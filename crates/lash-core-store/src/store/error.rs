@@ -1,6 +1,8 @@
-use crate::SessionId;
 use crate::runtime_error::SessionStateVersionRefusal;
-use crate::{BatchId, InputId, NodeId};
+use lash_vocabulary::identity::BatchId;
+use lash_vocabulary::identity::InputId;
+use lash_vocabulary::identity::NodeId;
+use lash_vocabulary::identity::SessionId;
 
 /// Why a window's rows do not form one anchored frame (ADR 0112 §5).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -263,12 +265,14 @@ pub enum StoreError {
     },
 
     #[error("prepared registration for process {process_id} is stale")]
-    PreparedProcessRegistrationStale { process_id: crate::ProcessId },
+    PreparedProcessRegistrationStale {
+        process_id: lash_vocabulary::identity::ProcessId,
+    },
 
     #[error("session {session_id} already has unfinished run {run}")]
     UnfinishedRunConflict {
-        session_id: crate::SessionId,
-        run: crate::TurnId,
+        session_id: lash_vocabulary::identity::SessionId,
+        run: lash_vocabulary::identity::TurnId,
     },
     /// Capturing dirty executor state failed before any store commit was
     /// attempted. The current execution must abort, but no publication is
@@ -432,7 +436,7 @@ pub enum StoreError {
     /// host-supplied id, or one read back from a stored row. No retry repairs
     /// either.
     #[error(transparent)]
-    BlankIdentity(#[from] crate::BlankIdentity),
+    BlankIdentity(#[from] lash_vocabulary::identity::BlankIdentity),
     #[error(
         "session `{session_id}` was used and deleted; session ids cannot be reused in this store"
     )]
@@ -617,7 +621,7 @@ pub enum StoreError {
     )]
     RunWindowReleased {
         session_id: SessionId,
-        run: crate::TurnId,
+        run: lash_vocabulary::identity::TurnId,
         revision: u64,
     },
     #[error("fork target session `{session_id}` already exists")]
@@ -645,15 +649,15 @@ pub enum StoreError {
     )]
     IngressRowNotAdmitted {
         session_id: SessionId,
-        run: crate::TurnId,
+        run: lash_vocabulary::identity::TurnId,
         row: Box<super::IngressRowId>,
-        admitted_run: Option<crate::TurnId>,
+        admitted_run: Option<lash_vocabulary::identity::TurnId>,
     },
     /// A commit's ingress settlement named one row twice.
     #[error("run `{run}` of session `{session_id}` settles {row} twice in one commit")]
     IngressSettlementDuplicate {
         session_id: SessionId,
-        run: crate::TurnId,
+        run: lash_vocabulary::identity::TurnId,
         row: Box<super::IngressRowId>,
     },
     /// A commit carries both a run's ingress settlement and a
@@ -665,7 +669,7 @@ pub enum StoreError {
     )]
     IngressAndSessionCommandRun {
         session_id: SessionId,
-        run: crate::TurnId,
+        run: lash_vocabulary::identity::TurnId,
     },
     /// The command lane's applying commit found one of its command rows
     /// withdrawn or admitted since it read them (design §2.7). Nothing was
@@ -694,7 +698,7 @@ pub enum StoreError {
     #[error("run `{run}` of session `{session_id}` is already terminal ({by:?})")]
     RunAlreadyTerminal {
         session_id: SessionId,
-        run: crate::TurnId,
+        run: lash_vocabulary::identity::TurnId,
         by: Box<super::RunTerminalCause>,
     },
     /// Withdrawal settled every input bound to this run before its stale
@@ -702,7 +706,7 @@ pub enum StoreError {
     #[error("run `{run}` of session `{session_id}` has only withdrawn inputs")]
     RunInputWithdrawn {
         session_id: SessionId,
-        run: crate::TurnId,
+        run: lash_vocabulary::identity::TurnId,
     },
     /// The session is closing: its `CloseSession` intent committed, so it
     /// accepts no input and admits no run. Deletion only retries from here
@@ -721,7 +725,7 @@ pub enum StoreError {
     #[error("session `{session_id}` has no running or ended turn `{turn_id}` to address")]
     IngressTurnAddressUnknown {
         session_id: SessionId,
-        turn_id: crate::TurnId,
+        turn_id: lash_vocabulary::identity::TurnId,
     },
     /// A submission used a source key reserved for another kind (ADR 0101
     /// §8). Nothing was stored.
@@ -809,7 +813,7 @@ pub enum StoreError {
     )]
     PendingTurnInputRunSpecMismatch {
         session_id: SessionId,
-        turn_id: crate::TurnId,
+        turn_id: lash_vocabulary::identity::TurnId,
     },
     /// A run named run spec `hash`, which its session does not hold.
     #[error("run spec `{hash}` of session `{session_id}` is not interned")]

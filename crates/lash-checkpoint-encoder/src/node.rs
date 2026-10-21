@@ -4,10 +4,16 @@
 use std::fmt;
 use std::sync::Arc;
 
-use lash_kernel_doc::graph_tokens::{
-    CanonicalFault, ChildRef, RefForm, TokenCodec, TokenError, TokenEvent, TokenReader,
-    TokenWriter, get_varint, put_varint,
-};
+use lash_vocabulary::tokens::CanonicalFault;
+use lash_vocabulary::tokens::ChildRef;
+use lash_vocabulary::tokens::RefForm;
+use lash_vocabulary::tokens::TokenCodec;
+use lash_vocabulary::tokens::TokenError;
+use lash_vocabulary::tokens::TokenEvent;
+use lash_vocabulary::tokens::TokenReader;
+use lash_vocabulary::tokens::TokenWriter;
+use lash_vocabulary::tokens::get_varint;
+use lash_vocabulary::tokens::put_varint;
 
 use super::refusal::{DecodeLimits, GraphRefusal};
 use super::registry::NodeKind;
@@ -244,7 +250,7 @@ pub fn write_envelope(kind: NodeKind, children: &[[u8; 32]], body: &[u8]) -> Vec
 
 /// The length [`write_envelope`] produces.
 pub fn envelope_len(kind: NodeKind, children: usize, body: usize) -> usize {
-    use lash_kernel_doc::graph_tokens::varint_len;
+    use lash_vocabulary::tokens::varint_len;
     child_table_offset(kind, children) + 32 * children + varint_len(body as u64) + body
 }
 
@@ -252,7 +258,7 @@ pub fn envelope_len(kind: NodeKind, children: usize, body: usize) -> usize {
 /// starts: after its magic, its kind and its child count.
 #[must_use]
 pub fn child_table_offset(kind: NodeKind, children: usize) -> usize {
-    use lash_kernel_doc::graph_tokens::varint_len;
+    use lash_vocabulary::tokens::varint_len;
     MAGIC.len() + varint_len(u64::from(kind.0)) + varint_len(children as u64)
 }
 
@@ -452,7 +458,7 @@ pub fn direct_logical(envelope: &NodeEnvelope<'_>, id: NodeId) -> Result<Vec<u8>
         return Err(GraphRefusal::UnsupportedKind(envelope.kind.0));
     }
     let refuse = |error| GraphRefusal::from_token(error, Some(id), Some(envelope.kind.0));
-    let mut out = lash_kernel_doc::graph_tokens::TokenWriter::with_capacity(
+    let mut out = lash_vocabulary::tokens::TokenWriter::with_capacity(
         envelope.body.len() + 32 * envelope.children.len(),
     );
     let mut reader = envelope.reader();
@@ -528,7 +534,7 @@ fn check_size(len: u64, limits: &DecodeLimits) -> Result<(), GraphRefusal> {
     }
     if len > limits.node_bytes {
         return Err(GraphRefusal::DecodeLimit {
-            dimension: lash_kernel_doc::graph_tokens::DecodeDimension::NodeBytes,
+            dimension: lash_vocabulary::tokens::DecodeDimension::NodeBytes,
             actual: len,
             limit: limits.node_bytes,
         });

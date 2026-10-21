@@ -10,7 +10,7 @@ pub(super) fn append_request_commit(
     operation_id: &str,
     nodes: &[crate::SessionAppendNode],
     requested_ancestor_node_id: Option<&str>,
-) -> (RuntimeCommit, Vec<lash_core::NodeId>) {
+) -> (RuntimeCommit, Vec<lash_vocabulary::identity::NodeId>) {
     let operation = lash_core::testing::conformance_support::boundary_operation(
         &state.session_id,
         operation_id,
@@ -669,7 +669,7 @@ pub async fn append_request_receipt_replays_after_ancestor_superseded<F, Fut>(
     store: Arc<dyn RuntimeStore>,
     supersede: F,
 ) where
-    F: FnOnce(lash_core::NodeId) -> Fut,
+    F: FnOnce(lash_vocabulary::identity::NodeId) -> Fut,
     Fut: std::future::Future<Output = ()>,
 {
     let mut state = seed_append_receipt_state(&store).await;
@@ -721,7 +721,7 @@ pub async fn inactive_append_ancestor_precedes_stale_head<F, Fut>(
     store: Arc<dyn RuntimeStore>,
     supersede: F,
 ) where
-    F: FnOnce(lash_core::NodeId) -> Fut,
+    F: FnOnce(lash_vocabulary::identity::NodeId) -> Fut,
     Fut: std::future::Future<Output = ()>,
 {
     let mut state = seed_append_receipt_state(&store).await;
@@ -767,7 +767,7 @@ pub async fn inactive_append_ancestor_precedes_stale_head<F, Fut>(
 )]
 pub async fn tombstoned_old_leaf_is_rejected<F, Fut>(store: Arc<dyn RuntimeStore>, tombstone: F)
 where
-    F: FnOnce(lash_core::NodeId) -> Fut,
+    F: FnOnce(lash_vocabulary::identity::NodeId) -> Fut,
     Fut: std::future::Future<Output = ()>,
 {
     let mut state = seed_append_receipt_state(&store).await;

@@ -214,7 +214,9 @@ fn initial_frame_protocol_turn_options(state: &RuntimeSessionState) -> crate::Pr
 }
 
 /// The initial frame's committed payload, without its wall-clock timestamp.
-fn initial_frame_payload(state: &RuntimeSessionState) -> (crate::NodeId, serde_json::Value) {
+fn initial_frame_payload(
+    state: &RuntimeSessionState,
+) -> (lash_vocabulary::identity::NodeId, serde_json::Value) {
     let [node] = state.session_graph.nodes.as_slice() else {
         panic!("the state holds only its initial frame");
     };
@@ -816,7 +818,7 @@ fn released_plugin_bodies_drop_their_cache_and_keep_only_held_addresses() {
 /// twice.
 #[test]
 fn a_commit_carries_the_pending_suffix_and_its_receipt_makes_only_that_durable() {
-    fn ids(commit: &crate::GraphAppend) -> Vec<crate::NodeId> {
+    fn ids(commit: &crate::GraphAppend) -> Vec<lash_vocabulary::identity::NodeId> {
         commit
             .nodes()
             .iter()

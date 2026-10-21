@@ -8,6 +8,7 @@ use lash_core::provider::Provider;
 use lash_core::sync::MutexExt;
 /// content-block identity unsigned thinking parts must still carry.
 use lash_protocol_types::{llm::types::StreamBlockEvent, llm::types::StreamBlockKind};
+
 use std::sync::Arc;
 
 #[derive(Debug)]

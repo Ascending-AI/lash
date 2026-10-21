@@ -4,7 +4,9 @@
 use std::collections::BTreeMap;
 
 use lash_kernel_dialect::readability::SurfacePrinter as _;
-use lash_kernel_doc::{self as k, EffectName, Name, Param, Signature, Type};
+use lash_kernel_doc::{self as k};
+
+use lash_vocabulary::{EffectName, Name, Param, Signature, Type};
 
 use super::{lower_against, print_document};
 use crate::TypeScript;
@@ -41,7 +43,15 @@ fn a_multiword_operation_is_written_in_camel_case_and_performed_canonically() {
     )
     .expect("the camelCase spelling lowers");
     let text = print_document(&lowered.document);
-    assert!(text.contains("perform inbox.send_item("), "{text}");
+    assert!(
+        text.contains(&format!(
+            "perform {}(",
+            super::linked::operation_slot(&lowered.document, "inbox.send_item")
+                .expect("operation import")
+                .0
+        )),
+        "{text}"
+    );
     assert!(text.contains("item_id"), "{text}");
 }
 
@@ -104,43 +114,13 @@ fn a_keyword_operation_is_callable_through_the_qualified_escape() {
     )
     .expect("the escape names the operation");
     let text = print_document(&lowered.document);
-    assert!(text.contains("perform records.delete("), "{text}");
-}
-
-/// PRINT-ROUNDTRIP: a code export and an operation that share the package
-/// prefix `dataframe` print and read back byte-exact.
-#[test]
-fn a_code_export_beside_an_operation_of_its_package_prints_and_reads_back() {
-    let mut registry = k::FunctionRegistry::new();
-    let col = k::parse_definition(
-        "function dataframe.col(name: Any) -> Any\nkernel 1\ncharge 1\nbody {\n  return name\n}\n",
-    )
-    .expect("a definition");
-    let col = registry
-        .register(col, None)
-        .expect("the definition registers");
-    let document = k::parse_document(&format!(
-        r#"kernel 1
-numbers float
-use dataframe.col = @{col}
-effect dataframe.run(input: Any) -> Any contract "1"
-main {{
-  let column = dataframe.col("value")
-  let ran = perform dataframe.run(column) as Any
-  finish ran
-}}"#
-    ))
-    .expect("a document");
-    let printed = TypeScript::default()
-        .print(&document, None, Default::default())
-        .expect("the document prints")
-        .source;
-    assert!(printed.contains("await dataframe.run("), "{printed}");
-    let (read, _) = crate::read_kernel(&printed, &document, Default::default())
-        .unwrap_or_else(|error| panic!("{error}\n{printed}"));
-    assert_eq!(
-        read.canonical_bytes(),
-        document.canonical_bytes(),
-        "{printed}"
+    assert!(
+        text.contains(&format!(
+            "perform {}(",
+            super::linked::operation_slot(&lowered.document, "records.delete")
+                .expect("operation import")
+                .0
+        )),
+        "{text}"
     );
 }

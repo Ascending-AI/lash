@@ -18,14 +18,14 @@ pub struct WorkflowExecutionOverlayAccumulator {
 /// what it keeps of those at or below it.
 #[derive(Default)]
 struct SiteHistory {
-    occurrences: BTreeMap<lash_protocol_types::VisitId, OccurrenceHistory>,
+    occurrences: BTreeMap<lash_vocabulary::sites::VisitId, OccurrenceHistory>,
     retention: Option<SiteRetention>,
 }
 
 impl SiteHistory {
     fn observe(
         &mut self,
-        occurrence: lash_protocol_types::VisitId,
+        occurrence: lash_vocabulary::sites::VisitId,
         transition: Transition,
         observation: Observation,
         history_limit: usize,
@@ -238,7 +238,10 @@ impl WorkflowExecutionOverlayAccumulator {
             observation.observed_at_ms,
             ExecutionRef::of_language(&observation.execution),
             WorkflowOverlayFact::Language {
-                document: observation.execution.identity.document.clone(),
+                document: match &observation.execution.identity.document {
+                    crate::TraceExecutionCode::Start(start) => start.clone(),
+                    crate::TraceExecutionCode::Callable(_) => return Ok(()),
+                },
                 payload: Box::new(observation.execution.payload.clone()),
             },
         )
@@ -369,7 +372,7 @@ impl WorkflowExecutionOverlayAccumulator {
 
     fn cell_counts(
         &mut self,
-        document: &crate::WorkflowDocumentRef,
+        document: &lash_vocabulary::names::LinkedStart,
         counts: crate::TraceCellCounts,
     ) {
         if let Some(loaded) = &self.document
@@ -430,7 +433,7 @@ impl WorkflowExecutionOverlayAccumulator {
                 _ => None,
             });
         let mut ran = BTreeMap::<u32, u64>::new();
-        if observation == Some(lash_kernel_doc::RunObservation::Counts) {
+        if observation == Some(lash_vocabulary::observation::RunObservation::Counts) {
             for segment in self.ran_segments.values() {
                 for (ordinal, count) in segment {
                     let total = ran.entry(*ordinal).or_default();

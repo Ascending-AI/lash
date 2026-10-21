@@ -12,7 +12,6 @@
 
 use std::sync::Arc;
 
-use lash_core::ProcessId;
 use lash_core::tool_run::{KnownFailureReason, MaterialOwner, MaterialRole};
 use lash_core_store::tool_run::{Material, SettledOutput};
 use lash_execution_contracts::process::CapacityCause;
@@ -20,13 +19,15 @@ use lash_execution_contracts::process::CapacityVerdict;
 use lash_execution_contracts::process::EngineStepAnswer;
 use lash_execution_contracts::process::EngineStepRun;
 use lash_kernel_doc::{Datum, Document, ErrorDatum, Handle, Integer, Timestamp};
+
 use lash_kernel_vm::{Bounds, End, Request, RunError, Target};
+use lash_protocol_types::engine_fault::{PoolFault, ProtocolBreach};
 use lash_vm_broker::ParentFault;
 use lash_vm_broker::kernel::{
     DrivenMachine, KernelFailure, MachineStep, Machines, datum_from_json, datum_to_json,
 };
 use lash_vm_client::{FrameEpoch, InfrastructureOutcome, OwnerEpoch, RunHost, VmOwner};
-use lash_vm_protocol::{PoolFault, ProtocolBreach};
+use lash_vocabulary::identity::ProcessId;
 use tokio_util::sync::CancellationToken;
 
 use super::pages::{RunCandidate, StepActivation};
@@ -125,16 +126,11 @@ fn failed(process: &ProcessId, fault: &RunFault) -> SettledOutput {
 /// segment's tape (FIG-6370).
 struct StepHost {
     trace: Option<super::trace::ProcessTrace>,
-    now_ms: i64,
-    random: Arc<dyn Fn() -> u64 + Send + Sync>,
     providers: ProjectionCatalog,
-    observe: lash_kernel_vm::ObservationMode,
+    observe: lash_vocabulary::observation::RunObservation,
     reads: std::sync::Mutex<HostReads>,
     effect_reads: Arc<dyn lash_execution_contracts::process::EngineEffectReads>,
-    required: std::collections::BTreeMap<
-        lash_kernel_doc::EffectName,
-        lash_kernel_doc::OperationRequirement,
-    >,
+    environment: Arc<lash_core_store::tool_surface::ExecutionEnvironment>,
     cancel: CancellationToken,
     parent_wait: std::time::Duration,
     /// The live deltas this segment reported, which name their trace facts.
@@ -152,20 +148,20 @@ impl StepHost {
 
     /// The segment's tape, at `observe: counts`.
     fn tape(&self) -> Option<HostReads> {
-        (self.observe == lash_kernel_vm::ObservationMode::Counts)
+        (self.observe == lash_vocabulary::observation::RunObservation::Counts)
             .then(|| std::mem::take(&mut *self.taped()))
     }
 }
 
 #[async_trait::async_trait]
 impl RunHost for StepHost {
-    fn observe(&self) -> lash_kernel_vm::ObservationMode {
+    fn observe(&self) -> lash_vocabulary::observation::RunObservation {
         self.observe
     }
 
     /// A live delta is provisional: the segment's commit makes its total
     /// exact, as `process.ran`.
-    fn ran(&self, delta: &lash_kernel_vm::SiteCounts) {
+    fn ran(&self, delta: &lash_vocabulary::observation::SiteCounts) {
         if let Some(trace) = &self.trace {
             let frame = self
                 .deltas
@@ -178,27 +174,10 @@ impl RunHost for StepHost {
         self.trace.is_some()
     }
 
-    fn enter_site(&self, at: &lash_kernel_doc::EffectId) {
+    fn enter_site(&self, at: &lash_vocabulary::sites::EffectId) {
         if let Some(trace) = &self.trace {
             trace.node(at, lash_trace::TraceNodeFact::Started { call_id: None });
         }
-    }
-
-    async fn clock(&self) -> Result<Timestamp, ParentFault> {
-        if self.observe == lash_kernel_vm::ObservationMode::Counts {
-            self.taped().now_ms = Some(self.now_ms);
-        }
-        Ok(Timestamp {
-            nanoseconds: Integer::from(self.now_ms.saturating_mul(1_000_000)),
-        })
-    }
-
-    async fn random(&self) -> Result<u64, ParentFault> {
-        let bits = (self.random)();
-        if self.observe == lash_kernel_vm::ObservationMode::Counts {
-            self.taped().random.push(bits);
-        }
-        Ok(bits)
     }
 
     async fn read(
@@ -212,14 +191,18 @@ impl RunHost for StepHost {
     /// Read through the runner the process's environment recorded.
     async fn perform(
         &self,
-        effect: &lash_kernel_doc::EffectName,
+        effect: &lash_vocabulary::names::OperationUse,
         args: &[Datum],
-        site: &lash_kernel_doc::PositionLabel,
-        origin: &lash_kernel_doc::Site,
+        site: &lash_vocabulary::sites::PositionLabel,
+        origin: &lash_vocabulary::sites::Site,
     ) -> Result<Result<Datum, ErrorDatum>, ParentFault> {
-        let requirement = self.required.get(effect).ok_or_else(|| {
-            ParentFault(format!("the process reads undeclared effect `{effect}`"))
-        })?;
+        let requirement = self
+            .environment
+            .fixed(effect)
+            .map(|fixed| &fixed.requirement)
+            .ok_or_else(|| {
+                ParentFault(format!("the process reads undeclared effect `{effect}`"))
+            })?;
         let input = crate::tool_input(
             args,
             |input| {
@@ -235,14 +218,15 @@ impl RunHost for StepHost {
         );
         let deadline = std::time::Instant::now() + self.parent_wait;
         let answer = super::reads::answer(
+            &requirement.signature.result,
             self.effect_reads
-                .read(effect, &requirement.contract, input, &self.cancel, deadline)
+                .read(effect, input, &self.cancel, deadline)
                 .await
                 .map_err(|error| ParentFault(error.to_string()))?,
         );
-        if self.observe == lash_kernel_vm::ObservationMode::Counts {
+        if self.observe == lash_vocabulary::observation::RunObservation::Counts {
             self.taped().effects.push(super::state::EffectRead {
-                effect: effect.clone(),
+                use_: *effect,
                 args: args.to_vec(),
                 site: site.clone(),
                 origin: origin.clone(),
@@ -266,7 +250,7 @@ fn ended(
     Ok((
         KernelRunOutput::Ended {
             outcome: Box::new(outcome),
-            ran: lash_kernel_vm::SiteCounts::new(),
+            ran: lash_vocabulary::observation::SiteCounts::new(),
             caught: Vec::new(),
             reads: None,
             start: None,
@@ -292,17 +276,25 @@ async fn kernel_run(
             ));
         }
     };
-    let document = match engine.documents.get_shared(&process_input.document).await {
-        Ok(Some(document)) => document,
-        Ok(None) => {
-            return ended(failure(
-                KernelProcessFailureCode::DocumentMissing,
-                format!("no document `{}` is retained", process_input.document),
-                None,
-            ));
-        }
-        Err(error) => return Err(RunFault(error.to_string()).into()),
-    };
+    let loaded_execution = engine
+        .load_execution(&process_input.code)
+        .await
+        .map_err(|error| RunFault(error.to_string()))?;
+    let content = loaded_execution.content;
+    let reach = loaded_execution.reach;
+    let (root_link, _) = process_input
+        .code
+        .linked()
+        .ok_or_else(|| RunFault("unrealized process input".into()))?;
+    let root = content
+        .links
+        .get(&root_link)
+        .ok_or_else(|| RunFault("process Link is absent".into()))?;
+    let document = content
+        .documents
+        .get(&root.document)
+        .ok_or_else(|| RunFault("process Document is absent".into()))?
+        .clone();
     let settings: KernelRecordedSettings = match run
         .engine_settings
         .as_ref()
@@ -348,59 +340,73 @@ async fn kernel_run(
             trace.delivered(delivery);
         }
     }
-    // The run executes the definitions its document was written against:
-    // the node's own where it holds them, the store's otherwise (FIG-6985).
-    let closure = match pinned_closure(engine, &document).await? {
-        Ok(closure) => closure,
-        Err(Unpinned::Unretained(unretained)) => {
-            return ended(failure(
-                KernelProcessFailureCode::DefinitionUnretained,
-                format!("the process's code is not retained: {unretained:?}"),
-                None,
-            ));
-        }
-        Err(Unpinned::Refused(refusal)) => {
-            return ended(failure(
-                KernelProcessFailureCode::DefinitionRefused,
-                format!("the process's code is refused: {refusal}"),
-                None,
-            ));
-        }
-    };
-    // What running the process requires of a node while it parks on this
-    // run: its code's natives and kernel version, and its env's links'
-    // providers and codecs (FIG-6985).
-    let requirements = lash_vm_broker::kernel::loader::requirements(
-        &closure,
-        document.manifest.kernel,
-        run.effects.values(),
-    );
+    let loaded = lash_vm_broker::kernel::loader::declare_reach(
+        &document,
+        &content
+            .documents
+            .iter()
+            .map(|(id, document)| (*id, Arc::new(document.clone())))
+            .collect(),
+        &reach.functions,
+        &reach.machine,
+        &engine.functions,
+    )
+    .map_err(|error| RunFault(error.to_string()))?;
+    let closure = loaded.closure;
+    let mut requirements = run.environment.requirements.clone();
+    requirements.machine.extend(&reach.machine);
+    let mut program = lash_kernel_vm::Program::prepare(
+        root_link,
+        content
+            .documents
+            .iter()
+            .map(|(id, document)| (*id, Arc::new(document.clone())))
+            .collect(),
+        &content.links,
+        lash_kernel_doc::heap::PageId(closure.reference().0),
+        lash_kernel_vm::PreparedLibrary::with_charge(loaded.registry, settings.charge),
+    )
+    .map_err(|error| RunFault(error.to_string()))?;
+    program.functions = closure.body().identities().collect();
     let counts = settings.observe == lash_kernel_vm::ObservationMode::Counts;
-    let start = counts.then(|| recorded_start(process_input.document, &input));
+    let start = counts.then(|| recorded_start(process_input.code.clone(), &input));
     // A recovered wait is reported by the occurrence it was delivered as.
-    let delivered: Vec<(lash_protocol_types::WaitId, lash_kernel_doc::EffectId)> = input
+    let delivered: Vec<(
+        lash_vocabulary::sites::WaitId,
+        lash_vocabulary::sites::EffectId,
+    )> = input
         .deliver
         .iter()
         .map(|delivery| (delivery.wait, delivery.identity.clone()))
         .collect();
-    let modes = lash_kernel_vm::EffectModes::reading(
-        run.effects
-            .iter()
-            .filter(|(_, link)| link.policy == lash_core::ExecutionPolicy::Read)
-            .map(|(effect, _)| effect.clone()),
-    );
+    let modes: lash_kernel_vm::EffectModes = run
+        .environment
+        .uses
+        .keys()
+        .map(|use_| {
+            (
+                *use_,
+                run.environment
+                    .mode(use_)
+                    .unwrap_or(lash_vocabulary::package::OperationMode::Waited),
+            )
+        })
+        .collect();
     let host = Arc::new(StepHost {
         trace: trace.clone(),
-        now_ms: run.now.0,
-        random: Arc::clone(&engine.random),
         providers: ProjectionCatalog::of_backend(run.projection_providers.as_deref()),
         observe: settings.observe,
         reads: std::sync::Mutex::new(HostReads {
-            read_effects: modes.reads().clone(),
+            read_effects: modes
+                .iter()
+                .filter_map(|(use_, mode)| {
+                    (*mode == lash_vocabulary::package::OperationMode::Read).then_some(*use_)
+                })
+                .collect(),
             ..HostReads::default()
         }),
         effect_reads: Arc::clone(&run.reads),
-        required: document.manifest.effects.clone(),
+        environment: Arc::clone(&run.environment),
         cancel: stop.clone(),
         parent_wait: engine.workers.config().tuning.parent_wait,
         deltas: std::sync::atomic::AtomicU64::new(0),
@@ -415,10 +421,13 @@ async fn kernel_run(
         OwnerEpoch(0),
         FrameEpoch(0),
         Arc::clone(&host) as Arc<dyn RunHost>,
-        &document,
+        &lash_kernel_doc::IdentifiedDocument::new(document.clone()),
         &settings.dialect,
         lash_vm_client::RunStart {
-            target: Target::Entry(process_input.entry.clone()),
+            link: program.link,
+            instances: program.instances,
+            documents: program.documents,
+            target: process_input.code.target().map_err(RunFault)?,
             args,
             session: None,
             modes,
@@ -489,21 +498,20 @@ async fn kernel_run(
             let Some((state, candidate)) = state else {
                 return Err(RunFault("the run parked without a state".to_owned()).into());
             };
-            let withdrawn: Vec<lash_protocol_types::WaitId> = park.withdrawn.clone();
+            let withdrawn: Vec<lash_vocabulary::sites::WaitId> = park.withdrawn.clone();
             let issued = park
                 .requests
                 .into_iter()
                 .filter(|request| {
                     !withdrawn.contains(&match request {
                         Request::Effect(effect) => effect.wait,
-                        Request::Sleep(sleep) => sleep.wait,
                     })
                 })
                 .map(|request| {
                     if let (Some(trace), Request::Effect(effect)) = (&trace, &request) {
                         trace.origin(&effect.identity, &effect.origin);
                     }
-                    issue(&run.effects, &document.manifest.effects, run.now.0, request)
+                    issue(&run.environment, request)
                 })
                 .collect::<Vec<_>>();
             if let Some(trace) = &trace {
@@ -530,7 +538,7 @@ async fn kernel_run(
 
 /// Where `input` starts, as a segment records it for a replay: each part
 /// by reference to the retained record that holds it.
-fn recorded_start(document: lash_kernel_doc::DocumentId, input: &KernelRunInput) -> RecordedStart {
+fn recorded_start(code: super::InlineRequest, input: &KernelRunInput) -> RecordedStart {
     let from = match &input.parked {
         None => StartedFrom::Entry,
         Some(parked) => StartedFrom::Output {
@@ -556,7 +564,7 @@ fn recorded_start(document: lash_kernel_doc::DocumentId, input: &KernelRunInput)
         })
         .collect();
     RecordedStart {
-        document,
+        code,
         from,
         admissions,
         deliver,
@@ -568,10 +576,10 @@ fn recorded_start(document: lash_kernel_doc::DocumentId, input: &KernelRunInput)
 pub(super) struct Driven {
     pub(super) step: MachineStep,
     pub(super) parked: Option<(ParkedPage, RunCandidate)>,
-    pub(super) ran: lash_kernel_vm::SiteCounts,
-    pub(super) path: lash_kernel_vm::ExecutionPath,
+    pub(super) ran: lash_vocabulary::observation::SiteCounts,
+    pub(super) path: lash_vocabulary::observation::ExecutionPath,
     /// The waits whose failed outcome a `catch` recovered from.
-    pub(super) caught: Vec<lash_protocol_types::WaitId>,
+    pub(super) caught: Vec<lash_vocabulary::sites::WaitId>,
 }
 
 /// Starts or resumes the machine over a page activation of the process's
@@ -637,7 +645,7 @@ pub(super) async fn run_machine(
     activation: &mut StepActivation,
     binding: lash_core_store::checkpoint_graph::NodeId,
     deliver: Vec<(
-        lash_protocol_types::WaitId,
+        lash_vocabulary::sites::WaitId,
         lash_vm_client::wire::OutcomeWire,
     )>,
     slice: u64,
@@ -710,34 +718,6 @@ pub(super) enum Unpinned {
 ///
 /// [`RunFault`] when the store does not answer or a closure node does not
 /// encode.
-pub(super) async fn pinned_closure(
-    engine: &KernelProcessEngine,
-    document: &lash_kernel_doc::Document,
-) -> Result<Result<lash_vm_broker::kernel::closure::Closure, Unpinned>, RunFault> {
-    let stored = match engine
-        .documents
-        .stored_definitions(document, &engine.functions)
-        .await
-        .map_err(|error| RunFault(error.to_string()))?
-    {
-        Ok(stored) => stored,
-        Err(unretained) => return Ok(Err(Unpinned::Unretained(unretained))),
-    };
-    if let Err(refusal) = crate::admit_internal(engine.authority.as_ref(), &stored)
-        .await
-        .map_err(|unread| RunFault(unread.to_string()))?
-    {
-        return Ok(Err(Unpinned::Refused(refusal)));
-    }
-    lash_vm_broker::kernel::closure::derive(
-        document.manifest.functions.keys().copied(),
-        &engine.functions,
-        &stored,
-    )
-    .map(Ok)
-    .map_err(|refusal| RunFault(refusal.to_string()))
-}
-
 /// What a failure to drive the machine is to the process: its terminal
 /// when every attempt would meet it the same way, the host's capacity
 /// verdict, which records nothing and runs again uncounted, or a fault of
@@ -792,7 +772,7 @@ fn capacity_cause(outcome: &InfrastructureOutcome) -> Option<CapacityCause> {
             | PoolFault::UnsupportedPlatform
             | PoolFault::Io { .. }
             | PoolFault::Cgroup { .. }
-            | PoolFault::Package { .. } => None,
+            | PoolFault::Library { .. } => None,
         },
         InfrastructureOutcome::WorkerLimitExceeded { limit } => limit
             .is_host_verdict()
@@ -813,108 +793,95 @@ fn capacity_cause(outcome: &InfrastructureOutcome) -> Option<CapacityCause> {
     }
 }
 
-/// The entry's arguments in parameter order, from the start's arguments by
-/// name. An omitted optional parameter is absent (`K-FN-004`).
+/// Start arguments follow the selected function Export's signature. Main
+/// takes no arguments and is never run before an Export start.
 pub(super) fn entry_args(
     document: &Document,
     input: &KernelProcessInput,
 ) -> Result<Vec<Datum>, String> {
-    let entry = document.entries.get(&input.entry).ok_or_else(|| {
-        format!(
-            "document `{}` has no entry `{}`",
-            input.document, input.entry
-        )
-    })?;
-    let signature = &entry.signature;
-    if let Some(unknown) = input.args.keys().find(|name| {
-        !signature
+    use lash_vocabulary::names::StartSelector;
+    let mut supplied = std::collections::BTreeMap::new();
+    let signature = match &input.code {
+        super::InlineRequest::Linked { start } => match &start.selector {
+            StartSelector::Main => {
+                if !input.args.is_empty() {
+                    return Err("Main takes no arguments".into());
+                }
+                return Ok(Vec::new());
+            }
+            StartSelector::Export(name) => match document.exports.get(name) {
+                Some(lash_kernel_doc::Export::Function(export)) => &export.signature,
+                _ => return Err(format!("{name} is not a function Export")),
+            },
+        },
+        super::InlineRequest::Callable { function, .. } => &function.signature,
+        super::InlineRequest::Unlinked { .. } => return Err("unrealized process input".into()),
+    };
+    for (name, value) in &input.args {
+        let param = signature
             .params
             .iter()
-            .any(|param| param.name.as_str() == name.as_str())
-    }) {
-        return Err(format!(
-            "entry `{}` has no parameter `{unknown}`",
-            input.entry
-        ));
+            .find(|param| param.name.as_str() == name)
+            .ok_or_else(|| format!("unknown argument {name}"))?;
+        let value = lash_vm_broker::kernel::value::datum_from_tool_json(value, &param.ty)?;
+        supplied.insert(lash_vocabulary::names::Name::new(name), value);
     }
-    signature
+    if let super::InlineRequest::Linked { start } = &input.code {
+        lash_kernel_check::validate_start_input(document, &start.selector, &supplied)
+            .map_err(|error| error.to_string())?;
+    } else {
+        let decoder = lash_kernel_doc::Decoder {
+            max_depth: lash_vocabulary::data_limits::KernelDataLimits::standard().document_depth(),
+            policy: document.numbers,
+            declared: &|id| document.functions.contains_key(&id.function),
+        };
+        for param in &signature.params {
+            decoder
+                .decode(
+                    supplied.get(&param.name).unwrap_or(&Datum::Absent),
+                    &param.ty,
+                )
+                .map_err(|error| error.to_string())?;
+        }
+    }
+    Ok(signature
         .params
         .iter()
-        .map(|param| match input.args.get(param.name.as_str()) {
-            Some(value) => datum_from_json(&value.to_string()).map_err(|error| {
-                format!("argument `{}` is not an effect value: {error}", param.name)
-            }),
-            None if param.optional => Ok(Datum::Absent),
-            None => Err(format!(
-                "entry `{}` requires argument `{}`",
-                input.entry, param.name
-            )),
-        })
-        .collect()
+        .map(|param| supplied.get(&param.name).cloned().unwrap_or(Datum::Absent))
+        .collect())
 }
 
 /// The wait a request names and its admission.
-pub(super) fn admission_of(request: &Request) -> (lash_protocol_types::WaitId, Admission) {
-    match request {
-        Request::Sleep(sleep) => (
-            sleep.wait,
-            Admission(lash_kernel_state::AdmittedWait {
-                identity: sleep.identity.clone(),
-                request: lash_kernel_state::AdmittedRequest::Sleep {
-                    duration: sleep.duration.into(),
-                },
-            }),
-        ),
-        Request::Effect(request) => (
-            request.wait,
-            Admission(lash_kernel_state::AdmittedWait {
-                identity: request.identity.clone(),
-                request: lash_kernel_state::AdmittedRequest::Effect {
-                    effect: request.effect.clone(),
-                    args: request.args.clone(),
-                },
-            }),
-        ),
-    }
+pub(super) fn admission_of(request: &Request) -> (lash_vocabulary::sites::WaitId, Admission) {
+    let Request::Effect(request) = request;
+    (
+        request.wait,
+        Admission(lash_kernel_state::AdmittedWait {
+            identity: request.identity.clone(),
+            request: lash_kernel_state::AdmittedRequest::Effect {
+                use_: request.use_,
+                args: request.args.clone(),
+            },
+        }),
+    )
 }
 
-/// Resolves one wait the machine asked for against the effects the
-/// process's env links, under the contract the document requires of it.
-/// The link check at the start fitted each to the document's requirement,
-/// and a process links no turn control.
+/// A waited request retains its defining use. Core resolves and commits a
+/// deferred use before fitting and admitting this invocation's input.
 fn issue(
-    effects: &std::collections::BTreeMap<lash_kernel_doc::EffectName, lash_core::OperationLink>,
-    required: &std::collections::BTreeMap<
-        lash_kernel_doc::EffectName,
-        lash_kernel_doc::OperationRequirement,
-    >,
-    now_ms: i64,
+    environment: &lash_core_store::tool_surface::ExecutionEnvironment,
     request: Request,
 ) -> Issued {
     let (wait, admission) = admission_of(&request);
-    let request = match request {
-        Request::Sleep(sleep) => {
-            let millis = i64::try_from(sleep.duration.as_millis()).unwrap_or(i64::MAX);
-            return Issued::Sleep {
-                wait,
-                admission,
-                until_ms: now_ms.saturating_add(millis),
-            };
-        }
-        Request::Effect(request) => request,
-    };
-    let contract = required
-        .get(&request.effect)
-        .filter(|_| effects.contains_key(&request.effect))
-        .map(|requirement| requirement.contract.clone());
-    let Some(contract) = contract else {
+    let Request::Effect(request) = request;
+    if !environment.uses.contains_key(&request.use_) {
         return Issued::Refused {
             wait,
             admission,
-            kind: EFFECT_UNKNOWN.to_owned(),
-            message: format!("the host offers no effect `{}`", request.effect),
+            kind: EFFECT_UNKNOWN.into(),
+            message: format!("the host offers no operation use `{}`", request.use_),
         };
-    };
+    }
     let input = crate::tool_input(
         &request.args,
         |input| {
@@ -923,8 +890,8 @@ fn issue(
         },
         |count| {
             format!(
-                "the effect `{}` takes one input record, and {count} arguments were passed",
-                request.effect
+                "operation use `{}` takes one input record; received {count} arguments",
+                request.use_
             )
         },
     );
@@ -932,14 +899,13 @@ fn issue(
         Ok(input) => Issued::Effect {
             wait,
             admission,
-            effect: request.effect.clone(),
-            contract,
+            use_: request.use_,
             input,
         },
         Err(message) => Issued::Refused {
             wait,
             admission,
-            kind: EFFECT_ARGUMENTS.to_owned(),
+            kind: EFFECT_ARGUMENTS.into(),
             message,
         },
     }
@@ -1005,7 +971,7 @@ pub(super) fn outcome_of_end(end: End) -> lash_execution_contracts::process::Pro
 /// cause, its message as the failure's, its data as the raw value.
 fn uncaught(
     error: Datum,
-    site: Option<lash_kernel_doc::Site>,
+    site: Option<lash_vocabulary::sites::Site>,
 ) -> lash_execution_contracts::process::ProcessOutcome {
     let json = |value: &Datum| {
         datum_to_json(value)
@@ -1060,7 +1026,8 @@ mod tests {
     /// none.
     #[test]
     fn a_worker_the_run_crashed_spends_an_attempt_and_one_lost_before_it_ran_does_not() {
-        let evidence = lash_vm_protocol::SupervisorEvidence::Signalled { signal: 9 };
+        let evidence =
+            lash_protocol_types::engine_fault::SupervisorEvidence::Signalled { signal: 9 };
         let ran = worker_failure(KernelFailure::Worker {
             outcome: InfrastructureOutcome::RunCrashedWorker { evidence },
         });

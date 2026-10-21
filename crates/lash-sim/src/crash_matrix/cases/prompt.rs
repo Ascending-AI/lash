@@ -37,7 +37,7 @@ use lash_core::sync::MutexExt as _;
 use lash_core_store::store::RunTerminalKind;
 use lash_durable::CommitLabel;
 use lash_durable_test::{Cut, Fault, SimNodes};
-use lash_protocol_types::SessionId;
+use lash_vocabulary::identity::SessionId;
 
 use super::{admit_turn, turn_end, turn_settled};
 use crate::crash_matrix::deployment::Workload;

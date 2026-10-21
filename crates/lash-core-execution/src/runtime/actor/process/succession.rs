@@ -28,10 +28,8 @@ use lash_durable::{
 use super::activation::{Live, Pass, ProcessActivation, corrupt};
 use super::driver::Driver;
 use super::effects::append_event;
-use crate::ProcessId;
 use crate::runtime::actor::round::RunFold;
 use crate::runtime::process::carry_refusal;
-use crate::runtime::process::relinked_step;
 use lash_execution_contracts::process::EngineState;
 use lash_execution_contracts::process::ProcessEngine;
 use lash_execution_contracts::process::ProcessEventAppendRequest;
@@ -41,6 +39,7 @@ use lash_execution_contracts::process::ProcessSuccessorRefusal;
 use lash_execution_contracts::process::ProcessSuccessorRequest;
 use lash_execution_contracts::process::SUCCESSOR_MAIL;
 use lash_execution_contracts::process::SuccessorCarry;
+use lash_vocabulary::identity::ProcessId;
 
 /// What a successor step did with the pass's transaction.
 pub(super) enum Succession {
@@ -58,7 +57,7 @@ pub(super) struct Current<'a> {
     pub(super) engine: &'a dyn ProcessEngine,
     pub(super) root: Option<&'a ExecRootRow>,
     /// The hard requirements record of the engine state `root` holds.
-    pub(super) requirements: &'a lash_kernel_doc::ExecutionRequirements,
+    pub(super) requirements: &'a lash_vocabulary::claims::ClaimRequirements,
 }
 
 fn unavailable(message: impl std::fmt::Display) -> DurableError {
@@ -169,12 +168,7 @@ impl ProcessActivation {
         state: Option<&EngineState>,
         fold: Option<&RunFold>,
     ) -> Result<Succession, DurableError> {
-        let ProcessInput::Engine {
-            kind,
-            payload,
-            launch,
-        } = current.record.input.as_ref()
-        else {
+        let ProcessInput::Engine { kind, .. } = current.record.input.as_ref() else {
             return Err(corrupt("a successor request", "the process runs no engine"));
         };
         let successor_env = lash_execution_contracts::process::load_process_env(
@@ -183,68 +177,164 @@ impl ProcessActivation {
         )
         .await
         .map_err(unavailable)?;
-        let refusal = if current.record.cancel_request.is_some() {
-            Some(ProcessSuccessorRefusal::Cancelling)
-        } else {
-            let envs = self.backend.process_env_store();
-            let load = |env_ref| {
-                let envs = std::sync::Arc::clone(&envs);
-                async move {
-                    lash_execution_contracts::process::load_process_env(envs.as_ref(), &env_ref)
-                        .await
-                        .map_err(unavailable)
-                }
-            };
-            let old = load(launch.env.clone()).await?;
-            relinked_step(driver.in_flight_effects(), &old, &successor_env)
-        };
+        let refusal = current
+            .record
+            .cancel_request
+            .is_some()
+            .then_some(ProcessSuccessorRefusal::Cancelling);
+        let context = self
+            .steps
+            .succession_context(current.record, &request, &successor_env)
+            .await
+            .map_err(unavailable)?;
+        let inspection = current
+            .engine
+            .inspect_link(
+                context.to.link,
+                &lash_execution_contracts::process::linking::ReachSelector::Start(
+                    context.to.selector.clone(),
+                ),
+            )
+            .await
+            .map_err(unavailable)?;
         let carried = match refusal {
             Some(refusal) => Err(refusal),
             None => match self.steps.succession(current.record) {
                 None => Err(ProcessSuccessorRefusal::Unsupported { kind: kind.clone() }),
-                Some(succession) => match succession
-                    .carry(
-                        current.process,
-                        payload,
-                        &request.payload,
-                        state,
-                        &successor_env,
-                    )
-                    .await
-                {
-                    Ok(SuccessorCarry::Carried { state, own_formats }) => Ok((state, own_formats)),
-                    // A run in flight is carried at its next park.
-                    Ok(SuccessorCarry::InFlight) => {
-                        return Ok(Succession::AsWritten(Box::new(tx)));
+                Some(succession) => {
+                    match succession.carry(current.process, &context, state).await {
+                        Ok(SuccessorCarry::Carried {
+                            state,
+                            own_formats,
+                            correspondence,
+                            resolutions,
+                            requirements,
+                            artifacts,
+                        }) => Ok((
+                            state,
+                            own_formats,
+                            correspondence,
+                            resolutions,
+                            requirements,
+                            artifacts,
+                        )),
+                        // A run in flight is carried at its next park.
+                        Ok(SuccessorCarry::InFlight) => {
+                            return Ok(Succession::AsWritten(Box::new(tx)));
+                        }
+                        Err(error) => {
+                            Err(carry_refusal(error).map_err(|error| unavailable(&error))?)
+                        }
                     }
-                    Err(error) => Err(carry_refusal(error).map_err(|error| unavailable(&error))?),
-                },
+                }
             },
         };
-        let (carried, own_formats) = match carried {
-            Ok(carried) => carried,
-            Err(refusal) => {
-                if current.row.state_rev > 0 {
-                    tx.write(DomainWrite::Process(ProcessWrite::Advance {
-                        process: current.process.clone(),
-                        expected_rev: current.row.state_rev,
-                        driver_json: driver.encode(),
+        let carried = match carried {
+            Err(refusal) => Err(refusal),
+            Ok(carried) => (|| -> Result<_, DurableError> {
+                if let Err(message) = validate_pins(&context, &inspection, &carried.2, &carried.3) {
+                    return Ok(Err(ProcessSuccessorRefusal::Engine {
+                        refusal: serde_json::json!({"kind":"incompatible_succession", "message":message}),
+                        message,
                     }));
                 }
-                tracing::info!(process_id = %current.process, %refusal, "successor pair refused");
-                append_event(
-                    &mut tx,
-                    current.process,
-                    ProcessEventAppendRequest::successor_refused(
-                        current.process,
-                        &request,
-                        &refusal,
-                    ),
-                );
-                owned.commit(tx, CommitLabel::PROCESS_ADVANCE).await?;
-                return Ok(Succession::Ended(Pass::Again));
-            }
+                let seeds: Vec<_> = carried
+                    .3
+                    .iter()
+                    .map(|record| lash_core_store::resolutions::ResolutionSeed {
+                        use_: record.key.use_,
+                        entry: record.entry.clone(),
+                    })
+                    .collect();
+                let mut known = match self.steps.check_successor_links(
+                    &std::sync::Arc::new(successor_env.clone()),
+                    &inspection,
+                    &seeds,
+                ) {
+                    Ok(known) => known,
+                    Err(crate::PluginError::Package(cause))
+                        if cause.failure_class()
+                            == lash_protocol_types::ToolFailureClass::InvalidRequest =>
+                    {
+                        return Ok(Err(ProcessSuccessorRefusal::Admission { cause }));
+                    }
+                    Err(error) => return Err(unavailable(error)),
+                };
+                for seed in &seeds {
+                    if let Some(debt) = seed.entry.requirements() {
+                        known.extend(debt);
+                    }
+                }
+                let mut supplied = known.clone();
+                supplied.extend(&carried.4);
+                if supplied != *carried.4 {
+                    return Ok(Err(ProcessSuccessorRefusal::Engine {
+                        refusal: serde_json::json!({"kind":"missing_successor_requirements"}),
+                        message: "carry omitted known successor claim debt".into(),
+                    }));
+                }
+                if carried
+                    .5
+                    .iter()
+                    .any(|artifact| !inspection.artifacts.contains(artifact))
+                {
+                    return Ok(Err(ProcessSuccessorRefusal::Engine {
+                        refusal: serde_json::json!({"kind":"unretained_successor_artifact"}),
+                        message: "carry added artifacts outside retained reach".into(),
+                    }));
+                }
+                Ok(Ok(carried))
+            })()?,
         };
+        let (carried, own_formats, correspondence, resolutions, requirements, _artifacts) =
+            match carried {
+                Ok(carried) => carried,
+                Err(refusal) => {
+                    if current.row.state_rev > 0 {
+                        tx.write(DomainWrite::Process(ProcessWrite::Advance {
+                            process: current.process.clone(),
+                            expected_rev: current.row.state_rev,
+                            driver_json: driver.encode(),
+                        }));
+                    }
+                    tracing::info!(process_id = %current.process, %refusal, "successor pair refused");
+                    append_event(
+                        &mut tx,
+                        current.process,
+                        ProcessEventAppendRequest::successor_refused(
+                            current.process,
+                            &request,
+                            &refusal,
+                        ),
+                    );
+                    owned.commit(tx, CommitLabel::PROCESS_ADVANCE).await?;
+                    return Ok(Succession::Ended(Pass::Again));
+                }
+            };
+        let mut registration = crate::runtime::actor::resolutions::registration(
+            context.execution.clone(),
+            &inspection,
+            lash_core_store::artifact_referrer::ArtifactReferrer::ProcessRecord(
+                current.process.clone(),
+            ),
+            *requirements,
+        );
+        for (use_, entry) in &context.resolutions {
+            if let Some(target) = correspondence.uses.get(use_) {
+                if let Some(lash_execution_contracts::process::linking::OperationNeed::Deferred {
+                    name,
+                    ..
+                }) = inspection.operations.get(target)
+                {
+                    registration.uses.insert(*target, name.clone());
+                }
+                let _ = entry;
+            }
+        }
+        tx.adopt_execution(registration);
+        for resolution in resolutions {
+            tx.seed_resolution(resolution);
+        }
         let mut next = current.record.clone();
         lash_execution_contracts::process::validation::apply_successor_input(&mut next, &request)
             .map_err(|error| corrupt("a successor request", error))?;
@@ -337,4 +427,80 @@ impl ProcessActivation {
         tracing::info!(process_id = %current.process, env = %request.env, "process carried onto its successor pair");
         Ok(Succession::Ended(Pass::Released))
     }
+}
+
+pub(crate) fn validate_pins(
+    context: &lash_execution_contracts::process::SuccessionContext,
+    inspection: &lash_execution_contracts::process::linking::LinkInspection,
+    correspondence: &lash_execution_contracts::process::UseCorrespondence,
+    resolutions: &[lash_core_store::resolutions::ResolutionRecord],
+) -> Result<(), String> {
+    use lash_execution_contracts::process::linking::OperationNeed;
+    let required: std::collections::BTreeSet<_> = context
+        .predecessor
+        .uses
+        .keys()
+        .chain(context.resolutions.keys())
+        .copied()
+        .collect();
+    if correspondence
+        .uses
+        .keys()
+        .copied()
+        .collect::<std::collections::BTreeSet<_>>()
+        != required
+    {
+        return Err("carry changed live or held use membership".into());
+    }
+    for (source, target) in &correspondence.uses {
+        if !inspection.operations.contains_key(target) {
+            return Err("live use maps outside successor reach".into());
+        }
+        let old = context
+            .predecessor
+            .uses
+            .get(source)
+            .ok_or("source use has no retained binding")?;
+        let new = context
+            .environment
+            .uses
+            .get(target)
+            .ok_or("successor use has no retained binding")?;
+        if old != new {
+            return Err("carry changed a live requirement, route or scoped grant".into());
+        }
+    }
+    let mut expected = std::collections::BTreeMap::new();
+    for (source, entry) in &context.resolutions {
+        let target = correspondence
+            .uses
+            .get(source)
+            .ok_or("pinned use has no successor")?;
+        let Some(OperationNeed::Deferred { name, .. }) = inspection.operations.get(target) else {
+            return Err("pinned use maps outside deferred successor reach".into());
+        };
+        let record = lash_core_store::resolutions::ResolutionRecord {
+            key: lash_core_store::resolutions::ResolutionKey {
+                execution: context.execution.clone(),
+                use_: *target,
+            },
+            requested: name.clone(),
+            entry: entry.clone(),
+        };
+        if let Some(previous) = expected.insert(*target, record.clone())
+            && previous != record
+        {
+            return Err("many-to-one correspondence merges unequal outcomes".into());
+        }
+    }
+    if resolutions.len() != expected.len() {
+        return Err("carry changed pinned outcome membership".into());
+    }
+    for record in resolutions {
+        record.entry.validate()?;
+        if expected.remove(&record.key.use_).as_ref() != Some(record) {
+            return Err("carry changed a committed outcome or execution identity".into());
+        }
+    }
+    Ok(())
 }

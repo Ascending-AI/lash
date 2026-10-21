@@ -8,8 +8,10 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use lash_kernel_doc::{Datum, ErrorDatum, Float, Handle, Integer, Name, Timestamp, parse_document};
+use lash_kernel_doc::{Datum, ErrorDatum, Float, Handle, Integer, Timestamp};
+
 use lash_kernel_vm::{Bounds, CellStart, End, Host, Machine, Program, RunError, Step, Target};
+use lash_vocabulary::Name;
 
 use super::machine;
 
@@ -28,12 +30,10 @@ const BOUNDS: Bounds = Bounds {
 /// makes what start arguments cannot carry: a shared value, cycles and
 /// closures.
 const ENTRIES: &str = r#"
-entry fast(v: Any, mode: Int, tail: List(Any)) -> Any
-entry walk(v: Any, mode: Int, tail: List(Any)) -> Any
-entry admits(v: Any, mode: Int, tail: List(Any)) -> Any
-entry draw(v: Any, mode: Int, tail: List(Any)) -> Any
-entry idle(v: Any, mode: Int, tail: List(Any)) -> Any
-fn build(v, mode) {
+function build(v: Any, mode: Any) -> Any
+kernel 1
+metering statements
+body {
   let shout = fn(holder, passed) { print "toJSON" return "shout" }
   if eq(mode, 1) { return [v, v] }
   if eq(mode, 2) { let r = {head: v} set r.self = r return r }
@@ -44,38 +44,55 @@ fn build(v, mode) {
   if eq(mode, 7) { return {a: v, b: [v, {c: v}]} }
   return v
 }
-fn fast(v, mode, tail) {
-  let x = call build(v, mode)
+function fast(v: Any, mode: Int, tail: List(Any)) -> Any
+kernel 1
+metering statements
+body {
+  let x = invoke build(v, mode)
   let args = list.concat([x], tail)
   let out = invoke ts.json.stringify(null, args)
   return out
 }
-fn walk(v, mode, tail) {
-  let x = call build(v, mode)
+function walk(v: Any, mode: Int, tail: List(Any)) -> Any
+kernel 1
+metering statements
+body {
+  let x = invoke build(v, mode)
   let args = list.concat([x], tail)
   let out = invoke ts.json.stringify_generic(null, args)
   return out
 }
-fn admits(v, mode, tail) {
-  let x = call build(v, mode)
+function admits(v: Any, mode: Int, tail: List(Any)) -> Any
+kernel 1
+metering statements
+body {
+  let x = invoke build(v, mode)
   let args = list.concat([x], tail)
   let out = invoke ts.json.plain(x)
   return out
 }
-fn draw(v, mode, tail) {
-  let x = call build(v, mode)
+function draw(v: Any, mode: Int, tail: List(Any)) -> Any
+kernel 1
+metering statements
+body {
+  let x = invoke build(v, mode)
   let args = list.concat([x], tail)
   let out = invoke ts.console.json(x)
   return out
 }
-fn idle(v, mode, tail) {
-  let x = call build(v, mode)
+function idle(v: Any, mode: Int, tail: List(Any)) -> Any
+kernel 1
+metering statements
+body {
+  let x = invoke build(v, mode)
   let args = list.concat([x], tail)
   let out = null
   return out
 }
-fn quick(x) { return x }
-main { }
+function quick(x: Any) -> Any
+kernel 1
+metering statements
+body { return x }
 "#;
 
 fn program() -> &'static Program {
@@ -91,23 +108,27 @@ fn program() -> &'static Program {
             "ts.json.plain",
             "ts.console.json",
         ];
-        let mut text = String::from("kernel 1\nnumbers float\n");
-        for name in names {
-            let (id, _) = registry
-                .iter()
-                .find(|(_, function)| function.definition().name.as_str() == name)
-                .unwrap_or_else(|| panic!("{name} is registered"));
-            text.push_str(&format!("use {name} = @{id}\n"));
-        }
+        let mut text = names
+            .iter()
+            .map(|name| format!("use {name}\n"))
+            .collect::<String>();
+        text.push_str("use build\n");
+        text.push_str("use fast\n");
+        text.push_str("use walk\n");
+        text.push_str("use admits\n");
+        text.push_str("use draw\n");
+        text.push_str("use idle\n");
+        text.push_str("use quick\n");
         text.push_str(ENTRIES);
-        let mut document = parse_document(&text).unwrap_or_else(|error| panic!("{error}"));
-        document.manifest.functions =
-            lash_kernel_check::requirements(&document, registry.as_ref()).functions;
-        Program {
-            closure: super::pages::CLOSURE,
-            document: Arc::new(document),
-            library: lash_kernel_vm::PreparedLibrary::new(registry),
-        }
+        let document = super::linked::definitions(
+            &text,
+            &["fast", "walk", "admits", "draw", "idle"],
+            super::library(),
+        );
+        crate::tests::linked::program(
+            Arc::new(document),
+            lash_kernel_vm::PreparedLibrary::new(registry),
+        )
     })
 }
 
@@ -118,14 +139,14 @@ struct Console {
 }
 
 impl Host for Console {
-    fn clock(&mut self) -> Timestamp {
-        Timestamp {
-            nanoseconds: Integer::from(0),
-        }
-    }
-
-    fn random(&mut self) -> u64 {
-        0
+    fn perform(
+        &mut self,
+        use_: &lash_vocabulary::OperationUse,
+        _: &[Datum],
+        _: &lash_vocabulary::sites::PositionLabel,
+        _: &lash_vocabulary::sites::Site,
+    ) -> Result<Result<Datum, lash_kernel_doc::ErrorDatum>, lash_kernel_vm::HostFault> {
+        crate::tests::linked::read(use_, 0)
     }
 
     fn read(&mut self, _handle: &Handle, _request: &Datum) -> Result<Datum, ErrorDatum> {
@@ -568,11 +589,8 @@ fn smith_values() -> Vec<Datum> {
             modes: Default::default(),
             host: Vec::new(),
         };
-        let program = Program {
-            closure: super::pages::CLOSURE,
-            document: Arc::new(smith.document),
-            library: machine::prepared().clone(),
-        };
+        let program =
+            crate::tests::linked::program(Arc::new(smith.document), machine::prepared().clone());
         let mut machine =
             super::pages::with_source(program, BOUNDS, start, &session.source).unwrap();
         let mut console = Console::default();
@@ -581,7 +599,6 @@ fn smith_values() -> Vec<Datum> {
                 Step::Parked(park) => {
                     for request in park.requests {
                         let (wait, outcome) = match request {
-                            Request::Sleep(sleep) => (sleep.wait, Outcome::Elapsed),
                             Request::Effect(effect) => {
                                 (effect.wait, Outcome::Completed(effect.args[0].clone()))
                             }

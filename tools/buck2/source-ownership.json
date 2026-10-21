@@ -730,6 +730,7 @@
     "unit_test_sources": [
       "src/cell.rs",
       "src/lib.rs",
+      "src/namespace.rs",
       "src/printed.rs",
       "src/readable.rs"
     ],
@@ -1002,7 +1003,6 @@
     },
     "test_includes": {},
     "test_input_fallbacks": {},
-    "unit_test_includes": [],
     "unit_test_sources": [
       "src/append_vec.rs",
       "src/append_vec_tests.rs",
@@ -1016,15 +1016,14 @@
       "src/derived.rs",
       "src/durable_serde.rs",
       "src/effect_identity.rs",
+      "src/engine_fault.rs",
       "src/execution_budgets.rs",
       "src/execution_budgets/tests.rs",
       "src/execution_node_kind.rs",
       "src/frame_key.rs",
       "src/future.rs",
       "src/handle.rs",
-      "src/identity.rs",
       "src/json_decode.rs",
-      "src/json_schema.rs",
       "src/lib.rs",
       "src/llm/attachment_delivery.rs",
       "src/llm/attempt_control.rs",
@@ -1057,13 +1056,6 @@
       "src/result_fit.rs",
       "src/retained_output.rs",
       "src/run_aggregate.rs",
-      "src/schema_contract.rs",
-      "src/schema_contract/omission_null.rs",
-      "src/schema_contract/omission_null_tests.rs",
-      "src/schema_contract/ref_inline.rs",
-      "src/schema_contract/ref_inline_tests.rs",
-      "src/schema_contract/tests.rs",
-      "src/schema_contract/typed_output.rs",
       "src/session.rs",
       "src/session_model/failure.rs",
       "src/session_model/message.rs",
@@ -1077,9 +1069,6 @@
       "src/sync.rs",
       "src/tool_call_id.rs",
       "src/tool_catalog.rs",
-      "src/tool_contract.rs",
-      "src/tool_contract/schema_validation.rs",
-      "src/tool_declaration.rs",
       "src/tool_intents.rs",
       "src/tool_output.rs",
       "src/tool_output/attachment_adoption.rs",
@@ -1091,7 +1080,8 @@
       "src/value_shape.rs",
       "src/worker_limit.rs",
       "src/workflow_site.rs"
-    ]
+    ],
+    "unit_test_includes": []
   },
   "crates/lash-execution-contracts": {
     "library_test_sources": [
@@ -1115,19 +1105,14 @@
       "labels/python.json",
       "labels/regex.json",
       "labels/typescript.json",
-      "labels/url.json",
-      "src/testing/dataframe.kernel",
-      "src/testing/dataframe.labels.json",
-      "src/testing/dataframe.surface"
+      "labels/url.json"
     ]
   },
   "examples/dataframe": {
     "compile_data": [
-      "dataframe.kernel",
-      "dataframe.surface",
-      "dataframe.labels.json",
-      "wordcount.ts",
-      "wordcount.py"
+      "df.ts",
+      "cell.ts",
+      "nightly.ts"
     ]
   }
 }

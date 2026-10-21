@@ -4,6 +4,7 @@ use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use lash_kernel_doc::{FunctionRegistry, parse_document};
+
 use lash_kernel_vm::Machine;
 
 use crate::{ExpectedEnd, HarnessError, MachineRunner, Shard, check_case};
@@ -30,7 +31,6 @@ pub fn check_native<M: Machine>(
             continue;
         };
         let used: BTreeSet<_> = document
-            .manifest
             .functions
             .keys()
             .copied()

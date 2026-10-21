@@ -30,6 +30,7 @@ use lash_kernel_doc::heap::{LogicalBytes, NormalKey};
 use lash_kernel_doc::{
     Args, NativeCall, NativeError, NewObject, Nursery, Retry, TaskId, Value, WorkCounter,
 };
+
 use lash_kernel_state::arena::{Arena, Key};
 
 use super::exec::Call;
@@ -550,6 +551,22 @@ impl KernelMachine {
     /// kernel body, its native declining or absent, has that body's frame
     /// pushed, its arguments moved in, the caller's statement `awaiting`
     /// waiting in it, if any: `Step`.
+    pub(super) fn call_lib_linked(
+        &mut self,
+        task: TaskId,
+        exe: &Executable,
+        (lib, link): (LibId, lash_vocabulary::content_ids::LinkId),
+        args: Reg,
+        count: usize,
+        awaiting: Option<StmtId>,
+    ) -> Status {
+        let caller = self.active_link;
+        self.active_link = link;
+        let result = self.call_lib(task, exe, lib, args, count, awaiting);
+        self.active_link = caller;
+        result
+    }
+
     pub(super) fn call_lib(
         &mut self,
         task: TaskId,
@@ -586,7 +603,9 @@ impl KernelMachine {
         let AdmittedBody { code, entry } = admitted;
         // An argument the call leaves out is absent: the body binds every
         // parameter.
-        let call = Call::new(code, args, function.arity).of_library(lib);
+        let call = Call::new(code, args, function.arity)
+            .in_link(self.current_link())
+            .of_library(lib);
         self.push_operation_frame(task, exe, call.awaited_by(awaiting), entry)?;
         Ok(Flow::Step)
     }

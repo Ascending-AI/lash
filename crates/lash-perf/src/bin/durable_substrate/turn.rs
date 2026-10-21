@@ -37,13 +37,19 @@ use lash_core_store::tool_run::SettledOutput;
 use lash_core_store::tool_run::{CompletionSource, MaterialOwner, MaterialRole};
 use lash_durable::ActorKey;
 use lash_execution_contracts::backend::Backend;
+use lash_protocol_types::ExecutionBudgets;
+use lash_protocol_types::ModelToolReturn;
+use lash_protocol_types::ToolCallOutput;
+use lash_protocol_types::ToolFailure;
+use lash_protocol_types::ToolFailureClass;
 use lash_protocol_types::sync::MutexExt as _;
-use lash_protocol_types::{
-    ExecutionBudgets, ExecutionPolicy, ModelToolReturn, SessionId, ToolCallOutput, ToolFailure,
-    ToolFailureClass, ToolId, TurnId,
-};
 use lash_protocol_types::{llm::types::ProviderRouteIdentity, llm::types::RecordedRequestTemplate};
+
 use lash_sansio::sansio::ExecutionEnvironmentSync;
+use lash_vocabulary::identity::SessionId;
+use lash_vocabulary::identity::TurnId;
+use lash_vocabulary::tool_contract::ExecutionPolicy;
+use lash_vocabulary::tool_contract::ToolId;
 use serde::Serialize;
 use tokio::sync::oneshot;
 
@@ -706,7 +712,7 @@ impl RoundTools for EchoTools {
         MemberPin::admitted(
             ToolId::new(ECHO),
             ExecutionPolicy::Once,
-            lash_protocol_types::ToolBounds {
+            lash_vocabulary::tool_contract::ToolBounds {
                 execution: std::time::Duration::from_secs(30),
                 park: None,
             },

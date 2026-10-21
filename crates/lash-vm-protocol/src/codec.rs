@@ -21,12 +21,12 @@
 //! only declared lengths, so a hostile length is refused before the typed
 //! decode allocates anything for it.
 
+use lash_protocol_types::engine_fault::CodecRefusal;
+use serde::Serialize;
 use serde::de::DeserializeOwned;
-use serde::{Deserialize, Serialize};
-use thiserror::Error;
 
 use crate::message::{BorrowedParentFrame, ParentFrame, WorkerFrame};
-use crate::outcome::Detail;
+use lash_protocol_types::engine_fault::Detail;
 
 pub const FRAME_MAGIC: [u8; 4] = *b"LVMP";
 
@@ -71,47 +71,25 @@ impl DecodeLimits {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Error, Serialize, Deserialize, schemars::JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum CodecRefusal {
-    #[error("frame is truncated: {needed} bytes needed, {available} available")]
-    Truncated { needed: u64, available: u64 },
-    #[error("frame does not start with the protocol magic")]
-    BadMagic,
-    #[error("frame declares {declared} bytes, over the {limit}-byte bound")]
-    FrameTooLarge { limit: u64, declared: u64 },
-    #[error("payload nests deeper than {limit}")]
-    DepthExceeded { limit: u32 },
-    #[error("payload holds more than {limit} values")]
-    NodeLimitExceeded { limit: u64 },
-    #[error("payload would allocate {requested} bytes, over the {limit}-byte bound")]
-    AllocationExceeded { limit: u64, requested: u64 },
-    #[error("frame is malformed: {reason}")]
-    Malformed { reason: Detail },
-    #[error("frame is followed by {extra} unread bytes")]
-    TrailingBytes { extra: u64 },
-    /// A page exchange names more than [`crate::PAGE_BATCH_PAGES`] pages or
-    /// carries more than [`crate::PAGE_BATCH_BYTES`] envelope bytes.
-    #[error("a page exchange of {pages} pages and {bytes} bytes exceeds its batch bound")]
-    PageBatch { pages: u64, bytes: u64 },
-}
-
 /// Encodes and decodes frames under one set of bounds.
 #[derive(Clone, Debug)]
 pub struct FrameCodec {
     limits: DecodeLimits,
-    detail_limit: crate::DetailLimit,
+    detail_limit: lash_protocol_types::engine_fault::DetailLimit,
 }
 
 impl FrameCodec {
     pub fn new(limits: DecodeLimits) -> Self {
         Self {
             limits,
-            detail_limit: crate::DetailLimit::standard(),
+            detail_limit: lash_protocol_types::engine_fault::DetailLimit::standard(),
         }
     }
 
-    pub fn with_detail_limit(mut self, limit: crate::DetailLimit) -> Self {
+    pub fn with_detail_limit(
+        mut self,
+        limit: lash_protocol_types::engine_fault::DetailLimit,
+    ) -> Self {
         self.detail_limit = limit;
         self
     }
@@ -513,10 +491,10 @@ impl FrameCodec {
         // can carry.
         let envelope = self.encode_worker(&WorkerFrame {
             header: crate::MessageHeader {
-                lease: crate::ExecutionLease(u64::MAX),
-                owner_epoch: crate::OwnerEpoch(u64::MAX),
-                frame_epoch: crate::FrameEpoch(u64::MAX),
-                sequence: crate::TransportSequence(u64::MAX),
+                lease: lash_protocol_types::engine_fault::ExecutionLease(u64::MAX),
+                owner_epoch: lash_protocol_types::engine_fault::OwnerEpoch(u64::MAX),
+                frame_epoch: lash_protocol_types::engine_fault::FrameEpoch(u64::MAX),
+                sequence: lash_protocol_types::engine_fault::TransportSequence(u64::MAX),
             },
             message: crate::WorkerMessage::Printed {
                 payload: crate::EncodedPayload(Vec::new()),

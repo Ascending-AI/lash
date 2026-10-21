@@ -148,10 +148,12 @@ fn finish<M: Machine>(
                 for request in park.requests {
                     let (wait, outcome) = match &request {
                         Request::Effect(effect) => {
-                            assert_eq!(effect.effect.as_str(), "host.observe");
+                            assert_eq!(
+                                crate::linked::operation(&effect.use_).as_str(),
+                                "host.observe"
+                            );
                             (effect.wait, Outcome::Completed(Datum::Null))
                         }
-                        Request::Sleep(sleep) => (sleep.wait, Outcome::Elapsed),
                     };
                     requests.push(request);
                     machine.deliver(wait, outcome).unwrap();
@@ -235,7 +237,6 @@ fn reopen_all<const L: u64>(name: &str, program: &Program, library: &PreparedLib
         for request in owed {
             let (wait, outcome) = match request {
                 Request::Effect(effect) => (effect.wait, Outcome::Completed(Datum::Null)),
-                Request::Sleep(sleep) => (sleep.wait, Outcome::Elapsed),
             };
             requests.push(request.clone());
             machine.deliver(wait, outcome).unwrap();

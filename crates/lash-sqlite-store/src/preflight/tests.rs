@@ -478,7 +478,7 @@ mod walk {
         .expect("install a bare checkpoint blob");
         crate::revisions::record_revision_conn(
             &raw,
-            &lash_protocol_types::SessionId::from("bare-checkpoint-session"),
+            &lash_vocabulary::identity::SessionId::from("bare-checkpoint-session"),
             0,
             None,
             Some("0000000000000000000000000000000000000000000000000000000000000000"),
@@ -538,7 +538,7 @@ mod walk {
         let raw = rusqlite::Connection::open(&core).expect("open raw core");
         crate::revisions::record_revision_conn(
             &raw,
-            &lash_protocol_types::SessionId::from("published"),
+            &lash_vocabulary::identity::SessionId::from("published"),
             0,
             None,
             Some(stored.checkpoint_ref.as_str()),
@@ -627,7 +627,7 @@ mod walk {
         let raw = rusqlite::Connection::open(&core).expect("open raw core");
         crate::revisions::record_revision_conn(
             &raw,
-            &lash_protocol_types::SessionId::from("stateless"),
+            &lash_vocabulary::identity::SessionId::from("stateless"),
             0,
             None,
             Some(stored.checkpoint_ref.as_str()),

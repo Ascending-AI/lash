@@ -20,7 +20,7 @@ impl RuntimeSessionServices {
         let core = &self.current.host.core;
         let (routes, catalog) = engine.composition.linked_tools(
             &engine.env,
-            crate::RuntimeOwner::Process(process_id.clone()),
+            lash_vocabulary::identity::RuntimeOwner::Process(process_id.clone()),
             &core.process_engines.components().host().extensions,
             core.process_engines.engine_kinds(),
         )?;
@@ -48,7 +48,23 @@ impl RuntimeSessionServices {
         let (routes, catalog) = self.process_step_surface()?;
         let (_, engine) = self.current.engine_process()?;
         let env = Arc::clone(&engine.env);
-        let effects = Arc::new(env.effects().clone());
+        let environment = Arc::new(env.execution().clone());
+        let execution = lash_core_store::resolutions::ExecutionId::process(&process.id);
+        let mut pins = std::collections::BTreeMap::new();
+        let resolution_store = cx.backend().stores().execution_resolutions();
+        for use_ in environment.uses.keys() {
+            if let Some(record) = resolution_store
+                .load(&lash_core_store::resolutions::ResolutionKey {
+                    execution: execution.clone(),
+                    use_: *use_,
+                })
+                .await
+                .map_err(lash_execution_contracts::plugin_error::registry_error)?
+            {
+                pins.insert(*use_, record.entry);
+            }
+        }
+        engine.resolutions.lock_recover().extend(pins.clone());
         let dispatch = self.process_step_dispatch(routes, Arc::clone(&catalog), cx)?;
         let core = &self.current.host.core;
         let context = crate::RuntimeExecutionContext::new(
@@ -64,7 +80,12 @@ impl RuntimeSessionServices {
         .with_fleet_format(core.session_store_factory().fleet_format())
         .with_tool_material_store(core.backend().tool_material_store())
         .with_process_work(self.current.host.work.process_wiring().cloned())
-        .with_process_execution(process, Some(env));
+        .with_linked_execution(lash_core_execution::session::LinkedExecution {
+            execution,
+            environment: Arc::clone(&environment),
+            resolutions: Arc::clone(&engine.resolutions),
+        })
+        .with_process_execution(process, Some(env))?;
         let tools = context
             .round_tools(crate::EffectOpener::Process {
                 process_id: process.id.clone(),
@@ -74,8 +95,11 @@ impl RuntimeSessionServices {
             })?;
         Ok(crate::runtime::ProcessStepTools {
             catalog,
-            effects,
-            reads: engine.composition.effect_reads(Arc::clone(&engine.env)),
+            environment,
+            resolutions: Arc::clone(&engine.resolutions),
+            reads: engine
+                .composition
+                .effect_reads(Arc::clone(&engine.env), Arc::clone(&core.clock)),
             tools,
             context: Arc::new(self.clone()),
         })
@@ -138,11 +162,110 @@ impl lash_core_execution::runtime::process::steps::ProcessStepContext for Runtim
     /// pinned to `contract` (D3), judged now.
     fn step_link(
         &self,
-        effect: &lash_kernel_doc::EffectName,
-        contract: &lash_kernel_doc::ContractId,
+        effect: &lash_vocabulary::names::OperationUse,
     ) -> Result<crate::plugin::StepLink, lash_execution_contracts::plugin_error::PluginError> {
         let (_, engine) = self.current.engine_process()?;
-        Ok(engine.composition.step_link(&engine.env, effect, contract))
+        Ok(engine.composition.step_link(&engine.env, effect))
+    }
+
+    async fn resolve_use(
+        &self,
+        cx: &crate::ActorContext,
+        process: &lash_execution_contracts::process::ProcessRecord,
+        use_: lash_vocabulary::names::OperationUse,
+    ) -> Result<
+        lash_core_execution::runtime::actor::resolutions::CommittedUse,
+        lash_core_execution::runtime::actor::resolutions::ResolutionError,
+    > {
+        use lash_core_execution::runtime::actor::resolutions::{FirstUse, ResolutionError};
+        use lash_core_store::tool_surface::UseBinding;
+        use lash_execution_contracts::process::linking::{
+            AdmissionRefusal, EnginePortError, OperationNeed,
+        };
+        let (_, engine) = self
+            .current
+            .engine_process()
+            .map_err(|error| ResolutionError::Corrupt(error.to_string()))?;
+        let environment = engine.env.execution();
+        let Some(UseBinding::Deferred(grant)) = environment.uses.get(&use_) else {
+            return Err(EnginePortError::Refused(AdmissionRefusal::MissingRoute { use_ }).into());
+        };
+        let lash_execution_contracts::process::ProcessInput::Engine { kind, payload, .. } =
+            process.input.as_ref()
+        else {
+            return Err(ResolutionError::Corrupt(
+                "a session turn cannot resolve a code use".into(),
+            ));
+        };
+        let inspection = self
+            .current
+            .host
+            .core
+            .process_engines
+            .inspect_code(kind, payload)
+            .await?;
+        let Some(OperationNeed::Deferred { name, .. }) = inspection.operations.get(&use_) else {
+            return Err(EnginePortError::Refused(AdmissionRefusal::MissingRoute { use_ }).into());
+        };
+        let composition = &engine.composition.composition;
+        let provider = composition
+            .deferred_package_provider(&grant.provider)
+            .ok_or_else(|| {
+                EnginePortError::Refused(AdmissionRefusal::ProviderNotHostable {
+                    provider: grant.provider.clone(),
+                    registry: environment.registry,
+                })
+            })?;
+        let handle = lash_vocabulary::providers::ToolProviderHandle::from_name(
+            environment.registry,
+            &grant.provider,
+        )
+        .map_err(|error| ResolutionError::Corrupt(error.to_string()))?;
+        let owner = self
+            .current
+            .execution_owner()
+            .map_err(|error| ResolutionError::Corrupt(error.to_string()))?;
+        let config = crate::plugin::OwnerConfigView::components(Arc::clone(&engine.env));
+        let tx = cx.begin().await?;
+        let store = cx.backend().stores().execution_resolutions();
+        FirstUse {
+            store: store.as_ref(),
+            owner: lash_durable::resolutions::ResolutionOwner {
+                actor: cx.actor().clone(),
+                epoch: cx.epoch(),
+                expected_revision: tx.revision(),
+            },
+            execution: lash_core_store::resolutions::ExecutionId::process(&process.id),
+            environment,
+            capabilities: cx.capabilities(),
+            provider: provider.as_ref(),
+            context: crate::DeferredResolveContext::new(
+                &handle,
+                &owner,
+                None,
+                engine.env.capabilities(),
+                &config,
+            ),
+            validator: composition.as_ref(),
+            clock: cx.clock().as_ref(),
+            cancel: cx.cancel(),
+        }
+        .resolve(use_, name.clone())
+        .await
+        .map(|committed| {
+            let record = match &committed {
+                lash_core_execution::runtime::actor::resolutions::CommittedUse::Ready(record)
+                | lash_core_execution::runtime::actor::resolutions::CommittedUse::Parked {
+                    record,
+                    ..
+                } => record,
+            };
+            engine
+                .resolutions
+                .lock_recover()
+                .insert(use_, record.entry.clone());
+            committed
+        })
     }
 
     /// How this node serves the engine process's call of the tool
@@ -166,7 +289,7 @@ impl lash_core_execution::runtime::process::steps::ProcessStepContext for Runtim
     /// for `input`, through the deferred provider its grant links (P6).
     async fn resolve_dispatch(
         &self,
-        effect: &lash_kernel_doc::EffectName,
+        effect: &lash_vocabulary::names::OperationUse,
         input: &serde_json::Value,
     ) -> Result<
         Result<crate::DeferredMatch, lash_core_execution::DispatchRefusal>,
@@ -184,7 +307,7 @@ impl lash_core_execution::runtime::process::steps::ProcessStepContext for Runtim
     /// resolved, as the grant at `effect` names them again for `input`.
     fn dispatch_args(
         &self,
-        effect: &lash_kernel_doc::EffectName,
+        effect: &lash_vocabulary::names::OperationUse,
         input: &serde_json::Value,
         matched: &crate::DeferredMatch,
     ) -> Result<
@@ -202,7 +325,7 @@ impl lash_core_execution::runtime::process::steps::ProcessStepContext for Runtim
     fn requirements(
         &self,
     ) -> Result<
-        std::collections::BTreeSet<crate::ObligationToken>,
+        std::collections::BTreeSet<lash_vocabulary::claims::ObligationToken>,
         lash_execution_contracts::plugin_error::PluginError,
     > {
         let (_, engine) = self.current.engine_process()?;
@@ -213,7 +336,7 @@ impl lash_core_execution::runtime::process::steps::ProcessStepContext for Runtim
                 engine.state.as_ref(),
                 entry.id().as_str(),
             );
-            requires.insert(crate::ObligationToken::for_component(
+            requires.insert(lash_vocabulary::claims::ObligationToken::for_component(
                 entry.id(),
                 namespace.format_version,
             ));

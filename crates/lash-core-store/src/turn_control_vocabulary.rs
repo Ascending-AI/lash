@@ -3,10 +3,13 @@
 //! A turn's address, a host's cancel request, and what a cancel did with the
 //! input the turn did not deliver.
 
-use crate::{
-    ExecutionScope, RuntimeError, SessionId, TurnCancelMode, TurnCancelUndeliveredInputPolicy,
-    TurnCancellationEvidence, TurnId,
-};
+use crate::ExecutionScope;
+use crate::RuntimeError;
+use crate::TurnCancelMode;
+use crate::TurnCancelUndeliveredInputPolicy;
+use crate::TurnCancellationEvidence;
+use lash_vocabulary::identity::SessionId;
+use lash_vocabulary::identity::TurnId;
 use serde::{Deserialize, Serialize};
 
 /// Stable routing identity for one foreground turn.
@@ -38,7 +41,7 @@ impl TurnAddress {
 /// One undelivered active-turn input affected by cancellation repair.
 #[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct TurnCancelAffectedInput {
-    pub input_id: crate::InputId,
+    pub input_id: lash_vocabulary::identity::InputId,
     pub payload: crate::TurnInput,
     pub disposition: TurnCancelUndeliveredInputPolicy,
 }

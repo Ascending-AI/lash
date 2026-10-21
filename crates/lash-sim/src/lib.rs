@@ -79,7 +79,7 @@ fn sim_process_owner() -> lash_core::LeaseOwnerIdentity {
 pub(crate) async fn open_created_session(
     model: impl Into<lash::LlmProfileKey>,
     core: &lash::LashCore,
-    session_id: impl Into<lash::SessionId>,
+    session_id: impl Into<lash_vocabulary::identity::SessionId>,
 ) -> lash::Result<lash::LashSession> {
     open_created_session_from(
         lash::SessionSpec::new(
@@ -103,7 +103,7 @@ pub(crate) async fn open_created_session(
 pub(crate) async fn open_created_finish_required_session(
     model: impl Into<lash::LlmProfileKey>,
     core: &lash::LashCore,
-    session_id: impl Into<lash::SessionId>,
+    session_id: impl Into<lash_vocabulary::identity::SessionId>,
 ) -> lash::Result<lash::LashSession> {
     open_created_session_from(
         lash::SessionSpec::new(
@@ -130,7 +130,7 @@ pub(crate) async fn open_created_finish_required_session(
 pub(crate) async fn open_created_session_from(
     spec: lash::SessionSpec,
     core: &lash::LashCore,
-    session_id: impl Into<lash::SessionId>,
+    session_id: impl Into<lash_vocabulary::identity::SessionId>,
 ) -> lash::Result<lash::LashSession> {
     let session_id = session_id.into();
     match core

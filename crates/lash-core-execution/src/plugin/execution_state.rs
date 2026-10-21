@@ -25,7 +25,7 @@ pub trait ExecutionState: Send + Sync {
         &self,
     ) -> std::collections::BTreeMap<String, super::prompt::CommittedPluginNamespace>;
 
-    fn owner(&self) -> &crate::RuntimeOwner;
+    fn owner(&self) -> &lash_vocabulary::identity::RuntimeOwner;
 
     /// The bounds on the execution evidence this state's calls record.
     fn evidence_limits(&self) -> lash_core_store::execution_limits::EvidenceLimits;
@@ -85,7 +85,7 @@ impl ExecutionState for PluginSession {
     ) -> std::collections::BTreeMap<String, super::prompt::CommittedPluginNamespace> {
         PluginSession::committed_namespaces(self)
     }
-    fn owner(&self) -> &crate::RuntimeOwner {
+    fn owner(&self) -> &lash_vocabulary::identity::RuntimeOwner {
         PluginSession::owner(self)
     }
     fn evidence_limits(&self) -> lash_core_store::execution_limits::EvidenceLimits {

@@ -1,6 +1,13 @@
 //! External authorship proof. The only production dependency is lash.
 #![allow(unused_imports, unused_variables, dead_code)]
 
+use lash::AwaitEventKey;
+use lash::AwaitEventWaitIdentity;
+use lash::CancellationToken;
+use lash::Resolution;
+use lash::ResolveOutcome;
+use lash::SessionError;
+use lash::TurnAttach;
 use lash::attachments::*;
 use lash::direct::*;
 use lash::durability::*;
@@ -13,10 +20,10 @@ use lash::provider::*;
 use lash::runtime::*;
 use lash::tools::*;
 use lash::*;
-use lash::{
-    AwaitEventKey, AwaitEventWaitIdentity, CancellationToken, NodeId, ProcessId, Resolution,
-    ResolveOutcome, SessionError, SessionId, TurnAttach, TurnId,
-};
+use lash_vocabulary::identity::NodeId;
+use lash_vocabulary::identity::ProcessId;
+use lash_vocabulary::identity::SessionId;
+use lash_vocabulary::identity::TurnId;
 use std::collections::BTreeSet;
 use std::num::{NonZeroU32, NonZeroUsize};
 use std::result::Result;
@@ -265,11 +272,21 @@ impl ProcessEngine for Integrator {
         lash::plugins::ProcessTraceClass::Internal
     }
 
-    async fn performed_effects(
+    async fn inspect_link(
         &self,
-        _payload: &lash::messages::JsonValue,
-    ) -> Result<lash::process::PerformedEffects, lash::process::ProcessEnvRefusal> {
-        Ok(lash::process::PerformedEffects::new())
+        _: lash::package::LinkId,
+        _: &lash::package::ReachSelector,
+    ) -> Result<lash::package::LinkInspection, lash::package::EnginePortError> {
+        unreachable!("external signature witness")
+    }
+    async fn inspect_start(
+        &self,
+        _: &lash::messages::JsonValue,
+    ) -> Result<lash::package::LinkInspection, lash::package::EnginePortError> {
+        unreachable!("external signature witness")
+    }
+    fn capabilities(&self) -> lash::package::NodeRequirements {
+        unreachable!("external signature witness")
     }
 
     async fn check_args(

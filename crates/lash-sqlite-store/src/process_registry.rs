@@ -1,7 +1,7 @@
 mod roster;
 use super::*;
 use lash_execution_contracts::process::ProcessQuery as _;
-use lash_protocol_types::ProcessId;
+use lash_vocabulary::identity::ProcessId;
 pub(crate) mod actor;
 mod event_release;
 #[cfg(test)]

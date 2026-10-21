@@ -5,7 +5,7 @@
 //! [`ConformanceDeployment`](crate::store::ConformanceDeployment) for each
 //! case: a deployment store with the test seams that corrupt its accelerators.
 
-use lash_protocol_types::SessionId;
+use lash_vocabulary::identity::SessionId;
 use std::collections::{BTreeMap, BTreeSet};
 use std::future::Future;
 use std::path::PathBuf;
@@ -91,23 +91,23 @@ struct GeneratedCase {
 
 #[derive(Clone, Debug)]
 struct ModelNode {
-    parent_node_id: Option<lash_core::NodeId>,
+    parent_node_id: Option<lash_vocabulary::identity::NodeId>,
     owner_session_id: SessionId,
 }
 
 #[derive(Clone, Debug)]
 struct ModelSession {
     physical_id: String,
-    path: Vec<lash_core::NodeId>,
+    path: Vec<lash_vocabulary::identity::NodeId>,
     head_revision: u64,
     /// The revisions the store still retains, each with the leaf it
     /// published. A sweep drops every one that is neither head nor pinned.
-    revisions: BTreeMap<u64, Option<lash_core::NodeId>>,
+    revisions: BTreeMap<u64, Option<lash_vocabulary::identity::NodeId>>,
     pins: BTreeSet<u64>,
 }
 
 impl ModelSession {
-    fn created(physical_id: String, path: Vec<lash_core::NodeId>) -> Self {
+    fn created(physical_id: String, path: Vec<lash_vocabulary::identity::NodeId>) -> Self {
         let revisions = BTreeMap::from([(0, path.last().cloned())]);
         Self {
             physical_id,
@@ -128,7 +128,7 @@ impl ModelSession {
 
 /// What a revision selector names in one session.
 enum SelectedRevision {
-    Retained(u64, Option<lash_core::NodeId>),
+    Retained(u64, Option<lash_vocabulary::identity::NodeId>),
     /// Published once and collected since.
     Pruned(u64),
     /// Past the head: nothing has published it yet.
@@ -156,7 +156,7 @@ impl SelectedRevision {
 #[derive(Clone, Debug, Default)]
 struct ReferenceModel {
     sessions: BTreeMap<u8, ModelSession>,
-    nodes: BTreeMap<lash_core::NodeId, ModelNode>,
+    nodes: BTreeMap<lash_vocabulary::identity::NodeId, ModelNode>,
     next_session_generation: u64,
     next_operation: u64,
 }
@@ -576,7 +576,7 @@ impl SessionGraphScenario {
             0 => None,
             1 => old_path.first().cloned(),
             2 => old_path.last().cloned(),
-            _ => Some(lash_core::NodeId::fixture(format!(
+            _ => Some(lash_vocabulary::identity::NodeId::fixture(format!(
                 "missing-required-{}",
                 self.model.next_operation
             ))),
@@ -717,7 +717,7 @@ impl SessionGraphScenario {
         source_slot: u8,
         selected: &SelectedRevision,
         physical_id: &str,
-    ) -> Result<Option<(LiveSession, Vec<lash_core::NodeId>)>, String> {
+    ) -> Result<Option<(LiveSession, Vec<lash_vocabulary::identity::NodeId>)>, String> {
         let source_session_id = SessionId::fixture(
             self.model
                 .sessions
@@ -958,7 +958,7 @@ impl SessionGraphScenario {
         let session_id = SessionId::fixture(session.physical_id.clone());
         // The honest ceilings: the highest node each ancestor owner holds on
         // this session's path (the ForkPlan of ADR 0057).
-        let mut honest = BTreeMap::<SessionId, lash_core::NodeId>::new();
+        let mut honest = BTreeMap::<SessionId, lash_vocabulary::identity::NodeId>::new();
         for node_id in &session.path {
             let owner = &self
                 .model
@@ -1164,7 +1164,7 @@ impl SessionGraphScenario {
     /// one past the head.
     fn selected_revision(&self, slot: u8, selector: u8) -> Option<SelectedRevision> {
         let session = self.model.sessions.get(&(slot % SESSION_COUNT))?;
-        let retained = |(revision, leaf): (&u64, &Option<lash_core::NodeId>)| {
+        let retained = |(revision, leaf): (&u64, &Option<lash_vocabulary::identity::NodeId>)| {
             SelectedRevision::Retained(*revision, leaf.clone())
         };
         match selector % 4 {
@@ -1192,7 +1192,10 @@ impl SessionGraphScenario {
     }
 
     /// The path from the root to `leaf`, by the modeled parent edges.
-    fn path_to(&self, leaf: Option<&lash_core::NodeId>) -> Vec<lash_core::NodeId> {
+    fn path_to(
+        &self,
+        leaf: Option<&lash_vocabulary::identity::NodeId>,
+    ) -> Vec<lash_vocabulary::identity::NodeId> {
         let mut path = Vec::new();
         let mut cursor = leaf.cloned();
         while let Some(node_id) = cursor {
@@ -1448,8 +1451,8 @@ impl SessionGraphScenario {
     /// A retained revision whose history holds `node_id`.
     fn retaining_revision_for(
         &self,
-        node_id: &lash_core::NodeId,
-    ) -> Option<(u8, u64, Option<lash_core::NodeId>)> {
+        node_id: &lash_vocabulary::identity::NodeId,
+    ) -> Option<(u8, u64, Option<lash_vocabulary::identity::NodeId>)> {
         self.model.sessions.iter().find_map(|(slot, session)| {
             session.revisions.iter().find_map(|(revision, leaf)| {
                 self.path_to(leaf.as_ref())
@@ -1463,7 +1466,7 @@ impl SessionGraphScenario {
         &mut self,
         slot: u8,
         revision: u64,
-        leaf: Option<lash_core::NodeId>,
+        leaf: Option<lash_vocabulary::identity::NodeId>,
         expected_node_id: &str,
     ) -> Result<(), String> {
         let probe_id = self.next_operation_id("retention-probe");
@@ -1509,7 +1512,7 @@ impl SessionGraphScenario {
     }
 
     /// The nodes some retained revision of a live session still reaches.
-    fn reachable_nodes(&self) -> BTreeSet<lash_core::NodeId> {
+    fn reachable_nodes(&self) -> BTreeSet<lash_vocabulary::identity::NodeId> {
         let roots = self
             .model
             .sessions
@@ -1587,8 +1590,8 @@ fn malformed_graph_append(
     shape: u8,
 ) -> Result<crate::GraphAppend, String> {
     let old_leaf = state.session_graph.leaf_node_id.clone();
-    let plugin_node =
-        |ordinal: u64, parent_node_id: Option<lash_core::NodeId>| crate::SessionNodeRecord {
+    let plugin_node = |ordinal: u64, parent_node_id: Option<lash_vocabulary::identity::NodeId>| {
+        crate::SessionNodeRecord {
             node_id: crate::store::derive_history_node_id(&state.session_id, operation, ordinal)
                 .expect("property operation id is valid"),
             parent_node_id,
@@ -1601,7 +1604,8 @@ fn malformed_graph_append(
                     serde_json::json!({"shape": shape}),
                 ),
             },
-        };
+        }
+    };
     Ok(match shape {
         0 => {
             let frame_key = crate::FrameKey::from_caller_material(&format!(
@@ -1610,22 +1614,26 @@ fn malformed_graph_append(
             ))
             .expect("non-empty frame material");
             let node_id = crate::frame_node_id(&state.session_id, frame_key.as_str()).into_inner();
-            let frame = |parent_node_id: Option<lash_core::NodeId>| crate::SessionNodeRecord {
-                node_id: lash_core::NodeId::fixture(node_id.clone()),
-                parent_node_id,
-                timestamp: "1970-01-01T00:00:00.000000000Z"
-                    .parse()
-                    .expect("canonical node timestamp"),
-                payload: crate::SessionNodePayload::FrameOpen {
-                    frame_key: frame_key.clone(),
-                    reason: crate::AgentFrameReason::initial(),
-                    assignment: crate::AgentFrameAssignment::unconfigured(state.policy.clone()),
-                },
+            let frame = |parent_node_id: Option<lash_vocabulary::identity::NodeId>| {
+                crate::SessionNodeRecord {
+                    node_id: lash_vocabulary::identity::NodeId::fixture(node_id.clone()),
+                    parent_node_id,
+                    timestamp: "1970-01-01T00:00:00.000000000Z"
+                        .parse()
+                        .expect("canonical node timestamp"),
+                    payload: crate::SessionNodePayload::FrameOpen {
+                        frame_key: frame_key.clone(),
+                        reason: crate::AgentFrameReason::initial(),
+                        assignment: crate::AgentFrameAssignment::unconfigured(state.policy.clone()),
+                    },
+                }
             };
             crate::GraphAppend::Extend {
                 nodes: vec![
                     frame(old_leaf),
-                    frame(Some(lash_core::NodeId::fixture(node_id.clone()))),
+                    frame(Some(lash_vocabulary::identity::NodeId::fixture(
+                        node_id.clone(),
+                    ))),
                 ],
             }
         }
@@ -1649,7 +1657,7 @@ fn malformed_graph_append(
                 crate::frame_node_id(&state.session_id, resident_frame_key.as_str()).into_inner();
             crate::GraphAppend::Extend {
                 nodes: vec![crate::SessionNodeRecord {
-                    node_id: lash_core::NodeId::fixture(node_id.clone()),
+                    node_id: lash_vocabulary::identity::NodeId::fixture(node_id.clone()),
                     parent_node_id: old_leaf.clone(),
                     timestamp: "1970-01-01T00:00:00.000000000Z"
                         .parse()
@@ -1671,8 +1679,10 @@ fn malformed_graph_append(
             let node_id = crate::frame_node_id(&state.session_id, frame_key.as_str()).into_inner();
             crate::GraphAppend::Extend {
                 nodes: vec![crate::SessionNodeRecord {
-                    node_id: lash_core::NodeId::fixture(node_id.clone()),
-                    parent_node_id: Some(lash_core::NodeId::fixture(node_id.clone())),
+                    node_id: lash_vocabulary::identity::NodeId::fixture(node_id.clone()),
+                    parent_node_id: Some(lash_vocabulary::identity::NodeId::fixture(
+                        node_id.clone(),
+                    )),
                     timestamp: "1970-01-01T00:00:00.000000000Z"
                         .parse()
                         .expect("canonical node timestamp"),
@@ -1715,8 +1725,8 @@ fn assert_bounded_resident_rejection(shape: u8) -> Result<(), String> {
 
 fn malformed_resident_graph(shape: u8) -> crate::SessionGraph {
     let node = |id: &str, parent: Option<&str>| crate::SessionNodeRecord {
-        node_id: lash_core::NodeId::fixture(id.to_string()),
-        parent_node_id: parent.map(lash_core::NodeId::fixture),
+        node_id: lash_vocabulary::identity::NodeId::fixture(id.to_string()),
+        parent_node_id: parent.map(lash_vocabulary::identity::NodeId::fixture),
         timestamp: "1970-01-01T00:00:00.000000000Z"
             .parse()
             .unwrap_or_else(|error| panic!("invalid fixture timestamp: {error}")),
@@ -1748,7 +1758,9 @@ fn malformed_resident_graph(shape: u8) -> crate::SessionGraph {
     }
 }
 
-fn graph_path_ids(graph: &crate::SessionGraph) -> Result<Vec<lash_core::NodeId>, String> {
+fn graph_path_ids(
+    graph: &crate::SessionGraph,
+) -> Result<Vec<lash_vocabulary::identity::NodeId>, String> {
     graph
         .validate_resident_integrity()
         .map_err(|error| error.to_string())?;

@@ -58,8 +58,8 @@ use lash_durable_test::{
     Cut, Fault, Matrix, Scenario, SimClock, SimNodes, SimNodesConfig, Stored, Tripwire,
 };
 use lash_execution_contracts::backend::StoreSet;
-use lash_protocol_types::SessionId;
 use lash_protocol_types::sync::MutexExt as _;
+use lash_vocabulary::identity::SessionId;
 
 use dialect::Dialect;
 use served::Tier;
@@ -174,9 +174,9 @@ struct World {
     overlay_bodies: Mutex<Vec<Option<lash_core_store::plugin_state::NamespaceBody>>>,
 }
 
-fn tool_definition(name: &str) -> lash_core::ToolDefinition {
+fn tool_definition(name: &str) -> lash_vocabulary::tool_contract::ToolDefinition {
     let object = serde_json::json!({ "type": "object", "additionalProperties": true });
-    lash_core::ToolDefinition::raw(
+    lash_vocabulary::tool_contract::ToolDefinition::raw(
         format!("tool:{name}"),
         format!("tools.{name}"),
         "Changes its plugin's namespace.",
@@ -186,7 +186,7 @@ fn tool_definition(name: &str) -> lash_core::ToolDefinition {
     .expect("the tool's schemas")
     .with_execution(std::time::Duration::from_secs(120))
     // A call a kill interrupted runs again at its ordinal.
-    .with_execution_policy(lash_core::ExecutionPolicy::repeatable(
+    .with_execution_policy(lash_vocabulary::tool_contract::ExecutionPolicy::repeatable(
         std::num::NonZeroU32::new(3).expect("a nonzero attempt bound"),
         1,
         1,
@@ -295,7 +295,7 @@ impl lash_core::ToolProvider for StoragePlugin {
         &self,
         _config: &lash_core::OwnerConfigView,
     ) -> std::result::Result<
-        Vec<lash_core::ToolManifest>,
+        Vec<lash_vocabulary::tool_contract::ToolManifest>,
         lash_execution_contracts::plugin_error::PluginError,
     > {
         Ok(vec![tool_definition(self.tool()).manifest()])
@@ -305,7 +305,7 @@ impl lash_core::ToolProvider for StoragePlugin {
         &self,
         name: &str,
         _config: &lash_core::OwnerConfigView,
-    ) -> Option<Arc<lash_core::ToolContract>> {
+    ) -> Option<Arc<lash_vocabulary::tool_contract::ToolContract>> {
         (name.split_once('.') == Some(("tools", self.tool())))
             .then(|| Arc::new(tool_definition(self.tool()).contract()))
     }
@@ -1035,7 +1035,8 @@ async fn a_fork_copies_and_resets_namespaces_as_declared_at_its_revision(tier: T
     let revision = head(&world, &parent).await;
     served::assert_answered("second", &world.send(&parent, "fork-second").await);
 
-    let child_id = lash::SessionId::try_from("fork-child-session".to_owned()).unwrap();
+    let child_id =
+        lash_vocabulary::identity::SessionId::try_from("fork-child-session".to_owned()).unwrap();
     world
         .core
         .fork_at(

@@ -3,7 +3,7 @@
   "cases": [
     {
       "name": "nested closures and task handles are named and not carried",
-      "document": "kernel 1\nnumbers by_spelling\nfn f() { return null }\nmain { let kept = 1 let closure = [fn() { return null }] let task = spawn call f() let got = join task let nested = {h: task} finish null }\n",
+      "document": "kernel 1\nnumbers by_spelling\ndefinition \"function f() -> Any\\nkernel 1\\nmetering statements\\nbody {\\n  return null\\n}\\n\"\ndefinition \"function kernel.anonymous() -> Any\\nkernel 1\\nmetering statements\\nuse f = @3a3fa83c0b17c0b051937e32fdfb794c36af6c0ebe001a46fb5d64311b375880\\nbody {\\n  return null\\n}\\n\"\nmain {\n  let kept = 1\n  let closure = [fn kernel.anonymous ]\n  let task = spawn invoke f()\n  let got = join task\n  let nested = {h: task}\n  finish null\n}\n",
       "expected": {
         "prints": [],
         "trace": [],

@@ -205,7 +205,8 @@ async fn run_on_the_redeploying_core(
     let (stores, keep) = served::stores(tier).await?;
     let backend = served::backend(stores);
     let requests = Arc::new(Requests::default());
-    let session_id = lash::SessionId::try_from(session.to_owned()).expect("a session id");
+    let session_id =
+        lash_vocabulary::identity::SessionId::try_from(session.to_owned()).expect("a session id");
 
     let first = creating.core(&backend, &requests);
     let recorded = first
@@ -324,7 +325,9 @@ async fn a_host_started_process_runs_under_the_behaviour_its_creation_recorded(t
     let payload = looping_process_payload(&backend).await;
 
     let first = Deployment::RlmCreating.core(&backend, &requests);
-    let _ = first.session(lash::SessionId::try_from("host-process-anchor".to_owned()).unwrap());
+    let _ = first.session(
+        lash_vocabulary::identity::SessionId::try_from("host-process-anchor".to_owned()).unwrap(),
+    );
     first
         .drain()
         .await
@@ -374,7 +377,9 @@ async fn a_host_started_process_runs_under_the_behaviour_its_creation_recorded(t
     );
 
     let second = Deployment::RlmRedeploying.core(&backend, &requests);
-    let _ = second.session(lash::SessionId::try_from("host-process-anchor".to_owned()).unwrap());
+    let _ = second.session(
+        lash_vocabulary::identity::SessionId::try_from("host-process-anchor".to_owned()).unwrap(),
+    );
     let output = tokio::time::timeout(WATCHDOG, second.processes().await_output(&started))
         .await
         .expect("deadlock watchdog: the redeploying node never ran the process")

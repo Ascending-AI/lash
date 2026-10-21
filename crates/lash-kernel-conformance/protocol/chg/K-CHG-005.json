@@ -3,7 +3,7 @@
   "cases": [
     {
       "name": "deep of (1, 2) is 7",
-      "document": "kernel 1\nnumbers by_spelling\nuse probe.deep = @e5e9f004f359eee0f93f56c110bea16dd3897fcd83b9c78c638fd05030b0dcc7\nfn f() { return null }\nmain { let x = (1, 2) finish probe.deep(x) }\n",
+      "document": "kernel 1\nnumbers by_spelling\nnative @e5e9f004f359eee0f93f56c110bea16dd3897fcd83b9c78c638fd05030b0dcc7\ndefinition \"function f() -> Any\\nkernel 1\\nmetering statements\\nuse probe.deep = @e5e9f004f359eee0f93f56c110bea16dd3897fcd83b9c78c638fd05030b0dcc7\\nbody {\\n  return null\\n}\\n\"\nmain {\n  let x = (1, 2)\n  finish @e5e9f004f359eee0f93f56c110bea16dd3897fcd83b9c78c638fd05030b0dcc7(x)\n}\n",
       "expected": {
         "prints": [],
         "trace": [],
@@ -20,7 +20,7 @@
     },
     {
       "name": "deep of [1, 2] is 7",
-      "document": "kernel 1\nnumbers by_spelling\nuse probe.deep = @e5e9f004f359eee0f93f56c110bea16dd3897fcd83b9c78c638fd05030b0dcc7\nfn f() { return null }\nmain { let x = [1, 2] finish probe.deep(x) }\n",
+      "document": "kernel 1\nnumbers by_spelling\nnative @e5e9f004f359eee0f93f56c110bea16dd3897fcd83b9c78c638fd05030b0dcc7\ndefinition \"function f() -> Any\\nkernel 1\\nmetering statements\\nuse probe.deep = @e5e9f004f359eee0f93f56c110bea16dd3897fcd83b9c78c638fd05030b0dcc7\\nbody {\\n  return null\\n}\\n\"\nmain {\n  let x = [1, 2]\n  finish @e5e9f004f359eee0f93f56c110bea16dd3897fcd83b9c78c638fd05030b0dcc7(x)\n}\n",
       "expected": {
         "prints": [],
         "trace": [],
@@ -37,7 +37,7 @@
     },
     {
       "name": "deep of map{1:2} is 7",
-      "document": "kernel 1\nnumbers by_spelling\nuse probe.deep = @e5e9f004f359eee0f93f56c110bea16dd3897fcd83b9c78c638fd05030b0dcc7\nfn f() { return null }\nmain { let x = map{1:2} finish probe.deep(x) }\n",
+      "document": "kernel 1\nnumbers by_spelling\nnative @e5e9f004f359eee0f93f56c110bea16dd3897fcd83b9c78c638fd05030b0dcc7\ndefinition \"function f() -> Any\\nkernel 1\\nmetering statements\\nuse probe.deep = @e5e9f004f359eee0f93f56c110bea16dd3897fcd83b9c78c638fd05030b0dcc7\\nbody {\\n  return null\\n}\\n\"\nmain {\n  let x = map{1: 2}\n  finish @e5e9f004f359eee0f93f56c110bea16dd3897fcd83b9c78c638fd05030b0dcc7(x)\n}\n",
       "expected": {
         "prints": [],
         "trace": [],
@@ -54,7 +54,7 @@
     },
     {
       "name": "deep of {a:[1]} is 6",
-      "document": "kernel 1\nnumbers by_spelling\nuse probe.deep = @e5e9f004f359eee0f93f56c110bea16dd3897fcd83b9c78c638fd05030b0dcc7\nfn f() { return null }\nmain { let x = {a:[1]} finish probe.deep(x) }\n",
+      "document": "kernel 1\nnumbers by_spelling\nnative @e5e9f004f359eee0f93f56c110bea16dd3897fcd83b9c78c638fd05030b0dcc7\ndefinition \"function f() -> Any\\nkernel 1\\nmetering statements\\nuse probe.deep = @e5e9f004f359eee0f93f56c110bea16dd3897fcd83b9c78c638fd05030b0dcc7\\nbody {\\n  return null\\n}\\n\"\nmain {\n  let x = {a: [1]}\n  finish @e5e9f004f359eee0f93f56c110bea16dd3897fcd83b9c78c638fd05030b0dcc7(x)\n}\n",
       "expected": {
         "prints": [],
         "trace": [],
@@ -71,7 +71,7 @@
     },
     {
       "name": "deep of shared list is 7",
-      "document": "kernel 1\nnumbers by_spelling\nuse probe.deep = @e5e9f004f359eee0f93f56c110bea16dd3897fcd83b9c78c638fd05030b0dcc7\nmain { let a = [1] let x = [a,a] finish probe.deep(x) }\n",
+      "document": "kernel 1\nnumbers by_spelling\nnative @e5e9f004f359eee0f93f56c110bea16dd3897fcd83b9c78c638fd05030b0dcc7\nmain {\n  let a = [1]\n  let x = [a, a]\n  finish @e5e9f004f359eee0f93f56c110bea16dd3897fcd83b9c78c638fd05030b0dcc7(x)\n}\n",
       "expected": {
         "prints": [],
         "trace": [],
@@ -88,7 +88,7 @@
     },
     {
       "name": "deep of cyclic list is 2",
-      "document": "kernel 1\nnumbers by_spelling\nuse probe.deep = @e5e9f004f359eee0f93f56c110bea16dd3897fcd83b9c78c638fd05030b0dcc7\nmain { let x = [] set x[0] = x finish probe.deep(x) }\n",
+      "document": "kernel 1\nnumbers by_spelling\nnative @e5e9f004f359eee0f93f56c110bea16dd3897fcd83b9c78c638fd05030b0dcc7\nmain {\n  let x = []\n  set x[0] = x\n  finish @e5e9f004f359eee0f93f56c110bea16dd3897fcd83b9c78c638fd05030b0dcc7(x)\n}\n",
       "expected": {
         "prints": [],
         "trace": [],

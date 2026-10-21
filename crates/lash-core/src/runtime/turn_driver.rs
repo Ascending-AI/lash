@@ -40,7 +40,11 @@ pub(super) struct RuntimeTurnDriver<'a> {
     pub(super) cell_end: crate::CellEndHandoff,
     /// What the cell that last answered the machine left for the commit
     /// that consumes its answer.
-    pub(super) answered_cell_end: Option<(crate::EffectId, crate::EndedCell)>,
+    pub(super) answered_cell_execution: Option<(
+        lash_sansio::EffectId,
+        lash_core_store::resolutions::ExecutionId,
+    )>,
+    pub(super) answered_cell_end: Option<(lash_sansio::EffectId, crate::EndedCell)>,
     /// The model response that asked for the cell the turn runs next, held
     /// for the cell's first save (FIG-6000), until that cell runs.
     pub(super) held_response: Option<crate::HeldResponse>,
@@ -50,8 +54,10 @@ pub(super) struct RuntimeTurnDriver<'a> {
     pub(super) cell_start: Option<crate::runtime::durable::session::CellStart>,
     /// The closing record of the cell that last answered the machine, held
     /// for the commit that consumes its answer (P1).
-    pub(super) answered_cell_close:
-        Option<(crate::EffectId, crate::runtime::durable::session::CellClose)>,
+    pub(super) answered_cell_close: Option<(
+        lash_sansio::EffectId,
+        crate::runtime::durable::session::CellClose,
+    )>,
     /// Where the session's committed execution state stands on the
     /// persistent heap: the head this turn started from, then the working
     /// state its last committed cell left (FIG-6193), or the root a cell's
@@ -60,7 +66,7 @@ pub(super) struct RuntimeTurnDriver<'a> {
     pub(super) host: RuntimeHost,
     pub(super) scoped_effect_controller: ActorContext,
     pub(super) session_id: SessionId,
-    pub(super) turn_id: crate::TurnId,
+    pub(super) turn_id: lash_vocabulary::identity::TurnId,
     pub(super) turn_index: usize,
     pub(super) turn_pipeline: TurnBoundary,
     pub(super) prelude: Box<crate::runtime::effect::TurnPrelude>,

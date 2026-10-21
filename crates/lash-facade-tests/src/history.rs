@@ -11,8 +11,8 @@ use crate as lash;
 // decodes are bounded by the nodes it appends, whatever the session's
 // history depth.
 
-use lash::SessionId;
 use lash_core::store::{SessionHistoryStore, WindowSelector};
+use lash_vocabulary::identity::SessionId;
 
 /// The window reads one send makes: the engine's turn, the runtime its pass
 /// opens, the commit's publication, the open session's refresh and the

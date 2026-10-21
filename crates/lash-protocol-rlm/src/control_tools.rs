@@ -1,8 +1,13 @@
 use async_trait::async_trait;
-use lash_core::{
-    ToolArgumentProjectionPolicy, ToolCall, ToolContract, ToolDefinition, ToolManifest,
-    ToolOutcome, ToolProvider, TurnControl, TurnControls,
-};
+use lash_core::ToolCall;
+use lash_core::ToolOutcome;
+use lash_core::ToolProvider;
+use lash_core::TurnControl;
+use lash_vocabulary::tool_contract::ToolArgumentProjectionPolicy;
+use lash_vocabulary::tool_contract::ToolContract;
+use lash_vocabulary::tool_contract::ToolDefinition;
+use lash_vocabulary::tool_contract::ToolManifest;
+use lash_vocabulary::tool_declaration::TurnControls;
 use serde_json::{Value, json};
 use std::sync::Arc;
 
@@ -78,7 +83,7 @@ impl RlmFinishProvider {
             .ok()
             .flatten()
             .and_then(|recorded| recorded.finish_value_schema)
-            .and_then(|schema| lash_core::JsonSchema::admit(schema).ok());
+            .and_then(|schema| lash_vocabulary::json_schema::JsonSchema::admit(schema).ok());
         match schema {
             Some(schema) => definition
                 .clone()
@@ -224,7 +229,7 @@ pub(crate) fn finish_tool_definition_for(
     lash_core::finish_tool(
         FINISH_TOOL_NAME,
         definition_description,
-        lash_core::JsonSchema::any(),
+        lash_vocabulary::json_schema::JsonSchema::any(),
     )
     .expect("a canonical operation")
 }
@@ -320,7 +325,8 @@ mod tests {
     use super::*;
     use crate::projection::{decode_rlm_protocol_event, rlm_protocol_event};
     use lash_protocol_types::sync::MutexExt;
-    use lash_protocol_types::{ProcessId, SessionId};
+    use lash_vocabulary::identity::ProcessId;
+    use lash_vocabulary::identity::SessionId;
     use std::sync::{Arc, Mutex};
 
     use lash_core::SessionAppendNode;
@@ -368,8 +374,8 @@ mod tests {
     impl lash_core::plugin::SessionReadService for BatonManager {
         async fn committed_turn(
             &self,
-            _session_id: &lash_core::SessionId,
-            _turn_id: &lash_core::TurnId,
+            _session_id: &lash_vocabulary::identity::SessionId,
+            _turn_id: &lash_vocabulary::identity::TurnId,
         ) -> Result<
             Option<lash_core::transcript::CommittedTurnWithCalls>,
             lash_core::plugin::CommittedTurnReadError,
@@ -405,8 +411,8 @@ mod tests {
     impl SessionStateService for BatonManager {
         async fn turn_scope(
             &self,
-            _session_id: &lash_core::SessionId,
-            _turn_id: &lash_core::TurnId,
+            _session_id: &lash_vocabulary::identity::SessionId,
+            _turn_id: &lash_vocabulary::identity::TurnId,
         ) -> Result<lash_core::ExecutionScope, lash_execution_contracts::plugin_error::PluginError>
         {
             Err(
@@ -441,7 +447,7 @@ mod tests {
     impl SessionGraphService for BatonManager {
         async fn append_session_nodes(
             &self,
-            _session_id: &lash_core::SessionId,
+            _session_id: &lash_vocabulary::identity::SessionId,
             _request: lash_core::AppendSessionNodesRequest,
         ) -> Result<
             lash_core::SessionGraphAppendResult,
@@ -459,7 +465,7 @@ mod tests {
     impl lash_core::ProcessService for BatonManager {
         async fn stage_recorded_start(
             &self,
-            _owner: &lash_core::RuntimeOwner,
+            _owner: &lash_vocabulary::identity::RuntimeOwner,
             _request: lash_execution_contracts::process::ProcessStartRequest,
             _scope: lash_core::ProcessOpScope<'_>,
         ) -> Result<lash_core::StagedProcessStart, PluginError> {
@@ -501,7 +507,7 @@ mod tests {
 
         async fn validate_visible(
             &self,
-            _owner: &lash_core::RuntimeOwner,
+            _owner: &lash_vocabulary::identity::RuntimeOwner,
             _handle_ids: &[ProcessId],
             _scope: lash_core::ProcessOpScope<'_>,
         ) -> Result<(), PluginError> {
@@ -512,7 +518,7 @@ mod tests {
 
         async fn cancel(
             &self,
-            _owner: &lash_core::RuntimeOwner,
+            _owner: &lash_vocabulary::identity::RuntimeOwner,
             _process_id: &ProcessId,
             _scope: lash_core::ProcessOpScope<'_>,
         ) -> Result<lash_execution_contracts::process::ObservedProcess, PluginError> {
@@ -523,7 +529,7 @@ mod tests {
 
         async fn cancel_recorded_intent(
             &self,
-            _owner: &lash_core::RuntimeOwner,
+            _owner: &lash_vocabulary::identity::RuntimeOwner,
             _process_id: &ProcessId,
             _identity: lash_core::ToolIntentIdentity,
             _scope: lash_core::ProcessOpScope<'_>,
@@ -547,7 +553,7 @@ mod tests {
 
         async fn list_visible_for_attempt(
             &self,
-            _owner: &lash_core::RuntimeOwner,
+            _owner: &lash_vocabulary::identity::RuntimeOwner,
             _mode: lash_execution_contracts::process::ProcessListMode,
         ) -> Result<
             Vec<lash_execution_contracts::process::ObservedProcess>,
@@ -561,7 +567,7 @@ mod tests {
         }
         async fn start_from_request(
             &self,
-            _session_id: &lash_core::SessionId,
+            _session_id: &lash_vocabulary::identity::SessionId,
             _request: lash_execution_contracts::process::ProcessStartRequest,
             _scope: lash_core::ProcessOpScope<'_>,
         ) -> Result<
@@ -590,7 +596,7 @@ mod tests {
         }
         async fn cancel_bound(
             &self,
-            _process_id: &lash_core::ProcessId,
+            _process_id: &lash_vocabulary::identity::ProcessId,
             _scope: lash_core::ProcessOpScope<'_>,
         ) -> Result<(), lash_execution_contracts::plugin_error::PluginError> {
             Err(
@@ -601,7 +607,7 @@ mod tests {
         }
         async fn release_consumer_hold(
             &self,
-            _process_id: &lash_core::ProcessId,
+            _process_id: &lash_vocabulary::identity::ProcessId,
             _key: &str,
         ) -> Result<(), lash_execution_contracts::plugin_error::PluginError> {
             Err(
@@ -614,8 +620,10 @@ mod tests {
             &self,
             _key: &str,
             _owner: &lash_core::ScopeId,
-        ) -> Result<Vec<lash_core::ProcessId>, lash_execution_contracts::plugin_error::PluginError>
-        {
+        ) -> Result<
+            Vec<lash_vocabulary::identity::ProcessId>,
+            lash_execution_contracts::plugin_error::PluginError,
+        > {
             Err(
                 lash_execution_contracts::plugin_error::PluginError::Session(
                     "operation is absent from this fixture".into(),

@@ -2,18 +2,18 @@
   "rule": "K-HOST-003",
   "cases": [
     {
-      "name": "random uses top 53 bits and stays below one",
-      "document": "kernel 1\nnumbers by_spelling\n\nmain {\nfinish (random, random)\n}\n",
+      "name": "ordinary random read returns exact big endian bytes before dialect conversion",
+      "document": "kernel 1\nnumbers by_spelling\nimport 0 operation typescript.random() -> Bytes\nmain {\nfinish (perform 0() as Bytes, perform 0() as Bytes)\n}\n",
       "expected": {
         "prints": [],
         "end": {
           "finished": {
             "tuple": [
               {
-                "float": "0.0"
+                "bytes": "0000000000000000"
               },
               {
-                "float": "0.5"
+                "bytes": "8000000000000000"
               }
             ]
           }
@@ -23,11 +23,30 @@
       "environment": {
         "host": [
           {
-            "random": 0
+            "perform": {
+              "effect": "typescript.random",
+              "args": [],
+              "answer": {
+                "Ok": {
+                  "bytes": "0000000000000000"
+                }
+              }
+            }
           },
           {
-            "random": 9223372036854775808
+            "perform": {
+              "effect": "typescript.random",
+              "args": [],
+              "answer": {
+                "Ok": {
+                  "bytes": "8000000000000000"
+                }
+              }
+            }
           }
+        ],
+        "reads": [
+          "typescript.random"
         ]
       }
     }

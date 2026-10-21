@@ -2,12 +2,12 @@
 use super::*;
 use crate::interface::CellStart;
 use crate::paged::{OpenError, SealError, SealedRoot};
-use lash_kernel_doc::graph_tokens::encode_body;
 use lash_kernel_state::kernel_internals::tree::SealWork;
 use lash_kernel_state::paged::{
     AllocationCensus, CheckpointRoot, EditEpoch, PageKind, PageSource, RootStatus, SavedMeters,
     SealBudget, SequenceRoot,
 };
+use lash_vocabulary::tokens::encode_body;
 
 impl Machine for KernelMachine {
     fn start(
@@ -115,19 +115,16 @@ impl Machine for KernelMachine {
             WaitPhase::Committed(_) => return Err(DeliverError::AlreadyDelivered { wait }),
             WaitPhase::Admitted => (),
         }
-        if matches!(
-            pending.kind,
-            lash_kernel_state::paged::WaitKindRecord::Sleep
-        ) != matches!(outcome, Outcome::Elapsed)
-        {
-            return Err(DeliverError::WrongOutcome { wait });
-        }
         use lash_kernel_state::paged::CommittedOutcomeRecord;
         let exe = std::sync::Arc::clone(&self.exe);
-        let declared = |name: &_| exe.declared.contains_key(name);
+        let declared = |callable: &lash_vocabulary::names::CallableId| {
+            exe.instances
+                .get(&callable.link)
+                .is_some_and(|doc| doc.functions.contains_key(&callable.function))
+        };
         let decoder = lash_kernel_doc::Decoder {
             max_depth: self.limits.value_depth(),
-            policy: self.program.document.manifest.numbers,
+            policy: self.program.document.numbers,
             declared: &declared,
         };
         let rejected = |what: &str, mismatch: lash_kernel_doc::DecodeMismatch| {
@@ -138,11 +135,13 @@ impl Machine for KernelMachine {
             }))
         };
         let frozen = match outcome {
-            Outcome::Elapsed => CommittedOutcomeRecord::Elapsed,
             // A failure's data is decoded under the document's number
             // policy, as a result is, before the heap freezes it.
             Outcome::Failed(error) => {
-                match decoder.decode(&Datum::Error(Box::new(error)), &lash_kernel_doc::Type::Any) {
+                match decoder.decode(
+                    &Datum::Error(Box::new(error)),
+                    &lash_vocabulary::types::Type::Any,
+                ) {
                     Ok(datum) => CommittedOutcomeRecord::Failed(
                         self.heap.freeze_datum(&datum).map_err(delivery_error)?,
                     ),
@@ -169,7 +168,10 @@ impl Machine for KernelMachine {
                     ),
                     Err(mismatch) => CommittedOutcomeRecord::Rejected(
                         self.heap
-                            .freeze_datum(&rejected(&format!("the result of `{effect}`"), mismatch))
+                            .freeze_datum(&rejected(
+                                &format!("the result of `{effect:?}`"),
+                                mismatch,
+                            ))
                             .map_err(delivery_error)?,
                     ),
                 }
@@ -228,6 +230,19 @@ impl KernelMachine {
         mut source: Box<dyn PageSource>,
         layout: Layout,
     ) -> Result<Self, OpenError> {
+        program
+            .validate_links()
+            .map_err(|error| OpenError::Malformed {
+                problem: error.to_string(),
+            })?;
+        if root.link != program.link {
+            return Err(OpenError::Malformed {
+                problem: format!(
+                    "checkpoint Link {} differs from supplied {}",
+                    root.link, program.link
+                ),
+            });
+        }
         let census = match root.limits.memory {
             None => None,
             Some(_) => Some(session::restored_census(&mut *source, Some(root.heap))?),
@@ -257,7 +272,7 @@ impl KernelMachine {
         census: Option<Box<dyn AllocationCensus>>,
         layout: Layout,
     ) -> Result<Self, OpenError> {
-        let limits = lash_kernel_doc::KernelDataLimits::standard();
+        let limits = lash_vocabulary::data_limits::KernelDataLimits::standard();
         // The checkpoint owns its policies and its limits, as its limiters
         // grew them, even on a worker configured otherwise (FIG-6768).
         let bounds = Bounds {
@@ -273,7 +288,13 @@ impl KernelMachine {
         let library = program.library.in_charge(bounds.charge).in_layout(layout);
         let admitted = library.admit(&program.document, limits)?;
         let exe = admitted
-            .executable(&program.document, &library)
+            .executable(
+                &program.document,
+                &library,
+                &program.documents,
+                &program.functions,
+                &program.instances,
+            )
             .map_err(|missing| OpenError::MissingFunction {
                 function: missing.0,
             })?;
@@ -284,10 +305,10 @@ impl KernelMachine {
                 given,
             });
         }
-        if root.kernel != program.document.manifest.kernel {
+        if root.kernel != program.document.kernel() {
             return Err(OpenError::KernelVersion {
                 parked: root.kernel,
-                supported: program.document.manifest.kernel,
+                supported: program.document.kernel(),
             });
         }
         if root.closure != program.closure {
@@ -328,6 +349,7 @@ impl KernelMachine {
             lash_kernel_state::arena::Arena::from_ordinal(heap.next_ordinal()),
         ));
         let mut machine = Self {
+            active_link: program.link,
             closure: root.closure,
             owner: root.owner,
             document: Some(root.document),
@@ -399,8 +421,7 @@ impl KernelMachine {
     pub(crate) fn task_identity(
         &self,
         identity: lash_kernel_state::paged::TaskIdentityRef,
-    ) -> Result<lash_kernel_doc::kernel_internals::TaskIdentity, lash_kernel_doc::heap::HeapFault>
-    {
+    ) -> Result<lash_vocabulary::sites::TaskIdentity, lash_kernel_doc::heap::HeapFault> {
         identity.resolve(self.heap.pages())
     }
 }
@@ -489,12 +510,13 @@ impl KernelMachine {
             }
         };
         let root = CheckpointRoot {
+            link: self.program.link,
             limits: lash_kernel_state::paged::SavedLimits {
                 memory: (self.bounds.memory_meter == crate::MemoryMeter::On)
                     .then_some(self.bounds.memory),
                 charge: self.bounds.charge_limit,
             },
-            kernel: self.program.document.manifest.kernel,
+            kernel: self.program.document.kernel(),
             document,
             closure: self.closure,
             owner: self.owner,

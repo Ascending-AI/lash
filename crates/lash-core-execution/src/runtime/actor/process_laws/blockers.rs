@@ -26,7 +26,7 @@ pub(super) async fn observed(
 }
 
 /// The kind and site of each wait, in the order the record lists them.
-fn blockers(waits: &[WaitState]) -> Vec<(WaitKind, Option<lash_protocol_types::EffectId>)> {
+fn blockers(waits: &[WaitState]) -> Vec<(WaitKind, Option<lash_vocabulary::sites::EffectId>)> {
     waits
         .iter()
         .map(|wait| (wait.kind.clone(), wait.site.clone()))

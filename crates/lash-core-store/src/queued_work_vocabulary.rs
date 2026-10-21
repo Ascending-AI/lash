@@ -4,7 +4,7 @@
 //! session-command family that rides in them. The runtime's queue driver
 //! stays in `lash-core`; only the data it persists lives here.
 
-use crate::SessionId;
+use lash_vocabulary::identity::SessionId;
 
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
 #[serde(tag = "kind", rename_all = "snake_case")]
@@ -109,7 +109,7 @@ impl SessionCommand {
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct SessionCommandReceipt {
     pub session_id: SessionId,
-    pub batch_id: crate::BatchId,
+    pub batch_id: lash_vocabulary::identity::BatchId,
     pub source_key: String,
 }
 impl std::fmt::Display for SessionCommandReceipt {
@@ -355,7 +355,7 @@ impl QueuedWorkPayload {
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct QueuedWorkBatch {
-    pub batch_id: crate::BatchId,
+    pub batch_id: lash_vocabulary::identity::BatchId,
     pub session_id: SessionId,
     pub enqueue_seq: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -570,7 +570,7 @@ pub enum AdmissionBoundary {
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct QueuedWorkCompletion {
     pub session_id: SessionId,
-    pub batch_ids: Vec<crate::BatchId>,
+    pub batch_ids: Vec<lash_vocabulary::identity::BatchId>,
 }
 /// Queued-work batches one admission bound to a run, with their payloads,
 /// in `enqueue_seq` order (FIG-3927). The binding lives on the rows; this
@@ -589,7 +589,7 @@ impl AdmittedQueuedWork {
     }
 
     /// The admitted batches' ids, in admission order.
-    pub fn batch_ids(&self) -> Vec<crate::BatchId> {
+    pub fn batch_ids(&self) -> Vec<lash_vocabulary::identity::BatchId> {
         self.batches
             .iter()
             .map(|batch| batch.batch_id.clone())

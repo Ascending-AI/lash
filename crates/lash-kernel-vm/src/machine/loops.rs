@@ -11,13 +11,14 @@ use std::sync::Arc;
 
 use lash_kernel_doc::arena::ArenaHandle;
 use lash_kernel_doc::{NativeError, Retry, TaskId, Value};
+
 use lash_kernel_state::arena::Arena;
 use lash_kernel_state::paged::TableCursor;
 
 use super::ops::{Flow, Reg, Status};
 use super::stream::{Ran, Running};
 use super::{Control, Eval, Halt, KernelMachine, fault, raise};
-use crate::compile::{Executable, Form, LibId, StmtId, Via};
+use crate::compile::{Executable, Form, StmtId, Via};
 use crate::interface::Host;
 
 /// A `for`'s position in what it walks (`K-ITER-002`, `K-ITER-003`,
@@ -271,7 +272,7 @@ impl KernelMachine {
         task: TaskId,
         exe: &Executable,
         stmt: StmtId,
-        lib: LibId,
+        lib: crate::compile::LinkedHook,
         args: &[Value],
     ) -> Eval<Option<Value>> {
         // Protocol hooks have at most two arguments. This is the header's
@@ -281,7 +282,7 @@ impl KernelMachine {
         for (at, arg) in args.iter().enumerate() {
             self.put(at, *arg);
         }
-        match self.call_lib(task, exe, lib, 0, count, Some(stmt))? {
+        match self.call_hook(task, exe, lib, 0, count, Some(stmt))? {
             Flow::Done => Ok(Some(self.take(0))),
             Flow::Step => Ok(None),
         }

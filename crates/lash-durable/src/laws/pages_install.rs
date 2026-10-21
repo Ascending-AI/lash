@@ -7,13 +7,17 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex};
 
+use lash_core_store::checkpoint_graph::CommitId;
+use lash_core_store::checkpoint_graph::EncodedNode;
+use lash_core_store::checkpoint_graph::GraphRefusal;
+use lash_core_store::checkpoint_graph::NodeId;
+use lash_core_store::checkpoint_graph::NodeKind;
+use lash_core_store::checkpoint_graph::TypedBody;
 use lash_core_store::checkpoint_graph::stage::{
     CandidateManifest, EDGE_RECORD_BYTES, EdgeLog, ManifestEntry, ManifestSummary, StageFault,
 };
-use lash_core_store::checkpoint_graph::{
-    CommitId, EncodedNode, GraphRefusal, NodeId, NodeKind, TokenWriter, TypedBody,
-};
 use lash_core_store::store_failure::StoreFailureKind;
+use lash_vocabulary::tokens::TokenWriter;
 
 use super::super::{LawBroken, LawOutcome, ensure};
 use super::{

@@ -1,14 +1,14 @@
 use super::*;
-use crate::TurnId;
 use crate::direct_completion_client::{DirectCompletionService, DirectExecutionPosition};
 use lash_protocol_types::sync::MutexExt;
+use lash_vocabulary::identity::TurnId;
 use std::collections::BTreeMap;
 
 impl RuntimeSessionServices {
     fn direct_invocation_context<'a>(
         &'a self,
         effect_controller: crate::ActorContext,
-        turn_id: Option<&'a crate::TurnId>,
+        turn_id: Option<&'a lash_vocabulary::identity::TurnId>,
         position: DirectExecutionPosition,
         effect_attempt: Option<crate::EffectAttempt>,
     ) -> DirectInvocationContext<'a> {
@@ -31,7 +31,7 @@ impl DirectCompletionService for RuntimeSessionServices {
         request: crate::DirectRequest,
         usage_source: &str,
         effect_controller: crate::ActorContext,
-        turn_id: Option<&crate::TurnId>,
+        turn_id: Option<&lash_vocabulary::identity::TurnId>,
         position: DirectExecutionPosition,
         effect_attempt: Option<&crate::EffectAttempt>,
     ) -> Result<crate::DirectCompletion, lash_execution_contracts::plugin_error::PluginError> {
@@ -56,7 +56,7 @@ impl DirectCompletionService for RuntimeSessionServices {
         facts: Option<Arc<dyn std::any::Any + Send + Sync>>,
         usage_source: &str,
         effect_controller: crate::ActorContext,
-        turn_id: Option<&crate::TurnId>,
+        turn_id: Option<&lash_vocabulary::identity::TurnId>,
         position: DirectExecutionPosition,
         caused_by: Option<crate::CausalRef>,
         effect_attempt: Option<&crate::EffectAttempt>,
@@ -219,8 +219,8 @@ impl CurrentOwnerCapability {
     /// session, or the process's own record namespace.
     fn owned_call_session(&self) -> SessionId {
         match self.runtime_owner() {
-            crate::RuntimeOwner::Session(session) => session,
-            crate::RuntimeOwner::Process(process) => {
+            lash_vocabulary::identity::RuntimeOwner::Session(session) => session,
+            lash_vocabulary::identity::RuntimeOwner::Process(process) => {
                 SessionId::prefixed("process:", process.as_str())
             }
         }
@@ -593,7 +593,7 @@ mod tests {
             &env,
             policy.clone(),
             crate::RuntimeSessionState {
-                session_id: crate::SessionId::fixture(SESSION_ID.to_string()),
+                session_id: lash_vocabulary::identity::SessionId::fixture(SESSION_ID.to_string()),
                 policy: policy.clone(),
                 ..crate::RuntimeSessionState::fixture(crate::SessionPolicy::new(
                     crate::TurnBudget::Unbounded,

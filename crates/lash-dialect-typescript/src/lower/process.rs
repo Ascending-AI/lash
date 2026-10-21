@@ -2,9 +2,9 @@
 
 use std::collections::HashSet;
 
-use lash_kernel_doc::{
-    EffectName, Expr, Literal, Name, Param, RecordType, RecordTypeField, Signature, Type,
-};
+use lash_kernel_doc::{Expr, Literal};
+
+use lash_vocabulary::{EffectName, Name, Param, RecordType, RecordTypeField, Signature, Type};
 
 use lash_kernel_dialect::workflow::{self, ModuleRefusal};
 
@@ -26,11 +26,7 @@ impl Lowerer<'_> {
         let ast::Expr::Function(function) = init else {
             return None;
         };
-        (self.module.is_some()
-            && function.is_async
-            && self.in_cell_code()
-            && self.scopes.len() == 1)
-            .then_some(function)
+        (self.module.is_some() && self.in_cell_code() && self.scopes.len() == 1).then_some(function)
     }
 
     /// Whether lowering stands in the cell's own code, outside every
@@ -101,11 +97,14 @@ impl Lowerer<'_> {
             .extend(function.captions.entries(&entry, &names));
         let (params, body, packed) = self.lift(function)?;
         let (body, notes) = body.into_parts();
-        let function = lash_kernel_doc::Function {
+        let definition = lash_kernel_dialect::authoring::local_function(
             params,
             body,
-            start: None,
-        };
+            &self.imports.as_map(),
+            self.library,
+            &self.local_functions,
+        );
+        let identity = definition.identity();
         let convention = self.entry_convention(packed)?;
         // Only a module's lowering finds an entry (`module_entry`).
         if let Some(module) = self.module.as_mut() {
@@ -113,14 +112,19 @@ impl Lowerer<'_> {
                 .add(workflow::Entry {
                     name: entry.clone(),
                     span,
-                    function,
+                    function: definition,
+                    asynchronous: function.is_async,
+                    rest: function
+                        .params
+                        .last()
+                        .is_some_and(|param| matches!(param, ast::Pattern::Rest(_))),
                     signature,
                     convention,
                     notes,
                 })
                 .map_err(Diagnostic::module)?;
         }
-        Ok(reference(entry))
+        Ok(reference(identity))
     }
 
     /// The author's entry body, lowered with none of the cell or module
@@ -176,12 +180,12 @@ impl Lowerer<'_> {
     ) -> Lowering<lash_kernel_doc::StartConvention> {
         if !packed {
             return Ok(lash_kernel_doc::StartConvention::TsDirect {
-                await_fn: self.function("ts.await")?,
+                await_fn: self.function_target("ts.await")?,
             });
         }
         Ok(lash_kernel_doc::StartConvention::TsArgsList {
-            await_fn: self.function("ts.await")?,
-            same_fn: self.function("same")?,
+            await_fn: self.function_target("ts.await")?,
+            same_fn: lash_kernel_doc::FunctionTarget::Local(self.function("same")?),
         })
     }
 
@@ -281,7 +285,7 @@ impl Lowerer<'_> {
 }
 
 /// The value a reference to the declared function `entry` is.
-fn reference(entry: Name) -> Operand {
+fn reference(entry: lash_vocabulary::FunctionId) -> Operand {
     Operand {
         plain: None,
         text_prefix: None,

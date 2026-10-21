@@ -1,11 +1,14 @@
 mod call_error;
-use crate::{RunId, SessionId, TurnId};
 pub use call_error::LlmCallError;
+use lash_vocabulary::identity::RunId;
+use lash_vocabulary::identity::SessionId;
+use lash_vocabulary::identity::TurnId;
 use schemars::JsonSchema;
 use std::num::NonZeroUsize;
 use std::sync::Arc;
 
-use crate::{AttachmentRef, SchemaContract};
+use crate::AttachmentRef;
+use lash_vocabulary::schema_contract::SchemaContract;
 
 mod response;
 pub use response::{
@@ -568,7 +571,9 @@ pub enum LlmRequestOwner {
     /// A session: its turns, and the tools and plugins its turns run.
     Session { session_id: SessionId },
     /// A process: the tools its steps run.
-    Process { process_id: crate::ProcessId },
+    Process {
+        process_id: lash_vocabulary::identity::ProcessId,
+    },
     /// The host's own direct call, made for no session or process.
     Host,
 }

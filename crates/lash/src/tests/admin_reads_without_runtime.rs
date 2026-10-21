@@ -6,7 +6,7 @@
 
 use super::*;
 use crate::TurnInput;
-use lash_protocol_types::SessionId;
+use lash_vocabulary::identity::SessionId;
 
 /// What the durable admin reads answered.
 struct AdminReads {

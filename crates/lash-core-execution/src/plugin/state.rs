@@ -46,7 +46,7 @@ use std::sync::{Arc, Mutex};
 #[derive(Clone)]
 pub struct PluginStateView {
     /// Who the plugin session this view belongs to was built for.
-    owner: Option<crate::RuntimeOwner>,
+    owner: Option<lash_vocabulary::identity::RuntimeOwner>,
     plugin_id: Arc<str>,
     state: Arc<Mutex<PluginStateRegistry>>,
 }
@@ -68,7 +68,7 @@ impl PluginStateView {
     }
 
     pub(crate) fn bind(
-        owner: &crate::RuntimeOwner,
+        owner: &lash_vocabulary::identity::RuntimeOwner,
         plugin_id: &str,
         state: Arc<Mutex<PluginStateRegistry>>,
     ) -> Self {
@@ -80,7 +80,7 @@ impl PluginStateView {
     }
 
     fn namespace(
-        owner: Option<crate::RuntimeOwner>,
+        owner: Option<lash_vocabulary::identity::RuntimeOwner>,
         plugin_id: &str,
         state: Arc<Mutex<PluginStateRegistry>>,
     ) -> Self {
@@ -98,7 +98,7 @@ impl PluginStateView {
     }
 
     /// The materialized owner, absent when a component is bound for a deployment preview.
-    pub fn owner(&self) -> Option<&crate::RuntimeOwner> {
+    pub fn owner(&self) -> Option<&lash_vocabulary::identity::RuntimeOwner> {
         self.owner.as_ref()
     }
 

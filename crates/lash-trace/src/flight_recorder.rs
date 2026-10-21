@@ -5,9 +5,12 @@ use std::num::NonZeroUsize;
 use std::sync::Mutex;
 use std::time::Duration;
 
+use lash_protocol_types::ToolCallId;
 use lash_protocol_types::llm::types::AttemptOutcome;
 use lash_protocol_types::sync::MutexExt;
-use lash_protocol_types::{ProcessId, SessionId, ToolCallId, TurnId};
+use lash_vocabulary::identity::ProcessId;
+use lash_vocabulary::identity::SessionId;
+use lash_vocabulary::identity::TurnId;
 
 use crate::{
     TraceDomainStatus, TraceEvent, TraceEventKind, TraceLanguageExecutionPayload,

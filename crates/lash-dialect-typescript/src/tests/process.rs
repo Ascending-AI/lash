@@ -2,7 +2,8 @@
 
 use std::collections::BTreeMap;
 
-use lash_kernel_doc::{EffectName, Name, Param, Signature, Type, print_document};
+use lash_kernel_doc::print_document;
+use lash_vocabulary::{EffectName, Name, Param, Signature, Type};
 
 use super::machine;
 
@@ -38,14 +39,19 @@ fn awaiting_a_value_waits_for_the_process_a_handle_names() {
     .document;
     let text = print_document(&document);
     assert!(
-        text.contains("perform processes.await("),
+        text.contains(&format!(
+            "perform {}(",
+            super::linked::operation_slot(&document, "processes.await")
+                .expect("operation import")
+                .0
+        )),
         "`await handle` waits as `processes.await` does:\n{text}"
     );
     // Where no process effect is offered, an await is an await.
     let plain = super::lower_with_effects("const got = await Promise.resolve(3);")
         .expect("the cell lowers")
         .document;
-    assert!(!print_document(&plain).contains("processes.await"));
+    assert!(super::linked::operation_slot(&plain, "processes.await").is_none());
 }
 
 /// FIG-6361: split returns List(Any). Every method sharing the guarded
@@ -82,7 +88,7 @@ fn a_capturing_async_cell_function_is_plain_code_with_or_without_process_tools()
     let offered = lower(source)
         .expect("the same closure with process tools")
         .document;
-    assert!(plain.entries.is_empty());
-    assert!(offered.entries.is_empty());
+    assert!(plain.exports.is_empty());
+    assert!(offered.exports.is_empty());
     assert_eq!(plain, offered, "tools do not change function lowering");
 }

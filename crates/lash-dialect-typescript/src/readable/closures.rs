@@ -3,7 +3,10 @@
 //! arguments read from the call's list, and an async one's body started as
 //! a promise.
 
-use lash_kernel_doc::{self as k, Name, Site};
+use lash_kernel_doc::{self as k};
+
+use lash_vocabulary::Name;
+use lash_vocabulary::sites::Site;
 
 use super::lift::{Lift, Lifter, refuse};
 use super::source::{Body, Expr, Function, Param, Type};
@@ -40,11 +43,11 @@ impl Lifter<'_> {
         if !bound.is_empty() || !bare {
             return refuse("a function value with a bound `this` or properties");
         }
-        let Some(start) = &closure.start else {
+        let Some(start) = &closure.presentation else {
             return refuse("a function value no host can start");
         };
-        if !matches!(start.convention, k::StartConvention::TsDirect { await_fn }
-            if self.is(&await_fn, "ts.await"))
+        if !matches!(&start.convention, k::StartConvention::TsDirect { await_fn }
+            if self.is(await_fn, "ts.await"))
         {
             return refuse("a function value started another way");
         }
@@ -52,7 +55,18 @@ impl Lifter<'_> {
         if declared.get() != arity as f64 {
             return refuse("a function value whose arity is not its parameters'");
         }
-        let [_, args] = closure.params.as_slice() else {
+        let definition = self
+            .document
+            .functions
+            .get(&closure.function)
+            .ok_or_else(|| "missing closure body".to_owned())?;
+        let params = definition
+            .signature
+            .params
+            .iter()
+            .map(|param| param.name.clone())
+            .collect::<Vec<_>>();
+        let [_, args] = params.as_slice() else {
             return refuse("a function value's callable takes `this` and its arguments");
         };
         let mut params = Vec::with_capacity(arity);
@@ -65,13 +79,21 @@ impl Lifter<'_> {
             });
         }
         // The callable's body, at its site: the token's fifth part.
-        let site = site.child(4).child(0);
-        let (is_async, args, body, site) = match closure.body.as_slice() {
+        let site = Site::new(
+            lash_vocabulary::sites::Unit::Library(closure.function),
+            Vec::new(),
+        );
+        let (is_async, args, body, site) = match definition
+            .body()
+            .ok_or_else(|| "closure has no body".to_owned())?
+            .block
+            .as_slice()
+        {
             [
                 k::Stmt::Return {
                     value: k::Expr::Act(act),
                 },
-            ] if matches!(&act.kind, k::ActKind::Call(k::Callee::Library(id))
+            ] if matches!(&act.kind, k::ActKind::Call(k::Callee::Import(id))
                 if self.is(id, "ts.promise.start")) =>
             {
                 let [
@@ -90,14 +112,27 @@ impl Lifter<'_> {
                 {
                     return refuse("an async function's start");
                 }
-                let [_, inner_args] = inner.params.as_slice() else {
+                let inner_definition = self
+                    .document
+                    .functions
+                    .get(&inner.function)
+                    .ok_or_else(|| "missing async body".to_owned())?;
+                let inner_params = &inner_definition.signature.params;
+                let [_, inner_param] = inner_params.as_slice() else {
                     return refuse("an async function's body takes `this` and its arguments");
                 };
                 (
                     true,
-                    inner_args,
-                    inner.body.as_slice(),
-                    site.child(0).child(0).child(0).child(0),
+                    &inner_param.name,
+                    inner_definition
+                        .body()
+                        .ok_or_else(|| "missing async body".to_owned())?
+                        .block
+                        .as_slice(),
+                    Site::new(
+                        lash_vocabulary::sites::Unit::Library(inner.function),
+                        Vec::new(),
+                    ),
                 )
             }
             body => (false, args, body, site),
@@ -128,7 +163,8 @@ impl Lifter<'_> {
         body: &[k::Stmt],
         site: &Site,
     ) -> Lift<Body> {
-        let adopts = |lifter: &Self, policy: &k::FunctionId| lifter.is(policy, "ts.promise.adopt");
+        let adopts =
+            |lifter: &Self, policy: &k::FunctionTarget| lifter.is(policy, "ts.promise.adopt");
         // An arrow's expression: its arguments bound around it.
         let returned = match body {
             [k::Stmt::Return { value }] if !is_async => Some(value),
@@ -192,7 +228,7 @@ fn padded(lifter: &Lifter<'_>, args: &Name, arity: usize, value: &k::Expr) -> bo
             && matches!(operands.as_slice(), [k::Expr::Call { function: len, args: of }, bound]
                 if lifter.is(len, "list.len") && of.as_slice() == [list.clone()] && *bound == n));
     let pads = matches!(&**then, k::Expr::Act(act)
-        if matches!(&act.kind, k::ActKind::Call(k::Callee::Library(id)) if lifter.is(id, "ts.pad"))
+        if matches!(&act.kind, k::ActKind::Call(k::Callee::Import(id)) if lifter.is(id, "ts.pad"))
             && act.args.as_slice() == [list.clone(), n.clone()]);
     tests && pads && **r#else == list
 }
@@ -276,14 +312,14 @@ fn arguments_before(
 }
 
 /// A function value's parameter annotation, `None` for `Any`.
-fn annotation(ty: &k::Type) -> Lift<Option<Type>> {
+fn annotation(ty: &lash_vocabulary::Type) -> Lift<Option<Type>> {
     Ok(Some(match ty {
-        k::Type::Any => return Ok(None),
-        k::Type::Text => Type::Word("string"),
-        k::Type::Number => Type::Word("number"),
-        k::Type::Bool => Type::Word("boolean"),
-        k::Type::Null => Type::Word("null"),
-        k::Type::List(item) => match annotation(item)? {
+        lash_vocabulary::Type::Any => return Ok(None),
+        lash_vocabulary::Type::Text => Type::Word("string"),
+        lash_vocabulary::Type::Number => Type::Word("number"),
+        lash_vocabulary::Type::Bool => Type::Word("boolean"),
+        lash_vocabulary::Type::Null => Type::Word("null"),
+        lash_vocabulary::Type::List(item) => match annotation(item)? {
             Some(item) => Type::Array(Box::new(item)),
             None => Type::Array(Box::new(Type::Word("unknown"))),
         },

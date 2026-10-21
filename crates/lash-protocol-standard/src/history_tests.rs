@@ -1,5 +1,6 @@
 use super::*;
-use lash_protocol_types::{AttachmentId, MediaType, PartAttachment, ToolCallId};
+use lash_protocol_types::ToolCallId;
+use lash_protocol_types::{AttachmentId, MediaType, PartAttachment};
 fn part(kind: PartKind, content: &str) -> Part {
     match kind {
         PartKind::Text => Part::text("p0".into(), content.into(), None),

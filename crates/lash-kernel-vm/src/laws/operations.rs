@@ -10,9 +10,10 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use lash_kernel_doc::{
-    Datum, FunctionId, FunctionRegistry, NativeCall, NativeError, NativeFunction, Value,
-    parse_definition,
+    Datum, FunctionRegistry, NativeCall, NativeError, NativeFunction, Value, parse_definition,
 };
+
+use lash_vocabulary::names::FunctionId;
 
 use super::embedder::{Embedder, ROOMY, Setup, int, text};
 use crate::{Bound, BoundExceeded, Bounds, End, Layout, RunError, Step};
@@ -172,7 +173,7 @@ main {
   }
   let a = op.step(bump)
   let t = op.step("ab")
-  let e = perform echo(t) as Any
+  let e = perform 0(t) as Any
   let b = invoke op.step(bump)
   let kind = "none"
   try {
@@ -187,7 +188,7 @@ main {
 /// How a run ended: a finished run's result, finish and the bindings it did
 /// not carry, or any other end. The carry's page identities are left out,
 /// for a run reopened cold may lay its heap out on other pages.
-type Ended = Result<(Datum, bool, Vec<(lash_kernel_doc::Name, String)>), End>;
+type Ended = Result<(Datum, bool, Vec<(lash_vocabulary::names::Name, String)>), Box<End>>;
 
 /// What a law compares of a run: how it ended, what it printed, the
 /// requests it made, and its charge.
@@ -202,7 +203,7 @@ type Observed = (
 fn ended(end: End) -> Ended {
     match end {
         End::Finished(finished) => Ok((finished.result, finished.finish, finished.not_carried)),
-        other => Err(other),
+        other => Err(Box::new(other)),
     }
 }
 
@@ -378,7 +379,7 @@ main {
         let observed = observe(program, bounds, plan);
         assert!(
             matches!(
-                &observed.0,
+                observed.0.as_ref().map_err(|end| end.as_ref()),
                 Err(End::Error(RunError::Bound(BoundExceeded {
                     bound: Bound::Memory,
                     limit,
@@ -476,7 +477,7 @@ fn metered_tests_and_completion_have_plan_independent_bound_events() {
             &plans[0],
         );
         assert!(matches!(
-            bounded.0,
+            bounded.0.as_ref().map_err(|end| end.as_ref()),
             Err(End::Error(RunError::Bound(BoundExceeded {
                 bound: Bound::Charge,
                 ..

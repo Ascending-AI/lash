@@ -1,39 +1,99 @@
-//! A host-owned dataframe package. No callback enters the native runner.
-pub mod evaluator;
+//! A TypeScript library published as a Document and immutable Link. Only its
+//! ordinary IO and clock operations cross the VM boundary.
 pub mod host;
-pub mod runner;
 
-use lash::package::{HeldPackages, Package, PackageSources};
+use lash::package::*;
 use std::sync::Arc;
 
-pub const TYPESCRIPT: &str = include_str!("../wordcount.ts");
-pub const PYTHON: &str = include_str!("../wordcount.py");
+pub const LIBRARY: &str = include_str!("../df.ts");
+pub const CELL: &str = include_str!("../cell.ts");
+pub const NIGHTLY: &str = include_str!("../nightly.ts");
 
-pub fn packages() -> Result<Arc<HeldPackages>, String> {
-    let built = lash::package::lash_packages().map_err(|e| e.to_string())?;
-    let artifacts = built
-        .artifacts()
-        .values()
-        .map(|p| p.as_ref().clone())
-        .collect::<Vec<_>>();
-    let kernel = artifacts
-        .iter()
-        .find(|p| p.path().to_string() == "kernel")
-        .ok_or("missing kernel artifact")?;
-    let dataframe = Package::build(
-        "dataframe",
-        "1.0",
-        &PackageSources {
-            kernel: include_str!("../dataframe.kernel"),
-            surface: include_str!("../dataframe.surface"),
-            labels: include_str!("../dataframe.labels.json"),
-        },
-        &[kernel],
+/// Publish the source's own Export inventory; no surface file or whole-set
+/// image supplies a second inventory. The caller already owns `pin` cleanup.
+pub async fn publish_library(
+    backend: &lash::Backend,
+    pin: &lash::process::HostArtifactPin,
+    workers: &lash::vm::WorkerService,
+    provider: Arc<dyn lash::plugins::ProcessDocumentProvider>,
+    namespace: &RecordedPackages,
+    context: PublicationContext,
+) -> Result<(Package, PublicationRecord), String> {
+    let documents = Arc::new(lash::vm::KernelDocuments::new(
+        backend.module_artifacts(),
+        backend.package_store(),
+    ));
+    let environment = host::environment_request(namespace, context.clone());
+    let names = documents
+        .namespace(&environment)
+        .await
+        .map_err(|error| error.to_string())?;
+    let (document, _, _) = workers
+        .import_workflow(
+            lash::workflow::document::SourceLanguage::TypeScript,
+            LIBRARY,
+            &names,
+            None,
+        )
+        .await
+        .map_err(|error| error.to_string())?;
+    let exports: Vec<_> = document.exports.keys().cloned().collect();
+    let claim = lash::persistence::ReferrerClaim::unguarded(
+        lash::persistence::ArtifactReferrer::HostPin(pin.clone()),
     )
-    .map_err(|e| e.to_string())?;
-    HeldPackages::install(artifacts.into_iter().chain([dataframe]))
-        .map(Arc::new)
-        .map_err(|e| e.to_string())
+    .map_err(|error| error.to_string())?;
+    let id = documents
+        .admit_document(
+            &claim,
+            &lash::workflow::document::DocumentBytes::from(document),
+        )
+        .await
+        .map_err(|error| error.to_string())?;
+    let path = PackagePath::parse("df").map_err(|error| error.to_string())?;
+    let linked = documents
+        .fulfil(&FulfilRequest {
+            document: id,
+            selector: ReachSelector::AllExports,
+            snapshot: namespace.snapshot.clone(),
+            context: context.clone(),
+            purpose: LinkPurpose::PackageCode { path: path.clone() },
+        })
+        .await
+        .map_err(|error| error.to_string())?;
+    let members = exports
+        .into_iter()
+        .map(|name| {
+            Ok((
+                Segment::new(name.as_str()).map_err(|error| error.to_string())?,
+                Member {
+                    visibility: Visibility::Public,
+                    kind: MemberKind::Export {
+                        link: linked.content.identity(),
+                        export: ExportName { name, member: None },
+                    },
+                },
+            ))
+        })
+        .collect::<Result<_, String>>()?;
+    let package = Package { path, members };
+    let publisher = ScopedPackagePublisher::new(
+        context.clone(),
+        namespace.snapshot.clone(),
+        provider,
+        backend.package_store(),
+    );
+    let publication = publisher
+        .publish(
+            &claim,
+            &context,
+            PublishPackage {
+                package: package.clone(),
+                code: vec![linked],
+            },
+        )
+        .await
+        .map_err(|error| error.to_string())?;
+    Ok((package, publication))
 }
 
 #[cfg(test)]

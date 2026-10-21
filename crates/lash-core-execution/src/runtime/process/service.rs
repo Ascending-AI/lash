@@ -1,6 +1,6 @@
-use crate::ProcessId;
-use crate::SessionId;
 use lash_execution_contracts::plugin_error::PluginError;
+use lash_vocabulary::identity::ProcessId;
+use lash_vocabulary::identity::SessionId;
 
 use super::op_scope::ProcessOpScope;
 use super::start_staging::StagedProcessStart;
@@ -40,7 +40,7 @@ pub trait ProcessService: Send + Sync {
     /// sees the processes it observes; a process sees the ones it started.
     async fn list_visible_for_attempt(
         &self,
-        owner: &crate::RuntimeOwner,
+        owner: &lash_vocabulary::identity::RuntimeOwner,
         mode: ProcessListMode,
     ) -> Result<Vec<lash_execution_contracts::process::ObservedProcess>, PluginError>;
 
@@ -63,7 +63,7 @@ pub trait ProcessService: Send + Sync {
     /// outcome never committed.
     async fn stage_recorded_start(
         &self,
-        owner: &crate::RuntimeOwner,
+        owner: &lash_vocabulary::identity::RuntimeOwner,
         request: ProcessStartRequest,
         scope: ProcessOpScope<'_>,
     ) -> Result<StagedProcessStart, PluginError>;
@@ -146,14 +146,14 @@ pub trait ProcessService: Send + Sync {
     /// whose recorded ancestry names it as their immediate starter.
     async fn validate_visible(
         &self,
-        owner: &crate::RuntimeOwner,
+        owner: &lash_vocabulary::identity::RuntimeOwner,
         process_ids: &[ProcessId],
         scope: ProcessOpScope<'_>,
     ) -> Result<(), PluginError>;
 
     async fn cancel(
         &self,
-        owner: &crate::RuntimeOwner,
+        owner: &lash_vocabulary::identity::RuntimeOwner,
         process_id: &ProcessId,
         scope: ProcessOpScope<'_>,
     ) -> Result<lash_execution_contracts::process::ObservedProcess, PluginError>;
@@ -161,7 +161,7 @@ pub trait ProcessService: Send + Sync {
     /// Journal-first cancellation used only by the recorded intent protocol.
     async fn cancel_recorded_intent(
         &self,
-        owner: &crate::RuntimeOwner,
+        owner: &lash_vocabulary::identity::RuntimeOwner,
         process_id: &ProcessId,
         identity: crate::ToolIntentIdentity,
         scope: ProcessOpScope<'_>,
@@ -175,7 +175,7 @@ pub trait ProcessService: Send + Sync {
         let entries = self
             .list_visible(session_id, ProcessListMode::Live, scope.clone())
             .await?;
-        let owner = crate::RuntimeOwner::Session(session_id.clone());
+        let owner = lash_vocabulary::identity::RuntimeOwner::Session(session_id.clone());
         let mut cancelled = Vec::new();
         for record in entries {
             if record.status().is_terminal() {

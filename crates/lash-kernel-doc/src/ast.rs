@@ -1,20 +1,24 @@
 //! The kernel's forms as one closed tree (`K-FORM-001`).
 //!
-//! A form that may pause a task, or call a non-native library function,
+//! A form that may pause lash_vocabulary::types::Type;
+//! use a task, or call a non-native library function,
 //! is an action. Every action has an [`Expr::Act`] spelling with expression
 //! arguments; `do` always holds an expression. A whole right-hand side with
 //! [`Atom`] arguments uses [`Rhs::Action`]. A task may pause at either
 //! (`K-EVAL-008`). Validation checks that [`Expr::Call`] names a function
 //! with a native implementation.
 
+use lash_vocabulary::types::Type;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::function_value::StartAdapter;
-use crate::name::{EffectName, FunctionId, Name};
+use crate::function_value::{CallablePresentation, FunctionTarget};
+
 use crate::number::{Float, Integer};
-use crate::types::Type;
+use lash_vocabulary::names::{FunctionId, Name};
+
 use crate::value::Bytes;
+use lash_vocabulary::names::ImportSlot;
 
 /// A sequence of statements, run in order.
 pub type Block = Vec<Stmt>;
@@ -88,7 +92,7 @@ pub enum Stmt {
     /// directly, outside the source function's handlers.
     ReturnVia {
         value: Expr,
-        policy: FunctionId,
+        policy: FunctionTarget,
     },
     Try(TryStmt),
     Throw {
@@ -110,25 +114,25 @@ pub enum Stmt {
 /// A dialect's iteration protocol: the library functions a `for … via`
 /// calls at its header, by identity (`K-ITER-005`). Each is listed in the
 /// manifest as any library function a document reaches.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Protocol {
     /// Takes the iterated value to what the loop walks: a list, a tuple, a
     /// map, a set or a text, which the loop's own cursor walks, or any
     /// other value, a driver that `next` steps.
-    pub open: FunctionId,
+    pub open: FunctionTarget,
     /// Steps a driver: an empty tuple when it is exhausted, else a tuple of
     /// one item.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub next: Option<FunctionId>,
+    pub next: Option<FunctionTarget>,
     /// Takes what was walked and an item of it to the value bound.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub item: Option<FunctionId>,
+    pub item: Option<FunctionTarget>,
     /// Checks a map or a set against its size when the loop opened it and
     /// the items it may still give, after each step; gives that budget
     /// anew.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub check: Option<FunctionId>,
+    pub check: Option<FunctionTarget>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
@@ -167,18 +171,11 @@ pub enum Action {
     Call { callee: Callee, args: Vec<Atom> },
     /// Runs one effect and yields its result, decoded as `result`.
     Perform {
-        effect: EffectName,
+        slot: ImportSlot,
         args: Vec<Atom>,
         result: Type,
         /// Whether the task takes one more turn of the ready queue once
         /// the outcome is in, before it continues (`K-TASK-005`).
-        #[serde(default, skip_serializing_if = "is_false")]
-        then_yield: bool,
-    },
-    /// Waits for a number of milliseconds.
-    Sleep {
-        duration: Atom,
-        /// As [`Action::Perform`]'s.
         #[serde(default, skip_serializing_if = "is_false")]
         then_yield: bool,
     },
@@ -195,7 +192,7 @@ pub enum Action {
     /// Awaits a value by its dialect's await policy: a library function
     /// that takes the value, waits as the dialect's `await` does, and
     /// yields what the `await` gives (`K-TASK-026`).
-    Await { policy: FunctionId, value: Atom },
+    Await { policy: FunctionTarget, value: Atom },
 }
 
 fn is_false(flag: &bool) -> bool {
@@ -222,11 +219,10 @@ pub enum JoinMode {
 #[serde(rename_all = "snake_case")]
 pub enum Callee {
     /// A declared function of the document, by name.
-    Declared(Name),
+    Local(FunctionId),
+    Import(ImportSlot),
     /// The closure or function reference a variable holds.
     Value(Name),
-    /// A library function, by identity.
-    Library(FunctionId),
 }
 
 /// An argument of an action: a variable or a literal, never a computation.
@@ -248,7 +244,7 @@ pub enum Literal {
     Text(String),
     Bytes(Bytes),
     /// A reference to a declared function of the document.
-    Function(Name),
+    Function(FunctionId),
 }
 
 /// An expression, evaluated within one statement. Only an [`Expr::Act`]
@@ -284,9 +280,7 @@ pub enum Expr {
         args: Vec<Expr>,
     },
     /// The embedder's clock, as a timestamp.
-    Clock,
     /// A float drawn by the embedder, uniform in `[0, 1)`.
-    Random,
     /// Reads through a projection handle.
     Read(Box<ProjectionRead>),
     /// An action nested in the expression: the statement may pause at it,
@@ -314,14 +308,8 @@ pub enum ActKind {
     Call(Callee),
     /// Runs one effect and yields its result, decoded as `result`.
     Perform {
-        effect: EffectName,
+        slot: ImportSlot,
         result: Type,
-        /// As [`Action::Perform`]'s.
-        #[serde(default, skip_serializing_if = "is_false")]
-        then_yield: bool,
-    },
-    /// Waits for a number of milliseconds, its one argument.
-    Sleep {
         /// As [`Action::Perform`]'s.
         #[serde(default, skip_serializing_if = "is_false")]
         then_yield: bool,
@@ -337,7 +325,7 @@ pub enum ActKind {
     /// Cancels the task handle that is its one argument.
     Cancel,
     /// Awaits its one argument by the await policy (`K-TASK-026`).
-    Await(FunctionId),
+    Await(FunctionTarget),
 }
 
 impl ActExpr {
@@ -364,17 +352,13 @@ impl ActExpr {
                 args,
             },
             ActKind::Perform {
-                effect,
+                slot,
                 result,
                 then_yield,
             } => Action::Perform {
-                effect: effect.clone(),
+                slot: *slot,
                 args,
                 result: result.clone(),
-                then_yield: *then_yield,
-            },
-            ActKind::Sleep { then_yield } => Action::Sleep {
-                duration: one(args)?,
                 then_yield: *then_yield,
             },
             ActKind::Yield if args.is_empty() => Action::Yield,
@@ -386,7 +370,7 @@ impl ActExpr {
                 tasks: one(args)?,
             },
             ActKind::Await(policy) => Action::Await {
-                policy: *policy,
+                policy: policy.clone(),
                 value: one(args)?,
             },
         })
@@ -462,96 +446,14 @@ impl AssignOrder {
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Closure {
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub params: Vec<Name>,
-    pub body: Block,
-    /// How a value this closure makes is started when it crosses to a tool
-    /// as a [`crate::FunctionValue`] (`K-CLO-004`); `None` for one that
-    /// cannot be started. Executable behaviour: it is part of the
-    /// document's identity.
+    /// The anonymous body's own identity, local to the defining Document.
+    pub function: FunctionId,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub start: Option<StartAdapter>,
-}
-
-/// A declared function's parameters and body.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct Function {
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub params: Vec<Name>,
-    pub body: Block,
-    /// How a reference to this function is started when it crosses to a
-    /// tool, as [`Closure::start`] says for a closure: a saved function
-    /// keeps the adapter of the closure it was saved from. An entry needs
-    /// none; its signature and kernel convention are its own.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub start: Option<StartAdapter>,
-}
-
-/// The code a node belongs to.
-#[derive(
-    Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, JsonSchema,
-)]
-#[serde(rename_all = "snake_case")]
-pub enum Unit {
-    /// The document's `main`.
-    Main,
-    /// A declared function of the document.
-    Function(Name),
-    /// The kernel-code body of a library function.
-    Library(FunctionId),
-}
-
-/// A node's address: the code it belongs to and the chain of
-/// [`Node::children`] indexes that reaches it from that code's body.
-///
-/// A site is derived from the document and is never written by a host
-/// (`K-ID-004`). An empty chain addresses the body itself.
-#[derive(
-    Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, JsonSchema,
-)]
-#[serde(deny_unknown_fields)]
-pub struct Site {
-    pub unit: Unit,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub path: Vec<u32>,
-}
-
-impl Site {
-    pub fn new(unit: Unit, path: impl Into<Vec<u32>>) -> Self {
-        Self {
-            unit,
-            path: path.into(),
-        }
-    }
-
-    /// The site of this node's `index`-th child.
-    pub fn child(&self, index: u32) -> Self {
-        let mut path = self.path.clone();
-        path.push(index);
-        Self {
-            unit: self.unit.clone(),
-            path,
-        }
-    }
-}
-
-impl std::fmt::Display for Site {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match &self.unit {
-            Unit::Main => f.write_str("main")?,
-            Unit::Function(name) => write!(f, "fn {name}")?,
-            Unit::Library(id) => write!(f, "function {id}")?,
-        }
-        for step in &self.path {
-            write!(f, "/{step}")?;
-        }
-        Ok(())
-    }
+    pub presentation: Option<CallablePresentation>,
 }
 
 /// Any node of the tree, for a walk that does not care which.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Node<'a> {
     Block(&'a [Stmt]),
     Stmt(&'a Stmt),
@@ -637,7 +539,7 @@ impl<'a> Node<'a> {
                 }
             },
             Node::Expr(expr) => match expr {
-                Expr::Literal(_) | Expr::Variable(_) | Expr::Clock | Expr::Random => {}
+                Expr::Literal(_) | Expr::Variable(_) => {}
                 Expr::Tuple(items) | Expr::List(items) | Expr::Set(items) => {
                     out.extend(items.iter().map(Node::Expr));
                 }
@@ -651,7 +553,7 @@ impl<'a> Node<'a> {
                     out.extend(entries.iter().map(|entry| Node::Expr(&entry.value)));
                 }
                 Expr::Member(member) => push_member(member, &mut out),
-                Expr::Closure(closure) => out.push(Node::Block(&closure.body)),
+                Expr::Closure(_) => {}
                 Expr::Call { args, .. } => out.extend(args.iter().map(Node::Expr)),
                 Expr::If { cond, then, r#else } => {
                     out.extend([Node::Expr(cond), Node::Expr(then), Node::Expr(r#else)]);
@@ -776,7 +678,7 @@ impl<'a> NodeMut<'a> {
                 }
             },
             Self::Expr(expr) => match expr {
-                Expr::Literal(_) | Expr::Variable(_) | Expr::Clock | Expr::Random => {}
+                Expr::Literal(_) | Expr::Variable(_) => {}
                 Expr::Tuple(items) | Expr::List(items) | Expr::Set(items) => {
                     out.extend(items.iter_mut().map(NodeMut::Expr));
                 }
@@ -794,7 +696,7 @@ impl<'a> NodeMut<'a> {
                     );
                 }
                 Expr::Member(member) => push_member_mut(member, &mut out),
-                Expr::Closure(closure) => out.push(NodeMut::Block(&mut closure.body)),
+                Expr::Closure(_) => {}
                 Expr::Call { args, .. } => out.extend(args.iter_mut().map(NodeMut::Expr)),
                 Expr::If { cond, then, r#else } => {
                     out.extend([
@@ -931,7 +833,7 @@ fn member_closures(member: &mut Member, visit: &mut dyn FnMut(&mut Closure)) {
 
 fn expr_closures(expr: &mut Expr, visit: &mut dyn FnMut(&mut Closure)) {
     match expr {
-        Expr::Literal(_) | Expr::Variable(_) | Expr::Clock | Expr::Random => {}
+        Expr::Literal(_) | Expr::Variable(_) => {}
         Expr::Tuple(items) | Expr::List(items) | Expr::Set(items) => {
             items.iter_mut().for_each(|item| expr_closures(item, visit));
         }
@@ -945,7 +847,6 @@ fn expr_closures(expr: &mut Expr, visit: &mut dyn FnMut(&mut Closure)) {
         Expr::Member(member) => member_closures(member, visit),
         Expr::Closure(closure) => {
             visit(closure);
-            each_closure_mut(&mut closure.body, visit);
         }
         Expr::Call { args, .. } => args.iter_mut().for_each(|arg| expr_closures(arg, visit)),
         Expr::If { cond, then, r#else } => {
@@ -981,30 +882,21 @@ impl From<Action> for Expr {
                 (ActKind::Spawn(callee.clone()), args.iter().collect())
             }
             Action::Perform {
-                effect,
+                slot,
                 args,
                 result,
                 then_yield,
             } => (
                 ActKind::Perform {
-                    effect: effect.clone(),
+                    slot: *slot,
                     result: result.clone(),
                     then_yield: *then_yield,
                 },
                 args.iter().collect(),
             ),
-            Action::Sleep {
-                duration,
-                then_yield,
-            } => (
-                ActKind::Sleep {
-                    then_yield: *then_yield,
-                },
-                vec![duration],
-            ),
             Action::Join { task } => (ActKind::Join, vec![task]),
             Action::JoinMany { mode, tasks } => (ActKind::JoinMany(*mode), vec![tasks]),
-            Action::Await { policy, value } => (ActKind::Await(*policy), vec![value]),
+            Action::Await { policy, value } => (ActKind::Await(policy.clone()), vec![value]),
             Action::Yield => (ActKind::Yield, vec![]),
             Action::Cancel { task } => (ActKind::Cancel, vec![task]),
         };
@@ -1018,3 +910,5 @@ impl From<Action> for Expr {
 fn is_zero(units: &u64) -> bool {
     *units == 0
 }
+
+use lash_vocabulary::sites::{Site, Unit};

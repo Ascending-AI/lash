@@ -2,13 +2,16 @@
 //! read the way its dialect's presenter writes them, and the presenter
 //! decides nothing else.
 
-use lash_core::{ToolCatalog, ToolContract, ToolDefinition, ToolManifest};
-use lash_protocol_types::JsonSchema;
+use lash_core::ToolCatalog;
 use lash_tool_presenter_api::{
     PresentationRefusal, PresentedToolSection, ToolPresentationEntry, ToolPresentationRequest,
     ToolPresenter, ToolPresenterSlot, WrappedToolPresenter,
 };
 use lash_tool_presenter_typescript::TypescriptToolPresenter;
+use lash_vocabulary::json_schema::JsonSchema;
+use lash_vocabulary::tool_contract::ToolContract;
+use lash_vocabulary::tool_contract::ToolDefinition;
+use lash_vocabulary::tool_contract::ToolManifest;
 use serde_json::{Value, json};
 
 use crate::dialect::{CellDialect, SessionDialect};
@@ -147,9 +150,15 @@ fn a_replaced_or_wrapped_presenter_changes_the_section_and_never_admission() {
         "### Tools\n\n`tools.lookup(query: number)` finds a record by number."
     );
     let contract = &catalog.entries()[0].contract;
-    assert!(lash_protocol_types::validate_tool_input(contract, &json!({ "query": 7 })).is_err());
-    assert!(lash_protocol_types::validate_tool_input(contract, &json!({})).is_err());
-    assert!(lash_protocol_types::validate_tool_input(contract, &json!({ "query": "a" })).is_ok());
+    assert!(
+        lash_vocabulary::tool_contract::validate_tool_input(contract, &json!({ "query": 7 }))
+            .is_err()
+    );
+    assert!(lash_vocabulary::tool_contract::validate_tool_input(contract, &json!({})).is_err());
+    assert!(
+        lash_vocabulary::tool_contract::validate_tool_input(contract, &json!({ "query": "a" }))
+            .is_ok()
+    );
 
     let unaccounted = declarations(
         CellDialect::typescript().with_tool_presenter(ToolPresenterSlot::new(HostPresenter {

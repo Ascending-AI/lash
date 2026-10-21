@@ -23,7 +23,7 @@ pub struct ReopenableToolMaterialStore {
 /// A fresh logical Run's opener.
 fn run(label: &str) -> lash_core::EffectOpener {
     lash_core::EffectOpener::turn(
-        lash_core::SessionId::prefixed(
+        lash_vocabulary::identity::SessionId::prefixed(
             "material-session-",
             format!("{label}-{}", uuid::Uuid::new_v4().simple()),
         ),
@@ -85,7 +85,7 @@ where
     let source_session = format!("material-source-{}", uuid::Uuid::new_v4().simple());
     let source = lash_core::AwaitEventKey {
         scope: lash_core::ExecutionScope::turn(
-            lash_core::SessionId::fixture(source_session),
+            lash_vocabulary::identity::SessionId::fixture(source_session),
             "material-turn",
         ),
         wait: lash_core::AwaitEventWaitIdentity::tool_call(lash_core::ToolCallId::fixture(

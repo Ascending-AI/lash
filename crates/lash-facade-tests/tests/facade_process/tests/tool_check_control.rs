@@ -13,8 +13,8 @@ const ECHO_OPERATION: &str = "tools.echo_tool";
 /// A tool that answers every call with its arguments.
 struct EchoTool;
 
-fn echo_definition() -> lash_core::ToolDefinition {
-    lash_core::ToolDefinition::raw(
+fn echo_definition() -> lash_vocabulary::tool_contract::ToolDefinition {
+    lash_vocabulary::tool_contract::ToolDefinition::raw(
         format!("tool:{ECHO}"),
         ECHO_OPERATION,
         "Echo the value.",
@@ -34,7 +34,10 @@ impl ToolProvider for EchoTool {
     fn tool_manifests(
         &self,
         _config: &lash_core::OwnerConfigView,
-    ) -> std::result::Result<Vec<lash_core::ToolManifest>, lash::plugins::PluginError> {
+    ) -> std::result::Result<
+        Vec<lash_vocabulary::tool_contract::ToolManifest>,
+        lash::plugins::PluginError,
+    > {
         Ok(vec![echo_definition().manifest()])
     }
 
@@ -42,7 +45,7 @@ impl ToolProvider for EchoTool {
         &self,
         name: &str,
         _config: &lash_core::OwnerConfigView,
-    ) -> Option<Arc<lash_core::ToolContract>> {
+    ) -> Option<Arc<lash_vocabulary::tool_contract::ToolContract>> {
         (name == ECHO_OPERATION).then(|| Arc::new(echo_definition().contract()))
     }
 
@@ -114,7 +117,7 @@ async fn run_policy_turn(
     .plugin(tool_policy_plugin(decision))
     .build(lash_facade_tests::runtime_lease_owner())?;
     let session = core
-        .session(lash::SessionId::parse(id).expect("nonblank host identity"))
+        .session(lash_vocabulary::identity::SessionId::parse(id).expect("nonblank host identity"))
         .create(lash::SessionCreation::root(mock_session_spec()))
         .await?;
     let events = RecordingEvents::default();

@@ -31,16 +31,16 @@ use super::*;
 #[derive(Clone)]
 pub struct ToolHookContext {
     /// Who the call runs for: a session, or a process runtime.
-    pub owner: crate::RuntimeOwner,
+    pub owner: lash_vocabulary::identity::RuntimeOwner,
     /// The durable identity of the call, fixed at admission.
     pub call_id: crate::ToolCallId,
-    pub tool_id: crate::ToolId,
+    pub tool_id: lash_vocabulary::tool_contract::ToolId,
     pub tool_name: String,
     /// The plugin configuration this hook runs under (FIG-4379): the running
     /// run's admitted configuration and its revision, a process's captured
     /// one, or the head's outside a run — never today's head inside a run.
     pub config: super::OwnerConfigView,
-    pub argument_projection: crate::ToolArgumentProjectionPolicy,
+    pub argument_projection: lash_vocabulary::tool_contract::ToolArgumentProjectionPolicy,
     pub turn_context: crate::TurnContext,
     pub(crate) check_phase: super::ControlPhaseDeadline,
     pub(crate) clock: Arc<dyn crate::Clock>,
@@ -86,7 +86,7 @@ impl PreparedCallReadView {
         self.0.provider_call_id.as_deref()
     }
 
-    pub fn tool_id(&self) -> &crate::ToolId {
+    pub fn tool_id(&self) -> &lash_vocabulary::tool_contract::ToolId {
         &self.0.tool_id
     }
 

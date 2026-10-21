@@ -33,11 +33,11 @@ pub fn native_format_two_component(id: &'static str) -> crate::plugin::ProcessCo
         }
     }
 
-    let two = crate::FormatVersion::new(2).expect("format 2");
+    let two = lash_vocabulary::providers::FormatVersion::new(2).expect("format 2");
     let mut declaration =
         crate::plugin::ProcessComponentDeclaration::initial(id, two).expect("a component id");
-    declaration.readable_formats = vec![crate::FormatVersion::ONE, two];
-    declaration.writable_formats = vec![crate::FormatVersion::ONE, two];
+    declaration.readable_formats = vec![lash_vocabulary::providers::FormatVersion::ONE, two];
+    declaration.writable_formats = vec![lash_vocabulary::providers::FormatVersion::ONE, two];
     let mut registry = crate::plugin::ProcessComponentRegistry::new();
     registry
         .register(
@@ -49,7 +49,10 @@ pub fn native_format_two_component(id: &'static str) -> crate::plugin::ProcessCo
 }
 
 /// An environment of no tools naming component `id` at config `format`.
-pub fn component_env(id: &'static str, format: crate::FormatVersion) -> crate::ProcessEnv {
+pub fn component_env(
+    id: &'static str,
+    format: lash_vocabulary::providers::FormatVersion,
+) -> crate::ProcessEnv {
     crate::ProcessEnv::builder(crate::MaxToolCalls::new(16))
         .component(crate::ProcessConfigKey::<()>::new(id, format), &())
         .build()

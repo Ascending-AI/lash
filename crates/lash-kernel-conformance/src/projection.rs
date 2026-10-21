@@ -228,15 +228,15 @@ impl<const L: u64> Machine for Plan<L> {
     fn set_options(&mut self, options: lash_kernel_vm::MachineOptions) {
         self.0.set_options(options);
     }
-    fn take_counts(&mut self) -> lash_kernel_vm::SiteCounts {
+    fn take_counts(&mut self) -> lash_vocabulary::observation::SiteCounts {
         self.0.take_counts()
     }
     fn take_path(
         &mut self,
-    ) -> Result<lash_kernel_vm::ExecutionPath, lash_kernel_doc::heap::HeapFault> {
+    ) -> Result<lash_vocabulary::observation::ExecutionPath, lash_kernel_doc::heap::HeapFault> {
         self.0.take_path()
     }
-    fn take_caught(&mut self) -> Vec<lash_kernel_vm::WaitId> {
+    fn take_caught(&mut self) -> Vec<lash_vocabulary::sites::WaitId> {
         self.0.take_caught()
     }
     fn run(
@@ -248,7 +248,7 @@ impl<const L: u64> Machine for Plan<L> {
     }
     fn deliver(
         &mut self,
-        wait: lash_kernel_vm::WaitId,
+        wait: lash_vocabulary::sites::WaitId,
         outcome: lash_kernel_vm::Outcome,
     ) -> Result<lash_kernel_vm::Delivered, lash_kernel_vm::DeliverError> {
         self.0.deliver(wait, outcome)

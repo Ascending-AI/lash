@@ -14,8 +14,8 @@ use crate::AdmittedScope;
 use crate::Clock;
 use crate::ExecutionScope;
 use crate::RuntimeError;
-use crate::TurnId;
 use lash_execution_contracts::backend::Backend;
+use lash_vocabulary::identity::TurnId;
 
 /// The one effect context of an owned actor.
 ///
@@ -99,6 +99,7 @@ pub(super) struct Inner {
     /// effects (FIG-7044); a context that owns no claim has none.
     hints: Option<lash_durable::runner::Hints>,
     clock: Arc<dyn Clock>,
+    capabilities: lash_vocabulary::claims::NodeCapabilities,
     cancel: CancellationToken,
     probe: Arc<dyn DurableProbe>,
     dues: Dues,
@@ -154,6 +155,7 @@ impl ActorContext {
                 liveness: None,
                 hints: None,
                 clock,
+                capabilities: lash_vocabulary::claims::NodeCapabilities::default(),
                 cancel,
                 probe,
                 dues: Dues::new(),
@@ -192,11 +194,17 @@ impl ActorContext {
                 liveness: Some(owned.liveness().clone()),
                 hints: Some(owned.hints().clone()),
                 clock: Arc::clone(owned.clock()),
+                capabilities: owned.capabilities().clone(),
                 cancel,
                 probe,
                 dues: Dues::new(),
                 obligations: (owned.actor().kind() == lash_durable::ActorKind::Session)
-                    .then(|| crate::SessionId::try_from(owned.actor().id().to_owned()).ok())
+                    .then(|| {
+                        lash_vocabulary::identity::SessionId::try_from(
+                            owned.actor().id().to_owned(),
+                        )
+                        .ok()
+                    })
                     .flatten()
                     .map(|session| {
                         super::claim_obligations::SessionObligations::claimed(
@@ -236,6 +244,7 @@ impl ActorContext {
                 liveness: None,
                 hints: None,
                 clock: Arc::new(crate::SystemClock),
+                capabilities: lash_vocabulary::claims::NodeCapabilities::default(),
                 cancel: CancellationToken::new(),
                 probe: Arc::new(lash_durable::NoProbe),
                 dues: Dues::new(),
@@ -315,6 +324,11 @@ impl ActorContext {
     /// `expires_at - now`.
     pub fn clock(&self) -> &Arc<dyn Clock> {
         &self.inner.clock
+    }
+
+    /// The claiming node's advertised capabilities, captured from its lease.
+    pub fn capabilities(&self) -> &lash_vocabulary::claims::NodeCapabilities {
+        &self.inner.capabilities
     }
 
     /// The owner's unfenced reads of its domain rows (S0): current unless
@@ -875,7 +889,7 @@ impl ActorContext {
 
     /// The process a process scope is.
     #[must_use]
-    pub fn admitted_process(&self) -> Option<&crate::ProcessId> {
+    pub fn admitted_process(&self) -> Option<&lash_vocabulary::identity::ProcessId> {
         self.scope.admitted.process_id()
     }
 

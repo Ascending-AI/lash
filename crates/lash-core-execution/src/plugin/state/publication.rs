@@ -29,12 +29,12 @@
 //! other's uncommitted state, and each committed record is one step of the
 //! namespace's frontier.
 use super::*;
-use crate::plugin::FormatVersion;
 use crate::{RuntimeEffectControllerError, RuntimeEffectKind, RuntimeEffectOutcome};
-use lash_core_store::store::plugin_writers::PluginCallbackIdentity;
 use lash_core_store::tool_run::{
     FrontierStep, ReducerRefusal, StateCommandBatch, StateCommandLimits,
 };
+use lash_vocabulary::providers::FormatVersion;
+use lash_vocabulary::providers::PluginCallbackIdentity;
 use std::future::Future;
 
 /// The resolutions one recorded body published, retained with its result.
@@ -45,7 +45,7 @@ use std::future::Future;
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PluginStateEffect {
-    pub owner: crate::RuntimeOwner,
+    pub owner: lash_vocabulary::identity::RuntimeOwner,
     pub address: crate::EffectAddress,
     pub resolutions: Vec<StateResolution>,
 }
@@ -362,7 +362,7 @@ pub(in crate::plugin) trait StateAuthority: Send + Sync {
 /// namespaces.
 pub(in crate::plugin) struct StateDesk<'a> {
     pub(in crate::plugin) state: &'a Arc<std::sync::Mutex<PluginStateRegistry>>,
-    pub(in crate::plugin) owner: &'a crate::RuntimeOwner,
+    pub(in crate::plugin) owner: &'a lash_vocabulary::identity::RuntimeOwner,
     pub(in crate::plugin) authority: &'a dyn StateAuthority,
     /// The deployment's bounds on one batch of state commands.
     pub(in crate::plugin) limits: StateCommandLimits,

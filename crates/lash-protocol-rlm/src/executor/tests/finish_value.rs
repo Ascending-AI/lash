@@ -6,15 +6,17 @@ use super::*;
 /// `answer.submit`: a host finish tool that takes any record and declares
 /// an integer value. Its body answers the record's `value` as the turn's
 /// value, so settlement alone stands between a text value and the turn.
-fn submit() -> lash_core::ToolDefinition {
-    lash_core::ToolDefinition::control(
+fn submit() -> lash_vocabulary::tool_contract::ToolDefinition {
+    lash_vocabulary::tool_contract::ToolDefinition::control(
         "tool:answer_submit",
         "answer.submit",
         "End the turn with an integer",
-        lash_core::ToolDefinition::default_input_schema(),
-        lash_core::TurnControls::finish(
-            lash_core::JsonSchema::admit(serde_json::json!({ "type": "integer" }))
-                .expect("an integer schema is admitted"),
+        lash_vocabulary::tool_contract::ToolDefinition::default_input_schema(),
+        lash_vocabulary::tool_declaration::TurnControls::finish(
+            lash_vocabulary::json_schema::JsonSchema::admit(
+                serde_json::json!({ "type": "integer" }),
+            )
+            .expect("an integer schema is admitted"),
         ),
     )
     .expect("a valid control tool")
@@ -29,7 +31,7 @@ impl lash_core::ToolProvider for SubmitTool {
         &self,
         _config: &lash_core::OwnerConfigView,
     ) -> std::result::Result<
-        Vec<lash_core::ToolManifest>,
+        Vec<lash_vocabulary::tool_contract::ToolManifest>,
         lash_execution_contracts::plugin_error::PluginError,
     > {
         Ok(vec![submit().manifest()])
@@ -39,7 +41,7 @@ impl lash_core::ToolProvider for SubmitTool {
         &self,
         name: &str,
         _config: &lash_core::OwnerConfigView,
-    ) -> Option<Arc<lash_core::ToolContract>> {
+    ) -> Option<Arc<lash_vocabulary::tool_contract::ToolContract>> {
         matches!(name, "answer.submit" | "tool:answer_submit")
             .then(|| Arc::new(submit().contract()))
     }

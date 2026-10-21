@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
-use lash_protocol_types::SessionId;
+use lash_vocabulary::identity::SessionId;
 use serde::Serialize;
 
 use super::FollowerMode;

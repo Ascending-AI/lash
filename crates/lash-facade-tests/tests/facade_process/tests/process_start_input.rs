@@ -14,9 +14,11 @@ async fn upload_core(backend: lash_execution_contracts::backend::Backend) -> Res
     let core = explicit_ephemeral_facets(LashCore::standard_builder(backend))
         .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
         .build(lash_facade_tests::runtime_lease_owner())?;
-    core.session(lash::SessionId::parse(SESSION).expect("nonblank host identity"))
-        .create(lash::SessionCreation::root(mock_session_spec()))
-        .await?;
+    core.session(
+        lash_vocabulary::identity::SessionId::parse(SESSION).expect("nonblank host identity"),
+    )
+    .create(lash::SessionCreation::root(mock_session_spec()))
+    .await?;
     Ok(core)
 }
 
@@ -25,7 +27,7 @@ fn uploads(core: &LashCore) -> lash_core::facade_support::RuntimeAttachmentStore
     lash_core::facade_support::RuntimeAttachmentStore::new(
         core.backend().attachment_store(),
         core.backend().attachment_referrers(),
-        lash_core::RuntimeOwner::Session(SESSION.into()),
+        lash_vocabulary::identity::RuntimeOwner::Session(SESSION.into()),
         lash_core::facade_support::AttachmentPolicy::standard(),
     )
     .with_upload_expiry_ms(1_000)
@@ -218,7 +220,7 @@ impl lash_core::AttachmentReferrers for ContendedOnce {
 
     async fn session_referrer_state(
         &self,
-        id: &lash_core::SessionId,
+        id: &lash_vocabulary::identity::SessionId,
     ) -> std::result::Result<lash_core::store::SessionReferrerState, StoreError> {
         self.inner.session_referrer_state(id).await
     }

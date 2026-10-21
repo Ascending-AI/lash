@@ -33,8 +33,8 @@ fn cell(finishes: bool) -> String {
 }
 
 /// `tools.<name>`; a deferring one may park on its completion key.
-fn tool(name: &str, deferring: bool) -> lash_core::ToolDefinition {
-    let definition = lash_core::ToolDefinition::raw(
+fn tool(name: &str, deferring: bool) -> lash_vocabulary::tool_contract::ToolDefinition {
+    let definition = lash_vocabulary::tool_contract::ToolDefinition::raw(
         format!("tool:{name}"),
         format!("tools.{name}"),
         "A law's tool.",
@@ -52,8 +52,8 @@ fn tool(name: &str, deferring: bool) -> lash_core::ToolDefinition {
     }
     definition
         .with_declaration(
-            lash_core::ToolDeclaration::deferring(),
-            Some(lash_core::ParkBound::Within(
+            lash_vocabulary::tool_declaration::ToolDeclaration::deferring(),
+            Some(lash_vocabulary::tool_contract::ParkBound::Within(
                 std::time::Duration::from_secs(120),
             )),
         )
@@ -72,7 +72,10 @@ impl ToolProvider for ApprovalTools {
     fn tool_manifests(
         &self,
         _config: &lash_core::OwnerConfigView,
-    ) -> std::result::Result<Vec<lash_core::ToolManifest>, crate::plugins::PluginError> {
+    ) -> std::result::Result<
+        Vec<lash_vocabulary::tool_contract::ToolManifest>,
+        crate::plugins::PluginError,
+    > {
         Ok({
             vec![
                 tool("app_lookup", false).manifest(),
@@ -85,7 +88,7 @@ impl ToolProvider for ApprovalTools {
         &self,
         name: &str,
         _config: &lash_core::OwnerConfigView,
-    ) -> Option<Arc<lash_core::ToolContract>> {
+    ) -> Option<Arc<lash_vocabulary::tool_contract::ToolContract>> {
         let Some(("tools", name)) = name.split_once('.') else {
             return None;
         };
@@ -148,10 +151,13 @@ impl World {
     }
 
     async fn session(&self, name: &str) -> Result<crate::DurableSession> {
-        created_session(&self.core, crate::SessionId::fixture(name))
-            .await
-            .durable()
-            .await
+        created_session(
+            &self.core,
+            lash_vocabulary::identity::SessionId::fixture(name),
+        )
+        .await
+        .durable()
+        .await
     }
 
     /// The approval's completion key, once the cell parked on it.
@@ -221,8 +227,8 @@ async fn assert_retired(
     run: &str,
 ) -> std::collections::BTreeSet<String> {
     let journal = lash_core::ExecutionScope::turn(
-        crate::SessionId::fixture(session),
-        crate::TurnId::fixture(run),
+        lash_vocabulary::identity::SessionId::fixture(session),
+        lash_vocabulary::identity::TurnId::fixture(run),
     )
     .journal_identity()
     .expect("the turn journal identity");
@@ -264,8 +270,8 @@ async fn assert_retired(
             .effect_host()
             .durable_reads()
             .expect("the durable reads"),
-        &crate::SessionId::fixture(session),
-        &crate::TurnId::fixture(run),
+        &lash_vocabulary::identity::SessionId::fixture(session),
+        &lash_vocabulary::identity::TurnId::fixture(run),
     )
     .await
     .expect("the turn's end published its transcript");
@@ -290,7 +296,7 @@ async fn a_cancelled_turn_retires_the_cell_it_stopped_in_and_keeps_its_transcrip
     let session = world.session(session_name).await?;
     let handle = session
         .send(TurnInput::text("look up, then ask"))
-        .id(crate::TurnId::fixture(run))
+        .id(lash_vocabulary::identity::TurnId::fixture(run))
         .await?;
     let input = handle.input_id().clone();
     let key = world.parked().await;
@@ -298,8 +304,8 @@ async fn a_cancelled_turn_retires_the_cell_it_stopped_in_and_keeps_its_transcrip
         lash_core::runtime::durable::services::RuntimeTurnServices::tool_call_bodies(
             &world.core.effect_host(),
             session.session_id(),
-            &crate::TurnId::fixture(run),
-            Some(&crate::TurnId::fixture(run)),
+            &lash_vocabulary::identity::TurnId::fixture(run),
+            Some(&lash_vocabulary::identity::TurnId::fixture(run)),
             &world.core.transcript_decoders(),
         )
         .await?;
@@ -312,7 +318,7 @@ async fn a_cancelled_turn_retires_the_cell_it_stopped_in_and_keeps_its_transcrip
     assert_eq!(
         session
             .read_tool_call(&crate::TurnToolCallRef {
-                turn_id: crate::TurnId::fixture(run),
+                turn_id: lash_vocabulary::identity::TurnId::fixture(run),
                 call_id: settled[0].call_id.clone()
             })
             .await?,
@@ -324,7 +330,7 @@ async fn a_cancelled_turn_retires_the_cell_it_stopped_in_and_keeps_its_transcrip
         assert!(matches!(
             session
                 .read_tool_call(&crate::TurnToolCallRef {
-                    turn_id: crate::TurnId::fixture(run),
+                    turn_id: lash_vocabulary::identity::TurnId::fixture(run),
                     call_id: id.clone()
                 })
                 .await?,
@@ -366,7 +372,9 @@ async fn a_cancelled_turn_retires_the_cell_it_stopped_in_and_keeps_its_transcrip
     let followed_run = follower.run().await?.expect("settled run");
     follower.output().await?;
     let durable_calls = session
-        .read_turn_tool_calls(&crate::TurnId::parse(followed_run.as_str())?)
+        .read_turn_tool_calls(&lash_vocabulary::identity::TurnId::parse(
+            followed_run.as_str(),
+        )?)
         .await?;
     assert_eq!(
         durable_calls, live_calls,
@@ -390,7 +398,7 @@ async fn a_committed_turn_retires_its_consumed_cell_and_compacts_its_waits() -> 
     let session = world.session(session_name).await?;
     let handle = session
         .send(TurnInput::text("look up, then ask"))
-        .id(crate::TurnId::fixture(run))
+        .id(lash_vocabulary::identity::TurnId::fixture(run))
         .await?;
     let input = handle.input_id().clone();
     let key = world.parked().await;
@@ -417,7 +425,7 @@ async fn a_committed_turn_retires_its_consumed_cell_and_compacts_its_waits() -> 
     let transcript = lash_core::testing::turn_transcript(
         world.core.effect_host().durable_reads()?,
         session.session_id(),
-        &crate::TurnId::fixture(run),
+        &lash_vocabulary::identity::TurnId::fixture(run),
     )
     .await?;
     let sizes = lash_core::testing::cell_ledger_bytes(&transcript, &live_calls)
@@ -445,14 +453,16 @@ async fn a_committed_turn_retires_its_consumed_cell_and_compacts_its_waits() -> 
     let followed_run = follower.run().await?.expect("settled run");
     follower.output().await?;
     let durable_calls = session
-        .read_turn_tool_calls(&crate::TurnId::parse(followed_run.as_str())?)
+        .read_turn_tool_calls(&lash_vocabulary::identity::TurnId::parse(
+            followed_run.as_str(),
+        )?)
         .await?;
     assert_eq!(durable_calls, live_calls);
     for call in &live_calls {
         assert_eq!(
             session
                 .read_tool_call(&crate::TurnToolCallRef {
-                    turn_id: crate::TurnId::fixture(run),
+                    turn_id: lash_vocabulary::identity::TurnId::fixture(run),
                     call_id: call.call_id.clone()
                 })
                 .await?,
@@ -481,7 +491,7 @@ async fn a_deleted_session_leaves_no_engine_row_and_only_its_own_nodes_go() -> R
         let session = world.session(name).await?;
         let handle = session
             .send(TurnInput::text("look up, then ask"))
-            .id(crate::TurnId::fixture(run.clone()))
+            .id(lash_vocabulary::identity::TurnId::fixture(run.clone()))
             .await?;
         let input = handle.input_id().clone();
         let key = world.parked().await;
@@ -525,7 +535,9 @@ async fn a_deleted_session_leaves_no_engine_row_and_only_its_own_nodes_go() -> R
     let followed_run = follower.run().await?.expect("settled run");
     follower.output().await?;
     let durable_calls = session
-        .read_turn_tool_calls(&crate::TurnId::parse(followed_run.as_str())?)
+        .read_turn_tool_calls(&lash_vocabulary::identity::TurnId::parse(
+            followed_run.as_str(),
+        )?)
         .await?;
     assert_eq!(durable_calls, live_calls);
     drop(session);
@@ -555,7 +567,9 @@ async fn a_recorded_run_using_a_retired_session_plugins_effect_parks_typed() -> 
         .resolve(&key, lash_core::Resolution::Ok(serde_json::json!({})))
         .await?;
     let durable = second
-        .session(crate::SessionId::fixture("retired-session-used"))
+        .session(lash_vocabulary::identity::SessionId::fixture(
+            "retired-session-used",
+        ))
         .durable()
         .await?;
     let park = tokio::time::timeout(std::time::Duration::from_secs(60), async {
@@ -569,7 +583,7 @@ async fn a_recorded_run_using_a_retired_session_plugins_effect_parks_typed() -> 
     .await;
     assert!(
         matches!(park, Ok(Ok(crate::SessionParkReason::PluginRetired {
-        refusal: crate::plugins::RetirementRefusal::Serves { registry: crate::plugins::RegistryKind::Session, ref id, .. }
+        refusal: crate::plugins::RetirementRefusal::Serves { registry: lash_vocabulary::claims::RegistryKind::Session, ref id, .. }
     })) if id == "tools"),
         "the removed provider must produce a typed park: {park:?}"
     );
@@ -629,10 +643,13 @@ async fn recorded_session_with_retired_plugin(retain_state: bool) -> Result<()> 
         .plugin(Arc::new(plugin))
         .serve_test_llm_profile(provider, mock_llm_profile_spec())
         .build(crate::tests::host::runtime_lease_owner())?;
-    let session = created_session(&first, crate::SessionId::fixture("retired-session-unused"))
-        .await
-        .durable()
-        .await?;
+    let session = created_session(
+        &first,
+        lash_vocabulary::identity::SessionId::fixture("retired-session-unused"),
+    )
+    .await
+    .durable()
+    .await?;
     let running = session.send(TurnInput::text("resume me")).await?;
     tokio::time::timeout(std::time::Duration::from_secs(60), entered.notified())
         .await
@@ -651,7 +668,9 @@ async fn recorded_session_with_retired_plugin(retain_state: bool) -> Result<()> 
         .build(crate::tests::host::runtime_lease_owner())?;
     if retain_state {
         let durable = second
-            .session(crate::SessionId::fixture("retired-session-unused"))
+            .session(lash_vocabulary::identity::SessionId::fixture(
+                "retired-session-unused",
+            ))
             .durable()
             .await?;
         let park = tokio::time::timeout(std::time::Duration::from_secs(60), async {
@@ -668,7 +687,7 @@ async fn recorded_session_with_retired_plugin(retain_state: bool) -> Result<()> 
             park,
             crate::SessionParkReason::PluginRetired {
                 refusal: crate::plugins::RetirementRefusal::HasState {
-                    registry: crate::plugins::RegistryKind::Session,
+                    registry: lash_vocabulary::claims::RegistryKind::Session,
                     id: "retired-spare".into(),
                 }
             }
@@ -725,7 +744,9 @@ async fn a_new_session_naming_a_retired_plugin_is_refused_typed() -> Result<()> 
         .insert_typed("retired-spare", serde_json::json!({}))
         .expect("plain config");
     let error = match core
-        .session(crate::SessionId::fixture("retired-session-new"))
+        .session(lash_vocabulary::identity::SessionId::fixture(
+            "retired-session-new",
+        ))
         .create(crate::SessionCreation::root(spec))
         .await
     {
@@ -741,7 +762,7 @@ async fn a_new_session_naming_a_retired_plugin_is_refused_typed() -> Result<()> 
     assert!(error.is_terminal(), "admission refuses permanently");
     assert!(
         matches!(error.cause, Some(lash_core::RuntimeErrorCause::PluginRetired { refusal })
-        if *refusal == crate::plugins::RetirementRefusal::Admission { registry: crate::plugins::RegistryKind::Session, id: "retired-spare".into() })
+        if *refusal == crate::plugins::RetirementRefusal::Admission { registry: lash_vocabulary::claims::RegistryKind::Session, id: "retired-spare".into() })
     );
     core.shutdown().await?;
     Ok(())
@@ -754,18 +775,18 @@ async fn settled_reads(
     core: &LashCore,
     session: &str,
     run: &str,
-    input: &crate::InputId,
+    input: &lash_vocabulary::identity::InputId,
 ) -> Result<Vec<lash_core::ToolCallRecord>> {
     let session = core
-        .session(crate::SessionId::fixture(session))
+        .session(lash_vocabulary::identity::SessionId::fixture(session))
         .durable()
         .await?;
     session.attach(input.clone()).output().await?;
     let calls = session
-        .read_turn_tool_calls(&crate::TurnId::fixture(run))
+        .read_turn_tool_calls(&lash_vocabulary::identity::TurnId::fixture(run))
         .await?;
     let committed = session
-        .committed_turn(&crate::TurnId::fixture(run))
+        .committed_turn(&lash_vocabulary::identity::TurnId::fixture(run))
         .await?
         .expect("the turn committed");
     assert_eq!(committed.tool_calls, calls);
@@ -773,7 +794,7 @@ async fn settled_reads(
         assert_eq!(
             session
                 .read_tool_call(&crate::TurnToolCallRef {
-                    turn_id: crate::TurnId::fixture(run),
+                    turn_id: lash_vocabulary::identity::TurnId::fixture(run),
                     call_id: call.call_id.clone()
                 })
                 .await?,
@@ -834,7 +855,7 @@ async fn a_recovered_cell_turn_reads_its_calls_from_its_transcript_without_its_l
     let session = world.session(session_name).await?;
     let handle = session
         .send(TurnInput::text("look up, then ask"))
-        .id(crate::TurnId::fixture(run))
+        .id(lash_vocabulary::identity::TurnId::fixture(run))
         .await?;
     let input = handle.input_id().clone();
     let key = world.parked().await;
@@ -965,12 +986,14 @@ const FLAKY: &str = "flaky_lookup";
 
 const FLAKY_OPERATION: &str = "tools.flaky_lookup";
 
-fn flaky_definition() -> lash_core::ToolDefinition {
-    tool(FLAKY, false).with_execution_policy(lash_core::ExecutionPolicy::repeatable(
-        std::num::NonZeroU32::new(2).expect("nonzero attempt bound"),
-        0,
-        0,
-    ))
+fn flaky_definition() -> lash_vocabulary::tool_contract::ToolDefinition {
+    tool(FLAKY, false).with_execution_policy(
+        lash_vocabulary::tool_contract::ExecutionPolicy::repeatable(
+            std::num::NonZeroU32::new(2).expect("nonzero attempt bound"),
+            0,
+            0,
+        ),
+    )
 }
 
 #[async_trait]
@@ -978,7 +1001,10 @@ impl ToolProvider for FlakyLookup {
     fn tool_manifests(
         &self,
         _config: &lash_core::OwnerConfigView,
-    ) -> std::result::Result<Vec<lash_core::ToolManifest>, crate::plugins::PluginError> {
+    ) -> std::result::Result<
+        Vec<lash_vocabulary::tool_contract::ToolManifest>,
+        crate::plugins::PluginError,
+    > {
         Ok(vec![flaky_definition().manifest()])
     }
 
@@ -986,7 +1012,7 @@ impl ToolProvider for FlakyLookup {
         &self,
         name: &str,
         _config: &lash_core::OwnerConfigView,
-    ) -> Option<Arc<lash_core::ToolContract>> {
+    ) -> Option<Arc<lash_vocabulary::tool_contract::ToolContract>> {
         (name == FLAKY_OPERATION).then(|| Arc::new(flaky_definition().contract()))
     }
 
@@ -1052,17 +1078,17 @@ async fn a_retried_native_call_reads_from_its_transcript_without_its_ledger() ->
     };
     let first = core()?;
     let session = first
-        .session(crate::SessionId::fixture(session_name))
+        .session(lash_vocabulary::identity::SessionId::fixture(session_name))
         .create(crate::SessionCreation::root(mock_session_spec()))
         .await?;
     let handle = session
         .send(TurnInput::text("look it up"))
-        .id(crate::TurnId::fixture(run))
+        .id(lash_vocabulary::identity::TurnId::fixture(run))
         .await?;
     let input = handle.input_id().clone();
     let live = handle.output().await?;
     let live_calls = session
-        .read_turn_tool_calls(&crate::TurnId::fixture(run))
+        .read_turn_tool_calls(&lash_vocabulary::identity::TurnId::fixture(run))
         .await?;
     assert_eq!(live.status(), crate::TurnStatus::Answered);
     assert_eq!(

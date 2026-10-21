@@ -9,11 +9,23 @@ use std::ops::ControlFlow;
 
 use serde::{Deserialize, Serialize};
 
+use crate::AssignOrder;
+use crate::Closure;
+use crate::Document;
+use crate::Expr;
+use crate::Literal;
+use crate::Node;
+use crate::Place;
+use crate::Rhs;
+use crate::Stmt;
+use crate::ValueKind;
 use crate::heap::{Chunk, Element, EntityId, HeapFault, Identity, PageReader, PageValue, TupleRef};
-use crate::{
-    AssignOrder, Closure, Document, EffectName, Expr, FunctionId, Literal, Name, Node, Place, Rhs,
-    Site, Stmt, Unit, ValueKind,
-};
+
+use lash_vocabulary::names::EffectName;
+use lash_vocabulary::names::FunctionId;
+use lash_vocabulary::names::Name;
+use lash_vocabulary::sites::Site;
+use lash_vocabulary::sites::Unit;
 
 use super::reads::CodeReads;
 
@@ -24,6 +36,11 @@ pub trait SnapshotHeap {
 
     /// The heap's values, read without allocating.
     fn pages(&self) -> &dyn PageReader;
+
+    fn closure_callable(
+        &self,
+        id: EntityId,
+    ) -> Result<lash_vocabulary::names::CallableId, HeapFault>;
 
     /// The site the closure `id` was made at.
     ///
@@ -63,8 +80,8 @@ pub trait SnapshotHeap {
     fn freeze(
         &mut self,
         value: &PageValue,
-        named: &BTreeMap<EntityId, Name>,
-    ) -> Result<(Self::Frozen, BTreeSet<Name>), SnapshotError>;
+        named: &BTreeSet<EntityId>,
+    ) -> Result<(Self::Frozen, BTreeSet<EntityId>), SnapshotError>;
 }
 
 /// Why one captured variable cannot be frozen.
@@ -90,9 +107,6 @@ pub enum SnapshotRefusal {
     /// A variable the code reads cannot be frozen.
     #[error("its function reads `{name}`, {why}")]
     Capture { name: Name, why: CaptureRefusal },
-    /// The function was made inside a library function's body.
-    #[error("its function was made by a library function, whose code is not the run's")]
-    MadeByLibrary,
     /// The token a function is held in holds data about it that cannot be
     /// frozen.
     #[error("its function's value holds data about the function that is no constant")]
@@ -262,11 +276,11 @@ pub fn closure_held(
 pub fn validate_capture(
     heap: &dyn PageReader,
     value: &PageValue,
-    named: &BTreeMap<EntityId, Name>,
+    named: &BTreeSet<EntityId>,
     active: &mut BTreeSet<EntityId>,
 ) -> Result<(), CaptureCheck> {
     match value {
-        PageValue::Closure(id) if !named.contains_key(id) => Err(CaptureCheck::Heap(
+        PageValue::Closure(id) if !named.contains(id) => Err(CaptureCheck::Heap(
             HeapFault::Malformed("a captured closure was named by no walk".into()),
         )),
         PageValue::Task(_) | PageValue::Ref(Identity::Task(_)) => {
@@ -344,10 +358,10 @@ fn no_constant_kind(value: &PageValue) -> ValueKind {
 
 /// The closure expression at `site` of `document`'s own code.
 pub fn closure_at<'a>(document: &'a Document, site: &Site) -> Option<&'a Closure> {
-    let body = match &site.unit {
-        Unit::Main => &document.main,
-        Unit::Function(name) => &document.functions.get(name)?.body,
-        Unit::Library(_) => return None,
+    let body: &[Stmt] = match &site.unit {
+        Unit::Main => document.main.as_deref()?,
+        Unit::Library(id) => &document.functions.get(id)?.body()?.block,
+        Unit::Function(_) => return None,
     };
     let mut node = Node::Block(body);
     for step in &site.path {
@@ -359,151 +373,67 @@ pub fn closure_at<'a>(document: &'a Document, site: &Site) -> Option<&'a Closure
     }
 }
 
-enum Held<F> {
-    Data(F, Box<PageValue>),
-    Helper(EntityId),
-}
-
-/// A closure a gathered function reads under a name and makes again in its
-/// own body.
-#[derive(Clone, Debug)]
-pub struct Helper<F> {
-    pub name: Name,
-    pub code: Closure,
-    pub token: Option<FrozenToken<F>>,
-}
-
-/// The code and captures gathered from one root closure.
+/// Frozen captures of a linked closure; code remains in its defining document.
 pub struct Gathered<F> {
-    /// The root closure's code.
-    pub root: Closure,
-    /// Its function's body: each helper declared, made, then the root's
-    /// own body. A token member is a capture of a reserved name.
-    pub function: crate::Function,
-    /// Each name the body reads that the run froze, frozen.
+    pub environment: EntityId,
+    pub callable: lash_vocabulary::names::CallableId,
     pub captures: BTreeMap<Name, F>,
-    /// The effects the code performs and the library functions it calls.
-    pub effects: BTreeSet<EffectName>,
-    pub library: BTreeSet<FunctionId>,
-    /// The declared functions it names, in its code or in its captures.
-    pub references: BTreeSet<Name>,
-    /// The named functions whose helpers it shares.
-    pub owners: BTreeSet<Name>,
-    /// The site the root closure was made at.
+    pub references: BTreeSet<EntityId>,
     pub site: std::sync::Arc<Site>,
 }
 
-/// Gathers the code the closure `root` reaches and the captures it reads,
-/// with its helpers made in its own body. `named` are the closures a name
-/// of their own holds, which the code reaches by reference; a closure a
-/// capture holds whole that `named` does not name is a helper.
-/// `helper_owners` are the named functions that share a helper. `avoid`
-/// says whether a reserved capture name is taken.
-///
-/// # Errors
-///
-/// The heap's fault, or why the code cannot be gathered.
 pub fn gather<H: SnapshotHeap>(
     heap: &mut H,
-    document: &Document,
-    tag: Option<&str>,
+    catalog: &dyn crate::FunctionCatalog,
     root: EntityId,
-    named: &BTreeMap<EntityId, Name>,
-    helper_owners: &BTreeMap<EntityId, BTreeSet<Name>>,
-    avoid: &dyn Fn(&Name) -> bool,
+    named: &BTreeSet<EntityId>,
 ) -> Result<Gathered<H::Frozen>, SnapshotError> {
-    let mut gatherer = Gatherer {
-        document,
-        tag,
-        heap,
-        named,
-        effects: BTreeSet::new(),
-        library: BTreeSet::new(),
-        bound: BTreeMap::new(),
-        helpers: Vec::new(),
-        helper_owners,
-        owners: BTreeSet::new(),
-        references: BTreeSet::new(),
-    };
-    let code = gatherer.absorb(root)?.clone();
-    let site = gatherer.heap.closure_site(root)?;
-    let mut body = Vec::new();
-    for helper in &gatherer.helpers {
-        body.push(Stmt::Let {
-            name: helper.name.clone(),
-            value: Rhs::Expr(Expr::Literal(Literal::Absent)),
-        });
-    }
-    // Token members stay captures, not AST constants. A private helper's code
-    // refers to private capture names chosen outside the document's names.
-    let mut captures: BTreeMap<Name, H::Frozen> = gatherer
-        .bound
-        .into_iter()
-        .filter_map(|(name, held)| match held {
-            Held::Data(value, _) => Some((name, value)),
-            Held::Helper(_) => None,
-        })
+    let callable = heap.closure_callable(root)?;
+    let site = heap.closure_site(root)?;
+    let definition = catalog
+        .definition(&callable.function)
+        .ok_or_else(|| unreadable("closure definition is not loaded"))?;
+    let body = definition
+        .body()
+        .ok_or_else(|| unreadable("closure has no body"))?;
+    let params: Vec<_> = definition
+        .signature
+        .params
+        .iter()
+        .map(|p| p.name.clone())
         .collect();
-    let root_reads = CodeReads::of(&code.params, &code.body);
-    for (index, helper) in gatherer.helpers.into_iter().enumerate() {
-        let made = Expr::Closure(Box::new(helper.code));
-        let value = if let Some(token) = helper.token {
-            let mut values = vec![Expr::Literal(Literal::Text(token.tag))];
-            for (side, refs) in [("before", token.before), ("after", token.after)] {
-                if side == "after" {
-                    values.push(made.clone());
-                }
-                for (at, frozen) in refs.into_iter().enumerate() {
-                    let mut capture = Name::new(format!("__saved_token_{index}_{side}_{at}"));
-                    while captures.contains_key(&capture)
-                        || avoid(&capture)
-                        || root_reads.free.contains(&capture)
-                    {
-                        capture = Name::new(format!("_{}", capture.as_str()));
-                    }
-                    captures.insert(capture.clone(), frozen);
-                    values.push(Expr::Variable(capture));
-                }
-            }
-            Expr::Tuple(values)
-        } else {
-            made
+    let reads = CodeReads::of(&params, &body.block, catalog);
+    let mut captures = BTreeMap::new();
+    let mut references = BTreeSet::new();
+    for name in reads.free {
+        let captured = heap.closure_capture(root, &name)?;
+        let value = match captured {
+            Some(value) => Some(value),
+            None => heap.unit_binding(&site.unit, &name)?,
         };
-        body.push(Stmt::Assign {
-            place: Place::Variable(helper.name),
-            value: Rhs::Expr(value),
-            order: AssignOrder::ValueFirst,
-        });
+        if let Some(value) = value {
+            validate_capture(heap.pages(), &value, named, &mut BTreeSet::new())
+                .map_err(|error| error.named(&name))?;
+            let (frozen, called) = heap.freeze(&value, named)?;
+            captures.insert(name, frozen);
+            references.extend(called);
+        }
     }
-    body.extend(code.body.iter().cloned());
     Ok(Gathered {
-        function: crate::Function {
-            params: code.params.clone(),
-            body,
-            start: code.start.clone(),
-        },
-        root: code,
+        environment: root,
+        callable,
         captures,
-        effects: gatherer.effects,
-        library: gatherer.library,
-        references: gatherer.references,
-        owners: gatherer.owners,
+        references,
         site,
     })
 }
 
-/// Freezes the members of the token `values` around its callable at `at`.
-///
-/// # Errors
-///
-/// The heap's fault, or [`SnapshotRefusal::Token`] for a member that is no
-/// capture data. A closure among the members is one of `named`.
 pub fn freeze_token<H: SnapshotHeap>(
     heap: &mut H,
     values: &[PageValue],
     at: usize,
     tag: &str,
-    named: &BTreeMap<EntityId, Name>,
+    named: &BTreeSet<EntityId>,
 ) -> Result<FrozenToken<H::Frozen>, SnapshotError> {
     let mut each = |values: &[PageValue]| -> Result<Vec<H::Frozen>, SnapshotError> {
         values
@@ -526,121 +456,11 @@ pub fn freeze_token<H: SnapshotHeap>(
     })
 }
 
-struct Gatherer<'a, 'h, H: SnapshotHeap> {
-    document: &'a Document,
-    tag: Option<&'a str>,
-    heap: &'h mut H,
-    named: &'a BTreeMap<EntityId, Name>,
-    effects: BTreeSet<EffectName>,
-    library: BTreeSet<FunctionId>,
-    bound: BTreeMap<Name, Held<H::Frozen>>,
-    helpers: Vec<Helper<H::Frozen>>,
-    helper_owners: &'a BTreeMap<EntityId, BTreeSet<Name>>,
-    owners: BTreeSet<Name>,
-    references: BTreeSet<Name>,
-}
-
-impl<'a, H: SnapshotHeap> Gatherer<'a, '_, H> {
-    fn code(&self, id: EntityId) -> Result<(&'a Closure, std::sync::Arc<Site>), SnapshotError> {
-        let site = self.heap.closure_site(id)?;
-        if let Unit::Library(_) = site.unit {
-            return Err(SnapshotRefusal::MadeByLibrary.into());
-        }
-        if let Unit::Function(name) = &site.unit
-            && !self.document.functions.contains_key(name)
-        {
-            return Err(unreadable("its unit is not declared"));
-        }
-        let closure = closure_at(self.document, &site)
-            .ok_or_else(|| unreadable("its site is not a closure expression"))?;
-        Ok((closure, site))
-    }
-
-    fn captured(
-        &mut self,
-        id: EntityId,
-        site: &Site,
-        free: &Name,
-    ) -> Result<Option<PageValue>, SnapshotError> {
-        if let Some(value) = self.heap.closure_capture(id, free)? {
-            return Ok(Some(value));
-        }
-        // A closure `main` made reads the session's bindings.
-        if site.unit == Unit::Main {
-            return Ok(self.heap.unit_binding(&Unit::Main, free)?);
-        }
-        Ok(None)
-    }
-
-    fn absorb(&mut self, id: EntityId) -> Result<&'a Closure, SnapshotError> {
-        let (closure, site) = self.code(id)?;
-        let reads = CodeReads::of(&closure.params, &closure.body);
-        self.effects.extend(reads.effects);
-        self.library.extend(reads.library);
-        self.references.extend(reads.declared);
-        for free in &reads.free {
-            let Some(value) = self.captured(id, &site, free)? else {
-                continue;
-            };
-            if let Some(helper) = closure_held(self.heap.pages(), &value, self.tag)?
-                && !self.named.contains_key(&helper)
-            {
-                if let Some(owners) = self.helper_owners.get(&helper) {
-                    self.owners.extend(owners.iter().cloned());
-                }
-                match self.bound.get(free) {
-                    Some(Held::Helper(id)) if *id == helper => continue,
-                    Some(_) => return Err(capture_refused(free, CaptureRefusal::Conflict)),
-                    None => (),
-                }
-                let token = match (&value, token_closure(self.heap.pages(), &value, self.tag)?) {
-                    (PageValue::Tuple(t), Some((_, at))) => {
-                        let values = members(self.heap.pages(), t)?;
-                        Some(freeze_token(
-                            self.heap,
-                            &values,
-                            at,
-                            self.tag.unwrap_or_default(),
-                            self.named,
-                        )?)
-                    }
-                    _ => None,
-                };
-                self.bound.insert(free.clone(), Held::Helper(helper));
-                let code = self.absorb(helper)?.clone();
-                self.helpers.push(Helper {
-                    name: free.clone(),
-                    code,
-                    token,
-                });
-                continue;
-            }
-            if let Some(Held::Data(_, held)) = self.bound.get(free)
-                && self.heap.pages().equal(held, &value)?
-            {
-                continue;
-            }
-            validate_capture(self.heap.pages(), &value, self.named, &mut BTreeSet::new())
-                .map_err(|e| e.named(free))?;
-            let (frozen, functions) = self.heap.freeze(&value, self.named)?;
-            self.references.extend(functions);
-            match self.bound.get(free) {
-                Some(Held::Data(_, held)) if self.heap.pages().equal(held, &value)? => (),
-                Some(_) => return Err(capture_refused(free, CaptureRefusal::Conflict)),
-                None => {
-                    self.bound
-                        .insert(free.clone(), Held::Data(frozen, Box::new(value)));
-                }
-            }
-        }
-        Ok(closure)
-    }
-}
-
-// The capture refusal's codec, which a kind-30 bundle's refused members
-// carry (FIG-5887 §2 numbers).
-
-use crate::graph_tokens::{CodecVariant, TokenCodec, TokenError, TokenReader, TokenWriter};
+use lash_vocabulary::tokens::CodecVariant;
+use lash_vocabulary::tokens::TokenCodec;
+use lash_vocabulary::tokens::TokenError;
+use lash_vocabulary::tokens::TokenReader;
+use lash_vocabulary::tokens::TokenWriter;
 
 #[doc(hidden)]
 impl CodecVariant for CaptureRefusal {

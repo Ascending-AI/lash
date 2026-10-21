@@ -1,7 +1,7 @@
-use crate::ProcessId;
 use lash_durable::DurableError;
 use lash_durable::StoreFailure;
 use lash_durable::StoreFailureKind;
+use lash_vocabulary::identity::ProcessId;
 /// Why a process actor parked: the actor row's typed reason. A parked
 /// process runs no engine code until an operator redrives it; a cancel ends
 /// it without running its engine.
@@ -44,7 +44,7 @@ pub enum ProcessParkReason {
         /// Its version.
         version: u32,
         /// The kernel migration's typed refusal.
-        refusal: lash_kernel_migrate::KernelMigrationRefusal,
+        refusal: crate::process::engine_state::EngineStateRefusal,
         /// The reason in words.
         message: String,
     },

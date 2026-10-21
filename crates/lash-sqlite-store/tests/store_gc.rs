@@ -19,8 +19,8 @@ use lash_core_store::store::StoreError;
 use lash_core_store::store::StoreMaintenance;
 use lash_core_store::store::TurnInputStore;
 use lash_core_store::store::WindowSelector;
-use lash_protocol_types::SessionId;
 use lash_sqlite_store::{BlobArtifactDescriptor, SqliteStore};
+use lash_vocabulary::identity::SessionId;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -413,7 +413,7 @@ async fn sqlite_catalog_partitions_derived_node_ids_by_session() {
             frame_key.as_str(),
         );
         let node = lash_core_store::session_graph::SessionNodeRecord {
-            node_id: lash_protocol_types::NodeId::fixture(frame_node_id.to_string()),
+            node_id: lash_vocabulary::identity::NodeId::fixture(frame_node_id.to_string()),
             parent_node_id: None,
             timestamp: "2026-07-26T00:00:00.000000000Z"
                 .parse()
@@ -461,7 +461,7 @@ async fn sqlite_catalog_partitions_derived_node_ids_by_session() {
         first
             .contains_active_ancestor(
                 &first_state.session_id,
-                &lash_protocol_types::NodeId::fixture(first_node_id.to_string())
+                &lash_vocabulary::identity::NodeId::fixture(first_node_id.to_string())
             )
             .await
             .unwrap()
@@ -470,7 +470,7 @@ async fn sqlite_catalog_partitions_derived_node_ids_by_session() {
         second
             .contains_active_ancestor(
                 &second_state.session_id,
-                &lash_protocol_types::NodeId::fixture(second_node_id.to_string())
+                &lash_vocabulary::identity::NodeId::fixture(second_node_id.to_string())
             )
             .await
             .unwrap()
@@ -516,7 +516,7 @@ async fn sqlite_catalog_leaf_validation_is_session_scoped() {
         frame_key.as_str(),
     );
     let node = lash_core_store::session_graph::SessionNodeRecord {
-        node_id: lash_protocol_types::NodeId::fixture(frame_node_id.to_string()),
+        node_id: lash_vocabulary::identity::NodeId::fixture(frame_node_id.to_string()),
         parent_node_id: None,
         timestamp: "2026-07-26T00:00:00.000000000Z"
             .parse()
@@ -669,7 +669,7 @@ fn raw_node_ids(root: &Path, sql: &str) -> Vec<String> {
 async fn commit_single_root_node(
     factory: &Arc<SqliteStore>,
     session_id: &SessionId,
-) -> (Arc<SqliteStore>, lash_protocol_types::NodeId) {
+) -> (Arc<SqliteStore>, lash_vocabulary::identity::NodeId) {
     let store = admit_store(
         factory,
         &SessionStoreCreateRequest {
@@ -819,7 +819,7 @@ async fn sqlite_delete_reclaims_fork_ancestry_orphaned_by_earlier_owner_delete()
             .session_graph
             .apply_append(&lash_core_store::store::GraphAppend::Extend {
                 nodes: vec![lash_core_store::session_graph::SessionNodeRecord {
-                    node_id: lash_protocol_types::NodeId::from("orphan-fork-child-node"),
+                    node_id: lash_vocabulary::identity::NodeId::from("orphan-fork-child-node"),
                     parent_node_id,
                     timestamp: "2026-08-17T00:00:00.000000000Z"
                         .parse()

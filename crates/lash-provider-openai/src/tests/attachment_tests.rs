@@ -4,6 +4,7 @@ use lash_protocol_types::{
     llm::attachment_delivery::AttachmentPosition, llm::attachment_delivery::Delivery,
     llm::attachment_delivery::DeliverySecret, llm::attachment_delivery::ProviderFileScope,
 };
+
 use lash_protocol_types::{llm::types::StreamBlockEvent, llm::types::StreamBlockKind};
 
 // DELIVERY-SCOPE: Chat has no Files namespace, even when the host permits one.

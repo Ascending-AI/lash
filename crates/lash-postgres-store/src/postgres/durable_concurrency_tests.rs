@@ -698,7 +698,8 @@ async fn until_lock_waiters<T>(
 async fn a_record_racing_a_release_of_a_shared_text_keeps_it() {
     use lash_durable::domain::{ModelCallId, PromptCallKey, PromptText, PromptWrite};
     use lash_durable::{DomainWrite, DurableReads as _};
-    use lash_protocol_types::{SessionId, TurnId};
+    use lash_vocabulary::identity::SessionId;
+    use lash_vocabulary::identity::TurnId;
 
     let Some((_database, storage)) =
         storage("a_record_racing_a_release_of_a_shared_text_keeps_it").await

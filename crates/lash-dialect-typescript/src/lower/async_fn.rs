@@ -10,7 +10,7 @@
 //!   promise's task, after one `yield` when the promise has already
 //!   settled, and one `yield` alone for a value that is no promise.
 //! - **`await tool(args)`** is one `perform … then yield` in the awaiting
-//!   task, and `await sleep(ms)` one `sleep … then yield`.
+//!   task, and `await sleep(ms)` one ordinary sleep operation with `then yield`.
 //! - **`tool(args)` and `sleep(ms)` not awaited where they stand** are
 //!   promises whose task performs the effect or sleeps.
 //!
@@ -30,7 +30,13 @@
 //! actual spawn site and its occurrence name the child (`K-TASK-020`).
 
 use lash_kernel_dialect::{Resolution, Spelling};
-use lash_kernel_doc::{ActKind, EffectName, Expr, Literal, Rhs, Signature, Stmt};
+use lash_kernel_doc::{ActKind, Expr, Literal, Rhs, Stmt};
+
+use lash_vocabulary::{
+    EffectName, Name,
+    names::{Import, ImportKind, QualifiedName},
+    types::{Param, Signature, Type},
+};
 
 use super::{Lowerer, Lowering, Operand, Ty};
 use crate::adapter as ast;
@@ -59,7 +65,10 @@ impl Lowerer<'_> {
         else {
             unreachable!("a source body is a fresh closure");
         };
-        let convention = source_body.start.take().map(|start| start.convention);
+        let convention = source_body
+            .presentation
+            .take()
+            .map(|start| start.convention);
         let written = self.written(function);
         let this = self.fresh("this");
         let args = self.fresh("args");
@@ -84,13 +93,13 @@ impl Lowerer<'_> {
             Ok(())
         })?;
         self.written = Some(written);
-        let start = self.start_adapter(function);
+        let start = self.callable_presentation(function);
         let closure = self.emit_closure(params, block, start);
         if let Some(Stmt::Let {
             value: Rhs::Expr(Expr::Closure(closure)),
             ..
         }) = self.buf.last_stmt_mut()
-            && let Some(start) = &mut closure.start
+            && let Some(start) = &mut closure.presentation
             && let Some(convention) = convention
         {
             start.convention = convention;
@@ -136,7 +145,7 @@ impl Lowerer<'_> {
             } => self.expression_block(|this| this.call(callee, args, *call_span, false, true))?,
             value => self.lower_expr(value)?,
         };
-        let policy = self.function("ts.await")?;
+        let policy = self.function_target("ts.await")?;
         let awaited = self.action(ActKind::Await(policy), vec![value.expr()], Ty::Unknown);
         self.await_process(awaited, span)
     }
@@ -216,6 +225,14 @@ impl Lowerer<'_> {
     /// names it is written with.
     pub(super) fn wait_of(&self, callee: &ast::Expr) -> Option<Wait> {
         let (root, path) = super::calls::path_segments(callee)?;
+        let expanded = self.imported.get(root).map(|prefix| {
+            prefix
+                .iter()
+                .map(String::as_str)
+                .chain(path.iter().skip(1).copied())
+                .collect::<Vec<_>>()
+        });
+        let path = expanded.unwrap_or(path);
         if self.is_bound(root) || crate::builtins::is_global(root) {
             return None;
         }
@@ -223,23 +240,18 @@ impl Lowerer<'_> {
             return Some(Wait::Sleep);
         }
         match self.namespaces.resolve(&path, Spelling::TypeScript) {
-            Resolution::Operation { operation, .. } => Some(Wait::Effect(operation.effect_name())),
+            Resolution::Operation { operation, .. } | Resolution::Deferred { operation } => {
+                Some(Wait::Effect(operation.effect_name()))
+            }
             _ => None,
         }
     }
 
-    /// The requirement `effect`, an offered operation, is performed under:
-    /// its signature and the contract its offer states.
-    fn requirement_of(&self, effect: &EffectName) -> &lash_kernel_doc::OperationRequirement {
-        match self.namespaces.operation(effect) {
-            Some((_, offered)) => &offered.requirement,
-            None => unreachable!("a wait's effect is an offered operation"),
-        }
-    }
-
-    /// The signature `effect`, an offered operation, is performed under.
-    fn signature_of(&self, effect: &EffectName) -> &Signature {
-        &self.requirement_of(effect).signature
+    fn signature_of(&self, effect: &EffectName) -> Signature {
+        self.namespaces
+            .operation(effect)
+            .map(|(_, offered)| offered.signature.clone())
+            .unwrap_or_else(lash_kernel_dialect::deferred_signature)
     }
 
     /// The refusal of a call whose dotted path names an operation the
@@ -318,7 +330,12 @@ impl Lowerer<'_> {
         let (name, least, most) = match wait {
             Wait::Sleep => ("sleep".to_string(), 1, 1),
             Wait::Effect(effect) => {
-                let params = &self.signature_of(effect).params;
+                let signature = self.signature_of(effect);
+                let params = &signature.params;
+                if self.namespaces.operation(effect).is_none() {
+                    let operands = self.operands(&values)?;
+                    return Ok(operands.iter().map(Operand::expr).collect());
+                }
                 let required = params.iter().filter(|param| !param.optional).count();
                 (effect.to_string(), required, params.len())
             }
@@ -348,14 +365,20 @@ impl Lowerer<'_> {
     fn wait_action(&mut self, wait: Wait, args: Vec<Expr>, then_yield: bool) -> Lowering<Operand> {
         match wait {
             Wait::Effect(effect) => {
-                let requirement = self.requirement_of(&effect).clone();
-                let signature = requirement.signature.clone();
-                // The perform states the result type the tool declares, so
-                // an `Int` or a `Float` is decoded as declared, and what
-                // it gives is known to be that type.
+                let signature = self.signature_of(&effect);
+                let deferred = self.namespaces.operation(&effect).is_none();
+                let operation = lash_vocabulary::names::QualifiedOperation::from_effect(&effect)
+                    .expect("canonical operation");
+                let slot = self.imports.operation(
+                    QualifiedName {
+                        package: operation.package,
+                        member: operation.name,
+                        type_member: None,
+                    },
+                    signature.clone(),
+                );
                 let result = signature.result.clone();
                 let ty = Ty::decoded(&result);
-                self.performed.insert(effect.clone(), requirement);
                 let mut copied = Vec::with_capacity(args.len());
                 for expr in args {
                     // The boundary gives a literal back as it is: it holds
@@ -370,11 +393,15 @@ impl Lowerer<'_> {
                 }
                 Ok(self.action(
                     ActKind::Perform {
-                        effect,
+                        slot,
                         result,
                         then_yield,
                     },
-                    copied,
+                    if deferred {
+                        vec![Expr::List(copied)]
+                    } else {
+                        copied
+                    },
                     ty,
                 ))
             }
@@ -384,7 +411,21 @@ impl Lowerer<'_> {
                 };
                 // Sleep returns Null in the kernel, whereas JavaScript sleep
                 // resolves to undefined. A scoped role preserves that value.
-                let sleep = self.action(ActKind::Sleep { then_yield }, vec![duration], Ty::Unknown);
+                let duration = self.inline(duration, Ty::Unknown);
+                let duration = self.invoke("ts.sleep_duration", &[duration], Ty::Number)?;
+                let slot = self.imports.operation(
+                    lash_kernel_dialect::service_name("typescript", "sleep"),
+                    lash_kernel_dialect::sleep_signature(),
+                );
+                let sleep = self.action(
+                    ActKind::Perform {
+                        slot,
+                        result: Type::Null,
+                        then_yield,
+                    },
+                    vec![duration.expr()],
+                    Ty::Unknown,
+                );
                 let name = self.temp();
                 Ok(self.inline(
                     Expr::Let {

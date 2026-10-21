@@ -33,8 +33,10 @@ pub(super) async fn record_native_transition(
     lash_execution_contracts::plugin_error::PluginError,
 > {
     let attribution = match &request.owner {
-        crate::RuntimeOwner::Session(id) => crate::RuntimeAttribution::for_session(id.clone()),
-        crate::RuntimeOwner::Process(_) => crate::RuntimeAttribution::none(),
+        lash_vocabulary::identity::RuntimeOwner::Session(id) => {
+            crate::RuntimeAttribution::for_session(id.clone())
+        }
+        lash_vocabulary::identity::RuntimeOwner::Process(_) => crate::RuntimeAttribution::none(),
     };
     let invocation =
         crate::RuntimeEffectInvocation::new(request.id.0.clone(), attribution, "plugin-transition");
@@ -191,7 +193,7 @@ impl crate::runtime::LashRuntime {
         .map_err(crate::RuntimeError::from)?;
         let request = crate::plugin::PluginTransitionRequest {
             id: crate::plugin::PluginTransitionId(address),
-            owner: crate::RuntimeOwner::Session(self.state.session_id.clone()),
+            owner: lash_vocabulary::identity::RuntimeOwner::Session(self.state.session_id.clone()),
             base: crate::plugin::PluginTransitionBase::Session {
                 head: crate::store::SessionHeadRef {
                     generation: 0,

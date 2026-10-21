@@ -155,9 +155,12 @@ fn run(
             .collect::<Vec<_>>(),
         before
     );
-    let charge = definition.charge.evaluate(&mut |operand, how| {
-        measure(definition, &heap, &args, result.as_ref().ok(), operand, how)
-    });
+    let charge = definition
+        .charge()
+        .expect("native formula")
+        .evaluate(&mut |operand, how| {
+            measure(definition, &heap, &args, result.as_ref().ok(), operand, how)
+        });
     Run {
         outcome: match result {
             Ok(value) => Ok(heap.read(&value)),

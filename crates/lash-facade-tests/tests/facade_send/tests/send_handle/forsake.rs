@@ -6,7 +6,7 @@
 
 use super::*;
 
-fn forsaken_refusal(error: &EmbedError) -> Option<&lash_core::InputId> {
+fn forsaken_refusal(error: &EmbedError) -> Option<&lash_vocabulary::identity::InputId> {
     match error {
         EmbedError::Runtime(error)
             if error.code == lash_core::RuntimeErrorCode::TurnInputForsaken =>
@@ -35,7 +35,7 @@ async fn a_forsaken_id_refuses_its_send_and_answers_forsaken() -> Result<()> {
         .await
         .open()
         .await?;
-    let id = lash::TurnId::fixture("forsaken-before-send");
+    let id = lash_vocabulary::identity::TurnId::fixture("forsaken-before-send");
     for forsaking in [
         session.forsake(id.clone()).await?,
         session.forsake(id.clone()).await?,
@@ -68,7 +68,7 @@ async fn a_forsaken_id_refuses_its_send_and_answers_forsaken() -> Result<()> {
     let refused = session
         .send_batch([
             (
-                lash::TurnId::fixture("beside-the-forsaken"),
+                lash_vocabulary::identity::TurnId::fixture("beside-the-forsaken"),
                 TurnInput::text("beside"),
             ),
             (id.clone(), TurnInput::text("arrives after the forsake")),
@@ -97,7 +97,7 @@ async fn forsaking_a_sent_id_answers_the_send() -> Result<()> {
         .await
         .open()
         .await?;
-    let id = lash::TurnId::fixture("sent-before-forsake");
+    let id = lash_vocabulary::identity::TurnId::fixture("sent-before-forsake");
     let sent = session.send(TurnInput::text(HELD)).id(id.clone()).await?;
     provider_called(&fixture, 1).await;
     let running = accepted(session.forsake(id.clone()).await?);
@@ -139,7 +139,7 @@ async fn an_id_forsaken_before_its_session_exists_refuses_its_send() -> Result<(
     let fixture = fixture(1).await?;
     let session_id = SessionId::fixture("forsake-before-creation");
     let absent = fixture.core.session(session_id.clone()).durable().await?;
-    let id = lash::TurnId::fixture("lost-first-send");
+    let id = lash_vocabulary::identity::TurnId::fixture("lost-first-send");
     for _ in 0..2 {
         assert!(
             matches!(absent.forsake(id.clone()).await?, lash::Forsaking::Forsaken),
@@ -193,7 +193,7 @@ async fn an_id_forsaken_before_its_session_exists_refuses_its_send() -> Result<(
 async fn a_forsake_racing_the_creating_send_has_exactly_one_winner() -> Result<()> {
     const ROUNDS: u64 = 12;
     let fixture = fixture(1).await?;
-    let id = lash::TurnId::fixture("raced-first-send");
+    let id = lash_vocabulary::identity::TurnId::fixture("raced-first-send");
     for round in 0..ROUNDS {
         let session_id = SessionId::fixture(format!("forsake-creation-race-{round}"));
         let durable = fixture.core.session(session_id.clone()).durable().await?;

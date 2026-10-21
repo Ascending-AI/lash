@@ -118,25 +118,16 @@ pub enum DurableError {
         /// The operator command that carries them forward.
         command: String,
     },
-    /// The database permanently refused package installation. Node startup
-    /// ends with this error, observable through the facade's node_stopped().
-    /// Retrying the same install cannot make it serve.
-    #[error("package installation refused (SQLSTATE {sqlstate}): {message}")]
-    PackageInstallRefused {
-        /// The database's structured refusal code.
-        sqlstate: String,
-        /// The database's account of the refusal.
-        message: String,
+    /// A first resolution raced another state change. Reopen and retry.
+    #[error("resolution owner {actor} is at revision {current:?}, expected {expected:?}")]
+    ResolutionRevisionConflict {
+        actor: ActorKey,
+        expected: crate::StateRevision,
+        current: crate::StateRevision,
     },
-    /// A package set's install named an artifact the store does not hold
-    /// and the install did not carry (FIG-6918): a set's members are
-    /// installed with it or before it. Nothing was written.
-    #[error("package set {set} names artifact {path}@{artifact}, which is not installed")]
-    UnknownArtifact {
-        set: crate::PackageSetDigest,
-        artifact: crate::ArtifactDigest,
-        path: String,
-    },
+    /// An immutable package record or execution registration was refused.
+    #[error("package record refused: {0}")]
+    Package(#[from] crate::packages::PackageRefusal),
 }
 
 impl From<lash_core_store::checkpoint_graph::GraphRefusal> for DurableError {

@@ -8,8 +8,8 @@ mod roster;
 
 use crate::*;
 use lash_execution_contracts::process::ProcessQuery as _;
-use lash_protocol_types::ProcessId;
-use lash_protocol_types::SessionId;
+use lash_vocabulary::identity::ProcessId;
+use lash_vocabulary::identity::SessionId;
 #[path = "process_registry/event_release.rs"]
 mod event_release;
 #[path = "process_registry/lifecycle.rs"]
@@ -225,6 +225,8 @@ impl lash_execution_contracts::process::ProcessRegistrar for PostgresProcessRegi
         &self,
         prepared: lash_execution_contracts::process::PreparedProcessRegistration,
     ) -> Result<lash_execution_contracts::process::ProcessRegistrationReceipt, PluginError> {
+        let execution = prepared.execution.clone();
+        let initial_resolutions = prepared.initial_resolutions.clone();
         let (registration, observers, process_id, retained, now) = prepared.into_commit();
         let unprepared = registration.clone();
         let mut tx = begin_guarded(&self.pool, &self.fence)
@@ -242,6 +244,14 @@ impl lash_execution_contracts::process::ProcessRegistrar for PostgresProcessRegi
         .await?
         {
             AppliedRegistration::Created(record) => {
+                crate::durable::packages::register_process_execution(
+                    &mut tx,
+                    &record.id,
+                    execution.as_ref(),
+                    &initial_resolutions,
+                )
+                .await
+                .map_err(lash_execution_contracts::plugin_error::registry_error)?;
                 tx.commit().await.map_err(plugin_sqlx_error)?;
                 // The process's actor committed ready: its node hears of it
                 // now, not at its claim poll (FIG-7044).

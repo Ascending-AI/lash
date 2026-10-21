@@ -3,7 +3,7 @@
   "cases": [
     {
       "name": "separate effect results never share identity",
-      "document": "kernel 1\nnumbers by_spelling\neffect items() -> List(Int) contract \"1\"\nmain {\nlet a = perform items() as List(Int) let b = perform items() as List(Int) set a[0] = 2 finish b\n}\n",
+      "document": "kernel 1\nnumbers by_spelling\nimport 0 operation host.items() -> List(Int)\nmain {\n  let a = perform 0() as List(Int)\n  let b = perform 0() as List(Int)\n  set a[0] = 2\n  finish b\n}\n",
       "expected": {
         "prints": [],
         "end": {
@@ -18,7 +18,7 @@
         "trace": [
           {
             "effect": {
-              "effect": "items",
+              "effect": "host.items",
               "args": [],
               "result": {
                 "list": "int"
@@ -27,7 +27,7 @@
           },
           {
             "effect": {
-              "effect": "items",
+              "effect": "host.items",
               "args": [],
               "result": {
                 "list": "int"

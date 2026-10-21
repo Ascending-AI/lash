@@ -7,12 +7,18 @@
 //! here is derived from the document and never stored as authority: the
 //! view is rebuilt on every change.
 
+use lash_kernel_doc::FunctionTarget;
+use lash_vocabulary::names::ImportSlot;
 use std::collections::{BTreeMap, BTreeSet};
 
-use lash_kernel_doc::{
-    AssignOrder, EffectName, FunctionId, JoinMode, Literal, Name, Protocol, Signature, Site, Type,
-    Unit,
-};
+use lash_kernel_doc::{AssignOrder, JoinMode, Literal, Protocol};
+
+use lash_vocabulary::names::FunctionId;
+use lash_vocabulary::names::Name;
+use lash_vocabulary::sites::Site;
+use lash_vocabulary::sites::Unit;
+use lash_vocabulary::types::Signature;
+use lash_vocabulary::types::Type;
 
 macro_rules! dense_id {
     ($(#[$meta:meta])* $name:ident) => {
@@ -178,7 +184,7 @@ pub struct EffectSet {
     /// The effects performed by the unit's own code, the closures it
     /// writes, the library bodies it calls and every declared function it
     /// calls, spawns or references, transitively.
-    pub effects: BTreeSet<EffectName>,
+    pub effects: BTreeSet<ImportSlot>,
     /// The unit, or a function it reaches, calls a function held in a
     /// variable, a library function with only a kernel-code body, or one
     /// whose body beside a native implementation applies a closure. What
@@ -261,7 +267,7 @@ pub enum StmtNode {
     },
     ReturnVia {
         value: NodeId,
-        policy: FunctionId,
+        policy: FunctionTarget,
     },
     Throw {
         value: NodeId,
@@ -317,12 +323,9 @@ pub enum ActionNode {
         args: Vec<AtomNode>,
     },
     Perform {
-        effect: EffectName,
+        slot: ImportSlot,
         args: Vec<AtomNode>,
         result: Type,
-    },
-    Sleep {
-        duration: AtomNode,
     },
     Join {
         task: AtomNode,
@@ -341,16 +344,16 @@ pub enum ActionNode {
     },
     /// Calls the await policy with the value (`K-TASK-026`).
     Await {
-        policy: FunctionId,
+        policy: FunctionTarget,
         value: AtomNode,
     },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum CalleeNode {
-    Declared(Name),
+    Import(ImportSlot),
     Value(Reference),
-    Library(FunctionId),
+    Local(FunctionId),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -380,6 +383,7 @@ pub enum ExprNode {
     Record(Vec<RecordEntryNode>),
     Member(MemberNode),
     Closure {
+        function: FunctionId,
         params: Vec<BindingId>,
         body: NodeId,
         /// The variables of enclosing scopes the closure shares, in the
@@ -390,8 +394,6 @@ pub enum ExprNode {
         function: FunctionId,
         args: Vec<NodeId>,
     },
-    Clock,
-    Random,
     Read {
         handle: NodeId,
         request: NodeId,
@@ -410,15 +412,14 @@ pub enum ActNode {
     Cancel,
     Call(CalleeNode),
     Perform {
-        effect: EffectName,
+        slot: ImportSlot,
         result: Type,
     },
-    Sleep,
     Spawn(CalleeNode),
     Join,
     JoinMany(JoinMode),
     /// Calls the await policy with the one argument (`K-TASK-026`).
-    Await(FunctionId),
+    Await(FunctionTarget),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -501,10 +502,7 @@ impl GraphNode {
                 }
             },
             NodeKind::Expr(expr) => match expr {
-                ExprNode::Literal(_)
-                | ExprNode::Variable(_)
-                | ExprNode::Clock
-                | ExprNode::Random => {}
+                ExprNode::Literal(_) | ExprNode::Variable(_) => {}
                 ExprNode::Tuple(items) | ExprNode::List(items) | ExprNode::Set(items) => {
                     out.extend(items);
                 }
@@ -627,7 +625,6 @@ pub struct Edge {
 pub enum SiteKind {
     Call,
     Perform,
-    Sleep,
     Join,
     JoinMany,
     Yield,
@@ -641,7 +638,7 @@ impl SiteKind {
     pub fn waits(self) -> bool {
         matches!(
             self,
-            Self::Perform | Self::Sleep | Self::Join | Self::JoinMany | Self::Yield
+            Self::Perform | Self::Join | Self::JoinMany | Self::Yield
         )
     }
 }

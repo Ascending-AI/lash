@@ -16,7 +16,8 @@ use std::sync::Arc;
 
 use lash_core_store::checkpoint_graph::NodeId;
 use lash_kernel_doc::heap::PageId;
-use lash_kernel_doc::{Datum, EffectName, ErrorDatum, Handle, Integer, Timestamp};
+use lash_kernel_doc::{Datum, ErrorDatum, Handle, Integer};
+
 use lash_kernel_vm::{
     CellStart, EffectModes, End, Host, HostFault, KernelMachine, Machine, Outcome, Program,
     Request, Step, Target,
@@ -24,6 +25,7 @@ use lash_kernel_vm::{
 use lash_vm_broker::kernel::next_stage_lease;
 use lash_vm_broker::kernel::pages::{CommittedPages, LocalPages, SpoolRoot};
 use lash_vm_client::WorkerTuning;
+use lash_vocabulary::names::EffectName;
 
 use crate::embedding::tests::every_dialect;
 
@@ -34,26 +36,16 @@ struct Answering {
 }
 
 impl Host for Answering {
-    fn clock(&mut self) -> Timestamp {
-        Timestamp {
-            nanoseconds: Integer::from(0),
-        }
-    }
-
-    fn random(&mut self) -> u64 {
-        0
-    }
-
     fn read(&mut self, _handle: &Handle, _request: &Datum) -> Result<Datum, ErrorDatum> {
         panic!("the cell reads no projection")
     }
 
     fn perform(
         &mut self,
-        _effect: &EffectName,
+        _effect: &lash_vocabulary::OperationUse,
         _args: &[Datum],
-        _site: &lash_kernel_doc::PositionLabel,
-        _origin: &lash_kernel_doc::Site,
+        _site: &lash_vocabulary::sites::PositionLabel,
+        _origin: &lash_vocabulary::sites::Site,
     ) -> Result<Result<Datum, ErrorDatum>, HostFault> {
         Ok(self.answer.take().expect("the cell reads once"))
     }
@@ -94,10 +86,21 @@ fn run(
     read: bool,
     answer: &Result<Datum, ErrorDatum>,
 ) -> Ran {
+    let instance = &program.instances[&program.link];
+    let slot = program
+        .document
+        .imports
+        .iter()
+        .find_map(|(slot, import)| (import.name.to_string() == effect.as_str()).then_some(*slot))
+        .expect("tool import");
+    let use_ = match &instance.slots[&slot] {
+        lash_kernel_vm::PreparedSlot::Operation(use_) => *use_,
+        _ => panic!("operation slot"),
+    };
     let modes = if read {
-        EffectModes::reading([effect.clone()])
+        [(use_, lash_vocabulary::OperationMode::Read)].into()
     } else {
-        EffectModes::recorded()
+        EffectModes::new()
     };
     let start = CellStart {
         owner: PageId([0; 32]),
@@ -151,7 +154,7 @@ fn run(
                     let Request::Effect(request) = request else {
                         panic!("the cell sleeps nowhere");
                     };
-                    assert_eq!(&request.effect, effect, "the cell performs only its tool");
+                    assert_eq!(request.use_, use_, "the cell performs only its tool");
                     let outcome = match answer {
                         Ok(value) => Outcome::Completed(value.clone()),
                         Err(error) => Outcome::Failed(error.clone()),
@@ -171,13 +174,13 @@ fn lowered(dialect: &str, source: &str, effect: &EffectName) -> Program {
     let embedding = every_dialect(&WorkerTuning::standard()).expect("an embedding of both");
     let effects = BTreeMap::from([(
         effect.clone(),
-        lash_protocol_types::tool_signature(
-            &lash_protocol_types::JsonSchema::admit(serde_json::json!({
+        lash_vocabulary::json_schema::tool_signature(
+            &lash_vocabulary::JsonSchema::admit(serde_json::json!({
                 "type": "object",
                 "properties": { "x": { "type": "number" } }
             }))
             .expect("an admissible input schema"),
-            &lash_protocol_types::JsonSchema::admit(serde_json::json!({ "type": "integer" }))
+            &lash_vocabulary::JsonSchema::admit(serde_json::json!({ "type": "integer" }))
                 .expect("an admissible result schema"),
         ),
     )]);
@@ -188,12 +191,8 @@ fn lowered(dialect: &str, source: &str, effect: &EffectName) -> Program {
             source,
             &lash_kernel_dialect::Environment::new(
                 library,
-                &lash_kernel_dialect::Namespaces::of_effects(
-                    &effects,
-                    &lash_kernel_doc::ContractId::new("1"),
-                    &Default::default(),
-                )
-                .expect("the test's effects are operations"),
+                &crate::embedding::tests::namespaces(&effects, &Default::default())
+                    .expect("the test's effects are operations"),
             ),
             lash_kernel_dialect::Mode::Cell(lash_kernel_dialect::CellEnvironment::first()),
         )
@@ -204,17 +203,7 @@ fn lowered(dialect: &str, source: &str, effect: &EffectName) -> Program {
         .prepared_library()
         .expect("the document's library")
         .clone();
-    let closure = lash_vm_broker::kernel::closure::derive(
-        document.manifest.functions.keys().copied(),
-        library.registry(),
-        &std::collections::BTreeMap::new(),
-    )
-    .expect("the worker holds the cell's functions");
-    Program {
-        closure: lash_kernel_doc::heap::PageId(closure.reference().0),
-        document: Arc::new(document),
-        library,
-    }
+    crate::embedding::tests::linked(document, library)
 }
 
 #[test]

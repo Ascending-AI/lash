@@ -1,4 +1,4 @@
-use lash::SessionId;
+use lash_vocabulary::identity::SessionId;
 use lash::persistence::{PersistedSessionConfig, SessionHeadMeta};
 
 fn main() {

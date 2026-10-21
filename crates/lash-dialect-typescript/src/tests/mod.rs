@@ -2,7 +2,9 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::OnceLock;
 
 use lash_kernel_dialect::{CellEnvironment, Environment, Lowered, Mode, NamedLibrary};
-use lash_kernel_doc::{EffectName, Signature, parse_document, print_document, validate_document};
+use lash_kernel_doc::{parse_document, print_document, validate_document};
+
+use lash_vocabulary::{EffectName, Signature};
 
 use crate::Diagnostic;
 
@@ -12,7 +14,6 @@ mod async_fn;
 mod builtin_values;
 mod controls;
 mod deviations;
-mod generated_source;
 mod guarded_text;
 mod hoisting;
 mod hot_helpers;
@@ -23,32 +24,15 @@ mod module;
 mod naming;
 mod operands;
 mod package;
-mod package_members;
 mod pages;
 mod positional;
-mod printer;
-mod printer_corpus;
 mod process;
 mod protocol_loops;
-mod readable_print;
-mod readable_source;
 mod remaining_builtins;
 mod source_map;
 mod text_building;
 mod trim;
 mod typed;
-
-/// The kernel surface alone, as the shared readability harness prints it.
-impl lash_kernel_dialect::readability::SurfacePrinter for crate::TypeScript {
-    fn print(
-        &self,
-        document: &lash_kernel_doc::Document,
-        captions: Option<&lash_kernel_doc::Captions>,
-        options: lash_kernel_dialect::PrintOptions,
-    ) -> Result<lash_kernel_dialect::PrintedSource, lash_kernel_dialect::PrintError> {
-        crate::print_kernel(document, captions, options)
-    }
-}
 
 /// Dependencies and the building-artifact function for independent helper definitions.
 pub(crate) fn kernel_registry() -> lash_kernel_doc::FunctionRegistry {
@@ -68,7 +52,11 @@ pub(crate) fn kernel_registry() -> lash_kernel_doc::FunctionRegistry {
 pub(crate) fn library() -> &'static NamedLibrary {
     static LIBRARY: OnceLock<NamedLibrary> = OnceLock::new();
     LIBRARY.get_or_init(|| {
-        NamedLibrary::from_registry(machine::registry()).expect("unique library names")
+        let roots = lash_vm_releases::helper_release()
+            .expect("helper release")
+            .resolver_roots();
+        NamedLibrary::resolving(machine::registry(), |id| roots.contains(id))
+            .expect("unique exported names")
     })
 }
 
@@ -110,12 +98,8 @@ fn lower_against(
     effects: &BTreeMap<EffectName, Signature>,
 ) -> Result<Lowered, Diagnostic> {
     let bindings: BTreeSet<_> = bindings.iter().map(|name| (*name).into()).collect();
-    let environment_namespaces = lash_kernel_dialect::Namespaces::of_effects(
-        effects,
-        &lash_kernel_doc::ContractId::new("1"),
-        controls(),
-    )
-    .expect("the test's effects are operations");
+    let environment_namespaces = crate::tests::linked::namespaces(effects, controls())
+        .expect("the test's effects are operations");
     let environment = Environment::new(library(), &environment_namespaces);
     let lowered = crate::lower(
         source,
@@ -144,8 +128,8 @@ fn lower_against(
     Ok(lowered)
 }
 
-/// The body of `main` in kernel text, one statement per line, without the
-/// header that lists library functions.
+/// Main and authored function definitions in final kernel text, excluding
+/// native reference bodies and the document's import declarations.
 pub(crate) fn main_text(source: &str) -> String {
     main_of(lower(source))
 }
@@ -160,27 +144,35 @@ fn main_of(lowered: Result<Lowered, Diagnostic>) -> String {
         Ok(lowered) => lowered,
         Err(diagnostic) => panic!("{diagnostic}"),
     };
-    let text = print_document(&lowered.document);
-    let start = text.find("main {").expect("a document has a main");
-    text[start..]
-        .lines()
-        .skip(1)
-        .take_while(|line| *line != "}")
-        .map(|line| line.strip_prefix("  ").unwrap_or(line))
-        .collect::<Vec<_>>()
-        .join("\n")
+    // Authored bodies are identity-keyed definitions alongside optional main.
+    // Keep inspecting those source statements rather than native reference bodies.
+    let mut bodies = Vec::new();
+    if lowered.document.main.is_some() {
+        let text = print_document(&lowered.document);
+        bodies.push(text[text.find("main {").expect("main")..].to_owned());
+    }
+    for definition in lowered.document.functions.values() {
+        if matches!(
+            definition.implementation,
+            lash_kernel_doc::Implementation::Guest {
+                metering: lash_kernel_doc::Metering::Statements,
+                ..
+            }
+        ) {
+            let text = lash_kernel_doc::print_definition(definition);
+            bodies.push(text);
+        }
+    }
+    bodies.join("\n")
 }
 
 /// SOURCE-ADMISSION-POLICY: source byte limits are deployment choices, independently of nesting safety.
 #[test]
 fn a_host_source_policy_allows_a_larger_typescript_cell() {
     let source = format!("//{}", "x".repeat(crate::MAX_SOURCE_BYTES));
-    let environment_namespaces = lash_kernel_dialect::Namespaces::of_effects(
-        &Default::default(),
-        &lash_kernel_doc::ContractId::new("1"),
-        &Default::default(),
-    )
-    .expect("the test's effects are operations");
+    let environment_namespaces =
+        crate::tests::linked::namespaces(&Default::default(), &Default::default())
+            .expect("the test's effects are operations");
     let environment = Environment::new(library(), &environment_namespaces);
     let cell = Mode::Cell(CellEnvironment::first());
     assert!(crate::lower(&source, &environment, cell).is_err());
@@ -199,3 +191,5 @@ fn a_host_source_policy_allows_a_larger_typescript_cell() {
         crate::lower_with_limits("const x = ((1));", &environment, cell, limits).unwrap_err();
     assert!(diagnostic.message.contains("1-level"), "{diagnostic}");
 }
+
+mod linked;

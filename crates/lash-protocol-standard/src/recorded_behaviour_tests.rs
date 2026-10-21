@@ -39,7 +39,7 @@ fn standard_owner() -> StandardConfigOwner {
 /// field by field and tool by tool, and nothing else of the namespace moves.
 #[test]
 fn run_options_apply_over_the_recorded_render_field_by_field() {
-    let tool = lash_core::ToolId::new("tool:a");
+    let tool = lash_vocabulary::tool_contract::ToolId::new("tool:a");
     let mut session = defaults(Some(10), Some(40));
     session.per_tool.insert(
         tool.clone(),

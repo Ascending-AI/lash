@@ -13,7 +13,7 @@
 //! the resolve's answer, the decision. A row is deleted once `resolve`
 //! answers, or once its call is no longer parked.
 
-use lash::SessionId;
+use lash_vocabulary::identity::SessionId;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 

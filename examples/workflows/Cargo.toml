@@ -12,6 +12,7 @@ doctest = false
 workspace = true
 
 [dependencies]
+lash-vocabulary = { workspace = true }
 lash = { workspace = true, features = ["codemode"] }
 anyhow.workspace = true
 serde = { workspace = true, features = ["derive"] }
@@ -25,6 +26,7 @@ lash-kernel-edit.workspace = true
 lash-kernel-view.workspace = true
 lash-kernel-state.workspace = true
 lash-kernel-vm.workspace = true
+lash-kernel-package.workspace = true
 lash-vm-worker = { workspace = true, features = ["dialect-typescript", "dialect-python"] }
 
 [dev-dependencies]

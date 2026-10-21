@@ -3,7 +3,7 @@
   "cases": [
     {
       "name": "return charges result size 2",
-      "document": "kernel 1\nnumbers by_spelling\nuse probe.result = @484d66ceed6752bb16858cd93e6da6ed3f7bd4a1596832f943bb81d219e43df1\nmain { try { do invoke probe.result() } catch e { } finish null }\n",
+      "document": "kernel 1\nnumbers by_spelling\nnative @484d66ceed6752bb16858cd93e6da6ed3f7bd4a1596832f943bb81d219e43df1\nmain {\n  try {\n    do invoke @484d66ceed6752bb16858cd93e6da6ed3f7bd4a1596832f943bb81d219e43df1()\n  } catch e {}\n  finish null\n}\n",
       "expected": {
         "prints": [],
         "trace": [],
@@ -15,7 +15,7 @@
     },
     {
       "name": "throw charges result size 0",
-      "document": "kernel 1\nnumbers by_spelling\nuse probe.result = @f2d9e700f7a4e7718a4f9a168df9d580e2e822fcc9489402dd29fd70a0fb4cfe\nmain { try { do invoke probe.result() } catch e { } finish null }\n",
+      "document": "kernel 1\nnumbers by_spelling\nnative @f2d9e700f7a4e7718a4f9a168df9d580e2e822fcc9489402dd29fd70a0fb4cfe\nmain {\n  try {\n    do invoke @f2d9e700f7a4e7718a4f9a168df9d580e2e822fcc9489402dd29fd70a0fb4cfe()\n  } catch e {}\n  finish null\n}\n",
       "expected": {
         "prints": [],
         "trace": [],

@@ -1,5 +1,5 @@
 use super::*;
-use lash::SessionId;
+use lash_vocabulary::identity::SessionId;
 
 pub(crate) fn turn_input_routes() -> Router<AppState> {
     Router::new()

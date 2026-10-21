@@ -20,7 +20,6 @@ mod cell_run;
 pub(crate) mod envelope;
 mod host;
 mod link;
-mod packages;
 #[cfg(feature = "testing")]
 mod perf_fixture;
 #[cfg(feature = "testing")]
@@ -46,8 +45,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex};
 
 use lash_core::{ExecRequest, ExecResponse, RuntimeExecutionContext};
-use lash_kernel_dialect::OfferedSource;
-use lash_kernel_doc::{Datum, IdentifiedDocument, Name};
+use lash_kernel_doc::{Datum, IdentifiedDocument};
+
 use lash_kernel_vm::{Bounds, End, Target};
 use lash_protocol_types::sync::MutexExt;
 use lash_vm_broker::kernel::run::PagePlan;
@@ -55,6 +54,7 @@ use lash_vm_broker::kernel::{KernelBroker, KernelCeilings, KernelEnd, KernelFail
 use lash_vm_client::service::runtime_ops::ServiceRuntimeOps as _;
 use lash_vm_client::service::{Request, Response};
 use lash_vm_runtime::HostBoundary;
+use lash_vocabulary::names::Name;
 
 use self::envelope::CellEnvelope;
 use self::host::{CellHost, CellHostLedgers};
@@ -76,7 +76,6 @@ pub(crate) struct CellServices {
     pub prompts: Arc<dyn crate::dialect::DialectPrompts>,
     /// Which package set the cell is lowered under; `None` is lash's own
     /// (FIG-6918).
-    pub packages: Option<Arc<dyn crate::plugin::PackageGate>>,
     /// The library the workers hold, which a cell's document is retained
     /// with the declarations of.
     pub kernel: KernelCarry,
@@ -249,7 +248,6 @@ fn clean_model_code(code: &str) -> String {
 struct LinkedCell {
     envelope: CellEnvelope,
     document: IdentifiedDocument,
-    boundary: HostBoundary,
     /// The host's read-only bindings, which `main` starts with over the
     /// session's.
     host: Vec<(Name, Datum)>,
@@ -258,7 +256,7 @@ struct LinkedCell {
     graph: host::HostGraph,
     /// The effect identity each call a resumed cell holds open was
     /// performed at.
-    open_sites: BTreeMap<lash_core::ToolCallId, lash_kernel_doc::EffectId>,
+    open_sites: BTreeMap<lash_core::ToolCallId, lash_vocabulary::sites::EffectId>,
     resumed: bool,
 }
 
@@ -268,8 +266,6 @@ enum Refused {
     Cell(Box<lash_core::CellFailure>),
     /// A nested effect of the cell's setup failed: recorded for the turn.
     Nested(Box<lash_core::RuntimeEffectControllerError>),
-    /// No package set is yet held by every live serving node.
-    Packages(Box<lash_core::RuntimeEffectControllerError>),
     /// A worker fault.
     Worker(Box<lash_vm_client::PoolError>),
 }
@@ -302,47 +298,6 @@ fn ended_root_pages(
         owner: lash_durable::domain::graph::RootOwner::Exec(snapshots.exec().clone()),
         root,
     })
-}
-
-/// The effects a cell of this session may perform as reads (ADR 0144),
-/// each with the provider the run's surface retained for its tool: every
-/// catalog tool that declares a read and whose read this node can route,
-/// unless a plugin sees tool calls through a hook, which a read would pass
-/// by. The protocol's own argument projection is no such hook: a read
-/// applies it itself. A deferred match is no candidate: it is recorded as a
-/// grant and its calls stay recorded. The worker keeps the candidates the
-/// cell's `main` certifiably reaches; any other `perform` stays recorded.
-fn read_candidates(
-    ctx: &RuntimeExecutionContext<'_>,
-    boundary: &HostBoundary,
-    grants: &BTreeMap<lash_core::ToolId, lash_core::ToolExecutionGrant>,
-    read_tools: BTreeMap<lash_kernel_doc::EffectName, lash_core::ToolId>,
-) -> BTreeMap<lash_kernel_doc::EffectName, lash_core::ProviderKey> {
-    let projection = lash_core::plugin::PluginCallbackIdentity {
-        owner: crate::RLM_PROTOCOL_PLUGIN_ID.to_owned(),
-        key: format!(
-            "{}:{}",
-            lash_core_store::tool_run::CallbackSlot::ToolArgsTransform.key_prefix(),
-            crate::plugin::PROJECTED_ARGS.as_str()
-        ),
-    };
-    if ctx.tool_call_hooks().iter().any(|hook| *hook != projection) {
-        return BTreeMap::new();
-    }
-    read_tools
-        .into_iter()
-        .filter(|(effect, tool)| {
-            !grants.contains_key(tool)
-                && boundary
-                    .tool(effect)
-                    .is_some_and(|offered| &offered == tool)
-        })
-        .filter_map(|(effect, tool)| {
-            let (_, offered) = boundary.effect(&effect)?;
-            let route = ctx.read_route(&tool, &offered.requirement.contract).ok()?;
-            Some((effect, route.provider))
-        })
-        .collect()
 }
 
 /// The bounds a cell's run asks for: the session's instruction and memory
@@ -464,24 +419,44 @@ async fn run_linked_cell(
                 lash_core::CellFailure::new(lash_core::CellFailureKind::Host, message),
             );
         }
-        Err(Refused::Packages(error)) => {
-            let message = error.to_string();
-            ctx.record_nested_effect_error(*error);
-            return exec_setup_failure_or_stop(
-                state,
-                &ctx,
-                lash_core::CellFailure::new(lash_core::CellFailureKind::Host, message),
-            );
-        }
         Err(Refused::Worker(error)) => return worker_setup_failure(state, &ctx, *error),
     };
-    // A process the cell starts captures the tools its committed deferred
-    // matches resolved from them, with their bindings, never resolving
-    // again, and a function it starts inline is linked under the cell's
-    // own set; a resumed cell's are its envelope's.
-    let ctx = ctx
-        .with_recorded_grants(Arc::new(linked.envelope.recorded_grants()))
-        .with_linked_packages(linked.envelope.packages);
+    let execution = link::execution_id(snapshots.exec());
+    let mut pins = BTreeMap::new();
+    let resolutions = ctx
+        .actor_context()
+        .backend()
+        .stores()
+        .execution_resolutions();
+    for use_ in linked.envelope.environment.uses.keys() {
+        match resolutions
+            .load(&lash_core_store::resolutions::ResolutionKey {
+                execution: execution.clone(),
+                use_: *use_,
+            })
+            .await
+        {
+            Ok(Some(record)) => {
+                pins.insert(*use_, record.entry);
+            }
+            Ok(None) => {}
+            Err(error) => {
+                return exec_setup_failure_or_stop(
+                    state,
+                    &ctx,
+                    lash_core::CellFailure::new(
+                        lash_core::CellFailureKind::Host,
+                        error.to_string(),
+                    ),
+                );
+            }
+        }
+    }
+    let ctx = ctx.with_linked_execution(lash_core::LinkedExecution {
+        execution: execution.clone(),
+        environment: Arc::new(linked.envelope.environment.clone()),
+        resolutions: Arc::new(Mutex::new(pins)),
+    });
 
     // Every call the cell makes is its own admitted execution, run from
     // these bodies (ADR 0132 §5): a resumed cell knows each call its ledger
@@ -521,7 +496,6 @@ async fn run_linked_cell(
     let LinkedCell {
         envelope,
         document,
-        boundary,
         host: host_bindings,
         ledgers,
         graph,
@@ -547,77 +521,56 @@ async fn run_linked_cell(
     };
     let observation = ctx
         .run_spec()
-        .map_or(lash_kernel_doc::RunObservation::Off, |spec| spec.observe);
-    let trace = trace::CellTrace::new(&ctx, document_identity, &envelope.dialect, segment);
+        .map_or(lash_vocabulary::observation::RunObservation::Off, |spec| {
+            spec.observe
+        });
+    let trace = trace::CellTrace::new(&ctx, envelope.link, &envelope.dialect, segment);
     if let Some(trace) = &trace {
         trace.started();
     }
-    let published = if runs_on {
-        Ok(())
-    } else {
-        match services.kernel.library() {
-            Ok(functions) => processes::retain_document(&ctx, &document, &functions).await,
-            Err(refusal) => Err(refusal.to_string()),
-        }
-    };
-    if let Err(message) = published {
-        return exec_setup_failure_or_stop(
-            state,
-            &ctx,
-            lash_core::CellFailure::new(lash_core::CellFailureKind::Host, message),
-        );
-    }
-    // Each planned read goes where the run's surface retained its tool,
-    // and nowhere else: a node whose provider drifted or registers no
-    // reader takes up none of the cell, which waits for one that does.
     let mut routes = BTreeMap::new();
-    for (effect, provider) in &envelope.reads {
-        let Some(recorded) = envelope.effects.get(effect) else {
-            return exec_setup_failure_or_stop(
-                state,
-                &ctx,
-                lash_core::CellFailure::new(
-                    lash_core::CellFailureKind::Host,
-                    format!(
-                        "the cell's read plan names `{effect}`, which it was not lowered against"
-                    ),
-                ),
-            );
-        };
-        match ctx.read_route(&recorded.tool, &recorded.requirement.contract) {
-            Ok(route) if &route.provider == provider => {
-                routes.insert(effect.clone(), route);
-            }
-            routed => {
-                let error = routed.err().unwrap_or_else(|| {
-                    lash_core::RuntimeEffectControllerError::new(
-                        lash_core::RuntimeErrorCode::LashVmCellBindingDrift,
-                        format!(
-                            "the cell plans its reads of `{effect}` through provider `{provider}`, \
-                             and the run's surface now routes tool `{}` elsewhere; nothing was read",
-                            recorded.tool
-                        ),
-                    )
-                });
-                let message = error.to_string();
-                ctx.record_nested_runtime_effect_error(error);
-                return exec_setup_failure_or_stop(
-                    state,
-                    &ctx,
-                    lash_core::CellFailure::new(lash_core::CellFailureKind::Host, message),
-                );
+    for (use_, binding) in &envelope.environment.uses {
+        if let lash_core_store::tool_surface::UseBinding::Fixed(operation) = binding
+            && operation.offer.mode == lash_vocabulary::package::OperationMode::Read
+        {
+            match ctx.operation_read_route(operation) {
+                Ok(route) => {
+                    routes.insert(*use_, route);
+                }
+                Err(error) => {
+                    let message = error.to_string();
+                    ctx.record_nested_effect_error(error);
+                    return exec_setup_failure_or_stop(
+                        state,
+                        &ctx,
+                        lash_core::CellFailure::new(lash_core::CellFailureKind::Host, message),
+                    );
+                }
             }
         }
     }
-    let modes = lash_kernel_vm::EffectModes::reading(envelope.reads.keys().cloned());
+    let modes = envelope
+        .environment
+        .uses
+        .keys()
+        .map(|use_| {
+            (
+                *use_,
+                envelope
+                    .environment
+                    .mode(use_)
+                    .unwrap_or(lash_vocabulary::package::OperationMode::Waited),
+            )
+        })
+        .collect();
     let ledgers = Arc::new(Mutex::new(ledgers));
     let cell_reads = Arc::new(reads::CellReads {
+        clock: Arc::clone(ctx.actor_context().clock()),
         routes,
         config: ctx.owner_config().clone(),
         cancel: ctx.cancellation(),
         parent_wait: services.workers.config().tuning.parent_wait,
         ledgers: Arc::clone(&ledgers),
-        boundary: boundary.clone(),
         limit: ctx.max_tool_calls(),
         cell: "cell".to_owned(),
     });
@@ -625,8 +578,7 @@ async fn run_linked_cell(
         trace: trace.clone(),
         sites: Mutex::new(open_sites),
         ctx: ctx.clone(),
-        boundary,
-        grants: envelope.grants.clone(),
+        execution,
         members,
         opener: identities.opener().clone(),
         prints: Arc::clone(&prints),
@@ -640,8 +592,6 @@ async fn run_linked_cell(
             .unwrap_or_default(),
     };
     let printed = Arc::clone(&prints);
-    let random = std::collections::hash_map::RandomState::new();
-    let drawn = std::sync::atomic::AtomicU64::new(0);
     let counts_trace = trace.clone();
     let run_host = Arc::new(lash_vm_runtime::ParentHost {
         observation,
@@ -651,10 +601,6 @@ async fn run_linked_cell(
             }
         }),
         store: Arc::clone(snapshots),
-        random: Arc::new(move || {
-            use std::hash::BuildHasher as _;
-            random.hash_one(drawn.fetch_add(1, std::sync::atomic::Ordering::Relaxed))
-        }),
         providers: lash_vm_runtime::ProjectionCatalog::of_backend(
             ctx.projection_providers().as_deref(),
         ),
@@ -663,19 +609,35 @@ async fn run_linked_cell(
     });
     let bounds = cell_bounds(services);
     let save = lash_vm_client::wire::SaveWire {
-        controls: host.boundary.controls(),
+        controls: host
+            .envelope
+            .environment
+            .uses
+            .iter()
+            .filter_map(|(use_, binding)| match binding {
+                lash_core_store::tool_surface::UseBinding::Fixed(operation) => Some((
+                    *use_,
+                    lash_vm_runtime::effect_controls(&operation.offer.controls),
+                )),
+                _ => None,
+            })
+            .collect(),
         written: host.envelope.written.clone(),
     };
     // The cell's roots pin its document's execution closure, and a saved
     // function's record names it: a capture stages it with them.
     // A resumed cell runs the definitions it was written against, the
     // store's where this node lacks them (FIG-6985).
-    let closure = match services.kernel.library() {
-        Ok(functions) => processes::pinned_closure(&ctx, &document, &functions).await,
-        Err(refusal) => Err(refusal.to_string()),
+    let start = lash_vocabulary::names::LinkedStart {
+        link: host.envelope.link,
+        selector: lash_vocabulary::names::StartSelector::Main,
     };
-    let closure = match closure {
-        Ok(closure) => closure,
+    let prepared = match services.kernel.library() {
+        Ok(functions) => processes::prepare(&ctx, &start, &functions).await,
+        Err(error) => Err(error.to_string()),
+    };
+    let prepared = match prepared {
+        Ok(prepared) => prepared,
         Err(message) => {
             return exec_setup_failure_or_stop(
                 state,
@@ -684,17 +646,43 @@ async fn run_linked_cell(
             );
         }
     };
+    let closure = prepared.loaded.closure;
+    let mut program = match lash_kernel_vm::Program::prepare(
+        start.link,
+        prepared
+            .content
+            .documents
+            .iter()
+            .map(|(id, document)| (*id, Arc::new(document.clone())))
+            .collect(),
+        &prepared.content.links,
+        lash_kernel_doc::heap::PageId(closure.reference().0),
+        lash_kernel_vm::PreparedLibrary::with_charge(prepared.loaded.registry, bounds.charge),
+    ) {
+        Ok(program) => program,
+        Err(error) => {
+            return exec_setup_failure_or_stop(
+                state,
+                &ctx,
+                lash_core::CellFailure::new(lash_core::CellFailureKind::Host, error.to_string()),
+            );
+        }
+    };
+    program.functions = closure.body().identities().collect();
     let carried = state.carried_closures();
     state.runs_under(&closure);
     let machines = match lash_vm_client::RemoteMachines::new(
         services.workers.clone(),
         owner,
-        lash_vm_protocol::OwnerEpoch(0),
-        lash_vm_protocol::FrameEpoch(0),
+        lash_protocol_types::engine_fault::OwnerEpoch(0),
+        lash_protocol_types::engine_fault::FrameEpoch(0),
         run_host,
         &document,
         &dialect,
         lash_vm_client::RunStart {
+            link: program.link,
+            instances: program.instances,
+            documents: program.documents,
             target: Target::Main,
             args: Vec::new(),
             session: state.session(),
@@ -871,7 +859,7 @@ async fn run_linked_cell(
                 // gave no control, answered nothing: the cell completed.
                 let controlled = finished
                     .finish
-                    .then(|| collected.settled_control(&host.boundary))
+                    .then(|| collected.settled_control())
                     .flatten()
                     .map(|(record, control)| lash_core::CellOutcome::Controlled {
                         tool_name: record.tool.clone(),
@@ -906,12 +894,7 @@ async fn run_linked_cell(
                 ),
             ),
             End::Error(error) => {
-                let observation = CellObservation::of_run_error(
-                    error,
-                    &state.not_carried(),
-                    services.kernel.packages().ok().as_deref(),
-                    &state.read_surfaces(),
-                );
+                let observation = CellObservation::of_run_error(error, &state.not_carried());
                 respond(lash_core::CellOutcome::Failed(observation.failure(
                     code,
                     source_map.as_ref().filter(|map| {
@@ -992,7 +975,7 @@ async fn end_cell(
     state: &mut CodeModeExecutionState,
     snapshots: &lash_vm_broker::DurableSnapshotStore,
     host: &CellHost<'_>,
-    document: lash_kernel_doc::DocumentId,
+    document: lash_vocabulary::names::DocumentId,
     ledger: lash_vm_broker::kernel::EffectLedger,
     end: End,
     pages: &lash_vm_broker::kernel::pages::SharedPages,
@@ -1023,7 +1006,7 @@ async fn record_end(
     state: &mut CodeModeExecutionState,
     snapshots: &lash_vm_broker::DurableSnapshotStore,
     host: &CellHost<'_>,
-    document: lash_kernel_doc::DocumentId,
+    document: lash_vocabulary::names::DocumentId,
     ledger: lash_vm_broker::kernel::EffectLedger,
     end: End,
     pages: &lash_vm_broker::kernel::pages::SharedPages,
@@ -1139,7 +1122,9 @@ fn broker_failure(
         }
         KernelFailure::Worker { outcome } => {
             // A limit the run itself exhausted is the cell's result.
-            if let lash_vm_protocol::InfrastructureOutcome::WorkerLimitExceeded { limit } = &outcome
+            if let lash_protocol_types::engine_fault::InfrastructureOutcome::WorkerLimitExceeded {
+                limit,
+            } = &outcome
                 && !limit.is_host_verdict()
             {
                 return exec_response_from(
@@ -1150,7 +1135,9 @@ fn broker_failure(
             // A worker that died running the cell ends it once its death is
             // the cell's to read; until then the pass fails as the host's
             // verdict below, and the next runs the cell again (FIG-6806).
-            if let lash_vm_protocol::InfrastructureOutcome::RunCrashedWorker { evidence } = &outcome
+            if let lash_protocol_types::engine_fault::InfrastructureOutcome::RunCrashedWorker {
+                evidence,
+            } = &outcome
                 && let Some(failure) = died.answer(*evidence, &collected.executed_calls())
             {
                 return exec_response_from(collected, lash_core::CellOutcome::Failed(failure));
@@ -1160,8 +1147,13 @@ fn broker_failure(
             // aborts with the typed refusal, and its turn parks on the
             // cell's checkpoint.
             if runs_on
-                && let lash_vm_protocol::InfrastructureOutcome::RunRefused { refusal } = &outcome
-                && matches!(refusal, lash_vm_protocol::RunRefusal::Restore { .. })
+                && let lash_protocol_types::engine_fault::InfrastructureOutcome::RunRefused {
+                    refusal,
+                } = &outcome
+                && matches!(
+                    refusal,
+                    lash_protocol_types::engine_fault::RunRefusal::Restore { .. }
+                )
             {
                 let mut refused = lash_core::RuntimeError::new(
                     lash_core::RuntimeErrorCode::VmWorkerFailed,
@@ -1266,7 +1258,7 @@ fn worker_setup_failure(
     error: lash_vm_client::PoolError,
 ) -> ExecResponse {
     if let lash_vm_client::PoolError::Infrastructure(
-        lash_vm_protocol::InfrastructureOutcome::WorkerLimitExceeded { limit },
+        lash_protocol_types::engine_fault::InfrastructureOutcome::WorkerLimitExceeded { limit },
     ) = &error
         && !limit.is_host_verdict()
     {

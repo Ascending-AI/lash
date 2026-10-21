@@ -48,8 +48,12 @@ impl lash_execution_contracts::process::EngineSteps for Saturating {
     fn retry(
         &self,
         _kind: &lash_execution_contracts::process::EngineStepKind,
-    ) -> lash_core::ExecutionPolicy {
-        lash_core::ExecutionPolicy::repeatable(std::num::NonZeroU32::MIN.saturating_add(2), 0, 0)
+    ) -> lash_vocabulary::tool_contract::ExecutionPolicy {
+        lash_vocabulary::tool_contract::ExecutionPolicy::repeatable(
+            std::num::NonZeroU32::MIN.saturating_add(2),
+            0,
+            0,
+        )
     }
 
     async fn run(
@@ -217,7 +221,7 @@ async fn saturating_deployment(
 /// The kinds of `process`'s run facts, in order.
 async fn fact_kinds(
     deployment: &Deployment,
-    process: &lash_core::ProcessId,
+    process: &lash_vocabulary::identity::ProcessId,
 ) -> Vec<lash_durable::domain::RunFactKind> {
     deployment
         .backend

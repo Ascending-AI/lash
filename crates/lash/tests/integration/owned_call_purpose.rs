@@ -264,30 +264,34 @@ async fn compaction_and_direct_calls_compose_only_their_own_purpose() {
             lash::persistence::LeaseIncarnationId::new("purpose-probe-boot"),
         ))
         .expect("core");
-    core.session(lash::SessionId::from("purpose-probe-session"))
-        .create(lash::SessionCreation {
-            parent: None,
-            spec: lash::SessionSpec::new(
-                MODEL,
-                lash::TurnBudget::Unbounded,
-                lash::MaxToolCalls::new(1024),
-                lash::NoProgressBudget::bounded(12),
-            ),
-            prompt_plan: Some(PromptPlan {
-                placements: vec![PromptSectionPlacement {
-                    section: PromptSectionId::new(
-                        "standard_compaction",
-                        PromptSectionKey::new("summary_instruction").expect("valid section key"),
-                    ),
-                    placement: PromptPlacement::InitialInstructions,
-                }],
-                ..Default::default()
-            }),
-        })
-        .await
-        .expect("session created");
+    core.session(lash_vocabulary::identity::SessionId::from(
+        "purpose-probe-session",
+    ))
+    .create(lash::SessionCreation {
+        parent: None,
+        spec: lash::SessionSpec::new(
+            MODEL,
+            lash::TurnBudget::Unbounded,
+            lash::MaxToolCalls::new(1024),
+            lash::NoProgressBudget::bounded(12),
+        ),
+        prompt_plan: Some(PromptPlan {
+            placements: vec![PromptSectionPlacement {
+                section: PromptSectionId::new(
+                    "standard_compaction",
+                    PromptSectionKey::new("summary_instruction").expect("valid section key"),
+                ),
+                placement: PromptPlacement::InitialInstructions,
+            }],
+            ..Default::default()
+        }),
+    })
+    .await
+    .expect("session created");
     let session = core
-        .session(lash::SessionId::from("purpose-probe-session"))
+        .session(lash_vocabulary::identity::SessionId::from(
+            "purpose-probe-session",
+        ))
         .open()
         .await
         .expect("session opens");

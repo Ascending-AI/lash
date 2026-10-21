@@ -1,4 +1,5 @@
-use crate::{ToolContract, ValueMismatch};
+use lash_vocabulary::tool_contract::ToolContract;
+use lash_vocabulary::json_schema::ValueMismatch;
 
 pub fn validate_tool_input(
     contract: &ToolContract,
@@ -10,7 +11,8 @@ pub fn validate_tool_input(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{JsonSchema, ToolDefinition};
+use lash_vocabulary::json_schema::JsonSchema;
+use lash_vocabulary::tool_contract::ToolDefinition;
     use std::time::{Duration, Instant};
 
     #[test]
@@ -242,7 +244,7 @@ mod tests {
             JsonSchema::admit(serde_json::json!({ "$ref": "#/definitions/Missing" })).unwrap_err();
         assert!(matches!(
             error,
-            crate::SchemaAdmissionError::Compilation { .. }
+            lash_vocabulary::json_schema::SchemaAdmissionError::Compilation { .. }
         ));
     }
 
@@ -256,7 +258,7 @@ mod tests {
             .unwrap_err();
             assert!(matches!(
                 error,
-                crate::SchemaAdmissionError::NonLocalReference { .. }
+                lash_vocabulary::json_schema::SchemaAdmissionError::NonLocalReference { .. }
             ));
         }
     }

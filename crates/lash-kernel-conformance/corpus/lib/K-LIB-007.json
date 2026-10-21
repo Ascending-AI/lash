@@ -3,7 +3,7 @@
   "cases": [
     {
       "name": "native shallow copy allocates a result without changing its argument",
-      "document": "kernel 1\nnumbers by_spelling\nuse same = @1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578\nuse list.copy = @9582e9497de80ffe91797c946b2d48fc9e1621735e02d33bf53c8c828a41d63a\nmain { let xs = [1, 2] let ys = list.copy(xs) set ys[0] = 9 finish [xs, ys, same(xs, ys)] }\n",
+      "document": "kernel 1\nnumbers by_spelling\nnative @048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544\nnative @c3fb28f03761c4ba70c0af3d4d1985af9660a8f1ff7d494315fee5cf10242c3a\ndefinition \"function same(arg0: Any, arg1: Any) -> Bool\\nkernel 1\\nerrors \\\"arity\\\"\\ncharge sum(1, sum(min(size(arg0), size(arg1)), nested(arg0), nested(arg1)), deep(result))\\nnative\\n\"\ndefinition \"function list.copy(xs: List(Any)) -> List(Any)\\nkernel 1\\nerrors \\\"cyclic_value\\\", \\\"index_out_of_range\\\", \\\"invalid_key\\\", \\\"key_missing\\\", \\\"too_deep\\\", \\\"type_error\\\"\\ncharge sum(1, size(xs), size(result))\\nnative\\n\"\nmain {\n  let xs = [1, 2]\n  let ys = list.copy(xs)\n  set ys[0] = 9\n  finish [xs, ys, same(xs, ys)]\n}\n",
       "expected": {
         "prints": [],
         "trace": [],

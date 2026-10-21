@@ -7,7 +7,7 @@ use lash_execution_contracts::park::ProcessParkReason;
 use crate::runtime::actor::waits;
 use lash_execution_contracts::process::ProcessOutcome;
 use lash_protocol_types::CancelOrigin;
-use lash_protocol_types::ProcessId;
+use lash_vocabulary::identity::ProcessId;
 
 /// The terminal of a process cancelled with `origin`: forced when lash
 /// ended it at its grace.
@@ -49,6 +49,7 @@ pub fn record_terminal(
         process: process.clone(),
         outcome_json,
     }));
+    tx.end_execution(lash_core_store::resolutions::ExecutionId::process(process));
     waits::resolve_process_terminal_waits(tx, process, outcome)?;
     waits::revoke_scope(tx, &ScopeKey::Process(process.clone()));
     tx.write(DomainWrite::ExecRoot(ExecRootWrite::Clear {

@@ -5,8 +5,9 @@
 //! general path: no prepared native entry or operator opcode
 //! (`K-MACH-008`).
 
+use lash_kernel_doc::Datum;
 use lash_kernel_doc::heap::PageId;
-use lash_kernel_doc::{Datum, Name, parse_document};
+use lash_vocabulary::names::Name;
 
 use super::embedder::{ROOMY, Source, World, census, library};
 use crate::{
@@ -281,16 +282,15 @@ const RUNS: [(Layout, bool); 3] = [(Layout(0), true), (Layout(1), true), (Layout
 fn program(expression: &str, layout: Layout, native_twice: bool) -> Program {
     let library = library(native_twice);
     let text = format!(
-        "numbers by_spelling\n{}entry go() -> Any\n\
-         fn go() {{ let a = 7 let b = [1, 2, 3] let x = {expression} return 0 }}\nmain {{}}\n",
-        library.header
+        "numbers by_spelling\n{}definition \"function go() -> Any\\nkernel 1\\nmetering statements\\nbody {{  let a = 7 let b = [1, 2, 3] let x = {expression_json} return 0  }}\"\n\nmain {{}}\n",
+        library.header,
+        expression_json = super::embedder::fragment(expression)
     );
-    let document = parse_document(&text).unwrap_or_else(|error| panic!("{error}\n{text}"));
-    Program {
-        closure: PageId([8; 32]),
-        document: std::sync::Arc::new(document),
-        library: PreparedLibrary::with_layout(library.registry, layout),
-    }
+    let document = super::embedder::document(&text, &library.registry);
+    crate::laws::embedder::program(
+        std::sync::Arc::new(document),
+        PreparedLibrary::with_layout(library.registry, layout),
+    )
 }
 
 /// How the run of `program` under a charge bound of `charge` ends, and
@@ -301,7 +301,7 @@ fn ends(program: &Program, layout: Layout, charge: u64) -> (End, u64) {
         args: Vec::new(),
         session: None,
         owner: PageId([9; 32]),
-        modes: crate::EffectModes::recorded(),
+        modes: crate::EffectModes::new(),
         host: Vec::new(),
     };
     let bounds = Bounds {
@@ -407,15 +407,17 @@ fn conditional_regions_are_lazy_and_expression_bindings_evaluate_once_in_every_l
     use super::embedder::{Embedder, Setup};
     let mut charge = None;
     for layout in [Layout(0), Layout(1), Layout(0x5eed)] {
-        for skipped in ["null.missing", "(clock, clock, clock)"] {
+        for skipped in [
+            "null.missing",
+            "(read(h, \"skipped\"), read(h, \"skipped\"), read(h, \"skipped\"))",
+        ] {
             let program = format!(
                 r#"
-entry go(h: Handle("table")) -> Any
-fn go(h) {{
-  finish (if(read(h, true), read(h, "then"), {skipped}), if(read(h, false), {skipped}, read(h, "else")), let(x = read(h, "bound"), (x, x)))
-}}
+definition "function go(h: Handle(\"table\")) -> Any\nkernel 1\nmetering statements\nbody {{ \n  finish (if(read(h, true), read(h, \"then\"), {skipped_json}), if(read(h, false), {skipped_json}, read(h, \"else\")), let(x = read(h, \"bound\"), (x, x)))\n }}"
+
 main {{ finish null }}
-"#
+"#,
+                skipped_json = crate::laws::embedder::fragment(skipped)
             );
             let mut embedder = Embedder::with(
                 &program,
@@ -429,7 +431,7 @@ main {{ finish null }}
                         })],
                         session: None,
                         owner: PageId([9; 32]),
-                        modes: crate::EffectModes::recorded(),
+                        modes: crate::EffectModes::new(),
                         host: Vec::new(),
                     },
                     ..Setup::default()

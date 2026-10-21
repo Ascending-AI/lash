@@ -21,7 +21,8 @@ use lash_durable::{
 use lash_execution_contracts::scope::scope_id;
 use lash_execution_contracts::scope::scope_index;
 use lash_execution_contracts::scope::subtree_roots;
-use lash_protocol_types::{CancelOrigin, ProcessId};
+use lash_protocol_types::CancelOrigin;
+use lash_vocabulary::identity::ProcessId;
 use sqlx::PgConnection;
 
 use super::steps::{Entry, Shape, Step, Ty, Value};
@@ -206,7 +207,15 @@ async fn register_within(
     )
     .await
     {
-        Ok(AppliedRegistration::Created(_)) => Ok(()),
+        Ok(AppliedRegistration::Created(_)) => {
+            super::packages::register_process_execution(
+                tx,
+                &rows.process,
+                rows.execution.as_deref(),
+                &rows.initial_resolutions,
+            )
+            .await
+        }
         Ok(AppliedRegistration::Retained { record, .. }) if record.id == rows.process => Ok(()),
         Ok(
             AppliedRegistration::Retained { record, .. }

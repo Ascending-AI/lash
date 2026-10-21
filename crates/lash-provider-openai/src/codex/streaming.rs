@@ -9,6 +9,7 @@
 //! from the first to the second only while no stream events have been seen.
 
 use lash_protocol_types::{llm::types::StreamBlockEvent, llm::types::StreamBlockKind};
+
 use std::sync::Arc;
 
 use async_trait::async_trait;

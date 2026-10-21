@@ -3,7 +3,7 @@
   "cases": [
     {
       "name": "integer floor quotient and remainder sign",
-      "document": "kernel 1\nnumbers by_spelling\nuse div_floor = @e6cd29e23878b70c30d6243e68ec3cd427006b152f6d63b42d7fc9dee624c9eb\nuse rem_floor = @29af527b6d9c66e48a3f2f3d6c0fd85b2a209aa9c6b3b640b9970c53a7046c9e\nmain {  finish [div_floor(-7, 3), rem_floor(-7, 3), div_floor(7, -3), rem_floor(7, -3)] }\n",
+      "document": "kernel 1\nnumbers by_spelling\nnative @07af89de59ea5f818f17ab86068b415a1d8f010b1f6643dce499d8b8752fe50a\nnative @53f4f4c776781169b2a150fb2c9198edd2e5c6071c1a60bb5a8b390a0eb3f7d1\ndefinition \"function div_floor(arg0: Number, arg1: Number) -> Number\\nkernel 1\\nerrors \\\"arity\\\", \\\"division_by_zero\\\", \\\"number_range\\\", \\\"type_error\\\"\\ncharge sum(1, product(sum(deep(arg0), deep(arg1)), sum(deep(arg0), deep(arg1))), deep(result))\\nnative\\n\"\ndefinition \"function rem_floor(arg0: Number, arg1: Number) -> Number\\nkernel 1\\nerrors \\\"arity\\\", \\\"division_by_zero\\\", \\\"number_range\\\", \\\"type_error\\\"\\ncharge sum(1, product(sum(deep(arg0), deep(arg1)), sum(deep(arg0), deep(arg1))), deep(result))\\nnative\\n\"\nmain {\n  finish [div_floor(-7, 3), rem_floor(-7, 3), div_floor(7, -3), rem_floor(7, -3)]\n}\n",
       "expected": {
         "prints": [],
         "trace": [],
@@ -29,7 +29,7 @@
     },
     {
       "name": "div floor integer zero divisor",
-      "document": "kernel 1\nnumbers by_spelling\nuse div_floor = @e6cd29e23878b70c30d6243e68ec3cd427006b152f6d63b42d7fc9dee624c9eb\nmain {  try { print div_floor(1, 0) } catch e { finish e.kind } finish null }\n",
+      "document": "kernel 1\nnumbers by_spelling\nnative @07af89de59ea5f818f17ab86068b415a1d8f010b1f6643dce499d8b8752fe50a\ndefinition \"function div_floor(arg0: Number, arg1: Number) -> Number\\nkernel 1\\nerrors \\\"arity\\\", \\\"division_by_zero\\\", \\\"number_range\\\", \\\"type_error\\\"\\ncharge sum(1, product(sum(deep(arg0), deep(arg1)), sum(deep(arg0), deep(arg1))), deep(result))\\nnative\\n\"\nmain {\n  try {\n    print div_floor(1, 0)\n  } catch e {\n    finish e.kind\n  }\n  finish null\n}\n",
       "expected": {
         "prints": [],
         "trace": [],
@@ -42,7 +42,7 @@
     },
     {
       "name": "rem floor integer zero divisor",
-      "document": "kernel 1\nnumbers by_spelling\nuse rem_floor = @29af527b6d9c66e48a3f2f3d6c0fd85b2a209aa9c6b3b640b9970c53a7046c9e\nmain {  try { print rem_floor(1, 0) } catch e { finish e.kind } finish null }\n",
+      "document": "kernel 1\nnumbers by_spelling\nnative @53f4f4c776781169b2a150fb2c9198edd2e5c6071c1a60bb5a8b390a0eb3f7d1\ndefinition \"function rem_floor(arg0: Number, arg1: Number) -> Number\\nkernel 1\\nerrors \\\"arity\\\", \\\"division_by_zero\\\", \\\"number_range\\\", \\\"type_error\\\"\\ncharge sum(1, product(sum(deep(arg0), deep(arg1)), sum(deep(arg0), deep(arg1))), deep(result))\\nnative\\n\"\nmain {\n  try {\n    print rem_floor(1, 0)\n  } catch e {\n    finish e.kind\n  }\n  finish null\n}\n",
       "expected": {
         "prints": [],
         "trace": [],

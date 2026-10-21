@@ -39,6 +39,8 @@ synthetic-next = [
 workspace = true
 
 [dependencies]
+lash-vocabulary = { workspace = true }
+fastrand = { workspace = true }
 lash-execution-contracts = { workspace = true }
 lash-vm-client = { workspace = true }
 lash-vm-protocol = { workspace = true }
@@ -68,6 +70,8 @@ serde_json = { workspace = true }
 thiserror = { workspace = true }
 
 [dev-dependencies]
+lash-core-execution = { workspace = true, features = ["testing"] }
+lash-core-ids = { workspace = true, features = ["testing"] }
 lash-kernel-package = { workspace = true, features = ["testing"] }
 # The laws' runs pin a dialect's release, so their build holds one.
 lash-vm-releases = { workspace = true, features = ["dialect-typescript"] }

@@ -152,7 +152,7 @@ impl ModuleArtifactStore for CutModules {
             .iter()
             .filter_map(|artifact| match artifact {
                 ModuleArtifactHold::Publish { module_ref, .. } => Some((*module_ref).to_owned()),
-                ModuleArtifactHold::Acquire { .. } => None,
+                ModuleArtifactHold::Acquire { .. } | ModuleArtifactHold::Retain { .. } => None,
             })
             .collect();
         for document in &documents {
@@ -407,21 +407,23 @@ fn launch_definitions() -> Vec<lash::tools::ToolDefinition> {
         )
         .expect("tool schema")
         // The contract the spawner's kernel text pins.
-        .declared_contract(lash_core::ContractId::new("1"))
+        .declared_contract(lash_vocabulary::operations::ContractId::new("1"))
         .with_execution(std::time::Duration::from_secs(120))
         .with_declaration(
-            lash_core::ToolDeclaration::default()
-                .with_intents([lash_core::ToolIntentKind::StartProcess]),
+            lash_vocabulary::tool_declaration::ToolDeclaration::default()
+                .with_intents([lash_vocabulary::ToolIntentKind::StartProcess]),
             None,
         )
         .expect("a declaring tool")
     };
     vec![
-        launch("launch").with_execution_policy(lash_core::ExecutionPolicy::repeatable(
-            std::num::NonZeroU32::new(4).unwrap(),
-            1,
-            1,
-        )),
+        launch("launch").with_execution_policy(
+            lash_vocabulary::tool_contract::ExecutionPolicy::repeatable(
+                std::num::NonZeroU32::new(4).unwrap(),
+                1,
+                1,
+            ),
+        ),
         launch("launch_once"),
     ]
 }
@@ -536,7 +538,7 @@ fn inline_request(
 async fn host_start(
     core: &lash::LashCore,
     request: lash_execution_contracts::process::ProcessStartRequest,
-) -> lash::Result<lash_core::ProcessId> {
+) -> lash::Result<lash_vocabulary::identity::ProcessId> {
     core.processes()
         .start(request, core.effect_host())
         .await
@@ -579,7 +581,7 @@ async fn settle_cleanup(core: &lash::LashCore) {
 async fn holds_its_closure(
     core: &lash::LashCore,
     stores: &Arc<lash_sqlite_store::SqliteStoreSet>,
-    process: &lash_core::ProcessId,
+    process: &lash_vocabulary::identity::ProcessId,
     value: &FunctionValue,
 ) {
     settle_cleanup(core).await;

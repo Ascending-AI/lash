@@ -2,7 +2,7 @@ use super::*;
 
 async fn await_process_terminal(
     process_work: &dyn crate::ProcessWorkSubstrate,
-    process_id: &crate::ProcessId,
+    process_id: &lash_vocabulary::identity::ProcessId,
 ) -> Result<
     lash_execution_contracts::process::ProcessAwaitOutput,
     lash_execution_contracts::plugin_error::PluginError,
@@ -254,10 +254,10 @@ impl ProcessLocalExecution {
                 let mut not_visible = None;
                 for process_id in process_ids {
                     let visible = match &owner {
-                        crate::RuntimeOwner::Session(session_id) => {
+                        lash_vocabulary::identity::RuntimeOwner::Session(session_id) => {
                             registry.is_observer(session_id, &process_id).await
                         }
-                        crate::RuntimeOwner::Process(starter) => {
+                        lash_vocabulary::identity::RuntimeOwner::Process(starter) => {
                             let starter = crate::ScopeId::process(starter.clone());
                             registry.get_process(&process_id).await.map(|record| {
                                 record.is_some_and(|record| {
@@ -412,7 +412,7 @@ impl ProcessLocalExecution {
     pub async fn stage_start(
         self,
         registration: lash_execution_contracts::process::ProcessStartRegistration,
-        observers: Vec<crate::SessionId>,
+        observers: Vec<lash_vocabulary::identity::SessionId>,
         execution_context: lash_execution_contracts::process::ProcessExecutionContext,
     ) -> Result<crate::StagedProcessStart, RuntimeEffectControllerError> {
         let starter = process_start_starter(&registration, &execution_context)?;
@@ -502,7 +502,7 @@ mod terminal_wait_tests {
     impl crate::ProcessWorkSubstrate for ReattachOnce {
         async fn await_process_terminal(
             &self,
-            process_id: &crate::ProcessId,
+            process_id: &lash_vocabulary::identity::ProcessId,
         ) -> Result<crate::ProcessTerminalWait, lash_execution_contracts::plugin_error::PluginError>
         {
             assert_eq!(process_id, &crate::process_id_for_test("reattach-process"));
@@ -515,7 +515,7 @@ mod terminal_wait_tests {
 
         async fn deliver_cancel(
             &self,
-            _process_id: &crate::ProcessId,
+            _process_id: &lash_vocabulary::identity::ProcessId,
             _request: &crate::CancelRequest,
             _key: &str,
         ) -> Result<(), lash_execution_contracts::plugin_error::PluginError> {

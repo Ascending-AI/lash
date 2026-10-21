@@ -128,7 +128,7 @@ fn echo_definitions() -> Vec<lash::tools::ToolDefinition> {
         )
         .expect("tool schema")
         // The contract the laws' kernel texts pin.
-        .declared_contract(lash_core::ContractId::new("1"))
+        .declared_contract(lash_vocabulary::operations::ContractId::new("1"))
         .with_execution(std::time::Duration::from_secs(120)),
     ]
 }
@@ -579,7 +579,7 @@ async fn a_host_captures_exactly_the_published_entrys_environment() {
     let link = links.get_mut(&await_effect).expect("await link");
     let tool = link.tool.to_string();
     link.provider = lash::plugins::ToolProviderHandle::new(
-        lash::plugins::RegistryKind::Process,
+        lash_vocabulary::claims::RegistryKind::Process,
         link.provider.owner(),
         lash::tool_provider_key!("unserved"),
     );
@@ -625,7 +625,7 @@ async fn start(
     definition: &lash_execution_contracts::process::ProcessDefinition,
     key: &str,
     name: &str,
-) -> lash_core::ProcessId {
+) -> lash_vocabulary::identity::ProcessId {
     let mut args = serde_json::Map::new();
     args.insert("name".to_owned(), serde_json::json!(name));
     start_with(core, env_ref, definition, key, args).await
@@ -637,7 +637,7 @@ async fn start_with(
     definition: &lash_execution_contracts::process::ProcessDefinition,
     key: &str,
     args: serde_json::Map<String, serde_json::Value>,
-) -> lash_core::ProcessId {
+) -> lash_vocabulary::identity::ProcessId {
     core.processes()
         .start(
             lash_execution_contracts::process::ProcessStartRequest::definition(
@@ -665,7 +665,10 @@ async fn start_with(
 }
 
 /// What the process finished with.
-async fn finished(core: &lash::LashCore, process_id: &lash_core::ProcessId) -> serde_json::Value {
+async fn finished(
+    core: &lash::LashCore,
+    process_id: &lash_vocabulary::identity::ProcessId,
+) -> serde_json::Value {
     let output = tokio::time::timeout(
         std::time::Duration::from_secs(120),
         core.processes().await_output(process_id),
@@ -931,7 +934,7 @@ async fn stored_sleep_waits_name_the_sleep_site_and_each_loop_occurrence() {
                 .expect("waiting row");
             assert_eq!(
                 row.occurrences,
-                lash_protocol_types::ObservationReader::counts(at).starts
+                lash_vocabulary::sites::ObservationReader::counts(at).starts
             );
             let lash::process::WaitKind::Sleep { until_ms } = wait.kind else {
                 panic!("the loop waits on its sleep: {wait:?}");
@@ -1118,7 +1121,7 @@ main { finish null }
                 };
                 assert_eq!(
                     row.occurrences,
-                    lash_protocol_types::ObservationReader::counts(at).starts
+                    lash_vocabulary::sites::ObservationReader::counts(at).starts
                 );
                 assert_eq!(row.state, ProcessWorkflowSiteState::Running);
             }
@@ -1213,7 +1216,7 @@ async fn a_fan_out_overlay_holds_one_row_for_each_elements_effect() {
     );
 
     let mut overlay = WorkflowExecutionOverlayAccumulator::default();
-    overlay.set_document(lash::workflow::WorkflowOverlayDocument::of(
+    overlay.set_document(lash::workflow::workflow_overlay_document(
         &publication_document(&core, &publication).await,
     ));
     loop {
@@ -1463,7 +1466,7 @@ async fn a_process_starts_another_entry_of_its_document_by_function_reference_an
 /// The injected store clock holds the timer until the host observed its park.
 async fn timer_park_after(
     core: &lash::LashCore,
-    process: &lash_core::ProcessId,
+    process: &lash_vocabulary::identity::ProcessId,
     after: u64,
 ) -> u64 {
     let mut trace = Vec::new();

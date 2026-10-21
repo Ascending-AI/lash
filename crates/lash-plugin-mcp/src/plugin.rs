@@ -4,9 +4,14 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use lash_core::ToolCall;
+use lash_core::ToolOutcome;
+use lash_core::ToolProvider;
 use lash_core::plugin::PluginFactory;
-use lash_core::{ToolCall, ToolContract, ToolId, ToolManifest, ToolOutcome, ToolProvider};
 use lash_execution_contracts::plugin_error::PluginError;
+use lash_vocabulary::tool_contract::ToolContract;
+use lash_vocabulary::tool_contract::ToolId;
+use lash_vocabulary::tool_contract::ToolManifest;
 
 use crate::config::McpServerConfig;
 #[cfg(test)]
@@ -231,6 +236,11 @@ impl McpSessionPlugin {
                 }) as Arc<dyn ToolProvider>)
             },
         )?;
+        reg.package_provider_bound(lash_core::tool_provider_key!("servers"), |this, _| {
+            Ok(Arc::new(McpToolProvider {
+                pool: Arc::clone(&this.pool),
+            }))
+        })?;
         let family = lash_core::plugin::prompt::PromptSectionKey::new(
             crate::pool::guidance::McpGuidanceSections::FAMILY,
         )
@@ -265,7 +275,7 @@ impl McpToolProvider {
     fn offered(
         &self,
         config: &lash_core::OwnerConfigView,
-    ) -> Result<Vec<lash_core::ToolDefinition>, PluginError> {
+    ) -> Result<Vec<lash_vocabulary::tool_contract::ToolDefinition>, PluginError> {
         Ok({
             let selection =
                 lash_tool_support::ToolSelection::of(config, MCP_PLUGIN_ID).map_err(|error| {
@@ -296,7 +306,8 @@ pub const MCP_RUN_OPTIONS: lash_core::RunOptionsKey<lash_tool_support::ToolSelec
 /// `{"kind": "mcp", "server": <server>, "tool_id": <tool id>}`.
 /// version_surface = "coexist"
 /// version_guard(items(MCP_BINDING_FORMAT, mcp_binding))
-pub const MCP_BINDING_FORMAT: lash_core::FormatVersion = lash_core::FormatVersion::ONE;
+pub const MCP_BINDING_FORMAT: lash_vocabulary::providers::FormatVersion =
+    lash_vocabulary::providers::FormatVersion::ONE;
 
 /// Non-resident MCP catalog provider for explicit code mode execution grants.
 ///
@@ -312,7 +323,10 @@ impl McpDeferredToolProvider {
         Self { pool }
     }
 
-    fn definition_by_id(&self, id: &ToolId) -> Option<lash_core::ToolDefinition> {
+    fn definition_by_id(
+        &self,
+        id: &ToolId,
+    ) -> Option<lash_vocabulary::tool_contract::ToolDefinition> {
         self.pool
             .advertised_tools()
             .into_iter()
@@ -347,7 +361,7 @@ impl ToolProvider for McpToolProvider {
             .map(|tool| Arc::new(tool.contract()))
     }
 
-    fn readable_binding_formats(&self) -> &'static [lash_core::FormatVersion] {
+    fn readable_binding_formats(&self) -> &'static [lash_vocabulary::providers::FormatVersion] {
         &[MCP_BINDING_FORMAT]
     }
 
@@ -356,7 +370,7 @@ impl ToolProvider for McpToolProvider {
         &self,
         manifest: &ToolManifest,
         _config: &lash_core::OwnerConfigView,
-    ) -> Option<(lash_core::FormatVersion, serde_json::Value)> {
+    ) -> Option<(lash_vocabulary::providers::FormatVersion, serde_json::Value)> {
         self.pool
             .link_payload(&manifest.id)
             .map(|payload| (MCP_BINDING_FORMAT, payload))
@@ -417,7 +431,7 @@ impl ToolProvider for McpDeferredToolProvider {
             .map(|tool| Arc::new(tool.contract()))
     }
 
-    fn readable_binding_formats(&self) -> &'static [lash_core::FormatVersion] {
+    fn readable_binding_formats(&self) -> &'static [lash_vocabulary::providers::FormatVersion] {
         &[MCP_BINDING_FORMAT]
     }
 
@@ -435,8 +449,10 @@ impl ToolProvider for McpDeferredToolProvider {
 
 /// `payload` as the execution binding MCP's deferred provider reads.
 #[cfg(test)]
-pub(crate) fn mcp_binding(payload: serde_json::Value) -> lash_core::ExecutionBinding {
-    lash_core::ExecutionBinding {
+pub(crate) fn mcp_binding(
+    payload: serde_json::Value,
+) -> lash_vocabulary::providers::ExecutionBinding {
+    lash_vocabulary::providers::ExecutionBinding {
         codec: lash_core::plugin::ToolProviderHandle::new(
             lash_core::plugin::RegistryKind::Session,
             MCP_PLUGIN_ID,
@@ -458,7 +474,7 @@ pub(crate) async fn prepared_test_call(
         .link_payload(manifest, &lash_core::OwnerConfigView::default())
         .map(|(_, payload)| mcp_binding(payload));
     let context = lash_core::ToolPrepareContext::for_testing(
-        lash_core::RuntimeOwner::Session("mcp-admitted-test".into()),
+        lash_vocabulary::identity::RuntimeOwner::Session("mcp-admitted-test".into()),
         Arc::new(lash_core::testing::MockSessionManager::default()),
         None,
     );
@@ -575,7 +591,7 @@ mod tests {
     }
     #[tokio::test]
     async fn mcp_law_binding_and_catalog_name_keep_request_causes() {
-        let id = lash_core::ToolId::new("mcp:fixture/work");
+        let id = lash_vocabulary::tool_contract::ToolId::new("mcp:fixture/work");
         let binding = crate::pool::linked_server(None, &id).unwrap_err();
         let context = lash_core::testing::mock_attempt_context();
         let missing = McpConnectionPool::empty()
@@ -623,5 +639,49 @@ mod certification {
                 reason: lash::testing::CertificationUnavailable::NoScenario
             }
         )));
+    }
+}
+
+#[async_trait::async_trait]
+impl lash_core::plugin::packages::PackageProvider for McpToolProvider {
+    async fn hold(
+        &self,
+        _: &lash_core_store::artifact_referrer::ReferrerClaim,
+        _: &lash_vocabulary::package::PackageAdvertisement,
+    ) -> Result<(), lash_execution_contracts::process::linking::EnginePortError> {
+        Ok(())
+    }
+
+    fn roots(&self) -> std::collections::BTreeSet<lash_vocabulary::names::Segment> {
+        self.pool
+            .advertised_tools()
+            .into_iter()
+            .map(|tool| tool.manifest.operation.package.as_slice()[0].clone())
+            .collect()
+    }
+    fn advertise(
+        &self,
+        config: &lash_core::OwnerConfigView,
+        context: &lash_vocabulary::package::PublicationContext,
+    ) -> Result<Vec<lash_core::plugin::packages::PackageContribution>, PluginError> {
+        let provider = lash_core::plugin::ToolProviderHandle::new(
+            config.registry_kind(),
+            "mcp",
+            lash_core::tool_provider_key!("servers"),
+        );
+        lash_core::plugin::packages::operation_packages(
+            &provider,
+            self.offered(config)?,
+            |tool| {
+                self.pool.link_payload(&tool.manifest.id).map(|payload| {
+                    lash_vocabulary::providers::ExecutionBinding {
+                        codec: provider.clone(),
+                        format: MCP_BINDING_FORMAT,
+                        payload,
+                    }
+                })
+            },
+            context,
+        )
     }
 }

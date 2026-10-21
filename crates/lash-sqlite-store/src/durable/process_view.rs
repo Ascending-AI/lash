@@ -3,7 +3,7 @@
 //! ([`DurableStore::open_process`](lash_durable::DurableStore::open_process)).
 use super::*;
 use lash_durable::domain::{ProcessRegistryRow, ProcessView};
-use lash_protocol_types::ProcessId;
+use lash_vocabulary::identity::ProcessId;
 
 lash_store_sql::statements! {
     /// The process owner's open, as SQLite reads it: the store's clock is

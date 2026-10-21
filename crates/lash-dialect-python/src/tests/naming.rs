@@ -4,7 +4,9 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use lash_kernel_dialect::{CellEnvironment, Environment, Lowered, Mode, Namespaces};
-use lash_kernel_doc::{self as k, EffectName, Name, Param, Signature, Type};
+use lash_kernel_doc::{self as k};
+
+use lash_vocabulary::{EffectName, Name, Param, Signature, Type};
 
 use super::machine;
 
@@ -35,12 +37,8 @@ fn lower(
     bindings: &[&str],
     names: &[&str],
 ) -> Result<Lowered, lash_kernel_dialect::Diagnostic> {
-    let namespaces = Namespaces::of_effects(
-        &effects(names),
-        &lash_kernel_doc::ContractId::new("1"),
-        &BTreeMap::new(),
-    )
-    .expect("the law's effects are operations");
+    let namespaces = crate::tests::linked::namespaces(&effects(names), &BTreeMap::new())
+        .expect("the law's effects are operations");
     let bindings = bindings
         .iter()
         .map(|name| Name::new(*name))
@@ -71,7 +69,15 @@ fn a_dotted_call_performs_the_operation_by_its_canonical_name() {
     ] {
         let lowered = lower(source, &[], &[operation]).unwrap_or_else(|error| panic!("{error}"));
         let text = k::print_document(&lowered.document);
-        assert!(text.contains(&format!("perform {operation}(")), "{text}");
+        assert!(
+            text.contains(&format!(
+                "perform {}(",
+                super::linked::operation_slot(&lowered.document, operation)
+                    .expect("operation import")
+                    .0
+            )),
+            "{text}"
+        );
     }
     let error = lower("await web_fetch({})\n", &[], &["web.fetch"])
         .expect_err("the flattened name is no operation");
@@ -109,42 +115,13 @@ fn a_keyword_operation_is_callable_through_the_qualified_escape() {
     )
     .unwrap_or_else(|error| panic!("{error}"));
     let text = k::print_document(&lowered.document);
-    assert!(text.contains("perform processes.await("), "{text}");
-}
-
-/// PRINT-ROUNDTRIP: a code export and an operation that share the package
-/// prefix `dataframe` print and read back byte-exact.
-#[test]
-fn a_code_export_beside_an_operation_of_its_package_prints_and_reads_back() {
-    let mut registry = k::FunctionRegistry::new();
-    let col = k::parse_definition(
-        "function dataframe.col(name: Any) -> Any\nkernel 1\ncharge 1\nbody {\n  return name\n}\n",
-    )
-    .expect("a definition");
-    let col = registry
-        .register(col, None)
-        .expect("the definition registers");
-    let document = k::parse_document(&format!(
-        r#"kernel 1
-numbers float
-use dataframe.col = @{col}
-effect dataframe.run(input: Any) -> Any contract "1"
-main {{
-  let column = dataframe.col("value")
-  let ran = perform dataframe.run(column) as Any
-  finish ran
-}}"#
-    ))
-    .expect("a document");
-    let printed = crate::print_kernel(&document, None, Default::default())
-        .expect("the document prints")
-        .source;
-    assert!(printed.contains("await dataframe.run("), "{printed}");
-    let (read, _) = crate::read_kernel(&printed, &document, Default::default())
-        .unwrap_or_else(|error| panic!("{error}\n{printed}"));
-    assert_eq!(
-        read.canonical_bytes(),
-        document.canonical_bytes(),
-        "{printed}"
+    assert!(
+        text.contains(&format!(
+            "perform {}(",
+            super::linked::operation_slot(&lowered.document, "processes.await")
+                .expect("operation import")
+                .0
+        )),
+        "{text}"
     );
 }

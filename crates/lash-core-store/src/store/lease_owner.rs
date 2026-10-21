@@ -1,6 +1,6 @@
 //! The stable identity of a lease holder: a worker process and its boot.
 
-use crate::ProcessId;
+use lash_vocabulary::identity::ProcessId;
 
 /// Stable name of a lease holder: a node name or an engine process owner.
 ///

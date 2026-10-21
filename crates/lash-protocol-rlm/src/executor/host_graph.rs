@@ -31,10 +31,12 @@ use lash_core::{
     ProcessId, ToolCallId, ToolCallLimitExceeded, ToolCallLimitScope, TurnControlKind,
 };
 use lash_core_store::checkpoint_graph::{
-    GraphDecoder, GraphRefusal, GraphStaging, NodeId, NodeKind, TokenCodec, TokenError,
-    TokenReader, TokenWriter,
+    GraphDecoder, GraphRefusal, GraphStaging, NodeId, NodeKind,
 };
-use lash_kernel_doc::{Datum, EffectId, EffectName};
+use lash_kernel_doc::Datum;
+use lash_vocabulary::names::OperationUse;
+use lash_vocabulary::sites::EffectId;
+use lash_vocabulary::tokens::{TokenCodec, TokenError, TokenReader, TokenWriter};
 
 /// Items per page and children per index.
 pub const FANOUT: u64 = 32;
@@ -438,7 +440,7 @@ pub struct CallSummary {
     /// Where the cell performed it.
     pub effect: EffectId,
     /// The effect, as the cell's source names it.
-    pub operation: EffectName,
+    pub operation: OperationUse,
     pub call_id: ToolCallId,
     /// Its Admission, which holds its request.
     pub admission: NodeId,
@@ -503,7 +505,7 @@ impl TokenCodec for CallSummary {
         input.expect_struct(6)?;
         let ordinal = input.unsigned()?;
         let effect = EffectId::decode(input)?;
-        let operation = EffectName::decode(input)?;
+        let operation = OperationUse::decode(input)?;
         let call_id =
             ToolCallId::parse(input.text()?).map_err(|error| invalid(error.to_string()))?;
         let admission = NodeId::decode(input)?;
@@ -842,7 +844,7 @@ impl HostState {
     pub fn admit(
         &mut self,
         effect: EffectId,
-        operation: EffectName,
+        operation: OperationUse,
         call_id: ToolCallId,
         admission: NodeId,
         control: bool,

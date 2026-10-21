@@ -110,7 +110,7 @@ pub(crate) enum PageAccessError {
     #[error("the session stages pages, and its host named no staging directory")]
     NoStaging,
     #[error("the run's pages are not readable: {0}")]
-    Run(lash_vm_protocol::page::PageRefusal),
+    Run(lash_protocol_types::engine_fault::PageRefusal),
     #[error(transparent)]
     Staging(#[from] StageFault),
 }

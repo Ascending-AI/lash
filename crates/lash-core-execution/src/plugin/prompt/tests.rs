@@ -32,7 +32,7 @@ fn catalog(plugins: Vec<(&'static str, Register)>) -> Result<PromptCatalog, Plug
             ),
         };
         entries.push(crate::plugin::ContributionDescriptor {
-            registry: crate::plugin::RegistryKind::Session,
+            registry: lash_vocabulary::claims::RegistryKind::Session,
             kind,
             key,
             details,
@@ -42,7 +42,7 @@ fn catalog(plugins: Vec<(&'static str, Register)>) -> Result<PromptCatalog, Plug
     }
     for wrap in &contributions.prompt.wraps {
         entries.push(crate::plugin::ContributionDescriptor {
-            registry: crate::plugin::RegistryKind::Session,
+            registry: lash_vocabulary::claims::RegistryKind::Session,
             kind: crate::plugin::ContributionKind::PromptWrapper,
             key: crate::plugin::ContributionKey::PromptWrapper(wrap.id()),
             details: crate::plugin::ContributionDetails::PromptWrapper(wrap.spec.clone()),
@@ -51,7 +51,9 @@ fn catalog(plugins: Vec<(&'static str, Register)>) -> Result<PromptCatalog, Plug
         });
     }
     let metadata = PromptCatalogSnapshot::from_inventory(&crate::plugin::InstalledInventory {
-        scope: crate::plugin::InventoryScope::Deployment(crate::plugin::RegistryKind::Session),
+        scope: crate::plugin::InventoryScope::Deployment(
+            lash_vocabulary::claims::RegistryKind::Session,
+        ),
         readiness: vec![crate::plugin::ContributionReadiness::NotValidated; entries.len()],
         entries,
         stateless: Default::default(),
@@ -74,7 +76,7 @@ fn id(owner: &str, local: &str) -> PromptSectionId {
 fn cut(namespaces: BTreeMap<String, CommittedPluginNamespace>) -> PromptCut {
     PromptCut::new(PromptCutParts {
         call: PromptCall {
-            session_id: crate::SessionId::from("prompt-laws"),
+            session_id: lash_vocabulary::identity::SessionId::from("prompt-laws"),
             frame: None,
             run: None,
             turn: None,
@@ -394,7 +396,9 @@ fn a_renderer_reads_one_namespace_generation() {
                 .insert(key.into(), serde_json::json!(value));
         }
     }
-    let owner = crate::RuntimeOwner::Session(crate::SessionId::from("prompt-laws"));
+    let owner = lash_vocabulary::identity::RuntimeOwner::Session(
+        lash_vocabulary::identity::SessionId::from("prompt-laws"),
+    );
     let view = crate::plugin::PluginStateView::bind(&owner, "mem", Arc::clone(&registry));
     let neighbor = crate::plugin::PluginStateView::bind(&owner, "neighbor", Arc::clone(&registry));
     let frozen = cut(BTreeMap::from([
@@ -568,8 +572,8 @@ impl PromptSectionSource for ModuleGuidance {
     }
 }
 
-fn module_tool(name: &str, module: &str) -> crate::ToolDefinition {
-    crate::ToolDefinition::raw(
+fn module_tool(name: &str, module: &str) -> lash_vocabulary::tool_contract::ToolDefinition {
+    lash_vocabulary::tool_contract::ToolDefinition::raw(
         name,
         format!("{module}.{name}"),
         "",
@@ -581,7 +585,7 @@ fn module_tool(name: &str, module: &str) -> crate::ToolDefinition {
 }
 
 /// A call offering `tools` natively, from their pinned catalog.
-fn offering(tools: Vec<crate::ToolDefinition>) -> OfferedTools {
+fn offering(tools: Vec<lash_vocabulary::tool_contract::ToolDefinition>) -> OfferedTools {
     OfferedTools::new(
         Arc::new(crate::ToolCatalog::from_tool_definitions(tools)),
         false,
@@ -696,7 +700,7 @@ fn discovery_hidden_tools_are_absent_from_the_offered_surface() {
     assert_eq!(
         offered
             .manifests()
-            .map(crate::ToolManifest::tool)
+            .map(lash_vocabulary::tool_contract::ToolManifest::tool)
             .collect::<Vec<_>>(),
         vec!["github.search".to_owned()]
     );
@@ -704,7 +708,8 @@ fn discovery_hidden_tools_are_absent_from_the_offered_surface() {
     assert!(!offered.offers("slack.private_search"));
     assert!(
         offered.catalog().has_callable_tool(
-            &crate::IntoOperation::into_operation("slack.private_search").unwrap()
+            &lash_vocabulary::tool_contract::IntoOperation::into_operation("slack.private_search")
+                .unwrap()
         ),
         "discovery retains execution authority"
     );

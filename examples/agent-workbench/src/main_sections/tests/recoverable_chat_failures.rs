@@ -1,5 +1,5 @@
 use super::*;
-use lash::SessionId;
+use lash_vocabulary::identity::SessionId;
 
 #[test]
 fn authorization_seam_can_deny_observation_without_product_specific_auth() {

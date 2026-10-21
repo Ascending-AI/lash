@@ -22,7 +22,7 @@ impl SessionPromptAdmin {
     /// absent or released.
     pub async fn snapshot(
         &self,
-        run: &crate::TurnId,
+        run: &lash_vocabulary::identity::TurnId,
         call: u32,
     ) -> Result<Option<crate::prompt::LoadedPromptSnapshot>> {
         let context = self.context.target.context().await?;

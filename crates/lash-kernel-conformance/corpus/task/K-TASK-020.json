@@ -3,7 +3,7 @@
   "cases": [
     {
       "name": "effect owner contains the spawning site and occurrence",
-      "document": "kernel 1\nnumbers by_spelling\neffect echo(value: Int) -> Int contract \"1\"\nfn child(value) { print value let answer = perform echo(value) as Int print answer return answer }\n\nmain {\nlet h = spawn call child(1) let answer = join h finish answer\n}\n",
+      "document": "kernel 1\nnumbers by_spelling\nimport 0 operation host.echo(value: Int) -> Int\ndefinition \"function child(value: Any) -> Any\\nkernel 1\\nmetering statements\\nimport 0 operation host.echo(value: Int) -> Int\\nbody {\\n  print value\\n  let answer = perform 0(value) as Int\\n  print answer\\n  return answer\\n}\\n\"\nmain {\n  let h = spawn invoke child(1)\n  let answer = join h\n  finish answer\n}\n",
       "expected": {
         "prints": [
           {
@@ -21,7 +21,7 @@
         "trace": [
           {
             "effect": {
-              "effect": "echo",
+              "effect": "host.echo",
               "args": [
                 {
                   "int": "1"
@@ -44,7 +44,7 @@
                 },
                 "site": {
                   "unit": {
-                    "function": "child"
+                    "library": "09d97a2c19c5bec729e1b166acedf7a05c831888d76f1759fce7d9f307c69a73"
                   },
                   "path": [
                     1,

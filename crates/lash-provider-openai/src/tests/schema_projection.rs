@@ -8,34 +8,36 @@ fn chat_tools_use_projected_openai_schema_and_preserve_override() {
         LlmToolSpec {
             name: "empty".to_string(),
             description: "Empty".to_string(),
-            input_schema: lash_protocol_types::SchemaContract::admit(json!({"type": "object"}))
-                .expect("valid declared schema"),
-            output_schema: lash_protocol_types::SchemaContract::admit(json!({}))
+            input_schema: lash_vocabulary::schema_contract::SchemaContract::admit(
+                json!({"type": "object"}),
+            )
+            .expect("valid declared schema"),
+            output_schema: lash_vocabulary::schema_contract::SchemaContract::admit(json!({}))
                 .expect("valid declared schema"),
         },
         LlmToolSpec {
             name: "override".to_string(),
             description: "Override".to_string(),
-            input_schema: lash_core::SchemaContract::admit(json!({
+            input_schema: lash_vocabulary::schema_contract::SchemaContract::admit(json!({
                 "type": "object",
                 "properties": {"raw": {"const": "x"}}
             }))
             .expect("valid declared schema")
             .with_override(
-                lash_core::SchemaDialect::OpenaiToolParameters,
-                lash_protocol_types::JsonSchema::admit(json!({
+                lash_vocabulary::schema_contract::SchemaDialect::OpenaiToolParameters,
+                lash_vocabulary::json_schema::JsonSchema::admit(json!({
                     "type": "object",
                     "properties": { "raw": { "type": "string", "enum": ["x"] } }
                 }))
                 .expect("valid declared projection schema"),
             ),
-            output_schema: lash_protocol_types::SchemaContract::admit(json!({}))
+            output_schema: lash_vocabulary::schema_contract::SchemaContract::admit(json!({}))
                 .expect("valid declared schema"),
         },
         LlmToolSpec {
             name: "schemars".to_string(),
             description: "Schemars".to_string(),
-            input_schema: lash_protocol_types::SchemaContract::admit(json!({
+            input_schema: lash_vocabulary::schema_contract::SchemaContract::admit(json!({
                 "type": "object",
                 "properties": {
                     "limit": {
@@ -51,7 +53,7 @@ fn chat_tools_use_projected_openai_schema_and_preserve_override() {
                 }
             }))
             .expect("valid declared schema"),
-            output_schema: lash_protocol_types::SchemaContract::admit(json!({}))
+            output_schema: lash_vocabulary::schema_contract::SchemaContract::admit(json!({}))
                 .expect("valid declared schema"),
         },
     ]);

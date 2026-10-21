@@ -21,130 +21,11 @@
 use std::collections::BTreeMap;
 
 use crate::compat::{CompatRefusal, VersionRange};
-use crate::plugin_state::{FormatNamespace, FormatVersion, PluginStateMap};
+use crate::plugin_state::FormatNamespace;
+use crate::plugin_state::PluginStateMap;
+use lash_vocabulary::providers::FormatVersion;
 
 use super::StoreError;
-
-/// A callback slot within one plugin, selected by its stable key.
-#[derive(
-    Clone,
-    Debug,
-    PartialEq,
-    Eq,
-    PartialOrd,
-    Ord,
-    Hash,
-    serde::Serialize,
-    serde::Deserialize,
-    schemars::JsonSchema,
-)]
-#[serde(deny_unknown_fields)]
-pub struct PluginCallbackIdentity {
-    pub owner: String,
-    pub key: String,
-}
-
-impl PluginCallbackIdentity {
-    /// The identity of `owner`'s tool provider declared under `key`: the one
-    /// identity a call binds to and dispatches through.
-    #[must_use]
-    pub fn tool_provider(owner: impl Into<String>, key: &str) -> Self {
-        Self {
-            owner: owner.into(),
-            key: format!(
-                "{}:{key}",
-                crate::tool_run::CallbackSlot::ToolProvider.key_prefix()
-            ),
-        }
-    }
-
-    /// The identity of the reader `owner`'s provider `key` registered: the
-    /// callback a cell's read plan owes for that provider's reads.
-    pub fn tool_reads(owner: impl Into<String>, key: &str) -> Self {
-        Self {
-            owner: owner.into(),
-            key: format!(
-                "{}:{key}",
-                crate::tool_run::CallbackSlot::ToolReads.key_prefix()
-            ),
-        }
-    }
-
-    /// The declared key of a tool provider identity, or `None` when this
-    /// names another callback or a provider by anything but a declared key.
-    #[must_use]
-    pub fn tool_provider_key(&self) -> Option<&str> {
-        self.key
-            .strip_prefix(crate::tool_run::CallbackSlot::ToolProvider.key_prefix())
-            .and_then(|rest| rest.strip_prefix(':'))
-            .filter(|key| is_declared_tool_provider_key(key))
-    }
-}
-
-impl std::fmt::Display for PluginCallbackIdentity {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(formatter, "{}:{}", self.owner, self.key)
-    }
-}
-
-/// Whether `key` is a declared tool provider key: 1 to 64 bytes of ASCII
-/// letters, digits, `_`, `-` and `.`, beginning with a letter. A provider is
-/// named by its author, never by its position, so no key is a number.
-#[must_use]
-pub fn is_declared_tool_provider_key(key: &str) -> bool {
-    let bytes = key.as_bytes();
-    bytes.len() <= 64
-        && bytes.first().is_some_and(u8::is_ascii_alphabetic)
-        && bytes
-            .iter()
-            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-' | b'.'))
-}
-
-/// Decodes a recorded tool provider identity, refusing one that names its
-/// provider by anything but a declared key (FIG-6073).
-pub mod declared_tool_provider {
-    use super::PluginCallbackIdentity;
-
-    /// # Errors
-    /// The identity does not decode, or names no declared tool provider.
-    pub fn deserialize<'de, D>(deserializer: D) -> Result<PluginCallbackIdentity, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        let identity = <PluginCallbackIdentity as serde::Deserialize>::deserialize(deserializer)?;
-        if identity.tool_provider_key().is_none() {
-            return Err(serde::de::Error::custom(format!(
-                "recorded tool provider `{}:{}` is not named by a declared provider key",
-                identity.owner, identity.key
-            )));
-        }
-        Ok(identity)
-    }
-
-    /// [`deserialize`] for an optional identity.
-    pub mod option {
-        use super::PluginCallbackIdentity;
-
-        /// # Errors
-        /// A present identity does not decode, or names no declared tool
-        /// provider.
-        pub fn deserialize<'de, D>(
-            deserializer: D,
-        ) -> Result<Option<PluginCallbackIdentity>, D::Error>
-        where
-            D: serde::Deserializer<'de>,
-        {
-            #[derive(serde::Deserialize)]
-            struct Declared(
-                #[serde(deserialize_with = "super::deserialize")] PluginCallbackIdentity,
-            );
-            Ok(
-                <Option<Declared> as serde::Deserialize>::deserialize(deserializer)?
-                    .map(|Declared(identity)| identity),
-            )
-        }
-    }
-}
 
 /// A recorded callback key the running build no longer registers.
 #[derive(
@@ -566,6 +447,8 @@ impl PluginAdmission {
             .collect()
     }
 }
+
+use lash_vocabulary::providers::PluginCallbackIdentity;
 
 #[cfg(test)]
 mod tests {

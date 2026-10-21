@@ -1,14 +1,13 @@
-//! lash's own packages, made by the build (FIG-6917), and what a parent
-//! holds of them (FIG-5812). A parent links, admits and migrates documents
-//! against exactly the functions its workers hold, and runs none of them
-//! (ADR 0123): it decodes the packages as data, without linking a dialect
-//! or an extension, and registers them once as a [`HeldPackages`], from
-//! which its admission and every worker's registry are derived (V1). A
-//! build with no dialect feature holds `kernel` alone.
+//! Build-generated helper Documents, ordinary package namespaces and native
+//! declarations. Runtime references retain their Link DAG; there is no set.
 
 use std::sync::{Arc, OnceLock};
 
-use lash_kernel_package::{HeldPackages, Package, PackageHeader};
+use lash_kernel_doc::{Document, FunctionRegistry};
+
+use lash_kernel_package::LinkedContent;
+use lash_vocabulary::{names::*, package::*};
+use std::collections::BTreeMap;
 
 /// The TypeScript dialect name recorded by sessions and runs.
 pub const TYPESCRIPT: &str = "typescript";
@@ -20,18 +19,15 @@ pub const SHIPPED_DIALECTS: &[&str] = &[TYPESCRIPT, PYTHON];
 #[cfg(test)]
 mod tests;
 
-/// One of lash's packages as the build made it: its header and the
-/// release image of its code (`lash_kernel_package::Package::from_image`).
+/// One build-generated release image and its native constructor membership.
 #[derive(Clone, Copy, Debug)]
 pub struct BuiltPackage {
     /// The package's path.
     pub path: &'static str,
-    /// Its `PackageHeader`, as JSON.
-    pub header: &'static str,
     /// Its code, validated against the packages it requires.
     pub image: &'static [u8],
     /// This build's native implementations, sorted by function identity.
-    pub natives: &'static [(lash_kernel_doc::FunctionId, &'static str)],
+    pub natives: &'static [(lash_vocabulary::names::FunctionId, &'static str)],
 }
 
 impl BuiltPackage {
@@ -40,8 +36,8 @@ impl BuiltPackage {
     /// resolve an implementation's dependencies through a global name index.
     pub fn native_callees(
         &self,
-        function: &lash_kernel_doc::FunctionId,
-    ) -> Result<Vec<(lash_kernel_doc::FunctionId, &'static str)>, String> {
+        function: &lash_vocabulary::names::FunctionId,
+    ) -> Result<Vec<(lash_vocabulary::names::FunctionId, &'static str)>, String> {
         let image = lash_kernel_doc::ReleasedFunctions::read(self.image)
             .map_err(|error| error.to_string())?;
         let at = image
@@ -56,7 +52,6 @@ macro_rules! package {
     ($path:literal, $stem:literal) => {
         BuiltPackage {
             path: $path,
-            header: include_str!(concat!(env!("OUT_DIR"), "/", $stem, ".package.json")),
             image: include_bytes!(concat!(env!("OUT_DIR"), "/", $stem, ".bin")),
             natives: include!(concat!(env!("OUT_DIR"), "/", $stem, ".natives.rs")),
         }
@@ -94,57 +89,115 @@ pub struct LibraryError {
 }
 
 impl LibraryError {
-    fn new(message: impl std::fmt::Display) -> Self {
+    pub fn new(message: impl std::fmt::Display) -> Self {
         Self {
             message: message.to_string(),
         }
     }
 }
 
+/// The helper release is executable declarations plus its linked namespace.
+/// Native bodies are supplied separately by the worker embedding.
+#[derive(Clone, Debug)]
+pub struct HelperRelease {
+    pub content: LinkedContent,
+    pub functions: FunctionRegistry,
+}
+
+impl HelperRelease {
+    /// Resolve only authored exports; lifted local functions remain reachable
+    /// by identity but never enter the global source-name resolver.
+    pub fn resolver_roots(&self) -> std::collections::BTreeSet<FunctionId> {
+        self.content
+            .packages
+            .values()
+            .flat_map(|package| package.members.values())
+            .filter_map(|member| {
+                let MemberKind::Export { link, export } = &member.kind else {
+                    return None;
+                };
+                let link = self.content.links.get(link)?;
+                let document = self.content.documents.get(&link.document)?;
+                match document.exports.get(&export.name)? {
+                    lash_kernel_doc::Export::Function(function) => Some(function.function),
+                    _ => None,
+                }
+            })
+            .collect()
+    }
+}
+
 fn standard_in(
-    slot: &OnceLock<Result<Arc<HeldPackages>, LibraryError>>,
-    assemble: impl FnOnce() -> Result<Arc<HeldPackages>, LibraryError>,
-) -> Result<Arc<HeldPackages>, LibraryError> {
-    // Assembly decodes and registers every package. Cold readers must
-    // wait for that work, rather than each allocating their own copy. A
-    // failure is a fixed defect of this build, so retain it as well.
+    slot: &OnceLock<Result<Arc<HelperRelease>, LibraryError>>,
+    assemble: impl FnOnce() -> Result<Arc<HelperRelease>, LibraryError>,
+) -> Result<Arc<HelperRelease>, LibraryError> {
     slot.get_or_init(assemble).clone()
 }
 
-/// lash's packages, decoded from the build's images in dependency order.
-///
-/// # Errors
-///
-/// The decoder's message: a defect of the build.
-pub fn built() -> Result<Vec<Package>, String> {
-    PACKAGES
-        .iter()
-        .map(|built| {
-            let header: PackageHeader =
-                serde_json::from_str(built.header).map_err(|error| error.to_string())?;
-            let image = lash_kernel_doc::ReleasedFunctions::read(built.image)
-                .map_err(|error| error.to_string())?;
-            let package = Package::from_image(header, image).map_err(|error| error.to_string())?;
-            let display = lash_kernel_package::shipped_display::of(&package)
-                .map_err(|error| error.to_string())?;
-            Ok(package.with_display(display))
-        })
-        .collect()
-}
-
-/// lash's own packages as this build holds them, registered once in a
-/// process: the set a host that installs no package of its own runs on,
-/// and the requirements a host's package is built against.
-///
-/// # Errors
-///
-/// [`LibraryError`].
-pub fn lash_packages() -> Result<Arc<HeldPackages>, LibraryError> {
-    static STANDARD: OnceLock<Result<Arc<HeldPackages>, LibraryError>> = OnceLock::new();
+/// Assemble the build's one helper Document, and retain registry declarations
+/// independently of package provenance. This does not install durable roots.
+pub fn helper_release() -> Result<Arc<HelperRelease>, LibraryError> {
+    static STANDARD: OnceLock<Result<Arc<HelperRelease>, LibraryError>> = OnceLock::new();
     standard_in(&STANDARD, || {
-        Ok(Arc::new(
-            HeldPackages::install(built().map_err(LibraryError::new)?)
-                .map_err(LibraryError::new)?,
-        ))
+        let document: Document = serde_json::from_str(include_str!(concat!(
+            env!("OUT_DIR"),
+            "/helpers.document.json"
+        )))
+        .map_err(LibraryError::new)?;
+        let mut functions = FunctionRegistry::declarations();
+        for built in PACKAGES {
+            let image =
+                lash_kernel_doc::ReleasedFunctions::read(built.image).map_err(LibraryError::new)?;
+            functions
+                .register_released(image)
+                .map_err(LibraryError::new)?;
+        }
+        let mut content = LinkedContent::default();
+        let document_id = document.identity();
+        let fills = document
+            .imports
+            .iter()
+            .map(|(slot, import)| {
+                lash_kernel_dialect::authoring::service_requirement(&import.name)
+                    .map(|requirement| (*slot, Fill::Operation(requirement)))
+                    .ok_or_else(|| {
+                        LibraryError::new(format!(
+                            "helper Import {:?} has no build-defined operation offer",
+                            import.name
+                        ))
+                    })
+            })
+            .collect::<Result<BTreeMap<_, _>, _>>()?;
+        let link = Link {
+            document: document_id,
+            fills,
+        };
+        let link_id = link.identity();
+        let packages: BTreeMap<PackagePath, BTreeMap<Segment, ExportName>> = serde_json::from_str(
+            include_str!(concat!(env!("OUT_DIR"), "/helpers.packages.json")),
+        )
+        .map_err(LibraryError::new)?;
+        for (path, exports) in packages {
+            let members = exports
+                .into_iter()
+                .map(|(name, export)| {
+                    (
+                        name,
+                        Member {
+                            visibility: Visibility::Public,
+                            kind: MemberKind::Export {
+                                link: link_id,
+                                export,
+                            },
+                        },
+                    )
+                })
+                .collect();
+            let package = Package { path, members };
+            content.packages.insert(package.identity(), package);
+        }
+        content.documents.insert(document_id, document);
+        content.links.insert(link_id, link);
+        Ok(Arc::new(HelperRelease { content, functions }))
     })
 }

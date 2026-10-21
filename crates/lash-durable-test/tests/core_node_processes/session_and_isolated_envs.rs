@@ -277,11 +277,15 @@ const ORDINARY_TOOL: &str = "core_node_ordinary";
 const ORDINARY_OPERATION: &str = "tools.core_node_ordinary";
 const B_TOOL: &str = "core_node_b";
 /// Cross-cutting: no tools, one result check.
-const CHECK_COMPONENT: lash_core::ProcessConfigKey<()> =
-    lash_core::ProcessConfigKey::new("core-node-check", lash_core::FormatVersion::ONE);
+const CHECK_COMPONENT: lash_core::ProcessConfigKey<()> = lash_core::ProcessConfigKey::new(
+    "core-node-check",
+    lash_vocabulary::providers::FormatVersion::ONE,
+);
 /// The component that provides `B_TOOL`.
-const B_COMPONENT: lash_core::ProcessConfigKey<()> =
-    lash_core::ProcessConfigKey::new("core-node-b", lash_core::FormatVersion::ONE);
+const B_COMPONENT: lash_core::ProcessConfigKey<()> = lash_core::ProcessConfigKey::new(
+    "core-node-b",
+    lash_vocabulary::providers::FormatVersion::ONE,
+);
 
 /// The engine runs `B_TOOL` once and ends with its answer.
 fn explicit_engine_advance(
@@ -313,13 +317,13 @@ fn explicit_engine_advance(
 }
 
 /// What the explicit engine performs: B's tool.
-fn b_runs() -> Vec<lash_core::ToolDefinition> {
+fn b_runs() -> Vec<lash_vocabulary::tool_contract::ToolDefinition> {
     vec![object_tool(B_TOOL, ["b", "run"])]
 }
 
-fn object_tool(name: &str, binding: [&str; 2]) -> lash_core::ToolDefinition {
+fn object_tool(name: &str, binding: [&str; 2]) -> lash_vocabulary::tool_contract::ToolDefinition {
     let object = serde_json::json!({ "type": "object", "additionalProperties": true });
-    lash_core::ToolDefinition::raw(
+    lash_vocabulary::tool_contract::ToolDefinition::raw(
         name,
         format!("{}.{}", binding[0], binding[1]),
         "Answers its arguments.",
@@ -332,13 +336,17 @@ fn object_tool(name: &str, binding: [&str; 2]) -> lash_core::ToolDefinition {
 
 /// The ordinary tool: repeatable, so that a worker stopping mid-body
 /// redelivers it.
-fn ordinary_definition() -> lash_core::ToolDefinition {
+fn ordinary_definition() -> lash_vocabulary::tool_contract::ToolDefinition {
     object_tool(ORDINARY_TOOL, ["tools", ORDINARY_TOOL]).with_execution_policy(
-        lash_core::ExecutionPolicy::repeatable(std::num::NonZeroU32::new(3).unwrap(), 1, 1),
+        lash_vocabulary::tool_contract::ExecutionPolicy::repeatable(
+            std::num::NonZeroU32::new(3).unwrap(),
+            1,
+            1,
+        ),
     )
 }
 
-fn explicit_definition() -> lash_core::ToolDefinition {
+fn explicit_definition() -> lash_vocabulary::tool_contract::ToolDefinition {
     object_tool(EXPLICIT_TOOL, ["iso", "explicit"])
         .isolated_in(EXPLICIT_ENGINE)
         .expect("an isolated tool names its engine")
@@ -392,7 +400,7 @@ impl lash_core::ToolProvider for SessionTools {
         &self,
         _config: &lash_core::OwnerConfigView,
     ) -> std::result::Result<
-        Vec<lash_core::ToolManifest>,
+        Vec<lash_vocabulary::tool_contract::ToolManifest>,
         lash_execution_contracts::plugin_error::PluginError,
     > {
         Ok({
@@ -407,7 +415,7 @@ impl lash_core::ToolProvider for SessionTools {
         &self,
         name: &str,
         _config: &lash_core::OwnerConfigView,
-    ) -> Option<Arc<lash_core::ToolContract>> {
+    ) -> Option<Arc<lash_vocabulary::tool_contract::ToolContract>> {
         match name {
             EXPLICIT_OPERATION => Some(Arc::new(explicit_definition().contract())),
             ORDINARY_OPERATION => Some(Arc::new(ordinary_definition().contract())),

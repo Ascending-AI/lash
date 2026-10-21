@@ -4,8 +4,12 @@
 //! written in terms of. The plugin-facing session handle, its create request
 //! and the lifecycle services stay in `lash-core`.
 
+use crate::PluginConfig;
+use crate::ProtocolTurnOptions;
+use crate::SessionAppendNode;
+use crate::SessionPolicy;
 use crate::facade_support::SessionGraphFacadeOps;
-use crate::{PluginConfig, ProtocolTurnOptions, SessionAppendNode, SessionId, SessionPolicy};
+use lash_vocabulary::identity::SessionId;
 use serde::{Deserialize, Serialize};
 
 /// One durable, not-yet-settled process-observer edge.
@@ -15,12 +19,12 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct SessionObserverIntent {
-    pub process_id: crate::ProcessId,
+    pub process_id: lash_vocabulary::identity::ProcessId,
 }
 impl SessionObserverIntent {
     /// Observe the process the host selected. Its minted id is never reused,
     /// so the intent can never bind to a later process.
-    pub fn host_requested(process_id: crate::ProcessId) -> Self {
+    pub fn host_requested(process_id: lash_vocabulary::identity::ProcessId) -> Self {
         Self { process_id }
     }
 }
@@ -32,7 +36,7 @@ impl SessionObserverIntent {
 #[repr(transparent)]
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize)]
 #[serde(transparent)]
-pub struct FrameNodeId(crate::NodeId);
+pub struct FrameNodeId(lash_vocabulary::identity::NodeId);
 
 /// The wire shape is the node identity's: a non-empty string.
 impl schemars::JsonSchema for FrameNodeId {
@@ -41,11 +45,11 @@ impl schemars::JsonSchema for FrameNodeId {
     }
 
     fn schema_name() -> std::borrow::Cow<'static, str> {
-        <crate::NodeId as schemars::JsonSchema>::schema_name()
+        <lash_vocabulary::identity::NodeId as schemars::JsonSchema>::schema_name()
     }
 
     fn json_schema(generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
-        <crate::NodeId as schemars::JsonSchema>::json_schema(generator)
+        <lash_vocabulary::identity::NodeId as schemars::JsonSchema>::json_schema(generator)
     }
 }
 /// Rejection produced when constructing a [`FrameNodeId`] from invalid text.
@@ -60,7 +64,7 @@ pub enum FrameNodeIdError {
 impl FrameNodeId {
     /// Validates and wraps a durable frame-node identity.
     pub fn new(value: impl Into<String>) -> Result<Self, FrameNodeIdError> {
-        crate::NodeId::parse(value)
+        lash_vocabulary::identity::NodeId::parse(value)
             .map(Self)
             .map_err(|_| FrameNodeIdError::Empty)
     }
@@ -71,7 +75,7 @@ impl FrameNodeId {
     }
 
     /// The frame-open node this identity names.
-    pub fn node_id(&self) -> &crate::NodeId {
+    pub fn node_id(&self) -> &lash_vocabulary::identity::NodeId {
         &self.0
     }
 
@@ -80,22 +84,22 @@ impl FrameNodeId {
         self.0.into_inner()
     }
 }
-impl From<crate::NodeId> for FrameNodeId {
-    fn from(node_id: crate::NodeId) -> Self {
+impl From<lash_vocabulary::identity::NodeId> for FrameNodeId {
+    fn from(node_id: lash_vocabulary::identity::NodeId) -> Self {
         Self(node_id)
     }
 }
-impl From<&crate::NodeId> for FrameNodeId {
-    fn from(node_id: &crate::NodeId) -> Self {
+impl From<&lash_vocabulary::identity::NodeId> for FrameNodeId {
+    fn from(node_id: &lash_vocabulary::identity::NodeId) -> Self {
         Self(node_id.clone())
     }
 }
-impl From<FrameNodeId> for crate::NodeId {
+impl From<FrameNodeId> for lash_vocabulary::identity::NodeId {
     fn from(frame_node_id: FrameNodeId) -> Self {
         frame_node_id.0
     }
 }
-impl From<&FrameNodeId> for crate::NodeId {
+impl From<&FrameNodeId> for lash_vocabulary::identity::NodeId {
     fn from(frame_node_id: &FrameNodeId) -> Self {
         frame_node_id.0.clone()
     }
@@ -290,7 +294,7 @@ pub struct OpenAgentFrameOutcome {
     pub frame_node_id: String,
     pub opened: bool,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub initial_node_ids: Vec<crate::NodeId>,
+    pub initial_node_ids: Vec<lash_vocabulary::identity::NodeId>,
 }
 /// Durable session lineage. Each session's token usage lives on that session's
 /// own ledger — nothing folds child usage into a parent — so a host that wants
@@ -319,7 +323,7 @@ pub enum SessionRelation {
         /// of a revision with no history, such as a session that has never
         /// run a turn, has none.
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        source_node_id: Option<crate::NodeId>,
+        source_node_id: Option<lash_vocabulary::identity::NodeId>,
     },
 }
 /// Durable lineage identity of a [`SessionRelation`].
@@ -514,7 +518,7 @@ pub struct SessionStoreCreateRequest {
     /// process whose start created it (FIG-3607 R1). Recorded once, at
     /// creation, as `session_meta.owning_process_id`; a start made in one of
     /// the session's turns records that process's lineage above the session.
-    pub owning_process_id: Option<crate::ProcessId>,
+    pub owning_process_id: Option<lash_vocabulary::identity::ProcessId>,
     /// Which revisions the session keeps besides its head and its pins,
     /// recorded with the catalog row a creating admission writes. The
     /// creator states it: a store has no retention of its own to fall back
@@ -549,7 +553,7 @@ impl SessionStoreCreateRequest {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SessionObservedProcessReceipt {
-    pub process_id: crate::ProcessId,
+    pub process_id: lash_vocabulary::identity::ProcessId,
     pub outcome: SessionObservedProcessOutcome,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

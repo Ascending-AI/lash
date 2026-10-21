@@ -66,7 +66,7 @@ async fn deployment_preflight_requires_process_host_port() {
         fn declaration(&self) -> lash_core::plugin::ProcessComponentDeclaration {
             lash_core::plugin::ProcessComponentDeclaration::initial(
                 "needs-reads",
-                lash_core::FormatVersion::ONE,
+                lash_vocabulary::providers::FormatVersion::ONE,
             )
             .unwrap()
         }
@@ -113,7 +113,10 @@ async fn deployment_preflight_requires_process_host_port() {
     )))
     .process_component(
         Arc::new(Component),
-        lash_core::ProcessConfigKey::<()>::new("needs-reads", lash_core::FormatVersion::ONE),
+        lash_core::ProcessConfigKey::<()>::new(
+            "needs-reads",
+            lash_vocabulary::providers::FormatVersion::ONE,
+        ),
     )
     .build(lash_facade_tests::runtime_lease_owner());
     assert!(matches!(
@@ -218,7 +221,9 @@ async fn a_refused_plugin_build_fails_the_turn_typed(
         }),
     );
     let session = core
-        .session(lash_protocol_types::SessionId::try_from("refused-build".to_owned()).expect("id"))
+        .session(
+            lash_vocabulary::identity::SessionId::try_from("refused-build".to_owned()).expect("id"),
+        )
         .create(lash::SessionCreation::root(mock_session_spec()))
         .await
         .expect("creation records config and builds no plugin");
@@ -248,7 +253,9 @@ async fn a_retryably_refused_plugin_build_completes_the_turn(
         }),
     );
     let session = core
-        .session(lash_protocol_types::SessionId::try_from("retried-build".to_owned()).expect("id"))
+        .session(
+            lash_vocabulary::identity::SessionId::try_from("retried-build".to_owned()).expect("id"),
+        )
         .create(lash::SessionCreation::root(mock_session_spec()))
         .await
         .expect("created");

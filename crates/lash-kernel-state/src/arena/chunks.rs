@@ -262,9 +262,7 @@ impl Arena {
                     .ok_or_else(|| malformed("a table has no index"))?
                     .join();
             }
-            Body::LongText(text) | Body::LongFunction(text)
-                if text.chunks.len() > 1 && first_cold(&text.chunks).is_none() =>
-            {
+            Body::LongText(text) if text.chunks.len() > 1 && first_cold(&text.chunks).is_none() => {
                 let mut joined = String::with_capacity(text.summary.utf8_bytes as usize);
                 for chunk in &text.chunks {
                     if let Chunk::Resident(part) = chunk {
@@ -293,7 +291,7 @@ impl Arena {
         Ok(match self.body(handle)? {
             Body::List(sequence) | Body::Tuple(sequence) => sequence.chunks.first_cold(),
             Body::Map(table) | Body::Set(table) | Body::Record(table) => table.chunks.first_cold(),
-            Body::LongText(text) | Body::LongFunction(text) => first_cold(&text.chunks),
+            Body::LongText(text) => first_cold(&text.chunks),
             Body::Bytes(bytes) => first_cold(&bytes.chunks),
             _ => None,
         }
@@ -305,7 +303,7 @@ impl Arena {
         Ok(match self.body(handle)? {
             Body::List(sequence) | Body::Tuple(sequence) => sequence.chunks.count(),
             Body::Map(table) | Body::Set(table) | Body::Record(table) => table.chunks.count(),
-            Body::LongText(text) | Body::LongFunction(text) => text.chunks.len(),
+            Body::LongText(text) => text.chunks.len(),
             Body::Bytes(bytes) => bytes.chunks.len(),
             _ => 0,
         })
@@ -333,9 +331,7 @@ impl Arena {
             None
         }
         Ok(match self.body(handle)? {
-            Body::LongText(text) | Body::LongFunction(text) => {
-                span(&text.chunks, |part| part.len() as u64, chunk)
-            }
+            Body::LongText(text) => span(&text.chunks, |part| part.len() as u64, chunk),
             Body::Bytes(bytes) => span(&bytes.chunks, |part| part.len() as u64, chunk),
             _ => None,
         })
@@ -369,7 +365,7 @@ impl Arena {
             .ok_or_else(|| malformed("a stale handle reached the machine"))?;
         let mut added = 0u64;
         match (body, part) {
-            (Body::LongText(text) | Body::LongFunction(text), PayloadPart::Leaf(bytes)) => {
+            (Body::LongText(text), PayloadPart::Leaf(bytes)) => {
                 added = bytes.len() as u64 / 16;
                 let text_part =
                     String::from_utf8(bytes).map_err(|_| malformed("a text chunk is not UTF-8"))?;
@@ -387,7 +383,7 @@ impl Arena {
                     vec![Chunk::Resident(bytes.into_boxed_slice())],
                 )?;
             }
-            (Body::LongText(text) | Body::LongFunction(text), PayloadPart::Index(children)) => {
+            (Body::LongText(text), PayloadPart::Index(children)) => {
                 let children = children
                     .into_iter()
                     .map(|(page, len)| Chunk::Cold {

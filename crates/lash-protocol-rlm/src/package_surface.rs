@@ -5,34 +5,32 @@
 
 use std::fmt::Write as _;
 
-use lash_kernel_dialect::{BRAND_FIELD, Export, SpellKind, Spelling, TypeMember};
-use lash_kernel_doc::{Signature, Type};
-use lash_kernel_package::{Origin, PackageView};
+use lash_kernel_dialect::{
+    BRAND_FIELD, NamespaceKind, Namespaces, SpellKind, Spelling, TypeMember,
+};
+use lash_vocabulary::{Signature, Type};
 
-/// The code exports of `view`'s host packages, each package under a
-/// heading of its path and release; empty when the set holds none.
-pub(crate) fn render(view: &PackageView<'_>, spelling: Spelling) -> String {
+pub(crate) fn render(view: &Namespaces, spelling: Spelling) -> String {
     let mut out = String::new();
-    for package in view
-        .packages()
-        .filter(|package| package.origin() == Origin::Host)
-    {
+    for (package, members) in view.packages() {
         let path = package
-            .path()
             .iter()
             .map(|segment| spelling.spell(SpellKind::PathSegment, segment))
             .collect::<Vec<_>>()
             .join(".");
         let mut lines = Vec::new();
-        for (segment, export) in package.exports() {
-            match export {
-                Export::Operation(_) => {}
-                Export::Function(member) => lines.push(format!(
+        for (segment, member) in members {
+            if member.visibility != lash_vocabulary::Visibility::Public {
+                continue;
+            }
+            match &member.kind {
+                NamespaceKind::Operation(_) => {}
+                NamespaceKind::Function(member) => lines.push(format!(
                     "`{path}.{}{}`",
                     spelling.spell(SpellKind::Member, segment),
                     call(&member.signature, 0, spelling)
                 )),
-                Export::Type(value_type) => {
+                NamespaceKind::Type(value_type) => {
                     let ty = format!("{path}.{}", spelling.spell(SpellKind::TypeName, segment));
                     lines.push(format!("`{ty}`: a sealed value type"));
                     for (name, member) in &value_type.members {
@@ -51,7 +49,7 @@ pub(crate) fn render(view: &PackageView<'_>, spelling: Spelling) -> String {
                         });
                     }
                 }
-                Export::Error => lines.push(format!(
+                NamespaceKind::Error => lines.push(format!(
                     "`{path}.{}`: an error",
                     spelling.spell(SpellKind::TypeName, segment)
                 )),
@@ -60,7 +58,7 @@ pub(crate) fn render(view: &PackageView<'_>, spelling: Spelling) -> String {
         if lines.is_empty() {
             continue;
         }
-        let _ = writeln!(out, "#### `{path}` ({})\n", package.release());
+        let _ = writeln!(out, "#### `{path}`\n");
         for line in lines {
             let _ = writeln!(out, "- {line}");
         }
@@ -129,12 +127,12 @@ fn type_text(ty: &Type, spelling: Spelling) -> String {
             .collect::<Vec<_>>()
             .join(" | "),
         Type::Function(signature) => format!("Fn{}", call(signature, 0, spelling)),
-        other => lash_kernel_doc::print_type(other),
+        other => lash_vocabulary::print_type(other),
     }
 }
 
 /// The `(package, type)` a package value's record type names.
-fn branded(record: &lash_kernel_doc::RecordType) -> Option<(&str, &str)> {
+fn branded(record: &lash_vocabulary::RecordType) -> Option<(&str, &str)> {
     let field = record
         .fields
         .iter()
@@ -152,7 +150,7 @@ fn branded(record: &lash_kernel_doc::RecordType) -> Option<(&str, &str)> {
 }
 
 fn spelled(spelling: Spelling, kind: SpellKind, text: &str) -> String {
-    lash_kernel_dialect::Segment::new(text).map_or_else(
+    lash_vocabulary::names::Segment::new(text).map_or_else(
         |_| text.to_owned(),
         |segment| spelling.spell(kind, &segment),
     )

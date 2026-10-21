@@ -14,11 +14,11 @@ impl ProductionToolHandlers<'_> {
     pub(super) fn leaf_definition(
         &self,
         invocation: &crate::session::tool_execution::ToolInvocation,
-    ) -> Option<crate::ToolDefinition> {
+    ) -> Option<lash_vocabulary::tool_contract::ToolDefinition> {
         invocation
             .execution_grant
             .as_deref()
-            .map(|grant| crate::ToolDefinition {
+            .map(|grant| lash_vocabulary::tool_contract::ToolDefinition {
                 manifest: grant.manifest().clone(),
                 contract: grant.contract().clone(),
             })
@@ -46,7 +46,7 @@ impl ProductionToolHandlers<'_> {
         &self,
         owner: &crate::EffectOpener,
         invocation: &crate::session::tool_execution::ToolInvocation,
-        definition: crate::ToolDefinition,
+        definition: lash_vocabulary::tool_contract::ToolDefinition,
         parent: Option<crate::RuntimeInvocation>,
         attribution: &crate::session::ToolObservationAttribution,
     ) -> Result<SingletonToolCall, SingletonRunError> {

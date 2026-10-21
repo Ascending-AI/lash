@@ -14,13 +14,13 @@ use std::time::Duration;
 
 use super::turn_feed_law::ArmLateCommit;
 use crate::SessionCatalogStore;
-use crate::SessionId;
-use crate::TurnId;
 use crate::store::{
     CommittedTurnCursor, OperationId, RuntimeCommit, RuntimeTurnCommitStamp, SessionCommitStore,
     SessionHistoryStore, TurnCommitOutcome,
 };
 use lash_execution_contracts::deployment::DeploymentStore;
+use lash_vocabulary::identity::SessionId;
+use lash_vocabulary::identity::TurnId;
 
 /// How long the law lets the other sessions commit while the late turn is
 /// held.

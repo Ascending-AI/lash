@@ -9,6 +9,7 @@
 //! reruns a `Repeatable` one from its admission at the same ordinal. No
 //! code here is ever run again against a recorded history.
 
+use lash_vocabulary::{DeclarationRefusal, ExecutionPolicy, OutcomeShape};
 use std::sync::Arc;
 
 use tokio_util::sync::CancellationToken;
@@ -18,7 +19,6 @@ use super::singleton_run::{
     SingletonBodyOutcome, SingletonCapture, SingletonPreparedRequest, SingletonPresentationError,
     SingletonRunError, SingletonToolCall, SingletonToolHandlers, StartLaunch,
 };
-use crate::ProcessId;
 use crate::ScopeId;
 use crate::ToolCallId;
 use crate::runtime::actor::round::StoreLocalEffect;
@@ -29,12 +29,12 @@ use crate::runtime::process::{
 };
 use crate::tool_run::{
     AdmissionRefusal, AfterCheckVerdict, AttemptOrdinal, AttributedVerdict, CallDecision,
-    CheckRank, CheckRecord, DeclarationRefusal, ExecutionPolicy, ExternalCancelPolicy, HookCause,
-    OutcomeShape, RankedVerdict, ResultSource,
+    CheckRank, CheckRecord, ExternalCancelPolicy, HookCause, RankedVerdict, ResultSource,
 };
 use lash_execution_contracts::process::ConsumerHold;
 use lash_execution_contracts::process::ProcessStartRegistration;
-use lash_protocol_types::ToolIntentKind;
+use lash_vocabulary::ToolIntentKind;
+use lash_vocabulary::identity::ProcessId;
 
 #[cfg(test)]
 #[path = "call_run/tests.rs"]

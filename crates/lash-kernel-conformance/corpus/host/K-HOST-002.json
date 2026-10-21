@@ -3,7 +3,7 @@
   "cases": [
     {
       "name": "clock retains timestamp kind",
-      "document": "kernel 1\nnumbers by_spelling\n\nmain {\nfinish clock\n}\n",
+      "document": "kernel 1\nnumbers by_spelling\nimport 0 operation typescript.clock() -> Timestamp\nmain {\nfinish perform 0() as Timestamp\n}\n",
       "expected": {
         "prints": [],
         "end": {
@@ -16,8 +16,19 @@
       "environment": {
         "host": [
           {
-            "clock": "100"
+            "perform": {
+              "effect": "typescript.clock",
+              "args": [],
+              "answer": {
+                "Ok": {
+                  "timestamp": "100"
+                }
+              }
+            }
           }
+        ],
+        "reads": [
+          "typescript.clock"
         ]
       }
     }

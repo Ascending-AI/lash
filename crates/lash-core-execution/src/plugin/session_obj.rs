@@ -1,6 +1,6 @@
-use crate::SessionId;
 use lash_execution_contracts::session_types::PluginOwned;
 use lash_execution_contracts::state_commands::StateCommands;
+use lash_vocabulary::identity::SessionId;
 
 use crate::plugin::{PluginSessionMaterializationRequest, PluginSessionRequest};
 use std::collections::BTreeMap;
@@ -257,7 +257,7 @@ pub struct PluginSession {
     pub(super) host: PluginHost,
     pub(super) declared_inventory: Arc<InstalledInventory>,
     pub(super) transcript_decoders: lash_core_store::transcript::TranscriptDecoders,
-    pub(super) owner: crate::RuntimeOwner,
+    pub(super) owner: lash_vocabulary::identity::RuntimeOwner,
     pub(super) capabilities: Arc<std::sync::OnceLock<PluginSessionCapabilities>>,
     pub(super) materialized: Arc<std::sync::atomic::AtomicBool>,
     pub(super) materialization_lock: Arc<std::sync::Mutex<()>>,
@@ -571,7 +571,7 @@ impl PluginSession {
             })
     }
     /// Who this plugin session was built for.
-    pub fn owner(&self) -> &crate::RuntimeOwner {
+    pub fn owner(&self) -> &lash_vocabulary::identity::RuntimeOwner {
         &self.owner
     }
 
@@ -670,7 +670,7 @@ impl PluginSession {
     #[doc(hidden)]
     pub fn code_executor_identity(
         &self,
-    ) -> Option<crate::store::plugin_writers::PluginCallbackIdentity> {
+    ) -> Option<lash_vocabulary::providers::PluginCallbackIdentity> {
         self.capabilities()
             .contributions
             .code_executor
@@ -978,7 +978,7 @@ impl PluginSession {
                 config,
                 seed_snapshot: Some(&snapshot),
             },
-            owner: crate::RuntimeOwner::Session(session_id.into()),
+            owner: lash_vocabulary::identity::RuntimeOwner::Session(session_id.into()),
         })
     }
 
@@ -1289,9 +1289,11 @@ mod presentation_plan_tests {
             .composition()
             .present_tool_result(
                 ToolResultProjectionContext {
-                    owner: crate::RuntimeOwner::Session("presentation-plan".into()),
+                    owner: lash_vocabulary::identity::RuntimeOwner::Session(
+                        "presentation-plan".into(),
+                    ),
                     call_id: crate::ToolCallId::fixture("call"),
-                    tool_id: crate::ToolId::new("fixture:id"),
+                    tool_id: lash_vocabulary::tool_contract::ToolId::new("fixture:id"),
                     tool_name: "fixture".into(),
                     render: None,
                     args: serde_json::Value::Null,

@@ -78,7 +78,6 @@ pub enum DiagnosticCode {
     /// A member a package or a package value type does not declare.
     PackageMemberUnknown,
     /// Printed helper identities and declarations require their base document.
-    PrintedSourceNeedsBase,
     AssignConst,
     SavedFunctionUnusable,
     MethodUnsupported,
@@ -168,7 +167,6 @@ impl DiagnosticCode {
         Self::PackageNamespaceValue,
         Self::OperationValue,
         Self::PackageMemberUnknown,
-        Self::PrintedSourceNeedsBase,
         Self::AssignConst,
         Self::SavedFunctionUnusable,
         Self::MethodUnsupported,
@@ -313,9 +311,6 @@ impl DiagnosticCode {
             Self::GeneratedSourceDepth => {
                 "export a shallower document or raise the host's depth budget within the native ceiling"
             }
-            Self::PrintedSourceNeedsBase => {
-                "use `typescript::read(source, base)` with the document the source was printed from"
-            }
             Self::ReservedIdentifier => "choose a different name",
             Self::PackageNamespaceValue => {
                 "write the member's full path, `dataframe.col(...)`, or bind a code member by name: `const { col } = dataframe`"
@@ -354,8 +349,7 @@ impl DiagnosticCode {
         match self {
             // Constructs the dialect does not have. Writing one again in any
             // form is refused again; the fix is the other construct.
-            Self::PrintedSourceNeedsBase
-            | Self::ClassUnsupported
+            Self::ClassUnsupported
             | Self::GeneratorUnsupported
             | Self::WithUnsupported
             | Self::EvalUnsupported
@@ -510,7 +504,6 @@ impl DiagnosticCode {
             Self::PackageNamespaceValue => "TS_PACKAGE_NAMESPACE_VALUE",
             Self::OperationValue => "TS_OPERATION_VALUE",
             Self::PackageMemberUnknown => "TS_PACKAGE_MEMBER_UNKNOWN",
-            Self::PrintedSourceNeedsBase => "TS_PRINTED_SOURCE_NEEDS_BASE",
             Self::AssignConst => "TS_ASSIGN_CONST",
             Self::SavedFunctionUnusable => "TS_SAVED_FUNCTION_UNUSABLE",
             Self::MethodUnsupported => "TS_METHOD_UNSUPPORTED",
@@ -854,16 +847,7 @@ mod tests {
     #[test]
     fn every_accepted_repair_idiom_lowers() {
         use DiagnosticCode::*;
-        let document = lash_kernel_doc::Document::new(lash_kernel_doc::NumberPolicy::Float, vec![]);
-        let generated = crate::print_kernel(&document, None, Default::default())
-            .expect("small document prints");
-        let decoded = crate::read_kernel(&generated.source, &document, Default::default())
-            .expect("small, shallow generated source decodes");
-        assert_eq!(document.canonical_bytes(), decoded.0.canonical_bytes());
         let examples = [
-            (PrintedSourceNeedsBase, generated.source.as_str()),
-            (GeneratedSourceBytes, generated.source.as_str()),
-            (GeneratedSourceDepth, generated.source.as_str()),
             (
                 ClassUnsupported,
                 "function make(message, code) { return Object.assign(new Error(message), { code }); } make('oops', 'bad');",
@@ -1042,12 +1026,7 @@ mod tests {
             }
         }
         for (code, source) in examples {
-            let accepted = match code {
-                PrintedSourceNeedsBase | GeneratedSourceBytes | GeneratedSourceDepth => {
-                    crate::read_kernel(source, &document, Default::default()).map(|_| ())
-                }
-                _ => crate::tests::lower_with_effects(source).map(|_| ()),
-            };
+            let accepted = crate::tests::lower_with_effects(source).map(|_| ());
             accepted.unwrap_or_else(|error| {
                 panic!(
                     "{} suggests an unaccepted idiom: {error}\n{source}",

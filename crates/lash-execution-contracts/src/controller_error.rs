@@ -29,7 +29,8 @@ impl From<PluginError> for RuntimeEffectControllerError {
                     terminal_reason,
                 })
                 .into(),
-            error @ (PluginError::PackageNamespace { .. }
+            error @ (PluginError::Package(_)
+            | PluginError::PackageNamespace { .. }
             | PluginError::InternalOperation { .. }
             | PluginError::Preflight(_)
             | PluginError::ProviderConfig { .. }
@@ -106,6 +107,13 @@ impl From<PluginError> for RuntimeEffectControllerError {
                 record_kind,
                 message,
             } => Self::stored_data_corrupt(record_kind, message),
+            PluginError::PackageStoreRefused(refusal) => {
+                RuntimeError::new(RuntimeErrorCode::Plugin, refusal.to_string())
+                    .with_cause(crate::RuntimeErrorCause::PackageStoreRefused {
+                        refusal: Box::new(refusal),
+                    })
+                    .into()
+            }
             PluginError::StoreRefusal(err) => err.into_store_error().into(),
             PluginError::StoreUnavailable { fault } => Self::new(fault.code(), fault.to_string()),
             PluginError::Runtime(err) => err.into(),
@@ -189,7 +197,7 @@ impl From<PluginError> for RuntimeEffectControllerError {
             PluginError::ToolRegistrationRefused { ref source }
                 if matches!(
                     **source,
-                    crate::RegistrationRefused::UnregisteredIsolationEngine { .. }
+                    lash_vocabulary::tool_contract::RegistrationRefused::UnregisteredIsolationEngine { .. }
                 ) =>
             {
                 Self::new(
@@ -231,7 +239,7 @@ impl From<PluginError> for RuntimeEffectControllerError {
     }
 }
 
-fn err_message(refusal: &crate::RegistrationRefused) -> String {
+fn err_message(refusal: &lash_vocabulary::tool_contract::RegistrationRefused) -> String {
     format!("{refusal}; the work waits for a worker that registers that engine")
 }
 

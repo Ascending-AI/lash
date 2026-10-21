@@ -14,6 +14,7 @@ use lash_protocol_types::{
     llm::attachment_delivery::DeliveryForms, llm::attachment_delivery::DeliveryLimits,
     llm::attachment_delivery::DeliverySecret, llm::attachment_delivery::ProviderAccepts,
 };
+
 use lash_protocol_types::{
     llm::capability::AttachmentAcceptanceRule, llm::capability::AttachmentAcceptor,
     llm::capability::AttachmentCapabilitySnapshot,
@@ -116,6 +117,13 @@ struct LawStores {
     attachments: Arc<DeliveringStore>,
 }
 impl StoreSet for LawStores {
+    fn package_store(&self) -> Arc<dyn lash_durable::packages::PackageStore> {
+        self.inner.package_store()
+    }
+    fn execution_resolutions(&self) -> Arc<dyn lash_durable::resolutions::ExecutionResolutions> {
+        self.inner.execution_resolutions()
+    }
+
     fn durable_store(&self) -> Arc<dyn lash_durable::DurableStore> {
         self.inner.durable_store()
     }
@@ -184,8 +192,8 @@ impl StoreSet for LawStores {
 }
 
 struct NestedMedia;
-fn definition() -> lash_core::ToolDefinition {
-    lash_core::ToolDefinition::raw(
+fn definition() -> lash_vocabulary::tool_contract::ToolDefinition {
+    lash_vocabulary::tool_contract::ToolDefinition::raw(
         "tool:nested_media",
         "tools.nested_media",
         "Return retained media in an MCP content block",
@@ -201,7 +209,7 @@ impl ToolProvider for NestedMedia {
         &self,
         _config: &lash_core::OwnerConfigView,
     ) -> std::result::Result<
-        Vec<lash_core::ToolManifest>,
+        Vec<lash_vocabulary::tool_contract::ToolManifest>,
         lash_execution_contracts::plugin_error::PluginError,
     > {
         Ok(vec![definition().manifest()])
@@ -210,7 +218,7 @@ impl ToolProvider for NestedMedia {
         &self,
         name: &str,
         _config: &lash_core::OwnerConfigView,
-    ) -> Option<Arc<lash_core::ToolContract>> {
+    ) -> Option<Arc<lash_vocabulary::tool_contract::ToolContract>> {
         (name == "tools.nested_media").then(|| Arc::new(definition().contract()))
     }
     async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
@@ -330,7 +338,7 @@ async fn send(url: bool, tools: bool) -> Sent {
             lash::persistence::LeaseIncarnationId::new("node"),
         ))
         .unwrap();
-    let id = lash::SessionId::from("ref-law");
+    let id = lash_vocabulary::identity::SessionId::from("ref-law");
     let spec = lash::SessionSpec::new(
         MODEL,
         lash::TurnBudget::Unbounded,
@@ -359,7 +367,7 @@ async fn send(url: bool, tools: bool) -> Sent {
         std::time::Duration::from_secs(60),
         session
             .send(lash::TurnInput::text("read the media").with_attachment(reference.clone()))
-            .id(lash::TurnId::from("ref-law-turn"))
+            .id(lash_vocabulary::identity::TurnId::from("ref-law-turn"))
             .output(),
     )
     .await
@@ -491,7 +499,7 @@ impl ToolProvider for ReceiptTool {
         &self,
         _config: &lash_core::OwnerConfigView,
     ) -> std::result::Result<
-        Vec<lash_core::ToolManifest>,
+        Vec<lash_vocabulary::tool_contract::ToolManifest>,
         lash_execution_contracts::plugin_error::PluginError,
     > {
         Ok(vec![definition().manifest()])
@@ -501,7 +509,7 @@ impl ToolProvider for ReceiptTool {
         &self,
         name: &str,
         _config: &lash_core::OwnerConfigView,
-    ) -> Option<Arc<lash_core::ToolContract>> {
+    ) -> Option<Arc<lash_vocabulary::tool_contract::ToolContract>> {
         (name == "tools.nested_media").then(|| Arc::new(definition().contract()))
     }
 
@@ -591,7 +599,7 @@ async fn tool_put_receipts_match_session_delivery_advice() {
             lash::persistence::LeaseIncarnationId::new("node"),
         ))
         .unwrap();
-    let id = lash::SessionId::from("put-receipt-law");
+    let id = lash_vocabulary::identity::SessionId::from("put-receipt-law");
     core.session(id.clone())
         .create(lash::SessionCreation::root(lash::SessionSpec::new(
             MODEL,
@@ -629,7 +637,7 @@ async fn tool_put_receipts_match_session_delivery_advice() {
         std::time::Duration::from_secs(60),
         session
             .send(lash::TurnInput::text("put both blobs"))
-            .id(lash::TurnId::from("put-receipt-turn"))
+            .id(lash_vocabulary::identity::TurnId::from("put-receipt-turn"))
             .output(),
     )
     .await

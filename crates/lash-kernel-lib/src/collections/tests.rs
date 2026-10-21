@@ -4,6 +4,7 @@ use std::sync::Arc;
 use lash_kernel_doc::{
     Datum, ErrorDatum, FunctionRegistry, Handle, Integer, Timestamp, parse_document,
 };
+
 use lash_kernel_vm::{
     Bounds, End, Host, KernelMachine, Machine, Outcome, Program, Request, RunError, Step,
     register_machine_functions,
@@ -23,14 +24,6 @@ struct World {
     prints: Vec<Datum>,
 }
 impl Host for World {
-    fn clock(&mut self) -> Timestamp {
-        Timestamp {
-            nanoseconds: Integer::from(0),
-        }
-    }
-    fn random(&mut self) -> u64 {
-        0
-    }
     fn read(&mut self, _: &Handle, _: &Datum) -> Result<Datum, ErrorDatum> {
         Ok(Datum::Null)
     }
@@ -53,17 +46,15 @@ const BOUNDS: Bounds = Bounds {
 };
 fn program(source: &str) -> Program {
     let registry = Arc::new(registry());
-    let mut text =
-        String::from("kernel 1\nnumbers by_spelling\neffect echo(x: Any) -> Any contract \"1\"\n");
-    for (id, function) in registry.iter() {
-        text.push_str(&format!("use {} = @{id}\n", function.definition().name));
-    }
+    let mut text = String::from(
+        "kernel 1\nnumbers by_spelling\nimport 0 operation host.echo(x: Any) -> Any\n",
+    );
     text.push_str(source);
-    Program {
-        closure: lash_kernel_doc::heap::PageId([8; 32]),
-        document: Arc::new(parse_document(&text).unwrap()),
-        library: lash_kernel_vm::PreparedLibrary::new(registry),
-    }
+    let document = crate::testsupport::document(&text, &registry);
+    crate::testsupport::program(
+        Arc::new(document),
+        lash_kernel_vm::PreparedLibrary::new(registry),
+    )
 }
 fn machine(source: &str) -> KernelMachine {
     crate::testsupport::start(
@@ -86,9 +77,6 @@ fn run(source: &str) -> End {
                             machine
                                 .deliver(effect.wait, Outcome::Completed(effect.args[0].clone()))
                                 .unwrap();
-                        }
-                        Request::Sleep(sleep) => {
-                            machine.deliver(sleep.wait, Outcome::Elapsed).unwrap();
                         }
                     }
                 }
@@ -328,10 +316,7 @@ fn k_col_007_copies_preserve_sharing_and_refuse_cycles() {
 fn k_col_016_holds_none_reads_what_a_deep_copy_reads() {
     let verdict = |build: &str, kinds: &str| {
         let source = format!(
-            "fn nest(n) {{ let d = \"leaf\" let i = 0 while num.lt(i, n) {{ set d = [d] set i = num.add(i, 1) }} return d }} \
-             main {{ let x = absent {build} let held = [x] let passed = collection.holds_none(held, {kinds}) \
-             let copied = \"copied\" try {{ let c = list.copy_deep(held) }} catch e {{ set copied = e.kind }} \
-             return (passed, copied) }}"
+            "definition \"function nest(n: Any) -> Any\\nkernel 1\\nmetering statements\\nimport 0 operation host.echo(x: Any) -> Any\\nbody {{ let d = \\\"leaf\\\" let i = 0 while num.lt(i, n) {{ set d = [d] set i = num.add(i, 1) }} return d }}\"\n main {{ let x = absent {build} let held = [x] let passed = collection.holds_none(held, {kinds}) let copied = \"copied\" try {{ let c = list.copy_deep(held) }} catch e {{ set copied = e.kind }} return (passed, copied) }}"
         );
         match result(&source) {
             Datum::Tuple(pair) => match &pair[..] {
@@ -740,25 +725,25 @@ fn k_col_012_sum_zip_enumerate_and_range_have_kernel_bodies() {
 fn k_col_013_task_helpers_join_work_and_cancellation_cleanup() {
     assert_eq!(
         result(
-            "fn worker(x) { let v = perform echo(x) as Any return v } main { let a = spawn call worker(1) let b = spawn call worker(2) let out = invoke tasks.wait_all() return out }"
+            "definition \"function worker(x: Any) -> Any\\nkernel 1\\nmetering statements\\nimport 0 operation host.echo(x: Any) -> Any\\nbody { let v = perform 0(x) as Any return v }\"\n main { let a = spawn call worker(1) let b = spawn call worker(2) let out = invoke tasks.wait_all() return out }"
         ),
         list(&[1, 2])
     );
     assert_eq!(
         result(
-            "fn worker() { try { let v = perform echo(1) as Any } finally { let c = perform echo(2) as Any } } main { let h = spawn call worker() let out = invoke tasks.cancel_all() return list.len(out) }"
+            "definition \"function worker() -> Any\\nkernel 1\\nmetering statements\\nimport 0 operation host.echo(x: Any) -> Any\\nbody { try { let v = perform 0(1) as Any } finally { let c = perform 0(2) as Any } }\"\n main { let h = spawn call worker() let out = invoke tasks.cancel_all() return list.len(out) }"
         ),
         int(1)
     );
     assert_eq!(
         result(
-            "fn child() { let x = perform echo(2) as Any return x } fn parent() { let x = perform echo(1) as Any let h = spawn call child() return x } main { let h = spawn call parent() let out = invoke tasks.wait_all() return out }"
+            "definition \"function child() -> Any\\nkernel 1\\nmetering statements\\nimport 0 operation host.echo(x: Any) -> Any\\nbody { let x = perform 0(2) as Any return x }\"\n definition \"function parent() -> Any\\nkernel 1\\nmetering statements\\nimport 0 operation host.echo(x: Any) -> Any\\nbody { let x = perform 0(1) as Any let h = spawn call child() return x }\"\n main { let h = spawn call parent() let out = invoke tasks.wait_all() return out }"
         ),
         list(&[1, 2])
     );
     assert_eq!(
         result(
-            "fn child() { try { let x = perform echo(3) as Any } finally { let x = perform echo(4) as Any } } fn parent() { try { let x = perform echo(1) as Any } finally { let h = spawn call child() } } main { let h = spawn call parent() let out = invoke tasks.cancel_all() return list.len(out) }"
+            "definition \"function child() -> Any\\nkernel 1\\nmetering statements\\nimport 0 operation host.echo(x: Any) -> Any\\nbody { try { let x = perform 0(3) as Any } finally { let x = perform 0(4) as Any } }\"\n definition \"function parent() -> Any\\nkernel 1\\nmetering statements\\nimport 0 operation host.echo(x: Any) -> Any\\nbody { try { let x = perform 0(1) as Any } finally { let h = spawn call child() } }\"\n main { let h = spawn call parent() let out = invoke tasks.cancel_all() return list.len(out) }"
         ),
         int(2)
     );
@@ -806,7 +791,7 @@ fn callback_law(source: &str, expected: Datum, expected_effects: usize) {
     // The uninterrupted witness has the same callback body without its effect.
     // S4 owns checkpoint sealing; this law pins ordinary activation
     // waits, resuming the machine through its public delivery interface.
-    let uninterrupted = source.replace("let y = perform echo(x) as Any", "let y = x");
+    let uninterrupted = source.replace("let y = perform 0(x) as Any", "let y = x");
     assert_eq!(result(&uninterrupted), expected);
     let program = program(source);
     let mut machine = crate::testsupport::start(
@@ -842,7 +827,7 @@ fn callback_law(source: &str, expected: Datum, expected_effects: usize) {
 #[test]
 fn map_callback_wait_resumes_the_taken_element() {
     callback_law(
-        "fn f(x) { let y = perform echo(x) as Any return num.add(y, y) } main { let arg19 = [1, 2, 3] let out = invoke collection.map(arg19, &f) return out }",
+        "definition \"function f(x: Any) -> Any\\nkernel 1\\nmetering statements\\nimport 0 operation host.echo(x: Any) -> Any\\nbody { let y = perform 0(x) as Any return num.add(y, y) }\"\n main { let arg19 = [1, 2, 3] let out = invoke collection.map(arg19, &f) return out }",
         list(&[2, 4, 6]),
         3,
     );
@@ -850,7 +835,7 @@ fn map_callback_wait_resumes_the_taken_element() {
 #[test]
 fn filter_callback_wait_resumes_the_predicate_and_element() {
     callback_law(
-        "fn f(x) { let y = perform echo(x) as Any return num.lt(y, 3) } main { let arg20 = [1, 3, 2] let out = invoke collection.filter(arg20, &f) return out }",
+        "definition \"function f(x: Any) -> Any\\nkernel 1\\nmetering statements\\nimport 0 operation host.echo(x: Any) -> Any\\nbody { let y = perform 0(x) as Any return num.lt(y, 3) }\"\n main { let arg20 = [1, 3, 2] let out = invoke collection.filter(arg20, &f) return out }",
         list(&[1, 2]),
         3,
     );
@@ -858,7 +843,7 @@ fn filter_callback_wait_resumes_the_predicate_and_element() {
 #[test]
 fn reduce_callback_wait_resumes_the_accumulator() {
     callback_law(
-        "fn f(a, x) { let y = perform echo(x) as Any return num.add(a, y) } main { let arg21 = [1, 2, 3] let out = invoke collection.reduce(arg21, &f, 10) return out }",
+        "definition \"function f(a: Any, x: Any) -> Any\\nkernel 1\\nmetering statements\\nimport 0 operation host.echo(x: Any) -> Any\\nbody { let y = perform 0(x) as Any return num.add(a, y) }\"\n main { let arg21 = [1, 2, 3] let out = invoke collection.reduce(arg21, &f, 10) return out }",
         int(16),
         3,
     );
@@ -866,7 +851,7 @@ fn reduce_callback_wait_resumes_the_accumulator() {
 #[test]
 fn sort_callback_wait_resumes_the_snapshot_and_comparator_operands() {
     callback_law(
-        "fn f(a, b) { let x = num.sub(a, b) let y = perform echo(x) as Any return y } main { let xs = [3, 1, 2] do invoke list.sort(xs, &f) return xs }",
+        "definition \"function f(a: Any, b: Any) -> Any\\nkernel 1\\nmetering statements\\nimport 0 operation host.echo(x: Any) -> Any\\nbody { let x = num.sub(a, b) let y = perform 0(x) as Any return y }\"\n main { let xs = [3, 1, 2] do invoke list.sort(xs, &f) return xs }",
         list(&[1, 2, 3]),
         3,
     );
@@ -937,6 +922,7 @@ fn k_col_014_native_charges_count_the_sizes_and_are_repeatable() {
         .unwrap();
     let mut heap = crate::testsupport::heap();
     use lash_kernel_doc::{Operand, WorkCounter};
+
     let xs = crate::testsupport::decode(&mut heap, Datum::List(vec![Datum::Null; 3]));
     for _ in 0..2 {
         let result = crate::testsupport::call(
@@ -947,13 +933,17 @@ fn k_col_014_native_charges_count_the_sizes_and_are_repeatable() {
             &mut WorkCounter::new(None),
         )
         .unwrap();
-        let charge = copy.definition().charge.evaluate(&mut |operand, _| {
-            let value = match operand {
-                Operand::Result => &result,
-                Operand::Param(_) => &xs,
-            };
-            1 + heap.arena().len(value.handle().unwrap()).unwrap()
-        });
+        let charge = copy
+            .definition()
+            .charge()
+            .expect("formula-metered library function")
+            .evaluate(&mut |operand, _| {
+                let value = match operand {
+                    Operand::Result => &result,
+                    Operand::Param(_) => &xs,
+                };
+                1 + heap.arena().len(value.handle().unwrap()).unwrap()
+            });
         assert_eq!(charge, 9);
         assert_ne!(xs.handle(), result.handle());
     }
@@ -963,11 +953,10 @@ fn recorded_iteration(shard: &str) {
     let shard: serde_json::Value = serde_json::from_str(shard).unwrap();
     for case in shard["cases"].as_array().unwrap() {
         let document = parse_document(case["document"].as_str().unwrap()).unwrap();
-        let program = Program {
-            closure: lash_kernel_doc::heap::PageId([8; 32]),
-            document: Arc::new(document),
-            library: lash_kernel_vm::PreparedLibrary::new(Arc::new(FunctionRegistry::new())),
-        };
+        let program = crate::testsupport::program(
+            Arc::new(document),
+            lash_kernel_vm::PreparedLibrary::new(Arc::new(FunctionRegistry::new())),
+        );
         let mut machine = crate::testsupport::start(
             program,
             BOUNDS,
@@ -1310,6 +1299,7 @@ fn collection_expansion_refuses_under_the_real_census() {
 #[test]
 fn index_of_range_charge_bounds_search_and_numeric_equivalence() {
     use lash_kernel_doc::{Measure, Operand, WorkCounter};
+
     let registry = registry();
     let (_, search) = registry
         .iter()
@@ -1345,7 +1335,8 @@ fn index_of_range_charge_bounds_search_and_numeric_equivalence() {
             );
             let charge = search
                 .definition()
-                .charge
+                .charge()
+                .expect("formula-metered library function")
                 .evaluate(&mut |operand, measure| {
                     let Operand::Param(name) = operand else {
                         panic!("formula only measures arguments");
@@ -1385,6 +1376,7 @@ fn index_of_range_charge_bounds_search_and_numeric_equivalence() {
 #[test]
 fn identity_key_projection_preserves_identity_and_bounds_its_charge() {
     use lash_kernel_doc::{Float, Operand, Value, WorkCounter};
+
     let registry = registry();
     let (_, function) = registry
         .iter()
@@ -1419,10 +1411,14 @@ fn identity_key_projection_preserves_identity_and_bounds_its_charge() {
                 .all(|member| matches!(member, Value::ObjectRef(id) if *id == object)),
             "every slot keys the one object by its identity"
         );
-        let charged = function.definition().charge.evaluate(&mut |operand, _| {
-            assert_eq!(*operand, Operand::Result);
-            1 + length as u64
-        });
+        let charged = function
+            .definition()
+            .charge()
+            .expect("formula-metered library function")
+            .evaluate(&mut |operand, _| {
+                assert_eq!(*operand, Operand::Result);
+                1 + length as u64
+            });
         assert_eq!(charged, 2 + length as u64);
         assert_eq!(work.spent(), 1 + length as u64);
         assert!(charged >= work.spent());

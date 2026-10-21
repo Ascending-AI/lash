@@ -17,7 +17,7 @@ use std::time::{Duration, Instant};
 
 use lash_core_store::store::SessionCatalogStore as _;
 use lash_core_store::store::StoreError;
-use lash_protocol_types::SessionId;
+use lash_vocabulary::identity::SessionId;
 use rusqlite::{Connection, OpenFlags};
 
 use super::{

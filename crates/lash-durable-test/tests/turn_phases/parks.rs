@@ -261,7 +261,7 @@ impl Activation for PoisonFirst {
                 run: run(),
                 admission: RunAdmissionRecord::Turn {
                     took: AdmittedTurnRows::Inputs {
-                        ids: AdmittedInputIds::one(lash_protocol_types::InputId::from(
+                        ids: AdmittedInputIds::one(lash_vocabulary::identity::InputId::from(
                             "poisoned-batch",
                         )),
                     },

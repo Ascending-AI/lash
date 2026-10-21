@@ -10,7 +10,7 @@
     },
     {
       "name": "repeated parameters",
-      "document": "kernel 1\nnumbers by_spelling\nfn f(x, x) { return x } main { finish null }\n",
+      "document": "kernel 1\nnumbers by_spelling\ndefinition \"function f(x: Any, x: Any) -> Any\\nkernel 1\\nmetering statements\\nbody {\\n  return x\\n}\\n\"\nmain {\n  finish null\n}\n",
       "expected": {
         "end": "refused"
       }
@@ -31,7 +31,7 @@
     },
     {
       "name": "too many declared arguments",
-      "document": "kernel 1\nnumbers by_spelling\nfn f(x) { return x } main { do call f(1, 2) }\n",
+      "document": "kernel 1\nnumbers by_spelling\ndefinition \"function f(x: Any) -> Any\\nkernel 1\\nmetering statements\\nbody {\\n  return x\\n}\\n\"\nmain {\n  do invoke f(1, 2)\n}\n",
       "expected": {
         "end": "refused"
       }

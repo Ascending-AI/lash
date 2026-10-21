@@ -3,7 +3,7 @@
   "cases": [
     {
       "name": "callbacks execute as ordinary kernel code",
-      "document": "kernel 1\nnumbers by_spelling\nfn f(x) { return x } main { let callback = fn(x) { let y = call f(x) return y } let y = apply callback(7) finish y }\n",
+      "document": "kernel 1\nnumbers by_spelling\ndefinition \"function f(x: Any) -> Any\\nkernel 1\\nmetering statements\\nbody {\\n  return x\\n}\\n\"\ndefinition \"function kernel.anonymous(x: Any) -> Any\\nkernel 1\\nmetering statements\\nuse f = @8fe356185f3125e308ee26d96cab14597a67d5f6fdc83fbdc17d7d85aef33082\\nbody {\\n  let y = invoke f(x)\\n  return y\\n}\\n\"\nmain {\n  let callback = fn kernel.anonymous \n  let y = apply callback(7)\n  finish y\n}\n",
       "expected": {
         "end": {
           "finished": {

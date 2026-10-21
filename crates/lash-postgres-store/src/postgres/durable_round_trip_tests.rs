@@ -7,10 +7,13 @@
 // hands it.
 #![allow(clippy::disallowed_methods)]
 
-use lash_core_store::checkpoint_graph::{
-    CommitId, EncodeBudget, ExplicitLimit, GraphStaging, NodeId as GraphNode, NodeKind,
-    TokenWriter, TypedBody,
-};
+use lash_core_store::checkpoint_graph::CommitId;
+use lash_core_store::checkpoint_graph::EncodeBudget;
+use lash_core_store::checkpoint_graph::ExplicitLimit;
+use lash_core_store::checkpoint_graph::GraphStaging;
+use lash_core_store::checkpoint_graph::NodeId as GraphNode;
+use lash_core_store::checkpoint_graph::NodeKind;
+use lash_core_store::checkpoint_graph::TypedBody;
 use lash_core_store::store::AdmittedTurnRows;
 use lash_core_store::store::RunAdmissionRecord;
 use lash_durable::domain::{
@@ -21,7 +24,9 @@ use lash_durable::{
     ActorKey, ActorTx, CommitLabel, DurableReads as _, DurableStore as _, Epoch, FormatSet, MailTx,
     NodeId, NodeSpec, Release,
 };
-use lash_protocol_types::{SessionId, TurnId};
+use lash_vocabulary::identity::SessionId;
+use lash_vocabulary::identity::TurnId;
+use lash_vocabulary::tokens::TokenWriter;
 
 use crate::PostgresStorage;
 use crate::observed_sql::ROUND_TRIPS;
@@ -106,7 +111,7 @@ fn staged(tx: &mut ActorTx, kind: NodeKind, text: &str) -> GraphNode {
 }
 
 /// Accept input `id` for `owned`'s session, as a producer does.
-async fn accept(owned: &Owned, id: &str) -> lash_protocol_types::InputId {
+async fn accept(owned: &Owned, id: &str) -> lash_vocabulary::identity::InputId {
     use lash_core_store::store::TurnInputStore as _;
     use lash_core_store::turn_input_vocabulary::PendingTurnInputBatch;
     let draft = lash_core_store::turn_input_vocabulary::PendingTurnInputDraft::new(
@@ -125,7 +130,7 @@ async fn accept(owned: &Owned, id: &str) -> lash_protocol_types::InputId {
 }
 
 /// Admit `run` with `input` on `tx`, as the session's drain does.
-fn admit(tx: &mut ActorTx, owned: &Owned, run: &TurnId, input: lash_protocol_types::InputId) {
+fn admit(tx: &mut ActorTx, owned: &Owned, run: &TurnId, input: lash_vocabulary::identity::InputId) {
     tx.write(DomainWrite::SessionMail(SessionMailWrite::Admit {
         session: owned.session.clone(),
         run: run.clone(),

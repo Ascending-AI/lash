@@ -14,7 +14,7 @@ use lash_core_store::checkpoint_graph::{
     DecodeLimits, GraphDecoder, GraphStaging, NodeId, NodeSource,
 };
 
-use crate::plugin::PluginCallbackIdentity;
+use lash_vocabulary::providers::PluginCallbackIdentity;
 
 /// A model call's receipt: the callbacks its derivation owes, in their
 /// recorded order, and the outcome `A` the integrator records.

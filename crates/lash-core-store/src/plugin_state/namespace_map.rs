@@ -7,12 +7,22 @@ use std::sync::{Arc, Mutex};
 use serde_json::Value;
 
 use super::NamespaceValues;
-use crate::checkpoint_graph::{
-    DecodeLimits, EncodeBudget, EncodedNode, ExplicitLimit, GraphDecoder, GraphRefusal,
-    GraphStaging, NodeId, NodeKind, NodeSource, TokenCodec, TokenError, TokenReader, TokenWriter,
-    closure,
-};
+use crate::checkpoint_graph::DecodeLimits;
+use crate::checkpoint_graph::EncodeBudget;
+use crate::checkpoint_graph::EncodedNode;
+use crate::checkpoint_graph::ExplicitLimit;
+use crate::checkpoint_graph::GraphDecoder;
+use crate::checkpoint_graph::GraphRefusal;
+use crate::checkpoint_graph::GraphStaging;
+use crate::checkpoint_graph::NodeId;
+use crate::checkpoint_graph::NodeKind;
+use crate::checkpoint_graph::NodeSource;
+use crate::checkpoint_graph::closure;
 use crate::store::BlobRef;
+use lash_vocabulary::tokens::TokenCodec;
+use lash_vocabulary::tokens::TokenError;
+use lash_vocabulary::tokens::TokenReader;
+use lash_vocabulary::tokens::TokenWriter;
 
 /// A resident optimization with no value semantics and no serialized state.
 #[derive(Clone, Default)]

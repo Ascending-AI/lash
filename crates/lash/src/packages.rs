@@ -1,432 +1,295 @@
-//! What package code a node runs, and which package surface its cells are
-//! written under (FIG-6918, FIG-6991, FIG-6993).
-//!
-//! A host registers its package set once ([`HeldPackages`]). Before its
-//! node starts, [`NodeInstall`] installs every artifact and the set in the
-//! store, the set with its surface snapshot and requirements and every
-//! definition of it as a stored kind-14 node, and the node advertises
-//! what it offers running code: the natives it binds, the kernel versions
-//! it interprets and its own set. Snapshots and the definitions they name
-//! are never deleted: an install writes them once and nothing else writes
-//! or removes them. Work linked under any stored set runs from the store on
-//! any node whose capabilities meet the work's hard requirements, so no
-//! node retains another build's code.
-//!
-//! [`FleetPackages`] is the package gate (PROMOTE-BY-CAPABILITY): a cell
-//! is written under the newest, by the store's install sequence, of the
-//! live serving nodes' own surfaces whose requirements every live serving
-//! node meets ([`promoted`]). A serving node is one that decodes this
-//! build's session set or a session set it carries forward, so a node
-//! serving only carried sessions counts. With no serving nodes, the gate
-//! durably installs and answers the writer's own set without registering
-//! a node. With a nonempty fleet, when no candidate is one every
-//! serving node can run, a new cell fails with the typed
-//! `NoCompatibleSnapshot` refusal: the gate never answers a partial
-//! surface. The gate reads the chosen set's surface as any node reads a
-//! stored one: its own from its registration, another's from the store.
+//! Trusted scoped publication. Package content and its provenance are held
+//! before config, a round or a process can expose their references.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
-use lash_core::durable_port::packages::{ArtifactInstall, SetInstall};
-use lash_core::durable_port::{
-    DurableError, FormatSet, NodeCapabilities, NodeCapability, PackageArtifact, PackageCatalog,
-    PackageSetDigest, StoreFailure, StoreFailureKind, StoredSet,
+use lash_core::ReferrerClaim;
+use lash_core::durable_port::packages::PackageStore;
+use lash_core::plugin::packages::{
+    PackagePublisher, PublishPackage, package_store_error as store_error,
 };
-use lash_kernel_package::{ArtifactKey, HeldPackages, PackageSet};
+use lash_core_store::packages::PackageRecord;
+use lash_execution_contracts::process::ProcessDocumentProvider;
+use lash_execution_contracts::process::linking::{AdmissionRefusal, ContentRef, EnginePortError};
+use lash_vocabulary::{names::*, package::*};
 
-/// The artifact `key` as the store spells it.
-fn package_artifact(key: &ArtifactKey) -> PackageArtifact {
-    PackageArtifact {
-        digest: key.digest,
-        path: key.path.to_string(),
-    }
+/// A publisher bound by the host to its owned roots and immutable accepted
+/// namespace. Guest input cannot choose a publication domain or publisher.
+pub struct ScopedPackagePublisher {
+    context: PublicationContext,
+    snapshot: NamespaceSnapshot,
+    runtime: Arc<dyn ProcessDocumentProvider>,
+    store: Arc<dyn PackageStore>,
 }
 
-fn members(set: &PackageSet) -> BTreeSet<PackageArtifact> {
-    set.keys().map(|key| package_artifact(&key)).collect()
-}
-
-/// The rows a node of `packages` installs before it serves: every artifact
-/// of its set, by key with its header, its definitions and the operations
-/// it declares internal, and the set, with its surface and requirements.
-pub fn install_rows(packages: &HeldPackages) -> (Vec<ArtifactInstall>, Vec<SetInstall>) {
-    let artifacts = packages
-        .artifacts()
-        .iter()
-        .map(|(key, package)| ArtifactInstall {
-            artifact: package_artifact(key),
-            header: serde_json::to_string(&package.header()).unwrap_or_default(),
-            definitions: package.code().ids().iter().copied().collect(),
-            internal: package
-                .exports()
-                .iter()
-                .filter_map(|(segment, export)| match export {
-                    lash_kernel_package::Export::Operation(operation)
-                        if operation.visibility == lash_kernel_package::Visibility::Internal =>
-                    {
-                        Some(
-                            lash_kernel_package::QualifiedOperation {
-                                package: package.path().clone(),
-                                name: segment.clone(),
-                            }
-                            .effect_name(),
-                        )
-                    }
-                    _ => None,
-                })
-                .collect(),
-            labels: lash_kernel_package::PackageLabels {
-                release: package.release().to_owned(),
-                display: package.display().clone(),
-            }
-            .encode(),
-        })
-        .collect();
-    let set = packages.set();
-    let surface = packages.surface();
-    let sets = vec![SetInstall {
-        digest: set.digest(),
-        members: members(set),
-        surface: surface.encode(),
-        requirements: surface.requirements().clone(),
-    }];
-    (artifacts, sets)
-}
-
-/// The referrer that holds a stored surface's definitions: one pin per set,
-/// named by its digest and never released, so the definitions a surface
-/// names stay stored as long as the surface does, which is always.
-fn surface_pin(packages: &PackageSetDigest) -> lash_core::ReferrerClaim {
-    // A pin spells a v4 UUID: the digest's first 16 bytes with the
-    // version and variant bits set.
-    let mut bytes = [0_u8; 16];
-    bytes.copy_from_slice(&packages.as_bytes()[..16]);
-    bytes[6] = (bytes[6] & 0x0f) | 0x40;
-    bytes[8] = (bytes[8] & 0x3f) | 0x80;
-    let hex: String = bytes.iter().map(|byte| format!("{byte:02x}")).collect();
-    lash_core::HostArtifactPin::try_from(format!("host-pin:v1:{hex}"))
-        .ok()
-        .and_then(|pin| {
-            lash_core::ReferrerClaim::unguarded(lash_core::ArtifactReferrer::HostPin(pin)).ok()
-        })
-        .unwrap_or_else(|| unreachable!("a digest's hex is a pin"))
-}
-
-/// Stores every definition of `packages`' set as its kind-14 node, under
-/// the set's pin, when the store does not hold the set yet: what a node
-/// built with another set reads its code from. The set's row is written
-/// after its definitions, so a stored set's definitions are stored.
-async fn hold_definitions(
-    backend: &crate::Backend,
-    packages: &HeldPackages,
-    catalog: &PackageCatalog,
-) -> Result<(), DurableError> {
-    let digest = packages.digest();
-    if catalog.sets.iter().any(|stored| stored.digest == digest) {
-        return Ok(());
-    }
-    let documents = lash_vm_runtime::KernelDocuments::new(backend.module_artifacts());
-    let definitions: Vec<_> = packages
-        .artifacts()
-        .values()
-        .flat_map(|package| package.code().ids().iter().copied())
-        .filter_map(|function| {
-            let registered = packages.functions().get(&function)?;
-            Some((function, registered.image()))
-        })
-        .collect();
-    documents
-        .hold_definitions(&surface_pin(&digest), &definitions)
-        .await
-        .map_err(|error| {
-            DurableError::Store(StoreFailure {
-                kind: StoreFailureKind::Unavailable,
-                message: format!("package set {digest}'s definitions are not stored: {error}"),
-            })
-        })
-}
-
-/// The package code one node runs: the host's one registration, which
-/// the node installs and advertises before it starts.
-pub(crate) struct NodeInstall {
-    packages: Arc<HeldPackages>,
-    capabilities: NodeCapabilities,
-}
-
-impl NodeInstall {
-    pub(crate) fn new(packages: Arc<HeldPackages>) -> Self {
-        Self {
-            capabilities: lash_kernel_package::node_capabilities(&packages),
-            packages,
-        }
-    }
-}
-
-#[async_trait::async_trait]
-impl lash_execution_contracts::backend::NodePackages for NodeInstall {
-    fn surface_view(&self) -> Arc<dyn lash_kernel_dialect::ExportView + Send + Sync> {
-        Arc::new(lash_kernel_package::SharedPackageView::declared(
-            Arc::clone(&self.packages),
-        ))
-    }
-    fn packages(&self) -> &Arc<HeldPackages> {
-        &self.packages
-    }
-
-    async fn install(&self, backend: &crate::Backend) -> Result<NodeCapabilities, DurableError> {
-        let (artifacts, sets) = install_rows(&self.packages);
-        let catalog = backend.durable().package_catalog().await?;
-        hold_definitions(backend, &self.packages, &catalog).await?;
-        backend
-            .durable()
-            .install_packages(&artifacts, &sets)
-            .await?;
-        Ok(self.capabilities.clone())
-    }
-}
-
-/// The live nodes that serve these sessions: each that decodes `session`,
-/// this build's session set, or one of `carried`, the session sets it
-/// carries forward. A node serving only carried sessions decodes no set of
-/// this build and still serves them.
-pub(crate) fn serving<'a>(
-    live: &'a [NodeCapability],
-    session: &FormatSet,
-    carried: &[FormatSet],
-) -> Vec<&'a NodeCapability> {
-    live.iter()
-        .filter(|node| {
-            node.decodes.contains(session) || carried.iter().any(|set| node.decodes.contains(set))
-        })
-        .collect()
-}
-
-/// PROMOTE-BY-CAPABILITY (FIG-6993): of the stored sets that are the own
-/// set of some live node of `serving`, the newest by install sequence
-/// whose requirements `writer` and every node of `serving` meet; `None`
-/// when there is none. The gate handles an empty serving fleet separately.
-pub(crate) fn promoted<'a>(
-    stored: &'a [StoredSet],
-    serving: &[&NodeCapability],
-    writer: &NodeCapabilities,
-) -> Option<&'a StoredSet> {
-    stored
-        .iter()
-        .filter(|set| {
-            serving
-                .iter()
-                .any(|node| node.capabilities.surface == Some(set.digest))
-        })
-        .filter(|set| {
-            set.requirements.met_by(writer)
-                && serving
-                    .iter()
-                    .all(|node| set.requirements.met_by(&node.capabilities))
-        })
-        .max_by_key(|set| set.sequence)
-}
-
-/// The package surface a node of `backend` writes a cell under: the
-/// package gate. Stored surfaces not the node's own are read once each,
-/// with the definitions they name that it lacks: both are immutable.
-#[cfg(feature = "codemode")]
-pub(crate) struct FleetPackages {
-    backend: crate::Backend,
-    node: Arc<dyn lash_execution_contracts::backend::NodePackages>,
-    /// What the node's package code offers: the writer's capabilities the
-    /// gate's answer must meet.
-    capabilities: NodeCapabilities,
-    stored: std::sync::Mutex<
-        std::collections::BTreeMap<PackageSetDigest, lash_execution_contracts::CellPackages>,
-    >,
-}
-
-#[cfg(feature = "codemode")]
-impl FleetPackages {
-    pub(crate) fn new(
-        backend: crate::Backend,
-        node: Arc<dyn lash_execution_contracts::backend::NodePackages>,
+impl ScopedPackagePublisher {
+    pub fn new(
+        context: PublicationContext,
+        snapshot: NamespaceSnapshot,
+        runtime: Arc<dyn ProcessDocumentProvider>,
+        store: Arc<dyn PackageStore>,
     ) -> Self {
         Self {
-            capabilities: lash_kernel_package::node_capabilities(node.packages()),
-            backend,
-            node,
-            stored: std::sync::Mutex::default(),
+            context,
+            snapshot,
+            runtime,
+            store,
         }
     }
 
-    /// The surface of `packages`: the node's own registration when it is
-    /// the node's set, else the stored surface over the node's registry and
-    /// the stored definitions it lacks.
-    async fn surface(
-        &self,
-        packages: PackageSetDigest,
-    ) -> Result<lash_execution_contracts::CellPackages, String> {
-        let held = self.node.packages();
-        if held.digest() == packages {
-            return Ok(lash_execution_contracts::CellPackages::held(held));
-        }
-        if let Some(cell) = self
-            .stored
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .get(&packages)
-        {
-            return Ok(cell.clone());
-        }
-        let bytes = self
-            .backend
-            .durable()
-            .package_surface(&packages)
+    /// Rebuild config from its exact publication. This does not link against
+    /// today's namespace or select a newer publication at the same path.
+    pub async fn configured(&self, key: &PublicationKey) -> Result<Package, EnginePortError> {
+        let record = self
+            .store
+            .publication(key)
             .await
-            .map_err(|error| error.to_string())?
-            .ok_or_else(|| format!("package set {packages} has no stored surface"))?;
-        let surface = lash_kernel_package::SurfaceSnapshot::decode(packages, &bytes)
-            .map_err(|refusal| refusal.to_string())?;
-        let artifacts: Vec<_> = surface
-            .packages()
-            .map(lash_kernel_package::SnapshotPackage::digest)
-            .collect();
-        let labels = self
-            .backend
-            .durable()
-            .package_labels(&artifacts)
-            .await
-            .map_err(|error| error.to_string())?;
-        // An artifact's newest install's labels: the release it was last
-        // installed as.
-        let surface = surface.with_labels(|artifact| {
-            labels
-                .get(artifact)
-                .and_then(|labels| labels.last())
-                .and_then(|text| lash_kernel_package::PackageLabels::decode(text).ok())
-        });
-        let missing: Vec<_> = surface
-            .functions()
-            .into_iter()
-            .filter(|function| held.functions().get(function).is_none())
-            .collect();
-        let stored = lash_vm_runtime::KernelDocuments::new(self.backend.module_artifacts())
-            .stored_functions(missing)
-            .await
-            .map_err(|error| error.to_string())?
-            .map_err(|unretained| {
-                format!("package set {packages}'s definitions: {unretained:?}")
+            .map_err(store_error)?
+            .ok_or_else(|| EnginePortError::Unavailable {
+                message: format!("configured package publication {key:?} is missing"),
             })?;
-        let catalog = held
-            .catalog_with(&stored)
-            .map_err(|refusal| refusal.to_string())?;
-        let cell =
-            lash_execution_contracts::CellPackages::stored(Arc::new(surface), catalog, stored);
-        self.stored
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .insert(packages, cell.clone());
-        Ok(cell)
+        if record.context != self.context {
+            return Err(EnginePortError::Refused(AdmissionRefusal::NotOwner {
+                path: record.path,
+            }));
+        }
+        let PublishedContent::Package(id) = record.content else {
+            return Err(EnginePortError::Refused(
+                AdmissionRefusal::InvalidDocument {
+                    message: "configured enumerated package is deferred".into(),
+                },
+            ));
+        };
+        self.store
+            .package(&id)
+            .await
+            .map_err(store_error)?
+            .map(|record| record.package)
+            .ok_or_else(|| EnginePortError::Unavailable {
+                message: format!("configured package {id} is missing"),
+            })
     }
 }
 
-#[cfg(feature = "codemode")]
-fn packages_unavailable(message: impl Into<String>) -> lash_core::RuntimeEffectControllerError {
-    lash_core::RuntimeEffectControllerError::new(
-        lash_core::RuntimeErrorCode::RunDefinitionUnavailable,
-        message,
-    )
-    .retryable_uncommitted_derivation()
-}
-
-/// The candidates the gate considered when it answers none: each live
-/// serving node's own surface the store holds, with what
-/// some serving node or the writer lacks to run it.
-#[cfg(feature = "codemode")]
-fn candidates(
-    stored: &[StoredSet],
-    serving: &[&NodeCapability],
-    writer: &NodeCapabilities,
-) -> Vec<lash_core_store::runtime_error::SnapshotCandidate> {
-    let capabilities = writer;
-    stored
-        .iter()
-        .filter(|set| {
-            serving
-                .iter()
-                .any(|node| node.capabilities.surface == Some(set.digest))
-        })
-        .map(|set| {
-            let mut unmet = set.requirements.unmet_by(capabilities);
-            for node in serving {
-                let lacking = set.requirements.unmet_by(&node.capabilities);
-                unmet.natives.extend(lacking.natives);
-                unmet.kernels.extend(lacking.kernels);
-            }
-            lash_core_store::runtime_error::SnapshotCandidate {
-                surface: set.digest.to_string(),
-                unmet: unmet
-                    .natives
-                    .iter()
-                    .map(|native| format!("native {native}"))
-                    .chain(
-                        unmet
-                            .kernels
-                            .iter()
-                            .map(|kernel| format!("kernel {kernel}")),
-                    )
-                    .collect(),
-            }
-        })
-        .collect()
-}
-
-#[cfg(feature = "codemode")]
 #[async_trait::async_trait]
-impl lash_execution_contracts::PackageGate for FleetPackages {
-    async fn writable(
+impl PackagePublisher for ScopedPackagePublisher {
+    async fn publish(
         &self,
-    ) -> Result<lash_execution_contracts::CellPackages, lash_core::RuntimeEffectControllerError>
-    {
-        let durable = self.backend.durable();
-        let unavailable = |error: DurableError| {
-            tracing::warn!(?error, "package gate read unavailable; lowering deferred");
-            packages_unavailable(format!("package gate read unavailable: {error}"))
+        claim: &ReferrerClaim,
+        context: &PublicationContext,
+        request: PublishPackage,
+    ) -> Result<PublicationRecord, EnginePortError> {
+        let package = request.package;
+        if context != &self.context || package.path.as_slice()[0] != context.root {
+            return Err(EnginePortError::Refused(AdmissionRefusal::NotOwner {
+                path: package.path,
+            }));
+        }
+        let mut content = lash_kernel_package::LinkedContent::default();
+        for accepted in &self.snapshot.advertisements {
+            if let PackageAdvertisement::Enumerated(package) = &accepted.advertisement {
+                content.packages.insert(package.identity(), package.clone());
+            }
+        }
+        let publications: Vec<_> = self
+            .snapshot
+            .advertisements
+            .iter()
+            .map(|accepted| &accepted.publication)
+            .collect();
+        let mut prepared = BTreeMap::new();
+        for code in request.code {
+            if code.content.identity() != code.inspection.link
+                || code.content.document != code.inspection.document
+            {
+                return Err(EnginePortError::Refused(
+                    AdmissionRefusal::InvalidDocument {
+                        message: "prepared Link inspection does not identify its content".into(),
+                    },
+                ));
+            }
+            let id = code.inspection.link;
+            if prepared.insert(id, code).is_some() {
+                return Err(EnginePortError::Refused(
+                    AdmissionRefusal::InvalidDocument {
+                        message: format!("duplicate prepared Link {id}"),
+                    },
+                ));
+            }
+        }
+        let code_links: BTreeSet<_> = package
+            .members
+            .values()
+            .filter_map(|member| match member.kind {
+                MemberKind::Export { link, .. } => Some(link),
+                MemberKind::Operation(_) => None,
+            })
+            .collect();
+        let mut pending: Vec<_> = code_links.iter().copied().collect();
+        let mut imported = BTreeSet::new();
+        while let Some(id) = pending.pop() {
+            if content.links.contains_key(&id) {
+                continue;
+            }
+            let link = match prepared.get(&id) {
+                Some(code) => code.content.clone(),
+                None => self
+                    .runtime
+                    .load(&ContentRef::Link(id))
+                    .await?
+                    .material
+                    .downcast::<Link>()
+                    .map_err(|_| {
+                        EnginePortError::Refused(AdmissionRefusal::InvalidDocument {
+                            message: format!("runtime returned another material for Link {id}"),
+                        })
+                    })?,
+            };
+            let document = self
+                .runtime
+                .load(&ContentRef::Document(link.document))
+                .await?
+                .material
+                .downcast::<lash_kernel_doc::Document>()
+                .map_err(|_| {
+                    EnginePortError::Refused(AdmissionRefusal::InvalidDocument {
+                        message: format!(
+                            "runtime returned another material for Document {}",
+                            link.document
+                        ),
+                    })
+                })?;
+            for (slot, import) in &document.imports {
+                if prepared.contains_key(&id)
+                    && import.name.package != package.path
+                    && matches!(link.fills.get(slot), Some(Fill::Export { .. }))
+                {
+                    imported.insert(import.name.package.clone());
+                }
+            }
+            for fill in link.fills.values() {
+                if let Fill::Export { link, .. } = fill {
+                    pending.push(*link);
+                }
+            }
+            content.documents.insert(link.document, document);
+            content.links.insert(id, link);
+        }
+        let namespace = lash_kernel_package::Namespace {
+            advertisements: self
+                .snapshot
+                .advertisements
+                .iter()
+                .map(|accepted| (&accepted.publication.context, &accepted.advertisement))
+                .collect(),
         };
-        let catalog = durable.package_catalog().await.map_err(unavailable)?;
-        let live = durable.live_nodes().await.map_err(unavailable)?;
-        let formats = self.backend.formats();
-        let serving = serving(&live, formats.session(), formats.carried_sessions());
-        let chosen = if serving.is_empty() {
-            self.node.install(&self.backend).await.map_err(|error| {
-                tracing::warn!(
-                    ?error,
-                    "package bootstrap installation unavailable; lowering deferred"
-                );
-                packages_unavailable(format!(
-                    "package bootstrap installation unavailable: {error}"
-                ))
-            })?;
-            self.node.packages().digest()
-        } else {
-            promoted(&catalog.sets, &serving, &self.capabilities)
-                .map(|set| set.digest)
+        // A newly prepared Link must be exactly the result of fulfilment
+        // under this publisher. Reusing a stored Link instead retains its
+        // original publication and never relinks its internal Imports.
+        let candidate = PackageAdvertisement::Enumerated(package.clone());
+        let mut advertisements = namespace.advertisements.clone();
+        advertisements.push((context, &candidate));
+        let authoring = lash_kernel_package::Namespace { advertisements };
+        for code in prepared.values() {
+            let expected = authoring
+                .fulfil(
+                    &content,
+                    code.content.document,
+                    context,
+                    Some(&package.path),
+                    None,
+                )
+                .map_err(lash_vm_runtime::map_link_refusal)?;
+            if expected != code.content {
+                return Err(EnginePortError::Refused(
+                    AdmissionRefusal::InvalidDocument {
+                        message: "prepared Link does not match its publisher's admitted Imports"
+                            .into(),
+                    },
+                ));
+            }
+        }
+        content
+            .validate_publication(context, &package, &namespace)
+            .map_err(lash_vm_runtime::map_link_refusal)?;
+        // Keep exact source publications, including alias provenance, rather
+        // than treating a copied LinkId as permission to use internal code.
+        let mut imported_publications = Vec::new();
+        for path in imported {
+            let accepted = self
+                .snapshot
+                .advertisements
+                .iter()
+                .find(|accepted| match &accepted.advertisement {
+                    PackageAdvertisement::Enumerated(source) => source.path == path,
+                    PackageAdvertisement::Deferred(_) => false,
+                })
                 .ok_or_else(|| {
-                    lash_core::RuntimeEffectControllerError::no_compatible_snapshot(candidates(
-                        &catalog.sets,
-                        &serving,
-                        &self.capabilities,
-                    ))
-                })?
+                    EnginePortError::Refused(AdmissionRefusal::NotOwner { path: path.clone() })
+                })?;
+            let PackageAdvertisement::Enumerated(source) = &accepted.advertisement else {
+                unreachable!("selected enumerated source")
+            };
+            let id = source.identity();
+            let mut sources = publications.iter().copied().filter(|record| {
+                record.context == accepted.publication.context
+                    && record.path == path
+                    && record.content == PublishedContent::Package(id)
+            });
+            let source = sources.next().ok_or_else(|| {
+                EnginePortError::Refused(AdmissionRefusal::NotOwner { path: path.clone() })
+            })?;
+            if sources.any(|other| other != source) {
+                return Err(EnginePortError::Refused(AdmissionRefusal::NotOwner {
+                    path,
+                }));
+            }
+            imported_publications.push(source.key());
+        }
+        // An alias has no code Import of its own. Retain the exact publication
+        // that already admitted its defining Link, never provenance by hash alone.
+        for id in code_links.iter().filter(|id| !prepared.contains_key(id)) {
+            let mut sources = publications
+                .iter()
+                .copied()
+                .filter(|record| record.code_links.contains(id));
+            let source = sources.next().ok_or_else(|| {
+                EnginePortError::Refused(AdmissionRefusal::NotOwner {
+                    path: package.path.clone(),
+                })
+            })?;
+            if sources.any(|other| other != source) {
+                return Err(EnginePortError::Refused(AdmissionRefusal::NotOwner {
+                    path: package.path.clone(),
+                }));
+            }
+            let key = source.key();
+            if !imported_publications.contains(&key) {
+                imported_publications.push(key);
+            }
+        }
+        for id in &code_links {
+            self.runtime.hold(claim, &ContentRef::Link(*id)).await?;
+        }
+        let id = package.identity();
+        let path = package.path.clone();
+        self.store
+            .put_package(claim, &PackageRecord { id, package })
+            .await
+            .map_err(store_error)?;
+        let record = PublicationRecord {
+            context: context.clone(),
+            path,
+            content: PublishedContent::Package(id),
+            code_links,
+            imported_publications,
         };
-        tracing::info!(
-            serving = serving.len(),
-            chosen = %chosen.short(),
-            "package gate"
-        );
-        self.surface(chosen).await.map_err(|message| {
-            tracing::warn!(%message, "stored package surface unavailable; lowering deferred");
-            packages_unavailable(format!(
-                "the stored package surface {chosen} is unavailable: {message}"
-            ))
-        })
+        self.store
+            .publish(claim, &record)
+            .await
+            .map_err(store_error)?;
+        Ok(record)
     }
 }
 

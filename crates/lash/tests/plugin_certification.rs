@@ -287,7 +287,7 @@ async fn the_battery_names_the_state_law_for_an_over_limit_plugin() {
         }
         fn initialize_state(
             &self,
-            _: &lash::RuntimeOwner,
+            _: &lash_vocabulary::identity::RuntimeOwner,
             _: &PluginConfig,
         ) -> Result<std::collections::BTreeMap<String, serde_json::Value>, PluginError> {
             Ok(std::collections::BTreeMap::from([(

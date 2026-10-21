@@ -1,3 +1,13 @@
+use bool.not
+use num.is_finite
+use num.to_float
+use num.le
+use num.mul
+use num.lt
+use error.new
+operation python.sleep(milliseconds: Int) -> Null
+use float.to_int
+use num.floor
 # asyncio over kernel tasks.
 #
 # A Python task is a kernel task handle. The task runs `py.task.run`, which
@@ -129,7 +139,7 @@ body {
 # run and asks the host for nothing.
 function py.sleep(seconds: Any) -> Null
 kernel 1
-charge 6
+charge 512
 body {
   let ok = invoke py.is_number(seconds)
   if ok {
@@ -137,8 +147,13 @@ body {
       do yield
       return null
     }
-    let duration = mul(seconds, 1000)
-    do sleep duration
+    if bool.not(num.is_finite(seconds)) { throw error.new("number_range", "`sleep` takes a duration that is finite and not negative") }
+    let milliseconds = 9223372036854775807
+    if le(seconds, 9223372036854775) {
+      let duration = num.mul(num.to_float(seconds), 1000.0)
+      if num.lt(duration, 9223372036854775808.0) { set milliseconds = float.to_int(num.floor(duration)) }
+    }
+    do perform python.sleep(milliseconds) as Null then yield
     return null
   }
   let name = invoke py.type(seconds)

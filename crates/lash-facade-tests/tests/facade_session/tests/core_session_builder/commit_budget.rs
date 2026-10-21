@@ -24,21 +24,29 @@ async fn adopted_attachment_intent_rows_fail_the_node_budget_before_commit() {
     .expect("core");
 
     // Precondition: a turn with no attachment fits the budget.
-    core.session(lash::SessionId::parse("commit-graph-only-budget-surface").expect("id"))
-        .create(lash::SessionCreation::root(mock_session_spec()))
-        .await
-        .expect("created")
-        .send(lash::TurnInput::text("graph rows only"))
-        .output()
-        .await
-        .expect("a graph-only turn fits the node budget");
+    core.session(
+        lash_vocabulary::identity::SessionId::parse("commit-graph-only-budget-surface")
+            .expect("id"),
+    )
+    .create(lash::SessionCreation::root(mock_session_spec()))
+    .await
+    .expect("created")
+    .send(lash::TurnInput::text("graph rows only"))
+    .output()
+    .await
+    .expect("a graph-only turn fits the node budget");
 
-    core.session(lash::SessionId::parse("commit-adoption-row-budget-surface").expect("id"))
-        .create(lash::SessionCreation::root(mock_session_spec()))
-        .await
-        .expect("created");
+    core.session(
+        lash_vocabulary::identity::SessionId::parse("commit-adoption-row-budget-surface")
+            .expect("id"),
+    )
+    .create(lash::SessionCreation::root(mock_session_spec()))
+    .await
+    .expect("created");
     let session = core
-        .session(lash::SessionId::from("commit-adoption-row-budget-surface"))
+        .session(lash_vocabulary::identity::SessionId::from(
+            "commit-adoption-row-budget-surface",
+        ))
         .open()
         .await
         .expect("open");
@@ -116,12 +124,16 @@ async fn attachment_put_reports_its_configured_byte_delivery_budget() {
     )
     .build(lash_facade_tests::runtime_lease_owner())
     .expect("core");
-    core.session(lash::SessionId::from("put-budget-receipt"))
-        .create(lash::SessionCreation::root(mock_session_spec()))
-        .await
-        .expect("session");
+    core.session(lash_vocabulary::identity::SessionId::from(
+        "put-budget-receipt",
+    ))
+    .create(lash::SessionCreation::root(mock_session_spec()))
+    .await
+    .expect("session");
     let session = core
-        .session(lash::SessionId::from("put-budget-receipt"))
+        .session(lash_vocabulary::identity::SessionId::from(
+            "put-budget-receipt",
+        ))
         .open()
         .await
         .expect("open");

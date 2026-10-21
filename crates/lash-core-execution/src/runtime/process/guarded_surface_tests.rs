@@ -44,7 +44,7 @@ fn restamp_occurrence(bytes: &[u8], version: u32) -> Vec<u8> {
 // --- SCOPE_STORAGE_PAYLOAD_VERSION: a ledger row's typed parent scope. ---
 
 fn scope() -> crate::ScopeId {
-    crate::ScopeId::Session(crate::SessionId::from("session"))
+    crate::ScopeId::Session(lash_vocabulary::identity::SessionId::from("session"))
 }
 
 fn write_scope(fleet: FleetFormat) -> Vec<u8> {
@@ -71,7 +71,7 @@ fn restamp_scope(bytes: &[u8], version: u32) -> Vec<u8> {
 }
 
 fn write_admission(fleet: FleetFormat) -> Vec<u8> {
-    let session = crate::SessionId::fixture("admission");
+    let session = lash_vocabulary::identity::SessionId::fixture("admission");
     let view = crate::plugin::PluginNativeView {
         request: crate::plugin::PluginTransitionRequest {
             id: crate::plugin::PluginTransitionId(
@@ -81,7 +81,7 @@ fn write_admission(fleet: FleetFormat) -> Vec<u8> {
                 )
                 .expect("address"),
             ),
-            owner: crate::RuntimeOwner::Session(session),
+            owner: lash_vocabulary::identity::RuntimeOwner::Session(session),
             base: crate::plugin::PluginTransitionBase::Session {
                 head: crate::store::SessionHeadRef {
                     generation: 0,

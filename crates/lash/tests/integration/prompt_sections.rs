@@ -373,7 +373,7 @@ async fn a_host_registers_sections_sets_the_plan_and_decodes_a_snapshot_through_
         );
     }
 
-    let run = lash::TurnId::parse("prompt-witness-call").expect("run id");
+    let run = lash_vocabulary::identity::TurnId::parse("prompt-witness-call").expect("run id");
     let turn = session
         .send(lash::TurnInput::text("build the plugin session"))
         .id(run.clone())
@@ -548,7 +548,7 @@ async fn a_host_reads_back_its_plan_and_the_catalog_and_previews_the_resolution(
             .all(|section| section.section != id("module.github")),
         "no offered module, no guidance section"
     );
-    let run = lash::TurnId::parse("prompt-excluded-call").expect("run id");
+    let run = lash_vocabulary::identity::TurnId::parse("prompt-excluded-call").expect("run id");
     let turn = session
         .send(lash::TurnInput::text("read without notes"))
         .id(run.clone())
@@ -627,7 +627,9 @@ async fn a_removed_plugins_plan_override_is_recorded_and_the_turn_succeeds() {
 
     let core = witness_core_over(stores, false).await;
     let session = core
-        .session(lash::SessionId::from("removed-prompt-session"))
+        .session(lash_vocabulary::identity::SessionId::from(
+            "removed-prompt-session",
+        ))
         .open()
         .await
         .expect("open without plugin");
@@ -640,7 +642,7 @@ async fn a_removed_plugins_plan_override_is_recorded_and_the_turn_succeeds() {
             .expect("plan retained"),
         plan
     );
-    let run = lash::TurnId::parse("removed-prompt-call").expect("run id");
+    let run = lash_vocabulary::identity::TurnId::parse("removed-prompt-call").expect("run id");
     let turn = session
         .send(lash::TurnInput::text("continue without the plugin"))
         .id(run.clone())
@@ -753,7 +755,7 @@ async fn diagnostics_executes_no_plugin() {
     .delta_coalescing(lash::DeltaCoalescing::recommended())
     .build(lash_core::testing::runtime_lease_owner())
     .unwrap();
-    let session_id = lash::SessionId::from("diagnostics-observer");
+    let session_id = lash_vocabulary::identity::SessionId::from("diagnostics-observer");
     core.session(session_id.clone())
         .create(lash::SessionCreation::root(lash::SessionSpec::new(
             MODEL,
@@ -778,9 +780,11 @@ async fn diagnostics_executes_no_plugin() {
     let diagnostics = core.plugin_diagnostics();
     let snapshot = diagnostics.local_node();
     for scope in [
-        lash::plugins::InventoryScope::Deployment(lash::plugins::RegistryKind::Session),
-        lash::plugins::InventoryScope::Deployment(lash::plugins::RegistryKind::Process),
-        lash::plugins::InventoryScope::Owner(lash::RuntimeOwner::Session(session_id.clone())),
+        lash::plugins::InventoryScope::Deployment(lash_vocabulary::claims::RegistryKind::Session),
+        lash::plugins::InventoryScope::Deployment(lash_vocabulary::claims::RegistryKind::Process),
+        lash::plugins::InventoryScope::Owner(lash_vocabulary::identity::RuntimeOwner::Session(
+            session_id.clone(),
+        )),
     ] {
         let _ = diagnostics.installed(&scope);
     }

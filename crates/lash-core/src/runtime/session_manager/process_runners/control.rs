@@ -112,7 +112,7 @@ impl<'scope> ProcessCommandRunner<'scope> {
 
     async fn await_process_ref(
         &self,
-        process_id: crate::ProcessId,
+        process_id: lash_vocabulary::identity::ProcessId,
     ) -> Result<
         lash_execution_contracts::process::ProcessAwaitOutput,
         lash_execution_contracts::plugin_error::PluginError,
@@ -361,7 +361,7 @@ impl ProcessCapability {
     pub(in crate::runtime::session_manager) async fn stage_recorded_start_process(
         &self,
         current: &CurrentOwnerCapability,
-        owner: &crate::RuntimeOwner,
+        owner: &lash_vocabulary::identity::RuntimeOwner,
         request: lash_execution_contracts::process::ProcessStartRequest,
         scope: crate::ProcessOpScope<'_>,
     ) -> Result<crate::StagedProcessStart, lash_execution_contracts::plugin_error::PluginError>
@@ -479,7 +479,7 @@ impl ProcessCapability {
     pub(in crate::runtime::session_manager) async fn await_process_ref(
         &self,
         current: &CurrentOwnerCapability,
-        process_id: crate::ProcessId,
+        process_id: lash_vocabulary::identity::ProcessId,
         scope: crate::ProcessOpScope<'_>,
     ) -> Result<
         lash_execution_contracts::process::ProcessAwaitOutput,
@@ -532,7 +532,7 @@ impl ProcessCapability {
     pub(in crate::runtime::session_manager) async fn list_model_tool_process_handles_for_attempt(
         &self,
         current: &CurrentOwnerCapability,
-        owner: &crate::RuntimeOwner,
+        owner: &lash_vocabulary::identity::RuntimeOwner,
         mode: lash_execution_contracts::process::ProcessListMode,
     ) -> Result<
         Vec<lash_execution_contracts::process::ObservedProcess>,
@@ -542,10 +542,10 @@ impl ProcessCapability {
             .list_process_handles_for_attempt(current, owner, mode)
             .await?;
         Ok(match owner {
-            crate::RuntimeOwner::Session(session_id) => {
+            lash_vocabulary::identity::RuntimeOwner::Session(session_id) => {
                 Self::narrow_tool_visible_records(current, session_id, records)
             }
-            crate::RuntimeOwner::Process(_) => records,
+            lash_vocabulary::identity::RuntimeOwner::Process(_) => records,
         })
     }
 
@@ -555,7 +555,7 @@ impl ProcessCapability {
     pub(in crate::runtime::session_manager) async fn list_process_handles_for_attempt(
         &self,
         current: &CurrentOwnerCapability,
-        owner: &crate::RuntimeOwner,
+        owner: &lash_vocabulary::identity::RuntimeOwner,
         mode: lash_execution_contracts::process::ProcessListMode,
     ) -> Result<
         Vec<lash_execution_contracts::process::ObservedProcess>,
@@ -567,7 +567,7 @@ impl ProcessCapability {
             )
         })?;
         let records = match owner {
-            crate::RuntimeOwner::Session(session_id) => match mode {
+            lash_vocabulary::identity::RuntimeOwner::Session(session_id) => match mode {
                 lash_execution_contracts::process::ProcessListMode::Live => {
                     registry.list_live_observed_by(session_id).await
                 }
@@ -583,7 +583,7 @@ impl ProcessCapability {
                         .await
                 }
             },
-            crate::RuntimeOwner::Process(process_id) => {
+            lash_vocabulary::identity::RuntimeOwner::Process(process_id) => {
                 let starter = crate::ScopeId::process(process_id.clone());
                 let filter = &lash_execution_contracts::process::ProcessListFilter {
                     status: lash_execution_contracts::process::ProcessStatusFilter::Any,
@@ -635,7 +635,7 @@ impl ProcessCapability {
     pub(in crate::runtime::session_manager) async fn cancel_process(
         &self,
         current: &CurrentOwnerCapability,
-        owner: &crate::RuntimeOwner,
+        owner: &lash_vocabulary::identity::RuntimeOwner,
         process_id: &ProcessId,
         scope: crate::ProcessOpScope<'_>,
     ) -> Result<
@@ -744,7 +744,7 @@ impl ProcessCapability {
     pub(in crate::runtime::session_manager) async fn validate_process_handles_observed(
         &self,
         current: &CurrentOwnerCapability,
-        owner: &crate::RuntimeOwner,
+        owner: &lash_vocabulary::identity::RuntimeOwner,
         handle_ids: &[ProcessId],
         scope: crate::ProcessOpScope<'_>,
     ) -> Result<(), lash_execution_contracts::plugin_error::PluginError> {
@@ -770,18 +770,18 @@ impl ProcessCapability {
     pub(in crate::runtime::session_manager) async fn validate_model_tool_process_handles(
         &self,
         current: &CurrentOwnerCapability,
-        owner: &crate::RuntimeOwner,
+        owner: &lash_vocabulary::identity::RuntimeOwner,
         handle_ids: &[ProcessId],
         scope: crate::ProcessOpScope<'_>,
     ) -> Result<(), lash_execution_contracts::plugin_error::PluginError> {
         self.validate_process_handles_observed(current, owner, handle_ids, scope)
             .await?;
         match owner {
-            crate::RuntimeOwner::Session(session_id) => {
+            lash_vocabulary::identity::RuntimeOwner::Session(session_id) => {
                 self.validate_tool_filter(current, session_id, handle_ids)
                     .await
             }
-            crate::RuntimeOwner::Process(_) => Ok(()),
+            lash_vocabulary::identity::RuntimeOwner::Process(_) => Ok(()),
         }
     }
 

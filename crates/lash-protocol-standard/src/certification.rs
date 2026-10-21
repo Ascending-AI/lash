@@ -19,7 +19,7 @@ impl PluginScenario for Presentation {
         }
     }
     async fn prepare(&self, harness: &mut PluginHarness) -> Result<(), PluginHarnessError> {
-        let tool = lash_core::ToolDefinition::raw(
+        let tool = lash_vocabulary::tool_contract::ToolDefinition::raw(
             "echo",
             "tools.echo",
             "echo",

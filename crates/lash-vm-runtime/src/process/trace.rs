@@ -8,14 +8,14 @@
 //! function of the process and the identity: a repeat is the same fact.
 
 use lash_core::plugin::PluginExecutionTrace;
-use lash_kernel_doc::EffectId;
 use lash_trace::{
     TraceContext, TraceEvent, TraceLanguageExecution, TraceLanguageExecutionFailure,
     TraceLanguageExecutionIdentity, TraceLanguageExecutionPayload, TraceLanguageExecutionStatus,
     TraceNodeAwaited, TraceNodeFact, TraceNodeWaitResolution, TraceRuntimeScope,
-    TraceRuntimeSubject, WorkflowDocumentEntry, WorkflowDocumentRef,
+    TraceRuntimeSubject,
 };
 use lash_vm_client::wire::OutcomeWire;
+use lash_vocabulary::sites::EffectId;
 
 use super::state::{Delivery, Issued, KernelProcessInput};
 
@@ -23,16 +23,16 @@ use super::state::{Delivery, Issued, KernelProcessInput};
 pub(super) struct ProcessTrace {
     tracing: PluginExecutionTrace,
     identity: TraceLanguageExecutionIdentity,
-    process_id: lash_core::ProcessId,
-    observation: lash_kernel_doc::RunObservation,
+    process_id: lash_vocabulary::identity::ProcessId,
+    observation: lash_vocabulary::observation::RunObservation,
 }
 
 impl ProcessTrace {
     pub(super) fn new(
         runtime: Option<&lash_core::trace::TraceRuntime>,
-        process: &lash_core::ProcessId,
+        process: &lash_vocabulary::identity::ProcessId,
         input: &KernelProcessInput,
-        observation: lash_kernel_doc::RunObservation,
+        observation: lash_vocabulary::observation::RunObservation,
     ) -> Option<Self> {
         let tracing = PluginExecutionTrace::new(runtime?.unreplayed(None));
         if !tracing.observes_language() {
@@ -44,13 +44,25 @@ impl ProcessTrace {
             process_id: process.clone(),
             identity: TraceLanguageExecutionIdentity {
                 scope: TraceRuntimeScope::none(),
-                document: WorkflowDocumentRef {
-                    document: input.document,
-                    entry: WorkflowDocumentEntry::Entry {
-                        function: input.entry.clone(),
-                    },
+                document: match &input.code {
+                    super::InlineRequest::Linked { start } => {
+                        lash_trace::TraceExecutionCode::Start(start.clone())
+                    }
+                    super::InlineRequest::Callable { function, .. } => {
+                        lash_trace::TraceExecutionCode::Callable(function.callable)
+                    }
+                    super::InlineRequest::Unlinked { .. } => return None,
                 },
-                entry_name: input.entry.to_string(),
+                entry_name: match &input.code {
+                    super::InlineRequest::Linked { start } => match &start.selector {
+                        lash_vocabulary::names::StartSelector::Main => "main".into(),
+                        lash_vocabulary::names::StartSelector::Export(name) => name.to_string(),
+                    },
+                    super::InlineRequest::Callable { function, .. } => {
+                        function.callable.function.to_string()
+                    }
+                    super::InlineRequest::Unlinked { .. } => return None,
+                },
                 engine_execution_id: Some(process.to_string()),
                 // The durable actor has no execution-attempt fact. Its
                 // minted process identity names the resumed lifetime.
@@ -85,7 +97,7 @@ impl ProcessTrace {
         });
     }
 
-    pub(super) fn origin(&self, at: &EffectId, origin: &lash_kernel_doc::Site) {
+    pub(super) fn origin(&self, at: &EffectId, origin: &lash_vocabulary::sites::Site) {
         self.node(
             at,
             TraceNodeFact::Origin {
@@ -113,18 +125,8 @@ impl ProcessTrace {
                     message: error.message.clone(),
                 },
             },
-            OutcomeWire::Elapsed => TraceNodeFact::Resumed {
-                resolution: TraceNodeWaitResolution::Resumed,
-            },
         };
         self.node(&delivery.identity, fact);
-        // A sleep that ended is done; an effect's own terminal says so.
-        if matches!(delivery.outcome, OutcomeWire::Elapsed) {
-            self.node(
-                &delivery.identity,
-                TraceNodeFact::Completed { call_id: None },
-            );
-        }
     }
 
     /// One wait the machine asked for at a park. An effect that became a
@@ -140,28 +142,17 @@ impl ProcessTrace {
                     TraceNodeFact::Started { call_id: None },
                 );
             }
-            Issued::Sleep {
-                admission,
-                until_ms,
-                ..
-            } => {
-                let identity = admission.identity();
-                self.node(identity, TraceNodeFact::Started { call_id: None });
-                self.node(
-                    identity,
-                    TraceNodeFact::Waiting {
-                        awaited: TraceNodeAwaited::Sleep {
-                            deadline_ms: u64::try_from(*until_ms).ok(),
-                        },
-                    },
-                );
-            }
         }
     }
 
     /// One live delta of the segment that started at `segment`, its
     /// `frame`th: a recomputed segment reports the same facts.
-    pub(super) fn ran(&self, segment: &str, frame: u64, delta: &lash_kernel_vm::SiteCounts) {
+    pub(super) fn ran(
+        &self,
+        segment: &str,
+        frame: u64,
+        delta: &lash_vocabulary::observation::SiteCounts,
+    ) {
         self.emit(TraceLanguageExecutionPayload::Counts {
             counts: lash_trace::TraceCountObservation::Process(lash_trace::TraceProcessCounts {
                 process_id: self.process_id.clone(),

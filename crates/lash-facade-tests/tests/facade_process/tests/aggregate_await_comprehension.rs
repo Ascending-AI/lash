@@ -35,7 +35,10 @@ impl ToolProvider for RetailTools {
     fn tool_manifests(
         &self,
         _config: &lash_core::OwnerConfigView,
-    ) -> std::result::Result<Vec<lash_core::ToolManifest>, lash::plugins::PluginError> {
+    ) -> std::result::Result<
+        Vec<lash_vocabulary::tool_contract::ToolManifest>,
+        lash::plugins::PluginError,
+    > {
         Ok(vec![retail_order_definition().manifest()])
     }
 
@@ -43,7 +46,7 @@ impl ToolProvider for RetailTools {
         &self,
         name: &str,
         _config: &lash_core::OwnerConfigView,
-    ) -> Option<Arc<lash_core::ToolContract>> {
+    ) -> Option<Arc<lash_vocabulary::tool_contract::ToolContract>> {
         (name == "retail.order").then(|| Arc::new(retail_order_definition().contract()))
     }
 
@@ -67,8 +70,8 @@ impl ToolProvider for RetailTools {
     }
 }
 
-fn retail_order_definition() -> lash_core::ToolDefinition {
-    lash_core::ToolDefinition::raw(
+fn retail_order_definition() -> lash_vocabulary::tool_contract::ToolDefinition {
+    lash_vocabulary::tool_contract::ToolDefinition::raw(
         "tool:retail_order",
         "retail.order",
         "Look up one retail order by id.",
@@ -132,7 +135,8 @@ async fn delivered_orders_printed_by(cell: &str) -> Result<(String, usize)> {
             .build(lash_facade_tests::runtime_lease_owner())?;
     let session = created_session(
         &core,
-        lash::SessionId::parse("fig2764-comprehension").expect("nonblank host identity"),
+        lash_vocabulary::identity::SessionId::parse("fig2764-comprehension")
+            .expect("nonblank host identity"),
     )
     .await
     .open()

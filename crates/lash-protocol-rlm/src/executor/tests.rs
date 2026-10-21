@@ -7,13 +7,12 @@ mod crossing;
 mod document_trips;
 mod finish_value;
 mod graph;
-mod packages;
 mod python;
 mod tool_input;
 
 use std::collections::BTreeSet;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use super::CodeModeExecutionState;
 use crate::CellDialect;
@@ -39,27 +38,6 @@ fn typescript_services() -> super::CellServices {
     )
 }
 
-/// The cell context `tools` run under, with `deferred` as the run's
-/// deferred provider when there is one.
-fn context_with(
-    host: &DurableHost,
-    replay_key: &'static str,
-    tools: Arc<dyn lash_core::ToolProvider>,
-    deferred: Option<&Arc<dyn lash_core::DeferredToolProvider>>,
-) -> lash_core::RuntimeExecutionContext<'static> {
-    match deferred {
-        Some(deferred) => crate::testing::deferred_cell_context(
-            host,
-            SESSION,
-            TURN,
-            replay_key,
-            tools,
-            Arc::clone(deferred),
-        ),
-        None => cell_context(host, SESSION, TURN, replay_key, tools),
-    }
-}
-
 /// A deterministic race: fast waits until slow is live, and slow settles
 /// only when the cell explicitly releases it.
 #[derive(Default)]
@@ -74,7 +52,7 @@ impl lash_core::ToolProvider for ControlRaceTools {
         &self,
         _config: &lash_core::OwnerConfigView,
     ) -> std::result::Result<
-        Vec<lash_core::ToolManifest>,
+        Vec<lash_vocabulary::tool_contract::ToolManifest>,
         lash_execution_contracts::plugin_error::PluginError,
     > {
         Ok({
@@ -88,7 +66,7 @@ impl lash_core::ToolProvider for ControlRaceTools {
         &self,
         name: &str,
         _config: &lash_core::OwnerConfigView,
-    ) -> Option<Arc<lash_core::ToolContract>> {
+    ) -> Option<Arc<lash_vocabulary::tool_contract::ToolContract>> {
         let tool = name.split_once('.').filter(|(root, _)| *root == "tools")?.1;
         ["slow", "fast", "release"]
             .contains(&tool)
@@ -281,17 +259,17 @@ async fn a_session_whose_host_names_no_staging_refuses_to_stage() {
 
 async fn open_host() -> DurableHost {
     DurableHost::open(lash_core::AdmittedScope::turn(
-        lash_core::SessionId::from(SESSION),
-        lash_core::TurnId::from(TURN),
+        lash_vocabulary::identity::SessionId::from(SESSION),
+        lash_vocabulary::identity::TurnId::from(TURN),
     ))
     .await
 }
 
-fn definition(id: &str, operation: &str) -> lash_core::ToolDefinition {
+fn definition(id: &str, operation: &str) -> lash_vocabulary::tool_contract::ToolDefinition {
     typed_definition(
         id,
         operation,
-        lash_core::ToolDefinition::default_input_schema(),
+        lash_vocabulary::tool_contract::ToolDefinition::default_input_schema(),
     )
 }
 
@@ -299,8 +277,8 @@ fn typed_definition(
     id: &str,
     operation: &str,
     input: serde_json::Value,
-) -> lash_core::ToolDefinition {
-    lash_core::ToolDefinition::raw(
+) -> lash_vocabulary::tool_contract::ToolDefinition {
+    lash_vocabulary::tool_contract::ToolDefinition::raw(
         id,
         operation,
         "Echo the text back",
@@ -313,7 +291,7 @@ fn typed_definition(
 
 /// `echo.say`: it echoes its `text`, and takes a function in `add`, the one
 /// slot of its input that admits one.
-fn echo_say() -> lash_core::ToolDefinition {
+fn echo_say() -> lash_vocabulary::tool_contract::ToolDefinition {
     typed_definition(
         "tool:echo",
         "echo.say",
@@ -356,7 +334,7 @@ impl lash_core::ToolProvider for CellTools {
         &self,
         _config: &lash_core::OwnerConfigView,
     ) -> std::result::Result<
-        Vec<lash_core::ToolManifest>,
+        Vec<lash_vocabulary::tool_contract::ToolManifest>,
         lash_execution_contracts::plugin_error::PluginError,
     > {
         Ok({
@@ -369,9 +347,9 @@ impl lash_core::ToolProvider for CellTools {
 
     fn resolve_manifest_by_id(
         &self,
-        id: &lash_core::ToolId,
+        id: &lash_vocabulary::tool_contract::ToolId,
         _config: &lash_core::OwnerConfigView,
-    ) -> Option<lash_core::ToolManifest> {
+    ) -> Option<lash_vocabulary::tool_contract::ToolManifest> {
         match id.as_str() {
             "tool:echo" => Some(echo_say().manifest()),
             "tool:echo_await" => Some(definition("tool:echo_await", "echo.await").manifest()),
@@ -384,7 +362,7 @@ impl lash_core::ToolProvider for CellTools {
         &self,
         name: &str,
         _config: &lash_core::OwnerConfigView,
-    ) -> Option<Arc<lash_core::ToolContract>> {
+    ) -> Option<Arc<lash_vocabulary::tool_contract::ToolContract>> {
         match name {
             "echo.say" | "tool:echo" => Some(Arc::new(echo_say().contract())),
             "echo.await" | "tool:echo_await" => Some(Arc::new(
@@ -473,80 +451,6 @@ async fn a_tool_failure_keeps_its_code_and_plain_message_in_feedback() {
         ),
         "{rendered}"
     );
-}
-
-/// Grants `web.fetch` and counts how often it was asked.
-#[derive(Default)]
-struct GrantsWebFetch {
-    asked: AtomicUsize,
-    paths: std::sync::Mutex<Vec<String>>,
-}
-
-/// A deferred provider advertises nothing and runs no tool itself: what it
-/// resolves names the provider that executes it.
-macro_rules! resolves_only {
-    ($provider:ty) => {
-        #[async_trait::async_trait]
-        impl lash_core::ToolProvider for $provider {
-            fn tool_manifests(
-                &self,
-                _config: &lash_core::OwnerConfigView,
-            ) -> std::result::Result<
-                Vec<lash_core::ToolManifest>,
-                lash_execution_contracts::plugin_error::PluginError,
-            > {
-                Ok({ Vec::new() })
-            }
-
-            fn resolve_contract(
-                &self,
-                _name: &str,
-                _config: &lash_core::OwnerConfigView,
-            ) -> Option<Arc<lash_core::ToolContract>> {
-                None
-            }
-
-            async fn execute(
-                &self,
-                call: lash_core::ToolCall<'_>,
-            ) -> lash_core::ToolAttemptOutcome {
-                lash_core::ToolOutcome::err_fmt(format_args!("Unknown tool: {}", call.name()))
-                    .into()
-            }
-        }
-    };
-}
-
-resolves_only!(GrantsWebFetch);
-
-#[async_trait::async_trait]
-impl lash_core::DeferredToolProvider for GrantsWebFetch {
-    async fn resolve(
-        &self,
-        _cx: &lash_core::DeferredResolveContext<'_>,
-        paths: &[&str],
-    ) -> std::collections::BTreeMap<String, lash_core::DeferredOutcome> {
-        self.asked.fetch_add(1, Ordering::SeqCst);
-        self.paths
-            .lock()
-            .unwrap()
-            .extend(paths.iter().map(|path| (*path).to_owned()));
-        paths
-            .iter()
-            .map(|path| {
-                let outcome = if *path == "web.fetch" {
-                    lash_core::DeferredOutcome::resolved(
-                        lash_core::testing::test_tools_provider(),
-                        definition("tool:web_fetch", "web.fetch"),
-                        None,
-                    )
-                } else {
-                    lash_core::DeferredOutcome::Unavailable { note: None }
-                };
-                ((*path).to_string(), outcome)
-            })
-            .collect()
-    }
 }
 
 fn finish_of(response: &lash_core::ExecResponse) -> serde_json::Value {
@@ -812,7 +716,6 @@ async fn crash_at_the_held_call_and_resume(
     host: &mut DurableHost,
     tools: &Arc<CellTools>,
     services: &super::CellServices,
-    deferred: Option<&Arc<dyn lash_core::DeferredToolProvider>>,
     code: &str,
 ) -> lash_core::ExecResponse {
     tools.hold.store(true, Ordering::SeqCst);
@@ -820,7 +723,7 @@ async fn crash_at_the_held_call_and_resume(
         let mut state = typescript_state();
         let cell = run_cell(
             &mut state,
-            context_with(host, "exec-code:0", tools.clone(), deferred),
+            cell_context(host, SESSION, TURN, "exec-code:0", tools.clone()),
             services,
             code,
         );
@@ -833,7 +736,7 @@ async fn crash_at_the_held_call_and_resume(
     tools.hold.store(false, Ordering::SeqCst);
     run_cell(
         &mut typescript_state(),
-        context_with(host, "exec-code:0", tools.clone(), deferred),
+        cell_context(host, SESSION, TURN, "exec-code:0", tools.clone()),
         services,
         code,
     )
@@ -854,7 +757,6 @@ async fn a_cell_resumes_from_its_park_after_its_node_dies() {
         &mut host,
         &tools,
         &typescript_services(),
-        None,
         "console.log(\"before\");\nconst first = await echo.say({ text: \"first\" });\nlet second = \"unset\";\ntry {\n  second = await echo.say({ text: \"held\" });\n} catch (error) {\n  second = \"interrupted\";\n}\nconsole.log(\"after\");\nawait control.finish([first, second]);",
     )
     .await;
@@ -892,247 +794,6 @@ async fn a_cell_resumes_from_its_park_after_its_node_dies() {
             lash_core::ExecutedCallOutcome::Ok {}
         ]
     );
-}
-
-/// A tool granted to a cell by the session's deferred resolver is bound as
-/// an effect of that cell and recorded with it: after a restart inside the
-/// cell the tool is still callable, under the recorded grant, and the
-/// resolver is not asked again.
-#[tokio::test(flavor = "multi_thread")]
-async fn a_deferred_tool_granted_to_a_cell_is_callable_after_a_restart() {
-    let mut host = open_host().await;
-    let tools = Arc::new(CellTools::default());
-    let resolver = Arc::new(GrantsWebFetch::default());
-    let response = crash_at_the_held_call_and_resume(
-        &mut host,
-        &tools,
-        &typescript_services(),
-        Some(&(resolver.clone() as Arc<dyn lash_core::DeferredToolProvider>)),
-        "const first = await web.fetch({ text: \"first\" });\ntry {\n  await web.fetch({ text: \"held\" });\n} catch (error) {\n  console.log(\"interrupted\");\n}\nconst third = await web.fetch({ text: \"third\" });\nawait control.finish([first, third]);",
-    )
-    .await;
-    assert_eq!(finish_of(&response), serde_json::json!(["first", "third"]));
-    assert_eq!(
-        tools.answered(),
-        vec!["first", "third"],
-        "the tool granted before the restart runs after it"
-    );
-    assert_eq!(
-        resolver.asked.load(Ordering::SeqCst),
-        1,
-        "the grant is the cell's record; the resumed cell does not resolve it again"
-    );
-}
-
-/// OFFERED-ONE: every operation a cell is offered, a deferred grant and an
-/// unavailable note included, is one entry of the cell's operations and
-/// resolves through its namespaces: `alpha.lookup`, which the deferred
-/// provider grants, performs, and `beta.gone`, which it explains away,
-/// raises the host's note, in either dialect.
-#[tokio::test(flavor = "multi_thread")]
-async fn a_deferred_grant_performs_and_an_unavailable_note_raises_through_namespaces() {
-    struct GrantsAlpha;
-
-    resolves_only!(GrantsAlpha);
-
-    #[async_trait::async_trait]
-    impl lash_core::DeferredToolProvider for GrantsAlpha {
-        async fn resolve(
-            &self,
-            _cx: &lash_core::DeferredResolveContext<'_>,
-            paths: &[&str],
-        ) -> std::collections::BTreeMap<String, lash_core::DeferredOutcome> {
-            paths
-                .iter()
-                .filter_map(|path| {
-                    let outcome = match *path {
-                        "alpha.lookup" => lash_core::DeferredOutcome::resolved(
-                            lash_core::testing::test_tools_provider(),
-                            definition("tool:alpha_lookup", "alpha.lookup"),
-                            None,
-                        ),
-                        "beta.gone" => lash_core::DeferredOutcome::Unavailable {
-                            note: Some("beta is retired; use alpha".to_owned()),
-                        },
-                        _ => return None,
-                    };
-                    Some(((*path).to_owned(), outcome))
-                })
-                .collect()
-        }
-    }
-
-    for dialect in [CellDialect::typescript(), CellDialect::python()] {
-        let host = open_host().await;
-        let tools = Arc::new(CellTools::default());
-        let deferred = Arc::new(GrantsAlpha) as Arc<dyn lash_core::DeferredToolProvider>;
-        let services = cell_services(
-            &dialect,
-            if dialect.name() == CellDialect::python().name() {
-                python_workers()
-            } else {
-                lash_vm_client::service::Service::default()
-            },
-        );
-        let (lookup, gone) = if dialect.name() == CellDialect::python().name() {
-            (
-                "await control.finish(await alpha.lookup({'text': 'found'}))",
-                "await beta.gone({})",
-            )
-        } else {
-            (
-                "await control.finish(await alpha.lookup({ text: 'found' }));",
-                "await beta.gone({});",
-            )
-        };
-        let found = run_cell(
-            &mut crate::testing::session_state(&dialect),
-            context_with(&host, "exec-code:0", tools.clone(), Some(&deferred)),
-            &services,
-            lookup,
-        )
-        .await;
-        assert_eq!(
-            finish_of(&found),
-            serde_json::json!("found"),
-            "{}",
-            dialect.name()
-        );
-        assert_eq!(tools.answered(), ["found"]);
-        let gone = run_cell(
-            &mut crate::testing::session_state(&dialect),
-            context_with(&host, "exec-code:1", tools.clone(), Some(&deferred)),
-            &services,
-            gone,
-        )
-        .await;
-        let failure = gone.error().expect("`beta.gone` is unavailable");
-        assert!(
-            failure.message.ends_with("beta is retired; use alpha"),
-            "{}: {failure:?}",
-            dialect.name()
-        );
-    }
-}
-
-/// FIG-6590 / FIG-6011: host notes and refusal reasons survive commit and
-/// reopen verbatim in either dialect, without rediscovery on redrive.
-#[tokio::test(flavor = "multi_thread")]
-async fn deferred_host_explanations_survive_commit_and_reopen_verbatim() {
-    struct Explains {
-        asked: AtomicUsize,
-        refused: bool,
-    }
-
-    fn host_note() -> String {
-        format!("{}éé", "é🦀".repeat(170))
-    }
-
-    resolves_only!(Explains);
-
-    #[async_trait::async_trait]
-    impl lash_core::DeferredToolProvider for Explains {
-        async fn resolve(
-            &self,
-            _cx: &lash_core::DeferredResolveContext<'_>,
-            _paths: &[&str],
-        ) -> std::collections::BTreeMap<String, lash_core::DeferredOutcome> {
-            let attempt = self.asked.fetch_add(1, Ordering::SeqCst);
-            std::collections::BTreeMap::from([("web.fetch".into(), {
-                let note = if attempt == 0 {
-                    host_note()
-                } else {
-                    "a different discovery answer".to_owned()
-                };
-                if self.refused {
-                    lash_core::DeferredOutcome::Refused { reason: note }
-                } else {
-                    lash_core::DeferredOutcome::Unavailable { note: Some(note) }
-                }
-            })])
-        }
-    }
-
-    let expected = host_note();
-    assert_eq!(expected.len(), 1024);
-    for refused in [true, false] {
-        for dialect in [CellDialect::typescript(), CellDialect::python()] {
-            let mut host = open_host().await;
-            let tools = Arc::new(CellTools::default());
-            let resolver = Arc::new(Explains {
-                asked: AtomicUsize::new(0),
-                refused,
-            });
-            let services = cell_services(
-                &dialect,
-                if dialect.name() == CellDialect::python().name() {
-                    python_workers()
-                } else {
-                    lash_vm_client::service::Service::default()
-                },
-            );
-            let deferred = resolver.clone() as Arc<dyn lash_core::DeferredToolProvider>;
-            let code = if dialect.name() == CellDialect::python().name() {
-                "try:\n    await echo.say({'text': 'held'})\nexcept Exception:\n    pass\nawait web.fetch({})"
-            } else {
-                "try { await echo.say({ text: 'held' }); } catch (error) {}\nawait web.fetch({});"
-            };
-            tools.hold.store(true, Ordering::SeqCst);
-            {
-                let mut state = crate::testing::session_state(&dialect);
-                let running = run_cell(
-                    &mut state,
-                    context_with(&host, "exec-code:0", tools.clone(), Some(&deferred)),
-                    &services,
-                    code,
-                );
-                tokio::select! {
-                    response = running => panic!("the cell ended before its held call: {:?}", response.error()),
-                    () = tools.held_started.notified() => {}
-                }
-            }
-            assert_eq!(resolver.asked.load(Ordering::SeqCst), 1);
-            host.kill_and_resume().await;
-            tools.hold.store(false, Ordering::SeqCst);
-            let first = run_cell(
-                &mut crate::testing::session_state(&dialect),
-                context_with(&host, "exec-code:0", tools.clone(), Some(&deferred)),
-                &services,
-                code,
-            )
-            .await;
-            let failure = first.error().expect("the tool is unavailable");
-            assert!(failure.message.ends_with(&expected), "{failure:?}");
-            let rendered = crate::feedback::render(failure, "cell");
-            assert!(rendered.contains(&expected), "{rendered}");
-
-            host.kill_and_resume().await;
-            let redriven = run_cell(
-                &mut crate::testing::session_state(&dialect),
-                context_with(&host, "exec-code:0", tools.clone(), Some(&deferred)),
-                &services,
-                code,
-            )
-            .await;
-            assert_eq!(redriven.error(), first.error());
-            assert_eq!(resolver.asked.load(Ordering::SeqCst), 1);
-
-            let next = run_cell(
-                &mut crate::testing::session_state(&dialect),
-                context_with(&host, "exec-code:1", tools, Some(&deferred)),
-                &services,
-                "await web.fetch({})",
-            )
-            .await;
-            assert!(
-                next.error()
-                    .unwrap()
-                    .message
-                    .contains("a different discovery answer")
-            );
-            assert_eq!(resolver.asked.load(Ordering::SeqCst), 2);
-        }
-    }
 }
 
 /// FIG-5766: a cell's response says what its committed transition did to
@@ -1379,7 +1040,7 @@ async fn an_unrelated_error_keeps_its_cause_after_a_binding_is_dropped() {
 
     // K-SES-003 requires both the unbound-variable kind and exact data.
     let dropped = std::collections::BTreeMap::from([(
-        lash_kernel_doc::Name::new("format"),
+        lash_vocabulary::names::Name::new("format"),
         lash_kernel_dialect::NotSaved::Task.to_string(),
     )]);
     for (kind, binding, expected) in [
@@ -1398,8 +1059,6 @@ async fn an_unrelated_error_keeps_its_cause_after_a_binding_is_dropped() {
                 site: None,
             },
             &dropped,
-            None,
-            &[],
         );
         if expected {
             assert_eq!(
@@ -1457,7 +1116,6 @@ async fn an_interrupted_once_effect_observation_names_the_effect() {
         &mut host,
         &tools,
         &typescript_services(),
-        None,
         "await echo.say({ text: \"held\" });",
     )
     .await;
@@ -1482,385 +1140,4 @@ async fn an_interrupted_once_effect_observation_names_the_effect() {
         failure.message
     );
     assert!(tools.answered().is_empty(), "Once never starts again");
-}
-
-/// FIG-6524: local methods and built-ins never enter deferred resolution.
-async fn local_methods_stay_in_the_language(dialect: CellDialect, code: &str) {
-    struct RejectMethods;
-    resolves_only!(RejectMethods);
-    #[async_trait::async_trait]
-    impl lash_core::DeferredToolProvider for RejectMethods {
-        async fn resolve(
-            &self,
-            _cx: &lash_core::DeferredResolveContext<'_>,
-            paths: &[&str],
-        ) -> std::collections::BTreeMap<String, lash_core::DeferredOutcome> {
-            assert!(
-                paths.is_empty(),
-                "language operations reached the tool resolver: {paths:?}"
-            );
-            Default::default()
-        }
-    }
-    struct ItemsTools;
-    #[async_trait::async_trait]
-    impl lash_core::ToolProvider for ItemsTools {
-        fn tool_manifests(
-            &self,
-            _config: &lash_core::OwnerConfigView,
-        ) -> Result<Vec<lash_core::ToolManifest>, lash_execution_contracts::plugin_error::PluginError>
-        {
-            Ok(vec![definition("tool:tools_sort", "tools.sort").manifest()])
-        }
-        fn resolve_contract(
-            &self,
-            name: &str,
-            _config: &lash_core::OwnerConfigView,
-        ) -> Option<Arc<lash_core::ToolContract>> {
-            match name {
-                "tools.sort" => Some(Arc::new(
-                    definition("tool:tools_sort", "tools.sort").contract(),
-                )),
-                _ => None,
-            }
-        }
-        async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
-            panic!("a language method reached a tool: {}", call.name());
-        }
-    }
-    let host = open_host().await;
-    let services = cell_services(
-        &dialect,
-        if dialect.name() == "python" {
-            python_workers()
-        } else {
-            Default::default()
-        },
-    );
-    let deferred = Arc::new(RejectMethods) as Arc<dyn lash_core::DeferredToolProvider>;
-    let response = run_cell(
-        &mut crate::testing::session_state(&dialect),
-        context_with(&host, "exec-code:0", Arc::new(ItemsTools), Some(&deferred)),
-        &services,
-        code,
-    )
-    .await;
-    assert_eq!(
-        finish_of(&response),
-        serde_json::json!([{"key": 1}, {"key": 2}])
-    );
-    assert_eq!(response.prints.len(), 1, "the sorted records are logged");
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn typescript_local_sort_and_console_never_resolve_tools() {
-    local_methods_stay_in_the_language(
-        CellDialect::typescript(),
-        r#"
-        const items = [{key: 2}, {key: 1}];
-        function order(items) { items.sort((a, b) => a.key - b.key); return items; }
-        order(items).sort((a, b) => a.key - b.key);
-        console.log(items);
-        await control.finish(items);
-    "#,
-    )
-    .await;
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn python_local_sort_and_print_never_resolve_tools() {
-    local_methods_stay_in_the_language(CellDialect::python(), "items = [{'key': 2}, {'key': 1}]\ndef order(items):\n    items.sort(key=lambda item: item['key'])\n    return items\norder(items).sort(key=lambda item: item['key'])\nprint(items)\nawait control.finish(items)\n").await;
-}
-
-/// OP-INTERNAL: neither a catalog perform nor a deferred provider's grant
-/// admits an internal operation from authored cell code.
-#[tokio::test(flavor = "multi_thread")]
-async fn internal_operations_are_refused_in_static_and_deferred_cells() {
-    fn private_definition() -> lash_core::ToolDefinition {
-        lash_core::ToolDefinition::raw(
-            "dataframe",
-            "dataframe.run",
-            "private",
-            serde_json::json!({}),
-            serde_json::json!({"type":"string"}),
-        )
-        .unwrap()
-        .declared_contract(lash_kernel_doc::ContractId::new("run/1"))
-        .with_execution(std::time::Duration::from_secs(30))
-    }
-    struct Dataframe;
-    #[async_trait::async_trait]
-    impl lash_core::ToolProvider for Dataframe {
-        fn tool_manifests(
-            &self,
-            _: &lash_core::OwnerConfigView,
-        ) -> Result<Vec<lash_core::ToolManifest>, lash_execution_contracts::plugin_error::PluginError>
-        {
-            Ok(vec![private_definition().manifest])
-        }
-        fn resolve_contract(
-            &self,
-            _: &str,
-            _: &lash_core::OwnerConfigView,
-        ) -> Option<Arc<lash_core::ToolContract>> {
-            Some(Arc::new(private_definition().contract))
-        }
-        async fn execute(&self, _: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
-            panic!("an internal operation must never be dispatched")
-        }
-    }
-    struct GrantsDataframe;
-    resolves_only!(GrantsDataframe);
-    #[async_trait::async_trait]
-    impl lash_core::DeferredToolProvider for GrantsDataframe {
-        async fn resolve(
-            &self,
-            _: &lash_core::DeferredResolveContext<'_>,
-            paths: &[&str],
-        ) -> std::collections::BTreeMap<String, lash_core::DeferredOutcome> {
-            paths
-                .iter()
-                .map(|path| {
-                    (
-                        (*path).to_owned(),
-                        lash_core::DeferredOutcome::resolved(
-                            lash_core::testing::test_tools_provider(),
-                            private_definition(),
-                            None,
-                        ),
-                    )
-                })
-                .collect()
-        }
-    }
-    let builtin = lash_vm_runtime::lash_packages().unwrap();
-    let package = lash_kernel_package::Package::build(
-        "dataframe",
-        "1",
-        &lash_kernel_package::PackageSources {
-            surface: "internal operation run(input?: Record{..Json}) -> Any contract \"run/1\"\n",
-            ..Default::default()
-        },
-        &[],
-    )
-    .unwrap();
-    let held = Arc::new(
-        lash_kernel_package::HeldPackages::install(
-            builtin
-                .in_order()
-                .into_iter()
-                .map(|package| (**package).clone())
-                .chain([package]),
-        )
-        .unwrap(),
-    );
-    for deferred in [false, true] {
-        let host = open_host().await;
-        let mut services = typescript_services();
-        services.workers = services.workers.with_packages(held.clone());
-        let resolver = Arc::new(GrantsDataframe) as Arc<dyn lash_core::DeferredToolProvider>;
-        let tools = if deferred {
-            Arc::new(CellTools::default()) as Arc<dyn lash_core::ToolProvider>
-        } else {
-            Arc::new(Dataframe) as Arc<dyn lash_core::ToolProvider>
-        };
-        let response = run_cell(
-            &mut typescript_state(),
-            context_with(&host, "exec-code:0", tools, deferred.then_some(&resolver)),
-            &services,
-            if deferred {
-                "await external.lookup({text: 'private'});"
-            } else {
-                "await dataframe.run({text: 'private'});"
-            },
-        )
-        .await;
-        let error = response.error().expect("the internal perform is refused");
-        assert!(error.message.contains("dataframe.run"), "{error:?}");
-        assert!(error.message.contains("internal operation"), "{error:?}");
-        if !deferred {
-            assert!(
-                error.message.contains("main"),
-                "the refusal names its authored unit: {error:?}"
-            );
-            let restored: lash_core::CellFailure =
-                serde_json::from_value(serde_json::to_value(error).unwrap()).unwrap();
-            assert!(
-                matches!(restored.defect, Some(lash_core::CellDefect::InternalOperation { operation, unit: lash_kernel_doc::Unit::Main }) if operation.as_str() == "dataframe.run")
-            );
-        }
-    }
-}
-
-/// Closed package namespaces: internal and unknown paths never reach the
-/// resolver; an outside path still resolves and commits on SQLite.
-#[tokio::test]
-async fn package_namespace_candidates_are_decided_without_the_provider() {
-    let package = lash_kernel_package::Package::build(
-        "dataframe",
-        "1",
-        &lash_kernel_package::PackageSources {
-            kernel: "function dataframe.col() -> Int\nkernel 1\ncharge 1\nbody { return 7 }\n",
-            surface: "internal operation run(input?: Json) -> Any contract \"run/1\"\nfunction col() -> Int = dataframe.col\n",
-            ..Default::default()
-        },
-        &[],
-    )
-    .unwrap();
-    let builtin = lash_vm_runtime::lash_packages().unwrap();
-    let held = Arc::new(
-        lash_kernel_package::HeldPackages::install(
-            builtin
-                .in_order()
-                .into_iter()
-                .map(|package| (**package).clone())
-                .chain([package]),
-        )
-        .unwrap(),
-    );
-    let view = held.view();
-    let host = open_host().await;
-    #[derive(Default)]
-    struct ClaimsAny {
-        paths: std::sync::Mutex<Vec<String>>,
-    }
-    resolves_only!(ClaimsAny);
-    #[async_trait::async_trait]
-    impl lash_core::DeferredToolProvider for ClaimsAny {
-        async fn resolve(
-            &self,
-            _: &lash_core::DeferredResolveContext<'_>,
-            paths: &[&str],
-        ) -> std::collections::BTreeMap<String, lash_core::DeferredOutcome> {
-            self.paths
-                .lock()
-                .unwrap()
-                .extend(paths.iter().map(|path| (*path).to_owned()));
-            paths
-                .iter()
-                .map(|path| {
-                    (
-                        (*path).to_owned(),
-                        lash_core::DeferredOutcome::resolved(
-                            lash_core::testing::test_tools_provider(),
-                            definition(path, path),
-                            None,
-                        ),
-                    )
-                })
-                .collect()
-        }
-    }
-    let resolver = Arc::new(ClaimsAny::default());
-    let deferred = resolver.clone() as Arc<dyn lash_core::DeferredToolProvider>;
-    let context = context_with(
-        &host,
-        "exec-code:0",
-        Arc::new(CellTools::default()),
-        Some(&deferred),
-    );
-    let refusal = crate::deferred::journal_deferred_matches(
-        BTreeSet::from(["dataframe.run".into()]),
-        &context,
-        &view,
-    )
-    .await
-    .unwrap_err();
-    assert!(
-        matches!(refusal, crate::deferred::DeferredResolutionError::ProviderRegistry(lash_execution_contracts::PluginError::InternalOperation { operation }) if operation=="dataframe.run")
-    );
-    assert!(resolver.paths.lock().unwrap().is_empty());
-    let context = context_with(
-        &host,
-        "exec-code:1",
-        Arc::new(CellTools::default()),
-        Some(&deferred),
-    );
-    let matches = crate::deferred::journal_deferred_matches(
-        BTreeSet::from(["dataframe.nosuch".into(), "web.fetch".into()]),
-        &context,
-        &view,
-    )
-    .await
-    .unwrap()
-    .unwrap();
-    assert!(matches!(
-        matches["dataframe.nosuch"].outcome,
-        lash_core::DeferredOutcome::Refused { .. }
-    ));
-    assert!(matches["web.fetch"].resolved().is_some());
-    assert_eq!(*resolver.paths.lock().unwrap(), ["web.fetch"]);
-    let mut services = typescript_services();
-    services.workers = services.workers.with_packages(held.clone());
-    services.kernel = super::KernelCarry::holding(Some(held.clone()), None);
-    for (key, source) in [
-        ("exec-code:2", "await dataframe.run({});"),
-        ("exec-code:3", "await dataframe.nosuch({});"),
-        ("exec-code:4", "await dataframe.sub.nosuch({});"),
-    ] {
-        let response = run_cell(
-            &mut typescript_state(),
-            context_with(&host, key, Arc::new(CellTools::default()), Some(&deferred)),
-            &services,
-            source,
-        )
-        .await;
-        let error = response
-            .error()
-            .expect("the surface refuses the package path");
-        assert!(error.message.contains("dataframe"), "{error:?}");
-    }
-    let mut state = typescript_state();
-    let response = run_cell(
-        &mut state,
-        context_with(
-            &host,
-            "exec-code:5",
-            Arc::new(CellTools::default()),
-            Some(&deferred),
-        ),
-        &services,
-        "await control.finish(dataframe.col());",
-    )
-    .await;
-    assert!(response.error().is_none(), "{:?}", response.error());
-    assert_eq!(finish_of(&response), serde_json::json!(7));
-    let mut shadowed = typescript_state();
-    let response = run_cell(
-        &mut shadowed,
-        context_with(
-            &host,
-            "exec-code:6",
-            Arc::new(CellTools::default()),
-            Some(&deferred),
-        ),
-        &services,
-        "const dataframe = {col: 9};",
-    )
-    .await;
-    assert!(response.error().is_none(), "{:?}", response.error());
-    crate::testing::commit_working(&mut shadowed, &host).await;
-    let response = run_cell(
-        &mut shadowed,
-        context_with(
-            &host,
-            "exec-code:7",
-            Arc::new(CellTools::default()),
-            Some(&deferred),
-        ),
-        &services,
-        "await control.finish(dataframe.col);",
-    )
-    .await;
-    assert!(response.error().is_none(), "{:?}", response.error());
-    assert_eq!(
-        finish_of(&response),
-        serde_json::json!(9),
-        "a session binding shadows its package namespace"
-    );
-    assert_eq!(
-        *resolver.paths.lock().unwrap(),
-        ["web.fetch"],
-        "internal, unknown, nested, public and shadowed package paths never reach the provider"
-    );
 }

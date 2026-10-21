@@ -8,7 +8,7 @@ use crate::builtins::Receiver;
 use crate::{Diagnostic, DiagnosticCode, DiagnosticKind, SourceSpan};
 
 mod discovery;
-pub(crate) use discovery::{printed_source_reference, tool_calls};
+pub(crate) use discovery::tool_calls;
 
 /// A statically spelled path and its root, before lexical resolution.
 /// Computed properties and expression receivers are value operations.
@@ -779,7 +779,7 @@ impl Lowerer<'_> {
         let items = match builtin {
             crate::builtins::Builtin::Function { call, length } => {
                 let (helper, class) = call.callee(path);
-                let function = self.function(helper)?;
+                let function = self.helper_callee(helper)?;
                 let this = self.fresh("this");
                 let args = self.fresh("args");
                 let body = self.block(|lowerer| {
@@ -788,7 +788,7 @@ impl Lowerer<'_> {
                         None => vec![Expr::Variable(this.clone()), Expr::Variable(args.clone())],
                     };
                     let result = lowerer.action(
-                        lash_kernel_doc::ActKind::Call(Callee::Library(function)),
+                        lash_kernel_doc::ActKind::Call(function.clone()),
                         passed,
                         Ty::Unknown,
                     );

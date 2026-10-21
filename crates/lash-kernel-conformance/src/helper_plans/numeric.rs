@@ -7,6 +7,7 @@ use super::*;
 #[test]
 fn generated_scalar_templates_agree_with_their_bodies() {
     use lash_kernel_doc::{Float, PreparedNative, Value, parse_document};
+
     use std::sync::Arc;
     let samples = [
         "null",
@@ -120,14 +121,18 @@ fn generated_scalar_templates_agree_with_their_bodies() {
             for call_depth in 0..=template.depth + 2 {
                 let args = vec![if dialect == "python" { "1" } else { "1.0" }; arity];
                 let source = format!(
-                    "kernel 1\nnumbers by_spelling\nuse op = @{function}\nmain {{ let value = invoke op({}) return value }}",
+                    "kernel 1\nnumbers by_spelling\n# local definition op @{function}\nmain {{ let value = invoke @{function}({}) return value }}",
                     args.join(", ")
                 );
-                let mut program = Program {
-                    closure: base.closure,
-                    document: Arc::new(parse_document(&source).unwrap()),
-                    library: base.library.clone(),
-                };
+                let mut program = crate::machine::prepare_document(
+                    &(base.library.clone()),
+                    Arc::new(crate::document_fixture::authored(
+                        &source,
+                        base.library.registry(),
+                    )),
+                    None,
+                )
+                .expect("prepare linked law document");
                 let expected = run_at_depth::<0>(
                     &case,
                     &program,
@@ -159,14 +164,18 @@ fn generated_scalar_templates_agree_with_their_bodies() {
                     })
                     .collect();
                 let source = format!(
-                    "kernel 1\nnumbers by_spelling\nuse op = @{function}\nmain {{ let value = invoke op({}) return value }}",
+                    "kernel 1\nnumbers by_spelling\n# local definition op @{function}\nmain {{ let value = invoke @{function}({}) return value }}",
                     args.join(", ")
                 );
-                let mut program = Program {
-                    closure: base.closure,
-                    document: Arc::new(parse_document(&source).unwrap()),
-                    library: base.library.clone(),
-                };
+                let mut program = crate::machine::prepare_document(
+                    &(base.library.clone()),
+                    Arc::new(crate::document_fixture::authored(
+                        &source,
+                        base.library.registry(),
+                    )),
+                    None,
+                )
+                .expect("prepare linked law document");
                 let case = runner::Case {
                     id: format!("{name}({})", args.join(", ")),
                     ..case.clone()
@@ -200,6 +209,7 @@ fn generated_scalar_templates_agree_with_their_bodies() {
 #[test]
 fn python_floor_forwards_agree_with_their_bodies_on_edge_pairs() {
     use lash_kernel_doc::{parse_document, scalar::ScalarOp};
+
     use std::sync::Arc;
     let runner = runner::Runner::new("python").unwrap();
     let case = runner::Case {
@@ -221,7 +231,7 @@ fn python_floor_forwards_agree_with_their_bodies_on_edge_pairs() {
                 .iter()
                 .find(|(_, entry)| entry.definition().name.as_str() == name)
                 .unwrap();
-            format!("use {name} = @{id}\n")
+            format!("# local definition {name} @{id}\n")
         })
         .collect::<String>();
     let general = prepare_with_layout(Arc::clone(registry), Layout(1));
@@ -282,20 +292,23 @@ fn python_floor_forwards_agree_with_their_bodies_on_edge_pairs() {
         for (a, b) in pairs {
             for body in [
                 format!(
-                    "main {{ let i = 0 let v = 0 while lt(i, 1) {{ set v = invoke op({a}, {b}) set i = 1 }} return v }}"
+                    "main {{ let i = 0 let v = 0 while lt(i, 1) {{ set v = invoke @{function}({a}, {b}) set i = 1 }} return v }}"
                 ),
                 format!(
-                    "main {{ let out = [] for a in [{a}] {{ let v = invoke op(a, {b}) set out[list.len(out)] = v }} return out }}"
+                    "main {{ let out = [] for a in [{a}] {{ let v = invoke @{function}(a, {b}) set out[list.len(out)] = v }} return out }}"
                 ),
                 format!(
-                    "fn calculate(a, b) {{ let v = invoke op(a, b) return v }} main {{ let v = call calculate({a}, {b}) return v }}"
+                    "definition \"function calculate(a: Any, b: Any) -> Any\\nkernel 1\\nmetering statements\\nimport 0 operation host.echo(x: Any) -> Any\\nbody {{ let v = invoke @{function}(a, b) return v }}\"\n main {{ let v = call calculate({a}, {b}) return v }}"
                 ),
             ] {
                 let source = format!(
-                    "kernel 1\nnumbers by_spelling\nuse op = @{function}\n{}\n{body}",
+                    "kernel 1\nnumbers by_spelling\n# local definition op @{function}\n{}\n{body}",
                     header
                 );
-                let document = Arc::new(parse_document(&source).unwrap());
+                let document = Arc::new(crate::document_fixture::authored(
+                    &source,
+                    base.library.registry(),
+                ));
                 let program = Program {
                     document,
                     ..base.clone()

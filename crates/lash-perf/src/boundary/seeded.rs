@@ -31,7 +31,7 @@ fn whole_number(value: &serde_json::Value, field: &'static str) -> Result<u64> {
 
 struct Tools {
     workload: Arc<Workload>,
-    contracts: BTreeMap<String, lash_core::ToolDefinition>,
+    contracts: BTreeMap<String, lash_vocabulary::tool_contract::ToolDefinition>,
     meter: Meter,
 }
 impl Tools {
@@ -54,7 +54,7 @@ impl Tools {
                 serde_json::json!({"type":"object"}),
             ),
         ] {
-            let definition = lash_core::ToolDefinition::raw(
+            let definition = lash_vocabulary::tool_contract::ToolDefinition::raw(
                 format!("tool:{name}"),
                 format!("tools.{name}"),
                 "Seeded synthetic boundary workload",
@@ -126,7 +126,7 @@ impl lash_core::ToolProvider for Tools {
         &self,
         _config: &lash_core::OwnerConfigView,
     ) -> std::result::Result<
-        Vec<lash_core::ToolManifest>,
+        Vec<lash_vocabulary::tool_contract::ToolManifest>,
         lash_execution_contracts::plugin_error::PluginError,
     > {
         Ok(self.contracts.values().map(|d| d.manifest()).collect())
@@ -135,7 +135,7 @@ impl lash_core::ToolProvider for Tools {
         &self,
         name: &str,
         _config: &lash_core::OwnerConfigView,
-    ) -> Option<Arc<lash_core::ToolContract>> {
+    ) -> Option<Arc<lash_vocabulary::tool_contract::ToolContract>> {
         self.contracts.get(name).map(|d| Arc::new(d.contract()))
     }
     async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
@@ -251,8 +251,10 @@ pub(super) async fn run(args: &Args) -> Result<Receipt> {
     // A generated cell's process runs under the turn's run with the
     // workload's tools and the process controls, and a process it starts
     // inherits that environment (FIG-6034).
-    const TOOLS: lash_core::ProcessConfigKey<()> =
-        lash_core::ProcessConfigKey::new("seeded-plan-tools", lash_core::FormatVersion::ONE);
+    const TOOLS: lash_core::ProcessConfigKey<()> = lash_core::ProcessConfigKey::new(
+        "seeded-plan-tools",
+        lash_vocabulary::providers::FormatVersion::ONE,
+    );
     let components = [TOOLS, lash_plugin_process_controls::PROCESS_CONTROLS_CONFIG];
     let tools: Arc<dyn lash_core::ToolProvider> = Arc::new(Tools::new(workload.clone(), &meter)?);
     let mut plugins = lash::PluginStack::new();
@@ -322,7 +324,7 @@ async fn execute(
                 meter.operation("seeded.plan.materialize", plan.operation.key(), "ok", start);
                 let start = Instant::now();
                 let handle = session.send(lash::TurnInput::text(format!("seeded-operation:{}\n{}\n{}", plan.operation.key(), payload.input, payload.prompt)))
-                    .id(lash::TurnId::try_from(plan.operation.key())?).await?;
+                    .id(lash_vocabulary::identity::TurnId::try_from(plan.operation.key())?).await?;
                 meter.operation("seeded.send.accept", plan.operation.key(), "ok", start);
                 let start = Instant::now();
                 let output = tokio::time::timeout(Duration::from_secs(120), handle.output()).await??;
@@ -334,7 +336,7 @@ async fn execute(
                 for queued in &plan.queued_inputs {
                     let start = Instant::now();
                     let output = session.send(lash::TurnInput::text(format!("seeded-operation:{}", queued.idempotency_key)))
-                        .id(lash::TurnId::try_from(queued.idempotency_key.clone())?).output().await?;
+                        .id(lash_vocabulary::identity::TurnId::try_from(queued.idempotency_key.clone())?).output().await?;
                     ensure!(matches!(&output.outcome, lash::TurnOutcome::Finished(lash::TurnFinish::Finished { tool_name, value })
                         if tool_name == "control.finish" && value["operation"] == queued.idempotency_key), "queued seeded input did not finish");
                     meter.operation("seeded.queued.settle", &queued.idempotency_key, "ok", start);

@@ -24,8 +24,10 @@
 
 use std::collections::BTreeSet;
 
-use crate::graph_tokens::TokenError;
-use crate::{FunctionDefinition, FunctionId, ValidatedFunctions};
+use crate::{FunctionDefinition, ValidatedFunctions};
+use lash_vocabulary::names::FunctionId;
+use lash_vocabulary::sites::Site;
+use lash_vocabulary::tokens::TokenError;
 
 #[cfg(test)]
 std::thread_local! {
@@ -45,7 +47,7 @@ const CLOSURES: u32 = 1 << 3;
 /// What a machine's preparation reserves for a library body before it
 /// compiles it: its codes (the body and each closure), blocks, statements
 /// and property read sites, whether it declares a closure, and the child
-/// path of each action whose occurrence it counts. The machine computes it
+/// site of each action whose occurrence it counts. The machine computes it
 /// (`lash_kernel_vm::body_census`), and a build writes it into its image
 /// so that a process prepares a release without walking its bodies.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -55,7 +57,7 @@ pub struct BodyCensus {
     pub stmts: u32,
     pub sites: u32,
     pub closures: bool,
-    pub occurrences: Vec<Vec<u32>>,
+    pub occurrences: Vec<Site>,
 }
 
 /// A release image the build wrote is malformed: a defect of the build.
@@ -189,16 +191,8 @@ impl ReleasedFunctions {
             return None;
         }
         let field = |index: usize| self.word(self.records() + at * RECORD + ID + index * 4);
-        let mut occurrences = Vec::new();
-        let paths = self.slice(self.range(at, 9));
-        let mut words = paths
-            .as_chunks::<4>()
-            .0
-            .iter()
-            .map(|word| u32::from_le_bytes(*word));
-        while let Some(len) = words.next() {
-            occurrences.push(words.by_ref().take(len as usize).collect());
-        }
+        let occurrences =
+            lash_vocabulary::tokens::decode_body(self.slice(self.range(at, 9))).ok()?;
         Some(BodyCensus {
             codes: field(5),
             blocks: field(6),
@@ -231,7 +225,7 @@ impl ReleasedFunctions {
     }
 
     /// Function `at`'s definition's canonical token body
-    /// ([`crate::graph_tokens::encode_body`]).
+    /// ([`lash_vocabulary::tokens::encode_body`]).
     pub fn definition_bytes(&self, at: usize) -> &'static [u8] {
         self.slice(self.range(at, 0))
     }
@@ -244,7 +238,7 @@ impl ReleasedFunctions {
     pub fn definition(&self, at: usize) -> Result<FunctionDefinition, TokenError> {
         #[cfg(test)]
         DECODED.with(|decoded| decoded.set(decoded.get() + 1));
-        crate::graph_tokens::decode_body(self.definition_bytes(at))
+        lash_vocabulary::tokens::decode_body(self.definition_bytes(at))
     }
 
     fn records(&self) -> usize {
@@ -317,7 +311,7 @@ impl ValidatedFunctions {
         let mut names = String::new();
         let mut records = Vec::with_capacity(functions.len() * RECORD);
         for (function, definition) in &functions {
-            let body = put(&crate::graph_tokens::encode_body(*definition));
+            let body = put(&lash_vocabulary::tokens::encode_body(*definition));
             let name = [names.len() as u32, definition.name.as_str().len() as u32];
             names.push_str(definition.name.as_str());
             let census = census(function, definition);
@@ -335,10 +329,7 @@ impl ValidatedFunctions {
                     if census.closures {
                         flags |= CLOSURES;
                     }
-                    for path in &census.occurrences {
-                        paths.extend((path.len() as u32).to_le_bytes());
-                        paths.extend(path.iter().flat_map(|step| step.to_le_bytes()));
-                    }
+                    paths = lash_vocabulary::tokens::encode_body(&census.occurrences);
                     [census.codes, census.blocks, census.stmts, census.sites]
                 }
                 None => [0; 4],

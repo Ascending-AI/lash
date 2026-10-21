@@ -6,6 +6,7 @@ use super::*;
 use lash_protocol_types::{
     llm::attachment_delivery::AttachmentPosition, llm::attachment_delivery::DeliveryForms,
 };
+
 use lash_protocol_types::{
     llm::wire_corpus::corpus_tool, llm::wire_corpus::digest_line, llm::wire_corpus::reuse_cases,
     llm::wire_corpus::wire_corpus,
@@ -161,6 +162,7 @@ fn a_reused_prefix_sends_the_bytes_a_cold_lowering_sends() {
 #[test]
 fn a_custom_plugin_sends_the_request_it_means() {
     use lash_protocol_types::{llm::types::RequestSegment, llm::types::TemplateError};
+
     use lash_protocol_types::{llm::wire_corpus::growing_history, llm::wire_corpus::text_only};
 
     let route = canonical_route();

@@ -20,12 +20,14 @@
 use std::sync::{Arc, Weak};
 
 use lash::tools::{StaticToolExecute, StaticToolProvider};
+use lash_core::ToolCall;
 use lash_core::facade_support::ProviderHandle;
 use lash_core::llm::types::{LlmContentBlock, LlmOutputPart, LlmRequest, LlmResponse};
 use lash_core::plugin::prompt::{PromptWrapSpec, PromptWrapTarget};
 use lash_core::prompt_sections::{PromptSectionId, PromptSectionKey, PromptWrapKey};
-use lash_core::{ExecutionPolicy, ToolCall};
-use lash_protocol_types::{SessionId, TurnId};
+use lash_vocabulary::identity::SessionId;
+use lash_vocabulary::identity::TurnId;
+use lash_vocabulary::tool_contract::ExecutionPolicy;
 
 use super::services::{FINAL, session_id};
 use super::world::World;
@@ -370,7 +372,7 @@ impl Memo {
 fn tools()
 -> Result<Arc<dyn lash_core::ToolProvider>, lash_execution_contracts::plugin_error::PluginError> {
     let definition = |name: &str, description: &str| {
-        lash_core::ToolDefinition::raw(
+        lash_vocabulary::tool_contract::ToolDefinition::raw(
             name,
             format!("tools.{name}"),
             description,

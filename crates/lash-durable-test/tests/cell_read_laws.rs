@@ -43,10 +43,13 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use lash::tools::{StaticToolExecute, StaticToolProvider};
+use lash_core::LlmOutputPart;
+use lash_core::ToolCall;
+use lash_core::ToolCallId;
+use lash_core::ToolOutcome;
 use lash_core::facade_support::ProviderHandle;
 use lash_core::llm::types::{LlmRequest, LlmResponse};
 use lash_core::runtime::durable::session::SessionActivation;
-use lash_core::{ExecutionPolicy, LlmOutputPart, ToolCall, ToolCallId, ToolOutcome};
 use lash_core_execution::runtime::actor::process::ProcessActivation;
 use lash_core_execution::runtime::actor::round::{AdmittedExecution, MemberBody};
 use lash_core_execution::runtime::process::steps::{ProcessSteps, StepAdmission, StepRefusal};
@@ -62,8 +65,9 @@ use lash_execution_contracts::backend::Backend;
 use lash_execution_contracts::backend::BackendParts;
 use lash_execution_contracts::backend::StoreSet;
 use lash_execution_contracts::projection::NoProjectionProviders;
-use lash_protocol_types::SessionId;
 use lash_protocol_types::sync::MutexExt as _;
+use lash_vocabulary::identity::SessionId;
+use lash_vocabulary::tool_contract::ExecutionPolicy;
 use serde_json::{Value, json};
 
 const SESSION: &str = "cell-read-session";
@@ -211,8 +215,11 @@ impl lash::tools::ToolReads for WorldReads {
     }
 }
 
-fn definition(name: &str, policy: ExecutionPolicy) -> lash_core::ToolDefinition {
-    lash_core::ToolDefinition::raw(
+fn definition(
+    name: &str,
+    policy: ExecutionPolicy,
+) -> lash_vocabulary::tool_contract::ToolDefinition {
+    lash_vocabulary::tool_contract::ToolDefinition::raw(
         name,
         format!("tools.{name}"),
         "A host call the cell read laws watch.",
@@ -231,8 +238,8 @@ fn definition(name: &str, policy: ExecutionPolicy) -> lash_core::ToolDefinition 
 /// The token a node serves when it registers `ext_read`'s reader, and a
 /// cell that plans reads of it owes.
 fn reader_token() -> String {
-    lash_core::ObligationToken::for_callback(
-        lash_core::RegistryKind::Session,
+    lash_vocabulary::claims::ObligationToken::for_callback(
+        lash_vocabulary::claims::RegistryKind::Session,
         &lash_core::plugin::ToolProviderHandle::new(
             lash_core::plugin::RegistryKind::Session,
             READER,

@@ -25,6 +25,7 @@
 pub mod native;
 
 use crate::number::{Float, Integer};
+
 use crate::value::TaskId;
 
 use crate::heap::{PageRef, TextSummary};
@@ -168,9 +169,8 @@ pub enum Value {
     Task(TaskId),
     /// A ref to a task (`K-KEY-004`).
     TaskRef(TaskId),
-    /// A function reference by a name of at most [`ShortText::MAX`] bytes;
-    /// a longer one is [`Value::LongFunction`].
-    Function(ShortText),
+    /// An admitted linked function, stored in the arena.
+    Function(ArenaHandle),
     /// Immutable and shared, by handle.
     BigInt(ArenaHandle),
     LongText(ArenaHandle),
@@ -178,7 +178,6 @@ pub enum Value {
     BigTimestamp(ArenaHandle),
     Tuple(ArenaHandle),
     Error(ArenaHandle),
-    LongFunction(ArenaHandle),
     /// A host handle (`K-HOST-004`).
     Handle(ArenaHandle),
     /// Mutable, by identity.
@@ -214,7 +213,7 @@ impl Value {
             Self::Closure(_) => Kind::Closure,
             Self::Error(_) => Kind::Error,
             Self::Task(_) => Kind::Task,
-            Self::Function(_) | Self::LongFunction(_) => Kind::Function,
+            Self::Function(_) => Kind::Function,
             Self::Handle(_) => Kind::Handle,
             Self::TaskRef(_) | Self::ObjectRef(_) => Kind::Ref,
         }
@@ -229,9 +228,7 @@ impl Value {
             (Self::Bool(a), Self::Bool(b)) => a == b,
             (Self::Int(a), Self::Int(b)) | (Self::Timestamp(a), Self::Timestamp(b)) => a == b,
             (Self::Float(a), Self::Float(b)) => a.get().to_bits() == b.get().to_bits(),
-            (Self::Text(a), Self::Text(b)) | (Self::Function(a), Self::Function(b)) => {
-                a.as_bytes() == b.as_bytes()
-            }
+            (Self::Text(a), Self::Text(b)) => a.as_bytes() == b.as_bytes(),
             (Self::Task(a), Self::Task(b)) | (Self::TaskRef(a), Self::TaskRef(b)) => a == b,
             _ => {
                 std::mem::discriminant(self) == std::mem::discriminant(other)
@@ -250,7 +247,7 @@ impl Value {
             | Self::BigTimestamp(handle)
             | Self::Tuple(handle)
             | Self::Error(handle)
-            | Self::LongFunction(handle)
+            | Self::Function(handle)
             | Self::Handle(handle)
             | Self::List(handle)
             | Self::Map(handle)
@@ -266,8 +263,7 @@ impl Value {
             | Self::Text(_)
             | Self::Timestamp(_)
             | Self::Task(_)
-            | Self::TaskRef(_)
-            | Self::Function(_) => None,
+            | Self::TaskRef(_) => None,
         }
     }
 }
@@ -613,7 +609,7 @@ pub enum Body {
     Timestamp(Integer),
     Tuple(Sequence),
     Error(ErrorBody),
-    LongFunction(LongText),
+    Function(Box<lash_vocabulary::names::CallableId>),
     Handle(crate::Handle),
     List(Sequence),
     Map(Table),
@@ -623,7 +619,7 @@ pub enum Body {
     /// its captured variables' cells, and the code a call last found for
     /// the site.
     Closure {
-        site: std::sync::Arc<crate::Site>,
+        identity: std::sync::Arc<ClosureIdentity>,
         captures: Box<[ArenaHandle]>,
         code: Option<LocalCode>,
     },
@@ -635,6 +631,13 @@ pub enum Body {
 // A tiny list's, tuple's or table's inline values fit beside the widest
 // body, a closure's: no slot is wider for them.
 const _: () = assert!(std::mem::size_of::<Body>() == 56);
+
+/// Immutable identity of a closure, shared by its resident projections.
+#[derive(Clone, Debug)]
+pub struct ClosureIdentity {
+    pub callable: lash_vocabulary::names::CallableId,
+    pub site: crate::linked_site::LinkedSite,
+}
 
 /// The code a closure runs, as one prepared executable numbers its codes:
 /// a process-local cache of the lookup by the closure's site. Like an

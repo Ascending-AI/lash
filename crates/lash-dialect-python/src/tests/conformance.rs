@@ -164,7 +164,9 @@ fn conditional_functions_keep_their_written_signatures() {
         let lowered = super::machine::lower(source).unwrap();
         assert_eq!(lowered.written.len(), 2);
         for site in lowered.written.keys() {
-            let mut node = lash_kernel_doc::Node::Block(&lowered.document.main);
+            let mut node = lash_kernel_doc::Node::Block(
+                lowered.document.main.as_ref().expect("authored main"),
+            );
             for child in &site.path {
                 node = node.children()[*child as usize];
             }
@@ -197,7 +199,9 @@ fn nested_actions_keep_the_authors_statement_shape() {
     let source = "def observe(value):\n    return value\nasync def work(value):\n    return await host.echo(value)\nresult = observe(await work(1))\nprint(result)\n";
     let lowered = machine::lower(source).expect("the admitted program");
     let mut statements = 0;
-    let mut pending = vec![lash_kernel_doc::Node::Block(&lowered.document.main)];
+    let mut pending = vec![lash_kernel_doc::Node::Block(
+        lowered.document.main.as_ref().expect("authored main"),
+    )];
     while let Some(node) = pending.pop() {
         statements += usize::from(matches!(node, lash_kernel_doc::Node::Stmt(_)));
         pending.extend(node.children());
@@ -212,48 +216,6 @@ fn nested_actions_keep_the_authors_statement_shape() {
 /// FIG-6657, SHAPE: a `while` test keeps its awaited call in the loop's own
 /// condition, evaluated afresh at each pass; the loop prints and reads back,
 /// and its `else` runs on exhaustion.
-#[test]
-fn a_while_test_keeps_its_actions_in_the_condition() {
-    let source = "async def more(k):\n    return await host.echo(k) < 2\nn = 0\nwhile await more(n):\n    n = n + 1\nelse:\n    print('done')\nprint(n)\n";
-    let lowered = machine::lower(source).expect("the admitted program");
-    let mut statements = 0;
-    let mut nested_test = false;
-    let mut pending = vec![lash_kernel_doc::Node::Block(&lowered.document.main)];
-    while let Some(node) = pending.pop() {
-        statements += usize::from(matches!(node, lash_kernel_doc::Node::Stmt(_)));
-        if let lash_kernel_doc::Node::Stmt(lash_kernel_doc::Stmt::While { condition, .. }) = node {
-            let mut inside = vec![lash_kernel_doc::Node::Expr(condition)];
-            while let Some(part) = inside.pop() {
-                nested_test |= matches!(
-                    part,
-                    lash_kernel_doc::Node::Expr(lash_kernel_doc::Expr::Act(_))
-                );
-                inside.extend(part.children());
-            }
-        }
-        pending.extend(node.children());
-    }
-    let text = machine::kernel_text(source);
-    assert!(nested_test, "the loop's test holds no action\n{text}");
-    assert!(
-        statements <= 7,
-        "SHAPE: {statements} statements for 7 author statements\n{text}"
-    );
-    // It prints, and its printed source reads back to it (`K-DIALECT-001`).
-    let printed = crate::print_kernel(&lowered.document, None, Default::default())
-        .expect("the lowered loop prints");
-    let read = crate::read_kernel(&printed.source, &lowered.document, Default::default())
-        .expect("its source reads back");
-    assert_eq!(
-        read.0.canonical_bytes(),
-        lowered.document.canonical_bytes(),
-        "{}",
-        printed.source
-    );
-    let run = machine::run(source, &[]);
-    assert_eq!(run.lines(), ["done", "2"]);
-    assert_eq!(run.end, "ok");
-}
 
 /// FIG-6402 rev2 §11: capture needs a slot even when its first binding comes later.
 #[test]

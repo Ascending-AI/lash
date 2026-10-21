@@ -15,7 +15,7 @@ const LASH_RECORD_CONFIG_REQUEST_DOMAIN_VERSION: &str = "lash-record-config-requ
 const LASH_CREATE_SESSION_REQUEST_DOMAIN_VERSION: &str = "lash-create-session-request/v1";
 
 use super::*;
-use crate::SessionId;
+use lash_vocabulary::identity::SessionId;
 
 /// Encoding version of the record-config semantic-boundary request identity.
 ///

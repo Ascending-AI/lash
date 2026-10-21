@@ -3,7 +3,9 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
 
-use lash_kernel_doc::{FunctionDefinition, FunctionId, Name, Node};
+use lash_kernel_doc::{FunctionDefinition, Node};
+
+use lash_vocabulary::{FunctionId, Name};
 
 use super::{Emitter, Plan, Unsupported, Var};
 use crate::library::Library;

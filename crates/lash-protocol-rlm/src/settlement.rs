@@ -10,8 +10,8 @@ use lash_core::{
     CellOutcome, CellRecord, CheckpointKind, DriverAction, DriverContextView, ExecResponse,
     ToolCallOutcome, ToolCallRecord, facade_support::TurnOutcome, facade_support::TurnStop,
 };
-use lash_protocol_types::TurnId;
 use lash_rlm_types::{RlmDiagnosticEvent, RlmDiagnosticPhase, RlmProtocolEvent};
+use lash_vocabulary::identity::TurnId;
 use serde_json::Value;
 
 use crate::dialect::SessionDialect;

@@ -5,6 +5,7 @@
 
 use crate::support::*;
 use lash_protocol_types::{llm::types::StreamBlockEvent, llm::types::StreamBlockKind};
+
 use std::collections::HashSet;
 
 fn invalid_block_index(raw: &str, detail: impl std::fmt::Display) -> LlmTransportError {

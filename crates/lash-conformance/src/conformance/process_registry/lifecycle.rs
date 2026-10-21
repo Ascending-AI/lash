@@ -318,7 +318,7 @@ pub(super) async fn a_resume_event_cannot_return_an_ended_process_to_running(
         since_ms: 1,
         kind: crate::WaitKind::Call {
             call_id: lash_protocol_types::ToolCallId::fixture("process-wait-law"),
-            tool_id: lash_protocol_types::ToolId::new("process_wait"),
+            tool_id: lash_vocabulary::tool_contract::ToolId::new("process_wait"),
         },
         site: None,
     };

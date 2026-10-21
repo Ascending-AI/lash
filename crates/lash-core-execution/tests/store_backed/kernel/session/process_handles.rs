@@ -1,14 +1,17 @@
 mod tests {
-    use crate::ProcessId;
     use crate::RuntimeExecutionContext;
-    use crate::SessionId;
     use crate::plugin::PluginSessionRequest;
+    use lash_vocabulary::identity::ProcessId;
+    use lash_vocabulary::identity::SessionId;
 
+    use crate::PreparedToolCall;
+    use crate::ToolCall;
+    use crate::ToolOutcome;
+    use crate::ToolPrepareCall;
+    use crate::ToolProvider;
     use crate::tool_dispatch::ToolDispatchContext;
-    use crate::{
-        PreparedToolCall, ToolCall, ToolDefinition, ToolOutcome, ToolPrepareCall, ToolProvider,
-    };
     use lash_core_execution::core_internal::RuntimeExecutionContextRuntimeOps as _;
+    use lash_vocabulary::tool_contract::ToolDefinition;
     use serde_json::json;
     use std::collections::BTreeMap;
     use std::sync::Arc;
@@ -58,7 +61,7 @@ mod tests {
             &self,
             _config: &crate::plugin::OwnerConfigView,
         ) -> std::result::Result<
-            Vec<crate::ToolManifest>,
+            Vec<lash_vocabulary::tool_contract::ToolManifest>,
             lash_execution_contracts::plugin_error::PluginError,
         > {
             Ok(vec![process_tool_definition().manifest()])
@@ -68,7 +71,7 @@ mod tests {
             &self,
             name: &str,
             _config: &crate::plugin::OwnerConfigView,
-        ) -> Option<Arc<crate::ToolContract>> {
+        ) -> Option<Arc<lash_vocabulary::tool_contract::ToolContract>> {
             (name == "tools.process_prepare")
                 .then(|| Arc::new(process_tool_definition().contract()))
         }
@@ -640,7 +643,7 @@ mod tests {
         );
 
         let identity = crate::ToolIntentIdentity {
-            owner: crate::RuntimeOwner::Session(SessionId::from("session")),
+            owner: lash_vocabulary::identity::RuntimeOwner::Session(SessionId::from("session")),
             execution_scope_id: "session".to_string(),
             tool_call_id: lash_core_execution::ToolCallId::fixture("start-child"),
             intent_index: 0,
@@ -653,7 +656,7 @@ mod tests {
                     call_id: lash_core_execution::ToolCallId::fixture("start-child"),
                     provider_call_id: None,
                 },
-                crate::ToolId::new("start_process"),
+                lash_vocabulary::tool_contract::ToolId::new("start_process"),
                 None,
                 crate::tool_dispatch::ToolDispatchOutcome {
                     record: crate::ToolCallRecord {

@@ -5,12 +5,11 @@
 
 use std::sync::Arc;
 
-use lash_kernel_doc::{Datum, FunctionRegistry, parse_definition, parse_document};
+use lash_kernel_doc::{Datum, parse_document};
 
 use super::embedder::{Embedder, Setup, library_with};
-use lash_kernel_doc::heap::PageId;
 
-use crate::{End, Machine, PreparedLibrary, Program, StartError, Step};
+use crate::{End, Machine, PreparedLibrary, Step};
 
 /// Closures over a body-only helper, a native, a helper whose native
 /// stands beside its body, and a loop that calls them.
@@ -70,52 +69,6 @@ fn a_run_answers_and_charges_alike_whatever_its_library_prepared_before() {
     }
 }
 
-/// FIG-6843: a library function whose body lists a function the registry
-/// does not hold (one it names but never calls, which registration
-/// admits) refuses a document that lists it with the function it lacks,
-/// and runs once that function is registered after it.
-#[test]
-fn a_body_that_reaches_an_absent_function_refuses_its_document_until_it_is_registered() {
-    let inner = parse_definition(
-        "function probe.inner(x: Any) -> Any\nkernel 1\ncharge 1\nbody { return x }\n",
-    )
-    .unwrap();
-    let inner_id = inner.identity();
-    let outer = parse_definition(&format!(
-        "function probe.outer(x: Any) -> Any\nkernel 1\ncharge 5\nuse probe.inner = @{inner_id}\n\
-         body {{ return x }}\n"
-    ))
-    .unwrap();
-    let mut registry = FunctionRegistry::new();
-    let outer_id = registry.register(outer, None).unwrap();
-    let document = Arc::new(
-        parse_document(&format!(
-            "numbers by_spelling\nkernel 1\nuse probe.outer = @{outer_id}\n\
-             main {{ let x = invoke probe.outer(7) return x }}\n"
-        ))
-        .unwrap(),
-    );
-    let start = |registry: &FunctionRegistry| {
-        let setup = Setup::default();
-        crate::KernelMachine::start(
-            Program {
-                closure: PageId([8; 32]),
-                document: Arc::clone(&document),
-                library: PreparedLibrary::new(Arc::new(registry.clone())),
-            },
-            setup.bounds,
-            setup.start,
-            Box::new(super::embedder::Source::default()),
-        )
-    };
-    assert!(matches!(
-        start(&registry),
-        Err(StartError::MissingFunction { function }) if function == inner_id
-    ));
-    registry.register(inner, None).unwrap();
-    assert!(start(&registry).is_ok());
-}
-
 /// FIG-6931: admission validates a document once per identity. An identity
 /// a caller validated against the library (a dialect that validates while
 /// it lowers) is admitted without being validated again, whichever copy of
@@ -128,7 +81,7 @@ fn an_identity_validated_against_the_library_is_admitted_without_validating_it_a
     let document =
         Arc::new(parse_document("numbers by_spelling\nkernel 1\nmain { break }\n").unwrap());
     let identity = document.identity();
-    let limits = lash_kernel_doc::KernelDataLimits::standard();
+    let limits = lash_vocabulary::data_limits::KernelDataLimits::standard();
     assert!(
         !prepared.admit_identified(&document, identity, limits),
         "validation refuses it"

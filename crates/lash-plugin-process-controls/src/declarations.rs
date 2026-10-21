@@ -19,13 +19,13 @@ use serde_json::Value;
 
 use lash_core::AttemptContext;
 use lash_core::ToolAttemptOutcome;
-use lash_core::ToolDeclaration;
-use lash_core::ToolDefinition;
-use lash_core::ToolIntentKind;
 use lash_core::ToolOutcome;
 use lash_core::ToolOutcomeDone;
 use lash_execution_contracts::tool_intent::ToolIntent;
 use lash_execution_contracts::tool_intent::ToolIntents;
+use lash_vocabulary::ToolIntentKind;
+use lash_vocabulary::tool_contract::ToolDefinition;
+use lash_vocabulary::tool_declaration::ToolDeclaration;
 
 use crate::done_without_intents;
 
@@ -180,18 +180,21 @@ pub async fn execute_process_start_tool_call(
         Some(_) => return refuse("args must be an object"),
     };
     let (resolved, inline) = match (fields.get("definition"), fields.get("definition_id")) {
-        (Some(value), None) => match context
-            .resolve_inline_start(
-                lash_protocol_types::LASH_VM_ENGINE_KIND,
-                value.clone(),
-                run_args,
-            )
-            .await
-        {
-            Ok(inline) => (inline.target.clone(), Some(inline)),
-            Err(lash_core::ResolveTargetError::Refused(message)) => return refuse(message),
-            Err(lash_core::ResolveTargetError::Fault(error)) => return host_failed(error),
-        },
+        (Some(value), None) => {
+            let request = match crate::inline_callable_request(context, value) {
+                Ok(request) => request,
+                Err(lash_core::ResolveTargetError::Refused(message)) => return refuse(message),
+                Err(lash_core::ResolveTargetError::Fault(error)) => return host_failed(error),
+            };
+            match context
+                .resolve_inline_start(lash_protocol_types::LASH_VM_ENGINE_KIND, request, run_args)
+                .await
+            {
+                Ok(inline) => (inline.target.clone(), Some(inline)),
+                Err(lash_core::ResolveTargetError::Refused(message)) => return refuse(message),
+                Err(lash_core::ResolveTargetError::Fault(error)) => return host_failed(error),
+            }
+        }
         (None, Some(value)) => {
             let id = match lash_core::ProcessDefinitionId::from_tagged_json(value) {
                 Ok(id) => id,
@@ -252,6 +255,9 @@ pub async fn execute_process_start_tool_call(
     {
         Ok(choice) => choice,
         Err(lash_core::ProcessEnvPolicyError::Refused(refusal)) => return refuse(refusal),
+        Err(lash_core::ProcessEnvPolicyError::Package(error)) => {
+            return host_failed((*error).into());
+        }
         Err(lash_core::ProcessEnvPolicyError::Fault(message)) => {
             return host_failed(
                 lash_execution_contracts::plugin_error::PluginError::attempt_fault(message),
@@ -264,6 +270,7 @@ pub async fn execute_process_start_tool_call(
                 Ok(launch) => launch,
                 Err(lash_core::HoldEnvError::Refused(refusal)) => return refuse(refusal),
                 Err(lash_core::HoldEnvError::Fault(error)) => return host_failed(error),
+                Err(lash_core::HoldEnvError::Admission(error)) => return host_failed(error.into()),
             };
             lash_execution_contracts::process::ProcessStartDeclaration::inline(
                 resolved.args.clone(),
@@ -277,6 +284,7 @@ pub async fn execute_process_start_tool_call(
                 Ok(launch) => launch,
                 Err(lash_core::HoldEnvError::Refused(refusal)) => return refuse(refusal),
                 Err(lash_core::HoldEnvError::Fault(error)) => return host_failed(error),
+                Err(lash_core::HoldEnvError::Admission(error)) => return host_failed(error.into()),
             };
             lash_execution_contracts::process::ProcessStartDeclaration::definition(
                 Some(resolved.signature.clone()),

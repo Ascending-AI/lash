@@ -3,12 +3,12 @@
 //! laws the deleted engine-double session lifecycle tests owed.
 
 use super::*;
-use lash_core::SessionId;
+use lash_vocabulary::identity::SessionId;
 
 mod session_binding;
 
-fn session(text: &str) -> lash::SessionId {
-    lash::SessionId::parse(text).expect("nonblank host identity")
+fn session(text: &str) -> lash_vocabulary::identity::SessionId {
+    lash_vocabulary::identity::SessionId::parse(text).expect("nonblank host identity")
 }
 
 #[cfg(feature = "rlm")]
@@ -266,12 +266,12 @@ async fn a_native_model_patch_reaches_all_runtime_consumers() {
         })
         .build()
         .into_handle();
-    let definition = lash_core::ToolDefinition::control(
+    let definition = lash_vocabulary::tool_contract::ToolDefinition::control(
         "switch_frame",
         "tools.switch_frame",
         "Switches the agent frame.",
         serde_json::json!({ "type": "object", "additionalProperties": false, "properties": {} }),
-        lash_core::TurnControls::switch_agent_frame(),
+        lash_vocabulary::tool_declaration::TurnControls::switch_agent_frame(),
     )
     .expect("switch_frame's schemas")
     .with_execution(std::time::Duration::from_secs(120));
@@ -442,7 +442,7 @@ async fn open_with_state_keeps_supplied_policy_without_rewriting_frame_history()
     let frame_node_id = lash_core::facade_support::frame_node_id(&session_id, frame_key.as_str());
     let mut nodes = persisted.session_graph.nodes.clone();
     nodes.push(Arc::new(lash_core::SessionNodeRecord {
-        node_id: lash_core::NodeId::fixture(frame_node_id.to_string()),
+        node_id: lash_vocabulary::identity::NodeId::fixture(frame_node_id.to_string()),
         parent_node_id: persisted.session_graph.leaf_node_id.clone(),
         timestamp: "2026-07-27T00:00:00.000000000Z"
             .parse()
@@ -458,7 +458,9 @@ async fn open_with_state_keeps_supplied_policy_without_rewriting_frame_history()
     }));
     persisted.session_graph = lash_core::SessionGraph::from_shared_nodes(
         nodes,
-        Some(lash_core::NodeId::fixture(frame_node_id.to_string())),
+        Some(lash_vocabulary::identity::NodeId::fixture(
+            frame_node_id.to_string(),
+        )),
     )
     .expect("the fixture graph is valid");
     persisted.current_frame_node_id = Some(frame_node_id);

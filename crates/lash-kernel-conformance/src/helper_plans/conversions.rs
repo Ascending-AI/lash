@@ -2,7 +2,11 @@
 //! completion charge, tape and bound stop, including every value kind.
 
 use super::*;
-use lash_kernel_doc::{Float, Name, PreparedNative, Value, parse_document};
+use lash_kernel_doc::Float;
+use lash_kernel_doc::PreparedNative;
+use lash_kernel_doc::Value;
+use lash_kernel_doc::parse_document;
+use lash_vocabulary::names::Name;
 use std::sync::Arc;
 
 fn observe<const L: u64>(program: &Program, charge_limit: u64) -> Observed {
@@ -197,13 +201,12 @@ main {{ return null }}
         ),
     ];
     for source in sources {
-        let program = Program {
-            closure: base.closure,
-            document: Arc::new(
-                parse_document(&format!("kernel 1\nnumbers by_spelling\n{source}")).unwrap(),
-            ),
-            library: base.library.clone(),
-        };
+        let program = crate::machine::prepare_document(
+            &(base.library.clone()),
+            Arc::new(parse_document(&format!("kernel 1\nnumbers by_spelling\n{source}")).unwrap()),
+            None,
+        )
+        .expect("prepare linked law document");
         let reference = Program {
             library: prepare_with_layout(Arc::clone(registry), Layout(3)),
             ..program.clone()
@@ -307,11 +310,12 @@ fn probe(handle) {{
 main {{ return null }}
 "#
     );
-    let program = Program {
-        closure: base.closure,
-        document: Arc::new(parse_document(&source).unwrap()),
-        library: base.library.clone(),
-    };
+    let program = crate::machine::prepare_document(
+        &(base.library.clone()),
+        Arc::new(parse_document(&source).unwrap()),
+        None,
+    )
+    .expect("prepare linked law document");
     let reference = Program {
         library: prepare_with_layout(Arc::clone(registry), Layout(3)),
         ..program.clone()

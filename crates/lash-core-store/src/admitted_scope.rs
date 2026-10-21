@@ -6,7 +6,10 @@
 //! (ADR 0107), which is an opener by itself (ADR 0099 §1): no incarnation is
 //! pinned beside it, because no successor can ever share the id.
 
-use crate::{ExecutionScope, ProcessId, SessionId, TurnId};
+use crate::ExecutionScope;
+use lash_vocabulary::identity::ProcessId;
+use lash_vocabulary::identity::SessionId;
+use lash_vocabulary::identity::TurnId;
 
 /// An [`ExecutionScope`] admitted for effect work.
 #[derive(Clone, Debug, PartialEq, Eq)]

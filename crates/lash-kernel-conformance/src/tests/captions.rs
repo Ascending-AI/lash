@@ -5,13 +5,31 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use lash_kernel_dialect::{Dialect, EffectControl, Environment, Mode, NamedLibrary, SourceFormat};
-use lash_kernel_doc::{
-    ActKind, Action, Caption, CaptionEntry, CaptionField, CaptionKind, CaptionRefusal,
-    CaptionTarget, Captions, CaptionsRefusal, Document, EffectName, Expr, Literal, Name, Node,
-    Param, Signature, Site, Stmt, Type, Unit, parse_document,
-};
+use lash_kernel_doc::ActKind;
+use lash_kernel_doc::Action;
+use lash_kernel_doc::Caption;
+use lash_kernel_doc::CaptionEntry;
+use lash_kernel_doc::CaptionField;
+use lash_kernel_doc::CaptionKind;
+use lash_kernel_doc::CaptionRefusal;
+use lash_kernel_doc::CaptionTarget;
+use lash_kernel_doc::Captions;
+use lash_kernel_doc::CaptionsRefusal;
+use lash_kernel_doc::Document;
+use lash_kernel_doc::Expr;
+use lash_kernel_doc::Literal;
+use lash_kernel_doc::Node;
+use lash_kernel_doc::Stmt;
+use lash_kernel_doc::parse_document;
 use lash_kernel_edit::authoring::{Branch, DataValue, Operation, ValueTarget, Wrapper};
 use lash_kernel_edit::{Draft, Position, Transaction};
+use lash_vocabulary::names::EffectName;
+use lash_vocabulary::names::Name;
+use lash_vocabulary::sites::Site;
+use lash_vocabulary::sites::Unit;
+use lash_vocabulary::types::Param;
+use lash_vocabulary::types::Signature;
+use lash_vocabulary::types::Type;
 
 use crate::captions::{CaptionCorpus, CaptionDialect};
 
@@ -59,12 +77,8 @@ fn each_dialect(law: impl Fn(&CaptionDialect<'_>) -> Result<(), crate::HarnessEr
             PYTHON,
         ),
     ];
-    let namespaces = lash_kernel_dialect::Namespaces::of_effects(
-        &effects,
-        &lash_kernel_doc::ContractId::new("1"),
-        &controls,
-    )
-    .expect("the test's effects are operations");
+    let namespaces =
+        crate::linked::namespaces(&effects, &controls).expect("test operation namespaces");
     for (package, library, format, corpus) in &dialects {
         let corpus = CaptionCorpus::from_json(corpus).expect("caption corpus");
         let dialect = CaptionDialect {
@@ -327,6 +341,7 @@ fn text_domain() {
 /// drops it once the parameter is gone.
 fn signature_targets() {
     use lash_kernel_doc::{FieldPath, FieldRoot, FieldTarget, ParamTarget};
+
     let document = parse_document(concat!(
         "kernel 1\nnumbers float\n",
         "entry flow(event: Record{answer: Record{choice: Text}}, ",
@@ -426,26 +441,12 @@ fn signature_targets() {
     let send = EffectName::new("send").expect("a tool's name");
     let registry = lash_kernel_doc::FunctionRegistry::new();
     let mut environment = lash_kernel_check::Environment::new(&registry);
-    environment.effects.insert(
-        send.clone(),
-        lash_kernel_doc::OperationRequirement::new(
-            Signature {
-                params: vec![Param {
-                    name: Name::new("value"),
-                    ty: Type::Any,
-                    optional: false,
-                }],
-                result: Type::Any,
-            },
-            lash_kernel_doc::ContractId::new("1"),
-        ),
-    );
     let mut draft = Draft::open(document.clone()).expect("a draft");
     let insert = Operation::InsertStep {
         base,
         at: Position::before(Site::new(Unit::Function(Name::new("flow")), [0]))
             .expect("a statement of the body"),
-        effect: send,
+        slot: lash_vocabulary::ImportSlot(0),
         args: vec![DataValue::Literal(Literal::Text("new".into()))],
         result: Type::Any,
         binding: None,
@@ -523,16 +524,23 @@ fn signature_view(dialect: &CaptionDialect<'_>) -> Result<(), crate::HarnessErro
             .lower(&case.source, &dialect.environment, Mode::Module)
             .map_err(|diagnostic| fail(&case.name, format!("{diagnostic:?}")))?;
         let document = lowered.document.document();
-        for (name, entry) in &document.entries {
-            let holder = lash_kernel_check::WorkflowDocument::derive(
+        for (name, export) in &document.exports {
+            let lash_kernel_doc::Export::Function(entry) = export else {
+                continue;
+            };
+            let link = lash_vocabulary::package::Link {
+                document: document.identity(),
+                fills: Default::default(),
+            };
+            let holder = lash_kernel_check::WorkflowDocument::entered(
                 document.clone(),
-                lash_kernel_doc::WorkflowDocumentEntry::Entry {
-                    function: name.clone(),
+                lash_vocabulary::LinkedStart {
+                    link: link.identity(),
+                    selector: lash_vocabulary::StartSelector::Export(name.clone()),
                 },
-                dialect.environment.library,
             )
             .map_err(|error| fail(&case.name, error.to_string()))?;
-            let view = lash_kernel_view::derive(&holder, &test_packages())
+            let view = lash_kernel_view::derive(&holder)
                 .map_err(|error| fail(&case.name, error.to_string()))?;
             let joined = view
                 .captions(&holder, &lowered.captions)
@@ -639,26 +647,7 @@ fn rekey() {
     ))
     .expect("document");
     let registry = lash_kernel_doc::FunctionRegistry::new();
-    let required = lash_kernel_check::requirements(&document, &registry);
-    document
-        .manifest
-        .effects
-        .retain(|effect, _| required.effects.contains(effect));
     let mut environment = lash_kernel_check::Environment::new(&registry);
-    environment.effects.insert(
-        EffectName::new("send").expect("a tool's name"),
-        lash_kernel_doc::OperationRequirement::new(
-            Signature {
-                params: vec![Param {
-                    name: Name::new("value"),
-                    ty: Type::Any,
-                    optional: false,
-                }],
-                result: Type::Any,
-            },
-            lash_kernel_doc::ContractId::new("1"),
-        ),
-    );
     let captionable = CaptionKind::captionable(&document);
     let kinds: BTreeSet<CaptionKind> = captionable.iter().map(|(_, kind)| *kind).collect();
     assert_eq!(kinds, CaptionKind::ALL.into_iter().collect(), "every kind");
@@ -704,7 +693,7 @@ fn rekey() {
             Operation::InsertStep {
                 base,
                 at: Position::end(main_site(&[2, 1])),
-                effect: EffectName::new("send").expect("a tool's name"),
+                slot: lash_vocabulary::ImportSlot(0),
                 args: vec![text("new")],
                 result: Type::Any,
                 binding: None,
@@ -840,27 +829,23 @@ fn rekey_imported(dialect: &CaptionDialect<'_>) -> Result<(), crate::HarnessErro
             })?;
         let document = lowered.document.document();
         let entry = document
-            .entries
-            .keys()
-            .next()
-            .expect("a module has an entry");
-        let root = Site::new(Unit::Function(entry.clone()), Vec::new());
-        let effects = dialect.environment.namespaces.signatures();
-        let (effect, signature) = effects.iter().next().expect("the corpus tool");
+            .exports
+            .values()
+            .find_map(|export| match export {
+                lash_kernel_doc::Export::Function(entry) => Some(entry),
+                _ => None,
+            })
+            .expect("a module has a function export");
+        let root = Site::new(Unit::Library(entry.function), Vec::new());
+        let (effect, signature) = document
+            .imports
+            .iter()
+            .find_map(|(slot, import)| match &import.kind {
+                lash_vocabulary::ImportKind::Operation { signature } => Some((slot, signature)),
+                _ => None,
+            })
+            .expect("the corpus tool");
         let environment = lash_kernel_check::Environment {
-            effects: (effects.clone())
-                .iter()
-                .map(|(effect, signature)| {
-                    (
-                        effect.clone(),
-                        lash_kernel_doc::OperationRequirement::new(
-                            signature.clone(),
-                            lash_kernel_doc::ContractId::new("1"),
-                        ),
-                    )
-                })
-                .collect(),
-            internal: Box::new(|_| false),
             functions: dialect.environment.library,
             bindings: BTreeSet::new(),
         };
@@ -868,7 +853,7 @@ fn rekey_imported(dialect: &CaptionDialect<'_>) -> Result<(), crate::HarnessErro
         let insert = Operation::InsertStep {
             base,
             at: Position::before(root.child(0)).expect("a statement of the body"),
-            effect: effect.clone(),
+            slot: *effect,
             args: signature
                 .params
                 .iter()
@@ -942,19 +927,6 @@ fn rekey_canvas_edits(dialect: &CaptionDialect<'_>) -> Result<(), crate::Harness
             .map_err(|diagnostic| fail(&case.name, format!("{diagnostic:?}")))?;
         let document = lowered.document.document();
         let environment = lash_kernel_check::Environment {
-            effects: (dialect.environment.namespaces.signatures())
-                .iter()
-                .map(|(effect, signature)| {
-                    (
-                        effect.clone(),
-                        lash_kernel_doc::OperationRequirement::new(
-                            signature.clone(),
-                            lash_kernel_doc::ContractId::new("1"),
-                        ),
-                    )
-                })
-                .collect(),
-            internal: Box::new(|_| false),
             functions: dialect.environment.library,
             bindings: BTreeSet::new(),
         };
@@ -1096,12 +1068,8 @@ fn first_site(document: &Document, wanted: impl Fn(Node<'_>) -> bool) -> Option<
             .zip(node.children())
             .find_map(|(index, child)| walk(child, site.child(index), wanted))
     }
-    let roots = document
-        .functions
-        .iter()
-        .map(|(name, function)| (Unit::Function(name.clone()), &function.body))
-        .chain(std::iter::once((Unit::Main, &document.main)));
-    roots
+    document
+        .units()
         .into_iter()
         .find_map(|(unit, body)| walk(Node::Block(body), Site::new(unit, Vec::new()), &wanted))
 }
@@ -1113,10 +1081,4 @@ fn acts(node: Node<'_>) -> bool {
 
 fn closes(node: Node<'_>) -> bool {
     matches!(node, Node::Expr(Expr::Closure(_))) || node.children().into_iter().any(closes)
-}
-
-fn test_packages() -> lash_kernel_package::PackageView<'static> {
-    static HELD: std::sync::LazyLock<lash_kernel_package::HeldPackages> =
-        std::sync::LazyLock::new(|| lash_kernel_package::HeldPackages::install([]).unwrap());
-    HELD.view()
 }

@@ -1,7 +1,7 @@
 //! Durable plugin-namespace state carried in a session checkpoint.
 use serde_json::Value;
 
-pub use lash_core_ids::FormatVersion;
+use lash_vocabulary::providers::FormatVersion;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 

@@ -36,7 +36,7 @@ impl FinishedTurn {
     pub(super) async fn read(
         cx: &ActorContext,
         session: &SessionId,
-        run: &crate::TurnId,
+        run: &lash_vocabulary::identity::TurnId,
         outcome: &TurnOutcome,
         unrecorded: Option<crate::runtime::durable::session::CellToolCalls>,
         decoders: &crate::transcript::TranscriptDecoders,

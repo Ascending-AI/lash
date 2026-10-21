@@ -30,7 +30,7 @@ use lash::package::{HeldPackages, Package, PackageSet, PackageSources};
 use lash_durable::{ActorKey, ActorState, DurableStore};
 use lash_durable_test::{Matrix, Script, SimClock, SimNodes, SimNodesConfig, Tripwire};
 use lash_execution_contracts::backend::StoreSet;
-use lash_kernel_doc::FunctionId;
+use lash_vocabulary::names::FunctionId;
 
 /// How many virtual-time steps a law takes before it gives up.
 const STEPS: usize = 200;
@@ -110,7 +110,7 @@ async fn start(
     core: &lash::LashCore,
     packages: &HeldPackages,
     document: &lash_kernel_doc::Document,
-) -> lash_core::ProcessId {
+) -> lash_vocabulary::identity::ProcessId {
     let identity = lash_vm_runtime::KernelDocuments::new(core.backend().module_artifacts())
         .publish(
             &lash_core::ReferrerClaim::unguarded(lash_core::ArtifactReferrer::HostPin(
@@ -164,12 +164,15 @@ async fn start(
         .process_id
 }
 
-fn actor(process: &lash_core::ProcessId) -> ActorKey {
+fn actor(process: &lash_vocabulary::identity::ProcessId) -> ActorKey {
     ActorKey::process(process.as_str()).expect("a process actor key")
 }
 
 /// `process`'s terminal output, encoded, once it has one.
-async fn terminal(core: &lash::LashCore, process: &lash_core::ProcessId) -> Option<String> {
+async fn terminal(
+    core: &lash::LashCore,
+    process: &lash_vocabulary::identity::ProcessId,
+) -> Option<String> {
     core.backend()
         .process_registry()
         .get_process(process)

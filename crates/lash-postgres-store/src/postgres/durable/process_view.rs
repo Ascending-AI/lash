@@ -8,8 +8,8 @@ use lash_durable::{
     ActorKey, ActorState, ActorTx, DurableError, DurableInstant, Epoch, Fenced, Mail, MailKind,
     MailSeq, OpenedActor, StateRevision,
 };
-use lash_protocol_types::ProcessId;
 use lash_store_sql::Dialect;
+use lash_vocabulary::identity::ProcessId;
 use sqlx::Row;
 use sqlx::postgres::PgRow;
 

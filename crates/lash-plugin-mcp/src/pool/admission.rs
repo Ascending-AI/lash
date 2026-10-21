@@ -34,9 +34,11 @@ fn digest(value: &impl Serialize) -> Result<String, McpError> {
 pub(super) fn contract_tag(
     tool_id: &str,
     tool: &rmcp::model::Tool,
-) -> Result<lash_core::HostTag, McpError> {
+) -> Result<lash_vocabulary::tool_contract::HostTag, McpError> {
     let schemas = digest(&(&tool.name, &tool.input_schema, &tool.output_schema))?;
-    Ok(lash_core::HostTag::new(format!("{tool_id}#{schemas}")))
+    Ok(lash_vocabulary::tool_contract::HostTag::new(format!(
+        "{tool_id}#{schemas}"
+    )))
 }
 
 /// `tools` with the guidance `peer`'s discover instructions pin.
@@ -55,8 +57,8 @@ pub(super) fn pinned_guidance(
 ///
 /// The payload is absent, not MCP's, or names another tool.
 pub(crate) fn linked_server(
-    binding: Option<&lash_core::ExecutionBinding>,
-    tool_id: &lash_core::ToolId,
+    binding: Option<&lash_vocabulary::providers::ExecutionBinding>,
+    tool_id: &lash_vocabulary::tool_contract::ToolId,
 ) -> Result<String, ToolOutcome> {
     let payload = binding.map_or(&Value::Null, |binding| &binding.payload);
     match serde_json::from_value::<McpLinkPayload>(payload.clone()) {
@@ -74,7 +76,10 @@ pub(crate) fn linked_server(
 
 impl McpConnectionPool {
     /// The payload a link to the imported tool `tool_id` records.
-    pub(crate) fn link_payload(&self, tool_id: &lash_core::ToolId) -> Option<Value> {
+    pub(crate) fn link_payload(
+        &self,
+        tool_id: &lash_vocabulary::tool_contract::ToolId,
+    ) -> Option<Value> {
         let target = self.lookup_by_id(tool_id)?;
         serde_json::to_value(McpLinkPayload::Mcp {
             server: target.entry.server_name.clone(),

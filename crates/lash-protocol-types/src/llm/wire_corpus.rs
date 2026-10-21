@@ -250,14 +250,16 @@ pub fn corpus_tool() -> crate::llm::types::LlmToolSpec {
     crate::llm::types::LlmToolSpec {
         name: "read_file".into(),
         description: "Read a file.".into(),
-        input_schema: crate::SchemaContract::admit(serde_json::json!({
+        input_schema: lash_vocabulary::schema_contract::SchemaContract::admit(serde_json::json!({
             "type": "object",
             "properties": { "path": { "type": "string" } },
             "required": ["path"]
         }))
         .expect("valid declared schema"),
-        output_schema: crate::SchemaContract::admit(serde_json::json!({}))
-            .expect("valid declared schema"),
+        output_schema: lash_vocabulary::schema_contract::SchemaContract::admit(serde_json::json!(
+            {}
+        ))
+        .expect("valid declared schema"),
     }
 }
 

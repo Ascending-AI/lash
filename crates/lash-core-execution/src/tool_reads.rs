@@ -1,5 +1,5 @@
 //! Declared reads (ADR 0144): what answers a call of a tool whose manifest
-//! declares [`ExecutionPolicy::Read`](crate::ExecutionPolicy::Read) inside
+//! declares [`ExecutionPolicy::Read`](lash_vocabulary::tool_contract::ExecutionPolicy::Read) inside
 //! a code cell.
 //!
 //! A provider that serves `Read` tools registers a reader beside itself
@@ -21,13 +21,17 @@ use std::time::Instant;
 
 use tokio_util::sync::CancellationToken;
 
+use crate::ProviderKey;
+use crate::ToolProvider;
 use crate::plugin::OwnerConfigView;
-use crate::{ProviderKey, ToolDefinition, ToolManifest, ToolProvider};
+use lash_vocabulary::tool_contract::ToolDefinition;
+use lash_vocabulary::tool_contract::ToolManifest;
 
 /// One read a cell performs: the tool as its run's surface retained it, the
 /// arguments it projected from the guest's, the run's configuration, and
 /// what bounds it.
 pub struct ReadCall<'a> {
+    pub clock: &'a dyn lash_core_ids::clock::Clock,
     /// The tool's manifest as the run's surface retained it.
     pub manifest: &'a ToolManifest,
     /// The tool's arguments, projected from the guest's as a recorded
@@ -157,11 +161,13 @@ impl ReadRoute {
         &self,
         args: &serde_json::Value,
         config: &OwnerConfigView,
+        clock: &dyn lash_core_ids::clock::Clock,
         cancel: &CancellationToken,
         deadline: Instant,
     ) -> Result<serde_json::Value, ReadError> {
         self.reads
             .read(ReadCall {
+                clock,
                 manifest: &self.definition.manifest,
                 args,
                 config,

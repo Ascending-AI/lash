@@ -94,8 +94,8 @@ pub(super) fn build(
     ))?)
 }
 
-fn definition() -> Result<lash_core::ToolDefinition> {
-    Ok(lash_core::ToolDefinition::raw(
+fn definition() -> Result<lash_vocabulary::tool_contract::ToolDefinition> {
+    Ok(lash_vocabulary::tool_contract::ToolDefinition::raw(
         "tool:boundary_wait",
         "tools.boundary_wait",
         "Synthetic deferred call",
@@ -104,18 +104,20 @@ fn definition() -> Result<lash_core::ToolDefinition> {
     )?
     .with_execution(Duration::from_secs(120))
     .with_declaration(
-        lash_core::ToolDeclaration::deferring(),
-        Some(lash_core::ParkBound::Within(Duration::from_secs(120))),
+        lash_vocabulary::tool_declaration::ToolDeclaration::deferring(),
+        Some(lash_vocabulary::tool_contract::ParkBound::Within(
+            Duration::from_secs(120),
+        )),
     )?)
 }
-struct DeferredTools(lash_core::ToolDefinition);
+struct DeferredTools(lash_vocabulary::tool_contract::ToolDefinition);
 #[async_trait::async_trait]
 impl lash_core::ToolProvider for DeferredTools {
     fn tool_manifests(
         &self,
         _config: &lash_core::OwnerConfigView,
     ) -> std::result::Result<
-        Vec<lash_core::ToolManifest>,
+        Vec<lash_vocabulary::tool_contract::ToolManifest>,
         lash_execution_contracts::plugin_error::PluginError,
     > {
         Ok(vec![self.0.manifest()])
@@ -124,7 +126,7 @@ impl lash_core::ToolProvider for DeferredTools {
         &self,
         name: &str,
         _config: &lash_core::OwnerConfigView,
-    ) -> Option<Arc<lash_core::ToolContract>> {
+    ) -> Option<Arc<lash_vocabulary::tool_contract::ToolContract>> {
         (name == "tools.boundary_wait").then(|| Arc::new(self.0.contract()))
     }
     async fn execute(&self, _call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
@@ -134,7 +136,9 @@ impl lash_core::ToolProvider for DeferredTools {
 
 pub(super) async fn create(core: &lash::LashCore, name: &str) -> Result<lash::DurableSession> {
     Ok(core
-        .session(lash::SessionId::try_from(name.to_owned())?)
+        .session(lash_vocabulary::identity::SessionId::try_from(
+            name.to_owned(),
+        )?)
         .create(lash::SessionCreation::root(spec()?))
         .await?)
 }
@@ -143,7 +147,9 @@ pub(super) async fn send(session: &lash::DurableSession, name: &str, meter: &Met
     let handle = crate::perf_support::async_operations::observe("boundary.send.accept", async {
         session
             .send(lash::TurnInput::text(name))
-            .id(lash::TurnId::try_from(name.to_owned())?)
+            .id(lash_vocabulary::identity::TurnId::try_from(
+                name.to_owned(),
+            )?)
             .await
     })
     .await?;

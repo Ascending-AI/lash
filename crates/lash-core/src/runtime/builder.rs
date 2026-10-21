@@ -1,6 +1,6 @@
 use super::host::RuntimeWork;
-use crate::SessionId;
 use crate::plugin::PluginSessionRequest;
+use lash_vocabulary::identity::SessionId;
 use std::sync::Arc;
 
 use crate::plugin::{PluginFactory, PluginHost, PluginSession};

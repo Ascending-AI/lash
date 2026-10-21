@@ -64,6 +64,8 @@ test = false
 workspace = true
 
 [dependencies]
+lash-protocol-types.workspace = true
+lash-vocabulary = { workspace = true }
 lash-execution-contracts = { workspace = true }
 async-trait = { workspace = true }
 dhat = { version = "0.3", optional = true }

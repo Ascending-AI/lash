@@ -73,7 +73,7 @@ pub fn append_conformance_event_node(
 ) {
     let parent_node_id = state.session_graph.leaf_node_id.clone();
     let node = crate::SessionNodeRecord {
-        node_id: crate::NodeId::fixture(id),
+        node_id: lash_vocabulary::identity::NodeId::fixture(id),
         parent_node_id,
         timestamp: "2026-07-27T00:00:00.000000000Z"
             .parse()
@@ -172,8 +172,8 @@ pub async fn commit_runtime_state_for_test(
 pub async fn admit_at_checkpoint_for_test(
     store: &Arc<dyn RuntimeStore>,
     session_id: &SessionId,
-    run: &crate::TurnId,
-    turn_id: &crate::TurnId,
+    run: &lash_vocabulary::identity::TurnId,
+    turn_id: &lash_vocabulary::identity::TurnId,
     checkpoint: crate::CheckpointKind,
     step: &str,
     max_inputs: usize,
@@ -218,7 +218,10 @@ pub fn session_request_from_meta_for_test(
 /// execution state is (FIG-6193). Store conformance asserts what a commit
 /// installs and a load returns of it, never what it means.
 pub fn execution_graph(state: &str) -> crate::plugin::ExecutionGraphCapture {
-    use crate::checkpoint_graph::{MAX_NODE_BYTES, NodeKind, TokenWriter, node::frame_direct};
+    use crate::checkpoint_graph::MAX_NODE_BYTES;
+    use crate::checkpoint_graph::NodeKind;
+    use crate::checkpoint_graph::node::frame_direct;
+    use lash_vocabulary::tokens::TokenWriter;
     let mut body = TokenWriter::new();
     body.text(state);
     let root = frame_direct(NodeKind::SESSION_ROOT, &body.into_bytes(), MAX_NODE_BYTES)

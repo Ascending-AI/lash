@@ -14,11 +14,15 @@
 use std::collections::HashMap;
 
 use anyhow::{Context, Result, bail, ensure};
+use lash_core::CellControl;
+use lash_core::CellOutcome;
+use lash_core::CellRecord;
+use lash_core::ToolCallId;
 use lash_core::transcript::{
     ToolResultBlock, TranscriptBlock, TranscriptEntry, TranscriptItem, TranscriptMessage,
     TranscriptRole,
 };
-use lash_core::{CellControl, CellOutcome, CellRecord, ToolCallId, TurnId};
+use lash_vocabulary::identity::TurnId;
 
 use super::provider::{LARGE, LOOKUP, large_text};
 use super::script::{FORMAT, Protocol, Reply, Source, ToolCallSpec, TurnGroup, Workload};
@@ -81,7 +85,7 @@ pub async fn record(args: &RecordArgs) -> Result<()> {
             lash::persistence::LeaseIncarnationId::new(format!("{}", std::process::id())),
         ))
         .map_err(|error| anyhow::anyhow!("build the reading core: {error}"))?;
-    let id = lash::SessionId::try_from(args.session.clone())
+    let id = lash_vocabulary::identity::SessionId::try_from(args.session.clone())
         .map_err(|error| anyhow::anyhow!("{error}"))?;
     let transcript = core
         .session(id)
@@ -426,7 +430,7 @@ mod tests {
     /// A committed entry of turn `turn` (none: outside every turn).
     fn entry(turn: Option<&str>, item: TranscriptItem) -> TranscriptEntry {
         let provenance = EntryProvenance {
-            turn_id: turn.map(lash_core::TurnId::fixture),
+            turn_id: turn.map(lash_vocabulary::identity::TurnId::fixture),
             ..EntryProvenance::default()
         };
         serde_json::from_value(serde_json::json!({

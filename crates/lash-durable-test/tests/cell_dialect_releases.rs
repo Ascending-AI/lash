@@ -20,7 +20,9 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use lash::tools::{StaticToolExecute, StaticToolProvider};
-use lash_core::{ExecutionPolicy, ToolCall, ToolOutcome};
+use lash_core::ToolCall;
+use lash_core::ToolOutcome;
+use lash_vocabulary::tool_contract::ExecutionPolicy;
 use serde_json::json;
 
 use served::{Tier, World};
@@ -36,8 +38,8 @@ impl StaticToolExecute for Echo {
     }
 }
 
-fn echo() -> lash_core::ToolDefinition {
-    lash_core::ToolDefinition::raw(
+fn echo() -> lash_vocabulary::tool_contract::ToolDefinition {
+    lash_vocabulary::tool_contract::ToolDefinition::raw(
         "ext_echo",
         "tools.ext_echo",
         "Answers its argument.",

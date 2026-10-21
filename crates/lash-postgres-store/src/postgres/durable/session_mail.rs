@@ -10,7 +10,10 @@ use lash_durable::domain::{
 };
 use lash_durable::{ActorKey, DurableInstant, Woken};
 use lash_durable::{DurableError, StoreFailure, StoreFailureKind};
-use lash_protocol_types::{BatchId, InputId, SessionId, TurnId};
+use lash_vocabulary::identity::BatchId;
+use lash_vocabulary::identity::InputId;
+use lash_vocabulary::identity::SessionId;
+use lash_vocabulary::identity::TurnId;
 use sqlx::PgConnection;
 
 use super::steps::{self, Entry, Shape, Step, Ty, Value};

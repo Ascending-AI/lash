@@ -13,8 +13,8 @@ use super::{
 use crate::dialect::typescript_test_dialect;
 use crate::plugin::RlmDiscovery;
 
-fn tool(namespace: &str, operation: &str) -> lash_core::ToolDefinition {
-    lash_core::ToolDefinition::raw(
+fn tool(namespace: &str, operation: &str) -> lash_vocabulary::tool_contract::ToolDefinition {
+    lash_vocabulary::tool_contract::ToolDefinition::raw(
         format!("tool:{namespace}/{operation}"),
         format!("{namespace}.{operation}"),
         format!("The {namespace} {operation} operation."),
@@ -29,11 +29,12 @@ fn tool(namespace: &str, operation: &str) -> lash_core::ToolDefinition {
     .with_execution(std::time::Duration::from_secs(120))
 }
 
-fn operation(text: &str) -> lash_core::QualifiedOperation {
-    lash_core::IntoOperation::into_operation(text).expect("a canonical operation")
+fn operation(text: &str) -> lash_vocabulary::names::QualifiedOperation {
+    lash_vocabulary::tool_contract::IntoOperation::into_operation(text)
+        .expect("a canonical operation")
 }
 
-fn catalog(tools: Vec<lash_core::ToolDefinition>) -> lash_core::ToolCatalog {
+fn catalog(tools: Vec<lash_vocabulary::tool_contract::ToolDefinition>) -> lash_core::ToolCatalog {
     lash_core::ToolCatalog::from_tool_definitions(tools)
 }
 
@@ -45,7 +46,7 @@ fn discovery(catalogue_bytes: usize) -> RlmDiscovery {
 }
 
 /// The bytes one listed doc takes, as the budget counts it.
-fn doc_bytes(tool: &lash_core::ToolDefinition) -> usize {
+fn doc_bytes(tool: &lash_vocabulary::tool_contract::ToolDefinition) -> usize {
     rlm_prompt_tool_docs(
         &catalog(vec![tool.clone()]),
         &typescript_test_dialect(),
@@ -231,7 +232,7 @@ fn an_appended_tool_leaves_every_listed_byte_before_it_unchanged() {
 /// its field descriptions are in the text a search matches.
 #[test]
 fn a_discovered_tool_carries_its_field_notes() {
-    let search = lash_core::ToolDefinition::raw(
+    let search = lash_vocabulary::tool_contract::ToolDefinition::raw(
         "tool:tracker/issues_search",
         "tracker.issues_search",
         "Search issues.",
@@ -290,7 +291,7 @@ fn a_discovered_tool_carries_its_field_notes() {
 /// without fabricating an execution definition, in each dialect.
 #[test]
 fn a_path_and_schemas_render_the_loaded_tool_signature_in_each_dialect() {
-    let tool = lash_core::ToolDefinition::raw(
+    let tool = lash_vocabulary::tool_contract::ToolDefinition::raw(
         "tool:tracker/search",
         "tracker.issues.search",
         "Search issues.",
@@ -392,8 +393,10 @@ fn discovered_signatures_preserve_ten_level_select_options_in_every_dialect() {
         if named {
             input["$defs"] = json!({"Option": option});
         }
-        let input = lash_core::JsonSchema::admit(input).expect("valid deep select options");
-        let output = lash_core::JsonSchema::admit(json!({"type": "string"})).unwrap();
+        let input = lash_vocabulary::json_schema::JsonSchema::admit(input)
+            .expect("valid deep select options");
+        let output =
+            lash_vocabulary::json_schema::JsonSchema::admit(json!({"type": "string"})).unwrap();
         for (dialect, field_type) in [
             (crate::dialect::CellDialect::typescript(), "string"),
             (crate::dialect::CellDialect::python(), "str"),
@@ -439,7 +442,8 @@ fn discovered_signature_refusals_retain_the_presenter_cause() {
     use std::error::Error;
 
     let config = json!({"unsupported_host_option": true});
-    let schema = lash_core::JsonSchema::admit(json!({"type": "string"})).unwrap();
+    let schema =
+        lash_vocabulary::json_schema::JsonSchema::admit(json!({"type": "string"})).unwrap();
     let dialect = crate::dialect::CellDialect::typescript();
     let expected = lash_tool_presenter_typescript::TypescriptToolPresenter
         .admit_config(&config)

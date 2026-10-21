@@ -13,10 +13,9 @@ pub(super) fn colliding(commit: TurnCommit) -> Result<TurnCommit, TurnError> {
         lash_core_store::store::decode_session_commit(&commit.commit.json).map_err(store)?;
     let frame_key = lash_core::FrameKey::from_caller_material("l3-collide")
         .map_err(|error| TurnError::Exec(error.to_string()))?;
-    let frame = lash_core::NodeId::from(lash_core_store::session_graph::frame_node_id(
-        &session(),
-        frame_key.as_str(),
-    ));
+    let frame = lash_vocabulary::identity::NodeId::from(
+        lash_core_store::session_graph::frame_node_id(&session(), frame_key.as_str()),
+    );
     let nodes = runtime.graph.nodes_mut();
     let [.., first, second] = nodes else {
         return Err(TurnError::Exec(format!(
@@ -62,12 +61,12 @@ pub(super) fn outside_writer_range(commit: TurnCommit) -> Result<TurnCommit, Tur
     let mut execution = runtime.config.clone();
     runtime.config.plugin_config.insert_versioned(
         WRITER_PLUGIN,
-        lash_core_ids::FormatVersion::ONE,
+        lash_vocabulary::providers::FormatVersion::ONE,
         serde_json::json!({}),
     );
     execution.plugin_config.insert_versioned(
         WRITER_PLUGIN,
-        lash_core_ids::FormatVersion::new(2).expect("2 is a format version"),
+        lash_vocabulary::providers::FormatVersion::new(2).expect("2 is a format version"),
         serde_json::json!({}),
     );
     runtime.execution_config = Some(Box::new(execution));

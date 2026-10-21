@@ -13,7 +13,8 @@
 //! reclamation finishes. A text goes with the last edge that references it.
 //! [`PromptWrite::Release`] also supports explicit root and session deletion.
 
-use lash_protocol_types::{SessionId, TurnId};
+use lash_vocabulary::identity::SessionId;
+use lash_vocabulary::identity::TurnId;
 
 use crate::ids::Epoch;
 

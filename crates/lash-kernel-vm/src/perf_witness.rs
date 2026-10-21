@@ -136,7 +136,7 @@ impl Profiling for crate::KernelMachine {
 pub fn next_ready_statement(
     checkpoint: &lash_kernel_state::paged::Checkpoint,
     source: Box<dyn lash_kernel_state::paged::PageSource>,
-) -> Result<Option<lash_kernel_doc::Site>, lash_kernel_doc::heap::HeapFault> {
+) -> Result<Option<lash_vocabulary::sites::Site>, lash_kernel_doc::heap::HeapFault> {
     let root = lash_kernel_state::kernel_internals::checkpoint_root(checkpoint);
     use lash_kernel_state::kernel_internals::PagedHeap;
     use lash_kernel_state::kernel_internals::directory::ordinal_key;
@@ -159,7 +159,7 @@ pub fn next_ready_statement(
     };
     let frame: FrameRecord = frame;
     let site = frame.statement.resolve(heap.pages())?;
-    Ok(Some(lash_kernel_doc::Site::clone(&site)))
+    Ok(Some(lash_vocabulary::sites::Site::clone(&site)))
 }
 
 /// A first-use library compilation boundary. A callback body's compilation
@@ -167,7 +167,7 @@ pub fn next_ready_statement(
 #[derive(Clone, Copy)]
 pub enum Preparation {
     Begin {
-        function: lash_kernel_doc::FunctionId,
+        function: lash_vocabulary::names::FunctionId,
         callback: bool,
     },
     End,

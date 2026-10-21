@@ -179,7 +179,11 @@ impl TraceRuntime {
     /// Whether `fingerprint`, `session`'s composition now, is one this
     /// runtime has not reported as the session's latest: once it returns
     /// `true`, it is.
-    pub fn report_composition(&self, session: &crate::SessionId, fingerprint: [u8; 32]) -> bool {
+    pub fn report_composition(
+        &self,
+        session: &lash_vocabulary::identity::SessionId,
+        fingerprint: [u8; 32],
+    ) -> bool {
         self.parts
             .compositions
             .report(session, fingerprint, self.parts.composition.sessions())

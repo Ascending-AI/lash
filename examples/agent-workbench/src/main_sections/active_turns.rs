@@ -1,6 +1,6 @@
 use super::*;
-use lash::SessionId;
-use lash::TurnId;
+use lash_vocabulary::identity::SessionId;
+use lash_vocabulary::identity::TurnId;
 
 /// Who claimed a turn.
 ///

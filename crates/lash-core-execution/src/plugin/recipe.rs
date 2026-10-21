@@ -7,8 +7,9 @@ use super::registries::{
     Admits, CallbackContribution, Contribution, Process, Registry, Session, contribution,
 };
 use super::*;
-pub use lash_core_store::obligations::{ObligationToken, RegistryKind};
-pub use lash_core_store::tool_run::{CallbackSlot, TraceScopeOf};
+pub use lash_vocabulary::claims::ObligationToken;
+pub use lash_vocabulary::claims::RegistryKind;
+pub use lash_vocabulary::providers::CallbackSlot;
 use std::sync::Arc;
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -57,7 +58,7 @@ pub enum ContributionDetails {
         /// For a tool provider, the execution binding formats it reads,
         /// declared with its key (S8): what its node offers as the codec of
         /// those versions (FIG-6993). Empty for every other callback.
-        reads: &'static [crate::FormatVersion],
+        reads: &'static [lash_vocabulary::providers::FormatVersion],
     },
     Operation(PluginOperationDef),
     PromptSection(PromptSectionSpec),
@@ -77,7 +78,7 @@ pub struct ContributionDescriptor {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum InventoryScope {
     Deployment(RegistryKind),
-    Owner(crate::RuntimeOwner),
+    Owner(lash_vocabulary::identity::RuntimeOwner),
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ContributionReadiness {
@@ -112,9 +113,9 @@ impl InstalledInventory {
     /// What these registrations offer running code (FIG-6993): each ready
     /// tool provider, by key, and the codec of each binding format it
     /// declares it reads. What a node advertises beside its package code.
-    pub fn offers(&self) -> lash_kernel_doc::NodeCapabilities {
-        let prefix = format!("{}:", CallbackSlot::ToolProvider.key_prefix());
-        let mut offers = lash_kernel_doc::NodeCapabilities::default();
+    pub fn offers(&self) -> lash_vocabulary::claims::NodeCapabilities {
+        use lash_vocabulary::{claims::*, package::ProviderName};
+        let mut offers = NodeCapabilities::default();
         for (entry, readiness) in self.entries.iter().zip(&self.readiness) {
             let (
                 ContributionKey::Callback(identity),
@@ -124,17 +125,38 @@ impl InstalledInventory {
             else {
                 continue;
             };
-            if entry.kind != ContributionKind::Callback(CallbackSlot::ToolProvider) {
-                continue;
-            }
-            let Some(key) = identity.key.strip_prefix(&prefix) else {
+            offers.callbacks.insert(CallbackRequirement {
+                registry: entry.registry,
+                callback: identity.clone(),
+            });
+            let slot = match entry.kind {
+                ContributionKind::Callback(CallbackSlot::ToolProvider) => {
+                    CallbackSlot::ToolProvider
+                }
+                ContributionKind::Callback(CallbackSlot::DeferredPackageProvider) => {
+                    CallbackSlot::DeferredPackageProvider
+                }
+                _ => continue,
+            };
+            let Some(key) = identity
+                .key
+                .strip_prefix(slot.key_prefix())
+                .and_then(|key| key.strip_prefix(':'))
+            else {
                 continue;
             };
-            let provider = format!("{}/{key}", identity.owner);
+            let provider = ProviderName {
+                owner: identity.owner.clone(),
+                key: key.to_owned(),
+            };
             offers
                 .codecs
-                .extend(reads.iter().map(|format| (provider.clone(), format.get())));
+                .extend(reads.iter().map(|format| (provider.clone(), *format)));
             offers.providers.insert(provider);
+            offers.callbacks.insert(CallbackRequirement {
+                registry: entry.registry,
+                callback: identity.clone(),
+            });
         }
         offers
     }
@@ -267,6 +289,10 @@ fn refused(registry: RegistryKind, owner: Option<&str>, kind: &ContributionKind)
     })
 }
 impl<T: Send + Sync + 'static, R: Registry> PluginRegistrar<T, R> {
+    pub fn declared_owner(&self) -> Option<&str> {
+        self.owner.as_deref()
+    }
+
     pub fn require(&mut self, service: ServiceKind) {
         self.requirements.services.insert(service);
     }
@@ -349,6 +375,66 @@ impl<T: Send + Sync + 'static, R: Registry> PluginRegistrar<T, R> {
             bind,
         )
     }
+    /// Register package advertisement independently of model tool exposure.
+    pub fn package_provider(
+        &mut self,
+        key: ToolProviderKey,
+        provider: Arc<dyn super::packages::PackageProvider>,
+    ) -> Result<(), PluginError>
+    where
+        R: Admits<contribution::PackageProvider>,
+    {
+        self.package_provider_bound(key, move |_, _| Ok(Arc::clone(&provider)))
+    }
+
+    pub fn package_provider_bound(
+        &mut self,
+        key: ToolProviderKey,
+        binder: impl Fn(
+            &T,
+            &PluginStateView,
+        ) -> Result<Arc<dyn super::packages::PackageProvider>, PluginError>
+        + Send
+        + Sync
+        + 'static,
+    ) -> Result<(), PluginError>
+    where
+        R: Admits<contribution::PackageProvider>,
+    {
+        self.callback::<contribution::PackageProvider>(
+            Some(HookKey::__literal(key.as_str())),
+            None,
+            ContributionDetails::Callback {
+                stream_state_from: None,
+                reads: &[],
+            },
+            Arc::new(move |owner, state, reg| reg.add_package_provider(key, binder(owner, state)?)),
+        )
+    }
+
+    /// Register repeatable deferred discovery under its own callback identity.
+    /// This does not register an executor or a model tool.
+    pub fn deferred_package_provider(
+        &mut self,
+        key: ToolProviderKey,
+        provider: Arc<dyn super::packages::DeferredPackageProvider>,
+    ) -> Result<(), PluginError>
+    where
+        R: Admits<contribution::DeferredPackageProvider>,
+    {
+        self.callback::<contribution::DeferredPackageProvider>(
+            Some(HookKey::__literal(key.as_str())),
+            None,
+            ContributionDetails::Callback {
+                stream_state_from: None,
+                reads: &[],
+            },
+            Arc::new(move |_, _, reg| {
+                reg.add_deferred_package_provider(key, Arc::clone(&provider))
+            }),
+        )
+    }
+
     pub fn state_reducer(
         &mut self,
         name: impl Into<String>,
@@ -684,7 +770,7 @@ impl<T: Send + Sync + 'static, R: Registry> ToolRegistrations<'_, T, R> {
     pub fn provider_reading(
         self,
         key: ToolProviderKey,
-        reads: &'static [crate::FormatVersion],
+        reads: &'static [lash_vocabulary::providers::FormatVersion],
         binder: impl Fn(&T, &PluginStateView) -> Result<Arc<dyn ToolProvider>, PluginError>
         + Send
         + Sync
@@ -726,7 +812,7 @@ impl<T: Send + Sync + 'static, R: Registry> ToolRegistrations<'_, T, R> {
     pub(crate) fn record_provider_with_reads(
         self,
         key: ToolProviderKey,
-        reads: &'static [crate::FormatVersion],
+        reads: &'static [lash_vocabulary::providers::FormatVersion],
         binder: impl Fn(&T, &PluginStateView) -> Result<crate::ToolProviderRegistration, PluginError>
         + Send
         + Sync
@@ -762,7 +848,7 @@ impl<T: Send + Sync + 'static, R: Registry> ToolRegistrations<'_, T, R> {
     pub(crate) fn record_provider(
         self,
         key: ToolProviderKey,
-        reads: &'static [crate::FormatVersion],
+        reads: &'static [lash_vocabulary::providers::FormatVersion],
         binder: impl Fn(&T, &PluginStateView) -> Result<Arc<dyn ToolProvider>, PluginError>
         + Send
         + Sync
@@ -811,7 +897,7 @@ impl<T: Send + Sync + 'static, R: Registry> ToolRegistrations<'_, T, R> {
     pub fn deferred_reading(
         self,
         key: ToolProviderKey,
-        reads: &'static [crate::FormatVersion],
+        reads: &'static [lash_vocabulary::providers::FormatVersion],
         binder: impl Fn(
             &T,
             &PluginStateView,
@@ -833,7 +919,7 @@ impl<T: Send + Sync + 'static, R: Registry> ToolRegistrations<'_, T, R> {
     pub(crate) fn record_deferred(
         self,
         key: ToolProviderKey,
-        reads: &'static [crate::FormatVersion],
+        reads: &'static [lash_vocabulary::providers::FormatVersion],
         binder: impl Fn(
             &T,
             &PluginStateView,
@@ -864,7 +950,7 @@ impl<T: Send + Sync + 'static, R: Registry> ToolRegistrations<'_, T, R> {
 /// than `declared`, what its registration offers (S8, FIG-6993).
 fn declared_reads(
     key: ToolProviderKey,
-    declared: &'static [crate::FormatVersion],
+    declared: &'static [lash_vocabulary::providers::FormatVersion],
     provider: &(impl ToolProvider + ?Sized),
 ) -> Result<(), PluginError> {
     let reads = provider.readable_binding_formats();

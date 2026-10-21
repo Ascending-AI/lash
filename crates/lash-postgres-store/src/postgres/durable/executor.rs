@@ -281,6 +281,10 @@ pub(super) fn program(
     held: &HeldTexts,
 ) -> Result<Option<Vec<Step>>, DurableError> {
     match write {
+        DomainWrite::RegisterExecution(_)
+        | DomainWrite::EndExecution(_)
+        | DomainWrite::AdoptExecution(_)
+        | DomainWrite::SeedResolution(_) => Ok(None),
         DomainWrite::Turn(write) => turns::steps(epoch, write),
         DomainWrite::RunFact(write) => run_records::steps(epoch, write),
         DomainWrite::ExecRoot(write) => snapshots::steps(epoch, write),
@@ -411,7 +415,10 @@ impl Call {
     ) -> Option<Self> {
         // Root-lease work uses the explicit transaction, which returns the
         // acquired leases and applies releases under the owner fence.
-        if !tx.root_leases().is_empty() || !tx.released_root_leases().is_empty() {
+        if tx.requires().is_some()
+            || !tx.root_leases().is_empty()
+            || !tx.released_root_leases().is_empty()
+        {
             return None;
         }
         let mut call = Self {
@@ -822,9 +829,9 @@ pub(super) fn answer(
     };
     let turn_cancel = match (actor.kind(), text(0)) {
         (lash_durable::ActorKind::Session, Some(run)) => {
-            let session = lash_protocol_types::SessionId::try_from(actor.id().to_owned())
+            let session = lash_vocabulary::identity::SessionId::try_from(actor.id().to_owned())
                 .map_err(|_| super::corrupt("session id", actor.id()))?;
-            let run = lash_protocol_types::TurnId::try_from(run.clone())
+            let run = lash_vocabulary::identity::TurnId::try_from(run.clone())
                 .map_err(|_| super::corrupt("turn id", &run))?;
             Some(turns::decode_cancel(
                 &session,

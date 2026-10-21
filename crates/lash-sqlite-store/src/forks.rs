@@ -98,7 +98,7 @@ pub(super) async fn fork_at_in_catalog(
             let mut fork_plan = None;
             let mut source_frame_ended = false;
             if let Some(leaf_node_id) = leaf_node_id.as_deref() {
-                let leaf = lash_protocol_types::NodeId::parse(leaf_node_id)?;
+                let leaf = lash_vocabulary::identity::NodeId::parse(leaf_node_id)?;
                 // Retirement never tombstones a retained revision's leaf, so
                 // a dead one is damage, not a collected point.
                 let node_facts = tx
@@ -190,7 +190,7 @@ pub(super) async fn fork_at_in_catalog(
                     let parent_node_id = facts.1.clone();
                     edge_path.push(lash_core_store::store::ForkNodeFacts {
                         node_id: facts.0.try_into()?,
-                        parent_node_id: facts.1.map(lash_protocol_types::NodeId::parse).transpose()?,
+                        parent_node_id: facts.1.map(lash_vocabulary::identity::NodeId::parse).transpose()?,
                         owning_session_id: SessionId::parse(facts.2)?,
                         generation,
                     });

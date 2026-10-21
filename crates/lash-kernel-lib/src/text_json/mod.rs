@@ -12,10 +12,12 @@ use std::borrow::Cow;
 use std::sync::Arc;
 
 use lash_kernel_doc::{
-    Args, Formula, FunctionDefinition, FunctionName, FunctionRegistry, Implementation, Integer,
-    KERNEL_VERSION, Name, NativeCall, NativeError, NativeFunction, Nursery, Operand, Param,
-    PreparedNative, RegistryError, Signature, TextView, Type, Value,
+    Args, Formula, FunctionDefinition, FunctionRegistry, Implementation, Integer, KERNEL_VERSION,
+    NativeCall, NativeError, NativeFunction, Nursery, Operand, PreparedNative, RegistryError,
+    TextView, Value,
 };
+
+use lash_vocabulary::{FunctionName, Name, Param, Signature, Type};
 
 pub use json::{decode_number, parse_json, stringify_json};
 
@@ -30,10 +32,11 @@ pub(super) struct Function {
 impl Function {
     fn charge(&mut self, make: impl FnOnce(Formula) -> Formula) {
         if let Some(definition) = &mut self.definition {
-            definition.charge = make(std::mem::replace(
-                &mut definition.charge,
-                Formula::Constant(0),
-            ));
+            if let Implementation::Native { charge } | Implementation::Both { charge, .. } =
+                &mut definition.implementation
+            {
+                *charge = make(std::mem::replace(charge, Formula::Constant(0)));
+            }
         }
     }
 }
@@ -71,6 +74,14 @@ impl NativeFunction for Native {
 /// Unicode-dependent names include the pinned Unicode data version.
 fn catalogue(selection: &Selection<'_>) -> Vec<Function> {
     let mut functions = text::functions(selection);
+    functions.push(definition(
+        selection,
+        "timestamp.nanoseconds",
+        &[("value", Type::Timestamp)],
+        Type::Int,
+        &[],
+        timestamp_nanoseconds,
+    ));
     functions.extend(bytes::functions(selection));
     functions.extend(json::functions(selection));
     functions.extend(classify::functions(selection));
@@ -188,9 +199,8 @@ fn prepared_definition(
             name,
             signature: Signature { params, result },
             errors: errors.iter().map(|kind| (*kind).to_owned()).collect(),
-            charge,
             guard: None,
-            implementation: Implementation::Native,
+            implementation: Implementation::Native { charge },
             native_version: lash_kernel_doc::FIRST_NATIVE_VERSION,
         }),
         native: Some(Arc::new(Native {
@@ -314,4 +324,13 @@ fn sequence_values(args: &Args<'_>, value: &Value) -> Result<Vec<Value>, NativeE
 
 fn sequence_type(element: Type) -> Type {
     Type::List(Box::new(element))
+}
+
+fn timestamp_nanoseconds(call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
+    let value = arg(call.args.values(), 0)?;
+    let nanoseconds = call
+        .args
+        .timestamp(value)?
+        .ok_or_else(|| raise("type_error", "expected timestamp"))?;
+    Ok(call.new.integer(nanoseconds.into_owned()))
 }

@@ -8,7 +8,7 @@
 // library code).
 #![allow(clippy::disallowed_methods)]
 
-use lash_protocol_types::SessionId;
+use lash_vocabulary::identity::SessionId;
 
 // Attachment-store laws certify SQLite and S3; PostgreSQL owns only referrers.
 // live_replay_tests! run in tests/live_replay.rs, against the facade's PostgreSQL live replay store.
@@ -292,7 +292,7 @@ lash_conformance::append_head_switch_tests!({
     (
         _database_fixture,
         Arc::new(storage.store()) as Arc<dyn RuntimeStore>,
-        move |leaf_node_id: lash_protocol_types::NodeId| async move {
+        move |leaf_node_id: lash_vocabulary::identity::NodeId| async move {
             sqlx::query(
                 "WITH recorded AS (
                      INSERT INTO lash_session_revisions (session_id, head_revision, leaf_node_id, checkpoint_ref, config_ref)
@@ -320,7 +320,7 @@ lash_conformance::append_tombstone_tests!({
     (
         _database_fixture,
         Arc::new(storage.store()) as Arc<dyn RuntimeStore>,
-        move |node_id: lash_protocol_types::NodeId| async move {
+        move |node_id: lash_vocabulary::identity::NodeId| async move {
             sqlx::query("UPDATE lash_graph_nodes SET tombstoned = TRUE WHERE node_id = $1")
                 .bind(node_id.into_inner())
                 .execute(&pool)
@@ -383,6 +383,7 @@ lash_conformance::artifact_store_reopenable_tests!({
                 .await
                 .expect("open first Postgres artifact pool");
             let open = lash_conformance::fused_artifact_store::ArtifactStoreHandles {
+                packages: Arc::new(open_storage.lash_vm_artifact_store()),
                 artifacts: Arc::new(open_storage.lash_vm_artifact_store())
                     as Arc<dyn lash_execution_contracts::module_artifacts::ModuleArtifactStore>,
                 process_env: Arc::new(open_storage.process_env_store()) as Arc<dyn ProcessEnvStore>,
@@ -400,6 +401,7 @@ lash_conformance::artifact_store_reopenable_tests!({
                             .expect("construct post-write Postgres artifact pool")
                     });
                     lash_conformance::fused_artifact_store::ArtifactStoreHandles {
+                        packages: Arc::new(reopened.lash_vm_artifact_store()),
                         artifacts: Arc::new(reopened.lash_vm_artifact_store())
                             as Arc<
                                 dyn lash_execution_contracts::module_artifacts::ModuleArtifactStore,

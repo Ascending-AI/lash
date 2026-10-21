@@ -147,7 +147,7 @@ pub struct CellFailure {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub exec_failure: Option<ExecCodeFailureReason>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub schema_admission: Option<Box<crate::SchemaAdmissionError>>,
+    pub schema_admission: Option<Box<lash_vocabulary::json_schema::SchemaAdmissionError>>,
     /// The rule of a session's cells the program broke, when that is why
     /// the cell failed, kept typed through the plugin and host result.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -178,8 +178,8 @@ pub struct CellFailureRepair {
 pub enum CellDefect {
     /// OP-INTERNAL: an authored unit tried to perform a package-private operation.
     InternalOperation {
-        operation: lash_kernel_doc::EffectName,
-        unit: lash_kernel_doc::Unit,
+        operation: lash_vocabulary::names::EffectName,
+        unit: lash_vocabulary::sites::Unit,
     },
 
     /// The cell used a binding an earlier cell left that held a function or
@@ -214,7 +214,10 @@ impl CellFailure {
         self
     }
 
-    pub fn with_schema_admission(mut self, source: crate::SchemaAdmissionError) -> Self {
+    pub fn with_schema_admission(
+        mut self,
+        source: lash_vocabulary::json_schema::SchemaAdmissionError,
+    ) -> Self {
         self.schema_admission = Some(Box::new(source));
         self
     }
@@ -681,7 +684,7 @@ mod tests {
             finished(crate::OutputValue::Retained(retained("{\"rows\":["))),
             controlled(CellControl::SwitchAgentFrame {
                 frame_key: crate::FrameKey::from_call_site(
-                    &crate::SessionId::from("session"),
+                    &lash_vocabulary::identity::SessionId::from("session"),
                     "lineage",
                     &crate::ToolCallId::fixture("call-1"),
                 ),

@@ -1,3 +1,7 @@
+use lash_protocol_types::engine_fault::{
+    ExecutionLease, FrameEpoch, InfrastructureOutcome, OwnerEpoch, PayloadKind, SequenceFault,
+    SupervisorEvidence,
+};
 #[cfg(not(target_os = "linux"))]
 compile_error!("Lash VM workers require Linux");
 
@@ -9,10 +13,7 @@ use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
 use crate::{PoolConfig, PoolError};
-use lash_vm_protocol::{
-    FRAME_HEADER_BYTES, FrameCodec, InfrastructureOutcome, ParentFrame, PayloadKind, SequenceFault,
-    WorkerFrame,
-};
+use lash_vm_protocol::{FRAME_HEADER_BYTES, FrameCodec, ParentFrame, WorkerFrame};
 
 pub struct Worker {
     child: Child,
@@ -30,7 +31,7 @@ pub struct Worker {
     /// The execution's CPU budget, from which the worker sets its own CPU
     /// ceiling, and the limit a run meets past it.
     cpu_budget: Duration,
-    cpu_limit: lash_vm_protocol::WorkerLimit,
+    cpu_limit: lash_protocol_types::worker_limit::WorkerLimit,
     /// The worker's own cgroup, when its host places workers in one;
     /// removed after the worker is reaped.
     cgroup: Option<crate::cgroup::Placement>,
@@ -287,19 +288,19 @@ impl Worker {
     fn lost(&mut self) -> InfrastructureOutcome {
         let evidence = self.exit_evidence();
         if evidence
-            == (lash_vm_protocol::SupervisorEvidence::Signalled {
+            == (lash_protocol_types::engine_fault::SupervisorEvidence::Signalled {
                 signal: libc::SIGKILL,
             })
             && let Some(cgroup) = self.cgroup.as_ref().filter(|cgroup| cgroup.oom_killed())
         {
             return InfrastructureOutcome::WorkerLimitExceeded {
-                limit: lash_vm_protocol::WorkerLimit::Memory {
+                limit: lash_protocol_types::worker_limit::WorkerLimit::Memory {
                     bound_bytes: cgroup.memory_max_bytes(),
                 },
             };
         }
         if evidence
-            == (lash_vm_protocol::SupervisorEvidence::Signalled {
+            == (lash_protocol_types::engine_fault::SupervisorEvidence::Signalled {
                 signal: libc::SIGXCPU,
             })
             && Duration::from_nanos(self.terminate()) >= self.cpu_budget
@@ -311,7 +312,7 @@ impl Worker {
         InfrastructureOutcome::WorkerCrashed { evidence }
     }
 
-    fn exit_evidence(&self) -> lash_vm_protocol::SupervisorEvidence {
+    fn exit_evidence(&self) -> lash_protocol_types::engine_fault::SupervisorEvidence {
         self.await_exit();
         // Observe without reaping: terminate owns wait4 and its CPU receipt.
         let mut info = std::mem::MaybeUninit::<libc::siginfo_t>::zeroed();
@@ -328,7 +329,7 @@ impl Worker {
             )
         };
         if result != 0 {
-            return lash_vm_protocol::SupervisorEvidence::EndOfStream;
+            return lash_protocol_types::engine_fault::SupervisorEvidence::EndOfStream;
         }
         #[expect(
             unsafe_code,
@@ -341,14 +342,16 @@ impl Worker {
         )]
         let status = unsafe { info.si_status() };
         match info.si_code {
-            libc::CLD_EXITED => lash_vm_protocol::SupervisorEvidence::Exited { code: status },
+            libc::CLD_EXITED => {
+                lash_protocol_types::engine_fault::SupervisorEvidence::Exited { code: status }
+            }
             libc::CLD_KILLED | libc::CLD_DUMPED if status == libc::SIGSYS => {
-                lash_vm_protocol::SupervisorEvidence::ForbiddenSyscall
+                lash_protocol_types::engine_fault::SupervisorEvidence::ForbiddenSyscall
             }
             libc::CLD_KILLED | libc::CLD_DUMPED => {
-                lash_vm_protocol::SupervisorEvidence::Signalled { signal: status }
+                lash_protocol_types::engine_fault::SupervisorEvidence::Signalled { signal: status }
             }
-            _ => lash_vm_protocol::SupervisorEvidence::EndOfStream,
+            _ => lash_protocol_types::engine_fault::SupervisorEvidence::EndOfStream,
         }
     }
 
@@ -741,8 +744,7 @@ mod traffic_tests {
     use super::*;
     use crate::measurements::{IpcTraffic, Measurements};
     use lash_vm_protocol::{
-        DecodeLimits, EncodedPayload, ExecutionLease, FrameEpoch, MessageFence, OwnerEpoch,
-        ParentMessage, WorkerMessage,
+        DecodeLimits, EncodedPayload, MessageFence, ParentMessage, WorkerMessage,
     };
     use std::sync::{Arc, Mutex};
 
@@ -832,7 +834,7 @@ mod traffic_tests {
         // sends Deliver and Run separately. Count the actual wire envelopes.
         use lash_vm_protocol::{BorrowedParentFrame, BorrowedParentMessage, Delivery};
         let deliveries = [Delivery {
-            wait: lash_kernel_doc::testkit::wait_id(1),
+            wait: lash_vocabulary::sites::testkit::wait_id(1),
             outcome: EncodedPayload(vec![7; 8]),
         }];
         let bundled = codec
@@ -855,7 +857,7 @@ mod traffic_tests {
         let mut split_bytes = 0;
         for message in [
             ParentMessage::Deliver {
-                wait: lash_kernel_doc::testkit::wait_id(1),
+                wait: lash_vocabulary::sites::testkit::wait_id(1),
                 outcome: deliveries[0].outcome.clone(),
             },
             ParentMessage::Run {
@@ -899,9 +901,7 @@ mod traffic_tests {
 #[cfg(test)]
 mod loss_tests {
     use super::*;
-    use lash_vm_protocol::{
-        ExecutionLease, FrameEpoch, MessageFence, OwnerEpoch, ParentMessage, SupervisorEvidence,
-    };
+    use lash_vm_protocol::{MessageFence, ParentMessage};
 
     /// FIG-6823: a worker killed from outside is named by its signal when
     /// the parent meets its end writing to it, as when reading from it. A

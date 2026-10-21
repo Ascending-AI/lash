@@ -5,11 +5,12 @@ use lash_kernel_doc::Datum;
 use lash_kernel_doc::heap_values::{integer_digits, text_summary};
 impl PagedHeap {
     pub fn freeze_datum(&mut self, datum: &Datum) -> Result<FrozenRef, HeapWriteError> {
-        let named = BTreeMap::new();
+        let named = BTreeSet::new();
         let mut writer = Freezer {
             heap: self,
             objects: Tree::new(false),
             active: BTreeSet::new(),
+            seen: BTreeMap::new(),
             entities: 0,
             cost: 0,
             charge: 0,
@@ -97,7 +98,7 @@ impl Freezer<'_> {
             Datum::Text(v) => PageValue::Text(text(&self.heap.access, v)?),
             Datum::Bytes(v) => PageValue::Bytes(bytes(&self.heap.access, v.as_slice())?),
             Datum::Timestamp(v) => PageValue::Timestamp(v.clone()),
-            Datum::Function(v) => PageValue::Function(text(&self.heap.access, v.as_str())?),
+            Datum::Function(v) => PageValue::Function(Box::new(*v)),
             Datum::Handle(v) => PageValue::Handle(Arc::new(v.clone())),
             Datum::Tuple(values) => {
                 let mut rows = Tree::new(true);

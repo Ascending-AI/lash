@@ -1,6 +1,6 @@
 //! Shared durable-counter corruption and exhaustion conformance.
 
-use lash_protocol_types::SessionId;
+use lash_vocabulary::identity::SessionId;
 use pretty_assertions::assert_eq;
 use std::future::Future;
 use std::sync::Arc;

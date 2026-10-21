@@ -6,13 +6,13 @@ use crate::NoProgressBudget;
 use crate::PluginMessage;
 use crate::RuntimeSessionState;
 use crate::SessionAppendNode;
-use crate::SessionId;
 use crate::SessionPolicy;
 use crate::TurnBudget;
 use crate::facade_support::sql::Receipt;
 use crate::store::{HistoryAnchor, HistoryBudget, WindowSelector};
 use lash_core_ids::operational_metrics::sql;
 use lash_execution_contracts::backend::StoreSet;
+use lash_vocabulary::identity::SessionId;
 use std::num::{NonZeroU32, NonZeroU64};
 
 /// Functional physical receipts; every returned number is an operation-window

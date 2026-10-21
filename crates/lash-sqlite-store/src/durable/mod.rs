@@ -57,7 +57,7 @@ mod claim_facts;
 mod graph;
 mod model_calls;
 mod node_wake_sql;
-mod packages;
+pub(crate) mod packages;
 mod pages;
 mod park;
 mod process_view;
@@ -73,7 +73,7 @@ mod prompts;
 /// tool-intent payloads whose owning run's revision is released (FIG-6612).
 pub(crate) fn release_material_batch(
     tx: &Connection,
-    session: Option<&lash_protocol_types::SessionId>,
+    session: Option<&lash_vocabulary::identity::SessionId>,
 ) -> rusqlite::Result<usize> {
     let mut released = prompts::release_unretained(tx, session)?;
     let limit = i64::from(lash_store_sql::session::revisions::MATERIAL_RELEASE_BATCH);
@@ -85,7 +85,10 @@ pub(crate) fn release_material_batch(
         released += cached_execute(
             tx,
             statement.sql(),
-            rusqlite::params![session.map(lash_protocol_types::SessionId::as_str), limit],
+            rusqlite::params![
+                session.map(lash_vocabulary::identity::SessionId::as_str),
+                limit
+            ],
         )?;
     }
     // A released body no longer holds its attachments (FIG-6611).
@@ -94,7 +97,7 @@ pub(crate) fn release_material_batch(
         cached_execute(
             tx,
             statement.sql(),
-            rusqlite::params![session.map(lash_protocol_types::SessionId::as_str)],
+            rusqlite::params![session.map(lash_vocabulary::identity::SessionId::as_str)],
         )?;
     }
     released += crate::turn_ingress::release_settled_tool_intent_payloads(tx, session)?;
@@ -150,7 +153,7 @@ pub(crate) use waits::TABLES as WAITS_TABLES;
 /// those rows held: the delete's to retire.
 pub(crate) fn retire_session_rows(
     tx: &Connection,
-    session: &lash_protocol_types::SessionId,
+    session: &lash_vocabulary::identity::SessionId,
 ) -> rusqlite::Result<Vec<String>> {
     use lash_durable::domain::{ExecKey, OwnerKey, ScopeKey};
 
@@ -172,7 +175,7 @@ pub(crate) fn retire_session_rows(
 /// nodes they held are peeled.
 pub(crate) fn retire_process_rows(
     tx: &Connection,
-    process: &lash_protocol_types::ProcessId,
+    process: &lash_vocabulary::identity::ProcessId,
 ) -> rusqlite::Result<()> {
     let mut facts = run_records::delete_owner(
         tx,
@@ -180,7 +183,7 @@ pub(crate) fn retire_process_rows(
     )?;
     facts.extend(model_calls::delete_session(
         tx,
-        &lash_protocol_types::SessionId::prefixed("process:", process.as_str()),
+        &lash_vocabulary::identity::SessionId::prefixed("process:", process.as_str()),
     )?);
     if let Ok(actor) = ActorKey::process(process.as_str()) {
         waits::delete_owned(tx, &actor)?;
@@ -223,62 +226,8 @@ CREATE TABLE IF NOT EXISTS nodes (
     registered_at_ms INTEGER NOT NULL,
     heartbeat_expires_at_ms INTEGER NOT NULL,
     draining INTEGER NOT NULL DEFAULT 0 CONSTRAINT ck_nodes_draining CHECK (draining IN (0, 1)),
-    -- What the node offers running code, its own package set among it
-    -- (FIG-6991), as JSON: gone with the row.
+    -- What the node offers running code, as JSON: gone with the row.
     capabilities_json TEXT NOT NULL
-);
-
--- An installed package artifact (FIG-6918), keyed by its digest, with the
--- ordinal the store assigned it on its package line and its header.
-CREATE TABLE IF NOT EXISTS package_artifacts (
-    artifact TEXT PRIMARY KEY,
-    path TEXT NOT NULL,
-    ordinal INTEGER NOT NULL,
-    header TEXT NOT NULL,
-    CONSTRAINT uq_package_artifacts_line UNIQUE (path, ordinal)
-);
-
--- An installed package set, keyed by its digest, at the store's install
--- sequence: the only key behind newest first. Its surface snapshot and the
--- JSON of what running its code requires are written once (FIG-6991).
-CREATE TABLE IF NOT EXISTS package_sets (
-    digest TEXT PRIMARY KEY,
-    sequence INTEGER NOT NULL CONSTRAINT uq_package_sets_sequence UNIQUE,
-    surface BLOB NOT NULL,
-    requirements_json TEXT NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS package_set_members (
-    set_digest TEXT NOT NULL REFERENCES package_sets (digest),
-    artifact TEXT NOT NULL REFERENCES package_artifacts (artifact),
-    PRIMARY KEY (set_digest, artifact)
-);
-
--- Every definition of a stored package, helpers included, by identity and
--- path (FIG-6991): written only by an install, never deleted. Membership is
--- the authority to perform the package's internal operations.
-CREATE TABLE IF NOT EXISTS package_definitions (
-    function TEXT NOT NULL,
-    path TEXT NOT NULL,
-    PRIMARY KEY (function, path)
-);
-
--- Each distinct labels an install wrote for an artifact, in install order:
--- append-only, so releases of identical content keep their labels.
-CREATE TABLE IF NOT EXISTS package_labels (
-    artifact TEXT NOT NULL,
-    labels TEXT NOT NULL,
-    labels_digest BLOB NOT NULL CHECK (length(labels_digest) = 32),
-    sequence INTEGER NOT NULL CONSTRAINT uq_package_labels_sequence UNIQUE,
-    PRIMARY KEY (artifact, labels_digest)
-);
-
--- Every operation a stored package declares internal, by effect name and
--- the package's path: written only by an install, never deleted.
-CREATE TABLE IF NOT EXISTS package_internal_operations (
-    operation TEXT NOT NULL,
-    path TEXT NOT NULL,
-    PRIMARY KEY (operation, path)
 );
 
 CREATE TABLE IF NOT EXISTS actors (
@@ -315,6 +264,32 @@ CREATE INDEX IF NOT EXISTS ix_actors_due ON actors (next_due_ms)
     WHERE state = 'waiting' AND next_due_ms IS NOT NULL;
 CREATE INDEX IF NOT EXISTS ix_actors_owner ON actors (owner_node, owner_boot)
     WHERE state = 'owned';
+
+-- JSON sidecars belong to Package content, outside its structural identity.
+CREATE TABLE IF NOT EXISTS package_labels (
+    namespace TEXT NOT NULL CHECK (namespace = 'kernel_document'),
+    package_ref TEXT NOT NULL CHECK (package_ref LIKE 'package:v1:%'),
+    label_digest BLOB NOT NULL CHECK (length(label_digest) = 32),
+    labels_json TEXT NOT NULL,
+    PRIMARY KEY (namespace, package_ref, label_digest),
+    FOREIGN KEY (namespace, package_ref) REFERENCES artifact_refs(namespace, artifact_ref) ON DELETE CASCADE
+);
+
+-- Immutable execution membership and terminal deferred-use outcomes.
+CREATE TABLE IF NOT EXISTS package_executions (
+    execution TEXT PRIMARY KEY,
+    actor_key TEXT NOT NULL REFERENCES actors(actor_key) ON DELETE CASCADE,
+    registration_json TEXT NOT NULL,
+    ended INTEGER NOT NULL DEFAULT 0 CHECK (ended IN (0, 1))
+);
+CREATE INDEX IF NOT EXISTS idx_package_executions_actor ON package_executions(actor_key);
+CREATE TABLE IF NOT EXISTS execution_resolutions (
+    execution TEXT NOT NULL REFERENCES package_executions(execution) ON DELETE CASCADE,
+    link TEXT NOT NULL,
+    slot INTEGER NOT NULL CHECK (slot >= 0 AND slot <= 4294967295),
+    record_json TEXT NOT NULL,
+    PRIMARY KEY (execution, link, slot)
+);
 
 CREATE TABLE IF NOT EXISTS actor_mail (
     actor_key TEXT NOT NULL REFERENCES actors (actor_key),
@@ -748,7 +723,7 @@ pub(crate) fn wake_within(
 /// Guard and advance a fresh direct session mutation in its writer transaction.
 pub(crate) fn bump_unclaimed_session(
     tx: &Connection,
-    session: &lash_protocol_types::SessionId,
+    session: &lash_vocabulary::identity::SessionId,
     at_ms: u64,
 ) -> Result<(), lash_core_store::store::StoreError> {
     use lash_core_store::store::{HeadOwnershipFacts, StoreError, require_unclaimed_actor};
@@ -798,7 +773,7 @@ pub(crate) fn bump_unclaimed_session(
 /// belongs to a live one. `control` marks a cancel.
 pub(crate) fn wake_session_within(
     tx: &Connection,
-    session: &lash_protocol_types::SessionId,
+    session: &lash_vocabulary::identity::SessionId,
     control: bool,
     now: DurableInstant,
 ) -> Answer<Woken> {
@@ -828,7 +803,7 @@ pub(crate) fn wake_session_within(
 /// refuses such a session itself.
 pub(crate) fn wake_session_tx(
     tx: &Connection,
-    session: &lash_protocol_types::SessionId,
+    session: &lash_vocabulary::identity::SessionId,
     control: bool,
     at_ms: u64,
 ) -> Result<Option<Woken>, lash_core_store::store::StoreError> {
@@ -860,6 +835,12 @@ fn apply_domain(
     planned_under: lash_core_store::store::FleetFormat,
 ) -> Answer<()> {
     match write {
+        DomainWrite::AdoptExecution(record) => packages::adopt(tx, committing.actor, record),
+        DomainWrite::SeedResolution(record) => packages::seed(tx, committing.actor, record),
+        DomainWrite::EndExecution(execution) => {
+            packages::end_execution(tx, committing.actor, execution)
+        }
+        DomainWrite::RegisterExecution(write) => packages::register(tx, committing.actor, write),
         DomainWrite::Turn(write) => turns::apply(tx, committing, write),
         DomainWrite::SessionCommit(write) => turns::apply_session_commit(
             tx,
@@ -1268,84 +1249,12 @@ impl DurableStore for SqliteDurableStore {
             .await
     }
 
-    async fn install_packages(
-        &self,
-        artifacts: &[lash_durable::packages::ArtifactInstall],
-        sets: &[lash_durable::packages::SetInstall],
-    ) -> Result<(), DurableError> {
-        let artifacts = artifacts.to_vec();
-        let sets = sets.to_vec();
-        self.write(
-            CommitLabel::PACKAGES_INSTALL,
-            move |tx, _now| match packages::install(tx, &artifacts, &sets)? {
-                Ok(()) => commit(()),
-                Err(error) => refuse(error),
-            },
-        )
-        .await
-    }
-
-    async fn package_catalog(&self) -> Result<lash_durable::PackageCatalog, DurableError> {
-        self.read(packages::catalog).await
-    }
-
-    async fn package_surface(
-        &self,
-        digest: &lash_durable::PackageSetDigest,
-    ) -> Result<Option<Vec<u8>>, DurableError> {
-        let digest = digest.to_string();
-        self.read(move |tx| packages::surface(tx, &digest).map(Ok))
-            .await
-    }
-
-    async fn package_paths(
-        &self,
-        functions: &[lash_durable::packages::FunctionId],
-    ) -> Result<
-        std::collections::BTreeMap<
-            lash_durable::packages::FunctionId,
-            std::collections::BTreeSet<String>,
-        >,
-        DurableError,
-    > {
-        let functions = functions.to_vec();
-        self.read(move |tx| packages::paths(tx, packages::Index::Definitions, functions).map(Ok))
-            .await
-    }
-
-    async fn package_labels(
-        &self,
-        artifacts: &[lash_durable::ArtifactDigest],
-    ) -> Result<std::collections::BTreeMap<lash_durable::ArtifactDigest, Vec<String>>, DurableError>
-    {
-        let artifacts = artifacts.to_vec();
-        self.read(move |tx| packages::labels(tx, &artifacts).map(Ok))
-            .await
-    }
-
-    async fn internal_operations(
-        &self,
-        operations: &[lash_durable::packages::EffectName],
-    ) -> Result<
-        std::collections::BTreeMap<
-            lash_durable::packages::EffectName,
-            std::collections::BTreeSet<String>,
-        >,
-        DurableError,
-    > {
-        let operations = operations.to_vec();
-        self.read(move |tx| {
-            packages::paths(tx, packages::Index::InternalOperations, operations).map(Ok)
-        })
-        .await
-    }
-
     async fn begin(&self, actor: &ActorKey, epoch: Epoch) -> Result<ActorTx, DurableError> {
         let actor = actor.clone();
         let at = self.instant()?;
         let session = match actor.kind() {
             lash_durable::ActorKind::Session => Some(
-                lash_protocol_types::SessionId::try_from(actor.id().to_owned())
+                lash_vocabulary::identity::SessionId::try_from(actor.id().to_owned())
                     .map_err(|_| corrupt("session id", actor.id()))?,
             ),
             lash_durable::ActorKind::Process => None,
@@ -1358,7 +1267,9 @@ impl DurableStore for SqliteDurableStore {
                 let mut statement = connection.prepare_cached(SQL.sqlite.open.sql())?;
                 let mut rows = statement.query(rusqlite::params![
                     actor.as_str(),
-                    session.as_ref().map(lash_protocol_types::SessionId::as_str)
+                    session
+                        .as_ref()
+                        .map(lash_vocabulary::identity::SessionId::as_str)
                 ])?;
                 let mut opened: Option<(OpenedActor, Option<_>)> = None;
                 while let Some(row) = rows.next()? {

@@ -70,11 +70,15 @@ enum Fold {
 }
 
 impl Plan {
-    pub(crate) fn new(formula: &doc::Formula, params: &[doc::Param]) -> Self {
+    pub(crate) fn new(formula: &doc::Formula, params: &[lash_vocabulary::types::Param]) -> Self {
         Self::prepare(formula, params, false)
     }
 
-    fn prepare(formula: &doc::Formula, params: &[doc::Param], shallow: bool) -> Self {
+    fn prepare(
+        formula: &doc::Formula,
+        params: &[lash_vocabulary::types::Param],
+        shallow: bool,
+    ) -> Self {
         let mut plan = Self {
             ops: Vec::new(),
             measurements: Vec::new(),
@@ -142,7 +146,12 @@ impl Plan {
     }
 
     /// Appends a formula's program.
-    fn term(&mut self, formula: &doc::Formula, params: &[doc::Param], shallow: bool) {
+    fn term(
+        &mut self,
+        formula: &doc::Formula,
+        params: &[lash_vocabulary::types::Param],
+        shallow: bool,
+    ) {
         match formula {
             doc::Formula::Constant(amount) => self.ops.push(Op::Constant(*amount)),
             doc::Formula::CeilLog2(term) => {
@@ -178,7 +187,13 @@ impl Plan {
 
     /// Appends a sum or a product, with the terms of the sums or products
     /// it holds as its own and its constants folded into one.
-    fn fold(&mut self, fold: Fold, items: &[doc::Formula], params: &[doc::Param], shallow: bool) {
+    fn fold(
+        &mut self,
+        fold: Fold,
+        items: &[doc::Formula],
+        params: &[lash_vocabulary::types::Param],
+        shallow: bool,
+    ) {
         let (identity, combine): (u64, fn(u64, u64) -> u64) = match fold {
             Fold::Sum => (0, u64::saturating_add),
             Fold::Product => (1, u64::saturating_mul),
@@ -212,7 +227,13 @@ impl Plan {
     }
 
     /// Appends the largest or the smallest of some amounts; of none, 0.
-    fn extreme(&mut self, op: Op, items: &[doc::Formula], params: &[doc::Param], shallow: bool) {
+    fn extreme(
+        &mut self,
+        op: Op,
+        items: &[doc::Formula],
+        params: &[lash_vocabulary::types::Param],
+        shallow: bool,
+    ) {
         if items.is_empty() {
             self.ops.push(Op::Constant(0));
             return;
@@ -225,7 +246,12 @@ impl Plan {
         }
     }
 
-    fn measure(&mut self, operand: &doc::Operand, measure: doc::Measure, params: &[doc::Param]) {
+    fn measure(
+        &mut self,
+        operand: &doc::Operand,
+        measure: doc::Measure,
+        params: &[lash_vocabulary::types::Param],
+    ) {
         let source = match operand {
             doc::Operand::Result => Source::Result,
             doc::Operand::Param(name) => params
@@ -381,7 +407,7 @@ fn size_bit(source: Source) -> Option<usize> {
 
 impl ScalarTable {
     /// The table of `charge` for a function of `params`.
-    fn of(charge: &Plan, params: &[doc::Param]) -> Option<Self> {
+    fn of(charge: &Plan, params: &[lash_vocabulary::types::Param]) -> Option<Self> {
         if params.len() > 3
             || charge
                 .measurements
@@ -590,7 +616,7 @@ impl Fast {
     /// immediates, which a scalar charge table serves.
     pub(crate) fn new(
         formula: &doc::Formula,
-        params: &[doc::Param],
+        params: &[lash_vocabulary::types::Param],
         charge: &Plan,
         scalar: bool,
     ) -> Self {
@@ -773,14 +799,14 @@ mod text_laws {
     /// constant folding, saturation and arena declines.
     #[test]
     fn prepared_text_charge_is_the_original_formula() {
-        let params = ["a", "b", "c"].map(|name| doc::Param {
-            name: doc::Name::new(name),
-            ty: doc::Type::Any,
+        let params = ["a", "b", "c"].map(|name| lash_vocabulary::types::Param {
+            name: lash_vocabulary::names::Name::new(name),
+            ty: lash_vocabulary::types::Type::Any,
             optional: false,
         });
-        let a = doc::Operand::Param(doc::Name::new("a"));
-        let b = doc::Operand::Param(doc::Name::new("b"));
-        let c = doc::Operand::Param(doc::Name::new("c"));
+        let a = doc::Operand::Param(lash_vocabulary::names::Name::new("a"));
+        let b = doc::Operand::Param(lash_vocabulary::names::Name::new("b"));
+        let c = doc::Operand::Param(lash_vocabulary::names::Name::new("c"));
         let values = [
             Value::Int(0),
             Value::Int(-1),

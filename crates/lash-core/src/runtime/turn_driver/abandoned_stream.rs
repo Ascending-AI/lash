@@ -37,7 +37,7 @@ pub(super) fn model_stream_key(base: &str, attempt: u32) -> String {
 /// streamed, which the replay holds whole, in position order (FIG-5399).
 pub(super) fn attempt_reset(
     events: &[Arc<SessionObservationEvent>],
-    turn: &crate::TurnId,
+    turn: &lash_vocabulary::identity::TurnId,
     base: &str,
 ) -> TurnEvent {
     let first = model_stream_key(base, 1);

@@ -7,7 +7,7 @@ pub trait DirectCompletionService: Send + Sync {
         request: crate::DirectRequest,
         usage_source: &str,
         effect_controller: crate::ActorContext,
-        turn_id: Option<&crate::TurnId>,
+        turn_id: Option<&lash_vocabulary::identity::TurnId>,
         position: DirectExecutionPosition,
         effect_attempt: Option<&crate::EffectAttempt>,
     ) -> Result<crate::DirectCompletion, lash_execution_contracts::plugin_error::PluginError>;
@@ -23,7 +23,7 @@ pub trait DirectCompletionService: Send + Sync {
         facts: Option<Arc<dyn std::any::Any + Send + Sync>>,
         usage_source: &str,
         effect_controller: crate::ActorContext,
-        turn_id: Option<&crate::TurnId>,
+        turn_id: Option<&lash_vocabulary::identity::TurnId>,
         position: DirectExecutionPosition,
         caused_by: Option<crate::CausalRef>,
         effect_attempt: Option<&crate::EffectAttempt>,
@@ -38,7 +38,7 @@ pub trait DirectCompletionService: Send + Sync {
 struct RuntimeDirectSource<'run> {
     service: Arc<dyn DirectCompletionService>,
     effect_controller: crate::ActorContext,
-    turn_id: Option<crate::TurnId>,
+    turn_id: Option<lash_vocabulary::identity::TurnId>,
     /// The run this source serves; the context itself is `'static`.
     run: std::marker::PhantomData<&'run ()>,
 }
@@ -100,7 +100,7 @@ impl<'run> DirectCompletionClient<'run> {
     pub(crate) fn runtime(
         service: Arc<dyn DirectCompletionService>,
         effect_controller: crate::ActorContext,
-        turn_id: Option<crate::TurnId>,
+        turn_id: Option<lash_vocabulary::identity::TurnId>,
     ) -> Self {
         Self {
             source: DirectCompletionSource::Runtime(RuntimeDirectSource {
@@ -393,7 +393,7 @@ pub enum DirectExecutionPosition {
 pub fn runtime_direct_completion_client<'run>(
     service: Arc<dyn DirectCompletionService>,
     effect_controller: crate::ActorContext,
-    turn_id: Option<crate::TurnId>,
+    turn_id: Option<lash_vocabulary::identity::TurnId>,
 ) -> DirectCompletionClient<'run> {
     DirectCompletionClient::runtime(service, effect_controller, turn_id)
 }

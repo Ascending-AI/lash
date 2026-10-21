@@ -88,18 +88,10 @@ fn a_replaced_collection_no_projection_saw_is_never_identified_or_written() {
 /// A function that keeps replacing what it holds: under a tight bound its
 /// growth needs refinements to fit.
 const CHURN: &str = r#"
-fn make(n) {
-  return [n, n, n, n]
-}
-fn work(n) {
-  let keep = [0, 1, 2, 3, 4, 5, 6, 7]
-  let i = 0
-  while num.lt(i, n) {
-    set keep[0] = call make(i)
-    set i = num.add(i, 1)
-  }
-  return list.len(keep)
-}
+definition "function make(n: Any) -> Any\nkernel 1\nmetering statements\nbody { \n  return [n, n, n, n]\n }"
+
+definition "function work(n: Any) -> Any\nkernel 1\nmetering statements\nbody { \n  let keep = [0, 1, 2, 3, 4, 5, 6, 7]\n  let i = 0\n  while num.lt(i, n) {\n    set keep[0] = call make(i)\n    set i = num.add(i, 1)\n  }\n  return list.len(keep)\n }"
+
 main {
   let r = call work(3000)
   return r

@@ -1,13 +1,19 @@
 //! FIG-6889: what a turn's commit costs the store-read window it extends
 //! does not grow with the history the window already holds.
 
+use crate::Message;
+use crate::MessageOrigin;
+use crate::MessageRole;
+use crate::Part;
 use crate::session_graph::{SessionGraph, SessionNodePayload, SessionNodeRecord, WindowAnchor};
 use crate::session_model::{ConversationRecord, SessionHistoryRecord};
+use crate::shared_parts;
 use crate::transcript::{SessionTranscript, TranscriptDecoders};
-use crate::{Message, MessageOrigin, MessageRole, NodeId, Part, SessionId, shared_parts};
+use lash_vocabulary::identity::NodeId;
+use lash_vocabulary::identity::SessionId;
 
 fn record(id: &str, parent: &str, role: MessageRole, turn: &str) -> SessionNodeRecord {
-    let turn_id = crate::TurnId::parse(turn).expect("turn id");
+    let turn_id = lash_vocabulary::identity::TurnId::parse(turn).expect("turn id");
     let origin = match role {
         MessageRole::User => MessageOrigin::TurnInput {
             turn_id,

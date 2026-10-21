@@ -27,6 +27,8 @@
 
 use std::sync::{Arc, Mutex};
 
+use lash_core::ExecutionBudgets;
+use lash_core::LiveReplayStore;
 use lash_core::durable_port::DurableError;
 use lash_core::durable_port::DurableProbe;
 use lash_core::durable_port::runner::{Activation, Drain, Stopped};
@@ -35,7 +37,7 @@ use lash_core::runtime::durable::ProcessActivation;
 use lash_core::runtime::durable::node::{NodeServe, serve};
 use lash_core::runtime::durable::services::{RuntimeTurnServices, SessionRuntimes};
 use lash_core::runtime::durable::session::{SessionActivation, TurnError, TurnServices};
-use lash_core::{ExecutionBudgets, LiveReplayStore, SessionId};
+use lash_vocabulary::identity::SessionId;
 use tokio::sync::watch;
 use tokio_util::sync::CancellationToken;
 

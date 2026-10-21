@@ -3,8 +3,8 @@
 //! One validated [`ExecutionBudgets`] is the only source of lash's own
 //! execution bounds: the model call's hard total, the tool-check and turn-hook phase bounds,
 //! the stop grace and the provider attempt limits. A tool's bounds are its
-//! host's ([`ToolManifest::execution`](crate::ToolManifest::execution) and
-//! [`ToolManifest::park`](crate::ToolManifest::park)), as is every engine
+//! host's ([`ToolManifest::execution`](lash_vocabulary::tool_contract::ToolManifest::execution) and
+//! [`ToolManifest::park`](lash_vocabulary::tool_contract::ToolManifest::park)), as is every engine
 //! step's: lash holds no tool or wait default or ceiling.
 //!
 //! An [`ExecutionLimit`] is one executable stretch's bound, minted from the

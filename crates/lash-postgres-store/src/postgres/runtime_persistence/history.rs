@@ -283,7 +283,7 @@ async fn missing_anchor(
     .map_err(store_sqlx_error)?;
     Ok(StoreError::HistoryAnchorUnavailable {
         session_id: session_id.clone(),
-        node_id: lash_protocol_types::NodeId::parse(node_id)?,
+        node_id: lash_vocabulary::identity::NodeId::parse(node_id)?,
         reason: if tombstoned == Some(true) {
             AnchorUnavailable::Tombstoned
         } else {
@@ -367,7 +367,7 @@ async fn window_graph(
     conn: &mut sqlx::PgConnection,
     rows: &WindowRows<'_>,
     frame_row: &sqlx::postgres::PgRow,
-    leaf: lash_protocol_types::NodeId,
+    leaf: lash_vocabulary::identity::NodeId,
     first_generation: i64,
     leaf_generation: i64,
     windows: &WindowCacheRead,
@@ -437,7 +437,7 @@ async fn window_graph(
 pub(crate) async fn admitted_head_row(
     conn: &mut sqlx::PgConnection,
     session_id: &SessionId,
-    run: Option<&lash_protocol_types::TurnId>,
+    run: Option<&lash_vocabulary::identity::TurnId>,
     fleet: lash_core_store::store::FleetFormat,
     refuse_deleted: bool,
 ) -> Result<Option<sqlx::postgres::PgRow>, StoreError> {
@@ -870,7 +870,7 @@ impl SessionHistoryStore for PostgresStore {
     async fn contains_active_ancestor(
         &self,
         session_id: &SessionId,
-        node_id: &lash_protocol_types::NodeId,
+        node_id: &lash_vocabulary::identity::NodeId,
     ) -> Result<bool, StoreError> {
         let mut tx = read_tx(self).await?;
         check_live(&mut tx, session_id).await?;

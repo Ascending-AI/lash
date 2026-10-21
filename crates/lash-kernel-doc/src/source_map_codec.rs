@@ -1,9 +1,18 @@
 //! Canonical token encodings of source coordinates and document correspondence.
 
-use crate::graph_tokens::{CodecVariant, TokenCodec, TokenError, TokenReader, TokenWriter};
-use crate::{
-    Correspondence, DocumentId, Site, SourceLanguage, SourceMap, SourceSite, Span, Survivor,
-};
+use crate::Correspondence;
+use crate::SourceLanguage;
+use crate::SourceMap;
+use crate::SourceSite;
+use crate::Span;
+use crate::Survivor;
+use lash_vocabulary::names::DocumentId;
+use lash_vocabulary::sites::Site;
+use lash_vocabulary::tokens::CodecVariant;
+use lash_vocabulary::tokens::TokenCodec;
+use lash_vocabulary::tokens::TokenError;
+use lash_vocabulary::tokens::TokenReader;
+use lash_vocabulary::tokens::TokenWriter;
 
 impl TokenCodec for Span {
     fn encode(&self, out: &mut TokenWriter) {
@@ -14,8 +23,8 @@ impl TokenCodec for Span {
     fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
         input.expect_struct(2)?;
         Self::new(
-            crate::graph_tokens::checked_usize(input.unsigned()?)?,
-            crate::graph_tokens::checked_usize(input.unsigned()?)?,
+            lash_vocabulary::tokens::checked_usize(input.unsigned()?)?,
+            lash_vocabulary::tokens::checked_usize(input.unsigned()?)?,
         )
         .ok_or_else(|| TokenError::Invalid("source range ends before it starts".into()))
     }
@@ -47,7 +56,7 @@ impl TokenCodec for SourceSite {
             site: Site::decode(input)?,
             ranges: Vec::decode(input)?,
             implicit: Option::<u64>::decode(input)?
-                .map(crate::graph_tokens::checked_usize)
+                .map(lash_vocabulary::tokens::checked_usize)
                 .transpose()?,
         })
     }

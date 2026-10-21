@@ -1,401 +1,567 @@
-//! A host package's build: its sources defined against the exact
-//! artifacts it requires, checked and frozen into one artifact.
+//! Fresh fulfilment chooses compatible signatures; existing Links retain their pins.
+use crate::{LinkRefusal, LinkedContent};
+use lash_kernel_doc::{Document, Export, FunctionExport, FunctionTarget, Node};
 
+use lash_vocabulary::names::FunctionId;
+use lash_vocabulary::{names::*, package::*, types::Type};
 use std::collections::{BTreeMap, BTreeSet};
-use std::sync::Arc;
 
-use lash_kernel_dialect::{
-    Export, Member, MemberPath, NamedLibrary, PackagePath, Segment, define_functions,
-    define_functions_with,
-};
-use lash_kernel_doc::{
-    ActKind, Action, ArtifactDigest, Expr, Formula, FunctionDefinition, FunctionId, FunctionName,
-    FunctionRegistry, Implementation, Node, Operand, Type, parse_definition,
-};
-
-use crate::package::{Code, digest_of};
-use crate::shape::{STALE_VALUE, Shapes};
-use crate::surface;
-use crate::{NameRole, Origin, Package, PackageRefusal, Root};
-
-/// A host package's three source files.
-#[derive(Clone, Copy, Debug, Default)]
-pub struct PackageSources<'a> {
-    /// `<pkg>.kernel`: definitions in the helper-source format.
-    pub kernel: &'a str,
-    /// `<pkg>.surface`: the exports, under canonical names.
-    pub surface: &'a str,
-    /// `<pkg>.labels.json`: display facts for members and private definitions.
-    pub labels: &'a str,
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum ReachSelection {
+    AllExports,
+    Callable(FunctionId),
+    Start(StartSelector),
+    Function(ExportName),
+    Type(ExportName),
 }
-
-/// The kernel functions a generated check calls by name.
-const CHECK_CALLS: &[&str] = &[
-    "add",
-    "bool.not",
-    "brand.built",
-    "brand.of",
-    "eq",
-    "error.new",
-    "kind",
-    "map.values",
-    "record.contains",
-    "record.get",
-    "record.len",
-    "same",
-    "set.values",
-    "text.concat",
-    "tuple.len",
-];
-
-impl Package {
-    /// Defines, checks and freezes the host package at `path` from
-    /// `sources`, against `requires`, the exact artifacts its bodies call
-    /// into. Its one root is its own path. For each value type it
-    /// generates `<path>.<type>.check_shape`, and each member's body begins
-    /// by checking its package-typed slots. A constructor stamps its values
-    /// with its own identity (`brand.built`).
-    ///
-    /// # Errors
-    ///
-    /// The refusals of §2.1: a non-canonical segment, a segment declared
-    /// twice, a definition outside the path, a member with no definition
-    /// or other slots than its definition's, a sync member that can wait,
-    /// and an operation performed but not exported; [`PackageRefusal::Source`] for unreadable sources.
-    pub fn build(
-        path: &str,
-        release: &str,
-        sources: &PackageSources<'_>,
-        requires: &[&Package],
-    ) -> Result<Self, PackageRefusal> {
-        let path = PackagePath::parse(path).map_err(|invalid| PackageRefusal::NotCanonical {
-            role: NameRole::Path,
-            text: invalid.text,
-        })?;
-        let exports = surface::exports(&path, sources.surface)?;
-        let roots: BTreeSet<Root> = [Root::new(path.to_string())].into();
-        let display = crate::labels::read(sources.labels, &exports, &roots).map_err(|error| {
-            PackageRefusal::Labels {
-                package: path.clone(),
-                error,
+/// Trusted accepted advertisements. Contexts come from publication, never a guest value.
+pub struct Namespace<'a> {
+    pub advertisements: Vec<(&'a PublicationContext, &'a PackageAdvertisement)>,
+}
+fn invalid(message: impl Into<String>) -> LinkRefusal {
+    LinkRefusal::InvalidDocument {
+        message: message.into(),
+    }
+}
+fn path(advertisement: &PackageAdvertisement) -> &PackagePath {
+    match advertisement {
+        PackageAdvertisement::Enumerated(p) => &p.path,
+        PackageAdvertisement::Deferred(p) => &p.path,
+    }
+}
+fn visible(
+    visibility: Visibility,
+    owner: &PublicationContext,
+    request: &PublicationContext,
+    package: &PackagePath,
+    own_package: Option<&PackagePath>,
+) -> bool {
+    visibility == Visibility::Public || (owner == request && own_package == Some(package))
+}
+fn scope_visible(owner: &PublicationContext, consumer: &PublicationContext) -> bool {
+    owner.domain == consumer.domain
+        && (owner.scope == PublicationScope::Host || owner.scope == consumer.scope)
+}
+impl Namespace<'_> {
+    /// Validate roots, ownership, closed leaves and deferred prefix exclusion as one view.
+    pub fn validate(&self) -> Result<(), LinkRefusal> {
+        for (index, (context, advertisement)) in self.advertisements.iter().enumerate() {
+            let here = path(advertisement);
+            if here.first() != Some(&context.root) {
+                return Err(LinkRefusal::NotOwner { path: here.clone() });
             }
-        })?;
-        let requirements: BTreeMap<PackagePath, ArtifactDigest> = requires
-            .iter()
-            .map(|package| (package.path().clone(), package.digest()))
-            .collect();
-        let types: BTreeMap<String, &Type> = exports
-            .iter()
-            .filter_map(|(segment, export)| match export {
-                Export::Type(ty) => Some((segment.to_string(), &ty.representation)),
-                _ => None,
-            })
-            .collect();
-        let type_names: BTreeSet<String> = types.keys().cloned().collect();
-        let shapes = Shapes::new(&path, types);
-        let source = |message: String| PackageRefusal::Source {
-            package: path.clone(),
-            message,
-        };
-        let order = shapes.order().map_err(source)?;
-        let members = members_by_definition(&exports);
-        let kernel = resolve_signatures(&path.to_string(), &type_names, sources.kernel);
-        let mut registry = FunctionRegistry::declarations();
-        for package in requires {
-            package
-                .code()
-                .register_into(&mut registry, &|_| None)
-                .map_err(source)?;
+            for (other_context, other) in &self.advertisements[..index] {
+                let there = path(other);
+                if here == there {
+                    return Err(LinkRefusal::PathConflict { path: here.clone() });
+                }
+                if context.domain != other_context.domain {
+                    return Err(LinkRefusal::NotOwner { path: here.clone() });
+                }
+                if here.first() == there.first()
+                    && (context.publisher != other_context.publisher
+                        || context.scope != other_context.scope)
+                {
+                    return Err(LinkRefusal::NotOwner { path: here.clone() });
+                }
+                let prefix =
+                    here.starts_with(there.as_slice()) || there.starts_with(here.as_slice());
+                if prefix
+                    && (matches!(advertisement, PackageAdvertisement::Deferred(_))
+                        || matches!(other, PackageAdvertisement::Deferred(_)))
+                {
+                    return Err(LinkRefusal::PathConflict { path: here.clone() });
+                }
+                for (short, long, ad) in [(here, there, *advertisement), (there, here, *other)] {
+                    if long.starts_with(short.as_slice())
+                        && long.len() > short.len()
+                        && let PackageAdvertisement::Enumerated(package) = ad
+                        && package.members.contains_key(&long[short.len()])
+                    {
+                        return Err(LinkRefusal::PathConflict { path: long.clone() });
+                    }
+                }
+            }
         }
-        let mut library =
-            NamedLibrary::from_registry(&registry).map_err(|error| source(error.to_string()))?;
-        let mut checks = uses(CHECK_CALLS.iter().copied().map(str::to_owned));
-        for ty in &order {
-            checks.push_str(&format!("use {path}.{ty}.check_shape\n"));
+        Ok(())
+    }
+    pub fn fulfil(
+        &self,
+        content: &LinkedContent,
+        document: DocumentId,
+        context: &PublicationContext,
+        own_package: Option<&PackagePath>,
+        attachment: Option<&Attachment>,
+    ) -> Result<Link, LinkRefusal> {
+        self.validate()?;
+        let source = content.document(document)?;
+        let mut fills = BTreeMap::new();
+        for (slot, import) in &source.imports {
+            let mut chosen = None;
+            for (owner, ad) in &self.advertisements {
+                if !scope_visible(owner, context) {
+                    continue;
+                }
+                match ad {
+                    PackageAdvertisement::Enumerated(package)
+                        if package.path == import.name.package =>
+                    {
+                        let member = package.members.get(&import.name.member).ok_or_else(|| {
+                            LinkRefusal::MissingImport {
+                                slot: *slot,
+                                name: import.name.clone(),
+                            }
+                        })?;
+                        if !visible(
+                            member.visibility,
+                            owner,
+                            context,
+                            &package.path,
+                            own_package,
+                        ) {
+                            return Err(LinkRefusal::NotVisible {
+                                name: import.name.clone(),
+                            });
+                        }
+                        if let Some(attachment) = attachment
+                            && !attachment.packages.contains(&package.path)
+                            && !attachment.members.contains(&import.name)
+                        {
+                            return Err(LinkRefusal::NotVisible {
+                                name: import.name.clone(),
+                            });
+                        }
+                        let fill = match &member.kind {
+                            MemberKind::Operation(offer) if import.name.type_member.is_none() => {
+                                Fill::Operation(offer.requirement.clone())
+                            }
+                            MemberKind::Operation(_) => {
+                                return Err(LinkRefusal::KindMismatch {
+                                    slot: *slot,
+                                    name: import.name.clone(),
+                                });
+                            }
+                            MemberKind::Export { link, export } => {
+                                let mut export = export.clone();
+                                if let Some(member) = &import.name.type_member {
+                                    if export.member.is_some() {
+                                        return Err(LinkRefusal::KindMismatch {
+                                            slot: *slot,
+                                            name: import.name.clone(),
+                                        });
+                                    }
+                                    export.member = Some(member.clone());
+                                }
+                                Fill::Export {
+                                    link: *link,
+                                    export,
+                                }
+                            }
+                        };
+                        compatible(content, *slot, import, &fill)?;
+                        chosen = Some(fill);
+                        break;
+                    }
+                    PackageAdvertisement::Deferred(package)
+                        if import.name.package.starts_with(package.path.as_slice()) =>
+                    {
+                        if !visible(
+                            package.visibility,
+                            owner,
+                            context,
+                            &package.path,
+                            own_package,
+                        ) {
+                            return Err(LinkRefusal::NotVisible {
+                                name: import.name.clone(),
+                            });
+                        }
+                        if let Some(attachment) = attachment
+                            && !attachment.deferred.contains(&package.path)
+                        {
+                            return Err(LinkRefusal::UndeclaredDeferred {
+                                path: package.path.clone(),
+                            });
+                        }
+                        let ImportKind::Operation { signature } = &import.kind else {
+                            return Err(LinkRefusal::KindMismatch {
+                                slot: *slot,
+                                name: import.name.clone(),
+                            });
+                        };
+                        if !signature.params.iter().all(|param| param.ty == Type::Json)
+                            || signature.result != Type::Json
+                        {
+                            return Err(LinkRefusal::SignatureMismatch {
+                                slot: *slot,
+                                name: import.name.clone(),
+                            });
+                        }
+                        chosen = Some(Fill::Deferred {
+                            provider: Box::new(DeferredGrant {
+                                provider: package.provider.clone(),
+                                context: (*owner).clone(),
+                                path: package.path.clone(),
+                                visibility: package.visibility,
+                                signature: signature.clone(),
+                                config: package.config.clone(),
+                                resolution_policy: package.resolution_policy,
+                            }),
+                        });
+                        break;
+                    }
+                    _ => {}
+                }
+            }
+            fills.insert(
+                *slot,
+                chosen.ok_or_else(|| LinkRefusal::MissingImport {
+                    slot: *slot,
+                    name: import.name.clone(),
+                })?,
+            );
         }
-        for ty in &order {
-            checks.push_str(&shapes.definition(ty).lines.join("\n"));
-            checks.push('\n');
+        if let Some(attachment) = attachment {
+            let mut pending: Vec<_> = fills
+                .values()
+                .filter_map(|fill| match fill {
+                    Fill::Export { link, .. } => Some(*link),
+                    _ => None,
+                })
+                .collect();
+            let mut seen = BTreeSet::new();
+            while let Some(id) = pending.pop() {
+                if !seen.insert(id) {
+                    continue;
+                }
+                for fill in content.link(id)?.fills.values() {
+                    match fill {
+                        Fill::Deferred { provider }
+                            if !attachment.deferred.contains(&provider.path) =>
+                        {
+                            return Err(LinkRefusal::UndeclaredDeferred {
+                                path: provider.path.clone(),
+                            });
+                        }
+                        Fill::Export { link, .. } => pending.push(*link),
+                        _ => {}
+                    }
+                }
+            }
         }
-        let mut code = define_functions(&checks, &mut library)
-            .map_err(|error| source(format!("a generated shape check: {error}")))?;
-        code.extend(
-            define_functions_with(&kernel, &mut library, &mut |definition, library| {
-                if members.contains_key(&definition.name) {
-                    check_slots(&shapes, definition, library)?;
+        Ok(Link { document, fills })
+    }
+    /// Validate a source execution's authored Link against its accepted
+    /// publications. Only public members may supply authored cell Imports.
+    /// Previously admitted package internals keep their own publication proof.
+    pub fn validate_authored_origin(
+        &self,
+        content: &LinkedContent,
+        link: &Link,
+    ) -> Result<(), LinkRefusal> {
+        self.validate()?;
+        content.check_link(link)?;
+        for (slot, import) in &content.document(link.document)?.imports {
+            let pinned = &link.fills[slot];
+            let found = self.advertisements.iter().any(|(context, ad)| match ad {
+                PackageAdvertisement::Enumerated(package)
+                    if package.path == import.name.package =>
+                {
+                    package
+                        .members
+                        .get(&import.name.member)
+                        .is_some_and(|member| {
+                            if member.visibility != Visibility::Public {
+                                return false;
+                            }
+                            match (&member.kind, pinned) {
+                                (MemberKind::Operation(offer), Fill::Operation(requirement)) => {
+                                    import.name.type_member.is_none()
+                                        && offer.requirement == *requirement
+                                }
+                                (
+                                    MemberKind::Export { link, export },
+                                    Fill::Export {
+                                        link: held,
+                                        export: target,
+                                    },
+                                ) => {
+                                    let mut expected = export.clone();
+                                    if let Some(member) = &import.name.type_member {
+                                        if expected.member.is_some() {
+                                            return false;
+                                        }
+                                        expected.member = Some(member.clone());
+                                    }
+                                    link == held && expected == *target
+                                }
+                                _ => false,
+                            }
+                        })
+                }
+                PackageAdvertisement::Deferred(package) => match pinned {
+                    Fill::Deferred { provider } => {
+                        package.visibility == Visibility::Public
+                            && import.name.package.starts_with(package.path.as_slice())
+                            && provider.context == **context
+                            && provider.path == package.path
+                            && provider.visibility == package.visibility
+                            && provider.provider == package.provider
+                            && provider.config == package.config
+                            && provider.resolution_policy == package.resolution_policy
+                    }
+                    _ => false,
+                },
+                _ => false,
+            });
+            if !found {
+                return Err(LinkRefusal::NotVisible {
+                    name: import.name.clone(),
+                });
+            }
+        }
+        Ok(())
+    }
+    /// A live offer may serve a fresh Import while failing an existing C1 pin.
+    pub fn validate_link(
+        &self,
+        content: &LinkedContent,
+        link: &Link,
+        context: &PublicationContext,
+        own_package: Option<&PackagePath>,
+        attachment: Option<&Attachment>,
+    ) -> Result<(), LinkRefusal> {
+        content.check_link(link)?;
+        let offered = self.fulfil(content, link.document, context, own_package, attachment)?;
+        for (slot, pinned) in &link.fills {
+            match (pinned, &offered.fills[slot]) {
+                (Fill::Operation(before), Fill::Operation(now))
+                    if before.contract != now.contract =>
+                {
+                    return Err(LinkRefusal::ContractMismatch {
+                        use_: OperationUse {
+                            link: link.identity(),
+                            slot: *slot,
+                        },
+                        pinned: before.contract.clone(),
+                        offered: now.contract.clone(),
+                    });
+                }
+                (Fill::Operation(_), Fill::Operation(_)) => {}
+                (before, now) if before == now => {}
+                _ => {
+                    return Err(invalid(format!(
+                        "pinned fill {slot:?} differs from the accepted member"
+                    )));
+                }
+            }
+        }
+        Ok(())
+    }
+}
+pub(crate) fn compatible(
+    content: &LinkedContent,
+    slot: ImportSlot,
+    import: &Import,
+    fill: &Fill,
+) -> Result<(), LinkRefusal> {
+    let wrong = || LinkRefusal::KindMismatch {
+        slot,
+        name: import.name.clone(),
+    };
+    let signature = || LinkRefusal::SignatureMismatch {
+        slot,
+        name: import.name.clone(),
+    };
+    match (&import.kind, fill) {
+        (
+            ImportKind::Operation {
+                signature: expected,
+            },
+            Fill::Operation(requirement),
+        ) => {
+            if lash_vocabulary::type_relations::serves(&requirement.signature, expected).is_none() {
+                Ok(())
+            } else {
+                Err(signature())
+            }
+        }
+        (
+            ImportKind::Operation {
+                signature: expected,
+            },
+            Fill::Deferred { provider },
+        ) => {
+            if &provider.signature != expected
+                || !import.name.package.starts_with(provider.path.as_slice())
+                || !expected.params.iter().all(|p| p.ty == Type::Json)
+                || expected.result != Type::Json
+            {
+                Err(signature())
+            } else {
+                Ok(())
+            }
+        }
+        (kind, Fill::Export { link, export }) => match (kind, content.export(*link, export)?) {
+            (
+                ImportKind::Code {
+                    signature: expected,
+                    convention,
+                },
+                Export::Function(function),
+            ) => {
+                if function.convention.semantic() != *convention {
+                    return Err(LinkRefusal::ConventionMismatch {
+                        slot,
+                        name: import.name.clone(),
+                    });
+                }
+                if lash_vocabulary::type_relations::serves(&function.signature, expected).is_some()
+                {
+                    return Err(signature());
                 }
                 Ok(())
-            })
-            .map_err(|error| source(error.to_string()))?,
-        );
-        let code: Vec<(FunctionId, Arc<FunctionDefinition>)> = code
-            .into_iter()
-            .map(|definition| (definition.identity(), Arc::new(definition)))
-            .collect();
-        let ids: Vec<FunctionId> = code.iter().map(|(function, _)| *function).collect();
-        let digest = digest_of(&path, Origin::Host, &requirements, &roots, &exports, &ids);
-        let package = Self {
-            path,
-            release: release.to_owned(),
-            origin: Origin::Host,
-            requires: requirements,
-            roots,
-            exports,
-            code: Code::defined(code),
-            display,
-            digest,
-        };
-        package.check_roots()?;
-        package.check_members()?;
-        package.check_code()?;
-        Ok(package)
-    }
-
-    /// PKG-SURFACE: every member names a definition of the package with
-    /// exactly its slots; a sync member's definition never waits.
-    fn check_members(&self) -> Result<(), PackageRefusal> {
-        let asynchronous: BTreeSet<FunctionId> = members_by_definition(&self.exports)
-            .into_iter()
-            .filter(|(_, (_, member))| member.asynchronous)
-            .filter_map(|(definition, _)| self.function(definition.as_str()))
-            .collect();
-        for (definition, (member_path, member)) in members_by_definition(&self.exports) {
-            let at = self.code.position(definition.as_str()).ok_or_else(|| {
-                PackageRefusal::NoDefinition {
-                    package: self.path.clone(),
-                    member: member_path.clone(),
-                    definition: definition.clone(),
-                }
-            })?;
-            let found = self
-                .code
-                .definition(at)
-                .map_err(|message| PackageRefusal::Source {
-                    package: self.path.clone(),
-                    message,
-                })?;
-            if found.signature != member.signature {
-                return Err(PackageRefusal::OtherSlots {
-                    package: self.path.clone(),
-                    member: member_path,
-                    definition: definition.clone(),
-                    member_signature: Box::new(member.signature.clone()),
-                    definition_signature: Box::new(found.signature.clone()),
-                });
             }
-            if !member.asynchronous
-                && found.body().is_some_and(|body| {
-                    waits(Node::Block(&body.block))
-                        || body
-                            .functions
-                            .keys()
-                            .any(|callee| asynchronous.contains(callee))
-                })
-            {
-                return Err(PackageRefusal::SyncMemberWaits {
-                    package: self.path.clone(),
-                    member: member_path,
-                    definition: definition.clone(),
+            (ImportKind::Type { brand }, Export::Type(ty)) if *brand == ty.brand => Ok(()),
+            (ImportKind::Error { kind: expected }, Export::Error { kind }) if *expected == kind => {
+                Ok(())
+            }
+            _ => Err(wrong()),
+        },
+        _ => Err(wrong()),
+    }
+}
+impl LinkedContent {
+    /// Check canonical Brands and prevent an internal member from becoming a public alias.
+    pub fn validate_publication(
+        &self,
+        context: &PublicationContext,
+        package: &Package,
+        snapshot: &Namespace<'_>,
+    ) -> Result<(), LinkRefusal> {
+        snapshot.validate()?;
+        if package.path.first() != Some(&context.root) {
+            return Err(LinkRefusal::NotOwner {
+                path: package.path.clone(),
+            });
+        }
+        for (owner, ad) in &snapshot.advertisements {
+            if path(ad).first() == package.path.first() && (**owner != *context) {
+                return Err(LinkRefusal::NotOwner {
+                    path: package.path.clone(),
                 });
             }
         }
-        Ok(())
-    }
-
-    /// Every operation a body performs is one the package exports
-    /// (PKG-OPS).
-    fn check_code(&self) -> Result<(), PackageRefusal> {
-        for at in 0..self.code.len() {
-            let definition =
-                self.code
-                    .definition(at)
-                    .map_err(|message| PackageRefusal::Source {
-                        package: self.path.clone(),
-                        message,
-                    })?;
-            let Some(body) = definition.body() else {
+        let candidate = PackageAdvertisement::Enumerated(package.clone());
+        let mut ads: Vec<_> = snapshot
+            .advertisements
+            .iter()
+            .copied()
+            .filter(|(_, ad)| path(ad) != &package.path)
+            .collect();
+        ads.push((context, &candidate));
+        let publication = Namespace {
+            advertisements: ads,
+        };
+        publication.validate()?;
+        for (name, member) in &package.members {
+            let MemberKind::Export { link, export } = &member.kind else {
                 continue;
             };
-            for effect in body.effects.keys() {
-                let exported = effect
-                    .as_str()
-                    .strip_prefix(&format!("{}.", self.path))
-                    .and_then(|name| Segment::new(name).ok())
-                    .is_some_and(|name| {
-                        matches!(self.exports.get(&name), Some(Export::Operation(_)))
-                    });
-                if !exported {
-                    return Err(PackageRefusal::UndeclaredOperation {
-                        package: self.path.clone(),
-                        definition: definition.name.clone(),
-                        effect: effect.clone(),
-                    });
+            self.retain_reach(*link)?;
+            // Only a previously accepted public Export carries publication authority.
+            // An arbitrary structurally valid Link does not authorize its pinned internal fills.
+            let accepted = snapshot.advertisements.iter().any(|(owner, ad)| {
+                scope_visible(owner, context)
+                    && match ad {
+                        PackageAdvertisement::Enumerated(original) => original
+                            .members
+                            .values()
+                            .any(|m| m.visibility == Visibility::Public && m.kind == member.kind),
+                        PackageAdvertisement::Deferred(_) => false,
+                    }
+            });
+            if !accepted {
+                publication.validate_link(
+                    self,
+                    self.link(*link)?,
+                    context,
+                    Some(&package.path),
+                    None,
+                )?;
+            }
+            let target = self.export(*link, export)?;
+            let brand = match &target {
+                Export::Type(ty) => Some(&ty.brand),
+                Export::Error { kind } => Some(kind),
+                Export::Function(_) => None,
+            };
+            if let Some(brand) = brand
+                && (brand.package != package.path || brand.name != *name || export.member.is_some())
+            {
+                return Err(LinkRefusal::NotOwner {
+                    path: package.path.clone(),
+                });
+            }
+            for (owner, ad) in &snapshot.advertisements {
+                let PackageAdvertisement::Enumerated(p) = ad else {
+                    continue;
+                };
+                for original in p.members.values() {
+                    if original.kind == member.kind
+                        && original.visibility == Visibility::Internal
+                        && (p.path != package.path
+                            || **owner != *context
+                            || member.visibility != Visibility::Internal)
+                    {
+                        return Err(LinkRefusal::NotVisible {
+                            name: QualifiedName {
+                                package: package.path.clone(),
+                                member: name.clone(),
+                                type_member: None,
+                            },
+                        });
+                    }
                 }
             }
         }
         Ok(())
     }
 }
-
-/// Every member of `exports`, by the definition that implements it.
-fn members_by_definition(
-    exports: &BTreeMap<Segment, Export>,
-) -> BTreeMap<FunctionName, (MemberPath, &Member)> {
-    let mut members = BTreeMap::new();
-    for (segment, export) in exports {
-        match export {
-            Export::Function(member) => {
-                members.insert(
-                    member.definition.clone(),
-                    (
-                        MemberPath {
-                            export: segment.clone(),
-                            member: None,
-                        },
-                        member,
-                    ),
-                );
-            }
-            Export::Type(ty) => {
-                for (name, member) in &ty.members {
-                    let member = member.member();
-                    members.insert(
-                        member.definition.clone(),
-                        (
-                            MemberPath {
-                                export: segment.clone(),
-                                member: Some(name.clone()),
-                            },
-                            member,
-                        ),
-                    );
-                }
-            }
-            Export::Operation(_) | Export::Error => {}
+pub(crate) fn follow_function(
+    document: &Document,
+    root: FunctionId,
+    required: &mut lash_kernel_check::Requirements,
+) {
+    let mut pending = vec![root];
+    while let Some(id) = pending.pop() {
+        if required.functions.contains_key(&id) {
+            continue;
         }
-    }
-    members
-}
-
-/// `kernel` with each definition's signature line read with the package's
-/// type names standing for values of those types.
-fn resolve_signatures(path: &str, types: &BTreeSet<String>, kernel: &str) -> String {
-    let mut out = String::with_capacity(kernel.len());
-    for line in kernel.lines() {
-        match line.strip_prefix("function ") {
-            Some(rest) => {
-                out.push_str("function ");
-                out.push_str(&surface::resolve_types(path, types, rest));
-            }
-            None => out.push_str(line),
-        }
-        out.push('\n');
-    }
-    out
-}
-
-/// `use` header lines for `names`.
-fn uses(names: impl IntoIterator<Item = String>) -> String {
-    names
-        .into_iter()
-        .map(|name| format!("use {name}\n"))
-        .collect()
-}
-
-/// Makes a member's body begin with the checks of its package-typed
-/// slots, charged for and declaring the errors they raise.
-fn check_slots(
-    shapes: &Shapes<'_>,
-    definition: &mut FunctionDefinition,
-    library: &NamedLibrary,
-) -> Result<(), String> {
-    let inline = matches!(definition.implementation, Implementation::Both(_));
-    let Some((checks, slots)) = shapes.slots(&definition.signature, inline) else {
-        return Ok(());
-    };
-    let (Implementation::Body(body) | Implementation::Both(body)) = &mut definition.implementation
-    else {
-        // A native-only member checks its arguments natively.
-        return Ok(());
-    };
-    let params: Vec<String> = definition
-        .signature
-        .params
-        .iter()
-        .map(|param| format!("{}: Any", param.name))
-        .collect();
-    let mut text = format!(
-        "function {}.__checks({}) -> Null\nkernel {}\ncharge 1\nbody {{\n{}\n  return null\n}}\n",
-        definition.name,
-        params.join(", "),
-        definition.kernel,
-        checks.lines.join("\n")
-    );
-    for name in CHECK_CALLS
-        .iter()
-        .map(|name| (*name).to_owned())
-        .chain(checks.calls.iter().cloned())
-        .collect::<BTreeSet<_>>()
-    {
-        if let Some(function) = lash_kernel_dialect::Library::resolve(library, &name) {
-            text.push_str(&format!("use {name} = @{function}\n"));
-        }
-    }
-    let prologue = parse_definition(&text).map_err(|error| format!("its slot checks: {error}"))?;
-    let Some(prologue_body) = prologue.body() else {
-        unreachable!("the slot checks have a body")
-    };
-    let mut block = prologue_body.block.clone();
-    block.pop();
-    let held = Node::Block(&block).functions_within();
-    for (function, name) in &prologue_body.functions {
-        if held.contains(function) {
-            body.functions.insert(*function, name.clone());
-        }
-    }
-    body.block.splice(0..0, block);
-    definition.errors.insert("type_error".to_owned());
-    definition.errors.insert(STALE_VALUE.to_owned());
-    let mut charge = vec![definition.charge.clone()];
-    for slot in slots {
-        charge.push(Formula::DeepSize(Operand::Param(
-            lash_kernel_doc::Name::new(slot),
-        )));
-    }
-    definition.charge = Formula::Sum(charge);
-    Ok(())
-}
-
-/// Whether code below `node` can wait: it performs, sleeps, joins, yields
-/// or awaits.
-fn waits(node: Node<'_>) -> bool {
-    let mut pending = vec![node];
-    while let Some(node) = pending.pop() {
-        let waits = match node {
-            Node::Action(action) => matches!(
-                action,
-                Action::Perform { .. }
-                    | Action::Sleep { .. }
-                    | Action::Join { .. }
-                    | Action::JoinMany { .. }
-                    | Action::Yield
-                    | Action::Await { .. }
-            ),
-            Node::Expr(Expr::Act(act)) => matches!(
-                act.kind,
-                ActKind::Perform { .. }
-                    | ActKind::Sleep { .. }
-                    | ActKind::Join
-                    | ActKind::JoinMany(_)
-                    | ActKind::Yield
-                    | ActKind::Await(_)
-            ),
-            _ => false,
+        let Some(function) = document.functions.get(&id) else {
+            continue;
         };
-        if waits {
-            return true;
+        required.functions.insert(id, function.name.clone());
+        if let Some(body) = function.body() {
+            let node = Node::Block(&body.block);
+            required.imports.extend(node.imports_within());
+            pending.extend(node.functions_within());
         }
-        pending.extend(node.children());
     }
-    false
+}
+pub(crate) fn function_reach(
+    document: &Document,
+    function: &FunctionExport,
+) -> lash_kernel_check::Requirements {
+    let mut required = lash_kernel_check::Requirements::default();
+    follow_function(document, function.function, &mut required);
+    for target in function.convention.targets() {
+        match target {
+            FunctionTarget::Local(id) => follow_function(document, *id, &mut required),
+            FunctionTarget::Import(slot) => {
+                required.imports.insert(*slot);
+            }
+        }
+    }
+    required
 }

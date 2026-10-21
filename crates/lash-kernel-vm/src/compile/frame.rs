@@ -11,7 +11,7 @@ impl PreparedLibrary {
         let mut totals = [0u32; 4];
         let mut occurrences = Vec::new();
         for (at, (_, registered)) in registry.iter().enumerate() {
-            let Some(census) = census_of(registered) else {
+            let Some(census) = census_of(registered, registry) else {
                 continue;
             };
             bodies.extend(
@@ -34,10 +34,10 @@ impl PreparedLibrary {
             totals[1] += census.blocks;
             totals[2] += census.stmts;
             totals[3] += census.sites;
-            for path in &census.occurrences {
-                occurrences.extend((at as u32).to_le_bytes());
-                occurrences.extend((path.len() as u32).to_le_bytes());
-                occurrences.extend(path.iter().flat_map(|step| step.to_le_bytes()));
+            for site in &census.occurrences {
+                let encoded = lash_vocabulary::tokens::encode_body(site);
+                occurrences.extend((encoded.len() as u32).to_le_bytes());
+                occurrences.extend(encoded);
             }
         }
         let mut out = Vec::new();
@@ -138,10 +138,16 @@ impl PreparedLibrary {
         let end = at + word(24) as usize;
         let mut occurrence_at = BTreeMap::new();
         while at < end {
-            let (position, len) = (word(at) as usize, word(at + 4) as usize);
-            let path: Vec<u32> = (0..len).map(|step| word(at + 8 + step * 4)).collect();
-            at += 8 + len * 4;
-            occurrence_at.insert(Site::new(Unit::Library(functions[position]), path), 0);
+            let len = word(at) as usize;
+            at += 4;
+            let site: Site = lash_vocabulary::tokens::decode_body(
+                index
+                    .get(at..at + len)
+                    .ok_or_else(|| std::io::Error::other("truncated occurrence site"))?,
+            )
+            .map_err(std::io::Error::other)?;
+            at += len;
+            occurrence_at.insert(site, 0);
         }
         let by_key: BTreeMap<_, _> = occurrence_at
             .into_keys()

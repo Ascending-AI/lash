@@ -8,7 +8,9 @@ use lash_protocol_types::{
     llm::attachment_delivery::DeliveryLimits, llm::attachment_delivery::DeliverySecret,
     llm::attachment_delivery::ProviderAccepts,
 };
+
 use lash_protocol_types::{llm::types::AttachmentSlot, llm::types::SlotCodec};
+
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 struct FileProbe {

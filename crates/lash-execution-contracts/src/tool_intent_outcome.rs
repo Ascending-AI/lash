@@ -1,4 +1,5 @@
-use crate::{ToolIntentIdentity, ToolIntentKind};
+use crate::ToolIntentIdentity;
+use lash_vocabulary::ToolIntentKind;
 use serde::{Deserialize, Serialize};
 
 macro_rules! realized_payload {
@@ -28,7 +29,7 @@ macro_rules! define_realized {
         }
     };
 }
-lash_protocol_types::tool_intent_variants!(define_realized);
+lash_vocabulary::tool_intent_variants!(define_realized);
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "reason", rename_all = "snake_case")]
@@ -51,8 +52,8 @@ pub enum ToolIntentRefusalReason {
         maximum: usize,
     },
     OwnerMismatch {
-        expected: crate::RuntimeOwner,
-        recorded: crate::RuntimeOwner,
+        expected: lash_vocabulary::identity::RuntimeOwner,
+        recorded: lash_vocabulary::identity::RuntimeOwner,
     },
     CommandFailed {
         cause: crate::ToolIntentCommandFailure,

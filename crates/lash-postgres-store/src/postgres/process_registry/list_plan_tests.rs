@@ -143,7 +143,7 @@ async fn until_scope_roster_page_uses_the_lifetime_scope_index() {
         status: lash_execution_contracts::process::ProcessStatusFilter::Any,
         until: Some(lash_core_store::scope_identity::ScopeId::turn(
             SessionId::from("plan-session"),
-            lash_protocol_types::TurnId::from("plan-turn"),
+            lash_vocabulary::identity::TurnId::from("plan-turn"),
         )),
         ..lash_execution_contracts::process::ProcessListFilter::default()
     })

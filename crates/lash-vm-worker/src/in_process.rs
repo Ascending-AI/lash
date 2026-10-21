@@ -8,8 +8,8 @@ use std::sync::mpsc;
 use std::sync::{Arc, OnceLock};
 
 use lash_core_store::checkpoint_graph::NodeId;
+use lash_kernel_doc::ErrorDatum;
 use lash_kernel_doc::heap::{PageId, PageRef};
-use lash_kernel_doc::{DocumentId, ErrorDatum};
 use lash_kernel_state::paged::{Checkpoint, PageSource};
 use lash_kernel_vm::{
     Bounds, CellStart, Host, KernelMachine, Machine, Outcome, Program, Step, WaitId,
@@ -21,6 +21,7 @@ use lash_vm_broker::kernel::{
     DrivenMachine, KernelFailure, MachinePark, MachineStep, Machines, ParkedState,
 };
 use lash_vm_client::RunStart;
+use lash_vocabulary::names::DocumentId;
 
 use crate::host::{WirePageSource, grant_of, link_grant};
 
@@ -116,12 +117,6 @@ struct Cancelling<'a, H> {
 }
 
 impl<H: Host> Host for Cancelling<'_, H> {
-    fn clock(&mut self) -> lash_kernel_doc::Timestamp {
-        self.host.clock()
-    }
-    fn random(&mut self) -> u64 {
-        self.host.random()
-    }
     fn read(
         &mut self,
         handle: &lash_kernel_doc::Handle,
@@ -131,10 +126,10 @@ impl<H: Host> Host for Cancelling<'_, H> {
     }
     fn perform(
         &mut self,
-        effect: &lash_kernel_doc::EffectName,
+        effect: &lash_vocabulary::names::OperationUse,
         args: &[lash_kernel_doc::Datum],
-        site: &lash_kernel_doc::PositionLabel,
-        origin: &lash_kernel_doc::Site,
+        site: &lash_vocabulary::sites::PositionLabel,
+        origin: &lash_vocabulary::sites::Site,
     ) -> Result<Result<lash_kernel_doc::Datum, ErrorDatum>, lash_kernel_vm::HostFault> {
         self.host.perform(effect, args, site, origin)
     }
@@ -150,9 +145,11 @@ impl<H: Host> Host for Cancelling<'_, H> {
 /// infrastructure.
 fn fault(fault: impl std::fmt::Display) -> KernelFailure {
     KernelFailure::Worker {
-        outcome: crate::PoolError::breach(lash_vm_protocol::ProtocolBreach::Machine {
-            detail: lash_vm_protocol::Detail::new(fault),
-        })
+        outcome: crate::PoolError::breach(
+            lash_protocol_types::engine_fault::ProtocolBreach::Machine {
+                detail: lash_protocol_types::engine_fault::Detail::new(fault),
+            },
+        )
         .into_outcome(),
     }
 }

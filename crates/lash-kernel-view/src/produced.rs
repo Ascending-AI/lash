@@ -13,38 +13,29 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use lash_kernel_check::{
-    ActNode, ActionNode, AtomNode, BindingId, BindingKind, CalleeNode, ExprNode, Graph, NodeId,
-    NodeKind, Reference, StmtNode,
+    ActNode, ActionNode, AtomNode, BindingId, BindingKind, ExprNode, Graph, NodeId, NodeKind,
+    Reference, StmtNode,
 };
-use lash_kernel_doc::{FunctionDeclarations, FunctionId, Site};
-use lash_kernel_package::PackageView;
+
+use lash_vocabulary::sites::Site;
 
 use crate::ActionView;
 
 /// What one derivation reads to name a value's producing `perform`.
 pub(crate) struct Producers<'a> {
     graph: &'a Graph,
-    functions: &'a FunctionDeclarations,
     /// The callables each action of the view applies, by site.
     applies: BTreeMap<&'a Site, &'a [Site]>,
-    packages: &'a PackageView<'a>,
 }
 
 impl<'a> Producers<'a> {
-    pub(crate) fn new(
-        graph: &'a Graph,
-        functions: &'a FunctionDeclarations,
-        actions: &'a [ActionView],
-        packages: &'a PackageView<'a>,
-    ) -> Self {
+    pub(crate) fn new(graph: &'a Graph, actions: &'a [ActionView]) -> Self {
         Self {
             graph,
-            functions,
             applies: actions
                 .iter()
                 .map(|action| (&action.site, action.applies.as_slice()))
                 .collect(),
-            packages,
         }
     }
 
@@ -65,20 +56,6 @@ impl<'a> Producers<'a> {
                 kind: ActNode::Perform { .. },
                 ..
             }) => Some(node.site.clone()),
-            NodeKind::Action(ActionNode::Call {
-                callee: CalleeNode::Library(function),
-                args,
-            }) if self.receives(function, args.len()) => {
-                let value = self.atom(&args[0], seen)?;
-                self.reply(value, seen)
-            }
-            NodeKind::Expr(
-                ExprNode::Call { function, args }
-                | ExprNode::Act {
-                    kind: ActNode::Call(CalleeNode::Library(function)),
-                    args,
-                },
-            ) if self.receives(function, args.len()) => self.reply(args[0], seen),
             NodeKind::Action(ActionNode::Await { value, .. }) => {
                 let value = self.atom(value, seen)?;
                 self.settled(value, seen)
@@ -166,18 +143,5 @@ impl<'a> Producers<'a> {
             | NodeKind::Expr(ExprNode::Let { value, .. }) => Some(value),
             _ => None,
         }
-    }
-
-    /// Whether a call of `function` with `arity` arguments receives an
-    /// effect's reply.
-    fn receives(&self, function: &FunctionId, arity: usize) -> bool {
-        arity == 1
-            && self.functions.get(function).is_some_and(|definition| {
-                definition.signature.params.len() == 1
-                    && self
-                        .packages
-                        .display_for_function(function)
-                        .is_some_and(|display| display.reply)
-            })
     }
 }

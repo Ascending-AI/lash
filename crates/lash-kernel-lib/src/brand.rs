@@ -3,8 +3,10 @@
 //! capability, so a member still checks its arguments.
 
 use lash_kernel_doc::{
-    FunctionId, FunctionRegistry, NativeCall, NativeError, NativeFunction, Value, parse_definition,
+    FunctionRegistry, NativeCall, NativeError, NativeFunction, Value, parse_definition,
 };
+
+use lash_vocabulary::FunctionId;
 use std::sync::Arc;
 
 use crate::CollectionError;

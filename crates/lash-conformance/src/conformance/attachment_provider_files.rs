@@ -9,7 +9,9 @@ use lash_protocol_types::{
     llm::attachment_delivery::DeliveryContext, llm::attachment_delivery::DeliverySecret,
     llm::attachment_delivery::ProviderAccepts, llm::attachment_delivery::ProviderFileScope,
 };
+
 use lash_protocol_types::{llm::types::AttachmentSlot, llm::types::SlotCodec};
+
 use std::sync::Mutex;
 
 /// An uploader that names each file after the media type it was uploaded as

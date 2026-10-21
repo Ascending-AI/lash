@@ -17,7 +17,6 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 use lash_protocol_types::sync::MutexExt;
 
-use crate::SessionId;
 use crate::SessionStoreCreateRequest;
 use crate::store::{
     RuntimeCommit, RuntimeCommitReceipt, RuntimeStore, RuntimeStoreDecorator, SessionWindowRead,
@@ -25,6 +24,7 @@ use crate::store::{
 };
 use lash_core_execution::DeploymentStoreDecorator;
 use lash_execution_contracts::deployment::DeploymentStore;
+use lash_vocabulary::identity::SessionId;
 
 /// A session store with call counters and one-shot faults over the store it
 /// wraps. See the module documentation.
@@ -307,7 +307,7 @@ impl RuntimeStoreDecorator for RecordingStore {
     async fn end_refused_run(
         &self,
         session_id: &SessionId,
-        run: &crate::TurnId,
+        run: &lash_vocabulary::identity::TurnId,
         refusal: &crate::RuntimeError,
         at_ms: u64,
     ) -> Result<crate::store::RunEndOutcome, StoreError> {
@@ -480,7 +480,7 @@ impl RuntimeStoreDecorator for RecordingDeploymentStore {
     async fn end_refused_run(
         &self,
         session_id: &SessionId,
-        run: &crate::TurnId,
+        run: &lash_vocabulary::identity::TurnId,
         refusal: &crate::RuntimeError,
         at_ms: u64,
     ) -> Result<crate::store::RunEndOutcome, StoreError> {

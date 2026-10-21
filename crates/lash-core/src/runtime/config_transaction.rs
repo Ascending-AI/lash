@@ -379,7 +379,7 @@ impl LashRuntime {
     async fn deliver_committed_config_change(
         &mut self,
         run_controller: &crate::ActorContext,
-        batch_id: &crate::BatchId,
+        batch_id: &lash_vocabulary::identity::BatchId,
     ) {
         if self.state.undelivered_config_change.is_none() {
             return;
@@ -413,7 +413,7 @@ impl LashRuntime {
         &mut self,
         owner: &crate::ActorContext,
         tx: lash_durable::ActorTx,
-        batch_id: &crate::BatchId,
+        batch_id: &lash_vocabulary::identity::BatchId,
     ) {
         let operation = crate::OperationId::new(
             crate::facade_support::RuntimeSessionStateFacadeOps::session_operation_scope(

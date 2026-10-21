@@ -28,9 +28,9 @@ const LATE_PRESENTER: &str = "obligation-law-late";
 const PRESENTED: &str = "presented-under-the-recorded-plan";
 const LATE: &str = "presented-by-a-later-step";
 
-fn definition() -> lash_core::ToolDefinition {
+fn definition() -> lash_vocabulary::tool_contract::ToolDefinition {
     let object = serde_json::json!({ "type": "object", "additionalProperties": true });
-    lash_core::ToolDefinition::raw(
+    lash_vocabulary::tool_contract::ToolDefinition::raw(
         format!("tool:{DEFERRED}"),
         DEFERRED_OPERATION,
         "Answers once its completion wait resolves.",
@@ -40,8 +40,8 @@ fn definition() -> lash_core::ToolDefinition {
     .expect("the tool's schemas")
     .with_execution(std::time::Duration::from_secs(120))
     .with_declaration(
-        lash_core::ToolDeclaration::deferring(),
-        Some(lash_core::ParkBound::Within(
+        lash_vocabulary::tool_declaration::ToolDeclaration::deferring(),
+        Some(lash_vocabulary::tool_contract::ParkBound::Within(
             std::time::Duration::from_secs(120),
         )),
     )
@@ -62,7 +62,7 @@ impl lash_core::ToolProvider for Deferring {
         &self,
         _config: &lash_core::OwnerConfigView,
     ) -> std::result::Result<
-        Vec<lash_core::ToolManifest>,
+        Vec<lash_vocabulary::tool_contract::ToolManifest>,
         lash_execution_contracts::plugin_error::PluginError,
     > {
         Ok(vec![definition().manifest()])
@@ -72,7 +72,7 @@ impl lash_core::ToolProvider for Deferring {
         &self,
         name: &str,
         _config: &lash_core::OwnerConfigView,
-    ) -> Option<Arc<lash_core::ToolContract>> {
+    ) -> Option<Arc<lash_vocabulary::tool_contract::ToolContract>> {
         (name == DEFERRED_OPERATION).then(|| Arc::new(definition().contract()))
     }
 
@@ -108,8 +108,8 @@ fn presenter(owner: &'static str, text: &'static str) -> Arc<dyn lash::plugins::
 
 /// The obligation token of [`PRESENTER`]'s step, as a session requires it.
 fn step_token() -> String {
-    lash_core::ObligationToken::for_callback(
-        lash_core::RegistryKind::Session,
+    lash_vocabulary::claims::ObligationToken::for_callback(
+        lash_vocabulary::claims::RegistryKind::Session,
         &lash_core::plugin::PluginCallbackIdentity {
             owner: PRESENTER.to_owned(),
             key: format!("presentation_step:{STEP}"),
@@ -193,7 +193,7 @@ pub(super) async fn a_parked_members_recorded_presentation_plan_is_required_unti
     let session = world.session("obligation-session", served::spec(8)).await;
     let handle = session
         .send(lash::TurnInput::text(TURN))
-        .id(lash::TurnId::parse(RUN).expect("a turn id"))
+        .id(lash_vocabulary::identity::TurnId::parse(RUN).expect("a turn id"))
         .await
         .expect("the turn is accepted");
     tokio::time::timeout(WATCHDOG, tools.parked.notified())
@@ -251,14 +251,17 @@ pub(super) async fn a_parked_members_recorded_presentation_plan_is_required_unti
         .await;
     let session = world
         .core
-        .session(lash::SessionId::try_from("obligation-session".to_owned()).expect("an id"))
+        .session(
+            lash_vocabulary::identity::SessionId::try_from("obligation-session".to_owned())
+                .expect("an id"),
+        )
         .durable()
         .await
         .expect("the session resolves");
     let output = tokio::time::timeout(
         WATCHDOG,
         session
-            .attach_id(lash::TurnId::parse(RUN).expect("a turn id"))
+            .attach_id(lash_vocabulary::identity::TurnId::parse(RUN).expect("a turn id"))
             .output(),
     )
     .await

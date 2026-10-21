@@ -1,124 +1,80 @@
-//! Kernel processes and published definitions adopted onto a successor
-//! release of the packages they call (`K-LIB-009`).
-//!
-//! A package fix is a new function, and so is every function that calls
-//! it: a document written against an earlier release pins that release's
-//! functions by identity, and runs on exactly them while they are held.
-//! Nothing moves it off them on its own. Adoption relinks it by name
-//! ([`lash_kernel_migrate::relink`]): each function its code calls that the
-//! earlier release holds is replaced by the successor's function of the
-//! same name, unless that moves it onto a changed operation contract
-//! (ADOPT-CONTRACT), which refuses naming the operation.
-//!
-//! [`plan_adoption`] plans that relink for a published definition's
-//! document or a process, and [`plan_carry`] plans a successor pair its host
-//! names. Parked page rewriting and validation follow this document plan;
-//! only the fenced owner transaction publishes the carried run.
-
-use lash_kernel_doc::{Document, DocumentId, FunctionRegistry, validate_document};
-use lash_kernel_migrate::{DocumentRefusal, ParkedRefusal, Relink, Rewritten};
-
-/// Why a document or a run is not adopted onto other library functions:
-/// a successor release's, or those of the document a successor pair names.
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, thiserror::Error)]
-#[serde(rename_all = "snake_case", tag = "refused")]
-#[non_exhaustive]
+//! Adoption uses explicit import/use correspondence, never a global function-name rewrite.
+use lash_kernel_migrate::{AdoptedUses, AdoptionRefusal};
+use lash_kernel_package::{LinkRefusal, LinkedContent};
+use lash_vocabulary::{names::*, package::*};
+use std::collections::{BTreeMap, BTreeSet};
+#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 pub enum HelperAdoptionRefusal {
-    #[error("document {document} is not retained")]
-    DocumentMissing { document: DocumentId },
-    /// The relink refused the document: a function it calls has no
-    /// successor or is not held, or the relink would change the contract of
-    /// an operation it performs.
-    #[error("document {document} is not adopted: {refusal}")]
-    Document {
-        document: DocumentId,
-        refusal: DocumentRefusal,
-    },
-    /// The adopted document is not one this build runs.
-    #[error("document {document}, adopted, is not admitted: {reason}")]
-    NotAdmitted {
-        document: DocumentId,
-        reason: String,
-    },
-    #[error("the run parked under document {document} is not carried: {refusal}")]
-    Parked {
-        document: DocumentId,
-        refusal: ParkedRefusal,
-    },
-    #[error("the process's stored state does not decode: {message}")]
+    #[error(transparent)]
+    Link(#[from] LinkRefusal),
+    #[error(transparent)]
+    Use(#[from] AdoptionRefusal),
+    #[error("successor Import for {use_:?} is absent or ambiguous")]
+    AmbiguousUse { use_: OperationUse },
+    #[error("{message}")]
     State { message: String },
-    /// The code the adoption moves off or onto is not read from the
-    /// store, or not admitted there (FIG-6985).
-    #[error("the adopted code is not read: {message}")]
-    Unread { message: String },
-    /// The successor's document is not the process's document relinked
-    /// onto the successor's functions of the same names: no correspondence
-    /// carries the run onto it.
-    #[error("no correspondence carries document {document} onto {successor}")]
-    NoCorrespondence {
-        document: DocumentId,
-        successor: DocumentId,
-    },
-    /// The successor's payload starts another entry, or with other
-    /// arguments: it is no successor of this run.
-    #[error("the successor enters `{entry}` with other arguments than the run it would carry")]
-    OtherEntry { entry: lash_kernel_doc::Name },
 }
-
-/// A document adopted onto a successor release.
-#[derive(Clone, Debug)]
-pub struct AdoptedRun {
-    pub from: DocumentId,
-    pub rewritten: Rewritten,
-}
-
-/// `document`, a published definition's or a process's, adopted by
-/// `relink`; `None` when it lists no function `relink` names. `functions` holds both releases.
-///
-/// # Errors
-///
-/// The typed refusal of a document or run that is not adopted.
-pub fn plan_adoption(
-    document: &Document,
-    functions: &FunctionRegistry,
-    relink: &Relink,
-) -> Result<Option<AdoptedRun>, HelperAdoptionRefusal> {
-    // A document lists every function it reaches, through bodies too.
-    if !document
-        .manifest
-        .functions
-        .keys()
-        .any(|function| relink.contains_key(function))
-    {
-        return Ok(None);
+/// Pair by the complete scoped Import and immutable fill. Names alone cannot select an instance.
+pub fn plan_adoption<T: Clone + Eq>(
+    content: &LinkedContent,
+    from: LinkId,
+    to: LinkId,
+    live: &BTreeSet<OperationUse>,
+    outcomes: &BTreeMap<OperationUse, T>,
+    successor_outcomes: &BTreeMap<OperationUse, T>,
+) -> Result<AdoptedUses<T>, HelperAdoptionRefusal> {
+    let old = content.link(from)?;
+    let new = content.link(to)?;
+    let old_doc = content.document(old.document)?;
+    let new_doc = content.document(new.document)?;
+    let mut correspondence = BTreeMap::new();
+    let mut local_live = BTreeSet::new();
+    let mut local_outcomes = BTreeMap::new();
+    let mut retained = BTreeMap::new();
+    let mut resolutions = successor_outcomes.clone();
+    for use_ in live.iter().chain(outcomes.keys()) {
+        if use_.link != from {
+            content.link(use_.link)?;
+            retained.insert(*use_, *use_);
+            if let Some(outcome) = outcomes.get(use_) {
+                if resolutions.get(use_).is_some_and(|known| known != outcome) {
+                    return Err(AdoptionRefusal::OutcomeConflict { use_: *use_ }.into());
+                }
+                resolutions.insert(*use_, outcome.clone());
+            }
+            continue;
+        }
+        let import = old_doc.imports.get(&use_.slot);
+        let fill = old.fills.get(&use_.slot);
+        let candidates = new_doc
+            .imports
+            .iter()
+            .filter(|(slot, found)| Some(*found) == import && new.fills.get(slot) == fill)
+            .map(|(slot, _)| *slot)
+            .collect::<Vec<_>>();
+        let [slot] = candidates.as_slice() else {
+            return Err(HelperAdoptionRefusal::AmbiguousUse { use_: *use_ });
+        };
+        correspondence.insert(
+            *use_,
+            OperationUse {
+                link: to,
+                slot: *slot,
+            },
+        );
+        local_live.insert(*use_);
+        if let Some(outcome) = outcomes.get(use_) {
+            local_outcomes.insert(*use_, outcome.clone());
+        }
     }
-    plan_carry(document, functions, relink).map(Some)
-}
-
-/// `document` carried onto `relink`: each library function it calls
-/// replaced by its successor. `functions` holds every function the
-/// document reaches and every successor. The paged carry applies this plan to a parked run.
-///
-/// # Errors
-///
-/// The typed refusal of a document or run that is not carried.
-pub fn plan_carry(
-    document: &Document,
-    functions: &FunctionRegistry,
-    relink: &Relink,
-) -> Result<AdoptedRun, HelperAdoptionRefusal> {
-    let from = document.identity();
-    let rewritten = lash_kernel_migrate::adopt(document, relink, functions).map_err(|refusal| {
-        HelperAdoptionRefusal::Document {
-            document: from,
-            refusal,
-        }
-    })?;
-    validate_document(&rewritten.document, functions).map_err(|invalid| {
-        HelperAdoptionRefusal::NotAdmitted {
-            document: from,
-            reason: invalid.to_string(),
-        }
-    })?;
-    Ok(AdoptedRun { from, rewritten })
+    let mut adopted = lash_kernel_migrate::adopt(
+        (old, old_doc),
+        (new, new_doc),
+        &local_live,
+        &correspondence,
+        &local_outcomes,
+        &resolutions,
+    )?;
+    adopted.uses.extend(retained);
+    Ok(adopted)
 }

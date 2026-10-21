@@ -6,6 +6,7 @@
 #![allow(clippy::disallowed_methods, reason = "explicit corpus recorder")]
 
 use lash_kernel_doc::{FunctionRegistry, parse_document, print_document};
+
 use std::sync::Arc;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -40,14 +41,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             case.name == "sort refuses an unordered comparator and leaves its input unchanged"
         })
         .ok_or("missing unordered sort case")?;
-    let main_start = case.document.find("main {").ok_or("missing main block")?;
-    let mut text = String::from("kernel 1\nnumbers by_spelling\n");
-    for (id, function) in registry.iter() {
-        text.push_str(&format!("use {} = @{id}\n", function.definition().name));
-    }
-    text.push_str(&case.document[main_start..]);
-    let mut document = parse_document(&text)?;
-    document.manifest.functions = lash_kernel_check::requirements(&document, &registry).functions;
+    let mut document = parse_document(&case.document)?;
+    refresh_definitions(&mut document, &registry);
     let environment = lash_kernel_check::Environment::new(&registry);
     lash_kernel_check::admit(&document, &environment)?;
     // Replace only this document's JSON string; the oracle and every other
@@ -104,8 +99,8 @@ fn charges(
             // Refusal cases intentionally contain invalid source. Leave them
             // and unknown/regex manifests to their own recorder.
             if let Ok(document) = parse_document(&before) {
-                for (id, name) in &document.manifest.functions {
-                    if let Some(current) = names.get(name) {
+                for (id, definition) in &document.functions {
+                    if let Some(current) = names.get(&definition.name) {
                         case.document =
                             case.document.replace(&id.to_string(), &current.to_string());
                     }
@@ -171,10 +166,9 @@ fn regex(
         let source = case["document"].as_str().ok_or("corpus document")?;
         let document = parse_document(source)?;
         let old = document
-            .manifest
             .functions
             .iter()
-            .find(|(_, name)| name.as_str() == "regex.ecma.test")
+            .find(|(_, name)| name.name.as_str() == "regex.ecma.test")
             .map(|(id, _)| id.to_string())
             .ok_or("regex test reference")?;
         let source = source.replace(&old, &current).replace(
@@ -189,4 +183,26 @@ fn regex(
     }
     std::fs::write(path, serde_json::to_string_pretty(&shard)? + "\n")?;
     Ok(())
+}
+
+/// Replace complete local definitions from the build registry. Import slots stay document-owned.
+fn refresh_definitions(document: &mut lash_kernel_doc::Document, registry: &FunctionRegistry) {
+    let definitions: Vec<_> = document
+        .functions
+        .values()
+        .map(|definition| {
+            registry
+                .named(definition.name.as_str())
+                .next()
+                .and_then(|id| registry.get(&id))
+                .map_or_else(
+                    || definition.clone(),
+                    |registered| (**registered.definition()).clone(),
+                )
+        })
+        .collect();
+    document.functions = definitions
+        .into_iter()
+        .map(|definition| (definition.identity(), definition))
+        .collect();
 }

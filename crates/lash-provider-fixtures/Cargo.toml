@@ -22,6 +22,7 @@ default = []
 workspace = true
 
 [dependencies]
+lash-vocabulary = { workspace = true }
 async-trait = { workspace = true }
 bytes = { workspace = true }
 lash-core = { workspace = true }

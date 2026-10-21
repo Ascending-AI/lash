@@ -67,7 +67,6 @@ use std::time::Duration;
 
 use lash_core_execution::CancelOrigin;
 use lash_core_execution::DurableSettings;
-use lash_core_execution::ProcessId;
 use lash_core_execution::ScopeId;
 use lash_core_execution::ToolCallId;
 use lash_core_execution::ToolCallOutput;
@@ -109,8 +108,11 @@ use lash_execution_contracts::process::StepRequest;
 use lash_execution_contracts::process::SuccessionError;
 use lash_execution_contracts::process::SuccessorCarry;
 use lash_execution_contracts::projection::NoProjectionProviders;
+use lash_protocol_types::ExecutionLimit;
 use lash_protocol_types::sync::MutexExt as _;
-use lash_protocol_types::{ExecutionLimit, ExecutionPolicy, ToolId};
+use lash_vocabulary::identity::ProcessId;
+use lash_vocabulary::tool_contract::ExecutionPolicy;
+use lash_vocabulary::tool_contract::ToolId;
 use serde_json::{Value, json};
 
 const KIND: &str = "crash-proof";
@@ -144,7 +146,7 @@ fn step(name: &str, tool: &str) -> StepRequest {
     StepRequest::Tool {
         step: StepName(name.to_owned()),
         effect: lash_core_execution::testing::effect(tool),
-        contract: lash_core::ContractId::new("fixture"),
+        contract: lash_vocabulary::operations::ContractId::new("fixture"),
         input: json!({ "step": name }),
         site: None,
         matched: None,
@@ -156,7 +158,7 @@ fn carried_step(name: &str, tool: &str, script: &Value) -> StepRequest {
     StepRequest::Tool {
         step: StepName(name.to_owned()),
         effect: lash_core_execution::testing::effect(tool),
-        contract: lash_core::ContractId::new("fixture"),
+        contract: lash_vocabulary::operations::ContractId::new("fixture"),
         input: json!({ "step": name, "doc": script["doc"] }),
         site: None,
         matched: None,
@@ -213,12 +215,39 @@ impl ProcessEngine for ProofEngine {
         lash_execution_contracts::process::ProcessTraceClass::Internal
     }
 
-    async fn performed_effects(
+    async fn inspect_link(
+        &self,
+        link: lash_vocabulary::LinkId,
+        selector: &lash_execution_contracts::process::linking::ReachSelector,
+    ) -> Result<
+        lash_execution_contracts::process::linking::LinkInspection,
+        lash_execution_contracts::process::linking::EnginePortError,
+    > {
+        Ok(lash_execution_contracts::process::linking::LinkInspection {
+            link,
+            document: lash_vocabulary::DocumentId::from_bytes([0; 32]),
+            selector: selector.clone(),
+            operations: Default::default(),
+            machine: Default::default(),
+            artifacts: Vec::new(),
+            signature: None,
+        })
+    }
+    async fn inspect_start(
         &self,
         _payload: &serde_json::Value,
-    ) -> Result<lash_execution_contracts::process::PerformedEffects, lash_core::ProcessEnvRefusal>
-    {
-        Ok(lash_execution_contracts::process::PerformedEffects::new())
+    ) -> Result<
+        lash_execution_contracts::process::linking::LinkInspection,
+        lash_execution_contracts::process::linking::EnginePortError,
+    > {
+        Err(
+            lash_execution_contracts::process::linking::EnginePortError::Unsupported {
+                operation: "generic fixture has no linked code".into(),
+            },
+        )
+    }
+    fn capabilities(&self) -> lash_vocabulary::claims::NodeRequirements {
+        Default::default()
     }
 
     async fn check_args(
@@ -311,7 +340,9 @@ impl ProcessEngine for ProofEngine {
                     EngineAction::AwaitProcess {
                         process: ProcessId::parse(script["await"].as_str().unwrap_or_default())
                             .map_err(infra)?,
-                        bound: lash_core::ParkBound::Within(Duration::from_millis(WAIT_MS)),
+                        bound: lash_vocabulary::tool_contract::ParkBound::Within(
+                            Duration::from_millis(WAIT_MS),
+                        ),
                         site: None,
                     }
                 } else {
@@ -336,7 +367,9 @@ impl ProcessEngine for ProofEngine {
                     EngineAction::AwaitProcess {
                         process: ProcessId::parse(script["await"].as_str().unwrap_or_default())
                             .map_err(infra)?,
-                        bound: lash_core::ParkBound::Within(Duration::from_millis(WAIT_MS)),
+                        bound: lash_vocabulary::tool_contract::ParkBound::Within(
+                            Duration::from_millis(WAIT_MS),
+                        ),
                         site: None,
                     }
                 } else {

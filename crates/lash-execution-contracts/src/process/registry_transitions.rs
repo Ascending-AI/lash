@@ -13,7 +13,7 @@
 //! them.
 
 use crate::PluginError;
-use crate::ProcessId;
+use lash_vocabulary::identity::ProcessId;
 
 // ---------------------------------------------------------------------------
 // Terminal / tombstone classification

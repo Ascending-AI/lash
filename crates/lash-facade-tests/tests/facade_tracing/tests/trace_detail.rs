@@ -18,6 +18,7 @@ use lash::tracing::{
 };
 use lash_core::llm::types::{LlmOutputPart, LlmProviderTraceEvent, StreamBlockIdentity};
 use lash_protocol_types::{llm::types::StreamBlockEvent, llm::types::StreamBlockKind};
+
 use lash_trace::otel::OtelOptions;
 use opentelemetry_sdk::trace::{Sampler, SpanData};
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -96,10 +97,13 @@ async fn turn_under(
         None,
     );
     let core = builder.build(lash_facade_tests::runtime_lease_owner())?;
-    let session = created_session(&core, lash::SessionId::parse("l21-detail").expect("an id"))
-        .await
-        .open()
-        .await?;
+    let session = created_session(
+        &core,
+        lash_vocabulary::identity::SessionId::parse("l21-detail").expect("an id"),
+    )
+    .await
+    .open()
+    .await?;
     let output = session.send(TurnInput::text("retried")).output().await?;
     let output_model_calls =
         lash::testing::model_calls_for_activity(&session.durable(), &output.activities).await;

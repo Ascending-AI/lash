@@ -1,7 +1,7 @@
 //! Shared blob/record codecs for the SQLite store: JSON + msgpack envelopes
 //! and the compressed artifact-blob encoding.
 use super::*;
-use lash_protocol_types::SessionId;
+use lash_vocabulary::identity::SessionId;
 
 /// A content address bound at the SQLite boundary. Domain values stay hex;
 /// SQLite keys are the digest's 32 bytes, ordered identically to canonical hex.
@@ -98,7 +98,7 @@ fn blob_envelope_admits(version: u32) -> bool {
 /// store error [`sqlite_error`](crate::sqlite_error) unwraps.
 pub(crate) fn sql_identity<T>(value: String) -> rusqlite::Result<T>
 where
-    T: std::str::FromStr<Err = lash_protocol_types::BlankIdentity>,
+    T: std::str::FromStr<Err = lash_vocabulary::identity::BlankIdentity>,
 {
     value
         .parse()
@@ -110,8 +110,8 @@ where
 pub(crate) fn sql_process_id(
     column: usize,
     value: String,
-) -> rusqlite::Result<lash_protocol_types::ProcessId> {
-    lash_protocol_types::ProcessId::parse(&value).map_err(|error| {
+) -> rusqlite::Result<lash_vocabulary::identity::ProcessId> {
+    lash_vocabulary::identity::ProcessId::parse(&value).map_err(|error| {
         rusqlite::Error::FromSqlConversionFailure(
             column,
             rusqlite::types::Type::Text,
@@ -124,15 +124,16 @@ pub(crate) fn sql_process_id(
 pub(crate) fn row_process_id(
     row: &rusqlite::Row<'_>,
     column: usize,
-) -> rusqlite::Result<lash_protocol_types::ProcessId> {
+) -> rusqlite::Result<lash_vocabulary::identity::ProcessId> {
     sql_process_id(column, row.get(column)?)
 }
 
 /// Parse a stored process id outside a row read, as a store error.
 pub(crate) fn stored_process_id(
     value: &str,
-) -> Result<lash_protocol_types::ProcessId, lash_execution_contracts::plugin_error::PluginError> {
-    lash_protocol_types::ProcessId::parse(value).map_err(|error| {
+) -> Result<lash_vocabulary::identity::ProcessId, lash_execution_contracts::plugin_error::PluginError>
+{
+    lash_vocabulary::identity::ProcessId::parse(value).map_err(|error| {
         lash_execution_contracts::plugin_error::PluginError::Session(format!(
             "corrupt stored process id: {error}"
         ))
@@ -352,7 +353,7 @@ pub(crate) fn assemble_session_head_meta(
         head_revision,
         checkpoint_ref.map(Into::into),
         leaf_node_id
-            .map(lash_protocol_types::NodeId::parse)
+            .map(lash_vocabulary::identity::NodeId::parse)
             .transpose()?,
         current_frame_node_id,
     )

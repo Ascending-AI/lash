@@ -7,11 +7,11 @@ use super::heap_impl::{PagedHeap, binary_summary, value_depth};
 use super::tree::{Access, grant};
 use super::{HeapWriteError, ObjectKind, SemanticHeap};
 use lash_kernel_doc::Integer;
-use lash_kernel_doc::graph_tokens::{
-    TokenCodec, TokenError, TokenReader, TokenWriter, decode_body, encode_body,
-};
 use lash_kernel_doc::heap::*;
 use lash_kernel_doc::heap_values::text_summary;
+use lash_vocabulary::tokens::{
+    TokenCodec, TokenError, TokenReader, TokenWriter, decode_body, encode_body,
+};
 use std::ops::{ControlFlow, Range};
 use std::sync::Arc;
 

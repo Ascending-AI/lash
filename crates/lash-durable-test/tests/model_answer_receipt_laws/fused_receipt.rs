@@ -263,7 +263,7 @@ async fn an_observer_receives_only_its_inputs_acknowledged_terminal() {
     assert!(
         watch
             .committed_turn(&lash_core::store::FollowSubject::Input(
-                lash_core::InputId::from("unrelated-input")
+                lash_vocabulary::identity::InputId::from("unrelated-input")
             ))
             .is_none()
     );
@@ -287,7 +287,7 @@ async fn an_observer_receives_only_its_inputs_acknowledged_terminal() {
     assert!(
         watch
             .committed_turn(&lash_core::store::FollowSubject::Input(
-                lash_core::InputId::from("unrelated-input")
+                lash_vocabulary::identity::InputId::from("unrelated-input")
             ))
             .is_none()
     );

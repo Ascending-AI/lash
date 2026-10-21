@@ -1,8 +1,0 @@
-{
-  "members": {
-    "col": "Column",
-    "count": "Count rows",
-    "data_quanta.collect_rows": "Collect rows",
-    "data_quanta.explain": "Explain placement"
-  }
-}

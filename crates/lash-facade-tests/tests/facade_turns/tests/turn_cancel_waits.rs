@@ -61,7 +61,7 @@ async fn sleeping_cell_session(
         .serve_test_llm_profile(provider, mock_llm_profile_spec())
         .build(lash_facade_tests::runtime_lease_owner())?;
     let session = core
-        .session(lash::SessionId::parse(id).expect("nonblank host identity"))
+        .session(lash_vocabulary::identity::SessionId::parse(id).expect("nonblank host identity"))
         .create(lash::SessionCreation::root(mock_session_spec()))
         .await?;
     Ok((core, session))
@@ -196,7 +196,7 @@ async fn escalating_a_deferred_stop_aborts_the_cell_sleep() -> Result<()> {
     let escalated = outcome(
         session
             .cancel(lash::CancelTarget::Run(
-                lash::RunId::parse((run).as_str()).unwrap(),
+                lash_vocabulary::identity::RunId::parse((run).as_str()).unwrap(),
             ))
             .request_id("abort-second")
             .mode(TurnCancelMode::Immediate)

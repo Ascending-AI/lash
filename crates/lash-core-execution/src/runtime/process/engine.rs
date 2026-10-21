@@ -7,7 +7,7 @@ pub struct ProcessEngineRegistration {
     /// The host's retry policies for engine step kinds, over the engine's.
     engine_step_retries: BTreeMap<
         lash_execution_contracts::process::EngineStepKind,
-        lash_protocol_types::ExecutionPolicy,
+        lash_vocabulary::tool_contract::ExecutionPolicy,
     >,
 }
 
@@ -156,7 +156,7 @@ impl ProcessEngineRegistration {
     pub fn with_engine_step_retry(
         mut self,
         kind: lash_execution_contracts::process::EngineStepKind,
-        policy: lash_protocol_types::ExecutionPolicy,
+        policy: lash_vocabulary::tool_contract::ExecutionPolicy,
     ) -> Self {
         self.engine_step_retries.insert(kind, policy);
         self
@@ -198,7 +198,7 @@ struct RetriedEngineSteps {
     steps: Arc<dyn lash_execution_contracts::process::EngineSteps>,
     retries: BTreeMap<
         lash_execution_contracts::process::EngineStepKind,
-        lash_protocol_types::ExecutionPolicy,
+        lash_vocabulary::tool_contract::ExecutionPolicy,
     >,
 }
 
@@ -218,7 +218,7 @@ impl lash_execution_contracts::process::EngineSteps for RetriedEngineSteps {
     fn retry(
         &self,
         kind: &lash_execution_contracts::process::EngineStepKind,
-    ) -> lash_protocol_types::ExecutionPolicy {
+    ) -> lash_vocabulary::tool_contract::ExecutionPolicy {
         self.retries
             .get(kind)
             .copied()
@@ -476,75 +476,81 @@ impl ProcessEngineRegistry {
         self.require(kind)?.default_settings(payload)
     }
 
-    /// The effects a run of `payload` on the `kind` engine performs (P3).
-    ///
-    /// # Errors
-    ///
-    /// The engine is not configured, or it cannot certify the payload's
-    /// effects.
-    pub async fn performed_effects(
+    /// Inspect retained linked reach without re-fulfilling it against current advertisements.
+    pub async fn inspect_link(
         &self,
         kind: &str,
-        payload: &serde_json::Value,
-    ) -> Result<PerformedEffects, crate::ProcessEnvRefusal> {
+        start: &lash_vocabulary::names::LinkedStart,
+    ) -> Result<
+        lash_execution_contracts::process::linking::LinkInspection,
+        lash_execution_contracts::process::linking::EnginePortError,
+    > {
         self.require(kind)
-            .map_err(|error| crate::ProcessEnvRefusal::Uncertified {
-                reason: error.to_string(),
+            .map_err(|error| {
+                lash_execution_contracts::process::linking::EnginePortError::Unavailable {
+                    message: error.to_string(),
+                }
             })?
-            .performed_effects(payload)
+            .inspect_link(
+                start.link,
+                &lash_execution_contracts::process::linking::ReachSelector::Start(
+                    start.selector.clone(),
+                ),
+            )
             .await
     }
 
-    /// Freeze namespace roots from the definition's linked snapshot into its env.
-    /// The runtime needs no package view to refuse computed package paths.
-    pub async fn link_package_namespaces(
+    pub async fn inspect_code(
         &self,
         kind: &str,
         payload: &serde_json::Value,
-        env: crate::ProcessEnv,
-    ) -> Result<crate::ProcessEnv, lash_execution_contracts::PluginError> {
-        let Some(provider) = self.document_provider(kind) else {
-            return Ok(env);
-        };
-        let digest = provider.definition_packages(payload)?;
-        let view = provider.package_view(digest).await?;
-        let roots = view.namespace_roots();
-        Ok(env.with_package_roots(roots))
+    ) -> Result<
+        lash_execution_contracts::process::linking::LinkInspection,
+        lash_execution_contracts::process::linking::EnginePortError,
+    > {
+        self.require(kind)
+            .map_err(|error| {
+                lash_execution_contracts::process::linking::EnginePortError::Unavailable {
+                    message: error.to_string(),
+                }
+            })?
+            .inspect_start(payload)
+            .await
     }
 
-    /// Check that `env` links exactly `performed`, what a start of the
-    /// `kind` engine on `payload` performs, each to a tool its components
-    /// serve under the contract the code requires and, on a path a package
-    /// owns in the package set the start is linked under, as the package
-    /// declares it (P1, PKG-RUNNER), fitting under `fits`
-    /// ([`ProcessComponentRegistry::check_links`]).
-    ///
-    /// # Errors
-    ///
-    /// The pair's typed [`crate::ProcessEnvRefusal`]; a linked set whose
-    /// declarations are not read certifies no link
-    /// ([`crate::ProcessEnvRefusal::Uncertified`]).
-    pub async fn check_links(
+    /// Ordinary start admission checks every reached operation use and its known debt.
+    pub fn check_links(
         &self,
-        kind: &str,
-        payload: &serde_json::Value,
         env: &Arc<crate::ProcessEnv>,
-        performed: &PerformedEffects,
-        fits: &std::collections::BTreeMap<
-            lash_kernel_doc::EffectName,
-            lash_execution_contracts::process::FitPolicy,
-        >,
-    ) -> Result<(), crate::ProcessEnvRefusal> {
-        let owned = match self.document_provider(kind) {
-            Some(documents) => documents
-                .owned_operations(payload, performed)
-                .await
-                .map_err(|error| crate::ProcessEnvRefusal::Uncertified {
-                    reason: error.to_string(),
-                })?,
-            None => Default::default(),
-        };
-        self.components().check_links(env, performed, &owned, fits)
+        inspection: &lash_execution_contracts::process::linking::LinkInspection,
+    ) -> Result<
+        lash_vocabulary::claims::ClaimRequirements,
+        lash_execution_contracts::process::linking::EnginePortError,
+    > {
+        self.components().check_links(env, inspection)
+    }
+    pub fn check_links_with_seeds(
+        &self,
+        env: &Arc<crate::ProcessEnv>,
+        inspection: &lash_execution_contracts::process::linking::LinkInspection,
+        seeds: &[lash_core_store::resolutions::ResolutionSeed],
+    ) -> Result<
+        lash_vocabulary::claims::ClaimRequirements,
+        lash_execution_contracts::process::linking::EnginePortError,
+    > {
+        let mut requirements = self
+            .components()
+            .check_links_with_seeds(env, inspection, seeds)?;
+        requirements.extend(&crate::runtime::actor::resolutions::validate_seeds(
+            inspection,
+            env.execution(),
+            seeds,
+            |grant, name, definition, route, registry| {
+                self.components()
+                    .validate_seed_route(env, grant, name, definition, route, registry)
+            },
+        )?);
+        Ok(requirements)
     }
 
     /// Resolve the engine a `ProcessInput::Engine` start names, refusing a kind

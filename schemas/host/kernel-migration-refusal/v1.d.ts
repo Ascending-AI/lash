@@ -5,6 +5,10 @@
  * Why a kernel process is not carried to the next kernel version.
  */
 export type KernelMigrationRefusal = ({
+  "callable": CallableId;
+  "refused": "callable_origin_required";
+  [key: string]: unknown;
+} | {
   "document": DocumentId;
   "refused": "document_missing";
   [key: string]: unknown;
@@ -28,6 +32,14 @@ export type KernelMigrationRefusal = ({
   "refused": "state";
   [key: string]: unknown;
 });
+
+/**
+ * A stored function under its defining Link. Calls and escaped captures retain this Link.
+ */
+export type CallableId = {
+  "function": FunctionId;
+  "link": LinkId;
+};
 
 export type DocumentId = string;
 
@@ -63,6 +75,8 @@ export type DocumentRefusal = ({
 });
 
 export type FunctionId = string;
+
+export type LinkId = string;
 
 /**
  * A variable, parameter or declared-function name.

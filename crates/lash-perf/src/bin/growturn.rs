@@ -7,6 +7,7 @@ use lash_core::llm::types::{
 };
 use lash_core::provider::{ProviderOptions, ProviderReliability};
 use lash_protocol_types::{llm::types::StreamBlockEvent, llm::types::StreamBlockKind};
+
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
@@ -240,8 +241,10 @@ fn park_identity(call: &lash::admin::ParkedCall) -> serde_json::Value {
         "call":call.call_id.as_str(), "tool":call.tool_id.as_str(), "deadline_ms":call.deadline.map(|d| d.0)})
 }
 
-fn session_id() -> Result<lash::SessionId> {
-    Ok(lash::SessionId::try_from(SESSION.to_owned())?)
+fn session_id() -> Result<lash_vocabulary::identity::SessionId> {
+    Ok(lash_vocabulary::identity::SessionId::try_from(
+        SESSION.to_owned(),
+    )?)
 }
 
 async fn parked(core: &lash::LashCore) -> Result<lash::admin::ParkedCall> {
@@ -283,7 +286,9 @@ async fn run(args: &Args, meter: Arc<measure::Meter>) -> Result<()> {
         Phase::Sessions => {
             for ordinal in 1..=args.sessions {
                 meter.opened();
-                let id = lash::SessionId::try_from(format!("growturn-session-{ordinal}"))?;
+                let id = lash_vocabulary::identity::SessionId::try_from(format!(
+                    "growturn-session-{ordinal}"
+                ))?;
                 let session = core
                     .session(id.clone())
                     .create(lash::SessionCreation::root(lash::SessionSpec::new(
@@ -353,7 +358,9 @@ async fn run(args: &Args, meter: Arc<measure::Meter>) -> Result<()> {
                 .await?;
             let handle = session
                 .send(lash::TurnInput::text("measure one growing turn"))
-                .id(lash::TurnId::try_from(TURN.to_owned())?)
+                .id(lash_vocabulary::identity::TurnId::try_from(
+                    TURN.to_owned(),
+                )?)
                 .await?;
             // Handles observe; the durable engine owns the entire drive.
             drop(handle);
@@ -392,8 +399,9 @@ async fn run(args: &Args, meter: Arc<measure::Meter>) -> Result<()> {
             );
             meter.sample("resume-process-restart", args.rounds * 3 / 4)?;
             let session = core.session(session_id()?).durable().await?;
-            let handle =
-                session.attach(session.input_id(&lash::TurnId::try_from(TURN.to_owned())?));
+            let handle = session.attach(session.input_id(
+                &lash_vocabulary::identity::TurnId::try_from(TURN.to_owned())?,
+            ));
             resolve(&core, &restored).await?;
             let output = tokio::time::timeout(LIMIT, handle.output()).await??;
             ensure!(

@@ -4,10 +4,10 @@
 //! [`RecordedCallbackUnavailable`] naming every callback installed. The
 //! slot-specific executors run what it resolves.
 
-use super::PluginCallbackIdentity;
 use super::RecordedCallbackUnavailable;
 use super::registrar::RegisteredHook;
 use lash_execution_contracts::plugin_error::PluginError;
+use lash_vocabulary::providers::PluginCallbackIdentity;
 
 /// The installed callbacks recorded identities resolve against.
 #[derive(Clone, Copy)]

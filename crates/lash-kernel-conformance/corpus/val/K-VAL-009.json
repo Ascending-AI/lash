@@ -3,7 +3,7 @@
   "cases": [
     {
       "name": "clock exposes timestamp nanoseconds",
-      "document": "kernel 1\nnumbers by_spelling\n\nmain {\nfinish clock\n}\n",
+      "document": "kernel 1\nnumbers by_spelling\nimport 0 operation host.clock() -> Timestamp\nmain {\n  finish perform 0() as Timestamp\n}\n",
       "expected": {
         "prints": [],
         "end": {
@@ -16,8 +16,19 @@
       "environment": {
         "host": [
           {
-            "clock": "123456789012345678901234567890"
+            "perform": {
+              "effect": "host.clock",
+              "args": [],
+              "answer": {
+                "Ok": {
+                  "timestamp": "123456789012345678901234567890"
+                }
+              }
+            }
           }
+        ],
+        "reads": [
+          "host.clock"
         ]
       }
     }

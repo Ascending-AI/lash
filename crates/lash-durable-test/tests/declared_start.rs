@@ -24,14 +24,14 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use lash_core::llm::types::{LlmContentBlock, LlmRequest, LlmResponse};
-use lash_core_execution::ProcessId;
 use lash_execution_contracts::process::ProcessListFilter;
 use lash_execution_contracts::process::ProcessRecord;
 use lash_execution_contracts::process::ProcessStatus;
 use lash_execution_contracts::process::ProcessStatusFilter;
 use lash_execution_contracts::process::process_child_session_id;
-use lash_protocol_types::SessionId;
 use lash_protocol_types::sync::MutexExt as _;
+use lash_vocabulary::identity::ProcessId;
+use lash_vocabulary::identity::SessionId;
 
 use served::{Tier, WATCHDOG};
 
@@ -394,9 +394,9 @@ impl Forge {
 /// The session a [`Forge::ForeignSession`] declaration names.
 const FOREIGN_SESSION: &str = "declared-start-law-foreign-session";
 
-fn probe_tool() -> lash_core::ToolDefinition {
+fn probe_tool() -> lash_vocabulary::tool_contract::ToolDefinition {
     let object = serde_json::json!({ "type": "object", "additionalProperties": true });
-    lash_core::ToolDefinition::raw(
+    lash_vocabulary::tool_contract::ToolDefinition::raw(
         format!("tool:{PROBE_TOOL}"),
         PROBE_TOOL_OPERATION,
         "Declares one child start and resolves on its terminal.",
@@ -405,15 +405,15 @@ fn probe_tool() -> lash_core::ToolDefinition {
     )
     .expect("the probe's schemas")
     .with_execution(std::time::Duration::from_secs(120))
-    .with_execution_policy(lash_core::ExecutionPolicy::repeatable(
+    .with_execution_policy(lash_vocabulary::tool_contract::ExecutionPolicy::repeatable(
         std::num::NonZeroU32::new(2).unwrap(),
         1,
         1,
     ))
     // It parks on a declared start, and its failing first attempt declares
     // the start as an ordinary intent that the retry discards.
-    .with_declaration(lash_core::ToolDeclaration::deferring()
-            .with_intents([lash_core::ToolIntentKind::StartProcess]), Some(lash_core::ParkBound::Within(std::time::Duration::from_secs(120))))
+    .with_declaration(lash_vocabulary::tool_declaration::ToolDeclaration::deferring()
+            .with_intents([lash_vocabulary::ToolIntentKind::StartProcess]), Some(lash_vocabulary::tool_contract::ParkBound::Within(std::time::Duration::from_secs(120))))
             .expect("a deferring tool declares its park bound")
 }
 
@@ -447,7 +447,9 @@ impl DeclaringProbe {
             Forge::Unheld => {}
             Forge::ForeignSession => {
                 let mut identity = context.intent_identity(0);
-                let foreign = lash_core::RuntimeOwner::Session(SessionId::from(FOREIGN_SESSION));
+                let foreign = lash_vocabulary::identity::RuntimeOwner::Session(SessionId::from(
+                    FOREIGN_SESSION,
+                ));
                 identity.owner = foreign.clone();
                 let identity =
                     lash_execution_contracts::tool_intent::rederive_tool_intent_identity(&identity);
@@ -533,7 +535,7 @@ impl DeclaringProbe {
             ),
         );
         Ok(lash_execution_contracts::tool_intent::StartProcessIntent {
-            owner: lash_core::RuntimeOwner::Session(session_id),
+            owner: lash_vocabulary::identity::RuntimeOwner::Session(session_id),
             declaration,
         })
     }
@@ -545,7 +547,7 @@ impl lash_core::ToolProvider for DeclaringProbe {
         &self,
         _config: &lash_core::OwnerConfigView,
     ) -> std::result::Result<
-        Vec<lash_core::ToolManifest>,
+        Vec<lash_vocabulary::tool_contract::ToolManifest>,
         lash_execution_contracts::plugin_error::PluginError,
     > {
         Ok(vec![probe_tool().manifest()])
@@ -555,7 +557,7 @@ impl lash_core::ToolProvider for DeclaringProbe {
         &self,
         name: &str,
         _config: &lash_core::OwnerConfigView,
-    ) -> Option<Arc<lash_core::ToolContract>> {
+    ) -> Option<Arc<lash_vocabulary::tool_contract::ToolContract>> {
         (name == PROBE_TOOL_OPERATION).then(|| Arc::new(probe_tool().contract()))
     }
 
@@ -1221,7 +1223,7 @@ async fn declared_start_child_records_only_its_creators_facts(tier: Tier) {
     let stores = world.backend().stores();
     let process_builds = world
         .facts
-        .built_for(&lash_core::RuntimeOwner::Process(child.id.clone()).to_string());
+        .built_for(&lash_vocabulary::identity::RuntimeOwner::Process(child.id.clone()).to_string());
     assert!(
         process_builds.is_empty(),
         "the node built no plugin runtime for the session-turn process: {process_builds:?}"
@@ -1242,7 +1244,7 @@ async fn declared_start_child_records_only_its_creators_facts(tier: Tier) {
     );
     let session_builds = world
         .facts
-        .built_for(&lash_core::RuntimeOwner::Session(child_session).to_string());
+        .built_for(&lash_vocabulary::identity::RuntimeOwner::Session(child_session).to_string());
     assert!(
         !session_builds.is_empty() && session_builds.iter().all(|seen| *seen == default),
         "the child session ran under its recorded value: {session_builds:?}"

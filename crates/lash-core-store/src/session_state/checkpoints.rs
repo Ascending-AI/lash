@@ -90,7 +90,7 @@ impl RuntimeSessionState {
     /// ([`Self::retire_below_current_frame`]).
     pub fn mark_node_ids_persisted<I>(&mut self, node_ids: I)
     where
-        I: IntoIterator<Item = crate::NodeId>,
+        I: IntoIterator<Item = lash_vocabulary::identity::NodeId>,
     {
         let node_ids = node_ids.into_iter().collect::<Vec<_>>();
         self.session_graph.mark_durable(&node_ids);

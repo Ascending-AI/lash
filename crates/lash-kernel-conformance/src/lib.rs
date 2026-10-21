@@ -53,3 +53,9 @@ mod tests;
 mod helper_plans;
 #[cfg(test)]
 mod helper_segments;
+
+#[cfg(test)]
+#[path = "../../lash-dialect-typescript/src/tests/linked.rs"]
+mod linked;
+
+mod document_fixture;

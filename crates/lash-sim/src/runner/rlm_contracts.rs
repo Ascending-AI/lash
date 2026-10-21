@@ -1,6 +1,6 @@
 use super::*;
-use lash_protocol_types::SessionId;
-use lash_protocol_types::TurnId;
+use lash_vocabulary::identity::SessionId;
+use lash_vocabulary::identity::TurnId;
 
 pub(super) const RLM_CONTRACT_ROWS: &[FixedContractRow<TurnMachineContractExecutor>] = &[
     FixedContractRow {
@@ -711,7 +711,9 @@ fn drain_rlm_contract_effects(machine: &mut lash_core::TurnMachine) -> Vec<lash_
                 result: Ok(lash_core::sansio::ExecutionEnvironmentSync {
                     turn_controls: [(
                         lash_protocol_rlm::FINISH_TOOL_NAME.to_string(),
-                        lash_core::TurnControls::finish(lash_core::JsonSchema::any()),
+                        lash_vocabulary::tool_declaration::TurnControls::finish(
+                            lash_vocabulary::json_schema::JsonSchema::any(),
+                        ),
                     )]
                     .into(),
                     ..lash_core::sansio::ExecutionEnvironmentSync::default()

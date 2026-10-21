@@ -12,7 +12,9 @@ use std::collections::BTreeSet;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::{Correspondence, Document, DocumentId, IdentifiedDocument, Node, Site, Stmt, Unit};
+use crate::{Correspondence, Document, DocumentId, IdentifiedDocument, Node, Stmt};
+use lash_vocabulary::sites::Site;
+use lash_vocabulary::sites::Unit;
 
 mod target;
 
@@ -249,15 +251,10 @@ impl CaptionKind {
     pub fn of(document: &Document, site: &Site) -> Option<Self> {
         let Some((&index, parent)) = site.path.split_last() else {
             return match &site.unit {
-                Unit::Function(name) if document.functions.contains_key(name) => {
-                    Some(Self::Function)
-                }
+                Unit::Library(id) if document.functions.contains_key(id) => Some(Self::Function),
                 _ => None,
             };
         };
-        if matches!(site.unit, Unit::Library(_)) {
-            return None;
-        }
         let parent = document.node(&Site::new(site.unit.clone(), parent))?;
         match (parent, document.node(site)?) {
             (_, Node::Stmt(_)) => Some(Self::Statement),
@@ -294,36 +291,32 @@ impl CaptionKind {
             .into_iter()
             .map(|(site, kind)| (CaptionTarget::Site(site), kind))
             .collect();
-        for (function, declared) in &document.functions {
-            let params: Vec<&crate::Name> = match document.entries.get(function) {
-                Some(entry) => entry
-                    .signature
-                    .params
-                    .iter()
-                    .map(|param| &param.name)
-                    .collect(),
-                None => declared.params.iter().collect(),
+        for (name, export) in &document.exports {
+            let crate::Export::Function(function) = export else {
+                continue;
             };
-            out.extend(params.into_iter().map(|param| {
-                (
+            for param in &function.signature.params {
+                out.push((
                     CaptionTarget::Param(ParamTarget {
-                        function: function.clone(),
-                        param: param.clone(),
+                        function: name.clone(),
+                        param: param.name.clone(),
                     }),
                     Self::Param,
-                )
-            }));
-        }
-        for (function, entry) in &document.entries {
-            out.extend(FieldPath::every(&entry.signature).into_iter().map(|path| {
-                (
-                    CaptionTarget::Field(FieldTarget {
-                        function: function.clone(),
-                        path,
+                ));
+            }
+            out.extend(
+                FieldPath::every(&function.signature)
+                    .into_iter()
+                    .map(|path| {
+                        (
+                            CaptionTarget::Field(FieldTarget {
+                                function: name.clone(),
+                                path,
+                            }),
+                            Self::Field,
+                        )
                     }),
-                    Self::Field,
-                )
-            }));
+            );
         }
         out.sort();
         out
@@ -332,15 +325,10 @@ impl CaptionKind {
     /// Every captionable site of `document`, ascending.
     fn captionable_sites(document: &Document) -> Vec<(Site, Self)> {
         let mut out = Vec::new();
-        let roots = std::iter::once((Unit::Main, &document.main)).chain(
-            document
-                .functions
-                .iter()
-                .map(|(name, function)| (Unit::Function(name.clone()), &function.body)),
-        );
+        let roots = document.units();
         for (unit, body) in roots {
             let root = Site::new(unit, Vec::new());
-            if matches!(root.unit, Unit::Function(_)) {
+            if matches!(root.unit, Unit::Library(_)) {
                 out.push((root.clone(), Self::Function));
             }
             let mut pending = vec![(Node::Block(body), root)];
@@ -681,34 +669,34 @@ impl<'de> Deserialize<'de> for Captions {
     }
 }
 
-impl crate::graph_tokens::TokenCodec for Caption {
-    fn encode(&self, out: &mut crate::graph_tokens::TokenWriter) {
+impl lash_vocabulary::tokens::TokenCodec for Caption {
+    fn encode(&self, out: &mut lash_vocabulary::tokens::TokenWriter) {
         out.seq(2);
         out.text(&self.title);
         self.description.encode(out);
     }
 
     fn decode(
-        input: &mut crate::graph_tokens::TokenReader<'_>,
-    ) -> Result<Self, crate::graph_tokens::TokenError> {
+        input: &mut lash_vocabulary::tokens::TokenReader<'_>,
+    ) -> Result<Self, lash_vocabulary::tokens::TokenError> {
         input.expect_struct(2)?;
         let title = String::decode(input)?;
         let description = Option::decode(input)?;
         Self::new(title, description)
-            .map_err(|error| crate::graph_tokens::TokenError::Invalid(error.to_string()))
+            .map_err(|error| lash_vocabulary::tokens::TokenError::Invalid(error.to_string()))
     }
 }
 
-impl crate::graph_tokens::TokenCodec for Captions {
-    fn encode(&self, out: &mut crate::graph_tokens::TokenWriter) {
+impl lash_vocabulary::tokens::TokenCodec for Captions {
+    fn encode(&self, out: &mut lash_vocabulary::tokens::TokenWriter) {
         out.seq(2);
         self.document.encode(out);
         self.entries.encode(out);
     }
 
     fn decode(
-        input: &mut crate::graph_tokens::TokenReader<'_>,
-    ) -> Result<Self, crate::graph_tokens::TokenError> {
+        input: &mut lash_vocabulary::tokens::TokenReader<'_>,
+    ) -> Result<Self, lash_vocabulary::tokens::TokenError> {
         input.expect_struct(2)?;
         let captions = Self {
             document: DocumentId::decode(input)?,
@@ -716,7 +704,7 @@ impl crate::graph_tokens::TokenCodec for Captions {
         };
         captions
             .check_order()
-            .map_err(|error| crate::graph_tokens::TokenError::Invalid(error.to_string()))?;
+            .map_err(|error| lash_vocabulary::tokens::TokenError::Invalid(error.to_string()))?;
         Ok(captions)
     }
 }

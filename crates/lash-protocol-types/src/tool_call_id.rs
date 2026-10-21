@@ -13,8 +13,8 @@ const LASH_TOOL_CALL_ID_DOMAIN_VERSION: &str = "lash-tool-call-id/v1";
 
 use std::fmt;
 
-use crate::ProcessId;
 use crate::core_support::Blake3DomainHasher;
+use lash_vocabulary::identity::ProcessId;
 
 /// The prefix every tool call id carries.
 pub const TOOL_CALL_ID_PREFIX: &str = "tc_";
@@ -432,8 +432,8 @@ impl schemars::JsonSchema for ToolCallId {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::SessionId;
     use crate::frame_key::FrameKey;
+    use lash_vocabulary::identity::SessionId;
 
     const NAMESPACE: &str = "prod";
 

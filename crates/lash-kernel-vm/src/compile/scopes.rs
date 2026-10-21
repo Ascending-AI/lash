@@ -18,7 +18,7 @@ impl Compiler<'_> {
         charged: bool,
     ) {
         let main = unit == Unit::Main;
-        let free = matches!(unit, Unit::Function(_));
+        let free = matches!(unit, Unit::Library(_) | Unit::Function(_));
         self.unit = unit;
         self.path.clear();
         let compiled = self.code(params, body, main, charged, free);
@@ -41,6 +41,7 @@ impl Compiler<'_> {
         let enclosing = std::mem::take(&mut self.live);
         let enclosing_depth = self.stmt_depth;
         self.scopes.push(Scopes {
+            charged,
             main,
             body: site.clone(),
             blocks: Vec::new(),
@@ -50,6 +51,7 @@ impl Compiler<'_> {
         });
         let (body, params) = self.block(body, params);
         let scopes = self.scopes.pop().unwrap_or(Scopes {
+            charged,
             main,
             body: site.clone(),
             blocks: Vec::new(),
@@ -102,6 +104,7 @@ impl Compiler<'_> {
         });
         let ats_by_name = by_name.into_iter().map(|slot| positions[slot]).collect();
         Code {
+            created: None,
             site,
             params,
             body,
@@ -165,7 +168,7 @@ impl Compiler<'_> {
             )),
             name: name.clone(),
             declared: scopes.body.clone(),
-            shared: false,
+            shared: true,
         });
         free.push((name.clone(), slot));
         Some(slot)
@@ -425,10 +428,9 @@ impl Placer<'_> {
                 (Some(callee), args)
             }
             ActionKind::Perform { args, .. } => (None, args),
-            ActionKind::Sleep { duration: atom, .. }
-            | ActionKind::Join(atom)
-            | ActionKind::JoinMany(_, atom)
-            | ActionKind::Cancel(atom) => (None, std::slice::from_mut(atom)),
+            ActionKind::Join(atom) | ActionKind::JoinMany(_, atom) | ActionKind::Cancel(atom) => {
+                (None, std::slice::from_mut(atom))
+            }
             ActionKind::Yield => (None, &mut []),
         };
         if let Some(Callee::Value(var)) = callee {

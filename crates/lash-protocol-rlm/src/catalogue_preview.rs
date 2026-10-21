@@ -10,8 +10,9 @@
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
 
-use lash_core::{QualifiedOperation, ToolManifest};
 use lash_kernel_dialect::{SpellKind, Spelling};
+use lash_vocabulary::names::QualifiedOperation;
+use lash_vocabulary::tool_contract::ToolManifest;
 use serde_json::Value;
 
 pub const DEFAULT_CATALOGUE_PREVIEW_MODULE_LIMIT: usize = 100;
@@ -163,7 +164,7 @@ pub fn catalogue_preview_entry_from_manifest(
 /// The entry of a serialized tool manifest: its `operation`.
 pub fn catalogue_preview_entry_from_catalog_record(raw: &Value) -> Option<CataloguePreviewEntry> {
     let operation = raw.as_object()?.get("operation")?.as_str()?;
-    lash_kernel_dialect::operation_text::parse(operation)
+    lash_vocabulary::operation_text::parse(operation)
         .ok()
         .map(CataloguePreviewEntry::new)
 }

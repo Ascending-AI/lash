@@ -46,7 +46,7 @@ pub(super) fn main() -> Result<(), String> {
     let frame = std::env::var_os("KERNEL_PERF_FRAME")
         .map(|path| {
             let bytes = std::fs::read(path).map_err(|error| error.to_string())?;
-            let held = lash_kernel_package::HeldPackages::from_frame(bytes.into())
+            let held = lash_vm_client::packages::WorkerLibrary::from_frame(bytes.into())
                 .map_err(|error| error.to_string())?;
             let embedding = lash_vm_worker::built_dialects(&Default::default())
                 .and_then(|builder| builder.finish(&held))
@@ -60,7 +60,7 @@ pub(super) fn main() -> Result<(), String> {
                 lash_kernel_vm::Charge::Off => PreparedLibrary::over_frame(
                     registry.clone(),
                     charge,
-                    held.frame_indexes().map_err(|error| error.to_string())?.1,
+                    held.indexes().map_err(|error| error.to_string())?[1],
                 )
                 .map_err(|error| error.to_string())?,
             };
@@ -72,18 +72,20 @@ pub(super) fn main() -> Result<(), String> {
         None => (registry(), None),
     };
 
-    let library = NamedLibrary::from_registry(&registry).expect("unique library names");
+    let library = NamedLibrary::resolving(&registry, |id| {
+        lash_vm_releases::helper_release()
+            .expect("helper release")
+            .resolver_roots()
+            .contains(id)
+    })
+    .expect("unique library names");
     let effects = effects();
     let controls = BTreeMap::from([(
         EffectName::new("perf.finish").expect("tool name"),
         BTreeSet::from([EffectControl::Finish]),
     )]);
-    let environment_namespaces = lash_kernel_dialect::Namespaces::of_effects(
-        &effects,
-        &lash_kernel_doc::ContractId::new("1"),
-        &controls,
-    )
-    .expect("the test's effects are operations");
+    let environment_namespaces =
+        crate::linked::namespaces(&effects, &controls).expect("the test's effects are operations");
     let environment = Environment::new(&library, &environment_namespaces);
     let registry_ns = began.elapsed().as_nanos();
     let lower = Instant::now();
@@ -99,16 +101,15 @@ pub(super) fn main() -> Result<(), String> {
     };
     let lower_ns = lower.elapsed().as_nanos();
     let compile = Instant::now();
-    let program = Program {
-        closure: pages::CLOSURE,
-        document: Arc::clone(document.shared()),
-        library: prepared.unwrap_or_else(|| {
+    let program = crate::linked::program(
+        Arc::clone(document.shared()),
+        prepared.unwrap_or_else(|| {
             lash_kernel_vm::kernel_internals::in_charge(
                 &lash_kernel_vm::kernel_internals::prepare_with_layout(registry, layout),
                 charge,
             )
         }),
-    };
+    );
     let library_compile_ns = compile.elapsed().as_nanos();
     // Document compilation is lazy inside start, together with cell setup.
     let start_time = Instant::now();
@@ -120,7 +121,7 @@ pub(super) fn main() -> Result<(), String> {
             target: Target::Main,
             args: Vec::new(),
             session: None,
-            modes: lash_kernel_vm::EffectModes::recorded(),
+            modes: crate::linked::modes(&program),
             host: Vec::new(),
         },
         layout,
@@ -306,6 +307,9 @@ pub(super) fn write_frame() -> Result<(), String> {
     if args.next().is_some() {
         return Err("write-frame needs exactly one output path".into());
     }
-    let held = lash_vm_releases::lash_packages().map_err(|error| error.to_string())?;
+    let release = lash_vm_releases::helper_release().map_err(|error| error.to_string())?;
+    let held =
+        lash_vm_client::packages::WorkerLibrary::new(&release.functions, release.resolver_roots())
+            .map_err(|error| error.to_string())?;
     std::fs::write(path, held.frame()).map_err(|error| error.to_string())
 }

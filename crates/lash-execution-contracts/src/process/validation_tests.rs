@@ -319,7 +319,7 @@ fn a_resume_cannot_return_an_ended_process_to_running() {
         since_ms: 1,
         kind: crate::WaitKind::Call {
             call_id: crate::ToolCallId::fixture("resume-call"),
-            tool_id: crate::ToolId::from("resume-tool"),
+            tool_id: lash_vocabulary::tool_contract::ToolId::from("resume-tool"),
         },
         site: None,
     };
@@ -392,7 +392,7 @@ fn a_persisted_record_accepts_every_runtime_lifecycle_fact() {
     let wait = WaitState {
         kind: WaitKind::Call {
             call_id: crate::ToolCallId::fixture("pre-upgrade-call"),
-            tool_id: crate::ToolId::from("pre-upgrade-tool"),
+            tool_id: lash_vocabulary::tool_contract::ToolId::from("pre-upgrade-tool"),
         },
         since_ms: 2,
         site: None,

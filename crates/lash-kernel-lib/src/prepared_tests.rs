@@ -7,12 +7,14 @@
 use std::sync::Arc;
 
 use lash_kernel_doc::{
-    Datum, ErrorDatum, FunctionId, FunctionRegistry, Handle, Integer, Timestamp, parse_document,
+    Datum, ErrorDatum, FunctionRegistry, Handle, Integer, Timestamp, parse_document,
 };
+
 use lash_kernel_vm::kernel_internals::{Layout, prepare_with_layout};
 use lash_kernel_vm::{
     Bounds, End, Host, Machine, Meters, PreparedLibrary, Program, Step, register_machine_functions,
 };
+use lash_vocabulary::FunctionId;
 
 use crate::{register_collections, register_numbers, register_text_json};
 
@@ -30,14 +32,6 @@ const BOUNDS: Bounds = Bounds {
 struct World;
 
 impl Host for World {
-    fn clock(&mut self) -> Timestamp {
-        Timestamp {
-            nanoseconds: Integer::from(0),
-        }
-    }
-    fn random(&mut self) -> u64 {
-        0
-    }
     fn read(&mut self, _: &Handle, _: &Datum) -> Result<Datum, ErrorDatum> {
         Ok(Datum::Null)
     }
@@ -87,21 +81,13 @@ impl Libraries {
             .map(|(index, arg)| format!("let a{index} = {arg} "))
             .collect();
         let call: Vec<String> = (0..args.len()).map(|index| format!("a{index}")).collect();
-        let mut uses = format!("use {name} = @{}\n", self.id(name));
-        if name != "error.new" {
-            uses.push_str(&format!("use error.new = @{}\n", self.id("error.new")));
-        }
         let text = format!(
-            "kernel 1\nnumbers by_spelling\n{uses}main {{ {lets}return {name}({}) }}",
+            "kernel 1\nnumbers by_spelling\nmain {{ {lets}return {name}({}) }}",
             call.join(", ")
         );
-        let document = Arc::new(parse_document(&text).unwrap_or_else(|error| panic!("{error}")));
+        let document = Arc::new(crate::testsupport::document(&text, &self.registry));
         let run = |library: &PreparedLibrary, layout: Layout| -> (End, Meters) {
-            let program = Program {
-                closure: lash_kernel_doc::heap::PageId([8; 32]),
-                document: Arc::clone(&document),
-                library: library.clone(),
-            };
+            let program = crate::testsupport::program(Arc::clone(&document), library.clone());
             let mut machine = crate::testsupport::start(program, BOUNDS, layout).unwrap();
             match machine.run(&mut World, u64::MAX).unwrap() {
                 Step::Ended(end) => (end, machine.meters()),
@@ -242,22 +228,10 @@ fn short_integer_digits_are_the_integers_own_spelling() {
 #[test]
 fn prepared_and_general_layouts_attribute_the_same_work() {
     let libraries = Libraries::new();
-    let uses: String = [
-        "add",
-        "num.add",
-        "int.mul",
-        "float.add",
-        "lt",
-        "eq",
-        "bool.not",
-    ]
-    .iter()
-    .map(|name| format!("use {name} = @{}\n", libraries.id(name)))
-    .collect();
     let document = Arc::new(
-        parse_document(&format!(
-            "kernel 1\nnumbers by_spelling\n{uses}
-fn helper(x) {{ return add(x, 1) }}
+        crate::testsupport::document(&format!(
+            "kernel 1\nnumbers by_spelling\n
+definition \"function helper(x: Any) -> Any\\nkernel 1\\nmetering statements\\nbody {{ return add(x, 1) }}\"
 main {{
     let a = call helper(0)
     let b = num.add(-0.0, 2.5)
@@ -269,21 +243,19 @@ main {{
     try {{ let bad = num.add(\"text\", a) }} catch e {{ print e.kind }}
     return (a, b, c, d, ordered, structural, negated)
 }}"
-        ))
-        .unwrap(),
+        ), &libraries.registry),
     );
     let mut ends = Vec::new();
     let mut charges = Vec::new();
     for layout in [Layout(0), Layout(1)] {
-        let program = Program {
-            closure: lash_kernel_doc::heap::PageId([8; 32]),
-            document: Arc::clone(&document),
-            library: if layout == Layout(0) {
+        let program = crate::testsupport::program(
+            Arc::clone(&document),
+            if layout == Layout(0) {
                 libraries.fast.clone()
             } else {
                 libraries.general.clone()
             },
-        };
+        );
         let mut machine = crate::testsupport::start(program, BOUNDS, layout).unwrap();
         ends.push(machine.run(&mut World, u64::MAX).unwrap());
         charges.push(machine.meters().charged.expect("exact charge"));

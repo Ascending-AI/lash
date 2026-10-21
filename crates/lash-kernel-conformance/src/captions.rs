@@ -13,7 +13,12 @@ use std::collections::BTreeSet;
 use lash_kernel_dialect::{
     Dialect, Environment, Lowered, Mode, PrintError, PrintOptions, SourceFormat,
 };
-use lash_kernel_doc::{Caption, CaptionEntry, CaptionTarget, Captions, Document, Site};
+use lash_kernel_doc::Caption;
+use lash_kernel_doc::CaptionEntry;
+use lash_kernel_doc::CaptionTarget;
+use lash_kernel_doc::Captions;
+use lash_kernel_doc::Document;
+use lash_vocabulary::sites::Site;
 use serde::Deserialize;
 
 use crate::HarnessError;
@@ -277,10 +282,10 @@ impl CaptionDialect<'_> {
             .ok_or_else(|| fail(RULE, "corpus", "no readback case"))?;
         let lowered = self.module(RULE, &case.name, &case.source)?;
         let document = lowered.document.document();
-        let other = lash_kernel_doc::Document::new(document.manifest.numbers, Vec::new());
+        let other = lash_kernel_doc::Document::new(document.numbers, Vec::new());
         let caption = serde_json::json!({"title": "Send the report"});
-        let entry = document
-            .entries
+        let functions = document.function_names();
+        let entry = functions
             .keys()
             .next()
             .ok_or_else(|| fail(RULE, &case.name, "a module has an entry"))?;
@@ -288,12 +293,12 @@ impl CaptionDialect<'_> {
             (
                 "another document",
                 other.identity(),
-                serde_json::json!({"site": Site::new(lash_kernel_doc::Unit::Main, [0])}),
+                serde_json::json!({"site": Site::new(lash_vocabulary::sites::Unit::Main, [0])}),
             ),
             (
                 "main's body",
                 document.identity(),
-                serde_json::json!({"site": Site::new(lash_kernel_doc::Unit::Main, Vec::new())}),
+                serde_json::json!({"site": Site::new(lash_vocabulary::sites::Unit::Main, Vec::new())}),
             ),
             (
                 "a parameter the entry lacks",

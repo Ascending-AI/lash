@@ -18,6 +18,7 @@ doctest = false
 workspace = true
 
 [dependencies]
+lash-vocabulary = { workspace = true }
 arbitrary = "1"
 lash-kernel-check.workspace = true
 lash-kernel-dialect.workspace = true
@@ -32,6 +33,7 @@ serde_json.workspace = true
 thiserror.workspace = true
 
 [dev-dependencies]
+lash-vm-releases = { workspace = true, features = ["dialect-typescript", "dialect-python"] }
 lash-kernel-package = { workspace = true, features = ["testing"] }
 lash-ext-helper-compiler = { workspace = true }
 kernel-embedder = { path = "../../examples/kernel-embedder" }

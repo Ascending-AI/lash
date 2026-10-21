@@ -31,11 +31,11 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, Weak};
 
-use lash_protocol_types::SessionId;
 use lash_protocol_types::sync::MutexExt;
+use lash_vocabulary::identity::SessionId;
 
-use crate::NodeId;
 use crate::session_graph::{SessionGraph, WindowAnchor};
+use lash_vocabulary::identity::NodeId;
 
 /// The stored body bytes one store's cached windows may hold together.
 pub const WINDOW_CACHE_BUDGET_BYTES: u64 = 32 << 20;

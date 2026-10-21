@@ -3,7 +3,7 @@
   "cases": [
     {
       "name": "expression operands read host left to right",
-      "document": "kernel 1\nnumbers by_spelling\n\nmain {\nfinish (clock, clock)\n}\n",
+      "document": "kernel 1\nnumbers by_spelling\nimport 0 operation host.clock() -> Timestamp\nmain {\n  finish (perform 0() as Timestamp, perform 0() as Timestamp)\n}\n",
       "expected": {
         "prints": [],
         "end": {
@@ -23,11 +23,30 @@
       "environment": {
         "host": [
           {
-            "clock": "1"
+            "perform": {
+              "effect": "host.clock",
+              "args": [],
+              "answer": {
+                "Ok": {
+                  "timestamp": "1"
+                }
+              }
+            }
           },
           {
-            "clock": "2"
+            "perform": {
+              "effect": "host.clock",
+              "args": [],
+              "answer": {
+                "Ok": {
+                  "timestamp": "2"
+                }
+              }
+            }
           }
+        ],
+        "reads": [
+          "host.clock"
         ]
       }
     }

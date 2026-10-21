@@ -87,9 +87,9 @@ async fn a_host_presenter_replaces_the_body_without_losing_error_marking() {
         previous: ModelToolReturn::from_output("lookup".into(), &output),
         facts: Arc::new(ToolPresentationFacts::default()),
         context: ToolResultProjectionContext {
-            owner: lash_core::RuntimeOwner::Session("presenter".into()),
+            owner: lash_vocabulary::identity::RuntimeOwner::Session("presenter".into()),
             call_id: lash_core::ToolCallId::fixture("call-1"),
-            tool_id: lash_core::ToolId::new("lookup"),
+            tool_id: lash_vocabulary::tool_contract::ToolId::new("lookup"),
             tool_name: "lookup".into(),
             render: None,
             args: Value::Null,

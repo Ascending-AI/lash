@@ -98,7 +98,7 @@ fn append_identity_refuses_non_append_operation_key() {
 
 fn ingress_fixture(commit: &RuntimeCommit) -> IngressSettlement {
     IngressSettlement {
-        run: crate::TurnId::from("root-turn"),
+        run: lash_vocabulary::identity::TurnId::from("root-turn"),
         completed_inputs: vec![crate::TurnInputCompletion {
             session_id: commit.session_id.clone(),
             data: crate::TurnInputCompletionData {
@@ -157,14 +157,14 @@ fn legacy_hash_reproduces_random_committed_message_id_conflict() {
             applications: vec![crate::TurnInputApplication {
                 input_id: "input-1".into(),
                 source_key: None,
-                turn_id: crate::TurnId::from("turn-42"),
+                turn_id: lash_vocabulary::identity::TurnId::from("turn-42"),
                 committed_message_id: "random-attempt-a".to_string(),
                 checkpoint: None,
             }],
         },
     };
     first.ingress = Some(IngressSettlement {
-        run: crate::TurnId::from("turn-42"),
+        run: lash_vocabulary::identity::TurnId::from("turn-42"),
         completed_inputs: vec![completion],
         completed_batches: Vec::new(),
         released: Vec::new(),

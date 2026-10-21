@@ -1,12 +1,15 @@
-use crate::{ExecutionPolicy, PreparedToolCall, ToolContext, ToolOutcome};
+use crate::PreparedToolCall;
+use crate::ToolContext;
+use crate::ToolOutcome;
 use futures_util::FutureExt as _;
+use lash_vocabulary::tool_contract::ExecutionPolicy;
 
 use super::atomic_attempt::AttemptAuthority;
 use super::context::{ToolDispatchContext, ToolDispatchOutcome};
 
 pub(crate) fn resolve_execution_policy(
     context: &ToolDispatchContext<'_>,
-    tool_id: &crate::ToolId,
+    tool_id: &lash_vocabulary::tool_contract::ToolId,
     execution_grant: Option<&crate::ToolExecutionGrant>,
 ) -> ExecutionPolicy {
     execution_grant
@@ -203,7 +206,7 @@ fn launch_not_held(env_ref: &crate::ProcessEnvRef) -> ToolOutcome {
 
 async fn build_attempt_context<'run>(
     tool_context: &ToolContext<'run>,
-    admitted: &crate::ToolManifest,
+    admitted: &lash_vocabulary::tool_contract::ToolManifest,
 ) -> Result<crate::AttemptContext<'run>, ToolOutcome> {
     let scoped = tool_context.effect_controller.clone();
     // The key is reserved before the body runs, and only for a declared

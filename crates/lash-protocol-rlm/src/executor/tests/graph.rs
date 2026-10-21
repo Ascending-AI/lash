@@ -181,7 +181,9 @@ async fn a_working_state_is_adopted_whole_and_a_cancelled_cell_never_promotes_it
         "the cancelled cell's captured heap is not the session's"
     );
     assert!(
-        !state.names().contains(&lash_kernel_doc::Name::new("extra")),
+        !state
+            .names()
+            .contains(&lash_vocabulary::names::Name::new("extra")),
         "the cancelled cell's binding is gone"
     );
     let read = cell(

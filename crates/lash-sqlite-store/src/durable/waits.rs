@@ -92,7 +92,7 @@ pub(super) fn apply(tx: &Connection, commit: &Committing<'_>, write: &WaitWrite)
                     columns
                         .target
                         .as_ref()
-                        .map(lash_protocol_types::ProcessId::as_str),
+                        .map(lash_vocabulary::identity::ProcessId::as_str),
                     columns.deadline.map(|deadline| deadline.0),
                     commit.epoch.0,
                     columns
@@ -102,7 +102,7 @@ pub(super) fn apply(tx: &Connection, commit: &Committing<'_>, write: &WaitWrite)
                     columns
                         .tool
                         .as_ref()
-                        .map(lash_protocol_types::ToolId::as_str),
+                        .map(lash_vocabulary::tool_contract::ToolId::as_str),
                     columns.key_name
                 ],
             )?;
@@ -360,7 +360,7 @@ fn decode_stored(stored: Stored) -> Result<StoredWait, DurableError> {
             target: stored
                 .target
                 .map(|process| {
-                    lash_protocol_types::ProcessId::parse(&process)
+                    lash_vocabulary::identity::ProcessId::parse(&process)
                         .map_err(|_| corrupt("wait target process", &process))
                 })
                 .transpose()?,
@@ -371,7 +371,7 @@ fn decode_stored(stored: Stored) -> Result<StoredWait, DurableError> {
                         .map_err(|_| corrupt("wait call", &call))
                 })
                 .transpose()?,
-            tool: stored.tool.map(lash_protocol_types::ToolId::new),
+            tool: stored.tool.map(lash_vocabulary::tool_contract::ToolId::new),
             key_name: stored.key_name,
             deadline: stored.deadline.map(DurableInstant),
         },

@@ -3,6 +3,7 @@
 //! its receiver (§2.4 of the host-package design).
 
 use lash_kernel_doc::{Member, Place};
+
 use ruff_python_ast::{self as ast, Expr as PyExpr};
 use ruff_text_size::Ranged;
 
@@ -90,9 +91,6 @@ impl Lowerer<'_> {
         call: &ast::ExprCall,
         awaited: bool,
     ) -> Lowering<Operand> {
-        if let Some(refusal) = self.printed_receiver(&attribute.value) {
-            return Err(refusal);
-        }
         let name = attribute.attr.id.as_str();
         let method = METHODS.iter().find(|method| method.name == name);
         if self.seals() && !self.is_asyncio(&attribute.value) {

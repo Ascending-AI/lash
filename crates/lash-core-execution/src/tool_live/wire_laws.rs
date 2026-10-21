@@ -2,8 +2,8 @@
 //! as tagged JSON and read back exactly (figments feedback-14 a3).
 use super::*;
 
-fn process() -> crate::ProcessId {
-    crate::ProcessId::fixture("wire-process")
+fn process() -> lash_vocabulary::identity::ProcessId {
+    lash_vocabulary::identity::ProcessId::fixture("wire-process")
 }
 fn owner() -> ExecutionOwner {
     ExecutionOwner::Process {

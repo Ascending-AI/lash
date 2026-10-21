@@ -50,7 +50,6 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use lash_core_execution::ProcessId;
 use lash_durable::runner::Activation;
 use lash_durable::{ActorKey, ActorState, CommitLabel, DurableError, DurableStore};
 use lash_durable_test::{
@@ -64,8 +63,9 @@ use lash_execution_contracts::process::ProcessStatus;
 use lash_execution_contracts::process::ProcessStatusFilter;
 use lash_execution_contracts::process::ProjectionWatermark;
 use lash_execution_contracts::process::process_child_session_id;
-use lash_protocol_types::SessionId;
 use lash_protocol_types::sync::MutexExt as _;
+use lash_vocabulary::identity::ProcessId;
+use lash_vocabulary::identity::SessionId;
 
 use dialect::Dialect;
 use served::Tier;
@@ -151,9 +151,9 @@ const ECHO_OPERATION: &str = "tools.migrated_echo";
 /// The values the migrated-tools law's `batch` echoes.
 const ECHOED: [&str; 2] = ["migrated-alpha", "migrated-beta"];
 
-fn echo_definition() -> lash_core::ToolDefinition {
+fn echo_definition() -> lash_vocabulary::tool_contract::ToolDefinition {
     let object = serde_json::json!({ "type": "object", "additionalProperties": true });
-    lash_core::ToolDefinition::raw(
+    lash_vocabulary::tool_contract::ToolDefinition::raw(
         format!("tool:{ECHO}"),
         ECHO_OPERATION,
         "Answers the value it is given.",
@@ -173,7 +173,7 @@ impl lash_core::ToolProvider for Echo {
         &self,
         _config: &lash_core::OwnerConfigView,
     ) -> std::result::Result<
-        Vec<lash_core::ToolManifest>,
+        Vec<lash_vocabulary::tool_contract::ToolManifest>,
         lash_execution_contracts::plugin_error::PluginError,
     > {
         Ok(vec![echo_definition().manifest()])
@@ -183,7 +183,7 @@ impl lash_core::ToolProvider for Echo {
         &self,
         name: &str,
         _config: &lash_core::OwnerConfigView,
-    ) -> Option<Arc<lash_core::ToolContract>> {
+    ) -> Option<Arc<lash_vocabulary::tool_contract::ToolContract>> {
         (name == ECHO_OPERATION).then(|| Arc::new(echo_definition().contract()))
     }
 

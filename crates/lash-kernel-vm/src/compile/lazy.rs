@@ -91,7 +91,19 @@ impl LibraryTables {
             );
             compiler.metered = prepared.charge == crate::Charge::Exact;
             let code = compiler.reserve();
-            compiler.unit_code(code, Unit::Library(body.function), &params, block, false);
+            compiler.unit_code(
+                code,
+                Unit::Library(body.function),
+                &params,
+                block,
+                matches!(
+                    definition.implementation,
+                    doc::Implementation::Guest {
+                        metering: doc::Metering::Statements,
+                        ..
+                    }
+                ),
+            );
             let mut tables = compiler.finish();
             // The library occurrence census is independent of which helper
             // happened to compile first and of the layout's code order.
@@ -183,9 +195,8 @@ impl LibraryTables {
             .resize(self.blocks.len() + census.blocks as usize, owner);
         self.stmts
             .resize(self.stmts.len() + census.stmts as usize, owner);
-        for path in &census.occurrences {
-            self.occurrence_at
-                .insert(Site::new(Unit::Library(function), path.clone()), 0);
+        for site in &census.occurrences {
+            self.occurrence_at.insert(site.clone(), 0);
         }
         self.body_of.push(owner as u32);
         self.bodies.push(Body {
@@ -202,7 +213,10 @@ impl LibraryTables {
 /// one the machine runs itself. A build writes it into its release image
 /// (FIG-6843), and a process computes it only for a function registered one
 /// by one.
-pub fn body_census(definition: &FunctionDefinition) -> Option<doc::BodyCensus> {
+pub fn body_census(
+    definition: &FunctionDefinition,
+    catalog: &dyn doc::FunctionCatalog,
+) -> Option<doc::BodyCensus> {
     if machine_function(definition).is_some() {
         return None;
     }
@@ -215,8 +229,13 @@ pub fn body_census(definition: &FunctionDefinition) -> Option<doc::BodyCensus> {
     // last entries below its parent's, which the walk visited last at that
     // depth.
     let mut path: Vec<u32> = Vec::new();
-    let mut pending = vec![(doc::Node::Block(&body.block), 0usize, 0u32)];
-    while let Some((node, depth, index)) = pending.pop() {
+    let mut unit = Unit::Library(definition.identity());
+    let mut pending = vec![(doc::Node::Block(&body.block), 0usize, 0u32, unit.clone())];
+    while let Some((node, depth, index, owner)) = pending.pop() {
+        unit = owner;
+        if depth == 0 {
+            path.clear();
+        }
         if depth > 0 {
             path.truncate(depth - 1);
             path.push(index);
@@ -239,27 +258,37 @@ pub fn body_census(definition: &FunctionDefinition) -> Option<doc::BodyCensus> {
         match node {
             doc::Node::Block(_) => census.blocks += 1,
             doc::Node::Stmt(_) => census.stmts += 1,
-            doc::Node::Expr(doc::Expr::Closure(_)) => {
+            doc::Node::Expr(doc::Expr::Closure(closure)) => {
                 census.codes += 1;
                 census.closures = true;
+                if let Some(definition) = catalog.definition(&closure.function)
+                    && let Some(body) = definition.body()
+                {
+                    pending.push((
+                        doc::Node::Block(&body.block),
+                        0,
+                        0,
+                        Unit::Library(closure.function),
+                    ));
+                }
             }
             _ => {}
         }
         let counted = match node {
-            doc::Node::Action(
-                doc::Action::Perform { .. } | doc::Action::Sleep { .. } | doc::Action::Spawn { .. },
-            ) => true,
+            doc::Node::Action(doc::Action::Perform { .. } | doc::Action::Spawn { .. }) => true,
             doc::Node::Expr(doc::Expr::Act(act)) => matches!(
                 act.kind,
-                doc::ActKind::Perform { .. } | doc::ActKind::Sleep { .. } | doc::ActKind::Spawn(_)
+                doc::ActKind::Perform { .. } | doc::ActKind::Spawn(_)
             ),
             _ => false,
         };
         if counted {
-            census.occurrences.push(path.clone());
+            census
+                .occurrences
+                .push(Site::new(unit.clone(), path.clone()));
         }
         for (index, child) in node.children().into_iter().enumerate() {
-            pending.push((child, depth + 1, index as u32));
+            pending.push((child, depth + 1, index as u32, unit.clone()));
         }
     }
     Some(census)
@@ -267,11 +296,14 @@ pub fn body_census(definition: &FunctionDefinition) -> Option<doc::BodyCensus> {
 
 /// A registered function's census: its build's, for a released function,
 /// and computed from its definition otherwise.
-pub(super) fn census_of(registered: &doc::RegisteredFunction) -> Option<doc::BodyCensus> {
+pub(super) fn census_of(
+    registered: &doc::RegisteredFunction,
+    catalog: &dyn doc::FunctionCatalog,
+) -> Option<doc::BodyCensus> {
     if registered.released() {
         registered.census()
     } else {
-        body_census(registered.definition())
+        body_census(registered.definition(), catalog)
     }
 }
 
@@ -309,7 +341,7 @@ impl PreparedLibrary {
         let mut runs = Vec::with_capacity(order.len());
         for at in &order {
             let (function, registered) = registered[*at];
-            let census = census_of(registered);
+            let census = census_of(registered, registry.as_ref());
             match &census {
                 Some(census) => tables.reserve(*function, census, &mut sites),
                 None => tables.body_of.push(NO_BODY),
@@ -490,17 +522,21 @@ impl Prepared {
             (None, None, None) => LibRun::Declaration,
         };
         let params = &header.signature.params;
-        let charge = Plan::new(&header.charge, params);
+        let formula = header
+            .charge()
+            .cloned()
+            .unwrap_or(doc::Formula::Constant(0));
+        let charge = Plan::new(&formula, params);
         let limit = header
             .guard
             .as_ref()
             .map(|guard| Plan::new(&guard.limit, params));
         let prepared = entry.map(|entry| {
-            let fast = Fast::new(&header.charge, params, &charge, entry.immediate());
+            let fast = Fast::new(&formula, params, &charge, entry.immediate());
             (entry, fast)
         });
         let shared_params = if body_slot.is_some_and(|(_, slot)| slot.closures) {
-            parameters::shared(registered.definition())
+            parameters::shared(registered.definition(), self.registry.as_ref())
         } else {
             Vec::new()
         };

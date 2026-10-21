@@ -14,9 +14,13 @@ use crate::worker::{Fences, cpu_nanos};
 use lash_kernel_doc::heap::{
     HeapFault, HostResource, PAGE_GRANT_BYTES, PageGrant, PageId, PageRef,
 };
-use lash_kernel_doc::{Datum, EffectId, EffectName, ErrorDatum, Handle, TaskLabel, Timestamp};
+use lash_kernel_doc::{Datum, ErrorDatum, Handle, Timestamp};
+
 use lash_kernel_state::paged::PagePortLimits;
 use lash_kernel_state::paged::{PageAnswer, PageBody, PageSource};
+use lash_protocol_types::engine_fault::PageRefusal;
+use lash_protocol_types::engine_fault::{InfrastructureOutcome, PayloadKind, SequenceFault};
+use lash_protocol_types::worker_limit::WorkerLimit;
 use lash_vm_broker::kernel::pages::{answer_crossed, frame_page};
 use lash_vm_client::wire::{self, EffectAnswer, EffectRead, ProjectionAnswer, ProjectionRead};
 use lash_vm_client::{
@@ -24,10 +28,12 @@ use lash_vm_client::{
     ipc::{FrameSource, write_frame},
 };
 use lash_vm_protocol::page::{
-    PageAuthority, PageCapability, PageEnvelope, PageExchangeId, PageRefusal, PageReply,
-    PageRequest, ReadPage,
+    PageAuthority, PageCapability, PageEnvelope, PageExchangeId, PageReply, PageRequest, ReadPage,
 };
 use lash_vm_protocol::*;
+use lash_vocabulary::names::EffectName;
+use lash_vocabulary::sites::EffectId;
+use lash_vocabulary::sites::TaskLabel;
 use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::os::unix::net::UnixStream;
@@ -219,7 +225,7 @@ impl Wire {
             .pipe
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        if let Some(message) = WorkerRefusal::testimony(error.clone().into_outcome()) {
+        if let Some(message) = lash_vm_protocol::outcome::testimony(error.clone().into_outcome()) {
             let _ = self.send(&mut pipe, message);
         }
     }
@@ -332,14 +338,6 @@ impl lash_kernel_vm::Host for WireHost {
         self.sites.is_some().then_some(self)
     }
 
-    fn clock(&mut self) -> Timestamp {
-        self.exchange(HostReadKind::Clock, &())
-    }
-
-    fn random(&mut self) -> u64 {
-        self.exchange(HostReadKind::Random, &())
-    }
-
     fn read(&mut self, handle: &Handle, request: &Datum) -> Result<Datum, ErrorDatum> {
         let answer: ProjectionAnswer = self.exchange(
             HostReadKind::Projection,
@@ -356,15 +354,15 @@ impl lash_kernel_vm::Host for WireHost {
     /// on. The parent's own failure never crosses: it stops the run there.
     fn perform(
         &mut self,
-        effect: &EffectName,
+        effect: &lash_vocabulary::names::OperationUse,
         args: &[Datum],
-        site: &lash_kernel_doc::PositionLabel,
-        origin: &lash_kernel_doc::Site,
+        site: &lash_vocabulary::sites::PositionLabel,
+        origin: &lash_vocabulary::sites::Site,
     ) -> Result<Result<Datum, ErrorDatum>, lash_kernel_vm::HostFault> {
         let answer: EffectAnswer = self.exchange(
             HostReadKind::Effect,
             &EffectRead {
-                effect: effect.clone(),
+                use_: *effect,
                 args: args.to_vec(),
                 site: site.clone(),
                 origin: origin.clone(),

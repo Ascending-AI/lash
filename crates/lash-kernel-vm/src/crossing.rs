@@ -18,119 +18,157 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use lash_kernel_doc::heap::{EntityId, HeapFault, PageReader, PageValue};
-use lash_kernel_doc::snapshot::{
-    Budget, Crossing, SnapshotError, SnapshotHeap, constant_of, crossing_root, extract, members,
-    text_of, token_tag,
-};
-use lash_kernel_doc::{
-    Datum, Document, ErrorDatum, Expr, FunctionCatalog, FunctionValueLimits, KernelDataLimits,
-    Name, Site, Type, Unit,
-};
-use lash_kernel_state::kernel_internals::PagedHeap;
-use lash_kernel_state::kernel_internals::metadata::metadata_key;
-use lash_kernel_state::kernel_internals::tree::Tree;
-use lash_kernel_state::paged::{
-    FunctionRecord, HeapLifecycle, HeapWriteError, KeyedRoot, SemanticHeap,
-};
-
 use crate::data::{CopyError, raised};
+use lash_kernel_doc::heap::{EntityId, HeapFault, PageReader, PageValue};
+use lash_kernel_doc::snapshot::{members, text_of};
+use lash_kernel_doc::{Datum, ErrorDatum, FunctionCatalog};
 
-/// The live heap as a crossing reads it: `main`'s free names are the
-/// session's bindings, a saved function's are the captures its record
-/// froze, and a capture freezes to a constant.
+use lash_kernel_state::kernel_internals::PagedHeap;
+use lash_kernel_state::paged::SemanticHeap;
+use lash_vocabulary::content_ids::LinkId;
+use lash_vocabulary::data_limits::KernelDataLimits;
+use lash_vocabulary::names::{CallableId, DocumentId};
+use lash_vocabulary::types::Type;
+
 pub(crate) struct CrossingHeap<'m> {
     pub heap: &'m mut PagedHeap,
-    pub functions: &'m KeyedRoot,
-    pub budget: Budget,
 }
 
-fn write_fault(error: HeapWriteError) -> HeapFault {
-    match error {
-        HeapWriteError::Fault(fault) => fault,
-        other => HeapFault::Malformed(format!("a saved capture did not instantiate: {other}")),
-    }
-}
-
-impl SnapshotHeap for CrossingHeap<'_> {
-    type Frozen = Expr;
-
-    fn pages(&self) -> &dyn PageReader {
-        self.heap
-    }
-
-    fn closure_site(&self, id: EntityId) -> Result<Arc<Site>, HeapFault> {
-        self.heap.closure(id)?.site.resolve(self.heap.pages())
-    }
-
-    fn closure_capture(
-        &mut self,
-        id: EntityId,
-        name: &Name,
-    ) -> Result<Option<PageValue>, HeapFault> {
-        let object = self.heap.closure(id)?;
-        match object
-            .captures
-            .get(&metadata_key(name), self.heap.pages())?
-        {
-            Some((_, cell)) => self.heap.variable_get(cell).map(Some),
-            None => Ok(None),
-        }
-    }
-
-    fn unit_binding(&mut self, unit: &Unit, name: &Name) -> Result<Option<PageValue>, HeapFault> {
-        match unit {
-            Unit::Main => self.heap.session_binding(name),
-            Unit::Function(function) => {
-                let Some(record) = Tree::<FunctionRecord>::of_keyed(self.functions)
-                    .get(&metadata_key(function), self.heap.pages())?
-                else {
-                    return Ok(None);
-                };
-                match record.captures.get(name) {
-                    Some(frozen) => self.heap.instantiate(frozen).map(Some).map_err(write_fault),
-                    None => Ok(None),
-                }
-            }
-            Unit::Library(_) => Ok(None),
-        }
-    }
-
-    fn freeze(
-        &mut self,
-        value: &PageValue,
-        named: &BTreeMap<EntityId, Name>,
-    ) -> Result<(Expr, std::collections::BTreeSet<Name>), SnapshotError> {
-        constant_of(self.heap, value, named, &mut self.budget)
-    }
-}
-
-/// What a crossing reads of the run besides its heap.
 pub(crate) struct CrossingRun<'a> {
-    pub document: &'a Document,
-    pub captions: &'a [lash_kernel_doc::CaptionEntry],
+    pub documents: &'a BTreeMap<DocumentId, Arc<lash_kernel_doc::Document>>,
+    pub instances: &'a BTreeMap<LinkId, crate::interface::PreparedInstance>,
     pub catalog: &'a dyn FunctionCatalog,
     pub data: KernelDataLimits,
-    /// The tag of the document's tokens, found when a function first
-    /// crosses.
-    pub tag: Option<Option<String>>,
 }
 
-impl CrossingRun<'_> {
-    fn crossing(&mut self) -> Crossing<'_> {
-        let tag = self
-            .tag
-            .get_or_insert_with(|| token_tag(self.document))
-            .as_deref();
-        Crossing {
-            document: self.document,
-            captions: self.captions,
-            catalog: self.catalog,
-            limits: FunctionValueLimits::standard(),
-            data: self.data,
-            tag,
+fn defining_document<'a>(
+    run: &'a CrossingRun<'_>,
+    callable: CallableId,
+) -> Result<&'a lash_kernel_doc::Document, CopyError> {
+    run.instances
+        .get(&callable.link)
+        .and_then(|instance| run.documents.get(&instance.document))
+        .map(Arc::as_ref)
+        .ok_or_else(|| CopyError::Heap(HeapFault::Malformed("callable Link is not loaded".into())))
+}
+
+fn callable(heap: &CrossingHeap<'_>, value: &PageValue) -> Result<Option<CallableId>, CopyError> {
+    Ok(match value {
+        PageValue::Function(callable) => Some(**callable),
+        PageValue::Closure(id) => Some(heap.heap.closure(*id)?.callable),
+        _ => None,
+    })
+}
+
+/// Packed dialect callables cross as one FunctionValue; ordinary tuples keep their shape.
+fn function_root(
+    heap: &CrossingHeap<'_>,
+    run: &CrossingRun<'_>,
+    value: &PageValue,
+) -> Result<Option<PageValue>, CopyError> {
+    if callable(heap, value)?.is_some() {
+        return Ok(Some(value.clone()));
+    }
+    let PageValue::Tuple(tuple) = value else {
+        return Ok(None);
+    };
+    let values = members(heap.heap, tuple)?;
+    for (index, member) in values.iter().enumerate() {
+        let PageValue::Closure(id) = member else {
+            continue;
+        };
+        let closure = heap.heap.closure(*id)?;
+        let document = defining_document(run, closure.callable)?;
+        let site = closure.site.resolve(heap.heap.pages())?;
+        if let Some(start) = lash_kernel_doc::snapshot::closure_at(document, &site)
+            .and_then(|c| c.presentation.as_ref())
+            && let lash_kernel_doc::FunctionRepresentation::Token { tag, callable } =
+                &start.representation
+            && *callable as usize == index
+            && let Some(PageValue::Text(first)) = values.first()
+            && text_of(heap.heap, first)? == *tag
+        {
+            return Ok(Some(member.clone()));
         }
     }
+    Ok(None)
+}
+
+fn extract_function(
+    heap: &mut CrossingHeap<'_>,
+    run: &mut CrossingRun<'_>,
+    value: &PageValue,
+    budget: usize,
+    path: &mut Vec<EntityId>,
+) -> Result<lash_kernel_doc::FunctionValue, CopyError> {
+    let callable =
+        callable(heap, value)?.ok_or_else(|| raised("not_data", "no callable identity"))?;
+    let document = defining_document(run, callable)?;
+    let definition = run
+        .catalog
+        .definition(&callable.function)
+        .or_else(|| document.functions.get(&callable.function))
+        .ok_or_else(|| raised("not_data", "callable definition is not loaded"))?;
+    let mut signature = definition.signature.clone();
+    let mut convention = lash_kernel_doc::StartConvention::Direct;
+    let mut captured = Vec::new();
+    if let PageValue::Closure(id) = value {
+        if path.contains(id) {
+            return Err(raised("cycle", "a captured function holds itself").into());
+        }
+        let closure = heap.heap.closure(*id)?;
+        let site = closure.site.resolve(heap.heap.pages())?;
+        if let Some(start) = lash_kernel_doc::snapshot::closure_at(document, &site)
+            .and_then(|c| c.presentation.as_ref())
+        {
+            signature = start.signature.clone();
+            convention = start.convention.clone();
+        }
+        for index in 0..closure.captures.len() {
+            let (_, (name, cell)) = closure
+                .captures
+                .rank_get(index, heap.heap.pages())?
+                .ok_or_else(|| HeapFault::Malformed("closure capture missing".into()))?;
+            captured.push((
+                name.resolve(heap.heap.pages())?,
+                heap.heap.variable_get(cell)?,
+            ));
+        }
+        path.push(*id);
+    } else if let Some(export) = document.exports.values().find_map(|export| match export {
+        lash_kernel_doc::Export::Function(export) if export.function == callable.function => {
+            Some(export)
+        }
+        _ => None,
+    }) {
+        signature = export.signature.clone();
+        convention = export.convention.clone();
+    }
+    let mut captures = BTreeMap::new();
+    for (name, value) in captured {
+        let mut at = ArgumentPath {
+            steps: vec![name.as_str().to_owned()],
+        };
+        captures.insert(
+            name,
+            copy(heap, run, &value, &Slot::Open, &mut at, budget, path)?,
+        );
+    }
+    if matches!(value, PageValue::Closure(_)) {
+        path.pop();
+    }
+    let value = lash_kernel_doc::FunctionValue {
+        callable,
+        captures,
+        signature,
+        convention,
+        captions: lash_kernel_doc::Captions::empty(defining_document(run, callable)?.identity()),
+    };
+    let limits = lash_kernel_doc::FunctionValueLimits::standard();
+    value
+        .check(run.catalog, limits, run.data)
+        .map_err(|error| raised("not_data", error.to_string()))?;
+    Ok(value)
 }
 
 /// The declared type at one path of an effect argument: open, where every
@@ -309,7 +347,7 @@ fn copy(
         )
         .into());
     };
-    if let Some(root) = crossing_root(heap, run.document, value)? {
+    if let Some(root) = function_root(heap, run, value)? {
         if !slot.admits_function() {
             return Err(raised(
                 "not_data",
@@ -320,8 +358,7 @@ fn copy(
             )
             .into());
         }
-        let crossing = run.crossing();
-        let function = extract(heap, crossing, &root).map_err(refused)?;
+        let function = extract_function(heap, run, &root, budget, path)?;
         return Ok(Datum::FunctionValue(Box::new(function)));
     }
     Ok(match value {
@@ -434,17 +471,4 @@ fn copy(
         }
         other => crate::data::copy_page_out(heap.heap, other)?,
     })
-}
-
-/// A function that cannot cross raises `not_data` at the `perform`, the
-/// message naming its refusal.
-fn refused(error: SnapshotError) -> CopyError {
-    match error {
-        SnapshotError::Heap(fault) => CopyError::Heap(fault),
-        SnapshotError::Refused(refusal) => raised(
-            "not_data",
-            format!("a function cannot leave the run: {refusal}"),
-        )
-        .into(),
-    }
 }

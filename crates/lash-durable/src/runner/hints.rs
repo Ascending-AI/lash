@@ -29,7 +29,7 @@ use crate::tx::{ActorTx, Release};
 use lash_core_store::store::{
     FollowFacts, FollowSubject, RunCommittedOutcome, SessionStore, StoreError,
 };
-use lash_protocol_types::{InputId, TurnId};
+use lash_vocabulary::identity::{InputId, TurnId};
 use std::collections::{BTreeSet, HashMap};
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, PoisonError, Weak};

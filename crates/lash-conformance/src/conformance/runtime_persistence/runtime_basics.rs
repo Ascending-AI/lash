@@ -445,7 +445,7 @@ pub async fn session_read_loads_persisted_history(store: Arc<dyn RuntimeStore>) 
             .collect::<Vec<_>>(),
         expected_node_ids
             .iter()
-            .map(lash_core::NodeId::as_str)
+            .map(lash_vocabulary::identity::NodeId::as_str)
             .collect::<Vec<_>>(),
         "session reads must return the persisted leaf-to-root history"
     );

@@ -23,6 +23,7 @@ doctest = false
 workspace = true
 
 [dependencies]
+lash-vocabulary = { workspace = true }
 lash-durable = { workspace = true }
 lash-execution-contracts = { workspace = true }
 lash-transport-failure = { workspace = true }
@@ -35,6 +36,7 @@ lash-kernel-view = { workspace = true, optional = true }
 lash-kernel-dialect = { workspace = true, optional = true }
 lash-kernel-package = { workspace = true, optional = true }
 lash-vm-client = { workspace = true, optional = true }
+lash-vm-releases = { workspace = true, optional = true }
 lash-vm-worker = { workspace = true, optional = true }
 lash-sansio = { workspace = true, features = ["schema-validation"] }
 lash-protocol-types = { workspace = true, features = ["schema-validation"] }
@@ -82,6 +84,7 @@ default = []
 # runs and publishes documents needs none of them (FIG-6378).
 codemode = [
     "dep:lash-vm-client",
+    "dep:lash-vm-releases",
     "dep:lash-vm-runtime",
     "dep:lash-kernel-doc",
     "dep:lash-kernel-check",
@@ -120,11 +123,13 @@ workflow-authoring = ["workflow-view", "dep:lash-kernel-edit"]
 dialect-typescript = [
     "codemode",
     "lash-vm-runtime/dialect-typescript",
+    "lash-vm-releases/dialect-typescript",
     "lash-vm-worker?/dialect-typescript",
 ]
 dialect-python = [
     "codemode",
     "lash-vm-runtime/dialect-python",
+    "lash-vm-releases/dialect-python",
     "lash-vm-worker?/dialect-python",
 ]
 

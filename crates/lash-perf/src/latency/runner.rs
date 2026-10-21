@@ -3,6 +3,7 @@
 //! phase boundaries come from the serving engine's successful commits.
 
 use lash_protocol_types::{llm::types::StreamBlockEvent, llm::types::StreamBlockKind};
+
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -15,8 +16,8 @@ use lash_core_ids::perf_witness::latency::Stamp;
 use lash_core_ids::perf_witness::latency::Worker;
 use serde::Serialize;
 
-use lash_protocol_types::SessionId;
 use lash_protocol_types::sync::MutexExt;
+use lash_vocabulary::identity::SessionId;
 
 use super::FollowerMode;
 #[path = "diagnostics.rs"]
@@ -784,7 +785,7 @@ pub(crate) async fn measure_send(
     ctx: &SampleCtx<'_>,
     lane: usize,
     index: usize,
-    id: Option<lash::TurnId>,
+    id: Option<lash_vocabulary::identity::TurnId>,
     mut loop_clocks: LoopClocks,
     after_accept: impl FnOnce(),
 ) -> Result<CompletedSample> {
@@ -908,7 +909,7 @@ pub(crate) fn status_name(status: &lash::TurnStatus) -> String {
 pub(crate) async fn poll_marks(
     store: Arc<dyn lash::persistence::RuntimeStore>,
     session_id: SessionId,
-    input_id: lash_core::InputId,
+    input_id: lash_vocabulary::identity::InputId,
 ) -> PollMarks {
     let mut marks = PollMarks::default();
     let mut run = None;

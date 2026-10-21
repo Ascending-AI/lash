@@ -1,6 +1,6 @@
 use super::AdminContext;
 use crate::support::{EmbedError, InputItem, PluginMessage, Result, TurnInput};
-use lash_protocol_types::TurnId;
+use lash_vocabulary::identity::TurnId;
 
 #[derive(Clone)]
 /// Facade handle for injection administration.

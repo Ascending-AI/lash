@@ -1,4 +1,4 @@
-use lash_protocol_types::SessionId;
+use lash_vocabulary::identity::SessionId;
 use std::sync::Arc;
 
 use crate::conformance::DeploymentViewExt as _;

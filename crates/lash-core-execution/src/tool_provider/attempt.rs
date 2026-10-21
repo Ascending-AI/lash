@@ -2,6 +2,72 @@
 use super::*;
 
 impl<'run> AttemptContext<'run> {
+    /// Trusted origin of callable code retained by the execution admitting this attempt.
+    pub fn callable_origin(
+        &self,
+    ) -> Result<lash_vocabulary::package::CallableOrigin, ResolveTargetError> {
+        let environment = self.execution_environment().ok_or_else(|| {
+            ResolveTargetError::Refused(
+                "inline callable has no retained execution environment".into(),
+            )
+        })?;
+        Ok(lash_vocabulary::package::CallableOrigin {
+            publications: environment
+                .publications
+                .iter()
+                .map(lash_vocabulary::package::PublicationRecord::key)
+                .collect(),
+            authored: environment.authored.clone(),
+        })
+    }
+
+    /// One engine request, bound to the authenticated package facts of this attempt.
+    pub fn engine_inline_request(
+        &self,
+        payload: serde_json::Value,
+    ) -> Result<lash_execution_contracts::process::InlineRequest, ResolveTargetError> {
+        let packages = self
+            .routes
+            .as_ref()
+            .map(crate::SurfaceTools::packages)
+            .ok_or_else(|| {
+                ResolveTargetError::Refused("inline start has no recorded package surface".into())
+            })?;
+        let context = packages.consumer.clone().ok_or_else(|| {
+            ResolveTargetError::Refused("inline start has no authenticated consumer context".into())
+        })?;
+        Ok(lash_execution_contracts::process::InlineRequest {
+            code: lash_execution_contracts::process::InlineCode::Engine { payload },
+            snapshot: packages.snapshot.clone(),
+            context,
+            attachment: lash_vocabulary::package::Attachment {
+                members: Default::default(),
+                packages: Default::default(),
+                deferred: Default::default(),
+            },
+        })
+    }
+
+    /// The immutable recorded execution that admitted this attempt.
+    pub fn execution_environment(
+        &self,
+    ) -> Option<&lash_core_store::tool_surface::ExecutionEnvironment> {
+        self.linked_execution
+            .as_ref()
+            .map(|execution| execution.environment.as_ref())
+            .or_else(|| {
+                self.enclosing_env
+                    .as_ref()
+                    .map(|parent| parent.env.execution())
+            })
+    }
+
+    /// One injected clock snapshot before the provider callback. A committed timer
+    /// retains its absolute deadline; replay never recomputes this snapshot.
+    pub fn admission_now(&self) -> lash_durable::DurableInstant {
+        self.admission_now
+    }
+
     /// Where this attempt's body stands in the trace: under its tool span.
     /// Spans and points opened here are replay-safe: a body the journal
     /// serves never runs, and one that runs holds the attempt's right.
@@ -74,7 +140,7 @@ impl<'run> AttemptContext<'run> {
     /// host-started process or an operation outside a turn. The full turn
     /// address of a process's starting run is on
     /// [`process_spawn_provenance`](Self::process_spawn_provenance).
-    pub fn logical_run(&self) -> Option<crate::TurnId> {
+    pub fn logical_run(&self) -> Option<lash_vocabulary::identity::TurnId> {
         match self.process_spawn_provenance.as_ref() {
             Some(provenance) => provenance.run.as_ref().map(|run| run.turn_id.clone()),
             None => self.parent_scope.scope().logical_run(),
@@ -107,6 +173,9 @@ impl<'run> AttemptContext<'run> {
             .as_ref()
             .and_then(crate::RuntimeExecutionContext::attempt_phase_probe);
         Self {
+            admission_now: context
+                .admission_now
+                .unwrap_or_else(|| context.effect_controller.now()),
             live: live::bind(context),
             fleet_format: context
                 .runtime_execution_context
@@ -166,15 +235,16 @@ impl<'run> AttemptContext<'run> {
                 .runtime_dispatch
                 .as_ref()
                 .map(|dispatch| dispatch.routes.clone()),
-            recorded_grants: context
+            linked_execution: context
                 .runtime_execution_context
                 .as_ref()
-                .map(crate::RuntimeExecutionContext::recorded_grants)
+                .and_then(|cx| cx.linked_execution().cloned()),
+            resolution_pins: context
+                .runtime_execution_context
+                .as_ref()
+                .and_then(|cx| cx.linked_execution())
+                .map(|execution| execution.resolutions.lock_recover().clone())
                 .unwrap_or_default(),
-            linked_packages: context
-                .runtime_execution_context
-                .as_ref()
-                .and_then(crate::RuntimeExecutionContext::linked_packages),
             resolved_run: context
                 .runtime_execution_context
                 .as_ref()
@@ -256,7 +326,7 @@ impl<'run> AttemptContext<'run> {
     /// The execution binding of the deferred match this call runs on, its
     /// readability already checked against the provider's declared formats;
     /// `None` for a call that carries none.
-    pub fn tool_execution_binding(&self) -> Option<&crate::ExecutionBinding> {
+    pub fn tool_execution_binding(&self) -> Option<&lash_vocabulary::providers::ExecutionBinding> {
         self.tool_execution_binding.as_ref()
     }
 
@@ -346,17 +416,17 @@ impl<'run> AttemptContext<'run> {
             .start_payload(&args)
             .map_err(|error| ResolveTargetError::Refused(error.to_string()))?;
         let engine_kind = resolved.draft.engine_kind().as_str().to_owned();
-        let performed = engines
-            .performed_effects(&engine_kind, &payload)
+        let linked = engines
+            .inspect_code(&engine_kind, &payload)
             .await
-            .map_err(|refusal| ResolveTargetError::Refused(refusal.to_string()))?;
+            .map_err(|error| ResolveTargetError::Fault(error.into()))?;
         Ok(crate::ResolvedStartTarget {
             definition_id: resolved.id().clone(),
             engine_kind,
             signature: resolved.definition.signature.clone(),
             payload,
             args,
-            performed,
+            linked,
         })
     }
 
@@ -376,7 +446,7 @@ impl<'run> AttemptContext<'run> {
     pub async fn resolve_inline_start(
         &self,
         engine_kind: &str,
-        payload: serde_json::Value,
+        request: lash_execution_contracts::process::InlineRequest,
         args: serde_json::Map<String, serde_json::Value>,
     ) -> Result<crate::ResolvedInlineStart, ResolveTargetError> {
         let refused_or_fault = |error: PluginError| match error.class() {
@@ -385,16 +455,13 @@ impl<'run> AttemptContext<'run> {
             }
             _ => ResolveTargetError::Fault(error),
         };
-        let packages = self
-            .starting_packages(engine_kind)
-            .map_err(refused_or_fault)?;
         let inline = self
             .definition_engines
             .inline_starts(engine_kind)
             .map_err(refused_or_fault)?
-            .inspect(&payload, packages)
+            .inspect(&request)
             .await
-            .map_err(refused_or_fault)?;
+            .map_err(|error| refused_or_fault(error.into()))?;
         let resolved = lash_execution_contracts::process::ResolvedProcessDefinition {
             definition: lash_execution_contracts::process::ProcessDefinition::new(
                 inline.draft.id(),
@@ -412,46 +479,10 @@ impl<'run> AttemptContext<'run> {
                 signature: resolved.definition.signature,
                 payload: start_payload,
                 args,
-                performed: inline.performed,
+                linked: inline.linked,
             },
-            payload,
-            packages,
+            request,
         })
-    }
-
-    /// The package set a start this attempt declares is linked under
-    /// (FIG-6993): the declaring cell's own, the enclosing process's, or,
-    /// for a starter that runs no code, the `engine_kind` engine's producer
-    /// set. It is read here, once, and recorded on the start, so which node
-    /// later realizes or takes the start over never changes it.
-    ///
-    /// # Errors
-    ///
-    /// No engine produces documents for the starter, or its payload names
-    /// no set.
-    pub(super) fn starting_packages(
-        &self,
-        engine_kind: &str,
-    ) -> Result<lash_kernel_doc::PackageSetDigest, PluginError> {
-        if let Some(packages) = self.linked_packages {
-            return Ok(packages);
-        }
-        let unproduced = |kind: &str| {
-            PluginError::Registration(format!("the `{kind}` engine produces no package set"))
-        };
-        if let Some(enclosing) = &self.enclosing_env {
-            return self
-                .definition_engines
-                .document_provider(&enclosing.engine_kind)
-                .ok_or_else(|| unproduced(&enclosing.engine_kind))?
-                .definition_packages(&enclosing.payload);
-        }
-        Ok(self
-            .definition_engines
-            .document_provider(engine_kind)
-            .ok_or_else(|| unproduced(engine_kind))?
-            .initial_packages()?
-            .digest())
     }
 
     /// What a start policy decides `target`'s start with (§3.6): the
@@ -472,7 +503,12 @@ impl<'run> AttemptContext<'run> {
             self.enclosing_env.as_deref(),
             &self.definition_engines,
         )
-        .with_recorded_grants(&self.recorded_grants)
+        .with_execution(
+            self.linked_execution
+                .as_ref()
+                .map(|execution| execution.environment.as_ref()),
+            &self.resolution_pins,
+        )
     }
 
     /// Hold the environment `choice` states under this attempt's execution
@@ -516,8 +552,7 @@ impl<'run> AttemptContext<'run> {
         Ok(
             lash_execution_contracts::process::model::launch::held_inline_launch(
                 start.target.engine_kind.clone(),
-                start.payload.clone(),
-                start.packages,
+                start.request.clone(),
                 launch,
             ),
         )
@@ -531,11 +566,11 @@ impl<'run> AttemptContext<'run> {
         let launch = crate::runtime::process::hold_launch_performing(
             &self.definition_engines,
             &self.execution_scope,
-            self.enclosing_env.as_deref(),
             choice,
             &target.engine_kind,
             &target.payload,
-            &target.performed,
+            &target.linked,
+            self.routes.as_ref().map(crate::SurfaceTools::packages),
         )
         .await?;
         self.held_launches.lock_recover().push(launch.env.clone());
@@ -553,10 +588,10 @@ impl<'run> AttemptContext<'run> {
         let launch = crate::runtime::process::hold_launch(
             &self.definition_engines,
             &self.execution_scope,
-            self.enclosing_env.as_deref(),
             choice,
             kind,
             payload,
+            self.routes.as_ref().map(crate::SurfaceTools::packages),
         )
         .await?;
         self.held_launches.lock_recover().push(launch.env.clone());

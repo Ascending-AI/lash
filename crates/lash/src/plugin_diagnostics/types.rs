@@ -91,12 +91,12 @@ pub enum RecordLocator {
         ordinal: Ordinal,
     },
     TurnPhase {
-        session: crate::SessionId,
-        run: crate::TurnId,
+        session: lash_vocabulary::identity::SessionId,
+        run: lash_vocabulary::identity::TurnId,
     },
     /// The session's head: the config change it has not delivered.
     SessionHead {
-        session: crate::SessionId,
+        session: lash_vocabulary::identity::SessionId,
     },
     Prompt(PromptCallKey),
 }

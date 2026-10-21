@@ -13,9 +13,13 @@ use std::sync::Arc;
 
 use serde_json::Value;
 
+use lash_core::ToolCall;
+use lash_core::ToolOutcome;
+use lash_core::ToolProvider;
 use lash_core::plugin::{PluginFactory, PluginSpec, StaticPluginFactory};
-use lash_core::{ProcessId, ToolCall, ToolDefinition, ToolOutcome, ToolProvider};
 use lash_tool_support::{StaticToolExecute, StaticToolProvider};
+use lash_vocabulary::identity::ProcessId;
+use lash_vocabulary::tool_contract::ToolDefinition;
 
 mod declarations;
 
@@ -63,7 +67,7 @@ impl SessionProcessAdminPluginFactory {
     /// Process controls whose starts take `lifetime`, for example
     /// [`lash_execution_contracts::process::lifetime::session_or_starter`], and the environment
     /// `environment` states, for example
-    /// [`lash_core::runtime::env_policy::policy::from_run`].
+    /// [`crate::policy::from_run`].
     pub fn new(
         lifetime: impl Fn(
             &lash_execution_contracts::process::StartCx,
@@ -110,18 +114,25 @@ fn controls_spec(
     environment: Arc<dyn lash_core::ProcessEnvPolicy>,
     include_cancel_process: bool,
 ) -> PluginSpec {
-    let provider = StaticToolProvider::new(
+    let provider = Arc::new(StaticToolProvider::new(
         processes_tool_definitions(include_cancel_process),
         SessionProcessAdminTools {
             include_cancel_process,
             lifetime,
             environment,
         },
-    );
-    PluginSpec::new().with_tool_provider(
+    )) as Arc<dyn ToolProvider>;
+    let packages = lash_tool_support::ToolPackageProvider::new(
+        CONTROLS_OWNER,
         CONTROLS_PROVIDER_KEY,
-        Arc::new(provider) as Arc<dyn ToolProvider>,
-    )
+        [lash_vocabulary::names::Segment::new(CONTROLS_OWNER)
+            .unwrap_or_else(|_| unreachable!("static process root"))]
+        .into(),
+        Arc::clone(&provider),
+    );
+    PluginSpec::new()
+        .with_tool_provider(CONTROLS_PROVIDER_KEY, provider)
+        .with_package_provider(CONTROLS_PROVIDER_KEY, Arc::new(packages))
 }
 
 const CONTROLS_OWNER: &str = "processes";
@@ -144,7 +155,10 @@ pub const SESSION_PROCESS_CONTROLS_PROVIDER: lash_core::plugin::ToolProviderHand
 
 /// The config key of the process-controls component: its config is `()`.
 pub const PROCESS_CONTROLS_CONFIG: lash_core::ProcessConfigKey<()> =
-    lash_core::ProcessConfigKey::new(CONTROLS_OWNER, lash_core::FormatVersion::ONE);
+    lash_core::ProcessConfigKey::new(
+        CONTROLS_OWNER,
+        lash_vocabulary::providers::FormatVersion::ONE,
+    );
 
 /// The process controls as a process component (FIG-6034 §3.2): a process
 /// whose environment names `processes` gets `start_process` and its siblings,
@@ -428,7 +442,7 @@ fn process_await_tool_definition() -> ToolDefinition {
     // runtime pre-derives the completion key its recorded attempt reads.
     // An await has no deadline of its own: it parks until the awaited
     // process ends or the awaiting scope does.
-    .with_declaration(lash_core::ToolDeclaration::deferring(), Some(lash_core::ParkBound::UntilScopeEnd))
+    .with_declaration(lash_vocabulary::tool_declaration::ToolDeclaration::deferring(), Some(lash_vocabulary::tool_contract::ParkBound::UntilScopeEnd))
     .expect("a deferring tool declares its park bound")
 }
 
@@ -470,8 +484,8 @@ fn process_cancel_tool_definition() -> ToolDefinition {
     ).expect("valid declared tool schemas")
     // One store read or write: a short body.
     .with_execution(std::time::Duration::from_secs(30))
-    .with_declaration(lash_core::ToolDeclaration::default()
-            .with_intents([lash_core::ToolIntentKind::CancelProcess]), None)
+    .with_declaration(lash_vocabulary::tool_declaration::ToolDeclaration::default()
+            .with_intents([lash_vocabulary::ToolIntentKind::CancelProcess]), None)
             .expect("a valid tool declaration")
 }
 
@@ -518,10 +532,14 @@ pub async fn execute_process_list_tool_call(
         if args.get("definition_id").is_some() {
             return ToolOutcome::err_fmt("list accepts only one of definition or definition_id");
         }
+        let request = match inline_callable_request(context, &value) {
+            Ok(request) => request,
+            Err(error) => return ToolOutcome::err_fmt(error),
+        };
         let inline = match context
             .resolve_inline_start(
                 lash_protocol_types::LASH_VM_ENGINE_KIND,
-                value,
+                request,
                 serde_json::Map::new(),
             )
             .await
@@ -607,7 +625,7 @@ mod tests {
         // real `ProcessHandleView` serialization is what catches the drift the
         // previous hand-written schema had already accumulated.
         let view = lash_execution_contracts::process::ProcessHandleView::new(
-            lash_core::ProcessId::fixture("process-1"),
+            lash_vocabulary::identity::ProcessId::fixture("process-1"),
             {
                 let mut identity = lash_execution_contracts::process::ProcessIdentity::labelled(
                     "lashvm",
@@ -736,7 +754,7 @@ mod certification {
     async fn process_controls_pass_certification() {
         let factory = SessionProcessAdminPluginFactory::new(
             lash_execution_contracts::process::lifetime::session_or_starter,
-            lash_core::runtime::env_policy::policy::from_run(|_| Ok(Vec::new())),
+            crate::policy::from_run(|_| Ok(Vec::new())),
         );
         let scenario: Arc<dyn lash::testing::PluginScenario> = Arc::new(List);
         let report = lash::testing::certify_plugin_with(
@@ -752,4 +770,364 @@ mod certification {
             == lash::testing::PluginLaw::ReplayInvokesNoRecordedCallback
             && report.result == lash::testing::PluginLawResult::Passed));
     }
+}
+
+/// The process-controls plugin's environment choices. These are host policy;
+/// the engine independently validates every linked start and its known debt.
+pub mod policy {
+    use lash_core::{
+        ProcessEnv, ProcessEnvChoice, ProcessEnvCx, ProcessEnvPolicy, ProcessEnvPolicyError,
+        ProcessEnvRefusal, ProcessStartChoice,
+    };
+    use lash_core_store::process_env::ProcessComponentEntry;
+    use lash_core_store::resolutions::{ResolutionEntry, ResolutionSeed};
+    use lash_core_store::tool_surface::{ExecutionEnvironment, OperationRoute, UseBinding};
+    use lash_vocabulary::{claims::*, package::*, providers::*};
+    use std::collections::BTreeMap;
+    use std::sync::Arc;
+
+    fn refused(reason: impl Into<String>) -> ProcessEnvPolicyError {
+        ProcessEnvPolicyError::Refused(ProcessEnvRefusal::Policy {
+            reason: reason.into(),
+        })
+    }
+    fn twin(
+        composition: &lash_core::plugin::ProcessComposition,
+        provider: &ToolProviderHandle,
+    ) -> Result<ToolProviderHandle, ProcessEnvPolicyError> {
+        composition
+            .registry
+            .keys()
+            .find(|candidate| {
+                candidate.registry() == RegistryKind::Process
+                    && candidate.owner() == provider.owner()
+                    && candidate.key() == provider.key()
+            })
+            .cloned()
+            .ok_or_else(|| {
+                refused(format!(
+                    "provider {provider} has no registered process twin"
+                ))
+            })
+    }
+    fn route(
+        composition: &lash_core::plugin::ProcessComposition,
+        source: &OperationRoute,
+    ) -> Result<OperationRoute, ProcessEnvPolicyError> {
+        let mut route = source.clone();
+        route.provider = twin(composition, &route.provider)?;
+        if let Some(payload) = &mut route.payload {
+            payload.codec = twin(composition, &payload.codec)?;
+        }
+        Ok(route)
+    }
+    fn require(route: &OperationRoute, requirements: &mut ClaimRequirements) {
+        requirements.providers.insert(ProviderName {
+            owner: route.provider.owner().into(),
+            key: route.provider.key().into(),
+        });
+        let callback = if route.policy == lash_core::ExecutionPolicy::Read {
+            route.provider.reads_identity()
+        } else {
+            route.provider.callback_identity()
+        };
+        requirements.callbacks.insert(CallbackRequirement {
+            registry: RegistryKind::Process,
+            callback,
+        });
+        if let Some(payload) = &route.payload {
+            requirements.codecs.insert((
+                ProviderName {
+                    owner: payload.codec.owner().into(),
+                    key: payload.codec.key().into(),
+                },
+                payload.format,
+            ));
+            requirements.callbacks.insert(CallbackRequirement {
+                registry: RegistryKind::Process,
+                callback: payload.codec.callback_identity(),
+            });
+        }
+    }
+    async fn capture(
+        cx: &ProcessEnvCx<'_>,
+        components: Vec<ProcessComponentEntry>,
+    ) -> Result<ProcessStartChoice, ProcessEnvPolicyError> {
+        let source = cx
+            .execution
+            .or_else(|| cx.enclosing.map(|parent| parent.env.execution()))
+            .ok_or_else(|| refused("this start has no recorded execution environment"))?;
+        let mut builder = match cx.enclosing {
+            Some(parent) => {
+                let mut builder = ProcessEnv::builder(parent.env.max_tool_calls())
+                    .attachments(Arc::clone(parent.env.attachments()));
+                if let Some(model) = parent.env.model() {
+                    builder = builder.model(model.clone());
+                }
+                for (slot, value) in parent.env.capabilities() {
+                    builder = builder.capability(slot.clone(), value.clone());
+                }
+                builder
+            }
+            None => {
+                let run = cx
+                    .run
+                    .ok_or_else(|| refused("this start has no recorded run"))?;
+                let config = run.config();
+                let mut builder = ProcessEnv::builder(config.max_tool_calls)
+                    .attachments(Arc::clone(&config.attachment_acceptance));
+                if let Some(model) = &config.model {
+                    builder = builder.model(lash_core::ProcessModel::new(
+                        model.clone(),
+                        config.generation.clone(),
+                        config.charge_safety.clone(),
+                    ));
+                }
+                for (slot, value) in run.capabilities() {
+                    builder = builder.capability(slot.clone(), value.clone());
+                }
+                builder
+            }
+        };
+        for component in &components {
+            builder = builder.entry(component.clone());
+        }
+        let mut execution = ExecutionEnvironment {
+            publications: source.publications.clone(),
+            authored: source.authored.clone(),
+            roots: [cx.target.linked.link].into(),
+            uses: BTreeMap::new(),
+            registry: RegistryKind::Process,
+            requirements: ClaimRequirements {
+                machine: cx.target.linked.machine.clone(),
+                ..Default::default()
+            },
+        };
+        let skeleton = builder
+            .execution(execution.clone())
+            .build()
+            .map_err(ProcessEnvPolicyError::Refused)?;
+        let composition = cx
+            .components()
+            .compose(&skeleton, None)
+            .map_err(ProcessEnvPolicyError::Refused)?;
+        let mut initial_resolutions = Vec::new();
+        for (use_, need) in &cx.target.linked.operations {
+            let binding = source.uses.get(use_).ok_or_else(|| {
+                refused(format!("operation use {use_:?} has no recorded binding"))
+            })?;
+            let binding = match binding {
+                UseBinding::Fixed(fixed) => {
+                    let mut fixed = fixed.clone();
+                    fixed.route = route(&composition, &fixed.route)?;
+                    require(&fixed.route, &mut execution.requirements);
+                    UseBinding::Fixed(fixed)
+                }
+                UseBinding::Deferred(grant) => {
+                    let mut grant = grant.clone();
+                    let resolutions = cx
+                        .enclosing
+                        .map_or(cx.resolutions, |parent| &parent.resolutions);
+                    if let Some(entry) = resolutions.get(use_) {
+                        let entry = match entry {
+                            ResolutionEntry::Resolved {
+                                definition,
+                                contract,
+                                route: target,
+                                mode,
+                                requirements: _,
+                            } => {
+                                let target = route(&composition, target)?;
+                                let name = match need { lash_execution_contracts::process::linking::OperationNeed::Deferred { name, .. } => name, _ => return Err(refused("deferred binding does not match selected Link")) };
+                                let requirements = composition
+                                    .composition
+                                    .validate_resolved_route(
+                                        &grant,
+                                        name,
+                                        definition,
+                                        &target,
+                                        RegistryKind::Process,
+                                    )
+                                    .map_err(|error| {
+                                        ProcessEnvPolicyError::Package(Box::new(error))
+                                    })?;
+                                ResolutionEntry::Resolved {
+                                    definition: definition.clone(),
+                                    contract: contract.clone(),
+                                    route: Box::new(target),
+                                    mode: *mode,
+                                    requirements,
+                                }
+                            }
+                            entry => entry.clone(),
+                        };
+                        if let ResolutionEntry::Resolved { requirements, .. } = &entry {
+                            execution
+                                .requirements
+                                .providers
+                                .extend(requirements.providers.clone());
+                            execution
+                                .requirements
+                                .codecs
+                                .extend(requirements.codecs.clone());
+                            execution
+                                .requirements
+                                .callbacks
+                                .extend(requirements.callbacks.clone());
+                            execution
+                                .requirements
+                                .components
+                                .extend(requirements.components.clone());
+                        }
+                        initial_resolutions.push(ResolutionSeed { use_: *use_, entry });
+                    } else {
+                        let entry = components
+                        .iter()
+                        .find(|entry| entry.id().as_str() == grant.provider.owner)
+                        .ok_or_else(|| {
+                            refused(
+                                "unresolved grant has no explicitly configured process component",
+                            )
+                        })?;
+                        if entry.config().format_version() != grant.config.format
+                            || entry.config().value() != &grant.config.value
+                        {
+                            return Err(refused(
+                                "process resolver config differs from pinned grant config",
+                            ));
+                        }
+                        grant.config.component = Some(entry.id().clone());
+                        let known = composition
+                            .composition
+                            .validate_deferred_grant(&grant, RegistryKind::Process)
+                            .map_err(|error| ProcessEnvPolicyError::Package(Box::new(error)))?;
+                        execution.requirements.providers.extend(known.providers);
+                        execution.requirements.codecs.extend(known.codecs);
+                        execution.requirements.callbacks.extend(known.callbacks);
+                        execution.requirements.components.extend(known.components);
+                    }
+                    UseBinding::Deferred(grant)
+                }
+            };
+            execution.uses.insert(*use_, binding);
+        }
+        let mut builder = ProcessEnv::builder(skeleton.max_tool_calls())
+            .attachments(Arc::clone(skeleton.attachments()));
+        if let Some(model) = skeleton.model() {
+            builder = builder.model(model.clone());
+        }
+        for component in skeleton.components() {
+            builder = builder.entry(component.clone());
+        }
+        for (slot, value) in skeleton.capabilities() {
+            builder = builder.capability(slot.clone(), value.clone());
+        }
+        let env = builder
+            .execution(execution)
+            .build()
+            .map_err(ProcessEnvPolicyError::Refused)?;
+        Ok(ProcessStartChoice {
+            env: ProcessEnvChoice::New(env),
+            engine_settings: match cx.enclosing {
+                Some(parent) if parent.engine_kind == cx.target.engine_kind => {
+                    parent.settings.clone()
+                }
+                _ => cx.engine_defaults()?,
+            },
+            initial_resolutions,
+        })
+    }
+
+    type Mapping = dyn Fn(&ProcessEnvCx<'_>) -> Result<Vec<ProcessComponentEntry>, ProcessEnvRefusal>
+        + Send
+        + Sync;
+    struct FromRun(Box<Mapping>);
+    #[async_trait::async_trait]
+    impl ProcessEnvPolicy for FromRun {
+        async fn choose(
+            &self,
+            cx: &ProcessEnvCx<'_>,
+        ) -> Result<ProcessStartChoice, ProcessEnvPolicyError> {
+            capture(cx, (self.0)(cx).map_err(ProcessEnvPolicyError::Refused)?).await
+        }
+    }
+    pub fn from_run(
+        mapping: impl Fn(&ProcessEnvCx<'_>) -> Result<Vec<ProcessComponentEntry>, ProcessEnvRefusal>
+        + Send
+        + Sync
+        + 'static,
+    ) -> Arc<dyn ProcessEnvPolicy> {
+        Arc::new(FromRun(Box::new(mapping)))
+    }
+    struct RestrictOr(Arc<dyn ProcessEnvPolicy>);
+    #[async_trait::async_trait]
+    impl ProcessEnvPolicy for RestrictOr {
+        async fn choose(
+            &self,
+            cx: &ProcessEnvCx<'_>,
+        ) -> Result<ProcessStartChoice, ProcessEnvPolicyError> {
+            match cx.enclosing {
+                Some(parent) => capture(cx, parent.env.components().to_vec()).await,
+                None => self.0.choose(cx).await,
+            }
+        }
+    }
+    pub fn restrict_or(inner: Arc<dyn ProcessEnvPolicy>) -> Arc<dyn ProcessEnvPolicy> {
+        Arc::new(RestrictOr(inner))
+    }
+    struct Published(lash_execution_contracts::process::EngineLaunch);
+    #[async_trait::async_trait]
+    impl ProcessEnvPolicy for Published {
+        async fn choose(
+            &self,
+            _: &ProcessEnvCx<'_>,
+        ) -> Result<ProcessStartChoice, ProcessEnvPolicyError> {
+            Ok(ProcessStartChoice {
+                env: ProcessEnvChoice::Published(self.0.env.clone()),
+                engine_settings: self.0.settings.clone(),
+                initial_resolutions: self.0.initial_resolutions.clone(),
+            })
+        }
+    }
+    pub fn published(
+        launch: lash_execution_contracts::process::EngineLaunch,
+    ) -> Arc<dyn ProcessEnvPolicy> {
+        Arc::new(Published(launch))
+    }
+    struct Refuse(String);
+    #[async_trait::async_trait]
+    impl ProcessEnvPolicy for Refuse {
+        async fn choose(
+            &self,
+            _: &ProcessEnvCx<'_>,
+        ) -> Result<ProcessStartChoice, ProcessEnvPolicyError> {
+            Err(refused(self.0.clone()))
+        }
+    }
+    pub fn refuse(reason: impl Into<String>) -> Arc<dyn ProcessEnvPolicy> {
+        Arc::new(Refuse(reason.into()))
+    }
+}
+
+/// The tool accepts a function value; execution provenance comes only from its admitting context.
+fn inline_callable_request(
+    context: &lash_core::AttemptContext<'_>,
+    value: &serde_json::Value,
+) -> Result<lash_execution_contracts::process::InlineRequest, lash_core::ResolveTargetError> {
+    let refused = |message: &str| lash_core::ResolveTargetError::Refused(message.into());
+    let wrapper = value
+        .as_object()
+        .ok_or_else(|| refused("definition must be a function value"))?;
+    if wrapper.len() != 1 {
+        return Err(refused("definition must be a function value"));
+    }
+    let function = wrapper
+        .get("$lash_function")
+        .ok_or_else(|| refused("definition must be a function value"))?;
+    let link = function
+        .get("callable")
+        .and_then(|callable| callable.get("link"))
+        .ok_or_else(|| refused("function value has no defining Link"))?;
+    let origin = context.callable_origin()?;
+    context.engine_inline_request(serde_json::json!({"kind": "callable", "value": {"link": link, "function": function, "origin": origin}}))
 }

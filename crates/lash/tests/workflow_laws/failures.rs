@@ -79,7 +79,7 @@ impl Module {
         entry: &str,
         effects: &[&str],
         args: serde_json::Value,
-    ) -> (WorkflowPublication, lash_core::ProcessId) {
+    ) -> (WorkflowPublication, lash_vocabulary::identity::ProcessId) {
         let env_ref = core
             .host_artifacts()
             .publish_process_env(&self.pin, &linking(&self.environment, effects))
@@ -102,7 +102,7 @@ impl Module {
             .processes()
             .kernel_engine_defaults()
             .expect("the kernel states its settings")
-            .observing(lash::process::ObservationMode::Counts)
+            .observing(lash_vocabulary::observation::RunObservation::Counts)
             .into_engine_settings();
         let serde_json::Value::Object(args) = args else {
             panic!("arguments are a record");
@@ -140,7 +140,10 @@ impl Module {
 }
 
 /// The failure a process ended with.
-async fn failed(core: &lash::LashCore, process: &lash_core::ProcessId) -> ToolFailure {
+async fn failed(
+    core: &lash::LashCore,
+    process: &lash_vocabulary::identity::ProcessId,
+) -> ToolFailure {
     let output = tokio::time::timeout(
         std::time::Duration::from_secs(120),
         core.processes().await_output(process),

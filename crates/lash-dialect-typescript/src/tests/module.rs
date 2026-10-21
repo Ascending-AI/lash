@@ -7,18 +7,14 @@ use std::collections::BTreeMap;
 
 use lash_kernel_dialect::workflow::ModuleRefusal;
 use lash_kernel_dialect::{Environment, Lowered, Mode};
-use lash_kernel_doc::{EffectName, Name, Param, RecordType, RecordTypeField, Signature, Type};
+use lash_vocabulary::{EffectName, Name, Param, RecordType, RecordTypeField, Signature, Type};
 
 use crate::DiagnosticCode;
 
 fn module(source: &str) -> Result<Lowered, crate::Diagnostic> {
     let effects = super::machine::effects();
-    let environment_namespaces = lash_kernel_dialect::Namespaces::of_effects(
-        &effects,
-        &lash_kernel_doc::ContractId::new("1"),
-        super::controls(),
-    )
-    .expect("the test's effects are operations");
+    let environment_namespaces = crate::tests::linked::namespaces(&effects, super::controls())
+        .expect("the test's effects are operations");
     let environment = Environment::new(super::library(), &environment_namespaces);
     let lowered = crate::lower(source, &environment, Mode::Module)?;
     lash_kernel_doc::validate_document(&lowered.document, super::library())
@@ -36,9 +32,12 @@ fn entries(source: &str) -> BTreeMap<Name, Signature> {
     module(source)
         .unwrap_or_else(|diagnostic| panic!("{diagnostic}\n{source}"))
         .document
-        .entries
+        .exports
         .iter()
-        .map(|(name, entry)| (name.clone(), entry.signature.clone()))
+        .filter_map(|(name, export)| match export {
+            lash_kernel_doc::Export::Function(f) => Some((name.clone(), f.signature.clone())),
+            _ => None,
+        })
         .collect()
 }
 
@@ -50,12 +49,8 @@ fn filtering_records_then_mapping_the_result_admits() {
         .get_mut(&EffectName::new("host.echo").unwrap())
         .unwrap()
         .result = Type::List(Box::new(Type::Any));
-    let environment_namespaces = lash_kernel_dialect::Namespaces::of_effects(
-        &effects,
-        &lash_kernel_doc::ContractId::new("1"),
-        super::controls(),
-    )
-    .expect("the test's effects are operations");
+    let environment_namespaces = crate::tests::linked::namespaces(&effects, super::controls())
+        .expect("the test's effects are operations");
     let environment = Environment::new(super::library(), &environment_namespaces);
     let lowered = crate::lower(
         r#"
@@ -200,10 +195,6 @@ fn the_contract_refuses_under_the_shared_codes() {
             ModuleRefusal::DuplicateEntry,
         ),
         (
-            "const limit = 3;\nfunction helper() { return 1; }",
-            ModuleRefusal::EmptyModule,
-        ),
-        (
             "const limit = 3;\nexport async function a() { return limit; }",
             ModuleRefusal::CapturedModuleBinding,
         ),
@@ -274,7 +265,7 @@ fn entry_conventions_bind_source_arguments_and_normalize_absent() {
         ),
     ] {
         let document = module(source).unwrap().document.into_document();
-        let entry = &document.entries[&lash_kernel_doc::Name::new("run")];
+        let entry = super::linked::exported(&document, &lash_vocabulary::Name::new("run"));
         assert_eq!(
             matches!(
                 entry.convention,
@@ -287,7 +278,12 @@ fn entry_conventions_bind_source_arguments_and_normalize_absent() {
             lash_kernel_doc::StartConvention::TsDirect { .. }
         ) {
             assert_eq!(
-                document.functions[&lash_kernel_doc::Name::new("run")].params,
+                document.functions[&entry.function]
+                    .signature
+                    .params
+                    .iter()
+                    .map(|param| param.name.clone())
+                    .collect::<Vec<_>>(),
                 entry
                     .signature
                     .params

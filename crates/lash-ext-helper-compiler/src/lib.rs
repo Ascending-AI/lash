@@ -116,11 +116,11 @@ pub fn generate_library(library: &Library, dialect: Dialect) -> Result<Generated
     let mut taken = BTreeSet::new();
     // Include closed kernel bodies used by helpers: their natives may decline.
     fn order(
-        function: lash_kernel_doc::FunctionId,
+        function: lash_vocabulary::names::FunctionId,
         library: &Library,
         analysis: &Analysis,
-        seen: &mut BTreeSet<lash_kernel_doc::FunctionId>,
-        functions: &mut Vec<lash_kernel_doc::FunctionId>,
+        seen: &mut BTreeSet<lash_vocabulary::names::FunctionId>,
+        functions: &mut Vec<lash_vocabulary::names::FunctionId>,
     ) {
         if !seen.insert(function) {
             return;
@@ -236,7 +236,10 @@ pub fn generate_library(library: &Library, dialect: Dialect) -> Result<Generated
             facts.mutates,
             facts.closures(),
             facts.metered(),
-            analysis::formula(&definition.charge),
+            definition
+                .charge()
+                .map(analysis::formula)
+                .unwrap_or_else(|| "statements".to_owned()),
             outcomes.get(function).map_or("-", String::as_str),
         );
     }
@@ -297,7 +300,7 @@ pub fn body_perform_plans(source: &str) -> Result<String, String> {
     }
     Ok(generate_library(
         &Library {
-            packages: vec![],
+            names,
             registry,
             helpers,
         },
@@ -305,10 +308,6 @@ pub fn body_perform_plans(source: &str) -> Result<String, String> {
     )?
     .rust)
 }
-
-/// Where the plan of the `dataframe` fixture's `collect_rows` is checked
-/// in, from the repository root (FIG-6916).
-pub const DATAFRAME_PLANS: &str = "crates/lash-kernel-vm/src/laws/continuation/dataframe_plans.rs";
 
 /// Registers lash's kernel library, natives included: what the `dataframe`
 /// fixture's kernel package holds here and in the kernel laws that run its
@@ -326,95 +325,10 @@ pub fn register_kernel(registry: &mut lash_kernel_doc::FunctionRegistry) -> Resu
     Ok(())
 }
 
-/// The plan of the `dataframe` fixture's `collect_rows`, as the package
-/// builder makes it over lash's kernel library (FIG-6917): a body that
-/// performs `dataframe.run`, which the kernel laws run beside its plan.
-///
-/// # Errors
-///
-/// A refusal of the fixture's build, registration or compilation, as text.
-pub fn dataframe_plans() -> Result<String, String> {
-    let (kernel, dataframe) = lash_kernel_package::testing::kernel_and_dataframe(&register_kernel)
-        .map_err(|error| error.to_string())?;
-    let mut registry = lash_kernel_doc::FunctionRegistry::declarations();
-    for package in [&kernel, &dataframe] {
-        package.code().register_into(&mut registry, &|_| None)?;
-    }
-    let collect_rows = dataframe
-        .function("dataframe.data_quanta.collect_rows")
-        .ok_or("the fixture defines no `collect_rows`")?;
-    let library = Library {
-        packages: vec![kernel, dataframe],
-        registry,
-        helpers: vec![collect_rows],
-    };
-    Ok(generate_library(&library, Dialect::Python)?.rust)
-}
-
 #[cfg(test)]
 mod tests {
-    use lash_kernel_doc::{FunctionRegistry, parse_definition};
 
-    use super::{REGENERATE, body_perform_plans, generate_library};
-    use crate::library::{Dialect, Library};
-
-    /// A performing body reaches the host and compiles to a resumable
-    /// segment that yields at its `perform`, one that also applies guest
-    /// code at that call besides (FIG-6916).
-    #[test]
-    fn a_performing_body_is_a_segment_that_yields_at_its_perform() {
-        let mut registry = FunctionRegistry::new();
-        let mut helpers = Vec::new();
-        for definition in [
-            "function pkg.fetch(x: Any) -> Any\nkernel 1\ncharge 1\neffect echo(x?: Any) -> Any contract \"1\"\n\
-             body { let v = perform echo(x) as Any return v }\n",
-            "function pkg.visit(f: Fn(x: Any) -> Any, x: Any) -> Any\nkernel 1\ncharge 1\neffect echo(x?: Any) -> Any contract \"1\"\n\
-             body { let y = apply f(x) let v = perform echo(y) as Any return v }\n",
-        ] {
-            let definition = parse_definition(definition).unwrap();
-            helpers.push(registry.register(definition, None).unwrap());
-        }
-        let generated = generate_library(
-            &Library {
-                packages: vec![],
-                registry,
-                helpers,
-            },
-            Dialect::Python,
-        )
-        .unwrap();
-        assert_eq!(generated.planned, 2, "{}", generated.manifest);
-        let facts: Vec<(&str, &str, &str)> = generated
-            .manifest
-            .lines()
-            .skip(2)
-            .map(|line| {
-                let columns: Vec<&str> = line.split('\t').collect();
-                (columns[2], columns[3], columns[8])
-            })
-            .collect();
-        assert_eq!(
-            facts,
-            [
-                ("host", "perform echo", "segment of 1 sites"),
-                ("callback", "apply f; perform echo", "segment of 2 sites"),
-            ],
-            "{}",
-            generated.manifest
-        );
-        assert_eq!(generated.rust.matches("p::SiteCall::Perform").count(), 2);
-    }
-
-    /// The kernel laws run the plan of the `dataframe` fixture's
-    /// `collect_rows` this compiler gives now.
-    #[test]
-    fn dataframe_plans_are_what_the_compiler_gives_for_the_built_fixture() {
-        assert_eq!(
-            super::dataframe_plans().expect("the fixture's `collect_rows` compiles"),
-            include_str!("../../lash-kernel-vm/src/laws/continuation/dataframe_plans.rs"),
-            "run {REGENERATE}"
-        );
-    }
+    use super::{REGENERATE, body_perform_plans};
 
     /// The body-perform laws run the plans this compiler gives now.
     #[test]
@@ -429,3 +343,6 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+mod dialect_laws;

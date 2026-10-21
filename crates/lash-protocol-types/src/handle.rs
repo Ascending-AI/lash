@@ -27,7 +27,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::ProcessId;
+use lash_vocabulary::identity::ProcessId;
 
 /// The field naming a record as a handle.
 pub const HANDLE_FIELD: &str = "__handle__";

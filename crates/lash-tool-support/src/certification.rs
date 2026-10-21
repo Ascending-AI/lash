@@ -41,7 +41,7 @@ impl PluginScenario for Scenario {
 }
 #[tokio::test]
 async fn selected_tools_pass_certification() {
-    let definition = lash_core::ToolDefinition::raw(
+    let definition = lash_vocabulary::tool_contract::ToolDefinition::raw(
         "echo",
         "tools.echo",
         "echo",

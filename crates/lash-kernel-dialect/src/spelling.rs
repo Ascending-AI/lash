@@ -1,6 +1,6 @@
 //! Injective, context-free spellings of canonical surface segments.
 
-use crate::Segment;
+use lash_vocabulary::names::Segment;
 
 /// The syntactic namespace of a surface name.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

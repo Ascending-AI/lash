@@ -88,7 +88,7 @@ impl HistoryChecker for HostAdmission {
         let mut violations = Vec::new();
         for ((session, run), (at, outcome)) in &named {
             let id = lash_core::PendingTurnInputDraft::keyed_input_id(
-                &lash_core::SessionId::fixture(*session),
+                &lash_vocabulary::identity::SessionId::fixture(*session),
                 run,
             );
             let rows: Vec<_> = history
@@ -143,7 +143,7 @@ impl HistoryChecker for HostAdmission {
                 (
                     *session,
                     lash_core::PendingTurnInputDraft::keyed_input_id(
-                        &lash_core::SessionId::fixture(*session),
+                        &lash_vocabulary::identity::SessionId::fixture(*session),
                         run,
                     )
                     .to_string(),

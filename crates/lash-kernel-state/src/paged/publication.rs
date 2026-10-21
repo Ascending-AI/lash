@@ -75,9 +75,22 @@ impl PagedHeap {
     /// charged.
     pub fn restore_execution_roots(&mut self, root: &CheckpointRoot) {
         self.session = Tree::of_keyed(&root.session);
+        self.saved = Tree::of_keyed(&root.functions);
         self.session_slots = Default::default();
         self.tasks = Tree::of_keyed(&root.tasks);
         self.joins = Tree::of_keyed(&root.joins);
+    }
+    /// Retains the environments named by the session's saved function records.
+    pub fn set_saved_functions(&mut self, functions: &KeyedRoot) {
+        self.saved = Tree::of_keyed(functions);
+    }
+    pub(super) fn visit_saved_environments(
+        &self,
+        visit: &mut dyn FnMut(&PageValue) -> Result<(), HeapFault>,
+    ) -> Result<(), HeapFault> {
+        super::census_graph::visit_tree(&self.saved, &self.access, &mut |record| {
+            visit(&PageValue::Closure(record.environment))
+        })
     }
     /// The installed session bindings.
     pub fn session_root(&self) -> &Tree<BindingRecord> {

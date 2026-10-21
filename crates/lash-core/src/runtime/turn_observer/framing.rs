@@ -40,9 +40,12 @@ use std::time::Instant;
 
 use super::RuntimeStreamEvent;
 use super::{Lane, Observation, lane};
+use crate::TurnActivity;
+use crate::TurnActivityId;
+use crate::TurnEvent;
 use crate::runtime::DeltaCoalescing;
 use crate::session_model::SessionStreamEvent;
-use crate::{TurnActivity, TurnActivityId, TurnEvent, TurnId};
+use lash_vocabulary::identity::TurnId;
 
 /// How a turn frames its stream deltas: the clock frames are timed on and
 /// the host's terms

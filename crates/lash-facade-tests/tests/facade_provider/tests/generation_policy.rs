@@ -26,7 +26,7 @@ async fn session_serving(
     .build(lash_facade_tests::runtime_lease_owner())?;
     let session = created_session_with(
         &core,
-        lash::SessionId::parse(id).expect("nonblank host identity"),
+        lash_vocabulary::identity::SessionId::parse(id).expect("nonblank host identity"),
         spec,
     )
     .await
@@ -130,7 +130,10 @@ async fn turn_driver_rejects_unsupported_effort_before_provider_call() -> Result
     // selection is judged when the session is created, so no turn ever
     // carries it to the provider.
     let Err(refused) = core
-        .session(lash::SessionId::parse("unsupported-effort").expect("nonblank host identity"))
+        .session(
+            lash_vocabulary::identity::SessionId::parse("unsupported-effort")
+                .expect("nonblank host identity"),
+        )
         .create(lash::SessionCreation::root(spec))
         .await
     else {

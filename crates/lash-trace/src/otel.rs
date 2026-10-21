@@ -731,7 +731,7 @@ struct Projection<'a> {
     span: DomainSpan,
     model: Option<&'a str>,
     tool: Option<&'a str>,
-    tool_identity: Option<&'a lash_protocol_types::ToolId>,
+    tool_identity: Option<&'a lash_vocabulary::tool_contract::ToolId>,
     process: Option<&'a str>,
     /// A workflow node's site, which names its span.
     site: Option<String>,

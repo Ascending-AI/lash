@@ -1,28 +1,12 @@
-//! A tool's value admitted against the schema its contract declares. The
-//! declared schema is the contract: the value must be an instance of it
-//! ([`JsonSchema::validate`]), so maps, open objects and numeric bounds are
-//! checked. The schema's kernel result type
-//! ([`JsonSchema::result_type`]) is the program's typed
-//! view of the value, and the value must also decode by it (`K-EFF-007`):
-//! a value this admits is one the cell's `perform` of the tool decodes.
-
-use lash_kernel_doc::{Datum, Decoder, KernelDataLimits, NumberPolicy, NumberToken, Type};
+//! Schema admission plus neutral encoded-data fitting. Runtime Datum and
+//! heap decoding belong to the runtime; this checks the JSON result it receives.
+use lash_vocabulary::{JsonSchema, KernelDataLimits, Type, ValueMismatch};
 use serde_json::Value;
 
-use crate::{JsonSchema, ValueMismatch};
-
-/// Whether `value` is admitted by `schema`: an instance of it, and
-/// decodable by its kernel result type.
-///
-/// # Errors
-///
-/// [`ValueMismatch`]: the JSON pointer of the part of `value` that does not
-/// fit, and why.
 pub(crate) fn admit_value(
     schema: &JsonSchema,
     value: impl FnOnce() -> Value,
 ) -> Result<(), ValueMismatch> {
-    // The unconstrained schema admits every value: skip building it.
     if schema
         .as_value()
         .as_object()
@@ -33,65 +17,186 @@ pub(crate) fn admit_value(
     let value = value();
     schema.validate(&value)?;
     let ty = schema.result_type();
-    // Every value a cell can receive decodes as `Any`, and every JSON value
-    // as `Json`.
     if matches!(ty, Type::Any | Type::Json) {
         return Ok(());
     }
     let depth = KernelDataLimits::standard().value_depth();
-    let datum = datum_of(&value, depth).ok_or_else(|| ValueMismatch {
-        instance_path: String::new(),
-        message: format!("it exceeds the configured {depth}-level value depth"),
-    })?;
-    let decoder = Decoder {
-        max_depth: depth,
-        // The policy that decodes the most numbers: a cell's own policy
-        // admits no number this one refuses.
-        policy: NumberPolicy::BySpelling,
-        declared: &|_| false,
-    };
-    decoder
-        .decode(&datum, ty)
-        .map(drop)
-        .map_err(|mismatch| ValueMismatch {
-            instance_path: mismatch
-                .path
-                .iter()
-                .map(|field| format!("/{}", field.replace('~', "~0").replace('/', "~1")))
-                .collect(),
-            message: mismatch.problem,
-        })
+    if !within_depth(&value, depth) {
+        return Err(mismatch(format!(
+            "it exceeds the configured {depth}-level value depth"
+        )));
+    }
+    fit(&value, ty, depth)
 }
 
-/// The datum a cell reads `value` as, as its JSON reader builds it; `None`
-/// past `budget` levels.
-fn datum_of(value: &Value, budget: usize) -> Option<Datum> {
-    let budget = budget.checked_sub(1)?;
-    Some(match value {
-        Value::Null => Datum::Null,
-        Value::Bool(flag) => Datum::Bool(*flag),
-        Value::Number(number) => Datum::Number(NumberToken::new(number.to_string()).ok()?),
-        Value::String(text) => Datum::Text(text.clone()),
-        Value::Array(items) => Datum::List(
-            items
-                .iter()
-                .map(|item| datum_of(item, budget))
-                .collect::<Option<_>>()?,
-        ),
-        Value::Object(fields) => Datum::Record(
-            fields
-                .iter()
-                .map(|(name, value)| Some((name.clone(), datum_of(value, budget)?)))
-                .collect::<Option<_>>()?,
-        ),
-    })
+fn within_depth(value: &Value, budget: usize) -> bool {
+    let Some(budget) = budget.checked_sub(1) else {
+        return false;
+    };
+    match value {
+        Value::Array(items) => items.iter().all(|value| within_depth(value, budget)),
+        Value::Object(fields) => fields.values().all(|value| within_depth(value, budget)),
+        _ => true,
+    }
+}
+
+// Any/Json decoding takes its own recursive step after the type-fitting step.
+fn fit_data(value: &Value, budget: usize) -> Result<(), ValueMismatch> {
+    let budget = budget
+        .checked_sub(1)
+        .ok_or_else(|| mismatch("it exceeds the configured value depth"))?;
+    match value {
+        Value::Array(items) => items.iter().try_for_each(|value| fit_data(value, budget)),
+        Value::Object(fields) => fields
+            .values()
+            .try_for_each(|value| fit_data(value, budget)),
+        Value::Number(number) => {
+            let text = number.to_string();
+            if (!text.contains(['.', 'e', 'E']) && integral(&text))
+                || number.as_f64().is_some_and(f64::is_finite)
+            {
+                Ok(())
+            } else {
+                Err(mismatch("the number has no finite nearest float"))
+            }
+        }
+        _ => Ok(()),
+    }
+}
+
+fn mismatch(message: impl Into<String>) -> ValueMismatch {
+    ValueMismatch {
+        instance_path: String::new(),
+        message: message.into(),
+    }
+}
+
+// Match the runtime's exact decimal integer admission without creating a heap
+// value or rounding the input through binary64.
+fn canonical_decimal(text: &str) -> bool {
+    let digits = text.strip_prefix('-').unwrap_or(text);
+    !digits.is_empty()
+        && digits.bytes().all(|byte| byte.is_ascii_digit())
+        && (digits == "0" || !digits.starts_with('0'))
+        && text != "-0"
+}
+
+fn integral(text: &str) -> bool {
+    let (mantissa, exponent) = text.split_once(['e', 'E']).unwrap_or((text, "0"));
+    let Ok(exponent) = exponent.parse::<i64>() else {
+        return false;
+    };
+    let mantissa = mantissa.strip_prefix('-').unwrap_or(mantissa);
+    let (whole, fraction) = mantissa.split_once('.').unwrap_or((mantissa, ""));
+    if whole
+        .bytes()
+        .chain(fraction.bytes())
+        .all(|byte| byte == b'0')
+    {
+        return true;
+    }
+    let Some(scale) = exponent.checked_sub(fraction.len() as i64) else {
+        return false;
+    };
+    let zeroes = whole
+        .bytes()
+        .chain(fraction.bytes())
+        .rev()
+        .take_while(|byte| *byte == b'0')
+        .count() as i64;
+    let adjusted = scale + zeroes.min(scale.saturating_neg().max(0));
+    (0..=4096).contains(&adjusted)
+}
+
+fn fit(value: &Value, ty: &Type, budget: usize) -> Result<(), ValueMismatch> {
+    let budget = budget
+        .checked_sub(1)
+        .ok_or_else(|| mismatch("it exceeds the configured value depth"))?;
+    let finite = |number: &serde_json::Number| number.as_f64().is_some_and(f64::is_finite);
+    match (ty, value) {
+        (Type::Union(types), _) => types
+            .iter()
+            .find_map(|ty| fit(value, ty, budget).ok())
+            .ok_or_else(|| mismatch("value fits no member of the union")),
+        (Type::Number, Value::Number(number)) => {
+            let text = number.to_string();
+            if (!text.contains(['.', 'e', 'E']) && integral(&text)) || finite(number) {
+                Ok(())
+            } else {
+                Err(mismatch("the number has no finite nearest float"))
+            }
+        }
+        (Type::Any | Type::Json, _) => fit_data(value, budget),
+        (Type::Null, Value::Null)
+        | (Type::Bool, Value::Bool(_))
+        | (Type::Text, Value::String(_)) => Ok(()),
+        (Type::Timestamp, Value::String(text)) if canonical_decimal(text) => Ok(()),
+        (Type::Bytes, Value::String(text))
+            if text.len().is_multiple_of(2)
+                && text
+                    .bytes()
+                    .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte)) =>
+        {
+            Ok(())
+        }
+        (Type::Int, Value::Number(number)) if integral(&number.to_string()) => Ok(()),
+        (Type::Float, Value::Number(number)) if finite(number) => Ok(()),
+        (Type::Enum(members), Value::String(text)) if members.contains(text) => Ok(()),
+        (Type::Tuple(types), Value::Array(items)) if types.len() == items.len() => items
+            .iter()
+            .zip(types)
+            .try_for_each(|(value, ty)| fit(value, ty, budget)),
+        (Type::List(ty) | Type::Set(ty), Value::Array(items)) => {
+            items.iter().try_for_each(|value| fit(value, ty, budget))
+        }
+        (Type::Map(map), Value::Object(fields)) => fields.iter().try_for_each(|(key, value)| {
+            fit(&Value::String(key.clone()), &map.key, budget)?;
+            fit(value, &map.value, budget)
+        }),
+        (Type::Record(record), Value::Object(fields)) => {
+            for field in &record.fields {
+                if !field.optional && !fields.contains_key(&field.name) {
+                    return Err(mismatch(format!(
+                        "the required field `{}` is missing",
+                        field.name
+                    )));
+                }
+            }
+            for (name, value) in fields {
+                let ty = record
+                    .fields
+                    .iter()
+                    .find(|field| field.name == *name)
+                    .map(|field| &field.ty)
+                    .or(record.rest.as_deref())
+                    .ok_or_else(|| mismatch(format!("the record type has no field `{name}`")))?;
+                fit(value, ty, budget).map_err(|mut error| {
+                    error.instance_path = format!(
+                        "/{}{}",
+                        name.replace('~', "~0").replace('/', "~1"),
+                        error.instance_path
+                    );
+                    error
+                })?;
+            }
+            Ok(())
+        }
+        _ => Err(mismatch(format!(
+            "value does not fit {}",
+            lash_vocabulary::print_type(ty)
+        ))),
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use serde_json::{Value, json};
 
-    use crate::{DeclarationRefusal, JsonSchema, ToolCallOutput, ToolDeclaration, ValueMismatch};
+    use crate::ToolCallOutput;
+    use lash_vocabulary::json_schema::JsonSchema;
+    use lash_vocabulary::json_schema::ValueMismatch;
+    use lash_vocabulary::tool_declaration::DeclarationRefusal;
+    use lash_vocabulary::tool_declaration::ToolDeclaration;
 
     /// How a tool's success of `value` settles under `schema`.
     fn settle(schema: Value, value: Value) -> Result<(), ValueMismatch> {
@@ -157,5 +262,25 @@ mod tests {
             json!({"noul": 0.5, "answers": {"a": 1}, "extra": true}),
         )
         .expect("the value fits its schema");
+    }
+    /// L-DIALECT-SERVICES/K-EFF-007: ordinary operation schemas retain their
+    /// timestamp/bytes types and reject malformed encoded results.
+    #[test]
+    fn ordinary_service_markers_preserve_typed_encoded_results() {
+        for (kind, expected, valid, invalid) in [
+            (
+                "timestamp",
+                lash_vocabulary::Type::Timestamp,
+                "12345678901234567890123456789012345678901234567890",
+                "1.5",
+            ),
+            ("bytes", lash_vocabulary::Type::Bytes, "00abcdef", "ABC"),
+        ] {
+            let schema =
+                JsonSchema::admit(json!({"type":"string", "x-lash":{"kind":kind}})).unwrap();
+            assert_eq!(schema.result_type(), &expected);
+            super::admit_value(&schema, || json!(valid)).unwrap();
+            assert!(super::admit_value(&schema, || json!(invalid)).is_err());
+        }
     }
 }

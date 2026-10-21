@@ -1,6 +1,6 @@
-use crate::ProcessId;
-use crate::SessionId;
 use lash_protocol_types::sync::MutexExt;
+use lash_vocabulary::identity::ProcessId;
+use lash_vocabulary::identity::SessionId;
 use std::sync::Arc;
 
 mod held_response;
@@ -57,6 +57,7 @@ impl RecordedTurnCancel {
 pub struct CellEndHandoff {
     holds: bool,
     ended: Arc<std::sync::Mutex<Option<EndedCell>>>,
+    execution: Arc<std::sync::Mutex<Option<lash_core_store::resolutions::ExecutionId>>>,
 }
 
 /// The root an ended cell leaves for the commit that consumes its answer
@@ -79,12 +80,17 @@ impl CellEndHandoff {
         Self {
             holds: true,
             ended: Arc::default(),
+            execution: Arc::default(),
         }
     }
 
     /// What the last cell that ended left, taken: none for a cell that
     /// never parked, or one that did not end.
     #[must_use]
+    pub fn take_execution(&self) -> Option<lash_core_store::resolutions::ExecutionId> {
+        self.execution.lock_recover().take()
+    }
+
     pub fn take(&self) -> Option<EndedCell> {
         self.ended.lock_recover().take()
     }
@@ -205,15 +211,7 @@ pub struct RuntimeExecutionContext<'run> {
     /// the language runtime that reports the failed cell or process: its own
     /// error channel carries the refusal's class, code and message only.
     pub(crate) tool_call_limit_refusal: Arc<std::sync::Mutex<Option<crate::ToolCallLimitExceeded>>>,
-    /// The grants the committed deferred matches of the cell this context
-    /// runs recorded, by effect path: what a start its calls declare
-    /// captures an effect the run's surface does not offer from. Empty
-    /// outside a cell.
-    recorded_grants: RecordedGrants,
-    /// The package set the cell this context runs is linked under: what a
-    /// start its calls declare carries a function inline under, recorded on
-    /// the start (FIG-6993). `None` outside a cell.
-    linked_packages: Option<lash_kernel_doc::PackageSetDigest>,
+    linked_execution: Option<LinkedExecution>,
     /// Where the protocol or code-executor body this context runs stands in
     /// the trace ([`trace`](Self::trace)): bound by the wrapper that runs it.
     extension_trace: crate::trace::ExtensionTrace,
@@ -221,8 +219,20 @@ pub struct RuntimeExecutionContext<'run> {
 
 /// The grants a cell's committed deferred matches recorded, keyed by the
 /// effect path each matched tool's binding names.
-pub(crate) type RecordedGrants =
-    Arc<std::collections::BTreeMap<crate::EffectName, crate::ToolExecutionGrant>>;
+/// Immutable execution selection and its separately committed first-use pins.
+#[derive(Clone)]
+pub struct LinkedExecution {
+    pub execution: lash_core_store::resolutions::ExecutionId,
+    pub environment: Arc<lash_core_store::tool_surface::ExecutionEnvironment>,
+    pub resolutions: Arc<
+        std::sync::Mutex<
+            std::collections::BTreeMap<
+                lash_vocabulary::names::OperationUse,
+                lash_core_store::resolutions::ResolutionEntry,
+            >,
+        >,
+    >,
+}
 
 #[derive(Clone)]
 pub(crate) struct RuntimeProcessExecution {
@@ -524,46 +534,17 @@ impl<'run> RuntimeExecutionContext<'run> {
             incorporation_ledger: Arc::clone(&self.incorporation_ledger),
             tool_requests: Arc::clone(&self.tool_requests),
             tool_call_limit_refusal: Arc::clone(&self.tool_call_limit_refusal),
-            recorded_grants: Arc::clone(&self.recorded_grants),
-            linked_packages: self.linked_packages,
+            linked_execution: self.linked_execution.clone(),
             extension_trace: self.extension_trace.clone(),
         })
     }
 
-    /// This context running a cell whose committed deferred matches
-    /// recorded `grants`, by effect path: what a start the cell's calls
-    /// declare captures from. Only the declaring cell's own.
-    #[must_use]
-    pub fn with_recorded_grants(
-        mut self,
-        grants: Arc<std::collections::BTreeMap<crate::EffectName, crate::ToolExecutionGrant>>,
-    ) -> Self {
-        self.recorded_grants = grants;
+    pub fn with_linked_execution(mut self, execution: LinkedExecution) -> Self {
+        self.linked_execution = Some(execution);
         self
     }
-
-    /// This context running a cell linked under the package set
-    /// `packages`: what an inline start its calls declare is linked under.
-    #[must_use]
-    pub fn with_linked_packages(mut self, packages: lash_kernel_doc::PackageSetDigest) -> Self {
-        self.linked_packages = Some(packages);
-        self
-    }
-
-    /// The set of [`with_linked_packages`](Self::with_linked_packages);
-    /// `None` outside a cell.
-    #[must_use]
-    pub fn linked_packages(&self) -> Option<lash_kernel_doc::PackageSetDigest> {
-        self.linked_packages
-    }
-
-    /// The grants of [`with_recorded_grants`](Self::with_recorded_grants);
-    /// empty outside a cell.
-    #[must_use]
-    pub fn recorded_grants(
-        &self,
-    ) -> Arc<std::collections::BTreeMap<crate::EffectName, crate::ToolExecutionGrant>> {
-        Arc::clone(&self.recorded_grants)
+    pub fn linked_execution(&self) -> Option<&LinkedExecution> {
+        self.linked_execution.as_ref()
     }
 
     pub fn with_tool_material_store(
@@ -601,7 +582,7 @@ impl<'run> RuntimeExecutionContext<'run> {
     /// process name and no incarnation. The admitted scope the controller was
     /// built with carries the exact pair, and this is where an execution that
     /// must name its opener (ADR 0099 §1) reads it back.
-    pub fn admitted_process(&self) -> Option<crate::ProcessId> {
+    pub fn admitted_process(&self) -> Option<lash_vocabulary::identity::ProcessId> {
         self.dispatch.effect_controller.admitted_process().cloned()
     }
 
@@ -893,6 +874,10 @@ impl<'run> RuntimeExecutionContext<'run> {
     /// The cell ended, and left `ended` for its consumer. A cell executor's
     /// hook, not host surface.
     #[doc(hidden)]
+    pub fn cell_execution_registered(&self, execution: lash_core_store::resolutions::ExecutionId) {
+        *self.cell_end.execution.lock_recover() = Some(execution);
+    }
+
     pub fn cell_ended(&self, ended: EndedCell) {
         *self.cell_end.ended.lock_recover() = Some(ended);
     }
@@ -1003,7 +988,7 @@ impl<'run> RuntimeExecutionContext<'run> {
             .map(|exec| exec.provenance.clone())
     }
 
-    fn child_process_observers(&self) -> Vec<crate::SessionId> {
+    fn child_process_observers(&self) -> Vec<lash_vocabulary::identity::SessionId> {
         match self.process_execution.as_ref() {
             Some(exec) => match &exec.provenance.originator {
                 lash_execution_contracts::process::ProcessOriginator::Host { .. } => Vec::new(),
@@ -1025,9 +1010,23 @@ impl<'run> RuntimeExecutionContext<'run> {
     /// The process this context runs inside, with its recorded environment
     /// and settings, when its runtime loaded them.
     pub(crate) fn enclosing_env(&self) -> Option<Arc<crate::EnclosingProcess>> {
-        self.process_execution
-            .as_ref()
-            .and_then(|execution| execution.enclosing.clone())
+        let mut enclosing = self.process_execution.as_ref()?.enclosing.clone()?;
+        // Snapshot pins from this exact process execution at the policy boundary.
+        // Activation construction may precede loading its committed resolution rows.
+        if let Some(linked) = &self.linked_execution {
+            if linked.execution != enclosing.execution {
+                return None;
+            }
+            Arc::make_mut(&mut enclosing).resolutions = linked.resolutions.lock_recover().clone();
+        } else if enclosing.env.execution().uses.values().any(|binding| {
+            matches!(
+                binding,
+                lash_core_store::tool_surface::UseBinding::Deferred(_)
+            )
+        }) {
+            return None;
+        }
+        Some(enclosing)
     }
 
     /// Hold the environment `registration`'s launch names under this
@@ -1052,6 +1051,7 @@ impl<'run> RuntimeExecutionContext<'run> {
             crate::HoldEnvError::Refused(refusal) => {
                 lash_execution_contracts::plugin_error::PluginError::ProcessEnvRefused { refusal }
             }
+            crate::HoldEnvError::Admission(error) => error.into(),
             crate::HoldEnvError::Fault(error) => error,
         })
     }
@@ -1120,7 +1120,10 @@ impl<'run> RuntimeExecutionContext<'run> {
         }
     }
 
-    pub fn callable_tool_manifest_by_id(&self, id: &crate::ToolId) -> Option<crate::ToolManifest> {
+    pub fn callable_tool_manifest_by_id(
+        &self,
+        id: &lash_vocabulary::tool_contract::ToolId,
+    ) -> Option<lash_vocabulary::tool_contract::ToolManifest> {
         crate::tool_dispatch::resolve_callable_manifest_by_id(&self.dispatch, id)
     }
 
@@ -1233,18 +1236,102 @@ impl<'run> RuntimeExecutionContext<'run> {
     /// contract is routed, and raises `operation_contract_changed`.
     pub fn read_route(
         &self,
-        tool: &crate::ToolId,
-        pinned: &lash_kernel_doc::ContractId,
+        tool: &lash_vocabulary::tool_contract::ToolId,
+        pinned: &lash_vocabulary::operations::ContractId,
     ) -> Result<crate::ReadRoute, crate::RuntimeEffectControllerError> {
         self.dispatch
             .routes
             .read_route(tool, pinned, &self.dispatch.config)
     }
 
+    /// The registered package callbacks, independent of model tool exposure.
+    pub fn package_composition(&self) -> &Arc<crate::plugin::ExecutionComposition> {
+        &self.dispatch.composition
+    }
+
+    /// Read the exact provider/contract selected for one use, including
+    /// operations that were never exposed as model tools.
+    pub fn operation_read_route(
+        &self,
+        operation: &lash_core_store::tool_surface::RoutedOperation,
+    ) -> Result<crate::ReadRoute, crate::RuntimeEffectControllerError> {
+        let route = &operation.route;
+        let registry = self.dispatch.routes.registry();
+        let missing = || {
+            crate::RuntimeEffectControllerError::new(
+                crate::RuntimeErrorCode::LashVmCellBindingDrift,
+                format!(
+                    "provider {} cannot read operation {}",
+                    route.provider, route.tool
+                ),
+            )
+        };
+        let definition = registry
+            .served(&route.provider, &route.tool, self.owner_config())
+            .ok_or_else(missing)?;
+        let reads = registry.reads(&route.provider).ok_or_else(missing)?;
+        let drift = match crate::judge(&operation.requirement.contract, route, Some(&definition)) {
+            crate::Judgement::Served => None,
+            crate::Judgement::Missing => return Err(missing()),
+            crate::Judgement::ContractChanged { pinned, live } => {
+                Some(crate::operation_contract_changed(
+                    &definition.manifest.operation.effect_name().to_string(),
+                    &route.tool,
+                    &pinned,
+                    &live,
+                ))
+            }
+        };
+        Ok(
+            crate::ReadRoute::new(route.provider.clone(), definition, Arc::clone(reads))
+                .with_drift(drift),
+        )
+    }
+
+    /// A call-local authority from the selected route. Its definition is
+    /// checked against the pin before any preparation or tool body runs.
+    pub fn operation_grant(
+        &self,
+        route: &crate::OperationRoute,
+        contract: &lash_vocabulary::operations::ContractId,
+    ) -> Result<crate::ToolExecutionGrant, Box<crate::ToolFailure>> {
+        let registry = self.dispatch.routes.registry();
+        let served = registry.served(&route.provider, &route.tool, self.owner_config());
+        match crate::judge(contract, route, served.as_ref()) {
+            crate::Judgement::Missing => {
+                return Err(Box::new(crate::ToolFailure::runtime(
+                    crate::ToolFailureClass::InvalidRequest,
+                    "linked_tool_missing",
+                    format!("linked tool {} is no longer served", route.tool),
+                )));
+            }
+            crate::Judgement::ContractChanged { pinned, live } => {
+                return Err(Box::new(crate::operation_contract_changed(
+                    &route.tool.to_string(),
+                    &route.tool,
+                    &pinned,
+                    &live,
+                )));
+            }
+            crate::Judgement::Served => {}
+        }
+        let definition = route.resolution().cloned().or(served).ok_or_else(|| {
+            crate::ToolFailure::runtime(
+                crate::ToolFailureClass::InvalidRequest,
+                "linked_tool_missing",
+                "the selected tool is missing",
+            )
+        })?;
+        Ok(
+            crate::ToolExecutionGrant::from_definition(route.provider.clone(), definition)
+                .with_execution_binding(route.payload.clone()),
+        )
+    }
+
     /// The hooks through which the session's plugins see tool calls'
     /// arguments or results. A read runs no hook, so where one would see it
     /// the call stays recorded.
-    pub fn tool_call_hooks(&self) -> Vec<crate::plugin::PluginCallbackIdentity> {
+    pub fn tool_call_hooks(&self) -> Vec<lash_vocabulary::providers::PluginCallbackIdentity> {
         self.dispatch.composition.tool_call_hooks()
     }
 

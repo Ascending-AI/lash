@@ -3,13 +3,20 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 use lash_kernel_dialect::{Environment, NamedLibrary};
-use lash_kernel_doc::{
-    Datum, EffectName, ErrorDatum, Handle, Integer, Name, Param, Signature, Timestamp, Type,
-};
+use lash_kernel_doc::Datum;
+use lash_kernel_doc::ErrorDatum;
+use lash_kernel_doc::Handle;
+use lash_kernel_doc::Integer;
+use lash_kernel_doc::Timestamp;
 use lash_kernel_vm::{
     Bounds, CellStart, End, Host, Machine, Outcome, PreparedLibrary, Program, Request, RunError,
     Step, Target,
 };
+use lash_vocabulary::names::EffectName;
+use lash_vocabulary::names::Name;
+use lash_vocabulary::types::Param;
+use lash_vocabulary::types::Signature;
+use lash_vocabulary::types::Type;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
@@ -61,7 +68,7 @@ impl Runner {
         let built = lash_ext_helper_compiler::library::Library::of(dialect)?;
         let mut registry = built.registry;
         let helpers = built.helpers;
-        let library = NamedLibrary::from_registry(&registry).map_err(|e| e.to_string())?;
+        let library = built.names;
         // The runner installs each dialect's operation natives, as a worker
         // does (FIG-6440).
         match dialect {
@@ -97,12 +104,8 @@ impl Runner {
                 result: Type::Any,
             },
         )]);
-        let env_namespaces = lash_kernel_dialect::Namespaces::of_effects(
-            &effects,
-            &lash_kernel_doc::ContractId::new("1"),
-            &Default::default(),
-        )
-        .map_err(|e| e.to_string())?;
+        let env_namespaces =
+            crate::linked::namespaces(&effects, &Default::default()).map_err(|e| e.to_string())?;
         let env = Environment::new(&self.library, &env_namespaces);
         let lowered = match case.dialect.as_str() {
             "typescript" => lash_dialect_typescript::lower(
@@ -129,25 +132,13 @@ impl Runner {
                 }));
             }
         };
-        let mut admission = lash_kernel_check::Environment::new(&self.library);
-        admission.effects = (effects)
-            .iter()
-            .map(|(effect, signature)| {
-                (
-                    effect.clone(),
-                    lash_kernel_doc::OperationRequirement::new(
-                        signature.clone(),
-                        lash_kernel_doc::ContractId::new("1"),
-                    ),
-                )
-            })
-            .collect();
+
+        let admission = lash_kernel_check::Environment::new(&self.library);
         lash_kernel_check::admit(&lowered.document, &admission).map_err(|e| format!("{e:?}"))?;
-        Ok(Lowered::Program(Program {
-            closure: crate::pages::CLOSURE,
-            document: Arc::clone(lowered.document.shared()),
-            library: self.prepared.clone(),
-        }))
+        Ok(Lowered::Program(crate::linked::program(
+            Arc::clone(lowered.document.shared()),
+            self.prepared.clone(),
+        )))
     }
 
     /// Runs one admitted program through the embedding API.
@@ -177,10 +168,9 @@ impl Runner {
         .map_err(|e| e.to_string())?;
         let helpers = program
             .document
-            .manifest
-            .functions
+            .imports
             .values()
-            .map(ToString::to_string)
+            .map(|import| import.name.to_string())
             .collect();
         let mut host = ScriptHost {
             bits: case.bits,
@@ -198,14 +188,8 @@ impl Runner {
                     for request in park.requests {
                         let effect = match request {
                             Request::Effect(effect) => effect,
-                            Request::Sleep(sleep) => {
-                                machine
-                                    .deliver(sleep.wait, Outcome::Elapsed)
-                                    .map_err(|e| e.to_string())?;
-                                continue;
-                            }
                         };
-                        if effect.effect.as_str() != "host.observe" {
+                        if crate::linked::operation(&effect.use_).as_str() != "host.observe" {
                             return Err("unexpected effect".into());
                         }
                         let value = effect.args.first().ok_or("observe needs a value")?;
@@ -244,16 +228,29 @@ struct ScriptHost {
     nanoseconds: i64,
 }
 impl Host for ScriptHost {
-    fn clock(&mut self) -> Timestamp {
-        Timestamp {
-            nanoseconds: Integer::from(self.nanoseconds),
-        }
+    fn perform(
+        &mut self,
+        use_: &lash_vocabulary::OperationUse,
+        _: &[Datum],
+        _: &lash_vocabulary::sites::PositionLabel,
+        _: &lash_vocabulary::sites::Site,
+    ) -> Result<Result<Datum, ErrorDatum>, lash_kernel_vm::HostFault> {
+        let name = crate::linked::operation(use_);
+        Ok(Ok(if name.as_str().ends_with(".clock") {
+            Datum::Timestamp(Timestamp {
+                nanoseconds: Integer::from(self.nanoseconds),
+            })
+        } else if name.as_str().ends_with(".random") {
+            let bits = self.bits;
+            self.bits = self.bits.wrapping_add(self.stride);
+            Datum::Bytes(lash_kernel_doc::Bytes::new(bits.to_be_bytes().as_slice()))
+        } else {
+            return Err(lash_kernel_vm::HostFault::new(format!(
+                "unexpected read {name}"
+            )));
+        }))
     }
-    fn random(&mut self) -> u64 {
-        let bits = self.bits;
-        self.bits = bits.wrapping_add(self.stride);
-        bits
-    }
+
     fn read(&mut self, _: &Handle, _: &Datum) -> Result<Datum, ErrorDatum> {
         Err(ErrorDatum {
             kind: "type_error".into(),

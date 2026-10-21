@@ -100,7 +100,7 @@ impl From<lash_execution_contracts::plugin_error::PluginError> for EngineRefusal
 #[cfg(test)]
 mod refusal_classification_tests {
     use super::*;
-    use lash_protocol_types::SessionId;
+    use lash_vocabulary::identity::SessionId;
 
     #[test]
     fn engine_refusal_retries_only_retryable_plugin_operations() {

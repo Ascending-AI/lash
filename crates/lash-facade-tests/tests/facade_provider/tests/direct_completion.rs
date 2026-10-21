@@ -58,7 +58,7 @@ async fn a_tools_direct_completion_runs_in_its_call_and_records_usage_and_trace(
     .build(lash_facade_tests::runtime_lease_owner())?;
     let session = created_session(
         &core,
-        lash::SessionId::parse("direct-llm").expect("nonblank host identity"),
+        lash_vocabulary::identity::SessionId::parse("direct-llm").expect("nonblank host identity"),
     )
     .await
     .open()

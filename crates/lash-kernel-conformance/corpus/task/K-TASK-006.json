@@ -3,7 +3,7 @@
   "cases": [
     {
       "name": "yield schedules ready children FIFO",
-      "document": "kernel 1\nnumbers by_spelling\nfn child(n) { print n do yield print n }\nmain {\nlet a = spawn call child(1) let b = spawn call child(2) print 0 do yield let tasks = [a, b] do join all tasks\n}\n",
+      "document": "kernel 1\nnumbers by_spelling\ndefinition \"function child(n: Any) -> Any\\nkernel 1\\nmetering statements\\nbody {\\n  print n\\n  do yield\\n  print n\\n}\\n\"\nmain {\n  let a = spawn invoke child(1)\n  let b = spawn invoke child(2)\n  print 0\n  do yield\n  let tasks = [a, b]\n  do join all(tasks)\n}\n",
       "expected": {
         "prints": [
           {

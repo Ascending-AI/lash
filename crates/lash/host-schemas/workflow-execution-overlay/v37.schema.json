@@ -1,9 +1,5 @@
 {
   "$defs": {
-    "DocumentId": {
-      "pattern": "^[0-9a-f]{64}$",
-      "type": "string"
-    },
     "EffectAddress": {
       "description": "Canonical address of one admitted runtime effect.",
       "properties": {
@@ -126,6 +122,27 @@
       "pattern": "^[0-9a-f]{64}$",
       "type": "string"
     },
+    "LinkId": {
+      "pattern": "^[0-9a-f]{64}$",
+      "type": "string"
+    },
+    "LinkedStart": {
+      "additionalProperties": false,
+      "description": "The immutable Link and selected start that determine process definition identity.",
+      "properties": {
+        "link": {
+          "$ref": "#/$defs/LinkId"
+        },
+        "selector": {
+          "$ref": "#/$defs/StartSelector"
+        }
+      },
+      "required": [
+        "link",
+        "selector"
+      ],
+      "type": "object"
+    },
     "Name": {
       "description": "A variable, parameter or declared-function name.\n\nAny text is a name; the kernel gives none of them meaning. Structural\nvalidation refuses the empty name.",
       "type": "string"
@@ -182,6 +199,41 @@
         "unit"
       ],
       "type": "object"
+    },
+    "StartSelector": {
+      "description": "Main requires a main block; Export names a top-level function and never runs main.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "main",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "export",
+              "type": "string"
+            },
+            "value": {
+              "$ref": "#/$defs/Name"
+            }
+          },
+          "required": [
+            "kind",
+            "value"
+          ],
+          "type": "object"
+        }
+      ]
     },
     "StepBodyStarted": {
       "additionalProperties": false,
@@ -368,7 +420,7 @@
         "document": {
           "anyOf": [
             {
-              "$ref": "#/$defs/WorkflowDocumentRef"
+              "$ref": "#/$defs/LinkedStart"
             },
             {
               "type": "null"
@@ -956,60 +1008,6 @@
       "pattern": "^v:([0-9a-f]{2})+$",
       "type": "string"
     },
-    "WorkflowDocumentEntry": {
-      "description": "The entry of a [`WorkflowDocumentRef`].",
-      "oneOf": [
-        {
-          "description": "The document's `main`: a session cell.",
-          "properties": {
-            "kind": {
-              "const": "main",
-              "type": "string"
-            }
-          },
-          "required": [
-            "kind"
-          ],
-          "type": "object"
-        },
-        {
-          "description": "One entry of the document: a declared function a host may start,\nwhich is what a process runs.",
-          "properties": {
-            "function": {
-              "$ref": "#/$defs/Name"
-            },
-            "kind": {
-              "const": "entry",
-              "type": "string"
-            }
-          },
-          "required": [
-            "kind",
-            "function"
-          ],
-          "type": "object"
-        }
-      ]
-    },
-    "WorkflowDocumentRef": {
-      "additionalProperties": false,
-      "description": "Which workflow document an execution runs, and where it enters it. It\nnames the document; it is never the document. A host reads the document\nthe reference names through the facade's workflow inspection and may\ncache it under this value, which is immutable for a process: a running\ninstance keeps the document it was admitted under.",
-      "properties": {
-        "document": {
-          "$ref": "#/$defs/DocumentId",
-          "description": "The identity of the admitted kernel document: the hash of its\ncontent, kernel version and manifest included."
-        },
-        "entry": {
-          "$ref": "#/$defs/WorkflowDocumentEntry",
-          "description": "Where the execution enters the document."
-        }
-      },
-      "required": [
-        "document",
-        "entry"
-      ],
-      "type": "object"
-    },
     "WorkflowOverlayCall": {
       "description": "The admitted call an occurrence is bound to.",
       "properties": {
@@ -1114,7 +1112,7 @@
           "description": "The execution's start named this document; the reducer was not given\nit, so the listed sites are whatever was observed.",
           "properties": {
             "reference": {
-              "$ref": "#/$defs/WorkflowDocumentRef"
+              "$ref": "#/$defs/LinkedStart"
             },
             "state": {
               "const": "claimed",
@@ -1131,7 +1129,7 @@
           "description": "The reducer was given this document: every listed site is one of its\nsites, and a site it lacks is a mismatch.",
           "properties": {
             "reference": {
-              "$ref": "#/$defs/WorkflowDocumentRef"
+              "$ref": "#/$defs/LinkedStart"
             },
             "state": {
               "const": "loaded",
@@ -1223,7 +1221,7 @@
           "description": "What the language execution reported.",
           "properties": {
             "document": {
-              "$ref": "#/$defs/WorkflowDocumentRef"
+              "$ref": "#/$defs/LinkedStart"
             },
             "fact": {
               "const": "language",
@@ -1280,7 +1278,7 @@
           "description": "The execution's start names another document than the one loaded.",
           "properties": {
             "claimed": {
-              "$ref": "#/$defs/WorkflowDocumentRef"
+              "$ref": "#/$defs/LinkedStart"
             },
             "kind": {
               "const": "document",

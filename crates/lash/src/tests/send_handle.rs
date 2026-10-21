@@ -79,7 +79,8 @@ async fn graphless_session_reads_are_identical() -> Result<()> {
 /// same read as the input's binding (FIG-5915).
 async fn a_faulted_sessions_open_input_answers_the_fault() -> Result<()> {
     let fixture = fixture(1).await?;
-    let id = crate::SessionId::parse("send-faulted").expect("nonblank host identity");
+    let id = lash_vocabulary::identity::SessionId::parse("send-faulted")
+        .expect("nonblank host identity");
     let session = created_session(&fixture.core, id.clone())
         .await
         .open()
@@ -122,13 +123,14 @@ async fn a_faulted_sessions_open_input_answers_the_fault() -> Result<()> {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_shift_never_runs_on_a_session_opened_to_observe() -> Result<()> {
     let fixture = fixture(1).await?;
-    let session_id = lash_core::SessionId::from("send-observed");
+    let session_id = lash_vocabulary::identity::SessionId::from("send-observed");
     let host = created_session(&fixture.core, session_id.clone())
         .await
         .open()
         .await?;
     host.send(TurnInput::text("first"))
-        .id(crate::TurnId::parse("observed-first").expect("nonblank host identity"))
+        .id(lash_vocabulary::identity::TurnId::parse("observed-first")
+            .expect("nonblank host identity"))
         .output()
         .await?;
 
@@ -166,7 +168,8 @@ async fn a_shift_never_runs_on_a_session_opened_to_observe() -> Result<()> {
     let tail = fixture.core.live_replay_store.tail_cursor(&session_id);
     let second = host
         .send(TurnInput::text("second"))
-        .id(crate::TurnId::parse("observed-second").expect("nonblank host identity"))
+        .id(lash_vocabulary::identity::TurnId::parse("observed-second")
+            .expect("nonblank host identity"))
         .await?;
     assert_eq!(
         second.cursor(),
@@ -196,14 +199,15 @@ async fn replay_gaps_reach_both_streams_and_sinks() -> Result<()> {
     let fixture = fixture(1).await?;
     let session = created_session(
         &fixture.core,
-        crate::SessionId::parse("send-replay-gap").expect("nonblank host identity"),
+        lash_vocabulary::identity::SessionId::parse("send-replay-gap")
+            .expect("nonblank host identity"),
     )
     .await
     .open()
     .await?;
     let handle = session
         .send(TurnInput::text(HELD))
-        .id(crate::TurnId::parse("gap-run").expect("nonblank host identity"))
+        .id(lash_vocabulary::identity::TurnId::parse("gap-run").expect("nonblank host identity"))
         .await?;
     provider_called(&fixture, 1).await;
     fixture
@@ -259,7 +263,8 @@ async fn a_send_under_an_unserved_profile_key_is_refused_before_acceptance() -> 
     let fixture = fixture(1).await?;
     let session = created_session(
         &fixture.core,
-        crate::SessionId::parse("send-bad-route").expect("nonblank host identity"),
+        lash_vocabulary::identity::SessionId::parse("send-bad-route")
+            .expect("nonblank host identity"),
     )
     .await
     .open()
@@ -277,7 +282,7 @@ async fn a_send_under_an_unserved_profile_key_is_refused_before_acceptance() -> 
     );
     let store = lash_execution_contracts::deployment::live_session_view(
         &fixture.core.store_factory,
-        &lash_core::SessionId::from("send-bad-route"),
+        &lash_vocabulary::identity::SessionId::from("send-bad-route"),
     )
     .await?
     .expect("the opened session has a store");
@@ -334,7 +339,8 @@ async fn a_send_under_a_settled_id_commits_nothing_and_answers_its_evidence() ->
     let fixture = fixture(1).await?;
     let session = created_session(
         &fixture.core,
-        crate::SessionId::parse("send-settled-id").expect("nonblank host identity"),
+        lash_vocabulary::identity::SessionId::parse("send-settled-id")
+            .expect("nonblank host identity"),
     )
     .await
     .open()
@@ -342,7 +348,8 @@ async fn a_send_under_a_settled_id_commits_nothing_and_answers_its_evidence() ->
 
     let first = session
         .send(TurnInput::text("only once"))
-        .id(crate::TurnId::parse("settled-run").expect("nonblank host identity"))
+        .id(lash_vocabulary::identity::TurnId::parse("settled-run")
+            .expect("nonblank host identity"))
         .output()
         .await?;
     assert_eq!(first.assistant_message(), Some("echo: only once"));
@@ -359,12 +366,16 @@ async fn a_send_under_a_settled_id_commits_nothing_and_answers_its_evidence() ->
 
     let again = session
         .send(TurnInput::text("only once"))
-        .id(crate::TurnId::parse("settled-run").expect("nonblank host identity"))
+        .id(lash_vocabulary::identity::TurnId::parse("settled-run")
+            .expect("nonblank host identity"))
         .await?;
     assert_eq!(again.input_id(), &applied[0].input_id);
     assert_eq!(
         session
-            .attach_id(crate::TurnId::parse("settled-run").expect("nonblank host identity"))
+            .attach_id(
+                lash_vocabulary::identity::TurnId::parse("settled-run")
+                    .expect("nonblank host identity")
+            )
             .input_id(),
         again.input_id(),
         "a retry answers the original acceptance, which its id alone addresses"
@@ -376,7 +387,8 @@ async fn a_send_under_a_settled_id_commits_nothing_and_answers_its_evidence() ->
 
     let conflicting = session
         .send(TurnInput::text("different semantic input"))
-        .id(crate::TurnId::parse("settled-run").expect("nonblank host identity"))
+        .id(lash_vocabulary::identity::TurnId::parse("settled-run")
+            .expect("nonblank host identity"))
         .await;
     assert!(
         conflicting.is_err(),
@@ -396,25 +408,27 @@ async fn cancel_finds_the_consuming_run_before_application() -> Result<()> {
     let fixture = composing_fixture().await?;
     let session = created_session(
         &fixture.core,
-        crate::SessionId::parse("cancel-bound-input").expect("nonblank host identity"),
+        lash_vocabulary::identity::SessionId::parse("cancel-bound-input")
+            .expect("nonblank host identity"),
     )
     .await
     .open()
     .await?;
     let first = session
         .send(TurnInput::text(HELD))
-        .id(crate::TurnId::parse("first-run").expect("nonblank host identity"))
+        .id(lash_vocabulary::identity::TurnId::parse("first-run").expect("nonblank host identity"))
         .await?;
     provider_called(&fixture, 1).await;
     let second = session
         .send(TurnInput::text(HELD))
-        .id(crate::TurnId::parse("consuming-run").expect("nonblank host identity"))
+        .id(lash_vocabulary::identity::TurnId::parse("consuming-run")
+            .expect("nonblank host identity"))
         .await?;
     // The merging drain admits it with the second, as that run's last user
     // row: the provider holds the run on it.
     let third = session
         .send(TurnInput::text(format!("batched input, {HELD}")))
-        .id(crate::TurnId::parse("batched-id").expect("nonblank host identity"))
+        .id(lash_vocabulary::identity::TurnId::parse("batched-id").expect("nonblank host identity"))
         .await?;
     fixture.release.notify_one();
     provider_called(&fixture, 2).await;
@@ -422,7 +436,7 @@ async fn cancel_finds_the_consuming_run_before_application() -> Result<()> {
     let parts = session.durable().send_parts().await?;
     assert_eq!(
         parts.store.run_binding(&input_id).await?,
-        Some(lash_core::TurnId::from("consuming-run")),
+        Some(lash_vocabulary::identity::TurnId::from("consuming-run")),
         "the controlled barrier must hold after binding"
     );
     assert!(

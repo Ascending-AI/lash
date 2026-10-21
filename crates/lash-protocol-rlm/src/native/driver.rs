@@ -1,5 +1,5 @@
 use crate::dialect::SessionDialect;
-use lash_protocol_types::TurnId;
+use lash_vocabulary::identity::TurnId;
 use std::sync::Arc;
 
 use lash_core::sansio::{

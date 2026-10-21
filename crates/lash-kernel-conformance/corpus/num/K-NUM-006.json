@@ -3,7 +3,7 @@
   "cases": [
     {
       "name": "integer trunc quotient and remainder sign",
-      "document": "kernel 1\nnumbers by_spelling\nuse div_trunc = @6f3357941ffdd7bbbee0530a7ec533fe86d55478e920c526b047ee8251ff0ae5\nuse rem_trunc = @f40345e032dde30b6d07ca6afea7f0dcd4923cd4d8fe403843068097bfc6b7ab\nmain {  finish [div_trunc(-7, 3), rem_trunc(-7, 3), div_trunc(7, -3), rem_trunc(7, -3)] }\n",
+      "document": "kernel 1\nnumbers by_spelling\nnative @5729aacc17f5b264be6cf264815500cceb726e92558145538c83d90241149593\nnative @ffe29d5912501fc55db0ce2ba6e8bd68cdeb2d74c75a7e82614308806a3c6fdc\ndefinition \"function div_trunc(arg0: Number, arg1: Number) -> Number\\nkernel 1\\nerrors \\\"arity\\\", \\\"division_by_zero\\\", \\\"number_range\\\", \\\"type_error\\\"\\ncharge sum(1, product(sum(deep(arg0), deep(arg1)), sum(deep(arg0), deep(arg1))), deep(result))\\nnative\\n\"\ndefinition \"function rem_trunc(arg0: Number, arg1: Number) -> Number\\nkernel 1\\nerrors \\\"arity\\\", \\\"division_by_zero\\\", \\\"number_range\\\", \\\"type_error\\\"\\ncharge sum(1, product(sum(deep(arg0), deep(arg1)), sum(deep(arg0), deep(arg1))), deep(result))\\nnative\\n\"\nmain {\n  finish [div_trunc(-7, 3), rem_trunc(-7, 3), div_trunc(7, -3), rem_trunc(7, -3)]\n}\n",
       "expected": {
         "prints": [],
         "trace": [],
@@ -29,7 +29,7 @@
     },
     {
       "name": "div trunc integer zero divisor",
-      "document": "kernel 1\nnumbers by_spelling\nuse div_trunc = @6f3357941ffdd7bbbee0530a7ec533fe86d55478e920c526b047ee8251ff0ae5\nmain {  try { print div_trunc(1, 0) } catch e { finish e.kind } finish null }\n",
+      "document": "kernel 1\nnumbers by_spelling\nnative @5729aacc17f5b264be6cf264815500cceb726e92558145538c83d90241149593\ndefinition \"function div_trunc(arg0: Number, arg1: Number) -> Number\\nkernel 1\\nerrors \\\"arity\\\", \\\"division_by_zero\\\", \\\"number_range\\\", \\\"type_error\\\"\\ncharge sum(1, product(sum(deep(arg0), deep(arg1)), sum(deep(arg0), deep(arg1))), deep(result))\\nnative\\n\"\nmain {\n  try {\n    print div_trunc(1, 0)\n  } catch e {\n    finish e.kind\n  }\n  finish null\n}\n",
       "expected": {
         "prints": [],
         "trace": [],
@@ -42,7 +42,7 @@
     },
     {
       "name": "rem trunc integer zero divisor",
-      "document": "kernel 1\nnumbers by_spelling\nuse rem_trunc = @f40345e032dde30b6d07ca6afea7f0dcd4923cd4d8fe403843068097bfc6b7ab\nmain {  try { print rem_trunc(1, 0) } catch e { finish e.kind } finish null }\n",
+      "document": "kernel 1\nnumbers by_spelling\nnative @ffe29d5912501fc55db0ce2ba6e8bd68cdeb2d74c75a7e82614308806a3c6fdc\ndefinition \"function rem_trunc(arg0: Number, arg1: Number) -> Number\\nkernel 1\\nerrors \\\"arity\\\", \\\"division_by_zero\\\", \\\"number_range\\\", \\\"type_error\\\"\\ncharge sum(1, product(sum(deep(arg0), deep(arg1)), sum(deep(arg0), deep(arg1))), deep(result))\\nnative\\n\"\nmain {\n  try {\n    print rem_trunc(1, 0)\n  } catch e {\n    finish e.kind\n  }\n  finish null\n}\n",
       "expected": {
         "prints": [],
         "trace": [],

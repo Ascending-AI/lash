@@ -34,6 +34,7 @@ fn scalar(datum: &lash_kernel_doc::Datum) -> bool {
 #[test]
 fn k_lib_006_native_corpus_pins_results_charges_and_determinism() {
     use lash_kernel_doc::{Bytes, Datum, Float, Integer, Measure, Operand};
+
     use num_traits::ToPrimitive;
     let t = |s: &str| Datum::Text(s.to_owned());
     let i = |n: i64| Datum::Int(Integer::from(n));
@@ -436,7 +437,7 @@ fn k_lib_006_native_corpus_pins_results_charges_and_determinism() {
             }
             (actual, expected) => panic!("{name}: {actual:?} != {expected:?}"),
         };
-        let param = |name: &lash_kernel_doc::Name| {
+        let param = |name: &lash_vocabulary::names::Name| {
             registered
                 .definition()
                 .signature
@@ -447,7 +448,8 @@ fn k_lib_006_native_corpus_pins_results_charges_and_determinism() {
         };
         let charged = registered
             .definition()
-            .charge
+            .charge()
+            .expect("formula-metered library function")
             .evaluate(&mut |operand, measure| match (operand, measure) {
                 (Operand::Result, Measure::Magnitude) => result_magnitude,
                 (Operand::Result, Measure::DeepSize) => result_size,

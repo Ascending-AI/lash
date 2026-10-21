@@ -139,7 +139,7 @@ impl RuntimeExecutionContext<'_> {
         language: impl Into<String>,
         identity: lash_trace::TraceLanguageExecutionIdentity,
         subject: lash_trace::TraceRuntimeSubject,
-        at: lash_protocol_types::EffectId,
+        at: lash_vocabulary::sites::EffectId,
     ) {
         self.language_calls.lock_recover().insert(
             call_id,
@@ -239,7 +239,7 @@ impl RuntimeExecutionContext<'_> {
     #[doc(hidden)]
     pub async fn run_executing<F, Fut>(
         self,
-        callback: Option<&crate::store::plugin_writers::PluginCallbackIdentity>,
+        callback: Option<&lash_vocabulary::providers::PluginCallbackIdentity>,
         run: F,
     ) -> Fut::Output
     where

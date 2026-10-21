@@ -1,13 +1,17 @@
 //! Small session descriptors. Bindings, functions, notes and heap are
 //! page roots: the descriptor a session publishes never grows with what
 //! the session holds (FIG-6418).
-use lash_kernel_doc::graph_tokens::{TokenCodec, TokenReader, TokenWriter, encode_body};
 use lash_kernel_doc::heap::{HeapFault, PageRef};
+use lash_vocabulary::tokens::TokenCodec;
+use lash_vocabulary::tokens::TokenReader;
+use lash_vocabulary::tokens::TokenWriter;
+use lash_vocabulary::tokens::encode_body;
 use std::collections::BTreeSet;
 
-use lash_kernel_doc::{FunctionId, NumberPolicy, PackageSetDigest};
+use lash_kernel_doc::NumberPolicy;
 use lash_kernel_state::paged::session::SessionNotes;
 use lash_kernel_state::paged::{PageBody, PageKind, PageSource, SessionRoot};
+use lash_vocabulary::names::FunctionId;
 
 pub(super) struct SessionDescriptor {
     pub dialect: String,
@@ -20,13 +24,10 @@ pub(super) struct SessionDescriptor {
     /// The library functions the session's saved functions pin, together
     /// (FIG-5799): bounded by the build's library, never by the session.
     pub pins: BTreeSet<FunctionId>,
-    /// The package set every saved function is linked to: the last cell's
-    /// (K-LIB-009). A cell of that set relinks and re-saves nothing.
-    pub linked: Option<PackageSetDigest>,
 }
 impl TokenCodec for SessionDescriptor {
     fn encode(&self, out: &mut TokenWriter) {
-        out.seq(8);
+        out.seq(7);
         self.dialect.encode(out);
         self.numbers.encode(out);
         self.kernel.encode(out);
@@ -34,12 +35,9 @@ impl TokenCodec for SessionDescriptor {
         self.session.encode(out);
         self.notes.encode(out);
         self.pins.encode(out);
-        self.linked.encode(out);
     }
-    fn decode(
-        input: &mut TokenReader<'_>,
-    ) -> Result<Self, lash_kernel_doc::graph_tokens::TokenError> {
-        input.expect_struct(8)?;
+    fn decode(input: &mut TokenReader<'_>) -> Result<Self, lash_vocabulary::tokens::TokenError> {
+        input.expect_struct(7)?;
         Ok(Self {
             dialect: String::decode(input)?,
             numbers: NumberPolicy::decode(input)?,
@@ -48,7 +46,6 @@ impl TokenCodec for SessionDescriptor {
             session: SessionRoot::decode(input)?,
             notes: SessionNotes::decode(input)?,
             pins: BTreeSet::decode(input)?,
-            linked: Option::decode(input)?,
         })
     }
 }

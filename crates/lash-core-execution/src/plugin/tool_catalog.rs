@@ -5,7 +5,7 @@ use super::*;
 /// remove candidates; which tools exist is each provider's configuration.
 #[derive(Clone)]
 pub struct ToolCatalogContext {
-    pub owner: crate::RuntimeOwner,
+    pub owner: lash_vocabulary::identity::RuntimeOwner,
     /// The advertised candidates, every provider's under the run's config.
     pub tools: Vec<ToolManifest>,
     /// The run's resolved config.

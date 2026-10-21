@@ -76,7 +76,9 @@ async fn duplicate_plugin_id_refused() -> Result<()> {
                 )
                 .unwrap(),
             ),
-            owner: lash_core::RuntimeOwner::Session(SessionId::fixture("duplicate-owner")),
+            owner: lash_vocabulary::identity::RuntimeOwner::Session(SessionId::fixture(
+                "duplicate-owner",
+            )),
             base: lash::plugins::PluginTransitionBase::Session {
                 head: lash_core::store::SessionHeadRef {
                     generation: 0,
@@ -120,7 +122,8 @@ async fn plugin_surface_streams_as_semantic_turn_event() -> Result<()> {
     .build(lash_facade_tests::runtime_lease_owner())?;
     let session = created_session(
         &core,
-        lash::SessionId::parse("plugin-surface").expect("nonblank host identity"),
+        lash_vocabulary::identity::SessionId::parse("plugin-surface")
+            .expect("nonblank host identity"),
     )
     .await
     .open()
@@ -209,7 +212,8 @@ async fn tool_completed_activity_is_canonical_while_model_observation_is_project
             .build(lash_facade_tests::runtime_lease_owner())?;
         let standard_session = created_session(
             &standard_core,
-            lash::SessionId::parse("standard-projection").expect("nonblank host identity"),
+            lash_vocabulary::identity::SessionId::parse("standard-projection")
+                .expect("nonblank host identity"),
         )
         .await
         .open()
@@ -256,7 +260,8 @@ await control.finish("done");"#,
                     .build(lash_facade_tests::runtime_lease_owner())?;
             let rlm_session = created_session(
                 &rlm_core,
-                lash::SessionId::parse("rlm-projection").expect("nonblank host identity"),
+                lash_vocabulary::identity::SessionId::parse("rlm-projection")
+                    .expect("nonblank host identity"),
             )
             .await
             .open()
@@ -293,7 +298,10 @@ impl ToolProvider for BuilderSentinelTools {
     fn tool_manifests(
         &self,
         config: &lash_core::OwnerConfigView,
-    ) -> std::result::Result<Vec<lash_core::ToolManifest>, lash::plugins::PluginError> {
+    ) -> std::result::Result<
+        Vec<lash_vocabulary::tool_contract::ToolManifest>,
+        lash::plugins::PluginError,
+    > {
         AppTools.tool_manifests(config)
     }
 
@@ -301,7 +309,7 @@ impl ToolProvider for BuilderSentinelTools {
         &self,
         name: &str,
         config: &lash_core::OwnerConfigView,
-    ) -> Option<Arc<lash_core::ToolContract>> {
+    ) -> Option<Arc<lash_vocabulary::tool_contract::ToolContract>> {
         AppTools.resolve_contract(name, config)
     }
 
@@ -361,7 +369,7 @@ async fn builder_configured_tools_and_hooks_are_never_discarded(backend: Backend
     let id = "builder-sentinels";
     let mut session = created_session(
         &core,
-        lash::SessionId::parse(id).expect("nonblank host identity"),
+        lash_vocabulary::identity::SessionId::parse(id).expect("nonblank host identity"),
     )
     .await
     .open()
@@ -391,7 +399,10 @@ async fn builder_configured_tools_and_hooks_are_never_discarded(backend: Backend
         } else if turn == 1 {
             session.close().await?;
             session = core
-                .session(lash::SessionId::parse(id).expect("nonblank host identity"))
+                .session(
+                    lash_vocabulary::identity::SessionId::parse(id)
+                        .expect("nonblank host identity"),
+                )
                 .open()
                 .await?;
         }

@@ -1,6 +1,6 @@
 use super::*;
 use lash_core::session_graph::RealizedNodeTimestamp;
-use lash_protocol_types::SessionId;
+use lash_vocabulary::identity::SessionId;
 
 /// Resident-graph sizes swept by the curve. The defect under measurement is
 /// per-turn cost linear in resident history, so the sizes span two orders of
@@ -190,7 +190,7 @@ pub(super) async fn run_once_resident_graph_append_curve(
                     )?;
                     phase_profile.insert(phase.0, phase.1);
 
-                    let derived_node_id = lash_core::NodeId::fixture(format!(
+                    let derived_node_id = lash_vocabulary::identity::NodeId::fixture(format!(
                         "perf-derived/{resident_nodes}/{turn_index}"
                     ));
                     let (_, phase) = measure_runtime_perf_phase(
@@ -492,11 +492,11 @@ mod commit_scaling_tests {
             &state.session_id,
             &[(
                 draft,
-                lash_core::NodeId::fixture(format!("committed-{turn}")),
+                lash_vocabulary::identity::NodeId::fixture(format!("committed-{turn}")),
             )],
         );
         graph.apply_realized_node_timestamps(&[RealizedNodeTimestamp {
-            node_id: lash_core::NodeId::fixture(format!("committed-{turn}")),
+            node_id: lash_vocabulary::identity::NodeId::fixture(format!("committed-{turn}")),
             timestamp: "2026-09-30T00:00:01.000000000Z".parse()?,
         }]);
         let mut snapshot = state.to_snapshot();

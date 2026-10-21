@@ -31,8 +31,10 @@ fn processes_area_witnesses() {
         let _ = &value.observed_processes;
     });
     // W0012: lash::SessionCreateRequest::with_observed_processes [function]
-    let _: fn(lash::SessionCreateRequest, Vec<lash::ProcessId>) -> lash::SessionCreateRequest =
-        lash::SessionCreateRequest::with_observed_processes;
+    let _: fn(
+        lash::SessionCreateRequest,
+        Vec<lash_vocabulary::identity::ProcessId>,
+    ) -> lash::SessionCreateRequest = lash::SessionCreateRequest::with_observed_processes;
     // W0013: lash::durability::DurableProcessWorker [struct]
     type_witness::<lash::durability::DurableProcessWorker>();
     // W0014: lash::durability::DurableProcessWorker::config [function]
@@ -548,12 +550,12 @@ fn processes_area_witnesses() {
     // W0283: lash::process::ProcessStartOptions::with_initial_observer [function]
     let _ = lash::process::ProcessStartOptions::with_initial_observer(
         todo!(),
-        lash::SessionId::from("x"),
+        lash_vocabulary::identity::SessionId::from("x"),
     );
     // W0284: lash::process::ProcessStartOptions::with_initial_observers [function]
     let _ = lash::process::ProcessStartOptions::with_initial_observers(
         todo!(),
-        std::iter::empty::<lash::SessionId>(),
+        std::iter::empty::<lash_vocabulary::identity::SessionId>(),
     );
     // W0285: lash::process::ProcessStartOptions::with_spawn_provenance [function]
     let _ = lash::process::ProcessStartOptions::with_spawn_provenance;
@@ -589,7 +591,7 @@ fn processes_area_witnesses() {
     // W0305: lash::process::ProcessStartRequest::with_observers [function]
     let _ = lash::process::ProcessStartRequest::with_observers(
         todo!(),
-        std::iter::empty::<lash::SessionId>(),
+        std::iter::empty::<lash_vocabulary::identity::SessionId>(),
     );
     // W0307: lash::process::ProcessStatus::Abandoned [variant]
     variant_witness(|value: &lash::process::ProcessStatus| {
@@ -856,7 +858,10 @@ mod named_component_laws {
                 id,
                 reg,
                 move |ctx, _state| {
-                    if matches!(ctx.owner, lash_core::RuntimeOwner::Process(_)) {
+                    if matches!(
+                        ctx.owner,
+                        lash_vocabulary::identity::RuntimeOwner::Process(_)
+                    ) {
                         self.0.process_plugin_builds.fetch_add(1, Ordering::SeqCst);
                     }
                     Ok(Arc::new(Inert(Arc::clone(&self.0))))
@@ -1077,7 +1082,10 @@ mod named_component_laws {
             self.cells.lock_recover().push_back(code.to_owned());
             let session = self
                 .core
-                .session(lash::SessionId::try_from(name.to_owned()).expect("a session id"))
+                .session(
+                    lash_vocabulary::identity::SessionId::try_from(name.to_owned())
+                        .expect("a session id"),
+                )
                 .create(lash::SessionCreation::root(lash::SessionSpec::new(
                     MODEL,
                     lash::TurnBudget::Unbounded,
@@ -1248,7 +1256,7 @@ mod named_component_laws {
     impl lash::persistence::ProcessAuthorityReads for CountingAuthority {
         async fn process_authority(
             &self,
-            id: &lash::ProcessId,
+            id: &lash_vocabulary::identity::ProcessId,
         ) -> Result<
             Option<(lash::persistence::ProcessRecord, Option<Vec<u8>>)>,
             lash::persistence::StoreError,
@@ -1294,7 +1302,7 @@ mod named_component_laws {
     // The host guide's check, compiled with this owning test target.
     async fn may_address_process(
         processes: &lash::process::Processes,
-        id: &lash::ProcessId,
+        id: &lash_vocabulary::identity::ProcessId,
         offered: &lash::plugins::ToolCatalog,
     ) -> lash::Result<bool> {
         Ok(match processes.environment(id).await? {
@@ -1513,7 +1521,9 @@ mod named_component_laws {
             world
                 .core
                 .processes()
-                .environment(&lash::ProcessId::fixture("authority-unknown"))
+                .environment(&lash_vocabulary::identity::ProcessId::fixture(
+                    "authority-unknown"
+                ))
                 .await
                 .unwrap(),
             None
@@ -1669,7 +1679,7 @@ mod named_component_laws {
             &env,
             &ToolCatalog::from_tool_definitions(Vec::new())
         ));
-        let session = lash::SessionId::try_from("granted-session").unwrap();
+        let session = lash_vocabulary::identity::SessionId::try_from("granted-session").unwrap();
         let capability = lash::CapabilityRef {
             binding: lash::BindingId::new("binding:one"),
             contract: lash::ContractRef::new("integration", 1),

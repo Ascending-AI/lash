@@ -6,6 +6,7 @@ use lash_kernel_doc::{
     Formula, FunctionRegistry, NativeCall, NativeError, NativeFunction, Operand, Value,
     parse_definition,
 };
+
 use lash_kernel_vm::{End, KernelMachine, Machine, PreparedLibrary};
 
 use super::{Case, World, end, int, main, program, registry, start};
@@ -100,10 +101,10 @@ fn formula(case: &Case) {
 
 fn session(rule: &str, case: &Case) {
     use crate::pages::Session;
-    use lash_kernel_doc::Name;
     use lash_kernel_doc::heap::PageValue;
     use lash_kernel_state::kernel_internals::tree::Tree;
     use lash_kernel_state::paged::{BindingRecord, BoundRecord};
+    use lash_vocabulary::names::Name;
     let library = registry();
     let mut session = Session::default();
     let mut machine = start(
@@ -251,8 +252,10 @@ fn sites(rule: &str, case: &Case) {
                 assert_eq!(*outer.statement.resolve(heap.pages()).unwrap(), main(&[0]));
                 assert_eq!(
                     *inner.statement.resolve(heap.pages()).unwrap(),
-                    lash_kernel_doc::Site {
-                        unit: lash_kernel_doc::Unit::Function(lash_kernel_doc::Name::new("f")),
+                    lash_vocabulary::sites::Site {
+                        unit: lash_vocabulary::sites::Unit::Function(
+                            lash_vocabulary::names::Name::new("f")
+                        ),
                         path: vec![0, 1, 0]
                     }
                 );
@@ -298,7 +301,7 @@ fn sites(rule: &str, case: &Case) {
             }
             "K-SITE-002" => {
                 let child = task(1);
-                let lash_kernel_doc::kernel_internals::TaskIdentity::Spawned(spawn) =
+                let lash_vocabulary::sites::TaskIdentity::Spawned(spawn) =
                     lash_kernel_vm::kernel_internals::task_identity(&at.machine, child.identity)
                         .unwrap()
                 else {

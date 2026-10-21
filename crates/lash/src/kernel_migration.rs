@@ -92,7 +92,7 @@ pub async fn survey_kernel_migration(
             None => Vec::new(),
         };
         for actor in sessions {
-            let Ok(session) = lash_core::SessionId::parse(actor.id()) else {
+            let Ok(session) = lash_vocabulary::identity::SessionId::parse(actor.id()) else {
                 continue;
             };
             let mut refused = Vec::new();
@@ -207,8 +207,8 @@ pub(crate) fn retiring(backend: &crate::Backend, kernel: u32) -> crate::Backend 
 #[cfg(feature = "rlm")]
 pub(crate) async fn stored_cells(
     reads: &dyn lash_core::DurableStore,
-    session: &lash_core::SessionId,
-    run: &lash_core::TurnId,
+    session: &lash_vocabulary::identity::SessionId,
+    run: &lash_vocabulary::identity::TurnId,
     policy: lash_core_store::checkpoint_graph::GraphReadPolicy,
 ) -> Result<Vec<lash_core::plugin::StoredCell>, lash_core::durable_port::DurableError> {
     use lash_core::durable_port::domain::graph::RootOwner;

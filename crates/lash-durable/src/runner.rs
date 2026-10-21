@@ -372,18 +372,13 @@ pub trait Activation: Send + Sync + 'static {
     /// The runner drops this future, mid-await, when the node stops serving.
     async fn activate(&self, owned: Owned) -> Exit;
 
-    /// What the node's package code offers running code (FIG-6991,
-    /// FIG-6993): its activation installs the code in the store and
-    /// answers the natives, kernels and own package set the node
-    /// advertises before it registers. A node claims an actor to run it
-    /// only when its capabilities meet the actor's hard requirements, and a
-    /// set's surface is promoted only once every live serving node meets
-    /// its requirements. An activation that runs no package code offers
-    /// none.
+    /// Machine and registered execution capabilities this activation offers.
+    /// The runner unions these with its configured registrations before it
+    /// registers its node lease. Claims use that same advertised record.
     ///
     /// # Errors
     ///
-    /// The store's refusal of the install.
+    /// The activation cannot construct its capability record.
     async fn capabilities(&self) -> Result<crate::NodeCapabilities, DurableError> {
         Ok(crate::NodeCapabilities::default())
     }
@@ -394,6 +389,7 @@ pub struct Owned {
     store: Arc<dyn DurableStore>,
     clock: Arc<dyn Clock>,
     claimed: Claimed,
+    capabilities: crate::NodeCapabilities,
     claimed_on: Wake,
     hint: Arc<Notify>,
     hints: Hints,
@@ -448,6 +444,12 @@ impl Owned {
     #[must_use]
     pub fn requires(&self) -> &[String] {
         &self.claimed.requires
+    }
+
+    /// Capabilities of the node lease that claimed this activation.
+    #[must_use]
+    pub fn capabilities(&self) -> &crate::NodeCapabilities {
+        &self.capabilities
     }
 
     /// Whether the node is draining: the activation releases the actor
@@ -1171,7 +1173,7 @@ impl Runner {
                         next_claim = Some(now + settings.claim_backoff);
                     }
                     for claimed in claimed {
-                        self.activate(&mut active, &mut claims, claimed, woke);
+                        self.activate(&mut active, &mut claims, claimed, &lease.capabilities, woke);
                     }
                     self.hints.make_room(self.config.max_active);
                 }
@@ -1299,6 +1301,7 @@ impl Runner {
         active: &mut JoinSet<Exit>,
         claims: &mut HashMap<tokio::task::Id, (ActorKey, Epoch)>,
         claimed: Claimed,
+        capabilities: &crate::NodeCapabilities,
         claimed_on: Wake,
     ) {
         let actor = claimed.actor.clone();
@@ -1309,6 +1312,7 @@ impl Runner {
             hint: self.hints.start(actor.clone()),
             hints: self.hints.clone(),
             claimed,
+            capabilities: capabilities.clone(),
             claimed_on,
             poll: self.config.lease.settings().claim_poll,
             drain: self.drain.clone(),

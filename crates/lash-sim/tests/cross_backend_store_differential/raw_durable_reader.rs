@@ -142,7 +142,7 @@ impl RawDurableReader {
  OR (r.referrer_kind = 'process_record' AND r.referrer_id = $2)
  ORDER BY r.attachment_id, r.referrer_kind, r.referrer_id")
                 .bind(session_id.as_str())
-                .bind(lash_protocol_types::ProcessId::fixture(session_id.as_str()).as_str())
+                .bind(lash_vocabulary::identity::ProcessId::fixture(session_id.as_str()).as_str())
                 .fetch_all(pool).await.expect("read attachment roots");
                 let attachment_referrers = attachment_rows
                     .into_iter()
@@ -387,7 +387,7 @@ pub(super) async fn read_sqlite_durable_state(
             .query_map(
                 rusqlite::params![
                     session_id.as_str(),
-                    lash_protocol_types::ProcessId::fixture(session_id.as_str()).as_str()
+                    lash_vocabulary::identity::ProcessId::fixture(session_id.as_str()).as_str()
                 ],
                 |row| {
                     Ok((

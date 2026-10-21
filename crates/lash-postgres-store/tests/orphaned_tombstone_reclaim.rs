@@ -8,7 +8,7 @@
 
 use lash_core_store::store::SessionCatalogStore;
 use lash_postgres_store::{PostgresStorage, testing::IsolatedDatabase};
-use lash_protocol_types::SessionId;
+use lash_vocabulary::identity::SessionId;
 
 use crate::support::database_url;
 
@@ -165,7 +165,7 @@ async fn postgres_delete_reclaims_tombstones_orphaned_by_earlier_delete_when_con
             .session_graph
             .apply_append(&lash_core_store::store::GraphAppend::Extend {
                 nodes: vec![lash_core_store::session_graph::SessionNodeRecord {
-                    node_id: lash_core::NodeId::from("orphan-fork-child-node"),
+                    node_id: lash_vocabulary::identity::NodeId::from("orphan-fork-child-node"),
                     parent_node_id,
                     timestamp: "2026-08-17T00:00:00.000000000Z"
                         .parse()

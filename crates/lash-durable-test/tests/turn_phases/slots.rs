@@ -27,6 +27,7 @@ use lash_protocol_types::{
     llm::attachment_delivery::DeliveryContext, llm::attachment_delivery::DeliverySecret,
     llm::attachment_delivery::ProviderAccepts,
 };
+
 use lash_protocol_types::{
     llm::types::AttachmentSlot, llm::types::BodyPart, llm::types::LiveRequestBody,
     llm::types::ResponseContext, llm::types::SlotCodec,
@@ -50,7 +51,7 @@ pub(super) async fn put_image(backend: &Backend) -> Result<Image, String> {
     let store = lash_core::facade_support::RuntimeAttachmentStore::new(
         backend.attachment_store(),
         backend.attachment_referrers(),
-        lash_core::RuntimeOwner::Session(session()),
+        lash_vocabulary::identity::RuntimeOwner::Session(session()),
         lash_core::facade_support::AttachmentPolicy::standard(),
     );
     let reference = store
@@ -256,7 +257,7 @@ async fn send_adapter_attempt(
         store: lash_core::facade_support::RuntimeAttachmentStore::new(
             backend.attachment_store(),
             backend.attachment_referrers(),
-            lash_core::RuntimeOwner::Session(session()),
+            lash_vocabulary::identity::RuntimeOwner::Session(session()),
             lash_core::AttachmentPolicy::standard(),
         ),
         seen: Arc::clone(&services.seen),

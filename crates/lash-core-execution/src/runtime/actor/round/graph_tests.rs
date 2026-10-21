@@ -208,10 +208,11 @@ fn every_round_fact_round_trips_through_its_node() {
     for fact in [
         RoundFact::Admit {
             members: vec![AdmitMember::Pinned(Box::new(PinnedMember {
+                admitted_at: 0,
                 call: ToolCallId::fixture("a"),
                 tool: "query".to_owned(),
                 request: request.reference().clone(),
-                policy: lash_protocol_types::ExecutionPolicy::Once,
+                policy: lash_vocabulary::tool_contract::ExecutionPolicy::Once,
                 limit_expires_at_ms: 9,
                 limit_max_slice_ms: 4,
                 wait_id: Some("ab".to_owned()),

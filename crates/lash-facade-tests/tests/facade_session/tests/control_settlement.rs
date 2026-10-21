@@ -11,11 +11,11 @@ use lash_core::facade_support::{TurnFinish, TurnOutcome};
 /// `answer.submit`: the host's own finish tool, whose value
 /// `value_schema` types.
 #[cfg(feature = "rlm")]
-fn answer_tool(value_schema: serde_json::Value) -> lash_core::ToolDefinition {
+fn answer_tool(value_schema: serde_json::Value) -> lash_vocabulary::tool_contract::ToolDefinition {
     lash_core::finish_tool(
         "answer.submit",
         "End the turn with this call's input as its answer. It returns nothing, and nothing after the call runs: call it once every other piece of work has finished.",
-        lash_core::JsonSchema::admit(value_schema).expect("valid value schema"),
+        lash_vocabulary::json_schema::JsonSchema::admit(value_schema).expect("valid value schema"),
     )
     .expect("a canonical operation")
 }
@@ -200,11 +200,13 @@ type SubmitBody = fn(&serde_json::Value) -> lash_core::ToolOutcome;
 /// `value`, whose body is `body`.
 struct SubmitTool {
     body: SubmitBody,
-    value: lash_core::JsonSchema,
+    value: lash_vocabulary::json_schema::JsonSchema,
 }
 
-fn submit_definition(value: lash_core::JsonSchema) -> lash_core::ToolDefinition {
-    lash_core::ToolDefinition::control(
+fn submit_definition(
+    value: lash_vocabulary::json_schema::JsonSchema,
+) -> lash_vocabulary::tool_contract::ToolDefinition {
+    lash_vocabulary::tool_contract::ToolDefinition::control(
         format!("tool:{SUBMIT}"),
         format!("tools.{}", SUBMIT),
         "Submit the answer and end the turn.",
@@ -214,7 +216,7 @@ fn submit_definition(value: lash_core::JsonSchema) -> lash_core::ToolDefinition 
             "required": ["answer"],
             "additionalProperties": false
         }),
-        lash_core::TurnControls::finish(value),
+        lash_vocabulary::tool_declaration::TurnControls::finish(value),
     )
     .expect("valid declared tool schema")
     .with_execution(std::time::Duration::from_secs(30))
@@ -225,7 +227,10 @@ impl ToolProvider for SubmitTool {
     fn tool_manifests(
         &self,
         _config: &lash_core::OwnerConfigView,
-    ) -> std::result::Result<Vec<lash_core::ToolManifest>, lash::plugins::PluginError> {
+    ) -> std::result::Result<
+        Vec<lash_vocabulary::tool_contract::ToolManifest>,
+        lash::plugins::PluginError,
+    > {
         Ok(vec![submit_definition(self.value.clone()).manifest()])
     }
 
@@ -233,7 +238,7 @@ impl ToolProvider for SubmitTool {
         &self,
         name: &str,
         _config: &lash_core::OwnerConfigView,
-    ) -> Option<Arc<lash_core::ToolContract>> {
+    ) -> Option<Arc<lash_vocabulary::tool_contract::ToolContract>> {
         (name == format!("tools.{SUBMIT}"))
             .then(|| Arc::new(submit_definition(self.value.clone()).contract()))
     }
@@ -294,7 +299,7 @@ async fn run_submit_turn(
         lash::tool_provider_key!("tools"),
         Arc::new(SubmitTool {
             body,
-            value: lash_core::JsonSchema::any(),
+            value: lash_vocabulary::json_schema::JsonSchema::any(),
         }),
     )
     .plugin(plugin)
@@ -423,7 +428,7 @@ async fn a_control_tool_that_answers_a_value_is_refused() -> Result<()> {
         assert_eq!(
             failure.cause.as_deref(),
             Some(&lash_core::ToolFailureCause::Declaration {
-                refusal: lash_core::DeclarationRefusal::UndeclaredOutput,
+                refusal: lash_vocabulary::tool_declaration::DeclarationRefusal::UndeclaredOutput,
             }),
             "{route}: {output:?}"
         );
@@ -498,8 +503,10 @@ async fn a_batch_member_finish_is_checked_against_its_value_schema() -> Result<(
         lash::tool_provider_key!("tools"),
         Arc::new(SubmitTool {
             body: |args| lash_core::ToolOutcome::finish(args["answer"].clone()),
-            value: lash_core::JsonSchema::admit(serde_json::json!({ "type": "integer" }))
-                .expect("an integer schema is admitted"),
+            value: lash_vocabulary::json_schema::JsonSchema::admit(
+                serde_json::json!({ "type": "integer" }),
+            )
+            .expect("an integer schema is admitted"),
         }),
     )
     .build(lash_facade_tests::runtime_lease_owner())?;

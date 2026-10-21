@@ -29,7 +29,9 @@ use lash_core::facade_support::ToolInvocation;
 use lash_core::tool_dispatch::{CellCall, CellMember, CellMembers};
 use lash_core::{RuntimeExecutionContext, ToolExecutionGrant};
 use lash_core_store::checkpoint_graph::{GraphStaging, NodeId};
-use lash_kernel_doc::{Datum, EffectId, EffectName, ErrorDatum};
+use lash_core_store::tool_surface::{ExecutionEnvironment, UseBinding};
+use lash_kernel_doc::{Datum, ErrorDatum};
+
 use lash_kernel_vm::{EffectRequest, Outcome};
 use lash_protocol_types::sync::MutexExt;
 use lash_vm_broker::kernel::graph::{FrozenRequest, Projections};
@@ -38,7 +40,8 @@ use lash_vm_broker::kernel::{
     datum_to_json, outcome_of,
 };
 use lash_vm_broker::{MemberDraft, ParentFault};
-use lash_vm_runtime::HostBoundary;
+use lash_vocabulary::names::OperationUse;
+use lash_vocabulary::sites::EffectId;
 
 use super::envelope::CellEnvelope;
 use super::host_graph::{HostState, PrintEvent, ProcessEvent};
@@ -64,7 +67,8 @@ pub const UNKNOWN_EFFECT: &str = "unknown_effect";
 #[derive(Clone, Debug)]
 pub(super) struct LedgerCall {
     /// The effect the cell performed, as its source names it.
-    pub operation: EffectName,
+    pub operation: OperationUse,
+    pub control: bool,
     /// Where the cell performed it.
     pub effect: EffectId,
     pub state: LedgerCallState,
@@ -96,10 +100,8 @@ impl LedgerCall {
         }
     }
 
-    fn control(&self, boundary: &HostBoundary) -> bool {
-        boundary
-            .effect(&self.operation)
-            .is_some_and(|(_, offered)| !offered.controls.is_empty())
+    fn control(&self) -> bool {
+        self.control
     }
 }
 
@@ -119,10 +121,10 @@ impl CellHostLedgers {
     /// What `max_tool_calls` counts of the cell: its admitted calls and its
     /// reads. The cell's one control attempt is not counted: a cell at the
     /// limit can still end its turn.
-    pub(super) fn counted(&self, boundary: &HostBoundary) -> usize {
+    pub(super) fn counted(&self) -> usize {
         self.calls
             .iter()
-            .filter(|call| !call.control(boundary))
+            .filter(|call| !call.control())
             .count()
             .saturating_add(usize::try_from(self.reads).unwrap_or(usize::MAX))
     }
@@ -141,11 +143,10 @@ impl CellHostLedgers {
     /// as. `None` when the call failed or its body gave no control.
     pub(super) fn settled_control(
         &self,
-        boundary: &HostBoundary,
     ) -> Option<(&lash_core::ToolCallRecord, &lash_core::TurnControl)> {
         self.calls
             .iter()
-            .filter(|call| call.control(boundary))
+            .filter(|call| call.control())
             .find_map(|call| {
                 let record = call.record()?;
                 if !record.output.is_success() {
@@ -189,10 +190,9 @@ impl CellHostLedgers {
 pub(super) struct CellHost<'run> {
     pub ctx: RuntimeExecutionContext<'run>,
     /// The effects the cell was lowered against.
-    pub boundary: HostBoundary,
+    pub execution: lash_core_store::resolutions::ExecutionId,
     /// The grants the session's deferred resolutions recorded, for a tool
     /// outside the catalog.
-    pub grants: BTreeMap<lash_core::ToolId, ToolExecutionGrant>,
     /// The cell's admitted calls, by call: what their bodies run.
     pub members: Arc<CellMembers>,
     pub opener: lash_core::EffectOpener,
@@ -203,7 +203,7 @@ pub(super) struct CellHost<'run> {
     pub trace: Option<super::trace::CellTrace>,
     /// The effect identity each open call was performed at: where its
     /// terminal fact is published.
-    pub sites: Mutex<BTreeMap<lash_core::ToolCallId, lash_kernel_doc::EffectId>>,
+    pub sites: Mutex<BTreeMap<lash_core::ToolCallId, lash_vocabulary::sites::EffectId>>,
     /// What every park commits of the cell beside the ledgers and prints.
     pub envelope: CellEnvelope,
     /// The cell's host state as graph nodes, as its last park left it.
@@ -248,10 +248,7 @@ pub(super) fn tool_failed(failure: &lash_core::ToolFailure) -> ErrorDatum {
 }
 
 /// The refusal of a control call, carrying its typed cause as data.
-fn control_refused(
-    effect: &lash_kernel_doc::EffectName,
-    cause: lash_core::ToolFailureCause,
-) -> ErrorDatum {
+fn control_refused(effect: &OperationUse, cause: lash_core::ToolFailureCause) -> ErrorDatum {
     let message = match &cause {
         lash_core::ToolFailureCause::ControlFromSpawnedTask => format!(
             "`{effect}` ends the turn, so only the cell's main flow may call it: await it directly, not inside a concurrent task"
@@ -278,68 +275,113 @@ impl CellHost<'_> {
 
     /// The tool call `request` makes under `call`, frozen from the
     /// guest's own arguments, or the error its `perform` raises.
+    async fn operation(
+        &self,
+        use_: OperationUse,
+    ) -> Result<
+        Result<
+            (
+                lash_core::OperationRoute,
+                lash_vocabulary::operations::ContractId,
+                lash_core::TurnControls,
+            ),
+            ErrorDatum,
+        >,
+        ParentFault,
+    > {
+        match self.envelope.environment.uses.get(&use_) {
+            Some(UseBinding::Fixed(operation)) => Ok(Ok((
+                operation.route.clone(),
+                operation.requirement.contract.clone(),
+                operation.offer.controls.clone(),
+            ))),
+            Some(UseBinding::Deferred(_)) => {
+                let result = crate::deferred::resolve_use(
+                    &self.ctx,
+                    &self.execution,
+                    &self.envelope.environment,
+                    &self.envelope.inspection,
+                    use_,
+                )
+                .await;
+                let record = match result {
+                    Ok(lash_core::facade_support::CommittedUse::Ready(record)) => record,
+                    Ok(lash_core::facade_support::CommittedUse::Parked { unmet, .. }) => {
+                        let message = format!("resolved target requires {unmet}");
+                        self.ctx.record_nested_runtime_effect_error(
+                            lash_core::RuntimeEffectControllerError::new(
+                                lash_core::RuntimeErrorCode::LashVmCellBindingDrift,
+                                message.clone(),
+                            ),
+                        );
+                        return Err(ParentFault(message));
+                    }
+                    Err(error) => {
+                        let fault = ParentFault(error.to_string());
+                        self.ctx.record_nested_effect_error(
+                            lash_core::RuntimeEffectControllerError::retryable_response_derivation(
+                                error.to_string(),
+                            ),
+                        );
+                        return Err(fault);
+                    }
+                };
+                if let Some(execution) = self.ctx.linked_execution() {
+                    execution
+                        .resolutions
+                        .lock_recover()
+                        .insert(use_, record.entry.clone());
+                }
+                Ok(match record.entry {
+                    lash_core_store::resolutions::ResolutionEntry::Resolved {
+                        definition,
+                        contract,
+                        route,
+                        ..
+                    } => Ok((
+                        *route,
+                        contract,
+                        definition.manifest.declaration().controls.clone(),
+                    )),
+                    lash_core_store::resolutions::ResolutionEntry::Refused { note } => {
+                        Err(refused("tool_refused", note))
+                    }
+                    lash_core_store::resolutions::ResolutionEntry::Unavailable { note } => {
+                        Err(refused(
+                            "tool_unavailable",
+                            note.unwrap_or_else(|| "the operation is unavailable".into()),
+                        ))
+                    }
+                })
+            }
+            None => Ok(Err(refused(
+                UNKNOWN_EFFECT,
+                format!("the execution has no use {use_:?}"),
+            ))),
+        }
+    }
+
     fn tool_call(
         &self,
         request: &EffectRequest,
         call: lash_core::ToolCallId,
+        route: &lash_core::OperationRoute,
+        contract: lash_vocabulary::operations::ContractId,
     ) -> Result<(ToolInvocation, CellCall, FrozenRequest), ErrorDatum> {
-        if let Some(note) = self.envelope.unavailable_notes.get(request.effect.as_str()) {
-            return Err(refused(
-                UNKNOWN_EFFECT,
-                format!("this session cannot offer `{}`: {note}", request.effect),
-            ));
-        }
-        let tool = self.boundary.tool(&request.effect).ok_or_else(|| {
-            refused(
-                UNKNOWN_EFFECT,
-                format!("this session offers no `{}`", request.effect),
-            )
-        })?;
-        // The frozen request holds the arguments as they left the cell:
-        // data, each function in them already a function value.
+        let grant = self
+            .ctx
+            .operation_grant(route, &contract)
+            .map_err(|failure| tool_failed(&failure))?;
         let args = CellArgs
             .args(&request.args)
-            .map_err(|refusal| refusal.error(&request.effect))?;
-        // The call is pinned to the contract the cell's code requires of
-        // the operation, as the cell was lowered against it.
-        let contract = self
-            .boundary
-            .effect(&request.effect)
-            .map(|(_, offered)| offered.requirement.contract.clone())
-            .ok_or_else(|| {
-                refused(
-                    UNKNOWN_EFFECT,
-                    format!("this session offers no `{}`", request.effect),
-                )
-            })?;
-        let mut invocation = self.invocation(request, call, tool, args);
-        invocation.contract = Some(contract.clone());
+            .map_err(|refusal| refusal.error(&request.use_))?;
+        let invocation = ToolInvocation::new(call, route.tool.clone(), args)
+            .with_issuing_language_node_id(request.identity.position().to_string())
+            .with_execution_grant(grant);
         let cell = CellCall::of(&invocation, contract);
         let frozen = FrozenRequest::tool(cell.clone(), request.args.clone(), &CellArgs)
             .map_err(|refusal| refused(TOOL_ARGUMENTS, refusal.to_string()))?;
         Ok((invocation, cell, frozen))
-    }
-
-    /// The invocation of `tool` under `call`, with the grant a tool outside
-    /// the catalog runs under.
-    fn invocation(
-        &self,
-        request: &EffectRequest,
-        call: lash_core::ToolCallId,
-        tool: lash_core::ToolId,
-        args: serde_json::Value,
-    ) -> ToolInvocation {
-        let mut invocation = ToolInvocation::new(call, tool, args)
-            .with_issuing_language_node_id(request.identity.position().to_string());
-        if self
-            .ctx
-            .callable_tool_manifest_by_id(&invocation.tool_id)
-            .is_none()
-            && let Some(grant) = self.grants.get(&invocation.tool_id)
-        {
-            invocation = invocation.with_execution_grant(grant.clone());
-        }
-        invocation
     }
 }
 
@@ -351,7 +393,7 @@ pub(super) enum ArgsRefusal {
 
 impl ArgsRefusal {
     /// The error a `perform` of `effect` with these arguments raises.
-    pub(super) fn error(self, effect: &EffectName) -> ErrorDatum {
+    pub(super) fn error(self, effect: &OperationUse) -> ErrorDatum {
         refused(
             TOOL_ARGUMENTS,
             match self {
@@ -423,7 +465,11 @@ impl KernelEffects for CellHost<'_> {
         outstanding: u64,
         live: u64,
     ) -> Result<Result<MemberDraft, ErrorDatum>, ParentFault> {
-        let (invocation, cell, frozen) = match self.tool_call(request, call) {
+        let (route, contract, controls) = match self.operation(request.use_).await? {
+            Ok(operation) => operation,
+            Err(error) => return Ok(Err(error)),
+        };
+        let (invocation, cell, frozen) = match self.tool_call(request, call, &route, contract) {
             Ok(called) => called,
             Err(refusal) => return Ok(Err(refusal)),
         };
@@ -431,45 +477,40 @@ impl KernelEffects for CellHost<'_> {
         // it settles, so it is admitted only where the run can end on it:
         // from `main`, with no task outstanding, and once per cell. The
         // refusal comes before the body runs.
-        let control = self
-            .boundary
-            .effect(&request.effect)
-            .is_some_and(|(_, offered)| !offered.controls.is_empty());
+        let control = !controls.is_empty();
         // A cancelled call ends the cell whatever its program made of the
         // error, and so does the turn's own cancel: nothing after either
         // ends the turn in its place.
         if control && (self.ledgers.lock_recover().call_cancelled() || self.ctx.is_cancelled()) {
             return Ok(Err(refused(
                 EFFECT_CANCELLED,
-                format!(
-                    "`{}` was not called: the turn was cancelled",
-                    request.effect
-                ),
+                format!("`{}` was not called: the turn was cancelled", request.use_),
             )));
         }
         if control {
-            let cause = if !lash_kernel_doc::ObservationReader::is_root_task(&request.identity) {
-                Some(lash_core::ToolFailureCause::ControlFromSpawnedTask)
-            } else if outstanding > 0 || live > 0 {
-                Some(lash_core::ToolFailureCause::ControlWithOutstandingTasks)
-            } else if self
-                .ledgers
-                .lock_recover()
-                .calls
-                .iter()
-                .any(|call| call.control(&self.boundary))
-            {
-                Some(lash_core::ToolFailureCause::ControlAttemptSpent)
-            } else {
-                None
-            };
+            let cause =
+                if !lash_vocabulary::sites::ObservationReader::is_root_task(&request.identity) {
+                    Some(lash_core::ToolFailureCause::ControlFromSpawnedTask)
+                } else if outstanding > 0 || live > 0 {
+                    Some(lash_core::ToolFailureCause::ControlWithOutstandingTasks)
+                } else if self
+                    .ledgers
+                    .lock_recover()
+                    .calls
+                    .iter()
+                    .any(|call| call.control())
+                {
+                    Some(lash_core::ToolFailureCause::ControlAttemptSpent)
+                } else {
+                    None
+                };
             if let Some(cause) = cause {
-                return Ok(Err(control_refused(&request.effect, cause)));
+                return Ok(Err(control_refused(&request.use_, cause)));
             }
         }
         {
             let mut ledgers = self.ledgers.lock_recover();
-            let counted = ledgers.counted(&self.boundary);
+            let counted = ledgers.counted();
             if !control && counted.saturating_add(1) > self.ctx.max_tool_calls().get() {
                 let exceeded = lash_core::ToolCallLimitExceeded {
                     scope: lash_core::ToolCallLimitScope::Cell,
@@ -482,7 +523,8 @@ impl KernelEffects for CellHost<'_> {
                 return Ok(Err(refused(TOOL_CALL_LIMIT, exceeded.to_string())));
             }
             ledgers.calls.push(LedgerCall {
-                operation: request.effect.clone(),
+                control,
+                operation: request.use_.clone(),
                 effect: request.identity.clone(),
                 state: LedgerCallState::Pending {
                     call_id: invocation.id.clone(),
@@ -632,7 +674,7 @@ impl KernelEffects for CellHost<'_> {
             let Some(admission) = graph.admissions.get(call.call_id()).copied() else {
                 break;
             };
-            let control = call.control(&self.boundary);
+            let control = call.control();
             graph.state.admit(
                 call.effect.clone(),
                 call.operation.clone(),
@@ -691,38 +733,12 @@ impl KernelEffects for CellHost<'_> {
         };
         let host = graph.state.stage(staging, reads).map_err(fault)?;
         graph.staged = Some(staged);
-        // Every match the cell committed stays owed while it is parked: a
-        // later call may run on it. So does the reader of every provider
-        // its read plan reads through: a later statement may read.
-        let owed = self
-            .envelope
-            .grants
-            .values()
-            .flat_map(lash_core::ToolExecutionGrant::callbacks)
-            .chain(
-                self.envelope
-                    .reads
-                    .values()
-                    .map(lash_core::ProviderKey::reads_identity),
-            )
-            .collect::<BTreeSet<_>>()
-            .into_iter()
+        let links = self.envelope.environment.requirements.clone();
+        let owed = links
+            .callbacks
+            .iter()
+            .map(|requirement| requirement.callback.clone())
             .collect();
-        // What the cell's links require of a node that resumes it: the
-        // reader of every provider its read plan reads through (FIG-6985),
-        // and the provider and codec version of every match it committed,
-        // which a later call of the parked cell runs on (FIG-6993). A match
-        // joins the record with the commit that adds it to the envelope.
-        let mut links = lash_kernel_doc::ExecutionRequirements::default();
-        links.providers.extend(
-            self.envelope
-                .reads
-                .values()
-                .map(lash_core_store::tool_surface::provider_key),
-        );
-        for grant in self.envelope.grants.values() {
-            grant.link().require(&mut links);
-        }
         Ok(HostParts {
             host: Some(host),
             envelope: Some(envelope),
@@ -739,7 +755,7 @@ impl KernelEffects for CellHost<'_> {
     }
 
     fn plans_reads(&self) -> bool {
-        !self.envelope.reads.is_empty()
+        self.envelope.environment.uses.values().any(|binding| matches!(binding, UseBinding::Fixed(operation) if operation.offer.mode == lash_vocabulary::package::OperationMode::Read))
     }
 
     fn held_response(&self) -> Option<&lash_core::HeldResponse> {

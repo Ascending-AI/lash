@@ -3,10 +3,9 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use lash_kernel_doc::{
-    FunctionCatalog, FunctionDefinition, FunctionId, FunctionName, FunctionRegistry, Manifest,
-    RegisteredFunction, performed_by,
-};
+use lash_kernel_doc::{FunctionCatalog, FunctionDefinition, FunctionRegistry, RegisteredFunction};
+
+use lash_vocabulary::{FunctionId, FunctionName};
 
 /// One function per name: the choice of identities a front end lowers
 /// against.
@@ -19,23 +18,13 @@ pub trait Library: FunctionCatalog + Send + Sync {
     fn resolve(&self, name: &str) -> Option<FunctionId>;
 }
 
-/// Lists in `manifest` what the bodies of the functions it lists perform,
-/// each under what the body requires of it (`K-DOC-002`). An effect the
-/// document's own code performs keeps the manifest's requirement: admission
-/// refuses one name under two (`ADM-REQUIREMENT`).
-pub fn require_through_bodies(manifest: &mut Manifest, catalog: &dyn FunctionCatalog) {
-    for (effect, bodies) in performed_by(catalog, manifest.functions.keys().copied()) {
-        if let Some(requirement) = bodies.into_values().next() {
-            manifest
-                .effects
-                .entry(effect)
-                .or_insert_with(|| requirement.clone());
-        }
-    }
-}
-
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 pub enum LibraryError {
+    #[error("helpers `{first}` and `{second}` project to the same package member")]
+    ImportCollision {
+        first: FunctionName,
+        second: FunctionName,
+    },
     #[error("`{name}` is already defined as {function}")]
     NameTaken {
         name: FunctionName,
@@ -130,9 +119,32 @@ impl NamedLibrary {
                 function: taken,
             });
         }
+        if !definition.has_native() {
+            let projected = crate::authoring::helper_name(&definition.name);
+            for (name, id) in self.iter() {
+                if self.header(&id).is_some_and(|header| !header.has_native()) {
+                    let name = FunctionName::new(name).expect("registered qualified name");
+                    if crate::authoring::helper_name(&name) == projected {
+                        return Err(LibraryError::ImportCollision {
+                            first: name,
+                            second: definition.name.clone(),
+                        });
+                    }
+                }
+            }
+        }
         self.inserted.insert(definition.name.clone(), function);
         self.definitions.insert(function, definition);
         Ok(function)
+    }
+
+    /// Anonymous local bodies are loaded by identity and are never exposed
+    /// through the name resolver or a helper package member.
+    pub fn insert_local(&mut self, definition: impl Into<Arc<FunctionDefinition>>) -> FunctionId {
+        let definition = definition.into();
+        let id = definition.identity();
+        self.definitions.insert(id, definition);
+        id
     }
 
     /// Every function a name resolves to, ordered by name.

@@ -19,9 +19,11 @@ use std::fmt::Write as _;
 
 use lash_kernel_doc::arena::ArenaHandle;
 use lash_kernel_doc::{
-    ActKind, Action, Atom, Callee, Expr, FunctionDefinition, FunctionId, Literal, Member, Name,
-    Node, Place, Rhs, Stmt, TryStmt, Value, ValueKind,
+    ActKind, Action, Atom, Callee, Expr, FunctionDefinition, Literal, Member, Node, Place, Rhs,
+    Stmt, TryStmt, Value, ValueKind,
 };
+
+use lash_vocabulary::{FunctionId, Name};
 
 use crate::library::Library;
 
@@ -444,46 +446,33 @@ struct Evaluator<'a> {
 
 /// Every name a closure in `block` uses that it does not declare itself,
 /// as a parameter or a variable: the names it may capture.
-fn captured(block: &[Stmt]) -> std::collections::BTreeSet<Name> {
-    use std::collections::BTreeSet;
-    /// The names `node` mentions, and those it declares.
-    fn names(node: Node<'_>, used: &mut BTreeSet<Name>, declared: &mut BTreeSet<Name>) {
-        match node {
-            Node::Expr(Expr::Variable(name))
-            | Node::Stmt(Stmt::Assign {
-                place: Place::Variable(name),
-                ..
-            }) => {
-                used.insert(name.clone());
-            }
-            Node::Stmt(Stmt::Let { name, .. }) => {
-                declared.insert(name.clone());
-            }
-            Node::Action(Action::Call { args, .. }) => {
-                used.extend(args.iter().filter_map(|arg| match arg {
-                    Atom::Variable(name) => Some(name.clone()),
-                    Atom::Literal(_) => None,
-                }));
-            }
-            _ => {}
-        }
-        for child in node.children() {
-            names(child, used, declared);
-        }
-    }
-    fn walk(node: Node<'_>, captured: &mut BTreeSet<Name>) {
+fn captured(block: &[Stmt], library: &Library) -> std::collections::BTreeSet<Name> {
+    let mut captured = std::collections::BTreeSet::new();
+    let mut pending = vec![Node::Block(block)];
+    while let Some(node) = pending.pop() {
         if let Node::Expr(Expr::Closure(closure)) = node {
-            let (mut used, mut declared) = (BTreeSet::new(), BTreeSet::new());
-            declared.extend(closure.params.iter().cloned());
-            names(Node::Block(&closure.body), &mut used, &mut declared);
-            captured.extend(used.difference(&declared).cloned());
+            let definition = library
+                .definition(&closure.function)
+                .expect("validated local closure definition");
+            if let Some(body) = definition.body() {
+                let params = definition
+                    .signature
+                    .params
+                    .iter()
+                    .map(|param| param.name.clone())
+                    .collect::<Vec<_>>();
+                captured.extend(
+                    lash_kernel_doc::snapshot::CodeReads::of(
+                        &params,
+                        &body.block,
+                        &library.registry,
+                    )
+                    .free,
+                );
+            }
         }
-        for child in node.children() {
-            walk(child, captured);
-        }
+        pending.extend(node.children());
     }
-    let mut captured = BTreeSet::new();
-    walk(Node::Block(block), &mut captured);
     captured
 }
 
@@ -557,7 +546,7 @@ impl Evaluator<'_> {
         match rhs {
             Rhs::Expr(expr) => self.expr(expr, state, depth),
             Rhs::Action(Action::Call {
-                callee: Callee::Library(function),
+                callee: Callee::Local(function),
                 args,
             }) => {
                 let args = args
@@ -614,7 +603,7 @@ impl Evaluator<'_> {
                 self.call(*function, args, state, depth)
             }
             Expr::Act(act) => {
-                let ActKind::Call(Callee::Library(function)) = act.kind else {
+                let ActKind::Call(Callee::Local(function)) = act.kind else {
                     return None;
                 };
                 let args = act
@@ -702,11 +691,11 @@ impl Evaluator<'_> {
     /// The kind a call of `definition` answers, from its signature.
     fn result_kind(&self, definition: &FunctionDefinition) -> Option<ValueKind> {
         match definition.signature.result {
-            lash_kernel_doc::Type::Bool => Some(ValueKind::Bool),
-            lash_kernel_doc::Type::Float => Some(ValueKind::Float),
-            lash_kernel_doc::Type::Int => Some(ValueKind::Int),
-            lash_kernel_doc::Type::Text if !self.heap => Some(ValueKind::Text),
-            lash_kernel_doc::Type::Null => Some(ValueKind::Null),
+            lash_vocabulary::Type::Bool => Some(ValueKind::Bool),
+            lash_vocabulary::Type::Float => Some(ValueKind::Float),
+            lash_vocabulary::Type::Int => Some(ValueKind::Int),
+            lash_vocabulary::Type::Text if !self.heap => Some(ValueKind::Text),
+            lash_vocabulary::Type::Null => Some(ValueKind::Null),
             _ => None,
         }
     }
@@ -727,9 +716,9 @@ impl Evaluator<'_> {
         let counts = kind == Some(ValueKind::Int) && args.iter().all(|arg| !immediate(arg.kind));
         let number = matches!(
             definition.signature.result,
-            lash_kernel_doc::Type::Int
-                | lash_kernel_doc::Type::Float
-                | lash_kernel_doc::Type::Number
+            lash_vocabulary::Type::Int
+                | lash_vocabulary::Type::Float
+                | lash_vocabulary::Type::Number
         ) && args.iter().all(|arg| immediate(arg.kind));
         let builds = !matches!(kind, Some(ValueKind::Bool | ValueKind::Null)) && !counts && !number;
         let helper = definition.name.as_str().starts_with("py.")
@@ -737,11 +726,11 @@ impl Evaluator<'_> {
         let arena = !helper
             || !matches!(
                 definition.signature.result,
-                lash_kernel_doc::Type::Bool
-                    | lash_kernel_doc::Type::Int
-                    | lash_kernel_doc::Type::Float
-                    | lash_kernel_doc::Type::Number
-                    | lash_kernel_doc::Type::Null
+                lash_vocabulary::Type::Bool
+                    | lash_vocabulary::Type::Int
+                    | lash_vocabulary::Type::Float
+                    | lash_vocabulary::Type::Number
+                    | lash_vocabulary::Type::Null
             );
         let form = Form::Call {
             callee: self.heap_callee(function),
@@ -842,7 +831,7 @@ impl Evaluator<'_> {
             + args.iter().map(|arg| arg.calls).sum::<usize>();
         let name = self.fresh();
         let result = &definition.signature.result;
-        let reserved = matches!(result, lash_kernel_doc::Type::Text);
+        let reserved = matches!(result, lash_vocabulary::Type::Text);
         state.steps.push(
             if self.heap && (reserved || !args.iter().all(|arg| immediate(arg.kind))) {
                 // An operand the entry may decline, or a text whose room
@@ -854,11 +843,11 @@ impl Evaluator<'_> {
                     args: codes(&args),
                     builds: !matches!(
                         result,
-                        lash_kernel_doc::Type::Bool
-                            | lash_kernel_doc::Type::Int
-                            | lash_kernel_doc::Type::Float
-                            | lash_kernel_doc::Type::Number
-                            | lash_kernel_doc::Type::Null
+                        lash_vocabulary::Type::Bool
+                            | lash_vocabulary::Type::Int
+                            | lash_vocabulary::Type::Float
+                            | lash_vocabulary::Type::Number
+                            | lash_vocabulary::Type::Null
                     ),
                 }
             } else {
@@ -1116,8 +1105,8 @@ fn codes(symbols: &[Symbol]) -> String {
 }
 
 /// Whether a parameter of type `ty` takes a value of `kind`.
-fn accepts(ty: &lash_kernel_doc::Type, kind: ValueKind) -> bool {
-    use lash_kernel_doc::Type;
+fn accepts(ty: &lash_vocabulary::Type, kind: ValueKind) -> bool {
+    use lash_vocabulary::Type;
     match ty {
         Type::Any => true,
         Type::Null => kind == ValueKind::Null,
@@ -1279,7 +1268,7 @@ impl Evaluator<'_> {
                         // The path's answer owns its budget: an Any-returning
                         // operator may have both numeric and textual arms.
                         let most = if self.heap
-                            || definition.signature.result == lash_kernel_doc::Type::Text
+                            || definition.signature.result == lash_vocabulary::Type::Text
                             || value.kind == Some(ValueKind::Text)
                         {
                             PATH_CALLS
@@ -1466,7 +1455,7 @@ pub(crate) fn emit(
         heap_callees: Vec::new(),
         used: 0,
         heap: false,
-        captured: captured(&definition.body()?.block),
+        captured: captured(&definition.body()?.block, library),
     };
     let scalar = evaluator.pass(definition, &IMMEDIATE)?;
     // A helper whose native an embedder installs answers through it where

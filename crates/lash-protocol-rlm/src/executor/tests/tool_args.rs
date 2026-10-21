@@ -10,7 +10,7 @@ struct KeepsArgs {
     received: std::sync::Mutex<Option<serde_json::Value>>,
 }
 
-fn search() -> lash_core::ToolDefinition {
+fn search() -> lash_vocabulary::tool_contract::ToolDefinition {
     definition("tool:search_run", "search.run")
 }
 
@@ -20,7 +20,7 @@ impl lash_core::ToolProvider for KeepsArgs {
         &self,
         _config: &lash_core::OwnerConfigView,
     ) -> std::result::Result<
-        Vec<lash_core::ToolManifest>,
+        Vec<lash_vocabulary::tool_contract::ToolManifest>,
         lash_execution_contracts::plugin_error::PluginError,
     > {
         Ok(vec![search().manifest()])
@@ -30,7 +30,7 @@ impl lash_core::ToolProvider for KeepsArgs {
         &self,
         name: &str,
         _config: &lash_core::OwnerConfigView,
-    ) -> Option<Arc<lash_core::ToolContract>> {
+    ) -> Option<Arc<lash_vocabulary::tool_contract::ToolContract>> {
         matches!(name, "search.run" | "tool:search_run").then(|| Arc::new(search().contract()))
     }
 

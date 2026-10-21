@@ -430,14 +430,16 @@ fn codex_request_uses_openai_schema_projection() {
     req.tools = Arc::new(vec![LlmToolSpec {
         name: "empty".to_string(),
         description: "Empty".to_string(),
-        input_schema: lash_protocol_types::SchemaContract::admit(json!({"type": "object"}))
-            .expect("valid declared schema"),
-        output_schema: lash_protocol_types::SchemaContract::admit(json!({}))
+        input_schema: lash_vocabulary::schema_contract::SchemaContract::admit(
+            json!({"type": "object"}),
+        )
+        .expect("valid declared schema"),
+        output_schema: lash_vocabulary::schema_contract::SchemaContract::admit(json!({}))
             .expect("valid declared schema"),
     }]);
     req.output_spec = Some(LlmOutputSpec::JsonSchema(LlmJsonSchema {
         name: "result".to_string(),
-        schema: lash_protocol_types::SchemaContract::admit(json!({
+        schema: lash_vocabulary::schema_contract::SchemaContract::admit(json!({
             "type": "object",
             "properties": { "summary": { "type": "string" } }
         }))
@@ -1905,7 +1907,7 @@ fn codex_schema_projection_failure_is_local_validation_error() {
     let mut req = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
     req.output_spec = Some(LlmOutputSpec::JsonSchema(LlmJsonSchema {
         name: "bad".to_string(),
-        schema: lash_protocol_types::SchemaContract::admit(
+        schema: lash_vocabulary::schema_contract::SchemaContract::admit(
             json!({"type": "object", "allOf": [{"type": "object"}, {"type": "object"}]}),
         )
         .expect("valid declared schema"),

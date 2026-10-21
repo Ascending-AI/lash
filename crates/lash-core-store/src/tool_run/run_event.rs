@@ -99,6 +99,8 @@ pub struct CompletionSource {
     /// The process terminal wait a runtime-owned resolver awaits, by its
     /// id's hex.
     pub terminal: Option<String>,
+    /// An ordinary operation's durable timer, by its id's hex.
+    pub timer: Option<String>,
     /// The parked call's pending completion.
     pub metadata: MaterialRef,
 }
@@ -119,7 +121,7 @@ pub enum KnownFailureReason {
     StartRefused,
 }
 
-pub use lash_protocol_types::LimitCause;
+use lash_vocabulary::tool_contract::LimitCause;
 
 /// Only material actually retained before an attempt stopped.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]

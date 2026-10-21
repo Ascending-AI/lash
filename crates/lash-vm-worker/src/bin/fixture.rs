@@ -40,6 +40,7 @@ fn main() {
         mode,
         "protocol_below" | "protocol_above" | "opposite_generation" | "crate_version"
     ) {
+        use lash_protocol_types::engine_fault::{ExecutionLease, FrameEpoch, OwnerEpoch};
         use lash_vm_protocol::*;
         use std::io::Write;
         use std::os::fd::FromRawFd;

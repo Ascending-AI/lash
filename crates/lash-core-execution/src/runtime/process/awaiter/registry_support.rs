@@ -1,5 +1,5 @@
 use super::*;
-use crate::ProcessId;
+use lash_vocabulary::identity::ProcessId;
 
 impl WatchedProcessRegistry {
     /// A commit grew `process_id`'s log: tick this node's change hub, and

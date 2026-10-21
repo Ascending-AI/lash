@@ -17,7 +17,7 @@ async fn core_reads_are_gone(core: lash::LashCore) {
 // Observation stream carries the outcome instead.
 async fn queued_work_wait_is_gone(durable: lash::DurableSession) {
     let _ = durable
-        .await_queued_work_batch(&lash::BatchId::from("qwb:batch"))
+        .await_queued_work_batch(&lash_vocabulary::identity::BatchId::from("qwb:batch"))
         .await;
 }
 

@@ -3,7 +3,7 @@
   "cases": [
     {
       "name": "arithmetic refuses true",
-      "document": "kernel 1\nnumbers by_spelling\nuse add = @7e4f2312e59326d1b501e7b4d092549da7b8db86c07ada94902ee61f3317b537\nmain { let x = 1 set x = true try { print add(x, 1) } catch e { finish e.kind } finish null }\n",
+      "document": "kernel 1\nnumbers by_spelling\nnative @c00cf80881ccac569a1263a3b0a9c6589c0a0f75e1902fe5453b77b86427afef\ndefinition \"function add(arg0: Number, arg1: Number) -> Number\\nkernel 1\\nerrors \\\"arity\\\", \\\"number_range\\\", \\\"type_error\\\"\\ncharge sum(1, sum(deep(arg0), deep(arg1)), deep(result))\\nnative\\n\"\nmain {\n  let x = 1\n  set x = true\n  try {\n    print add(x, 1)\n  } catch e {\n    finish e.kind\n  }\n  finish null\n}\n",
       "expected": {
         "prints": [],
         "trace": [],
@@ -16,7 +16,7 @@
     },
     {
       "name": "numeric ordering refuses true",
-      "document": "kernel 1\nnumbers by_spelling\nuse num.lt = @34ca055d8b47010f1540ce16c398577f9b6a83e19896e062035424e4f5c8624e\nmain { let x = 1 set x = true try { print num.lt(x, 1) } catch e { finish e.kind } finish null }\n",
+      "document": "kernel 1\nnumbers by_spelling\nnative @1c50cd669ab12c8c1448a422ad8da57414f9cecb204e2761bf3ed6de239dc2f0\ndefinition \"function num.lt(arg0: Number, arg1: Number) -> Bool\\nkernel 1\\nerrors \\\"arity\\\", \\\"type_error\\\"\\ncharge sum(1, product(sum(deep(arg0), deep(arg1)), sum(deep(arg0), deep(arg1))), deep(result))\\nnative\\n\"\nmain {\n  let x = 1\n  set x = true\n  try {\n    print num.lt(x, 1)\n  } catch e {\n    finish e.kind\n  }\n  finish null\n}\n",
       "expected": {
         "prints": [],
         "trace": [],
@@ -29,7 +29,7 @@
     },
     {
       "name": "arithmetic refuses \"1\"",
-      "document": "kernel 1\nnumbers by_spelling\nuse add = @7e4f2312e59326d1b501e7b4d092549da7b8db86c07ada94902ee61f3317b537\nmain { let x = 1 set x = \"1\" try { print add(x, 1) } catch e { finish e.kind } finish null }\n",
+      "document": "kernel 1\nnumbers by_spelling\nnative @c00cf80881ccac569a1263a3b0a9c6589c0a0f75e1902fe5453b77b86427afef\ndefinition \"function add(arg0: Number, arg1: Number) -> Number\\nkernel 1\\nerrors \\\"arity\\\", \\\"number_range\\\", \\\"type_error\\\"\\ncharge sum(1, sum(deep(arg0), deep(arg1)), deep(result))\\nnative\\n\"\nmain {\n  let x = 1\n  set x = \"1\"\n  try {\n    print add(x, 1)\n  } catch e {\n    finish e.kind\n  }\n  finish null\n}\n",
       "expected": {
         "prints": [],
         "trace": [],
@@ -42,7 +42,7 @@
     },
     {
       "name": "numeric ordering refuses \"1\"",
-      "document": "kernel 1\nnumbers by_spelling\nuse num.lt = @34ca055d8b47010f1540ce16c398577f9b6a83e19896e062035424e4f5c8624e\nmain { let x = 1 set x = \"1\" try { print num.lt(x, 1) } catch e { finish e.kind } finish null }\n",
+      "document": "kernel 1\nnumbers by_spelling\nnative @1c50cd669ab12c8c1448a422ad8da57414f9cecb204e2761bf3ed6de239dc2f0\ndefinition \"function num.lt(arg0: Number, arg1: Number) -> Bool\\nkernel 1\\nerrors \\\"arity\\\", \\\"type_error\\\"\\ncharge sum(1, product(sum(deep(arg0), deep(arg1)), sum(deep(arg0), deep(arg1))), deep(result))\\nnative\\n\"\nmain {\n  let x = 1\n  set x = \"1\"\n  try {\n    print num.lt(x, 1)\n  } catch e {\n    finish e.kind\n  }\n  finish null\n}\n",
       "expected": {
         "prints": [],
         "trace": [],
@@ -55,7 +55,7 @@
     },
     {
       "name": "arithmetic refuses null",
-      "document": "kernel 1\nnumbers by_spelling\nuse add = @7e4f2312e59326d1b501e7b4d092549da7b8db86c07ada94902ee61f3317b537\nmain { let x = 1 set x = null try { print add(x, 1) } catch e { finish e.kind } finish null }\n",
+      "document": "kernel 1\nnumbers by_spelling\nnative @c00cf80881ccac569a1263a3b0a9c6589c0a0f75e1902fe5453b77b86427afef\ndefinition \"function add(arg0: Number, arg1: Number) -> Number\\nkernel 1\\nerrors \\\"arity\\\", \\\"number_range\\\", \\\"type_error\\\"\\ncharge sum(1, sum(deep(arg0), deep(arg1)), deep(result))\\nnative\\n\"\nmain {\n  let x = 1\n  set x = null\n  try {\n    print add(x, 1)\n  } catch e {\n    finish e.kind\n  }\n  finish null\n}\n",
       "expected": {
         "prints": [],
         "trace": [],
@@ -68,7 +68,7 @@
     },
     {
       "name": "numeric ordering refuses null",
-      "document": "kernel 1\nnumbers by_spelling\nuse num.lt = @34ca055d8b47010f1540ce16c398577f9b6a83e19896e062035424e4f5c8624e\nmain { let x = 1 set x = null try { print num.lt(x, 1) } catch e { finish e.kind } finish null }\n",
+      "document": "kernel 1\nnumbers by_spelling\nnative @1c50cd669ab12c8c1448a422ad8da57414f9cecb204e2761bf3ed6de239dc2f0\ndefinition \"function num.lt(arg0: Number, arg1: Number) -> Bool\\nkernel 1\\nerrors \\\"arity\\\", \\\"type_error\\\"\\ncharge sum(1, product(sum(deep(arg0), deep(arg1)), sum(deep(arg0), deep(arg1))), deep(result))\\nnative\\n\"\nmain {\n  let x = 1\n  set x = null\n  try {\n    print num.lt(x, 1)\n  } catch e {\n    finish e.kind\n  }\n  finish null\n}\n",
       "expected": {
         "prints": [],
         "trace": [],

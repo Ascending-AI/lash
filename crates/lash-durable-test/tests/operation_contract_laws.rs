@@ -50,12 +50,12 @@ enum Change {
     Retried,
 }
 
-fn probe_definition(change: Change) -> lash_core::ToolDefinition {
+fn probe_definition(change: Change) -> lash_vocabulary::tool_contract::ToolDefinition {
     let mut input = serde_json::json!({ "type": "object", "additionalProperties": true });
     if change == Change::Retyped {
         input["properties"] = serde_json::json!({ "label": { "type": "integer" } });
     }
-    lash_core::ToolDefinition::raw(
+    lash_vocabulary::tool_contract::ToolDefinition::raw(
         format!("tool:{PROBE}"),
         format!("tools.{PROBE}"),
         if change == Change::Reworded {
@@ -69,9 +69,9 @@ fn probe_definition(change: Change) -> lash_core::ToolDefinition {
     .expect("the probe's schemas")
     .with_execution(std::time::Duration::from_secs(120))
     .with_execution_policy(if change == Change::Retried {
-        lash_core::ExecutionPolicy::Once
+        lash_vocabulary::tool_contract::ExecutionPolicy::Once
     } else {
-        lash_core::ExecutionPolicy::repeatable(
+        lash_vocabulary::tool_contract::ExecutionPolicy::repeatable(
             std::num::NonZeroU32::new(3).expect("three attempts"),
             1,
             1,
@@ -107,7 +107,7 @@ impl lash_core::ToolProvider for Probe {
         &self,
         _config: &lash_core::OwnerConfigView,
     ) -> std::result::Result<
-        Vec<lash_core::ToolManifest>,
+        Vec<lash_vocabulary::tool_contract::ToolManifest>,
         lash_execution_contracts::plugin_error::PluginError,
     > {
         Ok(vec![probe_definition(self.change).manifest()])
@@ -117,7 +117,7 @@ impl lash_core::ToolProvider for Probe {
         &self,
         name: &str,
         _config: &lash_core::OwnerConfigView,
-    ) -> Option<Arc<lash_core::ToolContract>> {
+    ) -> Option<Arc<lash_vocabulary::tool_contract::ToolContract>> {
         (name == format!("tools.{PROBE}"))
             .then(|| Arc::new(probe_definition(self.change).contract()))
     }
@@ -143,8 +143,10 @@ impl lash_core::ToolProvider for Probe {
 }
 
 /// The component that serves the probe to a process body.
-const PROBE_COMPONENT: lash_core::ProcessConfigKey<()> =
-    lash_core::ProcessConfigKey::new("contract-probe", lash_core::FormatVersion::ONE);
+const PROBE_COMPONENT: lash_core::ProcessConfigKey<()> = lash_core::ProcessConfigKey::new(
+    "contract-probe",
+    lash_vocabulary::providers::FormatVersion::ONE,
+);
 
 /// A core running RLM turns whose processes outlive them, serving the probe
 /// as `change` makes it.
@@ -220,8 +222,10 @@ async fn resumed_under(tier: Tier, change: Change, witness: &Arc<Witness>) -> Op
         .finished()
         .map(|(_, value)| value.clone())
         .unwrap_or_else(|| panic!("the cell finished: {:?}", world.requests(&name).last()));
-    let process = lash_core::ProcessId::parse(finish["process"].as_str().expect("a process id"))
-        .expect("the handle names a process");
+    let process = lash_vocabulary::identity::ProcessId::parse(
+        finish["process"].as_str().expect("a process id"),
+    )
+    .expect("the handle names a process");
     tokio::time::timeout(served::WATCHDOG, async {
         while witness.of("committed").is_empty() {
             tokio::time::sleep(std::time::Duration::from_millis(10)).await;

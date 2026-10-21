@@ -366,6 +366,13 @@ struct LayeredStoreSet {
 }
 
 impl StoreSet for LayeredStoreSet {
+    fn package_store(&self) -> Arc<dyn lash_durable::packages::PackageStore> {
+        self.inner.package_store()
+    }
+    fn execution_resolutions(&self) -> Arc<dyn lash_durable::resolutions::ExecutionResolutions> {
+        self.inner.execution_resolutions()
+    }
+
     fn durable_store(&self) -> Arc<dyn lash_durable::DurableStore> {
         match &self.durable {
             Some(durable) => Arc::clone(durable),

@@ -47,7 +47,7 @@ async fn terminal_process_with_a_tail(
     pauses: &lash_sqlite_store::testing::SqlitePauses,
 ) -> (
     lash_sqlite_store::SqliteStoreSet,
-    lash_protocol_types::ProcessId,
+    lash_vocabulary::identity::ProcessId,
     u64,
 ) {
     let stores = lash_sqlite_store::SqliteStoreSet::open_with_options_and_clock(

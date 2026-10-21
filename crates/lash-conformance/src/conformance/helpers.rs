@@ -311,7 +311,7 @@ pub(crate) fn call_wait_event(
         since_ms: 1,
         kind: crate::WaitKind::Call {
             call_id: lash_core::ToolCallId::fixture(&format!("{label}:{payload}")),
-            tool_id: lash_core::ToolId::new(label),
+            tool_id: lash_vocabulary::tool_contract::ToolId::new(label),
         },
         site: None,
     };

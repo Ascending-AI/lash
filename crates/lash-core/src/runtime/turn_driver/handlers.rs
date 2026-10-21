@@ -759,6 +759,8 @@ impl RuntimeTurnDriver<'_> {
         // Completed activity takes the live window here.
         let cell_started = self.host.core.clock.now();
         self.answered_cell_end = None;
+        self.answered_cell_execution = None;
+        drop(self.cell_end.take_execution());
         drop(self.cell_end.take());
         self.held_response.clone_from(&held);
         let invoked = self
@@ -768,6 +770,10 @@ impl RuntimeTurnDriver<'_> {
         // What the cell left of its end, whether it answers with its result
         // or with a failure met after it ended.
         self.answered_cell_end = self.cell_end.take().map(|ended| (id, ended));
+        self.answered_cell_execution = self
+            .cell_end
+            .take_execution()
+            .map(|execution| (id, execution));
         let result = match invoked {
             Ok(result) => result,
             Err(err) => {
@@ -1115,7 +1121,7 @@ impl RuntimeTurnDriver<'_> {
 
     /// Retain the first start of the cell of effect `id` in `language`, now,
     /// unless the turn retains one for it already.
-    pub(super) fn begin_cell(&mut self, id: crate::EffectId, language: &str) {
+    pub(super) fn begin_cell(&mut self, id: lash_sansio::EffectId, language: &str) {
         if self
             .cell_start
             .as_ref()
@@ -1137,7 +1143,10 @@ impl RuntimeTurnDriver<'_> {
     pub(super) fn discarded_cell(
         &mut self,
         machine: &TurnMachine,
-    ) -> Option<(crate::EffectId, crate::runtime::durable::session::CellClose)> {
+    ) -> Option<(
+        lash_sansio::EffectId,
+        crate::runtime::durable::session::CellClose,
+    )> {
         let start = self.cell_start.take()?;
         let effect = start.effect;
         if !self.trace.is_observed() {
@@ -1226,7 +1235,7 @@ pub(super) fn foreground_exec_graph_key(invocation: &RuntimeInvocation) -> Optio
 /// live feed publishes once (FIG-3753, FIG-6274).
 pub(in crate::runtime) fn model_call_activity(
     controller: &ActorContext,
-    turn: &crate::TurnId,
+    turn: &lash_vocabulary::identity::TurnId,
     call_id: &crate::LlmCallId,
 ) -> crate::TurnActivity {
     let lane = crate::runtime::turn_loop::turn_observation_cursor(
@@ -1293,7 +1302,7 @@ mod tests {
         let process = RuntimeInvocation {
             attribution: RuntimeAttribution::for_turn("session-1", "turn-1", 2, 3),
             subject: lash_core_store::effect_identity::RuntimeSubject::Process {
-                process_id: crate::ProcessId::fixture("process-1"),
+                process_id: lash_vocabulary::identity::ProcessId::fixture("process-1"),
             },
             caused_by: None,
             replay: None,

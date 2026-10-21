@@ -1,6 +1,6 @@
 #[cfg(any(test, feature = "testing"))]
 use crate::PluginError;
-use crate::ProcessId;
+use lash_vocabulary::identity::ProcessId;
 
 use super::model::{ProcessChangeCursor, ProcessRecord};
 pub use super::registry_concerns::{

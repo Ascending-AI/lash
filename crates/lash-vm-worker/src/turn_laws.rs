@@ -18,8 +18,9 @@ use lash_core_store::checkpoint_graph::NodeId;
 use lash_core_store::checkpoint_graph::stage::StageLeaseId;
 use lash_durable::DurableError;
 use lash_durable::domain::pages::{RootLease, StoredPage};
-use lash_kernel_doc::{Datum, EffectName, Name, Param, Signature, Type};
+use lash_kernel_doc::Datum;
 use lash_kernel_vm::{Outcome, Request as RunRequest, Target};
+use lash_protocol_types::engine_fault::{ExecutionLease, FrameEpoch, OwnerEpoch, PayloadKind};
 use lash_vm_broker::kernel::MachinePark;
 use lash_vm_broker::kernel::pages::{
     ActivationPages, CapabilityKey, LeasedReads, PageExchange, PageLimits, SpoolRoot,
@@ -29,6 +30,11 @@ use lash_vm_client::service::{Request, Response};
 use lash_vm_client::wire::{self, OutcomeWire, ParkWire, StartWire};
 use lash_vm_client::{PoolConfig, WorkerEntry};
 use lash_vm_protocol::*;
+use lash_vocabulary::names::EffectName;
+use lash_vocabulary::names::Name;
+use lash_vocabulary::types::Param;
+use lash_vocabulary::types::Signature;
+use lash_vocabulary::types::Type;
 
 /// The dialect the law's cells are written in.
 const DIALECT: &str = lash_vm_releases::TYPESCRIPT;
@@ -140,19 +146,17 @@ impl Parent {
     fn name_hosts(&mut self, document: &[u8]) {
         let document = lash_kernel_doc::IdentifiedDocument::decode(
             document,
-            lash_kernel_doc::KernelDataLimits::standard(),
+            lash_vocabulary::data_limits::KernelDataLimits::standard(),
         )
         .expect("the lowered document");
-        let closure = lash_vm_broker::kernel::closure::derive(
-            document.manifest.functions.keys().copied(),
-            lash_vm_releases::lash_packages()
-                .expect("the parent's packages")
-                .functions(),
-            &std::collections::BTreeMap::new(),
-        )
-        .expect("the parent holds the cell's functions");
+        let embedding =
+            crate::embedding::tests::every_dialect(&Default::default()).expect("embedding");
+        let program = crate::embedding::tests::linked(
+            document.into_document(),
+            embedding.prepared_library().unwrap().clone(),
+        );
         let pages = self.pages.take().expect("a lease's pages");
-        self.pages = Some(pages.with_references([closure.reference(), NodeId(BINDING)]));
+        self.pages = Some(pages.with_references([NodeId(program.closure.0), NodeId(BINDING)]));
     }
 
     /// The worker's answer to `message`, past its progress and its page
@@ -236,27 +240,19 @@ fn lower() -> EncodedPayload {
         dialect: "typescript".into(),
         source: r#"await tools.mark({ key: "probe" }); await control.finish({ operation: "op" });"#
             .into(),
-        operations: lash_kernel_dialect::Namespaces::of_effects(
+        namespaces: crate::embedding::tests::namespaces(
             &["tools.mark", "control.finish"]
                 .into_iter()
                 .map(|name| (EffectName::new(name).expect("a tool's name"), tool()))
                 .collect(),
-            &lash_kernel_doc::ContractId::new("1"),
             &BTreeMap::from([(
                 EffectName::new("control.finish").expect("a tool's name"),
                 BTreeSet::from([lash_kernel_dialect::EffectControl::Finish]),
             )]),
         )
-        .expect("the law's effects are operations")
-        .operations()
-        .clone(),
+        .expect("the law's effects are operations"),
         bindings: BTreeSet::new(),
         functions: BTreeMap::new(),
-        packages: lash_vm_client::service::SurfaceRef::held(
-            lash_vm_releases::lash_packages()
-                .expect("the parent's packages")
-                .digest(),
-        ),
     };
     EncodedPayload(rmp_serde::to_vec_named(&request).expect("request"))
 }
@@ -276,11 +272,32 @@ fn turn(parent: &mut Parent, bounds: RunBounds) {
         panic!("the cell lowers")
     };
     parent.name_hosts(&document);
+    let embedding = crate::embedding::tests::every_dialect(&Default::default()).expect("embedding");
+    let loaded = lash_kernel_doc::IdentifiedDocument::decode_standard(&document).unwrap();
+    let program = crate::embedding::tests::linked(
+        loaded.into_document(),
+        embedding.prepared_library().unwrap().clone(),
+    );
     let start = Start {
         owner: VmOwner::new("codemode:session"),
         dialect: DIALECT.into(),
+        link: program.link,
+        instances: wire::encode(
+            PayloadKind::Start,
+            &program.instances.values().cloned().collect::<Vec<_>>(),
+        )
+        .unwrap(),
+        documents: program
+            .documents
+            .iter()
+            .map(|(id, document)| lash_vm_protocol::message::StoredDocument {
+                document: *id,
+                body: EncodedPayload(document.canonical_bytes()),
+            })
+            .collect(),
         document: EncodedPayload(document),
         definitions: Vec::new(),
+        functions: program.functions.clone(),
         from: StartFrom::Fresh(
             wire::encode(
                 PayloadKind::Start,
@@ -288,7 +305,7 @@ fn turn(parent: &mut Parent, bounds: RunBounds) {
                     Target::Main,
                     Vec::new(),
                     None,
-                    &lash_kernel_vm::EffectModes::recorded(),
+                    &Default::default(),
                     Vec::new(),
                 ),
             )

@@ -6,7 +6,7 @@ use tokio::sync::Notify;
 
 fn owner() -> ExecutionOwner {
     ExecutionOwner::SessionFrame {
-        session_id: crate::SessionId::from("live-owner"),
+        session_id: lash_vocabulary::identity::SessionId::from("live-owner"),
         agent_frame_id: crate::FrameNodeId::new("live-frame").unwrap(),
     }
 }

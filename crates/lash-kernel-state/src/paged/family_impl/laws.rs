@@ -2,8 +2,8 @@
 use crate::paged::family_impl::FrozenBase;
 use crate::paged::laws::heap::{Source, fresh, seal, write_list};
 use crate::paged::*;
-use lash_kernel_doc::Name;
 use lash_kernel_doc::heap::*;
+use lash_vocabulary::names::Name;
 use std::rc::Rc;
 
 fn int(n: i64) -> PageValue {
@@ -25,8 +25,8 @@ fn record(heap: &PagedHeap, name: &Name, value: PageValue) -> BindingRecord {
     BindingRecord {
         name: NameRef::new(name, &heap.access).unwrap(),
         declared: SiteRef::new(
-            &(lash_kernel_doc::Site {
-                unit: lash_kernel_doc::Unit::Main,
+            &(lash_vocabulary::sites::Site {
+                unit: lash_vocabulary::sites::Unit::Main,
                 path: vec![],
             }),
             &heap.access,
@@ -351,9 +351,13 @@ fn carry_classification_walks_the_union_and_propagates_through_cycles() {
     let (mut heap, _) = fresh();
     let closure = heap
         .allocate_object(ObjectInit::Closure {
+            callable: lash_vocabulary::names::CallableId {
+                link: lash_vocabulary::LinkId::from_bytes([1; 32]),
+                function: lash_vocabulary::names::FunctionId::from_bytes([2; 32]),
+            },
             site: SiteRef::new(
-                &(lash_kernel_doc::Site {
-                    unit: lash_kernel_doc::Unit::Main,
+                &(lash_vocabulary::sites::Site {
+                    unit: lash_vocabulary::sites::Unit::Main,
                     path: vec![],
                 }),
                 &heap.access,
@@ -533,6 +537,7 @@ fn a_paged_frozen_error_keeps_its_receiving_family_at_every_immutable_depth() {
 #[test]
 fn an_issued_intent_projects_identical_data_without_allocating_entities() {
     use lash_kernel_doc::{Datum, ErrorDatum};
+
     let (mut heap, _) = fresh();
     let datum = Datum::Tuple(vec![
         Datum::Text("request".repeat(32_000)),
@@ -644,12 +649,16 @@ fn session_slot_roots_and_task_edges_follow_replacements() {
         .unwrap();
     assert_eq!(heap.data_only_certificate().task_edges, 1);
     let site = SiteRef::new(
-        &lash_kernel_doc::Site::new(lash_kernel_doc::Unit::Main, [0]),
+        &lash_vocabulary::sites::Site::new(lash_vocabulary::sites::Unit::Main, [0]),
         heap.pages(),
     )
     .unwrap();
     let closure = heap
         .allocate_object(ObjectInit::Closure {
+            callable: lash_vocabulary::names::CallableId {
+                link: lash_vocabulary::LinkId::from_bytes([1; 32]),
+                function: lash_vocabulary::names::FunctionId::from_bytes([2; 32]),
+            },
             site,
             captures: Vec::new(),
         })
@@ -674,4 +683,110 @@ fn session_slot_roots_and_task_edges_follow_replacements() {
     heap.collect().unwrap();
     let root = heap.session_root().keyed_root().unwrap();
     assert!(heap.classify_carry(&root).unwrap().dropped.is_empty());
+}
+
+/// K-SES-004: saved closure environments remain distinct roots even when
+/// their code is identical and no current binding names them.
+#[test]
+fn saved_environments_keep_identity_and_shared_cells_across_carry() {
+    use lash_vocabulary::{
+        CallableId, FunctionId, LinkId,
+        sites::{Site, Unit},
+    };
+    use std::collections::{BTreeMap, BTreeSet};
+    let (mut heap, pages) = fresh();
+    let callable = CallableId {
+        link: LinkId::from_bytes([1; 32]),
+        function: FunctionId::from_bytes([2; 32]),
+    };
+    let site = SiteRef::new(&Site::new(Unit::Main, [0]), heap.pages()).unwrap();
+    let captured = NameRef::new(&Name::new("x"), heap.pages()).unwrap();
+    let first_cell = heap.allocate_object(ObjectInit::Variable(int(1))).unwrap();
+    let second_cell = heap.allocate_object(ObjectInit::Variable(int(2))).unwrap();
+    let mut make = |cell| {
+        heap.allocate_object(ObjectInit::Closure {
+            callable,
+            site: site.clone(),
+            captures: vec![(captured.clone(), cell)],
+        })
+        .unwrap()
+    };
+    let first = make(first_cell);
+    let second = make(second_cell);
+    let main_name = Name::new("main_global");
+    let main_cell = heap
+        .bind_closure_capture(first, &main_name, int(3))
+        .unwrap();
+    assert_eq!(
+        heap.bind_closure_capture(first, &main_name, int(99))
+            .unwrap(),
+        main_cell
+    );
+    let named = BTreeSet::from([first, second]);
+    let (frozen, references) = heap
+        .freeze_named(&PageValue::Closure(first), &named)
+        .unwrap();
+    assert_eq!(references, BTreeSet::from([first]));
+    assert!(matches!(heap.instantiate(&frozen).unwrap(), PageValue::Closure(id) if id == first));
+    seal(&mut heap);
+    let anchor = heap.sealed_root().unwrap();
+    let mut functions = crate::paged::tree::Tree::new(false);
+    for (name, environment) in [("first", first), ("second", second)] {
+        functions
+            .write(
+                name.as_bytes().to_vec(),
+                FunctionRecord {
+                    environment,
+                    callable,
+                    name: NameRef::new(&Name::new(name), heap.pages()).unwrap(),
+                    meta: PageValue::Absent,
+                    closure: anchor,
+                    captures: BTreeMap::new(),
+                    before: Vec::new(),
+                    after: Vec::new(),
+                },
+                heap.pages(),
+            )
+            .unwrap();
+    }
+    functions
+        .seal(
+            heap.pages(),
+            &mut crate::paged::tree::SealWork::new(SealBudget {
+                pages: u64::MAX,
+                bytes: u64::MAX,
+            }),
+        )
+        .unwrap();
+    let functions = crate::paged::heap_impl::keyed(&functions).unwrap();
+    let session = heap
+        .carry(CarryRoots {
+            bindings: empty(),
+            functions,
+        })
+        .unwrap();
+    let mut cold = PagedHeap::open_header(
+        session.heap,
+        Box::new(Source(Rc::clone(&pages))),
+        EditEpoch(2),
+    )
+    .unwrap();
+    cold.adopt(&session).unwrap();
+    cold.set_census(heap.census.take().unwrap()).unwrap();
+    cold.collect().unwrap();
+    assert!(
+        cold.equal(&cold.variable_get(main_cell).unwrap(), &int(3))
+            .unwrap()
+    );
+    assert_ne!(first, second);
+    assert_eq!(cold.closure(first).unwrap().callable, callable);
+    assert_eq!(cold.closure(second).unwrap().callable, callable);
+    assert!(
+        cold.equal(&cold.variable_get(first_cell).unwrap(), &int(1))
+            .unwrap()
+    );
+    assert!(
+        cold.equal(&cold.variable_get(second_cell).unwrap(), &int(2))
+            .unwrap()
+    );
 }

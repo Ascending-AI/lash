@@ -19,7 +19,9 @@ use lash_core_store::checkpoint_graph::{EncodeBudget, ExplicitLimit, GraphStagin
 use lash_durable::domain::{OwnerKey, RunFacts, TurnWrite};
 use lash_durable::{ActorTx, DomainWrite, DurableError};
 
-use crate::{ActorContext, SessionId, TurnId};
+use crate::ActorContext;
+use lash_vocabulary::identity::SessionId;
+use lash_vocabulary::identity::TurnId;
 
 /// End `run` of `session` in `tx` with `cause` and the head revision its
 /// commit published, if any, staging the turn's transcript beside it.

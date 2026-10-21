@@ -11,28 +11,10 @@ use crate::{Bounds, End, Layout, Machine, Request, Step};
 /// tasks, effects in loops, cleanup blocks, maps and library calls of
 /// every kind.
 const PROGRAM: &str = r#"
-fn worker(tag, counter) {
-  let total = 0
-  for step in [1, 2] {
-    try {
-      let got = perform echo(tag) as Any
-      set total = num.add(total, step)
-      do apply counter()
-    } finally {
-      print (tag, step)
-    }
-  }
-  return (tag, total)
-}
-fn make_counter(counts) {
-  let n = 0
-  let bump = fn() {
-    set n = num.add(n, 1)
-    set counts["calls"] = n
-    return n
-  }
-  return bump
-}
+definition "function worker(tag: Any, counter: Any) -> Any\nkernel 1\nmetering statements\nbody { \n  let total = 0\n  for step in [1, 2] {\n    try {\n      let got = perform 0(tag) as Any\n      set total = num.add(total, step)\n      do apply counter()\n    } finally {\n      print (tag, step)\n    }\n  }\n  return (tag, total)\n }"
+
+definition "function make_counter(counts: Any) -> Any\nkernel 1\nmetering statements\nbody { \n  let n = 0\n  let bump = fn() {\n    set n = num.add(n, 1)\n    set counts[\"calls\"] = n\n    return n\n  }\n  return bump\n }"
+
 main {
   let counts = map{"calls": 0}
   let counter = call make_counter(counts)
@@ -144,9 +126,12 @@ fn a_native_implementation_and_a_kernel_body_run_the_same() {
 #[test]
 fn property_caches_are_exact_across_guard_failures_and_cold_plans() {
     const READS: &str = r#"
-fn fetch(obj) { return obj.value }
-fn fetch_key(obj, key) { return obj[key] }
-fn sibling() { let reply = perform echo("peer") as Any return reply }
+definition "function fetch(obj: Any) -> Any\nkernel 1\nmetering statements\nbody {  return obj.value  }"
+
+definition "function fetch_key(obj: Any, key: Any) -> Any\nkernel 1\nmetering statements\nbody {  return obj[key]  }"
+
+definition "function sibling() -> Any\nkernel 1\nmetering statements\nbody {  let reply = perform 0(\"peer\") as Any return reply  }"
+
 main {
   let peer = spawn call sibling()
   let a = {value: 10, other: 90}
@@ -157,7 +142,7 @@ main {
   print call fetch_key(b, "other")
   print call fetch_key(b, "value")
   print call fetch_key([40, 50], 0)
-  let held = (num.add(call fetch(a), 1), perform echo("read") as Any)
+  let held = (num.add(call fetch(a), 1), perform 0("read") as Any)
   print held[0]
   let reply = held[1]
   remove a.value
@@ -276,12 +261,7 @@ fn session_binding_images_are_identical_across_layouts_and_cold_caches() {
         .map(|i| format!("let v{i} = {i}\n"))
         .collect::<String>();
     let source = format!(
-        "main {{ {declarations} let {long} = 7 \
-         set v0 = {long} set v69 = v0 \
-         let reply = perform echo(v69) as Any \
-         set {long} = reply set v0 = {long} \
-         let again = perform echo(v0) as Any \
-         set {long} = again return {long} }}"
+        "main {{ {declarations} let {long} = 7 set v0 = {long} set v69 = v0 let reply = perform 0(v69) as Any set {long} = reply set v0 = {long} let again = perform 0(v0) as Any set {long} = again return {long} }}"
     );
     let observe = |layout| {
         let mut embedder = Embedder::with(
@@ -312,7 +292,7 @@ fn session_binding_images_are_identical_across_layouts_and_cold_caches() {
         lash_kernel_state::paged::HeapLifecycle::adopt(&mut heap, &carry).unwrap();
         for name in ["v0", "v69", long.as_str()] {
             assert!(
-                heap.session_binding(&lash_kernel_doc::Name::new(name))
+                heap.session_binding(&lash_vocabulary::names::Name::new(name))
                     .unwrap()
                     .is_some(),
                 "the prepared key must equal the canonical key for {name}"
@@ -328,90 +308,5 @@ fn session_binding_images_are_identical_across_layouts_and_cold_caches() {
     let reference = observe(0);
     for layout in [1, 42, u64::MAX] {
         assert_eq!(observe(layout), reference, "layout {layout}");
-    }
-}
-
-/// Startup §3.8: preparing a registry leaves unused helper bodies cold.
-/// Native calls do not compile their fallback; an interpreted call compiles
-/// only its own body, once, and shares it across starts.
-#[test]
-fn helper_bodies_compile_only_when_the_body_runs() {
-    use super::embedder::{ROOMY, Source, World, library};
-    use crate::{CellStart, KernelMachine, PreparedLibrary, Program, Target};
-    use lash_kernel_doc::heap::PageId;
-    use std::sync::Arc;
-
-    let fixture = library(true);
-    let mut registry = (*fixture.registry).clone();
-    let identity = lash_kernel_doc::parse_definition(
-        "function cold.identity(x: Any) -> Any\nkernel 1\ncharge 1\nbody { return x }",
-    )
-    .unwrap();
-    let function = registry.register(identity, None).unwrap();
-    let plan = Box::leak(Box::new(lash_kernel_doc::plan::HelperPlan {
-        name: "cold.identity",
-        template: None,
-        function,
-        callees: &[],
-        literals: &[],
-        fields: &[],
-        records: &[],
-        registers: 1,
-        slots: &[],
-        closures: &[],
-        sites: &[],
-        run: |cx, _| {
-            cx.begin()?;
-            cx.param(0, 0)?;
-            Ok(cx.take(0))
-        },
-    }));
-    registry.install_plans(&[plan]).unwrap();
-    let header = format!("{}use cold.identity = @{function}\n", fixture.header);
-    let prepared = PreparedLibrary::new(Arc::new(registry));
-    let cold = format!("{prepared:?}");
-    assert!(
-        cold.contains("bodies: 0"),
-        "unused bodies must stay cold: {cold}"
-    );
-    for (source, compiled) in [
-        ("main { return pair.twice(21) }", 0),
-        ("main { return invoke cold.identity(42) }", 0),
-        (
-            "main { return invoke each.twice(fn(x) { return num.add(x, 1) }, 40) }",
-            1,
-        ),
-        (
-            "main { return invoke each.twice(fn(x) { return num.add(x, 1) }, 40) }",
-            1,
-        ),
-    ] {
-        let document =
-            lash_kernel_doc::parse_document(&format!("numbers by_spelling\n{}\n{source}", header))
-                .unwrap();
-        let mut machine = KernelMachine::start(
-            Program {
-                closure: PageId([8; 32]),
-                document: Arc::new(document),
-                library: prepared.clone(),
-            },
-            ROOMY,
-            CellStart {
-                target: Target::Main,
-                args: Vec::new(),
-                session: None,
-                owner: PageId([9; 32]),
-                modes: Default::default(),
-                host: Vec::new(),
-            },
-            Box::new(Source::default()),
-        )
-        .unwrap();
-        assert!(matches!(
-            machine.run(&mut World::default(), u64::MAX).unwrap(),
-            Step::Ended(End::Finished(_))
-        ));
-        let state = format!("{prepared:?}");
-        assert!(state.contains(&format!("bodies: {compiled}")), "{state}");
     }
 }

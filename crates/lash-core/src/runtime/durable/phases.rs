@@ -68,8 +68,9 @@ use crate::{
     ActorContext, Effect, HeldResponse, HostTurnProtocol, SessionStreamEvent, TurnMachine,
 };
 use lash_protocol_types::llm::types::AdmittedSend;
-use lash_protocol_types::{SessionId, TurnId};
 use lash_sansio::CheckpointDelta;
+use lash_vocabulary::identity::SessionId;
+use lash_vocabulary::identity::TurnId;
 use std::sync::Arc;
 
 /// The phase checkpoint of `drive` as it stands: its machine's checkpoint
@@ -1283,7 +1284,9 @@ async fn stop(
 
 /// The value schema the turn's accepted finish was validated under, as its
 /// candidate kept it from the call's settlement.
-fn accepted_finish_value_schema(machine: &crate::TurnMachine) -> Option<crate::JsonSchema> {
+fn accepted_finish_value_schema(
+    machine: &crate::TurnMachine,
+) -> Option<lash_vocabulary::json_schema::JsonSchema> {
     machine
         .decided_completions()
         .iter()
@@ -1369,7 +1372,11 @@ pub(super) fn settle_model_calls(
 }
 
 /// Model call `call` of `run`, as its admission is keyed.
-fn call_key(session: &crate::SessionId, run: &crate::TurnId, call: u32) -> PromptCallKey {
+fn call_key(
+    session: &lash_vocabulary::identity::SessionId,
+    run: &lash_vocabulary::identity::TurnId,
+    call: u32,
+) -> PromptCallKey {
     PromptCallKey {
         session: session.clone(),
         call: ModelCallId::Turn {

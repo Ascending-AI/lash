@@ -229,15 +229,14 @@ impl PreparedPlan {
             .closures
             .iter()
             .map(|path| {
-                let mut path = path.to_vec();
-                path.push(0);
+                let created = Site::new(code.site.unit.clone(), path.to_vec());
                 tables
-                    .code_at
-                    .get(&Site::new(code.site.unit.clone(), path))
-                    .copied()
-                    .unwrap_or(CodeId(u32::MAX))
+                    .closure_at
+                    .iter()
+                    .find_map(|((_, site), code)| (site == &created).then_some(*code))
+                    .ok_or_else(|| format!("a plan closure at {created} has no compiled body"))
             })
-            .collect();
+            .collect::<Result<_, _>>()?;
         let segment = (!plan.sites.is_empty())
             .then(|| segments::Segment::resolve(plan, &locals, body, tables, base))
             .transpose()?;

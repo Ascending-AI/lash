@@ -1,7 +1,7 @@
 use super::*;
-use crate::message::{
-    EncodedPayload, ExecutionLease, FrameEpoch, HostReadId, HostReadKind, MessageFence, OwnerEpoch,
-    WorkerMessage,
+use crate::message::{EncodedPayload, HostReadId, HostReadKind, MessageFence, WorkerMessage};
+use lash_protocol_types::engine_fault::{
+    ExecutionLease, FrameEpoch, HeaderRefusal, OwnerEpoch, TransportSequence,
 };
 
 fn codec() -> FrameCodec {
@@ -145,7 +145,7 @@ fn a_stream_yields_whole_frames_and_refuses_a_partial_tail() {
     let codec = codec();
     let first = request_frame();
     let mut second = request_frame();
-    second.header.sequence = crate::message::TransportSequence(1);
+    second.header.sequence = TransportSequence(1);
     let mut stream = codec.encode_worker(&first).unwrap();
     stream.extend(codec.encode_worker(&second).unwrap());
     let partial = codec.encode_worker(&first).unwrap();
@@ -166,7 +166,6 @@ fn a_stream_yields_whole_frames_and_refuses_a_partial_tail() {
 
 #[test]
 fn the_fence_admits_only_the_current_lease_epochs_and_next_sequence() {
-    use crate::message::{HeaderRefusal, TransportSequence};
     let mut sender = fence();
     let mut receiver = fence();
     let first = sender.next_header();
@@ -490,7 +489,7 @@ fn page_exchanges_respect_batch_bounds() {
     ));
     // A refused batch is a broken frame, retried on a fresh worker.
     assert!(
-        crate::InfrastructureOutcome::from(CodecRefusal::PageBatch {
+        lash_protocol_types::engine_fault::InfrastructureOutcome::from(CodecRefusal::PageBatch {
             pages: 65,
             bytes: 0
         })

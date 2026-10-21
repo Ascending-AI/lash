@@ -10,7 +10,7 @@ use lash_core::runtime::ParsedSessionCursor;
 use lash_core::{
     LiveReplayGapReason, LiveReplayStoreError, SessionObservationEvent, SessionRevision,
 };
-use lash_protocol_types::SessionId;
+use lash_vocabulary::identity::SessionId;
 use sqlx::Row as _;
 
 use super::fanout::{Follow, Row};

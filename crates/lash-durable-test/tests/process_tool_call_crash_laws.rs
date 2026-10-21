@@ -64,8 +64,8 @@ use lash_durable_test::{
     WriteKind,
 };
 use lash_execution_contracts::backend::StoreSet;
-use lash_protocol_types::SessionId;
 use lash_protocol_types::sync::MutexExt as _;
+use lash_vocabulary::identity::SessionId;
 
 use dialect::Dialect;
 use served::Tier;
@@ -93,9 +93,9 @@ struct World {
     entries: Mutex<BTreeMap<String, Vec<lash_core::ToolCallId>>>,
 }
 
-fn probe_definition() -> lash_core::ToolDefinition {
+fn probe_definition() -> lash_vocabulary::tool_contract::ToolDefinition {
     let object = serde_json::json!({ "type": "object", "additionalProperties": true });
-    lash_core::ToolDefinition::raw(
+    lash_vocabulary::tool_contract::ToolDefinition::raw(
         format!("tool:{PROBE}"),
         PROBE_OPERATION,
         "Records each body entry's call id; a held call never answers.",
@@ -107,7 +107,7 @@ fn probe_definition() -> lash_core::ToolDefinition {
     // A call a kill interrupted runs again at its ordinal: the raced calls
     // stay in flight across the kill, so the race is still held when the
     // call past the limit asks.
-    .with_execution_policy(lash_core::ExecutionPolicy::repeatable(
+    .with_execution_policy(lash_vocabulary::tool_contract::ExecutionPolicy::repeatable(
         std::num::NonZeroU32::new(3).expect("a nonzero attempt bound"),
         1,
         1,
@@ -124,7 +124,7 @@ impl lash_core::ToolProvider for Probe {
         &self,
         _config: &lash_core::OwnerConfigView,
     ) -> std::result::Result<
-        Vec<lash_core::ToolManifest>,
+        Vec<lash_vocabulary::tool_contract::ToolManifest>,
         lash_execution_contracts::plugin_error::PluginError,
     > {
         Ok(vec![probe_definition().manifest()])
@@ -134,7 +134,7 @@ impl lash_core::ToolProvider for Probe {
         &self,
         name: &str,
         _config: &lash_core::OwnerConfigView,
-    ) -> Option<Arc<lash_core::ToolContract>> {
+    ) -> Option<Arc<lash_vocabulary::tool_contract::ToolContract>> {
         (name == PROBE_OPERATION).then(|| Arc::new(probe_definition().contract()))
     }
 
@@ -169,8 +169,10 @@ fn cell() -> lash_core::llm::types::LlmResponse {
 }
 
 /// The component that serves the probe to a process body.
-const PROBE_COMPONENT: lash_core::ProcessConfigKey<()> =
-    lash_core::ProcessConfigKey::new("process-holding-probe", lash_core::FormatVersion::ONE);
+const PROBE_COMPONENT: lash_core::ProcessConfigKey<()> = lash_core::ProcessConfigKey::new(
+    "process-holding-probe",
+    lash_vocabulary::providers::FormatVersion::ONE,
+);
 
 /// The scenario, fresh for every matrix cell.
 struct Holding {
@@ -184,7 +186,7 @@ struct Holding {
     /// worker calls hold.
     clock: Mutex<Option<Arc<SimClock>>>,
     core: Mutex<Option<lash::LashCore>>,
-    processes: Mutex<BTreeSet<lash_core::ProcessId>>,
+    processes: Mutex<BTreeSet<lash_vocabulary::identity::ProcessId>>,
     keep: Mutex<Vec<Box<dyn std::any::Any + Send>>>,
 }
 
@@ -781,8 +783,10 @@ async fn an_aggregate_sleep_past_every_step_bound_wakes_at_its_deadline_across_a
 
 /// The component that serves a process's calls of the granted `call_tool`:
 /// its deferred provider resolves them and executes what it matched.
-const DYNAMIC_COMPONENT: lash_core::ProcessConfigKey<()> =
-    lash_core::ProcessConfigKey::new("process-dynamic", lash_core::FormatVersion::ONE);
+const DYNAMIC_COMPONENT: lash_core::ProcessConfigKey<()> = lash_core::ProcessConfigKey::new(
+    "process-dynamic",
+    lash_vocabulary::providers::FormatVersion::ONE,
+);
 
 /// The effect the granted tool is performed as.
 const CALL_TOOL_EFFECT: &str = "tools.call_tool";
@@ -821,8 +825,8 @@ struct Resolutions {
 
 /// The host-named tool the deferred provider grants dispatch: callers see
 /// an ordinary tool taking a target's name and its arguments.
-fn call_tool() -> lash_core::ToolDefinition {
-    lash_core::ToolDefinition::raw(
+fn call_tool() -> lash_vocabulary::tool_contract::ToolDefinition {
+    lash_vocabulary::tool_contract::ToolDefinition::raw(
         "tool:call_tool",
         CALL_TOOL_EFFECT,
         "Calls the search tool `target` names, with `args`.",
@@ -838,16 +842,16 @@ fn call_tool() -> lash_core::ToolDefinition {
         serde_json::json!({}),
     )
     .expect("the granted tool's schemas")
-    .declared_contract(lash_kernel_doc::ContractId::new("tools.call_tool/1"))
+    .declared_contract(lash_vocabulary::operations::ContractId::new("tools.call_tool/1"))
     // The grant's resolution policy replaces the bound when it is linked.
     .with_execution(std::time::Duration::from_secs(30))
 }
 
 /// A target the resolver matches: `Repeatable`, so a call a kill interrupted
 /// runs again under its id.
-fn dynamic_target(name: &str) -> lash_core::ToolDefinition {
+fn dynamic_target(name: &str) -> lash_vocabulary::tool_contract::ToolDefinition {
     let object = serde_json::json!({ "type": "object", "additionalProperties": true });
-    lash_core::ToolDefinition::raw(
+    lash_vocabulary::tool_contract::ToolDefinition::raw(
         format!("tool:{name}"),
         format!("tools.{name}"),
         "Records each body entry's call id.",
@@ -856,7 +860,7 @@ fn dynamic_target(name: &str) -> lash_core::ToolDefinition {
     )
     .expect("the target's schemas")
     .with_execution(std::time::Duration::from_secs(30))
-    .with_execution_policy(lash_core::ExecutionPolicy::repeatable(
+    .with_execution_policy(lash_vocabulary::tool_contract::ExecutionPolicy::repeatable(
         std::num::NonZeroU32::new(3).expect("a nonzero attempt bound"),
         1,
         1,
@@ -871,15 +875,17 @@ struct Resolver {
 
 #[async_trait::async_trait]
 impl lash_core::ToolProvider for Resolver {
-    fn readable_binding_formats(&self) -> &'static [lash_core::FormatVersion] {
-        &[lash_core::FormatVersion::ONE]
+    fn readable_binding_formats(&self) -> &'static [lash_vocabulary::providers::FormatVersion] {
+        &[lash_vocabulary::providers::FormatVersion::ONE]
     }
 
     fn tool_manifests(
         &self,
         _config: &lash_core::OwnerConfigView,
-    ) -> Result<Vec<lash_core::ToolManifest>, lash_execution_contracts::plugin_error::PluginError>
-    {
+    ) -> Result<
+        Vec<lash_vocabulary::tool_contract::ToolManifest>,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         Ok(Vec::new())
     }
 
@@ -887,7 +893,7 @@ impl lash_core::ToolProvider for Resolver {
         &self,
         name: &str,
         _config: &lash_core::OwnerConfigView,
-    ) -> Option<Arc<lash_core::ToolContract>> {
+    ) -> Option<Arc<lash_vocabulary::tool_contract::ToolContract>> {
         let (_, name) = name.split_once('.')?;
         ["dyn_first", "dyn_second"]
             .contains(&name)
@@ -934,7 +940,7 @@ impl lash_core::DeferredToolProvider for Resolver {
                         .then(|| lash::tools::ExecutionBinding {
                             codec: DYNAMIC_COMPONENT
                                 .tool_provider(lash::tool_provider_key!("deferred")),
-                            format: lash_core::FormatVersion::ONE,
+                            format: lash_vocabulary::providers::FormatVersion::ONE,
                             payload: serde_json::json!({"route": "matched"}),
                         }),
                 ),
@@ -1055,7 +1061,7 @@ struct DynamicCalls {
     backend: Mutex<Option<lash::Backend>>,
     clock: Mutex<Option<Arc<SimClock>>>,
     core: Mutex<Option<lash::LashCore>>,
-    process: Mutex<Option<lash_core::ProcessId>>,
+    process: Mutex<Option<lash_vocabulary::identity::ProcessId>>,
     tripwire: Arc<Tripwire>,
     keep: Mutex<Vec<Box<dyn std::any::Any + Send>>>,
 }
@@ -1078,18 +1084,18 @@ impl DynamicCalls {
         }
     }
 
-    fn policy(&self) -> lash_core::DeferredResolutionPolicy {
+    fn policy(&self) -> lash_vocabulary::providers::DeferredResolutionPolicy {
         if self.custom_policy {
-            lash_core::DeferredResolutionPolicy {
+            lash_vocabulary::providers::DeferredResolutionPolicy {
                 execution: Duration::from_secs(120),
-                execution_policy: lash_core::ExecutionPolicy::repeatable(
+                execution_policy: lash_vocabulary::tool_contract::ExecutionPolicy::repeatable(
                     std::num::NonZeroU32::new(5).unwrap(),
                     17,
                     71,
                 ),
             }
         } else {
-            lash_core::DeferredResolutionPolicy::default()
+            lash_vocabulary::providers::DeferredResolutionPolicy::default()
         }
     }
 
@@ -1150,11 +1156,11 @@ impl DynamicCalls {
 
     /// The link of `call_tool` the host's env records: its registration's
     /// grant, or, when withheld, a dispatch link the host built itself.
-    fn link(&self) -> lash::tools::OperationLink {
+    fn link(&self) -> lash::tools::OperationRoute {
         let deferred = DYNAMIC_COMPONENT.tool_provider(lash::tool_provider_key!("deferred"));
         match self.grant {
             Grant::Withheld => {
-                lash::tools::OperationLink::dispatch(deferred, call_tool(), self.policy())
+                lash::tools::OperationRoute::dispatch(deferred, call_tool(), self.policy())
             }
             Grant::Pure | Grant::Diverging => self
                 .registration()
@@ -1229,7 +1235,7 @@ impl DynamicCalls {
 
     /// The host's start of `dynamic()` under the env linking `call_tool`
     /// to the component's deferred provider.
-    async fn start_process(&self) -> Result<lash_core::ProcessId, String> {
+    async fn start_process(&self) -> Result<lash_vocabulary::identity::ProcessId, String> {
         let core = self.core();
         let document = lash::workflow::document::parse_document(self.document)
             .map_err(|error| format!("the document parses: {error}"))?;

@@ -3,7 +3,7 @@
   "cases": [
     {
       "name": "cancel injects typed error and runs waiting cleanup",
-      "document": "kernel 1\nnumbers by_spelling\nfn slow() { try { do sleep 0 } catch e { print e.kind } finally { print \"cleanup\" } }\nmain {\nlet h = spawn call slow() do cancel h do join h\n}\n",
+      "document": "kernel 1\nnumbers by_spelling\nimport 0 operation typescript.sleep(milliseconds: Int) -> Null\ndefinition \"function slow() -> Any\\nkernel 1\\nmetering statements\\nimport 0 operation typescript.sleep(milliseconds: Int) -> Null\\nbody {\\n  try {\\n    do perform 0(0) as Null\\n  } catch e {\\n    print e.kind\\n  } finally {\\n    print \\\"cleanup\\\"\\n  }\\n}\\n\"\nmain {\n  let h = spawn invoke slow()\n  do cancel(h)\n  do join(h)\n}\n",
       "expected": {
         "prints": [
           {
@@ -22,7 +22,7 @@
     },
     {
       "name": "cancelling ended task is harmless",
-      "document": "kernel 1\nnumbers by_spelling\nfn done() { return 7 }\nmain {\nlet h = spawn call done() do cancel h let answer = join h finish answer\n}\n",
+      "document": "kernel 1\nnumbers by_spelling\ndefinition \"function done() -> Any\\nkernel 1\\nmetering statements\\nbody {\\n  return 7\\n}\\n\"\nmain {\n  let h = spawn invoke done()\n  do cancel(h)\n  let answer = join h\n  finish answer\n}\n",
       "expected": {
         "prints": [],
         "end": {

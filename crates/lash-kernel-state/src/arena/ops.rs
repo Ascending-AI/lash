@@ -7,7 +7,9 @@
 //! the resident count the capacity meter reads (FIG-6791).
 
 use lash_kernel_doc::arena::{ArenaHandle, Body, Chunk, Chunks, LocalCode, Sequence, ShortText};
-use lash_kernel_doc::{NativeError, Retry, Site, Value};
+use lash_kernel_doc::{NativeError, Retry, Value};
+
+use lash_vocabulary::sites::Site;
 
 use super::{Arena, CARD, Facts, Key, Place, Summary, malformed, value_summary};
 
@@ -329,14 +331,21 @@ impl Arena {
     pub fn closure(
         &self,
         handle: ArenaHandle,
-    ) -> Result<(&Site, &[ArenaHandle], Option<LocalCode>), NativeError> {
+    ) -> Result<
+        (
+            &lash_kernel_doc::arena::ClosureIdentity,
+            &[ArenaHandle],
+            Option<LocalCode>,
+        ),
+        NativeError,
+    > {
         self.warm(handle)?;
         match self.body(handle)? {
             Body::Closure {
-                site,
+                identity,
                 captures,
                 code,
-            } => Ok((site, captures, *code)),
+            } => Ok((identity, captures, *code)),
             _ => Err(malformed("a closure handle names another body")),
         }
     }
@@ -363,11 +372,11 @@ impl Arena {
     /// object.
     pub fn new_closure(
         &mut self,
-        site: std::sync::Arc<Site>,
+        identity: std::sync::Arc<lash_kernel_doc::arena::ClosureIdentity>,
         captures: Vec<ArenaHandle>,
     ) -> ArenaHandle {
         self.insert_created(Body::Closure {
-            site,
+            identity,
             captures: captures.into_boxed_slice(),
             code: None,
         })

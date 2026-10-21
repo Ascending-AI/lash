@@ -11,7 +11,7 @@ use std::fmt;
 
 use lash_execution_contracts::deployment::DeploymentStore;
 use lash_protocol_standard::{BuiltinToolOutputRenderer, ToolOutputRenderer, ToolRenderParams};
-use lash_protocol_types::SessionId;
+use lash_vocabulary::identity::SessionId;
 use serde::Serialize;
 use serde_json::Value;
 
@@ -104,7 +104,7 @@ impl ToolResultContent {
                 &BuiltinToolOutputRenderer
                     .tool_output(
                         &lash_core::ToolCallOutput::success(value.clone()),
-                        &lash_core::ToolId::new(tool_name),
+                        &lash_vocabulary::tool_contract::ToolId::new(tool_name),
                         &ToolRenderParams::default(),
                     )
                     .body,

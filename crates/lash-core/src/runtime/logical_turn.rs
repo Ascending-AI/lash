@@ -1,7 +1,7 @@
 use super::*;
 use crate::ActorContext;
-use crate::TurnId;
-use lash_protocol_types::core_support::RunIdCoreSupport;
+use lash_vocabulary::identity::RunIdCoreSupport;
+use lash_vocabulary::identity::TurnId;
 
 /// The rows one turn executes, each admitted to the turn's run (FIG-3927):
 /// what the run's admission bound.
@@ -27,7 +27,7 @@ impl LashRuntime {
             observer,
             &mut cursor,
             run,
-            &crate::RunId::from_turn_id(run.clone()),
+            &lash_vocabulary::identity::RunId::from_turn_id(run.clone()),
         );
     }
 

@@ -6,7 +6,7 @@ use super::*;
 #[tokio::test]
 async fn effect_executor_allocations_are_independent_of_history_depth() {
     let backend = crate::testing::sqlite_recording_backend().await;
-    let session_id = crate::SessionId::fixture("sequence-sharing");
+    let session_id = lash_vocabulary::identity::SessionId::fixture("sequence-sharing");
     let store =
         crate::testing::runtime_helpers::recording_session_store(&backend, session_id.clone())
             .await;
@@ -18,7 +18,7 @@ async fn effect_executor_allocations_are_independent_of_history_depth() {
     .with_session_id(session_id)
     .build()
     .await;
-    let run = crate::TurnId::from("sequence-sharing");
+    let run = lash_vocabulary::identity::TurnId::from("sequence-sharing");
     let controller = crate::ActorContext::detached(backend)
         .scoped(crate::AdmittedScope::turn(
             runtime.state.session_id.clone(),
@@ -59,7 +59,7 @@ async fn effect_executor_allocations_are_independent_of_history_depth() {
                     None,
                 )]),
                 origin: Some(crate::MessageOrigin::TurnInput {
-                    turn_id: crate::TurnId::from("prior-turn"),
+                    turn_id: lash_vocabulary::identity::TurnId::from("prior-turn"),
                     input_id: None,
                 }),
                 reply_marker: None,

@@ -9,12 +9,15 @@
 
 use std::sync::Arc;
 
-use lash_kernel_doc::{Document, Name, parse_document, print_document};
+use lash_kernel_doc::Document;
+use lash_kernel_doc::parse_document;
+use lash_kernel_doc::print_document;
 use lash_kernel_exec::charge::Weight;
 use lash_kernel_vm::kernel_internals::{
     Layout, RegionWork, call_islands, in_charge, loop_regions, prepare_with_layout, transient_hold,
 };
 use lash_kernel_vm::{Charge, Machine, PreparedLibrary, Program};
+use lash_vocabulary::names::Name;
 
 use crate::machine::{Run, case_program, run_program_in};
 use crate::projection::{Image, Plan, Projector, corpus_agrees, taped_work};
@@ -39,74 +42,62 @@ const BOUNDS: usize = 240;
 const PROGRAMS: &[(&str, &str, u32)] = &[
     (
         "an integer sum loop",
-        "fn sum(n) { let i = 0 let s = 0 while num.lt(i, n) { set s = num.add(s, i) set i = num.add(i, 1) } return s }\n\
-         main { let r = call sum(40) finish r }",
+        "definition \"function sum(n: Any) -> Any\\nkernel 1\\nmetering statements\\nimport 0 operation host.echo(x: Any) -> Any\\nbody { let i = 0 let s = 0 while num.lt(i, n) { set s = num.add(s, i) set i = num.add(i, 1) } return s }\"\n\nmain { let r = call sum(40) finish r }",
         16,
     ),
     (
         "a float step loop",
-        "fn step(n) { let i = 0 let x = 0.5 while num.lt(i, n) { set x = num.add(x, 0.25) set i = num.add(i, 1) } return x }\n\
-         main { let r = call step(30) finish r }",
+        "definition \"function step(n: Any) -> Any\\nkernel 1\\nmetering statements\\nimport 0 operation host.echo(x: Any) -> Any\\nbody { let i = 0 let x = 0.5 while num.lt(i, n) { set x = num.add(x, 0.25) set i = num.add(i, 1) } return x }\"\n\nmain { let r = call step(30) finish r }",
         16,
     ),
     (
         "an integer overflowing into a big integer inside the batch",
-        "fn grow(n) { let i = 0 let x = 3 while num.lt(i, n) { set x = num.mul(x, 7) set i = num.add(i, 1) } return x }\n\
-         main { let r = call grow(30) finish r }",
+        "definition \"function grow(n: Any) -> Any\\nkernel 1\\nmetering statements\\nimport 0 operation host.echo(x: Any) -> Any\\nbody { let i = 0 let x = 3 while num.lt(i, n) { set x = num.mul(x, 7) set i = num.add(i, 1) } return x }\"\n\nmain { let r = call grow(30) finish r }",
         16,
     ),
     (
         "a raise inside the batch, caught",
-        "fn down(n) { let q = 0 let j = n while num.lt(0, 1) { set q = num.div(60, j) set j = num.sub(j, 1) } return q }\n\
-         main { try { let r = call down(6) finish r } catch e { finish e.kind } }",
+        "definition \"function down(n: Any) -> Any\\nkernel 1\\nmetering statements\\nimport 0 operation host.echo(x: Any) -> Any\\nbody { let q = 0 let j = n while num.lt(0, 1) { set q = num.div(60, j) set j = num.sub(j, 1) } return q }\"\n\nmain { try { let r = call down(6) finish r } catch e { finish e.kind } }",
         16,
     ),
     (
         "a slot that changes kind",
-        "fn kinds(n) { let i = 0 let x = null while num.lt(i, n) { set x = num.lt(i, 3) set i = num.add(i, 1) } return x }\n\
-         main { let r = call kinds(12) finish r }",
+        "definition \"function kinds(n: Any) -> Any\\nkernel 1\\nmetering statements\\nimport 0 operation host.echo(x: Any) -> Any\\nbody { let i = 0 let x = null while num.lt(i, n) { set x = num.lt(i, 3) set i = num.add(i, 1) } return x }\"\n\nmain { let r = call kinds(12) finish r }",
         16,
     ),
     (
         "nested loops",
-        "fn grid(n) { let i = 0 let s = 0 while num.lt(i, n) { set i = num.add(i, 1) let j = 0 while num.lt(j, i) { set s = num.add(s, j) set j = num.add(j, 1) } } return s }\n\
-         main { let r = call grid(9) finish r }",
+        "definition \"function grid(n: Any) -> Any\\nkernel 1\\nmetering statements\\nimport 0 operation host.echo(x: Any) -> Any\\nbody { let i = 0 let s = 0 while num.lt(i, n) { set i = num.add(i, 1) let j = 0 while num.lt(j, i) { set s = num.add(s, j) set j = num.add(j, 1) } } return s }\"\n\nmain { let r = call grid(9) finish r }",
         16,
     ),
     (
         "a loop in recursion past the call depth",
-        "fn deep(n) { if num.lt(n, 1) { return 0 } let i = 0 while num.lt(i, 2) { set i = num.add(i, 1) } let r = call deep(num.sub(n, 1)) return num.add(r, i) }\n\
-         main { let r = call deep(12) finish r }",
+        "definition \"function deep(self: Any, n: Any) -> Any\\nkernel 1\\nmetering statements\\nimport 0 operation host.echo(x: Any) -> Any\\nbody { if num.lt(n, 1) { return 0 } let i = 0 while num.lt(i, 2) { set i = num.add(i, 1) } let r = apply self(self, num.sub(n, 1)) return num.add(r, i) }\"\n\nmain { let r = call deep(&deep, 12) finish r }",
         6,
     ),
     (
         "if and else in the body",
-        "fn branch(n) { let i = 0 let s = 0 while num.lt(i, n) { if num.lt(num.rem_trunc(i, 3), 1) { set s = num.add(s, i) } else { set s = num.sub(s, i) } set i = num.add(i, 1) } return s }\n\
-         main { let r = call branch(14) finish r }",
+        "definition \"function branch(n: Any) -> Any\\nkernel 1\\nmetering statements\\nimport 0 operation host.echo(x: Any) -> Any\\nbody { let i = 0 let s = 0 while num.lt(i, n) { if num.lt(num.rem_trunc(i, 3), 1) { set s = num.add(s, i) } else { set s = num.sub(s, i) } set i = num.add(i, 1) } return s }\"\n\nmain { let r = call branch(14) finish r }",
         16,
     ),
     (
         "continue and break in the body",
-        "fn skip(n) { let i = 0 let s = 0 while true { set i = num.add(i, 1) if num.lt(n, i) { break } if num.lt(num.rem_trunc(i, 4), 1) { continue } set s = num.add(s, i) } return s }\n\
-         main { let r = call skip(13) finish r }",
+        "definition \"function skip(n: Any) -> Any\\nkernel 1\\nmetering statements\\nimport 0 operation host.echo(x: Any) -> Any\\nbody { let i = 0 let s = 0 while true { set i = num.add(i, 1) if num.lt(n, i) { break } if num.lt(num.rem_trunc(i, 4), 1) { continue } set s = num.add(s, i) } return s }\"\n\nmain { let r = call skip(13) finish r }",
         16,
     ),
     (
         "a return inside the loop",
-        "fn find(n) { let i = 0 while num.lt(i, n) { if num.lt(9, i) { return i } set i = num.add(i, 1) } return 0 }\n\
-         main { let r = call find(20) finish r }",
+        "definition \"function find(n: Any) -> Any\\nkernel 1\\nmetering statements\\nimport 0 operation host.echo(x: Any) -> Any\\nbody { let i = 0 while num.lt(i, n) { if num.lt(9, i) { return i } set i = num.add(i, 1) } return 0 }\"\n\nmain { let r = call find(20) finish r }",
         16,
     ),
     (
         "a for over a list whose elements are not all scalars",
-        "fn mixed(xs) { let s = 0 for x in xs { set s = num.add(s, x) } return s }\n\
-         main { try { let r = call mixed([1, 2, 3.5, 4, \"a\", 6]) finish r } catch e { finish e.kind } }",
+        "definition \"function mixed(xs: Any) -> Any\\nkernel 1\\nmetering statements\\nimport 0 operation host.echo(x: Any) -> Any\\nbody { let s = 0 for x in xs { set s = num.add(s, x) } return s }\"\n\nmain { try { let r = call mixed([1, 2, 3.5, 4, \"a\", 6]) finish r } catch e { finish e.kind } }",
         16,
     ),
     (
         "loops with barriers between them",
-        "fn mixed(n) { let i = 0 let s = 0 while num.lt(i, n) { set s = num.add(s, 2) set i = num.add(i, 1) } print s while num.lt(i, num.add(n, 3)) { print i set i = num.add(i, 1) } let t = 0 while num.lt(t, n) { set t = num.add(t, 1) } return (s, i, t) }\n\
-         main { let r = call mixed(10) finish r }",
+        "definition \"function mixed(n: Any) -> Any\\nkernel 1\\nmetering statements\\nimport 0 operation host.echo(x: Any) -> Any\\nbody { let i = 0 let s = 0 while num.lt(i, n) { set s = num.add(s, 2) set i = num.add(i, 1) } print s while num.lt(i, num.add(n, 3)) { print i set i = num.add(i, 1) } let t = 0 while num.lt(t, n) { set t = num.add(t, 1) } return (s, i, t) }\"\n\nmain { let r = call mixed(10) finish r }",
         16,
     ),
 ];
@@ -118,20 +109,17 @@ const PROGRAMS: &[(&str, &str, u32)] = &[
 const EXIT_PROGRAMS: &[(&str, &str, u32)] = &[
     (
         "nested arms and a let in an arm",
-        "fn arms(n) { let i = 0 let s = 0 while num.lt(i, n) { if num.lt(i, 6) { let d = num.mul(i, 2) if num.lt(d, 7) { set s = num.add(s, d) } else { set s = num.sub(s, 1) } } else { set s = num.add(s, 1) } set i = num.add(i, 1) } return s }\n\
-         main { let r = call arms(13) finish r }",
+        "definition \"function arms(n: Any) -> Any\\nkernel 1\\nmetering statements\\nimport 0 operation host.echo(x: Any) -> Any\\nbody { let i = 0 let s = 0 while num.lt(i, n) { if num.lt(i, 6) { let d = num.mul(i, 2) if num.lt(d, 7) { set s = num.add(s, d) } else { set s = num.sub(s, 1) } } else { set s = num.add(s, 1) } set i = num.add(i, 1) } return s }\"\n\nmain { let r = call arms(13) finish r }",
         16,
     ),
     (
         "a for over a list, with continue",
-        "fn total(xs) { let s = 0 for x in xs { if num.lt(x, 3) { continue } set s = num.add(s, x) } return s }\n\
-         main { let r = call total([1, 2, 3, 4, 5, 6, 7, 8, 9]) finish r }",
+        "definition \"function total(xs: Any) -> Any\\nkernel 1\\nmetering statements\\nimport 0 operation host.echo(x: Any) -> Any\\nbody { let s = 0 for x in xs { if num.lt(x, 3) { continue } set s = num.add(s, x) } return s }\"\n\nmain { let r = call total([1, 2, 3, 4, 5, 6, 7, 8, 9]) finish r }",
         16,
     ),
     (
         "a for over a tuple, with a let and a break",
-        "fn first(xs) { let s = 0 for x in xs { let y = num.mul(x, x) if num.lt(30, y) { break } set s = num.add(s, y) } return s }\n\
-         main { let r = call first((1, 2, 3, 4, 5, 6, 7)) finish r }",
+        "definition \"function first(xs: Any) -> Any\\nkernel 1\\nmetering statements\\nimport 0 operation host.echo(x: Any) -> Any\\nbody { let s = 0 for x in xs { let y = num.mul(x, x) if num.lt(30, y) { break } set s = num.add(s, y) } return s }\"\n\nmain { let r = call first((1, 2, 3, 4, 5, 6, 7)) finish r }",
         16,
     ),
 ];
@@ -141,84 +129,62 @@ const EXIT_PROGRAMS: &[(&str, &str, u32)] = &[
 const ISLANDS: &[(&str, &str, u32)] = &[
     (
         "declared recursion",
-        "fn fib(n) { if num.lt(n, 2) { return n } return num.add(call fib(num.sub(n, 1)), call fib(num.sub(n, 2))) }\n\
-         main { let r = call fib(7) finish r }",
+        "definition \"function fib(self: Any, n: Any) -> Any\\nkernel 1\\nmetering statements\\nimport 0 operation host.echo(x: Any) -> Any\\nbody { if num.lt(n, 2) { return n } return num.add(apply self(self, num.sub(n, 1)), apply self(self, num.sub(n, 2))) }\"\n\nmain { let r = call fib(&fib, 7) finish r }",
         64,
     ),
     (
         "closure recursion through its captured self",
-        "fn outer(k) { let f = absent set f = fn(n) { if num.lt(n, 2) { return n } return num.add(apply f(num.sub(n, 1)), apply f(num.sub(n, 2))) } let r = apply f(k) return r }\n\
-         main { let r = call outer(7) finish r }",
+        "definition \"function outer(k: Any) -> Any\\nkernel 1\\nmetering statements\\nimport 0 operation host.echo(x: Any) -> Any\\nbody { let f = absent set f = fn(n) { if num.lt(n, 2) { return n } return num.add(apply f(num.sub(n, 1)), apply f(num.sub(n, 2))) } let r = apply f(k) return r }\"\n\nmain { let r = call outer(7) finish r }",
         64,
     ),
     (
         "mutual recursion",
-        "fn even(n) { if num.lt(n, 1) { return true } return call odd(num.sub(n, 1)) }\n\
-         fn odd(n) { if num.lt(n, 1) { return false } return call even(num.sub(n, 1)) }\n\
-         main { let r = call even(17) finish r }",
+        "definition \"function even(n: Any) -> Any\\nkernel 1\\nmetering statements\\nimport 0 operation host.echo(x: Any) -> Any\\nbody { if num.lt(n, 1) { return true } return call odd(num.sub(n, 1)) }\"\n\ndefinition \"function odd(n: Any) -> Any\\nkernel 1\\nmetering statements\\nimport 0 operation host.echo(x: Any) -> Any\\nbody { if num.lt(n, 1) { return false } return call even(num.sub(n, 1)) }\"\n\nmain { let r = call even(17) finish r }",
         64,
     ),
     (
         "a depth bound crossed inside recursion",
-        "fn down(n) { if num.lt(n, 1) { return 0 } return num.add(call down(num.sub(n, 1)), 1) }\n\
-         main { let r = call down(40) finish r }",
+        "definition \"function down(n: Any) -> Any\\nkernel 1\\nmetering statements\\nimport 0 operation host.echo(x: Any) -> Any\\nbody { if num.lt(n, 1) { return 0 } return num.add(call down(num.sub(n, 1)), 1) }\"\n\nmain { let r = call down(40) finish r }",
         24,
     ),
     (
         "a raise deep in recursion, caught",
-        "fn f(n) { if num.lt(n, 1) { return num.div(1, n) } return num.add(call f(num.sub(n, 1)), 1) }\n\
-         main { try { let r = call f(9) finish r } catch e { finish e.kind } }",
+        "definition \"function f(n: Any) -> Any\\nkernel 1\\nmetering statements\\nimport 0 operation host.echo(x: Any) -> Any\\nbody { if num.lt(n, 1) { return num.div(1, n) } return num.add(call f(num.sub(n, 1)), 1) }\"\n\nmain { try { let r = call f(9) finish r } catch e { finish e.kind } }",
         64,
     ),
     (
         "an integer overflowing into a big integer after a call returns",
-        "fn fact(n) { if num.lt(n, 2) { return 1 } return num.mul(n, call fact(num.sub(n, 1))) }\n\
-         main { let r = call fact(23) finish r }",
+        "definition \"function fact(n: Any) -> Any\\nkernel 1\\nmetering statements\\nimport 0 operation host.echo(x: Any) -> Any\\nbody { if num.lt(n, 2) { return 1 } return num.mul(n, call fact(num.sub(n, 1))) }\"\n\nmain { let r = call fact(23) finish r }",
         64,
     ),
     (
         "variables, writes and nested blocks in island bodies",
-        "fn g(n) { let a = num.add(n, 1) set a = num.mul(a, 2) if num.lt(a, 12) { let b = num.add(a, 3) if num.lt(b, 9) { return b } set a = b } return num.sub(a, 1) }\n\
-         fn h(n) { if num.lt(n, 1) { return 0 } return num.add(call g(n), call h(num.sub(n, 1))) }\n\
-         main { let r = call h(5) finish r }",
+        "definition \"function g(n: Any) -> Any\\nkernel 1\\nmetering statements\\nimport 0 operation host.echo(x: Any) -> Any\\nbody { let a = num.add(n, 1) set a = num.mul(a, 2) if num.lt(a, 12) { let b = num.add(a, 3) if num.lt(b, 9) { return b } set a = b } return num.sub(a, 1) }\"\n\ndefinition \"function h(n: Any) -> Any\\nkernel 1\\nmetering statements\\nimport 0 operation host.echo(x: Any) -> Any\\nbody { if num.lt(n, 1) { return 0 } return num.add(call g(n), call h(num.sub(n, 1))) }\"\n\nmain { let r = call h(5) finish r }",
         64,
     ),
     (
         "a body that falls off its end, and helper calls",
-        "fn p(n) { if num.lt(n, 0) { return 1 } }\n\
-         fn q(n) { if num.lt(n, 1) { return 0 } let x = num.add(invoke num.add(n, 1), 0) return invoke num.add(call q(num.sub(n, 1)), num.sub(x, n)) }\n\
-         fn r(n) { if num.lt(n, 1) { return call p(3) } return call r(num.sub(n, 1)) }\n\
-         main { let a = call q(5) let c = call r(4) finish (a, c) }",
+        "definition \"function p(n: Any) -> Any\\nkernel 1\\nmetering statements\\nimport 0 operation host.echo(x: Any) -> Any\\nbody { if num.lt(n, 0) { return 1 } }\"\n\ndefinition \"function q(n: Any) -> Any\\nkernel 1\\nmetering statements\\nimport 0 operation host.echo(x: Any) -> Any\\nbody { if num.lt(n, 1) { return 0 } let x = num.add(invoke num.add(n, 1), 0) return invoke num.add(call q(num.sub(n, 1)), num.sub(x, n)) }\"\n\ndefinition \"function r(n: Any) -> Any\\nkernel 1\\nmetering statements\\nimport 0 operation host.echo(x: Any) -> Any\\nbody { if num.lt(n, 1) { return call p(3) } return call r(num.sub(n, 1)) }\"\n\nmain { let a = call q(5) let c = call r(4) finish (a, c) }",
         64,
     ),
     (
         "an island root nested in an expression, and an island with a print outside it",
-        "fn fib(n) { if num.lt(n, 2) { return n } return num.add(call fib(num.sub(n, 1)), call fib(num.sub(n, 2))) }\n\
-         fn w(n) { print n let r = num.add(call fib(n), 1) return r }\n\
-         main { let r = call w(6) finish r }",
+        "definition \"function fib(self: Any, n: Any) -> Any\\nkernel 1\\nmetering statements\\nimport 0 operation host.echo(x: Any) -> Any\\nbody { if num.lt(n, 2) { return n } return num.add(apply self(self, num.sub(n, 1)), apply self(self, num.sub(n, 2))) }\"\n\ndefinition \"function w(n: Any) -> Any\\nkernel 1\\nmetering statements\\nimport 0 operation host.echo(x: Any) -> Any\\nbody { print n let r = num.add(call fib(&fib, n), 1) return r }\"\n\nmain { let r = call w(6) finish r }",
         64,
     ),
     (
         "texts, lists and records an island holds, passed, bound and returned, and discarded calls",
-        "fn echo(v) { return v }\n\
-         fn tag(n) { if num.lt(n, 0) { return \"negative\" } do call echo(n) return \"done\" }\n\
-         fn pass(xs, t) { let u = xs do call echo(t) do u if same(call echo(u), t) { return t } return call echo(call echo(u)) }\n\
-         main { let a = call tag(-1) let b = call tag(2) let c = call pass([1, 2], \"x\") let d = call pass({k: \"v\"}, 3) let e = call echo(\"short\") let f = call pass(\"y\", \"y\") finish (a, b, c, d, e, f) }",
+        "definition \"function echo(v: Any) -> Any\\nkernel 1\\nmetering statements\\nimport 0 operation host.echo(x: Any) -> Any\\nbody { return v }\"\n\ndefinition \"function tag(n: Any) -> Any\\nkernel 1\\nmetering statements\\nimport 0 operation host.echo(x: Any) -> Any\\nbody { if num.lt(n, 0) { return \\\"negative\\\" } do call echo(n) return \\\"done\\\" }\"\n\ndefinition \"function pass(xs: Any, t: Any) -> Any\\nkernel 1\\nmetering statements\\nimport 0 operation host.echo(x: Any) -> Any\\nbody { let u = xs do call echo(t) do u if same(call echo(u), t) { return t } return call echo(call echo(u)) }\"\n\nmain { let a = call tag(-1) let b = call tag(2) let c = call pass([1, 2], \"x\") let d = call pass({k: \"v\"}, 3) let e = call echo(\"short\") let f = call pass(\"y\", \"y\") finish (a, b, c, d, e, f) }",
         64,
     ),
     (
         "a value no island frame holds, from a capture and as an argument, left to the reference",
-        "fn outer(s) { let f = fn(n) { let t = s if num.lt(n, 1) { return t } return n } let a = apply f(0) let b = apply f(1) let c = call echo(s) return (a, b, c) }\n\
-         fn echo(v) { return v }\n\
-         main { let r = call outer(\"a text longer than fourteen bytes\") finish r }",
+        "definition \"function outer(s: Any) -> Any\\nkernel 1\\nmetering statements\\nimport 0 operation host.echo(x: Any) -> Any\\nbody { let f = fn(n) { let t = s if num.lt(n, 1) { return t } return n } let a = apply f(0) let b = apply f(1) let c = call echo(s) return (a, b, c) }\"\n\ndefinition \"function echo(v: Any) -> Any\\nkernel 1\\nmetering statements\\nimport 0 operation host.echo(x: Any) -> Any\\nbody { return v }\"\n\nmain { let r = call outer(\"a text longer than fourteen bytes\") finish r }",
         64,
     ),
     (
         "operators on held texts and closures, charged their measured formulas, and a decline",
-        "fn ident(t) { return key.identity(3, absent, t) }\n\
-         fn check(v) { return collection.function_check(v) }\n\
-         fn ints(x) { return collection.int_check(x) }\n\
-         main { let f = fn(n) { return n } let a = call ident(\"tag\") let b = call check(f) let g = apply b(5) let c = call ints(4) try { let d = call ints(\"four\") finish (a, g, c, d) } catch e { finish (a, g, c, e.kind) } }",
+        "definition \"function ident(t: Any) -> Any\\nkernel 1\\nmetering statements\\nimport 0 operation host.echo(x: Any) -> Any\\nbody { return key.identity(3, absent, t) }\"\n\ndefinition \"function check(v: Any) -> Any\\nkernel 1\\nmetering statements\\nimport 0 operation host.echo(x: Any) -> Any\\nbody { return collection.function_check(v) }\"\n\ndefinition \"function ints(x: Any) -> Any\\nkernel 1\\nmetering statements\\nimport 0 operation host.echo(x: Any) -> Any\\nbody { return collection.int_check(x) }\"\n\nmain { let f = fn(n) { return n } let a = call ident(\"tag\") let b = call check(f) let g = apply b(5) let c = call ints(4) try { let d = call ints(\"four\") finish (a, g, c, d) } catch e { finish (a, g, c, e.kind) } }",
         64,
     ),
     (
@@ -250,18 +216,15 @@ const ISLANDS: &[(&str, &str, u32)] = &[
 const ALLOCATING: &[(&str, &str)] = &[
     (
         "records, lists and tuples built and read in the body",
-        "fn rows(n) { let i = 0 let s = 0 while num.lt(i, n) { let r = {index: i, pair: [i, num.add(i, 1)], both: (i, 2)} set s = num.add(s, num.add(r.index, r.pair[1])) set i = num.add(i, 1) } return s }\n\
-         main { let r = call rows(10) finish r }",
+        "definition \"function rows(n: Any) -> Any\\nkernel 1\\nmetering statements\\nimport 0 operation host.echo(x: Any) -> Any\\nbody { let i = 0 let s = 0 while num.lt(i, n) { let r = {index: i, pair: [i, num.add(i, 1)], both: (i, 2)} set s = num.add(s, num.add(r.index, r.pair[1])) set i = num.add(i, 1) } return s }\"\n\nmain { let r = call rows(10) finish r }",
     ),
     (
         "a list kept by appends, its rows labelled by text natives",
-        "fn churn(n) { let i = 0 let kept = [] while num.lt(i, n) { let scratch = {index: i, pair: [i, num.add(i, 1)], label: text.concat(\"row-\", num.to_text(i))} if num.lt(num.rem_trunc(i, 4), 1) { set kept[list.len(kept)] = scratch } set i = num.add(i, 1) } return kept }\n\
-         main { let r = call churn(14) finish r }",
+        "definition \"function churn(n: Any) -> Any\\nkernel 1\\nmetering statements\\nimport 0 operation host.echo(x: Any) -> Any\\nbody { let i = 0 let kept = [] while num.lt(i, n) { let scratch = {index: i, pair: [i, num.add(i, 1)], label: text.concat(\\\"row-\\\", num.to_text(i))} if num.lt(num.rem_trunc(i, 4), 1) { set kept[list.len(kept)] = scratch } set i = num.add(i, 1) } return kept }\"\n\nmain { let r = call churn(14) finish r }",
     ),
     (
         "a map counted by key",
-        "fn tally(n) { let i = 0 let counts = map{} while num.lt(i, n) { let key = text.concat(\"key_\", num.to_text(num.rem_trunc(i, 6))) if map.contains(counts, key) { set counts[key] = num.add(map.get(counts, key), 1) } else { set counts[key] = 1 } set i = num.add(i, 1) } return counts }\n\
-         main { let r = call tally(16) finish r }",
+        "definition \"function tally(n: Any) -> Any\\nkernel 1\\nmetering statements\\nimport 0 operation host.echo(x: Any) -> Any\\nbody { let i = 0 let counts = map{} while num.lt(i, n) { let key = text.concat(\\\"key_\\\", num.to_text(num.rem_trunc(i, 6))) if map.contains(counts, key) { set counts[key] = num.add(map.get(counts, key), 1) } else { set counts[key] = 1 } set i = num.add(i, 1) } return counts }\"\n\nmain { let r = call tally(16) finish r }",
     ),
     // FIG-6820: the region's own membership tests of maps, sets and
     // records, by key kind: tuple, long text, normalized number and NaN
@@ -270,33 +233,27 @@ const ALLOCATING: &[(&str, &str)] = &[
     // a long literal there is a barrier.
     (
         "membership tests of maps, sets and records by key kind",
-        "fn probe(n) { let i = 0 let s = 0 let m = map{\"key-past-limit1\": 1, (1, 2): 2, 3: 3, nan: 4} let xs = set{\"a\", 2.5, (1, ())} let r = {a: 1, b2: 2, key_past_limit2: 3} while num.lt(i, n) { let k = num.rem_trunc(i, 3) if map.contains(m, (1, num.add(k, 1))) { set s = num.add(s, 1) } if map.contains(m, text.concat(\"key-past-limit\", num.to_text(k))) { set s = num.add(s, 10) } if map.contains(m, num.add(k, 2.0)) { set s = num.add(s, 100) } if map.contains(m, nan) { set s = num.add(s, 1000) } if set.contains(xs, num.add(k, 1.5)) { set s = num.add(s, 10000) } if record.contains(r, text.concat(\"b\", num.to_text(k))) { set s = num.add(s, 100000) } if record.contains(r, text.concat(\"key_past_limit\", num.to_text(k))) { set s = num.add(s, 1000000) } set i = num.add(i, 1) } return s }\n\
-         main { let r = call probe(7) finish r }",
+        "definition \"function probe(n: Any) -> Any\\nkernel 1\\nmetering statements\\nimport 0 operation host.echo(x: Any) -> Any\\nbody { let i = 0 let s = 0 let m = map{\\\"key-past-limit1\\\": 1, (1, 2): 2, 3: 3, nan: 4} let xs = set{\\\"a\\\", 2.5, (1, ())} let r = {a: 1, b2: 2, key_past_limit2: 3} while num.lt(i, n) { let k = num.rem_trunc(i, 3) if map.contains(m, (1, num.add(k, 1))) { set s = num.add(s, 1) } if map.contains(m, text.concat(\\\"key-past-limit\\\", num.to_text(k))) { set s = num.add(s, 10) } if map.contains(m, num.add(k, 2.0)) { set s = num.add(s, 100) } if map.contains(m, nan) { set s = num.add(s, 1000) } if set.contains(xs, num.add(k, 1.5)) { set s = num.add(s, 10000) } if record.contains(r, text.concat(\\\"b\\\", num.to_text(k))) { set s = num.add(s, 100000) } if record.contains(r, text.concat(\\\"key_past_limit\\\", num.to_text(k))) { set s = num.add(s, 1000000) } set i = num.add(i, 1) } return s }\"\n\nmain { let r = call probe(7) finish r }",
     ),
     (
         "a map tested at an unhashable key",
-        "fn probe(m, keys) { let s = 0 for key in keys { if map.contains(m, key) { set s = num.add(s, 1) } } return s }\n\
-         main { try { let r = call probe(map{1: 1}, [1, 2, 1, [1]]) finish r } catch e { finish e.kind } }",
+        "definition \"function probe(m: Any, keys: Any) -> Any\\nkernel 1\\nmetering statements\\nimport 0 operation host.echo(x: Any) -> Any\\nbody { let s = 0 for key in keys { if map.contains(m, key) { set s = num.add(s, 1) } } return s }\"\n\nmain { try { let r = call probe(map{1: 1}, [1, 2, 1, [1]]) finish r } catch e { finish e.kind } }",
     ),
     (
         "a record tested at a number",
-        "fn probe(r, keys) { let s = 0 for key in keys { if record.contains(r, key) { set s = num.add(s, 1) } } return s }\n\
-         main { try { let r = call probe({a: 1}, [\"a\", \"b\", \"a\", 1]) finish r } catch e { finish e.kind } }",
+        "definition \"function probe(r: Any, keys: Any) -> Any\\nkernel 1\\nmetering statements\\nimport 0 operation host.echo(x: Any) -> Any\\nbody { let s = 0 for key in keys { if record.contains(r, key) { set s = num.add(s, 1) } } return s }\"\n\nmain { try { let r = call probe({a: 1}, [\"a\", \"b\", \"a\", 1]) finish r } catch e { finish e.kind } }",
     ),
     (
         "a record whose shape changes under its field reads and writes",
-        "fn shapes(n) { let i = 0 let s = 0 while num.lt(i, n) { let r = {a: i, b: 1} if num.lt(num.rem_trunc(i, 2), 1) { set r = {b: 2, c: 3, a: i} } set s = num.add(s, r.a) set r.b = s set i = num.add(i, 1) } return s }\n\
-         main { let r = call shapes(10) finish r }",
+        "definition \"function shapes(n: Any) -> Any\\nkernel 1\\nmetering statements\\nimport 0 operation host.echo(x: Any) -> Any\\nbody { let i = 0 let s = 0 while num.lt(i, n) { let r = {a: i, b: 1} if num.lt(num.rem_trunc(i, 2), 1) { set r = {b: 2, c: 3, a: i} } set s = num.add(s, r.a) set r.b = s set i = num.add(i, 1) } return s }\"\n\nmain { let r = call shapes(10) finish r }",
     ),
     (
         "a for over a list of records, writing a list's members",
-        "fn marks(xs) { let out = [0, 0, 0] for x in xs { set out[num.rem_trunc(x.k, 3)] = x.v } return out }\n\
-         main { try { let r = call marks([{k: 1, v: 2}, {k: 2, v: 3}, {k: 4, v: [5]}, {k: 3, v: \"a\"}, {k: 5}, {k: 6, v: 7}]) finish r } catch e { finish e.kind } }",
+        "definition \"function marks(xs: Any) -> Any\\nkernel 1\\nmetering statements\\nimport 0 operation host.echo(x: Any) -> Any\\nbody { let out = [0, 0, 0] for x in xs { set out[num.rem_trunc(x.k, 3)] = x.v } return out }\"\n\nmain { try { let r = call marks([{k: 1, v: 2}, {k: 2, v: 3}, {k: 4, v: [5]}, {k: 3, v: \"a\"}, {k: 5}, {k: 6, v: 7}]) finish r } catch e { finish e.kind } }",
     ),
     (
         "an index past a list's end, raised and caught",
-        "fn past(xs) { let s = 0 let i = 0 while num.lt(i, 6) { set s = num.add(s, xs[i]) set i = num.add(i, 1) } return s }\n\
-         main { try { let r = call past([1, 2, 3, 4]) finish r } catch e { finish e.kind } }",
+        "definition \"function past(xs: Any) -> Any\\nkernel 1\\nmetering statements\\nimport 0 operation host.echo(x: Any) -> Any\\nbody { let s = 0 let i = 0 while num.lt(i, 6) { set s = num.add(s, xs[i]) set i = num.add(i, 1) } return s }\"\n\nmain { try { let r = call past([1, 2, 3, 4]) finish r } catch e { finish e.kind } }",
     ),
 ];
 
@@ -308,13 +265,11 @@ const ALLOCATING: &[(&str, &str)] = &[
 const ACCUMULATORS: &[(&str, &str)] = &[
     (
         "a text accumulated by concatenation, no older version of it observed",
-        "fn build(n) { let i = 0 let s = text.concat(\"a text past the inline\", \" limit\") while num.lt(i, n) { set s = text.concat(s, text.concat(\"-row-\", num.to_text(i))) set i = num.add(i, 1) } return s }\n\
-         main { let r = call build(12) finish r }",
+        "definition \"function build(n: Any) -> Any\\nkernel 1\\nmetering statements\\nimport 0 operation host.echo(x: Any) -> Any\\nbody { let i = 0 let s = text.concat(\\\"a text past the inline\\\", \\\" limit\\\") while num.lt(i, n) { set s = text.concat(s, text.concat(\\\"-row-\\\", num.to_text(i))) set i = num.add(i, 1) } return s }\"\n\nmain { let r = call build(12) finish r }",
     ),
     (
         "a text accumulated over a prefix another variable holds, then with its older versions kept",
-        "fn build(n) { let i = 0 let start = text.concat(\"a prefix past the inline\", \" limit\") let s = start while num.lt(i, n) { set s = text.concat(s, num.to_text(i)) set i = num.add(i, 1) } let kept = [] let prev = s let j = 0 while num.lt(j, n) { set prev = s set s = text.concat(s, num.to_text(j)) set kept[list.len(kept)] = prev set j = num.add(j, 1) } return (start, s, kept) }\n\
-         main { let r = call build(9) finish r }",
+        "definition \"function build(n: Any) -> Any\\nkernel 1\\nmetering statements\\nimport 0 operation host.echo(x: Any) -> Any\\nbody { let i = 0 let start = text.concat(\\\"a prefix past the inline\\\", \\\" limit\\\") let s = start while num.lt(i, n) { set s = text.concat(s, num.to_text(i)) set i = num.add(i, 1) } let kept = [] let prev = s let j = 0 while num.lt(j, n) { set prev = s set s = text.concat(s, num.to_text(j)) set kept[list.len(kept)] = prev set j = num.add(j, 1) } return (start, s, kept) }\"\n\nmain { let r = call build(9) finish r }",
     ),
 ];
 
@@ -354,8 +309,7 @@ const SESSIONS: &[(&str, &str, bool)] = &[
     ),
     (
         "a top-level loop and a function's loop over the same names",
-        "fn inner(n) { let i = 0 let s = 0 while num.lt(i, n) { set s = num.add(s, i) set i = num.add(i, 1) } return s }\n\
-         main { let s = 0 let i = 0 while num.lt(i, 8) { set s = num.add(s, i) set i = num.add(i, 1) } let t = call inner(i) finish (s, t) }",
+        "definition \"function inner(n: Any) -> Any\\nkernel 1\\nmetering statements\\nimport 0 operation host.echo(x: Any) -> Any\\nbody { let i = 0 let s = 0 while num.lt(i, n) { set s = num.add(s, i) set i = num.add(i, 1) } return s }\"\n\nmain { let s = 0 let i = 0 while num.lt(i, 8) { set s = num.add(s, i) set i = num.add(i, 1) } let t = call inner(i) finish (s, t) }",
         false,
     ),
 ];
@@ -871,23 +825,34 @@ fn check_smith(
 /// then a frame's, not session bindings, so its loops can form regions.
 fn wrap(document: &Document) -> Option<Document> {
     let mut document = document.clone();
-    let name = Name::new("wrapped_main");
-    if document.functions.contains_key(&name) {
-        return None;
-    }
-    let caller =
-        parse_document("kernel 1\nmain { let result = call wrapped_main() return result }")
-            .ok()?
-            .main;
-    let body = std::mem::replace(&mut document.main, caller);
-    document.functions.insert(
-        name,
-        lash_kernel_doc::Function {
-            params: Vec::new(),
-            body,
-            start: None,
+    let body = document.main.take()?;
+    let function = lash_kernel_doc::FunctionDefinition {
+        kernel: lash_kernel_doc::KERNEL_VERSION,
+        name: lash_vocabulary::FunctionName::new("wrapped_main").unwrap(),
+        signature: lash_vocabulary::Signature {
+            params: vec![],
+            result: lash_vocabulary::Type::Any,
         },
-    );
+        errors: Default::default(),
+        guard: None,
+        native_version: 1,
+        implementation: lash_kernel_doc::Implementation::Guest {
+            body: lash_kernel_doc::FunctionBody {
+                functions: document.function_names(),
+                imports: document.imports.clone(),
+                block: body,
+            },
+            metering: lash_kernel_doc::Metering::Statements,
+        },
+    };
+    let id = function.identity();
+    document.functions.insert(id, function);
+    document.main = Some(vec![lash_kernel_doc::Stmt::Return {
+        value: lash_kernel_doc::Expr::Act(Box::new(lash_kernel_doc::ActExpr {
+            kind: lash_kernel_doc::ActKind::Call(lash_kernel_doc::Callee::Local(id)),
+            args: vec![],
+        })),
+    }]);
     Some(document)
 }
 
@@ -904,16 +869,10 @@ fn wrapped(case: &Case) -> Option<Case> {
 fn program_case(name: &str, text: &str, call_depth: u32) -> Case {
     let registry = super::corpus_registry();
     let mut source = String::from("kernel 1\nnumbers by_spelling\n");
-    for (id, function) in registry.iter() {
-        source.push_str(&format!("use {} = @{id}\n", function.definition().name));
-    }
     source.push_str(text);
-    let mut document =
-        parse_document(&source).unwrap_or_else(|error| panic!("{name} must parse: {error}"));
-    document.manifest.functions = lash_kernel_check::requirements(&document, &registry).functions;
+    let document = crate::document_fixture::authored(&source, &registry);
     // A refused program runs in no plan, and the law would compare nothing.
     let mut admission = lash_kernel_check::Environment::new(&registry);
-    admission.effects = document.manifest.effects.clone();
     lash_kernel_check::admit(&document, &admission)
         .unwrap_or_else(|refusal| panic!("{name} must be admitted: {refusal:?}"));
     let mut environment = Environment::default();
@@ -937,11 +896,8 @@ fn program_case(name: &str, text: &str, call_depth: u32) -> Case {
 /// `library`.
 fn formed(library: &PreparedLibrary, case: &Case) -> (usize, usize) {
     let document = parse_document(&case.document).expect("a region program parses");
-    let program = Program {
-        closure: crate::pages::CLOSURE,
-        document: Arc::new(document),
-        library: library.clone(),
-    };
+    let program = crate::machine::prepare_document(&(library.clone()), Arc::new(document), None)
+        .expect("prepare linked law document");
     (
         loop_regions(&program).expect("a region program is admitted"),
         call_islands(&program).expect("a region program is admitted"),
@@ -1084,7 +1040,7 @@ fn regions_on_and_off_agree(group: Option<usize>, core: Option<(usize, Sweep)>) 
         if *parks {
             case.environment.deliveries = vec![vec![crate::Delivery {
                 request: 0,
-                outcome: crate::ScriptOutcome::Elapsed,
+                outcome: crate::ScriptOutcome::Completed(lash_kernel_doc::Datum::Null),
                 dropped: false,
             }]];
         }
@@ -2214,13 +2170,11 @@ fn slots_walks_that_pin_or_stand_on_one_element_run_as_the_reference() {
 const TYPED: &[(&str, &str)] = &[
     (
         "a typed integer loop overflowing into a big integer",
-        "fn branch(n) { let i = 0 let s = 0 let x = 3 while num.lt(i, n) { if num.lt(num.rem_trunc(i, 3), 1) { set s = num.add(s, i) } else { set s = num.sub(s, i) } set x = num.mul(x, 7) set i = num.add(i, 1) } return (s, x) }\n\
-         main { let r = call branch(26) finish r }",
+        "definition \"function branch(n: Any) -> Any\\nkernel 1\\nmetering statements\\nimport 0 operation host.echo(x: Any) -> Any\\nbody { let i = 0 let s = 0 let x = 3 while num.lt(i, n) { if num.lt(num.rem_trunc(i, 3), 1) { set s = num.add(s, i) } else { set s = num.sub(s, i) } set x = num.mul(x, 7) set i = num.add(i, 1) } return (s, x) }\"\n\nmain { let r = call branch(26) finish r }",
     ),
     (
         "a typed integer run a declaration and a float end",
-        "fn mixed(n) { let i = 0 let s = 0 let f = 0.5 while num.lt(i, n) { set s = num.add(s, num.mul(i, 3)) let d = num.sub(s, i) set f = num.add(f, 0.25) set s = num.sub(d, 1) set i = num.add(i, 1) } return (s, f) }\n\
-         main { let r = call mixed(12) finish r }",
+        "definition \"function mixed(n: Any) -> Any\\nkernel 1\\nmetering statements\\nimport 0 operation host.echo(x: Any) -> Any\\nbody { let i = 0 let s = 0 let f = 0.5 while num.lt(i, n) { set s = num.add(s, num.mul(i, 3)) let d = num.sub(s, i) set f = num.add(f, 0.25) set s = num.sub(d, 1) set i = num.add(i, 1) } return (s, f) }\"\n\nmain { let r = call mixed(12) finish r }",
     ),
 ];
 

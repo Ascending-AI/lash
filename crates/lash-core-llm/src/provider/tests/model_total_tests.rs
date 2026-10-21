@@ -191,7 +191,7 @@ fn assert_model_total_exceeded(settled: &Settled, cap: Duration) {
     assert_eq!(
         last.retry_decision,
         Some(RetryDecision::Declined(RetryDeclineCause::TimedOut {
-            limit: lash_protocol_types::LimitCause::ExecutionTotal,
+            limit: lash_vocabulary::tool_contract::LimitCause::ExecutionTotal,
         }))
     );
 }

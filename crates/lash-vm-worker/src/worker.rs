@@ -1,4 +1,3 @@
-use std::collections::VecDeque;
 use std::os::unix::net::UnixStream;
 use std::sync::{Arc, Mutex};
 #[cfg(test)]
@@ -10,8 +9,15 @@ use crate::embedding::Embedding;
 use crate::host::{PagePort, Wire, WireHost, WireLimiter, WirePageSource, grant_of, link_grant};
 use lash_kernel_doc::heap::{PageId, PageRef};
 use lash_kernel_doc::{Datum, IdentifiedDocument};
+
 use lash_kernel_state::paged::{Checkpoint, PageSource};
 use lash_kernel_vm::{Bounds, CellStart, KernelMachine, Machine, OpenError, Program, Step};
+use lash_protocol_types::engine_fault::{
+    CheckpointRefusal, CodecRefusal, Detail, ExecutionLease, FrameEpoch, InfrastructureOutcome,
+    KernelRestoreRefusal, OwnerEpoch, PayloadKind, ProtocolBreach, RunInput, RunRefusal,
+    SequenceFault,
+};
+use lash_protocol_types::worker_limit::WorkerLimit;
 #[cfg(test)]
 use lash_vm_client::ipc::read_frame;
 use lash_vm_client::ipc::{Bootstrap, FrameSource, write_frame, write_frames};
@@ -34,7 +40,7 @@ struct Hosted {
     observe_sites: bool,
     /// The document's site ordinals, when the parent records the run's
     /// statement path.
-    path: Option<std::collections::BTreeMap<lash_kernel_doc::Site, u32>>,
+    path: Option<std::collections::BTreeMap<lash_vocabulary::sites::Site, u32>>,
 }
 
 pub(crate) struct Server<'embedding> {
@@ -48,11 +54,6 @@ pub(crate) struct Server<'embedding> {
     codec: FrameCodec,
     bootstrap: Bootstrap,
     hosted: Option<Hosted>,
-    /// Immutable preparation survives reset, scoped to this embedding's
-    /// fixed registry. Exact wire content includes format and helper ids.
-    /// At most sixteen documents and eight MiB of token bodies are held;
-    /// a larger document runs normally without becoming resident.
-    documents: VecDeque<(EncodedPayload, Program)>,
     fences: Arc<Mutex<Fences>>,
     owner: Option<VmOwner>,
     /// Whether the lease's one `Prepare` crossed, and no run started since.
@@ -132,7 +133,6 @@ impl<'embedding> Server<'embedding> {
             codec,
             bootstrap,
             hosted: None,
-            documents: VecDeque::new(),
             fences: Arc::new(Mutex::new(Fences {
                 incoming: None,
                 outgoing: MessageFence::new(ExecutionLease(0), OwnerEpoch(0), FrameEpoch(0)),
@@ -171,7 +171,7 @@ impl<'embedding> Server<'embedding> {
     /// Tells the parent why the worker stops, where that is the worker's to
     /// say. A lost pipe is the parent's own evidence, and nothing is sent.
     pub(crate) fn refuse(&mut self, error: &PoolError) -> Result<(), PoolError> {
-        match WorkerRefusal::testimony(error.clone().into_outcome()) {
+        match lash_vm_protocol::outcome::testimony(error.clone().into_outcome()) {
             Some(message) => self.send(message),
             None => Ok(()),
         }
@@ -495,7 +495,15 @@ impl<'embedding> Server<'embedding> {
             })
         };
         let fresh = matches!(start.from, StartFrom::Fresh(_));
-        let program = self.program(&start.document, &start.definitions, fresh)?;
+        let program = self.program(
+            &start.document,
+            &start.definitions,
+            &start.functions,
+            start.link,
+            &start.instances,
+            &start.documents,
+            fresh,
+        )?;
         let path = start.observe_path.then(|| program.document.site_ordinals());
         let bounds = Bounds {
             memory_meter: match start.bounds.memory_meter {
@@ -660,18 +668,12 @@ impl<'embedding> Server<'embedding> {
         &mut self,
         encoded: &EncodedPayload,
         definitions: &[StoredDefinition],
+        functions: &std::collections::BTreeSet<lash_vocabulary::names::FunctionId>,
+        link: lash_vocabulary::content_ids::LinkId,
+        encoded_instances: &EncodedPayload,
+        supplied_documents: &[lash_vm_protocol::message::StoredDocument],
         fresh: bool,
     ) -> Result<Program, PoolError> {
-        if let Some(index) = self
-            .documents
-            .iter()
-            .position(|(bytes, _)| bytes == encoded)
-            && let Some(hit) = self.documents.remove(index)
-        {
-            let program = hit.1.clone();
-            self.documents.push_back(hit);
-            return Ok(program);
-        }
         let document = IdentifiedDocument::decode(&encoded.0, self.bootstrap.tuning.kernel_data)
             .map_err(|error| {
                 PoolError::refused(RunRefusal::Undecodable {
@@ -679,18 +681,79 @@ impl<'embedding> Server<'embedding> {
                     detail: Detail::new(error),
                 })
             })?;
-        let supplied: Vec<(lash_kernel_doc::FunctionId, &[u8])> = definitions
+        let supplied: Vec<(lash_vocabulary::names::FunctionId, &[u8])> = definitions
             .iter()
             .map(|definition| {
                 (
-                    lash_kernel_doc::FunctionId::from_bytes(definition.function),
+                    lash_vocabulary::names::FunctionId::from_bytes(definition.function),
                     definition.body.0.as_slice(),
                 )
             })
             .collect();
+        let instances: Vec<lash_kernel_vm::interface::PreparedInstance> =
+            lash_vm_client::wire::decode(
+                lash_protocol_types::engine_fault::PayloadKind::Start,
+                encoded_instances,
+            )?;
+        let mut indexed = std::collections::BTreeMap::new();
+        for instance in instances {
+            if indexed.insert(instance.link, instance).is_some() {
+                return Err(PoolError::payload(
+                    lash_protocol_types::engine_fault::PayloadKind::Start,
+                    "duplicate linked instance",
+                ));
+            }
+        }
+        let mut documents = std::collections::BTreeMap::new();
+        for supplied in supplied_documents {
+            let loaded =
+                IdentifiedDocument::decode(&supplied.body.0, self.bootstrap.tuning.kernel_data)
+                    .map_err(|error| {
+                        PoolError::payload(
+                            lash_protocol_types::engine_fault::PayloadKind::Start,
+                            error,
+                        )
+                    })?;
+            if loaded.id() != supplied.document
+                || documents
+                    .insert(supplied.document, Arc::clone(loaded.shared()))
+                    .is_some()
+            {
+                return Err(PoolError::payload(
+                    lash_protocol_types::engine_fault::PayloadKind::Start,
+                    "document identity or duplicate",
+                ));
+            }
+        }
+        let root = indexed.get(&link).ok_or_else(|| {
+            PoolError::payload(
+                lash_protocol_types::engine_fault::PayloadKind::Start,
+                "root Link is not loaded",
+            )
+        })?;
+        if root.document != document.id() || !documents.contains_key(&document.id()) {
+            return Err(PoolError::payload(
+                lash_protocol_types::engine_fault::PayloadKind::Start,
+                "root Link names another document",
+            ));
+        }
+        let mut reached = document.shared().as_ref().clone();
+        reached.functions.clear();
+        for function in functions {
+            let definition = documents
+                .values()
+                .find_map(|doc| doc.functions.get(function))
+                .ok_or_else(|| {
+                    PoolError::payload(
+                        lash_protocol_types::engine_fault::PayloadKind::Start,
+                        "selected function definition is absent",
+                    )
+                })?;
+            reached.functions.insert(*function, definition.clone());
+        }
         let (library, closure) = crate::embedding::library_for(
             self.embedding,
-            &document,
+            &reached,
             &supplied,
             self.bootstrap.tuning.kernel_data,
         )
@@ -716,25 +779,14 @@ impl<'embedding> Server<'embedding> {
             self.bootstrap.tuning.kernel_data,
         );
         let program = Program {
+            functions: functions.clone(),
             closure: PageId(closure.reference().0),
             document: Arc::clone(document.shared()),
             library: library.clone(),
+            link,
+            instances: indexed,
+            documents,
         };
-        const BYTES: usize = 8 * 1024 * 1024;
-        if encoded.0.len() <= BYTES {
-            while self.documents.len() >= 16
-                || self
-                    .documents
-                    .iter()
-                    .map(|(bytes, _)| bytes.0.len())
-                    .sum::<usize>()
-                    + encoded.0.len()
-                    > BYTES
-            {
-                self.documents.pop_front();
-            }
-            self.documents.push_back((encoded.clone(), program.clone()));
-        }
         Ok(program)
     }
 
@@ -964,7 +1016,6 @@ fn requests_something(park: &lash_kernel_vm::Park) -> bool {
     park.requests.iter().any(|request| {
         let wait = match request {
             lash_kernel_vm::Request::Effect(effect) => effect.wait,
-            lash_kernel_vm::Request::Sleep(sleep) => sleep.wait,
         };
         !park.withdrawn.contains(&wait)
     })
@@ -994,24 +1045,48 @@ fn heap_fault(fault: lash_kernel_doc::heap::HeapFault) -> PoolError {
     use lash_kernel_doc::heap::{HeapFault as Kernel, HostResource as KernelResource};
     let detail = || Detail::new(&fault);
     let fault = match &fault {
-        Kernel::Missing { .. } => page::HeapFault::Missing { detail: detail() },
-        Kernel::Corrupt { .. } => page::HeapFault::Corrupt { detail: detail() },
-        Kernel::Unauthorized { .. } => page::HeapFault::Unauthorized { detail: detail() },
-        Kernel::LeaseLost => page::HeapFault::LeaseLost,
-        Kernel::Exhausted { resource } => page::HeapFault::Exhausted {
+        Kernel::Missing { .. } => {
+            lash_protocol_types::engine_fault::HeapFault::Missing { detail: detail() }
+        }
+        Kernel::Corrupt { .. } => {
+            lash_protocol_types::engine_fault::HeapFault::Corrupt { detail: detail() }
+        }
+        Kernel::Unauthorized { .. } => {
+            lash_protocol_types::engine_fault::HeapFault::Unauthorized { detail: detail() }
+        }
+        Kernel::LeaseLost => lash_protocol_types::engine_fault::HeapFault::LeaseLost,
+        Kernel::Exhausted { resource } => lash_protocol_types::engine_fault::HeapFault::Exhausted {
             resource: match resource {
-                KernelResource::TraceBudget => page::HostResource::TraceBudget,
-                KernelResource::CleanResidency => page::HostResource::CleanResidency,
-                KernelResource::DirtyResidency => page::HostResource::DirtyResidency,
-                KernelResource::PinnedPages => page::HostResource::PinnedPages,
-                KernelResource::StagingBytes => page::HostResource::StagingBytes,
-                KernelResource::ReadBatch => page::HostResource::ReadBatch,
-                KernelResource::HostWork => page::HostResource::HostWork,
+                KernelResource::TraceBudget => {
+                    lash_protocol_types::engine_fault::HostResource::TraceBudget
+                }
+                KernelResource::CleanResidency => {
+                    lash_protocol_types::engine_fault::HostResource::CleanResidency
+                }
+                KernelResource::DirtyResidency => {
+                    lash_protocol_types::engine_fault::HostResource::DirtyResidency
+                }
+                KernelResource::PinnedPages => {
+                    lash_protocol_types::engine_fault::HostResource::PinnedPages
+                }
+                KernelResource::StagingBytes => {
+                    lash_protocol_types::engine_fault::HostResource::StagingBytes
+                }
+                KernelResource::ReadBatch => {
+                    lash_protocol_types::engine_fault::HostResource::ReadBatch
+                }
+                KernelResource::HostWork => {
+                    lash_protocol_types::engine_fault::HostResource::HostWork
+                }
             },
         },
-        Kernel::Transport(_) => page::HeapFault::Transport { detail: detail() },
-        Kernel::Malformed(_) => page::HeapFault::Malformed { detail: detail() },
-        _ => page::HeapFault::Malformed { detail: detail() },
+        Kernel::Transport(_) => {
+            lash_protocol_types::engine_fault::HeapFault::Transport { detail: detail() }
+        }
+        Kernel::Malformed(_) => {
+            lash_protocol_types::engine_fault::HeapFault::Malformed { detail: detail() }
+        }
+        _ => lash_protocol_types::engine_fault::HeapFault::Malformed { detail: detail() },
     };
     InfrastructureOutcome::HeapFault { fault }.into()
 }
@@ -1090,22 +1165,98 @@ mod tests {
             .find(|(name, _)| *name == "num.add")
             .map(|(_, id)| id)
             .expect("helper");
-        let document = lash_kernel_doc::parse_document(&format!(
-            "kernel 1\nnumbers float\nuse num.add = @{add}\nfn work() {{ let n = num.add(3, 4) return n }}\nentry work() -> Any\nmain {{ return null }}",
-        )).expect("document");
+        use lash_kernel_doc::{Expr, Literal, NumberPolicy, Rhs, Stmt};
+
+        use lash_vocabulary::{FunctionName, Name, Signature, Type};
+        let native = embedding
+            .registry()
+            .unwrap()
+            .get(&add)
+            .unwrap()
+            .definition()
+            .as_ref()
+            .clone();
+        let body = lash_kernel_doc::FunctionDefinition {
+            kernel: lash_kernel_doc::KERNEL_VERSION,
+            name: FunctionName::new("test.work").unwrap(),
+            signature: Signature {
+                params: vec![],
+                result: Type::Any,
+            },
+            errors: Default::default(),
+            guard: None,
+            implementation: lash_kernel_doc::Implementation::Guest {
+                body: lash_kernel_doc::FunctionBody {
+                    functions: [(add, native.name.clone())].into(),
+                    imports: Default::default(),
+                    block: vec![
+                        Stmt::Let {
+                            name: Name::new("n"),
+                            value: Rhs::Expr(Expr::Call {
+                                function: add,
+                                args: vec![
+                                    Expr::Literal(Literal::Int(3.into())),
+                                    Expr::Literal(Literal::Int(4.into())),
+                                ],
+                            }),
+                        },
+                        Stmt::Return {
+                            value: Expr::Variable(Name::new("n")),
+                        },
+                    ],
+                },
+                metering: lash_kernel_doc::Metering::Statements,
+            },
+            native_version: 1,
+        };
+        let function = body.identity();
+        let mut document = lash_kernel_doc::Document::new(NumberPolicy::Float, vec![]);
+        document.main = None;
+        document.functions = [(add, native), (function, body)].into();
+        document.requires.natives.insert(add);
+        document.exports.insert(
+            Name::new("work"),
+            lash_kernel_doc::Export::Function(lash_kernel_doc::FunctionExport {
+                function,
+                signature: Signature {
+                    params: vec![],
+                    result: Type::Any,
+                },
+                convention: lash_kernel_doc::StartConvention::Direct,
+                asynchronous: false,
+                rest: false,
+            }),
+        );
+        let link = lash_vocabulary::Link {
+            document: document.identity(),
+            fills: Default::default(),
+        };
+        let link_id = link.identity();
+        let instances = vec![lash_kernel_vm::PreparedInstance {
+            link: link_id,
+            document: document.identity(),
+            slots: Default::default(),
+        }];
         let start = Start {
             owner: VmOwner::new("process:law"),
             dialect: lash_vm_releases::TYPESCRIPT.to_owned(),
             document: EncodedPayload(document.canonical_bytes()),
+            link: link_id,
+            instances: wire::encode(PayloadKind::Start, &instances).unwrap(),
+            documents: vec![lash_vm_protocol::message::StoredDocument {
+                document: document.identity(),
+                body: EncodedPayload(document.canonical_bytes()),
+            }],
             definitions: Vec::new(),
+            functions: document.functions.keys().copied().collect(),
             from: StartFrom::Fresh(
                 wire::encode(
                     PayloadKind::Start,
                     &StartWire::of(
-                        lash_kernel_vm::Target::Entry(lash_kernel_doc::Name::new("work")),
+                        lash_kernel_vm::Target::Entry(lash_vocabulary::names::Name::new("work")),
                         Vec::new(),
                         None,
-                        &lash_kernel_vm::EffectModes::recorded(),
+                        &Default::default(),
                         Vec::new(),
                     ),
                 )
@@ -1122,82 +1273,6 @@ mod tests {
             charge_limiter: false,
         };
         (document, start)
-    }
-
-    /// FIG-6148: activations of one process prepare identical content once
-    /// per worker, without changing charge. FIG-6257: the one preparation
-    /// is one token decode of the `Start`'s body, and no JSON.
-    #[test]
-    fn process_activations_decode_one_document_per_worker() {
-        let (config, _codec, embedding, mut server, _parent) = ready_server();
-        let (document, start) = work_start(&config, embedding);
-        let _ = lash_kernel_doc::document_work::take();
-        struct Quiet;
-        impl lash_kernel_vm::Host for Quiet {
-            fn clock(&mut self) -> lash_kernel_doc::Timestamp {
-                lash_kernel_doc::Timestamp {
-                    nanoseconds: 0.into(),
-                }
-            }
-            fn random(&mut self) -> u64 {
-                0
-            }
-            fn read(
-                &mut self,
-                _: &lash_kernel_doc::Handle,
-                _: &Datum,
-            ) -> Result<Datum, lash_kernel_doc::ErrorDatum> {
-                Ok(Datum::Null)
-            }
-            fn print(&mut self, _: &Datum) {}
-            fn cancel_requested(&mut self) -> bool {
-                false
-            }
-        }
-        let mut first = server.start(start.clone()).expect("first activation");
-        assert_eq!(
-            first.machine.run(&mut Quiet, 1).expect("slice"),
-            Step::Slice
-        );
-        let meters = first.machine.meters();
-        drop(first);
-        let mut second = server.start(start.clone()).expect("second activation");
-        assert_eq!(
-            second.machine.run(&mut Quiet, 1).expect("slice"),
-            Step::Slice
-        );
-        assert_eq!(second.machine.meters().charged, meters.charged);
-        drop(second);
-        assert_eq!(
-            lash_kernel_doc::document_work::take(),
-            lash_kernel_doc::document_work::DocumentWork {
-                token_decodes: 1,
-                ..Default::default()
-            },
-            "two activations share one token decode"
-        );
-        // Another format cannot reuse the earlier document's preparation.
-        let mut changed = document;
-        changed.manifest.kernel = 999;
-        let mut other = start.clone();
-        other.document = EncodedPayload(changed.canonical_bytes());
-        let _ = lash_kernel_doc::document_work::take();
-        assert!(server.start(other).is_err());
-        server
-            .start(start)
-            .expect("original preparation remains valid");
-        assert_eq!(lash_kernel_doc::document_work::take().token_decodes, 1);
-        // Distinct identities evict old residency rather than growing it.
-        for n in 0..17 {
-            let next = lash_kernel_doc::parse_document(&format!(
-                "kernel 1\nnumbers float\nmain {{ return {n} }}",
-            ))
-            .expect("document");
-            server
-                .program(&EncodedPayload(next.canonical_bytes()), &[], true)
-                .expect("preparation");
-        }
-        assert_eq!(server.documents.len(), 16);
     }
 
     /// FIG-5497: the worker must obey the parent's response IO deadline.
@@ -1314,7 +1389,7 @@ mod tests {
         for outcome in [
             outcome,
             InfrastructureOutcome::PageRefused {
-                refusal: page::PageRefusal::Corrupt,
+                refusal: lash_protocol_types::engine_fault::PageRefusal::Corrupt,
             },
         ] {
             assert!(!outcome.is_retryable(), "{outcome:?} is permanent");

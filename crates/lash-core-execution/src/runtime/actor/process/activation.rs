@@ -72,7 +72,6 @@ use super::{CascadeProgress, end_scope};
 use crate::ActorContext;
 use crate::AdmittedScope;
 use crate::CancelOrigin;
-use crate::ProcessId;
 use crate::runtime::actor::activation_loop;
 use crate::runtime::actor::round::lifecycle::{Act, Idle, Lifecycle};
 use crate::runtime::actor::round::{self, MemberBodies, PolicyView, RoundError, RunFold};
@@ -88,6 +87,7 @@ use lash_execution_contracts::process::EngineState;
 use lash_execution_contracts::process::ProcessEngine;
 use lash_execution_contracts::process::ProcessInput;
 use lash_execution_contracts::process::StepRequest;
+use lash_vocabulary::identity::ProcessId;
 
 /// The activation of claimed process actors: one per node, routed by
 /// [`lash_durable::ActorDispatch`].
@@ -212,7 +212,7 @@ pub(super) struct Live {
     /// The hard requirements record of the engine state this pass read,
     /// or of the state its last commit wrote: what every rewrite of
     /// `requires` keeps (FIG-6993).
-    pub(super) record: lash_kernel_doc::ExecutionRequirements,
+    pub(super) record: lash_vocabulary::claims::ClaimRequirements,
     /// What this activation keeps of its own acknowledged commits.
     continuation: super::continuation::Continuation,
 }
@@ -262,16 +262,6 @@ impl Activation for ProcessActivation {
         self.forget_published(&owned, &process).await;
         exit
     }
-    /// What the backend's node's package code offers running code
-    /// (FIG-6993), once installed.
-    async fn capabilities(
-        &self,
-    ) -> Result<lash_durable::NodeCapabilities, lash_durable::DurableError> {
-        match self.backend.packages() {
-            Some(packages) => packages.install(&self.backend).await,
-            None => Ok(lash_durable::NodeCapabilities::default()),
-        }
-    }
 }
 
 impl ProcessActivation {
@@ -302,7 +292,7 @@ impl ProcessActivation {
             history_restored: false,
             ended_refused: false,
             published: None,
-            record: lash_kernel_doc::ExecutionRequirements::default(),
+            record: lash_vocabulary::claims::ClaimRequirements::default(),
             continuation: super::continuation::Continuation::default(),
         };
         let mut retried_conflict = false;
@@ -697,7 +687,13 @@ impl ProcessActivation {
         for step in driver.steps.values() {
             if let Ok(admission) = self
                 .steps
-                .admit(&live.bodies.runtime, &record, &step.request, millis(now))
+                .admit(
+                    &live.bodies.runtime,
+                    &record,
+                    &step.request,
+                    step.target.as_ref(),
+                    millis(now),
+                )
                 .await
             {
                 policies.push((admission.tool, admission.policy));
@@ -1336,12 +1332,24 @@ impl ProcessActivation {
                         outcome: decision,
                     }));
                 }
-                if let Some(target) =
-                    crate::runtime::process::steps::matched_target(&step.request, matched)
-                {
+                if let Some(route) = matched.resolved() {
+                    let request = step.request.clone();
+                    let StepRequest::Tool { input, .. } = &request else {
+                        return Err(corrupt("dispatch", "resolution is not a tool use"));
+                    };
+                    let pin = crate::runtime::process::steps::InvocationTarget {
+                        route: route.clone(),
+                        contract: matched
+                            .definition()
+                            .ok_or_else(|| corrupt("dispatch", "missing definition"))?
+                            .contract_id(),
+                        args: input.clone(),
+                        dispatch_requested: Some(matched.requested.clone()),
+                    };
                     return Ok(Next::Matched(Box::new(Handoff {
                         resolution: step,
-                        target,
+                        target: request,
+                        pin,
                     })));
                 }
                 return Err(corrupt(

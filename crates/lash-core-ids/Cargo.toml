@@ -29,6 +29,7 @@ testing = ["dep:tracing-subscriber", "lash-protocol-types/testing"]
 workspace = true
 
 [dependencies]
+lash-vocabulary = { workspace = true }
 lash-checkpoint-encoder = { workspace = true, optional = true }
 rustix = { version = "=1.1.4", optional = true, features = ["time"] }
 async-trait = { workspace = true }

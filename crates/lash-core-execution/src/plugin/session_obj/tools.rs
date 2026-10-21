@@ -76,6 +76,7 @@ impl PluginSession {
             .map_err(|refusal| PluginError::ToolSurfaceRefused {
                 refusal: Box::new(refusal),
             })?;
+        let surface = surface.with_packages(self.advertised_packages(config)?);
         let catalog = self.surface_catalog(&surface)?;
         Ok(ResolvedToolSurface {
             surface: Arc::new(surface),
@@ -99,12 +100,12 @@ impl PluginSession {
                     .map(|provider| ("deferred".to_owned(), provider)),
             )
         {
-            if provider.registry() == crate::RegistryKind::Session
+            if provider.registry() == lash_vocabulary::claims::RegistryKind::Session
                 && self.host.retired_plugins.contains_key(provider.owner())
             {
                 return Err(PluginError::Runtime(
                     super::super::RetirementRefusal::Serves {
-                        registry: crate::RegistryKind::Session,
+                        registry: lash_vocabulary::claims::RegistryKind::Session,
                         id: provider.owner().to_owned(),
                         effect,
                     }
@@ -135,20 +136,20 @@ impl PluginSession {
 }
 
 /// A catalog build refusal as the plugin error it is.
-pub(crate) fn catalog_build_error(err: lash_protocol_types::ToolCatalogBuildError) -> PluginError {
+pub(crate) fn catalog_build_error(err: lash_vocabulary::ToolCatalogBuildError) -> PluginError {
     match err {
-        source @ lash_protocol_types::ToolCatalogBuildError::UnusableSchema { .. } => {
+        source @ lash_vocabulary::ToolCatalogBuildError::UnusableSchema { .. } => {
             PluginError::UnusableToolSchema {
                 source: Box::new(source),
             }
         }
-        lash_protocol_types::ToolCatalogBuildError::MissingContract { tool_id, operation } => {
+        lash_vocabulary::ToolCatalogBuildError::MissingContract { tool_id, operation } => {
             PluginError::ResidentToolContractUnavailable { tool_id, operation }
         }
-        lash_protocol_types::ToolCatalogBuildError::DuplicateId { tool_id } => {
+        lash_vocabulary::ToolCatalogBuildError::DuplicateId { tool_id } => {
             PluginError::ResidentToolDuplicateId { tool_id }
         }
-        lash_protocol_types::ToolCatalogBuildError::DuplicateOperation {
+        lash_vocabulary::ToolCatalogBuildError::DuplicateOperation {
             operation,
             first_tool,
             second_tool,
@@ -157,10 +158,10 @@ pub(crate) fn catalog_build_error(err: lash_protocol_types::ToolCatalogBuildErro
             first_tool,
             second_tool,
         },
-        lash_protocol_types::ToolCatalogBuildError::InvalidOperation { tool_id, message } => {
+        lash_vocabulary::ToolCatalogBuildError::InvalidOperation { tool_id, message } => {
             PluginError::ResidentToolInvalidOperation { tool_id, message }
         }
-        lash_protocol_types::ToolCatalogBuildError::RegistrationRefused { refusal } => {
+        lash_vocabulary::ToolCatalogBuildError::RegistrationRefused { refusal } => {
             PluginError::ToolRegistrationRefused {
                 source: Box::new(refusal),
             }

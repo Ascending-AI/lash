@@ -14,9 +14,11 @@
 //! An origin is reported with a request and handed to the host with a
 //! read-bound `perform`. It is never part of an effect's identity.
 
+use lash_kernel_doc::TaskId;
 use lash_kernel_doc::heap::HeapFault;
-use lash_kernel_doc::{Site, TaskId, Unit};
 use lash_kernel_state::paged::SiteRef;
+use lash_vocabulary::sites::Site;
+use lash_vocabulary::sites::Unit;
 
 use super::KernelMachine;
 use super::actions::Target;
@@ -54,10 +56,10 @@ impl KernelMachine {
         site: &Site,
         target: &Target,
     ) -> Result<Option<SiteRef>, HeapFault> {
-        let library = |unit: &Unit| matches!(unit, Unit::Library(_));
+        let library = |unit: &Unit| !exe.authored_unit(unit);
         let rooted_in_library = match target {
-            Target::Library(_) => true,
-            Target::Code(code, _) => library(&exe.code(*code).site.unit),
+            Target::Library(..) | Target::Export(..) => true,
+            Target::Code(code, _, _) => library(&exe.code(*code).site.unit),
         };
         if !library(&site.unit) && !rooted_in_library {
             return Ok(None);

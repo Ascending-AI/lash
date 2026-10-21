@@ -48,9 +48,9 @@ pub use lash_core_store::runtime_error::{
     AttachmentContentMismatch, AttachmentRetentionFailure, AttachmentRetentionStoreFailure,
     IngressReservedSourceKeyRefusal,
 };
-pub use lash_core_store::runtime_owner::RuntimeOwner;
 pub use lash_core_store::session_identity::SessionRevision;
 pub use lash_core_store::surface_format;
+pub use lash_vocabulary::identity::RuntimeOwner;
 
 /// The durable store a [`StoreSet`] hands out (ADR 0132 §1).
 pub use lash_durable::{DurableConfig, DurableSettings, DurableStore};
@@ -342,23 +342,16 @@ pub mod facade_support {
     pub use lash_protocol_types::ErrorEnvelope;
     pub use lash_protocol_types::MessageSequence;
     pub use lash_protocol_types::ModelToolReturnPart;
-    pub use lash_protocol_types::ProviderSchemaCapabilities;
     pub use lash_protocol_types::ReportedFailure;
-    pub use lash_protocol_types::ResolvedSchema;
     pub use lash_protocol_types::RetryProgress;
-    pub use lash_protocol_types::SchemaPurpose;
-    pub use lash_protocol_types::SchemaResolutionError;
-    pub use lash_protocol_types::SchemaResolutionRequest;
     pub use lash_protocol_types::SessionStreamEvent;
     pub use lash_protocol_types::StreamMessageKind;
-    pub use lash_protocol_types::ToolCatalogBuildError;
     pub use lash_protocol_types::TurnFinish;
     pub use lash_protocol_types::TurnOutcome;
     pub use lash_protocol_types::append_assistant_text_part;
     pub use lash_protocol_types::build_tool_catalog;
     pub use lash_protocol_types::normalized_response_parts;
     pub use lash_protocol_types::reasoning_part;
-    pub use lash_protocol_types::resolve_schema;
     pub use lash_protocol_types::shared_parts;
     pub use lash_protocol_types::visible_response_text_from_parts;
     pub use lash_protocol_types::{ModelToolOutcome, ModelToolReturn};
@@ -370,6 +363,13 @@ pub mod facade_support {
     pub use lash_trace::TraceRuntimeSubject;
     pub use lash_trace::TraceSink;
     pub use lash_trace::TraceSinkError;
+    pub use lash_vocabulary::ToolCatalogBuildError;
+    pub use lash_vocabulary::schema_contract::ProviderSchemaCapabilities;
+    pub use lash_vocabulary::schema_contract::ResolvedSchema;
+    pub use lash_vocabulary::schema_contract::SchemaPurpose;
+    pub use lash_vocabulary::schema_contract::SchemaResolutionError;
+    pub use lash_vocabulary::schema_contract::SchemaResolutionRequest;
+    pub use lash_vocabulary::schema_contract::resolve_schema;
     pub use schemars::JsonSchema;
 }
 
@@ -384,7 +384,8 @@ pub(crate) use crate::plugin::RuntimeServices;
 pub(crate) use lash_core_store::session_identity::SessionObservedProcessOutcome;
 pub(crate) use lash_core_store::session_identity::SessionObservedProcessReceipt;
 pub(crate) use lash_core_store::session_identity::SessionObserverIntent;
-pub(crate) use lash_protocol_types::{ToolCatalogBuildInput, validate_tool_input};
+pub(crate) use lash_protocol_types::ToolCatalogBuildInput;
+pub(crate) use lash_vocabulary::validate_tool_input;
 
 pub mod sansio {
     pub use crate::{CompletedToolCall, Response};
@@ -403,30 +404,82 @@ pub use attachments::{
     AttachmentStoreFailureClass, AttachmentStorePersistence, EmptyRootSetPolicy, StoredAttachment,
     StoredBlobRef,
 };
+pub use lash_protocol_types::AttachmentCreateMeta;
+pub use lash_protocol_types::AttachmentId;
+pub use lash_protocol_types::AttachmentRef;
+pub use lash_protocol_types::AttachmentTypeMetadata;
+pub use lash_protocol_types::BindingChanges;
+pub use lash_protocol_types::CancelOrigin;
+pub use lash_protocol_types::CancelRequest;
+pub use lash_protocol_types::CellControl;
+pub use lash_protocol_types::CellDefect;
+pub use lash_protocol_types::CellFailure;
+pub use lash_protocol_types::CellFailureKind;
+pub use lash_protocol_types::CellFailureRepair;
+pub use lash_protocol_types::CellOutcome;
+pub use lash_protocol_types::CellPrint;
+pub use lash_protocol_types::CellRecord;
+pub use lash_protocol_types::CheckpointKind;
+pub use lash_protocol_types::CompletionCandidate;
+pub use lash_protocol_types::CompletionDisposition;
+pub use lash_protocol_types::DecidedCompletion;
+pub use lash_protocol_types::DegradedBinding;
+pub use lash_protocol_types::ExecCodeFailure;
+pub use lash_protocol_types::ExecCodeFailureReason;
+pub use lash_protocol_types::ExecResponse;
+pub use lash_protocol_types::ExecutedCall;
+pub use lash_protocol_types::ExecutedCallOutcome;
+pub use lash_protocol_types::ExecutionBudgets;
+pub use lash_protocol_types::ExecutionBudgetsConfig;
+pub use lash_protocol_types::ExecutionBudgetsError;
+pub use lash_protocol_types::ExecutionLimit;
+pub use lash_protocol_types::FrameKey;
+pub use lash_protocol_types::FrameKeyError;
+pub use lash_protocol_types::LlmCallError;
+pub use lash_protocol_types::LlmUsage;
+pub use lash_protocol_types::MediaType;
+pub use lash_protocol_types::Message;
+pub use lash_protocol_types::MessageOrigin;
+pub use lash_protocol_types::MessageRole;
+pub use lash_protocol_types::NextRun;
+pub use lash_protocol_types::OutputRetentionPolicy;
+pub use lash_protocol_types::OutputValue;
+pub use lash_protocol_types::Part;
+pub use lash_protocol_types::PartKind;
+pub use lash_protocol_types::PluginMessage;
+pub use lash_protocol_types::PluginRuntimeEvent;
+pub use lash_protocol_types::ProviderAttemptLimits;
+pub use lash_protocol_types::RetainedOutput;
+pub use lash_protocol_types::RetainedValue;
+pub use lash_protocol_types::SessionAppendNode;
+pub use lash_protocol_types::TerminationMode;
+pub use lash_protocol_types::TextProjectionMetadata;
+pub use lash_protocol_types::TokenUsageOverflow;
+pub use lash_protocol_types::ToolCallOutcome;
+pub use lash_protocol_types::ToolCallOutput;
+pub use lash_protocol_types::ToolCallRecord;
+pub use lash_protocol_types::ToolCancellation;
+pub use lash_protocol_types::ToolCatalog;
+pub use lash_protocol_types::ToolCatalogEntry;
+pub use lash_protocol_types::ToolCheckConflict;
+pub use lash_protocol_types::ToolCheckPhase;
+pub use lash_protocol_types::ToolCheckReply;
+pub use lash_protocol_types::ToolCheckVerdictKind;
+pub use lash_protocol_types::ToolControl;
+pub use lash_protocol_types::ToolFailure;
+pub use lash_protocol_types::ToolFailureCause;
+pub use lash_protocol_types::ToolFailureClass;
+pub use lash_protocol_types::ToolFailureSource;
+pub use lash_protocol_types::ToolIntentIdentity;
+pub use lash_protocol_types::ToolValue;
+pub use lash_protocol_types::ToolView;
+pub use lash_protocol_types::ToolViewBlock;
+pub use lash_protocol_types::ToolViewMeta;
+pub use lash_protocol_types::TurnControl;
+pub use lash_protocol_types::TurnOutputSource;
+pub use lash_protocol_types::ValueShape;
+pub use lash_protocol_types::ValueShapeLimits;
 pub use lash_protocol_types::llm::attachment_delivery::ProviderFileScope;
-pub use lash_protocol_types::{
-    AttachmentCreateMeta, AttachmentId, AttachmentRef, AttachmentTypeMetadata, Backoff, BatchId,
-    BindingChanges, BoundedRetry, CancelOrigin, CancelRequest, CellControl, CellDefect,
-    CellFailure, CellFailureKind, CellFailureRepair, CellOutcome, CellPrint, CellRecord,
-    CheckpointKind, CompletionCandidate, CompletionDisposition, DecidedCompletion,
-    DeclarationRefusal, DegradedBinding, ExecCodeFailure, ExecCodeFailureReason, ExecResponse,
-    ExecutedCall, ExecutedCallOutcome, ExecutionBudgets, ExecutionBudgetsConfig,
-    ExecutionBudgetsError, ExecutionLimit, ExecutionPolicy, FrameKey, FrameKeyError, InputId,
-    IntoOperation, JsonSchema, LimitCause, LlmCallError, LlmUsage, MediaType, Message,
-    MessageOrigin, MessageRole, NextRun, NodeId, OutcomeShape, OutputRetentionPolicy, OutputValue,
-    ParkBound, Part, PartKind, PluginMessage, PluginRuntimeEvent, ProjectionMode,
-    ProviderAttemptLimits, QualifiedOperation, RegistrationRefused, RetainedOutput, RetainedValue,
-    SchemaAdmissionError, SchemaContract, SchemaDialect, SchemaProjectionOverride,
-    SchemaProjectionPolicy, SessionAppendNode, TerminationMode, TextProjectionMetadata,
-    TokenUsageOverflow, ToolArgumentProjectionPolicy, ToolBound, ToolBounds, ToolCallOutcome,
-    ToolCallOutput, ToolCallRecord, ToolCancellation, ToolCatalog, ToolCatalogBuildError,
-    ToolCatalogEntry, ToolCheckConflict, ToolCheckPhase, ToolCheckReply, ToolCheckVerdictKind,
-    ToolContract, ToolControl, ToolDeclaration, ToolDefinition, ToolDiscovery, ToolDraft,
-    ToolFailure, ToolFailureCause, ToolFailureClass, ToolFailureSource, ToolId, ToolIntentIdentity,
-    ToolIntentKind, ToolManifest, ToolOutputContract, ToolValue, ToolView, ToolViewBlock,
-    ToolViewMeta, TurnControl, TurnControlKind, TurnControls, TurnId, TurnOutputSource,
-    ValueMismatch, ValueShape, ValueShapeLimits,
-};
 pub use lash_protocol_types::{
     llm::types::AttemptOutcome, llm::types::AttemptRecord, llm::types::AttemptUsageOutcome,
     llm::types::ChargeSafetyDecision, llm::types::ChargeSafetyDenialReason,
@@ -443,6 +496,43 @@ pub use lash_protocol_types::{
     llm::types::RecordedRequestTemplate, llm::types::RetryDecision,
 };
 pub use lash_sansio::CheckpointDelivery;
+pub use lash_vocabulary::ToolCatalogBuildError;
+pub use lash_vocabulary::ToolIntentKind;
+pub use lash_vocabulary::identity::BatchId;
+pub use lash_vocabulary::identity::InputId;
+pub use lash_vocabulary::identity::NodeId;
+pub use lash_vocabulary::identity::TurnId;
+pub use lash_vocabulary::json_schema::JsonSchema;
+pub use lash_vocabulary::json_schema::SchemaAdmissionError;
+pub use lash_vocabulary::json_schema::ValueMismatch;
+pub use lash_vocabulary::names::QualifiedOperation;
+pub use lash_vocabulary::schema_contract::ProjectionMode;
+pub use lash_vocabulary::schema_contract::SchemaContract;
+pub use lash_vocabulary::schema_contract::SchemaDialect;
+pub use lash_vocabulary::schema_contract::SchemaProjectionOverride;
+pub use lash_vocabulary::schema_contract::SchemaProjectionPolicy;
+pub use lash_vocabulary::tool_contract::Backoff;
+pub use lash_vocabulary::tool_contract::BoundedRetry;
+pub use lash_vocabulary::tool_contract::ExecutionPolicy;
+pub use lash_vocabulary::tool_contract::IntoOperation;
+pub use lash_vocabulary::tool_contract::LimitCause;
+pub use lash_vocabulary::tool_contract::ParkBound;
+pub use lash_vocabulary::tool_contract::RegistrationRefused;
+pub use lash_vocabulary::tool_contract::ToolArgumentProjectionPolicy;
+pub use lash_vocabulary::tool_contract::ToolBound;
+pub use lash_vocabulary::tool_contract::ToolBounds;
+pub use lash_vocabulary::tool_contract::ToolContract;
+pub use lash_vocabulary::tool_contract::ToolDefinition;
+pub use lash_vocabulary::tool_contract::ToolDiscovery;
+pub use lash_vocabulary::tool_contract::ToolDraft;
+pub use lash_vocabulary::tool_contract::ToolId;
+pub use lash_vocabulary::tool_contract::ToolManifest;
+pub use lash_vocabulary::tool_contract::ToolOutputContract;
+pub use lash_vocabulary::tool_declaration::DeclarationRefusal;
+pub use lash_vocabulary::tool_declaration::OutcomeShape;
+pub use lash_vocabulary::tool_declaration::ToolDeclaration;
+pub use lash_vocabulary::tool_declaration::TurnControlKind;
+pub use lash_vocabulary::tool_declaration::TurnControls;
 pub use tool_provider::{ToolAttachmentClient, ToolDirectCompletionClient, ToolSessionLlmProfile};
 /// The stop a tool control other than a declared turn control ends the turn
 /// with: a tool-requested failure, or a plugin's abort. A declared turn
@@ -480,13 +570,15 @@ pub use deferred_provider::{
     DeferredResolveContext, DeferredToolProvider, DeferredToolProviderRegistration, DispatchGrant,
     DispatchGrantRefusal, DispatchRefusal, DispatchTarget, DispatchTransform, TransformRefusal,
 };
-pub use lash_core_store::obligations::{ObligationToken, RegistryKind};
 pub use lash_core_store::tool_surface::{
-    DeferredMatch, DeferredOutcome, DeferredResolutionPolicy, ExecutionBinding,
-    ExecutionBindingUnreadable, Judgement, LinkSource, OperationLink, ProviderKey, RecordedSurface,
-    SurfaceCollision, SurfaceDuplicateTool, SurfaceEntry, SurfaceRefusal, judge,
+    DeferredMatch, DeferredOutcome, Judgement, OperationRoute, ProviderKey, RecordedSurface,
+    RouteSource, SurfaceCollision, SurfaceDuplicateTool, SurfaceEntry, SurfaceRefusal, judge,
 };
-pub use lash_kernel_doc::EffectName;
+pub use lash_vocabulary::claims::{ObligationToken, RegistryKind};
+pub use lash_vocabulary::names::EffectName;
+pub use lash_vocabulary::providers::{
+    DeferredResolutionPolicy, ExecutionBinding, ExecutionBindingUnreadable,
+};
 pub use protocol_build::{FleetWriterFormats, ProtocolBuildInput};
 pub use tool_reads::{ReadCall, ReadError, ReadRoute, ToolProviderRegistration, ToolReads};
 pub use tool_registry::{
@@ -655,9 +747,9 @@ pub use lash_core_store::session_identity::FrameNodeIdError;
 pub use lash_core_store::session_identity::SessionLineage;
 pub use lash_core_store::session_identity::SessionRelation;
 pub use lash_core_store::session_identity::SessionSnapshot;
+pub use lash_vocabulary::providers::FormatVersion;
 pub use plugin::AppendSessionNodesOutcome;
 pub use plugin::AppendSessionNodesRequest;
-pub use plugin::FormatVersion;
 pub use plugin::PluginExtensions;
 pub use plugin::PluginStateEffect;
 pub use plugin::PluginStateView;
@@ -752,7 +844,9 @@ pub use lash_core_store::turn_input_vocabulary::PendingTurnInputDraft;
 pub use lash_core_store::turn_input_vocabulary::PendingTurnInputRead;
 pub use lash_core_store::turn_input_vocabulary::PendingTurnInputReadStatus;
 pub use lash_core_store::turn_input_vocabulary::PendingTurnInputSuffixCancelOutcome;
-pub use lash_protocol_types::ProcessId;
+pub use lash_vocabulary::identity::ProcessId;
+pub use lash_vocabulary::providers::ProcessComponentId;
+pub use lash_vocabulary::providers::ProcessComponentIdError;
 pub use runtime::ForkSessionReceipt;
 pub use runtime::ForkSessionRequest;
 pub use runtime::HandleId;
@@ -765,8 +859,6 @@ pub use runtime::NoProcessWork;
 pub use runtime::ProcessCommand;
 pub use runtime::ProcessComponentConfig;
 pub use runtime::ProcessComponentEntry;
-pub use runtime::ProcessComponentId;
-pub use runtime::ProcessComponentIdError;
 pub use runtime::ProcessConfigKey;
 pub use runtime::ProcessDefinitionId;
 pub use runtime::ProcessDriveStep;
@@ -845,7 +937,7 @@ pub use lash_core_store::turn_input_vocabulary::TurnInputCompletion;
 pub use lash_core_store::turn_input_vocabulary::TurnInputCompletionData;
 pub use lash_core_store::turn_input_vocabulary::TurnInputIngress;
 pub use lash_core_store::turn_input_vocabulary::TurnInputState;
-pub use lash_protocol_types::SessionId;
+pub use lash_vocabulary::identity::SessionId;
 pub use runtime::ProcessTerminalWait;
 pub use runtime::ProcessWorkSubstrate;
 pub use runtime::ProcessWorkWiring;
@@ -1046,3 +1138,5 @@ pub use tool_live::{
 use lash_execution_contracts::process::Durable;
 
 use lash_execution_contracts::*;
+
+pub use session::LinkedExecution;

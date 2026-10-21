@@ -264,7 +264,7 @@ async fn first_turn_continue_as_fences_its_initial_frame(backend: Backend) {
     // initial frame is read back through the history pages.
     let history = core
         .session(
-            lash::SessionId::parse("artifact-referrers-first-switch")
+            lash_vocabulary::identity::SessionId::parse("artifact-referrers-first-switch")
                 .expect("nonblank host identity"),
         )
         .durable()
@@ -754,7 +754,7 @@ async fn saved_function_process(
     let process_id = handle
         .get("process_id")
         .and_then(serde_json::Value::as_str)
-        .and_then(|id| lash_core::ProcessId::parse(id).ok())
+        .and_then(|id| lash_vocabulary::identity::ProcessId::parse(id).ok())
         .unwrap_or_else(|| panic!("a process handle names its process: {handle}"));
     drop(session);
 
@@ -791,7 +791,7 @@ async fn saved_function_process(
 /// that verb to report.
 async fn created_session(
     core: &lash::LashCore,
-    session_id: impl Into<lash::SessionId>,
+    session_id: impl Into<lash_vocabulary::identity::SessionId>,
 ) -> lash::SessionBuilder {
     let session_id = session_id.into();
     match core

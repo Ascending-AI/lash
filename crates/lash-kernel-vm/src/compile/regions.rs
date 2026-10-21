@@ -47,9 +47,9 @@
 
 use std::sync::OnceLock;
 
-use lash_kernel_doc::FunctionId;
 use lash_kernel_doc::arena::ShortText;
 use lash_kernel_exec::{ActIx, Op, OpRange, Reg, Weight};
+use lash_vocabulary::names::FunctionId;
 
 mod accumulators;
 mod calls;
@@ -58,6 +58,8 @@ mod cx;
 mod nodes;
 mod typed;
 mod verify;
+mod walk;
+use walk::Walk;
 
 pub(crate) use cx::{Accumulator, Cx, Guests, Made, measured_formula};
 pub(crate) use nodes::{
@@ -760,14 +762,18 @@ impl Formation<'_> {
                 if binding.shared || code.slots.get(binding.slot as usize)?.shared {
                     return None;
                 }
-                let item = via.and_then(|via| via.item);
+                let item = via
+                    .and_then(|via| via.item)
+                    .and_then(crate::compile::LinkedHook::library);
                 let charge = self.head_charge(*metered, binding.at, item, None, &mut gathered)?;
                 let head = Head::For {
                     charge,
                     guarded: None,
                     binding: binding.at,
                     item,
-                    check: via.and_then(|via| via.check),
+                    check: via
+                        .and_then(|via| via.check)
+                        .and_then(crate::compile::LinkedHook::library),
                 };
                 (head, *body)
             }
@@ -1080,7 +1086,7 @@ impl Formation<'_> {
     ) -> Option<(Walk, Shared, Option<Option<CodeId>>)> {
         let mut shared = Shared::default();
         let guest = match callee {
-            super::Callee::Library(_) => None,
+            super::Callee::Import(_) | super::Callee::Library(_) => None,
             super::Callee::Declared(code) => (self.lowered.island)(*code).then_some(Some(*code)),
             super::Callee::Value(var) => {
                 shared.reads.push(Self::var(var, gathered)?);
@@ -1090,7 +1096,7 @@ impl Formation<'_> {
         for arg in args {
             shared.reads.extend(Self::atom(arg, gathered)?);
         }
-        let counted = !matches!(action.site.unit, lash_kernel_doc::Unit::Library(_));
+        let counted = action.guest;
         let units = 1 + args.len() as u64;
         let mut program = vec![Event::Fixed(Weight::Atomic(1)); 1 + args.len()];
         let walk = match callee {
@@ -1564,43 +1570,6 @@ impl Formation<'_> {
         };
         if function.operation() || deepest > 0 {
             gathered.depth = Some(gathered.depth.unwrap_or(0).max(deepest));
-        }
-        Some(())
-    }
-}
-
-/// What a statement's derivation, or an arm's, has seen so far: the fixed
-/// units and the formulas' most it charges on its path, its program and
-/// whether it allocates.
-struct Walk {
-    fixed: u64,
-    formula_max: Option<u64>,
-    program: Vec<Event>,
-    allocates: bool,
-}
-
-impl Walk {
-    fn new(fixed: u64, program: Vec<Event>) -> Self {
-        Self {
-            fixed,
-            formula_max: Some(0),
-            program,
-            allocates: false,
-        }
-    }
-
-    /// The charge regions `closes` of `stream`, charged where an op closes
-    /// them: their totals and their events.
-    fn close(&mut self, stream: &Stream, closes: &[expr::Close]) -> Option<()> {
-        for close in closes {
-            self.fixed = self.fixed.checked_add(u64::from(close.total))?;
-            self.program.extend(
-                stream
-                    .regions
-                    .events(close.region)
-                    .iter()
-                    .map(|event| Event::Fixed(event.weight)),
-            );
         }
         Some(())
     }

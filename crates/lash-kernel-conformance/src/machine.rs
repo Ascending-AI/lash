@@ -1,15 +1,14 @@
 //! The scripted environment adapter for the kernel's public machine seam.
 
-use std::collections::VecDeque;
+use std::collections::{BTreeMap, VecDeque};
 use std::marker::PhantomData;
 use std::sync::Arc;
 
-use lash_kernel_doc::{
-    Datum, ErrorDatum, FunctionRegistry, Handle, Integer, Timestamp, parse_document,
-};
+use lash_kernel_doc::{Datum, ErrorDatum, FunctionRegistry, Handle, parse_document};
+
 use lash_kernel_vm::{
-    CellStart, Delivered, EffectModes, Host, HostFault, Machine, MachineError, PreparedLibrary,
-    Program, Request, StartError, Step, Target,
+    CellStart, Delivered, Host, HostFault, Machine, MachineError, PreparedLibrary, Program,
+    Request, StartError, Step, Target,
 };
 
 use crate::{Case, DocumentRunner, ExpectedEnd, HarnessError, HostAnswer, Observations, Trace};
@@ -166,30 +165,56 @@ fn refused() -> Observations {
 /// the prepared library reuse its executable across a law's sweep points.
 pub(crate) fn case_program(library: &PreparedLibrary, case: &Case) -> Option<Program> {
     let document = parse_document(&case.document).ok()?;
-    let mut admission = lash_kernel_check::Environment::new(library.registry().as_ref());
-    // A case's environment states signatures; admission compares no
-    // contract, so each is offered under one fixed contract.
-    admission.effects = match &case.environment.effects {
-        Some(effects) => effects
-            .iter()
-            .map(|(effect, signature)| {
-                (
-                    effect.clone(),
-                    lash_kernel_doc::OperationRequirement::new(
-                        signature.clone(),
-                        lash_kernel_doc::ContractId::new("conformance"),
-                    ),
-                )
-            })
-            .collect(),
-        None => document.manifest.effects.clone(),
+    prepare_document(
+        library,
+        Arc::new(document),
+        case.environment.effects.as_ref(),
+    )
+}
+
+pub(crate) fn prepare_document(
+    library: &PreparedLibrary,
+    document: Arc<lash_kernel_doc::Document>,
+    offered: Option<&BTreeMap<lash_vocabulary::EffectName, lash_vocabulary::Signature>>,
+) -> Option<Program> {
+    use lash_vocabulary::{
+        ContractId, ImportKind, OperationRequirement,
+        package::{Fill, Link},
     };
-    lash_kernel_check::admit(&document, &admission).ok()?;
-    Some(Program {
-        closure: crate::pages::CLOSURE,
-        document: Arc::new(document),
-        library: library.clone(),
-    })
+    let fills = document
+        .imports
+        .iter()
+        .map(|(slot, import)| {
+            let ImportKind::Operation { signature } = &import.kind else {
+                return None;
+            };
+            let signature = match offered {
+                Some(offered) => {
+                    offered.get(&lash_vocabulary::EffectName::new(import.name.to_string()).ok()?)?
+                }
+                None => signature,
+            };
+            Some((
+                *slot,
+                Fill::Operation(OperationRequirement::new(
+                    signature.clone(),
+                    ContractId::new("conformance"),
+                )),
+            ))
+        })
+        .collect::<Option<BTreeMap<_, _>>>()?;
+    let link = Link {
+        document: document.identity(),
+        fills,
+    };
+    Program::prepare(
+        link.identity(),
+        BTreeMap::from([(document.identity(), document)]),
+        &BTreeMap::from([(link.identity(), link)]),
+        crate::pages::CLOSURE,
+        library.clone(),
+    )
+    .ok()
 }
 
 /// Runs an already admitted case, retaining its prepared code but starting
@@ -218,7 +243,25 @@ pub(crate) fn run_program_in<M: Machine>(
         args: env.args.clone(),
         session: None,
         owner: crate::pages::OWNER,
-        modes: EffectModes::reading(env.reads.iter().cloned()),
+        modes: program
+            .document
+            .imports
+            .iter()
+            .filter(|(_, import)| {
+                env.reads
+                    .iter()
+                    .any(|name| name.as_str() == import.name.to_string())
+            })
+            .map(|(slot, _)| {
+                (
+                    lash_vocabulary::OperationUse {
+                        link: program.link,
+                        slot: *slot,
+                    },
+                    lash_vocabulary::package::OperationMode::Read,
+                )
+            })
+            .collect(),
         host: Vec::new(),
     };
     let mut machine = match (run.start)(program.clone(), bounds, start, &source) {
@@ -233,6 +276,24 @@ pub(crate) fn run_program_in<M: Machine>(
         prints: Vec::new(),
         fault: None,
         printed: run.printed,
+        operations: program
+            .instances
+            .iter()
+            .flat_map(|(link, instance)| {
+                program.documents[&instance.document]
+                    .imports
+                    .iter()
+                    .map(move |(slot, import)| {
+                        (
+                            lash_vocabulary::OperationUse {
+                                link: *link,
+                                slot: *slot,
+                            },
+                            import.name.to_string(),
+                        )
+                    })
+            })
+            .collect(),
     };
     let mut batches = env.deliveries.iter();
     let mut waits = Vec::new();
@@ -300,21 +361,11 @@ pub(crate) fn run_program_in<M: Machine>(
                                     )
                                     .clone(),
                                 ),
-                                effect: effect.effect.to_string(),
+                                effect: host.operations.get(&effect.use_).cloned().ok_or_else(
+                                    || HarnessError("undeclared Operation Use".into()),
+                                )?,
                                 args: effect.args.clone(),
                                 result: effect.result.clone(),
-                            });
-                        }
-                        Request::Sleep(sleep) => {
-                            waits.push(sleep.wait);
-                            trace.push(Trace::Sleep {
-                                identity: Some(
-                                    lash_kernel_doc::kernel_internals::effect_parts(
-                                        &sleep.identity,
-                                    )
-                                    .clone(),
-                                ),
-                                nanoseconds: sleep.duration.as_nanos(),
                             });
                         }
                     }
@@ -363,6 +414,7 @@ struct ScriptHost<'r> {
     prints: Vec<Datum>,
     fault: Option<String>,
     printed: &'r mut dyn FnMut(),
+    operations: BTreeMap<lash_vocabulary::OperationUse, String>,
 }
 
 impl ScriptHost<'_> {
@@ -374,28 +426,6 @@ impl ScriptHost<'_> {
 }
 
 impl Host for ScriptHost<'_> {
-    fn clock(&mut self) -> Timestamp {
-        match self.answers.pop_front() {
-            Some(HostAnswer::Clock(time)) => time,
-            answer => {
-                self.mismatch("clock", answer);
-                Timestamp {
-                    nanoseconds: Integer::from(0),
-                }
-            }
-        }
-    }
-
-    fn random(&mut self) -> u64 {
-        match self.answers.pop_front() {
-            Some(HostAnswer::Random(bits)) => bits,
-            answer => {
-                self.mismatch("random", answer);
-                0
-            }
-        }
-    }
-
     fn read(&mut self, handle: &Handle, request: &Datum) -> Result<Datum, ErrorDatum> {
         match self.answers.pop_front() {
             Some(HostAnswer::Read(read)) if read.handle == *handle && read.request == *request => {
@@ -414,14 +444,18 @@ impl Host for ScriptHost<'_> {
 
     fn perform(
         &mut self,
-        effect: &lash_kernel_doc::EffectName,
+        effect: &lash_vocabulary::names::OperationUse,
         args: &[Datum],
-        _site: &lash_kernel_doc::PositionLabel,
-        _origin: &lash_kernel_doc::Site,
+        _site: &lash_vocabulary::sites::PositionLabel,
+        _origin: &lash_vocabulary::sites::Site,
     ) -> Result<Result<Datum, ErrorDatum>, HostFault> {
         match self.answers.pop_front() {
             Some(HostAnswer::Perform(perform))
-                if perform.effect == *effect && perform.args == args =>
+                if self
+                    .operations
+                    .get(effect)
+                    .is_some_and(|name| name == perform.effect.as_str())
+                    && perform.args == args =>
             {
                 perform
                     .answer

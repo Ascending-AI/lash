@@ -21,6 +21,7 @@ use std::ops::Range;
 use lash_kernel_doc::arena::{ArenaHandle, Body, Chunks};
 use lash_kernel_doc::plan::Table;
 use lash_kernel_doc::{NewObject, Value, ValueKind};
+
 use lash_kernel_state::arena::VALUE_BYTES;
 
 use super::super::expr::{self, Callee, Expr, Kind, Make};
@@ -609,7 +610,7 @@ pub(super) fn root_call(
         super::super::Callee::Declared(_) => None,
         super::super::Callee::Value(super::super::Var::Local(local)) => Some(celled(local.at)),
         super::super::Callee::Value(var) => Some(variable(libs, var)?),
-        super::super::Callee::Library(_) => return None,
+        super::super::Callee::Import(_) | super::super::Callee::Library(_) => return None,
     };
     guest_call(call.clone(), read, atoms(libs, args)?)
 }

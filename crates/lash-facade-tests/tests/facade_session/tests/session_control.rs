@@ -56,7 +56,8 @@ async fn a_session_close_releases_its_running_runs_execution() -> Result<()> {
     ))
     .serve_test_llm_profile(hold_provider(Arc::clone(&calls)), mock_llm_profile_spec())
     .build(lash_facade_tests::runtime_lease_owner())?;
-    let session_id = lash::SessionId::parse("held-close").expect("nonblank host identity");
+    let session_id =
+        lash_vocabulary::identity::SessionId::parse("held-close").expect("nonblank host identity");
     let session = core
         .session(session_id.clone())
         .create(lash::SessionCreation::root(mock_session_spec()))

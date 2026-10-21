@@ -26,14 +26,17 @@ use lash_protocol_types::{
     llm::attachment_delivery::DeliverySecret, llm::attachment_delivery::ProviderAccepts,
     llm::attachment_delivery::ProviderFileScope,
 };
+
 use lash_protocol_types::{
     llm::capability::AttachmentAcceptanceRule, llm::capability::AttachmentAcceptor,
     llm::capability::AttachmentCapabilitySnapshot,
 };
+
 use lash_protocol_types::{
     llm::types::LiveRequestBody, llm::types::ProviderRouteIdentity,
     llm::types::RecordedRequestTemplate, llm::types::ResponseContext, llm::types::SegmentCache,
 };
+
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 /// What every signature this law's store mints starts with.
@@ -318,7 +321,9 @@ async fn delivered_values_stay_out_of_records_across_crash_and_resend() {
                 .expect("the core activation")
                 .1,
         );
-        let session_id = lash::SessionId::try_from("delivery-secret".to_owned()).expect("an id");
+        let session_id =
+            lash_vocabulary::identity::SessionId::try_from("delivery-secret".to_owned())
+                .expect("an id");
         let session = core
             .session(session_id.clone())
             .create(lash::SessionCreation::root(
@@ -329,7 +334,7 @@ async fn delivered_values_stay_out_of_records_across_crash_and_resend() {
         let uploads = lash_core::facade_support::RuntimeAttachmentStore::new(
             backend.attachment_store(),
             backend.attachment_referrers(),
-            lash_core::RuntimeOwner::Session(session_id),
+            lash_vocabulary::identity::RuntimeOwner::Session(session_id),
             lash_core::facade_support::AttachmentPolicy::standard(),
         );
         let mut input = lash::TurnInput::text("look at both pictures");

@@ -4,6 +4,7 @@
 
 use std::sync::Arc;
 
+use lash::SessionCreateRequest;
 use lash::persistence::FleetFormat;
 use lash::plugins::PluginOptions;
 use lash::process::{
@@ -38,7 +39,8 @@ use lash::tools::ToolOutcome;
 use lash::tools::ToolPrepareContext;
 use lash::tools::ToolProvider;
 use lash::tools::ToolValue;
-use lash::{RuntimeOwner, SessionCreateRequest, SessionId};
+use lash_vocabulary::identity::RuntimeOwner;
+use lash_vocabulary::identity::SessionId;
 use serde_json::{Value, json};
 
 use crate::{ChildConfig, DELEGATION_PLUGIN_ID, DelegatedChild};

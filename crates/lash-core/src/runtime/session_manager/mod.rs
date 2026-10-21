@@ -10,10 +10,10 @@
 //! owned by its process run, not held here.
 
 use super::*;
-use crate::ProcessId;
-use crate::SessionId;
-use crate::TurnId;
 use lash_protocol_types::sync::MutexExt as _;
+use lash_vocabulary::identity::ProcessId;
+use lash_vocabulary::identity::SessionId;
+use lash_vocabulary::identity::TurnId;
 use std::sync::atomic::AtomicBool;
 
 mod api;
@@ -78,7 +78,7 @@ pub(in crate::runtime) struct CurrentSession {
 pub(in crate::runtime) enum CurrentOwner {
     Session(Box<CurrentSession>),
     Process {
-        process_id: crate::ProcessId,
+        process_id: lash_vocabulary::identity::ProcessId,
         engine: Option<Arc<EngineProcessParts>>,
     },
 }
@@ -87,6 +87,14 @@ pub(in crate::runtime) enum CurrentOwner {
 /// composition only that environment's components make, and the state sink
 /// of its step state.
 pub(in crate::runtime) struct EngineProcessParts {
+    pub(in crate::runtime) resolutions: Arc<
+        std::sync::Mutex<
+            std::collections::BTreeMap<
+                lash_vocabulary::names::OperationUse,
+                lash_core_store::resolutions::ResolutionEntry,
+            >,
+        >,
+    >,
     pub(in crate::runtime) env: Arc<crate::ProcessEnv>,
     pub(in crate::runtime) composition: crate::plugin::ProcessComposition,
     pub(in crate::runtime) state: Arc<crate::plugin::ComponentState>,
@@ -146,13 +154,13 @@ pub(in crate::runtime) struct CurrentOwnerCapability {
 }
 
 impl CurrentOwnerCapability {
-    pub(in crate::runtime) fn runtime_owner(&self) -> crate::RuntimeOwner {
+    pub(in crate::runtime) fn runtime_owner(&self) -> lash_vocabulary::identity::RuntimeOwner {
         match &self.owner {
             CurrentOwner::Session(session) => {
-                crate::RuntimeOwner::Session(session.session_id.clone())
+                lash_vocabulary::identity::RuntimeOwner::Session(session.session_id.clone())
             }
             CurrentOwner::Process { process_id, .. } => {
-                crate::RuntimeOwner::Process(process_id.clone())
+                lash_vocabulary::identity::RuntimeOwner::Process(process_id.clone())
             }
         }
     }
@@ -244,7 +252,10 @@ impl CurrentOwnerCapability {
     pub(in crate::runtime) fn engine_process(
         &self,
     ) -> Result<
-        (&crate::ProcessId, &Arc<EngineProcessParts>),
+        (
+            &lash_vocabulary::identity::ProcessId,
+            &Arc<EngineProcessParts>,
+        ),
         lash_execution_contracts::plugin_error::PluginError,
     > {
         match &self.owner {
@@ -293,7 +304,7 @@ struct DirectCompletionCapability;
 
 /// What a process runtime's services are built from.
 pub(in crate::runtime) struct ProcessServicesPorts {
-    pub(in crate::runtime) process_id: crate::ProcessId,
+    pub(in crate::runtime) process_id: lash_vocabulary::identity::ProcessId,
     /// An engine process's environment and composition; `None` for a
     /// session-turn process.
     pub(in crate::runtime) engine: Option<Arc<EngineProcessParts>>,
@@ -649,8 +660,8 @@ pub(super) fn emit_session_events(event_tx: &TurnObserver, plugin_events: Vec<Se
 #[cfg(test)]
 mod process_visibility_tests {
     use super::{ProcessVisibility, RuntimeSessionProcessService};
-    use crate::SessionId;
-    use crate::TurnId;
+    use lash_vocabulary::identity::SessionId;
+    use lash_vocabulary::identity::TurnId;
 
     use crate::runtime::tests::helpers::standard_test_policy;
     use std::sync::Arc;
@@ -667,7 +678,7 @@ mod process_visibility_tests {
 
     struct CountingFilter {
         invocations: AtomicUsize,
-        hidden: std::sync::OnceLock<crate::ProcessId>,
+        hidden: std::sync::OnceLock<lash_vocabulary::identity::ProcessId>,
     }
 
     impl CountingFilter {
@@ -683,9 +694,9 @@ mod process_visibility_tests {
     impl crate::ProcessToolVisibilityFilter for CountingFilter {
         fn narrow(
             &self,
-            _session: &crate::SessionId,
-            candidates: &[crate::ProcessId],
-        ) -> Vec<crate::ProcessId> {
+            _session: &lash_vocabulary::identity::SessionId,
+            candidates: &[lash_vocabulary::identity::ProcessId],
+        ) -> Vec<lash_vocabulary::identity::ProcessId> {
             self.invocations.fetch_add(1, Ordering::SeqCst);
             candidates
                 .iter()
@@ -701,7 +712,7 @@ mod process_visibility_tests {
         RuntimeSessionProcessService,
         Arc<CountingFilter>,
         lash_execution_contracts::backend::Backend,
-        crate::ProcessId,
+        lash_vocabulary::identity::ProcessId,
     ) {
         let filter = Arc::new(CountingFilter {
             invocations: AtomicUsize::new(0),
@@ -798,7 +809,7 @@ mod process_visibility_tests {
 
     fn contains_hidden(
         records: &[lash_execution_contracts::process::ObservedProcess],
-        hidden: &crate::ProcessId,
+        hidden: &lash_vocabulary::identity::ProcessId,
     ) -> bool {
         records.iter().any(|record| record.process_id == *hidden)
     }
@@ -846,7 +857,9 @@ mod process_visibility_tests {
                     Operation::ListVisibleForAttempt => {
                         let records = crate::ProcessService::list_visible_for_attempt(
                             &service,
-                            &crate::RuntimeOwner::Session(SessionId::from(SESSION_ID)),
+                            &lash_vocabulary::identity::RuntimeOwner::Session(SessionId::from(
+                                SESSION_ID,
+                            )),
                             lash_execution_contracts::process::ProcessListMode::Live,
                         )
                         .await
@@ -860,7 +873,9 @@ mod process_visibility_tests {
                         let scope = operation_scope(&backend);
                         let result = crate::ProcessService::validate_visible(
                             &service,
-                            &crate::RuntimeOwner::Session(SessionId::from(SESSION_ID)),
+                            &lash_vocabulary::identity::RuntimeOwner::Session(SessionId::from(
+                                SESSION_ID,
+                            )),
                             std::slice::from_ref(&hidden_process_id),
                             crate::ProcessOpScope::new(scope),
                         )

@@ -48,7 +48,7 @@ fn frame(material: &str) -> lash::OpenAgentFrameRequest {
 struct Kept {
     config: lash_core::PersistedSessionConfig,
     current_frame: Option<lash_core::FrameNodeId>,
-    leaf: Option<lash_core::NodeId>,
+    leaf: Option<lash_vocabulary::identity::NodeId>,
 }
 
 /// Apply `transaction` through `config` against the session's current
@@ -297,7 +297,7 @@ async fn a_terminally_refused_command_commit_settles_with_its_cause_and_the_lane
             lash::persistence::LeaseIncarnationId::new("boot"),
         ))
         .unwrap();
-    let id = lash::SessionId::try_from("command-refusal".to_owned()).unwrap();
+    let id = lash_vocabulary::identity::SessionId::try_from("command-refusal".to_owned()).unwrap();
     let durable = core
         .session(id.clone())
         .create(lash::SessionCreation::root(served::spec(8)))

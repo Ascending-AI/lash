@@ -1,6 +1,7 @@
 use super::*;
+use crate::TurnInput;
 use crate::tests::host::controls::*;
-use crate::{SessionId, TurnInput};
+use lash_vocabulary::identity::SessionId;
 
 /// The config head `id` records.
 async fn recorded_config(core: &LashCore, id: &str) -> Result<lash_core::PersistedSessionConfig> {
@@ -51,7 +52,9 @@ async fn creation_refuses_charge_safety_above_the_ceiling_without_recording_a_se
     )?;
     for requested in [crate::ChargeSafetyPolicy::MAX_UNSAFE_RETRIES + 1, u8::MAX] {
         let error = core
-            .session(crate::SessionId::parse(ID).expect("nonblank host identity"))
+            .session(
+                lash_vocabulary::identity::SessionId::parse(ID).expect("nonblank host identity"),
+            )
             .create(crate::SessionCreation::root(
                 mock_session_spec().charge_safety(
                     crate::ChargeSafetyPolicy::AcceptDuplicateBilling {
@@ -119,7 +122,7 @@ async fn creation_refuses_charge_safety_above_the_ceiling_without_recording_a_se
             )
         );
     }
-    core.session(crate::SessionId::parse(ID).expect("nonblank host identity"))
+    core.session(lash_vocabulary::identity::SessionId::parse(ID).expect("nonblank host identity"))
         .create(crate::SessionCreation::root(
             mock_session_spec().charge_safety(crate::ChargeSafetyPolicy::AcceptDuplicateBilling {
                 max_unsafe_retries: crate::ChargeSafetyPolicy::MAX_UNSAFE_RETRIES,
@@ -430,7 +433,10 @@ impl ToolProvider for CountedAppTools {
     fn tool_manifests(
         &self,
         config: &lash_core::OwnerConfigView,
-    ) -> std::result::Result<Vec<lash_core::ToolManifest>, crate::plugins::PluginError> {
+    ) -> std::result::Result<
+        Vec<lash_vocabulary::tool_contract::ToolManifest>,
+        crate::plugins::PluginError,
+    > {
         AppTools.tool_manifests(config)
     }
 
@@ -438,7 +444,7 @@ impl ToolProvider for CountedAppTools {
         &self,
         name: &str,
         config: &lash_core::OwnerConfigView,
-    ) -> Option<Arc<lash_core::ToolContract>> {
+    ) -> Option<Arc<lash_vocabulary::tool_contract::ToolContract>> {
         AppTools.resolve_contract(name, config)
     }
 
@@ -473,7 +479,7 @@ async fn a_commanded_max_tool_calls_binds_the_next_run() -> Result<()> {
         "the session records the limit it was created with"
     );
     let session = core
-        .session(crate::SessionId::parse(ID).expect("nonblank host identity"))
+        .session(lash_vocabulary::identity::SessionId::parse(ID).expect("nonblank host identity"))
         .open()
         .await?;
     let admitted = session
@@ -517,7 +523,10 @@ async fn a_commanded_max_tool_calls_binds_the_next_run() -> Result<()> {
         2,
         "only the initially admitted bodies run"
     );
-    let durable = core.session(crate::SessionId::from(ID)).durable().await?;
+    let durable = core
+        .session(lash_vocabulary::identity::SessionId::from(ID))
+        .durable()
+        .await?;
     for output in [&refused, &reopened] {
         let output_tool_calls =
             crate::testing::tool_calls_for_activity(&durable, &output.activities).await;
@@ -620,9 +629,11 @@ async fn a_fork_records_its_fork_points_config_whatever_the_host_passes_now() ->
             max_duplicate_cost_tokens: None,
         });
     let core = core_over(backend.clone(), mock_provider())?;
-    core.session(crate::SessionId::parse(SOURCE).expect("nonblank host identity"))
-        .create(crate::SessionCreation::root(stated))
-        .await?;
+    core.session(
+        lash_vocabulary::identity::SessionId::parse(SOURCE).expect("nonblank host identity"),
+    )
+    .create(crate::SessionCreation::root(stated))
+    .await?;
     engine_executed_turn(&core, SOURCE, "before the fork").await?;
     let source = recorded_config(&core, SOURCE).await?;
     assert_eq!(source.turn_budget, crate::TurnBudget::bounded(7));
@@ -643,7 +654,9 @@ async fn a_fork_records_its_fork_points_config_whatever_the_host_passes_now() ->
             ..Default::default()
         });
     later
-        .session(crate::SessionId::parse(LATER).expect("nonblank host identity"))
+        .session(
+            lash_vocabulary::identity::SessionId::parse(LATER).expect("nonblank host identity"),
+        )
         .create(crate::SessionCreation::root(changed))
         .await?;
     later

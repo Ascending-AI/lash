@@ -1217,6 +1217,7 @@ impl ChunkedRequestTemplate {
         use lash_protocol_types::{
             llm::types::RequestSegment, llm::types::SegmentKind, llm::types::SegmentPart,
         };
+
         let mut stack = vec![self.root.clone()];
         let mut parts = Vec::new();
         let mut literal = String::new();

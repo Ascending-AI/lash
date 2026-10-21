@@ -2,7 +2,7 @@
 
 use super::process_registry::{ProcessEventAppendArm, ProcessEventBatch, tx_outcome};
 use super::*;
-use lash_protocol_types::ProcessId;
+use lash_vocabulary::identity::ProcessId;
 
 /// Authority-bound terminal completion, validated and appended as one atomic unit,
 /// with the run's terminal batch (`prelude`) ahead of the terminal event and

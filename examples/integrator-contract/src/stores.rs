@@ -86,6 +86,13 @@ impl StoreSet for IntegratorStores {
         self.substrate.attachment_store()
     }
 
+    fn package_store(&self) -> Arc<dyn lash::package::PackageStore> {
+        self.substrate.package_store()
+    }
+    fn execution_resolutions(&self) -> Arc<dyn lash::package::ExecutionResolutions> {
+        self.substrate.execution_resolutions()
+    }
+
     fn module_artifacts(&self) -> Arc<dyn ModuleArtifactStore> {
         self.substrate.module_artifacts()
     }

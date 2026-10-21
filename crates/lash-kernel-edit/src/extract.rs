@@ -1,13 +1,13 @@
 //! Reduce a document to one entry using the checker's reference derivation.
 
+use lash_vocabulary::names::Name;
 use std::collections::BTreeSet;
 
-use crate::apply::Working;
 use lash_kernel_check::{Environment, entry_reachability};
-use lash_kernel_doc::{Document, EffectName, Name, Site, Unit};
+use lash_kernel_doc::Document;
 
 use crate::refusal::refused;
-use crate::{Applied, Edit, EditDiagnostic, EditDiagnosticKind, EditRefusal};
+use crate::{Applied, EditDiagnostic, EditDiagnosticKind, EditRefusal};
 
 /// An entry extraction and the effects its retained code performs.
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
@@ -22,7 +22,7 @@ pub struct Extraction {
     /// Exactly the effects performed by the entry, its reachable declared
     /// functions and closures, and the library bodies they reach. Unrelated
     /// entries and `main` contribute none.
-    pub requirements: BTreeSet<EffectName>,
+    pub requirements: BTreeSet<lash_kernel_package::ImportSlot>,
 }
 
 /// Extract only `entry` and its reachable declared functions and closures.
@@ -37,70 +37,45 @@ pub fn extract_entry(
     entry: &Name,
     environment: &Environment<'_>,
 ) -> Result<Extraction, EditRefusal> {
-    if !document.entries.contains_key(entry) {
-        return Err(EditRefusal {
-            diagnostics: vec![EditDiagnostic {
-                edit: None,
-                location: None,
-                kind: EditDiagnosticKind::NoSuchEntry {
-                    name: entry.clone(),
-                },
-            }],
-        });
-    }
-    let reached = entry_reachability(document, entry).map_err(|error| refused(None, error))?;
-    let base = document.identity();
-    let mut edits = Vec::new();
-    let statements: Vec<_> = (0u32..)
-        .zip(&document.main)
-        .map(|(index, _)| Site::new(Unit::Main, [index]))
-        .collect();
-    for statement in statements.into_iter().rev() {
-        edits.push(Edit::RemoveStatement { statement });
-    }
-    edits.push(Edit::SetPrivateBindings {
-        names: Default::default(),
-    });
-    for function in document.entries.keys().filter(|name| *name != entry) {
-        edits.push(Edit::RemoveEntry {
-            function: function.clone(),
-        });
-    }
-    for name in document
-        .functions
-        .keys()
-        .filter(|name| !reached.functions.contains(*name))
-    {
-        edits.push(Edit::RemoveFunction { name: name.clone() });
-    }
-    let mut working = Working::open(document);
-    for edit in edits {
-        working.edit(&edit).map_err(|fault| match *fault {
-            crate::apply::FaultKind::At(location, kind) => EditRefusal {
-                diagnostics: vec![EditDiagnostic {
-                    edit: None,
-                    location,
-                    kind,
-                }],
+    let reached = entry_reachability(document, entry).map_err(|_error| EditRefusal {
+        diagnostics: vec![EditDiagnostic {
+            edit: None,
+            location: None,
+            kind: EditDiagnosticKind::NoSuchEntry {
+                name: entry.clone(),
             },
-            crate::apply::FaultKind::Unlinked(refusal) => refused(None, refusal),
-        })?;
-    }
-    let published = working.publish(base, environment)?;
+        }],
+    })?;
+    let mut extracted = document.clone();
+    extracted.main = None;
+    extracted.private_bindings.clear();
+    extracted.exports.retain(|name, _| name == entry);
+    extracted
+        .functions
+        .retain(|id, _| reached.functions.contains_key(id));
+    extracted
+        .imports
+        .retain(|slot, _| reached.imports.contains(slot));
+    let admitted =
+        lash_kernel_check::admit(&extracted, environment).map_err(|error| refused(None, error))?;
+    let survivors = extracted
+        .ordinal_nodes()
+        .into_iter()
+        .map(|(site, _)| lash_kernel_doc::Survivor {
+            from: site.clone(),
+            to: site,
+            edited: false,
+        })
+        .collect();
+    let correspondence =
+        lash_kernel_doc::Correspondence::of(document.identity(), extracted.identity(), survivors)
+            .ok_or_else(|| refused(None, lash_kernel_check::Refusal { errors: vec![] }))?;
     Ok(Extraction {
-        // The extracted document requires what its manifest lists: its own
-        // performs and those of the bodies it reaches (`K-DOC-002`).
-        requirements: published
-            .document
-            .manifest
-            .effects
-            .keys()
-            .cloned()
-            .collect(),
-        document: published.document,
+        requirements: reached.imports,
+        document: extracted,
         applied: Some(Applied {
-            correspondence: published.correspondence,
-            admitted: published.admitted,
+            admitted,
+            correspondence,
         }),
     })
 }

@@ -16,7 +16,7 @@ use lash_core_store::checkpoint_graph::stage::{StageLeaseId, StageSpool as _};
 use lash_durable::DurableError;
 use lash_durable::domain::pages::{RootLease, StoredPage};
 use lash_kernel_doc::heap::{PageGrant, PageRef};
-use lash_kernel_doc::{Datum, EffectId, Float, Handle, Integer, Name, Timestamp, parse_document};
+use lash_kernel_doc::{Datum, Float, Handle, Integer, Timestamp, parse_document};
 use lash_kernel_state::paged::{PageAnswer, PageBody, PageSource};
 use lash_kernel_vm::{Bound, End, Outcome, Request, RunError, Target};
 use lash_vm_broker::kernel::MachinePark;
@@ -28,6 +28,8 @@ use lash_vm_client::wire::{self, EndWire, OutcomeWire, ParkWire, ProjectionRead,
 use lash_vm_client::*;
 use lash_vm_protocol::page::PageCapability;
 use lash_vm_protocol::*;
+use lash_vocabulary::names::Name;
+use lash_vocabulary::sites::EffectId;
 
 const SLICE: u64 = 1_000_000;
 
@@ -132,18 +134,143 @@ fn document(body: &str) -> (String, EncodedPayload) {
 
 /// `body` as a document against the registry every worker assembles.
 fn parsed(body: &str) -> lash_kernel_doc::Document {
-    let embedding = lash_vm_worker::built_embedding(&WorkerTuning::standard())
-        .expect("an embedding of every built dialect");
+    let release = lash_vm_releases::helper_release().unwrap();
     let mut text = String::from(
-        "numbers by_spelling\nkernel 1\neffect host.echo(x?: Any) -> Any contract \"1\"\n",
+        "numbers by_spelling\nkernel 1\nimport 0 operation host.echo(x?: Any) -> Any\n",
     );
-    for (name, id) in embedding.library().iter() {
-        if ["num.add", "num.lt", "text.repeat"].contains(&name.to_string().as_str()) {
-            text.push_str(&format!("use {name} = @{id}\n"));
+    for (_, function) in release.functions.iter() {
+        if ["num.add", "num.lt", "text.repeat"].contains(&function.name()) {
+            text.push_str(&format!(
+                "definition {}\n",
+                serde_json::to_string(&lash_kernel_doc::print_definition(function.definition()))
+                    .unwrap()
+            ));
+            if function.definition().has_native() {
+                text.push_str(&format!("native @{}\n", function.definition().identity()));
+            }
         }
     }
     text.push_str(body);
     parse_document(&text).unwrap_or_else(|error| panic!("{error}\n{text}"))
+}
+
+/// Pin a fixture's final Imports against one immutable helper release.
+fn linked(document: lash_kernel_doc::Document) -> lash_kernel_vm::Program {
+    use lash_vocabulary::{Fill, ImportKind, Link, MemberKind, OperationRequirement};
+    let release = lash_vm_releases::helper_release().unwrap();
+    let fills = document
+        .imports
+        .iter()
+        .map(|(slot, import)| {
+            let fill = match &import.kind {
+                ImportKind::Operation { signature } => Fill::Operation(OperationRequirement::new(
+                    signature.clone(),
+                    lash_vocabulary::ContractId::new("1"),
+                )),
+                _ => {
+                    let package = release
+                        .content
+                        .packages
+                        .values()
+                        .find(|package| package.path == import.name.package)
+                        .expect("helper package");
+                    let MemberKind::Export { link, export } =
+                        &package.members[&import.name.member].kind
+                    else {
+                        panic!("helper export")
+                    };
+                    let mut export = export.clone();
+                    export.member = import.name.type_member.clone();
+                    Fill::Export {
+                        link: *link,
+                        export,
+                    }
+                }
+            };
+            (*slot, fill)
+        })
+        .collect();
+    let root = Link {
+        document: document.identity(),
+        fills,
+    };
+    let id = root.identity();
+    let mut links = release.content.links.clone();
+    links.insert(id, root);
+    let mut documents: std::collections::BTreeMap<_, _> = release
+        .content
+        .documents
+        .iter()
+        .map(|(id, document)| (*id, Arc::new(document.clone())))
+        .collect();
+    documents.insert(document.identity(), Arc::new(document));
+    let embedding = lash_vm_worker::built_embedding(&WorkerTuning::standard()).unwrap();
+    lash_kernel_vm::Program::prepare(
+        id,
+        documents,
+        &links,
+        lash_kernel_doc::heap::PageId([0; 32]),
+        embedding.prepared_library().unwrap().clone(),
+    )
+    .unwrap()
+}
+fn echo_namespace(signature: lash_vocabulary::Signature) -> lash_kernel_dialect::Namespaces {
+    let offer = lash_vocabulary::OperationOffer {
+        requirement: lash_vocabulary::OperationRequirement::new(
+            signature,
+            lash_vocabulary::ContractId::new("1"),
+        ),
+        intents: Default::default(),
+        controls: Default::default(),
+        mode: lash_vocabulary::OperationMode::Waited,
+    };
+    lash_kernel_dialect::Namespaces::new(
+        [(
+            lash_vocabulary::PackagePath::parse("host").unwrap(),
+            [(
+                lash_vocabulary::Segment::new("echo").unwrap(),
+                lash_kernel_dialect::NamespaceMember {
+                    visibility: lash_vocabulary::Visibility::Public,
+                    kind: lash_kernel_dialect::NamespaceKind::Operation(offer.into()),
+                },
+            )]
+            .into(),
+        )]
+        .into(),
+        Default::default(),
+        &|_| false,
+    )
+    .unwrap()
+}
+
+fn entry_document(source: &str) -> (String, EncodedPayload) {
+    let (definition, locals) = lash_kernel_doc::parse_definition_with_locals(source).unwrap();
+    let mut document =
+        lash_kernel_doc::Document::new(lash_kernel_doc::NumberPolicy::BySpelling, vec![]);
+    document.main = None;
+    document.imports = definition
+        .body()
+        .map_or_else(Default::default, |body| body.imports.clone());
+    document.exports.insert(
+        Name::new("go"),
+        lash_kernel_doc::Export::Function(lash_kernel_doc::FunctionExport {
+            function: definition.identity(),
+            signature: definition.signature.clone(),
+            convention: lash_kernel_doc::StartConvention::Direct,
+            asynchronous: false,
+            rest: false,
+        }),
+    );
+    document.functions.extend(
+        locals
+            .into_iter()
+            .chain([definition])
+            .map(|f| (f.identity(), f)),
+    );
+    (
+        document.identity().to_string(),
+        EncodedPayload(document.canonical_bytes()),
+    )
 }
 
 fn bounds() -> RunBounds {
@@ -151,7 +278,27 @@ fn bounds() -> RunBounds {
 }
 
 fn fresh(document: &EncodedPayload, target: Target, args: Vec<Datum>) -> Start {
+    let program = linked(
+        lash_kernel_doc::IdentifiedDocument::decode_standard(&document.0)
+            .unwrap()
+            .into_document(),
+    );
     Start {
+        link: program.link,
+        instances: wire::encode(
+            PayloadKind::Start,
+            &program.instances.values().collect::<Vec<_>>(),
+        )
+        .unwrap(),
+        documents: program
+            .documents
+            .iter()
+            .map(|(id, doc)| lash_vm_protocol::message::StoredDocument {
+                document: *id,
+                body: EncodedPayload(doc.canonical_bytes()),
+            })
+            .collect(),
+        functions: program.functions.clone(),
         owner: owner(),
         dialect: DIALECT.into(),
         document: document.clone(),
@@ -159,13 +306,7 @@ fn fresh(document: &EncodedPayload, target: Target, args: Vec<Datum>) -> Start {
         from: StartFrom::Fresh(
             wire::encode(
                 PayloadKind::Start,
-                &StartWire::of(
-                    target,
-                    args,
-                    None,
-                    &lash_kernel_vm::EffectModes::recorded(),
-                    Vec::new(),
-                ),
+                &StartWire::of(target, args, None, &Default::default(), Vec::new()),
             )
             .expect("start"),
         ),
@@ -189,7 +330,27 @@ fn resumed(
     root: PageCapability,
     admissions: Vec<EncodedPayload>,
 ) -> Start {
+    let program = linked(
+        lash_kernel_doc::IdentifiedDocument::decode_standard(&document.0)
+            .unwrap()
+            .into_document(),
+    );
     Start {
+        link: program.link,
+        instances: wire::encode(
+            PayloadKind::Start,
+            &program.instances.values().collect::<Vec<_>>(),
+        )
+        .unwrap(),
+        documents: program
+            .documents
+            .iter()
+            .map(|(id, doc)| lash_vm_protocol::message::StoredDocument {
+                document: *id,
+                body: EncodedPayload(doc.canonical_bytes()),
+            })
+            .collect(),
+        functions: program.functions.clone(),
         owner: owner(),
         dialect: dialect.into(),
         document: document.clone(),
@@ -215,12 +376,17 @@ const BINDING: [u8; 32] = [5; 32];
 fn closure(document: &EncodedPayload) -> NodeId {
     let document = lash_kernel_doc::IdentifiedDocument::decode_standard(&document.0)
         .expect("the document decodes");
+    let program = linked(document.into_document());
+    let stored = program
+        .documents
+        .values()
+        .flat_map(|doc| doc.functions.iter())
+        .map(|(id, f)| (*id, Arc::new(f.clone())))
+        .collect();
     lash_vm_broker::kernel::closure::derive(
-        document.manifest.functions.keys().copied(),
-        lash_vm_releases::lash_packages()
-            .expect("the parent's packages")
-            .functions(),
-        &std::collections::BTreeMap::new(),
+        program.functions.iter().copied(),
+        program.library.registry(),
+        &stored,
     )
     .expect("the parent holds the document's functions")
     .reference()
@@ -409,14 +575,21 @@ impl PageSource for Staged {
 }
 
 /// The one effect the park requests: its wait and its argument.
-fn requested(step: RunStep) -> (lash_kernel_doc::WaitId, Datum) {
+fn requested(step: RunStep) -> (lash_vocabulary::sites::WaitId, Datum) {
     let (wait, argument, _, _) = admitted(step);
     (wait, argument)
 }
 
 /// The one effect the park requests, as the parent's admission freezes it,
 /// and the checkpoint root the park sealed.
-fn admitted(step: RunStep) -> (lash_kernel_doc::WaitId, Datum, EncodedPayload, [u8; 32]) {
+fn admitted(
+    step: RunStep,
+) -> (
+    lash_vocabulary::sites::WaitId,
+    Datum,
+    EncodedPayload,
+    [u8; 32],
+) {
     let RunStep::Parked {
         park, candidate, ..
     } = step
@@ -428,11 +601,11 @@ fn admitted(step: RunStep) -> (lash_kernel_doc::WaitId, Datum, EncodedPayload, [
     let [Request::Effect(request)] = &park.requests[..] else {
         panic!("one effect: {park:?}")
     };
-    assert_eq!(request.effect.to_string(), "host.echo");
+    assert_eq!(request.use_.slot, lash_vocabulary::ImportSlot(0));
     let admission = lash_vm_broker::kernel::state::admission(&lash_kernel_state::AdmittedWait {
         identity: request.identity.clone(),
         request: lash_kernel_state::AdmittedRequest::Effect {
-            effect: request.effect.clone(),
+            use_: request.use_,
             args: request.args.clone(),
         },
     });
@@ -474,7 +647,7 @@ const TOOL_LOOP: &str = r#"
 main {
   let total = 0
   for step in [1, 2, 3] {
-    let got = perform host.echo(step) as Any
+    let got = perform 0(step) as Any
     set total = num.add(total, got)
   }
   return total
@@ -568,8 +741,8 @@ fn parts_that_outgrow_one_frame_cross_apart_and_the_run_goes_on_the_same() {
         r#"
 main {{
   if num.lt(1, 0) {{ let unused = "{padding}" }}
-  let kept = perform host.echo("a") as Any
-  let again = perform host.echo(kept) as Any
+  let kept = perform 0("a") as Any
+  let again = perform 0(kept) as Any
   return again
 }}"#
     ));
@@ -617,37 +790,22 @@ main {{
 fn a_typescript_cell_lowered_in_the_worker_parks_and_resumes() {
     use lash_vm_client::service::{Request, Response};
     let pool = WorkerPool::new(config("")).expect("pool");
-    let echo = lash_kernel_doc::Signature {
-        params: vec![lash_kernel_doc::Param {
+    let echo = lash_vocabulary::types::Signature {
+        params: vec![lash_vocabulary::types::Param {
             name: Name::new("x"),
-            ty: lash_kernel_doc::Type::Any,
+            ty: lash_vocabulary::types::Type::Any,
             optional: false,
         }],
-        result: lash_kernel_doc::Type::Any,
+        result: lash_vocabulary::types::Type::Any,
     };
     let request = Request::Lower {
         dialect: "typescript".into(),
         source:
             "let total = 0; for (const step of [1, 2, 3]) { total = total + await host.echo(step); }"
                 .into(),
-        operations: lash_kernel_dialect::Namespaces::of_effects(
-            &[(
-                lash_kernel_doc::EffectName::new("host.echo").expect("effect name"),
-                echo,
-            )]
-            .into(), &lash_kernel_doc::ContractId::new("1"),
-            &Default::default(),
-        )
-        .expect("the law's effects are operations")
-        .operations()
-        .clone(),
+        namespaces: echo_namespace(echo),
         bindings: Default::default(),
         functions: Default::default(),
-        packages: lash_vm_client::service::SurfaceRef::held(
-            lash_vm_releases::lash_packages()
-                .expect("the parent's packages")
-                .digest(),
-        ),
     };
     let mut worker = checkout(&pool);
     let response = worker
@@ -758,37 +916,21 @@ fn a_python_cell_lowered_in_the_worker_runs_under_its_confinement() {
     use lash_vm_client::service::{Request, Response};
     HOST_DIALECTS.set("typescript,python");
     let pool = WorkerPool::new(config("")).expect("pool");
-    let echo = lash_kernel_doc::Signature {
-        params: vec![lash_kernel_doc::Param {
+    let echo = lash_vocabulary::types::Signature {
+        params: vec![lash_vocabulary::types::Param {
             name: Name::new("x"),
-            ty: lash_kernel_doc::Type::Any,
+            ty: lash_vocabulary::types::Type::Any,
             optional: false,
         }],
-        result: lash_kernel_doc::Type::Any,
+        result: lash_vocabulary::types::Type::Any,
     };
     let request = Request::Lower {
         dialect: "python".into(),
         source: "total = 0\nfor step in [1, 2, 3]:\n    total = total + await host.echo(step)\n"
             .into(),
-        operations: lash_kernel_dialect::Namespaces::of_effects(
-            &[(
-                lash_kernel_doc::EffectName::new("host.echo").expect("effect name"),
-                echo,
-            )]
-            .into(),
-            &lash_kernel_doc::ContractId::new("1"),
-            &Default::default(),
-        )
-        .expect("the law's effects are operations")
-        .operations()
-        .clone(),
+        namespaces: echo_namespace(echo),
         bindings: Default::default(),
         functions: Default::default(),
-        packages: lash_vm_client::service::SurfaceRef::held(
-            lash_vm_releases::lash_packages()
-                .expect("the parent's packages")
-                .digest(),
-        ),
     };
     let mut worker = checkout(&pool);
     let response = worker
@@ -822,7 +964,7 @@ fn a_python_cell_lowered_in_the_worker_runs_under_its_confinement() {
 fn a_parked_run_is_refused_under_another_document() {
     let pool = WorkerPool::new(config("")).expect("pool");
     let (identity, document_a) = document(TOOL_LOOP);
-    let (other, document_b) = document("main { let got = perform host.echo(1) as Any return got }");
+    let (other, document_b) = document("main { let got = perform 0(1) as Any return got }");
     let mut parent = Parent::new(&[&document_a, &document_b]);
     let mut worker = checkout(&pool);
     worker
@@ -864,16 +1006,8 @@ fn a_parked_run_is_refused_under_another_document() {
 /// none.
 fn an_observed_run_names_its_last_entered_site_on_its_next_frame() {
     let pool = WorkerPool::new(config("")).expect("pool");
-    let (identity, document) = document(
-        r#"
-entry go(n: Any) -> Any
-fn same(value) { return value }
-fn go(n) {
-  for i in [1, 2] { let v = call same(i) }
-  let got = perform host.echo(n) as Any
-  return got
-}
-main { }"#,
+    let (identity, document) = entry_document(
+        "function go(n: Any) -> Any\nkernel 1\nmetering statements\nimport 0 operation host.echo(x?: Any) -> Any\nbody { let same = fn(value) { return value } for i in [1, 2] { let v = apply same(i) } let got = perform 0(n) as Any return got }",
     );
     let mut worker = checkout(&pool);
     let mut start = fresh(&document, Target::Entry(Name::new("go")), vec![int(7)]);
@@ -900,11 +1034,11 @@ main { }"#,
     };
     assert_eq!(
         call.visit(),
-        lash_protocol_types::workflow_testkit::visit(1),
+        lash_vocabulary::sites::testkit::visit(1),
         "the second call is the last entry"
     );
     assert_eq!(
-        lash_kernel_doc::ObservationReader::counts(call)
+        lash_vocabulary::sites::ObservationReader::counts(call)
             .loops
             .iter()
             .map(|iteration| iteration.entries)
@@ -928,16 +1062,8 @@ main { }"#,
 /// arrives with the slice, in order.
 fn host_reads_are_answered_by_the_parent_and_prints_arrive_in_order() {
     let pool = WorkerPool::new(config("")).expect("pool");
-    let (identity, document) = document(
-        r#"
-entry go(h: Handle("table")) -> Any
-fn go(h) {
-  print "before"
-  let row = read(h, "row 7")
-  print row
-  return (clock, random, row)
-}
-main { }"#,
+    let (identity, document) = entry_document(
+        "function go(h: Handle(\"table\")) -> Any\nkernel 1\nmetering statements\nbody { print \"before\" let row = read(h, \"row 7\") print row return row }",
     );
     let handle = Handle {
         kind: "table".into(),
@@ -955,9 +1081,6 @@ main { }"#,
             ExecutionClass::Process,
         )
         .expect("start");
-    let now = Timestamp {
-        nanoseconds: Integer::from(1_700_000_000),
-    };
     let mut parent = Parent::new(&[&document]);
     let mut kinds = Vec::new();
     let mut step = parent.run(&mut worker, SLICE, false).expect("run");
@@ -974,9 +1097,6 @@ main { }"#,
                         let answer: wire::ProjectionAnswer = Ok(Datum::Text("seven".into()));
                         wire::encode(PayloadKind::HostAnswer, &answer)
                     }
-                    HostReadKind::Clock => wire::encode(PayloadKind::HostAnswer, &now),
-                    // The top 53 bits, times 2^-53: one half.
-                    HostReadKind::Random => wire::encode(PayloadKind::HostAnswer, &(1_u64 << 63)),
                     HostReadKind::Effect | HostReadKind::Bound => {
                         panic!("the run binds no read and has no limiter")
                     }
@@ -988,14 +1108,7 @@ main { }"#,
             other => break ended(other),
         }
     };
-    assert_eq!(
-        kinds,
-        [
-            HostReadKind::Projection,
-            HostReadKind::Clock,
-            HostReadKind::Random
-        ]
-    );
+    assert_eq!(kinds, [HostReadKind::Projection]);
     let printed: Vec<Datum> = worker
         .take_printed()
         .iter()
@@ -1011,14 +1124,7 @@ main { }"#,
     let End::Finished(finished) = end else {
         panic!("the run finishes: {end:?}")
     };
-    assert_eq!(
-        finished.result,
-        Datum::Tuple(vec![
-            Datum::Timestamp(now),
-            Datum::Float(Float::new(0.5)),
-            Datum::Text("seven".into())
-        ])
-    );
+    assert_eq!(finished.result, Datum::Text("seven".into()));
     worker.release().expect("reset");
 }
 
@@ -1238,7 +1344,7 @@ main {
   while num.lt(i, 200) {
     set i = num.add(i, 1)
   }
-  let got = perform host.echo(i) as Any
+  let got = perform 0(i) as Any
   let j = 0
   while num.lt(j, 200) {
     set j = num.add(j, 1)
@@ -1838,28 +1944,20 @@ struct Stalled;
 
 #[async_trait::async_trait]
 impl RunHost for Stalled {
-    async fn clock(&self) -> Result<Timestamp, lash_vm_broker::ParentFault> {
-        std::future::pending().await
-    }
-
-    async fn random(&self) -> Result<u64, lash_vm_broker::ParentFault> {
-        Ok(0)
-    }
-
     async fn read(
         &self,
         _: &Handle,
         _: &Datum,
     ) -> Result<Result<Datum, lash_kernel_doc::ErrorDatum>, lash_vm_broker::ParentFault> {
-        panic!("the run reads no projection")
+        std::future::pending().await
     }
 
     async fn perform(
         &self,
-        _: &lash_kernel_doc::EffectName,
+        _: &lash_vocabulary::names::OperationUse,
         _: &[Datum],
-        _: &lash_kernel_doc::PositionLabel,
-        _: &lash_kernel_doc::Site,
+        _: &lash_vocabulary::sites::PositionLabel,
+        _: &lash_vocabulary::sites::Site,
     ) -> Result<Result<Datum, lash_kernel_doc::ErrorDatum>, lash_vm_broker::ParentFault> {
         panic!("the run binds no read")
     }
@@ -1881,8 +1979,11 @@ fn a_host_read_past_its_deadline_ends_the_run_with_its_typed_limit() {
     let mut config = config("");
     config.deadlines.host_read = Duration::from_millis(200);
     let service = service::Service::new(config);
-    let document: lash_kernel_doc::IdentifiedDocument =
-        parsed("entry go() -> Any\nfn go() {\n  return clock\n}\nmain { }").into();
+    let (_, bytes) = entry_document(
+        "function go() -> Any\nkernel 1\nmetering statements\nbody { let got = read(handle(\"table\", \"t1\"), \"row\") return got }",
+    );
+    let document = lash_kernel_doc::IdentifiedDocument::decode_standard(&bytes.0).unwrap();
+    let program = linked(document.shared().as_ref().clone());
     let run = bounds();
     let machines = RemoteMachines::new(
         service.clone(),
@@ -1893,10 +1994,13 @@ fn a_host_read_past_its_deadline_ends_the_run_with_its_typed_limit() {
         &document,
         DIALECT,
         RunStart {
+            link: program.link,
+            instances: program.instances.clone(),
+            documents: program.documents.clone(),
             target: Target::Entry(Name::new("go")),
             args: Vec::new(),
             session: None,
-            modes: lash_kernel_vm::EffectModes::recorded(),
+            modes: Default::default(),
             host: Vec::new(),
             save: None,
         },
@@ -1911,11 +2015,13 @@ fn a_host_read_past_its_deadline_ends_the_run_with_its_typed_limit() {
             join_members: run.join_members,
         },
         lash_vm_broker::kernel::closure::derive(
-            document.manifest.functions.keys().copied(),
-            lash_vm_releases::lash_packages()
-                .expect("the parent's packages")
-                .functions(),
-            &std::collections::BTreeMap::new(),
+            document.functions.keys().copied(),
+            program.library.registry(),
+            &document
+                .functions
+                .iter()
+                .map(|(id, f)| (*id, Arc::new(f.clone())))
+                .collect(),
         )
         .expect("the parent holds the document's functions"),
     )
@@ -2005,7 +2111,7 @@ fn bootstrap_uses_the_builds_allowance_without_extending_live_silence() {
 fn authored_workflow_import_is_worker_owned_and_preserves_source_policy() {
     HOST_DIALECTS.set("typescript");
     let workers = service::Service::new(config("normal")).with_worker_receipts();
-    let environment = lash_kernel_dialect::Operations::default();
+    let environment = lash_kernel_dialect::Namespaces::default();
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
@@ -2020,32 +2126,12 @@ fn authored_workflow_import_is_worker_owned_and_preserves_source_policy() {
     runtime.block_on(async {
         let source = "export async function digest(inbox: string) { return inbox; }";
         let (document, _, _) = workers
-            .import_workflow(
-                typescript,
-                source,
-                &environment,
-                service::SurfaceRef::held(lash_vm_releases::lash_packages().unwrap().digest()),
-                lash_vm_releases::lash_packages()
-                    .unwrap()
-                    .surface()
-                    .selection(),
-                limits(1024),
-            )
+            .import_workflow(typescript, source, &environment, limits(1024))
             .await
             .expect("workflow import");
-        assert!(document.entries.contains_key(&Name::new("digest")));
+        assert!(document.exports.contains_key(&Name::new("digest")));
         let refused = workers
-            .import_workflow(
-                typescript,
-                source,
-                &environment,
-                service::SurfaceRef::held(lash_vm_releases::lash_packages().unwrap().digest()),
-                lash_vm_releases::lash_packages()
-                    .unwrap()
-                    .surface()
-                    .selection(),
-                limits(1),
-            )
+            .import_workflow(typescript, source, &environment, limits(1))
             .await;
         assert!(matches!(
             refused,
@@ -2056,11 +2142,6 @@ fn authored_workflow_import_is_worker_owned_and_preserves_source_policy() {
                 typescript,
                 "export const broken = ;",
                 &environment,
-                service::SurfaceRef::held(lash_vm_releases::lash_packages().unwrap().digest()),
-                lash_vm_releases::lash_packages()
-                    .unwrap()
-                    .surface()
-                    .selection(),
                 limits(1024),
             )
             .await;
@@ -2081,38 +2162,26 @@ fn authored_workflow_import_is_worker_owned_and_preserves_source_policy() {
 mod pool_package;
 
 /// The parent's code-only package; the shipped worker is given no package list.
-fn pool_package(kernel: &str, release: &str) -> Arc<lash_kernel_package::Package> {
+fn pool_library(source: &str) -> Arc<lash_vm_client::packages::WorkerLibrary> {
+    let release = lash_vm_releases::helper_release().unwrap();
+    let mut registry = release.functions.clone();
+    let definition = lash_kernel_doc::parse_definition(source).unwrap();
+    let id = registry.register(definition, None).unwrap();
     Arc::new(
-        lash_kernel_package::Package::build(
-            "pool_fixture",
-            release,
-            &lash_kernel_package::PackageSources {
-                kernel,
-                surface: "",
-                labels: "",
-            },
-            &[],
+        lash_vm_client::packages::WorkerLibrary::new(
+            &registry,
+            release.resolver_roots().into_iter().chain([id]),
         )
-        .expect("the fixture package"),
+        .unwrap(),
     )
-}
-
-fn pool_holdings(own: Arc<lash_kernel_package::Package>) -> Arc<lash_kernel_package::HeldPackages> {
-    use lash_kernel_package::{HeldPackages, PackageSet};
-    let shipped = lash_vm_releases::lash_packages().expect("parent's shipped packages");
-    let mut members: Vec<_> = shipped.artifacts().values().map(Arc::as_ref).collect();
-    members.push(own.as_ref());
-    let set = PackageSet::new(members.iter().copied()).expect("own set");
-    let artifacts = shipped.artifacts().values().cloned().chain([own]);
-    Arc::new(HeldPackages::new(artifacts, set).expect("parent's holdings"))
 }
 
 fn pool_call(worker: &mut Checkout, definition: &str) -> (EndWire, Option<u64>) {
     let definition = lash_kernel_doc::parse_definition(definition).expect("definition");
     let function = definition.identity();
-    let name = definition.name;
+    let name = definition.name.clone();
     let document = parse_document(&format!(
-        "kernel 1\nnumbers by_spelling\nuse {name} = @{function}\nmain {{ let x = invoke {name}(7) return x }}"
+        "kernel 1\nnumbers by_spelling\ndefinition {}\nmain {{ let x = invoke {name}(7) return x }}", serde_json::to_string(&lash_kernel_doc::print_definition(&definition)).unwrap()
     )).expect("fixture document");
     let bytes = EncodedPayload(document.canonical_bytes());
     worker
@@ -2138,9 +2207,9 @@ fn pool_call(worker: &mut Checkout, definition: &str) -> (EndWire, Option<u64>) 
 #[test]
 fn a_shipped_both_function_without_its_native_answers_by_its_body_with_the_same_value_and_charge() {
     HOST_DIALECTS.set("typescript");
-    let packages = pool_holdings(pool_package(pool_package::BOTH, "1"));
+    let packages = pool_library(pool_package::BOTH);
     let mut native = config("package_native");
-    native.packages = Some(packages.clone());
+    native.library = Some(packages.clone());
     let native = WorkerPool::new(native).expect("native-enabled worker");
     let mut worker = checkout(&native);
     let expected = pool_call(&mut worker, pool_package::BOTH);
@@ -2149,7 +2218,7 @@ fn a_shipped_both_function_without_its_native_answers_by_its_body_with_the_same_
 
     let mut config =
         PoolConfig::standard(WorkerEntry::helper(env!("CARGO_BIN_EXE_lash-vm-worker")));
-    config.packages = Some(packages);
+    config.library = Some(packages);
     let body = WorkerPool::new(config).expect("unmodified shipped worker");
     let mut worker = checkout(&body);
     assert_eq!(pool_call(&mut worker, pool_package::BOTH), expected);
@@ -2160,14 +2229,15 @@ fn a_shipped_both_function_without_its_native_answers_by_its_body_with_the_same_
 /// under a warm worker and a fresh process, including the charge.
 #[test]
 fn a_shipped_packages_native_is_pure_across_warm_and_cold_workers() {
-    let held = lash_vm_releases::lash_packages().expect("shipped packages");
+    let held = lash_vm_releases::helper_release().expect("helper release");
     let function = held
-        .functions()
+        .functions
         .named("num.abs")
         .next()
         .expect("a shipped native");
     let definition = lash_kernel_doc::print_definition(
-        held.functions()
+        &held
+            .functions
             .get(&function)
             .expect("the native")
             .definition(),
@@ -2175,7 +2245,10 @@ fn a_shipped_packages_native_is_pure_across_warm_and_cold_workers() {
     let mut config =
         PoolConfig::standard(WorkerEntry::helper(env!("CARGO_BIN_EXE_lash-vm-worker")));
     config.max_workers = 1;
-    config.packages = Some(held);
+    config.library = Some(Arc::new(
+        lash_vm_client::packages::WorkerLibrary::new(&held.functions, held.resolver_roots())
+            .unwrap(),
+    ));
     let pool = WorkerPool::new(config.clone()).expect("warm pool");
     let mut worker = checkout(&pool);
     let pid = worker.pid();
@@ -2199,10 +2272,10 @@ fn a_shipped_packages_native_is_pure_across_warm_and_cold_workers() {
 fn a_workers_registry_is_the_pool_start_frame_unchanged_for_its_life() {
     HOST_DIALECTS.set("typescript");
     let later = pool_package::BOTH.replace("return x", "return 99");
-    let held = pool_holdings(pool_package(&later, "2"));
+    let held = pool_library(&later);
     let mut config =
         PoolConfig::standard(WorkerEntry::helper(env!("CARGO_BIN_EXE_lash-vm-worker")));
-    config.packages = Some(held);
+    config.library = Some(held);
     let pool = WorkerPool::new(config).expect("parent's own frame");
     let mut worker = checkout(&pool);
     let pid = worker.pid();
@@ -2224,36 +2297,33 @@ fn a_workers_registry_is_the_pool_start_frame_unchanged_for_its_life() {
 /// NativeMissing is a pool-start refusal, before the first guest checkout.
 #[test]
 fn a_frame_holding_a_native_only_function_the_shipped_worker_lacks_is_refused_at_pool_start() {
-    use lash_kernel_package::PackageRefusal;
+    use lash_protocol_types::engine_fault::WorkerLibraryRefusal;
     let source = pool_package::BOTH.replace("body { return x }\n", "");
     let definition = lash_kernel_doc::parse_definition(&source).expect("native-only definition");
     let mut config =
         PoolConfig::standard(WorkerEntry::helper(env!("CARGO_BIN_EXE_lash-vm-worker")));
     config.min_workers = 0;
-    config.packages = Some(pool_holdings(pool_package(&source, "1")));
+    config.library = Some(pool_library(&source));
     let error = WorkerPool::new(config)
         .err()
         .expect("refused before checkout");
-    let expected = PackageRefusal::NativeMissing {
+    let expected = WorkerLibraryRefusal::NativeMissing {
         function: definition.identity(),
         name: definition.name,
     };
-    assert_eq!(error, PoolError::Package(expected.clone()));
+    assert_eq!(error, PoolError::Library(expected.clone()));
     let runtime = error.into_runtime_error();
     let Some(lash_core_execution::RuntimeErrorCause::VmWorker { outcome }) = runtime.cause else {
         panic!("package refusal retains its worker cause");
     };
     let InfrastructureOutcome::ProtocolViolation {
         breach:
-            lash_vm_protocol::ProtocolBreach::Pool {
-                fault: lash_vm_protocol::PoolFault::Package { refusal },
+            lash_protocol_types::engine_fault::ProtocolBreach::Pool {
+                fault: lash_protocol_types::engine_fault::PoolFault::Library { refusal },
             },
     } = *outcome
     else {
         panic!("package refusal stays typed at the runtime boundary");
     };
-    assert_eq!(
-        lash_vm_client::packages::refusal(&refusal).expect("typed refusal"),
-        expected
-    );
+    assert_eq!(refusal, expected);
 }

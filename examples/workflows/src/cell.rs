@@ -50,14 +50,6 @@ impl PageSource for Pages {
 
 struct Quiet;
 impl Host for Quiet {
-    fn clock(&mut self) -> k::Timestamp {
-        k::Timestamp {
-            nanoseconds: k::Integer::from(0),
-        }
-    }
-    fn random(&mut self) -> u64 {
-        0
-    }
     fn read(&mut self, _: &k::Handle, _: &k::Datum) -> Result<k::Datum, k::ErrorDatum> {
         Err(k::ErrorDatum {
             kind: "no_projection".into(),
@@ -83,18 +75,27 @@ const BOUNDS: Bounds = Bounds {
 };
 
 fn machine(
-    document: Arc<Document>,
+    content: &lash_kernel_package::LinkedContent,
+    link: lash_vocabulary::LinkId,
     library: PreparedLibrary,
     target: Target,
     args: Vec<k::Datum>,
 ) -> Result<KernelMachine> {
     let pages = Pages::default();
     Ok(KernelMachine::start(
-        Program {
-            closure: PageId([7; 32]),
-            document,
+        Program::prepare(
+            link,
+            content
+                .documents
+                .iter()
+                .map(|(id, document)| (*id, Arc::new(document.clone())))
+                .collect(),
+            &content.links,
+            PageId(k::heap_values::key_digest(
+                &content.links[&link].document.to_string().into_bytes(),
+            )),
             library,
-        },
+        )?,
         BOUNDS,
         CellStart {
             target,
@@ -108,18 +109,18 @@ fn machine(
     )?)
 }
 
-pub(super) fn crossing(lowered: &Lowered, registry: Arc<k::FunctionRegistry>) -> Result<String> {
+pub(super) fn crossing(
+    lowered: &Lowered,
+    registry: Arc<k::FunctionRegistry>,
+    namespace: &FixtureNamespace,
+) -> Result<String> {
     ensure!(
-        lowered.document.entries.is_empty(),
+        lowered.document.exports.is_empty(),
         "CELL-PLAIN: cells have no entries"
     );
     let library = PreparedLibrary::new(registry.clone());
-    let mut vm = machine(
-        lowered.document.shared().clone(),
-        library.clone(),
-        Target::Main,
-        vec![],
-    )?;
+    let (content, link) = namespace.link((*lowered.document).clone())?;
+    let mut vm = machine(&content, link, library.clone(), Target::Main, vec![])?;
     let mut calls = Vec::new();
     loop {
         match vm.run(&mut Quiet, u64::MAX)? {
@@ -130,11 +131,8 @@ pub(super) fn crossing(lowered: &Lowered, registry: Arc<k::FunctionRegistry>) ->
                 for request in park.requests {
                     match request {
                         Request::Effect(effect) => {
-                            calls.push((effect.effect.clone(), effect.args.clone()));
+                            calls.push((effect.use_, effect.args.clone()));
                             vm.deliver(effect.wait, Outcome::Completed(k::Datum::Null))?;
-                        }
-                        Request::Sleep(sleep) => {
-                            vm.deliver(sleep.wait, Outcome::Elapsed)?;
                         }
                     }
                 }
@@ -143,9 +141,9 @@ pub(super) fn crossing(lowered: &Lowered, registry: Arc<k::FunctionRegistry>) ->
     }
     let mut text = String::from("cell entries: []\n");
     for (effect, args) in calls {
-        writeln!(text, "crossing {effect}")?;
+        writeln!(text, "crossing {effect:?}")?;
         for datum in args {
-            render_datum(&datum, &registry, &library, &mut text)?;
+            render_datum(&datum, &registry, &library, &content, &mut text)?;
         }
     }
     Ok(text)
@@ -155,6 +153,7 @@ fn render_datum(
     datum: &k::Datum,
     registry: &k::FunctionRegistry,
     library: &PreparedLibrary,
+    content: &lash_kernel_package::LinkedContent,
     text: &mut String,
 ) -> Result<()> {
     match datum {
@@ -162,25 +161,18 @@ fn render_datum(
             value.check(
                 registry,
                 k::FunctionValueLimits::standard(),
-                k::KernelDataLimits::standard(),
+                lash_vocabulary::KernelDataLimits::standard(),
             )?;
             writeln!(
                 text,
-                "FunctionValue entry={} signature={:?}",
-                value.entry,
-                value.signature()
+                "FunctionValue callable={:?} signature={:?}",
+                value.callable, value.signature
             )?;
-            // Extraction normalizes local and capture names itself. Replace
-            // helper content ids by their names only in this structural pin.
-            let mut body = k::print_document(&value.document);
-            for (id, name) in &value.document.manifest.functions {
-                body = body.replace(&format!("@{id}"), &format!("@{name}"));
-            }
-            text.push_str(&body);
             let mut vm = machine(
-                Arc::new(value.document.clone()),
+                content,
+                value.callable.link,
                 library.clone(),
-                Target::Entry(value.entry.clone()),
+                Target::Callable(Box::new((**value).clone())),
                 vec![k::Datum::Int(k::Integer::from(2))],
             )?;
             let result = loop {
@@ -196,7 +188,7 @@ fn render_datum(
             writeln!(text, "Record {{")?;
             for (key, value) in fields {
                 writeln!(text, "field {key}")?;
-                render_datum(value, registry, library, text)?;
+                render_datum(value, registry, library, content, text)?;
             }
             writeln!(text, "}}")?;
         }
@@ -204,7 +196,7 @@ fn render_datum(
             writeln!(text, "Map {{")?;
             for (key, value) in fields {
                 writeln!(text, "key {key:?}")?;
-                render_datum(value, registry, library, text)?;
+                render_datum(value, registry, library, content, text)?;
             }
             writeln!(text, "}}")?;
         }
@@ -216,7 +208,7 @@ fn render_datum(
             };
             writeln!(text, "{kind} [")?;
             for value in values {
-                render_datum(value, registry, library, text)?;
+                render_datum(value, registry, library, content, text)?;
             }
             writeln!(text, "]")?;
         }

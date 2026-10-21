@@ -21,7 +21,7 @@ const DIALECTS: [(SourceLanguage, &str); 2] = [
 /// entered them, read from its observation snapshot.
 async fn sleeps(
     core: &lash::LashCore,
-    process: &lash_core::ProcessId,
+    process: &lash_vocabulary::identity::ProcessId,
 ) -> Vec<ProcessWorkflowSiteState> {
     let snapshot = core
         .processes()
@@ -44,7 +44,10 @@ async fn sleeps(
 }
 
 /// The stored kinds of `process`'s wait-ending events, in order.
-async fn wait_ends(core: &lash::LashCore, process: &lash_core::ProcessId) -> Vec<&'static str> {
+async fn wait_ends(
+    core: &lash::LashCore,
+    process: &lash_vocabulary::identity::ProcessId,
+) -> Vec<&'static str> {
     let page = core
         .processes()
         .events(

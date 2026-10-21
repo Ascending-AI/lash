@@ -1,16 +1,20 @@
 //! Copy-on-write coordinate carry. Unchanged data trees retain their roots;
 //! rewritten records are never published until the embedding owner commits.
 use crate::{ParkedRefusal, Rewritten};
-use lash_kernel_doc::graph_tokens::encode_body;
+use lash_kernel_doc::Correspondence;
 use lash_kernel_doc::heap::{HeapFault, PageId, PageRef};
-use lash_kernel_doc::kernel_internals::{EffectIdentity, TaskIdentity, effect_id, effect_parts};
-use lash_kernel_doc::{Correspondence, EffectId, Site};
+use lash_kernel_doc::kernel_internals::{effect_id, effect_parts};
+use lash_vocabulary::sites::{EffectIdentity, TaskIdentity};
+use lash_vocabulary::tokens::encode_body;
+
 use lash_kernel_state::kernel_internals::{
     directory::{Body, ObjectHead},
     metadata::metadata_key,
     tree::{Access, Cell, SealWork, Tree},
 };
 use lash_kernel_state::paged::*;
+use lash_vocabulary::sites::EffectId;
+use lash_vocabulary::sites::Site;
 
 /// Infrastructure faults remain distinct from a semantic carry refusal.
 #[derive(Debug, thiserror::Error)]
@@ -44,7 +48,7 @@ fn task(c: &Correspondence, from: &TaskIdentity) -> Result<TaskIdentity, ParkedR
     }
     let mut to = TaskIdentity::Main;
     for (site, occurrence) in steps.into_iter().rev() {
-        to = TaskIdentity::Spawned(lash_kernel_doc::kernel_internals::SpawnIdentity {
+        to = TaskIdentity::Spawned(lash_vocabulary::sites::SpawnIdentity {
             parent: std::sync::Arc::new(to),
             site,
             occurrence,
@@ -63,7 +67,7 @@ pub fn carry_effect(c: &Correspondence, from: &EffectId) -> Result<EffectId, Par
             .loops
             .iter()
             .map(|held| {
-                Ok(lash_kernel_doc::kernel_internals::LoopIteration {
+                Ok(lash_vocabulary::sites::LoopIteration {
                     site: site(c, &held.site, "wait loop")?,
                     iteration: held.iteration,
                 })
@@ -293,9 +297,9 @@ pub fn carry_checkpoint(
         Ok(())
     })?;
     heap.directory = directory.keyed_root()?;
-    let mut tokens = lash_kernel_doc::graph_tokens::TokenWriter::new();
+    let mut tokens = lash_vocabulary::tokens::TokenWriter::new();
     tokens.sum(0, 1);
-    use lash_kernel_doc::graph_tokens::TokenCodec as _;
+    use lash_vocabulary::tokens::TokenCodec as _;
     heap.encode(&mut tokens);
     root.heap = carry.access.seal(
         PageKind::KEYED_LEAF,
@@ -306,7 +310,7 @@ pub fn carry_checkpoint(
             .collect(),
     )?;
     root.document = c.result;
-    root.kernel = rewritten.document.manifest.kernel;
+    root.kernel = rewritten.document.kernel();
     root.closure = closure;
     let children = [
         Some(root.heap),

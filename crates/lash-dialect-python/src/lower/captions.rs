@@ -3,9 +3,12 @@
 //! scaffolding, a predeclaration or another construct's statement.
 
 use lash_kernel_doc::{
-    Caption, CaptionEntry, CaptionTarget, Expr, FieldPath, FieldRoot, FieldTarget, Name, Node,
-    ParamTarget, Site, Stmt, Unit,
+    Caption, CaptionEntry, CaptionTarget, Expr, FieldPath, FieldRoot, FieldTarget, Node,
+    ParamTarget, Stmt,
 };
+
+use lash_vocabulary::Name;
+use lash_vocabulary::sites::{Site, Unit};
 use ruff_python_ast::{self as ast, Stmt as PyStmt};
 use ruff_text_size::{Ranged, TextSize};
 

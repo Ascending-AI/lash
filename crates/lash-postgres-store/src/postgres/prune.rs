@@ -1,7 +1,7 @@
 use crate::*;
 use lash_core_store::artifact_referrer::ArtifactCleanup;
 use lash_core_store::artifact_referrer::ArtifactReferrer;
-use lash_protocol_types::ProcessId;
+use lash_vocabulary::identity::ProcessId;
 
 pub(super) async fn prune_process_rows_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,

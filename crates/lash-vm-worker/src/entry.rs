@@ -3,6 +3,9 @@ use crate::PoolError;
 use crate::embedding::{EmbedError, Embedder, Embedding};
 use crate::process::inherited_pipe;
 use crate::worker::Server;
+use lash_protocol_types::engine_fault::{
+    BootstrapFault, Detail, ExecutionLease, FrameEpoch, OwnerEpoch, ProtocolBreach,
+};
 use lash_vm_client::ipc::{Bootstrap, read_frame, write_frame};
 use lash_vm_protocol::*;
 use std::time::Instant;
@@ -109,7 +112,7 @@ fn worker_entry_inner(
     let held = lash_vm_client::packages::read(holdings);
     let embedding = held.and_then(|held| {
         embedder.finish(&held).map_err(|error| match error {
-            EmbedError::Package(refusal) => PoolError::Package(refusal),
+            EmbedError::Library(refusal) => PoolError::Library(refusal),
             other => PoolError::breach(ProtocolBreach::Machine {
                 detail: Detail::new(other),
             }),
@@ -117,11 +120,11 @@ fn worker_entry_inner(
     });
     let embedding = match embedding {
         Ok(embedding) => embedding,
-        Err(PoolError::Package(refusal)) => {
+        Err(PoolError::Library(refusal)) => {
             let reply = lash_vm_client::packages::result(Err(refusal.clone()))?;
             let bytes = codec.encode_pool_started(&reply)?;
             write_frame(&mut pipe, &bytes, Instant::now() + bootstrap.serialization)?;
-            return Err(PoolError::Package(refusal));
+            return Err(PoolError::Library(refusal));
         }
         Err(error) => return Err(error),
     };

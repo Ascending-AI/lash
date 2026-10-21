@@ -1,9 +1,11 @@
 //! Canvas batches and private tree mutations.
 use crate::authoring::Operation;
-use lash_kernel_doc::{DocumentId, Expr, Name, Site, Stmt};
+use lash_kernel_doc::{Expr, Stmt};
+
+use lash_vocabulary::names::DocumentId;
+use lash_vocabulary::sites::Site;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeSet;
 
 /// A canvas batch applied whole or not at all. Every operation addresses this base.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -58,7 +60,7 @@ impl Position {
 pub(crate) enum Edit {
     InsertStatement {
         at: Position,
-        statement: Stmt,
+        statement: Box<Stmt>,
     },
     RemoveStatement {
         statement: Site,
@@ -79,14 +81,5 @@ pub(crate) enum Edit {
     SetCondition {
         statement: Site,
         condition: Expr,
-    },
-    RemoveFunction {
-        name: Name,
-    },
-    SetPrivateBindings {
-        names: BTreeSet<Name>,
-    },
-    RemoveEntry {
-        function: Name,
     },
 }

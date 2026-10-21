@@ -14,8 +14,9 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use lash_kernel_doc::plan::{HelperPlan, PlanLoop, SiteCall};
-use lash_kernel_doc::{Site, Unit};
 use lash_kernel_exec::ActIx;
+use lash_vocabulary::sites::Site;
+use lash_vocabulary::sites::Unit;
 
 use super::{ActionKind, Base, BlockId, CodeId, Form, Local, NestedKind, StmtId, Suffix, Tables};
 
@@ -213,44 +214,45 @@ fn resolve_site(
     let form = &tables.stmts[(stmt.0 - base.stmts) as usize].form;
     let statement = &path[..index];
     let full = Site::new(unit.clone(), path);
-    let (act, pending, roles, performs) = if let Some(act) = tables.stream.nested_at.get(&full) {
-        let nested = &tables.stream.nested[act.ix()];
-        if nested.depth as usize != index {
-            return Err("the action is nested in another statement".into());
-        }
-        // A `while` waits in its condition: it stands above its loop.
-        if matches!(form, Form::While { .. }) {
-            if loops.next() != Some(&PlanLoop::While) {
-                return Err("a `while` the site does not state".into());
+    let (act, pending, roles, performs) =
+        if let Some(act) = tables.stream.nested_at.get(&(stmt, full.clone())) {
+            let nested = &tables.stream.nested[act.ix()];
+            if nested.depth as usize != index {
+                return Err("the action is nested in another statement".into());
             }
-            control.push(SiteControl::While { stmt });
-        }
-        let mut roles = Vec::with_capacity(nested.roles.len());
-        for role in nested.roles.iter() {
-            let reg = site
-                .roles
-                .iter()
-                .find(|stated| stated.path == role.site.path.as_slice())
-                .ok_or_else(|| format!("the role {:?} is not stated", role.site.path))?
-                .reg;
-            roles.push((Arc::clone(&role.suffix), reg));
-        }
-        if roles.len() != site.roles.len() {
-            return Err("the site states a role the body does not hold".into());
-        }
-        let performs = matches!(nested.kind, NestedKind::Perform { .. });
-        (Some(*act), Arc::clone(&nested.suffix), roles, performs)
-    } else {
-        // The statement's own action: its frame holds no role there.
-        let Form::Action(action) = form else {
-            return Err("no action at the path".into());
+            // A `while` waits in its condition: it stands above its loop.
+            if matches!(form, Form::While { .. }) {
+                if loops.next() != Some(&PlanLoop::While) {
+                    return Err("a `while` the site does not state".into());
+                }
+                control.push(SiteControl::While { stmt });
+            }
+            let mut roles = Vec::with_capacity(nested.roles.len());
+            for role in nested.roles.iter() {
+                let reg = site
+                    .roles
+                    .iter()
+                    .find(|stated| stated.path == role.site.path.as_slice())
+                    .ok_or_else(|| format!("the role {:?} is not stated", role.site.path))?
+                    .reg;
+                roles.push((Arc::clone(&role.suffix), reg));
+            }
+            if roles.len() != site.roles.len() {
+                return Err("the site states a role the body does not hold".into());
+            }
+            let performs = matches!(nested.kind, NestedKind::Perform { .. });
+            (Some(*act), Arc::clone(&nested.suffix), roles, performs)
+        } else {
+            // The statement's own action: its frame holds no role there.
+            let Form::Action(action) = form else {
+                return Err("no action at the path".into());
+            };
+            if action.site != full || path.len() != statement.len() + 1 || !site.roles.is_empty() {
+                return Err("the statement's action is elsewhere".into());
+            }
+            let performs = matches!(action.kind, ActionKind::Perform { .. });
+            (None, Suffix::from([]), Vec::new(), performs)
         };
-        if action.site != full || path.len() != statement.len() + 1 || !site.roles.is_empty() {
-            return Err("the statement's action is elsewhere".into());
-        }
-        let performs = matches!(action.kind, ActionKind::Perform { .. });
-        (None, Suffix::from([]), Vec::new(), performs)
-    };
     if performs != (site.call == SiteCall::Perform) {
         return Err("the site's action is not the body's".into());
     }

@@ -54,7 +54,7 @@ pub trait RuntimeExecutionContextRuntimeOps<'run>: Sized {
         self,
         process: &lash_execution_contracts::process::ProcessRecord,
         env: Option<Arc<crate::ProcessEnv>>,
-    ) -> Self;
+    ) -> Result<Self, crate::PluginError>;
 
     /// Starts this execution's recorded turn-cancel fact, unset: `lent` is
     /// the stop the turn lends its tool children, fired when the fact
@@ -123,8 +123,7 @@ impl<'run> RuntimeExecutionContextRuntimeOps<'run> for RuntimeExecutionContext<'
             incorporation_ledger: Arc::default(),
             tool_requests: Arc::default(),
             tool_call_limit_refusal: Arc::default(),
-            recorded_grants: Arc::default(),
-            linked_packages: None,
+            linked_execution: None,
             extension_trace: crate::trace::ExtensionTrace::untraced(),
             parent_invocation: None,
             turn_phase_probe: None,
@@ -157,7 +156,7 @@ impl<'run> RuntimeExecutionContextRuntimeOps<'run> for RuntimeExecutionContext<'
         mut self,
         process: &lash_execution_contracts::process::ProcessRecord,
         env: Option<Arc<crate::ProcessEnv>>,
-    ) -> Self {
+    ) -> Result<Self, crate::PluginError> {
         // The lineage the process's body starts children under (FIG-3607 R1),
         // on the dispatch every start made inside this run realizes through.
         let mut dispatch = (*self.dispatch).clone();
@@ -169,9 +168,9 @@ impl<'run> RuntimeExecutionContextRuntimeOps<'run> for RuntimeExecutionContext<'
         self.process_execution = Some(RuntimeProcessExecution {
             process_id: process.id.clone(),
             provenance: process.provenance.clone(),
-            enclosing: enclosing_process(process, env),
+            enclosing: enclosing_process(process, env, self.linked_execution.as_ref())?,
         });
-        self
+        Ok(self)
     }
     fn with_recorded_turn_cancel(mut self, lent: CancellationToken) -> Self {
         // A tool this execution runs in process cooperates through the same
@@ -229,21 +228,40 @@ impl RuntimeExecutionContext<'_> {
 fn enclosing_process(
     process: &lash_execution_contracts::process::ProcessRecord,
     env: Option<Arc<crate::ProcessEnv>>,
-) -> Option<Arc<crate::EnclosingProcess>> {
+    linked: Option<&super::LinkedExecution>,
+) -> Result<Option<Arc<crate::EnclosingProcess>>, crate::PluginError> {
     let lash_execution_contracts::process::ProcessInput::Engine {
         kind,
         payload,
         launch,
     } = process.input.as_ref()
     else {
-        return None;
+        return Ok(None);
     };
-    Some(Arc::new(crate::EnclosingProcess {
+    let invalid = || {
+        crate::PluginError::Session(
+            "engine process has no matching retained execution context".into(),
+        )
+    };
+    let env = env.ok_or_else(invalid)?;
+    let linked = linked.ok_or_else(invalid)?;
+    if linked.execution != lash_core_store::resolutions::ExecutionId::process(&process.id)
+        || linked.environment.as_ref() != env.execution()
+    {
+        return Err(invalid());
+    }
+    Ok(Some(Arc::new(crate::EnclosingProcess {
         process: process.id.clone(),
+        execution: lash_core_store::resolutions::ExecutionId::process(&process.id),
+        resolutions: linked
+            .resolutions
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone(),
         env_ref: launch.env.clone(),
-        env: Arc::unwrap_or_clone(env?),
+        env: Arc::unwrap_or_clone(env),
         engine_kind: kind.clone(),
         payload: payload.clone(),
         settings: launch.settings.clone(),
-    }))
+    })))
 }

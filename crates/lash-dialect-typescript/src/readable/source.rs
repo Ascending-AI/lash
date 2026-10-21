@@ -135,6 +135,7 @@ pub(super) struct Arm {
 /// A top-level function of the module.
 #[derive(Clone, Debug, PartialEq)]
 pub(super) struct Item {
+    pub(super) is_async: bool,
     pub(super) caption: Option<Caption>,
     pub(super) name: String,
     pub(super) params: Vec<Param>,
@@ -201,7 +202,11 @@ impl Writer {
     pub(super) fn item(&mut self, item: &Item) {
         self.pad();
         self.caption(item.caption.as_ref());
-        self.out.push_str("export async function ");
+        self.out.push_str(if item.is_async {
+            "export async function "
+        } else {
+            "export function "
+        });
         self.out.push_str(&item.name);
         self.params(&item.params);
         if let Some(result) = &item.result {

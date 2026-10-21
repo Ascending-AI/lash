@@ -25,7 +25,7 @@ fn text_message(id: &str, role: MessageRole, content: &str) -> Message {
 fn construction_enforces_structural_graph_integrity() {
     let node = |id: &str, parent: Option<&str>| SessionNodeRecord {
         node_id: NodeId::fixture(id.to_string()),
-        parent_node_id: parent.map(crate::NodeId::fixture),
+        parent_node_id: parent.map(lash_vocabulary::identity::NodeId::fixture),
         timestamp: "2026-08-08T00:00:00.000000000Z"
             .parse()
             .expect("canonical node timestamp"),
@@ -228,7 +228,7 @@ fn cache_build_rejects_parent_cycles_scenario() {
 fn cache_build_rejects_cycles_in_inactive_components() {
     let plugin_node = |node_id: &str, parent_node_id: Option<&str>| SessionNodeRecord {
         node_id: NodeId::fixture(node_id.to_string()),
-        parent_node_id: parent_node_id.map(crate::NodeId::fixture),
+        parent_node_id: parent_node_id.map(lash_vocabulary::identity::NodeId::fixture),
         timestamp: "2026-07-31T00:00:00.000000000Z"
             .parse()
             .expect("canonical node timestamp"),
@@ -378,7 +378,9 @@ fn storage_body_excludes_indexed_graph_identity_and_parent_edge() {
     assert!(!encoded.contains("parent_node_id"));
     let decoded = SessionNodeRecord::decode_storage_body(
         node.node_id.to_string(),
-        node.parent_node_id.clone().map(crate::NodeId::into_inner),
+        node.parent_node_id
+            .clone()
+            .map(lash_vocabulary::identity::NodeId::into_inner),
         &encoded,
     )
     .expect("decode storage body");
@@ -467,10 +469,13 @@ fn supported_older_stored_bodies_remain_readable_after_finalize() {
         )
         .expect("supported older history must remain readable before and after finalize");
 
-        assert_eq!(decoded.node_id, crate::NodeId::from("node-1"));
+        assert_eq!(
+            decoded.node_id,
+            lash_vocabulary::identity::NodeId::from("node-1")
+        );
         assert_eq!(
             decoded.parent_node_id,
-            Some(crate::NodeId::from("parent-1"))
+            Some(lash_vocabulary::identity::NodeId::from("parent-1"))
         );
         assert_eq!(
             decoded.timestamp.to_string(),
@@ -598,19 +603,19 @@ fn nearest_frame_is_derived_from_ancestry() {
     assert_eq!(
         graph
             .nearest_frame_node_id(Some(&first_message))
-            .map(crate::NodeId::as_str),
+            .map(lash_vocabulary::identity::NodeId::as_str),
         Some(first.as_str())
     );
     assert_eq!(
         graph
             .nearest_frame_node_id(Some(&second_message))
-            .map(crate::NodeId::as_str),
+            .map(lash_vocabulary::identity::NodeId::as_str),
         Some(second.as_str())
     );
     assert_eq!(
         graph
             .nearest_frame_node_id(graph.leaf_node_id.as_deref())
-            .map(crate::NodeId::as_str),
+            .map(lash_vocabulary::identity::NodeId::as_str),
         Some(second.as_str())
     );
 }
@@ -942,7 +947,7 @@ fn remap_node_ids_rewrites_parents_on_child_before_parent_layouts() {
     for warm_cache in [true, false] {
         let record = |id: &str, parent: Option<&str>| SessionNodeRecord {
             node_id: NodeId::fixture(id.to_string()),
-            parent_node_id: parent.map(crate::NodeId::fixture),
+            parent_node_id: parent.map(lash_vocabulary::identity::NodeId::fixture),
             timestamp: "2026-08-08T00:00:00.000000000Z"
                 .parse()
                 .expect("canonical node timestamp"),
@@ -961,9 +966,9 @@ fn remap_node_ids_rewrites_parents_on_child_before_parent_layouts() {
             assert!(graph.find_node("root").is_some());
         }
 
-        let derived_root = crate::NodeId::from("derived-root");
+        let derived_root = lash_vocabulary::identity::NodeId::from("derived-root");
         graph.remap_node_ids(
-            &crate::SessionId::from("remap-test"),
+            &lash_vocabulary::identity::SessionId::from("remap-test"),
             &[("root".into(), derived_root.clone())],
         );
 
@@ -1025,7 +1030,7 @@ mod window_anchor {
             node_id: NodeId::fixture(
                 frame_node_id(&SessionId::from("window"), frame_key.as_str()).into_inner(),
             ),
-            parent_node_id: parent.map(crate::NodeId::fixture),
+            parent_node_id: parent.map(lash_vocabulary::identity::NodeId::fixture),
             timestamp: "2026-09-29T00:00:00.000000000Z"
                 .parse()
                 .expect("canonical node timestamp"),
@@ -1602,7 +1607,7 @@ fn transcript_nonempty_reasoning_remains_a_reasoning_entry() {
 fn a_commits_added_transcript_equals_the_full_decode_less_the_base() {
     use lash_protocol_types::core_support::TurnReplyCoreSupport;
     let decoders = crate::transcript::TranscriptDecoders::default();
-    let turn = |name: &str| crate::TurnId::parse(name).expect("turn id");
+    let turn = |name: &str| lash_vocabulary::identity::TurnId::parse(name).expect("turn id");
     let message = |id: &str, role, origin| Message {
         origin,
         ..text_message(id, role, id)

@@ -35,6 +35,7 @@ GENERATORS = (
     ),
     Generator("lash-internal-core", "crates/lash-core", "process_workflow_schema_generator"),
     Generator("lash-kernel-doc", "crates/lash-kernel-doc", "kernel_schema_generator"),
+    Generator("lash-kernel-migrate", "crates/lash-kernel-migrate", "kernel_migration_schema_generator"),
     Generator("lash-kernel-edit", "crates/lash-kernel-edit", "kernel_edit_schema_generator"),
     Generator("lash-kernel-view", "crates/lash-kernel-view", "kernel_view_schema_generator"),
     Generator(

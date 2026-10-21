@@ -3,7 +3,7 @@
   "cases": [
     {
       "name": "park and rebuild preserve the pinned charge",
-      "document": "kernel 1\nnumbers by_spelling\neffect echo(x: Int) -> Int contract \"1\"\nmain { let x = perform echo(1) as Int finish x }\n",
+      "document": "kernel 1\nnumbers by_spelling\nimport 0 operation host.echo(x: Int) -> Int\nmain {\n  let x = perform 0(1) as Int\n  finish x\n}\n",
       "expected": {
         "end": {
           "finished": {
@@ -15,7 +15,7 @@
         "trace": [
           {
             "effect": {
-              "effect": "echo",
+              "effect": "host.echo",
               "args": [
                 {
                   "int": "1"

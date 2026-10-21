@@ -1,9 +1,9 @@
 //! Opaque parked state and the small control facts an embedding may inspect.
 use super::{CheckpointRoot, PageAnswer, RootStatus};
-use lash_kernel_doc::{
-    DocumentId,
-    graph_tokens::{TokenCodec, TokenError, TokenReader, TokenWriter},
-    heap::{HeapFault, PageId},
+use lash_kernel_doc::heap::{HeapFault, PageId};
+use lash_vocabulary::{
+    names::DocumentId,
+    tokens::{TokenCodec, TokenError, TokenReader, TokenWriter},
 };
 
 /// An authenticated checkpoint opened from its root page. Execution records

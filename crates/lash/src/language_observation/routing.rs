@@ -1,5 +1,7 @@
-use lash_protocol_types::{ExecutionScope, ProcessId, SessionId};
+use lash_protocol_types::ExecutionScope;
 use lash_trace::{TraceLanguageExecution, TraceRuntimeSubject};
+use lash_vocabulary::identity::ProcessId;
+use lash_vocabulary::identity::SessionId;
 
 /// The canonical owner of a language execution, independent of its dialect.
 #[derive(Clone, Debug, PartialEq, Eq)]

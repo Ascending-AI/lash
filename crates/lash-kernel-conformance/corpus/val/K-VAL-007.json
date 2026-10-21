@@ -3,7 +3,7 @@
   "cases": [
     {
       "name": "scalar and UTF16 positions address the same astral character differently",
-      "document": "kernel 1\nnumbers by_spelling\nuse text.utf16_len = @7be9b48ecb000bf8c0c6267fce3ef23096b08740ce0279b456bd06e9c5e3ad18\nuse text.len = @a6c5541c537bca274e439467011e6f2a631cad9a29a4cca7a7710763e675f716\nuse text.get = @04442e8b0037608a734e4e93b04c62f6c031cc039f13ae147827ba9d32f22db3\nuse text.utf16_slice = @e63080421899ba41a3d2d26b5a0e27ab7e48207de832479e1e6614032c6fe409\nuse text.utf16_get = @682fa4fa6329e4f79afcd5bd4bbeb448c772ca482988723a6c48977c973e444d\nmain {  finish [text.len(\"a😀z\"), text.utf16_len(\"a😀z\"), text.get(\"a😀z\", 1), text.utf16_get(\"a😀z\", 1), text.utf16_get(\"a😀z\", 2), text.utf16_slice(\"a😀z\", 1, 3)] }\n",
+      "document": "kernel 1\nnumbers by_spelling\nnative @2aef13cab0aa88bb0ba559a67f4411063f131396cd9bec7d0b849a57e9efc6f8\nnative @5e9e6dd0a150425bb7c4ba4d7eca4cc1164290bc644a7277f3e25d64d5857c8a\nnative @7482cfd6b4c420a9c241554beaea7b98eb0406fc157fbca927237ed49928ed92\nnative @f271a528b4c37e5de4480595f202be2431e01c9fd57564614cdd8e11d309da78\nnative @f56cc47ed36c58f6ec0b00c2f09528afa6f30c7bfe3bcd06c29d4d61260ada05\ndefinition \"function text.utf16_len(text: Text) -> Int\\nkernel 1\\ncharge sum(1, deep(text), deep(result))\\nnative\\n\"\ndefinition \"function text.utf16_get(text: Text, index: Int) -> Int\\nkernel 1\\ncharge sum(1, deep(text), deep(index), deep(result))\\nnative\\n\"\ndefinition \"function text.len(text: Text) -> Int\\nkernel 1\\ncharge sum(1, deep(text), deep(result))\\nnative\\n\"\ndefinition \"function text.utf16_slice(text: Text, start: Int, end: Int) -> Text\\nkernel 1\\ncharge sum(1, deep(text), deep(start), deep(end), deep(result))\\nnative\\n\"\ndefinition \"function text.get(text: Text, index: Int) -> Text\\nkernel 1\\ncharge sum(1, deep(text), deep(index), deep(result))\\nnative\\n\"\nmain {\n  finish [text.len(\"a😀z\"), text.utf16_len(\"a😀z\"), text.get(\"a😀z\", 1), text.utf16_get(\"a😀z\", 1), text.utf16_get(\"a😀z\", 2), text.utf16_slice(\"a😀z\", 1, 3)]\n}\n",
       "expected": {
         "prints": [],
         "trace": [],
@@ -35,7 +35,7 @@
     },
     {
       "name": "UTF16 slice cannot split the pair",
-      "document": "kernel 1\nnumbers by_spelling\nuse text.utf16_slice = @e63080421899ba41a3d2d26b5a0e27ab7e48207de832479e1e6614032c6fe409\nmain {  try { print text.utf16_slice(\"a😀z\", 1, 2) } catch e { finish e.kind } finish null }\n",
+      "document": "kernel 1\nnumbers by_spelling\nnative @f271a528b4c37e5de4480595f202be2431e01c9fd57564614cdd8e11d309da78\ndefinition \"function text.utf16_slice(text: Text, start: Int, end: Int) -> Text\\nkernel 1\\ncharge sum(1, deep(text), deep(start), deep(end), deep(result))\\nnative\\n\"\nmain {\n  try {\n    print text.utf16_slice(\"a😀z\", 1, 2)\n  } catch e {\n    finish e.kind\n  }\n  finish null\n}\n",
       "expected": {
         "prints": [],
         "trace": [],

@@ -12,10 +12,12 @@
 //! its caller's statement.
 
 use lash_kernel_doc::arena::ArenaHandle;
-use lash_kernel_doc::{KernelDataLimits, TaskId, Value};
+use lash_kernel_doc::{TaskId, Value};
+
 use lash_kernel_exec::{ActIx, RegRange, Weight};
 use lash_kernel_state::arena::Arena;
 use lash_kernel_state::paged::PhaseRecord;
+use lash_vocabulary::data_limits::KernelDataLimits;
 
 use super::super::ops::Flow;
 use super::super::session::Session;

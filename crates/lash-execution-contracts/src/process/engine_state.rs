@@ -20,11 +20,14 @@
 
 use std::time::Duration;
 
+use lash_core_store::resolutions::{ExecutionId, ResolutionEntry};
 use lash_durable::DurableInstant;
 
+use crate::ProcessOutcome;
+use crate::Resolution;
 use crate::waits::PinnedKey;
-use crate::{ProcessId, ProcessOutcome, Resolution};
 use lash_core_store::tool_run::SettledOutput;
+use lash_vocabulary::identity::ProcessId;
 
 /// The encoding of an engine's [`EngineState`]: the engine's kind and a
 /// version it bumps when the encoding changes. A node claims a process only
@@ -37,33 +40,6 @@ pub struct EngineStateFormat {
     pub kind: String,
     /// The engine's encoding version.
     pub version: u32,
-}
-
-/// A process's committed engine state: opaque bytes in a declared format.
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct EngineState {
-    /// Private nodes a carry transfers to the owner transaction with this state.
-    #[serde(skip)]
-    pub staged: Vec<lash_core_store::checkpoint_graph::EncodedNode>,
-    /// The encoding of `bytes`.
-    pub format: EngineStateFormat,
-    /// The engine's own encoding of its state.
-    pub bytes: Vec<u8>,
-    /// The persistent-heap root the state stands on: the CheckpointRoot
-    /// page a step's outcome published ([`EngineStepAnswer::Paged`]), which
-    /// the process's execution root owns from the advance that names it
-    /// (FIG-6193). None for an engine that keeps no heap.
-    #[serde(default, skip_serializing_if = "Option::is_none", with = "page_hex")]
-    pub pages: Option<lash_core_store::checkpoint_graph::NodeId>,
-    /// What running the process requires of a node while it stands on
-    /// this state (FIG-6985): the natives and kernel versions its parked
-    /// run's code reaches and the providers and codecs of its env's
-    /// links. Its execution root records it; empty when no run is parked.
-    #[serde(
-        default,
-        skip_serializing_if = "lash_kernel_doc::ExecutionRequirements::is_empty"
-    )]
-    pub requirements: lash_kernel_doc::ExecutionRequirements,
 }
 
 impl EngineState {
@@ -81,7 +57,7 @@ impl EngineState {
             format,
             bytes,
             pages: None,
-            requirements: lash_kernel_doc::ExecutionRequirements::default(),
+            requirements: ClaimRequirements::default(),
         }
     }
 }
@@ -112,46 +88,6 @@ mod page_hex {
             })
             .transpose()
     }
-}
-
-/// An engine's carrying of its state from an earlier build's format to its
-/// own (ADR 0106 §1). An engine registered with one
-/// ([`Backend::with_state_migration`](crate::Backend::with_state_migration))
-/// decodes the formats it [`carries`](Self::carries) beside its
-/// [`state_format`](super::ProcessEngine::state_format), so its node claims
-/// a process the previous build left in one. The claimer carries the state
-/// forward as its first commit, before any transition, once every live node
-/// that serves the process decodes the newer format; until then it advances
-/// the process in the format it is in.
-#[async_trait::async_trait]
-pub trait EngineStateMigration: Send + Sync {
-    /// The earlier formats the engine carries forward.
-    fn carries(&self) -> Vec<EngineStateFormat>;
-
-    /// `state`, written in a carried format, in the engine's own; or
-    /// `None` when the process is not at a point the engine carries it
-    /// from, and goes on in the format it is in. It may read and publish
-    /// what the state names, and it changes nothing of the process: the
-    /// claimer commits the answer, or parks the process with the refusal.
-    async fn migrate(
-        &self,
-        process: &ProcessId,
-        state: &EngineState,
-    ) -> Result<Option<EngineState>, EngineStateRefusal>;
-}
-
-/// Why an engine did not carry a state forward.
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct EngineStateRefusal {
-    /// The kernel migration's typed refusal.
-    pub refusal: lash_kernel_migrate::KernelMigrationRefusal,
-    /// The reason in words.
-    pub message: String,
-    /// The same state will be refused again: the process is parked with
-    /// the refusal. A refusal that is not final, such as a store that did
-    /// not answer, is asked again at the next claim.
-    pub fatal: bool,
 }
 
 /// A read-only status an engine projects from its committed state: the
@@ -193,53 +129,6 @@ pub struct KeyName(pub String);
 )]
 pub struct StepName(pub String);
 
-/// One step an engine asks lash to run. Its identity is
-/// `(process, step, ordinal)`, and its `ToolCallId` derives from it.
-#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
-pub enum StepRequest {
-    /// A linked call, under its tool's declaration, `ExecutionPolicy` and
-    /// ceiling.
-    Tool {
-        /// The step's name.
-        step: StepName,
-        /// The effect it performs, by its path (P3): the process env's link
-        /// of it names the tool that runs, never the engine.
-        effect: lash_kernel_doc::EffectName,
-        /// The contract the performing code requires of the effect
-        /// (OP-CONTRACT-PIN): the call runs only on a tool serving it.
-        contract: lash_kernel_doc::ContractId,
-        /// The tool's input.
-        input: serde_json::Value,
-        /// The site of the engine's workflow document it runs for, when the
-        /// engine names one: its committed outcome is recorded as that
-        /// site's `process.effect_outcome`, and the start of its admitted
-        /// body is observed there ([`lash_trace::StepBodyStarted`]).
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        site: Option<Box<lash_protocol_types::EffectId>>,
-        /// The recorded match a granted tool's call runs on (P6): set only
-        /// by lash, on the step it issues once the call's resolution
-        /// committed, which runs the matched tool with the arguments the
-        /// grant's transform names for `input`. An engine never sets it: it
-        /// asks for the granted tool's effect, whose step is the resolution.
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        matched: Option<Box<crate::DeferredMatch>>,
-    },
-    /// A body of the process's own engine, run through the [`EngineSteps`]
-    /// its registration declares, under the retry policy its kind declares
-    /// (or its registration overrides), pinned at admission. It is neither
-    /// model-visible nor host-invocable. A registration that
-    /// declares no engine steps, or not this kind, is refused before
-    /// admission ([`EngineStepRefusal`]).
-    Engine {
-        /// The step's name.
-        step: StepName,
-        /// Which of the engine's bodies runs.
-        kind: EngineStepKind,
-        /// The body's input.
-        input: serde_json::Value,
-    },
-}
-
 impl StepRequest {
     /// The step's name.
     #[must_use]
@@ -257,19 +146,9 @@ impl StepRequest {
         }
     }
 
-    /// The recorded match the step runs on, when it is the target of a
-    /// granted tool's call.
-    #[must_use]
-    pub fn matched(&self) -> Option<&crate::DeferredMatch> {
-        match self {
-            Self::Tool { matched, .. } => matched.as_deref(),
-            Self::Engine { .. } => None,
-        }
-    }
-
     /// The effect node the step runs for, if its engine named one.
     #[must_use]
-    pub fn site(&self) -> Option<&lash_protocol_types::EffectId> {
+    pub fn site(&self) -> Option<&lash_vocabulary::sites::EffectId> {
         match self {
             Self::Tool { site, .. } => site.as_deref(),
             Self::Engine { .. } => None,
@@ -281,7 +160,7 @@ impl StepRequest {
     #[must_use]
     pub fn operation(&self) -> String {
         match self {
-            Self::Tool { effect, .. } => effect.to_string(),
+            Self::Tool { use_, .. } => format!("{}:{}", use_.link, use_.slot.0),
             Self::Engine { kind, .. } => kind.0.clone(),
         }
     }
@@ -292,8 +171,8 @@ impl EngineStepKind {
     /// `engine`: `<engine>/<kind>`, which only identifies the record. An
     /// engine step is dispatched by its variant, never by this name.
     #[must_use]
-    pub fn admitted_tool(&self, engine: &str) -> lash_protocol_types::ToolId {
-        lash_protocol_types::ToolId::new(format!("{engine}/{}", self.0))
+    pub fn admitted_tool(&self, engine: &str) -> lash_vocabulary::tool_contract::ToolId {
+        lash_vocabulary::tool_contract::ToolId::new(format!("{engine}/{}", self.0))
     }
 }
 
@@ -312,40 +191,6 @@ impl EngineStepKind {
     }
 }
 
-/// What an engine step's body is handed: the process, what its row
-/// recorded, the effects its env links, the activation's clock reading and
-/// the step's own kind and input.
-#[derive(Clone)]
-pub struct EngineStepRun {
-    /// The process the step belongs to.
-    pub process: ProcessId,
-    /// The engine settings the process's start stated and its row records
-    /// (D4): never this build's defaults.
-    pub engine_settings: Option<super::EngineSettings>,
-    /// The effects the process's env links (P3): what its linked calls
-    /// may perform, each by its link.
-    pub effects: std::sync::Arc<
-        std::collections::BTreeMap<lash_kernel_doc::EffectName, crate::OperationLink>,
-    >,
-    /// The readers registered by the process's recorded components.
-    pub reads: std::sync::Arc<dyn EngineEffectReads>,
-    /// The activation's clock reading when the body started.
-    pub now: DurableInstant,
-    /// The activation's clock, for a body that waits.
-    pub clock: std::sync::Arc<dyn crate::Clock>,
-    /// The backend's projection providers, which a body that runs a VM reads
-    /// projections through (ADR 0132 §9).
-    pub projection_providers: Option<std::sync::Arc<dyn crate::projection::ProjectionProviders>>,
-    /// Which body runs.
-    pub kind: EngineStepKind,
-    /// The body's input.
-    pub input: serde_json::Value,
-    /// The activation's heap page publication, for a body whose outcome
-    /// publishes pages ([`EngineStepAnswer::Paged`]); None on a store that
-    /// holds no heap pages.
-    pub pages: Option<StepPages>,
-}
-
 /// Answers a process's read-mode operations from its recorded environment.
 /// Reads admit no step and are repeated when an uncommitted run is retried.
 #[async_trait::async_trait]
@@ -359,8 +204,7 @@ pub trait EngineEffectReads: Send + Sync {
     /// stays a typed, catchable read error.
     async fn read(
         &self,
-        effect: &lash_kernel_doc::EffectName,
-        contract: &lash_kernel_doc::ContractId,
+        use_: &lash_vocabulary::names::OperationUse,
         input: Result<serde_json::Value, String>,
         cancel: &tokio_util::sync::CancellationToken,
         deadline: std::time::Instant,
@@ -573,42 +417,6 @@ impl From<SettledOutput> for EngineStepAnswer {
     }
 }
 
-/// An engine's own step bodies, declared at registration
-/// ([`ProcessEngineRegistration::with_engine_steps`](super::ProcessEngineRegistration::with_engine_steps)).
-/// Each runs under the retry policy its kind declares, pinned at admission:
-/// under `Repeatable`, a crash before its outcome commits runs it again from
-/// the same input and a failure is retried within the policy's attempts, so
-/// such a body must be a recomputation from that input, with no effect of
-/// its own; under `Once`, a crash settles it `Interrupted` and a failure is
-/// its outcome. A body that the host lacked capacity for answers a
-/// [`CapacityVerdict`] instead of a failure: under `Repeatable` it runs
-/// again uncounted and records nothing, so its attempts are spent only on
-/// failures of its own.
-#[async_trait::async_trait]
-pub trait EngineSteps: Send + Sync {
-    /// The kinds of body this engine runs.
-    fn kinds(&self) -> Vec<EngineStepKind>;
-
-    /// How long one run of a `kind` body may take: the engine's own bound,
-    /// as a host sets a tool's. Lash holds no step default.
-    fn execution(&self, kind: &EngineStepKind) -> Duration;
-
-    /// How a `kind` body is retried after a failure or a crash: the engine
-    /// author's default, which the host may override per kind when it
-    /// registers the engine
-    /// ([`ProcessEngineRegistration::with_engine_step_retry`](super::ProcessEngineRegistration::with_engine_step_retry)).
-    /// Lash holds no retry default.
-    fn retry(&self, kind: &EngineStepKind) -> lash_protocol_types::ExecutionPolicy;
-
-    /// Run one body to its outcome, observing `cancel`: its settled output,
-    /// or a [`CapacityVerdict`] when the host lacked capacity for it.
-    async fn run(
-        &self,
-        run: EngineStepRun,
-        cancel: tokio_util::sync::CancellationToken,
-    ) -> EngineStepAnswer;
-}
-
 /// Why an engine step was refused before admission.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, thiserror::Error)]
 #[serde(tag = "reason", rename_all = "snake_case")]
@@ -640,7 +448,7 @@ pub enum EngineStepRefusal {
 #[derive(Clone, Debug, PartialEq)]
 pub struct EngineWake {
     pub until: DurableInstant,
-    pub site: Option<lash_protocol_types::EffectId>,
+    pub site: Option<lash_vocabulary::sites::EffectId>,
 }
 
 /// What an engine asks lash to do next.
@@ -663,14 +471,14 @@ pub enum EngineAction {
         name: KeyName,
         /// How long the wait may stay open: the engine's own bound, with no
         /// lash default or ceiling.
-        bound: crate::ParkBound,
+        bound: lash_vocabulary::tool_contract::ParkBound,
     },
     /// Wait for a pinned key's resolution.
     AwaitExternal {
         /// The wait's name.
         name: KeyName,
         /// The node that waits, when the engine's workflow document names one.
-        site: Option<lash_protocol_types::EffectId>,
+        site: Option<lash_vocabulary::sites::EffectId>,
     },
     /// Wait for another process's terminal.
     AwaitProcess {
@@ -678,16 +486,16 @@ pub enum EngineAction {
         process: ProcessId,
         /// How long the wait may stay open: the engine's own bound, with no
         /// lash default or ceiling.
-        bound: crate::ParkBound,
+        bound: lash_vocabulary::tool_contract::ParkBound,
         /// The node that waits, when the engine's workflow document names one.
-        site: Option<lash_protocol_types::EffectId>,
+        site: Option<lash_vocabulary::sites::EffectId>,
     },
     /// Sleep until a durable instant.
     Sleep {
         /// When the process wakes.
         until: DurableInstant,
         /// The node that sleeps, when the engine's workflow document names one.
-        site: Option<lash_protocol_types::EffectId>,
+        site: Option<lash_vocabulary::sites::EffectId>,
     },
     /// Nothing to do and no deadline: the process waits until the next
     /// mailbox event (`Cancelled`, a resolved wait or a settled step)
@@ -755,3 +563,121 @@ pub enum EngineEvent {
         grace_until: DurableInstant,
     },
 }
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct EngineState {
+    /// Private nodes a carry transfers to the owner transaction with this state.
+    #[serde(skip)]
+    pub staged: Vec<lash_core_store::checkpoint_graph::EncodedNode>,
+    /// The encoding of `bytes`.
+    pub format: EngineStateFormat,
+    /// The engine's own encoding of its state.
+    pub bytes: Vec<u8>,
+    /// The persistent-heap root the state stands on: the CheckpointRoot
+    /// page a step's outcome published ([`EngineStepAnswer::Paged`]), which
+    /// the process's execution root owns from the advance that names it
+    /// (FIG-6193). None for an engine that keeps no heap.
+    #[serde(default, skip_serializing_if = "Option::is_none", with = "page_hex")]
+    pub pages: Option<lash_core_store::checkpoint_graph::NodeId>,
+    /// What running the process requires of a node while it stands on
+    /// this state (FIG-6985): the natives and kernel versions its parked
+    /// run's code reaches and the providers and codecs of its env's
+    /// links. Its execution root records it; empty when no run is parked.
+    pub requirements: ClaimRequirements,
+}
+
+use crate::ProjectionProviders;
+use crate::process::EngineSettings;
+use lash_core_ids::clock::Clock;
+use lash_core_store::tool_surface::ExecutionEnvironment;
+use lash_vocabulary::package::*;
+
+use lash_vocabulary::sites::EffectId;
+use lash_vocabulary::{ExecutionPolicy, claims::*, names::*};
+use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(
+    tag = "kind",
+    content = "value",
+    rename_all = "snake_case",
+    deny_unknown_fields
+)]
+pub enum StepRequest {
+    Tool {
+        step: StepName,
+        use_: OperationUse,
+        input: serde_json::Value,
+        site: Option<Box<EffectId>>,
+    },
+    Engine {
+        step: StepName,
+        kind: EngineStepKind,
+        input: serde_json::Value,
+    },
+}
+#[derive(Clone)]
+pub struct EngineStepRun {
+    pub process: ProcessId,
+    pub execution: ExecutionId,
+    pub engine_settings: Option<EngineSettings>,
+    pub environment: std::sync::Arc<ExecutionEnvironment>,
+    /// Registered readers over the recorded per-use environment.
+    pub reads: std::sync::Arc<dyn EngineEffectReads>,
+    pub resolutions: std::sync::Arc<BTreeMap<OperationUse, ResolutionEntry>>,
+    pub now: DurableInstant,
+    pub clock: std::sync::Arc<dyn Clock>,
+    pub projection_providers: Option<std::sync::Arc<dyn ProjectionProviders>>,
+    pub kind: EngineStepKind,
+    pub input: serde_json::Value,
+    pub pages: Option<StepPages>,
+}
+#[async_trait::async_trait]
+/// Neutral admitted engine bodies, per-use environment and committed resolutions. Core derives route/contract itself.
+pub trait EngineSteps: Send + Sync {
+    fn kinds(&self) -> Vec<EngineStepKind>;
+    fn execution(&self, kind: &EngineStepKind) -> std::time::Duration;
+    fn retry(&self, kind: &EngineStepKind) -> ExecutionPolicy;
+    async fn run(
+        &self,
+        run: EngineStepRun,
+        cancel: tokio_util::sync::CancellationToken,
+    ) -> EngineStepAnswer;
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct EngineStateRefusal {
+    pub code: String,
+    pub detail: serde_json::Value,
+    pub message: String,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(
+    tag = "kind",
+    content = "value",
+    rename_all = "snake_case",
+    deny_unknown_fields
+)]
+/// Deterministic state refusal or retryable infrastructure failure; neither clears execution resolutions.
+pub enum MigrationError {
+    Refused(EngineStateRefusal),
+    Unavailable { message: String },
+}
+#[async_trait::async_trait]
+/// Carries opaque state under general durable-format rules without changing execution identity or pins.
+pub trait EngineStateMigration: Send + Sync {
+    fn carries(&self) -> Vec<EngineStateFormat>;
+    async fn migrate(
+        &self,
+        process: &ProcessId,
+        state: &EngineState,
+    ) -> Result<Option<EngineState>, MigrationError>;
+}
+
+impl std::fmt::Display for MigrationError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{self:?}")
+    }
+}
+impl std::error::Error for MigrationError {}

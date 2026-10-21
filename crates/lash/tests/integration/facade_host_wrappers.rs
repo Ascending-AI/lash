@@ -92,6 +92,13 @@ struct HostStores {
 }
 
 impl lash::StoreSet for HostStores {
+    fn package_store(&self) -> Arc<dyn lash::package::PackageStore> {
+        self.inner.package_store()
+    }
+    fn execution_resolutions(&self) -> Arc<dyn lash::package::ExecutionResolutions> {
+        self.inner.execution_resolutions()
+    }
+
     fn durable_store(&self) -> Arc<dyn lash::durable::DurableStore> {
         self.inner.durable_store()
     }
@@ -328,7 +335,10 @@ async fn a_facade_host_wraps_the_rlm_factory_and_its_stores(tier: Tier) {
     );
 
     match core
-        .session(lash::SessionId::parse("facade-host-wrappers").expect("nonblank host identity"))
+        .session(
+            lash_vocabulary::identity::SessionId::parse("facade-host-wrappers")
+                .expect("nonblank host identity"),
+        )
         .create(lash::SessionCreation::root(lash::SessionSpec::new(
             "facade-host-wrappers",
             lash::TurnBudget::Unbounded,
@@ -341,7 +351,10 @@ async fn a_facade_host_wraps_the_rlm_factory_and_its_stores(tier: Tier) {
         Err(error) => panic!("create the session: {error:?}"),
     }
     let session = core
-        .session(lash::SessionId::parse("facade-host-wrappers").expect("nonblank host identity"))
+        .session(
+            lash_vocabulary::identity::SessionId::parse("facade-host-wrappers")
+                .expect("nonblank host identity"),
+        )
         .open()
         .await
         .expect("open the session");
@@ -439,7 +452,7 @@ async fn eviction_law(backend: lash::Backend, tag: &str) -> LashCore {
         ))
         .expect("core");
     let id = format!("replay-bounds-{tag}");
-    core.session(lash::SessionId::fixture(&id))
+    core.session(lash_vocabulary::identity::SessionId::fixture(&id))
         .create(lash::SessionCreation::root(lash::SessionSpec::new(
             "live-replay-bounds",
             lash::TurnBudget::Unbounded,
@@ -449,7 +462,7 @@ async fn eviction_law(backend: lash::Backend, tag: &str) -> LashCore {
         .await
         .expect("create");
     let session = core
-        .session(lash::SessionId::fixture(&id))
+        .session(lash_vocabulary::identity::SessionId::fixture(&id))
         .open()
         .await
         .expect("open");
@@ -475,7 +488,7 @@ async fn eviction_law(backend: lash::Backend, tag: &str) -> LashCore {
     );
 
     replay.current_cursor(
-        &lash::SessionId::fixture(format!("pressure-{tag}")),
+        &lash_vocabulary::identity::SessionId::fixture(format!("pressure-{tag}")),
         lash::observe::SessionRevision::new(0),
     );
     let SessionResume::Gap { observation, gap } = session

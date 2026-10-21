@@ -3,7 +3,7 @@
   "cases": [
     {
       "name": "declared entry and private binding are document nodes",
-      "document": "kernel 1\nnumbers by_spelling\nentry start(x: Int) -> Int\nprivate scratch\nfn start(x) { return x }\nmain { let scratch = 7 let y = call start(scratch) finish y }\n",
+      "document": "kernel 1\nnumbers by_spelling\nexport start \"{\\\"kind\\\":\\\"function\\\",\\\"value\\\":{\\\"function\\\":\\\"b35ec3b49ba9fed551c372a18f2ef1e3fdf488484b9c725ac42e5c39b6bd3dbb\\\",\\\"signature\\\":{\\\"params\\\":[{\\\"name\\\":\\\"x\\\",\\\"ty\\\":\\\"int\\\"}],\\\"result\\\":\\\"int\\\"},\\\"convention\\\":{\\\"kind\\\":\\\"direct\\\"},\\\"asynchronous\\\":false,\\\"rest\\\":false}}\"\ndefinition \"function start(x: Int) -> Int\\nkernel 1\\nmetering statements\\nbody {\\n  return x\\n}\\n\"\nprivate scratch\nmain {\n  let scratch = 7\n  let y = invoke start(scratch)\n  finish y\n}\n",
       "expected": {
         "end": {
           "finished": {

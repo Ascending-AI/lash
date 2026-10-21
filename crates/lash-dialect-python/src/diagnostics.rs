@@ -45,7 +45,6 @@ codes! {
     SavedFunctionUnusable => "PY_SAVED_FUNCTION_UNUSABLE", Refusal;
     LibraryMissing => "PY_LIBRARY_MISSING", Refusal;
     UnknownName => "PY_UNKNOWN_NAME", ProgramDefect;
-    PrintedSourceNeedsBase => "PY_PRINTED_SOURCE_NEEDS_BASE", Refusal;
     Arguments => "PY_ARGUMENTS", ProgramDefect;
     AwaitOutsideAsync => "PY_AWAIT_OUTSIDE_ASYNC", ProgramDefect;
     ReturnOutsideFunction => "PY_RETURN_OUTSIDE_FUNCTION", ProgramDefect;
@@ -139,19 +138,4 @@ impl GeneratedSourceCode {
             Self::InvalidGeneratedSource => "PY_INVALID_GENERATED_SOURCE",
         }
     }
-}
-
-/// Only unresolved references use this classification; authored bindings win.
-pub(crate) fn printed_source_name(id: &str, range: TextRange) -> Option<Diagnostic> {
-    (id.starts_with("helper_") || id.starts_with("kernel_name_") || matches!(id, "declared" | "k"))
-        .then(|| {
-            with_repair(
-                Code::PrintedSourceNeedsBase,
-                format!(
-                    "`{id}` needs its printed document's base; use `python::read(source, base)`"
-                ),
-                range,
-                "use `python::read(source, base)` with the document the source was printed from",
-            )
-        })
 }

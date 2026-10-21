@@ -246,8 +246,9 @@ impl Check<'_, '_> {
                         }
                         seen.expected.push(Event::Fixed(Weight::Atomic(1)));
                     }
-                    let counted = !matches!(action.site.unit, lash_kernel_doc::Unit::Library(_));
+                    let counted = action.guest;
                     match callee {
+                        Callee::Import(_) => return Err(Refused::Calls),
                         Callee::Library(lib) => {
                             if counted {
                                 seen.calls.push(action.occurrence);
@@ -279,9 +280,7 @@ impl Check<'_, '_> {
                         .nested
                         .get(act.ix())
                         .ok_or(Refused::Program { statement: index })?;
-                    let guest = !nested.operator
-                        && guest_site(nested)
-                        && !matches!(nested.site.unit, lash_kernel_doc::Unit::Library(_));
+                    let guest = !nested.operator && guest_site(nested) && nested.guest;
                     if guest {
                         // A guest call is its statement's first counted op.
                         if seen.guest.is_some() || !seen.calls.is_empty() {
@@ -298,9 +297,7 @@ impl Check<'_, '_> {
                         seen.allocates = true;
                         seen.expected.push(Event::Call);
                     } else {
-                        if matches!(nested.kind, NestedKind::Call(_))
-                            && !matches!(nested.site.unit, lash_kernel_doc::Unit::Library(_))
-                        {
+                        if matches!(nested.kind, NestedKind::Call(_)) && nested.guest {
                             seen.calls.push(nested.occurrence);
                         }
                         if let Some(lib) = nested.kind.operator_lib() {
@@ -539,10 +536,16 @@ impl LoopPlan {
             ) => {
                 if *binding != bound.at
                     || bound.shared
-                    || *item != via.and_then(|via| via.item)
+                    || *item
+                        != via
+                            .and_then(|via| via.item)
+                            .and_then(crate::compile::LinkedHook::library)
                     || item.is_some_and(|item| writes(lowered, item))
                     || guard.is_some_and(|guard| writes(lowered, guard))
-                    || *guard != via.and_then(|via| via.check)
+                    || *guard
+                        != via
+                            .and_then(|via| via.check)
+                            .and_then(crate::compile::LinkedHook::library)
                 {
                     return Err(head);
                 }

@@ -314,3 +314,14 @@ do not count against fresh names, so stripping them keeps the document's
 identity. The front end (from the parser's comment tokens) and the
 generated-source reader share one `captions` module; a cell has no
 captions.
+
+
+Deferred packages use Python import syntax: `import wip as pending` followed by
+`await pending.send_item(value)`, or `from wip import send_item as deliver`
+followed by `await deliver(value)`. Only paths advertised as deferred are
+accepted; a missing enumerated member is refused. These calls lower to ordinary
+signature-only operation Imports, filled later under the accepted provider.
+`time.time()` and `asyncio.sleep(seconds)` likewise call the ordinary `python`
+service package. Nonpositive sleep yields the ready queue without an operation.
+Printed source is ordinary Python; documents with no faithful authored spelling
+are refused by the printer.

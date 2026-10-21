@@ -1,6 +1,6 @@
 use super::process_registry::registration;
 use super::*;
-use lash_protocol_types::ProcessId;
+use lash_vocabulary::identity::ProcessId;
 use pretty_assertions::assert_eq;
 
 #[expect(

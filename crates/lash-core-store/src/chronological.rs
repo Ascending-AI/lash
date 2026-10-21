@@ -219,7 +219,7 @@ mod tests {
         use lash_protocol_types::core_support::TurnReplyCoreSupport;
         let mut reply = text_message("reply", MessageRole::Assistant, "answer");
         reply.reply_marker = Some(crate::TurnReply::mint(
-            crate::TurnId::parse("turn").unwrap(),
+            lash_vocabulary::identity::TurnId::parse("turn").unwrap(),
             reply.parts[0].id().to_owned(),
         ));
         let expected = reply.reply_marker.clone();

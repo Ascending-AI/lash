@@ -364,18 +364,20 @@ async fn created_with_label(core: &LashCore, session_id: &str, label: Option<&st
         .expect("encode the plugin's creation options"),
         None => lash::plugins::PluginOptions::default(),
     };
-    core.session(lash_core::SessionId::fixture(session_id.to_string()))
-        .create(lash::SessionCreation::root(
-            lash::SessionSpec::new(
-                "mock-model",
-                lash::TurnBudget::Unbounded,
-                lash::MaxToolCalls::new(1024),
-                lash::NoProgressBudget::bounded(12),
-            )
-            .plugin_options(plugin_options),
-        ))
-        .await
-        .expect("create the session");
+    core.session(lash_vocabulary::identity::SessionId::fixture(
+        session_id.to_string(),
+    ))
+    .create(lash::SessionCreation::root(
+        lash::SessionSpec::new(
+            "mock-model",
+            lash::TurnBudget::Unbounded,
+            lash::MaxToolCalls::new(1024),
+            lash::NoProgressBudget::bounded(12),
+        )
+        .plugin_options(plugin_options),
+    ))
+    .await
+    .expect("create the session");
 }
 
 #[tokio::test]
@@ -388,7 +390,10 @@ async fn turn_hook_and_tool_provider_read_recorded_session_config() {
     .await;
     created_with_label(&core, "typed-context", Some("page-a")).await;
     let session = core
-        .session(lash::SessionId::parse("typed-context").expect("nonblank host identity"))
+        .session(
+            lash_vocabulary::identity::SessionId::parse("typed-context")
+                .expect("nonblank host identity"),
+        )
         .open()
         .await
         .expect("session");
@@ -412,7 +417,10 @@ async fn sessions_that_record_no_plugin_config_do_not_get_inactive_fallback_tool
     let core = core_with_responses(vec![response_text("done")], plugin).await;
     created_with_label(&core, "without-typed-config", None).await;
     let session = core
-        .session(lash::SessionId::parse("without-typed-config").expect("nonblank host identity"))
+        .session(
+            lash_vocabulary::identity::SessionId::parse("without-typed-config")
+                .expect("nonblank host identity"),
+        )
         .open()
         .await
         .expect("session");

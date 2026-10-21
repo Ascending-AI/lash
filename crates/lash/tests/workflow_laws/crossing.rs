@@ -148,7 +148,7 @@ async fn a_function_a_process_ships_runs_from_its_own_document_as_it_was() {
         &shipped,
         functions.as_ref(),
         FunctionValueLimits::standard(),
-        lash::persistence::KernelDataLimits::standard(),
+        lash_vocabulary::data_limits::KernelDataLimits::standard(),
     )
     .unwrap_or_else(|refusal| panic!("a function value: {refusal}\n{shipped}"));
 

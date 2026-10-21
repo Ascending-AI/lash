@@ -43,7 +43,7 @@ pub enum RetryDeclineCause {
     RetryAfterExceedsCap,
     /// The call's limit expired: the model total ends every further attempt.
     TimedOut {
-        limit: crate::LimitCause,
+        limit: lash_vocabulary::tool_contract::LimitCause,
     },
     ChargeSafety {
         tokens_at_stake: u64,

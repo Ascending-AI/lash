@@ -3,7 +3,7 @@
   "cases": [
     {
       "name": "already ended race chooses first in member order",
-      "document": "kernel 1\nnumbers by_spelling\nfn value(n) { return n }\nmain {\nlet a = spawn call value(1) let b = spawn call value(2) let tasks = [b, a] let answer = join race tasks finish answer\n}\n",
+      "document": "kernel 1\nnumbers by_spelling\ndefinition \"function value(n: Any) -> Any\\nkernel 1\\nmetering statements\\nbody {\\n  return n\\n}\\n\"\nmain {\n  let a = spawn invoke value(1)\n  let b = spawn invoke value(2)\n  let tasks = [b, a]\n  let answer = join race tasks\n  finish answer\n}\n",
       "expected": {
         "prints": [],
         "end": {

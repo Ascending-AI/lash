@@ -55,8 +55,8 @@ pub fn admit_runtime_commit_budget(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::SessionId;
     use crate::session_graph::RealizedNodeTimestamp;
+    use lash_vocabulary::identity::SessionId;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     async fn commit_runtime_state_verified(
@@ -107,7 +107,7 @@ mod tests {
         async fn committed_turn_exists(
             &self,
             _session_id: &SessionId,
-            _turn_id: &crate::TurnId,
+            _turn_id: &lash_vocabulary::identity::TurnId,
         ) -> Result<bool, StoreError> {
             Ok(false)
         }
@@ -387,7 +387,7 @@ mod tests {
         commit.graph = super::super::GraphAppend::Extend {
             nodes: (0..=RuntimeCommit::MAX_COMMIT_NODE_COUNT)
                 .map(|index| crate::SessionNodeRecord {
-                    node_id: crate::NodeId::fixture(format!("node-{index}")),
+                    node_id: lash_vocabulary::identity::NodeId::fixture(format!("node-{index}")),
                     ..node.clone()
                 })
                 .collect(),

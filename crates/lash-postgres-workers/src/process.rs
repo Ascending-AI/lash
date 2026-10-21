@@ -27,7 +27,9 @@ use lash_execution_contracts::process::ProcessOutcome;
 use lash_execution_contracts::process::ProcessRecord;
 use lash_execution_contracts::process::StepName;
 use lash_execution_contracts::process::StepRequest;
-use lash_protocol_types::{ExecutionLimit, ExecutionPolicy, ToolId};
+use lash_protocol_types::ExecutionLimit;
+use lash_vocabulary::tool_contract::ExecutionPolicy;
+use lash_vocabulary::tool_contract::ToolId;
 use serde_json::{Value, json};
 
 use crate::events::{Event, report};
@@ -91,12 +93,39 @@ impl ProcessEngine for WorkerEngine {
         lash_execution_contracts::process::ProcessTraceClass::Internal
     }
 
-    async fn performed_effects(
+    async fn inspect_link(
+        &self,
+        link: lash_vocabulary::LinkId,
+        selector: &lash_execution_contracts::process::linking::ReachSelector,
+    ) -> Result<
+        lash_execution_contracts::process::linking::LinkInspection,
+        lash_execution_contracts::process::linking::EnginePortError,
+    > {
+        Ok(lash_execution_contracts::process::linking::LinkInspection {
+            link,
+            document: lash_vocabulary::DocumentId::from_bytes([0; 32]),
+            selector: selector.clone(),
+            operations: Default::default(),
+            machine: Default::default(),
+            artifacts: Vec::new(),
+            signature: None,
+        })
+    }
+    async fn inspect_start(
         &self,
         _payload: &serde_json::Value,
-    ) -> Result<lash_execution_contracts::process::PerformedEffects, lash_core::ProcessEnvRefusal>
-    {
-        Ok(lash_execution_contracts::process::PerformedEffects::new())
+    ) -> Result<
+        lash_execution_contracts::process::linking::LinkInspection,
+        lash_execution_contracts::process::linking::EnginePortError,
+    > {
+        Err(
+            lash_execution_contracts::process::linking::EnginePortError::Unsupported {
+                operation: "generic fixture has no linked code".into(),
+            },
+        )
+    }
+    fn capabilities(&self) -> lash_vocabulary::claims::NodeRequirements {
+        Default::default()
     }
 
     async fn check_args(
@@ -183,9 +212,9 @@ impl ProcessEngine for WorkerEngine {
                 "pin",
                 EngineAction::PinKey {
                     name: KeyName(WAIT.to_owned()),
-                    bound: lash_core::ParkBound::Within(Duration::from_millis(
-                        script["wait_ms"].as_u64().unwrap_or(1_000),
-                    )),
+                    bound: lash_vocabulary::tool_contract::ParkBound::Within(
+                        Duration::from_millis(script["wait_ms"].as_u64().unwrap_or(1_000)),
+                    ),
                 },
             ),
             EngineEvent::KeyPinned { name, .. } => {
@@ -298,6 +327,7 @@ impl ProcessSteps for WorkerSteps {
         _runtime: &std::sync::Arc<lash_core_execution::runtime::process::StepRuntime>,
         _process: &ProcessRecord,
         step: &StepRequest,
+        _target: Option<&lash_core_execution::runtime::process::steps::InvocationTarget>,
         now_ms: u64,
     ) -> Result<StepAdmission, StepRefusal> {
         if !matches!(step, StepRequest::Engine { kind, .. } if [BEFORE, AFTER].contains(&kind.0.as_str()))

@@ -9,17 +9,14 @@
 //! every closure the root reaches through data ([`reach`]), so a capture
 //! holding one refers to it by name.
 
-mod canon;
 mod collect;
-mod extract;
 mod reach;
 mod reads;
 
 pub use collect::{
-    CaptureCheck, CaptureRefusal, FrozenToken, Gathered, Helper, SnapshotError, SnapshotHeap,
+    CaptureCheck, CaptureRefusal, FrozenToken, Gathered, SnapshotError, SnapshotHeap,
     SnapshotRefusal, closure_at, closure_held, freeze_token, gather, members, text_is, text_of,
     token_closure, validate_capture,
 };
-pub use extract::{Budget, Crossing, CrossingRoot, constant_of, crossing_root, extract, token_tag};
 pub use reach::{Found, reach};
 pub use reads::CodeReads;

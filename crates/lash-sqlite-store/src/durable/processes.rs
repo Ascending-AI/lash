@@ -20,7 +20,8 @@ use lash_durable::{
 use lash_execution_contracts::scope::scope_id;
 use lash_execution_contracts::scope::scope_index;
 use lash_execution_contracts::scope::subtree_roots;
-use lash_protocol_types::{CancelOrigin, ProcessId};
+use lash_protocol_types::CancelOrigin;
+use lash_vocabulary::identity::ProcessId;
 use rusqlite::{Connection, OptionalExtension};
 
 use super::{Answer, Committing, SQL, actor_key, integer, wake_within};
@@ -296,7 +297,22 @@ fn register_within(
         staged.prepared_at_ms,
         commit.fleet,
     ) {
-        Ok(receipt) if receipt.record.id == rows.process => Ok(()),
+        Ok(receipt) if receipt.record.id == rows.process => {
+            if matches!(
+                receipt.outcome,
+                lash_execution_contracts::process::ProcessRegistrationOutcome::Created
+            ) {
+                super::packages::register_process_execution(
+                    tx,
+                    &rows.process,
+                    rows.execution.as_deref(),
+                    &rows.initial_resolutions,
+                )
+                .map_err(super::store_failure)?
+            } else {
+                Ok(())
+            }
+        }
         Ok(receipt) => Err(refused(format!(
             "process `{}` already holds its start key",
             receipt.record.id

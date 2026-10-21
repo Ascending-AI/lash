@@ -12,8 +12,11 @@
 
 use std::collections::BTreeMap;
 
-use lash_kernel_doc::graph_tokens::{TokenCodec, TokenError, TokenReader, TokenWriter};
-use lash_kernel_doc::{Expr, Name, Node, Site, SourceLanguage, Stmt};
+use lash_kernel_doc::{Expr, Node, SourceLanguage, Stmt};
+
+use lash_vocabulary::Name;
+use lash_vocabulary::sites::Site;
+use lash_vocabulary::tokens::{TokenCodec, TokenError, TokenReader, TokenWriter};
 use serde::{Deserialize, Serialize};
 
 /// A function as its dialect's source wrote it.

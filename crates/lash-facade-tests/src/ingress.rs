@@ -1,9 +1,9 @@
 use super::*;
 use lash_execution_contracts::process::ProcessRegistry;
 
-use lash_protocol_types::ProcessId;
+use lash_vocabulary::identity::ProcessId;
 
-use lash_protocol_types::SessionId;
+use lash_vocabulary::identity::SessionId;
 
 pub const SESSION: &str = "intent-ingress-session";
 pub const SCOPE: &str = "intent-ingress-turn";
@@ -45,7 +45,7 @@ pub async fn registered_process_count(registry: &Arc<dyn ProcessRegistry>) -> Re
 pub fn start_intent(session_id: &SessionId) -> lash_execution_contracts::tool_intent::ToolIntent {
     lash_execution_contracts::tool_intent::ToolIntent::StartProcess(Box::new(
         lash_execution_contracts::tool_intent::StartProcessIntent {
-            owner: lash::RuntimeOwner::Session(session_id.clone()),
+            owner: lash_vocabulary::identity::RuntimeOwner::Session(session_id.clone()),
             declaration: lash_execution_contracts::testing::held_engine_declaration(
                 serde_json::Value::Null,
                 lash_execution_contracts::process::ProcessOriginator::host(),
@@ -78,14 +78,39 @@ impl lash_execution_contracts::process::ProcessEngine for IngressAdmissionEngine
         lash_execution_contracts::process::ProcessTraceClass::Internal
     }
 
-    async fn performed_effects(
+    async fn inspect_link(
+        &self,
+        link: lash_vocabulary::LinkId,
+        selector: &lash_execution_contracts::process::linking::ReachSelector,
+    ) -> std::result::Result<
+        lash_execution_contracts::process::linking::LinkInspection,
+        lash_execution_contracts::process::linking::EnginePortError,
+    > {
+        Ok(lash_execution_contracts::process::linking::LinkInspection {
+            link,
+            document: lash_vocabulary::DocumentId::from_bytes([0; 32]),
+            selector: selector.clone(),
+            operations: Default::default(),
+            machine: Default::default(),
+            artifacts: Vec::new(),
+            signature: None,
+        })
+    }
+    async fn inspect_start(
         &self,
         _payload: &serde_json::Value,
     ) -> std::result::Result<
-        lash_execution_contracts::process::PerformedEffects,
-        lash_core::ProcessEnvRefusal,
+        lash_execution_contracts::process::linking::LinkInspection,
+        lash_execution_contracts::process::linking::EnginePortError,
     > {
-        Ok(lash_execution_contracts::process::PerformedEffects::new())
+        Err(
+            lash_execution_contracts::process::linking::EnginePortError::Unsupported {
+                operation: "generic fixture has no linked code".into(),
+            },
+        )
+    }
+    fn capabilities(&self) -> lash_vocabulary::claims::NodeRequirements {
+        Default::default()
     }
 
     async fn check_args(
@@ -368,7 +393,7 @@ pub async fn ingress_engine_core_with(
         .await?;
     let _session = created_session(
         &core,
-        lash::SessionId::parse(SESSION).expect("nonblank host identity"),
+        lash_vocabulary::identity::SessionId::parse(SESSION).expect("nonblank host identity"),
     )
     .await
     .open()
@@ -382,7 +407,9 @@ pub fn engine_start_intent(
 ) -> lash_execution_contracts::tool_intent::ToolIntent {
     lash_execution_contracts::tool_intent::ToolIntent::StartProcess(Box::new(
         lash_execution_contracts::tool_intent::StartProcessIntent {
-            owner: lash::RuntimeOwner::Session(SessionId::fixture(SESSION.to_string())),
+            owner: lash_vocabulary::identity::RuntimeOwner::Session(SessionId::fixture(
+                SESSION.to_string(),
+            )),
             declaration: lash_execution_contracts::process::ProcessStartDeclaration::engine(
                 kind,
                 payload,

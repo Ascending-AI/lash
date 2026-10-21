@@ -3,7 +3,7 @@
   "cases": [
     {
       "name": "omitted declared arguments bind absent",
-      "document": "kernel 1\nnumbers by_spelling\nfn pair(a, b) { return (a, b) }\nmain {\nlet answer = call pair(1) finish answer\n}\n",
+      "document": "kernel 1\nnumbers by_spelling\ndefinition \"function pair(a: Any, b: Any) -> Any\\nkernel 1\\nmetering statements\\nbody {\\n  return (a, b)\\n}\\n\"\nmain {\n  let answer = invoke pair(1)\n  finish answer\n}\n",
       "expected": {
         "prints": [],
         "end": {
@@ -21,7 +21,7 @@
     },
     {
       "name": "too many declared arguments are refused",
-      "document": "kernel 1\nnumbers by_spelling\nfn value(a) {}\nmain {\ndo call value(1, 2)\n}\n",
+      "document": "kernel 1\nnumbers by_spelling\ndefinition \"function value(a: Any) -> Any\\nkernel 1\\nmetering statements\\nbody {}\\n\"\nmain {\n  do invoke value(1, 2)\n}\n",
       "expected": {
         "prints": [],
         "end": "refused",

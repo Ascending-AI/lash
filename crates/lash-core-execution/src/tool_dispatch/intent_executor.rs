@@ -204,7 +204,7 @@ pub(crate) async fn realize_declared_start(
         ))
     });
     let scope = scope.with_parent_invocation(parent);
-    let kind = crate::ToolIntentKind::StartProcess;
+    let kind = lash_vocabulary::ToolIntentKind::StartProcess;
     let request = lash_execution_contracts::declared_start::declared_start_request(start)
         .with_trace_parent(
             scope
@@ -289,7 +289,7 @@ pub(crate) fn declared_start_fault(
 }
 
 pub(super) fn admit_batch(
-    owner: &crate::RuntimeOwner,
+    owner: &lash_vocabulary::identity::RuntimeOwner,
     intents: &lash_execution_contracts::tool_intent::ToolIntents,
     limits: lash_execution_contracts::tool_intent::ToolIntentLimits,
 ) -> Option<lash_execution_contracts::tool_intent_outcome::ToolIntentRefusalReason> {
@@ -313,7 +313,7 @@ pub(super) fn admit_batch(
             },
         );
     }
-    let mut by_kind = BTreeMap::<&'static str, (crate::ToolIntentKind, usize)>::new();
+    let mut by_kind = BTreeMap::<&'static str, (lash_vocabulary::ToolIntentKind, usize)>::new();
     for intent in &intents.intents {
         let entry = by_kind
             .entry(intent.kind().as_str())
@@ -426,7 +426,7 @@ fn derive_identity(
 
 fn refused(
     index: usize,
-    kind: crate::ToolIntentKind,
+    kind: lash_vocabulary::ToolIntentKind,
     identity: Option<crate::ToolIntentIdentity>,
     refusal: lash_execution_contracts::tool_intent_outcome::ToolIntentRefusalReason,
 ) -> lash_execution_contracts::tool_intent_outcome::ToolIntentExecutionOutcome {
@@ -609,12 +609,14 @@ mod tests {
 
     use super::*;
 
-    fn session(id: &str) -> crate::RuntimeOwner {
-        crate::RuntimeOwner::Session(crate::SessionId::fixture(id))
+    fn session(id: &str) -> lash_vocabulary::identity::RuntimeOwner {
+        lash_vocabulary::identity::RuntimeOwner::Session(
+            lash_vocabulary::identity::SessionId::fixture(id),
+        )
     }
 
     fn cancel(
-        owner: &crate::RuntimeOwner,
+        owner: &lash_vocabulary::identity::RuntimeOwner,
         index: usize,
     ) -> lash_execution_contracts::tool_intent::ToolIntent {
         lash_execution_contracts::tool_intent::ToolIntent::CancelProcess(
@@ -697,7 +699,7 @@ mod tests {
                 lash_execution_contracts::tool_intent::ToolIntentLimits::standard()
             ),
             Some(lash_execution_contracts::tool_intent_outcome::ToolIntentRefusalReason::PerKindBudgetExceeded {
-                kind: crate::ToolIntentKind::CancelProcess,
+                kind: lash_vocabulary::ToolIntentKind::CancelProcess,
                 actual: 17,
                 maximum: 16,
             })
@@ -758,7 +760,7 @@ mod tests {
                 .into_registration()
                 .stating_input()
                 .expect("the start states its input"),
-            crate::ProcessId::fixture("large-environment-child"),
+            lash_vocabulary::identity::ProcessId::fixture("large-environment-child"),
         );
         let command = crate::ProcessCommand::Start {
             registration: request.clone().into_registration(),

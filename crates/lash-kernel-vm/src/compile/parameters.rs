@@ -1,8 +1,13 @@
 //! Which operation parameters need shared cells before a native is offered a
 //! call. This lexical walk resolves only captures; it emits no body code.
-use lash_kernel_doc::{self as doc, Name};
+use lash_kernel_doc::{self as doc};
 
-pub(super) fn shared(definition: &doc::FunctionDefinition) -> Vec<usize> {
+use lash_vocabulary::names::Name;
+
+pub(super) fn shared(
+    definition: &doc::FunctionDefinition,
+    catalog: &dyn doc::FunctionCatalog,
+) -> Vec<usize> {
     definition
         .signature
         .params
@@ -11,6 +16,7 @@ pub(super) fn shared(definition: &doc::FunctionDefinition) -> Vec<usize> {
         .filter_map(|(index, param)| {
             let mut capture = Capture {
                 name: &param.name,
+                catalog,
                 shadowed: false,
                 depth: 0,
                 captured: false,
@@ -25,6 +31,7 @@ pub(super) fn shared(definition: &doc::FunctionDefinition) -> Vec<usize> {
 
 struct Capture<'a> {
     name: &'a Name,
+    catalog: &'a dyn doc::FunctionCatalog,
     shadowed: bool,
     depth: usize,
     captured: bool,
@@ -93,9 +100,20 @@ impl Capture<'_> {
             }
             Node::Expr(Expr::Closure(closure)) => {
                 let shadowed = self.shadowed;
-                self.shadowed |= closure.params.contains(self.name);
-                self.depth += 1;
-                self.node(Node::Block(&closure.body));
+                if let Some(definition) = self.catalog.definition(&closure.function) {
+                    self.shadowed |= definition
+                        .signature
+                        .params
+                        .iter()
+                        .any(|p| &p.name == self.name);
+                    self.depth += 1;
+                    if let Some(body) = definition.body() {
+                        self.node(Node::Block(&body.block));
+                    }
+                } else {
+                    return;
+                }
+
                 self.depth -= 1;
                 self.shadowed = shadowed;
                 return;
@@ -122,10 +140,7 @@ impl Capture<'_> {
                         self.atom(arg);
                     }
                 }
-                Action::Sleep {
-                    duration: value, ..
-                }
-                | Action::Join { task: value }
+                Action::Join { task: value }
                 | Action::Cancel { task: value }
                 | Action::JoinMany { tasks: value, .. }
                 | Action::Await { value, .. } => self.atom(value),

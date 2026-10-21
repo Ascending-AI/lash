@@ -9,8 +9,8 @@
 // No live_replay_tests!: live replay is an in-process cache, not SQLite-backed storage.
 // No queued-lane resolver macro: engine pacing belongs to the durable engine, not a persistence store.
 
-use lash_protocol_types::SessionId;
 use lash_protocol_types::sync::MutexExt;
+use lash_vocabulary::identity::SessionId;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
@@ -330,6 +330,7 @@ fn artifact_store_handles(
 ) -> lash_conformance::fused_artifact_store::ArtifactStoreHandles {
     let store = backend.blocking_store();
     lash_conformance::fused_artifact_store::ArtifactStoreHandles {
+        packages: Arc::clone(&store) as Arc<dyn lash_durable::packages::PackageStore>,
         artifacts: Arc::clone(&store)
             as Arc<dyn lash_execution_contracts::module_artifacts::ModuleArtifactStore>,
         process_env: Arc::clone(&store) as Arc<dyn ProcessEnvStore>,
@@ -700,7 +701,7 @@ lash_conformance::append_head_switch_tests!({
     (
         backend,
         store as Arc<dyn RuntimeStore>,
-        move |leaf_node_id: lash_protocol_types::NodeId| async move {
+        move |leaf_node_id: lash_vocabulary::identity::NodeId| async move {
             let conn = mutation.raw();
             conn.execute_batch("PRAGMA foreign_keys = ON; BEGIN IMMEDIATE")
                 .expect("begin branch publication");
@@ -727,7 +728,7 @@ lash_conformance::append_tombstone_tests!({
     (
         backend,
         store as Arc<dyn RuntimeStore>,
-        move |node_id: lash_protocol_types::NodeId| async move {
+        move |node_id: lash_vocabulary::identity::NodeId| async move {
             let conn = mutation.raw();
             conn.execute(
                 "UPDATE graph_nodes SET tombstoned = 1 WHERE node_id = ?1",

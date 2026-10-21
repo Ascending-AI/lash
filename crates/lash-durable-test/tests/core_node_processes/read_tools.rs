@@ -3,8 +3,10 @@
 use super::*;
 
 /// The component that contributes `tools.lookup`.
-const KNOWLEDGE: lash_core::ProcessConfigKey<()> =
-    lash_core::ProcessConfigKey::new("core-node-knowledge", lash_core::FormatVersion::ONE);
+const KNOWLEDGE: lash_core::ProcessConfigKey<()> = lash_core::ProcessConfigKey::new(
+    "core-node-knowledge",
+    lash_vocabulary::providers::FormatVersion::ONE,
+);
 
 /// The lookup tool's id: what its step's admission names. Its effect is
 /// `tools.lookup`.
@@ -28,8 +30,8 @@ main {
 "#;
 
 /// The `Read` tool `lookup`: what the knowledge base says about a topic.
-fn lookup_definition() -> lash_core::ToolDefinition {
-    lash_core::ToolDefinition::raw(
+fn lookup_definition() -> lash_vocabulary::tool_contract::ToolDefinition {
+    lash_vocabulary::tool_contract::ToolDefinition::raw(
         LOOKUP_TOOL,
         "tools.lookup",
         "Looks a topic up.",
@@ -38,9 +40,9 @@ fn lookup_definition() -> lash_core::ToolDefinition {
     )
     .expect("the lookup tool's schemas")
     // The contract the laws' kernel texts pin.
-    .declared_contract(lash_core::ContractId::new("1"))
+    .declared_contract(lash_vocabulary::operations::ContractId::new("1"))
     .with_execution(Duration::from_secs(120))
-    .with_execution_policy(lash_core::ExecutionPolicy::Read)
+    .with_execution_policy(lash_vocabulary::tool_contract::ExecutionPolicy::Read)
 }
 
 /// What the knowledge base says about the topic `args` names.
@@ -149,7 +151,7 @@ async fn a_sessionless_workflow_reads_fresh_after_a_cold_resume_on_sqlite_memory
                 .unwrap();
                 launch.settings = Some(
                     settings
-                        .observing(lash_kernel_vm::ObservationMode::Counts)
+                        .observing(lash_vocabulary::observation::RunObservation::Counts)
                         .into_engine_settings(),
                 );
             }

@@ -1,5 +1,5 @@
 use crate::PoolError;
-use lash_vm_protocol::BootstrapFault;
+use lash_protocol_types::engine_fault::BootstrapFault;
 use std::os::fd::FromRawFd;
 use std::os::unix::net::UnixStream;
 

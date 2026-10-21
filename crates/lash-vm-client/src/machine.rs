@@ -8,13 +8,15 @@
 //! for a projection handle. What the run prints arrives with the exchange
 //! that printed it.
 
+use lash_protocol_types::engine_fault::{
+    ExecutionLease, FrameEpoch, InfrastructureOutcome, OwnerEpoch, PayloadKind, TransportSequence,
+};
 use std::sync::Arc;
 
 use lash_core_store::checkpoint_graph::NodeId;
 use lash_kernel_doc::heap::PageGrant;
-use lash_kernel_doc::{
-    Datum, DocumentId, EffectName, ErrorDatum, Handle, IdentifiedDocument, Timestamp,
-};
+use lash_kernel_doc::{Datum, ErrorDatum, Handle, IdentifiedDocument, Timestamp};
+
 use lash_kernel_state::paged::SessionRoot;
 use lash_kernel_vm::{Bounds, EffectModes, End, Outcome, Target, WaitId};
 use lash_vm_broker::ParentFault;
@@ -25,9 +27,11 @@ use lash_vm_broker::kernel::{
 };
 use lash_vm_protocol::page::{PageReply, SealBatch};
 use lash_vm_protocol::{
-    BoundReached, CheckpointStart, EncodedPayload, FrameEpoch, HostReadKind, InfrastructureOutcome,
-    LimitDecision, LimitedBound, OwnerEpoch, PayloadKind, RunBounds, StartFrom, VmOwner,
+    BoundReached, CheckpointStart, EncodedPayload, HostReadKind, LimitDecision, LimitedBound,
+    RunBounds, StartFrom, VmOwner,
 };
+use lash_vocabulary::names::DocumentId;
+use lash_vocabulary::names::EffectName;
 
 use crate::service::{CallHeld, Service};
 use crate::wire::{
@@ -42,6 +46,15 @@ pub use lash_vm_broker::kernel::run::kernel_reads;
 /// owner binding, which the broker supplies per execution.
 #[derive(Clone, Debug)]
 pub struct RunStart {
+    pub link: lash_vocabulary::content_ids::LinkId,
+    pub instances: std::collections::BTreeMap<
+        lash_vocabulary::content_ids::LinkId,
+        lash_kernel_vm::interface::PreparedInstance,
+    >,
+    pub documents: std::collections::BTreeMap<
+        lash_vocabulary::names::DocumentId,
+        Arc<lash_kernel_doc::Document>,
+    >,
     pub target: Target,
     /// The entry's arguments. Empty for `main`.
     pub args: Vec<Datum>,
@@ -52,7 +65,7 @@ pub struct RunStart {
     /// holds its own.
     pub modes: EffectModes,
     /// The host's read-only bindings a cell's `main` starts with.
-    pub host: Vec<(lash_kernel_doc::Name, Datum)>,
+    pub host: Vec<(lash_vocabulary::names::Name, Datum)>,
     /// How a session cell's end saves its functions, fresh or resumed;
     /// none for a run that saves none.
     pub save: Option<wire::SaveWire>,
@@ -124,13 +137,11 @@ pub trait RunHost: Send + Sync {
     /// A provisional site entry: each task's last since the run's previous
     /// frame, taken from the next one. It neither yields a task nor admits
     /// work.
-    fn enter_site(&self, _at: &lash_kernel_doc::EffectId) {}
+    fn enter_site(&self, _at: &lash_vocabulary::sites::EffectId) {}
 
     /// The time, read once for each `clock` call the run makes.
-    async fn clock(&self) -> Result<Timestamp, ParentFault>;
 
     /// Sixty-four random bits.
-    async fn random(&self) -> Result<u64, ParentFault>;
 
     /// A read through a projection handle. `Err` is raised in the guest,
     /// which may catch it.
@@ -147,10 +158,10 @@ pub trait RunHost: Send + Sync {
     /// save stands.
     async fn perform(
         &self,
-        effect: &EffectName,
+        effect: &lash_vocabulary::names::OperationUse,
         args: &[Datum],
-        site: &lash_kernel_doc::PositionLabel,
-        origin: &lash_kernel_doc::Site,
+        site: &lash_vocabulary::sites::PositionLabel,
+        origin: &lash_vocabulary::sites::Site,
     ) -> Result<Result<Datum, ErrorDatum>, ParentFault>;
 
     /// One `print` call's value, in the order the run printed.
@@ -257,6 +268,24 @@ impl RemoteMachines {
             owner: self.owner.clone(),
             dialect: self.dialect.clone(),
             document: EncodedPayload(self.body.to_vec()),
+            link: self.start.link,
+            instances: wire::encode(
+                PayloadKind::Start,
+                &self.start.instances.values().collect::<Vec<_>>(),
+            )
+            .map_err(worker)?,
+            documents: self
+                .start
+                .documents
+                .iter()
+                .map(
+                    |(document, body)| lash_vm_protocol::message::StoredDocument {
+                        document: *document,
+                        body: EncodedPayload(lash_vocabulary::tokens::encode_body(body.as_ref())),
+                    },
+                )
+                .collect(),
+            functions: self.closure.body().identities().collect(),
             definitions: self
                 .closure
                 .stored()
@@ -308,7 +337,9 @@ impl RemoteMachines {
         let document = self.document.to_string();
         let class = match self.start.target {
             lash_kernel_vm::Target::Main => ExecutionClass::Cell,
-            lash_kernel_vm::Target::Entry(_) => ExecutionClass::Process,
+            lash_kernel_vm::Target::Entry(_) | lash_kernel_vm::Target::Callable(_) => {
+                ExecutionClass::Process
+            }
         };
         let held = CallHeld::of(Some(&self.service));
         let checkout = blocking(move || {
@@ -545,7 +576,9 @@ impl RemoteMachine {
             match link {
                 PageLink::Granted(capability) => pages.verify(capability).map(|_| PageGrant::NONE),
                 PageLink::Carried(page) if carried.contains(&NodeId(*page)) => Ok(PageGrant::NONE),
-                PageLink::Carried(_) => Err(lash_vm_protocol::page::PageRefusal::Unauthorized),
+                PageLink::Carried(_) => {
+                    Err(lash_protocol_types::engine_fault::PageRefusal::Unauthorized)
+                }
             }
             .map_err(|refusal| PoolError::from(InfrastructureOutcome::PageRefused { refusal }))
         })
@@ -707,8 +740,6 @@ async fn answer(
     bound: u64,
 ) -> Result<EncodedPayload, KernelFailure> {
     match kind {
-        HostReadKind::Clock => wire::encode(PayloadKind::HostAnswer, &host.clock().await?),
-        HostReadKind::Random => wire::encode(PayloadKind::HostAnswer, &host.random().await?),
         HostReadKind::Projection => {
             let read: ProjectionRead =
                 wire::decode(PayloadKind::HostRead, request).map_err(worker)?;
@@ -723,7 +754,7 @@ async fn answer(
             wire::encode_within(
                 PayloadKind::HostAnswer,
                 &host
-                    .perform(&read.effect, &read.args, &read.site, &read.origin)
+                    .perform(&read.use_, &read.args, &read.site, &read.origin)
                     .await?,
                 bound,
             )
@@ -769,7 +800,9 @@ impl DrivenMachine for RemoteMachine {
                     Self::end(&self.pages, end, &carried).await?,
                 ))
             }
-            Stop::Sealed(_) => Err(unexpected(lash_vm_protocol::WorkerFrameKind::Sealed)),
+            Stop::Sealed(_) => Err(unexpected(
+                lash_protocol_types::worker_limit::WorkerFrameKind::Sealed,
+            )),
         }
     }
 
@@ -801,9 +834,15 @@ impl DrivenMachine for RemoteMachine {
                 self.candidate = Some(root);
                 Ok(root)
             }
-            Stop::Parked { .. } => Err(unexpected(lash_vm_protocol::WorkerFrameKind::Parked)),
-            Stop::Slice => Err(unexpected(lash_vm_protocol::WorkerFrameKind::Slice)),
-            Stop::Ended { .. } => Err(unexpected(lash_vm_protocol::WorkerFrameKind::Ended)),
+            Stop::Parked { .. } => Err(unexpected(
+                lash_protocol_types::worker_limit::WorkerFrameKind::Parked,
+            )),
+            Stop::Slice => Err(unexpected(
+                lash_protocol_types::worker_limit::WorkerFrameKind::Slice,
+            )),
+            Stop::Ended { .. } => Err(unexpected(
+                lash_protocol_types::worker_limit::WorkerFrameKind::Ended,
+            )),
         }
     }
 
@@ -818,16 +857,16 @@ impl DrivenMachine for RemoteMachine {
     }
 }
 
-fn unexpected(found: lash_vm_protocol::WorkerFrameKind) -> KernelFailure {
+fn unexpected(found: lash_protocol_types::worker_limit::WorkerFrameKind) -> KernelFailure {
     worker(PoolError::breach(
-        lash_vm_protocol::ProtocolBreach::Unexpected {
-            exchange: lash_vm_protocol::Exchange::Seal,
+        lash_protocol_types::engine_fault::ProtocolBreach::Unexpected {
+            exchange: lash_protocol_types::engine_fault::Exchange::Seal,
             found,
         },
     ))
 }
 
-fn refused(refusal: lash_vm_protocol::page::PageRefusal) -> KernelFailure {
+fn refused(refusal: lash_protocol_types::engine_fault::PageRefusal) -> KernelFailure {
     worker(PoolError::from(InfrastructureOutcome::PageRefused {
         refusal,
     }))
@@ -847,8 +886,8 @@ async fn blocking<T: Send + 'static>(
         .await
         .map_err(|error| {
             worker(PoolError::breach(
-                lash_vm_protocol::ProtocolBreach::Panicked {
-                    detail: lash_vm_protocol::Detail::new(error),
+                lash_protocol_types::engine_fault::ProtocolBreach::Panicked {
+                    detail: lash_protocol_types::engine_fault::Detail::new(error),
                 },
             ))
         })?
@@ -863,10 +902,7 @@ fn start_reservation(
     start: &lash_vm_protocol::Start,
     codec: &lash_vm_protocol::FrameCodec,
 ) -> Result<usize, PoolError> {
-    use lash_vm_protocol::{
-        BorrowedParentFrame, BorrowedParentMessage, ExecutionLease, MessageHeader,
-        TransportSequence,
-    };
+    use lash_vm_protocol::{BorrowedParentFrame, BorrowedParentMessage, MessageHeader};
     let bytes = codec.borrowed_frame_len(&BorrowedParentFrame {
         header: MessageHeader {
             lease: ExecutionLease(u64::MAX),
@@ -882,9 +918,7 @@ fn start_reservation(
 #[cfg(test)]
 mod reservation_tests {
     use super::*;
-    use lash_vm_protocol::{
-        ExecutionLease, MessageHeader, ParentFrame, ParentMessage, TransportSequence,
-    };
+    use lash_vm_protocol::{MessageHeader, ParentFrame, ParentMessage};
 
     /// START-RESERVATION-IDENTITY: admission counts the complete encoded input,
     /// including its owner binding and the widest possible transport header.
@@ -895,7 +929,11 @@ mod reservation_tests {
             owner: VmOwner::new("reservation-law"),
             dialect: "typescript".to_owned(),
             document: EncodedPayload(vec![0; 16]),
+            documents: Vec::new(),
+            instances: EncodedPayload(Vec::new()),
+            link: lash_vocabulary::LinkId::from_bytes([1; 32]),
             definitions: Vec::new(),
+            functions: Default::default(),
             from: StartFrom::Fresh(EncodedPayload(vec![0; 16])),
             bounds: RunBounds {
                 memory_meter: lash_vm_protocol::MemoryMeter::On,

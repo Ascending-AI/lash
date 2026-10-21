@@ -17,6 +17,7 @@ pub(super) use lash_protocol_types::llm::capability::ReasoningIntent;
 pub(super) use lash_protocol_types::{
     session_model::FailureCode, session_model::Namespace, session_model::TurnFailureCode,
 };
+
 pub(super) use lash_transport_failure::{LlmTransportError, TransportRetryVerdict};
 
 #[cfg(test)]

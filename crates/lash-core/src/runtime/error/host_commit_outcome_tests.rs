@@ -25,7 +25,7 @@ fn head_cas_supersession_requires_reload_before_retry() {
 #[test]
 fn deleted_commit_is_typed_terminal_and_retains_the_session_id() {
     let deleted = runtime_error_from_store_commit(StoreError::SessionDeleted {
-        session_id: crate::SessionId::from("retired-during-commit"),
+        session_id: lash_vocabulary::identity::SessionId::from("retired-during-commit"),
     });
 
     assert_eq!(deleted.code, RuntimeErrorCode::SessionDeleted);

@@ -3,7 +3,7 @@
   "cases": [
     {
       "name": "disjoint perform result is refused",
-      "document": "kernel 1\nnumbers by_spelling\neffect echo(x: Int) -> Int contract \"1\"\nmain { do perform echo(1) as Text }\n",
+      "document": "kernel 1\nnumbers by_spelling\nimport 0 operation host.echo(x: Int) -> Int\nmain {\n  do perform 0(1) as Text\n}\n",
       "expected": {
         "end": "refused"
       }

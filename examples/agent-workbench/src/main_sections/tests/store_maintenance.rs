@@ -1,5 +1,5 @@
 use super::*;
-use lash::SessionId;
+use lash_vocabulary::identity::SessionId;
 
 // Coverage for `/api/admin/store-maintenance`: the two levers that bound
 // session-store growth, and — the point of the route — the destruction it

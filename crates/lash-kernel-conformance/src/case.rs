@@ -1,11 +1,17 @@
 //! The portable corpus envelope. Documents remain kernel text.
 
 // Corpus coordinates are kernel-owned rule oracles, not host identity tokens.
-use lash_kernel_doc::kernel_internals::{EffectIdentity, TaskIdentity};
+use lash_vocabulary::sites::{EffectIdentity, TaskIdentity};
 use std::collections::BTreeMap;
 
-use lash_kernel_doc::{Datum, EffectName, ErrorDatum, Handle, Name, Signature, Timestamp, Type};
+use lash_kernel_doc::Datum;
+use lash_kernel_doc::ErrorDatum;
+use lash_kernel_doc::Handle;
 use lash_kernel_vm::{Bound, Bounds, End, Outcome, RunError};
+use lash_vocabulary::names::EffectName;
+use lash_vocabulary::names::Name;
+use lash_vocabulary::types::Signature;
+use lash_vocabulary::types::Type;
 use serde::{Deserialize, Serialize};
 
 use crate::HarnessError;
@@ -120,7 +126,6 @@ pub struct Delivery {
 pub enum ScriptOutcome {
     Completed(Datum),
     Failed(ErrorDatum),
-    Elapsed,
 }
 
 impl From<ScriptOutcome> for Outcome {
@@ -128,7 +133,6 @@ impl From<ScriptOutcome> for Outcome {
         match value {
             ScriptOutcome::Completed(value) => Self::Completed(value),
             ScriptOutcome::Failed(error) => Self::Failed(error),
-            ScriptOutcome::Elapsed => Self::Elapsed,
         }
     }
 }
@@ -136,8 +140,6 @@ impl From<ScriptOutcome> for Outcome {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum HostAnswer {
-    Clock(Timestamp),
-    Random(u64),
     Read(ReadAnswer),
     Perform(PerformAnswer),
     Cancel(bool),
@@ -172,11 +174,6 @@ pub enum Trace {
         effect: String,
         args: Vec<Datum>,
         result: Type,
-    },
-    Sleep {
-        #[serde(default)]
-        identity: Option<EffectIdentity>,
-        nanoseconds: u128,
     },
 }
 
@@ -279,8 +276,7 @@ impl Expected {
         let mut trace = actual.trace.clone();
         for (expected, seen) in self.trace.iter().zip(&mut trace) {
             match (expected, seen) {
-                (Trace::Effect { identity: None, .. }, Trace::Effect { identity, .. })
-                | (Trace::Sleep { identity: None, .. }, Trace::Sleep { identity, .. }) => {
+                (Trace::Effect { identity: None, .. }, Trace::Effect { identity, .. }) => {
                     *identity = None;
                 }
                 _ => {}

@@ -1,5 +1,5 @@
-use crate::SessionId;
 use lash_protocol_types::CancelRequest;
+use lash_vocabulary::identity::SessionId;
 use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
@@ -7,13 +7,22 @@ use serde::{Deserialize, Serialize};
 use crate::PluginError;
 
 use super::events::{ProcessEvent, ProcessTerminal};
-use super::model::{
-    ProcessChangeCursor, ProcessEnvRef, ProcessExternalRef, ProcessId, ProcessIdentity,
-    ProcessInput, ProcessLifecycleState, ProcessListFilter, ProcessOriginator,
-    ProcessOriginatorFilter, ProcessRecord, ProcessStatus, ProcessTombstone, SessionScope,
-    WaitState,
-};
+use super::model::ProcessChangeCursor;
+use super::model::ProcessEnvRef;
+use super::model::ProcessExternalRef;
+use super::model::ProcessIdentity;
+use super::model::ProcessInput;
+use super::model::ProcessLifecycleState;
+use super::model::ProcessListFilter;
+use super::model::ProcessOriginator;
+use super::model::ProcessOriginatorFilter;
+use super::model::ProcessRecord;
+use super::model::ProcessStatus;
+use super::model::ProcessTombstone;
+use super::model::SessionScope;
+use super::model::WaitState;
 use super::registry::ProcessRegistry;
+use lash_vocabulary::identity::ProcessId;
 
 #[derive(Clone)]
 pub struct ProcessWorkObserver {

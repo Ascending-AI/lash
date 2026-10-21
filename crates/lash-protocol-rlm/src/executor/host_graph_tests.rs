@@ -7,8 +7,10 @@ use lash_core_store::checkpoint_graph::{
     DecodeLimits, EncodeBudget, EncodedNode, ExplicitLimit, GraphDecoder, GraphRefusal,
     GraphStaging, NodeId, NodeKind, parse_envelope,
 };
-use lash_kernel_doc::{EffectId, Site, Unit};
 use lash_vm_broker::round_graph::CallOutcome;
+use lash_vocabulary::sites::EffectId;
+use lash_vocabulary::sites::Site;
+use lash_vocabulary::sites::Unit;
 
 use super::*;
 
@@ -44,8 +46,8 @@ fn collected(
 }
 
 fn identity(occurrence: u64) -> EffectId {
-    lash_kernel_doc::testkit::effect(
-        lash_kernel_doc::testkit::root_task(),
+    lash_vocabulary::sites::testkit::effect(
+        lash_vocabulary::sites::testkit::root_task(),
         Site {
             unit: Unit::Main,
             path: vec![0],
@@ -87,8 +89,11 @@ fn outcome(
         .unwrap()
 }
 
-fn operation() -> EffectName {
-    EffectName::new("read").unwrap()
+fn operation() -> lash_vocabulary::names::OperationUse {
+    lash_vocabulary::names::OperationUse {
+        link: lash_vocabulary::package::LinkId::from_bytes([1; 32]),
+        slot: lash_vocabulary::names::ImportSlot(0),
+    }
 }
 
 /// The FIG-5887 §3 call summary: a dense radix tree of 32-entry pages.
@@ -246,7 +251,7 @@ fn a_hosts_control_cancel_and_limit_facts_survive_collection() {
 /// collection under the end they all read back exactly.
 #[test]
 fn a_cells_envelope_is_one_node_and_its_end_reads_back_after_collection() {
-    use crate::executor::envelope::{CellEnvelope, RecordedEffect};
+    use crate::executor::envelope::CellEnvelope;
 
     let document =
         lash_kernel_doc::parse_document("kernel 1\nnumbers float\nmain { return 1 }").unwrap();
@@ -255,7 +260,7 @@ fn a_cells_envelope_is_one_node_and_its_end_reads_back_after_collection() {
         "1",
         lash_kernel_doc::SourceLanguage::TypeScript,
         vec![lash_kernel_doc::SourceSite {
-            site: lash_kernel_doc::Site::new(lash_kernel_doc::Unit::Main, vec![0]),
+            site: lash_vocabulary::sites::Site::new(lash_vocabulary::sites::Unit::Main, vec![0]),
             ranges: vec![lash_kernel_doc::Span::new(0, 1).unwrap()],
             implicit: None,
         }],
@@ -265,30 +270,25 @@ fn a_cells_envelope_is_one_node_and_its_end_reads_back_after_collection() {
         code: CellEnvelope::code_digest("1"),
         dialect: "typescript".to_owned(),
         document: lash_kernel_doc::IdentifiedDocument::new(document.clone()),
-        packages: lash_kernel_doc::PackageSetDigest::from_bytes([7; 32]),
+        link: lash_vocabulary::LinkId::from_bytes([7; 32]),
+        environment: lash_core_store::tool_surface::ExecutionEnvironment::empty(
+            lash_vocabulary::claims::RegistryKind::Session,
+        ),
+        inspection: lash_execution_contracts::process::linking::LinkInspection {
+            link: lash_vocabulary::LinkId::from_bytes([7; 32]),
+            document: document.identity(),
+            selector: lash_execution_contracts::process::linking::ReachSelector::Start(
+                lash_vocabulary::StartSelector::Main,
+            ),
+            operations: Default::default(),
+            machine: Default::default(),
+            artifacts: vec![],
+            signature: None,
+        },
         source_map: Some(source_map),
         written: std::collections::BTreeMap::new(),
         function_values: None,
-        effects: [(
-            operation(),
-            RecordedEffect {
-                tool: lash_core::ToolId::new("read"),
-                requirement: lash_kernel_doc::OperationRequirement::new(
-                    lash_kernel_doc::Signature {
-                        params: Vec::new(),
-                        result: lash_kernel_doc::Type::Any,
-                    },
-                    lash_kernel_doc::ContractId::new("1"),
-                ),
-                controls: lash_core::TurnControls::default(),
-            },
-        )]
-        .into_iter()
-        .collect(),
-        grants: std::collections::BTreeMap::new(),
-        unavailable_notes: [("web.fetch".into(), "permission was revoked".into())].into(),
         projected: ["x".to_owned()].into_iter().collect(),
-        reads: std::collections::BTreeMap::new(),
     };
     let mut staging = staging();
     let node = envelope.stage(&mut staging).unwrap();
@@ -300,7 +300,7 @@ fn a_cells_envelope_is_one_node_and_its_end_reads_back_after_collection() {
     // what it reaches.
     let session = lash_vm_broker::kernel::pages::frame_page(&lash_kernel_state::paged::PageBody {
         kind: lash_kernel_state::paged::PageKind::SESSION_ROOT,
-        tokens: lash_kernel_doc::graph_tokens::encode_body(&0_u64),
+        tokens: lash_vocabulary::tokens::encode_body(&0_u64),
         children: Vec::new(),
     })
     .unwrap()
@@ -328,10 +328,10 @@ fn a_cells_envelope_is_one_node_and_its_end_reads_back_after_collection() {
     assert_eq!(CellEnd::load(&mut decoder, root).unwrap(), end);
     let loaded = CellEnvelope::load(&mut decoder, end.envelope).unwrap();
     assert_eq!(loaded.document, envelope.document);
-    assert_eq!(loaded.packages, envelope.packages);
+    assert_eq!(loaded.link, envelope.link);
+    assert_eq!(loaded.environment, envelope.environment);
+    assert_eq!(loaded.inspection, envelope.inspection);
     assert_eq!(loaded.source_map, envelope.source_map);
-    assert_eq!(loaded.effects, envelope.effects);
-    assert_eq!(loaded.unavailable_notes, envelope.unavailable_notes);
     assert_eq!(loaded.projected, envelope.projected);
     assert_eq!(
         HostState::load(&mut decoder, end.host)

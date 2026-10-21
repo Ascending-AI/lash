@@ -14,7 +14,6 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use lash_core::ProcessId;
 use lash_core_execution::runtime::Clock;
 use lash_core_store::checkpoint_graph::stage::StageFault;
 use lash_core_store::checkpoint_graph::{CommitId, EncodedNode, NodeId};
@@ -29,6 +28,7 @@ use lash_vm_broker::kernel::pages::{
 };
 use lash_vm_broker::kernel::state::checkpoint_header;
 use lash_vm_broker::kernel::{KernelFailure, ParkedState, next_stage_lease};
+use lash_vocabulary::identity::ProcessId;
 
 use super::run::RunFault;
 use super::state::ParkedPage;

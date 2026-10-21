@@ -4,12 +4,16 @@
 use std::collections::BTreeSet;
 use std::sync::Arc;
 
-use lash_core::{
-    LanguageExecutionObservation, ProcessId, ProcessObservationCursor, ProcessObservationEvent,
-    ProcessObservationEventPayload, ProcessObservationIdentity, ProcessReplayEventDraft,
-    ProcessReplayStoreError, ProcessSequence,
-};
+use lash_core::LanguageExecutionObservation;
+use lash_core::ProcessObservationCursor;
+use lash_core::ProcessObservationEvent;
+use lash_core::ProcessObservationEventPayload;
+use lash_core::ProcessObservationIdentity;
+use lash_core::ProcessReplayEventDraft;
+use lash_core::ProcessReplayStoreError;
+use lash_core::ProcessSequence;
 use lash_execution_contracts::process::ObservedProcessEvent;
+use lash_vocabulary::identity::ProcessId;
 
 /// The stored form of [`ProcessObservationEventPayload`], one variant each:
 /// what a row reads back as.

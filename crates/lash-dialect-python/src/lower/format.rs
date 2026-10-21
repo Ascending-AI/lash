@@ -6,6 +6,7 @@
 //! time.
 
 use lash_kernel_doc::{Expr, Literal};
+
 use ruff_python_ast::{self as ast};
 use ruff_text_size::Ranged;
 

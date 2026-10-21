@@ -60,7 +60,6 @@ impl CodeModeCheckpointPerfFixture {
                 channel: crate::plugin::RlmChannel::Cell,
                 code_renderer: crate::render::CodeRendererSlot::default(),
                 prompts: dialect.prompts(),
-                packages: None,
                 kernel: KernelCarry::default(),
             },
             state,
@@ -182,7 +181,7 @@ impl CodeModeCheckpointPerfFixture {
     pub fn read_head(
         &mut self,
         publisher: &CodeModeCheckpointPerfPublisher,
-        session: &lash_core::SessionId,
+        session: &lash_vocabulary::identity::SessionId,
         revision: u64,
         checkpoint: lash_core_store::checkpoint_graph::NodeId,
     ) -> Result<(), lash_core::SessionError> {
@@ -278,7 +277,7 @@ impl CodeModeCheckpointPerfPublisher {
     /// The store's refusal to create, register or claim.
     pub async fn open(
         backend: &lash_execution_contracts::backend::Backend,
-        session: &lash_core::SessionId,
+        session: &lash_vocabulary::identity::SessionId,
     ) -> Result<Self, lash_core::SessionError> {
         let failed = |error: lash_core::durable_port::DurableError| {
             lash_core::SessionError::Protocol(format!("checkpoint perf publisher: {error}"))
@@ -323,7 +322,7 @@ impl CodeModeCheckpointPerfPublisher {
             epoch,
             lash_core::AdmittedScope::turn(
                 session.clone(),
-                lash_core::TurnId::from("rlm-checkpoint-perf"),
+                lash_vocabulary::identity::TurnId::from("rlm-checkpoint-perf"),
             ),
             lash_core::CancellationToken::new(),
             Arc::new(lash_core::durable_port::NoProbe),
@@ -340,7 +339,7 @@ impl CodeModeCheckpointPerfPublisher {
     /// The store's refusal, or a node that does not decode.
     pub async fn reachable(
         &self,
-        session: &lash_core::SessionId,
+        session: &lash_vocabulary::identity::SessionId,
         revision: u64,
         checkpoint: lash_core_store::checkpoint_graph::NodeId,
     ) -> Result<u64, lash_core::SessionError> {

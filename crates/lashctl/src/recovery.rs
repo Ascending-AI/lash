@@ -270,8 +270,8 @@ async fn kernel_migration(backend: &lash::Backend, command: &Command) -> Result<
         ),
         _ => None,
     };
-    let functions = lash::package::lash_packages()
-        .map(|packages| std::sync::Arc::clone(packages.functions()))
+    let functions = lash::package::helper_release()
+        .map(|release| std::sync::Arc::new(release.functions.clone()))
         .map_err(|error| unexpected(&error))?;
     let survey = lash::vm::survey_kernel_migration(backend, &functions)
         .await

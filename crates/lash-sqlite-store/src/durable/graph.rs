@@ -31,10 +31,15 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::LazyLock;
 
-use lash_core_store::checkpoint_graph::{
-    BlobEncoding, DecodeDimension, DecodeLimits, GraphRefusal, InstalledGraphMeasurement, NodeId,
-    NodeSource, StoredNode, check_envelope, node::is_semantic,
-};
+use lash_core_store::checkpoint_graph::BlobEncoding;
+use lash_core_store::checkpoint_graph::DecodeLimits;
+use lash_core_store::checkpoint_graph::GraphRefusal;
+use lash_core_store::checkpoint_graph::InstalledGraphMeasurement;
+use lash_core_store::checkpoint_graph::NodeId;
+use lash_core_store::checkpoint_graph::NodeSource;
+use lash_core_store::checkpoint_graph::StoredNode;
+use lash_core_store::checkpoint_graph::check_envelope;
+use lash_core_store::checkpoint_graph::node::is_semantic;
 use lash_durable::domain::DomainRefusal;
 use lash_durable::domain::graph::{EffectAdmissionWrite, HydratedGraph, HydratedNode, RootOwner};
 use lash_durable::domain::graph_commit::{
@@ -45,6 +50,7 @@ use lash_store_sql::durable::graph::GraphStatements;
 use lash_store_sql::durable::run_records::RunRecordStatements;
 use lash_store_sql::durable::snapshots::SnapshotStatements;
 use lash_store_sql::durable::turns::TurnStatements;
+use lash_vocabulary::tokens::DecodeDimension;
 use rusqlite::{Connection, OptionalExtension};
 
 use super::{Answer, Committing, Retired, SqliteDurableStore, integer};

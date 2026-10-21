@@ -117,7 +117,7 @@ impl std::fmt::Debug for BenchEngine {
 fn pin(index: u64) -> EngineAction {
     EngineAction::PinKey {
         name: KeyName(format!("w{index}")),
-        bound: lash_core::ParkBound::Within(Duration::from_secs(3_600)),
+        bound: lash_vocabulary::tool_contract::ParkBound::Within(Duration::from_secs(3_600)),
     }
 }
 
@@ -141,12 +141,39 @@ impl ProcessEngine for BenchEngine {
         lash_execution_contracts::process::ProcessTraceClass::Internal
     }
 
-    async fn performed_effects(
+    async fn inspect_link(
+        &self,
+        link: lash_vocabulary::LinkId,
+        selector: &lash_execution_contracts::process::linking::ReachSelector,
+    ) -> Result<
+        lash_execution_contracts::process::linking::LinkInspection,
+        lash_execution_contracts::process::linking::EnginePortError,
+    > {
+        Ok(lash_execution_contracts::process::linking::LinkInspection {
+            link,
+            document: lash_vocabulary::DocumentId::from_bytes([0; 32]),
+            selector: selector.clone(),
+            operations: Default::default(),
+            machine: Default::default(),
+            artifacts: Vec::new(),
+            signature: None,
+        })
+    }
+    async fn inspect_start(
         &self,
         _payload: &serde_json::Value,
-    ) -> Result<lash_execution_contracts::process::PerformedEffects, lash_core::ProcessEnvRefusal>
-    {
-        Ok(lash_execution_contracts::process::PerformedEffects::new())
+    ) -> Result<
+        lash_execution_contracts::process::linking::LinkInspection,
+        lash_execution_contracts::process::linking::EnginePortError,
+    > {
+        Err(
+            lash_execution_contracts::process::linking::EnginePortError::Unsupported {
+                operation: "generic fixture has no linked code".into(),
+            },
+        )
+    }
+    fn capabilities(&self) -> lash_vocabulary::claims::NodeRequirements {
+        Default::default()
     }
 
     async fn check_args(
@@ -379,8 +406,8 @@ impl ProcessSteps for BenchSteps {
     ) -> Result<StepAdmission, StepRefusal> {
         let _ = step;
         Ok(StepAdmission::new(
-            lash_protocol_types::ToolId::new("probe"),
-            lash_protocol_types::ExecutionPolicy::Once,
+            lash_vocabulary::tool_contract::ToolId::new("probe"),
+            lash_vocabulary::tool_contract::ExecutionPolicy::Once,
             lash_protocol_types::ExecutionLimit::starting_at(
                 now_ms,
                 Duration::from_secs(60),
@@ -446,8 +473,8 @@ fn probe_step(n: u64) -> Result<EngineAction, ProcessInfraError> {
     Ok(EngineAction::Steps {
         steps: vec![StepRequest::Tool {
             step: lash_execution_contracts::process::StepName(format!("probe-{n}")),
-            effect: lash_core_execution::EffectName::new("probe").map_err(infra)?,
-            contract: lash_kernel_doc::ContractId::new("probe"),
+            effect: lash_vocabulary::names::EffectName::new("probe").map_err(infra)?,
+            contract: lash_vocabulary::operations::ContractId::new("probe"),
             input: json!({}),
             site: None,
             matched: None,

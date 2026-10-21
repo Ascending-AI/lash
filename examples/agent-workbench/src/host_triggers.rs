@@ -10,7 +10,7 @@
 //!   call registers once, with the caller's session from `owner()`.
 //! - A subscription has one lifecycle, and its row says where it is. It is
 //!   recorded `pending` with a freshly minted host pin, the pin then takes
-//!   publishes the recorded function through `publish_workflow`, and only
+//!   publishes the recorded function through `publish_callable`, and only
 //!   then is the row `pinned`. Only a
 //!   `pinned` row is listed, ticked or delivered to. Removal marks the row
 //!   `deleting`, which stops its dispatch in the same transaction, then
@@ -58,12 +58,14 @@ use std::sync::{Arc, Mutex, RwLock};
 use std::time::Duration;
 
 use async_trait::async_trait;
+use lash::LashCore;
 use lash::sync::RwLockExt;
 use lash::tools::{
     ToolAttemptOutcome, ToolCall, ToolContract, ToolDefinition, ToolManifest, ToolOutcome,
     ToolProvider,
 };
-use lash::{LashCore, ProcessId, SessionId};
+use lash_vocabulary::identity::ProcessId;
+use lash_vocabulary::identity::SessionId;
 use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
@@ -220,6 +222,8 @@ impl Delivery {
 
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum HostTriggerError {
+    #[error("{0}")]
+    Registration(String),
     #[error("trigger store lock is poisoned")]
     Poisoned,
     #[error("trigger store failed: {0}")]
@@ -271,7 +275,7 @@ impl HostTriggers {
                definition_json TEXT NOT NULL,
                -- The inline snapshot lets pending publication recover after a crash.
                function_json TEXT NOT NULL,
-               packages TEXT NOT NULL,
+               environment_json TEXT NOT NULL,
                event_arg TEXT NOT NULL,
                args_json TEXT NOT NULL,
                -- The host pin that holds the definition once the row is pinned.
@@ -1137,31 +1141,59 @@ impl ToolProvider for TriggerRegistrationProvider {
                 return ToolOutcome::err_fmt(format_args!(
                     "unknown trigger tool `{}`",
                     call.name()
-                ));
+                ))
+                .into();
             }
             // A subscription belongs to the session that registered it: its
             // processes live until that session ends and report back to it.
             let owner = match call.context.session_id() {
                 Ok(owner) => owner.clone(),
-                Err(error) => return ToolOutcome::err_fmt(error),
+                Err(error) => return ToolOutcome::err_fmt(error).into(),
             };
             let input = match TriggerRegistrationInput::deserialize(call.args) {
                 Ok(input) => input,
-                Err(error) => return ToolOutcome::err_fmt(error),
+                Err(error) => return ToolOutcome::err_fmt(error).into(),
             };
+            let Some(execution) = call.context.execution_environment() else {
+                return ToolOutcome::err_fmt(
+                    "trigger registration requires a retained execution origin",
+                )
+                .into();
+            };
+            let origin = lash::package::CallableOrigin {
+                publications: execution
+                    .publications
+                    .iter()
+                    .map(lash::package::PublicationRecord::key)
+                    .collect(),
+                authored: execution.authored.clone(),
+            };
+            if origin.publications.is_empty() && origin.authored.is_empty() {
+                return ToolOutcome::err_fmt(
+                    "trigger registration has no retained execution origin",
+                )
+                .into();
+            }
             match self
                 .triggers
-                .register(call.context.call_id().as_str(), &owner, input)
+                .register(call.context.call_id().as_str(), &owner, input, &origin)
                 .await
             {
                 Ok(subscription_id) => {
-                    ToolOutcome::ok(json!({ "subscription_id": subscription_id }))
+                    ToolOutcome::ok(json!({ "subscription_id": subscription_id })).into()
                 }
-                Err(message) => ToolOutcome::err_fmt(message),
+                Err(HostTriggerError::Lash(lash::EmbedError::Plugin(error))) => {
+                    ToolAttemptOutcome::host_failed(
+                        lash::runtime::RuntimeEffectControllerError::from(error),
+                    )
+                }
+                Err(HostTriggerError::Lash(lash::EmbedError::Runtime(error))) => {
+                    ToolAttemptOutcome::host_failed(error.into())
+                }
+                Err(error) => ToolOutcome::err_fmt(error).into(),
             }
         })
         .await
-        .into()
     }
 }
 

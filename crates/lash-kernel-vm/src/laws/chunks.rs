@@ -8,10 +8,11 @@ use std::rc::Rc;
 
 use lash_kernel_doc::heap::{HeapFault, PageRef};
 use lash_kernel_doc::{
-    FunctionId, FunctionRegistry, NativeCall, NativeError, NativeFunction, NewObject, Value,
-    parse_definition,
+    FunctionRegistry, NativeCall, NativeError, NativeFunction, NewObject, Value, parse_definition,
 };
+
 use lash_kernel_state::paged::{AllocationCensus as _, PageAnswer, PageBody, PageSource};
+use lash_vocabulary::names::FunctionId;
 use std::sync::Arc;
 
 use super::embedder::{Embedder, ROOMY, Setup, Source, int, result};
@@ -85,8 +86,7 @@ fn park(embedder: &mut Embedder) {
 /// the next checkpoint.
 fn point_write(build: &str, length: u64) -> (u64, u64, u64) {
     let text = format!(
-        "main {{ let xs = {build}({length}) let a = perform echo(1) as Any \
-         set xs[{at}] = 7 let b = perform echo(2) as Any return xs[{at}] }}",
+        "main {{ let xs = {build}({length}) let a = perform 0(1) as Any set xs[{at}] = 7 let b = perform 0(2) as Any return xs[{at}] }}",
         at = length / 2 + 3,
     );
     let mut embedder = Embedder::with(
@@ -161,7 +161,8 @@ fn a_point_write_to_a_cold_large_table_reads_and_seals_one_chunk_and_its_path() 
 /// text, so authenticated payload siblings share a bounded port round trip.
 #[test]
 fn a_host_copy_of_a_megabyte_binding_batches_its_payload_siblings() {
-    use lash_kernel_doc::{Datum, Name};
+    use lash_kernel_doc::Datum;
+    use lash_vocabulary::Name;
     use std::cell::RefCell;
 
     #[derive(Clone, Default)]

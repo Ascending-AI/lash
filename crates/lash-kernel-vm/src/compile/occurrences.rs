@@ -8,12 +8,10 @@ impl Compiler<'_> {
         let mut sites = BTreeSet::new();
         for stmt in &self.stmts {
             if let Form::Action(action) = &stmt.form
-                && (!matches!(action.site.unit, Unit::Library(_))
+                && (action.guest
                     || matches!(
                         action.kind,
-                        ActionKind::Perform { .. }
-                            | ActionKind::Sleep { .. }
-                            | ActionKind::Spawn { .. }
+                        ActionKind::Perform { .. } | ActionKind::Spawn { .. }
                     ))
             {
                 sites.insert(action.site.clone());
@@ -21,12 +19,10 @@ impl Compiler<'_> {
         }
         for action in &self.stream.nested {
             if !matches!(action.kind, NestedKind::Body(_))
-                && (!matches!(action.site.unit, Unit::Library(_))
+                && (action.guest
                     || matches!(
                         action.kind,
-                        NestedKind::Perform { .. }
-                            | NestedKind::Sleep { .. }
-                            | NestedKind::Spawn(_)
+                        NestedKind::Perform { .. } | NestedKind::Spawn(_)
                     ))
             {
                 sites.insert(action.site.clone());
@@ -65,27 +61,30 @@ impl Executable {
     }
 
     pub(crate) fn occurrence_index(&self, site: &Site) -> Option<usize> {
-        if matches!(site.unit, Unit::Library(_)) {
-            self.library.0.tables.occurrence_at.get(site).copied()
-        } else {
-            self.own.tables.occurrence_at.get(site).copied()
-        }
+        self.own
+            .tables
+            .occurrence_at
+            .get(site)
+            .copied()
+            .or_else(|| self.library.0.tables.occurrence_at.get(site).copied())
     }
 
     /// Saved metadata keys can be inline tokens or a digest of a long site.
     /// Match the compiled key directly; neither spelling is decoded as a Site.
     pub(crate) fn saved_occurrence_index(&self, key: &[u8]) -> Option<usize> {
-        let library = &self.library.0.tables.occurrence_keys;
-        library
+        self.own
+            .tables
+            .occurrence_keys
             .binary_search_by(|saved| saved.as_slice().cmp(key))
             .ok()
+            .map(|own| self.library.0.tables.occurrence_keys.len() + own)
             .or_else(|| {
-                self.own
+                self.library
+                    .0
                     .tables
                     .occurrence_keys
                     .binary_search_by(|saved| saved.as_slice().cmp(key))
                     .ok()
-                    .map(|own| library.len() + own)
             })
     }
 

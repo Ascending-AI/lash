@@ -15,7 +15,9 @@ pub mod model_receipt;
 pub mod process;
 #[cfg(feature = "testing")]
 pub mod process_laws;
+pub mod resolutions;
 pub mod round;
+pub mod route_selection;
 pub mod turn;
 pub mod vm;
 mod wait_effects;

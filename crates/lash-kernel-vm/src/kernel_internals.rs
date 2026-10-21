@@ -104,7 +104,7 @@ pub fn sealed_root(sealed: &crate::SealedRoot) -> &CheckpointRoot {
 pub fn task_identity(
     machine: &KernelMachine,
     identity: lash_kernel_state::paged::TaskIdentityRef,
-) -> Result<lash_kernel_doc::kernel_internals::TaskIdentity, lash_kernel_doc::heap::HeapFault> {
+) -> Result<lash_vocabulary::sites::TaskIdentity, lash_kernel_doc::heap::HeapFault> {
     machine.task_identity(identity)
 }
 
@@ -123,8 +123,8 @@ pub fn prepared_scalar_charge(
     mask: u8,
 ) -> Option<u64> {
     let params = &definition.signature.params;
-    let plan = crate::compile::Plan::new(&definition.charge, params);
-    crate::compile::Fast::new(&definition.charge, params, &plan, true).scalar_units(mask)
+    let plan = crate::compile::Plan::new(definition.charge()?, params);
+    crate::compile::Fast::new(definition.charge()?, params, &plan, true).scalar_units(mask)
 }
 
 /// What a region charges a call of `definition` on `args` that returned
@@ -139,8 +139,8 @@ pub fn immediate_charge(
     result: &lash_kernel_doc::Value,
 ) -> Option<u64> {
     let params = &definition.signature.params;
-    let plan = crate::compile::Plan::new(&definition.charge, params);
-    crate::compile::Fast::new(&definition.charge, params, &plan, false).immediate(
+    let plan = crate::compile::Plan::new(definition.charge()?, params);
+    crate::compile::Fast::new(definition.charge()?, params, &plan, false).immediate(
         args,
         crate::compile::Fresh::of(fresh),
         result,
@@ -158,10 +158,16 @@ pub fn immediate_charge(
 pub fn loop_regions(program: &Program) -> Result<usize, StartError> {
     let admitted = program.library.admit(
         &program.document,
-        lash_kernel_doc::KernelDataLimits::default(),
+        lash_vocabulary::data_limits::KernelDataLimits::default(),
     )?;
     let exe = admitted
-        .executable(&program.document, &program.library)
+        .executable(
+            &program.document,
+            &program.library,
+            &program.documents,
+            &program.functions,
+            &program.instances,
+        )
         .map_err(|missing| StartError::MissingFunction {
             function: missing.0,
         })?;
@@ -179,10 +185,16 @@ pub fn loop_regions(program: &Program) -> Result<usize, StartError> {
 pub fn call_islands(program: &Program) -> Result<usize, StartError> {
     let admitted = program.library.admit(
         &program.document,
-        lash_kernel_doc::KernelDataLimits::default(),
+        lash_vocabulary::data_limits::KernelDataLimits::default(),
     )?;
     let exe = admitted
-        .executable(&program.document, &program.library)
+        .executable(
+            &program.document,
+            &program.library,
+            &program.documents,
+            &program.functions,
+            &program.instances,
+        )
         .map_err(|missing| StartError::MissingFunction {
             function: missing.0,
         })?;

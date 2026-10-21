@@ -23,8 +23,8 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 const OWNER: &str = "extension-laws";
 
-fn spanning_definition() -> lash_core::ToolDefinition {
-    lash_core::ToolDefinition::raw(
+fn spanning_definition() -> lash_vocabulary::tool_contract::ToolDefinition {
+    lash_vocabulary::tool_contract::ToolDefinition::raw(
         "tool:spanning",
         "tools.spanning",
         "Open extension and tracing spans",
@@ -53,7 +53,10 @@ impl ToolProvider for Spanning {
     fn tool_manifests(
         &self,
         _config: &lash_core::OwnerConfigView,
-    ) -> std::result::Result<Vec<lash_core::ToolManifest>, lash::plugins::PluginError> {
+    ) -> std::result::Result<
+        Vec<lash_vocabulary::tool_contract::ToolManifest>,
+        lash::plugins::PluginError,
+    > {
         Ok(vec![spanning_definition().manifest()])
     }
 
@@ -61,7 +64,7 @@ impl ToolProvider for Spanning {
         &self,
         name: &str,
         _config: &lash_core::OwnerConfigView,
-    ) -> Option<Arc<lash_core::ToolContract>> {
+    ) -> Option<Arc<lash_vocabulary::tool_contract::ToolContract>> {
         (name == "tools.spanning").then(|| Arc::new(spanning_definition().contract()))
     }
 
@@ -154,13 +157,16 @@ async fn spanning_turn(
         None,
     );
     let core = builder.build(lash_facade_tests::runtime_lease_owner())?;
-    let output = created_session(&core, lash::SessionId::parse(session).expect("an id"))
-        .await
-        .open()
-        .await?
-        .send(TurnInput::text("open spans"))
-        .output()
-        .await?;
+    let output = created_session(
+        &core,
+        lash_vocabulary::identity::SessionId::parse(session).expect("an id"),
+    )
+    .await
+    .open()
+    .await?
+    .send(TurnInput::text("open spans"))
+    .output()
+    .await?;
     assert!(
         matches!(output.outcome, lash::TurnOutcome::Finished(_)),
         "{:?}",
@@ -429,8 +435,8 @@ async fn tracing_spans_in_a_tool_body_nest_under_its_tool_span() -> Result<()> {
     Ok(())
 }
 
-fn nesting_definition() -> lash_core::ToolDefinition {
-    lash_core::ToolDefinition::raw(
+fn nesting_definition() -> lash_vocabulary::tool_contract::ToolDefinition {
+    lash_vocabulary::tool_contract::ToolDefinition::raw(
         "tool:nesting",
         "tools.nesting",
         "Open an extension span with a point and a direct completion under it",
@@ -451,7 +457,10 @@ impl ToolProvider for Nesting {
     fn tool_manifests(
         &self,
         _config: &lash_core::OwnerConfigView,
-    ) -> std::result::Result<Vec<lash_core::ToolManifest>, lash::plugins::PluginError> {
+    ) -> std::result::Result<
+        Vec<lash_vocabulary::tool_contract::ToolManifest>,
+        lash::plugins::PluginError,
+    > {
         Ok(vec![nesting_definition().manifest()])
     }
 
@@ -459,7 +468,7 @@ impl ToolProvider for Nesting {
         &self,
         name: &str,
         _config: &lash_core::OwnerConfigView,
-    ) -> Option<Arc<lash_core::ToolContract>> {
+    ) -> Option<Arc<lash_vocabulary::tool_contract::ToolContract>> {
         (name == "tools.nesting").then(|| Arc::new(nesting_definition().contract()))
     }
 
@@ -552,13 +561,16 @@ async fn nesting_turn(
         None,
     );
     let core = builder.build(lash_facade_tests::runtime_lease_owner())?;
-    let output = created_session(&core, lash::SessionId::parse(session).expect("an id"))
-        .await
-        .open()
-        .await?
-        .send(TurnInput::text("nest"))
-        .output()
-        .await?;
+    let output = created_session(
+        &core,
+        lash_vocabulary::identity::SessionId::parse(session).expect("an id"),
+    )
+    .await
+    .open()
+    .await?
+    .send(TurnInput::text("nest"))
+    .output()
+    .await?;
     assert!(
         matches!(output.outcome, lash::TurnOutcome::Finished(_)),
         "{:?}",

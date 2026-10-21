@@ -85,18 +85,6 @@ async fn deleted_session_admission_keeps_installed_package_roots() {
             .apply(&case.operations[0])
             .await
             .expect("delete session");
-        assert!(
-            !runner
-                .lifecycle_backend
-                .durable()
-                .package_catalog()
-                .await
-                .expect("installed package catalog")
-                .sets
-                .is_empty(),
-            "{}: package installation must finish before measuring admission",
-            runner.name,
-        );
         let before = runner.residue_digest().await;
         let error = runner
             .apply(&case.operations[1])

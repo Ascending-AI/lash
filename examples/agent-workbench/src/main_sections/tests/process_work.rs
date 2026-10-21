@@ -1,6 +1,6 @@
 use super::*;
-use lash::ProcessId;
-use lash::SessionId;
+use lash_vocabulary::identity::ProcessId;
+use lash_vocabulary::identity::SessionId;
 
 use super::tests::{RecordingTrace, Workbench, runbook_stores, silent_provider};
 

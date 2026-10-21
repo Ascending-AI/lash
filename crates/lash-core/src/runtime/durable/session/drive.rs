@@ -352,7 +352,7 @@ pub trait TurnDrive: Send {
     async fn stopped_cell_calls(
         &mut self,
         _cx: &ActorContext,
-        _id: crate::EffectId,
+        _id: lash_sansio::EffectId,
     ) -> Result<CellToolCalls, TurnError> {
         Ok(CellToolCalls::default())
     }

@@ -29,8 +29,6 @@ mod trace;
 mod workflow;
 
 #[cfg(test)]
-mod page_carry_tests;
-#[cfg(test)]
 mod tests;
 
 use std::sync::Arc;
@@ -38,15 +36,116 @@ use std::sync::Arc;
 use lash_execution_contracts::process::EngineStepAnswer;
 use lash_execution_contracts::process::EngineStepKind;
 use lash_execution_contracts::process::EngineStepRun;
-use lash_kernel_doc::{Document, DocumentId, Name, Signature};
+use lash_kernel_doc::{Document, IdentifiedDocument};
+
+use lash_vocabulary::names::DocumentId;
+use lash_vocabulary::names::Name;
+use lash_vocabulary::types::Signature;
 use tokio_util::sync::CancellationToken;
 
+/// Kernel start input: linked source selection or a callable with its frozen environment.
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(
+    tag = "kind",
+    content = "value",
+    rename_all = "snake_case",
+    deny_unknown_fields
+)]
+pub enum InlineRequest {
+    Linked {
+        start: lash_vocabulary::names::LinkedStart,
+    },
+    Callable {
+        link: lash_vocabulary::package::LinkId,
+        function: lash_kernel_doc::FunctionValue,
+        origin: lash_vocabulary::package::CallableOrigin,
+    },
+    Unlinked {
+        document: DocumentId,
+        selector: lash_vocabulary::names::StartSelector,
+    },
+}
+impl InlineRequest {
+    pub fn linked(
+        &self,
+    ) -> Option<(
+        lash_vocabulary::package::LinkId,
+        lash_execution_contracts::process::linking::ReachSelector,
+    )> {
+        use lash_execution_contracts::process::linking::ReachSelector;
+        match self {
+            Self::Linked { start } => {
+                Some((start.link, ReachSelector::Start(start.selector.clone())))
+            }
+            Self::Callable { link, function, .. } => Some((
+                *link,
+                ReachSelector::Callable {
+                    function: function.callable.function,
+                },
+            )),
+            Self::Unlinked { .. } => None,
+        }
+    }
+    pub fn artifacts(&self) -> Vec<lash_core::ArtifactName> {
+        use lash_kernel_doc::Datum;
+        let mut links = std::collections::BTreeSet::new();
+        let mut pending = Vec::new();
+        match self {
+            Self::Linked { start } => {
+                links.insert(start.link);
+            }
+            Self::Callable {
+                link,
+                function,
+                origin,
+            } => {
+                links.extend(&origin.authored);
+                links.insert(*link);
+                links.insert(function.callable.link);
+                pending.extend(function.captures.values());
+            }
+            Self::Unlinked { .. } => {}
+        }
+        while let Some(value) = pending.pop() {
+            match value {
+                Datum::Function(callable) => {
+                    links.insert(callable.link);
+                }
+                Datum::FunctionValue(function) => {
+                    links.insert(function.callable.link);
+                    pending.extend(function.captures.values());
+                }
+                Datum::Tuple(values) | Datum::List(values) | Datum::Set(values) => {
+                    pending.extend(values)
+                }
+                Datum::Map(values) => {
+                    for (key, value) in values {
+                        pending.extend([key, value]);
+                    }
+                }
+                Datum::Record(values) => pending.extend(values.iter().map(|(_, v)| v)),
+                Datum::Error(error) => pending.push(&error.data),
+                _ => {}
+            }
+        }
+        let mut artifacts: Vec<_> = links.into_iter().map(documents::link_artifact).collect();
+        if let Self::Callable { origin, .. } = self {
+            artifacts.extend(
+                origin
+                    .publications
+                    .iter()
+                    .map(|key| lash_core::ArtifactName {
+                        store: lash_core::ArtifactStoreId::KernelDocument,
+                        artifact_ref: lash_durable::packages::publication_reference(key),
+                    }),
+            );
+        }
+        artifacts
+    }
+}
 pub(crate) use documents::ProcessPreparations;
-pub use documents::{
-    DocumentStoreError, ExecutionDocument, KernelDocuments, StoredSourceMap, StoredWorkflow,
-    Unretained,
-};
-pub use helpers::{AdoptedRun, HelperAdoptionRefusal, plan_adoption};
+pub use documents::{KernelDocuments, StoredSourceMap, Unretained, map_link_refusal};
+pub use helpers::{HelperAdoptionRefusal, plan_adoption};
 pub use migrate::{
     KernelMigrationRefusal, KernelMigrationSurvey, KernelMigrationSurveyError,
     KernelStateMigration, PlannedMigration, RefusedKernelCell, RefusedKernelProcess,
@@ -58,10 +157,7 @@ pub use replay::{
     TaskPath, Unreplayable,
 };
 pub use state::{KERNEL_RUN_STEP, KernelProcessDefinition, KernelProcessInput};
-pub use workflow::{
-    AdmittedWorkflow, WorkflowAdmissionOutcome, WorkflowAdmissionRefusal, WorkflowAdmissionRequest,
-    WorkflowDocument, WorkflowDocumentError, WorkflowEnvironment, WorkflowEnvironmentRequest,
-};
+pub use workflow::{WorkflowEnvironment, WorkflowEnvironmentRequest, WorkflowPublishRequest};
 
 /// The engine kind every kernel process is registered under.
 pub use lash_protocol_types::LASH_VM_ENGINE_KIND;
@@ -304,15 +400,10 @@ pub fn definition_draft(
     lash_execution_contracts::process::ProcessDefinitionDraft,
     lash_execution_contracts::process::ProcessDefinitionDraftError,
 > {
-    let mut value = serde_json::json!({
-        "packages": definition.packages,
-        "declared_packages": definition.declared_packages,
-        "document": definition.document,
-        "entry": definition.entry,
-    });
-    if !definition.functions.is_empty() {
-        value["functions"] = serde_json::json!(definition.functions);
+    if definition.code.linked().is_none() {
+        return Err(lash_execution_contracts::process::ProcessDefinitionDraftError::UnlinkedCode);
     }
+    let value = serde_json::json!({"code":definition.code});
     lash_execution_contracts::process::ProcessDefinitionDraft::new(
         lash_execution_contracts::process::ProcessEngineKind::new(LASH_VM_ENGINE_KIND),
         lash_execution_contracts::process::ProcessDefinitionValue::new(value),
@@ -334,42 +425,33 @@ pub fn entry_signature(
 /// The definition an explicit publication of `function` of `document`,
 /// linked under `packages`, would have: a pure id and signature derivation,
 /// with no storage or registry read.
-pub fn definition_of_entry(
-    document: &Document,
-    identity: DocumentId,
-    function: &Name,
-    packages: lash_kernel_doc::PackageSetDigest,
-    declared_packages: lash_kernel_package::PackageSelection,
+pub fn definition_of_start(
+    start: &lash_vocabulary::names::LinkedStart,
+    inspection: &lash_execution_contracts::process::linking::LinkInspection,
 ) -> Result<serde_json::Value, String> {
-    let signature = document.entries.get(function).ok_or_else(|| {
-        format!("`{function}` is not an entry of the document, so no process starts from it")
-    })?;
-    let draft = definition_draft(&KernelProcessDefinition::of(
-        document,
-        identity,
-        function.clone(),
-        packages,
-        declared_packages,
-    ))
-    .map_err(|error| error.to_string())?;
+    let draft = definition_draft(&KernelProcessDefinition {
+        code: InlineRequest::Linked {
+            start: start.clone(),
+        },
+    })
+    .map_err(|e| e.to_string())?;
     serde_json::to_value(lash_execution_contracts::process::ProcessDefinition::new(
         draft.id(),
-        entry_signature(&signature.signature),
+        inspection.signature.as_ref().map_or(
+            lash_execution_contracts::process::ProcessSignature::Unknown,
+            entry_signature,
+        ),
     ))
-    .map_err(|error| error.to_string())
+    .map_err(|e| e.to_string())
 }
 
 /// The kernel process engine.
 #[derive(Clone)]
 pub struct KernelProcessEngine {
     pub(crate) documents: KernelDocuments,
-    effect_preparations: Arc<std::sync::Mutex<documents::EffectPreparations>>,
     /// The library functions the engine's workers hold, by identity: what a
     /// document is linked and admitted against in the parent.
     pub(crate) functions: Arc<lash_kernel_doc::FunctionRegistry>,
-    /// The packages the engine's workers hold: the surfaces of their sets
-    /// are read without the store.
-    pub(crate) packages: Arc<lash_kernel_package::HeldPackages>,
     pub(crate) workers: lash_vm_client::service::Service,
     /// The dialect the host's process documents are written in: a new
     /// process records it, and its runs name it to their worker.
@@ -379,12 +461,7 @@ pub struct KernelProcessEngine {
     /// interprets.
     pub(crate) writes: lash_kernel_doc::KernelVersion,
     pub(crate) policy: KernelRunPolicy,
-    pub(crate) random: Arc<dyn Fn() -> u64 + Send + Sync>,
     pub(crate) trace_runtime: Option<lash_core::trace::TraceRuntime>,
-    /// Who may perform a package's internal operations, as the store's
-    /// snapshots answer it: what a run's stored code is admitted under
-    /// (R5, FIG-6985).
-    pub(crate) authority: Arc<dyn crate::InternalAuthority>,
     pub(crate) carry_stores: Option<Arc<dyn lash_execution_contracts::backend::StoreSet>>,
 }
 
@@ -437,114 +514,7 @@ impl Default for KernelRunPolicy {
     }
 }
 
-fn process_random() -> u64 {
-    use std::hash::{BuildHasher, Hasher};
-    std::collections::hash_map::RandomState::new()
-        .build_hasher()
-        .finish()
-}
-
 impl KernelProcessEngine {
-    /// The operations among `performed` whose paths a package owns in the
-    /// package set a start of `payload` is linked under, with what each
-    /// package declares (PKG-RUNNER): that set's surface snapshot, as this
-    /// node holds it or, for a set it does not hold, as the store keeps it
-    /// (FIG-6985). Every start names its set, recorded when it was made
-    /// (FIG-6993), so every node answers the same.
-    ///
-    /// # Errors
-    ///
-    /// A payload that is not this engine's, a set the store keeps no
-    /// surface of, and the store's failure to answer.
-    pub(crate) async fn owned_operations(
-        &self,
-        payload: &serde_json::Value,
-        performed: &lash_execution_contracts::process::PerformedEffects,
-    ) -> Result<
-        lash_execution_contracts::process::OwnedOperations,
-        lash_execution_contracts::plugin_error::PluginError,
-    > {
-        let fault = |message: String| {
-            lash_execution_contracts::plugin_error::PluginError::Session(format!(
-                "the package surface a start is linked under is not read: {message}"
-            ))
-        };
-        let linked = KernelProcessInput::from_payload(payload)
-            .map_err(|error| fault(error.to_string()))?
-            .packages;
-        let surface = self.linked_surface(linked).await.map_err(fault)?;
-        let view = lash_kernel_package::PackageView::new(&surface, self.packages.functions());
-        Ok(performed
-            .keys()
-            .filter_map(|effect| Some((effect.clone(), crate::owned_operation(&view, effect)?)))
-            .collect())
-    }
-
-    /// The surface of the package set `linked`: the node's own set's, or
-    /// the stored one (FIG-6993), which any node reads the same.
-    ///
-    /// # Errors
-    ///
-    /// The store does not answer, holds no surface for `linked`, or holds
-    /// one that does not read as it.
-    pub(crate) async fn linked_surface(
-        &self,
-        linked: lash_kernel_doc::PackageSetDigest,
-    ) -> Result<Arc<lash_kernel_package::SurfaceSnapshot>, String> {
-        if linked == self.packages.digest() {
-            return Ok(Arc::clone(self.packages.surface()));
-        }
-        let bytes = self
-            .authority
-            .package_surface(&linked)
-            .await
-            .map_err(|unread| unread.to_string())?
-            .ok_or_else(|| format!("package set {linked} has no stored surface"))?;
-        lash_kernel_package::SurfaceSnapshot::decode(linked, &bytes)
-            .map(Arc::new)
-            .map_err(|refusal| refusal.to_string())
-    }
-
-    /// The surface of the package set `linked` and the registry its code is
-    /// linked against: the node's own, or for a stored set the node's with
-    /// the definitions it lacks read from the store over it (FIG-6993).
-    ///
-    /// # Errors
-    ///
-    /// As [`Self::linked_surface`], or the store holds no definition the
-    /// stored surface names that the node lacks.
-    pub(crate) async fn linked_packages(
-        &self,
-        linked: lash_kernel_doc::PackageSetDigest,
-    ) -> Result<
-        (
-            Arc<lash_kernel_package::SurfaceSnapshot>,
-            Arc<lash_kernel_doc::FunctionRegistry>,
-        ),
-        String,
-    > {
-        let surface = self.linked_surface(linked).await?;
-        if linked == self.packages.digest() {
-            return Ok((surface, Arc::clone(self.packages.functions())));
-        }
-        let missing: Vec<_> = surface
-            .functions()
-            .into_iter()
-            .filter(|function| self.packages.functions().get(function).is_none())
-            .collect();
-        let stored = self
-            .documents
-            .stored_functions(missing)
-            .await
-            .map_err(|error| error.to_string())?
-            .map_err(|unretained| format!("package set {linked}'s definitions: {unretained:?}"))?;
-        let catalog = self
-            .packages
-            .catalog_with(&stored)
-            .map_err(|refusal| refusal.to_string())?;
-        Ok((surface, catalog))
-    }
-
     /// The engine that runs the documents in `documents`, written in
     /// `dialect`, on `workers`, holding each new process to `bounds`. The
     /// engine links and admits against the packages `workers` bind, and
@@ -560,22 +530,16 @@ impl KernelProcessEngine {
         workers: lash_vm_client::service::Service,
         bounds: lash_kernel_vm::Bounds,
     ) -> Result<Self, lash_vm_releases::LibraryError> {
-        let packages = workers.config().held_packages()?;
+        let functions = Arc::new(workers.config().worker_library()?.registry().clone());
         Ok(Self {
             documents,
-            effect_preparations: Arc::new(std::sync::Mutex::new(
-                documents::EffectPreparations::default(),
-            )),
-            functions: Arc::clone(packages.functions()),
-            packages,
+            functions,
             workers,
             dialect: dialect.to_owned(),
             bounds,
             writes: lash_kernel_doc::KernelVersion::NEWEST,
             policy: KernelRunPolicy::standard(),
-            random: Arc::new(process_random),
             trace_runtime: None,
-            authority: Arc::new(crate::NoInternalOperations),
             carry_stores: None,
         })
     }
@@ -594,21 +558,6 @@ impl KernelProcessEngine {
     #[must_use]
     pub fn with_run_policy(mut self, policy: KernelRunPolicy) -> Self {
         self.policy = policy;
-        self
-    }
-
-    /// Sets where a run's stored code is admitted under internal-operation
-    /// authority from (R5).
-    #[must_use]
-    pub fn with_internal_authority(mut self, authority: Arc<dyn crate::InternalAuthority>) -> Self {
-        self.authority = authority;
-        self
-    }
-
-    /// Sets the source of the random bits a body reads.
-    #[must_use]
-    pub fn with_random(mut self, random: Arc<dyn Fn() -> u64 + Send + Sync>) -> Self {
-        self.random = random;
         self
     }
 
@@ -633,53 +582,71 @@ impl KernelProcessEngine {
         &self.functions
     }
 
-    /// The entry a definition names, read from its stored document.
     pub(crate) async fn entry(
         &self,
         definition: &KernelProcessDefinition,
-    ) -> Result<Result<(lash_kernel_doc::IdentifiedDocument, Signature), String>, DocumentStoreError>
-    {
-        let Some(document) = self.documents.get_shared(&definition.document).await? else {
-            return Ok(Err(format!(
-                "document `{}` is not published",
-                definition.document
-            )));
+    ) -> Result<
+        (IdentifiedDocument, Option<Signature>),
+        lash_execution_contracts::process::linking::EnginePortError,
+    > {
+        let (link, selector) = definition.code.linked().ok_or_else(|| {
+            lash_execution_contracts::process::linking::EnginePortError::Refused(
+                lash_execution_contracts::process::linking::AdmissionRefusal::InvalidDocument {
+                    message: "unlinked process definition".into(),
+                },
+            )
+        })?;
+        let content = self.documents.load_linked(link).await?;
+        let reach = content
+            .inspect(link, &documents::selection(&selector))
+            .map_err(documents::refused)?;
+        let document = content
+            .document(content.link(link).map_err(documents::refused)?.document)
+            .map_err(documents::refused)?
+            .clone();
+        let signature = match &definition.code {
+            InlineRequest::Callable { link, function, .. } => {
+                if *link != function.callable.link {
+                    return Err(documents::refused(
+                        lash_kernel_package::LinkRefusal::InvalidDocument {
+                            message: "callable defining Link mismatch".into(),
+                        },
+                    ));
+                }
+                let internal = document
+                    .functions
+                    .get(&function.callable.function)
+                    .ok_or_else(|| {
+                        documents::refused(lash_kernel_package::LinkRefusal::InvalidDocument {
+                            message: "missing callable definition".into(),
+                        })
+                    })?;
+                lash_kernel_doc::validate_callable_signature(
+                    &function.signature,
+                    &function.convention,
+                    &internal.signature,
+                )
+                .map_err(|e| {
+                    documents::refused(lash_kernel_package::LinkRefusal::InvalidDocument {
+                        message: e.to_string(),
+                    })
+                })?;
+                Some(function.signature.clone())
+            }
+            _ => reach.signature,
         };
-        if !document
-            .manifest
-            .functions
-            .keys()
-            .eq(definition.functions.iter())
-        {
-            return Ok(Err(format!(
-                "the definition does not name the library functions document `{}` lists",
-                definition.document
-            )));
+        Ok((IdentifiedDocument::new(document), signature))
+    }
+    pub(crate) fn machine_requirements(&self) -> lash_vocabulary::claims::NodeRequirements {
+        lash_vocabulary::claims::NodeRequirements {
+            natives: self
+                .functions
+                .iter()
+                .filter(|(_, f)| f.native().is_some())
+                .map(|(id, _)| *id)
+                .collect(),
+            kernels: [self.writes.number()].into(),
         }
-        let (surface, functions) = match self.linked_packages(definition.packages).await {
-            Ok(linked) => linked,
-            Err(message) => return Ok(Err(message)),
-        };
-        let selected =
-            lash_kernel_package::SelectedPackages::new(&surface, &definition.declared_packages);
-        let reach = lash_kernel_check::requirements(&document, functions.as_ref());
-        let members = selected.undeclared(
-            &reach.functions,
-            reach.effects.iter().chain(reach.performs.keys()),
-        );
-        if !members.is_empty() {
-            return Ok(Err(
-                lash_kernel_check::WorkflowAdmissionRefusal::UndeclaredMembers { members }
-                    .to_string(),
-            ));
-        }
-        Ok(match document.entries.get(&definition.entry).cloned() {
-            Some(entry) => Ok((document, entry.signature)),
-            None => Err(format!(
-                "document `{}` has no entry `{}`",
-                definition.document, definition.entry
-            )),
-        })
     }
 }
 
@@ -711,45 +678,32 @@ impl lash_execution_contracts::process::ProcessEngine for KernelProcessEngine {
         std::time::Duration::ZERO
     }
 
-    /// The effects the entry's code calls or spawns (P2), as the checker
-    /// reads them from its published document.
-    async fn performed_effects(
+    async fn inspect_start(
         &self,
         payload: &serde_json::Value,
-    ) -> Result<lash_execution_contracts::process::PerformedEffects, lash_core::ProcessEnvRefusal>
-    {
-        let uncertified = |reason: String| lash_core::ProcessEnvRefusal::Uncertified { reason };
-        let definition = KernelProcessDefinition::from_payload(payload)
-            .map_err(|error| uncertified(format!("invalid kernel process payload: {error}")))?;
-        let (document, _) = self
-            .entry(&definition)
-            .await
-            .map_err(|error| uncertified(error.to_string()))?
-            .map_err(uncertified)?;
-        // A document written under a stored set names definitions the node
-        // may lack: they are certified as its pin stored them (FIG-6985).
-        // Where the store keeps none, the node's own registry answers, and
-        // names what it lacks.
-        let functions = match self
-            .documents
-            .stored_definitions(&document, &self.functions)
-            .await
-        {
-            Ok(Ok(stored)) if !stored.is_empty() => self
-                .packages
-                .catalog_with(&stored)
-                .map_err(|refusal| uncertified(refusal.to_string()))?,
-            _ => Arc::clone(&self.functions),
-        };
-        self.effect_preparations
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .effects(
-                definition.document,
-                &document,
-                &functions,
-                &definition.entry,
-            )
+    ) -> Result<
+        lash_execution_contracts::process::linking::LinkInspection,
+        lash_execution_contracts::process::linking::EnginePortError,
+    > {
+        let definition = KernelProcessDefinition::from_payload(payload).map_err(|error| {
+            documents::refused(lash_kernel_package::LinkRefusal::InvalidDocument {
+                message: error.to_string(),
+            })
+        })?;
+        Ok(self.load_execution(&definition.code).await?.inspection)
+    }
+    async fn inspect_link(
+        &self,
+        link: lash_vocabulary::package::LinkId,
+        selector: &lash_execution_contracts::process::linking::ReachSelector,
+    ) -> Result<
+        lash_execution_contracts::process::linking::LinkInspection,
+        lash_execution_contracts::process::linking::EnginePortError,
+    > {
+        self.documents.inspect_link(link, selector).await
+    }
+    fn capabilities(&self) -> lash_vocabulary::claims::NodeRequirements {
+        self.machine_requirements()
     }
 
     /// A process runs the document its payload names and resumes under the
@@ -961,18 +915,17 @@ impl lash_execution_contracts::process::ProcessEngine for KernelProcessEngine {
         };
         let definition = KernelProcessDefinition::from_payload(reference.definition.as_json())
             .map_err(|error| unresolvable(error.to_string()))?;
-        let (_, signature) = self
-            .entry(&definition)
-            .await
-            .map_err(|error| {
-                lash_execution_contracts::process::ProcessDefinitionError::Fault(error.into())
-            })?
-            .map_err(unresolvable)?;
+        let (_, signature) = self.entry(&definition).await.map_err(|error| {
+            lash_execution_contracts::process::ProcessDefinitionError::Fault(error.into())
+        })?;
 
         Ok(
-            lash_execution_contracts::process::ProcessDefinitionResolution::new(entry_signature(
-                &signature,
-            )),
+            lash_execution_contracts::process::ProcessDefinitionResolution::new(
+                signature.as_ref().map_or(
+                    lash_execution_contracts::process::ProcessSignature::Unknown,
+                    entry_signature,
+                ),
+            ),
         )
     }
 }
@@ -1025,7 +978,11 @@ pub fn admit_kernel_process(
     let definition = payload_definition(payload)?;
     let mut identity = lash_execution_contracts::process::ProcessIdentity::labelled(
         LASH_VM_ENGINE_KIND,
-        Some(definition.entry.to_string()),
+        Some(match &definition.code {
+            InlineRequest::Linked { start } => format!("{:?}", start.selector),
+            InlineRequest::Callable { function, .. } => function.callable.function.to_string(),
+            InlineRequest::Unlinked { selector, .. } => format!("{selector:?}"),
+        }),
     );
     identity.definition_id = Some(
         definition_draft(&definition)

@@ -29,10 +29,16 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex, OnceLock};
 
-use lash_kernel_doc::graph_tokens::{
-    CanonicalFault, ChildRef, TokenCodec, TokenEvent, TokenReader, TokenWriter, encode_body,
-    logical_digest, put_varint, varint_len,
-};
+use lash_vocabulary::tokens::CanonicalFault;
+use lash_vocabulary::tokens::ChildRef;
+use lash_vocabulary::tokens::TokenCodec;
+use lash_vocabulary::tokens::TokenEvent;
+use lash_vocabulary::tokens::TokenReader;
+use lash_vocabulary::tokens::TokenWriter;
+use lash_vocabulary::tokens::encode_body;
+use lash_vocabulary::tokens::logical_digest;
+use lash_vocabulary::tokens::put_varint;
+use lash_vocabulary::tokens::varint_len;
 
 use super::node::{
     EncodedNode, INDEX_FANOUT, INLINE_TOKEN_MAX, LEAF_PAYLOAD_MAX, MAX_NODE_BYTES, NodeId,

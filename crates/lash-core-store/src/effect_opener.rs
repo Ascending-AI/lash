@@ -32,7 +32,8 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 
 use crate::admitted_scope::AdmittedScope;
-use crate::{SessionId, TurnId};
+use lash_vocabulary::identity::SessionId;
+use lash_vocabulary::identity::TurnId;
 
 /// The tag of a session operation's rendering and canonical encoding. The
 /// encoding is a stable-identity preimage (tool-call admissions and stored
@@ -110,7 +111,7 @@ pub enum EffectOpener {
     /// One process.
     Process {
         /// The minted id of the process that owns this work.
-        process_id: crate::ProcessId,
+        process_id: lash_vocabulary::identity::ProcessId,
     },
 }
 
@@ -162,7 +163,7 @@ impl EffectOpener {
 
     /// The opener of one process.
     #[must_use]
-    pub fn process(process_id: crate::ProcessId) -> Self {
+    pub fn process(process_id: lash_vocabulary::identity::ProcessId) -> Self {
         Self::Process { process_id }
     }
 
@@ -184,7 +185,7 @@ impl EffectOpener {
 
     /// The process this opener is, when it is one.
     #[must_use]
-    pub fn process_id(&self) -> Option<&crate::ProcessId> {
+    pub fn process_id(&self) -> Option<&lash_vocabulary::identity::ProcessId> {
         match self {
             Self::Turn { .. } | Self::SessionOperation { .. } => None,
             Self::Process { process_id } => Some(process_id),
@@ -401,7 +402,7 @@ impl crate::store::DurableRecord for EffectOpener {
 #[cfg(test)]
 mod tests {
     use super::*;
-    fn process(n: u64) -> crate::ProcessId {
+    fn process(n: u64) -> lash_vocabulary::identity::ProcessId {
         crate::process_identity::ProcessIdMint::sequential_id_for_testing(n)
     }
 

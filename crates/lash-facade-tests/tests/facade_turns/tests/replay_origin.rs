@@ -114,7 +114,7 @@ impl Replay {
         let core = builder.build(lash_facade_tests::runtime_lease_owner())?;
         let session = created_session(
             &core,
-            lash::SessionId::parse(id).expect("nonblank host identity"),
+            lash_vocabulary::identity::SessionId::parse(id).expect("nonblank host identity"),
         )
         .await
         .open()

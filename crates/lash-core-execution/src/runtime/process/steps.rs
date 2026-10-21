@@ -33,16 +33,15 @@ use std::sync::{Arc, Mutex};
 
 use lash_core_store::tool_run::CompletionSource;
 use lash_core_store::tool_run::StateResolution;
+use lash_protocol_types::ExecutionLimit;
 use lash_protocol_types::sync::MutexExt as _;
-use lash_protocol_types::{ExecutionLimit, ExecutionPolicy};
+use lash_vocabulary::tool_contract::ExecutionPolicy;
 
 use lash_core_store::tool_run::{MaterialOwner, MaterialRole};
 
 use crate::ActorContext;
-use crate::ProcessId;
 use crate::RuntimeEffectControllerError;
 use crate::ToolCatalog;
-use crate::ToolId;
 use crate::runtime::actor::round::{
     AdmittedExecution, MemberBody, MemberOutcome, RoundTools, completed_call,
 };
@@ -53,10 +52,13 @@ use lash_execution_contracts::plugin_error::PluginError;
 use lash_execution_contracts::process::ProcessRecord;
 use lash_execution_contracts::process::StepRequest;
 use lash_execution_contracts::waits::ParkDeadline;
+use lash_vocabulary::identity::ProcessId;
+use lash_vocabulary::tool_contract::ToolId;
 
 /// A step's admission: what its tool's declaration pins before it runs.
 #[derive(Clone, Debug, PartialEq)]
 pub struct StepAdmission {
+    pub target: Option<InvocationTarget>,
     /// The tool its admission records: the linked tool, or an engine step's
     /// [`EngineStepKind::admitted_tool`](lash_execution_contracts::process::EngineStepKind::admitted_tool).
     pub tool: ToolId,
@@ -93,6 +95,7 @@ impl StepAdmission {
         park: Option<ParkDeadline>,
     ) -> Self {
         Self {
+            target: None,
             tool,
             policy,
             limit,
@@ -166,7 +169,15 @@ pub struct ProcessStepTools {
     pub catalog: Arc<ToolCatalog>,
     /// The effects the process's env links: what each step's effect path
     /// runs.
-    pub effects: Arc<std::collections::BTreeMap<lash_kernel_doc::EffectName, crate::OperationLink>>,
+    pub environment: Arc<lash_core_store::tool_surface::ExecutionEnvironment>,
+    pub resolutions: Arc<
+        Mutex<
+            std::collections::BTreeMap<
+                lash_vocabulary::names::OperationUse,
+                lash_core_store::resolutions::ResolutionEntry,
+            >,
+        >,
+    >,
     /// The inline readers over the same recorded routes and component config.
     pub reads: Arc<dyn lash_execution_contracts::process::EngineEffectReads>,
     /// The round tools over it, owned by the process.
@@ -187,9 +198,18 @@ pub trait ProcessStepContext: Send + Sync {
     /// The prepared runtime cannot answer the binding.
     fn step_link(
         &self,
-        effect: &lash_kernel_doc::EffectName,
-        contract: &lash_kernel_doc::ContractId,
+        effect: &lash_vocabulary::names::OperationUse,
     ) -> Result<crate::plugin::StepLink, PluginError>;
+    async fn resolve_use(
+        &self,
+        cx: &ActorContext,
+        process: &ProcessRecord,
+        use_: lash_vocabulary::names::OperationUse,
+    ) -> Result<
+        crate::runtime::actor::resolutions::CommittedUse,
+        crate::runtime::actor::resolutions::ResolutionError,
+    >;
+
     /// Judge a recorded dispatch match and its execution binding.
     ///
     /// # Errors
@@ -204,7 +224,7 @@ pub trait ProcessStepContext: Send + Sync {
     /// The prepared runtime has no engine composition.
     fn requirements(
         &self,
-    ) -> Result<std::collections::BTreeSet<crate::ObligationToken>, PluginError>;
+    ) -> Result<std::collections::BTreeSet<lash_vocabulary::claims::ObligationToken>, PluginError>;
     /// Resolve the call the grant linked at `effect` names for `input`
     /// through the prepared deferred provider: a refusal before the
     /// provider is asked is the call's typed [`crate::DispatchRefusal`].
@@ -214,7 +234,7 @@ pub trait ProcessStepContext: Send + Sync {
     /// asked here.
     async fn resolve_dispatch(
         &self,
-        effect: &lash_kernel_doc::EffectName,
+        effect: &lash_vocabulary::names::OperationUse,
         input: &serde_json::Value,
     ) -> Result<Result<crate::DeferredMatch, crate::DispatchRefusal>, PluginError>;
     /// The arguments the call of the tool `matched` resolved runs with: the
@@ -225,7 +245,7 @@ pub trait ProcessStepContext: Send + Sync {
     /// The env grants no dispatch at `effect`.
     fn dispatch_args(
         &self,
-        effect: &lash_kernel_doc::EffectName,
+        effect: &lash_vocabulary::names::OperationUse,
         input: &serde_json::Value,
         matched: &crate::DeferredMatch,
     ) -> Result<Result<serde_json::Value, crate::DispatchRefusal>, PluginError>;
@@ -259,6 +279,7 @@ pub struct StepRuntime {
     cx: ActorContext,
     tools: tokio::sync::OnceCell<Arc<ProcessStepTools>>,
     resident: Mutex<Resident>,
+    targets: Mutex<std::collections::BTreeMap<crate::ToolCallId, InvocationTarget>>,
 }
 
 /// Where a committed resolution publishes.
@@ -278,6 +299,7 @@ impl StepRuntime {
             cx,
             tools: tokio::sync::OnceCell::new(),
             resident: Mutex::new(Resident::Unbuilt(Vec::new())),
+            targets: Mutex::new(std::collections::BTreeMap::new()),
         }
     }
 
@@ -358,6 +380,7 @@ pub trait ProcessSteps: Send + Sync {
         runtime: &Arc<StepRuntime>,
         process: &ProcessRecord,
         step: &StepRequest,
+        target: Option<&InvocationTarget>,
         now_ms: u64,
     ) -> Result<StepAdmission, StepRefusal>;
 
@@ -408,7 +431,7 @@ pub trait ProcessSteps: Send + Sync {
         process: &ProcessRecord,
         steps: &[StepRequest],
     ) -> Result<
-        Option<std::collections::BTreeSet<crate::ObligationToken>>,
+        Option<std::collections::BTreeSet<lash_vocabulary::claims::ObligationToken>>,
         lash_durable::DurableError,
     > {
         let _ = (runtime, process, steps);
@@ -421,6 +444,36 @@ pub trait ProcessSteps: Send + Sync {
     fn succession(&self, process: &ProcessRecord) -> Option<Arc<dyn super::EngineSuccession>> {
         let _ = process;
         None
+    }
+
+    /// Re-run ordinary target admission after correspondence has carried pins.
+    fn check_successor_links(
+        &self,
+        environment: &Arc<crate::ProcessEnv>,
+        inspection: &lash_execution_contracts::process::linking::LinkInspection,
+        seeds: &[lash_core_store::resolutions::ResolutionSeed],
+    ) -> Result<lash_vocabulary::claims::ClaimRequirements, PluginError> {
+        let _ = (environment, inspection, seeds);
+        Err(
+            lash_execution_contracts::process::linking::EnginePortError::Unsupported {
+                operation: "successor linked admission".into(),
+            }
+            .into(),
+        )
+    }
+
+    async fn succession_context(
+        &self,
+        process: &ProcessRecord,
+        request: &super::ProcessSuccessorRequest,
+        environment: &crate::ProcessEnv,
+    ) -> Result<super::SuccessionContext, PluginError> {
+        let _ = (process, request, environment);
+        Err(PluginError::Package(Box::new(
+            lash_execution_contracts::process::linking::EnginePortError::Unsupported {
+                operation: "linked succession context".into(),
+            },
+        )))
     }
 
     /// How long a step body whose token was cancelled may still answer:
@@ -538,6 +591,9 @@ pub fn tool_step_output(
                     let mut material = process_material(process, text).parked(source.wait);
                     if let Some(terminal) = source.terminal {
                         material.await_terminal(terminal);
+                    }
+                    if let Some(timer) = source.timer {
+                        material.await_timer(timer);
                     }
                     SettledOutput::Waiting(material)
                 }
@@ -663,37 +719,7 @@ pub fn resolved_match(output: &SettledOutput) -> Option<crate::DeferredMatch> {
 /// The call of the tool `matched` resolved `resolution`'s path to: the
 /// step lash issues in the commit that consumes the resolution, under the
 /// same step name, site and input, the granted tool's, whose arguments its
-/// grant's transform names again when the call runs. `None` when `matched`
-/// resolved nothing, or `resolution` is not a resolution.
-#[must_use]
-pub fn matched_target(
-    resolution: &StepRequest,
-    matched: crate::DeferredMatch,
-) -> Option<StepRequest> {
-    let StepRequest::Tool {
-        step,
-        effect,
-        input,
-        site,
-        matched: None,
-        ..
-    } = resolution
-    else {
-        return None;
-    };
-    // The target serves the definition its match retains: its call is
-    // pinned to that definition's contract.
-    let contract = matched.definition()?.contract_id();
-    Some(StepRequest::Tool {
-        step: step.clone(),
-        effect: effect.clone(),
-        contract,
-        input: input.clone(),
-        site: site.clone(),
-        matched: Some(Box::new(matched)),
-    })
-}
-
+/// grant's transform names again when the call runs.
 /// What a body that called a granted tool is answered when its
 /// resolution decided `matched` against it: a refused or unavailable path
 /// is a tool failure it may catch, typed, from the recorded decision alone.
@@ -917,4 +943,55 @@ pub async fn read_process_steps(
                 })
         })
         .collect())
+}
+
+/// Per-invocation target retained in Core's driver, separate from the engine request.
+/// A dispatching operation chooses this once per call; a deferred package use
+/// obtains it from the execution's immutable resolution winner.
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct InvocationTarget {
+    pub route: crate::OperationRoute,
+    pub contract: lash_vocabulary::operations::ContractId,
+    pub args: serde_json::Value,
+    pub dispatch_requested: Option<String>,
+}
+
+impl StepRuntime {
+    /// The driver restores an admitted target by call identity before a body runs.
+    pub fn retain_target(&self, call: crate::ToolCallId, target: InvocationTarget) {
+        self.targets.lock_recover().insert(call, target);
+    }
+
+    pub fn target(&self, call: &crate::ToolCallId) -> Option<InvocationTarget> {
+        self.targets.lock_recover().get(call).cloned()
+    }
+}
+
+impl InvocationTarget {
+    pub fn deferred_match(&self) -> Option<crate::DeferredMatch> {
+        Some(crate::DeferredMatch {
+            requested: self.dispatch_requested.clone()?,
+            outcome: crate::DeferredOutcome::Resolved {
+                link: self.route.clone(),
+            },
+        })
+    }
+}
+
+impl ProcessStepTools {
+    pub fn route(
+        &self,
+        use_: &lash_vocabulary::names::OperationUse,
+    ) -> Option<crate::OperationRoute> {
+        if let Some(fixed) = self.environment.fixed(use_) {
+            return Some(fixed.route.clone());
+        }
+        match self.resolutions.lock_recover().get(use_)? {
+            lash_core_store::resolutions::ResolutionEntry::Resolved { route, .. } => {
+                Some((**route).clone())
+            }
+            _ => None,
+        }
+    }
 }

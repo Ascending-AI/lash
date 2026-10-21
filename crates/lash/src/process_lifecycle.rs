@@ -10,7 +10,8 @@ use lash_core::facade_support::{ProcessEventSink, RuntimeHandle};
 use lash_execution_contracts::process::ProcessEvent;
 use lash_execution_contracts::process::ProcessRegistry;
 use lash_protocol_types::sync::MutexExt;
-use lash_protocol_types::{ProcessId, SessionId};
+use lash_vocabulary::identity::ProcessId;
+use lash_vocabulary::identity::SessionId;
 
 /// One open handle's route: the revision its observation stands at, or
 /// `None` once the handle is gone.
@@ -70,7 +71,7 @@ impl ProcessLifecycleFeed {
         process_id: &ProcessId,
     ) {
         let draft = LiveReplayEventDraft::new(
-            None::<lash_core::TurnId>,
+            None::<lash_vocabulary::identity::TurnId>,
             SessionObservationEventPayload::ProcessChanged {
                 kind,
                 process_ids: vec![process_id.clone()],

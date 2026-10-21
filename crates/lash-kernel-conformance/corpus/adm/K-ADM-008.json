@@ -3,7 +3,7 @@
   "cases": [
     {
       "name": "closed function bodies cannot read an unbound name",
-      "document": "kernel 1\nnumbers by_spelling\nfn f() { return missing } main { let x = call f() finish x }\n",
+      "document": "kernel 1\nnumbers by_spelling\ndefinition \"function f() -> Any\\nkernel 1\\nmetering statements\\nbody {\\n  return missing\\n}\\n\"\nmain {\n  let x = invoke f()\n  finish x\n}\n",
       "expected": {
         "end": "refused"
       }

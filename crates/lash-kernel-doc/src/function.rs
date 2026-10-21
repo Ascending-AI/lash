@@ -10,10 +10,11 @@ use serde::{Deserialize, Serialize};
 
 use crate::ast::Block;
 use crate::document::{DecodeError, EncodeError, from_versioned_json_with_limits, to_json};
-use crate::graph_tokens::{encode_body, logical_digest};
-use crate::name::{EffectName, FunctionId, FunctionName, Name};
-use crate::requirement::OperationRequirement;
-use crate::types::Signature;
+
+use lash_vocabulary::names::{FunctionId, FunctionName, Name};
+use lash_vocabulary::names::{Import, ImportSlot};
+use lash_vocabulary::tokens::{encode_body, logical_digest};
+use lash_vocabulary::types::Signature;
 
 /// A library's declarations by content identity, without native implementations.
 ///
@@ -39,7 +40,6 @@ pub struct FunctionDefinition {
     #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
     pub errors: BTreeSet<String>,
     /// What a call is charged, whichever implementation runs.
-    pub charge: Formula,
     /// The work bound of a native implementation that can run away.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub guard: Option<Guard>,
@@ -65,7 +65,7 @@ pub struct FunctionHeader {
     pub name: FunctionName,
     pub signature: Signature,
     pub errors: BTreeSet<String>,
-    pub charge: Formula,
+    pub metering: Metering,
     pub guard: Option<Guard>,
     pub implementation: ImplementationKind,
 }
@@ -74,7 +74,7 @@ pub struct FunctionHeader {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ImplementationKind {
     Native,
-    Body,
+    Guest,
     Both,
 }
 
@@ -87,12 +87,12 @@ impl FunctionHeader {
             name: definition.name.clone(),
             signature: definition.signature.clone(),
             errors: definition.errors.clone(),
-            charge: definition.charge.clone(),
+            metering: definition.metering(),
             guard: definition.guard.clone(),
             implementation: match definition.implementation {
-                Implementation::Native => ImplementationKind::Native,
-                Implementation::Body(_) => ImplementationKind::Body,
-                Implementation::Both(_) => ImplementationKind::Both,
+                Implementation::Native { .. } => ImplementationKind::Native,
+                Implementation::Guest { .. } => ImplementationKind::Guest,
+                Implementation::Both { .. } => ImplementationKind::Both,
             },
         }
     }
@@ -112,7 +112,7 @@ impl FunctionHeader {
     pub fn has_body(&self) -> bool {
         matches!(
             self.implementation,
-            ImplementationKind::Body | ImplementationKind::Both
+            ImplementationKind::Guest | ImplementationKind::Both
         )
     }
 }
@@ -132,13 +132,38 @@ fn is_first_native_version(version: &u32) -> bool {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum Implementation {
-    /// Only a native implementation, registered by the embedder.
-    Native,
-    /// Only a kernel-code body. A call to it is a statement of its own.
-    Body(FunctionBody),
-    /// A native implementation and a kernel-code body that behave the same;
-    /// an engine may run either.
-    Both(FunctionBody),
+    /// Authored code charges statements; shipped guest helpers charge a completion formula.
+    Guest {
+        body: FunctionBody,
+        metering: Metering,
+    },
+    Native {
+        charge: Formula,
+    },
+    /// Both implementations have the same formula charge.
+    Both {
+        body: FunctionBody,
+        charge: Formula,
+    },
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(
+    tag = "kind",
+    content = "value",
+    rename_all = "snake_case",
+    deny_unknown_fields
+)]
+pub enum Metering {
+    Statements,
+    Formula(Formula),
+}
+impl Metering {
+    pub fn formula(&self) -> Option<&Formula> {
+        match self {
+            Self::Statements => None,
+            Self::Formula(formula) => Some(formula),
+        }
+    }
 }
 
 /// A library function's kernel-code body. Its parameters are the
@@ -154,7 +179,7 @@ pub struct FunctionBody {
     /// it (`K-LIB-004`). A body beside a native implementation performs
     /// nothing. What the functions it calls perform is theirs to list.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    pub effects: BTreeMap<EffectName, OperationRequirement>,
+    pub imports: BTreeMap<ImportSlot, Import>,
     pub block: Block,
 }
 
@@ -284,14 +309,14 @@ impl FunctionDefinition {
     pub fn has_native(&self) -> bool {
         matches!(
             self.implementation,
-            Implementation::Native | Implementation::Both(_)
+            Implementation::Native { .. } | Implementation::Both { .. }
         )
     }
 
     pub fn body(&self) -> Option<&FunctionBody> {
         match &self.implementation {
-            Implementation::Native => None,
-            Implementation::Body(body) | Implementation::Both(body) => Some(body),
+            Implementation::Native { .. } => None,
+            Implementation::Guest { body, .. } | Implementation::Both { body, .. } => Some(body),
         }
     }
 
@@ -300,12 +325,59 @@ impl FunctionDefinition {
     }
 
     pub fn from_json(text: &str) -> Result<Self, DecodeError> {
-        Self::from_json_with_limits(text, crate::KernelDataLimits::standard())
+        Self::from_json_with_limits(
+            text,
+            lash_vocabulary::data_limits::KernelDataLimits::standard(),
+        )
     }
     pub fn from_json_with_limits(
         text: &str,
-        limits: crate::KernelDataLimits,
+        limits: lash_vocabulary::data_limits::KernelDataLimits,
     ) -> Result<Self, DecodeError> {
         from_versioned_json_with_limits(text, limits)
+    }
+}
+
+impl FunctionDefinition {
+    pub fn body_mut(&mut self) -> Option<&mut FunctionBody> {
+        match &mut self.implementation {
+            Implementation::Native { .. } => None,
+            Implementation::Guest { body, .. } | Implementation::Both { body, .. } => Some(body),
+        }
+    }
+}
+
+impl FunctionDefinition {
+    pub fn charge(&self) -> Option<&Formula> {
+        match &self.implementation {
+            Implementation::Native { charge } | Implementation::Both { charge, .. } => Some(charge),
+            Implementation::Guest { metering, .. } => metering.formula(),
+        }
+    }
+    pub fn charge_mut(&mut self) -> Option<&mut Formula> {
+        match &mut self.implementation {
+            Implementation::Native { charge } | Implementation::Both { charge, .. } => Some(charge),
+            Implementation::Guest {
+                metering: Metering::Formula(charge),
+                ..
+            } => Some(charge),
+            Implementation::Guest {
+                metering: Metering::Statements,
+                ..
+            } => None,
+        }
+    }
+    pub fn metering(&self) -> Metering {
+        match &self.implementation {
+            Implementation::Guest { metering, .. } => metering.clone(),
+            Implementation::Native { charge } | Implementation::Both { charge, .. } => {
+                Metering::Formula(charge.clone())
+            }
+        }
+    }
+}
+impl FunctionHeader {
+    pub fn charge(&self) -> Option<&Formula> {
+        self.metering.formula()
     }
 }

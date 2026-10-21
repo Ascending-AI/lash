@@ -29,6 +29,7 @@ testing = ["lash-core-ids/testing", "lash-protocol-types/testing"]
 workspace = true
 
 [dependencies]
+lash-vocabulary = { workspace = true }
 lash-transport-failure = { workspace = true }
 lash-core-ids = { workspace = true }
 lash-protocol-types = { workspace = true, features = ["schema-validation"] }

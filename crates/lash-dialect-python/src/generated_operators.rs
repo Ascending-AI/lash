@@ -1,30 +1,34 @@
 //! Native tokens resolve by operand facts, then by a unique full identity.
 use lash_kernel_dialect::source_types::{Kind, Types};
 use lash_kernel_doc as k;
+use lash_vocabulary::{FunctionId, FunctionName, Import, ImportKind, ImportSlot};
 use std::collections::BTreeMap;
 
 #[derive(Default)]
 pub(crate) struct Operators {
-    functions: BTreeMap<k::FunctionId, k::FunctionName>,
-    candidates: BTreeMap<&'static str, Vec<k::FunctionId>>,
+    functions: BTreeMap<FunctionId, FunctionName>,
+    imports: BTreeMap<ImportSlot, Import>,
+    candidates: BTreeMap<&'static str, Vec<FunctionId>>,
 }
 impl Operators {
-    pub(crate) fn new(functions: &BTreeMap<k::FunctionId, k::FunctionName>) -> Self {
-        let mut candidates: BTreeMap<&'static str, Vec<k::FunctionId>> = BTreeMap::new();
-        for (id, name) in functions {
+    pub(crate) fn new(document: &k::Document) -> Self {
+        let functions = document.function_names();
+        let mut candidates: BTreeMap<&'static str, Vec<FunctionId>> = BTreeMap::new();
+        for (id, name) in &functions {
             if let Some(token) = spelling(name.as_str()) {
                 candidates.entry(token).or_default().push(*id);
             }
         }
         Self {
-            functions: functions.clone(),
+            functions,
+            imports: document.imports.clone(),
             candidates,
         }
     }
-    pub(crate) fn functions(&self) -> &BTreeMap<k::FunctionId, k::FunctionName> {
+    pub(crate) fn functions(&self) -> &BTreeMap<FunctionId, FunctionName> {
         &self.functions
     }
-    pub(crate) fn id(&self, token: &str, args: &[k::Expr], types: &Types) -> Option<k::FunctionId> {
+    pub(crate) fn id(&self, token: &str, args: &[k::Expr], types: &Types) -> Option<FunctionId> {
         let candidates = self.candidates.get(token)?;
         if let [id] = candidates.as_slice() {
             return Some(*id);
@@ -51,7 +55,7 @@ impl Operators {
     }
     pub(crate) fn token(
         &self,
-        id: &k::FunctionId,
+        id: &FunctionId,
         args: &[k::Expr],
         types: &Types,
     ) -> Option<&'static str> {
@@ -118,7 +122,7 @@ const BUILTINS: [(&str, &str); 17] = [
 
 impl Operators {
     /// The one function the base document labels `label`.
-    pub(crate) fn unique(&self, label: &str) -> Option<k::FunctionId> {
+    pub(crate) fn unique(&self, label: &str) -> Option<FunctionId> {
         let mut ids = self
             .functions
             .iter()
@@ -139,13 +143,13 @@ impl Operators {
             Some(_) => return None,
         };
         Some(k::Protocol {
-            open: self.unique(open)?,
+            open: self.target(open)?,
             next: None,
             item: match item {
-                Some(item) => Some(self.unique(item)?),
+                Some(item) => Some(self.target(item)?),
                 None => None,
             },
-            check: Some(self.unique("py.for_in.check")?),
+            check: Some(self.target("py.for_in.check")?),
         })
     }
     /// The view a native `for` spells for a loop through `via`, or none:
@@ -164,9 +168,10 @@ impl Operators {
     }
     /// The authored spelling of a library action, if it has one: a label
     /// the document holds once, and for a method a variable receiver.
-    pub(crate) fn authored(&self, id: &k::FunctionId, args: &[k::Expr]) -> Option<Authored> {
-        let label = self.functions.get(id)?.as_str();
-        if args.is_empty() || self.unique(label) != Some(*id) {
+    pub(crate) fn authored(&self, id: &impl Reference, args: &[k::Expr]) -> Option<Authored> {
+        let name = id.label(self)?;
+        let label = name.as_str();
+        if args.is_empty() {
             return None;
         }
         if let Some((name, _)) = BUILTINS.iter().find(|(_, helper)| *helper == label) {
@@ -190,4 +195,63 @@ pub(crate) fn builtin_label(name: &str) -> Option<&'static str> {
         .iter()
         .find(|(builtin, _)| *builtin == name)
         .map(|(_, helper)| *helper)
+}
+
+pub(crate) trait Reference {
+    fn label(&self, operators: &Operators) -> Option<String>;
+}
+impl Reference for FunctionId {
+    fn label(&self, operators: &Operators) -> Option<String> {
+        operators.functions.get(self).map(ToString::to_string)
+    }
+}
+impl Reference for ImportSlot {
+    fn label(&self, operators: &Operators) -> Option<String> {
+        operators
+            .imports
+            .get(self)
+            .map(|import| import.name.to_string())
+    }
+}
+impl Reference for k::FunctionTarget {
+    fn label(&self, operators: &Operators) -> Option<String> {
+        match self {
+            Self::Local(id) => id.label(operators),
+            Self::Import(slot) => slot.label(operators),
+        }
+    }
+}
+impl Operators {
+    pub(crate) fn name(&self, reference: &impl Reference) -> Option<String> {
+        reference.label(self)
+    }
+    pub(crate) fn is(&self, reference: &impl Reference, label: &str) -> bool {
+        let expected = lash_kernel_dialect::authoring::helper_name(
+            &FunctionName::new(label).expect("helper name"),
+        )
+        .to_string();
+        reference
+            .label(self)
+            .is_some_and(|name| name == label || name == expected)
+    }
+    fn target(&self, label: &str) -> Option<k::FunctionTarget> {
+        let expected = lash_kernel_dialect::authoring::helper_name(&FunctionName::new(label).ok()?)
+            .to_string();
+        let mut found = self
+            .imports
+            .iter()
+            .filter(|(_, import)| {
+                matches!(import.kind, ImportKind::Code { .. })
+                    && import.name.to_string() == expected
+            })
+            .map(|(slot, _)| k::FunctionTarget::Import(*slot))
+            .chain(
+                self.functions
+                    .iter()
+                    .filter(|(_, name)| name.as_str() == label)
+                    .map(|(id, _)| k::FunctionTarget::Local(*id)),
+            );
+        let target = found.next()?;
+        found.next().is_none().then_some(target)
+    }
 }

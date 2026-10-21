@@ -36,7 +36,7 @@
 
 use std::sync::OnceLock;
 
-use lash_kernel_doc::{Unit, Value};
+use lash_kernel_doc::Value;
 use lash_kernel_exec::{Op, Reg};
 
 use super::expr::{self, Arm, Callee, Close, Expr, Kind as ExprKind, Make};
@@ -242,7 +242,7 @@ pub(super) fn form(tables: &mut Tables, library: &Prepared, base: (u32, u32, u32
 /// island, as one that may enter an island.
 fn mark(tables: &mut Tables, islands: &Islands, codes: u32) {
     for nested in &mut tables.stream.nested {
-        if matches!(nested.site.unit, Unit::Library(_)) {
+        if !nested.guest {
             continue;
         }
         nested.island = match nested.kind {

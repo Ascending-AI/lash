@@ -28,10 +28,12 @@ pub enum CancelHint {
 pub enum PendingResolver {
     /// The terminal of a durable process resolves this wait.
     ///
-    /// A [`ProcessId`](crate::ProcessId) is minted and never reused, so a
+    /// A [`ProcessId`](lash_vocabulary::identity::ProcessId) is minted and never reused, so a
     /// wait armed against one process is never resolved by another's
     /// terminal.
-    ProcessTerminal { process_id: crate::ProcessId },
+    ProcessTerminal {
+        process_id: lash_vocabulary::identity::ProcessId,
+    },
     /// The terminal of the one process this call declares resolves the wait.
     ///
     /// The body cannot name that process: its id is minted only when the
@@ -39,6 +41,12 @@ pub enum PendingResolver {
     /// records the realized id as the call's launch receipt, and arms the
     /// terminal of that id, on the park and on every redrive.
     DeclaredStart(DeclaredStart),
+    /// The existing durable timer resolves this call with the recorded result.
+    Timer {
+        #[serde(with = "durable_instant")]
+        deadline: lash_durable::DurableInstant,
+        result: serde_json::Value,
+    },
 }
 
 impl PendingResolver {
@@ -48,6 +56,7 @@ impl PendingResolver {
     pub fn awaits_process_terminal(&self) -> bool {
         match self {
             Self::ProcessTerminal { .. } | Self::DeclaredStart(_) => true,
+            Self::Timer { .. } => false,
         }
     }
 }
@@ -93,6 +102,14 @@ impl PendingCompletion {
         self
     }
 
+    pub fn resolved_by_timer(
+        self,
+        deadline: lash_durable::DurableInstant,
+        result: serde_json::Value,
+    ) -> Self {
+        self.resolved_by(PendingResolver::Timer { deadline, result })
+    }
+
     pub fn resolved_by_process_terminal(self, process_id: crate::ProcessId) -> Self {
         self.resolved_by(PendingResolver::ProcessTerminal { process_id })
     }
@@ -121,7 +138,7 @@ impl PendingCompletion {
 /// # The completion-key contract
 ///
 /// A tool that returns [`ToolOutcome::Pending`] declares `may_defer` on its
-/// manifest's [`ToolDeclaration`](crate::ToolDeclaration); an undeclared tool
+/// manifest's [`ToolDeclaration`](lash_vocabulary::tool_declaration::ToolDeclaration); an undeclared tool
 /// that parks fails the call with `tool_outcome_not_declared`. Before
 /// returning `Pending`, it **must** first obtain a completion key by calling
 /// [`AttemptContext::completion_key`](crate::AttemptContext::completion_key)
@@ -387,6 +404,11 @@ pub fn tool_output_from_completion_resolution(
     resolution: crate::Resolution,
     resolver: Option<&crate::PendingResolver>,
 ) -> crate::ToolCallOutput {
+    if let (Some(crate::PendingResolver::Timer { result, .. }), crate::Resolution::Ok(_)) =
+        (resolver, &resolution)
+    {
+        return crate::ToolCallOutput::success(result.clone());
+    }
     if let (Some(resolver), crate::Resolution::Ok(value)) = (resolver, &resolution)
         && resolver.awaits_process_terminal()
         && let Ok(terminal) = serde_json::from_value::<
@@ -558,7 +580,9 @@ mod tests {
     /// §3.7): the call answers the child's own value, never the envelope.
     fn declared_start() -> crate::PendingResolver {
         let start = lash_execution_contracts::tool_intent::StartProcessIntent {
-            owner: crate::RuntimeOwner::Session(crate::SessionId::from("parent")),
+            owner: lash_vocabulary::identity::RuntimeOwner::Session(
+                lash_vocabulary::identity::SessionId::from("parent"),
+            ),
             declaration: lash_execution_contracts::testing::held_engine_declaration(
                 serde_json::Value::Null,
                 lash_execution_contracts::process::ProcessOriginator::host(),
@@ -566,7 +590,9 @@ mod tests {
             ),
         };
         let identity = lash_execution_contracts::tool_intent::derive_tool_intent_identity_under(
-            &crate::RuntimeOwner::Session(crate::SessionId::from("parent")),
+            &lash_vocabulary::identity::RuntimeOwner::Session(
+                lash_vocabulary::identity::SessionId::from("parent"),
+            ),
             "turn-1",
             &crate::ToolCallId::fixture("call-1"),
             0,
@@ -650,7 +676,9 @@ mod tests {
         };
         let derive = |session: &str, scope: &str, call: &str, index: u32| {
             lash_execution_contracts::tool_intent::derive_tool_intent_identity_under(
-                &crate::RuntimeOwner::Session(crate::SessionId::fixture(session)),
+                &lash_vocabulary::identity::RuntimeOwner::Session(
+                    lash_vocabulary::identity::SessionId::fixture(session),
+                ),
                 scope,
                 &crate::ToolCallId::fixture(call),
                 index,
@@ -659,7 +687,10 @@ mod tests {
         };
         let emission = crate::RuntimeInvocation::effect(
             crate::EffectAddress::new(
-                crate::ExecutionScope::turn(crate::SessionId::from("parent"), "turn-1"),
+                crate::ExecutionScope::turn(
+                    lash_vocabulary::identity::SessionId::from("parent"),
+                    "turn-1",
+                ),
                 "tool:call-1:attempt:2",
             )
             .expect("a turn address"),
@@ -678,7 +709,9 @@ mod tests {
             (
                 "another minting emission",
                 lash_execution_contracts::tool_intent::derive_tool_intent_identity_under(
-                    &crate::RuntimeOwner::Session(crate::SessionId::from("parent")),
+                    &lash_vocabulary::identity::RuntimeOwner::Session(
+                        lash_vocabulary::identity::SessionId::from("parent"),
+                    ),
                     "turn-1",
                     &crate::ToolCallId::fixture("call-1"),
                     0,
@@ -710,10 +743,25 @@ mod tests {
         assert_eq!(
             lash_execution_contracts::declared_start::bound_declared_start(&foreign, &declaring),
             Err(lash_execution_contracts::tool_intent_outcome::ToolIntentRefusalReason::OwnerMismatch {
-                expected: crate::RuntimeOwner::Session(crate::SessionId::from("parent")),
-                recorded: crate::RuntimeOwner::Session(crate::SessionId::from("other")),
+                expected: lash_vocabulary::identity::RuntimeOwner::Session(lash_vocabulary::identity::SessionId::from("parent")),
+                recorded: lash_vocabulary::identity::RuntimeOwner::Session(lash_vocabulary::identity::SessionId::from("other")),
             }),
             "a start naming another session is refused"
         );
+    }
+}
+
+mod durable_instant {
+    use serde::{Deserialize, Serialize};
+    pub fn serialize<S: serde::Serializer>(
+        value: &lash_durable::DurableInstant,
+        out: S,
+    ) -> Result<S::Ok, S::Error> {
+        value.0.serialize(out)
+    }
+    pub fn deserialize<'de, D: serde::Deserializer<'de>>(
+        input: D,
+    ) -> Result<lash_durable::DurableInstant, D::Error> {
+        i64::deserialize(input).map(lash_durable::DurableInstant)
     }
 }

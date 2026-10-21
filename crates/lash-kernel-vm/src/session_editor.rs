@@ -10,9 +10,9 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use lash_kernel_doc::Datum;
 use lash_kernel_doc::heap::HeapFault;
 use lash_kernel_doc::heap::PageValue;
-use lash_kernel_doc::{Datum, Name};
 use lash_kernel_state::kernel_internals::PagedHeap;
 use lash_kernel_state::kernel_internals::census_impl::Census;
 use lash_kernel_state::kernel_internals::family_impl::FrozenBase;
@@ -23,6 +23,7 @@ use lash_kernel_state::paged::{
     HeapLifecycle, HeapWriteError, KeyedRoot, NameRef, PageSource, SemanticHeap, SessionRoot,
     SiteRef,
 };
+use lash_vocabulary::names::Name;
 
 /// A binding a host reads: its value as data, or why it is none.
 #[derive(Clone, Debug, PartialEq)]
@@ -201,9 +202,13 @@ impl SessionEditor {
     /// # Errors
     ///
     /// The heap's faults.
-    pub fn refers(&self, binding: &Name, function: &Name) -> Result<bool, HeapFault> {
+    pub fn refers(
+        &self,
+        binding: &Name,
+        environment: &lash_kernel_doc::heap::EntityId,
+    ) -> Result<bool, HeapFault> {
         use lash_kernel_doc::heap::{Element, PageReader as _};
-        use lash_kernel_doc::snapshot::{members, text_of};
+        use lash_kernel_doc::snapshot::members;
         let Some(record) = self
             .bindings
             .get(&metadata_key(binding), self.heap.pages())?
@@ -217,9 +222,22 @@ impl SessionEditor {
         let mut objects = BTreeSet::new();
         while let Some(value) = pending.pop() {
             match &value {
-                PageValue::Function(name) => {
-                    if text_of(&self.heap, name)? == function.as_str() {
+                PageValue::Closure(id) => {
+                    if id == environment {
                         return Ok(true);
+                    }
+                    if objects.insert(*id) {
+                        let closure = self.heap.closure(*id)?;
+                        let mut cells = Vec::new();
+                        closure
+                            .captures
+                            .visit(self.heap.pages(), &mut |_, capture| {
+                                cells.push(capture.1);
+                                true
+                            })?;
+                        for cell in cells {
+                            pending.push(self.heap.variable_get(cell)?);
+                        }
                     }
                 }
                 PageValue::Tuple(tuple) => pending.extend(members(&self.heap, tuple)?),
@@ -258,7 +276,7 @@ impl SessionEditor {
         let record = BindingRecord {
             name: NameRef::new(name, self.heap.pages())?,
             declared: SiteRef::new(
-                &lash_kernel_doc::Site::new(lash_kernel_doc::Unit::Main, Vec::new()),
+                &lash_vocabulary::sites::Site::new(lash_vocabulary::sites::Unit::Main, Vec::new()),
                 self.heap.pages(),
             )?,
             value: BoundRecord::Value(value),

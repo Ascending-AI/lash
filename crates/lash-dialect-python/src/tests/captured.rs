@@ -14,8 +14,10 @@
 
 use std::collections::BTreeMap;
 
-use lash_kernel_doc::{Datum, EffectName, ErrorDatum, Name, Param, Signature, Type};
+use lash_kernel_doc::{Datum, ErrorDatum};
+
 use lash_kernel_vm::{End, Outcome, Request};
+use lash_vocabulary::{EffectName, Name, Param, Signature, Type};
 use serde::Deserialize;
 use serde_json::Value as Json;
 
@@ -157,10 +159,8 @@ fn on_the_kernel(source: &str, script: &Script) -> Capture {
             );
             let mut outcomes = Vec::new();
             for request in park.requests {
-                let Request::Effect(effect) = &request else {
-                    panic!("a captured case does not sleep\n{text_}");
-                };
-                if effect.effect.as_str() == "host.end" {
+                let Request::Effect(effect) = &request;
+                if crate::tests::linked::operation(&effect.use_).as_str() == "host.end" {
                     reported = Some((effect.args[0].clone(), effect.args[1].clone()));
                     outcomes.push((effect.wait, Outcome::Completed(Datum::Null)));
                     continue;

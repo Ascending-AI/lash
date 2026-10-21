@@ -26,8 +26,7 @@ testing = []
 workspace = true
 
 [dependencies]
-lash-kernel-check = { workspace = true }
-lash-kernel-doc = { workspace = true }
+lash-vocabulary = { workspace = true }
 lash-protocol-types = { workspace = true }
 chrono = { workspace = true, features = ["serde"] }
 opentelemetry = { version = "0.33", optional = true }

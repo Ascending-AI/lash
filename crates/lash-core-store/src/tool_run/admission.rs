@@ -28,13 +28,14 @@
 use std::collections::BTreeSet;
 
 use lash_protocol_types::ToolCallId;
-pub use lash_protocol_types::{DeclarationRefusal, OutcomeShape, ToolDeclaration};
+use lash_vocabulary::tool_declaration::DeclarationRefusal;
+use lash_vocabulary::tool_declaration::ToolDeclaration;
 use serde::{Deserialize, Serialize};
 
 use super::material::{MaterialOwner, MaterialRef, MaterialRole};
 use super::tool_hooks::{BeforeCheckVerdict, BeforeSelection, CheckRecord};
 use crate::effect_opener::EffectOpener;
-use crate::store::plugin_writers::PluginCallbackIdentity;
+use lash_vocabulary::providers::PluginCallbackIdentity;
 
 /// The presentation callbacks a call is bound to: the singleton presenter,
 /// then the ordered optional steps.
@@ -59,14 +60,10 @@ impl PresentationBinding {
 #[serde(deny_unknown_fields)]
 pub struct AdmittedBinding {
     /// The tool provider that executes the body, by its declared key.
-    #[serde(
-        deserialize_with = "crate::store::plugin_writers::declared_tool_provider::deserialize"
-    )]
+    #[serde(deserialize_with = "lash_vocabulary::providers::declared_tool_provider::deserialize")]
     pub executable: PluginCallbackIdentity,
     /// The tool provider that prepared the request, by its declared key.
-    #[serde(
-        deserialize_with = "crate::store::plugin_writers::declared_tool_provider::deserialize"
-    )]
+    #[serde(deserialize_with = "lash_vocabulary::providers::declared_tool_provider::deserialize")]
     pub preparation: PluginCallbackIdentity,
     pub presentation: PresentationBinding,
 }
@@ -80,7 +77,7 @@ impl AdmittedBinding {
     }
 }
 
-pub use lash_protocol_types::{Backoff, BoundedRetry, ExecutionPolicy};
+use lash_vocabulary::tool_contract::ExecutionPolicy;
 
 /// What cancelling an issued call asks of the external work it started.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]

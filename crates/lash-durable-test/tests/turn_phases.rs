@@ -141,13 +141,17 @@ use lash_durable_test::{
     Cut, Fault, Matrix, Scenario, SimClock, SimNodes, SimNodesConfig, Stored, Tripwire, WriteKind,
 };
 use lash_execution_contracts::backend::Backend;
+use lash_protocol_types::ExecutionBudgets;
+use lash_protocol_types::ExecutionBudgetsConfig;
+use lash_protocol_types::ProviderAttemptLimits;
+use lash_protocol_types::TurnCancelMode;
+use lash_protocol_types::TurnCancelUndeliveredInputPolicy;
 use lash_protocol_types::sync::MutexExt as _;
-use lash_protocol_types::{
-    ExecutionBudgets, ExecutionBudgetsConfig, ProviderAttemptLimits, SessionId, TurnCancelMode,
-    TurnCancelUndeliveredInputPolicy, TurnId,
-};
 use lash_protocol_types::{llm::types::ProviderRouteIdentity, llm::types::RecordedRequestTemplate};
+
 use lash_sansio::sansio::ExecutionEnvironmentSync;
+use lash_vocabulary::identity::SessionId;
+use lash_vocabulary::identity::TurnId;
 
 use dialect::Dialect;
 
@@ -400,7 +404,7 @@ struct Seen {
     /// The head revisions another writer moved the head from and to.
     moved: Option<(u64, u64)>,
     /// The input the host cancels, as the store accepted it.
-    queued: Option<lash_core::InputId>,
+    queued: Option<lash_vocabulary::identity::InputId>,
     /// What the host's cancel of the queued input answered.
     queued_cancel: Option<lash_core::facade_support::TurnCancelOutcome>,
     /// What the cancel sent at the admission cut answered.

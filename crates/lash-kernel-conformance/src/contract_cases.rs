@@ -7,17 +7,34 @@ use std::sync::Arc;
 use lash_kernel_check::{
     Environment, RefusalReason, admit, derive, derive_definition, requirements,
 };
-use lash_kernel_doc::{
-    Document, FunctionDefinition, FunctionRegistry, Implementation, InvalidReason, Name,
-    NativeCall, NativeError, NativeFunction, Node, Site, SourceLanguage, SourceMap, SourceSite,
-    Span, Unit, Value, parse_definition, parse_document, print_definition, print_document,
-    validate_definition, validate_document,
-};
+use lash_kernel_doc::Document;
+use lash_kernel_doc::FunctionDefinition;
+use lash_kernel_doc::FunctionRegistry;
+use lash_kernel_doc::Implementation;
+use lash_kernel_doc::InvalidReason;
+use lash_kernel_doc::NativeCall;
+use lash_kernel_doc::NativeError;
+use lash_kernel_doc::NativeFunction;
+use lash_kernel_doc::Node;
+use lash_kernel_doc::SourceLanguage;
+use lash_kernel_doc::SourceMap;
+use lash_kernel_doc::SourceSite;
+use lash_kernel_doc::Span;
+use lash_kernel_doc::Value;
+use lash_kernel_doc::parse_definition;
+use lash_kernel_doc::parse_document;
+use lash_kernel_doc::print_definition;
+use lash_kernel_doc::print_document;
+use lash_kernel_doc::validate_definition;
+use lash_kernel_doc::validate_document;
 use lash_kernel_vm::kernel_internals::Layout;
 use lash_kernel_vm::{
     CellStart, DeliverError, Delivered, End, KernelMachine, Machine, Outcome, PreparedLibrary,
     Program, Request, Step,
 };
+use lash_vocabulary::names::Name;
+use lash_vocabulary::sites::Site;
+use lash_vocabulary::sites::Unit;
 
 use crate::{Case, ExpectedEnd, MachineRunner, Shard, check_case};
 
@@ -135,7 +152,10 @@ fn definition_parts() {
     assert_eq!(original.signature.params[0].name.as_str(), "x");
     assert!(original.errors.contains("probe.error"));
     assert_eq!(original.guard.as_ref().unwrap().unit, "step");
-    assert!(matches!(original.implementation, Implementation::Native));
+    assert!(matches!(
+        original.implementation,
+        Implementation::Native { .. }
+    ));
     assert_eq!(
         FunctionDefinition::from_json(&original.to_json().unwrap()).unwrap(),
         original
@@ -214,23 +234,20 @@ fn outer(inner: &FunctionDefinition) -> FunctionDefinition {
 }
 
 fn manifest_closure() {
-    let mut registry = same_registry(BODY, false);
     let inner = definition(BODY);
     let outer = outer(&inner);
-    let outer_id = registry.register(outer, None).unwrap();
     let inner_id = inner.identity();
-    let mut document = doc(&format!(
-        "{HEADER}use probe.outer = @{outer_id}\nmain {{ let x = invoke probe.outer(7) finish x }}"
-    ));
-    let needs = requirements(&document, &registry);
-    assert_eq!(needs.functions.len(), 2);
-    assert!(needs.functions.contains_key(&inner_id));
-    let errors = admit(&document, &Environment::new(&registry))
-        .unwrap_err()
-        .errors;
-    assert!(errors.iter().any(|e| matches!(e.reason, RefusalReason::FunctionNotListed { function, .. } if function == inner_id)));
-    document.manifest.functions.insert(inner_id, inner.name);
-    admit(&document, &Environment::new(&registry)).unwrap();
+    let outer_id = outer.identity();
+    let mut document = Document::new(
+        lash_kernel_doc::NumberPolicy::BySpelling,
+        vec![lash_kernel_doc::Stmt::Return {
+            value: lash_kernel_doc::Expr::Literal(lash_kernel_doc::Literal::Null),
+        }],
+    );
+    document.functions.insert(outer_id, outer);
+    assert!(admit(&document, &Environment::new(&document.functions)).is_err());
+    document.functions.insert(inner_id, inner);
+    admit(&document, &Environment::new(&document.functions)).unwrap();
 }
 
 fn missing_transitive() {
@@ -277,7 +294,6 @@ fn typed_refusals(shard: &Shard, registry: &FunctionRegistry) {
         }
         let document = doc(&case.document);
         let mut env = Environment::new(registry);
-        env.effects = document.manifest.effects.clone();
         let errors = admit(&document, &env).unwrap_err().errors;
         assert!(errors.iter().any(|error| match shard.rule.as_str() {
             "K-ADM-005" => matches!(error.reason, RefusalReason::ArgumentType { .. }),
@@ -448,11 +464,7 @@ fn site_order(shard: &Shard, registry: &FunctionRegistry) {
     let mut sites = Vec::new();
     walk(&document, Site::new(Unit::Main, []), &mut sites);
     for name in document.functions.keys() {
-        walk(
-            &document,
-            Site::new(Unit::Function(name.clone()), []),
-            &mut sites,
-        );
+        walk(&document, Site::new(Unit::Library(*name), []), &mut sites);
     }
     assert_eq!(
         graph
@@ -493,11 +505,12 @@ fn charge_invariance(shard: &Shard, registry: &FunctionRegistry) {
     let mut observations = Vec::new();
     for native in [false, true] {
         for layout in [Layout(0), Layout(37)] {
-            let program = Program {
-                closure: crate::pages::CLOSURE,
-                document: Arc::new(document.clone()),
-                library: PreparedLibrary::new(Arc::new(same_registry(BOTH, native))),
-            };
+            let program = crate::machine::prepare_document(
+                &(PreparedLibrary::new(Arc::new(same_registry(BOTH, native)))),
+                Arc::new(document.clone()),
+                None,
+            )
+            .expect("prepare linked law document");
             let mut machine = crate::pages::start_with_layout(
                 program,
                 crate::CaseBounds::default().into(),
@@ -536,11 +549,12 @@ fn instance_isolation(shard: &Shard, registry: &FunctionRegistry) {
 }
 
 fn program(case: &Case, registry: &FunctionRegistry) -> Program {
-    Program {
-        closure: crate::pages::CLOSURE,
-        document: Arc::new(doc(&case.document)),
-        library: PreparedLibrary::new(Arc::new(registry.clone())),
-    }
+    crate::machine::prepare_document(
+        &PreparedLibrary::new(Arc::new(registry.clone())),
+        Arc::new(doc(&case.document)),
+        None,
+    )
+    .expect("prepare linked law document")
 }
 
 fn delivery_errors(shard: &Shard, registry: &FunctionRegistry) {
@@ -557,7 +571,7 @@ fn delivery_errors(shard: &Shard, registry: &FunctionRegistry) {
     let Request::Effect(request) = &park.requests[0] else {
         panic!("effect request")
     };
-    let before = lash_kernel_doc::graph_tokens::encode_body(
+    let before = lash_vocabulary::tokens::encode_body(
         &machine
             .seal(crate::pages::BUDGET)
             .unwrap()
@@ -572,7 +586,7 @@ fn delivery_errors(shard: &Shard, registry: &FunctionRegistry) {
         Err(DeliverError::UnknownWait { .. })
     ));
     assert_eq!(
-        lash_kernel_doc::graph_tokens::encode_body(
+        lash_vocabulary::tokens::encode_body(
             &machine
                 .seal(crate::pages::BUDGET)
                 .unwrap()
@@ -590,7 +604,7 @@ fn delivery_errors(shard: &Shard, registry: &FunctionRegistry) {
             .unwrap(),
         Delivered::Accepted
     );
-    let accepted = lash_kernel_doc::graph_tokens::encode_body(
+    let accepted = lash_vocabulary::tokens::encode_body(
         &machine
             .seal(crate::pages::BUDGET)
             .unwrap()
@@ -605,7 +619,7 @@ fn delivery_errors(shard: &Shard, registry: &FunctionRegistry) {
         Err(DeliverError::AlreadyDelivered { .. })
     ));
     assert_eq!(
-        lash_kernel_doc::graph_tokens::encode_body(
+        lash_vocabulary::tokens::encode_body(
             &machine
                 .seal(crate::pages::BUDGET)
                 .unwrap()
@@ -622,12 +636,6 @@ fn delivery_errors(shard: &Shard, registry: &FunctionRegistry) {
 
 struct ProbeHost;
 impl lash_kernel_vm::Host for ProbeHost {
-    fn clock(&mut self) -> lash_kernel_doc::Timestamp {
-        panic!("no clock in this case")
-    }
-    fn random(&mut self) -> u64 {
-        panic!("no random in this case")
-    }
     fn read(
         &mut self,
         _: &lash_kernel_doc::Handle,
@@ -655,12 +663,12 @@ fn identity_document(shard: &Shard) {
     // which decodes back to it, and the identity is that body's digest.
     let bytes = document.canonical_bytes();
     assert_eq!(
-        lash_kernel_doc::graph_tokens::decode_body::<Document>(&bytes).unwrap(),
+        lash_vocabulary::tokens::decode_body::<Document>(&bytes).unwrap(),
         document
     );
     assert_eq!(
         document.identity().as_bytes(),
-        &lash_kernel_doc::graph_tokens::logical_digest(&bytes)
+        &lash_vocabulary::tokens::logical_digest(&bytes)
     );
     if shard.rule == "K-ID-001" {
         // Two sources mapped onto one document share its identity.

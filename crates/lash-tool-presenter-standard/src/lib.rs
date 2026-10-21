@@ -9,14 +9,20 @@
 
 mod compact;
 
-use lash_protocol_types::{JsonSchema, ToolContract, ToolManifest, ToolOutputContract};
 use lash_tool_presenter_api::{
     PresentationRefusal, PresentedToolSection, ToolPresentationEntry, ToolPresentationRequest,
     ToolPresenter, import_schema, listing,
 };
-use lash_tool_shape::{
-    DefinitionId, ReadableNameAllocator, SchemaDocument, SchemaShape, ShapeConstraints, ShapeKind,
-};
+use lash_vocabulary::json_schema::JsonSchema;
+use lash_vocabulary::tool_contract::ToolContract;
+use lash_vocabulary::tool_contract::ToolManifest;
+use lash_vocabulary::tool_contract::ToolOutputContract;
+use lash_vocabulary::tool_shape::DefinitionId;
+use lash_vocabulary::tool_shape::ReadableNameAllocator;
+use lash_vocabulary::tool_shape::SchemaDocument;
+use lash_vocabulary::tool_shape::SchemaShape;
+use lash_vocabulary::tool_shape::ShapeConstraints;
+use lash_vocabulary::tool_shape::ShapeKind;
 use serde_json::Value;
 use std::collections::BTreeMap;
 
@@ -393,7 +399,7 @@ fn reserve_host_names(document: &SchemaDocument, allocator: &mut ReadableNameAll
                 for field in &object.fields {
                     reserve(&field.shape, allocator);
                 }
-                if let lash_tool_shape::ExtraKeys::Open(extra) = &object.extra_keys {
+                if let lash_vocabulary::tool_shape::ExtraKeys::Open(extra) = &object.extra_keys {
                     reserve(extra, allocator);
                 }
             }

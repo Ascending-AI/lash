@@ -12,9 +12,11 @@ use lash_core::llm::types::{AdmittedSend, LlmContentBlock, LlmMessage, LlmRole};
 use lash_core::provider::{Provider, ProviderHandle, ProviderOptions, ProviderReliability};
 use lash_llm_transport::{LlmHttpBody, LlmHttpRequest, LlmHttpResponse, LlmHttpTransport};
 use lash_protocol_types::{AttachmentCreateMeta, AttachmentRef, MediaType};
+
 use lash_protocol_types::{
     llm::attachment_delivery::DeliverySecret, llm::attachment_delivery::ProviderFileScope,
 };
+
 use lash_transport_failure::LlmTransportError;
 use serde_json::json;
 use std::sync::{Arc, Mutex};

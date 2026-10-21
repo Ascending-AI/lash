@@ -20,7 +20,8 @@ pub(super) async fn turn_started_identity_targets_cancellation_from_pull_stream(
     .build(lash_facade_tests::runtime_lease_owner())?;
     let session = created_session(
         &core,
-        lash::SessionId::parse("turn-started-cancel-target").expect("nonblank host identity"),
+        lash_vocabulary::identity::SessionId::parse("turn-started-cancel-target")
+            .expect("nonblank host identity"),
     )
     .await
     .open()
@@ -28,7 +29,8 @@ pub(super) async fn turn_started_identity_targets_cancellation_from_pull_stream(
     let expected_turn_id = "turn-started-cancel-target-id";
     let handle = session
         .send(TurnInput::text("wait for exact cancellation"))
-        .id(lash::TurnId::parse(expected_turn_id).expect("nonblank host identity"))
+        .id(lash_vocabulary::identity::TurnId::parse(expected_turn_id)
+            .expect("nonblank host identity"))
         .await?;
     let mut stream = handle.events();
 
@@ -77,7 +79,8 @@ pub(super) async fn idle_queued_input_emits_typed_application_and_durable_identi
     .build(lash_facade_tests::runtime_lease_owner())?;
     let session = created_session(
         &core,
-        lash::SessionId::parse("idle-input-application").expect("nonblank host identity"),
+        lash_vocabulary::identity::SessionId::parse("idle-input-application")
+            .expect("nonblank host identity"),
     )
     .await
     .open()
@@ -91,14 +94,18 @@ pub(super) async fn idle_queued_input_emits_typed_application_and_durable_identi
     let empty_admission = session
         .durable()
         .send(TurnInput::text(""))
-        .id(lash::TurnId::parse("idle-empty-source").expect("nonblank host identity"))
+        .id(
+            lash_vocabulary::identity::TurnId::parse("idle-empty-source")
+                .expect("nonblank host identity"),
+        )
         .await?
         .receipt()
         .clone();
     let admission = session
         .durable()
         .send(TurnInput::text("queued canonical input"))
-        .id(lash::TurnId::parse("idle-source").expect("nonblank host identity"))
+        .id(lash_vocabulary::identity::TurnId::parse("idle-source")
+            .expect("nonblank host identity"))
         .await?
         .receipt()
         .clone();
@@ -190,7 +197,8 @@ pub(super) async fn durable_application_read_survives_a_trimmed_live_replay_wind
     .build(lash_facade_tests::runtime_lease_owner())?;
     let session = created_session(
         &core,
-        lash::SessionId::parse("durable-input-application-gap").expect("nonblank host identity"),
+        lash_vocabulary::identity::SessionId::parse("durable-input-application-gap")
+            .expect("nonblank host identity"),
     )
     .await
     .open()
@@ -204,7 +212,7 @@ pub(super) async fn durable_application_read_survives_a_trimmed_live_replay_wind
     let admission = session
         .durable()
         .send(TurnInput::text("survives replay gap"))
-        .id(lash::TurnId::parse("gap-source").expect("nonblank host identity"))
+        .id(lash_vocabulary::identity::TurnId::parse("gap-source").expect("nonblank host identity"))
         .await?
         .receipt()
         .clone();
@@ -274,14 +282,16 @@ pub(super) async fn a_send_never_answers_from_a_run_another_store_ran() -> Resul
     let second = answering_core("answered by the second store").await?;
     let first_session = created_session(
         &first,
-        lash::SessionId::parse("shared-session").expect("nonblank host identity"),
+        lash_vocabulary::identity::SessionId::parse("shared-session")
+            .expect("nonblank host identity"),
     )
     .await
     .open()
     .await?;
     let second_session = created_session(
         &second,
-        lash::SessionId::parse("shared-session").expect("nonblank host identity"),
+        lash_vocabulary::identity::SessionId::parse("shared-session")
+            .expect("nonblank host identity"),
     )
     .await
     .open()
@@ -290,7 +300,8 @@ pub(super) async fn a_send_never_answers_from_a_run_another_store_ran() -> Resul
     // The first store's run settles; no handle takes its report.
     let unread = first_session
         .send(TurnInput::text("ask"))
-        .id(lash::TurnId::parse("shared-input").expect("nonblank host identity"))
+        .id(lash_vocabulary::identity::TurnId::parse("shared-input")
+            .expect("nonblank host identity"))
         .await?;
     let shared_input = unread.input_id().clone();
     drop(unread);
@@ -311,7 +322,8 @@ pub(super) async fn a_send_never_answers_from_a_run_another_store_ran() -> Resul
 
     let second_handle = second_session
         .send(TurnInput::text("ask"))
-        .id(lash::TurnId::parse("shared-input").expect("nonblank host identity"))
+        .id(lash_vocabulary::identity::TurnId::parse("shared-input")
+            .expect("nonblank host identity"))
         .await?;
     assert_eq!(second_handle.input_id(), &shared_input);
     let output = second_handle.output().await?;

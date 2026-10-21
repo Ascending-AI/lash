@@ -3,7 +3,7 @@
   "cases": [
     {
       "name": "settled joins record success and arbitrary failure data",
-      "document": "kernel 1\nnumbers by_spelling\nfn good() { return 1 } fn bad() { throw 7 }\nmain {\nlet a = spawn call good() let b = spawn call bad() let tasks = [a, b] let answer = join settled tasks finish answer\n}\n",
+      "document": "kernel 1\nnumbers by_spelling\ndefinition \"function good() -> Any\\nkernel 1\\nmetering statements\\nbody {\\n  return 1\\n}\\n\"\ndefinition \"function bad() -> Any\\nkernel 1\\nmetering statements\\nbody {\\n  throw 7\\n}\\n\"\nmain {\n  let a = spawn invoke good()\n  let b = spawn invoke bad()\n  let tasks = [a, b]\n  let answer = join settled tasks\n  finish answer\n}\n",
       "expected": {
         "prints": [],
         "end": {

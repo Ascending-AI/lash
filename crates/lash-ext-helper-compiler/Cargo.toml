@@ -21,6 +21,7 @@ path = "src/bin/regenerate.rs"
 workspace = true
 
 [dependencies]
+lash-vocabulary = { workspace = true }
 lash-dialect-python = { workspace = true }
 lash-dialect-typescript = { workspace = true }
 lash-ext-date-ecma = { workspace = true }
@@ -31,3 +32,6 @@ lash-kernel-doc = { workspace = true }
 lash-kernel-lib = { workspace = true }
 lash-kernel-package = { workspace = true, features = ["testing"] }
 lash-kernel-vm = { workspace = true }
+
+[dev-dependencies]
+lash-kernel-state = { workspace = true }

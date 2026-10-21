@@ -9,9 +9,11 @@
 //! refused. Both refusals come before the input row is written, and roll the
 //! whole admission back.
 
+use crate::PendingTurnInputDraft;
 use crate::run_spec::RunSpecHash;
 use crate::store::StoreError;
-use crate::{PendingTurnInputDraft, SessionId, TurnId};
+use lash_vocabulary::identity::SessionId;
+use lash_vocabulary::identity::TurnId;
 
 /// What admitting one draft writes for its spec: nothing for the default
 /// spec, or the hash the input row names and the bytes the session interns.

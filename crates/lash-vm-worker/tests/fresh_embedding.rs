@@ -8,6 +8,7 @@ use std::collections::BTreeMap;
 use std::time::Instant;
 
 use lash_kernel_doc::document_work;
+use lash_kernel_vm::Machine as _;
 use lash_vm_client::WorkerTuning;
 
 #[test]
@@ -34,9 +35,9 @@ fn a_fresh_embedding_parses_no_kernel_text_and_preserves_the_functions() {
     );
 
     let registry = embedding.registry().expect("the worker registry");
-    let expected = lash_vm_releases::lash_packages()
-        .map(|packages| std::sync::Arc::clone(packages.functions()))
-        .expect("the complete interpreted release declarations")
+    let expected = lash_vm_releases::helper_release()
+        .expect("the helper declarations")
+        .functions
         .export_declarations();
     assert_eq!(
         registry.export_declarations(),
@@ -49,128 +50,101 @@ fn a_fresh_embedding_parses_no_kernel_text_and_preserves_the_functions() {
     );
 }
 
-/// FIG-6917: a host package installs once, beside lash's own, and its one
-/// native reaches the worker by identity alone. A canonical document
-/// calling its members is admitted against the parent's registry and runs
-/// on the registry the single-binary worker derives from the same
-/// registration.
+/// WORKER-NATIVE-IDENTITY: native bindings consume exactly declared identities,
+/// and a complete host-authored Document runs with those bindings.
 #[test]
-fn a_host_package_installs_once_and_runs_in_a_single_binary_worker() {
-    use std::sync::Arc;
-
-    use lash_kernel_doc::{Datum, Integer, parse_document};
-    use lash_kernel_package::{HeldPackages, testing};
+fn a_host_native_library_binds_exact_declarations_and_runs_complete_documents() {
+    use lash_kernel_doc::{Datum, Integer, parse_definition, parse_document};
     use lash_kernel_vm::Machine as _;
-
-    let lash = lash_vm_releases::built().expect("lash's packages");
-    let kernel = lash
-        .iter()
-        .find(|package| package.path().to_string() == "kernel")
-        .expect("the kernel package");
-    let dataframe = testing::dataframe(kernel).expect("the fixture builds");
-    let width = dataframe
-        .function("dataframe.width")
-        .expect("its native function");
-    let held = HeldPackages::install(lash.iter().cloned().chain([dataframe.clone()]))
-        .expect("one registration");
-
-    // Native bindings are identities, and a body-only member cannot consume one.
-    let body_only = dataframe
-        .function("dataframe.col")
-        .expect("body-only member");
-    for function in [body_only, lash_kernel_doc::FunctionId::from_bytes([0; 32])] {
+    use lash_vm_client::packages::WorkerLibrary;
+    use std::sync::Arc;
+    let release = lash_vm_releases::helper_release().unwrap();
+    let width = parse_definition(
+        "function host.width(row: List(Any)) -> Int\nkernel 1\ncharge 1\nnative\n",
+    )
+    .unwrap();
+    let width_id = width.identity();
+    let guest = parse_definition(
+        "function host.guest() -> Null\nkernel 1\ncharge 1\nbody { return null }\n",
+    )
+    .unwrap();
+    let guest_id = guest.identity();
+    let mut registry = release.functions.clone();
+    registry.register(width.clone(), None).unwrap();
+    registry.register(guest, None).unwrap();
+    let library = WorkerLibrary::new(
+        &registry,
+        release
+            .resolver_roots()
+            .into_iter()
+            .chain([width_id, guest_id]),
+    )
+    .unwrap();
+    for id in [guest_id, lash_vocabulary::FunctionId::from_bytes([0; 32])] {
         let refusal = lash_vm_worker::Embedder::new()
-            .native(function, Arc::new(Width))
+            .native(id, Arc::new(Width))
             .and_then(|embedder| {
                 embedder.dialect(lash_vm_worker::typescript(&WorkerTuning::standard())?)
             })
-            .and_then(|embedder| embedder.finish(&held));
+            .and_then(|embedder| embedder.finish(&library));
         assert!(
-            matches!(refusal, Err(lash_vm_worker::EmbedError::Package(lash_kernel_package::PackageRefusal::NativeUnused { function: refused })) if refused == function)
+            matches!(refusal, Err(lash_vm_worker::EmbedError::Library(lash_protocol_types::engine_fault::WorkerLibraryRefusal::NativeUnused { function })) if function == id)
         );
     }
-
     let embedding = lash_vm_worker::Embedder::new()
-        .native(width, Arc::new(Width))
+        .native(width_id, Arc::new(Width))
         .and_then(|embedder| {
             embedder.dialect(lash_vm_worker::typescript(&WorkerTuning::standard())?)
         })
-        .and_then(|embedder| embedder.finish(&held))
-        .expect("the worker binds to the parent's registration");
-    let worker = Arc::clone(embedding.registry().expect("the worker registry"));
-    assert!(
-        worker
-            .get(&width)
-            .and_then(|function| function.native())
-            .is_some(),
-        "the host's native is installed by identity"
-    );
-    assert_eq!(
-        worker.export_declarations(),
-        held.functions().export_declarations(),
-        "the worker holds exactly what the parent registered"
-    );
-
-    let mut text = String::from("kernel 1\nnumbers by_spelling\n");
-    for name in [
-        "dataframe.width",
-        "dataframe.col",
-        "dataframe.expr.name",
-        "dataframe.data_quanta.read_text",
-        "dataframe.data_quanta.filter",
-        "dataframe.data_quanta.limit",
-    ] {
-        let function = dataframe.function(name).expect("a fixture member");
-        text.push_str(&format!("use {name} = @{function}\n"));
-    }
-    text.push_str(
-        "main {\n  let row = [1, 2, 3]\n  let n = invoke dataframe.width(row)\n  let e = invoke dataframe.col(\"value\")\n  let name = invoke dataframe.expr.name(e)\n  let q = invoke dataframe.data_quanta.read_text(\"a b\")\n  let q2 = invoke dataframe.data_quanta.filter(q, e)\n  let q3 = invoke dataframe.data_quanta.limit(q2, 5)\n  return (n, name, q3.plan[1].step)\n}\n",
-    );
-    let document = Arc::new(parse_document(&text).expect("a canonical kernel document"));
-    lash_kernel_doc::validate_document(&document, held.functions().as_ref())
-        .expect("the parent admits it");
-
-    let program = lash_kernel_vm::Program {
-        closure: lash_kernel_doc::heap::PageId([8; 32]),
-        document,
-        library: lash_kernel_vm::PreparedLibrary::new(worker),
+        .and_then(|embedder| embedder.finish(&library))
+        .unwrap();
+    let worker = Arc::clone(embedding.registry().unwrap());
+    assert!(worker.get(&width_id).unwrap().native().is_some());
+    assert_eq!(worker.export_declarations(), registry.export_declarations());
+    let document = Arc::new(parse_document(&format!(
+        "kernel 1\nnumbers by_spelling\ndefinition {}\nnative @{width_id}\nmain {{ let n = invoke host.width([1, 2, 3]) return n }}\n",
+        serde_json::to_string(&lash_kernel_doc::print_definition(&width)).unwrap(),
+    )).unwrap());
+    let link = lash_vocabulary::Link {
+        document: document.identity(),
+        fills: BTreeMap::new(),
     };
-    let start = lash_kernel_vm::CellStart {
-        owner: lash_kernel_doc::heap::PageId([9; 32]),
-        target: lash_kernel_vm::Target::Main,
-        args: Vec::new(),
-        session: None,
-        modes: Default::default(),
-        host: Vec::new(),
-    };
-    let mut machine = <lash_kernel_vm::KernelMachine as lash_kernel_vm::Machine>::start(
+    let id = link.identity();
+    let program = lash_kernel_vm::Program::prepare(
+        id,
+        BTreeMap::from([(document.identity(), document)]),
+        &BTreeMap::from([(id, link)]),
+        lash_kernel_doc::heap::PageId([8; 32]),
+        lash_kernel_vm::PreparedLibrary::new(worker),
+    )
+    .unwrap();
+    let mut machine = lash_kernel_vm::KernelMachine::start(
         program,
         BOUNDS,
-        start,
+        lash_kernel_vm::CellStart {
+            owner: lash_kernel_doc::heap::PageId([9; 32]),
+            target: lash_kernel_vm::Target::Main,
+            args: vec![],
+            session: None,
+            modes: Default::default(),
+            host: vec![],
+        },
         Box::<Pages>::default(),
     )
-    .expect("the worker starts the run");
-    let end = loop {
-        match machine.run(&mut World, u64::MAX).expect("a slice") {
-            lash_kernel_vm::Step::Ended(end) => break end,
+    .unwrap();
+    loop {
+        match machine.run(&mut World, u64::MAX).unwrap() {
             lash_kernel_vm::Step::Slice => {}
-            lash_kernel_vm::Step::Parked(park) => panic!("the document never waits: {park:?}"),
+            lash_kernel_vm::Step::Ended(lash_kernel_vm::End::Finished(done)) => {
+                assert_eq!(done.result, Datum::Int(Integer::from(3)));
+                break;
+            }
+            other => panic!("native run: {other:?}"),
         }
-    };
-    let lash_kernel_vm::End::Finished(done) = end else {
-        panic!("the run finishes: {end:?}");
-    };
-    assert_eq!(
-        done.result,
-        Datum::Tuple(vec![
-            Datum::Int(Integer::from(3)),
-            Datum::Text("value".into()),
-            Datum::Text("limit".into()),
-        ])
-    );
+    }
 }
 
-/// The fixture's `dataframe.width`, natively: a row's length.
+/// The host's native row length.
 struct Width;
 
 impl lash_kernel_doc::NativeFunction for Width {
@@ -203,14 +177,6 @@ const BOUNDS: lash_kernel_vm::Bounds = lash_kernel_vm::Bounds {
 struct World;
 
 impl lash_kernel_vm::Host for World {
-    fn clock(&mut self) -> lash_kernel_doc::Timestamp {
-        lash_kernel_doc::Timestamp {
-            nanoseconds: 0.into(),
-        }
-    }
-    fn random(&mut self) -> u64 {
-        0
-    }
     fn read(
         &mut self,
         _: &lash_kernel_doc::Handle,
@@ -369,75 +335,63 @@ static ALLOCATOR: Counting = Counting;
 fn a_run_from_stored_definitions_charges_exactly_as_the_writers_build() {
     use std::sync::Arc;
 
-    use lash_kernel_doc::{FunctionName, parse_document};
-    use lash_kernel_package::{HeldPackages, Package, PackageSources};
-    use lash_kernel_vm::Machine as _;
-    use lash_kernel_vm::kernel_internals::{Layout, start_with_layout};
+    use lash_kernel_doc::parse_document;
 
-    let lash = lash_vm_releases::built().expect("lash's packages");
-    let ts = lash
-        .iter()
-        .find(|package| package.function("ts.number.parse_int").is_some())
-        .expect("the package of a planned helper");
-    let parse_int = ts
-        .function("ts.number.parse_int")
-        .expect("a planned helper");
-    let w = |release: &str, step: i64| {
-        Package::build(
-            "w",
-            release,
-            &PackageSources {
-                kernel: &format!(
-                    "use ts.number.parse_int\n\nfunction w.go(s: Text) -> Any\nkernel 1\ncharge 2\nbody {{\n  let n = invoke ts.number.parse_int(s, 10, false)\n  let out = [n, {step}]\n  return out\n}}\n"
-                ),
-                surface: "function go(s: Text) -> Any = w.go\n",
-                labels: r#"{"members": {"go": "go"}}"#,
-            },
-            &lash.iter().collect::<Vec<_>>(),
-        )
-        .expect("w builds")
+    use lash_kernel_vm::kernel_internals::{Layout, start_with_layout};
+    use lash_vm_client::packages::WorkerLibrary;
+    let release = lash_vm_releases::helper_release().unwrap();
+    let parse_int = release
+        .functions
+        .named("ts.number.parse_int")
+        .next()
+        .unwrap();
+    let definition = |step| {
+        lash_kernel_doc::parse_definition(&format!(
+        "use ts.number.parse_int = @{parse_int}\nfunction w.go(s: Text) -> Any\nkernel 1\ncharge 2\nbody {{ let n = invoke ts.number.parse_int(s, 10, false) let out = [n, {step}] return out }}\n"
+    )).unwrap()
     };
-    let (w1, w2) = (w("1.0.0", 1), w("2.0.0", 2));
-    let go = w1.function("w.go").expect("release 1's w.go");
-    let install = |w: &Package| {
-        HeldPackages::install(lash.iter().cloned().chain([w.clone()])).expect("one registration")
+    let (w1, w2) = (definition(1), definition(2));
+    let go = w1.identity();
+    let install = |definition: lash_kernel_doc::FunctionDefinition| {
+        let id = definition.identity();
+        let mut registry = release.functions.clone();
+        registry.register(definition, None).unwrap();
+        WorkerLibrary::new(&registry, release.resolver_roots().into_iter().chain([id])).unwrap()
     };
-    let (writer, reader) = (install(&w1), install(&w2));
-    let embed = |held: &HeldPackages| {
+    let (writer, reader) = (install(w1), install(w2));
+    let embed = |library: &WorkerLibrary| {
         lash_vm_worker::Embedder::new()
-            .dialect(lash_vm_worker::typescript(&WorkerTuning::standard()).expect("typescript"))
-            .and_then(|embedder| embedder.finish(held))
-            .expect("the worker binds")
+            .dialect(lash_vm_worker::typescript(&WorkerTuning::standard()).unwrap())
+            .unwrap()
+            .finish(library)
+            .unwrap()
     };
     let (writes, reads) = (embed(&writer), embed(&reader));
-
     let closure =
-        lash_vm_broker::kernel::closure::derive([go], writer.functions(), &BTreeMap::new())
-            .expect("the writer's closure");
-    let mut document = parse_document(&format!(
-        "kernel 1\nnumbers float\nuse w.go = @{go}\nmain {{\n  let a = invoke w.go(\"123456789\")\n  return a\n}}\n"
-    ))
-    .expect("a document");
+        lash_vm_broker::kernel::closure::derive([go], writer.registry(), &BTreeMap::new()).unwrap();
+    let mut text = String::from("kernel 1\nnumbers float\n");
     for function in closure.body().identities() {
-        let name = writer
-            .functions()
-            .name_of(&function)
-            .expect("a held function");
-        document
-            .manifest
-            .functions
-            .insert(function, FunctionName::new(name).expect("a name"));
+        let definition = writer.registry().get(&function).unwrap();
+        text.push_str(&format!(
+            "definition {}\n",
+            serde_json::to_string(&lash_kernel_doc::print_definition(definition.definition()))
+                .unwrap()
+        ));
+        if definition.definition().has_native() {
+            text.push_str(&format!("native @{function}\n"));
+        }
     }
-    let document = Arc::new(document);
-    let stored: Vec<(lash_kernel_doc::FunctionId, Vec<u8>)> = closure
+    text.push_str("main { let a = invoke w.go(\"123456789\") return a }\n");
+    let document = Arc::new(parse_document(&text).unwrap());
+    let stored: Vec<(lash_vocabulary::names::FunctionId, Vec<u8>)> = closure
         .body()
         .identities()
-        .filter(|function| reader.functions().get(function).is_none())
+        .filter(|function| reader.registry().get(function).is_none())
         .map(|function| {
-            let definition = writer.functions().get(&function).expect("held");
+            let definition = writer.registry().get(&function).expect("held");
             (
                 function,
-                lash_kernel_doc::graph_tokens::encode_body(definition.definition().as_ref()),
+                lash_vocabulary::tokens::encode_body(definition.definition().as_ref()),
             )
         })
         .collect();
@@ -449,11 +403,11 @@ fn a_run_from_stored_definitions_charges_exactly_as_the_writers_build() {
         vec![go],
         "the reader lacks release 1's w.go alone"
     );
-    let definitions: Vec<(lash_kernel_doc::FunctionId, &[u8])> = stored
+    let definitions: Vec<(lash_vocabulary::names::FunctionId, &[u8])> = stored
         .iter()
         .map(|(function, body)| (*function, body.as_slice()))
         .collect();
-    let limits = lash_kernel_doc::KernelDataLimits::standard();
+    let limits = lash_vocabulary::KernelDataLimits::standard();
     let library = |embedding: &lash_vm_worker::Embedding, definitions| {
         lash_vm_worker::core_support::library_for(embedding, &document, definitions, limits)
             .expect("a prepared frame")
@@ -465,11 +419,19 @@ fn a_run_from_stored_definitions_charges_exactly_as_the_writers_build() {
         lash_vm_broker::kernel::closure::Closure,
     ),
                layout: Layout| {
-        let program = lash_kernel_vm::Program {
-            closure: lash_kernel_doc::heap::PageId(closure.reference().0),
-            document: Arc::clone(&document),
-            library,
+        let link = lash_vocabulary::Link {
+            document: document.identity(),
+            fills: BTreeMap::new(),
         };
+        let id = link.identity();
+        let program = lash_kernel_vm::Program::prepare(
+            id,
+            BTreeMap::from([(document.identity(), document.clone())]),
+            &BTreeMap::from([(id, link)]),
+            lash_kernel_doc::heap::PageId(closure.reference().0),
+            library,
+        )
+        .unwrap();
         let start = lash_kernel_vm::CellStart {
             owner: lash_kernel_doc::heap::PageId([9; 32]),
             target: lash_kernel_vm::Target::Main,

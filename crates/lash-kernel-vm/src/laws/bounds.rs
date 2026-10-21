@@ -3,12 +3,11 @@
 
 use std::sync::Arc;
 
-use lash_kernel_doc::{parse_definition, parse_document};
+use lash_kernel_doc::parse_document;
 
 use super::embedder::{Embedder, REPEAT_BUILDS, ROOMY, Setup, World, int, library, result};
 use crate::{
-    Bound, BoundExceeded, Bounds, CellStart, End, KernelMachine, Machine, Program, RunError, Step,
-    Target,
+    Bound, BoundExceeded, Bounds, CellStart, End, KernelMachine, Machine, RunError, Step, Target,
 };
 
 /// Wraps `body` so that a raise would be caught and a cleanup would
@@ -16,8 +15,10 @@ use crate::{
 fn guarded(body: &str) -> String {
     format!(
         r#"
-fn down(n) {{ let r = call down(n) return r }}
-fn waits(tag) {{ do perform echo(tag) as Any }}
+definition "function down(self: Any, n: Any) -> Any\nkernel 1\nmetering statements\nbody {{  let r = apply self(self, n) return r  }}"
+
+definition "function waits(tag: Any) -> Any\nkernel 1\nmetering statements\nbody {{  do perform 0(tag) as Any  }}"
+
 main {{
   try {{ {body} }} catch e {{ print "caught" }} finally {{ print "cleanup" }}
   return "survived"
@@ -74,7 +75,7 @@ fn the_memory_bound_holds_inside_a_native_call() {
     assert_eq!(
         passes("let big = work.fill(100000)", bounds),
         BoundExceeded {
-            function: Some(lash_kernel_doc::FunctionName::new("work.fill").unwrap()),
+            function: Some(lash_vocabulary::names::FunctionName::new("work.fill").unwrap()),
             ..exceeded(Bound::Memory, 64 << 10)
         }
     );
@@ -110,7 +111,7 @@ fn the_memory_bound_refuses_a_native_reservation_before_the_allocation() {
     assert_eq!(
         passes("let big = work.repeat(100000)", bounds),
         BoundExceeded {
-            function: Some(lash_kernel_doc::FunctionName::new("work.repeat").unwrap()),
+            function: Some(lash_vocabulary::names::FunctionName::new("work.repeat").unwrap()),
             ..exceeded(Bound::Memory, 64 << 10)
         }
     );
@@ -143,7 +144,7 @@ fn the_call_depth_bound_ends_the_run() {
         ..ROOMY
     };
     assert_eq!(
-        passes("do call down(1)", bounds),
+        passes("do call down(&down, 1)", bounds),
         exceeded(Bound::CallDepth, 50)
     );
 }
@@ -161,7 +162,7 @@ fn the_task_bound_ends_the_run() {
     );
 }
 
-/// `K-BND-001`: the effects and sleeps requested at one park are bounded.
+/// `K-BND-001`: the effects requested at one park are bounded.
 #[test]
 fn the_requests_per_park_bound_ends_the_run() {
     let bounds = Bounds {
@@ -201,7 +202,7 @@ fn a_native_guard_ends_the_run() {
     assert_eq!(
         passes("let spun = work.spin(101)", ROOMY),
         BoundExceeded {
-            function: Some(lash_kernel_doc::FunctionName::new("work.spin").unwrap()),
+            function: Some(lash_vocabulary::names::FunctionName::new("work.spin").unwrap()),
             ..exceeded(Bound::Guard { function }, 100)
         }
     );
@@ -217,9 +218,12 @@ fn a_native_guard_ends_the_run() {
 fn a_collection_frees_nothing_the_run_can_reach() {
     let mut embedder = Embedder::with(
         r#"
-fn thrower(i) { let e = {kind: "x", n: [i, i]} throw e }
-fn returner(i) { let r = {n: [i, i]} return r }
-fn later(i) { do yield let r = [i, i] return r }
+definition "function thrower(i: Any) -> Any\nkernel 1\nmetering statements\nbody {  let e = {kind: \"x\", n: [i, i]} throw e  }"
+
+definition "function returner(i: Any) -> Any\nkernel 1\nmetering statements\nbody {  let r = {n: [i, i]} return r  }"
+
+definition "function later(i: Any) -> Any\nkernel 1\nmetering statements\nbody {  do yield let r = [i, i] return r  }"
+
 main {
   let keep = [7, 8]
   let i = 0
@@ -294,27 +298,27 @@ fn a_closure_a_native_backed_body_makes_is_charged_where_it_runs() {
         id("num.add")
     );
     // Its native implementation is not registered, so its body runs.
-    let make = parse_definition(&format!(
+    let (make, locals) = lash_kernel_doc::parse_definition_with_locals(&format!(
         "function probe.counter(n: Any) -> Any\nkernel 1\ncharge 1\n{uses}native\n\
          body {{ return fn() {{ let i = 0 while num.lt(i, n) {{ set i = num.add(i, 1) }} return i }} }}\n"
     ))
     .unwrap();
-    let make = registry.register(make, None).unwrap();
-    let text = format!(
-        "numbers by_spelling\nkernel 1\nuse probe.counter = @{make}\n\
-         main {{ let count = probe.counter(200000) let n = apply count() return n }}\n"
+    for local in locals {
+        registry.register(local, None).unwrap();
+    }
+    registry.register(make, None).unwrap();
+    let text = "numbers by_spelling\nkernel 1\n\
+         main { let count = probe.counter(200000) let n = apply count() return n }\n";
+    let program = crate::laws::embedder::program(
+        Arc::new(super::embedder::document(text, &registry)),
+        crate::PreparedLibrary::new(Arc::new(registry)),
     );
-    let program = Program {
-        closure: lash_kernel_doc::heap::PageId([8; 32]),
-        document: Arc::new(parse_document(&text).unwrap()),
-        library: crate::PreparedLibrary::new(Arc::new(registry)),
-    };
     let start = CellStart {
         target: Target::Main,
         args: Vec::new(),
         session: None,
         owner: lash_kernel_doc::heap::PageId([9; 32]),
-        modes: crate::EffectModes::recorded(),
+        modes: crate::EffectModes::new(),
         host: Vec::new(),
     };
     let bounds = Bounds {
@@ -336,10 +340,14 @@ fn a_closure_a_native_backed_body_makes_is_charged_where_it_runs() {
 #[test]
 fn a_run_exactly_at_its_bounds_passes_none() {
     let text = r#"
-fn c() { return 1 }
-fn b() { let r = call c() return r }
-fn a() { let r = call b() return r }
-fn w(tag) { let r = perform echo(tag) as Any return r }
+definition "function c() -> Any\nkernel 1\nmetering statements\nbody {  return 1  }"
+
+definition "function b() -> Any\nkernel 1\nmetering statements\nbody {  let r = call c() return r  }"
+
+definition "function a() -> Any\nkernel 1\nmetering statements\nbody {  let r = call b() return r  }"
+
+definition "function w(tag: Any) -> Any\nkernel 1\nmetering statements\nbody {  let r = perform 0(tag) as Any return r  }"
+
 main {
   let d = call a()
   let x = spawn call w("x")
@@ -386,7 +394,7 @@ main {
 fn a_host_value_depth_policy_is_honored_by_a_kernel_run() {
     let mut embedder = Embedder::new("main { return (1, (2, 3)) }");
     let (program, _) = embedder.program(false);
-    let limits = lash_kernel_doc::KernelDataLimits::new(64, 352, 512, 512, 1).unwrap();
+    let limits = lash_vocabulary::data_limits::KernelDataLimits::new(64, 352, 512, 512, 1).unwrap();
     embedder.machine = KernelMachine::start_with_data_limits(
         program,
         ROOMY,
@@ -395,7 +403,7 @@ fn a_host_value_depth_policy_is_honored_by_a_kernel_run() {
             args: Vec::new(),
             session: None,
             owner: lash_kernel_doc::heap::PageId([9; 32]),
-            modes: crate::EffectModes::recorded(),
+            modes: crate::EffectModes::new(),
             host: Vec::new(),
         },
         limits,
@@ -463,7 +471,7 @@ fn charge_off_performs_no_charge_work() {
 #[test]
 fn charge_off_survives_a_resume_on_a_fresh_worker() {
     let mut run = Embedder::with(
-        "main { let first = num.add(1, 2) let answer = perform echo(first) as Any return num.add(answer, 4) }",
+        "main { let first = num.add(1, 2) let answer = perform 0(first) as Any return num.add(answer, 4) }",
         Setup {
             bounds: Bounds {
                 charge: crate::Charge::Off,
@@ -507,7 +515,7 @@ pub(super) const MEMORY_CHURN: &str = r#"main {
 /// while keeping the program's result and a durable cold continuation.
 #[test]
 fn memory_off_removes_accounting_and_survives_a_cold_resume() {
-    let text = MEMORY_CHURN.replacen("main {", "main { do perform echo(\"park\") as Any", 1);
+    let text = MEMORY_CHURN.replacen("main {", "main { do perform 0(\"park\") as Any", 1);
     let mut embedder = Embedder::with(
         &text,
         Setup {
@@ -580,6 +588,7 @@ fn an_unmetered_session_can_feed_off_or_metered_cells() {
             ))
             .unwrap(),
         );
+        program = super::embedder::program(Arc::clone(&program.document), program.library.clone());
         let mut machine = KernelMachine::start(
             program.clone(),
             Bounds {
@@ -605,6 +614,7 @@ fn an_unmetered_session_can_feed_off_or_metered_cells() {
             ))
             .unwrap(),
         );
+        program = super::embedder::program(Arc::clone(&program.document), program.library.clone());
         let mut reopened = KernelMachine::start(
             program,
             Bounds {

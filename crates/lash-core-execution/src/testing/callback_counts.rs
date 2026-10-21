@@ -1,11 +1,15 @@
 //! Counting adapters on the typed recipe's executable binders.
+use crate::ToolCall;
+use crate::ToolOutcome;
+use crate::ToolPrepareCall;
+use crate::ToolProvider;
 use crate::plugin::PluginContributions;
 use crate::plugin::*;
-use crate::{
-    ToolCall, ToolContract, ToolId, ToolManifest, ToolOutcome, ToolPrepareCall, ToolProvider,
-};
 use lash_execution_contracts::PluginError;
 use lash_protocol_types::sync::MutexExt;
+use lash_vocabulary::tool_contract::ToolContract;
+use lash_vocabulary::tool_contract::ToolId;
+use lash_vocabulary::tool_contract::ToolManifest;
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 
@@ -214,7 +218,7 @@ impl<T: ToolProvider + ?Sized> ToolProvider for CountedProvider<T> {
         self.counts.entered(&self.callback);
         self.inner.execute(call).await
     }
-    fn readable_binding_formats(&self) -> &'static [crate::FormatVersion] {
+    fn readable_binding_formats(&self) -> &'static [lash_vocabulary::providers::FormatVersion] {
         self.inner.readable_binding_formats()
     }
     fn isolated_start(

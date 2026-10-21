@@ -6,8 +6,11 @@ use lash_execution_contracts::process::EngineEvent;
 use lash_execution_contracts::process::EngineState;
 use lash_execution_contracts::process::StepName;
 use lash_execution_contracts::process::StepRequest;
-use lash_kernel_doc::{DocumentId, EffectId, Site, Unit};
 use lash_vm_client::wire::OutcomeWire;
+use lash_vocabulary::names::DocumentId;
+use lash_vocabulary::sites::EffectId;
+use lash_vocabulary::sites::Site;
+use lash_vocabulary::sites::Unit;
 
 use super::advance::{advance, decode, state_format};
 use super::state::{
@@ -18,7 +21,7 @@ use lash_kernel_doc::KernelVersion;
 use lash_kernel_state::{AdmittedRequest, AdmittedWait};
 use std::collections::BTreeMap;
 
-fn process() -> lash_core::ProcessId {
+fn process() -> lash_vocabulary::identity::ProcessId {
     lash_core::ProcessIdMint::sequential_id_for_testing(1)
 }
 
@@ -45,90 +48,25 @@ fn sealed() -> ParkedPage {
 /// its bytes, so the process's root owns it, and an ended run stands on
 /// none. A state whose bytes name another page than the root holds is
 /// refused.
-#[test]
-fn every_engine_state_holding_a_run_names_its_page_to_the_process_root() {
-    let mut written = Vec::new();
-    let (state, run0) = started();
-    let (state, action) = settle(
-        state,
-        &run0,
-        parked(
-            vec![
-                effect(1, element(0)),
-                Issued::Sleep {
-                    wait: lash_kernel_doc::testkit::wait_id(2),
-                    admission: admitted(element(1)),
-                    until_ms: 5_000,
-                },
-            ],
-            vec![],
-        ),
-    );
-    written.push(state.clone());
-    let EngineAction::Steps { steps, .. } = &action else {
-        panic!("a park on an effect asks for its step, found {action:?}");
-    };
-    let effect_step = steps[0].step().clone();
-    let (state, action) = settle(state, &effect_step, completed("\"a\"".to_owned()));
-    let (run1, input, _) = run_of(&action);
-    assert_eq!(
-        input.parked,
-        Some(ParkedRun {
-            page: sealed(),
-            by: 0
-        }),
-        "the run resumes from the page the run that parked it published"
-    );
-    written.push(state.clone());
-    let (state, action) = settle(state, &run1, parked(vec![], vec![]));
-    assert!(matches!(action, EngineAction::Sleep { .. }));
-    written.push(state.clone());
-    let (state, action) =
-        advance(KernelVersion::NEWEST, state, EngineEvent::Woke).expect("a wake advances");
-    let (run2, _, _) = run_of(&action);
-    written.push(state.clone());
-    let outcome = lash_execution_contracts::process::ProcessAwaitOutput::from_tool_output(
-        lash_core::ToolCallOutput::success(serde_json::json!("done")),
-    );
-    let (ended, _) = settle(
-        state,
-        &run2,
-        completed(
-            serde_json::to_string(&KernelRunOutput::Ended {
-                outcome: Box::new(outcome),
-                ran: Default::default(),
-                caught: Vec::new(),
-                reads: None,
-                start: None,
-            })
-            .expect("a run output serializes"),
-        ),
-    );
-    assert_eq!(ended.pages, None, "an ended run stands on no page");
-    for state in written {
-        assert_eq!(state.pages, Some(sealed().root), "the state names its page");
-        let (decoded, _) = decode(KernelVersion::NEWEST, &state)
-            .unwrap_or_else(|error| panic!("a written state decodes: {error:?}"));
-        assert_eq!(decoded.parked.map(|parked| parked.page), Some(sealed()));
-        let mut other = state.clone();
-        other.pages = Some(lash_core_store::checkpoint_graph::NodeId([8; 32]));
-        decode(KernelVersion::NEWEST, &other)
-            .expect_err("a state naming another page than its root holds is refused");
-    }
-}
 
 /// The admission of a `perform` of `fetch` at `identity`.
+fn operation_use() -> lash_vocabulary::OperationUse {
+    lash_vocabulary::OperationUse {
+        link: lash_vocabulary::LinkId::from_bytes([1; 32]),
+        slot: lash_vocabulary::ImportSlot(0),
+    }
+}
 fn admitted(identity: EffectId) -> Admission {
     Admission(AdmittedWait {
         identity,
         request: AdmittedRequest::Effect {
-            effect: lash_kernel_doc::EffectName::new("fetch").expect("a name"),
+            use_: operation_use(),
             args: Vec::new(),
         },
     })
 }
 
-fn parked(issued: Vec<Issued>, withdrawn: Vec<lash_protocol_types::WaitId>) -> SettledOutput {
+fn parked(issued: Vec<Issued>, withdrawn: Vec<lash_vocabulary::sites::WaitId>) -> SettledOutput {
     completed(
         serde_json::to_string(&KernelRunOutput::Parked {
             state: sealed(),
@@ -147,14 +85,14 @@ fn parked(issued: Vec<Issued>, withdrawn: Vec<lash_protocol_types::WaitId>) -> S
 /// The effect a fan-out element performs: the one site, run by the task
 /// the `element`-th execution of the spawn started.
 fn element(element: u64) -> EffectId {
-    lash_kernel_doc::testkit::effect(
-        lash_kernel_doc::testkit::spawned_task(
-            lash_kernel_doc::testkit::root_task(),
+    lash_vocabulary::sites::testkit::effect(
+        lash_vocabulary::sites::testkit::spawned_task(
+            lash_vocabulary::sites::testkit::root_task(),
             Site::new(Unit::Main, vec![0]),
             element,
         ),
         Site::new(
-            Unit::Function(lash_kernel_doc::Name::new("worker")),
+            Unit::Function(lash_vocabulary::names::Name::new("worker")),
             vec![0],
         ),
         0,
@@ -164,10 +102,9 @@ fn element(element: u64) -> EffectId {
 
 fn effect(wait: u64, identity: EffectId) -> Issued {
     Issued::Effect {
-        wait: lash_kernel_doc::testkit::wait_id(wait),
+        wait: lash_vocabulary::sites::testkit::wait_id(wait),
         admission: admitted(identity),
-        effect: lash_kernel_doc::EffectName::new("tools.fetch").expect("an effect name"),
-        contract: lash_kernel_doc::ContractId::new("1"),
+        use_: operation_use(),
         input: serde_json::json!({ "wait": wait }),
     }
 }
@@ -325,7 +262,7 @@ fn a_fan_out_waits_on_every_element_and_delivers_each_outcome_once_in_any_order(
     assert!(effects.is_empty());
     assert_eq!(
         input.deliver.iter().map(|d| d.wait).collect::<Vec<_>>(),
-        vec![lash_kernel_doc::testkit::wait_id(11)]
+        vec![lash_vocabulary::sites::testkit::wait_id(11)]
     );
     assert!(input.parked.is_some());
     let held = |input: &KernelRunInput| {
@@ -351,7 +288,7 @@ fn a_fan_out_waits_on_every_element_and_delivers_each_outcome_once_in_any_order(
     let (run2, input, _) = run_of(&action);
     assert_eq!(
         input.deliver.iter().map(|d| d.wait).collect::<Vec<_>>(),
-        vec![lash_kernel_doc::testkit::wait_id(10)]
+        vec![lash_vocabulary::sites::testkit::wait_id(10)]
     );
     assert_eq!(
         held(&input),
@@ -381,6 +318,7 @@ fn a_fan_out_waits_on_every_element_and_delivers_each_outcome_once_in_any_order(
         ),
     );
     assert_eq!(action, EngineAction::Terminal(outcome));
+    assert_eq!(state.pages, None);
     assert_eq!(
         decode(KernelVersion::NEWEST, &state)
             .expect("the state decodes")
@@ -394,155 +332,11 @@ fn a_fan_out_waits_on_every_element_and_delivers_each_outcome_once_in_any_order(
 /// the refusal is raised at its `perform` by the next run, a `sleep` is a
 /// timer the process wakes for, and the step of a wait the machine
 /// withdrew settles into nothing.
-#[test]
-fn a_refused_effect_is_raised_without_a_step_and_a_withdrawn_wait_is_never_delivered() {
-    let (state, run0) = started();
-    let (state, action) = settle(
-        state,
-        &run0,
-        parked(
-            vec![
-                effect(1, element(0)),
-                Issued::Refused {
-                    wait: lash_kernel_doc::testkit::wait_id(2),
-                    admission: admitted(element(1)),
-                    kind: super::EFFECT_UNKNOWN.to_owned(),
-                    message: "no such effect".to_owned(),
-                },
-                Issued::Sleep {
-                    wait: lash_kernel_doc::testkit::wait_id(3),
-                    admission: admitted(element(2)),
-                    until_ms: 5_000,
-                },
-            ],
-            vec![],
-        ),
-    );
-    let (run1, input, effects) = run_of(&action);
-    assert_eq!(effects.len(), 1);
-    let withdrawn_step = effects[0].step().clone();
-    assert_eq!(
-        input
-            .deliver
-            .iter()
-            .map(|d| (d.wait, d.outcome.clone()))
-            .collect::<Vec<_>>(),
-        vec![(
-            lash_kernel_doc::testkit::wait_id(2),
-            refused(super::EFFECT_UNKNOWN, "no such effect".to_owned())
-        )]
-    );
-    let EngineAction::Steps { wake, .. } = &action else {
-        unreachable!()
-    };
-    assert_eq!(
-        *wake,
-        Some(lash_execution_contracts::process::EngineWake {
-            until: lash_core::durable_port::DurableInstant(5_000),
-            site: Some(element(2))
-        })
-    );
-
-    // The machine caught the refusal and withdrew its wait on the effect.
-    let (state, action) = settle(
-        state,
-        &run1,
-        parked(vec![], vec![lash_kernel_doc::testkit::wait_id(1)]),
-    );
-    assert_eq!(
-        action,
-        EngineAction::Sleep {
-            until: lash_core::durable_port::DurableInstant(5_000),
-            site: Some(element(2)),
-        }
-    );
-    let (state, action) = settle(state, &withdrawn_step, completed("null".to_owned()));
-    assert!(matches!(action, EngineAction::Sleep { .. }));
-
-    let (_, action) =
-        advance(KernelVersion::NEWEST, state, EngineEvent::Woke).expect("a wake advances");
-    let (_, input, _) = run_of(&action);
-    assert_eq!(
-        input
-            .deliver
-            .iter()
-            .map(|d| (d.wait, d.outcome.clone()))
-            .collect::<Vec<_>>(),
-        vec![(lash_kernel_doc::testkit::wait_id(3), OutcomeWire::Elapsed)]
-    );
-}
 
 /// Workflow admission's local names preserve the wrapper and every checker
 /// error; hosts never need to parse a payload or display message for the code.
-#[test]
-fn workflow_admission_refusals_have_stable_local_codes() {
-    use super::workflow::WorkflowAdmissionRefusal;
-    let document = lash_kernel_doc::parse_document(
-        "kernel 1\nnumbers float\neffect fetch(url: Text) -> Any contract \"1\"\neffect store(key: Text) -> Any contract \"1\"\n\nmain {\n  let a = perform fetch(\"u\") as Any\n  let b = perform store(\"k\") as Any\n}\n",
-    ).expect("document");
-    let functions = BTreeMap::new();
-    let refusal =
-        lash_kernel_check::admit(&document, &lash_kernel_check::Environment::new(&functions))
-            .expect_err("both effects are missing");
-    let document_refusal = WorkflowAdmissionRefusal::Document(refusal);
-    assert_eq!(document_refusal.code(), "document");
-    let WorkflowAdmissionRefusal::Document(refusal) = document_refusal else {
-        panic!("the wrapper retains the checker refusal");
-    };
-    assert_eq!(refusal.errors.len(), 2);
-    assert_eq!(
-        refusal
-            .errors
-            .iter()
-            .map(|error| error.reason.code())
-            .collect::<Vec<_>>(),
-        ["missing_effect", "missing_effect"]
-    );
-    assert_eq!(
-        WorkflowAdmissionRefusal::NoSuchEntry {
-            entry: lash_kernel_doc::Name::new("missing"),
-        }
-        .code(),
-        "no_such_entry"
-    );
-    assert_eq!(
-        WorkflowAdmissionRefusal::Boundary {
-            message: "catalog cannot be stated as effects".into()
-        }
-        .code(),
-        "boundary"
-    );
-}
 
 /// P2: admitting an entry does not require the effects of main or siblings.
-#[test]
-fn workflow_admission_checks_only_the_selected_entry() {
-    let document = lash_kernel_doc::parse_document(
-        r#"kernel 1
-numbers float
-effect a.run(input: Any) -> Any contract "1"
-effect b.run(input: Any) -> Any contract "1"
-entry worker() -> Any
-fn worker() { let got = perform b.run(null) as Any return got }
-main { let got = perform a.run(null) as Any finish got }
-"#,
-    )
-    .unwrap();
-    let functions = BTreeMap::new();
-    let mut environment = lash_kernel_check::Environment::new(&functions);
-    environment.effects.insert(
-        lash_kernel_doc::EffectName::new("b.run").unwrap(),
-        document.manifest.effects[&lash_kernel_doc::EffectName::new("b.run").unwrap()].clone(),
-    );
-    super::WorkflowDocument::admit(
-        document,
-        lash_trace::WorkflowDocumentEntry::Entry {
-            function: lash_kernel_doc::Name::new("worker"),
-        },
-        &environment,
-    )
-    .expect("only worker's performed effect must be offered");
-}
 
 /// FIG-6431 / S1: HTTP engine settings round-trip strictly to the recorded
 /// settings; an unknown key or invalid typed value is never ignored.
@@ -562,7 +356,7 @@ fn engine_settings_decode_strictly_to_recorded_settings() {
             join_members: 16,
         },
     )
-    .observing(lash_kernel_vm::ObservationMode::Counts);
+    .observing(lash_vocabulary::observation::RunObservation::Counts);
     let engine = recorded.clone().into_engine_settings();
     assert_eq!(
         KernelRecordedSettings::from_engine_settings(&engine).unwrap(),
@@ -617,9 +411,9 @@ fn migration_refusal_round_trip(
         assert_eq!(value["refusal"]["reason"], cause);
     }
     let engine = lash_execution_contracts::process::EngineStateRefusal {
-        refusal: refusal.clone(),
+        code: "kernel_migration".into(),
+        detail: serde_json::to_value(&refusal).unwrap(),
         message: refusal.to_string(),
-        fatal: true,
     };
     let encoded = serde_json::to_string(&engine).unwrap();
     assert_eq!(
@@ -630,7 +424,7 @@ fn migration_refusal_round_trip(
     let park = lash_execution_contracts::park::ProcessParkReason::MigrationRefused {
         kind: "lashvm".to_owned(),
         version: 1,
-        refusal: refusal.clone(),
+        refusal: engine.clone(),
         message: refusal.to_string(),
     };
     let decoded: lash_execution_contracts::park::ProcessParkReason =
@@ -642,7 +436,7 @@ fn migration_refusal_round_trip(
     else {
         panic!("a migration refusal stays a migration refusal");
     };
-    assert_eq!(found, refusal);
+    assert_eq!(found, engine);
 }
 
 macro_rules! migration_refusal_law {
@@ -709,7 +503,7 @@ migration_refusal_law!(
     Document,
     DocumentRefusal,
     FunctionNotHeld {
-        function: lash_kernel_doc::FunctionId::from_bytes([2; 32])
+        function: lash_vocabulary::names::FunctionId::from_bytes([2; 32])
     },
     "document",
     "function_not_held"
@@ -719,8 +513,9 @@ migration_refusal_law!(
     Document,
     DocumentRefusal,
     FunctionRetired {
-        function: lash_kernel_doc::FunctionId::from_bytes([2; 32]),
-        name: lash_kernel_doc::FunctionName::try_from("retired.function".to_owned()).unwrap(),
+        function: lash_vocabulary::names::FunctionId::from_bytes([2; 32]),
+        name: lash_vocabulary::names::FunctionName::try_from("retired.function".to_owned())
+            .unwrap(),
     },
     "document",
     "function_retired"
@@ -779,7 +574,7 @@ migration_refusal_law!(
     Parked,
     ParkedRefusal,
     FunctionNotCarried {
-        function: lash_kernel_doc::FunctionId::from_bytes([2; 32])
+        function: lash_vocabulary::names::FunctionId::from_bytes([2; 32])
     },
     "parked",
     "function_not_carried"
@@ -801,283 +596,31 @@ migration_refusal_law!(
 /// identity follows. A value whose code calls a helper the build does not
 /// hold is refused, typed, rather than rebound to a helper of that name.
 #[cfg(feature = "synthetic-next")]
+
+/// A withdrawn operation wait never receives the later step's outcome.
 #[test]
-fn a_held_function_value_upgrades_as_its_document_does_and_an_unheld_helper_refuses() {
-    use lash_kernel_doc::{
-        Document, Expr, Function, FunctionId, FunctionValue, Name, NumberPolicy, Param, Rhs,
-        Signature, Stmt, Type,
+fn withdrawn_operation_waits_drop_late_outcomes() {
+    let (state, run) = started();
+    let (state, action) = settle(
+        state,
+        &run,
+        parked(vec![effect(1, element(0)), effect(2, element(1))], vec![]),
+    );
+    assert_eq!(state.pages, Some(sealed().root));
+    let EngineAction::Steps { steps, .. } = action else {
+        panic!("operation steps");
     };
-    let functions = lash_vm_releases::lash_packages()
-        .map(|packages| std::sync::Arc::clone(packages.functions()))
-        .expect("the build's library");
-    let (abs, name) = functions
-        .iter()
-        .find(|(_, registered)| {
-            registered.definition().kernel == KernelVersion::One.number()
-                && registered.definition().name.as_str() == "num.abs"
-        })
-        .map(|(id, registered)| (*id, registered.definition().name.clone()))
-        .expect("the earlier version's num.abs");
-    let value = |function: FunctionId| {
-        let run = Name::new(lash_kernel_doc::FUNCTION_VALUE_ENTRY);
-        let mut document = Document::new(NumberPolicy::Float, Vec::new());
-        document.manifest.kernel = KernelVersion::One.number();
-        document.manifest.functions.insert(function, name.clone());
-        document.functions.insert(
-            run.clone(),
-            Function {
-                params: vec![Name::new("x")],
-                body: vec![
-                    Stmt::Let {
-                        name: Name::new("y"),
-                        value: Rhs::Expr(Expr::Call {
-                            function,
-                            args: vec![Expr::Variable(Name::new("x"))],
-                        }),
-                    },
-                    Stmt::Return {
-                        value: Expr::Variable(Name::new("y")),
-                    },
-                ],
-                start: None,
-            },
-        );
-        document.entries.insert(
-            run.clone(),
-            lash_kernel_doc::Entry {
-                signature: Signature {
-                    params: vec![Param {
-                        name: Name::new("x"),
-                        ty: Type::Any,
-                        optional: false,
-                    }],
-                    result: Type::Any,
-                },
-                convention: lash_kernel_doc::StartConvention::Direct,
-            },
-        );
-        FunctionValue {
-            captions: lash_kernel_doc::Captions::empty(document.identity()),
-            document,
-            entry: run,
-        }
-    };
-
-    let held = value(abs);
-    let upgraded = super::migrate_function_value(&held, &functions, KernelVersion::NEWEST)
-        .expect("the value upgrades")
-        .expect("an earlier version's value is carried");
-    let planned = super::plan_migration(&held.document, &functions)
-        .expect("the document upgrades")
-        .expect("an earlier version's document is carried");
-    assert_eq!(upgraded.document, planned.rewritten.document);
-    assert_eq!(upgraded.entry, held.entry);
-    assert_eq!(upgraded.signature(), held.signature());
-    assert_ne!(
-        upgraded.document.identity(),
-        held.document.identity(),
-        "the carried value is another document"
+    let late = steps[0].step().clone();
+    let live = steps[1].step().clone();
+    let (state, action) = settle(state, &live, completed("null".into()));
+    let (run, _, _) = run_of(&action);
+    let (state, _) = settle(
+        state,
+        &run,
+        parked(vec![], vec![lash_vocabulary::sites::testkit::wait_id(1)]),
     );
-    assert!(
-        super::migrate_function_value(&upgraded, &functions, KernelVersion::NEWEST)
-            .expect("a current value checks")
-            .is_none(),
-        "a value in the newest version is kept as it is"
-    );
-
-    // No helper hashes to this identity: it names one the build never held.
-    let unheld = FunctionId::from_bytes([7; 32]);
-    let refusal = super::migrate_function_value(&value(unheld), &functions, KernelVersion::NEWEST)
-        .expect_err("an unheld helper refuses");
-    assert!(
-        matches!(
-            refusal,
-            super::KernelMigrationRefusal::Document {
-                refusal: lash_kernel_migrate::DocumentRefusal::FunctionNotHeld { function },
-                ..
-            } if function == unheld
-        ),
-        "{refusal:?}"
-    );
-}
-
-/// Two releases of package `p` in one registry, `p.outer` calling `p.fix`
-/// in each, with R2's `p.fix` corrected, and a workflow over each.
-fn releases() -> (
-    lash_kernel_doc::FunctionRegistry,
-    lash_kernel_migrate::Relink,
-    [lash_kernel_doc::Document; 2],
-) {
-    let release = |fixed: bool| {
-        let body = if fixed {
-            "let y = [x]\n  return y"
-        } else {
-            "return x"
-        };
-        let fix = lash_kernel_doc::parse_definition(&format!(
-            "function p.fix(x: Any) -> Any\nkernel 1\ncharge 1\nbody {{\n  {body}\n}}\n"
-        ))
-        .unwrap();
-        let outer = lash_kernel_doc::parse_definition(&format!(
-            "function p.outer(x: Any) -> Any\nkernel 1\ncharge 1\nuse p.fix = @{}\n\
-             body {{\n  let y = invoke p.fix(x)\n  return y\n}}\n",
-            fix.identity()
-        ))
-        .unwrap();
-        [fix, outer]
-    };
-    let workflow = |[fix, outer]: &[lash_kernel_doc::FunctionDefinition; 2]| {
-        lash_kernel_doc::parse_document(&format!(
-            "kernel 1\nnumbers float\nuse p.fix = @{}\nuse p.outer = @{}\n\
-             entry run(x: Any) -> Any\n\
-             fn run(x) {{\nlet got = invoke p.outer(x)\nreturn got\n}}\nmain {{}}\n",
-            fix.identity(),
-            outer.identity()
-        ))
-        .unwrap()
-    };
-    let (r1, r2) = (release(false), release(true));
-    let mut registry = lash_kernel_doc::FunctionRegistry::default();
-    for definition in r1.iter().chain(&r2) {
-        registry.register(definition.clone(), None).unwrap();
-    }
-    let relink = lash_kernel_migrate::relink(&r1, &r2);
-    (registry, relink, [workflow(&r1), workflow(&r2)])
-}
-
-/// K-LIB-009 through the runtime: a published definition's document, or
-/// a process that is not parked, written over release R1 of `p` is adopted
-/// onto R2 as exactly the workflow written over R2, admitted on the
-/// library that holds both; one that reaches nothing R1 holds is left as it
-/// is.
-#[test]
-fn a_definition_or_unparked_process_is_adopted_onto_the_successor_release() {
-    let (registry, relink, [over_r1, over_r2]) = releases();
-    let adopted = super::plan_adoption(&over_r1, &registry, &relink)
-        .expect("the workflow adopts")
-        .expect("it reaches R1");
-    assert_eq!(adopted.from, over_r1.identity());
-    assert_eq!(adopted.rewritten.document, over_r2);
-    assert!(
-        super::plan_adoption(&over_r2, &registry, &relink)
-            .expect("an R2 workflow plans")
-            .is_none(),
-        "a workflow already over R2 is not adopted"
-    );
-}
-
-/// One shared reader, two policies (FIG-6985): R2 of `p` changes the
-/// contract `p.fix` performs `p.send` under and keeps its signature. On a
-/// node that holds only R2, rebasing a saved function compares the
-/// signatures it was saved against and takes the changed contract;
-/// adopting a workflow reads R1's code from its stored definitions in
-/// declaration mode and refuses it, naming the operation.
-#[test]
-fn a_changed_contract_under_one_signature_is_rebased_and_never_adopted() {
-    use lash_kernel_doc::{FunctionDefinition, FunctionRegistry, parse_definition, parse_document};
-    use std::sync::Arc;
-
-    let release = |contract: &str| {
-        let fix = parse_definition(&format!(
-            "function p.fix(x: Any) -> Any\nkernel 1\ncharge 1\n\
-             effect p.send(value?: Any) -> Any contract \"{contract}\"\n\
-             body {{\n  let sent = perform p.send(x) as Any\n  return x\n}}\n"
-        ))
-        .unwrap();
-        let outer = parse_definition(&format!(
-            "function p.outer(x: Any) -> Any\nkernel 1\ncharge 1\nuse p.fix = @{}\n\
-             body {{\n  let y = invoke p.fix(x)\n  return y\n}}\n",
-            fix.identity()
-        ))
-        .unwrap();
-        [fix, outer]
-    };
-    let (r1, r2) = (release("1"), release("2"));
-    let mut node = FunctionRegistry::default();
-    for definition in &r2 {
-        node.register(definition.clone(), None).unwrap();
-    }
-    let stored: BTreeMap<_, Arc<FunctionDefinition>> = r1
-        .iter()
-        .map(|definition| (definition.identity(), Arc::new(definition.clone())))
-        .collect();
-    let [fix1, outer1] = [r1[0].identity(), r1[1].identity()];
-    let send = lash_kernel_doc::EffectName::new("p.send").unwrap();
-
-    // Rebasing a saved function written over R1 takes R2's contract.
-    let mut document = parse_document(&format!(
-        "kernel 1\nnumbers float\nuse p.outer = @{outer1}\n\
-         fn keep(n) {{ let e = invoke p.outer(n) return e }}\nmain {{}}"
-    ))
-    .unwrap();
-    document
-        .manifest
-        .functions
-        .insert(fix1, lash_kernel_doc::FunctionName::new("p.fix").unwrap());
-    let saved = lash_kernel_dialect::SavedFunction {
-        name: lash_kernel_doc::Name::new("keep"),
-        document,
-        captures: BTreeMap::new(),
-        closure: lash_kernel_doc::heap::PageRef {
-            id: lash_kernel_doc::heap::PageId([1; 32]),
-            grant: lash_kernel_doc::heap::PageGrant::NONE,
-        },
-        helper_owners: std::collections::BTreeSet::new(),
-        references: std::collections::BTreeSet::new(),
-        written: None,
-        token: None,
-        held: None,
-        against: r1
-            .iter()
-            .map(|definition| (definition.identity(), definition.signature.clone()))
-            .collect(),
-    };
-    let library = lash_kernel_dialect::NamedLibrary::resolving(&node, |_| true).unwrap();
-    let rebased =
-        lash_kernel_dialect::relink_saved(&saved, &library, &lash_kernel_dialect::NoPackages)
-            .expect("rebasing takes a changed contract under one signature");
-    assert!(
-        rebased
-            .document
-            .manifest
-            .functions
-            .contains_key(&r2[1].identity())
-    );
-    assert_eq!(
-        rebased.document.manifest.effects[&send].contract,
-        lash_kernel_doc::ContractId::new("2")
-    );
-
-    // Adopting a workflow written over R1 refuses it.
-    let over_r1 = parse_document(&format!(
-        "kernel 1\nnumbers float\neffect p.send(value?: Any) -> Any contract \"1\"\n\
-         use p.fix = @{fix1}\nuse p.outer = @{outer1}\n\
-         entry run(x: Any) -> Any\n\
-         fn run(x) {{\nlet got = invoke p.outer(x)\nreturn got\n}}\nmain {{}}\n"
-    ))
-    .unwrap();
-    let declared = lash_vm_broker::kernel::loader::declare(
-        over_r1
-            .manifest
-            .functions
-            .keys()
-            .copied()
-            .chain(r2.iter().map(FunctionDefinition::identity)),
-        1,
-        &node,
-        &stored,
-    )
-    .expect("both releases are declared");
-    let relink = lash_kernel_migrate::relink(&r1, &r2);
-    let refusal = super::plan_adoption(&over_r1, &declared, &relink)
-        .expect_err("adoption refuses a changed contract");
-    assert_eq!(
-        refusal,
-        super::HelperAdoptionRefusal::Document {
-            document: over_r1.identity(),
-            refusal: lash_kernel_migrate::DocumentRefusal::OperationContractChanged {
-                operation: send,
-            },
-        }
-    );
+    assert_eq!(state.pages, Some(sealed().root));
+    let (state, action) = settle(state, &late, completed("null".into()));
+    assert!(!matches!(action, EngineAction::Steps { .. }));
+    assert_eq!(state.pages, Some(sealed().root));
 }

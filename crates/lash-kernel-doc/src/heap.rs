@@ -24,6 +24,7 @@ use std::ops::{ControlFlow, Range};
 use std::sync::Arc;
 
 use crate::number::{Float, Integer};
+
 use crate::value::{Handle, TaskId, Timestamp};
 
 /// An identity family: the namespace of one allocation range. Family
@@ -282,7 +283,7 @@ pub enum PageValue {
     Closure(EntityId),
     Error(Arc<ErrorRef>),
     Task(TaskId),
-    Function(TextRef),
+    Function(Box<lash_vocabulary::names::CallableId>),
     Handle(Arc<Handle>),
     Ref(Identity),
 }

@@ -111,6 +111,7 @@ impl CensusGraph for ResidentGraph<'_> {
         &mut self,
         visit: &mut dyn FnMut(&PageValue) -> Result<(), HeapFault>,
     ) -> Result<(), HeapFault> {
+        self.heap.visit_saved_environments(visit)?;
         self.heap
             .visit_session_bindings_over(&self.walked.session, &mut |binding| {
                 binding_values(binding, visit)

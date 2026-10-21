@@ -12,8 +12,8 @@ use std::sync::{Arc, Mutex};
 
 use lash_protocol_types::sync::MutexExt;
 
-use crate::SessionId;
 use crate::llm::types::LlmToolSpec;
+use lash_vocabulary::identity::SessionId;
 
 /// One fingerprint per tool contract of a request, in its order.
 type ToolContractFingerprints = Arc<Vec<[u8; 32]>>;

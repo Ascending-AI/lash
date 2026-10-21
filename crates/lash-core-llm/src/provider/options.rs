@@ -2,6 +2,7 @@ use super::support::*;
 use lash_protocol_types::{
     llm::capability::CacheRetention, llm::capability::ReasoningRetentionSelection,
 };
+
 use std::collections::hash_map::RandomState;
 use std::hash::{BuildHasher, Hasher};
 

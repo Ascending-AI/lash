@@ -27,7 +27,7 @@ async fn compose(
 ) -> ComposedPrompt {
     let cut = lash_core::testing::prompt::cut(PromptCutParts {
         call: PromptCall {
-            session_id: lash_core::SessionId::from("standard-prompt"),
+            session_id: lash_vocabulary::identity::SessionId::from("standard-prompt"),
             frame: None,
             run: None,
             turn: None,
@@ -56,8 +56,8 @@ fn instructions(composed: &ComposedPrompt) -> &str {
     composed.initial_instructions.as_deref().unwrap_or("")
 }
 
-fn tool(name: &str, module: &str, inline: bool) -> lash_core::ToolDefinition {
-    let mut tool = lash_core::ToolDefinition::raw(
+fn tool(name: &str, module: &str, inline: bool) -> lash_vocabulary::tool_contract::ToolDefinition {
+    let mut tool = lash_vocabulary::tool_contract::ToolDefinition::raw(
         name,
         format!("{module}.{name}"),
         "Issue operation",
@@ -70,7 +70,7 @@ fn tool(name: &str, module: &str, inline: bool) -> lash_core::ToolDefinition {
     tool
 }
 
-fn module_tools() -> Vec<lash_core::ToolDefinition> {
+fn module_tools() -> Vec<lash_vocabulary::tool_contract::ToolDefinition> {
     vec![
         tool("issue_search", "issues", true),
         tool("issue_read", "issues", true),
@@ -78,7 +78,7 @@ fn module_tools() -> Vec<lash_core::ToolDefinition> {
     ]
 }
 
-fn recorded(tools: Vec<lash_core::ToolDefinition>) -> lash_core::ToolCatalog {
+fn recorded(tools: Vec<lash_vocabulary::tool_contract::ToolDefinition>) -> lash_core::ToolCatalog {
     let catalog = lash_core::ToolCatalog::from_tool_definitions(tools);
     serde_json::from_value(serde_json::to_value(catalog).expect("record catalog"))
         .expect("read recorded catalog")

@@ -11,9 +11,7 @@ fn tools() -> SessionProcessAdminTools {
         lifetime: std::sync::Arc::new(
             lash_execution_contracts::process::lifetime::session_or_starter,
         ),
-        environment: lash_core::runtime::env_policy::policy::refuse(
-            "these laws never reach the environment policy",
-        ),
+        environment: crate::policy::refuse("these laws never reach the environment policy"),
     }
 }
 
@@ -57,7 +55,7 @@ fn attempt_context(
     lash_core::testing::ToolCallFixture::mock()
         .scoped_effect_controller(scoped)
         .call_id(lash_core::ToolCallId::fixture("declaration-call"))
-        .enclosing_process_id(enclosing_process.map(lash_core::ProcessId::fixture))
+        .enclosing_process_id(enclosing_process.map(lash_vocabulary::identity::ProcessId::fixture))
 }
 
 macro_rules! attempt {
@@ -155,7 +153,7 @@ fn a_started_definition_is_the_definition_processes_list_filters_by() {
     );
     let mut record = lash_execution_contracts::process::ProcessRecord::from_registration(
         registration,
-        lash_core::ProcessId::fixture("run"),
+        lash_vocabulary::identity::ProcessId::fixture("run"),
     );
     record.identity.definition_id = Some(id(1));
     for (candidate, matches) in [(id(1), true), (id(2), false)] {

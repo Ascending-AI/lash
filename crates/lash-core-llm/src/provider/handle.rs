@@ -3,6 +3,7 @@ use super::traits::{AttemptEndReason, ProviderTerminalPolicy};
 use futures_util::FutureExt as _;
 use lash_protocol_types::llm::attachment_delivery::Delivery;
 use lash_protocol_types::{ErrorEnvelope, RetryProgress};
+
 use lash_trace::EmissionPermit;
 use lash_trace::telemetry::metrics::TelemetryMetrics;
 
@@ -540,7 +541,7 @@ impl ProviderHandle {
                     true,
                     failure_protocol_position(&error),
                     deadline.then_some(RetryDecision::Declined(RetryDeclineCause::TimedOut {
-                        limit: lash_protocol_types::LimitCause::ExecutionTotal,
+                        limit: lash_vocabulary::tool_contract::LimitCause::ExecutionTotal,
                     })),
                 );
                 if interrupted {
@@ -620,7 +621,7 @@ impl ProviderHandle {
                             true,
                             failure_protocol_position(failure),
                             Some(RetryDecision::Declined(RetryDeclineCause::TimedOut {
-                                limit: lash_protocol_types::LimitCause::ExecutionTotal,
+                                limit: lash_vocabulary::tool_contract::LimitCause::ExecutionTotal,
                             })),
                         ),
                         failure
@@ -763,7 +764,7 @@ impl ProviderHandle {
                     let (decision, verdict) = match decision.delay() {
                         Some(delay) if delay >= remaining(clock.as_ref()) => {
                             let cause = RetryDeclineCause::TimedOut {
-                                limit: lash_protocol_types::LimitCause::ExecutionTotal,
+                                limit: lash_vocabulary::tool_contract::LimitCause::ExecutionTotal,
                             };
                             (
                                 RetryDecision::Declined(cause),
@@ -963,7 +964,7 @@ fn model_total_exceeded(
                 true,
                 position,
                 Some(RetryDecision::Declined(RetryDeclineCause::TimedOut {
-                    limit: lash_protocol_types::LimitCause::ExecutionTotal,
+                    limit: lash_vocabulary::tool_contract::LimitCause::ExecutionTotal,
                 })),
             ),
             None,

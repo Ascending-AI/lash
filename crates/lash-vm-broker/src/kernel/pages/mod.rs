@@ -43,6 +43,7 @@ pub mod spool;
 #[cfg(test)]
 mod spool_laws;
 
+use lash_protocol_types::engine_fault::PageRefusal;
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -63,8 +64,7 @@ use lash_durable::domain::pages::{PageStore, RootLease, StoredPage};
 use lash_kernel_doc::heap::{HeapFault, HostResource, PageGrant, PageId, PageRef};
 use lash_kernel_state::paged::{PageAnswer, PageBody, PageKind};
 use lash_vm_protocol::page::{
-    PageAuthority, PageCapability, PageEnvelope, PageRefusal, PageReply, PageRequest, ReadPage,
-    SealBatch,
+    PageAuthority, PageCapability, PageEnvelope, PageReply, PageRequest, ReadPage, SealBatch,
 };
 
 pub use capability::CapabilityKey;

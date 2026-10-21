@@ -32,7 +32,7 @@ mod costs;
 mod crossing;
 mod data;
 mod functions;
-mod interface;
+pub mod interface;
 mod machine;
 mod observe;
 /// The machine's face after the persistent-heap cutover (FIG-6195):
@@ -50,9 +50,9 @@ mod laws;
 pub(crate) use compile::Layout;
 pub use compile::{PreparedLibrary, body_census};
 pub use functions::{MachineFunctions, implement_machine_functions, register_machine_functions};
-pub use lash_kernel_doc::ExecutionPath;
+pub use lash_vocabulary::observation::{ExecutionPath, SiteCounts};
 pub use machine::KernelMachine;
-pub use observe::{ChargeTape, ObservationMode, SiteCounts};
+pub use observe::{ChargeTape, ObservationMode};
 pub use paged::{SealedRoot, validate_foreign_checkpoint};
 pub use save::CellSaveContext;
 pub use session_editor::{SessionEditor, SessionValue};
@@ -66,10 +66,10 @@ pub mod kernel_internals;
 
 pub use interface::{
     Bound, BoundExceeded, Bounds, CellSave, CellStart, Charge, ChargeLimiter, DeliverError,
-    Delivered, EffectMode, EffectModes, EffectRequest, End, Finished, Host, HostFault,
-    LimitDecision, Machine, MachineError, MachineOptions, MemoryLimiter, MemoryMeter, Meters,
-    OpenError, Outcome, Park, Program, Request, RunError, RunObserver, SaveCell, SavedCell,
-    SealError, SleepRequest, StartError, Step, Target, WaitId,
+    Delivered, EffectModes, EffectRequest, End, Finished, Host, HostFault, LimitDecision, Machine,
+    MachineError, MachineOptions, MemoryLimiter, MemoryMeter, Meters, OpenError, Outcome, Park,
+    PreparedInstance, PreparedSlot, Program, Request, RunError, RunObserver, SaveCell, SavedCell,
+    SealError, StartError, Step, Target, WaitId,
 };
 
 pub use functions::machine_native;

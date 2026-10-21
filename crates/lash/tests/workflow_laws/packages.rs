@@ -34,7 +34,9 @@ fn run_definition() -> lash::tools::ToolDefinition {
         serde_json::json!({ "type": "array" }),
     )
     .expect("the runner's schemas")
-    .declared_contract(lash_core::ContractId::new("dataframe.run/1"))
+    .declared_contract(lash_vocabulary::operations::ContractId::new(
+        "dataframe.run/1",
+    ))
     .with_execution(std::time::Duration::from_secs(120))
 }
 

@@ -5,7 +5,7 @@
 //! numbers are the format: a new variant takes an unused number, and no
 //! variant is renumbered when the Rust declaration moves.
 
-use lash_kernel_doc::graph_tokens::CodecVariant;
+use lash_vocabulary::tokens::CodecVariant;
 
 use crate::tool_run::SettledOutput;
 use crate::tool_run::run_event::{AttemptOutcome, KnownFailureReason};

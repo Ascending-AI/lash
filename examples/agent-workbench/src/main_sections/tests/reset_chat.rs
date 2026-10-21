@@ -1,5 +1,5 @@
 use super::*;
-use lash::SessionId;
+use lash_vocabulary::identity::SessionId;
 
 // FIG-3136: reset on a busy session must always leave the page on a live
 // session. The roster rotation used to be a continuation of the browser's

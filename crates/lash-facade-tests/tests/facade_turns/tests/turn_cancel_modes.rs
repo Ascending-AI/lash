@@ -7,6 +7,7 @@ use super::*;
 use lash::{TurnCancelMode, TurnCancelUndeliveredInputPolicy, TurnEvent, TurnInput};
 use lash_core::facade_support::TurnCancelOutcome;
 use lash_protocol_types::{llm::types::StreamBlockEvent, llm::types::StreamBlockKind};
+
 use std::sync::atomic::AtomicBool;
 
 /// How long a cancelled turn may take to end.
@@ -45,8 +46,8 @@ impl TokenWatchingTool {
     }
 }
 
-fn tool_definition(name: &str) -> lash_core::ToolDefinition {
-    let definition = lash_core::ToolDefinition::raw(
+fn tool_definition(name: &str) -> lash_vocabulary::tool_contract::ToolDefinition {
+    let definition = lash_vocabulary::tool_contract::ToolDefinition::raw(
         format!("tool:{name}"),
         format!("tools.{name}"),
         "A cancel-mode probe.",
@@ -56,11 +57,13 @@ fn tool_definition(name: &str) -> lash_core::ToolDefinition {
     .expect("valid declared tool schemas")
     .with_execution(std::time::Duration::from_secs(120));
     if name == RETRY {
-        definition.with_execution_policy(lash_core::ExecutionPolicy::repeatable(
-            std::num::NonZeroU32::new(2).expect("nonzero attempt bound"),
-            RETRY_AFTER_MS,
-            RETRY_AFTER_MS,
-        ))
+        definition.with_execution_policy(
+            lash_vocabulary::tool_contract::ExecutionPolicy::repeatable(
+                std::num::NonZeroU32::new(2).expect("nonzero attempt bound"),
+                RETRY_AFTER_MS,
+                RETRY_AFTER_MS,
+            ),
+        )
     } else {
         definition
     }
@@ -71,7 +74,10 @@ impl ToolProvider for TokenWatchingTool {
     fn tool_manifests(
         &self,
         _config: &lash_core::OwnerConfigView,
-    ) -> std::result::Result<Vec<lash_core::ToolManifest>, lash::plugins::PluginError> {
+    ) -> std::result::Result<
+        Vec<lash_vocabulary::tool_contract::ToolManifest>,
+        lash::plugins::PluginError,
+    > {
         Ok(vec![tool_definition(WATCH).manifest()])
     }
 
@@ -79,7 +85,7 @@ impl ToolProvider for TokenWatchingTool {
         &self,
         name: &str,
         _config: &lash_core::OwnerConfigView,
-    ) -> Option<Arc<lash_core::ToolContract>> {
+    ) -> Option<Arc<lash_vocabulary::tool_contract::ToolContract>> {
         (name == WATCH_OPERATION).then(|| Arc::new(tool_definition(WATCH).contract()))
     }
 
@@ -118,7 +124,10 @@ impl ToolProvider for RetryOnceTool {
     fn tool_manifests(
         &self,
         _config: &lash_core::OwnerConfigView,
-    ) -> std::result::Result<Vec<lash_core::ToolManifest>, lash::plugins::PluginError> {
+    ) -> std::result::Result<
+        Vec<lash_vocabulary::tool_contract::ToolManifest>,
+        lash::plugins::PluginError,
+    > {
         Ok(vec![tool_definition(RETRY).manifest()])
     }
 
@@ -126,7 +135,7 @@ impl ToolProvider for RetryOnceTool {
         &self,
         name: &str,
         _config: &lash_core::OwnerConfigView,
-    ) -> Option<Arc<lash_core::ToolContract>> {
+    ) -> Option<Arc<lash_vocabulary::tool_contract::ToolContract>> {
         (name == RETRY_OPERATION).then(|| Arc::new(tool_definition(RETRY).contract()))
     }
 
@@ -246,7 +255,7 @@ async fn session_with(
     .tools(lash::tool_provider_key!("tools"), tools)
     .build(lash_facade_tests::runtime_lease_owner())?;
     let session = core
-        .session(lash::SessionId::parse(id).expect("nonblank host identity"))
+        .session(lash_vocabulary::identity::SessionId::parse(id).expect("nonblank host identity"))
         .create(lash::SessionCreation::root(mock_session_spec()))
         .await?;
     Ok((core, session))
@@ -403,7 +412,8 @@ async fn immediate_after_after_step_escalates_and_aborts_the_running_tool() -> R
         Arc::new(tool.clone()),
     )
     .await?;
-    let run = lash::TurnId::parse("escalate-to-abort-run").expect("nonblank host identity");
+    let run = lash_vocabulary::identity::TurnId::parse("escalate-to-abort-run")
+        .expect("nonblank host identity");
     let handle = session
         .send(TurnInput::text("use the tool"))
         .id(run.clone())
@@ -447,7 +457,7 @@ async fn immediate_after_after_step_escalates_and_aborts_the_running_tool() -> R
     assert_eq!(calls.load(Ordering::SeqCst), 1);
     let repeat = session
         .cancel(lash::CancelTarget::Run(
-            lash::RunId::parse((run).as_str()).unwrap(),
+            lash_vocabulary::identity::RunId::parse((run).as_str()).unwrap(),
         ))
         .request_id("abort-late")
         .mode(TurnCancelMode::Immediate)
@@ -540,7 +550,8 @@ async fn undelivered_input_settles_by(
             Arc::new(tool.clone()),
         )
         .await?;
-        let run = lash::TurnId::parse(format!("{name}-run")).expect("nonblank host identity");
+        let run = lash_vocabulary::identity::TurnId::parse(format!("{name}-run"))
+            .expect("nonblank host identity");
         let handle = session
             .send(TurnInput::text("use the tool"))
             .id(run.clone())
@@ -599,7 +610,7 @@ async fn undelivered_input_settles_by(
             (Witness::Report, _) => {
                 let extra = extra.expect("the report witness sends two addressed inputs");
                 let terminal = session
-                    .run_terminal(&lash::RunId::parse(run.as_str()).unwrap())
+                    .run_terminal(&lash_vocabulary::identity::RunId::parse(run.as_str()).unwrap())
                     .await?
                     .expect("cancel terminal");
                 let lash::persistence::RunTerminalCause::Cancelled {
@@ -650,7 +661,7 @@ async fn undelivered_input_settles_by(
                 .await
                 .expect("the late input runs")?;
                 let reread = session
-                    .run_terminal(&lash::RunId::parse(run.as_str()).unwrap())
+                    .run_terminal(&lash_vocabulary::identity::RunId::parse(run.as_str()).unwrap())
                     .await?
                     .expect("retained terminal");
                 let lash::persistence::RunTerminalCause::Cancelled {
@@ -1035,12 +1046,14 @@ async fn drop_request_survives_owner_failure_before_finish_and_prevents_redelive
     // request recorded and the turn unfinished.
     let tool = TokenWatchingTool::default();
     let core = deploy(tool.clone())?;
-    let session_id = lash::SessionId::parse(ID).expect("nonblank host identity");
+    let session_id =
+        lash_vocabulary::identity::SessionId::parse(ID).expect("nonblank host identity");
     let session = core
         .session(session_id.clone())
         .create(lash::SessionCreation::root(mock_session_spec()))
         .await?;
-    let run = lash::TurnId::parse("turn-that-cannot-finish").expect("nonblank host identity");
+    let run = lash_vocabulary::identity::TurnId::parse("turn-that-cannot-finish")
+        .expect("nonblank host identity");
     let handle = session
         .send(TurnInput::text("use the tool"))
         .id(run.clone())
@@ -1116,12 +1129,14 @@ async fn an_accepted_cancel_survives_its_owners_loss_in_a_retry_backoff_without_
             .build(lash_facade_tests::runtime_lease_owner())
     };
     let core = deploy()?;
-    let session_id = lash::SessionId::parse(ID).expect("nonblank host identity");
+    let session_id =
+        lash_vocabulary::identity::SessionId::parse(ID).expect("nonblank host identity");
     let session = core
         .session(session_id.clone())
         .create(lash::SessionCreation::root(mock_session_spec()))
         .await?;
-    let run = lash::TurnId::parse("turn-in-backoff").expect("nonblank host identity");
+    let run = lash_vocabulary::identity::TurnId::parse("turn-in-backoff")
+        .expect("nonblank host identity");
     let handle = session
         .send(TurnInput::text("use the tool"))
         .id(run.clone())

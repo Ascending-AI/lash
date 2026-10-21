@@ -1,5 +1,5 @@
 use crate::ActorContext;
-use crate::SessionId;
+use lash_vocabulary::identity::SessionId;
 use std::sync::Arc;
 
 use super::ProcessWorkSubstrate;
@@ -250,6 +250,7 @@ impl DeltaCoalescing {
 
 #[derive(Clone)]
 pub struct RuntimeControlConfig {
+    pub packages: crate::plugin::packages::RecordedPackages,
     /// Readable transcript copies; defaults to the named standard preset.
     pub output_cuts: lash_protocol_types::session_model::RuntimeOutputCuts,
     /// Optional host pool; absence uses the shared standard pool. Every model
@@ -361,6 +362,7 @@ impl RuntimeHostConfig {
                 run_definitions: crate::RunDefinitions::default(),
             },
             control: RuntimeControlConfig {
+                packages: Default::default(),
                 output_cuts: lash_protocol_types::session_model::RuntimeOutputCuts::standard(),
                 prompt_render_pool: None,
                 execution_budgets,
@@ -645,14 +647,18 @@ impl RuntimeHost {
     /// repairs it (FIG-4404, FIG-4531).
     pub fn resolve_owner_policy(
         &self,
-        owner: &crate::RuntimeOwner,
+        owner: &lash_vocabulary::identity::RuntimeOwner,
         policy: crate::SessionPolicy,
     ) -> Result<crate::RuntimeSessionPolicy, lash_execution_contracts::plugin_error::PluginError>
     {
         self.runtime_policy(policy).ok_or_else(|| {
             let owner = match owner {
-                crate::RuntimeOwner::Session(session_id) => format!("session `{session_id}`"),
-                crate::RuntimeOwner::Process(process_id) => format!("process `{process_id}`"),
+                lash_vocabulary::identity::RuntimeOwner::Session(session_id) => {
+                    format!("session `{session_id}`")
+                }
+                lash_vocabulary::identity::RuntimeOwner::Process(process_id) => {
+                    format!("process `{process_id}`")
+                }
             };
             lash_execution_contracts::plugin_error::PluginError::Session(format!(
                 "{owner} has selected no model"

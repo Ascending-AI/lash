@@ -11,10 +11,10 @@ use std::fmt;
 
 use serde::{Deserialize, Deserializer, Serialize};
 
-use crate::ProcessId;
 use crate::artifact_referrer::ArtifactName;
 use crate::await_event_identity::AwaitEventKey;
 use crate::effect_opener::EffectOpener;
+use lash_vocabulary::identity::ProcessId;
 
 /// version_surface = "coexist"
 /// version_guard(items(MATERIAL_DOMAIN, reference), roots(MaterialPayload))

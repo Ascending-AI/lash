@@ -13,13 +13,10 @@ use std::process::ExitCode;
 fn main() -> ExitCode {
     let (held, _) = fixtures::installed();
     let selector = std::env::args().nth(1);
-    let view = held.view();
+    let view = held;
     if let Some(selector) = &selector {
-        let exists = view.packages().any(|package| {
-            package
-                .functions()
-                .iter()
-                .any(|(name, id)| name.as_str() == selector || id.to_string() == *selector)
+        let exists = view.functions.iter().any(|(id, definition)| {
+            definition.name.as_str() == selector || id.to_string() == *selector
         });
         if !exists {
             eprintln!("unknown package definition: {selector}");

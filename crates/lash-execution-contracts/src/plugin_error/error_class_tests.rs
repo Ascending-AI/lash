@@ -1,9 +1,12 @@
 //! One value of every [`PluginError`] variant, and the laws that hold of
 //! each of them (FIG-4649).
 
+use crate::RuntimeEffectControllerError;
+use crate::RuntimeError;
+use crate::RuntimeErrorCode;
 use crate::plugin_error::PluginError;
 use crate::plugin_error::PluginErrorClass;
-use crate::{RuntimeEffectControllerError, RuntimeError, RuntimeErrorCode, SessionId};
+use lash_vocabulary::identity::SessionId;
 
 /// `plugin_error_samples!` names every `PluginError` variant with one value
 /// of it. Its one input generates the list the laws iterate and an
@@ -22,7 +25,7 @@ macro_rules! plugin_error_samples {
     };
 }
 
-fn process() -> crate::ProcessId {
+fn process() -> lash_vocabulary::identity::ProcessId {
     crate::process_id_for_test("sampled-process")
 }
 
@@ -39,6 +42,7 @@ fn cancel(actor: &str) -> Box<crate::CancelRequest> {
 }
 
 plugin_error_samples! {
+    Package(_) => PluginError::Package(Box::new(crate::process::linking::EnginePortError::Unsupported { operation: "sample".into() })),
     ProviderFailure { .. } => PluginError::ProviderFailure {
         kind: crate::ProviderFailureKind::Quota,
         code: Some(crate::FailureCode::provider("host_spend_cap")),
@@ -49,17 +53,17 @@ plugin_error_samples! {
     Operation(_) => PluginError::Operation(Box::new(operation_failure_sample("rejected"))),
     HookFailures { .. } => PluginError::HookFailures { causes: Vec::new() },
     UnusableSchema { .. } => PluginError::UnusableSchema {
-        source: Box::new(crate::JsonSchema::admit(serde_json::Value::Null)
+        source: Box::new(lash_vocabulary::json_schema::JsonSchema::admit(serde_json::Value::Null)
             .expect_err("null cannot be admitted as a schema")),
     },
     UnusableToolSchema { .. } => PluginError::UnusableToolSchema {
-        source: Box::new(crate::ToolDefinition::raw(
+        source: Box::new(lash_vocabulary::tool_contract::ToolDefinition::raw(
             "sampled", "tools.sampled", "sampled", serde_json::Value::Null, serde_json::json!({}),
         ).expect_err("a tool cannot publish an unusable schema")),
     },
     ValueMismatch { .. } => PluginError::ValueMismatch {
         context: "payload".into(),
-        source: Box::new(crate::ValueMismatch {
+        source: Box::new(lash_vocabulary::json_schema::ValueMismatch {
             instance_path: "/count".into(),
             message: "integer required".into(),
         }),
@@ -103,34 +107,34 @@ plugin_error_samples! {
         message: "sampled".to_string(),
     },
     ResidentToolContractUnavailable { .. } => PluginError::ResidentToolContractUnavailable {
-        tool_id: crate::ToolId::from("tool:sampled"),
+        tool_id: lash_vocabulary::tool_contract::ToolId::from("tool:sampled"),
         operation: "sampled.run".to_string(),
     },
     ResidentToolDuplicateId { .. } => PluginError::ResidentToolDuplicateId {
-        tool_id: crate::ToolId::from("tool:sampled"),
+        tool_id: lash_vocabulary::tool_contract::ToolId::from("tool:sampled"),
     },
     ResidentToolDuplicateOperation { .. } => PluginError::ResidentToolDuplicateOperation {
         operation: "sampled.run".to_string(),
-        first_tool: crate::ToolId::from("tool:sampled"),
-        second_tool: crate::ToolId::from("tool:other"),
+        first_tool: lash_vocabulary::tool_contract::ToolId::from("tool:sampled"),
+        second_tool: lash_vocabulary::tool_contract::ToolId::from("tool:other"),
     },
     ResidentToolInvalidOperation { .. } => PluginError::ResidentToolInvalidOperation {
-        tool_id: crate::ToolId::from("tool:sampled"),
+        tool_id: lash_vocabulary::tool_contract::ToolId::from("tool:sampled"),
         message: "no package".to_string(),
     },
     ToolRegistrationRefused { .. } => PluginError::ToolRegistrationRefused {
-        source: Box::new(crate::RegistrationRefused::MissingBound {
+        source: Box::new(lash_vocabulary::tool_contract::RegistrationRefused::MissingBound {
             tool: "sampled".to_string(),
-            bound: lash_protocol_types::ToolBound::Execution,
+            bound: lash_vocabulary::tool_contract::ToolBound::Execution,
         }),
     },
     ToolSurfaceRefused { .. } => PluginError::ToolSurfaceRefused {
         refusal: Box::new(crate::SurfaceRefusal::Collision(lash_core_store::tool_surface::SurfaceCollision {
             operation: "host.sampled".to_string(),
-            first_tool: crate::ToolId::from("tool:first"),
-            first_provider: lash_core_store::tool_surface::ProviderKey::new(lash_core_store::obligations::RegistryKind::Session, "first", lash_core_store::plugin_registrations::ToolProviderKey::__literal("tools")),
-            second_tool: crate::ToolId::from("tool:second"),
-            second_provider: lash_core_store::tool_surface::ProviderKey::new(lash_core_store::obligations::RegistryKind::Session, "second", lash_core_store::plugin_registrations::ToolProviderKey::__literal("tools")),
+            first_tool: lash_vocabulary::tool_contract::ToolId::from("tool:first"),
+            first_provider: lash_core_store::tool_surface::ProviderKey::new(lash_vocabulary::claims::RegistryKind::Session, "first", lash_vocabulary::providers::ToolProviderKey::__literal("tools")),
+            second_tool: lash_vocabulary::tool_contract::ToolId::from("tool:second"),
+            second_provider: lash_core_store::tool_surface::ProviderKey::new(lash_vocabulary::claims::RegistryKind::Session, "second", lash_vocabulary::providers::ToolProviderKey::__literal("tools")),
         })),
     },
     SessionAlreadyExists { .. } => PluginError::SessionAlreadyExists { session_id: session() },
@@ -138,7 +142,7 @@ plugin_error_samples! {
         session_id: session(),
         owner: crate::store::SessionHeadOwner::CommandLane { enqueue_seq: 1 },
     },
-    ProviderRegistryMismatch { .. } => PluginError::ProviderRegistryMismatch { expected: lash_core_store::obligations::RegistryKind::Session, provider: lash_core_store::plugin_registrations::ToolProviderHandle::new(lash_core_store::obligations::RegistryKind::Process, "component", lash_core_store::plugin_registrations::ToolProviderKey::__literal("tools")) },
+    ProviderRegistryMismatch { .. } => PluginError::ProviderRegistryMismatch { expected: lash_vocabulary::claims::RegistryKind::Session, provider: lash_vocabulary::providers::ToolProviderHandle::new(lash_vocabulary::claims::RegistryKind::Process, "component", lash_vocabulary::providers::ToolProviderKey::__literal("tools")) },
     ProviderConfig { .. } => PluginError::ProviderConfig { owner: "sampled".into(), message: "invalid selection".into() },
     Preflight(_) => PluginError::Preflight(lash_core_store::plugin_registrations::PreflightIssue::MissingPort { port: lash_core_store::plugin_registrations::RequiredPort::ProtocolDriver }),
     Registration(_) => PluginError::Registration("sampled".to_string()),
@@ -159,9 +163,10 @@ plugin_error_samples! {
     Format(_) => PluginError::Format(crate::FormatRefusal {
         plugin: "sampled".to_string(),
         namespace: crate::FormatNamespace::State,
-        stored: crate::FormatVersion::new(2).unwrap(),
-        readable: crate::FormatVersion::ONE,
+        stored: lash_vocabulary::providers::FormatVersion::new(2).unwrap(),
+        readable: lash_vocabulary::providers::FormatVersion::ONE,
     }),
+    PackageStoreRefused(_) => PluginError::PackageStoreRefused(lash_core_store::packages::PackageRefusal::ExecutionUse),
     StoreRefusal(_) => PluginError::StoreRefusal(crate::store::StoreRefusal::WriterFenced {
         recorded: 2,
         writable: crate::compat::VersionRange::exactly(1),

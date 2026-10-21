@@ -11,11 +11,12 @@
 use std::sync::{Arc, Mutex};
 
 use lash_core::sync::MutexExt as _;
+use lash_core_execution::ScopeId;
 use lash_core_execution::runtime::actor::waits::{self, Resolution};
-use lash_core_execution::{ProcessId, ScopeId};
 use lash_durable::ActorState;
 use lash_durable::domain::ResolveAnswer;
 use lash_durable_test::{Cut, SimNodes};
+use lash_vocabulary::identity::ProcessId;
 use serde_json::{Value, json};
 
 use super::{LOOK_EVERY, LOOKS, ended, find, outcome, process_actor, register, state};

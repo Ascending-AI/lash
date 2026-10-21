@@ -12,15 +12,19 @@ use std::any::TypeId;
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
-use lash_core_store::process_env::{
-    ProcessComponentEntry, ProcessComponentId, ProcessConfigKey, ProcessEnv, ProcessEnvRefusal,
-};
+use lash_core_store::process_env::ProcessComponentEntry;
+use lash_core_store::process_env::ProcessConfigKey;
+use lash_core_store::process_env::ProcessEnv;
+use lash_core_store::process_env::ProcessEnvRefusal;
 use lash_core_store::run_spec::{CapabilityRef, SlotId};
+use lash_vocabulary::providers::ProcessComponentId;
 
 use super::prompt::{PromptSection, PromptSectionSpec};
 use super::registrar::PluginContributions;
 use super::*;
-use crate::{ProcessId, SessionId, ToolProvider};
+use crate::ToolProvider;
+use lash_vocabulary::identity::ProcessId;
+use lash_vocabulary::identity::SessionId;
 
 mod declaration;
 mod reads;
@@ -136,6 +140,24 @@ impl ProcessComponentSpec {
         if let Err(error) = result {
             self.errors.push(error);
         }
+    }
+    pub fn with_package_provider(
+        mut self,
+        key: super::ToolProviderKey,
+        provider: Arc<dyn super::packages::PackageProvider>,
+    ) -> Self {
+        let result = self.registrations.package_provider(key, provider);
+        self.admit(result);
+        self
+    }
+    pub fn with_deferred_package_provider(
+        mut self,
+        key: super::ToolProviderKey,
+        provider: Arc<dyn super::packages::DeferredPackageProvider>,
+    ) -> Self {
+        let result = self.registrations.deferred_package_provider(key, provider);
+        self.admit(result);
+        self
     }
     pub fn with_tool_provider(
         mut self,
@@ -264,31 +286,102 @@ impl ProcessComponentRegistry {
     pub fn check_links(
         &self,
         env: &Arc<ProcessEnv>,
-        performed: &lash_execution_contracts::process::PerformedEffects,
-        owned: &lash_execution_contracts::process::OwnedOperations,
-        fits: &BTreeMap<lash_kernel_doc::EffectName, lash_execution_contracts::process::FitPolicy>,
-    ) -> Result<(), ProcessEnvRefusal> {
-        let mut served = BTreeMap::new();
-        if !env.effects().is_empty() {
-            let composition = self.compose(env, None)?;
-            for (effect, link) in env.effects() {
-                match composition.served_link(env, link) {
-                    Ok(Some(definition)) => {
-                        served.insert(effect.clone(), definition);
-                    }
-                    Ok(None) => {}
-                    Err((codec, reason)) => {
-                        return Err(ProcessEnvRefusal::BindingUnreadable {
-                            effect: effect.to_string(),
-                            tool: link.tool.to_string(),
-                            codec: codec.to_string(),
-                            reason,
-                        });
-                    }
+        inspection: &lash_execution_contracts::process::linking::LinkInspection,
+    ) -> Result<
+        lash_vocabulary::claims::ClaimRequirements,
+        lash_execution_contracts::process::linking::EnginePortError,
+    > {
+        self.check_links_with_seeds(env, inspection, &[])
+    }
+
+    pub fn check_links_with_seeds(
+        &self,
+        env: &Arc<ProcessEnv>,
+        inspection: &lash_execution_contracts::process::linking::LinkInspection,
+        seeds: &[lash_core_store::resolutions::ResolutionSeed],
+    ) -> Result<
+        lash_vocabulary::claims::ClaimRequirements,
+        lash_execution_contracts::process::linking::EnginePortError,
+    > {
+        use lash_core_store::tool_surface::UseBinding;
+        use lash_execution_contracts::process::linking::{AdmissionRefusal, EnginePortError};
+        let composition =
+            self.compose(env, None)
+                .map_err(|error| EnginePortError::Unavailable {
+                    message: error.to_string(),
+                })?;
+        let requirements = crate::runtime::actor::resolutions::start_requirements(
+            inspection,
+            env.execution(),
+            &seeds.iter().map(|seed| seed.use_).collect(),
+            |grant, registry| {
+                composition
+                    .composition
+                    .validate_deferred_grant(grant, registry)
+            },
+        )?;
+        for (use_, binding) in &env.execution().uses {
+            let UseBinding::Fixed(fixed) = binding else {
+                continue;
+            };
+            if !inspection.operations.contains_key(use_) {
+                continue;
+            }
+            let route = &fixed.route;
+            if route.provider.registry() != crate::RegistryKind::Process
+                || !composition.registers(&route.provider)
+            {
+                return Err(EnginePortError::Refused(
+                    AdmissionRefusal::ProviderNotHostable {
+                        provider: lash_core_store::tool_surface::logical_provider(&route.provider),
+                        registry: crate::RegistryKind::Process,
+                    },
+                ));
+            }
+            let served = composition
+                .served_link(env, route)
+                .map_err(|(_, message)| EnginePortError::Unavailable { message })?;
+            match crate::judge(&fixed.requirement.contract, route, served.as_ref()) {
+                crate::Judgement::Served => {}
+                crate::Judgement::Missing => {
+                    return Err(EnginePortError::Refused(AdmissionRefusal::MissingRoute {
+                        use_: *use_,
+                    }));
+                }
+                crate::Judgement::ContractChanged { pinned, live } => {
+                    return Err(EnginePortError::Refused(
+                        AdmissionRefusal::ContractMismatch {
+                            use_: *use_,
+                            pinned,
+                            offered: live,
+                        },
+                    ));
                 }
             }
         }
-        lash_execution_contracts::process::check_links(env, performed, owned, fits, &served)
+        Ok(requirements)
+    }
+
+    pub fn validate_seed_route(
+        &self,
+        env: &Arc<ProcessEnv>,
+        grant: &lash_vocabulary::package::DeferredGrant,
+        name: &lash_vocabulary::names::QualifiedName,
+        definition: &crate::ToolDefinition,
+        route: &crate::OperationRoute,
+        registry: crate::RegistryKind,
+    ) -> Result<
+        lash_vocabulary::claims::ClaimRequirements,
+        lash_execution_contracts::process::linking::EnginePortError,
+    > {
+        let composition = self.compose(env, None).map_err(|error| {
+            lash_execution_contracts::process::linking::EnginePortError::Unavailable {
+                message: error.to_string(),
+            }
+        })?;
+        composition
+            .composition
+            .validate_resolved_route(grant, name, definition, route, registry)
     }
 
     /// Install `factory` under `key`.
@@ -428,9 +521,15 @@ impl ProcessComponentRegistry {
         state: &PluginState,
     ) -> Result<ProcessEnv, ProcessEnvRefusal> {
         for id in self.retired_in(env) {
-            if let Some(effect) = env.effects().iter().find_map(|(effect, link)| {
-                (link.provider.registry() == crate::RegistryKind::Process
-                    && link.provider.owner() == id.as_str())
+            if let Some(effect) = env.execution().uses.iter().find_map(|(effect, link)| {
+                (match link {
+                    lash_core_store::tool_surface::UseBinding::Fixed(fixed) => {
+                        fixed.route.provider.owner() == id.as_str()
+                    }
+                    lash_core_store::tool_surface::UseBinding::Deferred(grant) => {
+                        grant.provider.owner == id.as_str()
+                    }
+                })
                 .then_some(effect)
             }) {
                 return Err(ProcessEnvRefusal::RetiredComponentServes {
@@ -469,7 +568,7 @@ impl ProcessComponentRegistry {
     /// The claim tokens this registry serves (§6.2, S7): every state and config
     /// format each component reads, and the callback tokens of its
     /// installed registrations.
-    pub fn served_tokens(&self) -> BTreeSet<crate::ObligationToken> {
+    pub fn served_tokens(&self) -> BTreeSet<lash_vocabulary::claims::ObligationToken> {
         let mut served = self.installed_inventory().served_tokens();
         served.extend(self.retired.served_tokens());
         for registered in self
@@ -479,7 +578,7 @@ impl ProcessComponentRegistry {
         {
             let declaration = &registered.declaration;
             for format in &declaration.readable_formats {
-                served.insert(crate::ObligationToken::for_component(
+                served.insert(lash_vocabulary::claims::ObligationToken::for_component(
                     &declaration.id,
                     *format,
                 ));
@@ -487,7 +586,7 @@ impl ProcessComponentRegistry {
         }
         for declaration in self.retired.values() {
             for format in &declaration.readable_formats {
-                served.insert(crate::ObligationToken::for_component(
+                served.insert(lash_vocabulary::claims::ObligationToken::for_component(
                     &declaration.id,
                     *format,
                 ));
@@ -537,7 +636,7 @@ impl ProcessComponentRegistry {
             }
         }
         InstalledInventory {
-            scope: InventoryScope::Deployment(crate::RegistryKind::Process),
+            scope: InventoryScope::Deployment(lash_vocabulary::claims::RegistryKind::Process),
             entries,
             readiness,
             stateless: Default::default(),
@@ -669,8 +768,12 @@ impl ProcessComponentRegistry {
             .collect::<Vec<_>>();
         let inventory = InstalledInventory {
             scope: process.map_or(
-                InventoryScope::Deployment(crate::RegistryKind::Process),
-                |process| InventoryScope::Owner(crate::RuntimeOwner::Process(process.clone())),
+                InventoryScope::Deployment(lash_vocabulary::claims::RegistryKind::Process),
+                |process| {
+                    InventoryScope::Owner(lash_vocabulary::identity::RuntimeOwner::Process(
+                        process.clone(),
+                    ))
+                },
             ),
             readiness: vec![ContributionReadiness::Ready; entries.len()],
             entries,
@@ -683,7 +786,7 @@ impl ProcessComponentRegistry {
             let ports = self.host.ports(entry);
             let state_view = match process {
                 Some(process) => PluginStateView::bind(
-                    &crate::RuntimeOwner::Process(process.clone()),
+                    &lash_vocabulary::identity::RuntimeOwner::Process(process.clone()),
                     &id,
                     Arc::clone(state),
                 ),
@@ -763,8 +866,10 @@ impl ProcessComponentRegistry {
         if let Some(process) = process
             && let Some(inventory) = &parts.inventory
         {
-            self.materialized_inventories
-                .observe(&crate::RuntimeOwner::Process(process.clone()), inventory);
+            self.materialized_inventories.observe(
+                &lash_vocabulary::identity::RuntimeOwner::Process(process.clone()),
+                inventory,
+            );
         }
         Ok(ProcessComposition {
             composition: Arc::new(parts.composition),
@@ -840,13 +945,13 @@ pub enum StepLink {
     Served {
         manifest: Box<ToolManifest>,
         binding: Box<crate::tool_run::AdmittedBinding>,
-        payload: Option<Box<crate::ExecutionBinding>>,
+        payload: Option<Box<lash_vocabulary::providers::ExecutionBinding>>,
     },
     /// The link's provider does not serve the tool, or serves it under
     /// another contract than the call is pinned to: the call settles typed,
     /// without a body.
     Drifted {
-        tool: crate::ToolId,
+        tool: lash_vocabulary::tool_contract::ToolId,
         kind: crate::ToolSurfaceDriftKind,
     },
     /// The link's provider is not registered on this node (FIG-6993):
@@ -867,7 +972,7 @@ pub enum StepLink {
 impl ProcessComposition {
     /// What this node serves `link` of `env` as: the tool its provider
     /// serves now, or the definition the link serves itself, admitted under
-    /// the link ([`crate::OperationLink::admitted`]). `Ok(None)` when it is
+    /// the link ([`crate::OperationRoute::admitted`]). `Ok(None)` when it is
     /// not served here.
     ///
     /// # Errors
@@ -877,7 +982,7 @@ impl ProcessComposition {
     fn served_link(
         &self,
         env: &Arc<crate::ProcessEnv>,
-        link: &crate::OperationLink,
+        link: &crate::OperationRoute,
     ) -> Result<Option<crate::ToolDefinition>, (crate::ProviderKey, String)> {
         if let Some(payload) = &link.payload {
             self.check_binding(payload)
@@ -886,7 +991,7 @@ impl ProcessComposition {
         let live = match &link.source {
             // A granted tool is no provider's advertisement: it is served
             // wherever the deferred provider its grant names is registered.
-            crate::LinkSource::Dispatch { .. } => {
+            crate::RouteSource::Dispatch { .. } => {
                 if self.registry.deferred_provider(&link.provider).is_none() {
                     return Ok(None);
                 }
@@ -894,8 +999,8 @@ impl ProcessComposition {
             }
             // A resolved link's provider serves the definition the link
             // retains, advertised or not.
-            crate::LinkSource::Resolved { .. } => None,
-            crate::LinkSource::Advertised => {
+            crate::RouteSource::Resolved { .. } => None,
+            crate::RouteSource::Advertised => {
                 let config = super::OwnerConfigView::components(Arc::clone(env));
                 let Some(served) = self.registry.served(&link.provider, &link.tool, &config) else {
                     return Ok(None);
@@ -922,12 +1027,13 @@ impl ProcessComposition {
     pub fn step_link(
         &self,
         env: &Arc<crate::ProcessEnv>,
-        effect: &lash_kernel_doc::EffectName,
-        contract: &lash_kernel_doc::ContractId,
+        effect: &lash_vocabulary::names::OperationUse,
     ) -> StepLink {
-        let Some(link) = env.effects().get(effect) else {
+        let Some(fixed) = env.execution().fixed(effect) else {
             return StepLink::Unlinked;
         };
+        let link = &fixed.route;
+        let contract = &fixed.requirement.contract;
         let drifted = |kind| StepLink::Drifted {
             tool: link.tool.clone(),
             kind,
@@ -1024,7 +1130,10 @@ impl ProcessComposition {
 
     /// Check that `binding`'s codec is a provider registered here that
     /// reads its format (S8).
-    fn check_binding(&self, binding: &crate::ExecutionBinding) -> Result<(), String> {
+    fn check_binding(
+        &self,
+        binding: &lash_vocabulary::providers::ExecutionBinding,
+    ) -> Result<(), String> {
         let readable = self
             .registry
             .provider(&binding.codec)
@@ -1053,12 +1162,13 @@ impl ProcessComposition {
     fn dispatch_target(
         &self,
         env: &Arc<crate::ProcessEnv>,
-        effect: &lash_kernel_doc::EffectName,
+        effect: &lash_vocabulary::names::OperationUse,
         input: &serde_json::Value,
     ) -> Result<Result<crate::DispatchTarget, crate::DispatchRefusal>, PluginError> {
         let link = env
-            .effects()
-            .get(effect)
+            .execution()
+            .fixed(effect)
+            .map(|fixed| &fixed.route)
             .filter(|link| link.dispatches())
             .ok_or_else(|| {
                 PluginError::Registration(format!(
@@ -1095,17 +1205,23 @@ impl ProcessComposition {
         &self,
         env: &Arc<crate::ProcessEnv>,
         owner: &crate::ExecutionOwner,
-        effect: &lash_kernel_doc::EffectName,
+        effect: &lash_vocabulary::names::OperationUse,
         input: &serde_json::Value,
     ) -> Result<Result<crate::DeferredMatch, crate::DispatchRefusal>, PluginError> {
         let path = match self.dispatch_target(env, effect, input)? {
             Ok(target) => target.path,
             Err(refusal) => return Ok(Err(refusal)),
         };
-        if let Err(refusal) = refuse_package_path(env.package_roots(), &path) {
+        if let Err(refusal) = refuse_package_path(env.execution(), &path) {
             return Ok(Err(refusal));
         }
-        let link = &env.effects()[effect];
+        let link = &env
+            .execution()
+            .fixed(effect)
+            .ok_or_else(|| {
+                PluginError::Registration(format!("dispatch use {effect} is not fixed"))
+            })?
+            .route;
         let config = super::OwnerConfigView::components(Arc::clone(env));
         config.validate_provider(&link.provider)?;
         let provider = self
@@ -1132,7 +1248,7 @@ impl ProcessComposition {
         if let crate::DeferredOutcome::Resolved { link } = &outcome
             && let Some(definition) = link.resolution()
             && let Err(refusal) = refuse_package_path(
-                env.package_roots(),
+                env.execution(),
                 definition.manifest.operation.effect_name().as_str(),
             )
         {
@@ -1165,10 +1281,19 @@ impl ProcessComposition {
     pub fn dispatch_args(
         &self,
         env: &Arc<crate::ProcessEnv>,
-        effect: &lash_kernel_doc::EffectName,
+        effect: &lash_vocabulary::names::OperationUse,
         input: &serde_json::Value,
         matched: &crate::DeferredMatch,
     ) -> Result<Result<serde_json::Value, crate::DispatchRefusal>, PluginError> {
+        let tool = env
+            .execution()
+            .fixed(effect)
+            .ok_or_else(|| {
+                PluginError::Registration(format!("dispatch use {effect} is not fixed"))
+            })?
+            .route
+            .tool
+            .clone();
         Ok(self
             .dispatch_target(env, effect, input)?
             .and_then(|target| {
@@ -1176,7 +1301,7 @@ impl ProcessComposition {
                     Ok(target.args)
                 } else {
                     Err(crate::DispatchRefusal::Diverged {
-                        tool: env.effects()[effect].tool.clone(),
+                        tool: tool.clone(),
                         committed: matched.requested.clone(),
                         recomputed: target.path,
                     })
@@ -1201,13 +1326,22 @@ impl ProcessComposition {
     pub fn linked_tools(
         &self,
         env: &Arc<crate::ProcessEnv>,
-        owner: crate::RuntimeOwner,
+        owner: lash_vocabulary::identity::RuntimeOwner,
         extensions: &PluginExtensions,
         isolation_engines: BTreeSet<String>,
     ) -> Result<(crate::tool_registry::SurfaceTools, crate::ToolCatalog), PluginError> {
         let config = super::OwnerConfigView::components(Arc::clone(env));
         let mut entries = BTreeMap::<crate::ToolId, crate::SurfaceEntry>::new();
-        for link in env.effects().values() {
+        for fixed in env
+            .execution()
+            .uses
+            .values()
+            .filter_map(|binding| match binding {
+                lash_core_store::tool_surface::UseBinding::Fixed(fixed) => Some(fixed),
+                lash_core_store::tool_surface::UseBinding::Deferred(_) => None,
+            })
+        {
+            let link = &fixed.route;
             if entries.contains_key(&link.tool) {
                 continue;
             }
@@ -1265,7 +1399,8 @@ impl ProcessComposition {
             crate::tool_registry::SurfaceTools::of_entries(
                 entries.into_values(),
                 Arc::clone(&self.registry),
-            ),
+            )
+            .with_packages(env.packages().clone()),
             catalog,
         ))
     }
@@ -1362,10 +1497,16 @@ impl ProcessComponentFactory for StaticProcessComponent {
 ///
 /// `DispatchRefusal::PackageNamespace`, naming the refused path.
 pub fn refuse_package_path(
-    roots: &BTreeSet<String>,
+    environment: &lash_core_store::tool_surface::ExecutionEnvironment,
     path: &str,
 ) -> Result<(), crate::DispatchRefusal> {
-    if roots.contains(path.split('.').next().unwrap_or(path)) {
+    let root = path.split('.').next().unwrap_or(path);
+    if environment.publications.iter().any(|publication| {
+        publication
+            .path
+            .first()
+            .is_some_and(|segment| segment.as_str() == root)
+    }) {
         return Err(crate::DispatchRefusal::PackageNamespace {
             path: path.to_owned(),
         });
@@ -1386,14 +1527,15 @@ mod internal_operation_tests {
             fn tool_manifests(
                 &self,
                 _: &crate::OwnerConfigView,
-            ) -> Result<Vec<crate::ToolManifest>, PluginError> {
+            ) -> Result<Vec<lash_vocabulary::tool_contract::ToolManifest>, PluginError>
+            {
                 Ok(Vec::new())
             }
             fn resolve_contract(
                 &self,
                 _: &str,
                 _: &crate::OwnerConfigView,
-            ) -> Option<Arc<crate::ToolContract>> {
+            ) -> Option<Arc<lash_vocabulary::tool_contract::ToolContract>> {
                 None
             }
             async fn execute(&self, _: crate::ToolCall<'_>) -> crate::ToolAttemptOutcome {
@@ -1416,7 +1558,7 @@ mod internal_operation_tests {
                     paths[0].to_owned(),
                     crate::DeferredOutcome::resolved(
                         cx.provider.clone(),
-                        crate::ToolDefinition::raw(
+                        lash_vocabulary::tool_contract::ToolDefinition::raw(
                             "outside",
                             if paths[0] == "outside.alias" {
                                 "dataframe.col"
@@ -1437,12 +1579,15 @@ mod internal_operation_tests {
         const KEY: crate::ProcessConfigKey<()> =
             crate::ProcessConfigKey::new("namespace-law", FormatVersion::ONE);
         let resolver = Arc::new(Resolver(std::sync::atomic::AtomicUsize::new(0)));
-        let granted = crate::ToolDefinition::raw(
+        let granted = lash_vocabulary::tool_contract::ToolDefinition::raw(
             "host:call", "tools.call_tool", "Dispatches a host-selected path.",
             serde_json::json!({"type":"object","properties":{"path":{"type":"string"}},"required":["path"],"additionalProperties":false}),
             serde_json::json!({}),
         ).unwrap().with_execution(std::time::Duration::from_secs(30));
-        let effect = crate::EffectName::new("tools.call_tool").unwrap();
+        let effect = lash_vocabulary::OperationUse {
+            link: lash_vocabulary::LinkId::from_bytes([5; 32]),
+            slot: lash_vocabulary::ImportSlot(0),
+        };
         let registration = crate::DeferredToolProviderRegistration::new(resolver.clone())
             .with_dispatch_grant(crate::DispatchGrant::new(granted.clone(), |input| {
                 Ok(crate::DispatchTarget {
@@ -1472,13 +1617,32 @@ mod internal_operation_tests {
         let env = Arc::new(
             crate::ProcessEnv::builder(crate::MaxToolCalls::new(10))
                 .component(KEY, &())
-                .link(
-                    effect.clone(),
-                    registration.dispatch_link(handle, granted.id()).unwrap(),
-                )
+                .execution({
+                    use lash_vocabulary::package::*;
+                    let route = registration.dispatch_link(handle, granted.id()).unwrap();
+                    let mut execution = crate::testing::operation_environment(
+                        lash_vocabulary::claims::RegistryKind::Process,
+                        [(effect, granted.clone(), route)],
+                    )
+                    .unwrap();
+                    execution.publications.push(PublicationRecord {
+                        context: PublicationContext {
+                            domain: PublicationDomain("fixture".into()),
+                            scope: PublicationScope::Host,
+                            publisher: PublisherInstance("fixture".into()),
+                            root: lash_vocabulary::Segment::new("dataframe").unwrap(),
+                        },
+                        path: lash_vocabulary::PackagePath::parse("dataframe").unwrap(),
+                        content: PublishedContent::Package(lash_vocabulary::PackageId::from_bytes(
+                            [4; 32],
+                        )),
+                        code_links: Default::default(),
+                        imported_publications: Vec::new(),
+                    });
+                    execution
+                })
                 .build()
-                .unwrap()
-                .with_package_roots(BTreeSet::from(["dataframe".to_owned()])),
+                .unwrap(),
         );
         let env =
             Arc::new(crate::ProcessEnv::from_store_bytes(&env.to_store_bytes().unwrap()).unwrap());

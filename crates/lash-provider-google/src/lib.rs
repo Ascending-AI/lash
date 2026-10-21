@@ -1104,12 +1104,12 @@ mod tests {
         req.tools = Arc::new(vec![LlmToolSpec {
             name: "cache-shaped-input".to_string(),
             description: "Host tool with a provider-looking property".to_string(),
-            input_schema: lash_protocol_types::SchemaContract::admit(json!({
+            input_schema: lash_vocabulary::schema_contract::SchemaContract::admit(json!({
                 "type": "object",
                 "properties": { "cachedContent": { "type": "string" } }
             }))
             .expect("valid declared schema"),
-            output_schema: lash_protocol_types::SchemaContract::admit(json!({}))
+            output_schema: lash_vocabulary::schema_contract::SchemaContract::admit(json!({}))
                 .expect("valid declared schema"),
         }]);
 
@@ -1292,7 +1292,7 @@ mod tests {
         claude_on_vertex.tools = Arc::new(vec![LlmToolSpec {
             name: "lookup".to_string(),
             description: "Lookup".to_string(),
-            input_schema: lash_protocol_types::SchemaContract::admit(json!({
+            input_schema: lash_vocabulary::schema_contract::SchemaContract::admit(json!({
                 "$schema": "https://json-schema.org/draft/2020-12/schema",
                 "$id": "tool.schema.json",
                 "$defs": { "unused": { "type": "string" } },
@@ -1307,7 +1307,7 @@ mod tests {
                 }
             }))
             .expect("valid declared schema"),
-            output_schema: lash_protocol_types::SchemaContract::admit(json!({}))
+            output_schema: lash_vocabulary::schema_contract::SchemaContract::admit(json!({}))
                 .expect("valid declared schema"),
         }]);
         let claude_on_vertex_body =

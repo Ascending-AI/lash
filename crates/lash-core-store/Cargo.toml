@@ -30,12 +30,12 @@ synthetic-next = ["lash-protocol-types/synthetic-next"]
 workspace = true
 
 [dependencies]
+blake3 = { workspace = true }
+lash-vocabulary = { workspace = true }
 lash-checkpoint-encoder = { workspace = true }
 lash-core-ids = { workspace = true }
 lash-core-llm = { workspace = true }
-lash-kernel-doc = { workspace = true }
 lash-protocol-types = { workspace = true, features = ["schema-validation"] }
-lash-vm-protocol = { workspace = true }
 lash-trace = { workspace = true }
 async-trait = { workspace = true }
 rmp-serde = { workspace = true }

@@ -3,7 +3,7 @@
   "cases": [
     {
       "name": "printed temporary remains before a waiting call and a mutation",
-      "document": "kernel 1\nnumbers by_spelling\neffect echo(value: Int) -> Int contract \"1\"\n\nmain {\nlet x = 1 let saved = x let fnc = fn() { do perform echo(1) as Int set x = 2 return 3 } let h = spawn apply fnc() let answer = join h finish (saved, x, answer)\n}\n",
+      "document": "kernel 1\nnumbers by_spelling\nimport 0 operation host.echo(value: Int) -> Int\ndefinition \"function kernel.anonymous() -> Any\\nkernel 1\\nmetering statements\\nimport 0 operation host.echo(value: Int) -> Int\\nbody {\\n  do perform 0(1) as Int\\n  set x = 2\\n  return 3\\n}\\n\"\nmain {\n  let x = 1\n  let saved = x\n  let fnc = fn kernel.anonymous \n  let h = spawn apply fnc()\n  let answer = join h\n  finish (saved, x, answer)\n}\n",
       "expected": {
         "prints": [],
         "end": {
@@ -24,7 +24,7 @@
         "trace": [
           {
             "effect": {
-              "effect": "echo",
+              "effect": "host.echo",
               "args": [
                 {
                   "int": "1"

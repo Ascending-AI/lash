@@ -3,7 +3,8 @@
 
 use std::sync::Arc;
 
-use lash_kernel_doc::{Datum, FunctionRegistry, Handle, Integer, Timestamp, parse_document};
+use lash_kernel_doc::{Datum, FunctionRegistry, Handle, parse_document};
+
 use lash_kernel_vm::{
     Bounds, CellStart, EffectRequest, End, Host, Machine, Outcome, PreparedLibrary, Program,
     Request, Step, Target,
@@ -39,17 +40,39 @@ pub fn embed<M: Machine>(
     mut answers: Vec<Answer>,
 ) -> Result<Report, String> {
     let document = parse_document(text).map_err(|e| e.to_string())?;
-    let mut environment = lash_kernel_check::Environment::new(registry.as_ref());
-    // This embedder's table provides exactly the effect signatures declared
-    // by its document. The matching row is consumed at the admitted park.
-    environment.effects = document.manifest.effects.clone();
-    lash_kernel_check::admit(&document, &environment).map_err(|e| e.to_string())?;
-    drop(environment);
-    let program = Program {
-        closure: PageId([7; 32]),
-        document: Arc::new(document),
-        library: PreparedLibrary::new(registry),
+    use lash_vocabulary::{
+        ContractId, ImportKind, OperationRequirement,
+        package::{Fill, Link},
     };
+    use std::collections::BTreeMap;
+    let fills = document
+        .imports
+        .iter()
+        .map(|(slot, import)| {
+            let ImportKind::Operation { signature } = &import.kind else {
+                return Err("the embedder expects Operation imports");
+            };
+            Ok((
+                *slot,
+                Fill::Operation(OperationRequirement::new(
+                    signature.clone(),
+                    ContractId::new("conformance"),
+                )),
+            ))
+        })
+        .collect::<Result<BTreeMap<_, _>, _>>()?;
+    let link = Link {
+        document: document.identity(),
+        fills,
+    };
+    let program = Program::prepare(
+        link.identity(),
+        BTreeMap::from([(document.identity(), Arc::new(document))]),
+        &BTreeMap::from([(link.identity(), link)]),
+        PageId([7; 32]),
+        PreparedLibrary::new(registry),
+    )
+    .map_err(|e| e.to_string())?;
     let bounds = Bounds {
         memory_meter: lash_kernel_vm::MemoryMeter::On,
         charge: lash_kernel_vm::Charge::Exact,
@@ -114,22 +137,23 @@ pub fn embed<M: Machine>(
                             let row = answers
                                 .iter()
                                 .position(|row| {
-                                    row.effect == request.effect.as_str()
+                                    row.effect
+                                        == program.documents
+                                            [&program.instances[&request.use_.link].document]
+                                            .imports[&request.use_.slot]
+                                            .name
+                                            .member
+                                            .as_str()
                                         && row.args == request.args
                                 })
                                 .ok_or_else(|| {
-                                    format!("no answer for {} {:?}", request.effect, request.args)
+                                    format!("no answer for {} {:?}", request.use_, request.args)
                                 })?;
                             let answer = answers.remove(row);
                             machine
                                 .deliver(request.wait, answer.outcome)
                                 .map_err(|e| e.to_string())?;
                             requests.push(request);
-                        }
-                        Request::Sleep(request) => {
-                            machine
-                                .deliver(request.wait, Outcome::Elapsed)
-                                .map_err(|e| e.to_string())?;
                         }
                     }
                 }
@@ -143,14 +167,6 @@ pub fn embed<M: Machine>(
 struct Output(Vec<Datum>);
 
 impl Host for Output {
-    fn clock(&mut self) -> Timestamp {
-        Timestamp {
-            nanoseconds: Integer::from(0),
-        }
-    }
-    fn random(&mut self) -> u64 {
-        0
-    }
     fn read(&mut self, _: &Handle, _: &Datum) -> Result<Datum, lash_kernel_doc::ErrorDatum> {
         Err(lash_kernel_doc::ErrorDatum {
             kind: "projection_missing".into(),

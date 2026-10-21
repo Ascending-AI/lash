@@ -13,8 +13,8 @@
 use crate::support::{Arc, EmbedError, LashCore, Result};
 use lash_core::ActorContext;
 
-use lash_protocol_types::ProcessId;
-use lash_protocol_types::SessionId;
+use lash_vocabulary::identity::ProcessId;
+use lash_vocabulary::identity::SessionId;
 
 async fn await_process_terminal(
     process_work: &dyn lash_core::ProcessWorkSubstrate,
@@ -55,7 +55,7 @@ pub enum ProcessAuthority {
         engine_settings: Option<lash_execution_contracts::process::EngineSettings>,
         /// The components `env` names that this core declares retired, in
         /// env order: the process builds without them (FIG-6296).
-        retired: Vec<lash_core::ProcessComponentId>,
+        retired: Vec<lash_vocabulary::providers::ProcessComponentId>,
     },
     SessionTurn {
         session: SessionId,
@@ -822,99 +822,27 @@ impl Processes {
         }))
     }
 
-    /// Capture the exact environment for a start of a published definition.
-    /// Keeps only the entry's certified called or spawned effects from
-    /// `candidate`, retaining their tool identities, providers and surfaces,
-    /// and preserving the candidate's components, config, model and limits.
-    /// Uses the same capture judgment as model starts. Nothing is published
-    /// or started; publish the returned env before starting the pair.
-    ///
-    /// [`Self::check_link`] and start admission still require LINK-EXACTLY:
-    /// they refuse extra links rather than capturing them.
-    ///
-    /// # Errors
-    ///
-    /// A missing or unreadable definition, uncertified entry effects, or the
-    /// typed [`ProcessEnvRefusal`](lash_core::ProcessEnvRefusal), accessible
-    /// through [`EmbedError::process_env_refusal`].
-    pub async fn capture(
-        &self,
-        definition: &lash_core::ProcessDefinitionId,
-        candidate: &lash_core::ProcessEnv,
-    ) -> Result<lash_core::ProcessEnv> {
-        let engines = &self.core.host_process_engines;
-        let resolved = self
-            .core
-            .host_artifacts()
-            .resolved_definition(definition)
-            .await?
-            .ok_or_else(|| {
-                EmbedError::Runtime(lash_core::RuntimeError::new(
-                    lash_core::RuntimeErrorCode::DefinitionMissing,
-                    format!(
-                        "process definition `{definition}` is not stored: no referrer holds it"
-                    ),
-                ))
-            })?;
-        let payload = resolved.start_payload(&Default::default())?;
-        let refused = |refusal| {
-            EmbedError::Plugin(
-                lash_execution_contracts::plugin_error::PluginError::ProcessEnvRefused { refusal },
-            )
-        };
-        let kind = resolved.draft.engine_kind().as_str();
-        let performed = engines
-            .performed_effects(kind, &payload)
-            .await
-            .map_err(refused)?;
-        engines
-            .capture_env(kind, &payload, &performed, candidate)
-            .await
-            .map_err(refused)
-    }
-
-    /// The link check of a start of the `kind` engine on `payload` under
-    /// `env` (P1): `env` links exactly the effects the payload performs, each
-    /// to a tool that fits it under its policy in `fits` (`Compatible` where
-    /// it states none), and this core's components serve each link with the
-    /// surface it retained. A start checks the same pair under `Compatible`;
-    /// `Exact` is a host's opt-in before it starts. Builds the env's
-    /// components and starts nothing.
-    ///
-    /// # Errors
-    ///
-    /// The pair's typed [`ProcessEnvRefusal`](lash_core::ProcessEnvRefusal).
+    /// Inspect the selected Link and validate its per-use environment through
+    /// the same judgment every process start uses. No policy is chosen here.
     pub async fn check_link(
         &self,
         kind: &str,
-        payload: &serde_json::Value,
+        start: &lash_vocabulary::LinkedStart,
         env: &lash_core::ProcessEnv,
-        fits: &std::collections::BTreeMap<
-            lash_core::EffectName,
-            lash_execution_contracts::process::FitPolicy,
-        >,
-    ) -> Result<()> {
-        let refused = |refusal| {
-            EmbedError::Plugin(
-                lash_execution_contracts::plugin_error::PluginError::ProcessEnvRefused { refusal },
-            )
-        };
+    ) -> Result<lash_vocabulary::claims::ClaimRequirements> {
         let engines = &self.core.host_process_engines;
-        let performed = engines
-            .performed_effects(kind, payload)
-            .await
-            .map_err(refused)?;
+        let inspection = engines.inspect_link(kind, start).await.map_err(|error| {
+            EmbedError::Plugin(lash_execution_contracts::PluginError::Package(Box::new(
+                error,
+            )))
+        })?;
         engines
-            .check_links(
-                kind,
-                payload,
-                &std::sync::Arc::new(env.clone()),
-                &performed,
-                fits,
-            )
-            .await
-            .map_err(refused)?;
-        Ok(())
+            .check_links(&Arc::new(env.clone()), &inspection)
+            .map_err(|error| {
+                EmbedError::Plugin(lash_execution_contracts::PluginError::Package(Box::new(
+                    error,
+                )))
+            })
     }
 
     /// Carry `id` onto the successor pair its host names (D2): the engine
@@ -1252,14 +1180,14 @@ mod terminal_wait_tests {
     impl lash_core::ProcessWorkSubstrate for ReattachOnce {
         async fn await_process_terminal(
             &self,
-            process_id: &lash_core::ProcessId,
+            process_id: &lash_vocabulary::identity::ProcessId,
         ) -> std::result::Result<
             lash_core::ProcessTerminalWait,
             lash_execution_contracts::plugin_error::PluginError,
         > {
             assert_eq!(
                 process_id,
-                &lash_core::ProcessId::fixture("admin-reattach-process")
+                &lash_vocabulary::identity::ProcessId::fixture("admin-reattach-process")
             );
             if self.waits.fetch_add(1, Ordering::SeqCst) == 0 {
                 Ok(lash_core::ProcessTerminalWait::Reattach)
@@ -1272,7 +1200,7 @@ mod terminal_wait_tests {
 
         async fn deliver_cancel(
             &self,
-            _process_id: &lash_core::ProcessId,
+            _process_id: &lash_vocabulary::identity::ProcessId,
             _request: &lash_core::CancelRequest,
             _key: &str,
         ) -> std::result::Result<(), lash_execution_contracts::plugin_error::PluginError> {
@@ -1292,7 +1220,7 @@ mod terminal_wait_tests {
 
         let output = await_process_terminal(
             &port,
-            &lash_core::ProcessId::fixture("admin-reattach-process"),
+            &lash_vocabulary::identity::ProcessId::fixture("admin-reattach-process"),
         )
         .await
         .expect("reattachment reaches terminal output");

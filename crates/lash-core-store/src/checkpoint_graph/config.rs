@@ -7,9 +7,14 @@
 use serde::{Serialize, de::DeserializeOwned};
 use serde_json::Value;
 
-use super::{
-    GraphDecoder, GraphStaging, NodeId, NodeKind, TokenCodec, TokenError, TokenReader, TokenWriter,
-};
+use super::GraphDecoder;
+use super::GraphStaging;
+use super::NodeId;
+use super::NodeKind;
+use lash_vocabulary::tokens::TokenCodec;
+use lash_vocabulary::tokens::TokenError;
+use lash_vocabulary::tokens::TokenReader;
+use lash_vocabulary::tokens::TokenWriter;
 
 // Preserve the nesting ceiling of the JSON reader these graph objects replace.
 const MAX_JSON_DEPTH: usize = 128;

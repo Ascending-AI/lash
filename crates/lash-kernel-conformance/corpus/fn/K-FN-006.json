@@ -3,7 +3,7 @@
   "cases": [
     {
       "name": "callee raise is caught at caller statement",
-      "document": "kernel 1\nnumbers by_spelling\nfn raises() { throw 7 }\nmain {\ntry { do call raises() } catch e { finish e }\n}\n",
+      "document": "kernel 1\nnumbers by_spelling\ndefinition \"function raises() -> Any\\nkernel 1\\nmetering statements\\nbody {\\n  throw 7\\n}\\n\"\nmain {\n  try {\n    do invoke raises()\n  } catch e {\n    finish e\n  }\n}\n",
       "expected": {
         "prints": [],
         "end": {

@@ -3,7 +3,7 @@
   "cases": [
     {
       "name": "aliases survive saved park and resume",
-      "document": "kernel 1\nnumbers by_spelling\neffect echo(value: Int) -> Int contract \"1\"\n\nmain {\nlet xs = [1] let alias = xs do perform echo(1) as Int set alias[0] = 2 finish xs\n}\n",
+      "document": "kernel 1\nnumbers by_spelling\nimport 0 operation host.echo(value: Int) -> Int\nmain {\n  let xs = [1]\n  let alias = xs\n  do perform 0(1) as Int\n  set alias[0] = 2\n  finish xs\n}\n",
       "expected": {
         "prints": [],
         "end": {
@@ -18,7 +18,7 @@
         "trace": [
           {
             "effect": {
-              "effect": "echo",
+              "effect": "host.echo",
               "args": [
                 {
                   "int": "1"

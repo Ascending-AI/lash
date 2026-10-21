@@ -165,7 +165,7 @@ fn admitted_runs_share_immutable_config_json() {
     let mut base = snapshot();
     base.plugin_config.insert_versioned(
         "protocol",
-        crate::plugin_state::FormatVersion::new(7).expect("nonzero format"),
+        lash_vocabulary::providers::FormatVersion::new(7).expect("nonzero format"),
         serde_json::json!({"schema": "x".repeat(8192)}),
     );
     let encoded = serde_json::to_vec(&base).expect("encode config");

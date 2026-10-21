@@ -137,7 +137,7 @@ pub async fn a_parked_call_is_reopened_from_its_completion_wait_after_a_restart_
             "another tool",
             rebound(WaitPurpose::ToolCompletion {
                 call: call.clone(),
-                tool: crate::ToolId::new("another-tool"),
+                tool: lash_vocabulary::tool_contract::ToolId::new("another-tool"),
                 deadline: Some(deadline),
             }),
         ),

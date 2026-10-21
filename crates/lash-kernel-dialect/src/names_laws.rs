@@ -1,6 +1,7 @@
-use lash_kernel_doc::EffectName;
+use lash_vocabulary::EffectName;
 
-use crate::{MemberPath, PackagePath, QualifiedOperation, Segment, SpellKind, Spelling};
+use crate::{SpellKind, Spelling};
+use lash_vocabulary::{MemberPath, PackagePath, QualifiedOperation, Segment};
 
 // Exhaust all short words over representative letter, digit, separator,
 // uppercase and non-ASCII classes; long fixtures exercise multiple humps.

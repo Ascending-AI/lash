@@ -33,12 +33,12 @@ pub struct AccountTools {
     pub names: Arc<StdMutex<Vec<String>>>,
 }
 
-pub fn account_tool(name: &str) -> lash_core::ToolDefinition {
-    lash_core::ToolDefinition::raw(
+pub fn account_tool(name: &str) -> lash_vocabulary::tool_contract::ToolDefinition {
+    lash_vocabulary::tool_contract::ToolDefinition::raw(
         format!("tool:{name}"),
         format!("tools.{name}"),
         "Reads an account's inbox.",
-        lash_core::ToolDefinition::default_input_schema(),
+        lash_vocabulary::tool_contract::ToolDefinition::default_input_schema(),
         serde_json::json!({ "type": "string" }),
     )
     .expect("the account tool's schemas")
@@ -50,7 +50,10 @@ impl ToolProvider for AccountTools {
     fn tool_manifests(
         &self,
         _config: &lash_core::OwnerConfigView,
-    ) -> std::result::Result<Vec<lash_core::ToolManifest>, lash::plugins::PluginError> {
+    ) -> std::result::Result<
+        Vec<lash_vocabulary::tool_contract::ToolManifest>,
+        lash::plugins::PluginError,
+    > {
         Ok({
             self.names
                 .lock_recover()
@@ -64,7 +67,7 @@ impl ToolProvider for AccountTools {
         &self,
         name: &str,
         _config: &lash_core::OwnerConfigView,
-    ) -> Option<Arc<lash_core::ToolContract>> {
+    ) -> Option<Arc<lash_vocabulary::tool_contract::ToolContract>> {
         self.names
             .lock_recover()
             .iter()

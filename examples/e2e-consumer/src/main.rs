@@ -15,7 +15,13 @@ use anyhow::{Context as _, Result};
 use axum::extract::{Path, State};
 use axum::routing::{get, post};
 use axum::{Json, Router};
-use lash::{InputId, LashCore, SessionCreation, SessionId, SessionSpec, TurnId, TurnInput};
+use lash::LashCore;
+use lash::SessionCreation;
+use lash::SessionSpec;
+use lash::TurnInput;
+use lash_vocabulary::identity::InputId;
+use lash_vocabulary::identity::SessionId;
+use lash_vocabulary::identity::TurnId;
 use serde::Deserialize;
 use serde_json::{Value, json};
 

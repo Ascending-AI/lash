@@ -4,7 +4,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use lash_execution_contracts::process::{EngineEffectReads, EngineReadError};
-use lash_kernel_doc::{ContractId, EffectName};
+use lash_vocabulary::names::OperationUse;
 use tokio_util::sync::CancellationToken;
 
 use super::{OwnerConfigView, PluginError, ProcessComposition, ProcessEnv};
@@ -12,15 +12,21 @@ use super::{OwnerConfigView, PluginError, ProcessComposition, ProcessEnv};
 struct ProcessReads {
     composition: Arc<ProcessComposition>,
     env: Arc<ProcessEnv>,
+    clock: Arc<dyn crate::Clock>,
 }
 
 impl ProcessComposition {
     /// Readers of this composition, under the environment the process
     /// recorded. No session is needed and no execution is admitted.
-    pub fn effect_reads(&self, env: Arc<ProcessEnv>) -> Arc<dyn EngineEffectReads> {
+    pub fn effect_reads(
+        &self,
+        env: Arc<ProcessEnv>,
+        clock: Arc<dyn crate::Clock>,
+    ) -> Arc<dyn EngineEffectReads> {
         Arc::new(ProcessReads {
             composition: Arc::new(self.clone()),
             env,
+            clock,
         })
     }
 }
@@ -29,18 +35,20 @@ impl ProcessComposition {
 impl EngineEffectReads for ProcessReads {
     async fn read(
         &self,
-        effect: &EffectName,
-        contract: &ContractId,
+        use_: &OperationUse,
         input: Result<serde_json::Value, String>,
         cancel: &CancellationToken,
         deadline: Instant,
     ) -> Result<Result<serde_json::Value, EngineReadError>, PluginError> {
+        let effect = format!("{}:{}", use_.link, use_.slot.0);
         let unavailable = |why: String| PluginError::Session(format!("read of `{effect}`: {why}"));
-        let Some(link) = self.env.effects().get(effect) else {
+        let Some(fixed) = self.env.execution().fixed(use_) else {
             return Err(unavailable(
                 "the recorded environment has no route".to_owned(),
             ));
         };
+        let link = &fixed.route;
+        let contract = &fixed.requirement.contract;
         if link.policy != crate::ExecutionPolicy::Read || link.dispatches() {
             return Err(unavailable("the recorded route is not a read".to_owned()));
         }
@@ -87,8 +95,7 @@ impl EngineEffectReads for ProcessReads {
             Ok(input) => input,
             Err(message) => return Ok(Err(EngineReadError::Arguments(message))),
         };
-        if let Err(source) = lash_protocol_types::validate_tool_input(&definition.contract, &input)
-        {
+        if let Err(source) = lash_vocabulary::validate_tool_input(&definition.contract, &input) {
             return Ok(Err(EngineReadError::Tool(Box::new(
                 crate::ToolFailure::runtime(
                     crate::ToolFailureClass::InvalidRequest,
@@ -103,6 +110,7 @@ impl EngineEffectReads for ProcessReads {
         // The manifest retains the route's policy and argument projection.
         // Process operands are plain tool JSON, with no protocol wrappers.
         let read = reader.read(crate::ReadCall {
+            clock: self.clock.as_ref(),
             manifest: &definition.manifest,
             args: &input,
             config: &config,

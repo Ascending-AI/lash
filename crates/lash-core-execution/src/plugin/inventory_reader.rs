@@ -1,7 +1,7 @@
 //! Weak observations of the canonical frozen inventory. This index owns
 //! neither a plugin instance nor a second contribution roster.
 use super::InstalledInventory;
-use crate::RuntimeOwner;
+use lash_vocabulary::identity::RuntimeOwner;
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex, Weak};
 

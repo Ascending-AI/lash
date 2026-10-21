@@ -1,7 +1,7 @@
 use crate::ActorContext;
-use crate::SessionId;
 use crate::plugin::PluginSessionRequest;
 use crate::session::runtime_ops::RuntimeExecutionContextRuntimeOps as _;
+use lash_vocabulary::identity::SessionId;
 use std::sync::Arc;
 
 use super::{EmptyToolProvider, MockSessionManager};
@@ -10,15 +10,15 @@ use super::{EmptyToolProvider, MockSessionManager};
 pub const TEST_TOOLS_PLUGIN_ID: &str = "test_tools";
 
 /// The key a test context registers its provider under.
-pub const TEST_TOOLS_PROVIDER_KEY: crate::plugin::ToolProviderKey =
+pub const TEST_TOOLS_PROVIDER_KEY: lash_vocabulary::providers::ToolProviderKey =
     crate::tool_provider_key!("tools");
 
 /// The identity of a test context's provider: what a grant of one of its
 /// tools names.
 #[must_use]
-pub fn test_tools_provider() -> crate::plugin::ToolProviderHandle {
-    crate::plugin::ToolProviderHandle::new(
-        crate::plugin::RegistryKind::Session,
+pub fn test_tools_provider() -> lash_vocabulary::providers::ToolProviderHandle {
+    lash_vocabulary::providers::ToolProviderHandle::new(
+        lash_vocabulary::claims::RegistryKind::Session,
         TEST_TOOLS_PLUGIN_ID,
         TEST_TOOLS_PROVIDER_KEY,
     )
@@ -320,7 +320,7 @@ impl<'run> TestExecutionContextBuilder<'run> {
     /// through it.
     pub fn deferred_provider(
         mut self,
-        handle: crate::plugin::ToolProviderHandle,
+        handle: lash_vocabulary::providers::ToolProviderHandle,
         provider: Arc<dyn crate::DeferredToolProvider>,
     ) -> Self {
         self.deferred = Some((handle, provider));
@@ -350,7 +350,7 @@ impl<'run> TestExecutionContextBuilder<'run> {
                 let contract = self.provider.resolve_contract(&manifest.tool(), &config)?;
                 Some(crate::SurfaceEntry::advertised(
                     key.clone(),
-                    crate::ToolDefinition {
+                    lash_vocabulary::tool_contract::ToolDefinition {
                         manifest,
                         contract: (*contract).clone(),
                     },
@@ -576,7 +576,7 @@ impl<'run> TestExecutionContextBuilder<'run> {
                 .unwrap_or_else(|| {
                     crate::AdmittedScope::turn(
                         self.session_id.clone(),
-                        crate::TurnId::from("test-turn"),
+                        lash_vocabulary::identity::TurnId::from("test-turn"),
                     )
                 })
         };
@@ -710,7 +710,7 @@ fn code_execution_invocation(
     session_id: &SessionId,
     protocol_iteration: usize,
 ) -> crate::RuntimeInvocation {
-    let turn_id = crate::TurnId::from("test-turn");
+    let turn_id = lash_vocabulary::identity::TurnId::from("test-turn");
     crate::runtime::causal::turn_effect_invocation(
         &crate::ExecutionScope::turn(session_id.clone(), turn_id.clone()),
         session_id,

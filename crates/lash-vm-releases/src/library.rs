@@ -11,7 +11,8 @@
 //! by identity. The library of this crate holds data alone, and does not
 //! compile this file.
 
-use lash_kernel_doc::{FunctionId, FunctionRegistry};
+use lash_kernel_doc::FunctionRegistry;
+use lash_vocabulary::names::FunctionId;
 
 /// The release label of every lash package this tree builds.
 #[allow(

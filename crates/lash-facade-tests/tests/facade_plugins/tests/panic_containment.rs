@@ -12,7 +12,7 @@ use std::collections::VecDeque;
 
 /// The component that serves the panicking tool to a process body.
 const PANIC_COMPONENT: lash_core::ProcessConfigKey<()> =
-    lash_core::ProcessConfigKey::new("panic-tool", lash_core::FormatVersion::ONE);
+    lash_core::ProcessConfigKey::new("panic-tool", lash_vocabulary::providers::FormatVersion::ONE);
 
 /// The fixture echo tool panics during future construction or polling.
 #[derive(Default)]
@@ -25,7 +25,10 @@ impl ToolProvider for PanicTool {
     fn tool_manifests(
         &self,
         _config: &lash_core::OwnerConfigView,
-    ) -> std::result::Result<Vec<lash_core::ToolManifest>, lash::plugins::PluginError> {
+    ) -> std::result::Result<
+        Vec<lash_vocabulary::tool_contract::ToolManifest>,
+        lash::plugins::PluginError,
+    > {
         Ok(vec![panic_tool_definition().manifest()])
     }
 
@@ -33,7 +36,7 @@ impl ToolProvider for PanicTool {
         &self,
         name: &str,
         _config: &lash_core::OwnerConfigView,
-    ) -> Option<Arc<lash_core::ToolContract>> {
+    ) -> Option<Arc<lash_vocabulary::tool_contract::ToolContract>> {
         (name == lash_core::testing::FIXTURE_ECHO_TOOL)
             .then(|| Arc::new(panic_tool_definition().contract()))
     }
@@ -57,7 +60,7 @@ impl ToolProvider for PanicTool {
     }
 }
 
-fn panic_tool_definition() -> lash_core::ToolDefinition {
+fn panic_tool_definition() -> lash_vocabulary::tool_contract::ToolDefinition {
     lash_core::testing::fixture_echo_definition()
 }
 
@@ -100,7 +103,7 @@ async fn session(
     let core = builder.build(lash_facade_tests::runtime_lease_owner())?;
     let session = created_session(
         &core,
-        lash::SessionId::parse(id).expect("nonblank host identity"),
+        lash_vocabulary::identity::SessionId::parse(id).expect("nonblank host identity"),
     )
     .await
     .open()
@@ -249,7 +252,7 @@ await control.finish("must not finish");"#
             .build(lash_facade_tests::runtime_lease_owner())?;
     let session = created_session(
         &core,
-        lash::SessionId::parse(if process {
+        lash_vocabulary::identity::SessionId::parse(if process {
             "process-panic"
         } else {
             "cell-panic"
@@ -536,7 +539,9 @@ async fn tool_panic_effect_is_identical_before_quiet_return_or_loud_reraise() ->
     let input = TurnInput::text("panic tool");
     let first = session
         .send(input.clone())
-        .id(lash::TurnId::fixture("tool-panic-turn"))
+        .id(lash_vocabulary::identity::TurnId::fixture(
+            "tool-panic-turn",
+        ))
         .output()
         .await?;
     assert_tool_panic(&session.durable(), &first).await;
@@ -548,7 +553,9 @@ async fn tool_panic_effect_is_identical_before_quiet_return_or_loud_reraise() ->
     assert_eq!(reraised.load(Ordering::SeqCst), usize::from(loud));
     let replay = session
         .send(input)
-        .id(lash::TurnId::fixture("tool-panic-turn"))
+        .id(lash_vocabulary::identity::TurnId::fixture(
+            "tool-panic-turn",
+        ))
         .output()
         .await?;
     assert_eq!(first.outcome, replay.outcome);

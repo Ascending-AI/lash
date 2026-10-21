@@ -5,10 +5,10 @@ use lash_core_store::checkpoint_graph::GraphRefusal;
 fn unavailable(reason: EvidenceAbsence) -> Evidence<RecordedAttribution> {
     Evidence::Unavailable { reason }
 }
-fn registry(owner: &OwnerKey) -> crate::plugins::RegistryKind {
+fn registry(owner: &OwnerKey) -> lash_vocabulary::claims::RegistryKind {
     match owner {
-        OwnerKey::Process(_) => crate::plugins::RegistryKind::Process,
-        OwnerKey::Turn(..) | OwnerKey::Cell(..) => crate::plugins::RegistryKind::Session,
+        OwnerKey::Process(_) => lash_vocabulary::claims::RegistryKind::Process,
+        OwnerKey::Turn(..) | OwnerKey::Cell(..) => lash_vocabulary::claims::RegistryKind::Session,
     }
 }
 impl PluginDiagnostics {
@@ -32,7 +32,7 @@ impl PluginDiagnostics {
                 } else {
                     unavailable(EvidenceAbsence::UnsupportedRecordKind)
                 };
-                (evidence, crate::plugins::RegistryKind::Session)
+                (evidence, lash_vocabulary::claims::RegistryKind::Session)
             }
             DecisionRef::DeferredTool { record, call } => {
                 let evidence = self
@@ -47,7 +47,7 @@ impl PluginDiagnostics {
                             value: RecordedAttribution::DeferredTool { resolver, call },
                         },
                     );
-                (evidence, crate::plugins::RegistryKind::Session)
+                (evidence, lash_vocabulary::claims::RegistryKind::Session)
             }
             DecisionRef::Tool {
                 record,
@@ -168,7 +168,7 @@ impl PluginDiagnostics {
                             value: RecordedAttribution::Prompt(record),
                         },
                     );
-                (evidence, crate::plugins::RegistryKind::Session)
+                (evidence, lash_vocabulary::claims::RegistryKind::Session)
             }
             DecisionRef::Callback { record, ordinal } => {
                 let RecordLocator::TurnPhase { session, run } = record else {
@@ -197,7 +197,7 @@ impl PluginDiagnostics {
                             value: RecordedAttribution::Owner(value),
                         },
                     );
-                (evidence, crate::plugins::RegistryKind::Session)
+                (evidence, lash_vocabulary::claims::RegistryKind::Session)
             }
             DecisionRef::Surface { record, tool } => {
                 let RecordLocator::TurnPhase { session, run } = record else {
@@ -228,7 +228,7 @@ impl PluginDiagnostics {
                             value: RecordedAttribution::Surface(Box::new(entry)),
                         },
                     ),
-                    crate::plugins::RegistryKind::Session,
+                    lash_vocabulary::claims::RegistryKind::Session,
                 )
             }
         };
@@ -239,7 +239,7 @@ impl PluginDiagnostics {
         &self,
         decision: &DecisionRef,
         evidence: Evidence<RecordedAttribution>,
-        kind: crate::plugins::RegistryKind,
+        kind: lash_vocabulary::claims::RegistryKind,
     ) -> DecisionAttribution {
         let recorded = match &evidence {
             Evidence::Recorded { value, .. } | Evidence::Partial { value, .. } => Some(value),
@@ -280,7 +280,7 @@ impl PluginDiagnostics {
                         source: record.clone(),
                         value: RecordedAttribution::DeferredTool { resolver, call },
                     },
-                    crate::plugins::RegistryKind::Session,
+                    lash_vocabulary::claims::RegistryKind::Session,
                 )
             })
             .collect())
@@ -625,7 +625,7 @@ impl PluginDiagnostics {
                             repairs: feedback.repairs.clone(),
                         },
                     },
-                    crate::plugins::RegistryKind::Session,
+                    lash_vocabulary::claims::RegistryKind::Session,
                 ));
             }
         }

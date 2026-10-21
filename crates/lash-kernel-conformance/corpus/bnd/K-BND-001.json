@@ -3,7 +3,7 @@
   "cases": [
     {
       "name": "run bounds cannot be caught",
-      "document": "kernel 1\nnumbers by_spelling\nfn value() {}\nmain {\ntry { let h = spawn call value() } catch e { print 1 } finally { print 2 }\n}\n",
+      "document": "kernel 1\nnumbers by_spelling\ndefinition \"function value() -> Any\\nkernel 1\\nmetering statements\\nbody {}\\n\"\nmain {\n  try {\n    let h = spawn invoke value()\n  } catch e {\n    print 1\n  } finally {\n    print 2\n  }\n}\n",
       "expected": {
         "prints": [],
         "end": {

@@ -30,7 +30,8 @@ use lash_kernel_doc::heap::{
     EntityId, HeapFault, Identity, PageReader as _, PageValue, Payload, TextRef,
 };
 use lash_kernel_doc::heap_values::text_summary;
-use lash_kernel_doc::{Integer, Site, Timestamp, Value};
+use lash_kernel_doc::{Integer, Timestamp, Value};
+
 use lash_kernel_state::arena::{
     Arena, CARD, ColdChunk, PayloadPart, ProxyKind, Summary, cold_text,
 };
@@ -40,6 +41,7 @@ use lash_kernel_state::kernel_internals::{
     PagedHeap, StoredCards, StoredHead, StoredObject, page_reads, stored_pages,
 };
 use lash_kernel_state::paged::{HeapWriteError, NameRef, ObjectKind, SiteRef};
+use lash_vocabulary::sites::Site;
 
 use crate::compile::{CodeId, Executable};
 
@@ -80,7 +82,7 @@ pub(crate) fn project(
         Value::Int(word) => PageValue::Int(word.into()),
         Value::Float(float) => PageValue::Float(float),
         Value::Text(short) => PageValue::Text(resident_text(short.as_str())),
-        Value::Function(short) => PageValue::Function(resident_text(short.as_str())),
+
         Value::Timestamp(word) => PageValue::Timestamp(Timestamp {
             nanoseconds: Integer::from(word),
         }),
@@ -98,7 +100,7 @@ pub(crate) fn project(
         | Value::BigTimestamp(handle)
         | Value::Tuple(handle)
         | Value::Error(handle)
-        | Value::LongFunction(handle)
+        | Value::Function(handle)
         | Value::Handle(handle) => {
             let facts = arena.facts(handle).map_err(arena_fault)?;
             if let Some(page) = facts.page.get() {
@@ -184,9 +186,7 @@ fn immutable(
             nanoseconds: nanoseconds.clone(),
         }),
         Body::LongText(text) => PageValue::Text(stored_pages::text(pages, whole_text(text)?)?),
-        Body::LongFunction(text) => {
-            PageValue::Function(stored_pages::text(pages, whole_text(text)?)?)
-        }
+        Body::Function(callable) => PageValue::Function(callable.clone()),
         Body::Bytes(bytes) => match &*bytes.chunks {
             [Chunk::Resident(bytes)] => PageValue::Bytes(stored_pages::bytes(pages, bytes)?),
             [] => PageValue::Bytes(stored_pages::bytes(pages, &[])?),
@@ -236,20 +236,7 @@ pub(crate) fn admit(
             )),
         },
         PageValue::Text(text) => admit_text(arena, text, value)?,
-        PageValue::Function(text) => {
-            let name = page_reads::text(pages, text)?;
-            match ShortText::new(&name) {
-                Some(short) => Value::Function(short),
-                None => Value::LongFunction(arena.immutable(
-                    Body::LongFunction(LongText {
-                        summary: text.summary,
-                        chunks: Box::new([Chunk::Resident(String::from(&*name))]),
-                    }),
-                    Summary::default(),
-                    Some(value.clone()),
-                )),
-            }
-        }
+        PageValue::Function(callable) => arena.function(**callable),
         PageValue::Bytes(bytes) => {
             let chunk = match &bytes.body {
                 Payload::Resident(held) => Chunk::Resident(Box::from(&**held)),
@@ -370,17 +357,14 @@ pub(crate) fn project_cell(arena: &mut Arena, cell: ArenaHandle) -> Result<Entit
     entity(arena, cell)
 }
 
-#[cfg(test)]
-thread_local! {
-    /// How many closure sites [`closure_code`] projected on this thread.
-    pub(crate) static PROJECTED: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
-}
-
-/// The code a closure of `site` runs: its body is the site's first child.
-pub(crate) fn closure_code(exe: &Executable, site: &Site) -> Result<CodeId, HeapFault> {
-    #[cfg(test)]
-    PROJECTED.with(|projected| projected.set(projected.get() + 1));
-    exe.code_at(&site.child(0))
+/// Resolves a closure's lexical body by its function and creation site.
+pub(crate) fn closure_code(
+    exe: &Executable,
+    function: &lash_vocabulary::FunctionId,
+    site: &Site,
+) -> Result<CodeId, HeapFault> {
+    exe.closure_at(function, site)
+        .or_else(|| exe.declared.get(function).copied())
         .ok_or_else(|| malformed("a closure names no admitted code"))
 }
 
@@ -521,16 +505,24 @@ fn open(
                 Some((seqs, next)),
             )
         }
-        StoredHead::Small(StoredObject::Closure { site, captures }) => {
+        StoredHead::Small(StoredObject::Closure {
+            callable,
+            site,
+            captures,
+        }) => {
             let site = site.resolve(pages)?;
-            let code = exe.code(closure_code(exe, &site)?);
+            let code = exe.code(closure_code(exe, &callable.function, &site)?);
             let mut named = Vec::with_capacity(captures.len());
             for (name, cell) in captures {
                 named.push((name.resolve(pages)?, cell));
             }
             let mut cells = Vec::with_capacity(code.captures.len());
-            for capture in &code.captures {
-                let name = &code.slots[capture.inner as usize].name;
+            for name in code
+                .captures
+                .iter()
+                .map(|capture| &code.slots[capture.inner as usize].name)
+                .chain(code.free.iter().map(|(name, _)| name))
+            {
                 let cell = named
                     .iter()
                     .find(|(held, _)| held == name)
@@ -540,7 +532,13 @@ fn open(
             }
             (
                 Body::Closure {
-                    site,
+                    identity: Arc::new(lash_kernel_doc::arena::ClosureIdentity {
+                        callable,
+                        site: lash_kernel_doc::linked_site::LinkedSite {
+                            link: callable.link,
+                            site: site.as_ref().clone(),
+                        },
+                    }),
                     captures: cells.into_boxed_slice(),
                     code: None,
                 },
@@ -802,7 +800,10 @@ fn stored(
     enum Held {
         List(Vec<Value>),
         Table(ObjectKind, Vec<Value>, Vec<u64>, u64),
-        Closure(Arc<Site>, Vec<ArenaHandle>),
+        Closure(
+            Arc<lash_kernel_doc::arena::ClosureIdentity>,
+            Vec<ArenaHandle>,
+        ),
         Cell(Value),
     }
     let held = match arena.body(handle).map_err(arena_fault)? {
@@ -828,7 +829,9 @@ fn stored(
                 index.next(),
             )
         }
-        Body::Closure { site, captures, .. } => Held::Closure(site.clone(), captures.to_vec()),
+        Body::Closure {
+            identity, captures, ..
+        } => Held::Closure(identity.clone(), captures.to_vec()),
         Body::Cell(value) => Held::Cell(*value),
         _ => return Err(malformed("a dirty handle names an immutable")),
     };
@@ -854,15 +857,25 @@ fn stored(
                 next,
             }
         }
-        Held::Closure(site, captures) => {
-            let code = exe.code(closure_code(exe, &site)?);
+        Held::Closure(identity, captures) => {
+            let code = exe.code(closure_code(
+                exe,
+                &identity.callable.function,
+                &identity.site.site,
+            )?);
             let mut held = Vec::with_capacity(captures.len());
-            for (capture, cell) in code.captures.iter().zip(captures) {
-                let name = &code.slots[capture.inner as usize].name;
+            for (name, cell) in code
+                .captures
+                .iter()
+                .map(|capture| &code.slots[capture.inner as usize].name)
+                .chain(code.free.iter().map(|(name, _)| name))
+                .zip(captures)
+            {
                 held.push((NameRef::new(name, pages)?, project_cell(arena, cell)?));
             }
             StoredObject::Closure {
-                site: Box::new(SiteRef::new(&site, pages)?),
+                callable: identity.callable,
+                site: Box::new(SiteRef::new(&identity.site.site, pages)?),
                 captures: held,
             }
         }

@@ -7,12 +7,12 @@ use super::{
     CommitBudget, FleetFormat, MaintenanceResult, RuntimeCommit, SessionAdmission,
     SessionBlobReclaimReport, StoreError,
 };
-use crate::SessionId;
 use crate::session_catalog::{SessionListFilter, SessionView};
 use crate::session_store_factory_types::{
     ForkSessionReceipt, ForkSessionRequest, RetainedRevision, Retention, SessionLookup,
     SessionStoreCreateRequest, Target,
 };
+use lash_vocabulary::identity::SessionId;
 
 /// Session admission, lookup, enumeration, forks and deletion.
 ///

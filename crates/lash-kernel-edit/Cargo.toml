@@ -21,6 +21,7 @@ doctest = false
 workspace = true
 
 [dependencies]
+lash-vocabulary = { workspace = true }
 lash-kernel-check = { workspace = true }
 lash-kernel-doc = { workspace = true }
 lash-kernel-package = { workspace = true }
@@ -28,10 +29,6 @@ schemars = { workspace = true, features = ["derive"] }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
-
-[dev-dependencies]
-lash-kernel-state = { workspace = true }
-lash-kernel-vm = { workspace = true }
 
 [[bin]]
 name = "kernel_edit_schema_generator"

@@ -11,12 +11,23 @@
 
 use std::collections::BTreeMap;
 
+use crate::checkpoint_graph::BlobEncoding;
+use crate::checkpoint_graph::DecodeLimits;
+use crate::checkpoint_graph::EncodeBudget;
+use crate::checkpoint_graph::EncodedNode;
+use crate::checkpoint_graph::ExplicitLimit;
+use crate::checkpoint_graph::GraphDecoder;
+use crate::checkpoint_graph::GraphRefusal;
+use crate::checkpoint_graph::GraphStaging;
+use crate::checkpoint_graph::NodeId;
+use crate::checkpoint_graph::NodeKind;
+use crate::checkpoint_graph::NodeSource;
+use crate::checkpoint_graph::StoredNode;
 use crate::checkpoint_graph::bodies::{OpaqueLeaf, OpaquePayload};
-use crate::checkpoint_graph::{
-    BlobEncoding, DecodeLimits, EncodeBudget, EncodedNode, ExplicitLimit, GraphDecoder,
-    GraphRefusal, GraphStaging, NodeId, NodeKind, NodeSource, StoredNode, TokenCodec, TokenError,
-    TokenReader, TokenWriter,
-};
+use lash_vocabulary::tokens::TokenCodec;
+use lash_vocabulary::tokens::TokenError;
+use lash_vocabulary::tokens::TokenReader;
+use lash_vocabulary::tokens::TokenWriter;
 
 use super::{BlobRef, CheckpointComponentDescriptor, SessionCheckpoint};
 

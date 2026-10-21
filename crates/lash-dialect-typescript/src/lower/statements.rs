@@ -1,6 +1,8 @@
 //! Statements and control flow.
 
-use lash_kernel_doc::{AssignOrder, Expr, Literal, Member, Name, Place, Stmt};
+use lash_kernel_doc::{AssignOrder, Expr, Literal, Member, Place, Stmt};
+
+use lash_vocabulary::Name;
 
 use super::patterns::Mode;
 use super::{
@@ -647,9 +649,9 @@ impl Lowerer<'_> {
     ) -> Lowering<()> {
         let subject = self.lower_expr(subject)?;
         let via = lash_kernel_doc::Protocol {
-            open: self.function("ts.for_of.open")?,
-            next: Some(self.function("ts.for_of.next")?),
-            item: Some(self.function("ts.for_of.item")?),
+            open: self.function_target("ts.for_of.open")?,
+            next: Some(self.function_target("ts.for_of.next")?),
+            item: Some(self.function_target("ts.for_of.item")?),
             check: None,
         };
         let mut item = self.temp();

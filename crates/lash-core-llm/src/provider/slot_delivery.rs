@@ -12,9 +12,11 @@
 use std::sync::Arc;
 
 use lash_protocol_types::{AttachmentId, AttachmentRef};
+
 use lash_protocol_types::{
     llm::attachment_delivery::Delivery, llm::attachment_delivery::DeliveryContext,
 };
+
 use lash_protocol_types::{
     llm::types::AttachmentSlot, llm::types::LiveRequestBody, llm::types::RecordedRequestTemplate,
 };

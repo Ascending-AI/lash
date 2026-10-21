@@ -105,6 +105,7 @@ fn chunked_response_mode_is_recorded_only_outside_the_body() {
         llm::types::LiveRequestBody, llm::types::ProviderRouteIdentity,
         llm::types::RecordedRequestTemplate,
     };
+
     let route = ProviderRouteIdentity {
         provider: "fixture".into(),
         endpoint: "https://fixture.test".into(),
@@ -136,6 +137,7 @@ fn growing_requests_submit_new_fragments_and_logarithmic_index_paths() {
     use lash_protocol_types::{
         llm::types::ProviderRouteIdentity, llm::types::RecordedRequestTemplate,
     };
+
     let route = ProviderRouteIdentity {
         provider: "fixture".into(),
         endpoint: "https://fixture.test".into(),

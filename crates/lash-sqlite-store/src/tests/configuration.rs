@@ -47,7 +47,9 @@ async fn unchanged_configuration_is_not_rehydrated_by_transactional_or_history_r
             let terminal = store
                 .load_session_window(
                     &session,
-                    WindowSelector::Terminal(lash_core_execution::TurnId::from("config-terminal")),
+                    WindowSelector::Terminal(lash_vocabulary::identity::TurnId::from(
+                        "config-terminal",
+                    )),
                 )
                 .await
                 .expect("terminal window")

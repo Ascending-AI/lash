@@ -29,8 +29,8 @@ use tokio_util::sync::CancellationToken;
 /// The owner's transaction failed.
 pub(super) async fn enter(
     controller: &ActorContext,
-    session: &crate::SessionId,
-    batch: &crate::BatchId,
+    session: &lash_vocabulary::identity::SessionId,
+    batch: &lash_vocabulary::identity::BatchId,
 ) -> Result<bool, crate::RuntimeError> {
     let entered = async {
         let mut tx = controller.begin().await?;
@@ -60,8 +60,8 @@ pub(super) async fn enter(
 /// first.
 pub(super) async fn watch_cancel(
     controller: &ActorContext,
-    session: &crate::SessionId,
-    batch_id: &crate::BatchId,
+    session: &lash_vocabulary::identity::SessionId,
+    batch_id: &lash_vocabulary::identity::BatchId,
     stop: &CancellationToken,
 ) {
     let mut open = false;

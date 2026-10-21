@@ -16,11 +16,11 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::Duration;
 
 use crate::SessionCatalogStore;
-use crate::SessionId;
 use crate::store::{
     SessionFaultOrigin, SessionFaultRecord, SessionFaultStore, TurnChangeCursor, TurnChangeKind,
 };
 use lash_execution_contracts::deployment::DeploymentStore;
+use lash_vocabulary::identity::SessionId;
 
 /// How long the law lets the other writers commit while the late one is
 /// held. A store that orders its commits behind the held one cannot commit

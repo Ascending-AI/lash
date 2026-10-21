@@ -11,7 +11,10 @@ impl ToolProvider for GrantBoundTools {
     fn tool_manifests(
         &self,
         _config: &lash_core::OwnerConfigView,
-    ) -> std::result::Result<Vec<lash_core::ToolManifest>, lash::plugins::PluginError> {
+    ) -> std::result::Result<
+        Vec<lash_vocabulary::tool_contract::ToolManifest>,
+        lash::plugins::PluginError,
+    > {
         Ok(Vec::new())
     }
 
@@ -19,7 +22,7 @@ impl ToolProvider for GrantBoundTools {
         &self,
         _name: &str,
         _config: &lash_core::OwnerConfigView,
-    ) -> Option<Arc<lash_core::ToolContract>> {
+    ) -> Option<Arc<lash_vocabulary::tool_contract::ToolContract>> {
         None
     }
 
@@ -37,8 +40,8 @@ impl ToolProvider for GrantBoundTools {
     }
 }
 
-fn grant_bound_tool_definition() -> lash_core::ToolDefinition {
-    lash_core::ToolDefinition::raw(
+fn grant_bound_tool_definition() -> lash_vocabulary::tool_contract::ToolDefinition {
+    lash_vocabulary::tool_contract::ToolDefinition::raw(
         "tool:grant_bound",
         "tools.grant_bound",
         "Executes only under a granted route.",
@@ -60,9 +63,9 @@ async fn testing_facade_run_tool_granted_honors_the_granted_source_binding() {
         provider.clone(),
         grant_bound_tool_definition(),
     )
-    .with_execution_binding(Some(lash_core::ExecutionBinding {
+    .with_execution_binding(Some(lash_vocabulary::providers::ExecutionBinding {
         codec: provider,
-        format: lash_core::FormatVersion::ONE,
+        format: lash_vocabulary::providers::FormatVersion::ONE,
         payload: serde_json::json!({ "route": "deferred" }),
     }));
     let args = serde_json::json!({});
@@ -438,7 +441,7 @@ async fn test_parks_are_typed_fenced_and_redrivable(
         .unwrap();
     let handle = session
         .send(TurnInput::text("resume the parked input"))
-        .id(lash::TurnId::parse("test-park-input").unwrap())
+        .id(lash_vocabulary::identity::TurnId::parse("test-park-input").unwrap())
         .await
         .unwrap();
     let session_actor = ActorKey::session(session_id.as_str()).unwrap();
@@ -581,7 +584,7 @@ async fn test_parks_are_typed_fenced_and_redrivable(
     assert!(matches!(
         lash::testing::park_process(
             &backend,
-            &lash::ProcessId::fixture("test-park-missing"),
+            &lash_vocabulary::identity::ProcessId::fixture("test-park-missing"),
             process_reason.clone()
         )
         .await,

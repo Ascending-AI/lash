@@ -374,10 +374,10 @@ impl CommittedPluginNamespace {
 /// attempt of the same call and never composes again.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PromptCall {
-    pub session_id: crate::SessionId,
+    pub session_id: lash_vocabulary::identity::SessionId,
     pub frame: Option<lash_core_store::session_identity::FrameNodeId>,
-    pub run: Option<lash_protocol_types::RunId>,
-    pub turn: Option<crate::TurnId>,
+    pub run: Option<lash_vocabulary::identity::RunId>,
+    pub turn: Option<lash_vocabulary::identity::TurnId>,
     /// The protocol iteration the call belongs to.
     pub iteration: u32,
     /// The call's ordinal within its owner: distinct for every new call.
@@ -408,7 +408,7 @@ impl OfferedTools {
 
     /// The manifests offered as native declarations or code-callable bindings.
     /// Discovery-hidden tools are absent from both views.
-    pub fn manifests(&self) -> impl Iterator<Item = &crate::ToolManifest> {
+    pub fn manifests(&self) -> impl Iterator<Item = &lash_vocabulary::tool_contract::ToolManifest> {
         self.catalog
             .entries()
             .iter()

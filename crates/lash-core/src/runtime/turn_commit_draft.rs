@@ -1,7 +1,7 @@
-use crate::SessionId;
 #[cfg(test)]
 use crate::facade_support::SessionGraphFacadeOps;
 use lash_protocol_types::sync::MutexExt;
+use lash_vocabulary::identity::SessionId;
 use std::collections::HashSet;
 use std::sync::{Arc, Mutex as StdMutex};
 
@@ -59,8 +59,8 @@ struct TurnGraphAppendDraftInner {
     /// ancestor requirement resolves against, together with `minted`.
     base: crate::SessionGraph,
     /// Every node minted by a recorded append.
-    minted: HashSet<crate::NodeId>,
-    leaf_node_id: Option<crate::NodeId>,
+    minted: HashSet<lash_vocabulary::identity::NodeId>,
+    leaf_node_id: Option<lash_vocabulary::identity::NodeId>,
     recorded: Vec<RecordedTurnGraphAppend>,
     /// The turn's one frame switch (FIG-3303): its own switch outcome.
     frame_switch: Option<RecordedFrameSwitch>,
@@ -540,7 +540,7 @@ mod tests {
         }
     }
 
-    fn appended_ids(outcome: &AppendSessionNodesOutcome) -> Vec<crate::NodeId> {
+    fn appended_ids(outcome: &AppendSessionNodesOutcome) -> Vec<lash_vocabulary::identity::NodeId> {
         match outcome {
             AppendSessionNodesOutcome::Appended { node_ids, .. } => node_ids.clone(),
             other => panic!("expected an appended outcome, got {other:?}"),

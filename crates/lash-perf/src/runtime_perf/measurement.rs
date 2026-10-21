@@ -45,7 +45,7 @@ use super::store::RuntimePerfStoreTiming;
 #[cfg(test)]
 async fn load_runtime_perf_session_state(
     store: &Arc<dyn lash_core::RuntimeStore>,
-    session_id: &lash_protocol_types::SessionId,
+    session_id: &lash_vocabulary::identity::SessionId,
 ) -> Result<Option<RuntimeSessionState>, lash_core::StoreError> {
     let view = lash_core::SessionStore::new(store.clone(), session_id.clone())?;
     Ok(lash_core::store::load_session_window_state(

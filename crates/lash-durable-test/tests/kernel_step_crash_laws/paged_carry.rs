@@ -3,6 +3,7 @@
 use lash_core_store::checkpoint_graph::{EncodedNode, NodeId};
 use lash_kernel_doc::heap::{HeapFault, PageGrant, PageId, PageRef};
 use lash_kernel_doc::{Datum, Document, FunctionDefinition, FunctionRegistry};
+
 use lash_kernel_state::paged::{PageAnswer, PageBody, PageSource};
 use lash_kernel_vm::{KernelMachine, Machine, Program, Step};
 use std::cell::RefCell;
@@ -40,12 +41,6 @@ impl PageSource for Pages {
 }
 struct Host;
 impl lash_kernel_vm::Host for Host {
-    fn clock(&mut self) -> lash_kernel_doc::Timestamp {
-        panic!("no clock")
-    }
-    fn random(&mut self) -> u64 {
-        panic!("no random")
-    }
     fn read(
         &mut self,
         _: &lash_kernel_doc::Handle,
@@ -175,7 +170,7 @@ fn park_with(
     let root = machine.checkpoint().unwrap();
     (machine, root, request)
 }
-fn finish(machine: &mut KernelMachine, wait: lash_kernel_vm::WaitId) -> Datum {
+fn finish(machine: &mut KernelMachine, wait: lash_vocabulary::sites::WaitId) -> Datum {
     machine
         .deliver(
             wait,
@@ -303,7 +298,7 @@ async fn atomic_carry(tier: super::served::Tier) {
                 declared_packages: held_a.surface().selection(),
                 document: document.identity(),
                 functions: document.manifest.functions.keys().copied().collect(),
-                entry: lash_kernel_doc::Name::new("run"),
+                entry: lash_vocabulary::names::Name::new("run"),
                 args: Default::default(),
             })
             .unwrap(),
@@ -401,7 +396,7 @@ async fn atomic_carry(tier: super::served::Tier) {
     let mut tx = store.begin(&actor, claim.epoch).await.unwrap();
     tx.stage_all(staging).write(write);
     let tokens: Vec<String> =
-        lash_core_store::obligations::ObligationToken::for_requirements(&requirements_b)
+        lash_vocabulary::claims::ObligationToken::for_requirements(&requirements_b)
             .map(String::from)
             .collect();
     tx.set_requires(tokens);

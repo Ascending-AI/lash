@@ -3,7 +3,12 @@
 //! `Absent` is a durable negative answer, not a fallback for a catalog that
 //! cannot resolve an id. The missing method must remain a compile error.
 
-use lash::{RetainedRevision, Retention, SessionId, SessionListFilter, SessionView, Target};
+use lash::RetainedRevision;
+use lash::Retention;
+use lash_vocabulary::identity::SessionId;
+use lash::SessionListFilter;
+use lash::SessionView;
+use lash::Target;
 use lash::persistence::{
     ForkSessionReceipt, ForkSessionRequest, MaintenanceResult, SessionAdmission,
     SessionBlobReclaimReport, SessionCatalogStore, SessionStoreCreateRequest, StoreError,

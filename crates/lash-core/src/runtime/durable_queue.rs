@@ -16,7 +16,7 @@
 
 use std::sync::Arc;
 
-use crate::SessionId;
+use lash_vocabulary::identity::SessionId;
 
 use super::observation::{
     LiveReplayEventDraft, LiveReplayStore, SessionObservationEventPayload, SessionQueueEventKind,
@@ -107,7 +107,7 @@ impl DurableSessionOps {
             },
         };
         let drafts = vec![LiveReplayEventDraft::new(
-            None::<crate::TurnId>,
+            None::<lash_vocabulary::identity::TurnId>,
             SessionObservationEventPayload::QueueChanged { kind, batch_ids },
         )];
         if let Err(err) = self
@@ -374,7 +374,11 @@ impl QueueWithdrawalObservation {
 
 #[async_trait::async_trait]
 impl super::QueueWithdrawalPublisher for QueueWithdrawalObservation {
-    async fn publish_withdrawn(&self, session: &SessionId, input: &crate::InputId) {
+    async fn publish_withdrawn(
+        &self,
+        session: &SessionId,
+        input: &lash_vocabulary::identity::InputId,
+    ) {
         let ops = DurableSessionOps::new(session.clone(), Arc::clone(&self.live_replay_store));
         match crate::store::SessionStore::new(Arc::clone(&self.catalog), session.clone()) {
             Ok(store) => {

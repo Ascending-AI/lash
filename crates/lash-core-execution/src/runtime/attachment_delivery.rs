@@ -179,7 +179,9 @@ pub async fn deliver_output(
 }
 
 /// The claim a process's record holds what it publishes or receives under.
-fn process_record_claim(process_id: &crate::ProcessId) -> Result<ReferrerClaim, PluginError> {
+fn process_record_claim(
+    process_id: &lash_vocabulary::identity::ProcessId,
+) -> Result<ReferrerClaim, PluginError> {
     ReferrerClaim::unguarded(ArtifactReferrer::ProcessRecord(process_id.clone()))
         .map_err(|error| PluginError::Session(error.to_string()))
 }
@@ -190,7 +192,7 @@ fn process_record_claim(process_id: &crate::ProcessId) -> Result<ReferrerClaim, 
 /// the typed source-gone failure instead.
 pub async fn publish_process_terminal(
     attachments: &dyn AttachmentReferrers,
-    process_id: &crate::ProcessId,
+    process_id: &lash_vocabulary::identity::ProcessId,
     output: ProcessAwaitOutput,
 ) -> Result<ProcessAwaitOutput, PluginError> {
     let ids = delivered_attachment_ids(&output);
@@ -209,7 +211,7 @@ pub async fn publish_process_terminal(
 /// source was already swept is refused with nothing recorded.
 pub async fn acquire_completion_output(
     attachments: &dyn AttachmentReferrers,
-    process_id: &crate::ProcessId,
+    process_id: &lash_vocabulary::identity::ProcessId,
     output: &ProcessAwaitOutput,
 ) -> Result<(), PluginError> {
     let ids = delivered_attachment_ids(output);

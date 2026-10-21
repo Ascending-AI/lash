@@ -2,7 +2,7 @@
 //!
 //! An isolated call has no inline body. Its manifest names the registered
 //! [`ProcessEngine`](lash_execution_contracts::process::ProcessEngine) that runs it
-//! ([`ToolManifest::isolation_engine`](crate::ToolManifest::isolation_engine)),
+//! ([`ToolManifest::isolation_engine`](lash_vocabulary::tool_contract::ToolManifest::isolation_engine)),
 //! and the tool enters a catalog only where that engine is registered, so a
 //! call is never refused for it. Admission asks the call's provider for the
 //! engine's start payload and the environment and engine settings the
@@ -13,8 +13,8 @@
 //! the provider again. Cancellation of that process is cooperative: a
 //! host needing hard isolation builds it into its own engine.
 
-use crate::ToolId;
 use lash_protocol_types::ToolCallId;
+use lash_vocabulary::tool_contract::ToolId;
 
 /// An isolated call, as admission asks its provider for its start.
 #[derive(Clone, Copy, Debug)]

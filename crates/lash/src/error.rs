@@ -1,5 +1,5 @@
 use crate::support::SessionError;
-use lash_protocol_types::SessionId;
+use lash_vocabulary::identity::SessionId;
 
 #[derive(Debug, thiserror::Error)]
 /// Errors returned while configuring or operating the embedded Lash runtime.
@@ -225,8 +225,8 @@ pub enum RetiredConfigObserverRefusal {
 }
 
 /// Blank text a host offers as an identity is the store's refusal of it.
-impl From<lash_protocol_types::BlankIdentity> for EmbedError {
-    fn from(error: lash_protocol_types::BlankIdentity) -> Self {
+impl From<lash_vocabulary::identity::BlankIdentity> for EmbedError {
+    fn from(error: lash_vocabulary::identity::BlankIdentity) -> Self {
         Self::Store(error.into())
     }
 }
@@ -365,7 +365,7 @@ pub enum SendError {
     #[error("input `{input_id}` has no settled turn: {status:?}")]
     NotSettled {
         /// The input the handle follows.
-        input_id: lash_core::InputId,
+        input_id: lash_vocabulary::identity::InputId,
         /// What the input's run answered instead.
         status: crate::TurnStatus,
     },
@@ -374,7 +374,7 @@ pub enum SendError {
     #[error("input `{input_id}` settled but its terminal is unreadable")]
     Unresolved {
         /// The input the handle follows.
-        input_id: lash_core::InputId,
+        input_id: lash_vocabulary::identity::InputId,
     },
     /// The handle's live activity subscription fell outside the bounded
     /// replay window. The outcome is still readable from the store.
@@ -714,7 +714,7 @@ mod tests {
     use lash_core::SessionError;
     use lash_core::StoreError;
     use lash_execution_contracts::plugin_error::PluginError;
-    use lash_protocol_types::SessionId;
+    use lash_vocabulary::identity::SessionId;
 
     /// FIG-6549: exhaustion stays typed through runtime, plugin and session wrappers.
     #[cfg(feature = "codemode")]
@@ -811,7 +811,7 @@ mod tests {
         let session_id = SessionId::from("busy-session");
         for owner in [
             lash_core::store::SessionHeadOwner::Run {
-                run: lash_core::TurnId::from("bound-run"),
+                run: lash_vocabulary::identity::TurnId::from("bound-run"),
             },
             lash_core::store::SessionHeadOwner::CommandLane { enqueue_seq: 7 },
             lash_core::store::SessionHeadOwner::Actor { epoch: 3 },

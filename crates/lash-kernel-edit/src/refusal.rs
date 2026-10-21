@@ -5,7 +5,11 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 
 use lash_kernel_check::{Refusal, RefusalReason};
-use lash_kernel_doc::{DocumentId, InvalidReason, Name, Site};
+use lash_kernel_doc::InvalidReason;
+
+use lash_vocabulary::names::DocumentId;
+use lash_vocabulary::names::Name;
+use lash_vocabulary::sites::Site;
 
 use crate::tree::NodeClass;
 

@@ -13,10 +13,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, ensure};
-use lash::process::{
-    EngineLaunch, HostArtifactPin, Lifetime, ProcessConfigKey, ProcessDefinition, ProcessEnv,
-    ProcessOriginator, ProcessStartRequest,
-};
+use lash::process::{HostArtifactPin, ProcessConfigKey, ProcessEnv};
 
 use super::{Args, Case, Meter, Receipt, facade};
 use probes::{LiveReplayProbe, ProcessReplayProbe};
@@ -92,7 +89,7 @@ fn node_identity(index: usize, run: &str) -> lash::persistence::LeaseOwnerIdenti
 
 /// The tools every observation workload's processes and turns may call.
 struct Tools {
-    mark: lash_core::ToolDefinition,
+    mark: lash_vocabulary::tool_contract::ToolDefinition,
     meter: Meter,
 }
 
@@ -102,8 +99,8 @@ const WORKLOAD_TOOLS: ProcessConfigKey<()> =
     ProcessConfigKey::new("workload-tools", lash::plugins::FormatVersion::ONE);
 
 /// The workload's one tool, `mark`.
-fn mark_definition() -> Result<lash_core::ToolDefinition> {
-    Ok(lash_core::ToolDefinition::raw(
+fn mark_definition() -> Result<lash_vocabulary::tool_contract::ToolDefinition> {
+    Ok(lash_vocabulary::tool_contract::ToolDefinition::raw(
         "tool:mark",
         "tools.mark",
         "Synthetic observation workload step",
@@ -141,7 +138,7 @@ impl lash_core::ToolProvider for Tools {
         &self,
         _config: &lash_core::OwnerConfigView,
     ) -> std::result::Result<
-        Vec<lash_core::ToolManifest>,
+        Vec<lash_vocabulary::tool_contract::ToolManifest>,
         lash_execution_contracts::plugin_error::PluginError,
     > {
         Ok(vec![self.mark.manifest()])
@@ -150,7 +147,7 @@ impl lash_core::ToolProvider for Tools {
         &self,
         name: &str,
         _config: &lash_core::OwnerConfigView,
-    ) -> Option<Arc<lash_core::ToolContract>> {
+    ) -> Option<Arc<lash_vocabulary::tool_contract::ToolContract>> {
         (name == "tools.mark").then(|| Arc::new(self.mark.contract()))
     }
     async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
@@ -330,80 +327,77 @@ pub(super) fn unique(name: &str) -> String {
 /// The environment a workload's processes run under and are admitted
 /// against: the workload tool's component, linking `tools.mark` when the
 /// document performs it (a start links exactly what its process performs).
-fn environment(marks: bool) -> Result<ProcessEnv> {
-    let builder =
-        ProcessEnv::builder(lash::MaxToolCalls::new(1_000_000)).component(WORKLOAD_TOOLS, &());
-    let builder = if marks {
-        builder.link_tool(
-            WORKLOAD_TOOLS.tool_provider(lash::tool_provider_key!("tools")),
-            &mark_definition()?,
-        )
-    } else {
-        builder
-    };
-    Ok(builder.build()?)
+fn environment(_marks: bool) -> Result<ProcessEnv> {
+    Ok(ProcessEnv::builder(lash::MaxToolCalls::new(1_000_000))
+        .component(WORKLOAD_TOOLS, &())
+        .component(lash::vm::KERNEL_SERVICES_CONFIG, &())
+        .build()?)
 }
 
-/// A workflow lash admitted from a kernel document and holds under a pin.
+/// A retained Link with the exact namespace and routes used to publish it.
 pub(super) struct Published {
-    definition: ProcessDefinition,
-    launch: EngineLaunch,
+    pin: HostArtifactPin,
+    start: lash_vocabulary::LinkedStart,
+    environment: lash::vm::WorkflowEnvironmentRequest,
+    env: ProcessEnv,
+    settings: Option<lash::process::EngineSettings>,
 }
 
-/// Admit `document`, written in kernel text, as a definition of its entry
-/// `observed`.
-pub(super) async fn publish(core: &lash::LashCore, document: &str) -> Result<Published> {
-    use lash::workflow::WorkflowPublish;
-    use lash::workflow::document::{Name, parse_document};
-    let mut document =
-        parse_document(document).map_err(|error| anyhow::anyhow!("workflow document: {error}"))?;
-    let environment = environment(!document.manifest.effects.is_empty())?;
-    let artifacts = core.host_artifacts();
-    let packages = artifacts.cell_packages().await?;
-    // Publish the linked env before measuring starts: namespace authority
-    // belongs to this snapshot, and its first publication is not start work.
-    let environment = environment.with_package_roots(
-        lash_kernel_dialect::ExportView::namespace_roots(&packages.view()),
-    );
-    // The document performs each effect under the requirement this host
-    // offers it under: its signature and contract.
-    let offered = artifacts
-        .workflow_environment(&environment)
-        .await?
-        .context("this core reads no workflow documents")?;
-    for (effect, requirement) in &mut document.manifest.effects {
-        *requirement = offered
-            .checker()
-            .effects
-            .get(effect)
-            .with_context(|| format!("this host offers no effect `{effect}`"))?
-            .clone();
-    }
+pub(super) async fn publish(core: &lash::LashCore, source: &str) -> Result<Published> {
+    use lash::package::*;
+    let document = lash::workflow::document::parse_document(source)?;
+    let env = environment(!document.imports.is_empty())?;
     let pin = HostArtifactPin::mint();
-    let publication = match within(
+    let artifacts = core.host_artifacts();
+    let context = PublicationContext {
+        domain: PublicationDomain(core.backend().binding_identity().into()),
+        scope: PublicationScope::Host,
+        publisher: PublisherInstance("observation-workload".into()),
+        root: Segment::new("workload")?,
+    };
+    let packages = artifacts
+        .process_namespace(&pin, &env, context.clone())
+        .await?;
+    let environment = lash::vm::WorkflowEnvironmentRequest {
+        snapshot: packages.snapshot.clone(),
+        context,
+        attachment: Attachment {
+            members: Default::default(),
+            deferred: Default::default(),
+            packages: packages
+                .snapshot
+                .advertisements
+                .iter()
+                .filter_map(|accepted| match &accepted.advertisement {
+                    PackageAdvertisement::Enumerated(package) => Some(package.path.clone()),
+                    _ => None,
+                })
+                .collect(),
+        },
+    };
+    let start = within(
         "workflow publication",
         artifacts.publish_workflow(
             &pin,
-            &lash::workflow::document::DocumentBytes::from(document.clone()),
-            &Name::new(ENTRY),
+            &lash::workflow::document::DocumentBytes::from(document),
+            &StartSelector::Main,
             &environment,
-            packages.declare_all(),
             None,
         ),
     )
-    .await??
-    {
-        WorkflowPublish::Published(publication) => *publication,
-        other => anyhow::bail!("workflow was not admitted: {other:?}"),
-    };
-    let env_ref = artifacts.publish_process_env(&pin, &environment).await?;
-    // Every run states this build's kernel settings, chosen once here.
+    .await??;
+    let env = artifacts
+        .link_process_env(&env, &start, &packages, &Default::default())
+        .await?;
     let settings = core
         .processes()
         .engine_defaults(lash::process::LASH_VM_ENGINE_KIND, &serde_json::Value::Null)?;
     Ok(Published {
-        definition: publication.definition,
-        launch: EngineLaunch::new(env_ref, settings),
+        pin,
+        start,
+        environment,
+        env,
+        settings,
     })
 }
 
@@ -412,25 +406,24 @@ pub(super) async fn start(
     published: &Published,
     key: &str,
 ) -> Result<lash::ProcessId> {
-    let request = ProcessStartRequest::definition(
-        published.definition.id.clone(),
-        Some(published.definition.signature.clone()),
-        Default::default(),
-        published.launch.clone(),
-        ProcessOriginator::host(),
-        Lifetime::Detached,
-    )
-    .with_host_start_key(unique(key));
     Ok(within(
         "process start",
-        Box::pin(core.processes().start(request, core.effect_host())),
+        core.host_artifacts().start_linked(
+            &published.pin,
+            lash::package::StartLinked {
+                start: published.start.clone(),
+                args: Default::default(),
+                env: published.env.clone(),
+                settings: published.settings.clone(),
+                initial_resolutions: Vec::new(),
+            },
+            unique(key),
+            &published.environment,
+        ),
     )
     .await??
     .process_id)
 }
-
-/// The entry every workload document declares and its processes start.
-const ENTRY: &str = "observed";
 
 /// A process of `iterations` loop turns, each of `steps` tool calls. A step
 /// is a committed effect the machine observes at its own site.
@@ -439,15 +432,26 @@ pub(super) fn loop_document(iterations: usize, steps: usize) -> String {
         .map(|n| n.to_string())
         .collect::<Vec<_>>()
         .join(", ");
-    let mut document = format!(
-        "kernel 1\nnumbers float\neffect tools.mark(input: Any) -> Any contract \"1\"\nentry {ENTRY}() -> Any\n\n\
-         fn {ENTRY}() {{\n  let input = {{key: \"step\"}}\n  for item in [{items}] {{\n"
+    let mut source = format!(
+        "kernel 1\nnumbers float\nimport 0 operation tools.mark(input: Any) -> Any\nmain {{ let input = {{key: \"step\"}} for item in [{items}] {{\n"
     );
     for _ in 0..steps {
-        document.push_str("    do perform tools.mark(input) as Any\n");
+        source.push_str("do perform 0(input) as Any\n");
     }
-    document.push_str("  }\n  return 0\n}\n\nmain {\n  finish null\n}\n");
+    source.push_str("} return 0 }\n");
+    let mut document =
+        lash::workflow::document::parse_document(&source).expect("workload document");
+    let definition = mark_definition().expect("mark definition");
+    let signature = lash_vocabulary::json_schema::tool_signature(
+        &definition.contract.input_schema.canonical,
+        &definition.contract.output_schema.canonical,
+    );
     document
+        .imports
+        .get_mut(&lash_vocabulary::ImportSlot(0))
+        .expect("mark import")
+        .kind = lash_vocabulary::ImportKind::Operation { signature };
+    lash::workflow::document::print_document(&document)
 }
 
 /// A process that commits about `commits` effect facts. A site's committed
@@ -460,12 +464,10 @@ pub(super) fn commit_document(commits: usize) -> String {
 }
 
 /// A process that waits an hour, until it is cancelled.
-pub(super) const QUIET_DOCUMENT: &str = "kernel 1\nnumbers float\nentry observed() -> Any\n\n\
-    fn observed() {\n  do sleep 3600000\n  return 0\n}\n\nmain {\n  finish null\n}\n";
+pub(super) const QUIET_DOCUMENT: &str = "kernel 1\nnumbers float\nimport 0 operation typescript.sleep(milliseconds: Int) -> Null\nmain { do perform 0(3600000) as Null then yield return 0 }\n";
 
 /// A process that ends at once.
-pub(super) const BLANK_DOCUMENT: &str = "kernel 1\nnumbers float\nentry observed() -> Any\n\n\
-    fn observed() {\n  return 0\n}\n\nmain {\n  finish null\n}\n";
+pub(super) const BLANK_DOCUMENT: &str = "kernel 1\nnumbers float\nmain { return 0 }\n";
 
 pub(super) const SETTLE: Duration = Duration::from_secs(60);
 /// A whole population's bound: long runs settle well inside it.

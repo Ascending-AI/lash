@@ -1,33 +1,10 @@
-// A whole workflow document: the `kernel` and `numbers` header lines, an
-// `entry` signature for each declared function a host may start, and
-// `main`. Statements end at the line; kernel text has no `;`.
+// A Document declares signature-only Imports; fulfilment chooses their fills.
+// Main is optional and executes only for StartSelector::Main.
 fn document_example() {
-    use lash_kernel_doc::{ParseErrorReason, parse_document, print_document};
+    use lash_kernel_doc::{parse_document, print_document};
 
-    let text = r#"kernel 1
-numbers float
-entry digest(inbox: Text) -> Text
-
-fn digest(inbox) {
-  return inbox
-}
-
-main {
-  finish null
-}
-"#;
-
-    let document = parse_document(text).expect("a whole workflow parses");
-
-    // Printing is canonical: the printed text parses to a document with the
-    // same identity.
-    let printed = print_document(&document);
-    let reparsed = parse_document(&printed).expect("the printed text parses");
+    let text = "kernel 1\nnumbers float\nimport 0 operation service.echo(value: Text) -> Text\nmain { let answer = perform 0(\"hello\") as Text finish answer }\n";
+    let document = parse_document(text).expect("a complete Document");
+    let reparsed = parse_document(&print_document(&document)).expect("canonical Document text");
     assert_eq!(reparsed.identity(), document.identity());
-
-    // A trailing `;` is a typed refusal naming its line and column.
-    let misspelled = text.replace("return inbox", "return inbox;");
-    let error = parse_document(&misspelled).unwrap_err();
-    assert!(matches!(error.reason, ParseErrorReason::Malformed { .. }));
-    assert_eq!((error.line, error.column), (6, 15));
 }

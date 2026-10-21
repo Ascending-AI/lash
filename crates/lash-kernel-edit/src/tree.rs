@@ -8,7 +8,9 @@
 //! so a node's shadow travels with it. The document alone says which nodes
 //! there are: [`Shadow::find`] and [`Shadow::walk`] follow it.
 
-use lash_kernel_doc::{Node, Site};
+use lash_kernel_doc::Node;
+
+use lash_vocabulary::sites::Site;
 
 /// What a site addresses, for a diagnostic.
 #[derive(

@@ -476,7 +476,10 @@ async fn launch(
     core: &lash::LashCore,
     text: &str,
     key: &str,
-) -> (lash::ProcessId, lash::workflow::WorkflowDocument) {
+) -> (
+    lash_vocabulary::identity::ProcessId,
+    lash::workflow::WorkflowDocument,
+) {
     let document = parse_document(text).unwrap();
     let artifacts = core.host_artifacts();
     let pin = lash::process::HostArtifactPin::mint();
@@ -503,7 +506,7 @@ async fn launch(
         .processes()
         .kernel_engine_defaults()
         .unwrap()
-        .observing(lash::process::ObservationMode::Counts)
+        .observing(lash_vocabulary::observation::RunObservation::Counts)
         .into_engine_settings();
     let document = super::publication_document(core, &publication).await;
     let process = core
@@ -525,7 +528,10 @@ async fn launch(
         .process_id;
     (process, document)
 }
-async fn counts(core: &lash::LashCore, process: &lash::ProcessId) -> view::RanCounts {
+async fn counts(
+    core: &lash::LashCore,
+    process: &lash_vocabulary::identity::ProcessId,
+) -> view::RanCounts {
     let snapshot = core.processes().observe(process).snapshot().await.unwrap();
     let lash::process::ProcessReadView::Retained(read) = snapshot.read_view else {
         panic!("retained");

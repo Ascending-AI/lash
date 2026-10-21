@@ -3,7 +3,7 @@
   "cases": [
     {
       "name": "recursive calls pass per task depth bound",
-      "document": "kernel 1\nnumbers by_spelling\nfn recurse() { do call recurse() }\nmain {\ndo call recurse()\n}\n",
+      "document": "kernel 1\nnumbers by_spelling\ndefinition \"function recurse(self: Any) -> Any\\nkernel 1\\nmetering statements\\nbody {\\n  do apply self(self)\\n}\\n\"\nmain {\n  do invoke recurse(&recurse)\n}\n",
       "expected": {
         "prints": [],
         "end": {

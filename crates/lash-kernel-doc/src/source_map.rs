@@ -4,7 +4,11 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use crate::{Correspondence, Document, DocumentId, Site, SourceMapId};
+use crate::Correspondence;
+use crate::Document;
+use lash_vocabulary::names::DocumentId;
+use lash_vocabulary::names::SourceMapId;
+use lash_vocabulary::sites::Site;
 
 /// UTF-8 byte offsets in authored or printed source.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, JsonSchema)]
@@ -232,13 +236,15 @@ impl SourceMap {
     /// which a store holds and the identity is the digest of.
     #[must_use]
     pub fn canonical_bytes(&self) -> Vec<u8> {
-        crate::graph_tokens::encode_body(self)
+        lash_vocabulary::tokens::encode_body(self)
     }
 
     /// The map's identity: the logical digest of [`Self::canonical_bytes`].
     #[must_use]
     pub fn identity(&self) -> SourceMapId {
-        SourceMapId::from_bytes(crate::graph_tokens::logical_digest(&self.canonical_bytes()))
+        SourceMapId::from_bytes(lash_vocabulary::tokens::logical_digest(
+            &self.canonical_bytes(),
+        ))
     }
 
     /// The map `bytes` encode canonically, or why they do not.
@@ -248,7 +254,7 @@ impl SourceMap {
     /// The decoder's refusal: bytes that are not the one canonical body of a
     /// well-formed map.
     pub fn from_canonical_bytes(bytes: &[u8]) -> Result<Self, String> {
-        crate::graph_tokens::decode_body(bytes).map_err(|error| error.to_string())
+        lash_vocabulary::tokens::decode_body(bytes).map_err(|error| error.to_string())
     }
 }
 
@@ -287,5 +293,25 @@ impl<'de> Deserialize<'de> for SourceMap {
         SourceMapWire::deserialize(deserializer)?
             .try_into()
             .map_err(serde::de::Error::custom)
+    }
+}
+
+impl lash_vocabulary::sites::SourceLocations for SourceMap {
+    fn source_start(&self, site: &Site) -> Option<usize> {
+        self.sites
+            .iter()
+            .filter(|located| {
+                located.site.unit == site.unit && site.path.starts_with(&located.site.path)
+            })
+            .filter_map(|located| {
+                let start = located
+                    .ranges
+                    .first()
+                    .map(|range| range.start)
+                    .or(located.implicit)?;
+                Some((located.site.path.len(), start))
+            })
+            .max_by_key(|(depth, _)| *depth)
+            .map(|(_, start)| start)
     }
 }

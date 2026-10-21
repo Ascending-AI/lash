@@ -6,8 +6,9 @@
 //! runs. A control call made into a task, or inside a function, could
 //! settle beside work still running, and is refused before anything runs.
 
-use lash_kernel_doc::{Datum, EffectName, Name, Param, Signature, Type};
+use lash_kernel_doc::Datum;
 use lash_kernel_vm::{End, Outcome, Request};
+use lash_vocabulary::{EffectName, Name, Param, Signature, Type};
 
 use super::machine;
 
@@ -43,10 +44,9 @@ fn a_control_call_ends_the_program_and_nothing_after_it_runs() {
                 .iter()
                 .map(|request| match request {
                     Request::Effect(effect) => {
-                        asked.push(effect.effect.to_string());
+                        asked.push(crate::tests::linked::operation(&effect.use_).to_string());
                         (effect.wait, Outcome::Completed(Datum::Null))
                     }
-                    Request::Sleep(sleep) => (sleep.wait, Outcome::Elapsed),
                 })
                 .collect()
         },

@@ -3,8 +3,9 @@
 //! surface reads its one version; in the synthetic N+1's it reads N's
 //! through the registered lift, before and after finalize.
 
+use crate::SessionNodeRecord;
 use crate::testing::guarded_surfaces::{self as laws, SurfaceProbe};
-use crate::{SessionId, SessionNodeRecord};
+use lash_vocabulary::identity::SessionId;
 
 use super::{
     BlobRef, CHECKPOINT_COMPONENT_ENCODING_VERSION, CURRENT_SESSION_STATE_VERSION,

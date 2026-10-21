@@ -94,7 +94,7 @@ async fn postgres_session_meta_stamps_the_version_the_fleet_format_selects() {
         .open_host_provisioned(SchemaCheck::Enforce)
         .await
         .expect("open the host-provisioned schema");
-    let session_id = lash_core::SessionId::from("fleet-stamped-session");
+    let session_id = lash_vocabulary::identity::SessionId::from("fleet-stamped-session");
     let fleet = FleetFormat::current().with_writer_pins(&[WriterPin {
         constant: "CURRENT_SESSION_STATE_VERSION",
         generation: FLEET_FORMAT_VERSION,
@@ -210,7 +210,7 @@ async fn a_select_only_role_reads_the_fleet_format_and_is_refused_on_write() {
 
     // A write attempt is refused as a typed `StoreError`: the row-level DML
     // the writer needs is a privilege the role does not hold.
-    let session_id = lash_core::SessionId::from("select-only-session");
+    let session_id = lash_vocabulary::identity::SessionId::from("select-only-session");
     let store = storage.store();
     let error = lash_core::SessionCatalogStore::admit_session(
         &store,

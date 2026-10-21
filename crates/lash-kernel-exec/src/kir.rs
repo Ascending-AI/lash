@@ -201,12 +201,7 @@ pub enum Op {
         lib: LibIx,
         args: RegRange,
     },
-    Clock {
-        dst: Reg,
-    },
-    Random {
-        dst: Reg,
-    },
+
     /// `read` through the handle in `at` with the request in the next
     /// register (`K-HOST-004`).
     HostRead {
@@ -365,8 +360,7 @@ pub enum OpKind {
     Closure,
     Call,
     Operator,
-    Clock,
-    Random,
+
     HostRead,
     Pin,
     Act,
@@ -421,8 +415,6 @@ impl OpKind {
         Self::Closure,
         Self::Call,
         Self::Operator,
-        Self::Clock,
-        Self::Random,
         Self::HostRead,
         Self::Pin,
         Self::Act,
@@ -478,8 +470,6 @@ impl OpKind {
                 | Self::Closure
                 | Self::Call
                 | Self::Operator
-                | Self::Clock
-                | Self::Random
                 | Self::HostRead
                 | Self::Pin
                 | Self::Act
@@ -556,8 +546,7 @@ impl Op {
             Self::Closure { .. } => OpKind::Closure,
             Self::Call { .. } => OpKind::Call,
             Self::Operator { .. } => OpKind::Operator,
-            Self::Clock { .. } => OpKind::Clock,
-            Self::Random { .. } => OpKind::Random,
+
             Self::HostRead { .. } => OpKind::HostRead,
             Self::Pin { .. } => OpKind::Pin,
             Self::Act => OpKind::Act,
@@ -636,8 +625,6 @@ impl Op {
             | Self::Session { .. }
             | Self::Unbound { .. }
             | Self::Closure { .. }
-            | Self::Clock { .. }
-            | Self::Random { .. }
             | Self::Act
             | Self::While
             | Self::Try { .. }
@@ -656,9 +643,7 @@ impl Op {
             | Self::Local { dst, .. }
             | Self::Session { dst, .. }
             | Self::Unbound { dst, .. }
-            | Self::Closure { dst, .. }
-            | Self::Clock { dst }
-            | Self::Random { dst } => Some(dst),
+            | Self::Closure { dst, .. } => Some(dst),
             Self::Field { at, .. } | Self::Index { at, .. } | Self::HostRead { at } => Some(at),
             Self::MakeTuple { items }
             | Self::MakeList { items }

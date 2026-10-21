@@ -1,8 +1,13 @@
 //! The host's one interpretation of run counts and verified paths.
 
-use lash_kernel_doc::{
-    Document, Node, RanCounts, ReplayPath, RunObservation, Site, TaskLabel, Unit,
-};
+use lash_kernel_doc::{Document, Node};
+
+use lash_vocabulary::observation::RanCounts;
+use lash_vocabulary::observation::ReplayPath;
+use lash_vocabulary::observation::RunObservation;
+use lash_vocabulary::sites::Site;
+use lash_vocabulary::sites::TaskLabel;
+use lash_vocabulary::sites::Unit;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;

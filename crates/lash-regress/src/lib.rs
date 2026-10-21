@@ -8,7 +8,6 @@ This crate provides a regular expression engine which targets EcmaScript (aka Ja
 # Example: test if a string contains a match
 
 ```rust
-use lash_regress::Regex;
 let re = Regex::new(r"\d{4}").unwrap();
 let matched = re.find("2020-20-05").is_some();
 assert!(matched);
@@ -19,7 +18,6 @@ assert!(matched);
 Here we use a backreference to find doubled characters:
 
 ```rust
-use lash_regress::Regex;
 let re = Regex::new(r"(\w)\1").unwrap();
 let text = "Frankly, Miss Piggy, I don't give a hoot!";
 for m in re.find_iter(text) {
@@ -37,7 +35,6 @@ Capture groups are available in the `Match` object produced by a successful matc
 A capture group is a range of byte indexes into the original string.
 
 ```rust
-use lash_regress::Regex;
 let re = Regex::new(r"(\d{4})").unwrap();
 let text = "Today is 2020-20-05";
 let m = re.find(text).unwrap();
@@ -74,7 +71,6 @@ Note the parser assumes the `u` (Unicode) flag, as the non-Unicode path is tied 
 regress supports Unicode case folding. For example:
 
 ```rust
-use lash_regress::Regex;
 let re = Regex::with_flags("\u{00B5}", "i").unwrap();
 assert!(re.find("\u{03BC}").is_some());
 ```
@@ -99,7 +95,6 @@ This may provide improved performance if you do not need Unicode semantics, beca
 Example:
 
 ```rust
-use lash_regress::Regex;
 let re = Regex::with_flags("BC", "i").unwrap();
 assert!(re.find("abcd").is_some());
 ```

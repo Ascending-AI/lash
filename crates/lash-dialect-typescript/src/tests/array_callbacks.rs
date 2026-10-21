@@ -8,14 +8,14 @@ use std::collections::BTreeMap;
 use std::sync::{Arc, OnceLock};
 
 use lash_kernel_dialect::{Environment, Library, NamedLibrary};
-use lash_kernel_doc::{
-    Datum, ErrorDatum, FunctionCatalog, FunctionId, Handle, Integer, Timestamp, parse_document,
-};
+use lash_kernel_doc::{Datum, ErrorDatum, FunctionCatalog, Handle};
+
 use lash_kernel_vm::kernel_internals::conformance::{self, Checkpoint};
 use lash_kernel_vm::{
     Bounds, CellStart, End, Host, KernelMachine, Machine, Outcome, PreparedLibrary, Program,
     Request, Step, Target,
 };
+use lash_vocabulary::FunctionId;
 
 const BEFORE: &str = include_str!("array_callbacks_before.kernel");
 
@@ -112,14 +112,6 @@ struct Console {
 }
 
 impl Host for Console {
-    fn clock(&mut self) -> Timestamp {
-        Timestamp {
-            nanoseconds: Integer::from(0),
-        }
-    }
-    fn random(&mut self) -> u64 {
-        0
-    }
     fn read(&mut self, _handle: &Handle, _request: &Datum) -> Result<Datum, ErrorDatum> {
         Err(ErrorDatum {
             kind: "no_projection".into(),
@@ -195,13 +187,14 @@ fn observe(program: Program, relay: bool) -> Observed {
                 hop(&mut machine);
                 for request in park.requests {
                     let (wait, outcome) = match request {
-                        Request::Sleep(sleep) => {
-                            requests.push(("sleep".to_string(), Vec::new()));
-                            (sleep.wait, Outcome::Elapsed)
-                        }
                         Request::Effect(effect) => {
                             let answer = effect.args.first().cloned().unwrap_or(Datum::Null);
-                            requests.push((effect.effect.as_str().to_string(), effect.args));
+                            requests.push((
+                                crate::tests::linked::operation(&effect.use_)
+                                    .as_str()
+                                    .to_string(),
+                                effect.args,
+                            ));
                             (effect.wait, Outcome::Completed(answer))
                         }
                     };
@@ -215,12 +208,9 @@ fn observe(program: Program, relay: bool) -> Observed {
 
 /// Lowers a TypeScript cell against `kernel`'s library.
 fn lowered(kernel: &Kernel, source: &str) -> Program {
-    let environment_namespaces = lash_kernel_dialect::Namespaces::of_effects(
-        &super::machine::effects(),
-        &lash_kernel_doc::ContractId::new("1"),
-        super::controls(),
-    )
-    .expect("the test's effects are operations");
+    let environment_namespaces =
+        crate::tests::linked::namespaces(&super::machine::effects(), super::controls())
+            .expect("the test's effects are operations");
     let environment = Environment::new(&kernel.library, &environment_namespaces);
     let lowered = crate::lower(
         source,
@@ -228,11 +218,10 @@ fn lowered(kernel: &Kernel, source: &str) -> Program {
         lash_kernel_dialect::Mode::Cell(lash_kernel_dialect::CellEnvironment::first()),
     )
     .unwrap_or_else(|error| panic!("{error}\n{source}"));
-    Program {
-        closure: super::pages::CLOSURE,
-        document: Arc::clone(lowered.document.shared()),
-        library: kernel.prepared.clone(),
-    }
+    crate::tests::linked::program(
+        Arc::clone(lowered.document.shared()),
+        kernel.prepared.clone(),
+    )
 }
 
 /// How a run ended, without the numbering of the heap objects its
@@ -451,18 +440,16 @@ fn a_callback_that_parks_inside_a_method_resumes_identically() {
         // An answer that ends no method's loop early.
         let answer = helper == "every";
         let program = |kernel: &Kernel| {
-            let mut header = String::from(
-                "kernel 1\nnumbers by_spelling\neffect host.echo(x?: Any) -> Any contract \"1\"\n",
-            );
-            for (id, used) in manifest(kernel, &[name.as_str(), "list.len", "same"]) {
-                header.push_str(&format!("use {used} = @{id}\n"));
+            let mut header = String::from("");
+            for (_, used) in manifest(kernel, &[name.as_str(), "list.len", "same"]) {
+                header.push_str(&format!("use {used}\n"));
             }
             let text = format!(
-                "{header}main {{\n\
+                "{header}function law.main() -> Any\nkernel 1\nmetering statements\nimport 0 operation host.echo(x?: Any) -> Any\nbody {{\n\
                  let log = []\n\
                  let xs = [1, (), 3, 4, 5]\n\
                  let f = fn(receiver, passed) {{\n\
-                   let r = perform host.echo(passed) as Any\n\
+                   let r = perform 0(passed) as Any\n\
                    set log[list.len(log)] = (passed, r)\n\
                    if same(list.len(log), 2) {{ set xs[3] = () }}\n\
                    return {answer}\n\
@@ -472,12 +459,8 @@ fn a_callback_that_parks_inside_a_method_resumes_identically() {
                  return (out, log, xs)\n\
                  }}\n"
             );
-            let document = parse_document(&text).unwrap_or_else(|error| panic!("{error}\n{text}"));
-            Program {
-                closure: super::pages::CLOSURE,
-                document: Arc::new(document),
-                library: kernel.prepared.clone(),
-            }
+            let document = super::linked::main(&text, &kernel.library);
+            crate::tests::linked::program(Arc::new(document), kernel.prepared.clone())
         };
         let straight = observe(program(after()), false);
         assert!(

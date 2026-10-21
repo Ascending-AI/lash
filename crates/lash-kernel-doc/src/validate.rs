@@ -6,6 +6,7 @@
 //! type. Scopes, linking against an environment and derived facts belong to
 //! `lash-kernel-check`.
 
+use lash_vocabulary::types::{Signature, Type};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
@@ -13,14 +14,19 @@ use std::collections::BTreeSet;
 
 use crate::ast::{
     ActExpr, ActKind, Action, AssignOrder, Atom, Block, Callee, Closure, Expr, Literal, Member,
-    Node, Place, Protocol, Rhs, Site, Stmt, Unit,
+    Node, Place, Protocol, Rhs, Stmt,
 };
+
 use crate::document::Document;
 use crate::function::{Formula, FunctionDefinition, Implementation, Operand};
-use crate::name::{EffectName, FunctionId, FunctionName, Name};
+
 use crate::native::FunctionCatalog;
-use crate::types::{Signature, Type};
 use crate::version::KernelVersion;
+use crate::{Export, FunctionExport, FunctionTarget};
+use lash_vocabulary::names::{FunctionId, FunctionName, Name};
+
+use lash_vocabulary::names::{Import, ImportKind, ImportSlot};
+use lash_vocabulary::sites::{Site, Unit};
 
 /// Why a document or a definition is refused, and the node at fault.
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
@@ -47,7 +53,6 @@ fn at(site: &Option<Site>) -> String {
 pub enum StatementForm {
     Call,
     Perform,
-    Sleep,
     Join,
     Yield,
     Spawn,
@@ -60,7 +65,6 @@ impl StatementForm {
         match self {
             Self::Call => "call",
             Self::Perform => "perform",
-            Self::Sleep => "sleep",
             Self::Join => "join",
             Self::Yield => "yield",
             Self::Spawn => "spawn",
@@ -74,6 +78,10 @@ impl StatementForm {
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 #[non_exhaustive]
 pub enum InvalidReason {
+    #[error("invalid document: {message}")]
+    Document { message: String },
+    #[error("Import slot {slot:?} is missing or has the wrong kind")]
+    Import { slot: ImportSlot },
     #[error("written for kernel version {found}; this reader supports version {supported}")]
     KernelVersion { found: u32, supported: u32 },
     #[error("nests deeper than {limit} levels; flatten the program")]
@@ -117,16 +125,16 @@ pub enum InvalidReason {
         required: usize,
         accepted: usize,
     },
-    #[error("effect `{effect}` is performed but not listed in the manifest")]
-    EffectNotListed { effect: EffectName },
+    #[error("effect `{slot:?}` is performed but not listed in the manifest")]
+    EffectNotListed { slot: ImportSlot },
     #[error("function `{name}` is not declared")]
     FunctionNotDeclared { name: Name },
     #[error("a library function's body cannot name a declared function (`{name}`)")]
     DeclaredFunctionInLibrary { name: Name },
     /// `K-LIB-004`: a library body performs only the operations its
     /// `effects` lists.
-    #[error("effect `{effect}` is performed but not listed in the body's `effects`")]
-    EffectNotDeclared { effect: EffectName },
+    #[error("effect `{slot:?}` is performed but not listed in the body's `effects`")]
+    EffectNotDeclared { slot: ImportSlot },
     #[error("entry `{entry}` names no declared function")]
     EntryNotDeclared { entry: Name },
     #[error(
@@ -236,88 +244,193 @@ pub fn validate_document(
     document: &Document,
     catalog: &dyn FunctionCatalog,
 ) -> Result<(), Invalid> {
-    validate_document_with_limits(document, catalog, crate::KernelDataLimits::standard())
+    validate_document_with_limits(
+        document,
+        catalog,
+        lash_vocabulary::data_limits::KernelDataLimits::standard(),
+    )
 }
 /// Validate under a deployment's document recursion safety policy.
 pub fn validate_document_with_limits(
     document: &Document,
     catalog: &dyn FunctionCatalog,
-    limits: crate::KernelDataLimits,
+    limits: lash_vocabulary::data_limits::KernelDataLimits,
 ) -> Result<(), Invalid> {
-    let Some(version) = KernelVersion::of(document.manifest.kernel) else {
+    if document.requires.kernels.len() != 1 {
+        return Err(invalid(
+            None,
+            InvalidReason::Document {
+                message: "a Document requires exactly one kernel version".into(),
+            },
+        ));
+    }
+    let kernel = *document
+        .requires
+        .kernels
+        .first()
+        .unwrap_or_else(|| unreachable!("one kernel"));
+    let Some(version) = KernelVersion::of(kernel) else {
         return Err(invalid(
             None,
             InvalidReason::KernelVersion {
-                found: document.manifest.kernel,
+                found: kernel,
                 supported: KernelVersion::NEWEST.number(),
             },
         ));
     };
-    for function in document.manifest.functions.keys() {
-        check_written_for(catalog, function, version)?;
-    }
-    for requirement in document.manifest.effects.values() {
-        check_signature(&requirement.signature)?;
-    }
-    for name in &document.private_bindings {
-        check_name(name, None)?;
-    }
-    for (entry, definition) in &document.entries {
-        let signature = &definition.signature;
-        check_signature(signature)?;
-        for function in definition.convention.functions() {
-            if !document.manifest.functions.contains_key(function) {
-                return Err(invalid(
-                    None,
-                    InvalidReason::FunctionNotListed {
-                        function: *function,
-                    },
-                ));
-            }
-        }
-        let Some(function) = document.functions.get(entry) else {
-            return Err(invalid(
-                None,
-                InvalidReason::EntryNotDeclared {
-                    entry: entry.clone(),
-                },
-            ));
-        };
-        let expected = match definition.convention {
-            crate::StartConvention::Direct
-            | crate::StartConvention::TsDirect { .. }
-            | crate::StartConvention::PyDirect { .. } => signature.params.len(),
-            crate::StartConvention::TsArgsList { .. } => 2,
-        };
-        if function.params.len() != expected {
-            return Err(invalid(
-                None,
-                InvalidReason::EntryArity {
-                    entry: entry.clone(),
-                    signature: expected,
-                    declared: function.params.len(),
-                },
-            ));
-        }
-    }
+    let names = document
+        .functions
+        .iter()
+        .map(|(id, f)| (*id, f.name.clone()))
+        .collect();
     let scope = Scope {
         limits,
         document: Some(document),
-        functions: &document.manifest.functions,
-        effects: &document.manifest.effects,
+        functions: &names,
+        imports: &document.imports,
         catalog,
         native_body: false,
     };
-    for (name, function) in &document.functions {
-        let site = Site::new(Unit::Function(name.clone()), []);
-        check_name(name, Some(&site))?;
-        check_params(&function.params, &site)?;
-        if let Some(start) = &function.start {
-            scope.check_start(start, function.params.len(), &site)?;
-        }
-        scope.check_unit(&function.body, site)?;
+    for name in &document.private_bindings {
+        check_name(name, None)?;
     }
-    scope.check_unit(&document.main, Site::new(Unit::Main, []))
+    for import in document.imports.values() {
+        check_import(import)?;
+    }
+    for (id, definition) in &document.functions {
+        if definition.identity() != *id {
+            return Err(invalid(
+                None,
+                InvalidReason::Document {
+                    message: format!("function {id} has another identity"),
+                },
+            ));
+        }
+        if definition.kernel != kernel {
+            return Err(invalid(
+                None,
+                InvalidReason::FunctionOfAnotherVersion {
+                    function: *id,
+                    name: definition.name.clone(),
+                    written_for: definition.kernel,
+                    required: kernel,
+                },
+            ));
+        }
+        if let Some(body) = definition.body() {
+            for (slot, import) in &body.imports {
+                if document.imports.get(slot) != Some(import) {
+                    return Err(invalid(None, InvalidReason::Import { slot: *slot }));
+                }
+            }
+            for (callee, name) in &body.functions {
+                if document.functions.get(callee).map(|f| &f.name) != Some(name) {
+                    return Err(invalid(
+                        None,
+                        InvalidReason::FunctionNotListed { function: *callee },
+                    ));
+                }
+            }
+        }
+        // Use the document's local definitions, never a global same-name definition.
+        validate_definition_with_limits(definition, &document.functions, limits)?;
+    }
+    for native in &document.requires.natives {
+        check_written_for(catalog, native, version)?;
+        if !document
+            .functions
+            .get(native)
+            .is_some_and(FunctionDefinition::has_native)
+        {
+            return Err(invalid(
+                None,
+                InvalidReason::FunctionNotListed { function: *native },
+            ));
+        }
+    }
+    for export in document.exports.values() {
+        match export {
+            Export::Function(function) => check_export(function, &scope)?,
+            Export::Type(ty) => {
+                check_type(&ty.representation).map_err(|reason| invalid(None, reason))?;
+                let checker = scope.listed(&ty.checker, &Site::new(Unit::Main, []))?;
+                if checker.signature.params.len() != 1 || checker.signature.result != Type::Bool {
+                    return Err(invalid(
+                        None,
+                        InvalidReason::Document {
+                            message: "a type checker takes one value and returns Bool".into(),
+                        },
+                    ));
+                }
+                for member in ty.members.values() {
+                    check_export(member.function(), &scope)?;
+                }
+            }
+            Export::Error { .. } => {}
+        }
+    }
+    if let Some(main) = &document.main {
+        scope.check_unit(main, Site::new(Unit::Main, []))?;
+    }
+    Ok(())
+}
+
+fn check_import(import: &Import) -> Result<(), Invalid> {
+    match &import.kind {
+        ImportKind::Operation { signature } | ImportKind::Code { signature, .. } => {
+            check_signature(signature)
+        }
+        ImportKind::Type { .. } | ImportKind::Error { .. } => Ok(()),
+    }
+}
+/// Check the public callable ABI against its internal body convention.
+/// Parameter names and types need not be equal: source ABIs carry packed/internal parameters.
+pub fn validate_callable_signature(
+    signature: &Signature,
+    convention: &crate::StartConvention,
+    internal: &Signature,
+) -> Result<(), Invalid> {
+    check_signature(signature)?;
+    let expected = match convention {
+        crate::StartConvention::Direct | crate::StartConvention::PyDirect { .. } => {
+            Some(signature.params.len())
+        }
+        crate::StartConvention::TsArgsList { .. } => Some(2),
+        crate::StartConvention::TsDirect { .. } => None,
+    };
+    if let Some(signature) = expected.filter(|count| *count != internal.params.len()) {
+        return Err(invalid(
+            None,
+            InvalidReason::StartArity {
+                signature,
+                declared: internal.params.len(),
+            },
+        ));
+    }
+    Ok(())
+}
+fn check_export(export: &FunctionExport, scope: &Scope<'_>) -> Result<(), Invalid> {
+    let site = Site::new(Unit::Library(export.function), []);
+    let definition = scope.listed(&export.function, &site)?;
+    validate_callable_signature(&export.signature, &export.convention, &definition.signature)?;
+    if export.rest
+        && !export
+            .signature
+            .params
+            .last()
+            .is_some_and(|p| matches!(p.ty, Type::List(_)))
+    {
+        return Err(invalid(
+            Some(&site),
+            InvalidReason::Document {
+                message: "a rest parameter must be a final List parameter".into(),
+            },
+        ));
+    }
+    for target in export.convention.targets() {
+        scope.target(target, &site)?;
+    }
+    Ok(())
 }
 
 /// Validates a library-function definition's structure, checking its body's
@@ -326,13 +439,17 @@ pub fn validate_definition(
     definition: &FunctionDefinition,
     catalog: &dyn FunctionCatalog,
 ) -> Result<(), Invalid> {
-    validate_definition_with_limits(definition, catalog, crate::KernelDataLimits::standard())
+    validate_definition_with_limits(
+        definition,
+        catalog,
+        lash_vocabulary::data_limits::KernelDataLimits::standard(),
+    )
 }
 /// Validate under a deployment's document recursion safety policy.
 pub fn validate_definition_with_limits(
     definition: &FunctionDefinition,
     catalog: &dyn FunctionCatalog,
-    limits: crate::KernelDataLimits,
+    limits: lash_vocabulary::data_limits::KernelDataLimits,
 ) -> Result<(), Invalid> {
     validate_identified_definition(definition, catalog, limits).map(|_| ())
 }
@@ -341,8 +458,8 @@ pub fn validate_definition_with_limits(
 pub(crate) fn validate_identified_definition(
     definition: &FunctionDefinition,
     catalog: &dyn FunctionCatalog,
-    limits: crate::KernelDataLimits,
-) -> Result<Option<crate::FunctionId>, Invalid> {
+    limits: lash_vocabulary::data_limits::KernelDataLimits,
+) -> Result<Option<lash_vocabulary::names::FunctionId>, Invalid> {
     let Some(version) = KernelVersion::of(definition.kernel) else {
         return Err(invalid(
             None,
@@ -356,12 +473,14 @@ pub(crate) fn validate_identified_definition(
         for function in body.functions.keys() {
             check_written_for(catalog, function, version)?;
         }
-        for requirement in body.effects.values() {
-            check_signature(&requirement.signature)?;
+        for import in body.imports.values() {
+            check_import(import)?;
         }
     }
     check_signature(&definition.signature)?;
-    check_formula(&definition.charge, &definition.signature, true)?;
+    if let Some(charge) = definition.charge() {
+        check_formula(charge, &definition.signature, true)?;
+    }
     if definition.native_version == 0 {
         return Err(invalid(None, InvalidReason::NativeVersionZero));
     }
@@ -397,9 +516,9 @@ pub(crate) fn validate_identified_definition(
     let Some(body) = definition.body() else {
         return Ok(None);
     };
-    let native_body = matches!(definition.implementation, Implementation::Both(_));
+    let native_body = matches!(definition.implementation, Implementation::Both { .. });
     // A body beside a native performs nothing (`K-LIB-004`).
-    if native_body && !body.effects.is_empty() {
+    if native_body && !body.imports.is_empty() {
         return Err(invalid(
             None,
             InvalidReason::NativeBodyMayWait {
@@ -413,7 +532,7 @@ pub(crate) fn validate_identified_definition(
         limits,
         document: None,
         functions: &body.functions,
-        effects: &body.effects,
+        imports: &body.imports,
         catalog,
         native_body,
     };
@@ -477,14 +596,14 @@ fn native_call(function: &FunctionId, catalog: &dyn FunctionCatalog) -> Result<(
 }
 
 struct Scope<'a> {
-    limits: crate::KernelDataLimits,
+    limits: lash_vocabulary::data_limits::KernelDataLimits,
     /// The document being validated, or `None` inside a library body.
     document: Option<&'a Document>,
     /// The library functions this code may name.
     functions: &'a std::collections::BTreeMap<FunctionId, FunctionName>,
     /// The operations this code may perform: the document's manifest, or
     /// the body's own `effects`.
-    effects: &'a std::collections::BTreeMap<EffectName, crate::OperationRequirement>,
+    imports: &'a std::collections::BTreeMap<ImportSlot, Import>,
     catalog: &'a dyn FunctionCatalog,
     /// The code is a body that stands beside a native implementation.
     native_body: bool,
@@ -592,7 +711,7 @@ impl Scope<'_> {
             Stmt::Break => loop_control(in_loop, "break", site),
             Stmt::Continue => loop_control(in_loop, "continue", site),
             Stmt::ReturnVia { value, policy } => {
-                let definition = self.listed(policy, site)?;
+                let definition = self.target(policy, site)?;
                 if self.native_body && !definition.has_native() {
                     return Err(invalid(
                         Some(site),
@@ -653,7 +772,6 @@ impl Scope<'_> {
         let form = match &act.kind {
             ActKind::Call(_) => StatementForm::Call,
             ActKind::Perform { .. } => StatementForm::Perform,
-            ActKind::Sleep { .. } => StatementForm::Sleep,
             ActKind::Spawn(_) => StatementForm::Spawn,
             ActKind::Join | ActKind::JoinMany(_) => StatementForm::Join,
             ActKind::Await(_) => StatementForm::Await,
@@ -663,7 +781,7 @@ impl Scope<'_> {
         // As for a statement action (`K-LIB-004`): a body beside a native
         // may call functions that state one and apply a closure it holds.
         let callable = match &act.kind {
-            ActKind::Call(Callee::Library(function)) => self
+            ActKind::Call(Callee::Local(function)) => self
                 .catalog
                 .header(function)
                 .is_some_and(|header| header.has_native()),
@@ -680,12 +798,12 @@ impl Scope<'_> {
             ActKind::Call(callee) | ActKind::Spawn(callee) => {
                 self.check_callee(callee, act.args.len(), site)?
             }
-            ActKind::Perform { effect, result, .. } => {
-                let signature = self.performed(effect, site)?;
-                check_arity(effect.as_str(), act.args.len(), signature, site)?;
+            ActKind::Perform { slot, result, .. } => {
+                let signature = self.performed(slot, site)?;
+                check_arity("Import", act.args.len(), signature, site)?;
                 check_type(result).map_err(|reason| invalid(Some(site), reason))?;
             }
-            ActKind::Sleep { .. } | ActKind::Join | ActKind::JoinMany(_) | ActKind::Cancel => {
+            ActKind::Join | ActKind::JoinMany(_) | ActKind::Cancel => {
                 if act.args.len() != 1 {
                     return Err(invalid(
                         Some(site),
@@ -723,7 +841,7 @@ impl Scope<'_> {
                         },
                     ));
                 }
-                self.check_callee(&Callee::Library(*policy), 1, site)?
+                self.check_target(policy, 1, site)?
             }
         }
         self.check_exprs(act.args.iter(), site)
@@ -733,7 +851,6 @@ impl Scope<'_> {
         let form = match action {
             Action::Call { .. } => StatementForm::Call,
             Action::Perform { .. } => StatementForm::Perform,
-            Action::Sleep { .. } => StatementForm::Sleep,
             Action::Join { .. } | Action::JoinMany { .. } => StatementForm::Join,
             Action::Yield => StatementForm::Yield,
             Action::Spawn { .. } => StatementForm::Spawn,
@@ -745,7 +862,7 @@ impl Scope<'_> {
         // its arguments or one it made. It cannot wait itself (`K-LIB-004`).
         let callable = match action {
             Action::Call {
-                callee: Callee::Library(function),
+                callee: Callee::Local(function),
                 ..
             } => self
                 .catalog
@@ -769,22 +886,18 @@ impl Scope<'_> {
                 self.check_atoms(args, site)
             }
             Action::Perform {
-                effect,
-                args,
-                result,
-                ..
+                slot, args, result, ..
             } => {
-                let signature = self.performed(effect, site)?;
-                check_arity(effect.as_str(), args.len(), signature, site)?;
+                let signature = self.performed(slot, site)?;
+                check_arity("Import", args.len(), signature, site)?;
                 check_type(result).map_err(|reason| invalid(Some(site), reason))?;
                 self.check_atoms(args, site)
             }
             Action::Await { policy, value } => {
-                self.check_callee(&Callee::Library(*policy), 1, site)?;
+                self.check_target(policy, 1, site)?;
                 self.check_atoms(std::slice::from_ref(value), site)
             }
-            Action::Sleep { duration: atom, .. }
-            | Action::Join { task: atom }
+            Action::Join { task: atom }
             | Action::JoinMany { tasks: atom, .. }
             | Action::Cancel { task: atom } => self.check_atoms(std::slice::from_ref(atom), site),
             Action::Yield => Ok(()),
@@ -793,23 +906,9 @@ impl Scope<'_> {
 
     fn check_callee(&self, callee: &Callee, given: usize, site: &Site) -> Result<(), Invalid> {
         match callee {
-            Callee::Declared(name) => {
-                let function = self.declared(name, site)?;
-                if given > function {
-                    return Err(invalid(
-                        Some(site),
-                        InvalidReason::CallArity {
-                            name: name.to_string(),
-                            given,
-                            required: 0,
-                            accepted: function,
-                        },
-                    ));
-                }
-                Ok(())
-            }
+            Callee::Import(slot) => self.check_target(&FunctionTarget::Import(*slot), given, site),
             Callee::Value(name) => check_name(name, Some(site)),
-            Callee::Library(function) => {
+            Callee::Local(function) => {
                 let definition = self.listed(function, site)?;
                 check_arity(definition.name.as_str(), given, &definition.signature, site)
             }
@@ -828,7 +927,7 @@ impl Scope<'_> {
         ];
         for (function, given) in hooks {
             let Some(function) = function else { continue };
-            let definition = self.listed(function, site)?;
+            let definition = self.target(function, site)?;
             if self.native_body && !definition.has_native() {
                 return Err(invalid(
                     Some(site),
@@ -842,44 +941,45 @@ impl Scope<'_> {
         Ok(())
     }
 
-    /// The signature this code requires `effect` under: the manifest's
-    /// for a document, the body's own `effects` for a library body.
-    fn performed(&self, effect: &EffectName, site: &Site) -> Result<&Signature, Invalid> {
-        match self.effects.get(effect) {
-            Some(requirement) => Ok(&requirement.signature),
-            None if self.document.is_some() => Err(invalid(
-                Some(site),
-                InvalidReason::EffectNotListed {
-                    effect: effect.clone(),
-                },
-            )),
-            None => Err(invalid(
-                Some(site),
-                InvalidReason::EffectNotDeclared {
-                    effect: effect.clone(),
-                },
-            )),
+    fn performed(&self, slot: &ImportSlot, site: &Site) -> Result<&Signature, Invalid> {
+        match self.imports.get(slot).map(|i| &i.kind) {
+            Some(ImportKind::Operation { signature }) => Ok(signature),
+            _ => Err(invalid(Some(site), InvalidReason::Import { slot: *slot })),
         }
     }
-
-    /// The parameter count of the declared function `name`.
-    fn declared(&self, name: &Name, site: &Site) -> Result<usize, Invalid> {
-        let Some(document) = self.document else {
-            return Err(invalid(
-                Some(site),
-                InvalidReason::DeclaredFunctionInLibrary { name: name.clone() },
-            ));
-        };
-        document
-            .functions
-            .get(name)
-            .map(|function| function.params.len())
-            .ok_or_else(|| {
-                invalid(
-                    Some(site),
-                    InvalidReason::FunctionNotDeclared { name: name.clone() },
-                )
-            })
+    fn check_target(
+        &self,
+        target: &FunctionTarget,
+        given: usize,
+        site: &Site,
+    ) -> Result<(), Invalid> {
+        let header = self.target(target, site)?;
+        check_arity(header.name.as_str(), given, &header.signature, site)
+    }
+    fn target(
+        &self,
+        target: &FunctionTarget,
+        site: &Site,
+    ) -> Result<std::sync::Arc<crate::FunctionHeader>, Invalid> {
+        match target {
+            FunctionTarget::Local(id) => self.listed(id, site),
+            FunctionTarget::Import(slot) => match self.imports.get(slot) {
+                Some(Import {
+                    kind: ImportKind::Code { signature, .. },
+                    ..
+                }) => Ok(std::sync::Arc::new(crate::FunctionHeader {
+                    kernel: crate::KERNEL_VERSION,
+                    name: FunctionName::new("import.call")
+                        .unwrap_or_else(|_| unreachable!("valid name")),
+                    signature: signature.clone(),
+                    errors: Default::default(),
+                    metering: crate::Metering::Statements,
+                    guard: None,
+                    implementation: crate::ImplementationKind::Guest,
+                })),
+                _ => Err(invalid(Some(site), InvalidReason::Import { slot: *slot })),
+            },
+        }
     }
 
     /// The header of a library function this code lists.
@@ -896,14 +996,18 @@ impl Scope<'_> {
                 },
             ));
         }
-        self.catalog.header(function).ok_or_else(|| {
-            invalid(
-                Some(site),
-                InvalidReason::FunctionNotResolved {
-                    function: *function,
-                },
-            )
-        })
+        self.document
+            .and_then(|d| d.functions.get(function))
+            .map(|f| std::sync::Arc::new(crate::FunctionHeader::of(f)))
+            .or_else(|| self.catalog.header(function))
+            .ok_or_else(|| {
+                invalid(
+                    Some(site),
+                    InvalidReason::FunctionNotResolved {
+                        function: *function,
+                    },
+                )
+            })
     }
 
     fn check_atoms(&self, atoms: &[Atom], site: &Site) -> Result<(), Invalid> {
@@ -918,7 +1022,7 @@ impl Scope<'_> {
 
     fn check_literal(&self, literal: &Literal, site: &Site) -> Result<(), Invalid> {
         match literal {
-            Literal::Function(name) => self.declared(name, site).map(|_| ()),
+            Literal::Function(id) => self.listed(id, site).map(|_| ()),
             _ => Ok(()),
         }
     }
@@ -927,7 +1031,6 @@ impl Scope<'_> {
         match expr {
             Expr::Literal(literal) => self.check_literal(literal, site),
             Expr::Variable(name) => check_name(name, Some(site)),
-            Expr::Clock | Expr::Random => Ok(()),
             Expr::Tuple(items) | Expr::List(items) | Expr::Set(items) => {
                 self.check_exprs(items.iter(), site)
             }
@@ -1004,13 +1107,11 @@ impl Scope<'_> {
     }
 
     fn check_closure(&self, closure: &Closure, site: &Site) -> Result<(), Invalid> {
-        check_params(&closure.params, site)?;
-        if let Some(start) = &closure.start {
-            self.check_start(start, closure.params.len(), site)?;
+        let definition = self.listed(&closure.function, site)?;
+        if let Some(start) = &closure.presentation {
+            self.check_start(start, definition.signature.params.len(), site)?;
         }
-        // A closure body is a function body: an enclosing loop does not
-        // reach into it.
-        self.check_block(&closure.body, &site.child(0), false)
+        Ok(())
     }
 }
 
@@ -1023,7 +1124,7 @@ impl Scope<'_> {
     /// calls listed in the manifest.
     fn check_start(
         &self,
-        start: &crate::StartAdapter,
+        start: &crate::CallablePresentation,
         params: usize,
         site: &Site,
     ) -> Result<(), Invalid> {
@@ -1049,15 +1150,8 @@ impl Scope<'_> {
                 },
             ));
         }
-        for function in start.functions() {
-            if !self.functions.contains_key(function) {
-                return Err(invalid(
-                    Some(site),
-                    InvalidReason::FunctionNotListed {
-                        function: *function,
-                    },
-                ));
-            }
+        for target in start.convention.targets() {
+            self.target(target, site)?;
         }
         Ok(())
     }
@@ -1081,20 +1175,6 @@ fn check_name(name: &Name, site: Option<&Site>) -> Result<(), Invalid> {
     } else {
         Ok(())
     }
-}
-
-fn check_params(params: &[Name], site: &Site) -> Result<(), Invalid> {
-    let mut seen = BTreeSet::new();
-    for name in params {
-        check_name(name, Some(site))?;
-        if !seen.insert(name) {
-            return Err(invalid(
-                Some(site),
-                InvalidReason::DuplicateParam { name: name.clone() },
-            ));
-        }
-    }
-    Ok(())
 }
 
 fn check_arity(
@@ -1283,9 +1363,9 @@ impl Document {
     /// The node a site addresses, when the site is in this document.
     pub fn node(&self, site: &Site) -> Option<Node<'_>> {
         let body = match &site.unit {
-            Unit::Main => &self.main,
-            Unit::Function(name) => &self.functions.get(name)?.body,
-            Unit::Library(_) => return None,
+            Unit::Main => self.main.as_ref()?,
+            Unit::Function(_) => return None,
+            Unit::Library(id) => &self.functions.get(id)?.body()?.block,
         };
         let mut node = Node::Block(body);
         for step in &site.path {

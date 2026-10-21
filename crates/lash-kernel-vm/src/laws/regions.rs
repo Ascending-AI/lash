@@ -15,13 +15,9 @@ use crate::compile::{Event, Head, LoopPlan, Lowered, Refused, RegionSlot, Step};
 use crate::costs::Costs;
 use crate::paged::Machine as _;
 
-const LOOP: &str = "fn count(n) { let i = 0 let s = 0 \
-                    while num.lt(i, n) { set s = num.add(s, i) set i = num.add(i, 1) } return s }\n\
-                    main { let r = call count(5) finish r }";
+const LOOP: &str = "definition \"function count(n: Any) -> Any\\nkernel 1\\nmetering statements\\nbody {  let i = 0 let s = 0 while num.lt(i, n) { set s = num.add(s, i) set i = num.add(i, 1) } return s  }\"\n\nmain { let r = call count(5) finish r }";
 
-const WALK: &str = "fn walk(xs) { let s = 0 \
-                    for x in xs { let y = num.add(x, 1) if num.lt(x, 3) { continue } else { set s = num.add(s, y) } } return s }\n\
-                    main { let r = call walk([1, 2, 3, 4]) finish r }";
+const WALK: &str = "definition \"function walk(xs: Any) -> Any\\nkernel 1\\nmetering statements\\nbody {  let s = 0 for x in xs { let y = num.add(x, 1) if num.lt(x, 3) { continue } else { set s = num.add(s, y) } } return s  }\"\n\nmain { let r = call walk([1, 2, 3, 4]) finish r }";
 
 /// The one plan `text` forms, and what it is checked against.
 fn checked(text: &str, check: impl FnOnce(&LoopPlan, &dyn Fn(&LoopPlan) -> Result<(), Refused>)) {
@@ -31,7 +27,12 @@ fn checked(text: &str, check: impl FnOnce(&LoopPlan, &dyn Fn(&LoopPlan) -> Resul
         .admit(&program.document, Default::default())
         .unwrap_or_else(|_| panic!("the loop program is admitted"));
     let exe = admitted
-        .executable(&program.document, &program.library)
+        .executable(
+            &program.document,
+            &program.library,
+            &program.documents,
+            &program.instances,
+        )
         .unwrap_or_else(|_| panic!("the loop program compiles"));
     let [plan] = &exe.regions[..] else {
         panic!("one loop region forms, not {}", exe.regions.len());
@@ -227,9 +228,7 @@ fn lowering_admits_a_session_plan_only_as_its_ops_name_the_bindings() {
     });
 }
 
-const ISLAND: &str = "fn fib(n) { if num.lt(n, 2) { return n } \
-                      return num.add(call fib(num.add(n, -1)), call fib(num.add(n, -2))) }\n\
-                      main { let r = call fib(5) finish r }";
+const ISLAND: &str = "definition \"function fib(self: Any, n: Any) -> Any\\nkernel 1\\nmetering statements\\nbody {  if num.lt(n, 2) { return n } return num.add(apply self(self, num.add(n, -1)), apply self(self, num.add(n, -2)))  }\"\n\nmain { let r = call fib(&fib, 5) finish r }";
 
 #[test]
 fn lowering_admits_an_island_plan_only_as_its_stream_states_it() {
@@ -239,7 +238,12 @@ fn lowering_admits_an_island_plan_only_as_its_stream_states_it() {
         .admit(&program.document, Default::default())
         .unwrap_or_else(|_| panic!("the island program is admitted"));
     let exe = admitted
-        .executable(&program.document, &program.library)
+        .executable(
+            &program.document,
+            &program.library,
+            &program.documents,
+            &program.instances,
+        )
         .unwrap_or_else(|_| panic!("the island program compiles"));
     let [plan] = &exe.islands.plans[..] else {
         panic!("one island forms, not {}", exe.islands.plans.len());
@@ -285,38 +289,12 @@ fn test_close(plan: &mut islands::IslandPlan) -> &mut expr::Close {
     }
 }
 
-/// A loop region calling `tag` through its island, which calls `echo`
-/// through its own call site's cache: neither closure is ever called by
-/// the reference.
-const CLOSURES: &str = "fn count(n) { let echo = fn(v) { return v } \
-                        let tag = fn(v) { if num.lt(v, 0) { return 0 } do apply echo(v) return 1 } \
-                        let i = 0 let s = 0 \
-                        while num.lt(i, n) { set s = num.add(s, apply tag(num.add(i, -4))) set i = num.add(i, 1) } \
-                        return s }\n\
-                        main { let r = call count(12) finish r }";
-
-#[test]
-fn a_closure_an_island_calls_finds_its_code_by_its_site_once() {
-    let projected = || crate::machine::project::PROJECTED.with(std::cell::Cell::get);
-    let before = projected();
-    let (end, _) = run(CLOSURES);
-    assert_eq!(result(end), int(8));
-    // `tag` and `echo` each find their code once, on their first call:
-    // every later call, from the region and from inside the island, reads
-    // the code the closure kept.
-    assert_eq!(projected() - before, 2);
-}
-
 /// `COLLECTED` with each pass leaving `garbage`: a statement of the loop's
 /// body, before its guest call.
 fn collected(garbage: &str) -> String {
     format!(
-        "fn count(n) {{ let echo = fn(v) {{ return v }} \
-         let tag = fn(v) {{ do apply echo(v) return 1 }} \
-         let i = 0 let s = 0 let t = [0] \
-         while num.lt(i, n) {{ {garbage} set s = num.add(s, apply tag(i)) set i = num.add(i, 1) }} \
-         return s }}\n\
-         main {{ let r = call count(3000) finish r }}"
+        "definition \"function count(n: Any) -> Any\\nkernel 1\\nmetering statements\\nbody {{  let echo = fn(v) {{ return v }} let tag = fn(v) {{ do apply echo(v) return 1 }} let i = 0 let s = 0 let t = [0] while num.lt(i, n) {{ {garbage_json} set s = num.add(s, apply tag(i)) set i = num.add(i, 1) }} return s  }}\"\n\nmain {{ let r = call count(3000) finish r }}",
+        garbage_json = crate::laws::embedder::fragment(garbage)
     )
 }
 

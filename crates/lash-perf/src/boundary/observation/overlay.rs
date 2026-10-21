@@ -40,7 +40,7 @@ async fn fold(args: &Args, meter: &Meter) -> Result<Receipt> {
             anyhow::bail!("the process names no workflow document: {:?}", view.document);
         };
         let document = match node.core.host_artifacts().execution_document(reference).await? {
-            WorkflowDocumentRead::Read(read) => read.document,
+            WorkflowDocumentRead::Read(read) => read,
             other => anyhow::bail!("the workflow document cannot be read: {other:?}"),
         };
         let (nodes, site_count) = (
@@ -71,7 +71,7 @@ async fn fold(args: &Args, meter: &Meter) -> Result<Receipt> {
         ensure!(gaps == 0, "the overlay's feed gapped {gaps} times");
 
         let mut overlay = WorkflowExecutionOverlayAccumulator::default();
-        overlay.set_document(lash::workflow::WorkflowOverlayDocument::of(&document));
+        overlay.set_document(lash::workflow::workflow_overlay_document(&document));
         let window = Instant::now();
         let (mut folded, mut snapshots) = (0, 0);
         for event in &observations {

@@ -22,7 +22,7 @@
 //! verifier checks what its formation derived against the ops themselves,
 //! never against this tree.
 
-use lash_kernel_doc::{Unit, Value};
+use lash_kernel_doc::Value;
 use lash_kernel_exec::{
     ActIx, FieldIx, FieldListIx, LocalRef, NameIx, Op, OpRange, Reg, RegRange, SiteIx,
 };
@@ -551,7 +551,7 @@ impl<'s> Reader<'s> {
         let invoke = Invoke {
             act,
             occurrence: nested.occurrence,
-            guest: !matches!(nested.site.unit, Unit::Library(_)),
+            guest: nested.guest,
             call: matches!(nested.kind, NestedKind::Call(_)),
             operator: nested.operator,
         };
@@ -565,6 +565,7 @@ impl<'s> Reader<'s> {
         }
         let declared = match nested.kind {
             NestedKind::Call(NestedCallee::Read) if args.len >= 1 => None,
+            NestedKind::Call(NestedCallee::Import(_)) => return None,
             NestedKind::Call(NestedCallee::Declared(code)) => Some(code),
             _ => return None,
         };

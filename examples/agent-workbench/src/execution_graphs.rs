@@ -1,5 +1,5 @@
-use lash::ProcessId;
-use lash::SessionId;
+use lash_vocabulary::identity::ProcessId;
+use lash_vocabulary::identity::SessionId;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 use lash::tracing::{TraceRuntimeScope, TraceRuntimeSubject};
@@ -523,9 +523,9 @@ fn lineage_bridge_title(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use lash::TurnId;
     use lash::process::ProcessInput as RuntimeInput;
     use lash::tracing::TraceLanguageExecutionStatus;
+    use lash_vocabulary::identity::TurnId;
     use serde_json::json;
     use std::sync::Arc;
 

@@ -3,7 +3,7 @@
   "cases": [
     {
       "name": "arguments bind in order on each activation",
-      "document": "kernel 1\nnumbers by_spelling\nfn pair(a, b) { return (a, b) }\nmain {\nlet answer = call pair(1, 2) finish answer\n}\n",
+      "document": "kernel 1\nnumbers by_spelling\ndefinition \"function pair(a: Any, b: Any) -> Any\\nkernel 1\\nmetering statements\\nbody {\\n  return (a, b)\\n}\\n\"\nmain {\n  let answer = invoke pair(1, 2)\n  finish answer\n}\n",
       "expected": {
         "prints": [],
         "end": {

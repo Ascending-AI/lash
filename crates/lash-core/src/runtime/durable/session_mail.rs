@@ -31,7 +31,8 @@ use lash_durable::domain::{
     MailBatchKind, MailInput, SESSION_CLOSE_MAIL, SessionMailWrite, SessionMailbox,
 };
 use lash_durable::{ActorTx, DomainWrite, DurableError};
-use lash_protocol_types::{SessionId, TurnId};
+use lash_vocabulary::identity::SessionId;
+use lash_vocabulary::identity::TurnId;
 
 use super::session::AdmittedInputs;
 use crate::ActorContext;

@@ -38,7 +38,7 @@ fn sqlite_graph_generation_uniqueness_is_typed() {
         raw,
         &SessionId::from("session-a"),
         3,
-        &lash_protocol_types::NodeId::from("node-b"),
+        &lash_vocabulary::identity::NodeId::from("node-b"),
     );
     assert!(matches!(
         error,

@@ -1,4 +1,5 @@
-use lash_protocol_types::{SessionId, TurnId};
+use lash_vocabulary::identity::SessionId;
+use lash_vocabulary::identity::TurnId;
 use std::{fmt::Write as _, future::IntoFuture as _, path::PathBuf, sync::Arc};
 
 use lash::{
@@ -163,7 +164,7 @@ impl BenchmarkCore {
 pub(crate) struct MeasuredTurn {
     pub(crate) outcome: TurnOutcome,
     #[cfg(test)]
-    pub(crate) run: lash::RunId,
+    pub(crate) run: lash_vocabulary::identity::RunId,
     pub(crate) usage: lash::LlmUsage,
 }
 
@@ -782,8 +783,10 @@ fn benchmark_rlm_builder(
 // The benchmark plugin list, in push order. Every conditional reads the
 // scenario's `ScenarioWiring` column; the builders only append the result.
 /// The benchmark tools' process component.
-const RUNTIME_PERF_TOOLS: lash_core::ProcessConfigKey<()> =
-    lash_core::ProcessConfigKey::new("runtime_perf_tools", lash_core::FormatVersion::ONE);
+const RUNTIME_PERF_TOOLS: lash_core::ProcessConfigKey<()> = lash_core::ProcessConfigKey::new(
+    "runtime_perf_tools",
+    lash_vocabulary::providers::FormatVersion::ONE,
+);
 
 /// A process component and the key it registers under.
 type BenchmarkComponent = (

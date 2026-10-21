@@ -161,7 +161,7 @@ fn admitted_finish_schema(
     schema: Option<serde_json::Value>,
 ) -> Result<Option<serde_json::Value>, RlmConfigRefusal> {
     if let Some(schema) = &schema {
-        lash_core::JsonSchema::admit(schema.clone()).map_err(|error| {
+        lash_vocabulary::json_schema::JsonSchema::admit(schema.clone()).map_err(|error| {
             RlmConfigRefusal::FinishValueSchemaRefused {
                 message: error.to_string(),
             }

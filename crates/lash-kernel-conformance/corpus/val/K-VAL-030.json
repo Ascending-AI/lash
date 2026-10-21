@@ -3,7 +3,7 @@
   "cases": [
     {
       "name": "scalar ordering differs from UTF16 ordering for astral text",
-      "document": "kernel 1\nnumbers by_spelling\nuse compare = @a64b7137573be490848eb987237515f1e79671eabf043408caf9a83196c7cb77\nuse text.utf16_compare = @b67f500ce137b6b799850a96d9f81e2aa25e1f7272972265fb43a65142e955ed\nuse text.compare = @1ffde9482105d0066232a037f8056c41e232602059aa8e67197725d81b83062c\nmain {  finish [compare(\"𐀀\", \"\"), text.compare(\"𐀀\", \"\"), text.utf16_compare(\"𐀀\", \"\"), compare(\"a\", \"aa\")] }\n",
+      "document": "kernel 1\nnumbers by_spelling\nnative @06fafae84c379c4870606ae482072fe667a1ae7e07b766bd09a88a5cf75719eb\nnative @0dcb2bd91a089789890786873482fb4f5f8d0f5604fe59023939f2986aba544e\nnative @72074b777dbb6cae3583e94a75f77f97f6b4a74b312b693c8bb60e01dce8610e\ndefinition \"function compare(arg0: Any, arg1: Any) -> Int\\nkernel 1\\nerrors \\\"arity\\\", \\\"type_error\\\", \\\"unordered\\\"\\ncharge sum(1, product(sum(deep(arg0), deep(arg1)), sum(deep(arg0), deep(arg1))), deep(result))\\nnative\\n\"\ndefinition \"function text.compare(text: Text, other: Text) -> Int\\nkernel 1\\ncharge sum(1, deep(text), deep(other), deep(result))\\nnative\\n\"\ndefinition \"function text.utf16_compare(text: Text, other: Text) -> Int\\nkernel 1\\ncharge sum(1, deep(text), deep(other), deep(result))\\nnative\\n\"\nmain {\n  finish [compare(\"𐀀\", \"\"), text.compare(\"𐀀\", \"\"), text.utf16_compare(\"𐀀\", \"\"), compare(\"a\", \"aa\")]\n}\n",
       "expected": {
         "prints": [],
         "trace": [],

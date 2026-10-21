@@ -2,11 +2,16 @@
 
 use std::sync::Arc;
 
-use lash_kernel_doc::{Datum, ErrorDatum, Handle, Integer, Name, Timestamp};
+use lash_kernel_doc::Datum;
+use lash_kernel_doc::ErrorDatum;
+use lash_kernel_doc::Handle;
+use lash_kernel_doc::Integer;
+use lash_kernel_doc::Timestamp;
 use lash_kernel_vm::{
     CellStart, Delivered, Host, KernelMachine, Machine, Meters, Outcome, Program, Request,
     StartError, Step, Target,
 };
+use lash_vocabulary::names::Name;
 
 use super::{Smith, library};
 use crate::HarnessError;
@@ -29,8 +34,6 @@ pub struct Observation {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum HostCall {
-    Clock(Timestamp),
-    Random(u64),
     Read(Handle, Datum, Result<Datum, ErrorDatum>),
     Print(Datum),
 }
@@ -54,20 +57,6 @@ impl World {
 }
 
 impl Host for World {
-    fn clock(&mut self) -> Timestamp {
-        let time = Timestamp {
-            nanoseconds: Integer::from(self.bits() as i64),
-        };
-        self.calls.push(HostCall::Clock(time.clone()));
-        time
-    }
-
-    fn random(&mut self) -> u64 {
-        let bits = self.bits();
-        self.calls.push(HostCall::Random(bits));
-        bits
-    }
-
     fn read(&mut self, handle: &Handle, request: &Datum) -> Result<Datum, ErrorDatum> {
         let result = if self.fail {
             Err(error(request.clone()))
@@ -104,11 +93,8 @@ fn fault(error: impl std::fmt::Display) -> HarnessError {
 }
 
 fn program(smith: &Smith) -> Program {
-    Program {
-        closure: crate::pages::CLOSURE,
-        document: Arc::new(smith.document.clone()),
-        library: library().prepared.clone(),
-    }
+    crate::machine::prepare_document(&library().prepared, Arc::new(smith.document.clone()), None)
+        .expect("smith document prepares")
 }
 
 fn session() -> crate::pages::Session {
@@ -208,9 +194,12 @@ fn observe_in<M: Machine>(
             }
             for request in requests {
                 let (wait, outcome) = match request {
-                    Request::Sleep(sleep) => (sleep.wait, Outcome::Elapsed),
                     Request::Effect(effect) => {
-                        let data = effect.args.first().cloned().unwrap_or(Datum::Null);
+                        let data = if effect.use_.slot == lash_vocabulary::ImportSlot(1) {
+                            Datum::Null
+                        } else {
+                            effect.args.first().cloned().unwrap_or(Datum::Null)
+                        };
                         (
                             effect.wait,
                             if smith.schedule.fail_effects {

@@ -1,5 +1,5 @@
 use super::*;
-use crate::TurnId;
+use lash_vocabulary::identity::TurnId;
 
 impl crate::core_internal::RuntimeService for RuntimeSessionStateService {}
 
@@ -153,7 +153,7 @@ impl crate::plugin::ProcessReadService for RuntimeSessionProcessService {
 impl crate::ProcessService for RuntimeSessionProcessService {
     async fn list_visible_for_attempt(
         &self,
-        owner: &crate::RuntimeOwner,
+        owner: &lash_vocabulary::identity::RuntimeOwner,
         mode: lash_execution_contracts::process::ProcessListMode,
     ) -> Result<
         Vec<lash_execution_contracts::process::ObservedProcess>,
@@ -200,7 +200,7 @@ impl crate::ProcessService for RuntimeSessionProcessService {
 
     async fn stage_recorded_start(
         &self,
-        owner: &crate::RuntimeOwner,
+        owner: &lash_vocabulary::identity::RuntimeOwner,
         request: lash_execution_contracts::process::ProcessStartRequest,
         scope: crate::ProcessOpScope<'_>,
     ) -> Result<crate::StagedProcessStart, lash_execution_contracts::plugin_error::PluginError>
@@ -272,7 +272,7 @@ impl crate::ProcessService for RuntimeSessionProcessService {
 
     async fn await_process_ref(
         &self,
-        process_id: &crate::ProcessId,
+        process_id: &lash_vocabulary::identity::ProcessId,
         scope: crate::ProcessOpScope<'_>,
     ) -> Result<
         lash_execution_contracts::process::ProcessAwaitOutput,
@@ -340,7 +340,7 @@ impl crate::ProcessService for RuntimeSessionProcessService {
 
     async fn validate_visible(
         &self,
-        owner: &crate::RuntimeOwner,
+        owner: &lash_vocabulary::identity::RuntimeOwner,
         handle_ids: &[ProcessId],
         scope: crate::ProcessOpScope<'_>,
     ) -> Result<(), lash_execution_contracts::plugin_error::PluginError> {
@@ -367,7 +367,7 @@ impl crate::ProcessService for RuntimeSessionProcessService {
 
     async fn cancel(
         &self,
-        owner: &crate::RuntimeOwner,
+        owner: &lash_vocabulary::identity::RuntimeOwner,
         process_id: &ProcessId,
         scope: crate::ProcessOpScope<'_>,
     ) -> Result<
@@ -382,7 +382,7 @@ impl crate::ProcessService for RuntimeSessionProcessService {
 
     async fn cancel_recorded_intent(
         &self,
-        _owner: &crate::RuntimeOwner,
+        _owner: &lash_vocabulary::identity::RuntimeOwner,
         process_id: &ProcessId,
         identity: crate::ToolIntentIdentity,
         scope: crate::ProcessOpScope<'_>,

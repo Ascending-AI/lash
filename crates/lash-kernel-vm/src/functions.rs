@@ -11,10 +11,16 @@ use std::collections::BTreeSet;
 use std::sync::{Arc, LazyLock};
 
 use lash_kernel_doc::{
-    Formula, FunctionDefinition, FunctionId, FunctionRegistry, Implementation, KERNEL_VERSION,
-    Name, NativeCall, NativeError, NativeFunction, Operand, Param, QualifiedName, RegistryError,
-    Signature, Type, Value,
+    Formula, FunctionDefinition, FunctionRegistry, Implementation, KERNEL_VERSION, NativeCall,
+    NativeError, NativeFunction, Operand, RegistryError, Value,
 };
+
+use lash_vocabulary::names::FunctionId;
+use lash_vocabulary::names::FunctionName;
+use lash_vocabulary::names::Name;
+use lash_vocabulary::types::Param;
+use lash_vocabulary::types::Signature;
+use lash_vocabulary::types::Type;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum MachineFunction {
@@ -90,12 +96,11 @@ fn definition(function: MachineFunction, kernel: u32) -> FunctionDefinition {
     };
     FunctionDefinition {
         kernel,
-        name: QualifiedName::new(name).expect("a constant qualified name"),
+        name: FunctionName::new(name).expect("a constant qualified name"),
         signature: Signature { params, result },
         errors: BTreeSet::new(),
-        charge,
         guard: None,
-        implementation: Implementation::Native,
+        implementation: Implementation::Native { charge },
         native_version: lash_kernel_doc::FIRST_NATIVE_VERSION,
     }
 }

@@ -1,7 +1,8 @@
 use lash_protocol_types::ReportedFailure;
-use lash_protocol_types::SessionId;
-use lash_protocol_types::TurnId;
 use lash_protocol_types::{llm::types::StreamBlockEvent, llm::types::StreamBlockKind};
+
+use lash_vocabulary::identity::SessionId;
+use lash_vocabulary::identity::TurnId;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -13,10 +14,12 @@ mod held_progress;
 use lash_protocol_types::TurnFinish;
 use lash_protocol_types::session_model::message::PartAttachment;
 use lash_protocol_types::{ModelToolReturnPart, ToolCancellation, ToolFailure, ToolFailureClass};
+
 use lash_protocol_types::{
     llm::types::LlmOutputPart, llm::types::LlmRequest, llm::types::LlmResponse,
     llm::types::LlmTerminalReason,
 };
+
 use lash_protocol_types::{
     session_model::ConversationRecord, session_model::Message, session_model::MessageRole,
     session_model::MessageSequence, session_model::Part, session_model::SessionHistoryRecord,
@@ -1871,11 +1874,11 @@ fn recorded_environment(tool: &str) -> ExecutionEnvironmentSync {
         tool_specs: Arc::new(vec![lash_protocol_types::llm::types::LlmToolSpec {
             name: tool.to_string(),
             description: "desc".to_string(),
-            input_schema: lash_protocol_types::SchemaContract::admit(
+            input_schema: lash_vocabulary::schema_contract::SchemaContract::admit(
                 serde_json::json!({ "type": "object" }),
             )
             .expect("valid declared schema"),
-            output_schema: lash_protocol_types::SchemaContract::admit(
+            output_schema: lash_vocabulary::schema_contract::SchemaContract::admit(
                 serde_json::json!({ "type": "object" }),
             )
             .expect("valid declared schema"),

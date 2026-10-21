@@ -3,7 +3,7 @@
   "cases": [
     {
       "name": "num.add checks dynamic wrong-kind operand",
-      "document": "kernel 1\nnumbers by_spelling\nuse num.add = @9cda7fce431cb6f247f593c290eba8aa75171a9f1fbcc628f4603c6fe7ab6343\nmain { let x = null set x = \"1\" try { print num.add(x, x) } catch e { finish e.kind } finish null }\n",
+      "document": "kernel 1\nnumbers by_spelling\nnative @94621ce821ee886636f7d33907340b7290c9e71c2137bd762b6c70bb464566f9\ndefinition \"function num.add(arg0: Number, arg1: Number) -> Number\\nkernel 1\\nerrors \\\"arity\\\", \\\"number_range\\\", \\\"type_error\\\"\\ncharge sum(1, sum(deep(arg0), deep(arg1)), deep(result))\\nnative\\n\"\nmain {\n  let x = null\n  set x = \"1\"\n  try {\n    print num.add(x, x)\n  } catch e {\n    finish e.kind\n  }\n  finish null\n}\n",
       "expected": {
         "prints": [],
         "trace": [],
@@ -16,7 +16,7 @@
     },
     {
       "name": "int.add checks dynamic wrong-kind operand",
-      "document": "kernel 1\nnumbers by_spelling\nuse int.add = @78360cc510bfdd377db72105644bd2e053029f92e25536b497f6e2683e405235\nmain { let x = null set x = 1.0 try { print int.add(x, x) } catch e { finish e.kind } finish null }\n",
+      "document": "kernel 1\nnumbers by_spelling\nnative @4209671e25c9c9617435d20a287d567dd7dbbc4a9c3e6a761c048dd80e0d3043\ndefinition \"function int.add(arg0: Int, arg1: Int) -> Int\\nkernel 1\\nerrors \\\"arity\\\", \\\"number_range\\\", \\\"type_error\\\"\\ncharge sum(1, sum(deep(arg0), deep(arg1)), deep(result))\\nnative\\n\"\nmain {\n  let x = null\n  set x = 1.0\n  try {\n    print int.add(x, x)\n  } catch e {\n    finish e.kind\n  }\n  finish null\n}\n",
       "expected": {
         "prints": [],
         "trace": [],
@@ -29,7 +29,7 @@
     },
     {
       "name": "float.add checks dynamic wrong-kind operand",
-      "document": "kernel 1\nnumbers by_spelling\nuse float.add = @b6b5942521af2da87eff3bdfcee3f2e3e27f7d5f745bfd959e5b6d6c650aaef7\nmain { let x = null set x = 1 try { print float.add(x, x) } catch e { finish e.kind } finish null }\n",
+      "document": "kernel 1\nnumbers by_spelling\nnative @77fc61f786f96d420655573b085d672e715e9f3e94a12d8d3f2ce3ea6db876bb\ndefinition \"function float.add(arg0: Float, arg1: Float) -> Float\\nkernel 1\\nerrors \\\"arity\\\", \\\"number_range\\\", \\\"type_error\\\"\\ncharge sum(1, sum(deep(arg0), deep(arg1)), deep(result))\\nnative\\n\"\nmain {\n  let x = null\n  set x = 1\n  try {\n    print float.add(x, x)\n  } catch e {\n    finish e.kind\n  }\n  finish null\n}\n",
       "expected": {
         "prints": [],
         "trace": [],
@@ -42,7 +42,7 @@
     },
     {
       "name": "optional absent is handed to library unchanged",
-      "document": "kernel 1\nnumbers by_spelling\nuse error.new = @94cb9716bc8ce4815dfcc5451d7f6d00901c7ed7aeba0d131da241a5f750d064\nmain { let a = error.new(\"kind\", \"message\") let b = error.new(\"kind\", \"message\", absent) finish [a.data, b.data] }\n",
+      "document": "kernel 1\nnumbers by_spelling\nnative @e5f5e7081794f244d696377835fa16cadf6f6c49d53e947fc928b49494989ca3\ndefinition \"function error.new(kind: Text, message: Text, data?: Any) -> Error\\nkernel 1\\nerrors \\\"type_error\\\"\\ncharge sum(1, size(kind), size(message), size(result))\\nnative\\n\"\nmain {\n  let a = error.new(\"kind\", \"message\")\n  let b = error.new(\"kind\", \"message\", absent)\n  finish [a.data, b.data]\n}\n",
       "expected": {
         "prints": [],
         "trace": [],

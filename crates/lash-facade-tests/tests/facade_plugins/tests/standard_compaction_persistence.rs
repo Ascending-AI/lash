@@ -1,6 +1,6 @@
 use super::*;
 use lash_core::facade_support::SessionNodeProjection as _;
-use lash_protocol_types::SessionId;
+use lash_vocabulary::identity::SessionId;
 use std::collections::VecDeque;
 
 fn message_text(message: &lash_core::Message) -> String {
@@ -162,7 +162,7 @@ async fn explicit_compaction_opens_a_summary_frame_the_next_turn_continues_in() 
         .build(lash_facade_tests::runtime_lease_owner())?;
     let session = created_session_with(
         &core,
-        lash::SessionId::parse(session_id).expect("nonblank host identity"),
+        lash_vocabulary::identity::SessionId::parse(session_id).expect("nonblank host identity"),
         session_spec_for(&llm_profile_spec("standard-compaction-model", None, 40_000)),
     )
     .await
@@ -174,7 +174,7 @@ async fn explicit_compaction_opens_a_summary_frame_the_next_turn_continues_in() 
     ] {
         session
             .send(TurnInput::text(text))
-            .id(lash::TurnId::parse(turn_id).expect("nonblank host identity"))
+            .id(lash_vocabulary::identity::TurnId::parse(turn_id).expect("nonblank host identity"))
             .output()
             .await?;
     }
@@ -197,8 +197,10 @@ async fn explicit_compaction_opens_a_summary_frame_the_next_turn_continues_in() 
 
     session
         .send(TurnInput::text("after request"))
-        .id(lash::TurnId::parse("standard-compaction-explicit-after")
-            .expect("nonblank host identity"))
+        .id(
+            lash_vocabulary::identity::TurnId::parse("standard-compaction-explicit-after")
+                .expect("nonblank host identity"),
+        )
         .output()
         .await?;
     let next = committed(&session).await;
@@ -309,7 +311,7 @@ async fn overflow_recovery_failures_record_failed_then_exhausted_without_a_frame
         .build(lash_facade_tests::runtime_lease_owner())?;
     let session = created_session_with(
         &core,
-        lash::SessionId::parse(session_id).expect("nonblank host identity"),
+        lash_vocabulary::identity::SessionId::parse(session_id).expect("nonblank host identity"),
         session_spec_for(&llm_profile_spec(
             "standard-compaction-model",
             None,
@@ -322,7 +324,7 @@ async fn overflow_recovery_failures_record_failed_then_exhausted_without_a_frame
     let overflow = session
         .send(TurnInput::text("summarize the report"))
         .id(
-            lash::TurnId::parse("standard-compaction-exhausted-overflow")
+            lash_vocabulary::identity::TurnId::parse("standard-compaction-exhausted-overflow")
                 .expect("nonblank host identity"),
         )
         .output()
@@ -346,7 +348,7 @@ async fn overflow_recovery_failures_record_failed_then_exhausted_without_a_frame
     {
         let turn = session
             .send(TurnInput::text(format!("try again {attempt}")))
-            .id(lash_core::TurnId::fixture(format!(
+            .id(lash_vocabulary::identity::TurnId::fixture(format!(
                 "standard-compaction-exhausted-{attempt}"
             )))
             .output()
@@ -363,8 +365,10 @@ async fn overflow_recovery_failures_record_failed_then_exhausted_without_a_frame
     }
     session
         .send(TurnInput::text("after the cap"))
-        .id(lash::TurnId::parse("standard-compaction-exhausted-after")
-            .expect("nonblank host identity"))
+        .id(
+            lash_vocabulary::identity::TurnId::parse("standard-compaction-exhausted-after")
+                .expect("nonblank host identity"),
+        )
         .output()
         .await?;
 
@@ -500,7 +504,7 @@ async fn repeated_admin_compactions_distinguish_changed_snapshots() -> Result<()
         .build(lash_facade_tests::runtime_lease_owner())?;
     let session = created_session_with(
         &core,
-        lash::SessionId::parse(session_id).expect("nonblank host identity"),
+        lash_vocabulary::identity::SessionId::parse(session_id).expect("nonblank host identity"),
         session_spec_for(&llm_profile_spec("standard-compaction-model", None, 40_000)),
     )
     .await
@@ -512,7 +516,7 @@ async fn repeated_admin_compactions_distinguish_changed_snapshots() -> Result<()
     ] {
         session
             .send(TurnInput::text(text))
-            .id(lash::TurnId::parse(turn_id).expect("nonblank host identity"))
+            .id(lash_vocabulary::identity::TurnId::parse(turn_id).expect("nonblank host identity"))
             .output()
             .await?;
     }
@@ -567,7 +571,7 @@ async fn standard_compaction_threshold_turn_commits_from_durable_leaf_and_unbloc
         .build(lash_facade_tests::runtime_lease_owner())?;
     let session = created_session_with(
         &core,
-        lash::SessionId::parse(session_id).expect("nonblank host identity"),
+        lash_vocabulary::identity::SessionId::parse(session_id).expect("nonblank host identity"),
         session_spec_for(&llm_profile_spec("standard-compaction-model", None, 40_000)),
     )
     .await
@@ -576,7 +580,10 @@ async fn standard_compaction_threshold_turn_commits_from_durable_leaf_and_unbloc
 
     session
         .send(TurnInput::text("first request"))
-        .id(lash::TurnId::parse("standard-compaction-first").expect("nonblank host identity"))
+        .id(
+            lash_vocabulary::identity::TurnId::parse("standard-compaction-first")
+                .expect("nonblank host identity"),
+        )
         .output()
         .await?;
     let (durable_leaf_before_threshold, max_generation_before_threshold) =
@@ -584,7 +591,10 @@ async fn standard_compaction_threshold_turn_commits_from_durable_leaf_and_unbloc
 
     session
         .send(TurnInput::text("threshold request"))
-        .id(lash::TurnId::parse("standard-compaction-threshold").expect("nonblank host identity"))
+        .id(
+            lash_vocabulary::identity::TurnId::parse("standard-compaction-threshold")
+                .expect("nonblank host identity"),
+        )
         .output()
         .await?;
 
@@ -672,7 +682,7 @@ async fn standard_compaction_threshold_turn_commits_from_durable_leaf_and_unbloc
         .build(lash_facade_tests::runtime_lease_owner())?;
     let reopened_session = created_session_with(
         &reopened_core,
-        lash::SessionId::parse(session_id).expect("nonblank host identity"),
+        lash_vocabulary::identity::SessionId::parse(session_id).expect("nonblank host identity"),
         session_spec_for(&llm_profile_spec("standard-compaction-model", None, 40_000)),
     )
     .await
@@ -680,7 +690,10 @@ async fn standard_compaction_threshold_turn_commits_from_durable_leaf_and_unbloc
     .await?;
     reopened_session
         .send(TurnInput::text("continue after compaction"))
-        .id(lash::TurnId::parse("standard-compaction-reopened").expect("nonblank host identity"))
+        .id(
+            lash_vocabulary::identity::TurnId::parse("standard-compaction-reopened")
+                .expect("nonblank host identity"),
+        )
         .output()
         .await?;
     let conn = rusqlite::Connection::open(store_factory.database_uri())
@@ -744,7 +757,7 @@ async fn attachment_pruning_never_rewrites_the_durable_message() -> Result<()> {
     });
     let session = created_session_with(
         &core,
-        lash::SessionId::parse(session_id).expect("nonblank host identity"),
+        lash_vocabulary::identity::SessionId::parse(session_id).expect("nonblank host identity"),
         session_spec_for(&llm_profile_spec("attachment-prune-model", None, 100_000))
             .attachment_acceptance(acceptance),
     )
@@ -769,7 +782,10 @@ async fn attachment_pruning_never_rewrites_the_durable_message() -> Result<()> {
                     .reference,
             ),
         )
-        .id(lash::TurnId::parse("attachment-prune-first").expect("nonblank host identity"))
+        .id(
+            lash_vocabulary::identity::TurnId::parse("attachment-prune-first")
+                .expect("nonblank host identity"),
+        )
         .output()
         .await?;
     // The turn's input is admitted durably before it executes (ADR 0069), so its
@@ -789,7 +805,10 @@ async fn attachment_pruning_never_rewrites_the_durable_message() -> Result<()> {
     let first_input_message_id = original_durable_message.id.clone();
     session
         .send(TurnInput::text("trigger ephemeral pruning"))
-        .id(lash::TurnId::parse("attachment-prune-second").expect("nonblank host identity"))
+        .id(
+            lash_vocabulary::identity::TurnId::parse("attachment-prune-second")
+                .expect("nonblank host identity"),
+        )
         .output()
         .await?;
 
@@ -893,7 +912,7 @@ async fn threshold_continue_as_extends_the_pre_switch_durable_leaf() -> Result<(
         .build(lash_facade_tests::runtime_lease_owner())?;
     let session = created_session_with(
         &core,
-        lash::SessionId::parse(session_id).expect("nonblank host identity"),
+        lash_vocabulary::identity::SessionId::parse(session_id).expect("nonblank host identity"),
         session_spec_for(&llm_profile_spec(
             "standard-compaction-rlm-model",
             None,
@@ -906,7 +925,10 @@ async fn threshold_continue_as_extends_the_pre_switch_durable_leaf() -> Result<(
 
     let primed = session
         .send(TurnInput::text("prime durable history"))
-        .id(lash::TurnId::parse("standard-compaction-rlm-first").expect("nonblank host identity"))
+        .id(
+            lash_vocabulary::identity::TurnId::parse("standard-compaction-rlm-first")
+                .expect("nonblank host identity"),
+        )
         .output()
         .await?;
     assert_eq!(
@@ -920,8 +942,10 @@ async fn threshold_continue_as_extends_the_pre_switch_durable_leaf() -> Result<(
     // run (FIG-5232).
     let switched = session
         .send(TurnInput::text("cross the threshold and continue"))
-        .id(lash::TurnId::parse("standard-compaction-rlm-threshold")
-            .expect("nonblank host identity"))
+        .id(
+            lash_vocabulary::identity::TurnId::parse("standard-compaction-rlm-threshold")
+                .expect("nonblank host identity"),
+        )
         .output()
         .await?;
     let lash_core::facade_support::TurnOutcome::AgentFrameSwitch { frame_key, .. } =
@@ -984,7 +1008,7 @@ async fn facade_compaction_settings_control_pressure_and_summary() -> Result<()>
     .build(lash_facade_tests::runtime_lease_owner())?;
     let session = created_session_with(
         &core,
-        lash::SessionId::from("host-compaction"),
+        lash_vocabulary::identity::SessionId::from("host-compaction"),
         session_spec_for(&llm_profile_spec("host-compaction", None, 40_000)),
     )
     .await

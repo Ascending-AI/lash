@@ -6,6 +6,7 @@ use std::sync::Arc;
 
 use lash_kernel_doc::heap::{HeapFault, PageId, PageRef};
 use lash_kernel_doc::{Datum, FunctionRegistry, parse_document};
+
 use lash_kernel_state::paged::{PageAnswer, PageBody, PageSource, SealBudget};
 use lash_kernel_vm::kernel_internals::{Layout, start_with_layout};
 use lash_kernel_vm::{
@@ -45,32 +46,37 @@ const BOUNDS: Bounds = Bounds {
 
 /// Each slice, and a statement that reads no text, runs between two
 /// parks, so each can run cold.
-const ENTRY: &str = "entry f(t: Text) -> Any\nfn f(t) {\n\
-    let a = perform echo(0) as Any\n\
-    let x = text.utf16_slice(t, 0, 4096)\n\
-    let b = perform echo(1) as Any\n\
-    let y = text.utf16_slice(t, 7, 9)\n\
-    let c = perform echo(2) as Any\n\
-    let z = 1\n\
-    let d = perform echo(3) as Any\n\
-    print x print y return z }\nmain { }\n";
+const ENTRY: &str = "definition \"function f(t: Text) -> Any\\nkernel 1\\nmetering statements\\nimport 0 operation host.echo(x: Any) -> Any\\nbody { let a = perform 0(0) as Any let x = text.utf16_slice(t, 0, 4096) let b = perform 0(1) as Any let y = text.utf16_slice(t, 7, 9) let c = perform 0(2) as Any let z = 1 let d = perform 0(3) as Any print x print y return z }\"\nmain { }\n";
 
 fn program(operation: &str) -> Program {
     let mut registry = FunctionRegistry::new();
     register_machine_functions(&mut registry).unwrap();
     super::super::register_text_json(&mut registry).unwrap();
     let registry = Arc::new(registry);
-    let mut text =
-        String::from("kernel 1\nnumbers by_spelling\neffect echo(x: Any) -> Any contract \"1\"\n");
-    for (id, function) in registry.iter() {
-        text.push_str(&format!("use {} = @{id}\n", function.definition().name));
-    }
+    let mut text = String::from(
+        "kernel 1\nnumbers by_spelling\nimport 0 operation host.echo(x: Any) -> Any\n",
+    );
     text.push_str(&ENTRY.replace("text.utf16_slice", operation));
-    Program {
-        closure: PageId([8; 32]),
-        document: Arc::new(parse_document(&text).unwrap()),
-        library: lash_kernel_vm::PreparedLibrary::new(registry),
-    }
+    let mut document = crate::testsupport::document(&text, &registry);
+    let (id, definition) = document
+        .functions
+        .iter()
+        .find(|(_, f)| f.name.as_str() == "f")
+        .unwrap();
+    document.exports.insert(
+        lash_vocabulary::Name::new("f"),
+        lash_kernel_doc::Export::Function(lash_kernel_doc::FunctionExport {
+            function: *id,
+            signature: definition.signature.clone(),
+            convention: lash_kernel_doc::StartConvention::Direct,
+            asynchronous: false,
+            rest: false,
+        }),
+    );
+    crate::testsupport::program(
+        Arc::new(document),
+        lash_kernel_vm::PreparedLibrary::new(registry),
+    )
 }
 
 /// Runs to the next park and answers its one request.

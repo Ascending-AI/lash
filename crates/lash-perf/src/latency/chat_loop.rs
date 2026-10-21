@@ -4,8 +4,11 @@
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
-use lash_core::{ToolAttemptOutcome, ToolContract, ToolManifest, ToolProvider};
+use lash_core::ToolAttemptOutcome;
+use lash_core::ToolProvider;
 use lash_core_ids::perf_witness::latency::Stamp;
+use lash_vocabulary::tool_contract::ToolContract;
+use lash_vocabulary::tool_contract::ToolManifest;
 
 use super::loop_spans::{LoopClocks, ToolStamp};
 use super::provider::{LaneHold, ProviderTiming, STEERED_TEXT};
@@ -14,7 +17,7 @@ use super::runner::{
     measure_send, observer_poll_store,
 };
 use crate::runtime_perf::providers::BenchmarkEchoTool;
-use lash_protocol_types::SessionId;
+use lash_vocabulary::identity::SessionId;
 
 /// The benchmark echo tool, stamping each execution's own start and return
 /// under its session.
@@ -92,8 +95,11 @@ pub(crate) async fn steer_sample(
     index: usize,
     hold: &LaneHold,
 ) -> Result<CompletedSample> {
-    let turn = lash::TurnId::parse(format!("latency-{}-{lane}-{index}", ctx.spec.name))
-        .map_err(|error| anyhow::anyhow!("steer turn id: {error}"))?;
+    let turn = lash_vocabulary::identity::TurnId::parse(format!(
+        "latency-{}-{lane}-{index}",
+        ctx.spec.name
+    ))
+    .map_err(|error| anyhow::anyhow!("steer turn id: {error}"))?;
     hold.arm();
     let steer = async {
         tokio::time::timeout(STORE_POLL_TIMEOUT, hold.started.notified())

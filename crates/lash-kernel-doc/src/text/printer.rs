@@ -2,19 +2,21 @@
 
 use std::collections::BTreeMap;
 
-use super::is_keyword;
-use super::lexer::write_quoted;
 use crate::ast::{
     ActKind, Action, AssignOrder, Atom, Block, Callee, Expr, JoinMode, Literal, Member, Place, Rhs,
     Stmt,
 };
+use lash_vocabulary::type_text::write_quoted;
+
 use crate::document::Document;
 use crate::function::{Formula, FunctionDefinition, Operand};
-use crate::function_value::{FunctionRepresentation, StartAdapter, StartConvention};
-use crate::name::{FunctionId, FunctionName, Name, is_identifier};
+
+use crate::function_value::{CallablePresentation, FunctionRepresentation, StartConvention};
+
 use crate::number::NumberPolicy;
-use crate::requirement::OperationRequirement;
-use crate::types::{Signature, Type};
+use lash_vocabulary::names::{FunctionId, FunctionName, Name, is_identifier};
+use lash_vocabulary::type_text::is_keyword;
+use lash_vocabulary::types::{Signature, Type};
 
 /// Writes a document as kernel text. [`super::parse_document`] reads the
 /// text back to an equal document.
@@ -27,22 +29,52 @@ pub fn print_document(document: &Document) -> String {
 pub fn print_document_with_ranges(
     document: &Document,
 ) -> (String, BTreeMap<crate::Site, crate::Span>) {
-    let mut printer = Printer::new(&document.manifest.functions);
-    let out = &mut printer.out;
-    out.push_str(&format!("kernel {}\n", document.manifest.kernel));
-    out.push_str(match document.manifest.numbers {
+    let names = document
+        .functions
+        .iter()
+        .map(|(id, f)| (*id, f.name.clone()))
+        .collect();
+    let mut printer = Printer::new(&names);
+    for kernel in &document.requires.kernels {
+        printer.out.push_str(&format!("kernel {kernel}\n"));
+    }
+    printer.out.push_str(match document.numbers {
         NumberPolicy::Float => "numbers float\n",
         NumberPolicy::BySpelling => "numbers by_spelling\n",
     });
-    printer.effects(&document.manifest.effects);
-    printer.uses(&document.manifest.functions);
-    for (name, entry) in &document.entries {
-        printer.out.push_str("entry ");
+    printer.imports(&document.imports);
+    for native in &document.requires.natives {
+        printer.out.push_str(&format!("native @{native}\n"));
+    }
+    for (name, export) in &document.exports {
+        printer.out.push_str("export ");
         printer.name(name);
-        printer.signature(&entry.signature);
-        if entry.convention != StartConvention::Direct {
-            printer.convention(&entry.convention);
-            printer.out.pop();
+        printer.out.push(' ');
+        write_quoted(
+            &serde_json::to_string(export).unwrap_or_else(|_| unreachable!("serializable Export")),
+            '"',
+            &mut printer.out,
+        );
+        printer.out.push('\n');
+    }
+    for function in document.functions.values() {
+        printer.out.push_str("definition ");
+        let (source, ranges) = definition_with_ranges(function);
+        let base = printer.out.len();
+        write_quoted(&source, '"', &mut printer.out);
+        for (statement, span) in ranges {
+            let encoded_offset = |offset| {
+                let mut prefix = String::new();
+                write_quoted(&source[..offset], '"', &mut prefix);
+                base + prefix.len() - 1
+            };
+            printer.ranges.insert(
+                statement,
+                crate::Span {
+                    start: encoded_offset(span.start),
+                    end: encoded_offset(span.end),
+                },
+            );
         }
         printer.out.push('\n');
     }
@@ -51,19 +83,11 @@ pub fn print_document_with_ranges(
         printer.names(document.private_bindings.iter());
         printer.out.push('\n');
     }
-    for (name, function) in &document.functions {
-        printer.out.push_str("\nfn ");
-        printer.name(name);
-        printer.out.push('(');
-        printer.names(function.params.iter());
-        printer.out.push_str(") ");
-        printer.start(function.start.as_ref());
-        printer.block(&function.body);
+    if let Some(main) = &document.main {
+        printer.out.push_str("main ");
+        printer.block(main);
         printer.out.push('\n');
     }
-    printer.out.push_str("\nmain ");
-    printer.block(&document.main);
-    printer.out.push('\n');
     let ranges = document
         .ordinal_nodes()
         .into_iter()
@@ -71,32 +95,23 @@ pub fn print_document_with_ranges(
             let crate::Node::Stmt(stmt) = node else {
                 return None;
             };
-            Some((site, printer.ranges[&std::ptr::from_ref(stmt)]))
+            printer
+                .ranges
+                .get(&std::ptr::from_ref(stmt))
+                .map(|span| (site, *span))
         })
         .collect();
     (printer.out, ranges)
 }
 
-/// A requirement as an `effect` line writes it after the effect's name:
-/// its signature, then its contract.
-pub(crate) fn requirement_text(requirement: &OperationRequirement) -> String {
-    let no_functions = BTreeMap::new();
-    let mut printer = Printer::new(&no_functions);
-    printer.requirement(requirement);
-    printer.out
-}
-
-/// Writes a type in kernel text, as a signature writes it.
-pub fn print_type(ty: &Type) -> String {
-    let no_functions = BTreeMap::new();
-    let mut printer = Printer::new(&no_functions);
-    printer.ty(ty);
-    printer.out
-}
-
 /// Writes a library-function definition as kernel text.
 /// [`super::parse_definition`] reads the text back to an equal definition.
 pub fn print_definition(definition: &FunctionDefinition) -> String {
+    definition_with_ranges(definition).0
+}
+fn definition_with_ranges(
+    definition: &FunctionDefinition,
+) -> (String, BTreeMap<*const Stmt, crate::Span>) {
     let no_functions = BTreeMap::new();
     let functions = definition
         .body()
@@ -119,9 +134,13 @@ pub fn print_definition(definition: &FunctionDefinition) -> String {
         }
         printer.out.push('\n');
     }
-    printer.out.push_str("charge ");
-    printer.formula(&definition.charge);
-    printer.out.push('\n');
+    if let Some(charge) = definition.charge() {
+        printer.out.push_str("charge ");
+        printer.formula(charge);
+        printer.out.push('\n');
+    } else {
+        printer.out.push_str("metering statements\n");
+    }
     if let Some(guard) = &definition.guard {
         printer.out.push_str("guard ");
         write_quoted(&guard.unit, '"', &mut printer.out);
@@ -139,13 +158,13 @@ pub fn print_definition(definition: &FunctionDefinition) -> String {
         printer.out.push('\n');
     }
     if let Some(body) = definition.body() {
-        printer.effects(&body.effects);
+        printer.imports(&body.imports);
         printer.uses(&body.functions);
         printer.out.push_str("body ");
         printer.block(&body.block);
         printer.out.push('\n');
     }
-    printer.out
+    (printer.out, printer.ranges)
 }
 
 struct Printer<'a> {
@@ -309,7 +328,7 @@ impl<'a> Printer<'a> {
                 self.expr(iterable);
                 if let Some(via) = via {
                     self.out.push_str(" via (open ");
-                    self.function(&via.open);
+                    self.target(&via.open);
                     for (word, hook) in [
                         ("next", &via.next),
                         ("item", &via.item),
@@ -319,7 +338,7 @@ impl<'a> Printer<'a> {
                             self.out.push_str(", ");
                             self.out.push_str(word);
                             self.out.push(' ');
-                            self.function(hook);
+                            self.target(hook);
                         }
                     }
                     self.out.push(')');
@@ -352,7 +371,7 @@ impl<'a> Printer<'a> {
             Stmt::ReturnVia { value, policy } => {
                 self.keyword_expr("return", value);
                 self.out.push_str(" via ");
-                self.function(policy);
+                self.target(policy);
             }
             Stmt::Throw { value } => self.keyword_expr("throw", value),
             Stmt::Print { value } => self.keyword_expr("print", value),
@@ -396,30 +415,22 @@ impl<'a> Printer<'a> {
                 self.callee(callee, args);
             }
             Action::Perform {
-                effect,
+                slot,
                 args,
                 result,
                 then_yield,
             } => {
-                self.out.push_str(&format!("perform {effect}"));
+                self.out.push_str(&format!("perform {}", slot.0));
                 self.atoms(args);
                 self.out.push_str(" as ");
                 self.ty(result);
-                self.then_yield(*then_yield);
-            }
-            Action::Sleep {
-                duration,
-                then_yield,
-            } => {
-                self.out.push_str("sleep ");
-                self.atom(duration);
                 self.then_yield(*then_yield);
             }
             Action::Await { policy, value } => {
                 self.out.push_str("await ");
                 self.atom(value);
                 self.out.push_str(" via ");
-                self.function(policy);
+                self.target(policy);
             }
             Action::Join { task } => {
                 self.out.push_str("join ");
@@ -455,15 +466,12 @@ impl<'a> Printer<'a> {
 
     fn callee_name(&mut self, callee: &Callee) {
         match callee {
-            Callee::Declared(name) => {
-                self.out.push_str("call ");
-                self.name(name);
-            }
+            Callee::Import(slot) => self.out.push_str(&format!("invoke import {}", slot.0)),
             Callee::Value(name) => {
                 self.out.push_str("apply ");
                 self.name(name);
             }
-            Callee::Library(function) => {
+            Callee::Local(function) => {
                 self.out.push_str("invoke ");
                 self.function(function);
             }
@@ -515,9 +523,9 @@ impl<'a> Printer<'a> {
                 self.out.push('b');
                 write_quoted(&bytes.to_hex(), '"', &mut self.out);
             }
-            Literal::Function(name) => {
+            Literal::Function(id) => {
                 self.out.push('&');
-                self.name(name);
+                self.function(id);
             }
         }
     }
@@ -595,11 +603,10 @@ impl<'a> Printer<'a> {
             }
             Expr::Member(member) => self.member(member),
             Expr::Closure(closure) => {
-                self.out.push_str("fn(");
-                self.names(closure.params.iter());
-                self.out.push_str(") ");
-                self.start(closure.start.as_ref());
-                self.block(&closure.body);
+                self.out.push_str("fn ");
+                self.function(&closure.function);
+                self.out.push(' ');
+                self.start(closure.presentation.as_ref());
             }
             Expr::Call { function, args } => {
                 self.function(function);
@@ -607,8 +614,6 @@ impl<'a> Printer<'a> {
                 self.exprs(args.iter());
                 self.out.push(')');
             }
-            Expr::Clock => self.out.push_str("clock"),
-            Expr::Random => self.out.push_str("random"),
             Expr::If { cond, then, r#else } => {
                 self.out.push_str("if(");
                 self.expr(cond);
@@ -649,20 +654,14 @@ impl<'a> Printer<'a> {
                     self.out.push(')');
                 }
                 ActKind::Perform {
-                    effect,
+                    slot,
                     result,
                     then_yield,
                 } => {
-                    self.out.push_str(&format!("perform {effect}("));
+                    self.out.push_str(&format!("perform {}(", slot.0));
                     self.exprs(act.args.iter());
                     self.out.push_str(") as ");
                     self.ty(result);
-                    self.then_yield(*then_yield);
-                }
-                ActKind::Sleep { then_yield } => {
-                    self.out.push_str("sleep(");
-                    self.exprs(act.args.iter());
-                    self.out.push(')');
                     self.then_yield(*then_yield);
                 }
                 ActKind::Join => {
@@ -690,14 +689,14 @@ impl<'a> Printer<'a> {
                     self.out.push_str("await(");
                     self.exprs(act.args.iter());
                     self.out.push_str(") via ");
-                    self.function(policy);
+                    self.target(policy);
                 }
             },
         }
     }
 
     /// A start adapter after a function's parameters (`K-CLO-004`).
-    fn start(&mut self, start: Option<&StartAdapter>) {
+    fn start(&mut self, start: Option<&CallablePresentation>) {
         let Some(start) = start else {
             return;
         };
@@ -719,40 +718,62 @@ impl<'a> Printer<'a> {
             StartConvention::Direct => self.out.push_str(" direct "),
             StartConvention::TsDirect { await_fn } => {
                 self.out.push_str(" ts_direct(");
-                self.function(await_fn);
+                self.target(await_fn);
                 self.out.push_str(") ");
             }
             StartConvention::TsArgsList { await_fn, same_fn } => {
                 self.out.push_str(" ts_args(");
-                self.function(await_fn);
+                self.target(await_fn);
                 self.out.push_str(", ");
-                self.function(same_fn);
+                self.target(same_fn);
                 self.out.push_str(") ");
             }
             StartConvention::PyDirect { cleanup } => {
                 self.out.push_str(" py_direct(");
-                self.function(cleanup);
+                self.target(cleanup);
                 self.out.push_str(") ");
             }
         }
     }
 
-    /// One `effect` line for each operation the code requires.
-    fn effects(&mut self, effects: &BTreeMap<crate::EffectName, OperationRequirement>) {
-        for (name, requirement) in effects {
-            self.out.push_str(&format!("effect {name}"));
-            self.requirement(requirement);
+    fn target(&mut self, target: &crate::FunctionTarget) {
+        match target {
+            crate::FunctionTarget::Local(id) => self.function(id),
+            crate::FunctionTarget::Import(slot) => self.out.push_str(&format!("import {}", slot.0)),
+        }
+    }
+    fn imports(
+        &mut self,
+        imports: &BTreeMap<lash_vocabulary::names::ImportSlot, lash_vocabulary::names::Import>,
+    ) {
+        use lash_vocabulary::names::{Convention, ImportKind};
+        for (slot, import) in imports {
+            let name = format!("{}.{}", import.name.package, import.name.member);
+            self.out.push_str(&format!("import {} ", slot.0));
+            match &import.kind {
+                ImportKind::Operation { signature } => {
+                    self.out.push_str(&format!("operation {name}"));
+                    self.signature(signature);
+                }
+                ImportKind::Code {
+                    signature,
+                    convention,
+                } => {
+                    self.out.push_str(&format!("code {name}"));
+                    self.signature(signature);
+                    self.out.push_str(match convention {
+                        Convention::Direct => " direct",
+                        Convention::TsDirect => " ts_direct",
+                        Convention::TsArgsList => " ts_args",
+                        Convention::PyDirect => " py_direct",
+                    });
+                }
+                ImportKind::Type { .. } => self.out.push_str(&format!("type {name}")),
+                ImportKind::Error { .. } => self.out.push_str(&format!("error {name}")),
+            }
             self.out.push('\n');
         }
     }
-
-    /// A requirement's signature and its contract.
-    fn requirement(&mut self, requirement: &OperationRequirement) {
-        self.signature(&requirement.signature);
-        self.out.push_str(" contract ");
-        write_quoted(requirement.contract.as_str(), '"', &mut self.out);
-    }
-
     fn signature(&mut self, signature: &Signature) {
         self.out.push('(');
         for (index, param) in signature.params.iter().enumerate() {
@@ -770,87 +791,8 @@ impl<'a> Printer<'a> {
         self.ty(&signature.result);
     }
 
-    fn types(&mut self, name: &str, types: &[Type]) {
-        self.out.push_str(name);
-        self.out.push('(');
-        for (index, ty) in types.iter().enumerate() {
-            if index > 0 {
-                self.out.push_str(", ");
-            }
-            self.ty(ty);
-        }
-        self.out.push(')');
-    }
-
     fn ty(&mut self, ty: &Type) {
-        match ty {
-            Type::Any => self.out.push_str("Any"),
-            Type::Json => self.out.push_str("Json"),
-            Type::Null => self.out.push_str("Null"),
-            Type::Absent => self.out.push_str("Absent"),
-            Type::Bool => self.out.push_str("Bool"),
-            Type::Int => self.out.push_str("Int"),
-            Type::Float => self.out.push_str("Float"),
-            Type::Number => self.out.push_str("Number"),
-            Type::Text => self.out.push_str("Text"),
-            Type::Bytes => self.out.push_str("Bytes"),
-            Type::Timestamp => self.out.push_str("Timestamp"),
-            Type::Error => self.out.push_str("Error"),
-            Type::Tuple(members) => self.types("Tuple", members),
-            Type::Union(members) => self.types("Union", members),
-            Type::List(item) => self.types("List", std::slice::from_ref(item)),
-            Type::Set(item) => self.types("Set", std::slice::from_ref(item)),
-            Type::Task(item) => self.types("Task", std::slice::from_ref(item)),
-            Type::Map(map) => {
-                self.out.push_str("Map(");
-                self.ty(&map.key);
-                self.out.push_str(", ");
-                self.ty(&map.value);
-                self.out.push(')');
-            }
-            Type::Handle(kind) => {
-                self.out.push_str("Handle(");
-                write_quoted(kind, '"', &mut self.out);
-                self.out.push(')');
-            }
-            Type::Enum(members) => {
-                self.out.push_str("Enum(");
-                for (index, member) in members.iter().enumerate() {
-                    if index > 0 {
-                        self.out.push_str(", ");
-                    }
-                    write_quoted(member, '"', &mut self.out);
-                }
-                self.out.push(')');
-            }
-            Type::Function(signature) => {
-                self.out.push_str("Fn");
-                self.signature(signature);
-            }
-            Type::Record(record) => {
-                self.out.push_str("Record{");
-                let mut first = true;
-                for field in &record.fields {
-                    if !std::mem::take(&mut first) {
-                        self.out.push_str(", ");
-                    }
-                    self.field_name(&field.name);
-                    if field.optional {
-                        self.out.push('?');
-                    }
-                    self.out.push_str(": ");
-                    self.ty(&field.ty);
-                }
-                if let Some(rest) = &record.rest {
-                    if !first {
-                        self.out.push_str(", ");
-                    }
-                    self.out.push_str("..");
-                    self.ty(rest);
-                }
-                self.out.push('}');
-            }
-        }
+        self.out.push_str(&lash_vocabulary::print_type(ty));
     }
 
     fn formula(&mut self, formula: &Formula) {

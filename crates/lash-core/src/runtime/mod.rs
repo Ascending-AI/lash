@@ -257,6 +257,45 @@ pub use lash_core_execution::runtime::work::{
 };
 /// The trace handle a host config carries.
 pub use lash_core_execution::runtime::{TraceEmitter, TraceRuntime};
+pub use lash_vocabulary::observation::RunObservation;
+pub use observation::InMemoryProcessReplayStore;
+pub use observation::InMemoryProcessReplayStoreConfig;
+pub use observation::LanguageExecutionObservation;
+pub use observation::ParsedProcessObservationCursor;
+pub use observation::ProcessDocumentIdentity;
+pub use observation::ProcessEffectCoverage;
+pub use observation::ProcessEffectEvidence;
+pub use observation::ProcessEffectGapReason;
+pub use observation::ProcessObservation;
+pub use observation::ProcessObservationCursor;
+pub use observation::ProcessObservationCursorError;
+pub use observation::ProcessObservationEnd;
+pub use observation::ProcessObservationEvent;
+pub use observation::ProcessObservationEventPayload;
+pub use observation::ProcessObservationGapCause;
+pub use observation::ProcessObservationIdentity;
+pub use observation::ProcessObservationReplacement;
+pub use observation::ProcessReadView;
+pub use observation::ProcessReplayEventDraft;
+pub use observation::ProcessReplayGapReason;
+pub use observation::ProcessReplayOutcome;
+pub use observation::ProcessReplayPublishLimits;
+pub use observation::ProcessReplayStore;
+pub use observation::ProcessReplayStoreError;
+pub use observation::ProcessReplaySubscribeOutcome;
+pub use observation::ProcessReplaySubscription;
+pub use observation::ProcessSequence;
+pub use observation::ProcessWorkflowFoldError;
+pub use observation::ProcessWorkflowLiveCoverage;
+pub use observation::ProcessWorkflowOverlay;
+pub use observation::ProcessWorkflowOverlayAccumulator;
+pub use observation::ProcessWorkflowRan;
+pub use observation::ProcessWorkflowSite;
+pub use observation::ProcessWorkflowSiteState;
+pub use observation::ProcessWorkflowWaitKind;
+pub use observation::RetainedProcessView;
+pub use observation::StepBodyStartedObservation;
+pub use observation::commits_bridge;
 pub use observation::{
     InMemoryLiveReplayStore, InMemoryLiveReplayStoreConfig, LiveReplayEventDraft, LiveReplayGap,
     LiveReplayGapReason, LiveReplayOutcome, LiveReplayStore, LiveReplayStoreError,
@@ -265,20 +304,6 @@ pub use observation::{
     SessionObservation, SessionObservationEvent, SessionObservationEventPayload,
     SessionObservationSubscription, SessionProcessEventKind, SessionQueueEventKind, SessionResume,
     SessionRevision, WeakRuntimeHandle, load_durable_observation_head,
-};
-pub use observation::{
-    InMemoryProcessReplayStore, InMemoryProcessReplayStoreConfig, LanguageExecutionObservation,
-    ParsedProcessObservationCursor, ProcessDocumentIdentity, ProcessEffectCoverage,
-    ProcessEffectEvidence, ProcessEffectGapReason, ProcessObservation, ProcessObservationCursor,
-    ProcessObservationCursorError, ProcessObservationEnd, ProcessObservationEvent,
-    ProcessObservationEventPayload, ProcessObservationGapCause, ProcessObservationIdentity,
-    ProcessObservationReplacement, ProcessReadView, ProcessReplayEventDraft,
-    ProcessReplayGapReason, ProcessReplayOutcome, ProcessReplayPublishLimits, ProcessReplayStore,
-    ProcessReplayStoreError, ProcessReplaySubscribeOutcome, ProcessReplaySubscription,
-    ProcessSequence, ProcessWorkflowFoldError, ProcessWorkflowLiveCoverage,
-    ProcessWorkflowObservation, ProcessWorkflowOverlay, ProcessWorkflowOverlayAccumulator,
-    ProcessWorkflowRan, ProcessWorkflowSite, ProcessWorkflowSiteState, ProcessWorkflowWaitKind,
-    RetainedProcessView, StepBodyStartedObservation, commits_bridge,
 };
 pub use observation_publisher::{ObservationSource, work_with_observations};
 pub use process::ProcessChangeSubscription;
@@ -295,9 +320,9 @@ pub use process::ProcessChangeHub;
 
 pub use lash_core_store::process_env::ProcessComponentConfig;
 pub use lash_core_store::process_env::ProcessComponentEntry;
-pub use lash_core_store::process_env::ProcessComponentId;
-pub use lash_core_store::process_env::ProcessComponentIdError;
 pub use lash_core_store::process_env::ProcessConfigKey;
+pub use lash_vocabulary::providers::ProcessComponentId;
+pub use lash_vocabulary::providers::ProcessComponentIdError;
 
 pub use lash_protocol_types::ProcessDefinitionId;
 
@@ -317,7 +342,7 @@ pub use process::ProcessEnvSelection;
 pub use process::ProcessEventSink;
 
 pub use lash_core_store::process_identity::ProcessIdMint;
-pub use lash_protocol_types::ProcessId;
+pub use lash_vocabulary::identity::ProcessId;
 
 pub use lash_core_store::process_env::ProcessLimits;
 
@@ -340,7 +365,7 @@ pub use lash_core_store::scope_identity::SCOPE_STORAGE_PAYLOAD_VERSION;
 pub use lash_core_store::scope_identity::ScopeId;
 
 pub use lash_core_store::scope_identity::ScopeStorageError;
-pub use lash_protocol_types::SessionId;
+pub use lash_vocabulary::identity::SessionId;
 pub use process::SessionObserverIntentSource;
 
 pub use process::StagedProcessStart;

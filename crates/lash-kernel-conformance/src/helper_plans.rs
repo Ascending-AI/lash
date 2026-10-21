@@ -14,6 +14,7 @@ pub(crate) mod sorts;
 
 use crate::projection::{Plan, Projector};
 use lash_kernel_doc::{Datum, ErrorDatum, Handle, Integer, Timestamp};
+
 use lash_kernel_vm::kernel_internals::{Layout, prepare_with_layout};
 use lash_kernel_vm::{Bounds, CellStart, Host, Machine, Outcome, Program, Request, Step, Target};
 
@@ -82,16 +83,6 @@ pub(crate) struct World {
     pub(crate) prints: Vec<Datum>,
 }
 impl Host for World {
-    fn clock(&mut self) -> Timestamp {
-        Timestamp {
-            nanoseconds: Integer::from(self.nanoseconds),
-        }
-    }
-    fn random(&mut self) -> u64 {
-        let bits = self.bits;
-        self.bits = bits.wrapping_add(self.stride);
-        bits
-    }
     fn read(&mut self, _: &Handle, _: &Datum) -> Result<Datum, ErrorDatum> {
         Err(ErrorDatum {
             kind: "type_error".into(),
@@ -237,10 +228,12 @@ fn run_with_work<const L: u64>(
                 for request in park.requests {
                     let (wait, outcome) = match &request {
                         Request::Effect(effect) => {
-                            assert_eq!(effect.effect.as_str(), "host.observe");
+                            assert_eq!(
+                                crate::linked::operation(&effect.use_).as_str(),
+                                "host.observe"
+                            );
                             (effect.wait, Outcome::Completed(Datum::Null))
                         }
-                        Request::Sleep(sleep) => (sleep.wait, Outcome::Elapsed),
                     };
                     requests.push(request);
                     machine.deliver(wait, outcome).unwrap();
@@ -550,17 +543,13 @@ fn control_program(source: &str) -> Program {
         "the compiled control fixture matches its admitted bodies"
     );
     let mut source = format!("kernel 1\nnumbers by_spelling\n{source}\n");
-    for (function, registered) in registry.iter() {
-        source.push_str(&format!(
-            "use {} = @{function}\n",
-            registered.definition().name
-        ));
-    }
-    Program {
-        closure: crate::pages::CLOSURE,
-        document: Arc::new(lash_kernel_doc::parse_document(&source).unwrap()),
-        library: lash_kernel_vm::PreparedLibrary::new(Arc::new(registry)),
-    }
+    let document = crate::document_fixture::authored(&source, &registry);
+    crate::machine::prepare_document(
+        &lash_kernel_vm::PreparedLibrary::new(Arc::new(registry)),
+        Arc::new(document),
+        None,
+    )
+    .expect("prepare control document")
 }
 
 fn compare_control(source: &str, charge: u64) -> Observed {
@@ -640,7 +629,7 @@ fn generated_closures_share_cells_and_keep_ordinary_charge_and_depth() {
     for depth in 190..=200 {
         compare_control(
             &format!(
-                "fn descend(n, f) {{ if eq(n, 0) {{ let value = apply f() return value }} let next = num.sub(n, 1) let value = call descend(next, f) return value }} main {{ let pair = invoke law.factory(5) let peek = pair.peek let value = call descend({depth}, peek) return value }}"
+                "definition \"function descend(n: Any, f: Any) -> Any\\nkernel 1\\nmetering statements\\nimport 0 operation host.echo(x: Any) -> Any\\nbody {{ if eq(n, 0) {{ let value = apply f() return value }} let next = num.sub(n, 1) let value = call descend(next, f) return value }}\"\n main {{ let pair = invoke law.factory(5) let peek = pair.peek let value = call descend({depth}, peek) return value }}"
             ),
             1_000_000,
         );
@@ -740,12 +729,12 @@ fn uri_decode_completion_price_bounds_delegated_work_on_return_and_raise() {
             ] {
                 let input = format!("{prefix}{suffix}");
                 let source = format!(
-                    "kernel 1\nnumbers by_spelling\nuse decode = @{function}\nmain {{ let answer = invoke decode(null, [{input:?}]) return answer }}"
+                    "kernel 1\nnumbers by_spelling\n# local definition decode @{function}\nmain {{ let answer = invoke @{function}(null, [{input:?}]) return answer }}"
                 );
-                let program = Program {
-                    document: Arc::new(lash_kernel_doc::parse_document(&source).unwrap()),
-                    ..base.clone()
-                };
+                let document = crate::document_fixture::authored(&source, base.library.registry());
+                let program =
+                    crate::machine::prepare_document(&base.library, Arc::new(document), None)
+                        .unwrap();
                 let mut machine = crate::pages::start(
                     program,
                     Bounds {
