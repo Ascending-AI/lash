@@ -66,7 +66,11 @@ fn check_held<'a, D>(
     held: &'a BTreeMap<FunctionId, D>,
     declaration: impl Fn(&FunctionId, &'a D) -> (&'a FunctionDefinition, Option<FunctionId>),
 ) -> Result<(), DeclarationRefusal> {
-    let listed = &document.manifest.functions;
+    let listed: BTreeMap<_, _> = document
+        .functions
+        .iter()
+        .map(|(id, f)| (*id, f.name.clone()))
+        .collect();
     if let Some((function, name)) = listed
         .iter()
         .find(|(function, _)| !held.contains_key(function))
@@ -115,27 +119,13 @@ fn check_held<'a, D>(
 /// Each library function `document` lists, as `catalog` holds it: a
 /// registered definition with the identity registration took.
 fn drawn<'a>(
-    document: &Document,
-    catalog: &'a dyn FunctionCatalog,
+    document: &'a Document,
+    _catalog: &'a dyn FunctionCatalog,
 ) -> Result<BTreeMap<FunctionId, (&'a FunctionDefinition, Option<FunctionId>)>, DeclarationRefusal>
 {
     let mut held = BTreeMap::new();
-    for (function, name) in &document.manifest.functions {
-        let declaration = match catalog.registered(function) {
-            Some(registered) => (
-                registered.definition().as_ref(),
-                Some(registered.identity()),
-            ),
-            None => match catalog.definition(function) {
-                Some(definition) => (definition, None),
-                None => {
-                    return Err(DeclarationRefusal::Missing {
-                        function: *function,
-                        name: name.clone(),
-                    });
-                }
-            },
-        };
+    for (function, local) in &document.functions {
+        let declaration = (local, None);
         held.insert(*function, declaration);
     }
     check_held(document, &held, |_, declaration| *declaration)?;
@@ -223,8 +213,8 @@ impl CheckedDeclarations {
     /// A document lists every function it reaches, so these are its
     /// closure's.
     #[must_use]
-    pub fn requirements(&self, document: &Document) -> crate::ExecutionRequirements {
-        crate::ExecutionRequirements {
+    pub fn requirements(&self, document: &Document) -> lash_vocabulary::claims::NodeRequirements {
+        lash_vocabulary::claims::NodeRequirements {
             natives: self
                 .held
                 .iter()
@@ -233,8 +223,7 @@ impl CheckedDeclarations {
                 })
                 .map(|(function, _)| *function)
                 .collect(),
-            kernels: [document.manifest.kernel].into(),
-            ..Default::default()
+            kernels: document.requires.kernels.clone(),
         }
     }
 

@@ -1,63 +1,780 @@
-//! The admitted documents processes run, in the store set's module port.
-//!
-//! A document is stored once, as its checkpoint graph node (kind 10), under
-//! its identity: the digest of its canonical token body, kernel version and
-//! manifest included (`K-DOC-003`). The artifact's row roots that node, so
-//! a cell checkpoint naming the same document shares the one copy
-//! (FIG-6469). [`KernelDocuments::publish`] is the one writer: beside the
-//! document it holds the definition of every library function the document
-//! lists, each as its HelperDefinition node (kind 14) under its own
-//! identity, so a reader draws the
-//! document from what it retains and never from its own build's registry
-//! (FIG-6379). Equal helper sets are stored once, whichever documents list
-//! them.
-//!
-//! A source map never changes behaviour and is not part of a document. A
-//! host that publishes one with a workflow has it stored beside the source
-//! it maps, under the digest of its canonical bytes, and keeps that id
-//! itself. A document a migration or a successor carry rewrote records the
-//! correspondence it was rewritten by, so a host can carry a map it holds
-//! for the earlier document onto it.
+//! Retain immutable Documents/Links before publishing references. Cold readers validate stored bytes afresh.
+use lash_core::{ArtifactName, ArtifactStoreId, ReferrerClaim};
+use lash_core_store::packages::{LinkRecord, PackageRecord};
+use lash_durable::packages::PackageStore;
+use lash_execution_contracts::module_artifacts::{
+    ArtifactStoreError, ModuleArtifactBody, ModuleArtifactHold, ModuleArtifactStore,
+};
+use lash_execution_contracts::process::linking::*;
+use lash_kernel_doc::{Document, DocumentBytes, IdentifiedDocument, SourceMap};
 
-use std::collections::VecDeque;
+use lash_kernel_package::{LinkRefusal, LinkedContent, Namespace, ReachSelection, RetainedContent};
+use lash_vocabulary::data_limits::KernelDataLimits;
+use lash_vocabulary::legacy_names::DocumentId;
+use lash_vocabulary::legacy_names::SourceMapId;
+use lash_vocabulary::{claims::NodeRequirements, names::*, package::*};
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex};
 
-use lash_core::ArtifactName;
-use lash_core::ReferrerClaim;
-use lash_execution_contracts::module_artifacts::ArtifactStoreError;
-use lash_execution_contracts::module_artifacts::ModuleArtifactBody;
-use lash_execution_contracts::module_artifacts::ModuleArtifactHold;
-use lash_execution_contracts::module_artifacts::ModuleArtifactStore;
-use lash_kernel_check::{WorkflowDocument, WorkflowDocumentError};
-use lash_kernel_doc::{
-    CheckedDeclarations, Correspondence, Document, DocumentId, FunctionDeclarations,
-    FunctionDefinition, FunctionId, IdentifiedDocument, SourceMap, SourceMapId,
-    WorkflowDocumentRef,
-};
-
-/// The module artifact a document is stored under.
 pub(crate) fn document_artifact(document: &DocumentId) -> ArtifactName {
     ArtifactName {
-        store: lash_core::ArtifactStoreId::KernelDocument,
+        store: ArtifactStoreId::KernelDocument,
         artifact_ref: document.to_string(),
     }
 }
-
-/// The module artifact a library function's definition is stored under.
 pub(crate) fn function_artifact(function: &FunctionId) -> ArtifactName {
     ArtifactName {
-        store: lash_core::ArtifactStoreId::KernelDocument,
+        store: ArtifactStoreId::KernelDocument,
         artifact_ref: format!("function:{function}"),
     }
 }
-
-/// The module artifact a published document's requirements record is
-/// stored under (FIG-6985).
-pub(crate) fn requirements_artifact(document: &DocumentId) -> ArtifactName {
+pub(crate) fn link_artifact(link: LinkId) -> ArtifactName {
     ArtifactName {
-        store: lash_core::ArtifactStoreId::KernelDocument,
-        artifact_ref: format!("requirements:{document}"),
+        store: ArtifactStoreId::KernelDocument,
+        artifact_ref: format!("link:v1:{link}"),
     }
+}
+pub(crate) fn package_artifact(package: PackageId) -> ArtifactName {
+    ArtifactName {
+        store: ArtifactStoreId::KernelDocument,
+        artifact_ref: format!("package:v1:{package}"),
+    }
+}
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Unretained {
+    Missing {
+        artifact: ArtifactName,
+    },
+    Corrupt {
+        artifact: ArtifactName,
+        message: String,
+    },
+}
+#[derive(Clone, Debug)]
+pub enum StoredSourceMap {
+    Read { map: SourceMap, source: String },
+    Unretained(Unretained),
+}
+#[derive(Clone)]
+pub struct KernelDocuments {
+    store: Arc<dyn ModuleArtifactStore>,
+    packages: Arc<dyn PackageStore>,
+    /// Unpublished, deterministic fulfilments only; never a replacement for an existing stored read.
+    prepared: Arc<Mutex<LinkedContent>>,
+}
+#[derive(Default)]
+pub(crate) struct ProcessPreparations;
+impl ProcessPreparations {
+    pub(crate) fn bind(&self, engine: super::KernelProcessEngine) -> super::KernelProcessEngine {
+        engine
+    }
+}
+fn artifact_error(error: ArtifactStoreError) -> EnginePortError {
+    match error {
+        ArtifactStoreError::ArtifactMissing { artifact_ref } => EnginePortError::Missing {
+            artifact: ArtifactName {
+                store: ArtifactStoreId::KernelDocument,
+                artifact_ref,
+            },
+        },
+        ArtifactStoreError::ReferrerEnded { .. } => EnginePortError::Fenced,
+        error => EnginePortError::Unavailable {
+            message: error.to_string(),
+        },
+    }
+}
+fn store_error(error: lash_durable::DurableError) -> EnginePortError {
+    use lash_core_store::packages::PackageRefusal;
+    match error {
+        lash_durable::DurableError::Package(
+            PackageRefusal::Missing(artifact_ref)
+            | PackageRefusal::CarryMissing { artifact_ref, .. },
+        ) => EnginePortError::Missing {
+            artifact: ArtifactName {
+                store: ArtifactStoreId::KernelDocument,
+                artifact_ref,
+            },
+        },
+        lash_durable::DurableError::Package(
+            PackageRefusal::Identity(artifact_ref) | PackageRefusal::Immutable(artifact_ref),
+        ) => EnginePortError::Corrupt {
+            artifact: ArtifactName {
+                store: ArtifactStoreId::KernelDocument,
+                artifact_ref,
+            },
+            message: "immutable package content mismatch".into(),
+        },
+        lash_durable::DurableError::Package(PackageRefusal::ReferrerEnded(_)) => {
+            EnginePortError::Fenced
+        }
+        lash_durable::DurableError::Package(error) => {
+            EnginePortError::Refused(AdmissionRefusal::InvalidDocument {
+                message: error.to_string(),
+            })
+        }
+        error => EnginePortError::Unavailable {
+            message: error.to_string(),
+        },
+    }
+}
+pub fn map_link_refusal(error: LinkRefusal) -> EnginePortError {
+    let cause = match error {
+        LinkRefusal::MissingImport { slot, name } => AdmissionRefusal::MissingImport { slot, name },
+        LinkRefusal::KindMismatch { slot, name } => AdmissionRefusal::KindMismatch { slot, name },
+        LinkRefusal::SignatureMismatch { slot, name } => {
+            AdmissionRefusal::SignatureMismatch { slot, name }
+        }
+        LinkRefusal::ConventionMismatch { slot, name } => {
+            AdmissionRefusal::ConventionMismatch { slot, name }
+        }
+        LinkRefusal::NotVisible { name } => AdmissionRefusal::NotVisible { name },
+        LinkRefusal::PathConflict { path } => AdmissionRefusal::PathConflict { path },
+        LinkRefusal::NotOwner { path } => AdmissionRefusal::NotOwner { path },
+        LinkRefusal::UndeclaredDeferred { path } => AdmissionRefusal::UndeclaredDeferred { path },
+        LinkRefusal::ContractMismatch {
+            use_,
+            pinned,
+            offered,
+        } => AdmissionRefusal::ContractMismatch {
+            use_,
+            pinned,
+            offered,
+        },
+        LinkRefusal::MissingMain => AdmissionRefusal::MissingMain,
+        LinkRefusal::NotFunction { export } => AdmissionRefusal::NotFunction { export },
+        LinkRefusal::NotDataOnly { export } => AdmissionRefusal::NotDataOnly { export },
+        LinkRefusal::MissingDocument { document } => {
+            return EnginePortError::Missing {
+                artifact: document_artifact(&document),
+            };
+        }
+        LinkRefusal::MissingLink { link } => {
+            return EnginePortError::Missing {
+                artifact: link_artifact(link),
+            };
+        }
+        LinkRefusal::InvalidDocument { message } => AdmissionRefusal::InvalidDocument { message },
+    };
+    EnginePortError::Refused(cause)
+}
+pub(super) fn selection(selector: &ReachSelector) -> ReachSelection {
+    match selector {
+        ReachSelector::AllExports => ReachSelection::AllExports,
+        ReachSelector::Callable { function } => ReachSelection::Callable(*function),
+        ReachSelector::Start(start) => ReachSelection::Start(start.clone()),
+    }
+}
+fn namespace(snapshot: &NamespaceSnapshot) -> Namespace<'_> {
+    Namespace {
+        advertisements: snapshot
+            .advertisements
+            .iter()
+            .map(|ad| (&ad.publication.context, &ad.advertisement))
+            .collect(),
+    }
+}
+impl KernelDocuments {
+    pub fn new(store: Arc<dyn ModuleArtifactStore>, packages: Arc<dyn PackageStore>) -> Self {
+        Self {
+            store,
+            packages,
+            prepared: Arc::new(Mutex::new(LinkedContent::default())),
+        }
+    }
+    /// Bootstrap build-owned helper content under the receiving owner's existing claim.
+    /// Advertisement acceptance follows this operation; cancellation leaves only that claim's debt.
+    pub async fn hold_helper_release(
+        &self,
+        claim: &ReferrerClaim,
+        content: &LinkedContent,
+    ) -> Result<(), EnginePortError> {
+        for (id, document) in &content.documents {
+            if document.identity() != *id {
+                return Err(map_link_refusal(LinkRefusal::InvalidDocument {
+                    message: "helper Document hash differs".into(),
+                }));
+            }
+            lash_kernel_doc::validate_document(document, &document.functions).map_err(|e| {
+                map_link_refusal(LinkRefusal::InvalidDocument {
+                    message: e.to_string(),
+                })
+            })?;
+        }
+        for id in content.links.keys() {
+            content.retain_reach(*id).map_err(map_link_refusal)?;
+        }
+        for (id, package) in &content.packages {
+            if package.identity() != *id {
+                return Err(map_link_refusal(LinkRefusal::InvalidDocument {
+                    message: "helper Package hash differs".into(),
+                }));
+            }
+            for member in package.members.values() {
+                if let MemberKind::Export { link, export } = &member.kind {
+                    content.export(*link, export).map_err(map_link_refusal)?;
+                }
+            }
+        }
+        for document in content.documents.values() {
+            self.admit_document(claim, &DocumentBytes::from(document.clone()))
+                .await?;
+        }
+        let mut pending: BTreeSet<_> = content.links.keys().copied().collect();
+        let mut written = BTreeSet::new();
+        while !pending.is_empty() {
+            let ready = pending
+                .iter()
+                .copied()
+                .find(|id| {
+                    content.links[id].fills.values().all(|fill| match fill {
+                        Fill::Export { link, .. } => written.contains(link),
+                        _ => true,
+                    })
+                })
+                .ok_or_else(|| {
+                    map_link_refusal(LinkRefusal::InvalidDocument {
+                        message: "cyclic helper Link graph".into(),
+                    })
+                })?;
+            let link = &content.links[&ready];
+            self.packages
+                .put_link(
+                    claim,
+                    &LinkRecord {
+                        id: ready,
+                        link: link.clone(),
+                    },
+                    &[document_artifact(&link.document)],
+                )
+                .await
+                .map_err(store_error)?;
+            pending.remove(&ready);
+            written.insert(ready);
+        }
+        for (id, package) in &content.packages {
+            self.packages
+                .put_package(
+                    claim,
+                    &PackageRecord {
+                        id: *id,
+                        package: package.clone(),
+                    },
+                )
+                .await
+                .map_err(store_error)?;
+        }
+        Ok(())
+    }
+    pub async fn admit_document(
+        &self,
+        claim: &ReferrerClaim,
+        bytes: &DocumentBytes,
+    ) -> Result<DocumentId, EnginePortError> {
+        let document = bytes.decode(KernelDataLimits::standard()).map_err(|e| {
+            EnginePortError::Refused(AdmissionRefusal::InvalidDocument {
+                message: e.to_string(),
+            })
+        })?;
+        lash_kernel_check::derive(&document, &document.functions).map_err(|e| {
+            EnginePortError::Refused(AdmissionRefusal::InvalidDocument {
+                message: e.to_string(),
+            })
+        })?;
+        let artifact = document_artifact(&document.id());
+        self.store
+            .hold_module_artifacts(
+                claim,
+                &[ModuleArtifactHold::Publish {
+                    module_ref: &artifact.artifact_ref,
+                    body: ModuleArtifactBody::Document(document.body()),
+                }],
+            )
+            .await
+            .map_err(artifact_error)?;
+        Ok(document.id())
+    }
+    pub async fn get_shared(
+        &self,
+        id: &DocumentId,
+    ) -> Result<Option<IdentifiedDocument>, EnginePortError> {
+        let artifact = document_artifact(id);
+        let Some(bytes) = self
+            .store
+            .get_module_artifact(&artifact.artifact_ref)
+            .await
+            .map_err(artifact_error)?
+        else {
+            return Ok(None);
+        };
+        let document = IdentifiedDocument::decode_standard(&bytes).map_err(|error| {
+            EnginePortError::Corrupt {
+                artifact: artifact.clone(),
+                message: error.to_string(),
+            }
+        })?;
+        if document.id() != *id {
+            return Err(EnginePortError::Corrupt {
+                artifact,
+                message: "Document content hash differs".into(),
+            });
+        }
+        lash_kernel_doc::validate_document(&document, &document.functions).map_err(|e| {
+            EnginePortError::Corrupt {
+                artifact: document_artifact(id),
+                message: e.to_string(),
+            }
+        })?;
+        Ok(Some(document))
+    }
+    pub async fn get(&self, id: &DocumentId) -> Result<Option<Document>, EnginePortError> {
+        Ok(self
+            .get_shared(id)
+            .await?
+            .map(IdentifiedDocument::into_document))
+    }
+    /// Full cold-load from immutable store records, including currently unused fills.
+    pub async fn load_linked(&self, root: LinkId) -> Result<LinkedContent, EnginePortError> {
+        let mut content = LinkedContent::default();
+        let mut pending = vec![root];
+        while let Some(id) = pending.pop() {
+            if content.links.contains_key(&id) {
+                continue;
+            }
+            let record = self
+                .packages
+                .link(&id)
+                .await
+                .map_err(store_error)?
+                .ok_or_else(|| EnginePortError::Missing {
+                    artifact: link_artifact(id),
+                })?;
+            if record.id != id || record.link.identity() != id {
+                return Err(EnginePortError::Corrupt {
+                    artifact: link_artifact(id),
+                    message: "Link hash differs".into(),
+                });
+            }
+            let document =
+                self.get(&record.link.document)
+                    .await?
+                    .ok_or_else(|| EnginePortError::Missing {
+                        artifact: document_artifact(&record.link.document),
+                    })?;
+            content.documents.insert(record.link.document, document);
+            pending.extend(record.link.fills.values().filter_map(|f| match f {
+                Fill::Export { link, .. } => Some(*link),
+                _ => None,
+            }));
+            content.links.insert(id, record.link);
+        }
+        for link in content.links.values() {
+            content.check_link(link).map_err(map_link_refusal)?;
+        }
+        content.retain_reach(root).map_err(map_link_refusal)?;
+        Ok(content)
+    }
+    async fn content_for(
+        &self,
+        document: DocumentId,
+        snapshot: &NamespaceSnapshot,
+    ) -> Result<LinkedContent, EnginePortError> {
+        let mut content = LinkedContent::default();
+        let doc = self
+            .get(&document)
+            .await?
+            .ok_or_else(|| EnginePortError::Missing {
+                artifact: document_artifact(&document),
+            })?;
+        content.documents.insert(document, doc);
+        for ad in &snapshot.advertisements {
+            if let PackageAdvertisement::Enumerated(package) = &ad.advertisement {
+                for member in package.members.values() {
+                    if let MemberKind::Export { link, .. } = member.kind {
+                        let loaded = self.load_linked(link).await?;
+                        content.documents.extend(loaded.documents);
+                        content.links.extend(loaded.links);
+                    }
+                }
+            }
+        }
+        Ok(content)
+    }
+    /// A runtime-authored successor Link is structurally checked against cold immutable dependencies.
+    pub(crate) async fn prepare_link(&self, link: Link) -> Result<(), EnginePortError> {
+        let mut content = LinkedContent::default();
+        let document = self
+            .get(&link.document)
+            .await?
+            .ok_or_else(|| EnginePortError::Missing {
+                artifact: document_artifact(&link.document),
+            })?;
+        content
+            .insert_document(document)
+            .map_err(map_link_refusal)?;
+        for fill in link.fills.values() {
+            if let Fill::Export { link, .. } = fill {
+                let child = self.load_linked(*link).await?;
+                content.documents.extend(child.documents);
+                content.links.extend(child.links);
+            }
+        }
+        content.check_link(&link).map_err(map_link_refusal)?;
+        self.prepared
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .links
+            .insert(link.identity(), link);
+        Ok(())
+    }
+    pub async fn fulfil(&self, request: &FulfilRequest) -> Result<Fulfilled, EnginePortError> {
+        let mut content = self
+            .content_for(request.document, &request.snapshot)
+            .await?;
+        let (own, attachment) = match &request.purpose {
+            LinkPurpose::Cell => (None, None),
+            LinkPurpose::Workflow { attachment } => (None, Some(attachment)),
+            LinkPurpose::PackageCode { path } => (Some(path), None),
+        };
+        let link = namespace(&request.snapshot)
+            .fulfil(
+                &content,
+                request.document,
+                &request.context,
+                own,
+                attachment,
+            )
+            .map_err(map_link_refusal)?;
+        let id = link.identity();
+        content.links.insert(id, link.clone());
+        let inspection = inspection(&content, id, &request.selector)?;
+        {
+            let mut prepared = self
+                .prepared
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            prepared.links.insert(id, link.clone());
+        }
+        Ok(Fulfilled {
+            content: link,
+            inspection,
+        })
+    }
+    /// Retain accepted publication records intact. The store atomically retains
+    /// every imported publication and code dependency under this same claim.
+    /// Prove a callable origin from trusted accepted publication keys. Stored
+    /// hashes and a PublicationRecord's diagnostic code_links are never roots.
+    pub async fn validate_published_origin(
+        &self,
+        link: LinkId,
+        origin: &CallableOrigin,
+    ) -> Result<(), EnginePortError> {
+        let mut pending: Vec<_> = origin.publications.iter().cloned().collect();
+        let mut seen = BTreeSet::new();
+        let mut roots = BTreeSet::new();
+        let mut advertisements = Vec::new();
+        while let Some(key) = pending.pop() {
+            if !seen.insert(key.clone()) {
+                continue;
+            }
+            let artifact = ArtifactName {
+                store: ArtifactStoreId::KernelDocument,
+                artifact_ref: lash_durable::packages::publication_reference(&key),
+            };
+            let record = self
+                .packages
+                .publication(&key)
+                .await
+                .map_err(store_error)?
+                .ok_or_else(|| EnginePortError::Missing {
+                    artifact: artifact.clone(),
+                })?;
+            if record.key() != key {
+                return Err(EnginePortError::Corrupt {
+                    artifact,
+                    message: "publication key mismatch".into(),
+                });
+            }
+            pending.extend(record.imported_publications.iter().cloned());
+            if let PublishedContent::Package(id) = record.content {
+                let package = self
+                    .packages
+                    .package(&id)
+                    .await
+                    .map_err(store_error)?
+                    .ok_or_else(|| EnginePortError::Missing {
+                        artifact: package_artifact(id),
+                    })?;
+                if package.id != id
+                    || package.package.identity() != id
+                    || package.package.path != record.path
+                {
+                    return Err(EnginePortError::Corrupt {
+                        artifact: package_artifact(id),
+                        message: "published Package differs from its key or path".into(),
+                    });
+                }
+                roots.extend(package.package.members.values().filter_map(|member| {
+                    match (&member.visibility, &member.kind) {
+                        (Visibility::Public, MemberKind::Export { link, .. }) => Some(*link),
+                        _ => None,
+                    }
+                }));
+                if origin.publications.contains(&key) {
+                    advertisements.push((
+                        record.context,
+                        PackageAdvertisement::Enumerated(package.package),
+                    ));
+                }
+            } else if let PublishedContent::Deferred(package) = record.content {
+                if origin.publications.contains(&key) {
+                    advertisements.push((record.context, PackageAdvertisement::Deferred(package)));
+                }
+            }
+        }
+        let namespace = Namespace {
+            advertisements: advertisements
+                .iter()
+                .map(|(context, ad)| (context, ad))
+                .collect(),
+        };
+        let mut authored_reaches = Vec::new();
+        for root in &origin.authored {
+            let content = self.load_linked(*root).await?;
+            namespace
+                .validate_authored_origin(&content, content.link(*root).map_err(map_link_refusal)?)
+                .map_err(map_link_refusal)?;
+            authored_reaches.push(content);
+        }
+        if authored_reaches
+            .iter()
+            .any(|content| content.links.contains_key(&link))
+        {
+            return Ok(());
+        }
+        for root in roots {
+            let content = self.load_linked(root).await?;
+            if content.links.contains_key(&link) {
+                return Ok(());
+            }
+        }
+        Err(EnginePortError::Refused(
+            AdmissionRefusal::UnpublishedOrigin { link },
+        ))
+    }
+    pub async fn hold_publications(
+        &self,
+        claim: &ReferrerClaim,
+        snapshot: &NamespaceSnapshot,
+    ) -> Result<(), EnginePortError> {
+        for accepted in &snapshot.advertisements {
+            let record = &accepted.publication;
+            let key = record.key();
+            let stored = self.packages.publication(&key).await.map_err(store_error)?;
+            if stored.as_ref() != Some(record) {
+                return Err(EnginePortError::Corrupt {
+                    artifact: ArtifactName {
+                        store: ArtifactStoreId::KernelDocument,
+                        artifact_ref: lash_durable::packages::publication_reference(&key),
+                    },
+                    message: "accepted publication is absent or differs from the retained record"
+                        .into(),
+                });
+            }
+            self.packages
+                .acquire_publication(claim, &key)
+                .await
+                .map_err(store_error)?;
+        }
+        Ok(())
+    }
+    pub async fn inspect_link(
+        &self,
+        link: LinkId,
+        selector: &ReachSelector,
+    ) -> Result<LinkInspection, EnginePortError> {
+        inspection(&self.load_linked(link).await?, link, selector)
+    }
+    /// Retain existing content by its stored pointer. Only a fresh, unpublished preparation may write a Link.
+    pub async fn hold(
+        &self,
+        claim: &ReferrerClaim,
+        reference: &ContentRef,
+    ) -> Result<(), EnginePortError> {
+        let artifact = match reference {
+            ContentRef::Document(id) => {
+                self.get_shared(id)
+                    .await?
+                    .ok_or_else(|| EnginePortError::Missing {
+                        artifact: document_artifact(id),
+                    })?;
+                document_artifact(id)
+            }
+            ContentRef::Package(id) => {
+                let record = self
+                    .packages
+                    .package(id)
+                    .await
+                    .map_err(store_error)?
+                    .ok_or_else(|| EnginePortError::Missing {
+                        artifact: package_artifact(*id),
+                    })?;
+                if record.id != *id || record.package.identity() != *id {
+                    return Err(EnginePortError::Corrupt {
+                        artifact: package_artifact(*id),
+                        message: "Package hash differs".into(),
+                    });
+                }
+                for member in record.package.members.values() {
+                    if let MemberKind::Export { link, .. } = member.kind {
+                        self.load_linked(link).await?;
+                    }
+                }
+                package_artifact(*id)
+            }
+            ContentRef::Link(id) => {
+                if self.packages.link(id).await.map_err(store_error)?.is_some() {
+                    self.load_linked(*id).await?;
+                } else {
+                    let link = self
+                        .prepared
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner)
+                        .links
+                        .get(id)
+                        .cloned()
+                        .ok_or_else(|| EnginePortError::Missing {
+                            artifact: link_artifact(*id),
+                        })?;
+                    let document = self.get(&link.document).await?.ok_or_else(|| {
+                        EnginePortError::Missing {
+                            artifact: document_artifact(&link.document),
+                        }
+                    })?;
+                    let mut content = LinkedContent::default();
+                    content
+                        .insert_document(document)
+                        .map_err(map_link_refusal)?;
+                    for fill in link.fills.values() {
+                        if let Fill::Export { link, .. } = fill {
+                            let descendant = self.load_linked(*link).await?;
+                            content.documents.extend(descendant.documents);
+                            content.links.extend(descendant.links);
+                        }
+                    }
+                    content.check_link(&link).map_err(map_link_refusal)?;
+                    self.packages
+                        .put_link(
+                            claim,
+                            &LinkRecord {
+                                id: *id,
+                                link: link.clone(),
+                            },
+                            &[document_artifact(&link.document)],
+                        )
+                        .await
+                        .map_err(store_error)?;
+                    self.prepared
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner)
+                        .links
+                        .remove(id);
+                    return Ok(());
+                }
+                link_artifact(*id)
+            }
+        };
+        self.store
+            .acquire_module_artifact(claim, &artifact.artifact_ref)
+            .await
+            .map_err(artifact_error)
+    }
+    pub async fn execution_document(
+        &self,
+        start: &LinkedStart,
+    ) -> Result<lash_kernel_check::WorkflowDocument, EnginePortError> {
+        let content = self.load_linked(start.link).await?;
+        content
+            .inspect(start.link, &ReachSelection::Start(start.selector.clone()))
+            .map_err(map_link_refusal)?;
+        let document = content
+            .document(content.link(start.link).map_err(map_link_refusal)?.document)
+            .map_err(map_link_refusal)?
+            .clone();
+        lash_kernel_check::WorkflowDocument::entered(document, start.clone()).map_err(|e| {
+            EnginePortError::Refused(AdmissionRefusal::InvalidDocument {
+                message: e.to_string(),
+            })
+        })
+    }
+    pub async fn load(&self, reference: &ContentRef) -> Result<LoadedContent, EnginePortError> {
+        let material = match reference {
+            ContentRef::Document(id) => lash_execution_contracts::process::ProcessDocument::new(
+                self.get(id)
+                    .await?
+                    .ok_or_else(|| EnginePortError::Missing {
+                        artifact: document_artifact(id),
+                    })?,
+            ),
+            ContentRef::Link(id) => lash_execution_contracts::process::ProcessDocument::new(
+                self.load_linked(*id).await?,
+            ),
+            ContentRef::Package(id) => lash_execution_contracts::process::ProcessDocument::new(
+                self.packages
+                    .package(id)
+                    .await
+                    .map_err(store_error)?
+                    .ok_or_else(|| EnginePortError::Missing {
+                        artifact: package_artifact(*id),
+                    })?,
+            ),
+        };
+        Ok(LoadedContent {
+            reference: reference.clone(),
+            material,
+        })
+    }
+}
+pub(super) fn inspection(
+    content: &LinkedContent,
+    root: LinkId,
+    selector: &ReachSelector,
+) -> Result<LinkInspection, EnginePortError> {
+    let reach = content
+        .inspect(root, &selection(selector))
+        .map_err(map_link_refusal)?;
+    Ok(LinkInspection {
+        link: root,
+        document: content.link(root).map_err(map_link_refusal)?.document,
+        selector: selector.clone(),
+        operations: reach
+            .operations
+            .into_iter()
+            .map(|(use_, need)| {
+                (
+                    use_,
+                    match need {
+                        lash_kernel_package::OperationNeed::Fixed { name, requirement } => {
+                            OperationNeed::Fixed { name, requirement }
+                        }
+                        lash_kernel_package::OperationNeed::Deferred { name, grant } => {
+                            OperationNeed::Deferred { name, grant }
+                        }
+                    },
+                )
+            })
+            .collect(),
+        machine: reach.machine,
+        signature: reach.signature,
+        artifacts: reach
+            .artifacts
+            .into_iter()
+            .map(|a| match a {
+                RetainedContent::Document(id) => document_artifact(&id),
+                RetainedContent::Link(id) => link_artifact(id),
+                RetainedContent::Package(id) => package_artifact(id),
+            })
+            .collect(),
+    })
 }
 
 fn source_map_artifact(map: &SourceMapId) -> ArtifactName {
@@ -79,665 +796,37 @@ fn source_artifact(digest: &[u8; 32]) -> ArtifactName {
     }
 }
 
-fn rewrite_artifact(document: &DocumentId) -> ArtifactName {
-    ArtifactName {
-        store: lash_core::ArtifactStoreId::KernelDocument,
-        artifact_ref: format!("rewrite:{document}"),
-    }
-}
-
-/// An artifact a read needs that is not retained as it should be.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum Unretained {
-    /// Nothing retains it any more.
-    Missing { artifact: ArtifactName },
-    /// It is retained with bytes that are not the artifact its name says.
-    Corrupt {
-        artifact: ArtifactName,
-        message: String,
-    },
-}
-
-/// A document an execution names, read from what the store retains.
-#[derive(Clone, Debug, PartialEq)]
-pub struct ExecutionDocument {
-    /// The document entered where the reference says, held with the
-    /// declarations it was stored with.
-    pub document: WorkflowDocument,
-    /// The document this one was rewritten from by a kernel migration or a
-    /// successor carry, with the correspondence of the rewrite: what a
-    /// host holding a source map of the earlier document rekeys it with.
-    pub rewritten_from: Option<(DocumentId, Correspondence)>,
-}
-
-/// What a read of a stored workflow document found.
-#[derive(Clone, Debug, PartialEq)]
-pub enum StoredWorkflow {
-    Read(Box<ExecutionDocument>),
-    Unretained(Unretained),
-}
-
-/// What a read of a stored source map found.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum StoredSourceMap {
-    /// The map and the source it maps, checked against each other and,
-    /// while it is retained, against the document it names.
-    Read {
-        map: SourceMap,
-        source: String,
-    },
-    Unretained(Unretained),
-}
-
-/// Why a document could not be published or read.
-#[derive(Debug, thiserror::Error)]
-pub enum DocumentStoreError {
-    #[error("the document has no canonical encoding: {0}")]
-    Encode(#[from] lash_kernel_doc::EncodeError),
-    /// The declarations supplied with a document are not the ones it lists.
-    #[error("the document's declarations are refused: {0}")]
-    Declarations(#[from] lash_kernel_doc::DeclarationRefusal),
-    /// A source map is not one of the document and source it is published
-    /// with.
-    #[error("the source map is refused: {0}")]
-    SourceMap(#[from] lash_kernel_doc::SourceMapRefusal),
-    /// A retained document does not read at the entry a reference names.
-    #[error(transparent)]
-    Workflow(#[from] WorkflowDocumentError),
-    #[error("stored document `{document}` does not decode: {message}")]
-    Corrupt {
-        document: DocumentId,
-        message: String,
-    },
-    #[error("stored document `{document}` hashes to `{found}`")]
-    Identity {
-        document: DocumentId,
-        found: DocumentId,
-    },
-    #[error(transparent)]
-    Store(#[from] ArtifactStoreError),
-}
-
-impl From<DocumentStoreError> for lash_execution_contracts::plugin_error::PluginError {
-    fn from(error: DocumentStoreError) -> Self {
-        match error {
-            DocumentStoreError::Store(error) => error.into(),
-            error => Self::Runtime(lash_core::RuntimeError::new(
-                lash_core::RuntimeErrorCode::RuntimeStoreCorrupt,
-                error.to_string(),
-            )),
-        }
-    }
-}
-
-/// The store of admitted documents.
-#[derive(Clone)]
-pub struct KernelDocuments {
-    store: Arc<dyn ModuleArtifactStore>,
-    /// Pure content residency, shared by clones and a hosting factory's
-    /// runtime bindings. Reads still fetch current
-    /// bytes, so residency neither retains an artifact nor hides corruption.
-    /// Each entry is keyed by its token body.
-    decoded: Arc<Mutex<VecDeque<IdentifiedDocument>>>,
-    /// Stored definitions, decoded and checked once by identity; a read
-    /// still fetches each one's current bytes.
-    definitions: Arc<lash_vm_broker::kernel::loader::Definitions>,
-}
-
-/// The hosting factory outlives its per-activation engine bindings. Only
-/// pure preparations cross those bindings; each keeps its current store port.
-#[derive(Default)]
-pub(crate) struct ProcessPreparations {
-    decoded: Arc<Mutex<VecDeque<IdentifiedDocument>>>,
-    definitions: Arc<lash_vm_broker::kernel::loader::Definitions>,
-    effects: Arc<Mutex<EffectPreparations>>,
-}
-
-impl ProcessPreparations {
-    pub(crate) fn bind(
-        &self,
-        mut engine: super::KernelProcessEngine,
-    ) -> super::KernelProcessEngine {
-        engine.documents.decoded = Arc::clone(&self.decoded);
-        engine.documents.definitions = Arc::clone(&self.definitions);
-        engine.effect_preparations = Arc::clone(&self.effects);
-        engine
-    }
-}
-
-/// Pure effect-set preparation belongs to a hosting factory or standalone
-/// engine, shared by its bindings and clones.
-/// A registry is immutable once handed to it; retaining its Arc makes both
-/// release scope and allocation identity explicit, even across replacement.
-#[derive(Default)]
-pub(super) struct EffectPreparations {
-    entries: VecDeque<PreparedEffects>,
-    #[cfg(test)]
-    pub(super) preparations: usize,
-}
-
-struct PreparedEffects {
-    document: DocumentId,
-    entry: lash_kernel_doc::Name,
-    functions: Arc<lash_kernel_doc::FunctionRegistry>,
-    result:
-        Result<lash_execution_contracts::process::PerformedEffects, lash_core::ProcessEnvRefusal>,
-    bytes: usize,
-}
-
-impl EffectPreparations {
-    /// Called only after reading and verifying the current stored document
-    /// and its entry. This result holds neither host authority nor bindings.
-    pub(super) fn effects(
-        &mut self,
-        identity: DocumentId,
-        document: &Document,
-        functions: &Arc<lash_kernel_doc::FunctionRegistry>,
-        entry: &lash_kernel_doc::Name,
-    ) -> Result<lash_execution_contracts::process::PerformedEffects, lash_core::ProcessEnvRefusal>
-    {
-        if let Some(index) = self.entries.iter().position(|prepared| {
-            prepared.document == identity
-                && prepared.entry == *entry
-                && Arc::ptr_eq(&prepared.functions, functions)
-        }) && let Some(hit) = self.entries.remove(index)
-        {
-            let result = hit.result.clone();
-            self.entries.push_back(hit);
-            return result;
-        }
-        #[cfg(test)]
-        {
-            self.preparations += 1;
-        }
-        let uncertified =
-            |error: String| lash_core::ProcessEnvRefusal::Uncertified { reason: error };
-        // Match the existing refusal order: derive the view before the entry's
-        // closure. Helper-body graphs are scratch and are dropped here.
-        let result = lash_kernel_check::derive_view(document, functions.as_ref())
-            .map_err(|error| uncertified(error.to_string()))
-            .and_then(|graph| {
-                lash_kernel_check::entry_effects(document, &graph, functions.as_ref(), entry)
-                    .map_err(|error| uncertified(error.to_string()))
-            });
-        // Bound sixteen prepared entries by eight MiB of encoded results.
-        // Encoding failure or oversized results only bypass residency.
-        const BYTES: usize = 8 * 1024 * 1024;
-        let bytes = serde_json::to_vec(&result).map_or(BYTES + 1, |bytes| bytes.len());
-        if bytes <= BYTES {
-            while self.entries.len() >= 16
-                || self
-                    .entries
-                    .iter()
-                    .map(|prepared| prepared.bytes)
-                    .sum::<usize>()
-                    + bytes
-                    > BYTES
-            {
-                self.entries.pop_front();
-            }
-            self.entries.push_back(PreparedEffects {
-                document: identity,
-                entry: entry.clone(),
-                functions: Arc::clone(functions),
-                result: result.clone(),
-                bytes,
-            });
-        }
-        result
-    }
-}
-
-impl std::fmt::Debug for KernelDocuments {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("KernelDocuments").finish_non_exhaustive()
-    }
-}
-
 impl KernelDocuments {
-    /// The documents `store` holds.
-    pub fn new(store: Arc<dyn ModuleArtifactStore>) -> Self {
-        Self {
-            store,
-            decoded: Arc::new(Mutex::new(VecDeque::new())),
-            definitions: Arc::default(),
-        }
-    }
-
-    /// Stores `document` under its identity as its token body, with
-    /// `declarations`, the definition of every library function it lists,
-    /// each under its own identity as its token body, and adds `claim`'s edge to each, in one store transaction:
-    /// the one writer of kernel documents. The declarations are checked
-    /// against the document first; a declaration already stored is only
-    /// acquired.
-    ///
-    /// # Errors
-    ///
-    /// [`DocumentStoreError`]; a fenced referrer is the store's
-    /// `ReferrerEnded`.
-    pub async fn publish(
-        &self,
-        claim: &ReferrerClaim,
-        document: &IdentifiedDocument,
-        declarations: &CheckedDeclarations,
-    ) -> Result<DocumentId, DocumentStoreError> {
-        self.publish_held(claim, None, document, declarations).await
-    }
-
-    /// [`Self::publish`], with the declarations held by `retainer` and the
-    /// document by `claim`: a referrer that outlives `claim` and retains
-    /// what many documents list, such as the frame whose cells list the
-    /// same helpers (FIG-6481). An acquisition `retainer` already holds
-    /// writes nothing, so a document whose declarations are all retained
-    /// writes only itself. The declarations are held first, so a stored
-    /// document's are always held; a refusal of the document leaves them
-    /// to `retainer`, which reclaims them at its end.
-    ///
-    /// # Errors
-    ///
-    /// [`DocumentStoreError`]; a fenced referrer is the store's
-    /// `ReferrerEnded`.
-    pub async fn publish_retained(
-        &self,
-        claim: &ReferrerClaim,
-        retainer: &ReferrerClaim,
-        document: &IdentifiedDocument,
-        declarations: &CheckedDeclarations,
-    ) -> Result<DocumentId, DocumentStoreError> {
-        self.publish_held(claim, Some(retainer), document, declarations)
-            .await
-    }
-
-    /// The one writer: `document` under `claim`, its declarations under
-    /// `retainer`, or beside it in the same transaction when there is none.
-    async fn publish_held(
-        &self,
-        claim: &ReferrerClaim,
-        retainer: Option<&ReferrerClaim>,
-        document: &IdentifiedDocument,
-        declarations: &CheckedDeclarations,
-    ) -> Result<DocumentId, DocumentStoreError> {
-        declarations.check(document)?;
-        let identity = document.id();
-        let functions: Vec<(ArtifactName, Arc<[u8]>)> = declarations
-            .images()
-            .into_iter()
-            .map(|(function, image)| (function_artifact(&function), image))
-            .collect();
-        let document_ref = identity.to_string();
-        let mut artifacts: Vec<ModuleArtifactHold<'_>> = functions
-            .iter()
-            .map(|(name, image)| ModuleArtifactHold::Acquire {
-                module_ref: &name.artifact_ref,
-                body: ModuleArtifactBody::HelperDefinition(image),
-            })
-            .collect();
-        let document_hold = ModuleArtifactHold::Publish {
-            module_ref: &document_ref,
-            body: ModuleArtifactBody::Document(document.body()),
-        };
-        // What running the document requires by its code, written with it
-        // and held by its claim (FIG-6985). A retained document is a
-        // session cell's: its record is the cell's execution root, written
-        // at park and capture and empty between cells, so its publication
-        // costs only the document (DOC-COST).
-        let requirements = requirements_artifact(&identity);
-        let record =
-            lash_kernel_doc::graph_tokens::encode_body(&declarations.requirements(document));
-        let requirements_hold = ModuleArtifactHold::Acquire {
-            module_ref: &requirements.artifact_ref,
-            body: ModuleArtifactBody::Bytes(&record),
-        };
-        match retainer {
-            None => {
-                artifacts.push(document_hold);
-                artifacts.push(requirements_hold);
-                self.store.hold_module_artifacts(claim, &artifacts).await?;
-            }
-            Some(retainer) => {
-                self.store
-                    .hold_module_artifacts(retainer, &artifacts)
-                    .await?;
-                self.store
-                    .hold_module_artifacts(claim, &[document_hold])
-                    .await?;
-            }
-        }
-        Ok(identity)
-    }
-
-    /// Adds `claim`'s edge to the artifact `name`, storing `bytes` first
-    /// when nothing holds it.
-    async fn hold(
-        &self,
-        claim: &ReferrerClaim,
-        name: &ArtifactName,
-        bytes: &[u8],
-    ) -> Result<(), DocumentStoreError> {
-        Ok(self
-            .store
-            .hold_module_artifacts(
-                claim,
-                &[ModuleArtifactHold::Acquire {
-                    module_ref: &name.artifact_ref,
-                    body: ModuleArtifactBody::Bytes(bytes),
-                }],
-            )
-            .await?)
-    }
-
-    /// Holds each of `definitions`, a library function's identity with its
-    /// token body, under `claim`, storing the ones nothing holds yet: what a
-    /// node's install writes for the sets whose surfaces it stores, so a
-    /// node that does not hold a set's artifacts reads its code
-    /// ([`Self::stored_functions`], FIG-6991).
-    ///
-    /// # Errors
-    ///
-    /// The store's; a fenced referrer is the store's `ReferrerEnded`.
-    pub async fn hold_definitions(
-        &self,
-        claim: &ReferrerClaim,
-        definitions: &[(FunctionId, Arc<[u8]>)],
-    ) -> Result<(), DocumentStoreError> {
-        const BATCH: usize = 256;
-        let names: Vec<(ArtifactName, &Arc<[u8]>)> = definitions
-            .iter()
-            .map(|(function, image)| (function_artifact(function), image))
-            .collect();
-        for batch in names.chunks(BATCH) {
-            let holds: Vec<ModuleArtifactHold<'_>> = batch
-                .iter()
-                .map(|(name, image)| ModuleArtifactHold::Acquire {
-                    module_ref: &name.artifact_ref,
-                    body: ModuleArtifactBody::HelperDefinition(image),
-                })
-                .collect();
-            self.store.hold_module_artifacts(claim, &holds).await?;
-        }
-        Ok(())
-    }
-
-    /// The definition stored under each of `functions`' identities, read
-    /// back by FunctionId and checked to be that function's (FIG-6985):
-    /// the one read of stored code, whichever document, install or bundle
-    /// rooted it.
-    ///
-    /// # Errors
-    ///
-    /// The store's failure to answer.
-    pub async fn stored_functions(
-        &self,
-        functions: impl IntoIterator<Item = FunctionId>,
-    ) -> Result<
-        Result<std::collections::BTreeMap<FunctionId, Arc<FunctionDefinition>>, Unretained>,
-        DocumentStoreError,
-    > {
-        let mut stored = std::collections::BTreeMap::new();
-        for function in functions {
-            match self.definition(&function).await? {
-                Ok(definition) => stored.insert(function, definition),
-                Err(unretained) => return Ok(Err(unretained)),
-            };
-        }
-        Ok(Ok(stored))
-    }
-
-    /// The requirements record `document` was published with, checked
-    /// against the record its stored code derives (FIG-6985): a record
-    /// that does not read, or reads as another, is corrupt.
-    ///
-    /// # Errors
-    ///
-    /// The store's failure to answer.
-    pub async fn published_requirements(
-        &self,
-        document: &Document,
-    ) -> Result<Result<lash_kernel_doc::ExecutionRequirements, Unretained>, DocumentStoreError>
-    {
-        let artifact = requirements_artifact(&document.identity());
-        let Some(bytes) = self
-            .store
-            .get_module_artifact(&artifact.artifact_ref)
-            .await?
-        else {
-            return Ok(Err(Unretained::Missing { artifact }));
-        };
-        let stored = match self
-            .stored_functions(document.manifest.functions.keys().copied())
-            .await?
-        {
-            Ok(stored) => stored,
-            Err(unretained) => return Ok(Err(unretained)),
-        };
-        let declarations = stored
-            .into_iter()
-            .map(|(function, definition)| (function, definition.as_ref().clone()))
-            .collect::<FunctionDeclarations>();
-        let derived = match CheckedDeclarations::required(document, &declarations) {
-            Ok(checked) => checked.requirements(document),
-            Err(refusal) => {
-                return Ok(Err(Unretained::Corrupt {
-                    artifact,
-                    message: refusal.to_string(),
-                }));
-            }
-        };
-        Ok(
-            match lash_kernel_doc::graph_tokens::decode_body_with_limits::<
-                lash_kernel_doc::ExecutionRequirements,
-            >(&bytes, lash_kernel_doc::KernelDataLimits::standard())
-            {
-                Ok(record) if record == derived => Ok(record),
-                Ok(_) => Err(Unretained::Corrupt {
-                    artifact,
-                    message: "the record is not the one the document's code derives".to_owned(),
-                }),
-                Err(error) => Err(Unretained::Corrupt {
-                    artifact,
-                    message: error.to_string(),
-                }),
-            },
-        )
-    }
-
-    /// The stored definition of each library function `document` lists
-    /// that `held`, the node's registry, does not hold, read back under its
-    /// identity and checked to be that function's (FIG-6985): what a
-    /// pinned run of `document` executes beside the node's own functions,
-    /// which are the same definitions by identity. A node that holds every
-    /// one reads nothing.
-    ///
-    /// # Errors
-    ///
-    /// The store's failure to answer.
-    pub async fn stored_definitions(
-        &self,
-        document: &Document,
-        held: &lash_kernel_doc::FunctionRegistry,
-    ) -> Result<
-        Result<std::collections::BTreeMap<FunctionId, Arc<FunctionDefinition>>, Unretained>,
-        DocumentStoreError,
-    > {
-        let lacked: Vec<FunctionId> = document
-            .manifest
-            .functions
-            .keys()
-            .filter(|function| held.get(function).is_none())
-            .copied()
-            .collect();
-        self.stored_functions(lacked).await
-    }
-
-    /// The definition stored under `function`'s identity, decoded and
-    /// checked to be that function's.
-    async fn definition(
-        &self,
-        function: &FunctionId,
-    ) -> Result<Result<Arc<FunctionDefinition>, Unretained>, DocumentStoreError> {
-        let artifact = function_artifact(function);
-        let Some(bytes) = self
-            .store
-            .get_module_artifact(&artifact.artifact_ref)
-            .await?
-        else {
-            return Ok(Err(Unretained::Missing { artifact }));
-        };
-        Ok(self
-            .definitions
-            .decode(
-                *function,
-                &bytes,
-                lash_kernel_doc::KernelDataLimits::standard(),
-            )
-            .map_err(|refusal| Unretained::Corrupt {
-                artifact,
-                message: refusal.to_string(),
-            }))
-    }
-
-    /// The document `reference` names, entered where it says, with the
-    /// declarations it was stored with and the rewrite it was made by, if
-    /// any. No registry is read: a build that holds none of the document's
-    /// helpers reads it as the build that wrote it does.
-    ///
-    /// # Errors
-    ///
-    /// The store's failure to answer, or a retained document that does not
-    /// read at the entry `reference` names.
-    pub async fn workflow(
-        &self,
-        reference: &WorkflowDocumentRef,
-    ) -> Result<StoredWorkflow, DocumentStoreError> {
-        let artifact = document_artifact(&reference.document);
-        let document = match self.get(&reference.document).await {
-            Ok(Some(document)) => document,
-            Ok(None) => return Ok(StoredWorkflow::Unretained(Unretained::Missing { artifact })),
-            Err(
-                error @ (DocumentStoreError::Corrupt { .. } | DocumentStoreError::Identity { .. }),
-            ) => {
-                return Ok(StoredWorkflow::Unretained(Unretained::Corrupt {
-                    artifact,
-                    message: error.to_string(),
-                }));
-            }
-            Err(error) => return Err(error),
-        };
-        let declarations = match self
-            .stored_functions(document.manifest.functions.keys().copied())
-            .await?
-        {
-            Ok(stored) => stored
-                .into_iter()
-                .map(|(function, definition)| (function, definition.as_ref().clone()))
-                .collect::<FunctionDeclarations>(),
-            Err(unretained) => return Ok(StoredWorkflow::Unretained(unretained)),
-        };
-        if let Err(refusal) = lash_kernel_doc::check_declarations(&document, &declarations) {
-            return Ok(StoredWorkflow::Unretained(Unretained::Corrupt {
-                artifact: match &refusal {
-                    lash_kernel_doc::DeclarationRefusal::Identity { function, .. }
-                    | lash_kernel_doc::DeclarationRefusal::Name { function, .. }
-                    | lash_kernel_doc::DeclarationRefusal::Dependency { function, .. } => {
-                        function_artifact(function)
-                    }
-                    _ => artifact,
-                },
-                message: refusal.to_string(),
-            }));
-        }
-        let rewritten_from = match self.rewrite(&reference.document).await? {
-            Ok(rewrite) => rewrite,
-            Err(unretained) => return Ok(StoredWorkflow::Unretained(unretained)),
-        };
-        let document = WorkflowDocument::entered(document, reference.entry.clone(), declarations)?;
-        Ok(StoredWorkflow::Read(Box::new(ExecutionDocument {
-            document,
-            rewritten_from,
-        })))
-    }
-
-    /// Records that `correspondence.result` was rewritten from
-    /// `correspondence.base`, under `claim`. A document is rewritten from
-    /// one base by any one migration; should another base ever rewrite to
-    /// the same document, the first record stands, and a map of the other
-    /// base refuses to rekey through it (`SourceMap::rekey`).
-    ///
-    /// # Errors
-    ///
-    /// [`DocumentStoreError`].
-    pub(crate) async fn record_rewrite(
-        &self,
-        claim: &ReferrerClaim,
-        correspondence: &Correspondence,
-    ) -> Result<(), DocumentStoreError> {
-        let bytes =
-            serde_json::to_vec(correspondence).map_err(|error| lash_kernel_doc::EncodeError {
-                message: error.to_string(),
-            })?;
-        self.hold(claim, &rewrite_artifact(&correspondence.result), &bytes)
-            .await
-    }
-
-    async fn rewrite(
-        &self,
-        document: &DocumentId,
-    ) -> Result<Result<Option<(DocumentId, Correspondence)>, Unretained>, DocumentStoreError> {
-        let artifact = rewrite_artifact(document);
-        let Some(bytes) = self
-            .store
-            .get_module_artifact(&artifact.artifact_ref)
-            .await?
-        else {
-            return Ok(Ok(None));
-        };
-        Ok(match serde_json::from_slice::<Correspondence>(&bytes) {
-            Ok(correspondence) if correspondence.result == *document => {
-                Ok(Some((correspondence.base, correspondence)))
-            }
-            Ok(_) => Err(Unretained::Corrupt {
-                artifact,
-                message: "the rewrite record names another document".to_owned(),
-            }),
-            Err(error) => Err(Unretained::Corrupt {
-                artifact,
-                message: error.to_string(),
-            }),
-        })
-    }
-
-    /// Stores `map` and the `source` it maps under `claim`, once both are
-    /// checked against `document`, and answers the map's identity.
-    ///
-    /// # Errors
-    ///
-    /// [`DocumentStoreError::SourceMap`] for a map that is not one of
-    /// `document` and `source`; nothing is stored for it.
     pub async fn publish_source_map(
         &self,
         claim: &ReferrerClaim,
         document: &Document,
         map: &SourceMap,
         source: &str,
-    ) -> Result<SourceMapId, DocumentStoreError> {
-        map.validate(document, source)?;
+    ) -> Result<SourceMapId, EnginePortError> {
+        map.validate(document, source).map_err(|e| {
+            EnginePortError::Refused(AdmissionRefusal::InvalidDocument {
+                message: e.to_string(),
+            })
+        })?;
         let identity = map.identity();
         let map_bytes = map.canonical_bytes();
         self.store
             .hold_module_artifacts(
                 claim,
                 &[
-                    ModuleArtifactHold::Acquire {
+                    ModuleArtifactHold::Publish {
                         module_ref: &source_artifact(&map.source).artifact_ref,
                         body: ModuleArtifactBody::Bytes(source.as_bytes()),
                     },
-                    ModuleArtifactHold::Acquire {
+                    ModuleArtifactHold::Publish {
                         module_ref: &source_map_artifact(&identity).artifact_ref,
                         body: ModuleArtifactBody::Bytes(&map_bytes),
                     },
                 ],
             )
-            .await?;
+            .await
+            .map_err(artifact_error)?;
         Ok(identity)
     }
 
@@ -749,12 +838,13 @@ impl KernelDocuments {
     pub async fn source_map(
         &self,
         identity: &SourceMapId,
-    ) -> Result<StoredSourceMap, DocumentStoreError> {
+    ) -> Result<StoredSourceMap, EnginePortError> {
         let artifact = source_map_artifact(identity);
         let Some(bytes) = self
             .store
             .get_module_artifact(&artifact.artifact_ref)
-            .await?
+            .await
+            .map_err(artifact_error)?
         else {
             return Ok(StoredSourceMap::Unretained(Unretained::Missing {
                 artifact,
@@ -777,7 +867,8 @@ impl KernelDocuments {
         let Some(bytes) = self
             .store
             .get_module_artifact(&artifact.artifact_ref)
-            .await?
+            .await
+            .map_err(artifact_error)?
         else {
             return Ok(StoredSourceMap::Unretained(Unretained::Missing {
                 artifact,
@@ -795,518 +886,6 @@ impl KernelDocuments {
             Err(refusal) => corrupt(artifact, refusal.to_string()),
         }
     }
-
-    /// Adds `claim`'s edge to a stored document.
-    ///
-    /// # Errors
-    ///
-    /// The store's refusal; absent bytes are `ArtifactMissing`.
-    pub async fn acquire(
-        &self,
-        claim: &ReferrerClaim,
-        document: &DocumentId,
-    ) -> Result<(), ArtifactStoreError> {
-        self.store
-            .acquire_module_artifact(claim, &document.to_string())
-            .await
-    }
-
-    /// The document stored under `identity`, if any referrer holds it. The
-    /// bytes are checked against the identity they are read under.
-    ///
-    /// # Errors
-    ///
-    /// [`DocumentStoreError`].
-    pub async fn get(&self, identity: &DocumentId) -> Result<Option<Document>, DocumentStoreError> {
-        self.get_shared(identity)
-            .await
-            .map(|document| document.map(IdentifiedDocument::into_document))
-    }
-
-    /// Reuses the immutable document across process activations. The key
-    /// includes the stored bytes as well as their checked content identity.
-    /// A miss decodes the stored token body once; its digest is checked
-    /// against the identity it was read under.
-    pub(crate) async fn get_shared(
-        &self,
-        identity: &DocumentId,
-    ) -> Result<Option<IdentifiedDocument>, DocumentStoreError> {
-        let Some(bytes) = self
-            .store
-            .get_module_artifact(&identity.to_string())
-            .await?
-        else {
-            return Ok(None);
-        };
-        let mut decoded = self
-            .decoded
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        if let Some(index) = decoded
-            .iter()
-            .position(|entry| entry.id() == *identity && entry.body() == bytes.as_slice())
-            && let Some(hit) = decoded.remove(index)
-        {
-            let document = hit.clone();
-            decoded.push_back(hit);
-            return Ok(Some(document));
-        }
-        let document = IdentifiedDocument::decode_standard(&bytes).map_err(|error| {
-            DocumentStoreError::Corrupt {
-                document: *identity,
-                message: error.to_string(),
-            }
-        })?;
-        let found = document.id();
-        if found != *identity {
-            return Err(DocumentStoreError::Identity {
-                document: *identity,
-                found,
-            });
-        }
-        // Residency is an optimization, never an admission limit. Oversized
-        // input runs uncached. The bound covers sixteen decoded documents
-        // whose encoded content totals at most eight MiB.
-        const BYTES: usize = 8 * 1024 * 1024;
-        if bytes.len() <= BYTES {
-            while decoded.len() >= 16
-                || decoded
-                    .iter()
-                    .map(|entry| entry.body().len())
-                    .sum::<usize>()
-                    + bytes.len()
-                    > BYTES
-            {
-                decoded.pop_front();
-            }
-            decoded.push_back(document.clone());
-        }
-        Ok(Some(document))
-    }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use lash_kernel_doc::graph_tokens::decode_body;
-
-    struct Stored(Mutex<Option<Vec<u8>>>);
-
-    #[async_trait::async_trait]
-    impl ModuleArtifactStore for Stored {
-        async fn publish_module_artifact(
-            &self,
-            _: &ReferrerClaim,
-            _: &str,
-            bytes: &[u8],
-        ) -> Result<(), ArtifactStoreError> {
-            *self.0.lock().expect("store") = Some(bytes.to_vec());
-            Ok(())
-        }
-        async fn acquire_module_artifact(
-            &self,
-            _: &ReferrerClaim,
-            _: &str,
-        ) -> Result<(), ArtifactStoreError> {
-            Ok(())
-        }
-        async fn hold_module_artifacts(
-            &self,
-            _: &ReferrerClaim,
-            artifacts: &[ModuleArtifactHold<'_>],
-        ) -> Result<(), ArtifactStoreError> {
-            if let Some(last) = artifacts.last() {
-                *self.0.lock().expect("store") = Some(last.body().bytes().to_vec());
-            }
-            Ok(())
-        }
-        async fn end_module_referrer(
-            &self,
-            _: &lash_core::ResolvedArtifactCleanup,
-        ) -> Result<(), ArtifactStoreError> {
-            *self.0.lock().expect("store") = None;
-            Ok(())
-        }
-        async fn get_module_artifact(
-            &self,
-            _: &str,
-        ) -> Result<Option<Vec<u8>>, ArtifactStoreError> {
-            Ok(self.0.lock().expect("store").clone())
-        }
-    }
-
-    /// Every store write a retention makes.
-    #[derive(Default)]
-    struct Counted {
-        stored: Mutex<std::collections::BTreeMap<String, Vec<u8>>>,
-        /// Each artifact held as a graph node's body, and the node's kind.
-        nodes: Mutex<std::collections::BTreeMap<String, u32>>,
-    }
-
-    #[async_trait::async_trait]
-    impl ModuleArtifactStore for Counted {
-        async fn publish_module_artifact(
-            &self,
-            claim: &ReferrerClaim,
-            module_ref: &str,
-            bytes: &[u8],
-        ) -> Result<(), ArtifactStoreError> {
-            self.hold_module_artifacts(
-                claim,
-                &[ModuleArtifactHold::Publish {
-                    module_ref,
-                    body: ModuleArtifactBody::Bytes(bytes),
-                }],
-            )
-            .await
-        }
-        async fn acquire_module_artifact(
-            &self,
-            _: &ReferrerClaim,
-            module_ref: &str,
-        ) -> Result<(), ArtifactStoreError> {
-            Err(ArtifactStoreError::ArtifactMissing {
-                artifact_ref: module_ref.to_owned(),
-            })
-        }
-        async fn hold_module_artifacts(
-            &self,
-            _: &ReferrerClaim,
-            artifacts: &[ModuleArtifactHold<'_>],
-        ) -> Result<(), ArtifactStoreError> {
-            let mut stored = self.stored.lock().expect("store");
-            for artifact in artifacts {
-                let bytes = artifact.body().bytes();
-                stored
-                    .entry(artifact.module_ref().to_owned())
-                    .or_insert_with(|| bytes.to_vec());
-                if let Some(kind) = artifact.body().node_kind() {
-                    self.nodes
-                        .lock()
-                        .expect("nodes")
-                        .insert(artifact.module_ref().to_owned(), kind.0);
-                }
-            }
-            Ok(())
-        }
-        async fn end_module_referrer(
-            &self,
-            _: &lash_core::ResolvedArtifactCleanup,
-        ) -> Result<(), ArtifactStoreError> {
-            self.stored.lock().expect("store").clear();
-            Ok(())
-        }
-        async fn get_module_artifact(
-            &self,
-            module_ref: &str,
-        ) -> Result<Option<Vec<u8>>, ArtifactStoreError> {
-            Ok(self.stored.lock().expect("store").get(module_ref).cloned())
-        }
-    }
-
-    /// FIG-6257, FIG-6469: however many process definitions publish a
-    /// document, the store holds it once, as its checkpoint graph node (kind
-    /// 10) encoded from its token body, under the digest that keys that
-    /// node; each helper it lists is held as its own HelperDefinition node
-    /// (kind 14). A read decodes that body once, and nothing is JSON.
-    #[tokio::test]
-    async fn a_document_is_stored_once_as_its_graph_node_body() {
-        let mut registry = lash_kernel_doc::FunctionRegistry::new();
-        let helper = registry
-            .register(
-                lash_kernel_doc::parse_definition(
-                    "function helper() -> Any\nkernel 1\ncharge 1\nbody { return 7 }",
-                )
-                .expect("helper"),
-                None,
-            )
-            .expect("registered");
-        let document = IdentifiedDocument::new(
-            lash_kernel_doc::parse_document(&format!(
-                "kernel 1\nnumbers float\nuse helper = @{helper}\nentry one() -> Any\nentry two() -> Any\nfn one() {{ let n = invoke helper() return n }}\nfn two() {{ let n = invoke helper() return n }}\nmain {{ }}",
-            ))
-            .expect("document"),
-        );
-        let declarations = CheckedDeclarations::required(&document, &registry).expect("listed");
-        let store = Arc::new(Counted::default());
-        let documents = KernelDocuments::new(store.clone());
-        let claim = ReferrerClaim::unguarded(lash_core::ArtifactReferrer::HostPin(
-            lash_core::HostArtifactPin::mint(),
-        ))
-        .expect("a host pin is unguarded");
-        // One definition per entry, each publishing the document it runs.
-        for _ in document.entries.keys() {
-            assert_eq!(
-                documents
-                    .publish(&claim, &document, &declarations)
-                    .await
-                    .expect("published"),
-                document.id()
-            );
-        }
-        let held = store.stored.lock().expect("store").clone();
-        let stored: Vec<_> = held
-            .iter()
-            .filter(|(_, bytes)| decode_body::<Document>(bytes).is_ok())
-            .collect();
-        assert_eq!(stored.len(), 1, "one stored document: {:?}", held.keys());
-        let (name, bytes) = stored[0];
-        assert_eq!(name, &document.id().to_string());
-        assert_eq!(bytes.as_slice(), document.body());
-        assert_eq!(
-            &lash_kernel_doc::graph_tokens::logical_digest(bytes),
-            document.id().as_bytes(),
-            "the stored bytes are the body the graph keys by the document's id"
-        );
-        let definition =
-            decode_body::<FunctionDefinition>(&held[&function_artifact(&helper).artifact_ref])
-                .expect("the helper is stored as its token body");
-        assert_eq!(definition.identity(), helper);
-        assert_eq!(
-            *store.nodes.lock().expect("nodes"),
-            std::collections::BTreeMap::from([
-                (document.id().to_string(), 10),
-                (function_artifact(&helper).artifact_ref, 14),
-            ]),
-            "the document and its helper are held as graph nodes, not as copies of their bodies"
-        );
-        assert!(
-            held.values()
-                .all(|bytes| serde_json::from_slice::<serde_json::Value>(bytes).is_err()),
-            "nothing is stored as JSON"
-        );
-        let _ = lash_kernel_doc::document_work::take();
-        let read = documents
-            .get_shared(&document.id())
-            .await
-            .expect("read")
-            .expect("retained");
-        assert_eq!(read, document);
-        assert_eq!(
-            lash_kernel_doc::document_work::take(),
-            lash_kernel_doc::document_work::DocumentWork {
-                token_decodes: 1,
-                ..Default::default()
-            }
-        );
-    }
-
-    /// FIG-6148, K-DOC-003: repeated activations share decoding, but the
-    /// cache cannot keep a reclaimed document runnable or hide changed bytes.
-    #[tokio::test]
-    async fn shared_decoding_preserves_missing_and_corrupt_document_refusals() {
-        let document =
-            lash_kernel_doc::parse_document("kernel 1\nnumbers float\nmain { return 7 }")
-                .expect("document");
-        let identity = document.identity();
-        let store = Arc::new(Stored(Mutex::new(Some(document.canonical_bytes()))));
-        let documents = KernelDocuments::new(store.clone());
-        let first = documents
-            .get_shared(&identity)
-            .await
-            .expect("read")
-            .expect("retained");
-        let repeated = documents
-            .clone()
-            .get_shared(&identity)
-            .await
-            .expect("read")
-            .expect("retained");
-        assert!(Arc::ptr_eq(first.shared(), repeated.shared()));
-        *store.0.lock().expect("store") = None;
-        assert!(
-            documents
-                .get_shared(&identity)
-                .await
-                .expect("read")
-                .is_none()
-        );
-        *store.0.lock().expect("store") = Some(b"broken".to_vec());
-        assert!(matches!(
-            documents.get_shared(&identity).await,
-            Err(DocumentStoreError::Corrupt { .. })
-        ));
-        let other = lash_kernel_doc::parse_document("kernel 1\nnumbers float\nmain { return 8 }")
-            .expect("document");
-        *store.0.lock().expect("store") = Some(other.canonical_bytes());
-        assert!(matches!(
-            documents.get_shared(&identity).await,
-            Err(DocumentStoreError::Identity { .. })
-        ));
-    }
-    /// FIG-6148: engine activation effect requirements are a structural
-    /// preparation of document content under one helper registry, not work
-    /// repeated when the same process resumes.
-    #[tokio::test]
-    async fn activation_effects_are_prepared_once_per_document_and_registry() {
-        use lash_execution_contracts::process::ProcessEngine as _;
-        let package = lash_kernel_package::Package::build(
-            "fixture",
-            "1",
-            &lash_kernel_package::PackageSources {
-                kernel: "function fixture.helper() -> Any\nkernel 1\ncharge 1\nbody { return 7 }",
-                surface: "",
-                labels: "",
-            },
-            &[],
-        )
-        .expect("helper package");
-        let helper = package.function("fixture.helper").expect("helper identity");
-        let held = Arc::new(
-            lash_kernel_package::HeldPackages::install([package])
-                .expect("one package registration"),
-        );
-        let document = lash_kernel_doc::parse_document(&format!(
-            "kernel 1\nnumbers float\nuse fixture.helper = @{helper}\neffect ping(x: Any) -> Any contract \"1\"\nentry work() -> Any\nfn work() {{ let n = invoke fixture.helper() let x = perform ping(n) as Any return x }}\nmain {{ }}",
-        )).expect("document");
-        let identity = document.identity();
-        let store = Arc::new(Stored(Mutex::new(Some(document.canonical_bytes()))));
-        let config =
-            lash_vm_client::PoolConfig::codemode(lash_vm_client::WorkerEntry::helper("unused"));
-        let factory = crate::process_plugin::KernelProcessPluginFactory::new(
-            lash_vm_client::service::Service::new(config.clone()),
-            lash_vm_releases::TYPESCRIPT,
-            config.run_bounds,
-        )
-        .with_packages(held.clone());
-        let payload = serde_json::to_value(crate::KernelProcessInput {
-            packages: held.digest(),
-            declared_packages: held.surface().selection(),
-            document: identity,
-            functions: [helper].into_iter().collect(),
-            entry: lash_kernel_doc::Name::new("work"),
-            args: serde_json::Map::new(),
-        })
-        .expect("process payload");
-        let mut bindings = Vec::new();
-        let mut counts = std::collections::BTreeMap::new();
-        let mut expected = None;
-        for _ in 0..3 {
-            let bound = factory.engine(store.clone()).expect("runtime binding");
-            let effects = bound.performed_effects(&payload).await.expect("effects");
-            assert_eq!(effects.len(), 1);
-            if let Some(expected) = &expected {
-                assert_eq!(&effects, expected);
-            }
-            expected = Some(effects);
-            counts.insert(
-                Arc::as_ptr(&bound.effect_preparations) as usize,
-                bound
-                    .effect_preparations
-                    .lock()
-                    .expect("cache")
-                    .preparations,
-            );
-            bindings.push(bound);
-        }
-        assert_eq!(
-            counts.values().sum::<usize>(),
-            1,
-            "one preparation across runtime bindings"
-        );
-        let decoded = bindings[0]
-            .documents
-            .get_shared(&identity)
-            .await
-            .expect("document")
-            .expect("retained");
-        let rebound = bindings[1]
-            .documents
-            .get_shared(&identity)
-            .await
-            .expect("document")
-            .expect("retained");
-        assert!(
-            Arc::ptr_eq(decoded.shared(), rebound.shared()),
-            "decoding survives runtime rebinding too"
-        );
-        let absent = factory
-            .engine(Arc::new(Stored(Mutex::new(None))))
-            .expect("another backend");
-        assert!(
-            absent.performed_effects(&payload).await.is_err(),
-            "content residency confers no store authority"
-        );
-        let engine = &bindings[0];
-        let first = expected.expect("effects");
-        let mut other = engine.clone();
-        other.functions = Arc::new(lash_kernel_doc::FunctionRegistry::new());
-        assert!(other.performed_effects(&payload).await.is_err());
-        assert_eq!(
-            engine
-                .effect_preparations
-                .lock()
-                .expect("cache")
-                .preparations,
-            2
-        );
-        assert_eq!(
-            engine
-                .performed_effects(&payload)
-                .await
-                .expect("original registry"),
-            first
-        );
-        *store.0.lock().expect("store") = None;
-        assert!(engine.performed_effects(&payload).await.is_err());
-    }
-
-    /// A document is published with the requirements record its code
-    /// derives, in the same write (FIG-6985): the native of a native-only
-    /// function it reaches and its kernel version. The record reads back
-    /// only as the one its stored code derives again; one that reads
-    /// otherwise is corrupt, never taken.
-    #[tokio::test]
-    async fn a_document_is_published_with_the_requirements_its_code_derives() {
-        let mut registry = lash_kernel_doc::FunctionRegistry::declarations();
-        let leaf = registry
-            .register(
-                lash_kernel_doc::parse_definition(
-                    "function leaf() -> Int\nkernel 1\ncharge 1\nnative\n",
-                )
-                .expect("leaf"),
-                None,
-            )
-            .expect("registered");
-        let document = IdentifiedDocument::new(
-            lash_kernel_doc::parse_document(&format!(
-                "kernel 1\nnumbers float\nuse leaf = @{leaf}\nentry one() -> Any\nfn one() {{ let n = invoke leaf() return n }}\nmain {{ }}",
-            ))
-            .expect("document"),
-        );
-        let declarations = CheckedDeclarations::required(&document, &registry).expect("listed");
-        let store = Arc::new(Counted::default());
-        let documents = KernelDocuments::new(store.clone());
-        let claim = ReferrerClaim::unguarded(lash_core::ArtifactReferrer::HostPin(
-            lash_core::HostArtifactPin::mint(),
-        ))
-        .expect("a host pin is unguarded");
-        documents
-            .publish(&claim, &document, &declarations)
-            .await
-            .expect("published");
-        let record = documents
-            .published_requirements(&document)
-            .await
-            .expect("read")
-            .expect("the record reads as its code derives it");
-        assert_eq!(record.natives, [leaf].into());
-        assert_eq!(record.kernels, [1].into());
-
-        let forged = lash_kernel_doc::graph_tokens::encode_body(
-            &lash_kernel_doc::ExecutionRequirements::default(),
-        );
-        store
-            .stored
-            .lock()
-            .expect("store")
-            .insert(requirements_artifact(&document.id()).artifact_ref, forged);
-        assert!(matches!(
-            documents
-                .published_requirements(&document)
-                .await
-                .expect("read"),
-            Err(Unretained::Corrupt { .. })
-        ));
-    }
-}
+pub(super) use map_link_refusal as refused;

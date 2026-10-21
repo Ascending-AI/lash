@@ -20,10 +20,9 @@ use std::sync::{Arc, Mutex, OnceLock};
 
 use crate::arena::native::NativeFunction;
 use crate::function::FunctionDefinition;
-use crate::name::{EffectName, FunctionId, FunctionName};
+use crate::name::{FunctionId, FunctionName};
 use crate::plan::HelperPlan;
 use crate::released::{BodyCensus, ReleasedFunctions};
-use crate::requirement::OperationRequirement;
 use crate::validate::{Invalid, validate_identified_definition};
 
 /// The counter a native function is handed: it counts the function's guard
@@ -140,7 +139,7 @@ struct Facts {
     header: OnceLock<Arc<crate::FunctionHeader>>,
     callees: OnceLock<BTreeSet<FunctionId>>,
     /// The empty requirement set for a definition with no body.
-    no_effects: BTreeMap<EffectName, OperationRequirement>,
+    no_imports: BTreeMap<lash_vocabulary::names::ImportSlot, lash_vocabulary::names::Import>,
     /// The definition's token body, encoded once for every holder that
     /// stores it.
     image: OnceLock<Arc<[u8]>>,
@@ -328,10 +327,12 @@ impl RegisteredFunction {
     /// it ([`crate::FunctionBody::effects`]): none for a function with no
     /// body. A document reaching this function requires them through it
     /// (`K-DOC-002`); what its callees perform is theirs.
-    pub fn performs(&self) -> &BTreeMap<EffectName, OperationRequirement> {
+    pub fn imports(
+        &self,
+    ) -> &BTreeMap<lash_vocabulary::names::ImportSlot, lash_vocabulary::names::Import> {
         self.definition()
             .body()
-            .map_or(&self.facts().no_effects, |body| &body.effects)
+            .map_or(&self.facts().no_imports, |body| &body.imports)
     }
 }
 

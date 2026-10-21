@@ -4,10 +4,14 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-use lash_kernel_doc::{
-    EffectName, FunctionId, FunctionName, Invalid, InvalidReason, Name, OperationRequirement,
-    Signature, Site, Type,
-};
+use lash_kernel_doc::{Invalid, InvalidReason};
+
+use lash_vocabulary::legacy_names::FunctionId;
+use lash_vocabulary::legacy_names::FunctionName;
+use lash_vocabulary::legacy_names::Name;
+use lash_vocabulary::sites::Site;
+use lash_vocabulary::types::Signature;
+use lash_vocabulary::types::Type;
 
 /// Everything that keeps a document from being admitted. Admission does not
 /// stop at the first fault of the environment: every missing effect, every
@@ -62,18 +66,17 @@ pub enum RefusalReason {
     #[error("{0}")]
     Invalid(InvalidReason),
     /// `K-ADM-001`: the environment provides no such effect.
-    #[error("the environment provides no effect `{effect}`")]
-    MissingEffect { effect: EffectName },
-    /// OP-INTERNAL: only the declaring package's bodies may perform it.
-    #[error("internal operation `{effect}` may only be performed by its package bodies")]
-    InternalOperation { effect: EffectName },
+    #[error("the environment provides no effect `{slot:?}`")]
+    MissingEffect {
+        slot: lash_vocabulary::names::ImportSlot,
+    },
     /// `K-ADM-002`: the environment's effect does not serve the signature
     /// the document expects.
     #[error(
-        "effect `{effect}` is provided with a signature that does not serve the one expected: {mismatch}"
+        "effect `{slot:?}` is provided with a signature that does not serve the one expected: {mismatch}"
     )]
     EffectSignature {
-        effect: EffectName,
+        slot: lash_vocabulary::names::ImportSlot,
         expected: Signature,
         provided: Signature,
         mismatch: Box<SignatureMismatch>,
@@ -99,62 +102,11 @@ pub enum RefusalReason {
     },
     /// `K-ADM-006`: a `perform` states a result type no result of the
     /// effect's signature can have.
-    #[error("effect `{effect}` returns {declared:?}; this `perform` expects {stated:?}")]
+    #[error("effect `{slot:?}` returns {declared:?}; this `perform` expects {stated:?}")]
     PerformResult {
-        effect: EffectName,
+        slot: lash_vocabulary::names::ImportSlot,
         declared: Type,
         stated: Type,
-    },
-    /// `K-ADM-007`: the manifest lists an effect nothing performs.
-    #[error("the manifest lists effect `{effect}`, which nothing performs")]
-    EffectNotPerformed { effect: EffectName },
-    /// `K-ADM-007`: the manifest lists a function nothing reaches.
-    #[error("the manifest lists library function `{name}` ({function}), which nothing reaches")]
-    FunctionNotReached {
-        function: FunctionId,
-        name: FunctionName,
-    },
-    /// `K-ADM-007`: a function reached through another function's body is
-    /// not in the manifest.
-    #[error(
-        "library function `{name}` ({function}) is reached through {through} but not listed in \
-         the manifest"
-    )]
-    FunctionNotListed {
-        function: FunctionId,
-        name: FunctionName,
-        through: FunctionId,
-    },
-    /// `K-ADM-007`: a library body the document reaches performs an
-    /// operation the manifest does not list.
-    #[error(
-        "effect `{effect}` is performed by the body of {through}, which requires {requirement}, \
-         but not listed in the manifest"
-    )]
-    RequirementNotListed {
-        effect: EffectName,
-        through: FunctionId,
-        requirement: OperationRequirement,
-    },
-    /// `ADM-REQUIREMENT`: the document's code and the bodies it reaches
-    /// require one effect name under two requirements.
-    #[error(
-        "effect `{effect}` is required as {first} and as {second}; one name is one requirement"
-    )]
-    RequirementConflict {
-        effect: EffectName,
-        first: Box<RequiredBy>,
-        second: Box<RequiredBy>,
-    },
-    /// `K-ADM-007`: a function is listed under a name its definition does
-    /// not carry.
-    #[error(
-        "library function {function} is listed as `{listed}`; its definition names it `{defined}`"
-    )]
-    FunctionName {
-        function: FunctionId,
-        listed: FunctionName,
-        defined: FunctionName,
     },
 }
 
@@ -166,47 +118,20 @@ impl RefusalReason {
     pub fn code(&self) -> &'static str {
         match self {
             Self::Invalid(_) => "invalid",
-            Self::InternalOperation { .. } => "internal_operation",
             Self::MissingEffect { .. } => "missing_effect",
             Self::EffectSignature { .. } => "effect_signature",
             Self::MissingFunction { .. } => "missing_function",
             Self::UnboundVariable { .. } => "unbound_variable",
             Self::ArgumentType { .. } => "argument_type",
             Self::PerformResult { .. } => "perform_result",
-            Self::EffectNotPerformed { .. } => "effect_not_performed",
-            Self::FunctionNotReached { .. } => "function_not_reached",
-            Self::FunctionNotListed { .. } => "function_not_listed",
-            Self::FunctionName { .. } => "function_name",
-            Self::RequirementNotListed { .. } => "requirement_not_listed",
-            Self::RequirementConflict { .. } => "requirement_conflict",
         }
     }
 }
 
-/// A requirement of an effect, and the code that states it.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct RequiredBy {
-    /// The library function whose body states it; `None` for the
-    /// document's manifest, which states its own code's.
-    pub through: Option<FunctionId>,
-    pub requirement: OperationRequirement,
-}
-
-impl fmt::Display for RequiredBy {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match &self.through {
-            Some(function) => write!(f, "{} by the body of {function}", self.requirement),
-            None => write!(f, "{} by the manifest", self.requirement),
-        }
-    }
-}
-
+pub use lash_vocabulary::types::{SignatureMismatch, SignatureSide};
 pub(crate) fn refused(site: Option<&Site>, reason: RefusalReason) -> Refused {
     Refused {
         site: site.cloned(),
         reason,
     }
 }
-
-pub use lash_vocabulary::types::{SignatureMismatch, SignatureSide};

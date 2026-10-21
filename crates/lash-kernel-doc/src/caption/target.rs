@@ -131,19 +131,20 @@ impl CaptionTarget {
         match self {
             Self::Site(site) => CaptionKind::of(document, site),
             Self::Param(param) => {
-                let declared = document.functions.get(&param.function)?;
-                let named = match document.entries.get(&param.function) {
-                    Some(entry) => entry
-                        .signature
-                        .params
-                        .iter()
-                        .any(|signature| signature.name == param.param),
-                    None => declared.params.contains(&param.param),
+                let crate::Export::Function(export) = document.exports.get(&param.function)? else {
+                    return None;
                 };
+                let named = export
+                    .signature
+                    .params
+                    .iter()
+                    .any(|p| p.name == param.param);
                 named.then_some(CaptionKind::Param)
             }
             Self::Field(field) => {
-                let entry = document.entries.get(&field.function)?;
+                let crate::Export::Function(entry) = document.exports.get(&field.function)? else {
+                    return None;
+                };
                 field
                     .path
                     .resolve(&entry.signature)

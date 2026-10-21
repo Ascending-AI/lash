@@ -1,383 +1,154 @@
-//! Derivation and admission: the two things a caller asks of the checker.
+//! Scope/type checking reads document-local facts. Package admission owns fills and visibility.
+use crate::{Graph, Refusal, RefusalReason, Refused};
+use crate::{link::Linker, typing::Typer};
+use lash_kernel_doc::{Document, FunctionCatalog, FunctionDefinition};
 
-use lash_kernel_doc::core_support::RegisteredFunctionCoreSupport;
-use std::collections::{BTreeMap, BTreeSet};
+use lash_vocabulary::legacy_names::DocumentId;
+use lash_vocabulary::legacy_names::Name;
 
-use lash_kernel_doc::{
-    Document, DocumentId, EffectName, FunctionCatalog, FunctionDefinition, InvalidReason, Name,
-    OperationRequirement, Unit, validate_definition, validate_document,
-};
+use lash_vocabulary::sites::Unit;
+use std::collections::BTreeSet;
 
-use crate::flow;
-use crate::graph::Graph;
-use crate::link::Linker;
-use crate::manifest;
-use crate::refusal::{Refusal, RefusalReason, Refused, refused};
-use crate::types::serves;
-use crate::typing::Typer;
-
-/// What an embedder provides a document with (`K-ADM-001` to `K-ADM-004`).
 pub struct Environment<'a> {
-    /// The effects it can run, each with the requirement it offers them
-    /// under: its signature and the contract its runner serves.
-    pub effects: BTreeMap<EffectName, OperationRequirement>,
-    /// Whether the operation is internal to its declaring package.
-    pub internal: Box<dyn Fn(&EffectName) -> bool + Send + Sync + 'a>,
-    /// The library functions it holds, by identity.
     pub functions: &'a dyn FunctionCatalog,
-    /// The session bindings `main` starts with (`K-SES-001`).
     pub bindings: BTreeSet<Name>,
 }
-
 impl<'a> Environment<'a> {
-    /// An environment that holds `functions` and provides nothing else.
     pub fn new(functions: &'a dyn FunctionCatalog) -> Self {
         Self {
-            effects: BTreeMap::new(),
-            internal: Box::new(|_| false),
             functions,
             bindings: BTreeSet::new(),
         }
     }
-
-    /// OP-INTERNAL: checks the performing unit, rather than the transitive
-    /// effect set, so package bodies keep their authority and closures do not.
-    pub fn check_visibility(&self, graph: &Graph) -> Result<(), Refusal> {
-        let errors: Vec<_> = graph
-            .nodes()
-            .iter()
-            .filter_map(|node| {
-                let effect = match &node.kind {
-                    crate::NodeKind::Action(crate::ActionNode::Perform { effect, .. })
-                    | crate::NodeKind::Expr(crate::ExprNode::Act {
-                        kind: crate::ActNode::Perform { effect, .. },
-                        ..
-                    }) => effect,
-                    _ => return None,
-                };
-                ((self.internal)(effect) && !matches!(node.site.unit, Unit::Library(_))).then(
-                    || {
-                        refused(
-                            Some(&node.site),
-                            RefusalReason::InternalOperation {
-                                effect: effect.clone(),
-                            },
-                        )
-                    },
-                )
-            })
-            .collect();
-        if errors.is_empty() {
-            Ok(())
-        } else {
-            Err(Refusal { errors })
-        }
-    }
 }
-
-/// A document an environment can run, with everything derived from it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Admitted {
     pub identity: DocumentId,
     pub graph: Graph,
 }
-
-/// Links a document and derives its view, against the definitions in
-/// `catalog`. The result is a function of the document and those
-/// definitions and of nothing else.
-///
-/// A variable `main` does not declare is a session binding here and is
-/// reported by [`Graph::session_reads`]; [`admit`] refuses one the
-/// environment does not provide.
 pub fn derive(document: &Document, catalog: &dyn FunctionCatalog) -> Result<Graph, Refusal> {
-    let mut errors = Vec::new();
-    match check(document, catalog, &mut errors) {
-        Some(graph) if errors.is_empty() => Ok(graph),
-        _ => Err(Refusal { errors }),
+    lash_kernel_doc::validate_document(document, catalog).map_err(|error| Refusal {
+        errors: vec![error.into()],
+    })?;
+    let mut linker = Linker::new(&document.functions);
+    if let Some(main) = &document.main {
+        linker.unit(Unit::Main, &[], main, None);
     }
-}
-
-/// Derives the total view of a structurally valid document, checking type
-/// and scope rules only in the functions `entry` executes and their library
-/// callees. A function passed as a template is checked when it is entered;
-/// unrelated `main` code does not participate in definition linking.
-///
-/// # Errors
-///
-/// The entry is undeclared, the document is structurally invalid, a library
-/// definition is missing, or code the entry executes cannot link.
-pub fn derive_entry(
-    document: &Document,
-    catalog: &dyn FunctionCatalog,
-    entry: &Name,
-) -> Result<Graph, Refusal> {
-    if !document.functions.contains_key(entry) {
-        return Err(Refusal {
-            errors: vec![refused(
-                None,
-                RefusalReason::Invalid(InvalidReason::FunctionNotDeclared {
-                    name: entry.clone(),
-                }),
-            )],
-        });
+    // Anonymous definitions are checked in their lexical parent, with the defining Unit.
+    let mut lexical = BTreeSet::new();
+    for (_, block) in document.units() {
+        let mut nodes = vec![lash_kernel_doc::Node::Block(block)];
+        while let Some(node) = nodes.pop() {
+            if let lash_kernel_doc::Node::Expr(lash_kernel_doc::Expr::Closure(closure)) = node {
+                lexical.insert(closure.function);
+            }
+            nodes.extend(node.children());
+        }
     }
-    let mut errors = Vec::new();
-    let Some(graph) = check(document, catalog, &mut errors) else {
-        return Err(Refusal { errors });
-    };
-    let units = crate::closure::executed_units(&graph, catalog, entry);
-    let libraries = manifest::reach_blocks(
-        units.iter().filter_map(|unit| match unit {
-            Unit::Function(name) => document.functions.get(name).map(|function| &function.body),
-            _ => None,
-        }),
-        catalog,
-    )
-    .reached;
-    errors.retain(|error| match error.site.as_ref().map(|site| &site.unit) {
-        Some(Unit::Library(function)) => libraries.contains_key(function),
-        Some(unit) => units.contains(unit),
-        None => true,
-    });
+    for (id, function) in &document.functions {
+        if lexical.contains(id) {
+            continue;
+        }
+        let Some(body) = function.body() else {
+            continue;
+        };
+        let params = function
+            .signature
+            .params
+            .iter()
+            .map(|p| p.name.clone())
+            .collect::<Vec<_>>();
+        linker.unit(
+            Unit::Library(*id),
+            &params,
+            &body.block,
+            Some(function.signature.clone()),
+        );
+    }
+    let mut errors = linker.errors;
+    let mut graph = linker.graph;
+    Typer {
+        graph: &mut graph,
+        catalog: &document.functions,
+        imports: &document.imports,
+        errors: &mut errors,
+    }
+    .run();
+    crate::flow::derive(&mut graph, &document.functions);
     if errors.is_empty() {
         Ok(graph)
     } else {
         Err(Refusal { errors })
     }
 }
-
-/// The view of a document whose functions resolve and whose shape is
-/// valid, whatever faults its type and scope rules find: what a reader of
-/// its structure needs, such as an entry's linked-effect set, when the
-/// code it reads is checked where it runs. [`derive`] refuses those faults.
-///
-/// # Errors
-///
-/// A function the document names is missing, or its shape is invalid.
 pub fn derive_view(document: &Document, catalog: &dyn FunctionCatalog) -> Result<Graph, Refusal> {
-    let mut errors = Vec::new();
-    check(document, catalog, &mut errors).ok_or(Refusal { errors })
+    derive(document, catalog)
 }
-
-/// Links a library function's kernel-code body and derives its view: one
-/// unit, [`Unit::Library`] of the definition's identity. A definition with
-/// no body derives an empty view.
+pub fn derive_entry(
+    document: &Document,
+    catalog: &dyn FunctionCatalog,
+    _entry: &Name,
+) -> Result<Graph, Refusal> {
+    derive(document, catalog)
+}
 pub fn derive_definition(
     definition: &FunctionDefinition,
     catalog: &dyn FunctionCatalog,
 ) -> Result<Graph, Refusal> {
-    let mut errors = Vec::new();
-    let checked = library(definition, catalog, catalog.registration(definition));
-    errors.extend(checked.errors.iter().cloned());
-    match &checked.graph {
-        Some(graph) if errors.is_empty() => Ok(graph.clone()),
-        _ => Err(Refusal { errors }),
-    }
-}
-
-/// Admits a document against an environment, or refuses it naming every
-/// effect the environment lacks, every effect whose signature does not
-/// serve, every function identity it does not hold, and every fault of the
-/// document itself.
-pub fn admit(document: &Document, environment: &Environment<'_>) -> Result<Admitted, Refusal> {
-    let mut errors = Vec::new();
-    for (effect, required) in &document.manifest.effects {
-        let expected = &required.signature;
-        let reason = match environment.effects.get(effect) {
-            None => Some(RefusalReason::MissingEffect {
-                effect: effect.clone(),
-            }),
-            Some(provided) => serves(&provided.signature, expected).map(|mismatch| {
-                RefusalReason::EffectSignature {
-                    effect: effect.clone(),
-                    expected: expected.clone(),
-                    provided: provided.signature.clone(),
-                    mismatch: Box::new(mismatch),
-                }
-            }),
-        };
-        if let Some(reason) = reason {
-            errors.push(refused(None, reason));
-        }
-    }
-    let graph = check(document, environment.functions, &mut errors);
-    if let Some(graph) = &graph {
-        if let Err(refusal) = environment.check_visibility(graph) {
-            errors.extend(refusal.errors);
-        }
-        for (name, nodes) in graph.session_reads() {
-            if environment.bindings.contains(name) {
-                continue;
-            }
-            for node in nodes {
-                errors.push(refused(
-                    Some(&graph.node(*node).site),
-                    RefusalReason::UnboundVariable { name: name.clone() },
-                ));
-            }
-        }
-    }
-    let identity = document.identity();
-    match graph {
-        Some(graph) if errors.is_empty() => Ok(Admitted { identity, graph }),
-        _ => Err(Refusal { errors }),
-    }
-}
-
-/// Checks a document against `catalog`, pushing every fault it finds. The
-/// view is `None` when the document cannot be linked at all.
-fn check(
-    document: &Document,
-    catalog: &dyn FunctionCatalog,
-    errors: &mut Vec<Refused>,
-) -> Option<Graph> {
-    // Validation reads the definitions of the functions a statement calls
-    // (`K-LIB-002`), so a missing definition is named before anything else
-    // is read.
-    let reach = manifest::reach(document, catalog);
-    let missing = manifest::missing_functions(document, catalog, &reach.reached);
-    if !missing.is_empty() {
-        errors.extend(missing);
-        return None;
-    }
-    if let Err(invalid) = validate_document(document, catalog) {
-        errors.push(invalid.into());
-        return None;
-    }
-    // Structural validation and the scope rule hold of every body the
-    // document reaches, as they do of the document (`K-ADM-008`).
-    for function in reach.reached.keys() {
-        if let Some(definition) = catalog.definition(function) {
-            let checked = library(definition, catalog, catalog.registered(function));
-            errors.extend(checked.errors.iter().cloned());
-        }
-    }
-    manifest::check(document, catalog, &reach, errors);
-
-    let mut linker = Linker::new();
-    linker.unit(Unit::Main, &[], &document.main, None);
-    for (name, function) in &document.functions {
-        linker.unit(
-            Unit::Function(name.clone()),
-            &function.params,
-            &function.body,
-            document
-                .entries
-                .get(name)
-                .map(|entry| entry.signature.clone()),
-        );
-    }
-    errors.append(&mut linker.errors);
-    let mut graph = linker.graph;
-    Typer {
-        graph: &mut graph,
-        catalog,
-        effects: &document.manifest.effects,
-        declared: Some(&document.functions),
-        errors,
-    }
-    .run();
-    flow::derive(&mut graph, catalog);
-    Some(graph)
-}
-
-#[cfg(test)]
-std::thread_local! {
-    pub(crate) static LIBRARY_WORK: std::cell::Cell<(usize, usize, usize)> = const { std::cell::Cell::new((0, 0, 0)) };
-}
-
-struct CheckedLibrary {
-    graph: Option<Graph>,
-    errors: Vec<Refused>,
-}
-
-fn library(
-    definition: &FunctionDefinition,
-    catalog: &dyn FunctionCatalog,
-    registered: Option<&lash_kernel_doc::RegisteredFunction>,
-) -> std::sync::Arc<CheckedLibrary> {
-    if let Some(registered) = registered {
-        return registered.derive(|| {
-            let mut errors = Vec::new();
-            let graph = library_graph(definition, registered.identity(), catalog, &mut errors);
-            CheckedLibrary {
-                graph: Some(graph),
-                errors,
-            }
-        });
-    }
-    let mut errors = Vec::new();
-    let graph = unregistered_library(definition, catalog, &mut errors);
-    std::sync::Arc::new(CheckedLibrary { graph, errors })
-}
-
-fn unregistered_library(
-    definition: &FunctionDefinition,
-    catalog: &dyn FunctionCatalog,
-    errors: &mut Vec<Refused>,
-) -> Option<Graph> {
-    #[cfg(test)]
-    LIBRARY_WORK.with(|work| {
-        let (v, i, g) = work.get();
-        work.set((v + 1, i, g));
-    });
-    if let Err(invalid) = validate_definition(definition, catalog) {
-        errors.push(invalid.into());
-        return None;
-    }
-    if definition.body().is_none() {
-        return Some(Graph::empty());
-    }
-    #[cfg(test)]
-    LIBRARY_WORK.with(|work| {
-        let (v, i, g) = work.get();
-        work.set((v, i + 1, g));
-    });
-    Some(library_graph(
-        definition,
-        definition.identity(),
-        catalog,
-        errors,
-    ))
-}
-
-fn library_graph(
-    definition: &FunctionDefinition,
-    function: lash_kernel_doc::FunctionId,
-    catalog: &dyn FunctionCatalog,
-    errors: &mut Vec<Refused>,
-) -> Graph {
+    lash_kernel_doc::validate_definition(definition, catalog).map_err(|error| Refusal {
+        errors: vec![error.into()],
+    })?;
     let Some(body) = definition.body() else {
-        return Graph::empty();
+        return Ok(Graph::empty());
     };
-    #[cfg(test)]
-    LIBRARY_WORK.with(|work| {
-        let (v, i, g) = work.get();
-        work.set((v, i, g + 1));
-    });
-    let params: Vec<Name> = definition
+    let params = definition
         .signature
         .params
         .iter()
-        .map(|param| param.name.clone())
-        .collect();
-    let mut linker = Linker::new();
+        .map(|p| p.name.clone())
+        .collect::<Vec<_>>();
+    let mut linker = Linker::new(catalog);
     linker.unit(
-        Unit::Library(function),
+        Unit::Library(definition.identity()),
         &params,
         &body.block,
         Some(definition.signature.clone()),
     );
-    errors.append(&mut linker.errors);
+    let mut errors = linker.errors;
     let mut graph = linker.graph;
     Typer {
         graph: &mut graph,
         catalog,
-        effects: &body.effects,
-        declared: None,
-        errors,
+        imports: &body.imports,
+        errors: &mut errors,
     }
     .run();
-    flow::derive(&mut graph, catalog);
-    graph
+    crate::flow::derive(&mut graph, catalog);
+    if errors.is_empty() {
+        Ok(graph)
+    } else {
+        Err(Refusal { errors })
+    }
+}
+pub fn admit(document: &Document, environment: &Environment<'_>) -> Result<Admitted, Refusal> {
+    let graph = derive(document, environment.functions)?;
+    let mut errors = Vec::new();
+    for (name, nodes) in graph.session_reads() {
+        if !environment.bindings.contains(name) {
+            for id in nodes {
+                errors.push(Refused {
+                    site: Some(graph.node(*id).site.clone()),
+                    reason: RefusalReason::UnboundVariable { name: name.clone() },
+                });
+            }
+        }
+    }
+    if errors.is_empty() {
+        Ok(Admitted {
+            identity: document.identity(),
+            graph,
+        })
+    } else {
+        Err(Refusal { errors })
+    }
 }

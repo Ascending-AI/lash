@@ -1108,10 +1108,7 @@
       "labels/python.json",
       "labels/regex.json",
       "labels/typescript.json",
-      "labels/url.json",
-      "src/testing/dataframe.kernel",
-      "src/testing/dataframe.labels.json",
-      "src/testing/dataframe.surface"
+      "labels/url.json"
     ]
   },
   "examples/dataframe": {

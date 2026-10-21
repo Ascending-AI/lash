@@ -3,8 +3,14 @@
 //! makes a slot admit a function, through the one decode the presenters
 //! read too.
 
-use lash_kernel_doc::{MapType, Name, Param, RecordType, RecordTypeField, Signature, Type};
-use lash_tool_shape::{SchemaDocument, ShapeKind};
+use lash_vocabulary::legacy_names::Name;
+use lash_vocabulary::tool_shape::{SchemaDocument, ShapeKind};
+use lash_vocabulary::types::MapType;
+use lash_vocabulary::types::Param;
+use lash_vocabulary::types::RecordType;
+use lash_vocabulary::types::RecordTypeField;
+use lash_vocabulary::types::Signature;
+use lash_vocabulary::types::Type;
 use serde_json::{Value, json};
 
 use crate::{SchemaConflict, SchemaProjectionRefusal, signature_serves};

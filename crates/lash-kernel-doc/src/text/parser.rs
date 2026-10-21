@@ -5,21 +5,25 @@ use std::collections::{BTreeMap, BTreeSet};
 use num_traits::ToPrimitive;
 
 use super::lexer::{Spanned, Token, lex};
-use super::{ParseError, ParseErrorReason, is_keyword};
+use super::{ParseError, ParseErrorReason};
+use crate::FunctionTarget;
 use crate::ast::{
-    ActExpr, ActKind, Action, AssignOrder, Atom, Block, Callee, Catch, Closure, Expr, Function,
-    JoinMode, Literal, MapEntry, Member, Place, ProjectionRead, Protocol, RecordEntry, Rhs, Stmt,
-    TryStmt,
+    ActExpr, ActKind, Action, AssignOrder, Atom, Block, Callee, Catch, Closure, Expr, JoinMode,
+    Literal, MapEntry, Member, Place, ProjectionRead, Protocol, RecordEntry, Rhs, Stmt, TryStmt,
 };
-use crate::document::{Document, Manifest};
+use crate::document::Document;
 use crate::function::{Formula, FunctionBody, FunctionDefinition, Guard, Implementation, Operand};
-use crate::function_value::{FunctionRepresentation, StartAdapter, StartConvention};
-use crate::name::{EffectName, FunctionId, FunctionName, Name, QualifiedName};
+use crate::function_value::{CallablePresentation, FunctionRepresentation, StartConvention};
+use crate::name::{FunctionId, FunctionName, Name, QualifiedName};
 use crate::number::{Float, NumberPolicy};
-use crate::requirement::{ContractId, OperationRequirement};
 use crate::types::{MapType, Param, RecordType, RecordTypeField, Signature, Type};
 use crate::validate::StatementForm;
 use crate::value::Bytes;
+use lash_vocabulary::names::{
+    Brand, Convention, Import, ImportKind, ImportSlot, PackagePath, QualifiedName as ImportName,
+    Segment,
+};
+use lash_vocabulary::type_text::is_keyword;
 
 /// Reads a document from kernel text.
 ///
@@ -44,108 +48,62 @@ pub fn parse_document_with_limits(
     limits: crate::KernelDataLimits,
 ) -> Result<Document, ParseError> {
     let mut parser = Parser::new(text, limits)?;
-    let mut kernel = None;
-    let mut numbers = None;
-    let mut main = None;
-    let mut effects = BTreeMap::new();
-    let mut entries = BTreeMap::new();
-    let mut private_bindings = BTreeSet::new();
-    // Bodies are parsed after every `use` line is known, so a function may
-    // be used above the line that names it.
-    let mut bodies: Vec<(Option<Name>, Vec<Name>, usize)> = Vec::new();
+    let mut document = Document::new(NumberPolicy::Float, Vec::new());
+    document.main = None;
     while parser.peek() != &Token::End {
-        let word = parser.keyword("a top-level item")?;
-        match word.as_str() {
+        match parser.keyword("a document item")?.as_str() {
             "kernel" => {
-                let version = parser.version()?;
-                parser.once(kernel.replace(version), "`kernel`")?;
+                let kernel = parser.version()?;
+                document.requires.kernels = std::collections::BTreeSet::from([kernel]);
             }
             "numbers" => {
-                let policy = match parser.keyword("`float` or `by_spelling`")?.as_str() {
+                document.numbers = match parser.keyword("number policy")?.as_str() {
                     "float" => NumberPolicy::Float,
                     "by_spelling" => NumberPolicy::BySpelling,
-                    _ => return Err(parser.unexpected_previous("`float` or `by_spelling`")),
+                    _ => return Err(parser.unexpected_previous("number policy")),
                 };
-                parser.once(numbers.replace(policy), "`numbers`")?;
             }
-            "effect" => parser.effect_line(&mut effects)?,
-            "use" => parser.use_line()?,
-            "entry" => {
+            "import" => parser.import_line(&mut document.imports)?,
+            "export" => {
                 let name = parser.name()?;
-                let signature = parser.signature()?;
-                let convention = parser.entry_convention()?;
+                let text = parser.text()?;
+                let export = serde_json::from_str(&text)
+                    .map_err(|error| parser.malformed(error.to_string()))?;
+                parser.once(document.exports.insert(name, export), "Export")?;
+            }
+            "definition" => {
+                let definition = parse_definition_with_limits(&parser.text()?, limits)?;
+                let id = definition.identity();
                 parser.once(
-                    entries.insert(
-                        name.clone(),
-                        crate::Entry {
-                            signature,
-                            convention,
-                        },
-                    ),
-                    &format!("entry `{name}`"),
+                    document.functions.insert(id, definition),
+                    "function identity",
                 )?;
             }
+            "native" => {
+                document
+                    .requires
+                    .natives
+                    .insert(parser.function_reference()?);
+            }
             "private" => loop {
-                private_bindings.insert(parser.name()?);
+                document.private_bindings.insert(parser.name()?);
                 if !parser.eat(&Token::Comma) {
                     break;
                 }
             },
-            "fn" => {
-                let name = parser.name()?;
-                let params = parser.names()?;
-                let start_at = parser.position;
-                parser.skip_start()?;
-                bodies.push((Some(name), params, start_at));
-                parser.skip_block()?;
-            }
             "main" => {
-                bodies.push((None, Vec::new(), parser.position));
-                parser.skip_block()?;
+                parser.body_imports = document.imports.clone();
+                parser.uses = document.function_names();
+                let block = parser.block()?;
+                parser.once(document.main.replace(block), "main")?;
             }
-            _ => return Err(parser.unexpected_previous("a top-level item")),
+            _ => return Err(parser.unexpected_previous("a document item")),
         }
     }
-    let end = parser.position;
-    let mut functions = BTreeMap::new();
-    for (name, params, at) in bodies {
-        parser.position = at;
-        let start = match name {
-            Some(_) => parser.start()?,
-            None => None,
-        };
-        let body = parser.block()?;
-        match name {
-            Some(name) => {
-                let item = format!("function `{name}`");
-                parser.once(
-                    functions.insert(
-                        name,
-                        Function {
-                            params,
-                            body,
-                            start,
-                        },
-                    ),
-                    &item,
-                )?;
-            }
-            None => parser.once(main.replace(body), "`main`")?,
-        }
-    }
-    parser.position = end;
-    Ok(Document {
-        manifest: Manifest {
-            kernel: kernel.ok_or_else(|| parser.missing("the `kernel` line"))?,
-            effects,
-            functions: std::mem::take(&mut parser.uses),
-            numbers: numbers.ok_or_else(|| parser.missing("the `numbers` line"))?,
-        },
-        functions,
-        entries,
-        private_bindings,
-        main: main.ok_or_else(|| parser.missing("`main`"))?,
-    })
+    document
+        .functions
+        .extend(parser.locals.into_iter().map(|f| (f.identity(), f)));
+    Ok(document)
 }
 
 /// Reads a signature, `(name: Type, …) -> Type`, from kernel text: the
@@ -167,6 +125,22 @@ pub fn parse_definition_with_limits(
     text: &str,
     limits: crate::KernelDataLimits,
 ) -> Result<FunctionDefinition, ParseError> {
+    let (definition, locals) = parse_definition_with_locals_and_limits(text, limits)?;
+    if !locals.is_empty() {
+        return Err(ParseError {line:1,column:1,reason:ParseErrorReason::Malformed {problem:"inline closures require parse_definition_with_locals so their definitions are retained".into()}});
+    }
+    Ok(definition)
+}
+/// Parse a helper and lift each inline closure into its own local function definition.
+pub fn parse_definition_with_locals(
+    text: &str,
+) -> Result<(FunctionDefinition, Vec<FunctionDefinition>), ParseError> {
+    parse_definition_with_locals_and_limits(text, crate::KernelDataLimits::standard())
+}
+pub fn parse_definition_with_locals_and_limits(
+    text: &str,
+    limits: crate::KernelDataLimits,
+) -> Result<(FunctionDefinition, Vec<FunctionDefinition>), ParseError> {
     crate::document_work::note_definition_parse();
     let mut parser = Parser::new(text, limits)?;
     parser.expect_keyword("function")?;
@@ -175,10 +149,11 @@ pub fn parse_definition_with_limits(
     let mut kernel = None;
     let mut errors = BTreeSet::new();
     let mut charge = None;
+    let mut statements = false;
     let mut guard = None;
     let mut native = false;
     let mut native_version = None;
-    let mut effects = BTreeMap::new();
+    let mut imports = BTreeMap::new();
     let mut body_start = None;
     while parser.peek() != &Token::End {
         let word = parser.keyword("a definition item")?;
@@ -193,6 +168,10 @@ pub fn parse_definition_with_limits(
                     break;
                 }
             },
+            "metering" => {
+                parser.expect_keyword("statements")?;
+                statements = true;
+            }
             "charge" => {
                 let formula = parser.formula()?;
                 parser.once(charge.replace(formula), "`charge`")?;
@@ -209,7 +188,7 @@ pub fn parse_definition_with_limits(
                     parser.once(native_version.replace(version), "the native version")?;
                 }
             }
-            "effect" => parser.effect_line(&mut effects)?,
+            "import" => parser.import_line(&mut imports)?,
             "use" => parser.use_line()?,
             "body" => {
                 parser.once(body_start.replace(parser.position), "`body`")?;
@@ -221,35 +200,52 @@ pub fn parse_definition_with_limits(
     let body = match body_start {
         Some(start) => {
             parser.position = start;
+            parser.body_imports = imports.clone();
+            parser.kernel = kernel.unwrap_or(crate::KERNEL_VERSION);
             let block = parser.block()?;
+            for local in &parser.locals {
+                parser.uses.insert(local.identity(), local.name.clone());
+            }
             Some(FunctionBody {
                 functions: std::mem::take(&mut parser.uses),
-                effects,
+                imports,
                 block,
             })
         }
         // Only a body performs: an `effect` line needs one.
-        None if !effects.is_empty() => {
+        None if !imports.is_empty() => {
             return Err(parser.missing("the `body` its `effect` lines are performed by"));
         }
         None => None,
     };
     let implementation = match (native, body) {
-        (true, None) => Implementation::Native,
-        (false, Some(body)) => Implementation::Body(body),
-        (true, Some(body)) => Implementation::Both(body),
-        (false, None) => return Err(parser.missing("`native`, a `body`, or both")),
+        (true, None) => Implementation::Native {
+            charge: charge.ok_or_else(|| parser.missing("native charge formula"))?,
+        },
+        (false, Some(body)) => Implementation::Guest {
+            body,
+            metering: if statements {
+                crate::Metering::Statements
+            } else {
+                crate::Metering::Formula(charge.ok_or_else(|| parser.missing("guest metering"))?)
+            },
+        },
+        (true, Some(body)) => Implementation::Both {
+            body,
+            charge: charge.ok_or_else(|| parser.missing("native charge formula"))?,
+        },
+        (false, None) => return Err(parser.missing("native or body")),
     };
-    Ok(FunctionDefinition {
+    let definition = FunctionDefinition {
         kernel: kernel.ok_or_else(|| parser.missing("the `kernel` line"))?,
         name,
         signature,
         errors,
-        charge: charge.ok_or_else(|| parser.missing("the `charge` line"))?,
         guard,
         implementation,
         native_version: native_version.unwrap_or(crate::FIRST_NATIVE_VERSION),
-    })
+    };
+    Ok((definition, parser.locals))
 }
 
 struct Parser {
@@ -257,6 +253,9 @@ struct Parser {
     position: usize,
     /// The `use` lines read so far.
     uses: BTreeMap<FunctionId, FunctionName>,
+    body_imports: BTreeMap<ImportSlot, Import>,
+    kernel: u32,
+    locals: Vec<FunctionDefinition>,
     depth: usize,
     limit: usize,
 }
@@ -269,6 +268,9 @@ impl Parser {
             tokens: lex(text)?,
             position: 0,
             uses: BTreeMap::new(),
+            body_imports: BTreeMap::new(),
+            kernel: crate::KERNEL_VERSION,
+            locals: Vec::new(),
             depth: 0,
             limit: limits.document_depth(),
         })
@@ -461,28 +463,66 @@ impl Parser {
         }
     }
 
-    /// An `effect` line after its keyword: the operation's name, the
-    /// signature it is required under and its contract.
-    fn effect_line(
-        &mut self,
-        effects: &mut BTreeMap<EffectName, OperationRequirement>,
-    ) -> Parsed<()> {
-        let name = self.qualified_name()?;
-        let signature = self.signature()?;
-        self.expect_keyword("contract")?;
-        let contract = ContractId::new(self.text()?);
-        self.once(
-            effects.insert(
-                name.clone(),
-                OperationRequirement {
-                    signature,
-                    contract,
-                },
-            ),
-            &format!("effect `{name}`"),
-        )
+    fn malformed(&self, problem: String) -> ParseError {
+        let mut error = self.unexpected("valid document data");
+        error.reason = ParseErrorReason::Malformed { problem };
+        error
     }
-
+    fn import_line(&mut self, imports: &mut BTreeMap<ImportSlot, Import>) -> Parsed<()> {
+        let slot = ImportSlot(self.version()?);
+        let kind = self.keyword("Import kind")?;
+        let text = self.qualified_name()?.to_string();
+        let mut segments = text.split('.').collect::<Vec<_>>();
+        let member = Segment::new(segments.pop().unwrap_or_default())
+            .map_err(|error| self.malformed(error.to_string()))?;
+        let package = PackagePath::parse(&segments.join("."))
+            .map_err(|error| self.malformed(error.to_string()))?;
+        let name = ImportName {
+            package: package.clone(),
+            member: member.clone(),
+            type_member: None,
+        };
+        let kind = match kind.as_str() {
+            "operation" => ImportKind::Operation {
+                signature: self.signature()?,
+            },
+            "code" => {
+                let signature = self.signature()?;
+                let convention = match self.keyword("semantic convention")?.as_str() {
+                    "direct" => Convention::Direct,
+                    "ts_direct" => Convention::TsDirect,
+                    "ts_args" => Convention::TsArgsList,
+                    "py_direct" => Convention::PyDirect,
+                    _ => return Err(self.unexpected_previous("semantic convention")),
+                };
+                ImportKind::Code {
+                    signature,
+                    convention,
+                }
+            }
+            "type" => ImportKind::Type {
+                brand: Brand {
+                    package,
+                    name: member,
+                },
+            },
+            "error" => ImportKind::Error {
+                kind: Brand {
+                    package,
+                    name: member,
+                },
+            },
+            _ => return Err(self.unexpected_previous("Import kind")),
+        };
+        self.once(imports.insert(slot, Import { name, kind }), "Import slot")
+    }
+    fn target(&mut self) -> Parsed<FunctionTarget> {
+        if self.eat_word("import") {
+            Ok(FunctionTarget::Import(ImportSlot(self.version()?)))
+        } else {
+            self.function_reference().map(FunctionTarget::Local)
+        }
+    }
     fn use_line(&mut self) -> Parsed<()> {
         let name = self.qualified_name()?;
         self.expect(&Token::Equals)?;
@@ -645,7 +685,7 @@ impl Parser {
                 if self.eat_word("via") {
                     Stmt::ReturnVia {
                         value,
-                        policy: self.function_reference()?,
+                        policy: self.target()?,
                     }
                 } else {
                     Stmt::Return { value }
@@ -722,7 +762,7 @@ impl Parser {
             }
             Some(StatementForm::Perform) => {
                 self.position += 1;
-                let effect = self.qualified_name()?;
+                let slot = ImportSlot(self.version()?);
                 self.expect(&Token::LParen)?;
                 let args = self.exprs(&Token::RParen)?;
                 self.expect_keyword("as")?;
@@ -730,20 +770,11 @@ impl Parser {
                 let then_yield = self.then_yield()?;
                 return Ok(Some(ActExpr {
                     kind: ActKind::Perform {
-                        effect,
+                        slot,
                         result,
                         then_yield,
                     },
                     args,
-                }));
-            }
-            Some(StatementForm::Sleep) => {
-                self.position += 1;
-                let duration = self.act_operand()?;
-                let then_yield = self.then_yield()?;
-                return Ok(Some(ActExpr {
-                    kind: ActKind::Sleep { then_yield },
-                    args: vec![duration],
                 }));
             }
             Some(StatementForm::Join) => {
@@ -776,7 +807,7 @@ impl Parser {
                 let value = self.act_operand()?;
                 self.expect_keyword("via")?;
                 return Ok(Some(ActExpr {
-                    kind: ActKind::Await(self.function_reference()?),
+                    kind: ActKind::Await(self.target()?),
                     args: vec![value],
                 }));
             }
@@ -835,9 +866,9 @@ impl Parser {
     fn act_callee(&mut self) -> Parsed<Callee> {
         Ok(
             match self.keyword("`call`, `apply` or `invoke`")?.as_str() {
-                "call" => Callee::Declared(self.name()?),
+                "call" => self.target()?.callee(),
                 "apply" => Callee::Value(self.name()?),
-                "invoke" => Callee::Library(self.function_reference()?),
+                "invoke" => self.target()?.callee(),
                 _ => return Err(self.unexpected_previous("`call`, `apply` or `invoke`")),
             },
         )
@@ -851,7 +882,6 @@ impl Parser {
         Some(match word.as_str() {
             "call" | "apply" | "invoke" => StatementForm::Call,
             "perform" => StatementForm::Perform,
-            "sleep" => StatementForm::Sleep,
             "join" => StatementForm::Join,
             "yield" => StatementForm::Yield,
             "spawn" => StatementForm::Spawn,
@@ -877,20 +907,13 @@ impl Parser {
             }
             StatementForm::Perform => {
                 self.position += 1;
-                let effect = self.qualified_name()?;
+                let slot = ImportSlot(self.version()?);
                 let args = self.atoms()?;
                 self.expect_keyword("as")?;
                 Action::Perform {
-                    effect,
+                    slot,
                     args,
                     result: self.ty()?,
-                    then_yield: self.then_yield()?,
-                }
-            }
-            StatementForm::Sleep => {
-                self.position += 1;
-                Action::Sleep {
-                    duration: self.atom()?,
                     then_yield: self.then_yield()?,
                 }
             }
@@ -909,7 +932,7 @@ impl Parser {
                 let value = self.atom()?;
                 self.expect_keyword("via")?;
                 Action::Await {
-                    policy: self.function_reference()?,
+                    policy: self.target()?,
                     value,
                 }
             }
@@ -940,7 +963,7 @@ impl Parser {
     fn protocol(&mut self) -> Parsed<Protocol> {
         self.expect(&Token::LParen)?;
         self.expect_keyword("open")?;
-        let open = self.function_reference()?;
+        let open = self.target()?;
         let mut hooks = [None, None, None];
         let mut after = 0;
         while self.eat(&Token::Comma) {
@@ -952,7 +975,7 @@ impl Parser {
                 return Err(self.unexpected("`next`, `item` or `check`, in that order"));
             };
             self.position += 1;
-            hooks[after + at] = Some(self.function_reference()?);
+            hooks[after + at] = Some(self.target()?);
             after += at + 1;
         }
         self.expect(&Token::RParen)?;
@@ -1045,7 +1068,7 @@ impl Parser {
             Token::Bytes(bytes) => Literal::Bytes(Bytes::new(bytes.clone())),
             Token::Ampersand => {
                 self.position += 1;
-                return Ok(Some(Literal::Function(self.name()?)));
+                return Ok(Some(Literal::Function(self.function_reference()?)));
             }
             _ => return Ok(None),
         };
@@ -1169,8 +1192,6 @@ impl Parser {
                     self.expect(&Token::RParen)?;
                     Ok(Expr::Let { name, value, body })
                 }
-                "clock" => Ok(Expr::Clock),
-                "random" => Ok(Expr::Random),
                 "read" => {
                     self.expect(&Token::LParen)?;
                     let handle = self.expr()?;
@@ -1180,12 +1201,48 @@ impl Parser {
                     Ok(Expr::Read(Box::new(ProjectionRead { handle, request })))
                 }
                 "fn" => {
-                    let params = self.names()?;
-                    let start = self.start()?;
+                    let (function, start) = if self.peek() == &Token::LParen {
+                        let params = self.names()?;
+                        let start = self.start()?;
+                        let block = self.block()?;
+                        let body = FunctionBody {
+                            functions: self.uses.clone(),
+                            imports: self.body_imports.clone(),
+                            block,
+                        };
+                        let definition = FunctionDefinition {
+                            kernel: self.kernel,
+                            name: FunctionName::new("kernel.anonymous")
+                                .unwrap_or_else(|_| unreachable!("valid name")),
+                            signature: Signature {
+                                params: params
+                                    .into_iter()
+                                    .map(|name| Param {
+                                        name,
+                                        ty: Type::Any,
+                                        optional: false,
+                                    })
+                                    .collect(),
+                                result: Type::Any,
+                            },
+                            errors: BTreeSet::new(),
+                            guard: None,
+                            implementation: Implementation::Guest {
+                                body,
+                                metering: crate::Metering::Statements,
+                            },
+                            native_version: crate::FIRST_NATIVE_VERSION,
+                        };
+                        let id = definition.identity();
+                        self.uses.insert(id, definition.name.clone());
+                        self.locals.push(definition);
+                        (id, start)
+                    } else {
+                        (self.function_reference()?, self.start()?)
+                    };
                     Ok(Expr::Closure(Box::new(Closure {
-                        params,
-                        body: self.block()?,
-                        start,
+                        function,
+                        presentation: start,
                     })))
                 }
                 "map" => {
@@ -1255,8 +1312,8 @@ impl Parser {
 
     /// A start adapter, if one follows a function's parameters:
     /// `start <signature> bare|token(<tag>, <slot>) direct|ts_args(<await>, <same>)`.
-    fn start(&mut self) -> Parsed<Option<StartAdapter>> {
-        if !self.is_word("start") {
+    fn start(&mut self) -> Parsed<Option<CallablePresentation>> {
+        if !self.is_word("presentation") {
             return Ok(None);
         }
         self.position += 1;
@@ -1276,20 +1333,11 @@ impl Parser {
             _ => return Err(self.unexpected_previous("`bare` or `token`")),
         };
         let convention = self.convention()?;
-        Ok(Some(StartAdapter {
+        Ok(Some(CallablePresentation {
             signature,
             representation,
             convention,
         }))
-    }
-
-    fn entry_convention(&mut self) -> Parsed<StartConvention> {
-        if matches!(self.peek(), Token::Word(word) if word == "direct" || word == "ts_args" || word == "ts_direct" || word == "py_direct")
-        {
-            self.convention()
-        } else {
-            Ok(StartConvention::Direct)
-        }
     }
 
     fn convention(&mut self) -> Parsed<StartConvention> {
@@ -1298,36 +1346,27 @@ impl Parser {
             "direct" => StartConvention::Direct,
             "ts_direct" => {
                 self.expect(&Token::LParen)?;
-                let await_fn = self.function_reference()?;
+                let await_fn = self.target()?;
                 self.expect(&Token::RParen)?;
                 StartConvention::TsDirect { await_fn }
             }
             "ts_args" => {
                 self.expect(&Token::LParen)?;
-                let await_fn = self.function_reference()?;
+                let await_fn = self.target()?;
                 self.expect(&Token::Comma)?;
-                let same_fn = self.function_reference()?;
+                let same_fn = self.target()?;
                 self.expect(&Token::RParen)?;
                 StartConvention::TsArgsList { await_fn, same_fn }
             }
             "py_direct" => {
                 self.expect(&Token::LParen)?;
-                let cleanup = self.function_reference()?;
+                let cleanup = self.target()?;
                 self.expect(&Token::RParen)?;
                 StartConvention::PyDirect { cleanup }
             }
             _ => return Err(self.unexpected_previous(expected)),
         };
         Ok(convention)
-    }
-
-    /// Steps over a start adapter before the bodies are read, when the
-    /// `use` lines its functions name may still follow.
-    fn skip_start(&mut self) -> Parsed<()> {
-        while !matches!(self.peek(), Token::LBrace | Token::End) {
-            self.position += 1;
-        }
-        Ok(())
     }
 
     fn signature(&mut self) -> Parsed<Signature> {

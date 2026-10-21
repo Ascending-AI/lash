@@ -1,32 +1,10 @@
-//! The workflow contract every dialect's module mode implements (FIG-6380).
-//!
-//! A workflow module is source a host imports whole, in any dialect
-//! ([`crate::Mode::Module`]). Each dialect reads its own syntax, lowers its
-//! own bodies with its own helpers and maps its own annotations; the rules
-//! below are the same in all of them, and so are the refusal codes:
-//!
-//! - An entry is a top-level declaration statement, not inside a block,
-//!   whose value is an async function, by declaration or by `const`. A
-//!   function declared anywhere else is ordinary code of the module.
-//! - An entry captures nothing of the module: no module binding, no other
-//!   entry and no top-level helper. A host starts it in a run of its own,
-//!   which holds only its arguments
-//!   ([`ModuleRefusal::CapturedModuleBinding`]).
-//! - An entry's signature is the kernel meaning of the annotations its
-//!   dialect wrote. An annotation with none is refused
-//!   ([`ModuleRefusal::UnmappableEntryAnnotation`]), and so is a parameter
-//!   default ([`ModuleRefusal::EntryDefault`]): a start passes every
-//!   argument the signature names.
-//! - Two entries of one name ([`ModuleRefusal::DuplicateEntry`]) and a
-//!   module with no entry ([`ModuleRefusal::EmptyModule`]) are refused.
-//!
-//! [`Module`] holds the entries a front end lowered and assembles them into
-//! the document, in name order, so every dialect's documents order and
-//! collide alike. Parser errors stay each dialect's own.
-
+//! Module Exports share the document function convention; sync and async functions both qualify.
 use std::collections::BTreeMap;
 
-use lash_kernel_doc::{Document, Function, Name, Signature, Span};
+use lash_kernel_doc::{Document, FunctionDefinition, Span};
+use lash_vocabulary::legacy_names::FunctionId;
+use lash_vocabulary::legacy_names::Name;
+use lash_vocabulary::types::Signature;
 
 use crate::{Diagnostic, DiagnosticKind, Note};
 
@@ -36,8 +14,6 @@ use crate::{Diagnostic, DiagnosticKind, Note};
 pub enum ModuleRefusal {
     /// Two entries have one name.
     DuplicateEntry,
-    /// The module declares no entry.
-    EmptyModule,
     /// An entry reads a binding of the module: another entry, a top-level
     /// helper or a top-level value.
     CapturedModuleBinding,
@@ -49,9 +25,8 @@ pub enum ModuleRefusal {
 
 impl ModuleRefusal {
     /// Every rule, for a caller that lists them.
-    pub const ALL: [Self; 5] = [
+    pub const ALL: [Self; 4] = [
         Self::DuplicateEntry,
-        Self::EmptyModule,
         Self::CapturedModuleBinding,
         Self::UnmappableEntryAnnotation,
         Self::EntryDefault,
@@ -62,7 +37,6 @@ impl ModuleRefusal {
     pub const fn code(self) -> &'static str {
         match self {
             Self::DuplicateEntry => "WORKFLOW_DUPLICATE_ENTRY",
-            Self::EmptyModule => "WORKFLOW_EMPTY_MODULE",
             Self::CapturedModuleBinding => "WORKFLOW_CAPTURED_MODULE_BINDING",
             Self::UnmappableEntryAnnotation => "WORKFLOW_UNMAPPABLE_ENTRY_ANNOTATION",
             Self::EntryDefault => "WORKFLOW_ENTRY_DEFAULT",
@@ -75,10 +49,9 @@ impl ModuleRefusal {
     pub const fn kind(self) -> DiagnosticKind {
         match self {
             Self::DuplicateEntry => DiagnosticKind::ProgramDefect,
-            Self::EmptyModule
-            | Self::CapturedModuleBinding
-            | Self::UnmappableEntryAnnotation
-            | Self::EntryDefault => DiagnosticKind::Refusal,
+            Self::CapturedModuleBinding | Self::UnmappableEntryAnnotation | Self::EntryDefault => {
+                DiagnosticKind::Refusal
+            }
         }
     }
 
@@ -87,9 +60,6 @@ impl ModuleRefusal {
     pub const fn repair(self) -> &'static str {
         match self {
             Self::DuplicateEntry => "rename one of the entries",
-            Self::EmptyModule => {
-                "declare the workflow as a top-level async function, by declaration or by const"
-            }
             Self::CapturedModuleBinding => {
                 "pass the value as a parameter of the entry, or define the helper inside its body"
             }
@@ -157,7 +127,9 @@ pub struct Entry {
     pub name: Name,
     /// The entry's declaration in the source.
     pub span: Option<Span>,
-    pub function: Function,
+    pub function: FunctionDefinition,
+    pub asynchronous: bool,
+    pub rest: bool,
     pub signature: Signature,
     pub convention: lash_kernel_doc::StartConvention,
     pub notes: Vec<Note>,
@@ -188,12 +160,13 @@ impl Module {
     ///
     /// [`ModuleRefusal::DuplicateEntry`] at the second declaration when the
     /// module has an entry of its name.
-    pub fn add(&mut self, entry: Entry) -> Result<(), ModuleError> {
+    pub fn add(&mut self, entry: Entry) -> Result<FunctionId, ModuleError> {
         if self.entries.contains_key(&entry.name) {
             return Err(duplicate(&entry.name, entry.span));
         }
+        let id = entry.function.identity();
         self.entries.insert(entry.name.clone(), entry);
-        Ok(())
+        Ok(id)
     }
 
     /// Puts every entry into `document`, as a declared function and an
@@ -207,27 +180,25 @@ impl Module {
     pub fn assemble(
         self,
         document: &mut Document,
-        notes: &mut BTreeMap<Name, Vec<Note>>,
+        notes: &mut BTreeMap<FunctionId, Vec<Note>>,
     ) -> Result<(), ModuleError> {
-        if self.entries.is_empty() {
-            return Err(ModuleRefusal::EmptyModule.at(
-                "the module declares no entry: no top-level async function",
-                None,
-            ));
-        }
         for (name, entry) in self.entries {
-            if document.functions.contains_key(&name) || document.entries.contains_key(&name) {
+            if document.exports.contains_key(&name) {
                 return Err(duplicate(&name, entry.span));
             }
-            document.functions.insert(name.clone(), entry.function);
-            document.entries.insert(
+            let function = entry.function.identity();
+            document.functions.insert(function, entry.function);
+            document.exports.insert(
                 name.clone(),
-                lash_kernel_doc::Entry {
+                lash_kernel_doc::Export::Function(lash_kernel_doc::FunctionExport {
+                    function,
                     signature: entry.signature,
                     convention: entry.convention,
-                },
+                    asynchronous: entry.asynchronous,
+                    rest: entry.rest,
+                }),
             );
-            notes.insert(name, entry.notes);
+            notes.insert(function, entry.notes);
         }
         Ok(())
     }

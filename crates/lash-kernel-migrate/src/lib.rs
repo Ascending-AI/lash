@@ -40,7 +40,7 @@ mod saved;
 #[cfg(feature = "synthetic-next")]
 mod synthetic;
 
-pub use adopt::{Relink, adopt, relink};
+pub use adopt::{AdoptedUses, AdoptionRefusal, adopt};
 pub use migration::{
     DocumentRefusal, KernelMigrationRefusal, MigrateRegistryError, Migration, ParkedRefusal,
     Rewritten, migrate_registry, migration_from,

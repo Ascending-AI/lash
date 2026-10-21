@@ -5,7 +5,7 @@
 use num_bigint::BigInt;
 use num_traits::{FromPrimitive, ToPrimitive, Zero};
 
-use crate::{Datum, ErrorDatum, Float, Integer, Name, NumberPolicy, NumberToken, Type};
+use crate::{Datum, ErrorDatum, Float, Integer, NumberPolicy, NumberToken, Type};
 
 /// How an inbound datum is read.
 pub struct Decoder<'a> {
@@ -14,7 +14,7 @@ pub struct Decoder<'a> {
     /// How a bare number decodes.
     pub policy: NumberPolicy,
     /// Whether the document declares a function of this name.
-    pub declared: &'a dyn Fn(&Name) -> bool,
+    pub declared: &'a dyn Fn(&lash_vocabulary::names::CallableId) -> bool,
 }
 
 /// Why a datum does not fit a type: the problem, at the record fields that
@@ -284,7 +284,7 @@ impl Decoder<'_> {
                         (None, Some(rest)) => rest.as_ref(),
                         (None, None) => {
                             return Err(DecodeMismatch::new(format!(
-                                "the record type has no field `{name}`"
+                                "the record type has no field `{name:?}`"
                             )));
                         }
                     };
@@ -374,12 +374,12 @@ impl Decoder<'_> {
         }
     }
 
-    fn function(&self, name: &Name, datum: &Datum) -> Fit {
+    fn function(&self, name: &lash_vocabulary::names::CallableId, datum: &Datum) -> Fit {
         if (self.declared)(name) {
             Ok(datum.clone())
         } else {
             Err(DecodeMismatch::new(format!(
-                "the document declares no function `{name}`"
+                "the document declares no function `{name:?}`"
             )))
         }
     }

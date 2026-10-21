@@ -3,13 +3,19 @@
 //! rewrite that moves no node.
 
 use lash_kernel_doc::{Correspondence, Survivor};
+
 use std::collections::BTreeMap;
 use std::convert::Infallible;
 
 use lash_kernel_doc::{
-    Block, Document, FunctionBody, FunctionCatalog, FunctionDefinition, FunctionId, FunctionName,
-    Implementation, Node, NodeMut, Site, Unit,
+    Block, Document, FunctionBody, FunctionCatalog, FunctionDefinition, Implementation, Node,
+    NodeMut,
 };
+
+use lash_vocabulary::legacy_names::FunctionId;
+use lash_vocabulary::legacy_names::FunctionName;
+use lash_vocabulary::sites::Site;
+use lash_vocabulary::sites::Unit;
 
 use crate::migration::DocumentRefusal;
 
@@ -60,7 +66,8 @@ fn redeclare_one(
         redeclare_one(definition, called, catalog, done, ordered)?;
     }
     let mut redeclared = definition(written)?;
-    if let Implementation::Body(body) | Implementation::Both(body) = &mut redeclared.implementation
+    if let Implementation::Guest { body, .. } | Implementation::Both { body, .. } =
+        &mut redeclared.implementation
     {
         replace_in_body(function, body, done);
     }
@@ -78,8 +85,40 @@ fn redeclare_one(
 /// with the one `functions` maps it to. A function the map does not name is
 /// kept.
 pub fn replace_functions(document: &mut Document, functions: &BTreeMap<FunctionId, FunctionId>) {
-    document.manifest.functions = replace_listed(&mut document.manifest.functions, functions);
     let Ok(()) = document.try_each_function_mut(|_, function| replace(function, functions));
+    fn export(
+        f: &mut lash_kernel_doc::FunctionExport,
+        functions: &BTreeMap<FunctionId, FunctionId>,
+    ) {
+        if let Some(id) = functions.get(&f.function) {
+            f.function = *id;
+        }
+        for target in f.convention.targets_mut() {
+            if let lash_kernel_doc::FunctionTarget::Local(id) = target
+                && let Some(new) = functions.get(id)
+            {
+                *id = *new;
+            }
+        }
+    }
+    for value in document.exports.values_mut() {
+        match value {
+            lash_kernel_doc::Export::Function(f) => export(f, functions),
+            lash_kernel_doc::Export::Type(ty) => {
+                if let Some(id) = functions.get(&ty.checker) {
+                    ty.checker = *id;
+                }
+                for member in ty.members.values_mut() {
+                    match member {
+                        lash_kernel_doc::TypeMember::Static(f)
+                        | lash_kernel_doc::TypeMember::Method(f)
+                        | lash_kernel_doc::TypeMember::Property(f) => export(f, functions),
+                    }
+                }
+            }
+            lash_kernel_doc::Export::Error { .. } => {}
+        }
+    }
 }
 
 /// Replaces each library function the body of `function` lists and holds,
@@ -120,17 +159,26 @@ fn replace(
 /// declared function: every node of `base` to the same site of `result`.
 /// A node of a library function's body is not listed.
 pub fn unchanged(base: &Document, result: &Document) -> Result<Correspondence, DocumentRefusal> {
-    Correspondence::of(base.identity(), result.identity(), unmoved(base))
-        .ok_or(DocumentRefusal::Correspondence)
+    Correspondence::of(
+        base.identity(),
+        result.identity(),
+        unmoved(base)
+            .into_iter()
+            .filter(|survivor| {
+                base.node(&survivor.from)
+                    .zip(result.node(&survivor.to))
+                    .is_some_and(|(old, new)| old == new)
+            })
+            .collect(),
+    )
+    .ok_or(DocumentRefusal::Correspondence)
 }
 
 /// Every node of `base`'s `main` and declared functions, at the same site.
 pub(crate) fn unmoved(base: &Document) -> Vec<Survivor> {
     let mut entries = Vec::new();
-    same_sites(Unit::Main, Unit::Main, &base.main, &mut entries);
-    for (name, function) in &base.functions {
-        let unit = Unit::Function(name.clone());
-        same_sites(unit.clone(), unit, &function.body, &mut entries);
+    for (unit, body) in base.units() {
+        same_sites(unit.clone(), unit, body, &mut entries);
     }
     entries
 }
@@ -159,132 +207,5 @@ pub(crate) fn same_sites(from: Unit, to: Unit, body: &Block, entries: &mut Vec<S
             to: Site::new(to.clone(), path),
             edited: false,
         });
-    }
-}
-
-/// Extends a rewrite with body nodes whose semantic identity survives after
-/// relinking callees. Duplicate statements are ambiguous and are not carried:
-/// a vector position is never evidence of a node's identity.
-pub(crate) fn library_sites(
-    correspondence: Correspondence,
-    functions: &BTreeMap<FunctionId, FunctionId>,
-    catalog: &dyn FunctionCatalog,
-) -> Result<Correspondence, DocumentRefusal> {
-    let mut entries = correspondence.entries().to_vec();
-    for (&from, &to) in functions {
-        let Some(old) = catalog.definition(&from).and_then(FunctionDefinition::body) else {
-            continue;
-        };
-        let Some(new) = catalog.definition(&to).and_then(FunctionDefinition::body) else {
-            continue;
-        };
-        let mut normalized = old.clone();
-        replace_in_body(from, &mut normalized, functions);
-        if normalized.block == new.block {
-            same_sites(
-                Unit::Library(from),
-                Unit::Library(to),
-                &normalized.block,
-                &mut entries,
-            );
-            continue;
-        }
-        let mut pending = vec![(
-            Vec::new(),
-            Vec::new(),
-            Node::Block(&normalized.block),
-            Node::Block(&new.block),
-        )];
-        while let Some((old_path, new_path, a, b)) = pending.pop() {
-            entries.push(Survivor::new(
-                Site::new(Unit::Library(from), old_path.clone()),
-                Site::new(Unit::Library(to), new_path.clone()),
-                false,
-            ));
-            if let (Node::Block(a), Node::Block(b)) = (a, b) {
-                let mut old_end = old_path.clone();
-                old_end.push(a.len() as u32);
-                let mut new_end = new_path.clone();
-                new_end.push(b.len() as u32);
-                entries.push(Survivor::new(
-                    Site::new(Unit::Library(from), old_end),
-                    Site::new(Unit::Library(to), new_end),
-                    false,
-                ));
-                for (i, statement) in a.iter().enumerate() {
-                    if a.iter().filter(|other| *other == statement).count() != 1 {
-                        continue;
-                    }
-                    let mut matches = b
-                        .iter()
-                        .enumerate()
-                        .filter(|(_, other)| *other == statement);
-                    let Some((j, successor)) = matches.next() else {
-                        continue;
-                    };
-                    if matches.next().is_some() {
-                        continue;
-                    }
-                    let mut old_child = old_path.clone();
-                    old_child.push(i as u32);
-                    let mut new_child = new_path.clone();
-                    new_child.push(j as u32);
-                    pending.push((
-                        old_child,
-                        new_child,
-                        Node::Stmt(statement),
-                        Node::Stmt(successor),
-                    ));
-                }
-            } else {
-                // The parent statement is equal after identity substitution,
-                // so its grammar, children and evaluation order are identical.
-                for (i, (a, b)) in (0u32..).zip(a.children().into_iter().zip(b.children())) {
-                    let mut old_child = old_path.clone();
-                    old_child.push(i);
-                    let mut new_child = new_path.clone();
-                    new_child.push(i);
-                    pending.push((old_child, new_child, a, b));
-                }
-            }
-        }
-    }
-    Correspondence::of(correspondence.base, correspondence.result, entries)
-        .ok_or(DocumentRefusal::Correspondence)
-}
-
-#[cfg(test)]
-mod tests {
-    use std::collections::BTreeMap;
-
-    use lash_kernel_doc::{FunctionId, parse_document};
-
-    /// K-DOC-002 (FIG-6865): replacing a library function rewrites every
-    /// slot that holds it, so no slot keeps the old identity: an `await` in
-    /// either spelling, a call, a spawn, a native call, a returning policy,
-    /// a loop protocol, start adapters and an entry's convention.
-    #[test]
-    fn replacing_a_function_leaves_no_slot_holding_the_old_identity() {
-        let old = FunctionId::parse(&"a".repeat(64)).unwrap();
-        let new = FunctionId::parse(&"b".repeat(64)).unwrap();
-        let mut document = parse_document(&format!(
-            "kernel 1\nnumbers float\nuse helper.old = @{old}\n\
-             entry run(x: Any) -> Any ts_args(helper.old, helper.old)\n\
-             fn run(x) start (x: Any) -> Any bare py_direct(helper.old) {{\n\
-             let awaited = await x via helper.old\n\
-             let nested = (await x via helper.old,)\n\
-             let called = invoke helper.old(x)\n\
-             let spawned = spawn invoke helper.old(x)\n\
-             let direct = helper.old(x)\n\
-             for item in x via (open helper.old, next helper.old, item helper.old, check helper.old) {{}}\n\
-             let f = fn(a) start (a: Any) -> Any bare ts_direct(helper.old) {{ return a }}\n\
-             return x via helper.old\n\
-             }}\nmain {{}}\n"
-        ))
-        .unwrap();
-        super::replace_functions(&mut document, &BTreeMap::from([(old, new)]));
-        let json = document.to_json().unwrap();
-        assert!(!json.contains(&old.to_string()), "{json}");
-        assert_eq!(json.matches(&new.to_string()).count(), 15, "{json}");
     }
 }

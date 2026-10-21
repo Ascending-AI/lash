@@ -29,6 +29,7 @@ pub enum LinkPurpose {
 )]
 /// Reach for all Exports or one Main/function Export. Unused Export effects do not become start effects.
 pub enum ReachSelector {
+    Callable { function: FunctionId },
     AllExports,
     Start(StartSelector),
 }
@@ -129,6 +130,9 @@ pub struct LoadedContent {
 )]
 /// Typed deterministic admission refusal retained across the plugin/host boundary.
 pub enum AdmissionRefusal {
+    UnpublishedOrigin {
+        link: LinkId,
+    },
     MissingImport {
         slot: ImportSlot,
         name: QualifiedName,

@@ -9,7 +9,7 @@ Status: accepted as [ADR 0139](../adr/0139-the-lash-vm-is-a-dialect-free-kernel.
 1. A stable host-facing representation of a workflow that a host can read, edit and interpret.
 2. Several source dialects (TypeScript, Python, others) running on one engine.
 3. A dialect author can support any reasonable subset of their language.
-4. The representation is dialect-free. A host supplies effects; installed packages supply library functions; the document's manifest says which of each it needs. Nothing in a document's meaning names a dialect.
+4. The representation is dialect-free. A host supplies effects; Documents retain local function definitions and declare signature-only Imports; Links pin the fills. Nothing in a document's meaning names a dialect.
 
 Out of scope, by standing ruling: running a stock runtime behind a sandbox; journal-and-replay of code (ADR 0132 §2); a wire protocol (ADR 0136); host event routing and scheduling (ADR 0137).
 
@@ -47,7 +47,7 @@ The kernel is one small language with one meaning. It replaces the ECMAScript-sh
 
 **Cycles.** A heap graph may share objects; a cycle is refused where a value must be saved or passed to an effect, as today.
 
-**The effect boundary.** Effect arguments and results are copied: a tool never shares identity with guest objects, and a result is a fresh graph. Aliases between guest objects survive a wait. Each `perform` states the result type it expects, and the result is decoded by that type: `Int` and `Float` fields decode exactly as declared, and a bare `Number` decodes a JSON number with no fraction or exponent as an integer and any other as a float. Most tool results are untyped, so the manifest states the document's policy for a bare number once (float for a TypeScript document, by spelling for a Python one), and a site overrides it only where the effect's signature says more. The effect-value adapters that today reduce every number to an f64 before the worker sees it are rewritten to carry the number token to this decoder.
+**The effect boundary.** Effect arguments and results are copied: a tool never shares identity with guest objects, and a result is a fresh graph. Aliases between guest objects survive a wait. Each `perform` states the result type it expects, and the result is decoded by that type: `Int` and `Float` fields decode exactly as declared, and a bare `Number` decodes a JSON number with no fraction or exponent as an integer and any other as a float. Most tool results are untyped, so the Document states its numeric policy for a bare number once (float for a TypeScript document, by spelling for a Python one), and a site overrides it only where the effect's signature says more. The effect-value adapters that today reduce every number to an f64 before the worker sees it are rewritten to carry the number token to this decoder.
 
 **Projections.** A host projection is a handle. Reading through it is a request to the host that returns kernel data (ADR 0132 §9). Providers answer no language-shaped question.
 
@@ -98,7 +98,7 @@ A library function is a content-addressed definition with a name, a typed signat
 - **A helper** is a function a dialect package ships with a kernel-code body, to carry a difference between its language and the kernel.
 - **An extension function** is one a package ships with only a native implementation, for what kernel code cannot reasonably express: `regex.ecma.exec`, `url.whatwg.parse`.
 
-A document references functions by identity and lists them in its manifest; it does not contain their bodies. A host can resolve and read any body. Changing behaviour means a new definition with a new identity. A host adopts a corrected function with one edit that replaces identity A with B across a document.
+A Document contains immutable definitions keyed by FunctionId. Same-document calls name those identities; cross-document calls use explicit Import slots. A Link pairs the DocumentId with a complete slot-to-Fill map. Fresh fulfilment checks kind, visibility, ownership, signature and convention; existing Links keep their exact operation contract pins. Different fills produce different Links while retaining the same DocumentId and FunctionIds.
 
 A function with a kernel-code body is ordinary kernel code: it may nest actions (`K-EVAL-008`), may call a function argument, and so may wait if its callback does. Nothing about the registry makes a call effect-free. Every library call charges its declared formula at completion, plus its declared dynamic-loop tests. Guest callbacks and closures remain ordinarily charged (K-CHG-003/007).
 
@@ -115,10 +115,10 @@ A function with a kernel-code body is ordinary kernel code: it may nest actions 
 
 - The workflow document is a kernel program: `main`, declared functions (including those run as processes), private bindings. It is total (every construct is a typed node or a typed expression inside one) and it is the only authority.
 - Derived, never written by a host: node ids, edges, scopes, type facets, effect sets, execution sites. lash recomputes them on every change.
-- **Requirements manifest:** the kernel version, the effects called (name and signature) and every library function referenced, directly or through another function's body (identity). Admission refuses a document whose requirements the environment does not meet, naming what is missing.
+- **Imports and Exports:** Imports are document-local slots declaring operation/code signatures or nominal type/error Brands. Exports are Function, Type or Error values. Main is optional. Host-startable Exports are Function kind with data-only parameters and settled result; synchronous functions qualify, and Export starts never run Main. The function's StartConvention supplies its existing ABI helpers, without generating an adapter. Runtime inputs and settled results are still fitted.
 - **Identity.** A document's behavioural identity is the hash of its content. A source map from a dialect is a separate, optional value keyed to that identity; it never changes behaviour and may be dropped. Labels, layout and other presentation are the host's, keyed by site.
 - **Edits.** Typed, transactional edits and re-admission keep their present shape. Every expression payload changes to kernel forms, and edits and transactions become serialisable data; both are new work. A host edits kernel statements directly. Hoisted temporaries are ordinary variables, and the scope check refuses an edit that uses one before it is bound.
-- **Sessions.** Each REPL cell is its own kernel program. Session state is the session's bindings. A closure or task handle does not outlive the cell that created it, so a parked run names one document. A host keeps a function across cells as a saved function: the closure's code and the variables it read, frozen as data at its cell's end, declared again in the document of each cell that names it (`lash-kernel-dialect`, `SavedFunction`). Every closure a carried binding reaches, as its value, inside data or inside data a closure it reaches reads, is saved once per closure object: under the first binding name that holds it, or else under a generated name, `Name::saved(n)` (`saved#n`), which no dialect can spell, so no cell's declaration meets it. Each slot that held it holds `PageValue::Function(name)` in place, so an object the bindings share stays shared, and two bindings of one function hold one saved function (`K-SES-002`). A closure only a capture holds, as its whole value, stays a helper made again in each function that reads it, as lowering makes one. A binding that reaches a task, a function a library body made, one that performs a control, or a function where no reference can stand (a key, a set member, behind a ref, in an error: `NotSaved::Keyed`) is not carried and is named. What a function value is, and so whether a session keeps one at all, is what the dialect's package declares (`Package::function_values`). What the source wrote of a function is a typed record, `Written`, keyed by its closure's site in the document that makes it: its language, its signature for display and, for a dialect that places arguments by name, its call shape. It is stored with the cell and with the saved function, and needs no source map. The executable document owns the function's start adapter and kernel signature. At the start of each cell the session relinks every saved function by name to the package set the cell is written under (`RELINK-CLOSURE`, `relink_saved`), rewriting its record with the new document and execution closure; one the set no longer serves is dropped, named with the callee, and one saved under a generated name is named by the binding path that held it (`plan.map`), its binding dropped with it. A callee whose identity changes must keep the signature the function was saved or last relinked against, which the saved function holds (`SavedFunction::against`), whether or not the node still holds the old callee. The session's root records the set it was last linked to (`linked`), so a cell under that set rewrites nothing. A package value a binding holds keeps its type's release: once a later release has changed that type's shape, its first member call raises `package.stale_value`, naming both releases.
+- **Sessions.** Saved closures retain their defining Link, FunctionId, captured environment EntityId and nested reference membership. Relinking changes only the defining Link after fresh compatible fulfilment; it never copies or reidentifies code. Captured-only closures participate in saved reach. FunctionValue transport carries a CallableId, public signature, convention and frozen captures. Callable starts install that captured environment directly. Package values carry nominal Brands; changed representation raises `package.stale_value` through the ordinary member check.
 - **Kernel text.** lash owns one plain text notation for the kernel, for logs, diffs and showing a document to a model.
 
 ## 4. Dialects
@@ -138,7 +138,7 @@ A dialect is a package of a front end, a printer and the functions (helpers and 
 
 **Types.** A front end may use declared and inferred types to choose tier 1. If the type was wrong at run time, the strict operation raises a typed error (§2.1). Where no type is known the front end emits a helper that tests at run time, or refuses. Using types this way needs a type analysis per dialect; today's TypeScript front end erases types. Trusting types makes a dialect deliberately stricter than its language: where JavaScript would coerce a mistyped value, lash raises a typed error. Each dialect lists these in a deviation register, with a test per entry.
 
-**Printer.** A dialect prints a supported, structurally valid document as exact generated source in its language, including documents edited by a host or produced by another dialect. Its independent generated-source compiler reconstructs identical canonical bytes, including the complete manifest and original helper identities, without an installed library. Printing does not compile or admit. It does not recover original text. Native spellings require a precise direct inverse; complete generic forms cover every other case. The [generated-source format v1 contract](../design/generated-source-format.md) defines envelopes, reversible names, helper aliases, resource limits and optional final-text Site maps. Choosing a source dialect changes spelling only; the Document, admission environment and execution context stay the host's.
+**Printer.** Kernel canonical text round-trips Imports, Exports, optional Main and immutable local definitions. Retained source maps and captions are sidecars. A dialect source printer uses verified authored source supported by its ordinary lowering; it does not encode a second hidden kernel format. Workflow views derive names from the retained Document; Package labels are caller annotations outside the derived view.
 
 ## 5. Execution
 
@@ -287,3 +287,20 @@ It is built directly, on an arc branch, in the crates of §9. Every lane that re
 3. Parked runs, edits, the printer, the Python dialect.
 4. lash on the kernel: workers, sessions and cells, processes and the host workflow API, upgrades.
 5. Cutover and certification.
+
+### Linked package execution and adoption
+
+A selected Main, Export or callable derives its executable reach from the defining
+Link. An unused Export contributes no operation uses to that process. Operation
+identity is `(LinkId, ImportSlot)`, so one Document linked twice can invoke different
+contracts without changing function identities. Full immutable DAG retention is
+broader than executable reach. Publication records attest scoped provenance and
+are retained intact with their imported publication closure under the owner's
+existing claim; content hashes alone grant no visibility or ownership.
+
+Adoption maps explicit predecessor uses to successor uses. It preserves resolved,
+refused and unavailable facts, refuses incompatible pins and conflicting merges,
+and never invokes a resolver. General durable-format migration remains a separate
+port and must prove callable, frame, Site and Link correspondence before publication.
+Guest authored bodies charge statements; shipped guest helpers carry an explicit
+formula. Native and Both implementations carry their formula at the implementation.

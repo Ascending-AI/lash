@@ -6,10 +6,14 @@
 //! and its site come from the same traversal. It runs only on a tree
 //! structural validation has accepted, which bounds its depth.
 
-use lash_kernel_doc::{
-    ActKind, Action, Atom, Block, Callee, Expr, Member, Name, Place, Rhs, Signature, Site, Stmt,
-    Type, Unit,
-};
+use lash_kernel_doc::{ActKind, Action, Atom, Block, Callee, Expr, Member, Place, Rhs, Stmt};
+
+use lash_vocabulary::legacy_names::Name;
+
+use lash_vocabulary::sites::Site;
+use lash_vocabulary::sites::Unit;
+use lash_vocabulary::types::Signature;
+use lash_vocabulary::types::Type;
 
 use crate::graph::{
     ActNode, ActionNode, AtomNode, Binding, BindingId, BindingKind, CalleeNode, CatchNode,
@@ -26,7 +30,8 @@ struct ClosureFrame {
     captures: Vec<Reference>,
 }
 
-pub(crate) struct Linker {
+pub(crate) struct Linker<'a> {
+    catalog: &'a dyn lash_kernel_doc::FunctionCatalog,
     pub(crate) graph: Graph,
     pub(crate) errors: Vec<Refused>,
     /// The unit is `main`: a name nothing declares is a session binding.
@@ -51,9 +56,10 @@ impl Slots<'_> {
     }
 }
 
-impl Linker {
-    pub(crate) fn new() -> Self {
+impl<'a> Linker<'a> {
+    pub(crate) fn new(catalog: &'a dyn lash_kernel_doc::FunctionCatalog) -> Self {
         Self {
+            catalog,
             graph: Graph::empty(),
             errors: Vec::new(),
             session: false,
@@ -252,7 +258,7 @@ impl Linker {
                 StmtNode::For {
                     binding: declared[0],
                     iterable,
-                    via: *via,
+                    via: via.clone(),
                     body,
                     else_block,
                 }
@@ -285,7 +291,7 @@ impl Linker {
             },
             Stmt::ReturnVia { value, policy } => StmtNode::ReturnVia {
                 value: self.expr(value, slots.take(), id, scope),
-                policy: *policy,
+                policy: policy.clone(),
             },
             Stmt::Return { value } => StmtNode::Return {
                 value: self.expr(value, slots.take(), id, scope),
@@ -371,20 +377,14 @@ impl Linker {
                 ActionNode::Spawn { callee, args }
             }
             Action::Perform {
-                effect,
-                args,
-                result,
-                ..
+                slot, args, result, ..
             } => ActionNode::Perform {
-                effect: effect.clone(),
+                slot: *slot,
                 args: self.atoms(args, scope, &site, id),
                 result: result.clone(),
             },
-            Action::Sleep { duration, .. } => ActionNode::Sleep {
-                duration: self.atom(duration, scope, &site, id),
-            },
             Action::Await { policy, value } => ActionNode::Await {
-                policy: *policy,
+                policy: policy.clone(),
                 value: self.atom(value, scope, &site, id),
             },
             Action::Join { task } => ActionNode::Join {
@@ -437,9 +437,9 @@ impl Linker {
 
     fn callee(&mut self, callee: &Callee, scope: ScopeId, site: &Site, node: NodeId) -> CalleeNode {
         match callee {
-            Callee::Declared(name) => CalleeNode::Declared(name.clone()),
+            Callee::Import(slot) => CalleeNode::Import(*slot),
             Callee::Value(name) => CalleeNode::Value(self.resolve(name, scope, site, node)),
-            Callee::Library(function) => CalleeNode::Library(*function),
+            Callee::Local(function) => CalleeNode::Local(*function),
         }
     }
 
@@ -489,17 +489,32 @@ impl Linker {
             Expr::Closure(closure) => {
                 // A closure body is a function body: the loops around the
                 // closure do not reach into it (`K-CLO-003`).
+                let definition = self
+                    .catalog
+                    .definition(&closure.function)
+                    .unwrap_or_else(|| unreachable!("validated closure"));
+                let closure_body = definition
+                    .body()
+                    .unwrap_or_else(|| unreachable!("closure has a body"))
+                    .block
+                    .clone();
+                let closure_params = definition
+                    .signature
+                    .params
+                    .iter()
+                    .map(|p| p.name.clone())
+                    .collect::<Vec<_>>();
                 let loops = std::mem::take(&mut self.loops);
                 self.closures.push(ClosureFrame {
                     scope: ScopeId(self.graph.scopes.len() as u32),
                     captures: Vec::new(),
                 });
                 let (body, params) = self.block(
-                    &closure.body,
-                    slots.take(),
+                    &closure_body,
+                    Site::new(Unit::Library(closure.function), []),
                     Some(id),
                     Some(scope),
-                    &closure.params,
+                    &closure_params,
                     BindingKind::Param,
                     Some(id),
                 );
@@ -510,6 +525,7 @@ impl Linker {
                     .map(|frame| frame.captures)
                     .unwrap_or_default();
                 ExprNode::Closure {
+                    function: closure.function,
                     params,
                     body,
                     captures,
@@ -519,8 +535,6 @@ impl Linker {
                 function: *function,
                 args: self.exprs(args.iter(), &mut slots, id, scope),
             },
-            Expr::Clock => ExprNode::Clock,
-            Expr::Random => ExprNode::Random,
             Expr::If { cond, then, r#else } => ExprNode::If {
                 cond: self.expr(cond, slots.take(), id, scope),
                 then: self.expr(then, slots.take(), id, scope),
@@ -552,16 +566,15 @@ impl Linker {
                 let kind = match &act.kind {
                     ActKind::Call(callee) => ActNode::Call(self.callee(callee, scope, &site, id)),
                     ActKind::Spawn(callee) => ActNode::Spawn(self.callee(callee, scope, &site, id)),
-                    ActKind::Perform { effect, result, .. } => ActNode::Perform {
-                        effect: effect.clone(),
+                    ActKind::Perform { slot, result, .. } => ActNode::Perform {
+                        slot: *slot,
                         result: result.clone(),
                     },
-                    ActKind::Sleep { .. } => ActNode::Sleep,
                     ActKind::Yield => ActNode::Yield,
                     ActKind::Cancel => ActNode::Cancel,
                     ActKind::Join => ActNode::Join,
                     ActKind::JoinMany(mode) => ActNode::JoinMany(*mode),
-                    ActKind::Await(policy) => ActNode::Await(*policy),
+                    ActKind::Await(policy) => ActNode::Await(policy.clone()),
                 };
                 ExprNode::Act {
                     kind,

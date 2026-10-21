@@ -22,7 +22,12 @@ use lash_kernel_check::{
     ActNode, ActionNode, AtomNode, BindingId, CalleeNode, ExprNode, Graph, MemberNode, NodeId,
     NodeKind, PlaceNode, Reference, StmtNode,
 };
-use lash_kernel_doc::{FunctionDeclarations, FunctionId, Literal, Name, Site, Unit};
+use lash_kernel_doc::{FunctionDeclarations, Literal};
+
+use lash_vocabulary::legacy_names::FunctionId;
+use lash_vocabulary::legacy_names::Name;
+use lash_vocabulary::sites::Site;
+use lash_vocabulary::sites::Unit;
 
 use crate::Derived;
 
@@ -271,11 +276,8 @@ impl<'a> Analysis<'a> {
     fn callee(&mut self, callee: &CalleeNode, seen: &mut BTreeSet<Seen>) -> Value {
         match callee {
             CalleeNode::Value(reference) => self.reference(reference, seen),
-            CalleeNode::Declared(name) => Value::origin(Origin::Callable(Site::new(
-                Unit::Function(name.clone()),
-                Vec::new(),
-            ))),
-            CalleeNode::Library(_) => Value::default(),
+            CalleeNode::Import(_) => Value::default(),
+            CalleeNode::Local(_) => Value::default(),
         }
     }
 
@@ -284,13 +286,13 @@ impl<'a> Analysis<'a> {
             return Value::default();
         };
         match callee {
-            CalleeNode::Library(function) => {
+            CalleeNode::Local(function) => {
                 let applied = self.summary(function).applied;
                 let args = self.arguments(args, &applied, seen);
                 applied.substitute(&args)
             }
             CalleeNode::Value(_) => self.callee(callee, seen),
-            CalleeNode::Declared(_) => Value::default(),
+            CalleeNode::Import(_) => Value::default(),
         }
     }
 
@@ -300,7 +302,7 @@ impl<'a> Analysis<'a> {
         args: Arguments<'_>,
         seen: &mut BTreeSet<Seen>,
     ) -> Value {
-        if let CalleeNode::Library(function) = callee {
+        if let CalleeNode::Local(function) = callee {
             let returned = self.summary(function).returned;
             let args = self.arguments(args, &returned, seen);
             return returned.substitute(&args);
@@ -476,7 +478,7 @@ impl<'a> Analysis<'a> {
                 self.value(target, seen).member(&key)
             }
             NodeKind::Expr(ExprNode::Call { function, args }) => self.result(
-                &CalleeNode::Library(*function),
+                &CalleeNode::Local(*function),
                 Arguments::Expressions(args),
                 seen,
             ),
@@ -587,7 +589,7 @@ fn derived(kind: &NodeKind) -> Option<Derived<'_>> {
 fn literal_value(literal: &Literal) -> Value {
     match literal {
         Literal::Function(name) => Value::origin(Origin::Callable(Site::new(
-            Unit::Function(name.clone()),
+            Unit::Library(*name),
             Vec::new(),
         ))),
         _ => Value::default(),

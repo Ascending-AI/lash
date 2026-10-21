@@ -1,7 +1,11 @@
 //! Exact occurrence attribution. The observer owns evidence; the view owns its
 //! placement and the live badge's precedence across concurrent tasks.
 
-use lash_kernel_doc::{DocumentId, EffectId, PositionLabel, Site, Unit};
+use lash_vocabulary::legacy_names::DocumentId;
+use lash_vocabulary::sites::EffectId;
+use lash_vocabulary::sites::PositionLabel;
+use lash_vocabulary::sites::Site;
+use lash_vocabulary::sites::Unit;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -59,7 +63,7 @@ pub enum ActivityRefusal {
     Document,
     #[error("the observation names no action at {site}")]
     Action {
-        site: lash_kernel_doc::PositionLabel,
+        site: lash_vocabulary::sites::PositionLabel,
     },
 }
 

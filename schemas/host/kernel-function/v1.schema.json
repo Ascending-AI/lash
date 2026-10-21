@@ -42,11 +42,11 @@
             "perform": {
               "additionalProperties": false,
               "properties": {
-                "effect": {
-                  "$ref": "#/$defs/QualifiedName"
-                },
                 "result": {
                   "$ref": "#/$defs/Type"
+                },
+                "slot": {
+                  "$ref": "#/$defs/ImportSlot"
                 },
                 "then_yield": {
                   "description": "As [`Action::Perform`]'s.",
@@ -54,7 +54,7 @@
                 }
               },
               "required": [
-                "effect",
+                "slot",
                 "result"
               ],
               "type": "object"
@@ -62,26 +62,6 @@
           },
           "required": [
             "perform"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "description": "Waits for a number of milliseconds, its one argument.",
-          "properties": {
-            "sleep": {
-              "additionalProperties": false,
-              "properties": {
-                "then_yield": {
-                  "description": "As [`Action::Perform`]'s.",
-                  "type": "boolean"
-                }
-              },
-              "type": "object"
-            }
-          },
-          "required": [
-            "sleep"
           ],
           "type": "object"
         },
@@ -131,7 +111,7 @@
           "description": "Awaits its one argument by the await policy (`K-TASK-026`).",
           "properties": {
             "await": {
-              "$ref": "#/$defs/FunctionId"
+              "$ref": "#/$defs/FunctionTarget"
             }
           },
           "required": [
@@ -186,11 +166,11 @@
                   },
                   "type": "array"
                 },
-                "effect": {
-                  "$ref": "#/$defs/QualifiedName"
-                },
                 "result": {
                   "$ref": "#/$defs/Type"
+                },
+                "slot": {
+                  "$ref": "#/$defs/ImportSlot"
                 },
                 "then_yield": {
                   "description": "Whether the task takes one more turn of the ready queue once\nthe outcome is in, before it continues (`K-TASK-005`).",
@@ -198,7 +178,7 @@
                 }
               },
               "required": [
-                "effect",
+                "slot",
                 "args",
                 "result"
               ],
@@ -207,32 +187,6 @@
           },
           "required": [
             "perform"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "description": "Waits for a number of milliseconds.",
-          "properties": {
-            "sleep": {
-              "additionalProperties": false,
-              "properties": {
-                "duration": {
-                  "$ref": "#/$defs/Atom"
-                },
-                "then_yield": {
-                  "description": "As [`Action::Perform`]'s.",
-                  "type": "boolean"
-                }
-              },
-              "required": [
-                "duration"
-              ],
-              "type": "object"
-            }
-          },
-          "required": [
-            "sleep"
           ],
           "type": "object"
         },
@@ -348,7 +302,7 @@
               "additionalProperties": false,
               "properties": {
                 "policy": {
-                  "$ref": "#/$defs/FunctionId"
+                  "$ref": "#/$defs/FunctionTarget"
                 },
                 "value": {
                   "$ref": "#/$defs/Atom"
@@ -412,9 +366,47 @@
         }
       ]
     },
+    "Brand": {
+      "additionalProperties": false,
+      "description": "Nominal type or error identity: its defining package and canonical name, independent of representation.",
+      "properties": {
+        "name": {
+          "$ref": "#/$defs/Segment"
+        },
+        "package": {
+          "$ref": "#/$defs/PackagePath"
+        }
+      },
+      "required": [
+        "package",
+        "name"
+      ],
+      "type": "object"
+    },
     "Bytes": {
       "pattern": "^([0-9a-f]{2})*$",
       "type": "string"
+    },
+    "CallablePresentation": {
+      "additionalProperties": false,
+      "description": "How a function a closure makes is started from outside its run: the\nsignature it is started under, how the dialect holds the function as a\nvalue, and how the entry calls it.",
+      "properties": {
+        "convention": {
+          "$ref": "#/$defs/StartConvention"
+        },
+        "representation": {
+          "$ref": "#/$defs/FunctionRepresentation"
+        },
+        "signature": {
+          "$ref": "#/$defs/Signature"
+        }
+      },
+      "required": [
+        "signature",
+        "representation",
+        "convention"
+      ],
+      "type": "object"
     },
     "Callee": {
       "description": "What a call or a `spawn` runs.",
@@ -423,12 +415,24 @@
           "additionalProperties": false,
           "description": "A declared function of the document, by name.",
           "properties": {
-            "declared": {
-              "$ref": "#/$defs/Name"
+            "local": {
+              "$ref": "#/$defs/FunctionId"
             }
           },
           "required": [
-            "declared"
+            "local"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "import": {
+              "$ref": "#/$defs/ImportSlot"
+            }
+          },
+          "required": [
+            "import"
           ],
           "type": "object"
         },
@@ -442,19 +446,6 @@
           },
           "required": [
             "value"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "description": "A library function, by identity.",
-          "properties": {
-            "library": {
-              "$ref": "#/$defs/FunctionId"
-            }
-          },
-          "required": [
-            "library"
           ],
           "type": "object"
         }
@@ -484,38 +475,82 @@
       "additionalProperties": false,
       "description": "A function value written in place. It shares the variables of the scope\nthat defines it (`K-CLO-001`); which ones is derived, never written.",
       "properties": {
-        "body": {
-          "items": {
-            "$ref": "#/$defs/Stmt"
-          },
-          "type": "array"
+        "function": {
+          "$ref": "#/$defs/FunctionId",
+          "description": "The anonymous body's own identity, local to the defining Document."
         },
-        "params": {
-          "items": {
-            "$ref": "#/$defs/Name"
-          },
-          "type": "array"
-        },
-        "start": {
+        "presentation": {
           "anyOf": [
             {
-              "$ref": "#/$defs/StartAdapter"
+              "$ref": "#/$defs/CallablePresentation"
             },
             {
               "type": "null"
             }
-          ],
-          "description": "How a value this closure makes is started when it crosses to a tool\nas a [`crate::FunctionValue`] (`K-CLO-004`); `None` for one that\ncannot be started. Executable behaviour: it is part of the\ndocument's identity."
+          ]
         }
       },
       "required": [
-        "body"
+        "function"
       ],
       "type": "object"
     },
-    "ContractId": {
-      "description": "What pins an operation's meaning under its signature: opaque text,\ncompared for equality and never read for anything else.",
-      "type": "string"
+    "Convention": {
+      "description": "Semantic call convention. Compatibility compares this variant, not another document's helper IDs.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "direct",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "ts_direct",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "ts_args_list",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "py_direct",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        }
+      ]
     },
     "Expr": {
       "description": "An expression, evaluated within one statement. Only an [`Expr::Act`]\nin it may pause the task (`K-EVAL-008`).",
@@ -734,18 +769,8 @@
           "type": "object"
         },
         {
-          "const": "clock",
-          "description": "The embedder's clock, as a timestamp.",
-          "type": "string"
-        },
-        {
-          "const": "random",
-          "description": "A float drawn by the embedder, uniform in `[0, 1)`.",
-          "type": "string"
-        },
-        {
           "additionalProperties": false,
-          "description": "Reads through a projection handle.",
+          "description": "The embedder's clock, as a timestamp.\nA float drawn by the embedder, uniform in `[0, 1)`.\nReads through a projection handle.",
           "properties": {
             "read": {
               "$ref": "#/$defs/ProjectionRead"
@@ -931,22 +956,22 @@
           },
           "type": "array"
         },
-        "effects": {
-          "additionalProperties": false,
-          "description": "Every operation the body performs itself, with what it requires of\nit (`K-LIB-004`). A body beside a native implementation performs\nnothing. What the functions it calls perform is theirs to list.",
-          "patternProperties": {
-            "^[A-Za-z_][A-Za-z0-9_]*(\\.[A-Za-z_][A-Za-z0-9_]*)*$": {
-              "$ref": "#/$defs/OperationRequirement"
-            }
-          },
-          "type": "object"
-        },
         "functions": {
           "additionalProperties": false,
           "description": "Every library function the body calls, by identity, with the name\nits definition carries.",
           "patternProperties": {
             "^[0-9a-f]{64}$": {
               "$ref": "#/$defs/QualifiedName"
+            }
+          },
+          "type": "object"
+        },
+        "imports": {
+          "additionalProperties": false,
+          "description": "Every operation the body performs itself, with what it requires of\nit (`K-LIB-004`). A body beside a native implementation performs\nnothing. What the functions it calls perform is theirs to list.",
+          "patternProperties": {
+            "^\\d+$": {
+              "$ref": "#/$defs/Import"
             }
           },
           "type": "object"
@@ -999,6 +1024,45 @@
         }
       ]
     },
+    "FunctionTarget": {
+      "description": "A convention helper local to this document or named by an explicit Import slot.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "local",
+              "type": "string"
+            },
+            "value": {
+              "$ref": "#/$defs/FunctionId"
+            }
+          },
+          "required": [
+            "kind",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "import",
+              "type": "string"
+            },
+            "value": {
+              "$ref": "#/$defs/ImportSlot"
+            }
+          },
+          "required": [
+            "kind",
+            "value"
+          ],
+          "type": "object"
+        }
+      ]
+    },
     "Guard": {
       "additionalProperties": false,
       "description": "A native implementation's work bound: the unit it counts and the most\nunits one call may spend. A call that would pass the limit ends with a\ntyped bound error (`K-LIB-008`).",
@@ -1022,29 +1086,68 @@
       "description": "How a library function is implemented.",
       "oneOf": [
         {
-          "const": "native",
-          "description": "Only a native implementation, registered by the embedder.",
-          "type": "string"
-        },
-        {
           "additionalProperties": false,
-          "description": "Only a kernel-code body. A call to it is a statement of its own.",
+          "description": "Authored code charges statements; shipped guest helpers charge a completion formula.",
           "properties": {
-            "body": {
-              "$ref": "#/$defs/FunctionBody"
+            "guest": {
+              "properties": {
+                "body": {
+                  "$ref": "#/$defs/FunctionBody"
+                },
+                "metering": {
+                  "$ref": "#/$defs/Metering"
+                }
+              },
+              "required": [
+                "body",
+                "metering"
+              ],
+              "type": "object"
             }
           },
           "required": [
-            "body"
+            "guest"
           ],
           "type": "object"
         },
         {
           "additionalProperties": false,
-          "description": "A native implementation and a kernel-code body that behave the same;\nan engine may run either.",
+          "properties": {
+            "native": {
+              "properties": {
+                "charge": {
+                  "$ref": "#/$defs/Formula"
+                }
+              },
+              "required": [
+                "charge"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "native"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Both implementations have the same formula charge.",
           "properties": {
             "both": {
-              "$ref": "#/$defs/FunctionBody"
+              "properties": {
+                "body": {
+                  "$ref": "#/$defs/FunctionBody"
+                },
+                "charge": {
+                  "$ref": "#/$defs/Formula"
+                }
+              },
+              "required": [
+                "body",
+                "charge"
+              ],
+              "type": "object"
             }
           },
           "required": [
@@ -1053,6 +1156,142 @@
           "type": "object"
         }
       ]
+    },
+    "Import": {
+      "additionalProperties": false,
+      "description": "A named requirement on external code, an operation, a type, or an error.",
+      "properties": {
+        "kind": {
+          "$ref": "#/$defs/ImportKind"
+        },
+        "name": {
+          "$ref": "#/$defs/QualifiedName2"
+        }
+      },
+      "required": [
+        "name",
+        "kind"
+      ],
+      "type": "object"
+    },
+    "ImportKind": {
+      "description": "The compatibility facts required to fill an Import. Natives and cell variables are not Imports.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "operation",
+              "type": "string"
+            },
+            "value": {
+              "additionalProperties": false,
+              "properties": {
+                "signature": {
+                  "$ref": "#/$defs/Signature"
+                }
+              },
+              "required": [
+                "signature"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "kind",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "code",
+              "type": "string"
+            },
+            "value": {
+              "additionalProperties": false,
+              "properties": {
+                "convention": {
+                  "$ref": "#/$defs/Convention"
+                },
+                "signature": {
+                  "$ref": "#/$defs/Signature"
+                }
+              },
+              "required": [
+                "signature",
+                "convention"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "kind",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "type",
+              "type": "string"
+            },
+            "value": {
+              "additionalProperties": false,
+              "properties": {
+                "brand": {
+                  "$ref": "#/$defs/Brand"
+                }
+              },
+              "required": [
+                "brand"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "kind",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "error",
+              "type": "string"
+            },
+            "value": {
+              "additionalProperties": false,
+              "properties": {
+                "kind": {
+                  "$ref": "#/$defs/Brand"
+                }
+              },
+              "required": [
+                "kind"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "kind",
+            "value"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "ImportSlot": {
+      "description": "A stable document-local Import coordinate. Names are diagnostic, never dispatch keys.",
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
     },
     "Integer": {
       "pattern": "^(0|-?[1-9][0-9]*)$",
@@ -1156,7 +1395,7 @@
           "description": "A reference to a declared function of the document.",
           "properties": {
             "function": {
-              "$ref": "#/$defs/Name"
+              "$ref": "#/$defs/FunctionId"
             }
           },
           "required": [
@@ -1253,6 +1492,40 @@
         }
       ]
     },
+    "Metering": {
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "statements",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "formula",
+              "type": "string"
+            },
+            "value": {
+              "$ref": "#/$defs/Formula"
+            }
+          },
+          "required": [
+            "kind",
+            "value"
+          ],
+          "type": "object"
+        }
+      ]
+    },
     "Name": {
       "description": "A variable, parameter or declared-function name.\n\nAny text is a name; the kernel gives none of them meaning. Structural\nvalidation refuses the empty name.",
       "type": "string"
@@ -1280,22 +1553,9 @@
         }
       ]
     },
-    "OperationRequirement": {
-      "additionalProperties": false,
-      "description": "An operation as code requires it: the signature it performs the\noperation under and the contract it was written against, which the\noperation's runner declares or derives. A manifest states one for each\noperation the document performs or reaches, and a library body one for\neach operation it performs itself. A changed contract under one\nsignature is a different requirement (OP-SAME-SIGNATURE).",
-      "properties": {
-        "contract": {
-          "$ref": "#/$defs/ContractId"
-        },
-        "signature": {
-          "$ref": "#/$defs/Signature"
-        }
-      },
-      "required": [
-        "signature",
-        "contract"
-      ],
-      "type": "object"
+    "PackagePath": {
+      "pattern": "^[a-z][a-z0-9]*(_[a-z][a-z0-9]*)*(\\.[a-z][a-z0-9]*(_[a-z][a-z0-9]*)*)*$",
+      "type": "string"
     },
     "Param": {
       "additionalProperties": false,
@@ -1370,7 +1630,7 @@
         "check": {
           "anyOf": [
             {
-              "$ref": "#/$defs/FunctionId"
+              "$ref": "#/$defs/FunctionTarget"
             },
             {
               "type": "null"
@@ -1381,7 +1641,7 @@
         "item": {
           "anyOf": [
             {
-              "$ref": "#/$defs/FunctionId"
+              "$ref": "#/$defs/FunctionTarget"
             },
             {
               "type": "null"
@@ -1392,7 +1652,7 @@
         "next": {
           "anyOf": [
             {
-              "$ref": "#/$defs/FunctionId"
+              "$ref": "#/$defs/FunctionTarget"
             },
             {
               "type": "null"
@@ -1401,7 +1661,7 @@
           "description": "Steps a driver: an empty tuple when it is exhausted, else a tuple of\none item."
         },
         "open": {
-          "$ref": "#/$defs/FunctionId",
+          "$ref": "#/$defs/FunctionTarget",
           "description": "Takes the iterated value to what the loop walks: a list, a tuple, a\nmap, a set or a text, which the loop's own cursor walks, or any\nother value, a driver that `next` steps."
         }
       },
@@ -1413,6 +1673,33 @@
     "QualifiedName": {
       "pattern": "^[A-Za-z_][A-Za-z0-9_]*(\\.[A-Za-z_][A-Za-z0-9_]*)*$",
       "type": "string"
+    },
+    "QualifiedName2": {
+      "additionalProperties": false,
+      "description": "An Import name parsed by segment, optionally addressing a type member.",
+      "properties": {
+        "member": {
+          "$ref": "#/$defs/Segment"
+        },
+        "package": {
+          "$ref": "#/$defs/PackagePath"
+        },
+        "type_member": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Segment"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "package",
+        "member"
+      ],
+      "type": "object"
     },
     "RecordEntry": {
       "additionalProperties": false,
@@ -1502,6 +1789,10 @@
         }
       ]
     },
+    "Segment": {
+      "pattern": "^[a-z][a-z0-9]*(_[a-z][a-z0-9]*)*$",
+      "type": "string"
+    },
     "Signature": {
       "additionalProperties": false,
       "description": "What a function, an effect or an entry takes and returns.",
@@ -1521,44 +1812,33 @@
       ],
       "type": "object"
     },
-    "StartAdapter": {
-      "additionalProperties": false,
-      "description": "How a function a closure makes is started from outside its run: the\nsignature it is started under, how the dialect holds the function as a\nvalue, and how the entry calls it.",
-      "properties": {
-        "convention": {
-          "$ref": "#/$defs/StartConvention"
-        },
-        "representation": {
-          "$ref": "#/$defs/FunctionRepresentation"
-        },
-        "signature": {
-          "$ref": "#/$defs/Signature"
-        }
-      },
-      "required": [
-        "signature",
-        "representation",
-        "convention"
-      ],
-      "type": "object"
-    },
     "StartConvention": {
-      "description": "How a host starts an entry. A start adapter uses the same convention\nwhen it extracts a function value from a dialect callable.",
       "oneOf": [
         {
-          "const": "direct",
-          "description": "With the start's arguments, in the signature's order, returning what\nthe function returns.",
-          "type": "string"
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "direct",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
         },
         {
           "additionalProperties": false,
-          "description": "Source parameters are bound directly; extra start arguments are\ndiscarded, missing ones are absent, and an absent result becomes null.\nWhen extracting a packed TypeScript callable, `await_fn` settles its\nresult before the entry returns.",
           "properties": {
-            "ts_direct": {
+            "kind": {
+              "const": "ts_direct",
+              "type": "string"
+            },
+            "value": {
               "additionalProperties": false,
               "properties": {
                 "await_fn": {
-                  "$ref": "#/$defs/FunctionId"
+                  "$ref": "#/$defs/FunctionTarget"
                 }
               },
               "required": [
@@ -1568,22 +1848,26 @@
             }
           },
           "required": [
-            "ts_direct"
+            "kind",
+            "value"
           ],
           "type": "object"
         },
         {
           "additionalProperties": false,
-          "description": "With an absent `this` and the list of the start's arguments; the\nreturned value is awaited by `await_fn`, and an absent result\n(`same_fn` compares it with absent) ends the start with null.",
           "properties": {
-            "ts_args_list": {
+            "kind": {
+              "const": "ts_args_list",
+              "type": "string"
+            },
+            "value": {
               "additionalProperties": false,
               "properties": {
                 "await_fn": {
-                  "$ref": "#/$defs/FunctionId"
+                  "$ref": "#/$defs/FunctionTarget"
                 },
                 "same_fn": {
-                  "$ref": "#/$defs/FunctionId"
+                  "$ref": "#/$defs/FunctionTarget"
                 }
               },
               "required": [
@@ -1594,19 +1878,23 @@
             }
           },
           "required": [
-            "ts_args_list"
+            "kind",
+            "value"
           ],
           "type": "object"
         },
         {
           "additionalProperties": false,
-          "description": "As `Direct`, and the run's root cleanup: when the entry's body has\nleft, by its return or its raise, and its own `finally` blocks have\nrun, `cleanup` is called with no arguments before the run ends. The\nbody's departure then ends the run, unless the cleanup raises: its\nraise does instead. Python's `asyncio.run` cancels and waits for the\ntasks still running this way (`K-TASK-019`).",
           "properties": {
-            "py_direct": {
+            "kind": {
+              "const": "py_direct",
+              "type": "string"
+            },
+            "value": {
               "additionalProperties": false,
               "properties": {
                 "cleanup": {
-                  "$ref": "#/$defs/FunctionId"
+                  "$ref": "#/$defs/FunctionTarget"
                 }
               },
               "required": [
@@ -1616,7 +1904,8 @@
             }
           },
           "required": [
-            "py_direct"
+            "kind",
+            "value"
           ],
           "type": "object"
         }
@@ -1889,7 +2178,7 @@
               "additionalProperties": false,
               "properties": {
                 "policy": {
-                  "$ref": "#/$defs/FunctionId"
+                  "$ref": "#/$defs/FunctionTarget"
                 },
                 "value": {
                   "$ref": "#/$defs/Expr"
@@ -2215,10 +2504,6 @@
   "additionalProperties": false,
   "description": "A library function: its name, its typed signature over kernel values,\nits error kinds, what a call is charged, the guard that bounds its work,\nand how it is implemented. Its identity is the hash of all of it, so a\nchange to any part is a new function.",
   "properties": {
-    "charge": {
-      "$ref": "#/$defs/Formula",
-      "description": "What a call is charged, whichever implementation runs."
-    },
     "errors": {
       "description": "The kinds of error a call may raise, beyond the kernel's own.",
       "items": {
@@ -2236,7 +2521,7 @@
           "type": "null"
         }
       ],
-      "description": "The work bound of a native implementation that can run away."
+      "description": "What a call is charged, whichever implementation runs.\nThe work bound of a native implementation that can run away."
     },
     "implementation": {
       "$ref": "#/$defs/Implementation"
@@ -2264,7 +2549,6 @@
     "kernel",
     "name",
     "signature",
-    "charge",
     "implementation"
   ],
   "title": "FunctionDefinition",

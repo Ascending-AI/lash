@@ -4,7 +4,9 @@ use std::ops::Range;
 use std::sync::{Arc, OnceLock};
 
 use lash_kernel_dialect::{MemberPath, PackagePath};
-use lash_kernel_doc::{ArtifactDigest, FunctionName, FunctionRegistry};
+use lash_kernel_doc::{ArtifactDigest, FunctionRegistry};
+
+use lash_vocabulary::legacy_names::FunctionName;
 use lash_kernel_vm::PreparedLibrary;
 use serde::{Deserialize, Serialize};
 
@@ -33,7 +35,7 @@ fn refuse(message: impl std::fmt::Display) -> PackageRefusal {
 /// `roots`.
 pub(crate) fn build(
     held: &HeldPackages,
-    roots: &BTreeMap<lash_kernel_doc::FunctionId, lash_kernel_doc::FunctionId>,
+    roots: &BTreeMap<lash_vocabulary::legacy_names::FunctionId, lash_vocabulary::legacy_names::FunctionId>,
 ) -> Result<Arc<[u8]>, PackageRefusal> {
     let registry = held.functions();
     let image = registry.to_image_with_census(&lash_kernel_vm::body_census);

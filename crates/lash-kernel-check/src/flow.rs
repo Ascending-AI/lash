@@ -1,11 +1,15 @@
 //! Edges, execution sites and effect sets: what follows from the linked
 //! nodes without reading the document again.
 
+use lash_kernel_doc::FunctionTarget;
+use lash_vocabulary::names::ImportSlot;
 use std::collections::{BTreeMap, BTreeSet};
 
-use lash_kernel_doc::{
-    ActKind, Action, Callee, EffectName, Expr, FunctionCatalog, FunctionId, Literal, Name, Unit,
-};
+use lash_kernel_doc::{FunctionCatalog, Literal};
+
+use lash_vocabulary::legacy_names::FunctionId;
+
+use lash_vocabulary::sites::Unit;
 
 use crate::graph::{
     ActNode, ActionNode, AtomNode, CalleeNode, Edge, EdgeKind, ExecutionSite, ExprNode, Graph,
@@ -63,15 +67,15 @@ struct Flow<'a> {
 impl Flow<'_> {
     fn run(&mut self) {
         let graph = self.graph;
-        let bodies: BTreeMap<&Name, NodeId> = graph
+        let bodies: BTreeMap<&FunctionId, NodeId> = graph
             .units
             .iter()
             .filter_map(|unit| match &unit.unit {
-                Unit::Function(name) => Some((name, unit.body)),
-                Unit::Main | Unit::Library(_) => None,
+                Unit::Library(id) => Some((id, unit.body)),
+                Unit::Main | Unit::Function(_) => None,
             })
             .collect();
-        let function_body = |name: &Name| bodies.get(name).copied().map(Target::Node);
+        let function_body = |name: &FunctionId| bodies.get(name).copied().map(Target::Node);
         // A function body: every unit's, and every closure's.
         let leave = Routes {
             next: Target::Leave,
@@ -84,7 +88,7 @@ impl Flow<'_> {
             self.block(unit.body, leave);
         }
         for node in &graph.nodes {
-            let mut referenced: Vec<&Name> = Vec::new();
+            let mut referenced: Vec<&FunctionId> = Vec::new();
             match &node.kind {
                 NodeKind::Expr(ExprNode::Closure { body, .. }) => {
                     self.block(*body, leave);
@@ -98,7 +102,7 @@ impl Flow<'_> {
                         ActNode::Spawn(callee) => (Some(callee), EdgeKind::Spawn),
                         _ => (None, EdgeKind::Call),
                     };
-                    if let Some(CalleeNode::Declared(name)) = callee
+                    if let Some(CalleeNode::Local(name)) = callee
                         && let Some(to) = function_body(name)
                     {
                         self.edges.push(Edge {
@@ -114,7 +118,7 @@ impl Flow<'_> {
                         ActionNode::Spawn { callee, .. } => (Some(callee), EdgeKind::Spawn),
                         _ => (None, EdgeKind::Call),
                     };
-                    if let Some(CalleeNode::Declared(name)) = callee
+                    if let Some(CalleeNode::Local(name)) = callee
                         && let Some(to) = function_body(name)
                     {
                         self.edges.push(Edge {
@@ -316,8 +320,7 @@ pub(crate) fn atoms(action: &ActionNode) -> impl Iterator<Item = &AtomNode> {
         ActionNode::Call { args, .. }
         | ActionNode::Spawn { args, .. }
         | ActionNode::Perform { args, .. } => (args, None),
-        ActionNode::Sleep { duration: atom }
-        | ActionNode::Join { task: atom }
+        ActionNode::Join { task: atom }
         | ActionNode::JoinMany { tasks: atom, .. }
         | ActionNode::Cancel { task: atom }
         | ActionNode::Await { value: atom, .. } => (&[], Some(atom)),
@@ -333,7 +336,6 @@ fn execution_sites(graph: &Graph) -> Vec<ExecutionSite> {
             NodeKind::Action(action) => match action {
                 ActionNode::Call { .. } => SiteKind::Call,
                 ActionNode::Perform { .. } => SiteKind::Perform,
-                ActionNode::Sleep { .. } => SiteKind::Sleep,
                 ActionNode::Join { .. } => SiteKind::Join,
                 ActionNode::JoinMany { .. } => SiteKind::JoinMany,
                 ActionNode::Yield => SiteKind::Yield,
@@ -344,7 +346,6 @@ fn execution_sites(graph: &Graph) -> Vec<ExecutionSite> {
             NodeKind::Expr(ExprNode::Act { kind, .. }) => match kind {
                 ActNode::Call(_) => SiteKind::Call,
                 ActNode::Perform { .. } => SiteKind::Perform,
-                ActNode::Sleep => SiteKind::Sleep,
                 ActNode::Spawn(_) => SiteKind::Spawn,
                 ActNode::Yield => SiteKind::Yield,
                 ActNode::Cancel => SiteKind::Cancel,
@@ -410,152 +411,69 @@ fn execution_sites(graph: &Graph) -> Vec<ExecutionSite> {
     out
 }
 
-/// What one unit's own code does, before following its calls.
-#[derive(Default)]
-struct Direct {
-    effects: BTreeSet<EffectName>,
-    reaches: BTreeSet<Name>,
-    through_values: bool,
-}
-
-/// What a derivation has learned of the library functions a graph calls.
-struct Known<'c> {
-    catalog: &'c dyn FunctionCatalog,
-    applies: BTreeMap<FunctionId, bool>,
-    performs: BTreeMap<FunctionId, BTreeSet<EffectName>>,
-}
-
-impl Known<'_> {
-    /// What a call of the library function `function` lets a unit reach:
-    /// what its body and the bodies it reaches perform, and the functions
-    /// it may apply.
-    fn library(&mut self, unit: &mut Direct, function: &FunctionId) {
-        unit.through_values |= library_applies(self.catalog, function, &mut self.applies);
-        unit.effects.extend(crate::manifest::performs_through(
-            self.catalog,
-            function,
-            &mut self.performs,
-        ));
+fn effect_sets(graph: &mut Graph, _catalog: &dyn FunctionCatalog) {
+    #[derive(Clone, Default)]
+    struct Direct {
+        effects: BTreeSet<ImportSlot>,
+        reaches: BTreeSet<FunctionId>,
+        through_values: bool,
     }
-}
-
-/// What a call or a `spawn` of `callee` lets a unit reach.
-fn reach(unit: &mut Direct, callee: &CalleeNode, known: &mut Known<'_>) {
-    match callee {
-        CalleeNode::Declared(name) => {
-            unit.reaches.insert(name.clone());
+    fn callee(d: &mut Direct, c: &CalleeNode) {
+        match c {
+            CalleeNode::Local(id) => {
+                d.reaches.insert(*id);
+            }
+            CalleeNode::Import(slot) => {
+                d.effects.insert(*slot);
+            }
+            CalleeNode::Value(_) => d.through_values = true,
         }
-        CalleeNode::Value(_) => unit.through_values = true,
-        CalleeNode::Library(function) => known.library(unit, function),
     }
-}
-
-/// Whether a call of a library function may apply a function it is
-/// passed: one with only a kernel-code body may, and so may one whose body
-/// beside a native implementation applies a closure or calls a function
-/// that may (`K-LIB-004`). `known` keeps each answer for the one graph.
-fn library_applies(
-    catalog: &dyn FunctionCatalog,
-    function: &FunctionId,
-    known: &mut BTreeMap<FunctionId, bool>,
-) -> bool {
-    if let Some(applies) = known.get(function) {
-        return *applies;
+    fn target(d: &mut Direct, t: &FunctionTarget) {
+        match t {
+            FunctionTarget::Local(id) => {
+                d.reaches.insert(*id);
+            }
+            FunctionTarget::Import(slot) => {
+                d.effects.insert(*slot);
+            }
+        }
     }
-    let applies = match catalog.definition(function) {
-        None => true,
-        Some(definition) if !definition.has_native() => true,
-        Some(definition) => definition.body().is_some_and(|body| {
-            let mut pending = vec![lash_kernel_doc::Node::Block(&body.block)];
-            let mut callees = Vec::new();
-            let mut applies = false;
-            while let Some(node) = pending.pop() {
-                match node {
-                    lash_kernel_doc::Node::Action(Action::Call {
-                        callee: Callee::Value(_),
-                        ..
-                    }) => applies = true,
-                    lash_kernel_doc::Node::Expr(Expr::Act(act))
-                        if matches!(act.kind, ActKind::Call(Callee::Value(_))) =>
-                    {
-                        applies = true;
+    let mut direct: BTreeMap<Unit, Direct> = BTreeMap::new();
+    for node in &graph.nodes {
+        let d = direct.entry(node.site.unit.clone()).or_default();
+        match &node.kind {
+            NodeKind::Expr(
+                ExprNode::Closure { function, .. } | ExprNode::Call { function, .. },
+            ) => {
+                d.reaches.insert(*function);
+            }
+            NodeKind::Expr(ExprNode::Literal(Literal::Function(id))) => {
+                d.reaches.insert(*id);
+            }
+            NodeKind::Stmt(StmtNode::ReturnVia { policy, .. }) => target(d, policy),
+            NodeKind::Expr(ExprNode::Act { kind, .. }) => match kind {
+                ActNode::Call(c) | ActNode::Spawn(c) => callee(d, c),
+                ActNode::Perform { slot, .. } => {
+                    d.effects.insert(*slot);
+                }
+                ActNode::Await(policy) => target(d, policy),
+                _ => {}
+            },
+            NodeKind::Action(action) => {
+                match action {
+                    ActionNode::Call { callee: c, .. } | ActionNode::Spawn { callee: c, .. } => {
+                        callee(d, c)
                     }
-                    lash_kernel_doc::Node::Action(Action::Call {
-                        callee: Callee::Library(callee),
-                        ..
-                    })
-                    | lash_kernel_doc::Node::Expr(Expr::Call {
-                        function: callee, ..
-                    })
-                    | lash_kernel_doc::Node::Stmt(lash_kernel_doc::Stmt::ReturnVia {
-                        policy: callee,
-                        ..
-                    }) => callees.push(*callee),
-                    lash_kernel_doc::Node::Expr(Expr::Act(act)) => {
-                        if let ActKind::Call(Callee::Library(callee)) = &act.kind {
-                            callees.push(*callee);
-                        }
+                    ActionNode::Perform { slot, .. } => {
+                        d.effects.insert(*slot);
                     }
+                    ActionNode::Await { policy, .. } => target(d, policy),
                     _ => {}
                 }
-                pending.extend(node.children());
-            }
-            // Identities are content hashes, so the calls form no cycle.
-            applies
-                || callees
-                    .iter()
-                    .any(|callee| library_applies(catalog, callee, known))
-        }),
-    };
-    known.insert(*function, applies);
-    applies
-}
-
-/// Fills each unit's effect set: its own performs and those of the library
-/// bodies it calls, then those of every declared function it calls, spawns
-/// or references, to a fixed point.
-fn effect_sets(graph: &mut Graph, catalog: &dyn FunctionCatalog) {
-    let mut direct: BTreeMap<Unit, Direct> = BTreeMap::new();
-    let mut known = Known {
-        catalog,
-        applies: BTreeMap::new(),
-        performs: BTreeMap::new(),
-    };
-    for node in &graph.nodes {
-        let unit = direct.entry(node.site.unit.clone()).or_default();
-        match &node.kind {
-            NodeKind::Expr(ExprNode::Literal(Literal::Function(name))) => {
-                unit.reaches.insert(name.clone());
-            }
-            NodeKind::Expr(ExprNode::Act { kind, .. }) => match kind {
-                ActNode::Perform { effect, .. } => {
-                    unit.effects.insert(effect.clone());
-                }
-                ActNode::Call(callee) | ActNode::Spawn(callee) => reach(unit, callee, &mut known),
-                ActNode::Await(policy) => known.library(unit, policy),
-                ActNode::Sleep
-                | ActNode::Join
-                | ActNode::JoinMany(_)
-                | ActNode::Yield
-                | ActNode::Cancel => {}
-            },
-            NodeKind::Expr(ExprNode::Call { function, .. })
-            | NodeKind::Stmt(StmtNode::ReturnVia {
-                policy: function, ..
-            }) => known.library(unit, function),
-            NodeKind::Action(action) => {
-                if let ActionNode::Perform { effect, .. } = action {
-                    unit.effects.insert(effect.clone());
-                }
-                if let ActionNode::Call { callee, .. } | ActionNode::Spawn { callee, .. } = action {
-                    reach(unit, callee, &mut known);
-                }
-                if let ActionNode::Await { policy, .. } = action {
-                    known.library(unit, policy);
-                }
                 for atom in atoms(action) {
-                    if let AtomNode::Literal(Literal::Function(name)) = atom {
-                        unit.reaches.insert(name.clone());
+                    if let AtomNode::Literal(Literal::Function(id)) = atom {
+                        d.reaches.insert(*id);
                     }
                 }
             }
@@ -563,33 +481,26 @@ fn effect_sets(graph: &mut Graph, catalog: &dyn FunctionCatalog) {
         }
     }
     loop {
+        let previous = direct.clone();
         let mut changed = false;
-        let units: Vec<Unit> = direct.keys().cloned().collect();
-        for unit in units {
-            let reaches: Vec<Name> = direct[&unit].reaches.iter().cloned().collect();
-            for name in reaches {
-                let Some(callee) = direct.get(&Unit::Function(name)) else {
-                    continue;
-                };
-                let effects = callee.effects.clone();
-                let through_values = callee.through_values;
-                let Some(caller) = direct.get_mut(&unit) else {
-                    continue;
-                };
-                let before = (caller.effects.len(), caller.through_values);
-                caller.effects.extend(effects);
-                caller.through_values |= through_values;
-                changed |= before != (caller.effects.len(), caller.through_values);
+        for d in direct.values_mut() {
+            for id in &d.reaches {
+                if let Some(c) = previous.get(&Unit::Library(*id)) {
+                    let before = (d.effects.len(), d.through_values);
+                    d.effects.extend(&c.effects);
+                    d.through_values |= c.through_values;
+                    changed |= before != (d.effects.len(), d.through_values);
+                }
             }
         }
         if !changed {
             break;
         }
     }
-    for view in &mut graph.units {
-        if let Some(found) = direct.remove(&view.unit) {
-            view.effects.effects = found.effects;
-            view.effects.through_values = found.through_values;
+    for unit in &mut graph.units {
+        if let Some(d) = direct.remove(&unit.unit) {
+            unit.effects.effects = d.effects;
+            unit.effects.through_values = d.through_values;
         }
     }
 }

@@ -21,6 +21,7 @@ doctest = false
 workspace = true
 
 [dependencies]
+lash-vocabulary = { workspace = true }
 lash-helper-labels = { workspace = true }
 lash-kernel-check = { workspace = true }
 lash-kernel-doc = { workspace = true }
@@ -29,14 +30,6 @@ schemars = { workspace = true, features = ["derive"] }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
-
-[dev-dependencies]
-lash-vm-releases = { workspace = true, features = ["dialect-typescript", "dialect-python"] }
-lash-dialect-typescript = { workspace = true }
-lash-dialect-python = { workspace = true }
-lash-kernel-dialect = { workspace = true }
-lash-vm-worker = { workspace = true, features = ["dialect-typescript", "dialect-python"] }
-lash-kernel-edit = { workspace = true }
 
 [[bin]]
 name = "kernel_view_schema_generator"

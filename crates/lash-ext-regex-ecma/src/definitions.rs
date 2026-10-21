@@ -169,9 +169,8 @@ impl Operation {
                 .into_iter()
                 .map(str::to_string)
                 .collect::<BTreeSet<_>>(),
-            charge,
             guard,
-            implementation: Implementation::Native,
+            implementation: Implementation::Native { charge },
             native_version: lash_kernel_doc::FIRST_NATIVE_VERSION,
         }
     }

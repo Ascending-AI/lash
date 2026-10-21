@@ -3,7 +3,13 @@
 
 use std::collections::BTreeSet;
 
-use lash_kernel_doc::{Document, Name, Param, Site, Type, Unit};
+use lash_kernel_doc::Document;
+
+use lash_vocabulary::legacy_names::Name;
+use lash_vocabulary::sites::Site;
+use lash_vocabulary::sites::Unit;
+
+use lash_vocabulary::types::Type;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -53,33 +59,11 @@ pub(crate) fn entry(
     view: &WorkflowView,
 ) -> EntryView {
     let (name, params, result) = match unit {
-        Unit::Function(name) => match document.entries.get(name) {
-            Some(entry) => (
-                Some(name.clone()),
-                entry.signature.params.clone(),
-                entry.signature.result.clone(),
-            ),
-            None => (
-                Some(name.clone()),
-                document
-                    .functions
-                    .get(name)
-                    .map(|function| {
-                        function
-                            .params
-                            .iter()
-                            .map(|name| Param {
-                                name: name.clone(),
-                                ty: Type::Any,
-                                optional: false,
-                            })
-                            .collect()
-                    })
-                    .unwrap_or_default(),
-                Type::Any,
-            ),
-        },
-        Unit::Main | Unit::Library(_) => (None, Vec::new(), Type::Any),
+        Unit::Library(id) => document.functions.get(id).map(|f| (
+            document.exports.iter().find_map(|(name, e)| matches!(e, lash_kernel_doc::Export::Function(export) if export.function == *id).then(|| name.clone())),
+            f.signature.params.clone(), f.signature.result.clone()
+        )).unwrap_or((None, Vec::new(), Type::Any)),
+        Unit::Main | Unit::Function(_) => (None, Vec::new(), Type::Any),
     };
     let body = Site::new(unit.clone(), Vec::new());
     let unreached = unreached(view, &body);

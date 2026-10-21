@@ -3193,6 +3193,7 @@ dependencies = [
  "lash-internal-vm-client",
  "lash-internal-vm-protocol",
  "lash-internal-vm-releases",
+ "lash-internal-vocabulary",
  "lash-kernel-check",
  "lash-kernel-dialect",
  "lash-kernel-doc",
@@ -3344,11 +3345,10 @@ dependencies = [
 name = "lash-kernel-edit"
 version = "0.0.0-dev"
 dependencies = [
+ "lash-internal-vocabulary",
  "lash-kernel-check",
  "lash-kernel-doc",
  "lash-kernel-package",
- "lash-kernel-state",
- "lash-kernel-vm",
  "schemars",
  "serde",
  "serde_json",
@@ -3380,12 +3380,14 @@ dependencies = [
 name = "lash-kernel-migrate"
 version = "0.0.0-dev"
 dependencies = [
+ "lash-internal-vocabulary",
  "lash-kernel-check",
  "lash-kernel-dialect",
  "lash-kernel-doc",
  "lash-kernel-state",
  "schemars",
  "serde",
+ "serde_json",
  "thiserror 2.0.18",
 ]
 
@@ -3393,15 +3395,10 @@ dependencies = [
 name = "lash-kernel-package"
 version = "0.0.0-dev"
 dependencies = [
- "blake3",
  "lash-helper-labels",
- "lash-kernel-dialect",
+ "lash-internal-vocabulary",
+ "lash-kernel-check",
  "lash-kernel-doc",
- "lash-kernel-lib",
- "lash-kernel-migrate",
- "lash-kernel-state",
- "lash-kernel-vm",
- "rmp-serde",
  "serde",
  "serde_json",
  "thiserror 2.0.18",
@@ -3424,15 +3421,10 @@ dependencies = [
 name = "lash-kernel-view"
 version = "0.0.0-dev"
 dependencies = [
- "lash-dialect-python",
- "lash-dialect-typescript",
  "lash-helper-labels",
- "lash-internal-vm-releases",
- "lash-internal-vm-worker",
+ "lash-internal-vocabulary",
  "lash-kernel-check",
- "lash-kernel-dialect",
  "lash-kernel-doc",
- "lash-kernel-edit",
  "lash-kernel-package",
  "schemars",
  "serde",

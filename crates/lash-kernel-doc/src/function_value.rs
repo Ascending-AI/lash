@@ -4,7 +4,7 @@
 //! small document of its own holding the function's code, everything that
 //! code reaches, and its captures frozen as constants, with one entry that
 //! starts it. Nothing is stored at the crossing; the receiver decides
-//! whether to start, store or ignore the value. The [`StartAdapter`] a
+//! whether to start, store or ignore the value. The [`CallablePresentation`] a
 //! closure carries says how the entry calls it: the kernel builds the
 //! entry from the adapter, so no dialect runs at the crossing.
 
@@ -14,6 +14,7 @@ use serde::{Deserialize, Serialize};
 use crate::document::Document;
 use crate::name::{FunctionId, Name};
 use crate::types::Signature;
+use lash_vocabulary::names::ImportSlot;
 
 /// The record key a function value's transport wraps it under:
 /// `{"$lash_function": <FunctionValue>}`. Only the typed encoder writes it;
@@ -61,13 +62,13 @@ pub struct FunctionValue {
 /// value, and how the entry calls it.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct StartAdapter {
+pub struct CallablePresentation {
     pub signature: Signature,
     pub representation: FunctionRepresentation,
     pub convention: StartConvention,
 }
 
-impl StartAdapter {
+impl CallablePresentation {
     /// The library functions starting through this adapter calls: code
     /// that holds it reaches them (`K-DOC-002`).
     pub fn functions(&self) -> Vec<&FunctionId> {
@@ -96,33 +97,38 @@ impl FunctionRepresentation {
     }
 }
 
-/// How a host starts an entry. A start adapter uses the same convention
-/// when it extracts a function value from a dialect callable.
+// function_value: each helper is local to this Document or an explicit Import.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "snake_case", deny_unknown_fields)]
+#[serde(
+    tag = "kind",
+    content = "value",
+    rename_all = "snake_case",
+    deny_unknown_fields
+)]
+/// A convention helper local to this document or named by an explicit Import slot.
+pub enum FunctionTarget {
+    Local(FunctionId),
+    Import(ImportSlot),
+}
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
+#[serde(
+    tag = "kind",
+    content = "value",
+    rename_all = "snake_case",
+    deny_unknown_fields
+)]
 pub enum StartConvention {
-    /// With the start's arguments, in the signature's order, returning what
-    /// the function returns.
     Direct,
-    /// Source parameters are bound directly; extra start arguments are
-    /// discarded, missing ones are absent, and an absent result becomes null.
-    /// When extracting a packed TypeScript callable, `await_fn` settles its
-    /// result before the entry returns.
-    TsDirect { await_fn: FunctionId },
-    /// With an absent `this` and the list of the start's arguments; the
-    /// returned value is awaited by `await_fn`, and an absent result
-    /// (`same_fn` compares it with absent) ends the start with null.
-    TsArgsList {
-        await_fn: FunctionId,
-        same_fn: FunctionId,
+    TsDirect {
+        await_fn: FunctionTarget,
     },
-    /// As `Direct`, and the run's root cleanup: when the entry's body has
-    /// left, by its return or its raise, and its own `finally` blocks have
-    /// run, `cleanup` is called with no arguments before the run ends. The
-    /// body's departure then ends the run, unless the cleanup raises: its
-    /// raise does instead. Python's `asyncio.run` cancels and waits for the
-    /// tasks still running this way (`K-TASK-019`).
-    PyDirect { cleanup: FunctionId },
+    TsArgsList {
+        await_fn: FunctionTarget,
+        same_fn: FunctionTarget,
+    },
+    PyDirect {
+        cleanup: FunctionTarget,
+    },
 }
 
 /// The bound on one function value: its canonical tagged JSON, counting its
@@ -332,101 +338,13 @@ impl FunctionValue {
     }
 }
 
-/// Carries the start adapters of `from` into `into`, which a reader built
-/// from source printed from `from`: source spells no adapter, and the
-/// document it is read back against keeps them. A closure takes the adapter
-/// of the closure in the same place of the same unit when both take the
-/// same parameters; a declared function takes its namesake's.
-pub fn carry_start_adapters(from: &Document, into: &mut Document) {
-    let starts = |document: &mut Document| {
-        let mut units = Vec::new();
-        for block in std::iter::once(&mut document.main).chain(
-            document
-                .functions
-                .values_mut()
-                .map(|function| &mut function.body),
-        ) {
-            let mut found = Vec::new();
-            crate::ast::each_closure_mut(block, &mut |closure| {
-                found.push((closure.params.clone(), closure.start.clone()));
-            });
-            units.push(found);
-        }
-        units
-    };
-    let mut source = from.clone();
-    let carried = starts(&mut source);
-    let same_units = from.functions.keys().eq(into.functions.keys());
-    for (name, function) in &mut into.functions {
-        if let Some(found) = from.functions.get(name)
-            && found.params == function.params
-        {
-            function.start.clone_from(&found.start);
-        }
-    }
-    if !same_units {
-        return;
-    }
-    for (block, found) in std::iter::once(&mut into.main)
-        .chain(
-            into.functions
-                .values_mut()
-                .map(|function| &mut function.body),
-        )
-        .zip(carried)
-    {
-        let mut at = 0;
-        crate::ast::each_closure_mut(block, &mut |closure| {
-            if let Some((params, start)) = found.get(at)
-                && *params == closure.params
-            {
-                closure.start.clone_from(start);
-            }
-            at += 1;
-        });
-    }
-}
-
 /// Linked callable transport; implementation belongs to pkg-vm.
 pub mod linked {
+    use super::StartConvention;
     use crate::{Captions, Datum};
     use lash_vocabulary::{names::*, types::*};
     use serde::{Deserialize, Serialize};
     use std::collections::BTreeMap;
-    // function_value: each helper is local to this Document or an explicit Import.
-    #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
-    #[serde(
-        tag = "kind",
-        content = "value",
-        rename_all = "snake_case",
-        deny_unknown_fields
-    )]
-    /// A convention helper local to this document or named by an explicit Import slot.
-    pub enum FunctionTarget {
-        Local(FunctionId),
-        Import(ImportSlot),
-    }
-    #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
-    #[serde(
-        tag = "kind",
-        content = "value",
-        rename_all = "snake_case",
-        deny_unknown_fields
-    )]
-    pub enum StartConvention {
-        Direct,
-        TsDirect {
-            await_fn: FunctionTarget,
-        },
-        TsArgsList {
-            await_fn: FunctionTarget,
-            same_fn: FunctionTarget,
-        },
-        PyDirect {
-            cleanup: FunctionTarget,
-        },
-    }
-
     #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
     #[serde(deny_unknown_fields)]
     pub struct FunctionValue {

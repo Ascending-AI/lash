@@ -135,9 +135,6 @@ impl CodecVariant for Action {
             Self::Perform {
                 then_yield: false, ..
             } => 1,
-            Self::Sleep {
-                then_yield: false, ..
-            } => 2,
             Self::Join { .. } => 3,
             Self::JoinMany { .. } => 4,
             Self::Yield => 5,
@@ -146,9 +143,6 @@ impl CodecVariant for Action {
             Self::Perform {
                 then_yield: true, ..
             } => 8,
-            Self::Sleep {
-                then_yield: true, ..
-            } => 9,
             Self::Await { .. } => 10,
         }
     }
@@ -170,9 +164,9 @@ impl CodecVariant for JoinMode {
 impl CodecVariant for Callee {
     fn codec_variant(&self) -> u32 {
         match self {
-            Self::Declared(..) => 0,
+            Self::Local(..) => 0,
             Self::Value(..) => 1,
-            Self::Library(..) => 2,
+            Self::Import(..) => 2,
         }
     }
 }
@@ -217,8 +211,6 @@ impl CodecVariant for Expr {
             Self::Member(..) => 7,
             Self::Closure(..) => 8,
             Self::Call { .. } => 9,
-            Self::Clock => 10,
-            Self::Random => 11,
             Self::Read(..) => 12,
             Self::If { .. } => 13,
             Self::Let { .. } => 14,
@@ -235,7 +227,6 @@ impl CodecVariant for ActKind {
             Self::Perform {
                 then_yield: false, ..
             } => 1,
-            Self::Sleep { then_yield: false } => 2,
             Self::Spawn(..) => 3,
             Self::Join => 4,
             Self::JoinMany(..) => 5,
@@ -243,7 +234,6 @@ impl CodecVariant for ActKind {
             Self::Perform {
                 then_yield: true, ..
             } => 7,
-            Self::Sleep { then_yield: true } => 8,
             Self::Yield => 9,
             Self::Cancel => 10,
         }
@@ -276,9 +266,9 @@ impl CodecVariant for Place {
 impl CodecVariant for Implementation {
     fn codec_variant(&self) -> u32 {
         match self {
-            Self::Native => 0,
-            Self::Body(..) => 1,
-            Self::Both(..) => 2,
+            Self::Native { .. } => 0,
+            Self::Guest { .. } => 1,
+            Self::Both { .. } => 2,
         }
     }
 }

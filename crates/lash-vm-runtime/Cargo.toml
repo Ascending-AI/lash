@@ -39,6 +39,7 @@ synthetic-next = [
 workspace = true
 
 [dependencies]
+lash-vocabulary = { workspace = true }
 lash-execution-contracts = { workspace = true }
 lash-vm-client = { workspace = true }
 lash-vm-protocol = { workspace = true }

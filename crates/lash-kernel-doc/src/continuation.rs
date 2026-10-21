@@ -44,13 +44,16 @@ pub enum LiveRolesError {
 /// statement already holds when the action is reached.
 pub fn live_roles(document: &Document, site: &Site) -> Result<Vec<Site>, LiveRolesError> {
     let body = match &site.unit {
-        Unit::Main => &document.main,
-        Unit::Function(name) => document
-            .functions
-            .get(name)
-            .map(|function| &function.body)
-            .ok_or(LiveRolesError::NoSuchNode)?,
-        Unit::Library(_) => return Err(LiveRolesError::LibraryUnit),
+        Unit::Main => document.main.as_ref().ok_or(LiveRolesError::NoSuchNode)?,
+        Unit::Library(id) => {
+            &document
+                .functions
+                .get(id)
+                .and_then(crate::FunctionDefinition::body)
+                .ok_or(LiveRolesError::NoSuchNode)?
+                .block
+        }
+        Unit::Function(_) => return Err(LiveRolesError::NoSuchNode),
     };
     live_roles_in(body, site)
 }

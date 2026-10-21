@@ -25,14 +25,13 @@
 //! `$id`-relative references. Definition names are stable within a lash
 //! version, so hosts may splice the definitions into their own OpenAPI schemas.
 //!
-//! The caller supplies a [`PackageView`] of the cell's installed set for
-//! surface membership and display facts, including comparison and reply markers.
+//! Names come from the retained Document. Package labels are caller annotations.
 //! Reading a view links no dialect implementation, editor or runtime.
 
 use std::collections::BTreeMap;
 
 use lash_kernel_check::library_performs;
-use lash_kernel_package::{MemberPath, PackagePath, PackageView};
+use lash_kernel_package::{ExportName, ImportSlot};
 mod activity;
 mod applies;
 pub use activity::{ActionActivity, ActionObservation, ActionState, ActivityRefusal};
@@ -56,17 +55,24 @@ pub use coverage::{
     NodeCoverage, PathSite, PathStep, ScopeCoverage, StatementCoverage, WorkflowCoverage, coverage,
     path,
 };
-pub use lash_kernel_doc::{RanCounts, ReplayPath, RunObservation, TaskPath};
+pub use lash_vocabulary::observation::RanCounts;
 
 use lash_kernel_check::{
     ActNode, ActionNode, AtomNode, BindingId, CalleeNode, ExprNode, Graph, GraphNode, NodeId,
     NodeKind, Reference, StmtNode, WorkflowDocument,
 };
 use lash_kernel_doc::{
-    ActExpr, ActKind, Action, AssignOrder, Atom, Callee, Document, EffectName, Expr,
-    FunctionDeclarations, FunctionId, FunctionName, Name, Node, Param, Place, Site, Stmt, Type,
-    Unit,
+    ActExpr, ActKind, Action, AssignOrder, Atom, Callee, Document, Expr, FunctionDeclarations,
+    Node, Place, Stmt,
 };
+
+use lash_vocabulary::legacy_names::FunctionId;
+use lash_vocabulary::legacy_names::FunctionName;
+use lash_vocabulary::legacy_names::Name;
+use lash_vocabulary::sites::Site;
+use lash_vocabulary::sites::Unit;
+
+use lash_vocabulary::types::Type;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -100,7 +106,7 @@ pub const JSON_SCHEMA: &str = include_str!("../kernel-workflow-view-v1.schema.js
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct WorkflowView {
-    pub document: lash_kernel_doc::DocumentId,
+    pub document: lash_vocabulary::legacy_names::DocumentId,
     /// The callable the view opens: its declared signature and what a call
     /// of it can end with.
     pub entry: EntryView,
@@ -310,7 +316,7 @@ pub struct ActionView {
     /// Every canonical effect this action reaches, including calls through
     /// library bodies and statically known declared callees. Derived from the
     /// checker's effect derivation, in canonical order with duplicates removed.
-    pub performs: Vec<EffectName>,
+    pub performs: Vec<ImportSlot>,
     pub args: Vec<ArgumentView>,
     /// A `perform`'s declared result, else the checker's facet.
     pub result_type: Type,
@@ -328,19 +334,10 @@ pub enum CalleeView {
         name: FunctionName,
         /// Every installed surface member backed by this identity in the
         /// cell's package set. A private definition has no members.
-        member: Vec<PackageMemberView>,
+        exports: Vec<ExportName>,
     },
-    Declared(Name),
-    Effect(EffectName),
-}
-
-/// One installed name of a library definition. Package and member stay paired:
-/// one definition may implement several members, including across packages.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct PackageMemberView {
-    pub package: PackagePath,
-    pub member: MemberPath,
+    Import(ImportSlot),
+    Effect(ImportSlot),
 }
 
 /// One argument of an action.
@@ -438,7 +435,6 @@ pub enum ActionRole {
 pub enum SiteKind {
     Call,
     Perform,
-    Sleep,
     Join,
     JoinMany,
     Yield,
@@ -453,7 +449,6 @@ impl std::fmt::Display for SiteKind {
         f.write_str(match self {
             Self::Call => "call",
             Self::Perform => "perform",
-            Self::Sleep => "sleep",
             Self::Join => "join",
             Self::JoinMany => "join_many",
             Self::Yield => "yield",
@@ -484,11 +479,8 @@ pub enum ViewError {
 /// # Errors
 ///
 /// The holder's graph or declarations do not describe its document.
-pub fn derive(
-    document: &WorkflowDocument,
-    packages: &PackageView<'_>,
-) -> Result<WorkflowView, ViewError> {
-    derive_callable(document, &document.entry_unit(), packages)
+pub fn derive(document: &WorkflowDocument) -> Result<WorkflowView, ViewError> {
+    derive_callable(document, &document.entry_unit())
 }
 
 /// Open a declared callable without publishing it as an entry or inlining it
@@ -500,7 +492,6 @@ pub fn derive(
 pub fn derive_callable(
     document: &WorkflowDocument,
     entry: &Unit,
-    packages: &PackageView<'_>,
 ) -> Result<WorkflowView, ViewError> {
     let graph = document.graph();
     let functions = document.declarations();
@@ -509,22 +500,30 @@ pub fn derive_callable(
         unit: entry.clone(),
     })?;
     let body = match entry {
-        Unit::Main => Node::Block(&document.main),
-        Unit::Function(name) => match document.functions.get(name) {
-            Some(function) => Node::Block(&function.body),
-            None => return Err(mismatch(graph.node(unit.body))),
-        },
-        Unit::Library(_) => return Err(mismatch(graph.node(unit.body))),
+        Unit::Main => Node::Block(
+            document
+                .main
+                .as_ref()
+                .ok_or_else(|| mismatch(graph.node(unit.body)))?,
+        ),
+        Unit::Library(id) => Node::Block(
+            &document
+                .functions
+                .get(id)
+                .and_then(|f| f.body())
+                .ok_or_else(|| mismatch(graph.node(unit.body)))?
+                .block,
+        ),
+        Unit::Function(_) => return Err(mismatch(graph.node(unit.body))),
     };
     let expected = match entry {
-        Unit::Function(name) => document
-            .entries
-            .get(name)
-            .map(|entry| entry.signature.result.clone()),
-        Unit::Main | Unit::Library(_) => None,
+        Unit::Library(id) => document
+            .functions
+            .get(id)
+            .map(|f| f.signature.result.clone()),
+        _ => None,
     };
     let mut walk = Walk {
-        packages,
         ordinals: document.site_ordinals(),
         document,
         graph,
@@ -569,7 +568,7 @@ pub fn derive_callable(
     let Walk {
         mut view, mut uses, ..
     } = walk;
-    let producers = produced::Producers::new(graph, functions, &view.dataflow.actions, packages);
+    let producers = produced::Producers::new(graph, &view.dataflow.actions);
     let bindings = graph
         .bindings()
         .iter()
@@ -604,7 +603,7 @@ pub fn derive_callable(
         .collect();
     view.dataflow.bindings = bindings;
     view.entry = entry::entry(document, entry, &view.dataflow.parameters, &view);
-    coarse::project(document, graph, functions, &mut view, packages);
+    coarse::project(document, graph, functions, &mut view);
     Ok(view)
 }
 
@@ -617,7 +616,6 @@ fn execution_site(site: &lash_kernel_check::ExecutionSite) -> ExecutionSiteView 
         kind: match site.kind {
             Graph::Call => SiteKind::Call,
             Graph::Perform => SiteKind::Perform,
-            Graph::Sleep => SiteKind::Sleep,
             Graph::Join => SiteKind::Join,
             Graph::JoinMany => SiteKind::JoinMany,
             Graph::Yield => SiteKind::Yield,
@@ -655,7 +653,6 @@ struct Context {
 }
 
 struct Walk<'a> {
-    packages: &'a PackageView<'a>,
     ordinals: BTreeMap<Site, u32>,
     document: &'a Document,
     graph: &'a Graph,
@@ -747,8 +744,6 @@ impl<'a> Walk<'a> {
                     | ExprNode::Call { .. }
                     | ExprNode::If { .. }
                     | ExprNode::Let { .. }
-                    | ExprNode::Clock
-                    | ExprNode::Random
                     | ExprNode::Read { .. } => {}
                     ExprNode::Act { kind, args } => {
                         let Expr::Act(act) = written else {
@@ -766,7 +761,18 @@ impl<'a> Walk<'a> {
             }
         }
         let children = node.children();
-        let written = written.children();
+        let written = match written {
+            Node::Expr(Expr::Closure(closure)) => {
+                let body = self
+                    .document
+                    .functions
+                    .get(&closure.function)
+                    .and_then(|f| f.body())
+                    .ok_or_else(|| mismatch(node))?;
+                vec![Node::Block(&body.block)]
+            }
+            _ => written.children(),
+        };
         if children.len() != written.len() {
             return Err(mismatch(node));
         }
@@ -885,19 +891,27 @@ impl<'a> Walk<'a> {
                 kind: ActKind::Await(policy),
                 ..
             }) => {
-                awaited = Callee::Library(*policy);
+                awaited = match policy {
+                    lash_kernel_doc::FunctionTarget::Local(id) => Callee::Local(*id),
+                    lash_kernel_doc::FunctionTarget::Import(slot) => Callee::Import(*slot),
+                };
                 (Some(&awaited), None)
             }
-            Written::Statement(Action::Perform { effect, .. })
+            Written::Statement(Action::Perform { slot: effect, .. })
             | Written::Nested(ActExpr {
-                kind: ActKind::Perform { effect, .. },
+                kind: ActKind::Perform { slot: effect, .. },
                 ..
             }) => (None, Some(effect)),
             Written::Statement(_) | Written::Nested(_) => (None, None),
         };
-        let signature = effect.and_then(|effect| self.document.manifest.effects.get(effect));
+        let signature = effect
+            .and_then(|slot| self.document.imports.get(slot))
+            .and_then(|import| match &import.kind {
+                lash_kernel_package::ImportKind::Operation { signature } => Some(signature),
+                _ => None,
+            });
         let (callee, params) = match (callee, effect) {
-            (Some(Callee::Library(function)), _) => {
+            (Some(Callee::Local(function)), _) => {
                 let definition =
                     self.functions
                         .get(function)
@@ -907,59 +921,57 @@ impl<'a> Walk<'a> {
                 (
                     Some(CalleeView::Library {
                         id: *function,
-                        member: self
-                            .packages
-                            .members(function)
-                            .into_iter()
-                            .map(|(package, member)| PackageMemberView { package, member })
-                            .collect(),
-                        name: self
+                        exports: self
                             .document
-                            .manifest
-                            .functions
-                            .get(function)
-                            .cloned()
-                            .ok_or_else(|| mismatch(node))?,
+                            .exports
+                            .iter()
+                            .flat_map(|(name, value)| match value {
+                                lash_kernel_doc::Export::Function(f) if f.function == *function => {
+                                    vec![ExportName {
+                                        name: name.clone(),
+                                        member: None,
+                                    }]
+                                }
+                                lash_kernel_doc::Export::Type(ty) => ty
+                                    .members
+                                    .iter()
+                                    .filter(|(_, m)| m.function().function == *function)
+                                    .map(|(member, _)| ExportName {
+                                        name: name.clone(),
+                                        member: Some(member.clone()),
+                                    })
+                                    .collect(),
+                                _ => vec![],
+                            })
+                            .collect(),
+                        name: definition.name.clone(),
                     }),
                     definition.signature.params.clone(),
                 )
             }
-            (Some(Callee::Declared(name)), _) => {
-                let function = self
+            (Some(Callee::Import(slot)), _) => {
+                let params = self
                     .document
-                    .functions
-                    .get(name)
-                    .ok_or_else(|| mismatch(node))?;
-                let params = self.document.entries.get(name).map_or_else(
-                    || {
-                        function
-                            .params
-                            .iter()
-                            .map(|name| Param {
-                                name: name.clone(),
-                                ty: Type::Any,
-                                optional: false,
-                            })
-                            .collect()
-                    },
-                    |entry| entry.signature.params.clone(),
-                );
-                (Some(CalleeView::Declared(name.clone())), params)
+                    .imports
+                    .get(slot)
+                    .and_then(|import| match &import.kind {
+                        lash_kernel_package::ImportKind::Code { signature, .. } => {
+                            Some(signature.params.clone())
+                        }
+                        _ => None,
+                    })
+                    .unwrap_or_default();
+                (Some(CalleeView::Import(*slot)), params)
             }
             (Some(Callee::Value(_)), _) => (None, Vec::new()),
             (None, Some(effect)) => (
-                Some(CalleeView::Effect(effect.clone())),
-                signature.map_or_else(Vec::new, |required| required.signature.params.clone()),
+                Some(CalleeView::Effect(*effect)),
+                signature.map_or_else(Vec::new, |required| required.params.clone()),
             ),
             (None, None) => (None, Vec::new()),
         };
         // The operand a builtin action names its one argument.
         let operand = match written {
-            Written::Statement(Action::Sleep { .. })
-            | Written::Nested(ActExpr {
-                kind: ActKind::Sleep { .. },
-                ..
-            }) => Some("duration"),
             Written::Statement(Action::Join { .. } | Action::Cancel { .. })
             | Written::Nested(ActExpr {
                 kind: ActKind::Join | ActKind::Cancel,
@@ -1030,7 +1042,6 @@ impl<'a> Walk<'a> {
             Derived::Statement(action) => match action {
                 ActionNode::Call { .. } => SiteKind::Call,
                 ActionNode::Perform { .. } => SiteKind::Perform,
-                ActionNode::Sleep { .. } => SiteKind::Sleep,
                 ActionNode::Join { .. } => SiteKind::Join,
                 ActionNode::JoinMany { .. } => SiteKind::JoinMany,
                 ActionNode::Yield => SiteKind::Yield,
@@ -1041,7 +1052,6 @@ impl<'a> Walk<'a> {
             Derived::Nested(kind, _) => match kind {
                 ActNode::Call(_) => SiteKind::Call,
                 ActNode::Perform { .. } => SiteKind::Perform,
-                ActNode::Sleep => SiteKind::Sleep,
                 ActNode::Spawn(_) => SiteKind::Spawn,
                 ActNode::Yield => SiteKind::Yield,
                 ActNode::Cancel => SiteKind::Cancel,
@@ -1059,12 +1069,11 @@ impl<'a> Walk<'a> {
                     result: Type::Any, ..
                 },
                 _,
-            ) => signature.map_or(Type::Any, |required| required.signature.result.clone()),
+            ) => signature.map_or(Type::Any, |required| required.result.clone()),
             _ => node.facet.clone().unwrap_or(Type::Any),
         };
         let role = match (kind, &callee) {
             (SiteKind::Perform, _) => ActionRole::Effect,
-            (SiteKind::Sleep, _) => ActionRole::Wait,
             (SiteKind::Call | SiteKind::Spawn, Some(CalleeView::Library { .. }))
             | (SiteKind::Await, _) => ActionRole::Library,
             (SiteKind::Call | SiteKind::Spawn, _) => ActionRole::SubWorkflow,
@@ -1074,13 +1083,9 @@ impl<'a> Walk<'a> {
         };
         let applies = self.links.applies(self.graph, self.functions, derived);
         let mut performs = match &callee {
-            Some(CalleeView::Effect(effect)) => std::collections::BTreeSet::from([effect.clone()]),
+            Some(CalleeView::Effect(effect)) => std::collections::BTreeSet::from([*effect]),
             Some(CalleeView::Library { id, .. }) => library_performs(self.functions, id),
-            Some(CalleeView::Declared(name)) => self
-                .graph
-                .unit(&Unit::Function(name.clone()))
-                .map(|unit| unit.effects.effects.clone())
-                .unwrap_or_default(),
+            Some(CalleeView::Import(slot)) => std::collections::BTreeSet::from([*slot]),
             None => std::collections::BTreeSet::new(),
         };
         performs.extend(applied_performs(
@@ -1115,7 +1120,7 @@ fn applied_performs(
     functions: &FunctionDeclarations,
     links: &mut applies::Links,
     callables: &[Site],
-) -> std::collections::BTreeSet<EffectName> {
+) -> std::collections::BTreeSet<ImportSlot> {
     use std::collections::BTreeSet;
     let mut effects = BTreeSet::new();
     let mut callables = callables.to_vec();
@@ -1145,9 +1150,9 @@ fn applied_performs(
                 _ => None,
             };
             let callee = match action {
-                Some(Derived::Statement(ActionNode::Perform { effect, .. }))
-                | Some(Derived::Nested(ActNode::Perform { effect, .. }, _)) => {
-                    effects.insert(effect.clone());
+                Some(Derived::Statement(ActionNode::Perform { slot: effect, .. }))
+                | Some(Derived::Nested(ActNode::Perform { slot: effect, .. }, _)) => {
+                    effects.insert(*effect);
                     None
                 }
                 Some(Derived::Statement(
@@ -1157,17 +1162,16 @@ fn applied_performs(
                     Some(callee.clone())
                 }
                 Some(Derived::Statement(ActionNode::Await { policy, .. }))
-                | Some(Derived::Nested(ActNode::Await(policy), _)) => {
-                    Some(CalleeNode::Library(*policy))
-                }
+                | Some(Derived::Nested(ActNode::Await(policy), _)) => Some(match policy {
+                    lash_kernel_doc::FunctionTarget::Local(id) => CalleeNode::Local(*id),
+                    lash_kernel_doc::FunctionTarget::Import(slot) => CalleeNode::Import(*slot),
+                }),
                 _ => None,
             };
             match callee {
-                Some(CalleeNode::Library(id)) => effects.extend(library_performs(functions, &id)),
-                Some(CalleeNode::Declared(name)) => {
-                    if let Some(unit) = graph.unit(&Unit::Function(name)) {
-                        effects.extend(unit.effects.effects.iter().cloned());
-                    }
+                Some(CalleeNode::Local(id)) => effects.extend(library_performs(functions, &id)),
+                Some(CalleeNode::Import(slot)) => {
+                    effects.insert(slot);
                 }
                 _ => {}
             }
@@ -1177,7 +1181,8 @@ fn applied_performs(
             match &node.kind {
                 NodeKind::Expr(ExprNode::Call { function, .. })
                 | NodeKind::Stmt(StmtNode::ReturnVia {
-                    policy: function, ..
+                    policy: lash_kernel_doc::FunctionTarget::Local(function),
+                    ..
                 }) => effects.extend(library_performs(functions, function)),
                 _ => {}
             }
@@ -1266,8 +1271,6 @@ fn direct_references(kind: &NodeKind) -> Vec<BindingId> {
             | ExprNode::Call { .. }
             | ExprNode::If { .. }
             | ExprNode::Let { .. }
-            | ExprNode::Clock
-            | ExprNode::Random
             | ExprNode::Read { .. } => Vec::new(),
         },
         NodeKind::Action(action) => {
@@ -1275,11 +1278,10 @@ fn direct_references(kind: &NodeKind) -> Vec<BindingId> {
                 ActionNode::Call { callee, .. } | ActionNode::Spawn { callee, .. } => {
                     match callee {
                         CalleeNode::Value(reference) => Some(reference),
-                        CalleeNode::Declared(_) | CalleeNode::Library(_) => None,
+                        CalleeNode::Import(_) | CalleeNode::Local(_) => None,
                     }
                 }
                 ActionNode::Perform { .. }
-                | ActionNode::Sleep { .. }
                 | ActionNode::Join { .. }
                 | ActionNode::JoinMany { .. }
                 | ActionNode::Yield
@@ -1310,7 +1312,6 @@ fn atoms(action: &ActionNode) -> Vec<&AtomNode> {
         ActionNode::Call { args, .. }
         | ActionNode::Spawn { args, .. }
         | ActionNode::Perform { args, .. } => args.iter().collect(),
-        ActionNode::Sleep { duration } => vec![duration],
         ActionNode::Join { task } | ActionNode::Cancel { task } => vec![task],
         ActionNode::JoinMany { tasks, .. } => vec![tasks],
         ActionNode::Await { value, .. } => vec![value],
@@ -1323,7 +1324,6 @@ fn written_atoms(action: &Action) -> Vec<&Atom> {
         Action::Call { args, .. } | Action::Spawn { args, .. } | Action::Perform { args, .. } => {
             args.iter().collect()
         }
-        Action::Sleep { duration, .. } => vec![duration],
         Action::Join { task } | Action::Cancel { task } => vec![task],
         Action::JoinMany { tasks, .. } => vec![tasks],
         Action::Await { value, .. } => vec![value],
@@ -1391,10 +1391,3 @@ mod applies_tests;
 
 #[cfg(test)]
 mod display_tests;
-
-#[cfg(test)]
-fn test_packages() -> PackageView<'static> {
-    static HELD: std::sync::LazyLock<std::sync::Arc<lash_kernel_package::HeldPackages>> =
-        std::sync::LazyLock::new(|| lash_vm_releases::lash_packages().unwrap());
-    HELD.view()
-}

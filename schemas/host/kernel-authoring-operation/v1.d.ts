@@ -18,8 +18,8 @@ export type Operation = ({
     "at": Position;
     "base": DocumentId;
     "binding"?: (Name | null);
-    "effect": QualifiedName;
     "result": Type;
+    "slot": ImportSlot;
   };
 } | {
   "remove_step": {
@@ -70,15 +70,8 @@ export type ActKind = ({
   "call": Callee;
 } | {
   "perform": {
-    "effect": QualifiedName;
     "result": Type;
-    /**
-     * As [`Action::Perform`]'s.
-     */
-    "then_yield"?: boolean;
-  };
-} | {
-  "sleep": {
+    "slot": ImportSlot;
     /**
      * As [`Action::Perform`]'s.
      */
@@ -89,76 +82,7 @@ export type ActKind = ({
 } | "join" | {
   "join_many": JoinMode;
 } | "yield" | "cancel" | {
-  "await": FunctionId;
-});
-
-/**
- * An action as the whole right-hand side of its own statement, its
- * arguments atoms (`K-FORM-001`); [`Expr::Act`] nests one in an
- * expression.
- */
-export type Action = ({
-  "call": {
-    "args": Array<Atom>;
-    "callee": Callee;
-  };
-} | {
-  "perform": {
-    "args": Array<Atom>;
-    "effect": QualifiedName;
-    "result": Type;
-    /**
-     * Whether the task takes one more turn of the ready queue once
-     * the outcome is in, before it continues (`K-TASK-005`).
-     */
-    "then_yield"?: boolean;
-  };
-} | {
-  "sleep": {
-    "duration": Atom;
-    /**
-     * As [`Action::Perform`]'s.
-     */
-    "then_yield"?: boolean;
-  };
-} | {
-  "join": {
-    "task": Atom;
-  };
-} | {
-  "join_many": {
-    "mode": JoinMode;
-    "tasks": Atom;
-  };
-} | "yield" | {
-  "spawn": {
-    "args": Array<Atom>;
-    "callee": Callee;
-  };
-} | {
-  "cancel": {
-    "task": Atom;
-  };
-} | {
-  "await": {
-    "policy": FunctionId;
-    "value": Atom;
-  };
-});
-
-/**
- * The order an assignment to a member evaluates its parts in
- * (`K-EVAL-003`): each dialect's own, written in the document.
- */
-export type AssignOrder = ("value_first" | "place_first");
-
-/**
- * An argument of an action: a variable or a literal, never a computation.
- */
-export type Atom = ({
-  "variable": Name;
-} | {
-  "literal": Literal;
+  "await": FunctionTarget;
 });
 
 export type Branch = ("then" | "else" | "body");
@@ -166,38 +90,37 @@ export type Branch = ("then" | "else" | "body");
 export type Bytes = string;
 
 /**
+ * How a function a closure makes is started from outside its run: the
+ * signature it is started under, how the dialect holds the function as a
+ * value, and how the entry calls it.
+ */
+export type CallablePresentation = {
+  "convention": StartConvention;
+  "representation": FunctionRepresentation;
+  "signature": Signature;
+};
+
+/**
  * What a call or a `spawn` runs.
  */
 export type Callee = ({
-  "declared": Name;
+  "local": FunctionId;
+} | {
+  "import": ImportSlot;
 } | {
   "value": Name;
-} | {
-  "library": FunctionId;
 });
-
-export type Catch = {
-  /**
-   * The variable the caught error value is bound to.
-   */
-  "binding": Name;
-  "body": Array<Stmt>;
-};
 
 /**
  * A function value written in place. It shares the variables of the scope
  * that defines it (`K-CLO-001`); which ones is derived, never written.
  */
 export type Closure = {
-  "body": Array<Stmt>;
-  "params"?: Array<Name>;
   /**
-   * How a value this closure makes is started when it crosses to a tool
-   * as a [`crate::FunctionValue`] (`K-CLO-004`); `None` for one that
-   * cannot be started. Executable behaviour: it is part of the
-   * document's identity.
+   * The anonymous body's own identity, local to the defining Document.
    */
-  "start"?: (StartAdapter | null);
+  "function": FunctionId;
+  "presentation"?: (CallablePresentation | null);
 };
 
 export type DataMapEntry = {
@@ -270,7 +193,7 @@ export type Expr = ({
     "args": Array<Expr>;
     "function": FunctionId;
   };
-} | "clock" | "random" | {
+} | {
   "read": ProjectionRead;
 } | {
   "act": ActExpr;
@@ -290,6 +213,22 @@ export type FunctionRepresentation = ("bare" | {
   };
 });
 
+/**
+ * A convention helper local to this document or named by an explicit Import slot.
+ */
+export type FunctionTarget = ({
+  "kind": "local";
+  "value": FunctionId;
+} | {
+  "kind": "import";
+  "value": ImportSlot;
+});
+
+/**
+ * A stable document-local Import coordinate. Names are diagnostic, never dispatch keys.
+ */
+export type ImportSlot = number;
+
 export type Integer = string;
 
 export type JoinMode = ("all" | "all_settled" | "race" | "any");
@@ -305,7 +244,7 @@ export type Literal = (("null" | "absent") | {
 } | {
   "bytes": Bytes;
 } | {
-  "function": Name;
+  "function": FunctionId;
 });
 
 export type MapEntry = {
@@ -352,15 +291,6 @@ export type Param = {
 };
 
 /**
- * Where an assignment writes.
- */
-export type Place = ({
-  "variable": Name;
-} | {
-  "member": Member;
-});
-
-/**
  * Where a statement is put: in `block`, ahead of the statement `before`,
  * or at the block's end.
  */
@@ -376,37 +306,6 @@ export type ProjectionRead = {
    */
   "request": Expr;
 };
-
-/**
- * A dialect's iteration protocol: the library functions a `for … via`
- * calls at its header, by identity (`K-ITER-005`). Each is listed in the
- * manifest as any library function a document reaches.
- */
-export type Protocol = {
-  /**
-   * Checks a map or a set against its size when the loop opened it and
-   * the items it may still give, after each step; gives that budget
-   * anew.
-   */
-  "check"?: (FunctionId | null);
-  /**
-   * Takes what was walked and an item of it to the value bound.
-   */
-  "item"?: (FunctionId | null);
-  /**
-   * Steps a driver: an empty tuple when it is exhausted, else a tuple of
-   * one item.
-   */
-  "next"?: (FunctionId | null);
-  /**
-   * Takes the iterated value to what the loop walks: a list, a tuple, a
-   * map, a set or a text, which the loop's own cursor walks, or any
-   * other value, a driver that `next` steps.
-   */
-  "open": FunctionId;
-};
-
-export type QualifiedName = string;
 
 export type RecordEntry = {
   "field": string;
@@ -432,15 +331,6 @@ export type RecordTypeField = {
 };
 
 /**
- * The right-hand side of a `let` or an assignment.
- */
-export type Rhs = ({
-  "expr": Expr;
-} | {
-  "action": Action;
-});
-
-/**
  * What a function, an effect or an entry takes and returns.
  */
 export type Signature = {
@@ -460,118 +350,25 @@ export type Site = {
   "unit": Unit;
 };
 
-/**
- * How a function a closure makes is started from outside its run: the
- * signature it is started under, how the dialect holds the function as a
- * value, and how the entry calls it.
- */
-export type StartAdapter = {
-  "convention": StartConvention;
-  "representation": FunctionRepresentation;
-  "signature": Signature;
-};
-
-/**
- * How a host starts an entry. A start adapter uses the same convention
- * when it extracts a function value from a dialect callable.
- */
-export type StartConvention = ("direct" | {
-  "ts_direct": {
-    "await_fn": FunctionId;
+export type StartConvention = ({
+  "kind": "direct";
+} | {
+  "kind": "ts_direct";
+  "value": {
+    "await_fn": FunctionTarget;
   };
 } | {
-  "ts_args_list": {
-    "await_fn": FunctionId;
-    "same_fn": FunctionId;
+  "kind": "ts_args_list";
+  "value": {
+    "await_fn": FunctionTarget;
+    "same_fn": FunctionTarget;
   };
 } | {
-  "py_direct": {
-    "cleanup": FunctionId;
+  "kind": "py_direct";
+  "value": {
+    "cleanup": FunctionTarget;
   };
 });
-
-export type Stmt = (("break" | "continue") | {
-  "let": {
-    "name": Name;
-    "value": Rhs;
-  };
-} | {
-  "assign": {
-    "order"?: AssignOrder;
-    "place": Place;
-    "value": Rhs;
-  };
-} | {
-  "remove": {
-    "member": Member;
-  };
-} | {
-  "do": {
-    "value": Expr;
-  };
-} | {
-  "if": {
-    "condition": Expr;
-    "else_block"?: Array<Stmt>;
-    "then_block": Array<Stmt>;
-  };
-} | {
-  "for": {
-    "binding": Name;
-    "body": Array<Stmt>;
-    "else_block"?: Array<Stmt>;
-    "iterable": Expr;
-    /**
-     * Declared units at every continuation test, even in library code.
-     * Zero leaves the loop covered by the call's completion formula.
-     */
-    "metered"?: number;
-    "via"?: (Protocol | null);
-  };
-} | {
-  "while": {
-    "body": Array<Stmt>;
-    "condition": Expr;
-    "else_block"?: Array<Stmt>;
-    /**
-     * As the declared loop charge of [`Stmt::For`].
-     */
-    "metered"?: number;
-  };
-} | {
-  "return": {
-    "value": Expr;
-  };
-} | {
-  "return_via": {
-    "policy": FunctionId;
-    "value": Expr;
-  };
-} | {
-  "try": TryStmt;
-} | {
-  "throw": {
-    "value": Expr;
-  };
-} | {
-  "print": {
-    "value": Expr;
-  };
-} | {
-  "finish": {
-    "value": Expr;
-  };
-} | {
-  "fail": {
-    "value": Expr;
-  };
-});
-
-export type TryStmt = {
-  "body": Array<Stmt>;
-  "catch"?: (Catch | null);
-  "finally"?: (Array<Stmt> | null);
-};
 
 export type Type = (("null" | "absent" | "bool" | "int" | "float" | "text" | "bytes" | "timestamp" | "error") | "any" | "json" | "number" | {
   "tuple": Array<Type>;

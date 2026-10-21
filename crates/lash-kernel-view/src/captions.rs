@@ -5,10 +5,12 @@
 use std::collections::BTreeMap;
 
 use lash_kernel_check::WorkflowDocument;
-use lash_kernel_doc::{
-    Caption, CaptionTarget, Captions, Document, DocumentId, FieldPath, Name, ParamTarget, Site,
-    Unit,
-};
+use lash_kernel_doc::{Caption, CaptionTarget, Captions, Document, FieldPath, ParamTarget};
+
+use lash_vocabulary::legacy_names::DocumentId;
+use lash_vocabulary::legacy_names::Name;
+use lash_vocabulary::sites::Site;
+use lash_vocabulary::sites::Unit;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -248,24 +250,21 @@ impl WorkflowView {
             .iter()
             .find(|scope| scope.kind == crate::ScopeKind::Entry)
             .map(|scope| &scope.block.unit);
-        let Some(Unit::Function(function)) = entry else {
+        let Some(Unit::Library(id)) = entry else {
             return (Vec::new(), Vec::new());
         };
-        // An entry takes what its signature names; another declared
-        // function its own parameters.
-        let names: Vec<&Name> = match document.entries.get(function) {
-            Some(entry) => entry
-                .signature
-                .params
-                .iter()
-                .map(|param| &param.name)
-                .collect(),
-            None => document
-                .functions
-                .get(function)
-                .map(|declared| declared.params.iter().collect())
-                .unwrap_or_default(),
+        let Some((function, _)) = document
+            .exports
+            .iter()
+            .find(|(_, e)| matches!(e, lash_kernel_doc::Export::Function(f) if f.function == *id))
+        else {
+            return (Vec::new(), Vec::new());
         };
+        let names: Vec<&Name> = document
+            .functions
+            .get(id)
+            .map(|f| f.signature.params.iter().map(|p| &p.name).collect())
+            .unwrap_or_default();
         let params = names
             .into_iter()
             .enumerate()

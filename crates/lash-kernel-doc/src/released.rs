@@ -25,7 +25,7 @@
 use std::collections::BTreeSet;
 
 use crate::graph_tokens::TokenError;
-use crate::{FunctionDefinition, FunctionId, ValidatedFunctions};
+use crate::{FunctionDefinition, FunctionId, Site, ValidatedFunctions};
 
 #[cfg(test)]
 std::thread_local! {
@@ -45,7 +45,7 @@ const CLOSURES: u32 = 1 << 3;
 /// What a machine's preparation reserves for a library body before it
 /// compiles it: its codes (the body and each closure), blocks, statements
 /// and property read sites, whether it declares a closure, and the child
-/// path of each action whose occurrence it counts. The machine computes it
+/// site of each action whose occurrence it counts. The machine computes it
 /// (`lash_kernel_vm::body_census`), and a build writes it into its image
 /// so that a process prepares a release without walking its bodies.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -55,7 +55,7 @@ pub struct BodyCensus {
     pub stmts: u32,
     pub sites: u32,
     pub closures: bool,
-    pub occurrences: Vec<Vec<u32>>,
+    pub occurrences: Vec<Site>,
 }
 
 /// A release image the build wrote is malformed: a defect of the build.
@@ -189,16 +189,7 @@ impl ReleasedFunctions {
             return None;
         }
         let field = |index: usize| self.word(self.records() + at * RECORD + ID + index * 4);
-        let mut occurrences = Vec::new();
-        let paths = self.slice(self.range(at, 9));
-        let mut words = paths
-            .as_chunks::<4>()
-            .0
-            .iter()
-            .map(|word| u32::from_le_bytes(*word));
-        while let Some(len) = words.next() {
-            occurrences.push(words.by_ref().take(len as usize).collect());
-        }
+        let occurrences = crate::graph_tokens::decode_body(self.slice(self.range(at, 9))).ok()?;
         Some(BodyCensus {
             codes: field(5),
             blocks: field(6),
@@ -335,10 +326,7 @@ impl ValidatedFunctions {
                     if census.closures {
                         flags |= CLOSURES;
                     }
-                    for path in &census.occurrences {
-                        paths.extend((path.len() as u32).to_le_bytes());
-                        paths.extend(path.iter().flat_map(|step| step.to_le_bytes()));
-                    }
+                    paths = crate::graph_tokens::encode_body(&census.occurrences);
                     [census.codes, census.blocks, census.stmts, census.sites]
                 }
                 None => [0; 4],

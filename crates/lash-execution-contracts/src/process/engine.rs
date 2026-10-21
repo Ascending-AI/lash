@@ -598,8 +598,13 @@ pub mod linked {
     /// A linked execution reference; origin remains retained by the host.
     #[derive(Clone, Debug, PartialEq, Eq)]
     pub enum ProcessDocumentRefRead {
-        Named(LinkedStart),
-        ArtifactMissing { artifact: ArtifactName },
+        Named {
+            link: LinkId,
+            selector: ReachSelector,
+        },
+        ArtifactMissing {
+            artifact: ArtifactName,
+        },
     }
     use super::{
         ProcessDocument, ProcessDocumentRead, ProcessExecutionDocumentRead, ProcessInfraError,
@@ -658,7 +663,8 @@ pub mod linked {
         ) -> Result<(), PluginError>;
         async fn inspect_link(
             &self,
-            start: &LinkedStart,
+            link: LinkId,
+            selector: &ReachSelector,
         ) -> Result<LinkInspection, EnginePortError>;
         fn capabilities(&self) -> NodeRequirements;
         async fn check_args(

@@ -12,11 +12,12 @@ mod printer;
 use crate::validate::StatementForm;
 
 pub use parser::{
-    parse_definition, parse_definition_with_limits, parse_document, parse_document_with_limits,
+    parse_definition, parse_definition_with_limits, parse_definition_with_locals,
+    parse_definition_with_locals_and_limits, parse_document, parse_document_with_limits,
     parse_signature,
 };
 
-pub use printer::{print_definition, print_document, print_document_with_ranges, print_type};
+pub use printer::{print_definition, print_document, print_document_with_ranges};
 
 /// A kernel text that is not a document or a definition, and where.
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
@@ -57,5 +58,3 @@ pub enum ParseErrorReason {
     #[error("{problem}")]
     Malformed { problem: String },
 }
-
-pub(crate) use lash_vocabulary::type_text::is_keyword;

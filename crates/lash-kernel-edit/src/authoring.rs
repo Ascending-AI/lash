@@ -1,8 +1,12 @@
 //! The closed canvas vocabulary. Source replacement owns all other edits.
 use crate::Position;
-use lash_kernel_doc::{
-    DocumentId, EffectName, Expr, Literal, MapEntry, Name, RecordEntry, Site, Type,
-};
+use lash_kernel_doc::{Expr, Literal, MapEntry, RecordEntry};
+use lash_vocabulary::legacy_names::DocumentId;
+
+use lash_vocabulary::legacy_names::Name;
+use lash_vocabulary::types::Type;
+
+use lash_vocabulary::sites::Site;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -117,7 +121,7 @@ pub enum Operation {
     InsertStep {
         base: DocumentId,
         at: Position,
-        effect: EffectName,
+        slot: lash_kernel_package::ImportSlot,
         args: Vec<DataValue>,
         result: Type,
         #[serde(default, skip_serializing_if = "Option::is_none")]

@@ -24,19 +24,16 @@
 //! crate depends on `lash-kernel-doc` and on no other lash crate.
 
 mod admit;
-mod closure;
 mod flow;
 mod graph;
 mod link;
 mod manifest;
 mod refusal;
-mod schema;
-mod types;
+pub use lash_vocabulary::schema;
+pub use lash_vocabulary::type_relations as types;
 mod typing;
 mod workflow;
 
-#[cfg(test)]
-mod closure_tests;
 #[cfg(test)]
 mod schema_tests;
 #[cfg(test)]
@@ -45,7 +42,6 @@ mod tests;
 pub use admit::{
     Admitted, Environment, admit, derive, derive_definition, derive_entry, derive_view,
 };
-pub use closure::{EntryEffectsRefusal, entry_effects, main_effects};
 pub use graph::{
     ActNode, ActionNode, AtomNode, Binding, BindingId, BindingKind, CalleeNode, CatchNode, Edge,
     EdgeKind, EffectSet, ExecutionSite, ExprNode, Graph, GraphNode, MapEntryNode, MemberNode,
@@ -53,11 +49,14 @@ pub use graph::{
     Target, UnitView,
 };
 pub use manifest::{
-    EntryReachability, Performs, Requirements, entry_reachability, library_performs, requirements,
+    Requirements, entry_reachability, library_performs, requirements, selected_reach,
 };
-pub use refusal::{Refusal, RefusalReason, Refused, RequiredBy, SignatureMismatch, SignatureSide};
+pub use refusal::{Refusal, RefusalReason, Refused, SignatureMismatch, SignatureSide};
 pub use schema::{
     MAX_PROJECTED_TYPE_NODES, MAX_RESOLVED_REFERENCES, SchemaConflict, SchemaProjectionRefusal,
     result_type_of_schema, signature_mismatch, signature_serves, tool_signature, type_of_schema,
 };
-pub use workflow::{WorkflowAdmissionRefusal, WorkflowDocument, WorkflowDocumentError};
+pub use workflow::{
+    StartBoundaryRefusal, StartRefusal, WorkflowDocument, WorkflowDocumentError, startable_export,
+    validate_start_input, validate_start_result,
+};

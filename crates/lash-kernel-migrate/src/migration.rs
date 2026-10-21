@@ -4,9 +4,14 @@ use std::collections::BTreeMap;
 
 use lash_kernel_doc::Correspondence;
 use lash_kernel_doc::{
-    Document, DocumentId, EffectName, FunctionCatalog, FunctionDefinition, FunctionId,
-    FunctionName, FunctionRegistry, KernelVersion, RegistryError, Site,
+    Document, FunctionCatalog, FunctionDefinition, FunctionRegistry, KernelVersion, RegistryError,
 };
+
+use lash_vocabulary::legacy_names::DocumentId;
+use lash_vocabulary::legacy_names::EffectName;
+use lash_vocabulary::legacy_names::FunctionId;
+use lash_vocabulary::legacy_names::FunctionName;
+use lash_vocabulary::sites::Site;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -103,6 +108,10 @@ pub enum ParkedRefusal {
 #[serde(rename_all = "snake_case", tag = "refused")]
 #[non_exhaustive]
 pub enum KernelMigrationRefusal {
+    #[error("callable {callable:?} requires its retained defining Link to prove format carry")]
+    CallableOriginRequired {
+        callable: lash_vocabulary::names::CallableId,
+    },
     #[error("document {document} is not retained")]
     DocumentMissing { document: DocumentId },
     #[error("document {document} is not rewritten: {refusal}")]

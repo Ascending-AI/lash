@@ -183,3 +183,378 @@ pub struct Attachment {
     pub packages: BTreeSet<PackagePath>,
     pub deferred: BTreeSet<PackagePath>,
 }
+
+use crate::tokens::{TokenCodec, TokenError, TokenReader, TokenWriter};
+
+// Field order is the canonical record order, independent of JSON object keys.
+macro_rules! record_codec {
+    ($ty:ty { $($field:ident),+ $(,)? }) => {
+        impl TokenCodec for $ty {
+            fn encode(&self, out: &mut TokenWriter) {
+                out.seq([$(stringify!($field)),+].len() as u64);
+                $(self.$field.encode(out);)+
+            }
+            fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
+                input.expect_struct([$(stringify!($field)),+].len() as u64)?;
+                Ok(Self { $($field: TokenCodec::decode(input)?),+ })
+            }
+        }
+    };
+}
+macro_rules! text_codec {
+    ($ty:ty, $parse:expr) => {
+        impl TokenCodec for $ty {
+            fn encode(&self, out: &mut TokenWriter) {
+                out.text(&self.to_string());
+            }
+            fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
+                ($parse)(input.text()?).map_err(|error| TokenError::Invalid(format!("{error}")))
+            }
+        }
+    };
+}
+text_codec!(Segment, Segment::new);
+text_codec!(PackagePath, |text: &str| PackagePath::parse(text));
+record_codec!(ExportName { name, member });
+record_codec!(QualifiedName {
+    package,
+    member,
+    type_member
+});
+record_codec!(Brand { package, name });
+record_codec!(Import { name, kind });
+record_codec!(Link { document, fills });
+record_codec!(Package { path, members });
+record_codec!(Member { visibility, kind });
+record_codec!(ProviderName { owner, key });
+record_codec!(ProviderConfig {
+    component,
+    format,
+    value,
+    payload
+});
+record_codec!(GrantPayload {
+    codec,
+    format,
+    value
+});
+record_codec!(PublicationContext {
+    domain,
+    scope,
+    publisher,
+    root
+});
+record_codec!(DeferredGrant {
+    provider,
+    context,
+    path,
+    visibility,
+    signature,
+    config,
+    resolution_policy
+});
+record_codec!(DeferredPackage {
+    path,
+    visibility,
+    provider,
+    config,
+    resolution_policy
+});
+
+impl TokenCodec for FormatVersion {
+    fn encode(&self, out: &mut TokenWriter) {
+        self.get().encode(out);
+    }
+    fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
+        Self::new(u32::decode(input)?)
+            .ok_or_else(|| TokenError::Invalid("zero format version".into()))
+    }
+}
+impl TokenCodec for ProcessComponentId {
+    fn encode(&self, out: &mut TokenWriter) {
+        out.text(self.as_str());
+    }
+    fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
+        Self::new(input.text()?).map_err(|e| TokenError::Invalid(e.to_string()))
+    }
+}
+macro_rules! string_newtype_codec {
+    ($ty:ty) => {
+        impl TokenCodec for $ty {
+            fn encode(&self, out: &mut TokenWriter) {
+                self.0.encode(out);
+            }
+            fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
+                String::decode(input).map(Self)
+            }
+        }
+    };
+}
+string_newtype_codec!(PublicationDomain);
+string_newtype_codec!(PublisherInstance);
+impl TokenCodec for PublicationScope {
+    fn encode(&self, out: &mut TokenWriter) {
+        match self {
+            Self::Host => out.sum(0, 0),
+            Self::Session(id) => {
+                out.sum(1, 1);
+                out.text(id.as_str());
+            }
+        }
+    }
+    fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
+        Ok(match sum(input, &[(0, 0), (1, 1)])? {
+            0 => Self::Host,
+            _ => Self::Session(
+                SessionId::parse(input.text()?).map_err(|e| TokenError::Invalid(e.to_string()))?,
+            ),
+        })
+    }
+}
+impl TokenCodec for DeferredResolutionPolicy {
+    fn encode(&self, out: &mut TokenWriter) {
+        out.seq(3);
+        self.execution.as_secs().encode(out);
+        self.execution.subsec_nanos().encode(out);
+        match self.execution_policy {
+            crate::ExecutionPolicy::Once => out.sum(0, 0),
+            crate::ExecutionPolicy::Read => out.sum(1, 0),
+            crate::ExecutionPolicy::Repeatable { retry } => {
+                out.sum(2, 3);
+                retry.max_attempts.get().encode(out);
+                retry.backoff.base_delay_ms.encode(out);
+                retry.backoff.max_delay_ms.encode(out);
+            }
+        }
+    }
+    fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
+        input.expect_struct(3)?;
+        let secs = u64::decode(input)?;
+        let nanos = u32::decode(input)?;
+        if nanos >= 1_000_000_000 {
+            return Err(TokenError::Invalid("noncanonical duration".into()));
+        }
+        let execution_policy = match sum(input, &[(0, 0), (1, 0), (2, 3)])? {
+            0 => crate::ExecutionPolicy::Once,
+            1 => crate::ExecutionPolicy::Read,
+            _ => crate::ExecutionPolicy::repeatable(
+                std::num::NonZeroU32::new(u32::decode(input)?)
+                    .ok_or_else(|| TokenError::Invalid("zero retry attempts".into()))?,
+                u64::decode(input)?,
+                u64::decode(input)?,
+            ),
+        };
+        Ok(Self {
+            execution: std::time::Duration::new(secs, nanos),
+            execution_policy,
+        })
+    }
+}
+impl TokenCodec for TurnControls {
+    fn encode(&self, out: &mut TokenWriter) {
+        out.seq(2);
+        self.finish_declaration()
+            .map(|finish| finish.value_schema.as_value().clone())
+            .encode(out);
+        self.contains(crate::TurnControlKind::SwitchAgentFrame)
+            .encode(out);
+    }
+    fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
+        input.expect_struct(2)?;
+        let mut controls = Self::none();
+        if let Some(value) = Option::<serde_json::Value>::decode(input)? {
+            controls = controls.with_finish(
+                crate::JsonSchema::admit(value).map_err(|e| TokenError::Invalid(e.to_string()))?,
+            );
+        }
+        if bool::decode(input)? {
+            controls = controls.with_switch_agent_frame();
+        }
+        Ok(controls)
+    }
+}
+impl TokenCodec for Intent {
+    fn encode(&self, out: &mut TokenWriter) {
+        self.0.encode(out);
+    }
+    fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
+        String::decode(input).map(Self)
+    }
+}
+fn sum(input: &mut TokenReader<'_>, choices: &[(u32, u64)]) -> Result<u32, TokenError> {
+    let (kind, fields) = input.sum()?;
+    if choices.contains(&(kind, fields)) {
+        Ok(kind)
+    } else {
+        Err(TokenError::Invalid(
+            "unknown package variant or field count".into(),
+        ))
+    }
+}
+impl TokenCodec for Visibility {
+    fn encode(&self, out: &mut TokenWriter) {
+        out.sum(u32::from(*self == Self::Internal), 0);
+    }
+    fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
+        Ok(if sum(input, &[(0, 0), (1, 0)])? == 0 {
+            Self::Public
+        } else {
+            Self::Internal
+        })
+    }
+}
+impl TokenCodec for OperationMode {
+    fn encode(&self, out: &mut TokenWriter) {
+        out.sum(u32::from(*self == Self::Waited), 0);
+    }
+    fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
+        Ok(if sum(input, &[(0, 0), (1, 0)])? == 0 {
+            Self::Read
+        } else {
+            Self::Waited
+        })
+    }
+}
+record_codec!(OperationOffer {
+    requirement,
+    intents,
+    controls,
+    mode
+});
+impl TokenCodec for Convention {
+    fn encode(&self, out: &mut TokenWriter) {
+        out.sum(
+            match self {
+                Self::Direct => 0,
+                Self::TsDirect => 1,
+                Self::TsArgsList => 2,
+                Self::PyDirect => 3,
+            },
+            0,
+        );
+    }
+    fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
+        Ok(match sum(input, &[(0, 0), (1, 0), (2, 0), (3, 0)])? {
+            0 => Self::Direct,
+            1 => Self::TsDirect,
+            2 => Self::TsArgsList,
+            _ => Self::PyDirect,
+        })
+    }
+}
+impl TokenCodec for ImportKind {
+    fn encode(&self, out: &mut TokenWriter) {
+        match self {
+            Self::Operation { signature } => {
+                out.sum(0, 1);
+                signature.encode(out);
+            }
+            Self::Code {
+                signature,
+                convention,
+            } => {
+                out.sum(1, 2);
+                signature.encode(out);
+                convention.encode(out);
+            }
+            Self::Type { brand } => {
+                out.sum(2, 1);
+                brand.encode(out);
+            }
+            Self::Error { kind } => {
+                out.sum(3, 1);
+                kind.encode(out);
+            }
+        }
+    }
+    fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
+        Ok(match sum(input, &[(0, 1), (1, 2), (2, 1), (3, 1)])? {
+            0 => Self::Operation {
+                signature: Signature::decode(input)?,
+            },
+            1 => Self::Code {
+                signature: Signature::decode(input)?,
+                convention: Convention::decode(input)?,
+            },
+            2 => Self::Type {
+                brand: Brand::decode(input)?,
+            },
+            _ => Self::Error {
+                kind: Brand::decode(input)?,
+            },
+        })
+    }
+}
+impl TokenCodec for Fill {
+    fn encode(&self, out: &mut TokenWriter) {
+        match self {
+            Self::Operation(requirement) => {
+                out.sum(0, 1);
+                requirement.encode(out);
+            }
+            Self::Export { link, export } => {
+                out.sum(1, 2);
+                link.encode(out);
+                export.encode(out);
+            }
+            Self::Deferred { provider } => {
+                out.sum(2, 1);
+                provider.encode(out);
+            }
+        }
+    }
+    fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
+        Ok(match sum(input, &[(0, 1), (1, 2), (2, 1)])? {
+            0 => Self::Operation(OperationRequirement::decode(input)?),
+            1 => Self::Export {
+                link: LinkId::decode(input)?,
+                export: ExportName::decode(input)?,
+            },
+            _ => Self::Deferred {
+                provider: Box::decode(input)?,
+            },
+        })
+    }
+}
+impl TokenCodec for MemberKind {
+    fn encode(&self, out: &mut TokenWriter) {
+        match self {
+            Self::Operation(offer) => {
+                out.sum(0, 1);
+                offer.encode(out);
+            }
+            Self::Export { link, export } => {
+                out.sum(1, 2);
+                link.encode(out);
+                export.encode(out);
+            }
+        }
+    }
+    fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
+        Ok(match sum(input, &[(0, 1), (1, 2)])? {
+            0 => Self::Operation(OperationOffer::decode(input)?),
+            _ => Self::Export {
+                link: LinkId::decode(input)?,
+                export: ExportName::decode(input)?,
+            },
+        })
+    }
+}
+impl Link {
+    /// Content identity of the immutable document and every chosen fill.
+    pub fn identity(&self) -> LinkId {
+        LinkId::from_bytes(blake3::derive_key(
+            "lash.link.v1",
+            &crate::tokens::encode_body(self),
+        ))
+    }
+}
+impl Package {
+    /// Content identity of this namespace; routes and publication provenance are separate.
+    pub fn identity(&self) -> PackageId {
+        PackageId::from_bytes(blake3::derive_key(
+            "lash.package.v1",
+            &crate::tokens::encode_body(self),
+        ))
+    }
+}

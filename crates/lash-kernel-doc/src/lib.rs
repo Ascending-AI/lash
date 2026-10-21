@@ -12,7 +12,7 @@
 //! Its neutral leaves live in lash-vocabulary; it depends on no runtime crate.
 
 mod ast;
-mod capabilities;
+use lash_vocabulary::sites::{Site, Unit};
 mod caption;
 mod correspondence;
 mod declarations;
@@ -33,11 +33,10 @@ pub use declarations::{
 pub use source_map::{SourceLanguage, SourceMap, SourceMapRefusal, SourceSite, Span};
 mod codec_variants;
 mod continuation;
-mod data_limits;
 mod decode;
 pub use decode::{DecodeMismatch, Decoder};
 pub mod document;
-pub use data_limits::KernelDataLimits;
+use lash_vocabulary::data_limits::KernelDataLimits;
 /// The arena: what a run's objects are while it executes (seams C, D).
 /// Its value and native ABI are the crate root's.
 pub mod arena;
@@ -49,35 +48,32 @@ mod graph_codec;
 /// cross-crate seam for the kernel's and the store's binary codecs, not part
 /// of the document vocabulary.
 #[doc(hidden)]
-pub mod graph_tokens;
+use lash_vocabulary::tokens as graph_tokens;
 /// The persistent semantic heap's page vocabulary: what pages, saved rows
 /// and projection hold (FIG-6195, FIG-6708).
 pub mod heap;
 mod identified;
 pub use document_bytes::{DOCUMENT_GRAMMAR_VERSION, DocumentBytes, DocumentBytesRefusal};
 pub use identified::{IdentifiedDocument, document_work};
-mod identity;
-mod observation;
+use lash_vocabulary::observation;
+use lash_vocabulary::sites as identity;
 /// One root-based snapshot of live code: what a saved function and a
 /// crossing function share (`K-CLO-004`).
 pub mod snapshot;
-pub use observation::{ExecutionPath, RanCounts, ReplayPath, RunObservation, SiteCounts, TaskPath};
-mod name;
+use lash_vocabulary::legacy_names as name;
+use observation::ExecutionPath;
 mod native;
 mod number;
-mod package_ids;
 /// Generated execution plans for library bodies (FIG-6678): what a build's
 /// helper compiler emits and an embedder installs beside the definitions.
 pub mod plan;
 mod released;
-mod requirement;
 pub mod scalar;
 mod text;
-mod types;
+use lash_vocabulary::types;
 mod validate;
 mod value;
 mod version;
-mod workflow;
 
 #[cfg(test)]
 mod tests;
@@ -88,38 +84,29 @@ pub use arena::native::{
     PreparedNative, Reservation, Retry, Semantics, SequenceView, TableView, TextView,
 };
 pub use ast::{
-    ActExpr, ActKind, Action, AssignOrder, Atom, Block, Callee, Catch, Closure, Expr, Function,
-    JoinMode, Literal, MapEntry, Member, Node, NodeMut, Place, ProjectionRead, Protocol,
-    RecordEntry, Rhs, Site, Stmt, TryStmt, Unit, each_closure_mut,
+    ActExpr, ActKind, Action, AssignOrder, Atom, Block, Callee, Catch, Closure, Expr, JoinMode,
+    Literal, MapEntry, Member, Node, NodeMut, Place, ProjectionRead, Protocol, RecordEntry, Rhs,
+    Stmt, TryStmt, each_closure_mut,
 };
-pub use capabilities::{ExecutionRequirements, NodeCapabilities};
 pub use continuation::{LiveRolesError, live_roles, live_roles_in};
 pub use document::{
-    DecodeError, Document, EncodeError, Entry, KERNEL_VERSION, MAX_NESTING_DEPTH, Manifest,
-    Ordinals,
+    DecodeError, Document, EncodeError, Export, FunctionExport, KERNEL_VERSION, MAX_NESTING_DEPTH,
+    Ordinals, TypeDef, TypeMember,
 };
 pub use function::{
     FIRST_NATIVE_VERSION, Formula, FunctionBody, FunctionDeclarations, FunctionDefinition,
-    FunctionHeader, Guard, Implementation, ImplementationKind, Measure, Operand,
+    FunctionHeader, Guard, Implementation, ImplementationKind, Measure, Metering, Operand,
 };
 pub use function_value::{
-    FUNCTION_VALUE_ENTRY, FUNCTION_VALUE_TAG, FunctionRepresentation, FunctionValue,
-    FunctionValueLimits, FunctionValueRefusal, StartAdapter, StartConvention, carry_start_adapters,
+    CallablePresentation, FUNCTION_VALUE_ENTRY, FUNCTION_VALUE_TAG, FunctionRepresentation,
+    FunctionTarget, FunctionValue, FunctionValueLimits, FunctionValueRefusal, StartConvention,
     escape_function_key,
 };
-pub use graph_codec::{
-    FROZEN_DATUM, FROZEN_JSON, FROZEN_TOOL_VALUE, FrozenDatum, MAX_DECODE_DEPTH,
-};
+pub use graph_codec::FrozenDatum;
 pub use heap::{EntityId, FamilyId, Identity};
-pub use identity::{
-    EffectId, LoopCounts, ObservationReader, PositionCounts, PositionLabel, TaskLabel, VisitId,
-    WaitId,
-};
+use identity::{EffectId, PositionLabel, TaskLabel, VisitId, WaitId};
 pub(crate) use identity::{EffectIdentity, LoopIteration, SpawnIdentity, TaskIdentity};
-pub use name::{
-    DocumentId, EffectName, FunctionId, FunctionName, InvalidIdentity, InvalidQualifiedName, Name,
-    QualifiedName, SourceMapId,
-};
+use name::{DocumentId, FunctionId, FunctionName, Name, QualifiedName, SourceMapId};
 pub use native::{
     FunctionCatalog, FunctionRegistry, GuardExceeded, RegisteredFunction, RegistryError,
     ValidatedFunctions, WorkCounter,
@@ -127,24 +114,23 @@ pub use native::{
 pub use number::{
     Float, Integer, InvalidFloat, InvalidInteger, InvalidNumberToken, NumberPolicy, NumberToken,
 };
-pub use package_ids::{ArtifactDigest, InvalidDigest, PackageSetDigest};
 pub use released::{BodyCensus, ImageError, ReleasedFunctions};
-pub use requirement::{ContractId, OperationRequirement, performed_by, performed_through};
+
 pub use text::{
-    ParseError, ParseErrorReason, parse_definition, parse_definition_with_limits, parse_document,
+    ParseError, ParseErrorReason, parse_definition, parse_definition_with_limits,
+    parse_definition_with_locals, parse_definition_with_locals_and_limits, parse_document,
     parse_document_with_limits, parse_signature, print_definition, print_document,
-    print_document_with_ranges, print_type,
+    print_document_with_ranges,
 };
-pub use types::{MapType, Param, RecordType, RecordTypeField, Signature, Type};
+use types::{Signature, Type};
 pub use validate::{
     Invalid, InvalidReason, StatementForm, StatementRuleViolation, check_statement,
-    validate_definition, validate_definition_with_limits, validate_document,
-    validate_document_with_limits,
+    validate_callable_signature, validate_definition, validate_definition_with_limits,
+    validate_document, validate_document_with_limits,
 };
 pub use value::{Bytes, Datum, ErrorDatum, Handle, InvalidBytes, TaskId, Timestamp, ValueKind};
 
 pub use version::KernelVersion;
-pub use workflow::{WorkflowDocumentEntry, WorkflowDocumentRef};
 
 /// Internal registration facts shared by the checker and library assembly.
 #[doc(hidden)]

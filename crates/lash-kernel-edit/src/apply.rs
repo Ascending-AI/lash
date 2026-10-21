@@ -6,13 +6,17 @@
 //! [`Working::publish`] hands the result to the checker.
 
 use lash_kernel_doc::{Correspondence, Survivor};
+use lash_vocabulary::legacy_names::DocumentId;
+
 use std::collections::BTreeMap;
 
-use lash_kernel_check::{Admitted, Environment, admit, requirements};
+use lash_kernel_check::{Admitted, Environment, admit};
 use lash_kernel_doc::{
-    Action, Atom, Block, Document, DocumentId, Expr, Member, Name, Node, NodeMut, Place, Rhs, Site,
-    Stmt, Unit,
+    Action, Atom, Block, Document, Expr, Member, Node, NodeMut, Place, Rhs, Stmt,
 };
+
+use lash_vocabulary::sites::Site;
+use lash_vocabulary::sites::Unit;
 
 use crate::edit::{Edit, Position};
 use crate::refusal::{EditDiagnosticKind, EditRefusal, Location, invalid_correspondence, refused};
@@ -32,10 +36,6 @@ pub(super) fn at(base: &Site, kind: EditDiagnosticKind) -> Fault {
     Box::new(FaultKind::At(Some(Location::Base(base.clone())), kind))
 }
 
-pub(super) fn plain(kind: EditDiagnosticKind) -> Fault {
-    Box::new(FaultKind::At(None, kind))
-}
-
 /// What a transaction leaves when it is admitted.
 pub(crate) struct Published {
     pub(crate) document: Document,
@@ -50,12 +50,13 @@ pub(crate) struct Working {
 
 fn body<'a>(document: &'a mut Document, unit: &Unit) -> Option<&'a mut Block> {
     match unit {
-        Unit::Main => Some(&mut document.main),
-        Unit::Function(name) => document
+        Unit::Main => document.main.as_mut(),
+        Unit::Library(id) => document
             .functions
-            .get_mut(name)
-            .map(|function| &mut function.body),
-        Unit::Library(_) => None,
+            .get_mut(id)
+            .and_then(lash_kernel_doc::FunctionDefinition::body_mut)
+            .map(|body| &mut body.block),
+        Unit::Function(_) => None,
     }
 }
 
@@ -73,8 +74,7 @@ fn arguments(action: &mut Action) -> Vec<&mut Atom> {
         Action::Call { args, .. } | Action::Perform { args, .. } | Action::Spawn { args, .. } => {
             args.iter_mut().collect()
         }
-        Action::Sleep { duration: atom, .. }
-        | Action::Join { task: atom }
+        Action::Join { task: atom }
         | Action::JoinMany { tasks: atom, .. }
         | Action::Cancel { task: atom }
         | Action::Await { value: atom, .. } => vec![atom],
@@ -106,12 +106,9 @@ impl Working {
     /// A copy of `document`, every node of which is a node of the base.
     pub(crate) fn open(document: &Document) -> Self {
         let mut shadows = BTreeMap::new();
-        let main = Site::new(Unit::Main, []);
-        shadows.insert(Unit::Main, Shadow::base(Node::Block(&document.main), main));
-        for (name, function) in &document.functions {
-            let unit = Unit::Function(name.clone());
+        for (unit, body) in document.units() {
             let site = Site::new(unit.clone(), []);
-            shadows.insert(unit, Shadow::base(Node::Block(&function.body), site));
+            shadows.insert(unit, Shadow::base(Node::Block(body), site));
         }
         Self {
             document: document.clone(),
@@ -121,17 +118,10 @@ impl Working {
 
     /// Each unit's body and its shadow.
     fn units(&self) -> impl Iterator<Item = (Unit, Node<'_>, &Shadow)> {
-        let functions = self
-            .document
-            .functions
-            .iter()
-            .map(|(name, function)| (Unit::Function(name.clone()), &function.body));
-        std::iter::once((Unit::Main, &self.document.main))
-            .chain(functions)
-            .filter_map(|(unit, body)| {
-                let root = self.shadows.get(&unit)?;
-                Some((unit, Node::Block(body), root))
-            })
+        self.document.units().filter_map(|(unit, body)| {
+            let root = self.shadows.get(&unit)?;
+            Some((unit, Node::Block(body), root))
+        })
     }
 
     /// Every site of the document.
@@ -292,7 +282,7 @@ impl Working {
             Edit::InsertStatement { at, statement } => {
                 let (block, index) = self.position(at)?;
                 let shadow = Shadow::fresh(Node::Stmt(statement));
-                self.insert(&block, index, statement.clone(), shadow);
+                self.insert(&block, index, *statement.clone(), shadow);
             }
             Edit::RemoveStatement { statement } => {
                 let (block, index) = self.statement(statement)?;
@@ -332,19 +322,6 @@ impl Working {
                 *slot = condition.clone();
                 // The condition is the statement's first child (`K-ID-004`).
                 self.shadow(&site.child(0)).replace(Node::Expr(condition));
-            }
-            Edit::RemoveFunction { name } => {
-                self.declared(name)?;
-                self.document.functions.remove(name);
-                self.document.entries.remove(name);
-                self.shadows.remove(&Unit::Function(name.clone()));
-            }
-            Edit::SetPrivateBindings { names } => {
-                self.document.private_bindings.clone_from(names);
-            }
-            Edit::RemoveEntry { function } => {
-                self.entry(function)?;
-                self.document.entries.remove(function);
             }
         }
         Ok(())
@@ -437,26 +414,6 @@ impl Working {
         Ok(())
     }
 
-    fn declared(&self, name: &Name) -> Result<(), Fault> {
-        if self.document.functions.contains_key(name) {
-            Ok(())
-        } else {
-            Err(plain(EditDiagnosticKind::NoSuchFunction {
-                name: name.clone(),
-            }))
-        }
-    }
-
-    fn entry(&self, name: &Name) -> Result<(), Fault> {
-        if self.document.entries.contains_key(name) {
-            Ok(())
-        } else {
-            Err(plain(EditDiagnosticKind::NoSuchEntry {
-                name: name.clone(),
-            }))
-        }
-    }
-
     fn move_statement(&mut self, statement: &Site, to: &Position) -> Result<(), Fault> {
         let (from, at_index) = self.statement(statement)?;
         let (mut block, mut index) = self.position(to)?;
@@ -497,28 +454,31 @@ impl Working {
         base: DocumentId,
         environment: &Environment<'_>,
     ) -> Result<Published, EditRefusal> {
-        let required = requirements(&self.document, environment.functions);
-        let manifest = &mut self.document.manifest;
-        manifest.functions = required.functions;
-        manifest.effects.retain(|effect, _| {
-            required.effects.contains(effect) || required.performs.contains_key(effect)
-        });
-        for effect in required.effects {
-            if let Some(offered) = environment.effects.get(&effect) {
-                manifest
-                    .effects
-                    .entry(effect)
-                    .or_insert_with(|| offered.clone());
-            }
-        }
-        // What the bodies the code reaches perform, it requires through
-        // them (`K-DOC-002`).
-        for (effect, bodies) in required.performs {
-            if let Some(requirement) = bodies.into_values().next() {
-                manifest.effects.entry(effect).or_insert(requirement);
-            }
-        }
-
+        let reidentified = self.document.reidentify_functions().map_err(|message| {
+            crate::refusal::refused(
+                None,
+                lash_kernel_check::Refusal {
+                    errors: vec![lash_kernel_check::Refused {
+                        site: None,
+                        reason: lash_kernel_check::RefusalReason::Invalid(
+                            lash_kernel_doc::InvalidReason::Document { message },
+                        ),
+                    }],
+                },
+            )
+        })?;
+        self.shadows = std::mem::take(&mut self.shadows)
+            .into_iter()
+            .map(|(unit, shadow)| {
+                let unit = match unit {
+                    Unit::Library(id) => {
+                        Unit::Library(reidentified.get(&id).copied().unwrap_or(id))
+                    }
+                    unit => unit,
+                };
+                (unit, shadow)
+            })
+            .collect();
         let admitted =
             admit(&self.document, environment).map_err(|refusal| refused(None, refusal))?;
         let correspondence = self.correspondence(base, admitted.identity)?;
