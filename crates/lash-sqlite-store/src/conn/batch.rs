@@ -442,6 +442,7 @@ fn transact(
         }
         #[cfg(feature = "perf-witness")]
         let staged = witness.as_ref().map(|witness| witness.staged());
+        with_node_wakes(writer, crate::durable::NodeWakeWriter::begin_member);
         let mut outcome = member.run(&tx);
         if matches!(outcome, Kept::Writes) && !tx.is_autocommit() {
             let wakes = writer
@@ -455,6 +456,8 @@ fn transact(
                 outcome = Kept::Failed;
             }
         }
+        // Release capture even when the body failed before its flush.
+        with_node_wakes(writer, crate::durable::NodeWakeWriter::begin_member);
         writes.member(&tx);
         if tx.is_autocommit() {
             // SQLite ended the transaction itself (SQLITE_FULL, an I/O

@@ -39,8 +39,9 @@ async-trait = { workspace = true }
 flate2 = "1"
 rmp-serde = "1"
 tokio-rusqlite = { version = "0.7", features = ["bundled"] }
+# `functions`: connection-local wake capture without temporary row writes.
 # `hooks`: the WAL hook that drives the checkpoint worker (FIG-6907).
-rusqlite = { version = "0.37", features = ["bundled", "hooks", "trace"] }
+rusqlite = { version = "0.37", features = ["bundled", "functions", "hooks", "trace"] }
 serde = { workspace = true, features = ["derive"] }
 serde_bytes = { workspace = true }
 serde_json = { workspace = true }
@@ -59,7 +60,7 @@ lash-core = { workspace = true, features = ["testing"] }
 lash-core-store = { workspace = true, features = ["testing"] }
 lash-sqlite-store = { package = "lash-internal-sqlite-store", path = ".", features = ["testing"] }
 # `hooks`: the commit hook a law refuses a `COMMIT` with (FIG-5748).
-rusqlite = { version = "0.37", features = ["bundled", "hooks", "trace"] }
+rusqlite = { version = "0.37", features = ["bundled", "functions", "hooks", "trace"] }
 tempfile = { workspace = true }
 tokio = { workspace = true, features = ["io-util", "macros", "process", "rt-multi-thread", "sync", "time"] }
 

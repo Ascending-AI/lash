@@ -1,21 +1,16 @@
-//! Same-file hints belong to the member that produced the work. TEMP capture
-//! rows and the resulting wake rows roll back with that member's savepoint.
-//!
-//! The capture triggers also set the connection's capture mark
-//! (`lash_wake_captured()`), and a member's flush reads the capture tables
-//! only when the mark is set (FIG-6617). The tables are connection-local
-//! and only those triggers fill them; every write on a connection with
-//! wakes installed is a batch member, whose flush empties them or whose
-//! savepoint undoes its own rows, so they are empty whenever the mark is
-//! clear. A mark left set by rolled-back rows costs one empty read.
+//! Each batch member captures wake facts in memory on its writer connection.
+//! Triggers pass actor identities and values together; no capture rows or
+//! actor rereads are needed. The member starts with empty capture, flushes
+//! hints inside its savepoint only on success, and discards capture on every
+//! exit. Only the outer committed transaction rings listeners.
 
-use std::ffi::{c_int, c_void};
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::collections::{BTreeMap, BTreeSet};
+use std::sync::{Arc, Mutex};
 
 use lash_core_ids::clock::Clock;
 use lash_durable::{ActorKey, ActorState, BootId, NodeId, Owner, WakeBatch, Woken};
 use rusqlite::Connection;
+use rusqlite::functions::FunctionFlags;
 
 use super::doorbell::{Doorbell, Rung};
 use super::{INSERT, PRUNE, SqliteDurableStore, rows};
@@ -25,21 +20,21 @@ pub(crate) struct NodeWakeWriter {
     clock: Arc<dyn Clock>,
     sink: lash_durable::runner::WakeSink,
     retention: std::time::Duration,
-    captured: CaptureMark,
+    captured: Capture,
     /// Rings the listeners the batch's rows name once it commits.
     doorbell: Doorbell,
     /// The listeners the batch in flight wrote rows for.
     rung: std::sync::Mutex<Rung>,
 }
 
-/// Set by a capture trigger on the writer's connection, cleared once a
-/// flush has emptied the capture tables.
+/// Connection-local capture, owned by the current batch member.
 #[derive(Clone, Default)]
-pub(crate) struct CaptureMark(Arc<AtomicBool>);
+pub(crate) struct Capture(Arc<Mutex<Captured>>);
 
-enum Captured {
-    Woken(Woken),
-    Appended(String),
+#[derive(Default)]
+struct Captured {
+    woken: BTreeMap<ActorKey, Woken>,
+    appended: BTreeSet<ActorKey>,
 }
 
 impl NodeWakeWriter {
@@ -48,7 +43,7 @@ impl NodeWakeWriter {
             clock: Arc::clone(&store.clock),
             sink: store.conn.wakes().clone(),
             retention: store.conn.operational.wake_retention,
-            captured: CaptureMark::default(),
+            captured: Capture::default(),
             doorbell,
             rung: std::sync::Mutex::default(),
         }
@@ -63,6 +58,7 @@ impl NodeWakeWriter {
     /// The batch did not commit: its rows ring nobody.
     pub(crate) fn discard(&self) {
         *self.rung() = Rung::default();
+        self.begin_member();
     }
 
     fn rung(&self) -> std::sync::MutexGuard<'_, Rung> {
@@ -71,50 +67,25 @@ impl NodeWakeWriter {
             .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
-    /// The mark this writer's capture triggers set.
-    pub(crate) fn mark(&self) -> CaptureMark {
+    /// The capture this writer's triggers fill.
+    pub(crate) fn capture(&self) -> Capture {
         self.captured.clone()
     }
 
+    /// A failed or rolled-back member must never donate hints to a sibling.
+    pub(crate) fn begin_member(&self) {
+        *self.captured.lock() = Captured::default();
+    }
+
     pub(crate) fn flush(&self, tx: &Connection) -> rusqlite::Result<()> {
-        if !self.captured.0.load(Ordering::Acquire) {
-            return Ok(());
-        }
-        let mut woken = Vec::new();
-        let mut appended = Vec::new();
-        let mut statement = tx.prepare_cached(crate::durable::NODE_WAKE_ROWS)?;
-        let captured = statement.query_map([], |row| {
-            let actor: String = row.get(0)?;
-            let Some(state) = row.get::<_, Option<String>>(1)? else {
-                return Ok(Captured::Appended(actor));
-            };
-            let node: Option<String> = row.get(2)?;
-            let boot: Option<String> = row.get(3)?;
-            Ok(Captured::Woken(Woken {
-                actor: ActorKey::parse(&actor)
-                    .map_err(|error| rusqlite::Error::ToSqlConversionFailure(Box::new(error)))?,
-                state: super::super::actor_state(&state)
-                    .map_err(|error| rusqlite::Error::ToSqlConversionFailure(Box::new(error)))?,
-                owner: node.zip(boot).map(|(node, boot)| Owner {
-                    node: NodeId::new(node),
-                    boot: BootId::new(boot),
-                }),
-            }))
-        })?;
-        for capture in captured {
-            match capture? {
-                Captured::Woken(wake) => woken.push(wake),
-                Captured::Appended(actor) => appended.push(actor),
-            }
-        }
+        let Captured { woken, appended } = std::mem::take(&mut *self.captured.lock());
         if woken.is_empty() && appended.is_empty() {
-            self.captured.0.store(false, Ordering::Release);
             return Ok(());
         }
         let now = i64::try_from(self.clock.timestamp_ms())
             .map_err(|error| rusqlite::Error::ToSqlConversionFailure(Box::new(error)))?;
         let peers = if woken
-            .iter()
+            .values()
             .any(|wake| wake.owner.is_none() && wake.state == ActorState::Ready)
         {
             tx.prepare_cached(crate::durable::NODE_WAKE_PEERS)?
@@ -124,19 +95,14 @@ impl NodeWakeWriter {
             Vec::new()
         };
         let mut batch = WakeBatch::default();
-        for wake in &woken {
+        for wake in woken.values() {
             let planned = self.sink.plan(wake, &peers);
             batch.ready.extend(planned.ready);
             for (node, actors) in planned.owned {
                 batch.owned.entry(node).or_default().extend(actors);
             }
         }
-        for actor in appended {
-            batch.appended.insert(
-                ActorKey::parse(&actor)
-                    .map_err(|error| rusqlite::Error::ToSqlConversionFailure(Box::new(error)))?,
-            );
-        }
+        batch.appended = appended;
         for (node, payload) in rows(&batch) {
             cached_execute(tx, INSERT, rusqlite::params![node, payload, now])?;
             self.rung().add(node.as_deref());
@@ -144,70 +110,62 @@ impl NodeWakeWriter {
         let oldest =
             now.saturating_sub(i64::try_from(self.retention.as_millis()).unwrap_or(i64::MAX));
         cached_execute(tx, PRUNE, [oldest])?;
-        tx.execute_batch("DELETE FROM temp.lash_woken; DELETE FROM temp.lash_appended")?;
-        self.captured.0.store(false, Ordering::Release);
         Ok(())
     }
 }
 
-impl CaptureMark {
-    /// Register `lash_wake_captured()`, which sets this mark, on
-    /// `connection`, before the capture triggers that call it exist.
+impl Capture {
+    fn lock(&self) -> std::sync::MutexGuard<'_, Captured> {
+        self.0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    /// Install callbacks before creating the connection-local capture triggers.
     pub(crate) fn register(&self, connection: &Connection) -> rusqlite::Result<()> {
-        let mark = Arc::into_raw(Arc::clone(&self.0))
-            .cast_mut()
-            .cast::<c_void>();
-        // SAFETY: the handle is this live connection's, used on its own
-        // thread. SQLite owns `mark` from here, also when the call fails, and
-        // hands it to `release_mark` exactly once.
-        #[expect(
-            unsafe_code,
-            reason = "rusqlite's safe functions need its `functions` feature"
-        )]
-        let status = unsafe {
-            rusqlite::ffi::sqlite3_create_function_v2(
-                connection.handle(),
-                c"lash_wake_captured".as_ptr(),
-                0,
-                rusqlite::ffi::SQLITE_UTF8 | rusqlite::ffi::SQLITE_INNOCUOUS,
-                mark,
-                Some(set_mark),
-                None,
-                None,
-                Some(release_mark),
-            )
-        };
-        if status == rusqlite::ffi::SQLITE_OK {
-            Ok(())
-        } else {
-            Err(rusqlite::Error::SqliteFailure(
-                rusqlite::ffi::Error::new(status),
-                None,
-            ))
-        }
+        let flags = FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_INNOCUOUS;
+        let capture = self.clone();
+        connection.create_scalar_function("lash_capture_woken", 5, flags, move |ctx| {
+            let actor = captured_actor(ctx.get::<String>(0)?)?;
+            let state: Option<String> = ctx.get(1)?;
+            let mut captured = capture.lock();
+            // Deletion removes the actor just as the former capture join did.
+            let Some(state) = state else {
+                captured.woken.remove(&actor);
+                return Ok(None::<String>);
+            };
+            // Later ownership/state writes refresh an already captured actor:
+            // routing must use the member's final facts, not its first wake.
+            if ctx.get::<bool>(4)? || captured.woken.contains_key(&actor) {
+                let node: Option<String> = ctx.get(2)?;
+                let boot: Option<String> = ctx.get(3)?;
+                let state = super::super::actor_state(&state)
+                    .map_err(|error| rusqlite::Error::UserFunctionError(Box::new(error)))?;
+                captured.woken.insert(
+                    actor.clone(),
+                    Woken {
+                        actor,
+                        state,
+                        owner: node.zip(boot).map(|(node, boot)| Owner {
+                            node: NodeId::new(node),
+                            boot: BootId::new(boot),
+                        }),
+                    },
+                );
+            }
+            Ok(None::<String>)
+        })?;
+        let capture = self.clone();
+        connection.create_scalar_function("lash_capture_appended", 1, flags, move |ctx| {
+            capture
+                .lock()
+                .appended
+                .insert(captured_actor(ctx.get::<String>(0)?)?);
+            Ok(None::<String>)
+        })
     }
 }
 
-/// `lash_wake_captured()`: set the mark SQLite holds as the function's data.
-#[expect(unsafe_code, reason = "a SQLite function callback")]
-unsafe extern "C" fn set_mark(
-    context: *mut rusqlite::ffi::sqlite3_context,
-    _arguments: c_int,
-    _values: *mut *mut rusqlite::ffi::sqlite3_value,
-) {
-    // SAFETY: the data is the `AtomicBool` `CaptureMark::register` leaked, alive
-    // until `release_mark`.
-    unsafe {
-        let mark = rusqlite::ffi::sqlite3_user_data(context).cast::<AtomicBool>();
-        (*mark).store(true, Ordering::Release);
-        rusqlite::ffi::sqlite3_result_null(context);
-    }
-}
-
-/// Drop the mark's reference SQLite held.
-#[expect(unsafe_code, reason = "a SQLite function destructor")]
-unsafe extern "C" fn release_mark(mark: *mut c_void) {
-    // SAFETY: `mark` came from `Arc::into_raw` in `CaptureMark::register`, and SQLite
-    // releases it once.
-    drop(unsafe { Arc::from_raw(mark.cast::<AtomicBool>()) });
+fn captured_actor(actor: String) -> rusqlite::Result<ActorKey> {
+    ActorKey::parse(&actor).map_err(|error| rusqlite::Error::UserFunctionError(Box::new(error)))
 }

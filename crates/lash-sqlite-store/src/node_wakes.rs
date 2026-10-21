@@ -3,9 +3,9 @@
 //! nodes (FIG-5422).
 //!
 //! - **Wakes.** Each producer writes its hints in the transaction that wakes
-//!   its actors. A temporary capture table follows the member's savepoint:
-//!   refused work leaves no hint, and a group answers only after its shared
-//!   durable commit. A post-commit flush signals listeners without writing.
+//!   its actors. In-memory capture belongs to each member; its hints are
+//!   written inside that member's savepoint, so refused work leaves no hint.
+//!   A group answers only after its shared durable commit. A post-commit flush signals listeners without writing.
 //!   Standalone transport publications write their own batch: a row for
 //!   each node picked to claim a readied unowned actor, with no actors, and a
 //!   row for each owner node with the keys of its actors that took mail, and

@@ -111,9 +111,12 @@ mod waits;
 #[path = "../node_wakes.rs"]
 mod node_wakes;
 
+pub(super) use node_wake_sql::{NODE_WAKE_CAPTURE, NODE_WAKE_PEERS};
 #[cfg(test)]
-pub(super) use node_wake_sql::NODE_WAKE_ROLLBACK_MAIL;
-pub(super) use node_wake_sql::{NODE_WAKE_CAPTURE, NODE_WAKE_PEERS, NODE_WAKE_ROWS};
+pub(super) use node_wake_sql::{
+    NODE_WAKE_FINAL_OWNER, NODE_WAKE_OWNED_SETUP, NODE_WAKE_ROLLBACK_MAIL,
+    NODE_WAKE_SESSION_REVISION,
+};
 pub(crate) use node_wakes::TABLES as NODE_WAKES_TABLES;
 pub(crate) use node_wakes::{NodeWakeWriter, SqliteNodeWakes};
 

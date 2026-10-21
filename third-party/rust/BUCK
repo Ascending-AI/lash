@@ -16897,6 +16897,7 @@ third_party_rust_library(
     },
     features = [
         "bundled",
+        "functions",
         "hooks",
         "modern_sqlite",
         "trace",

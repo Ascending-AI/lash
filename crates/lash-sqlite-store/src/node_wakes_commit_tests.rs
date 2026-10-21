@@ -3,60 +3,134 @@
 use super::*;
 use lash_durable::laws::node_wakes::{Claims, CountingStore};
 
-/// The capture-buffer reads `receipt` counts.
-fn capture_reads(receipt: &lash_core_ids::operational_metrics::sql::Receipt) -> u64 {
-    receipt
-        .shapes
-        .iter()
-        .filter(|(sql, _)| sql.starts_with("select ") && sql.contains("temp.lash_"))
-        .map(|(_, shape)| shape.statements)
-        .sum()
-}
-
-/// WAKE-CAPTURE-WORK: a producer that captured nothing reads no capture
-/// buffer (FIG-6617), and one that captured a wake reads both buffers
-/// together, in one statement.
+/// WAKE-FINAL-FACTS: routing uses the member's final owner, including an
+/// owner change after the mail write, without capture-table reads or writes.
 #[tokio::test]
-async fn a_wake_capture_is_read_only_when_a_trigger_captured() {
-    let dir = tempfile::tempdir().unwrap();
-    let stores = SqliteStoreSet::open(dir.path().join("lash.db"), crate::SqliteSynchronous::Full)
-        .await
-        .unwrap();
-    let store = stores.durable_store();
-    let lease = store
-        .register_node(&lash_durable::NodeSpec {
-            node: NodeId::new("capture-owner"),
-            decodes: vec![formats()],
-            serves: Vec::new(),
-            capabilities: Default::default(),
-            ttl_millis: 15_000,
+async fn wake_capture_carries_final_facts_without_temporary_rows() {
+    let tier = SqliteTier::open().await;
+    let store = tier.stores.durable_store();
+    let hot = actor("capture-final-owner");
+    create(&store, &hot).await;
+    let key = hot.clone();
+    store
+        .conn
+        .write(move |tx| {
+            tx.execute("DELETE FROM node_wakes", [])?;
+            Ok(())
         })
         .await
         .unwrap();
-    let (answer, quiet) = lash_core_ids::operational_metrics::sql::collect(
-        "node.heartbeat",
+    let (changed, receipt) = lash_core_ids::operational_metrics::sql::collect(
+        "law.final_wake",
         "sqlite",
-        store.heartbeat(&lease),
+        store.conn.write(move |tx| {
+            let before = tx.total_changes();
+            tx.execute(crate::durable::NODE_WAKE_ROLLBACK_MAIL, [key.as_str()])?;
+            tx.execute(crate::durable::NODE_WAKE_FINAL_OWNER, [key.as_str()])?;
+            Ok(tx.total_changes() - before)
+        }),
     )
     .await;
-    answer.unwrap();
-    eprintln!(
-        "WAKE-CAPTURE SQL {}",
-        serde_json::to_string(&quiet).unwrap()
-    );
-    assert_eq!(capture_reads(&quiet), 0, "nothing was captured");
-    let actor = ActorKey::session("capture-woken").unwrap();
-    let (_, woke) = lash_core_ids::operational_metrics::sql::collect(
-        "mail.create",
-        "sqlite",
-        create(&store, &actor),
-    )
-    .await;
-    eprintln!("WAKE-CAPTURE SQL {}", serde_json::to_string(&woke).unwrap());
     assert_eq!(
-        capture_reads(&woke),
-        1,
-        "capture buffers must share a statement"
+        changed.unwrap(),
+        2,
+        "only the two actor writes changed rows"
+    );
+    assert!(
+        receipt.shapes.keys().all(|sql| !sql.contains("temp.lash_")),
+        "capture neither reads nor writes temporary rows: {receipt:?}"
+    );
+    let rows = store
+        .conn
+        .read(|c| {
+            c.prepare("SELECT node_id, actors FROM node_wakes ORDER BY seq")?
+                .query_map([], |row| {
+                    Ok((row.get::<_, Option<String>>(0)?, row.get::<_, String>(1)?))
+                })?
+                .collect::<rusqlite::Result<Vec<_>>>()
+        })
+        .await
+        .unwrap();
+    assert_eq!(rows.len(), 1, "one coalesced hint: {rows:?}");
+    assert_eq!(rows[0].0.as_deref(), Some("final-owner"));
+    assert_eq!(
+        node_wake_payload::decode(&rows[0].1),
+        Some(NodeWakeEvent::Owned(vec![hot]))
+    );
+}
+
+/// WAKE-MEMBER-ISOLATION: a refused batch member donates no captured actors
+/// to a later successful member of the same outer transaction.
+#[tokio::test]
+async fn rolled_back_capture_cannot_reach_a_committed_sibling() {
+    use std::future::Future as _;
+    let dir = tempfile::tempdir().unwrap();
+    let pauses = crate::testing::SqlitePauses::default();
+    let stores = SqliteStoreSet::open_with_options_and_clock(
+        dir.path().join("lash.db"),
+        crate::SqliteStoreSetOptions {
+            pauses: Some(pauses.clone()),
+            ..crate::SqliteStoreSetOptions::standard(crate::SqliteSynchronous::Full)
+        },
+        Arc::new(lash_core::testing::TestClock::new(STORE_TIME)),
+    )
+    .await
+    .unwrap();
+    let store = stores.durable_store();
+    let hot = actor("capture-rolled-back");
+    create(&store, &hot).await;
+    store
+        .conn
+        .write(|tx| {
+            tx.execute(crate::durable::NODE_WAKE_OWNED_SETUP, [])?;
+            tx.execute("DELETE FROM node_wakes", [])?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+    let hold = pauses.pause_after_fence();
+    let holding = tokio::spawn({
+        let conn = store.conn.clone();
+        async move { conn.write(|_| Ok(())).await }
+    });
+    hold.wait_until_reached().await;
+    let mut refused = Box::pin(store.conn.write_flow(move |tx| {
+        tx.execute(crate::durable::NODE_WAKE_ROLLBACK_MAIL, [hot.as_str()])?;
+        Ok(crate::conn::TxOutcome::Rollback(()))
+    }));
+    let mut sibling = Box::pin(store.conn.write(|tx| {
+        tx.execute(crate::durable::NODE_WAKE_SESSION_REVISION, [])?;
+        Ok(())
+    }));
+    std::future::poll_fn(|cx| {
+        assert!(refused.as_mut().poll(cx).is_pending());
+        assert!(sibling.as_mut().poll(cx).is_pending());
+        std::task::Poll::Ready(())
+    })
+    .await;
+    hold.release();
+    holding.await.unwrap().unwrap();
+    refused.await.unwrap();
+    sibling.await.unwrap();
+    let rows = store
+        .conn
+        .read(|c| {
+            c.prepare("SELECT node_id, actors FROM node_wakes ORDER BY seq")?
+                .query_map([], |row| {
+                    Ok((row.get::<_, Option<String>>(0)?, row.get::<_, String>(1)?))
+                })?
+                .collect::<rusqlite::Result<Vec<_>>>()
+        })
+        .await
+        .unwrap();
+    assert_eq!(rows.len(), 1, "only the sibling's appended hint: {rows:?}");
+    assert_eq!(
+        rows[0].0, None,
+        "the refused mail must not produce an owned hint"
+    );
+    assert_eq!(
+        node_wake_payload::decode(&rows[0].1),
+        Some(NodeWakeEvent::Appended(vec![actor("capture-rolled-back")]))
     );
 }
 
