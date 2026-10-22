@@ -96,6 +96,7 @@ enum EncodingKind {
     Text,
     Bytes,
     Envelope,
+    Logical(usize),
 }
 
 type EncodingKey = (EncodingKind, [u8; 32]);
@@ -112,13 +113,14 @@ struct PreparedEncoding {
 enum PreparedGraph {
     Encoding(Arc<PreparedEncoding>),
     Envelope { input: Box<[u8]>, framing: Framing },
+    Logical { input: Box<[u8]>, tokens: Arc<[u8]> },
 }
 
 impl PreparedGraph {
     fn input(&self) -> &[u8] {
         match self {
             Self::Encoding(prepared) => &prepared.input,
-            Self::Envelope { input, .. } => input,
+            Self::Envelope { input, .. } | Self::Logical { input, .. } => input,
         }
     }
 
@@ -126,6 +128,7 @@ impl PreparedGraph {
         match self {
             Self::Encoding(prepared) => prepared.bytes,
             Self::Envelope { input, .. } => input.len() + std::mem::size_of::<Framing>(),
+            Self::Logical { input, tokens } => input.len() + tokens.len(),
         }
     }
 }
@@ -160,14 +163,21 @@ impl EncodingCache {
     fn get(&mut self, key: &EncodingKey, input: &[u8]) -> Option<Arc<PreparedEncoding>> {
         match self.get_prepared(key, input)? {
             PreparedGraph::Encoding(prepared) => Some(Arc::clone(prepared)),
-            PreparedGraph::Envelope { .. } => None,
+            PreparedGraph::Envelope { .. } | PreparedGraph::Logical { .. } => None,
         }
     }
 
     fn envelope(&mut self, key: &EncodingKey, input: &[u8]) -> Option<Framing> {
         match self.get_prepared(key, input)? {
             PreparedGraph::Envelope { framing, .. } => Some(*framing),
-            PreparedGraph::Encoding(_) => None,
+            PreparedGraph::Encoding(_) | PreparedGraph::Logical { .. } => None,
+        }
+    }
+
+    fn logical(&mut self, key: &EncodingKey, input: &[u8]) -> Option<Arc<[u8]>> {
+        match self.get_prepared(key, input)? {
+            PreparedGraph::Logical { tokens, .. } => Some(Arc::clone(tokens)),
+            PreparedGraph::Encoding(_) | PreparedGraph::Envelope { .. } => None,
         }
     }
 
@@ -256,6 +266,40 @@ pub(crate) fn prepare_envelope(
         },
     );
     Ok(framing)
+}
+
+// A token expansion depends on the complete envelope and the body offset.
+// Compare actual bytes on lookup and publication, under the same bounded
+// preparation owner as canonical encoding and envelope framing.
+pub(crate) fn prepare_logical(
+    bytes: &[u8],
+    skip: usize,
+    expand: impl FnOnce() -> Result<Vec<u8>, GraphRefusal>,
+) -> Result<Arc<[u8]>, GraphRefusal> {
+    let cache = encoding_cache();
+    let key = (EncodingKind::Logical(skip), NodeId::of_envelope(bytes).0);
+    if let Some(tokens) = cache
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .logical(&key, bytes)
+    {
+        return Ok(tokens);
+    }
+    let tokens: Arc<[u8]> = expand()?.into();
+    let mut cache = cache
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    if let Some(tokens) = cache.logical(&key, bytes) {
+        return Ok(tokens);
+    }
+    cache.insert_prepared(
+        key,
+        PreparedGraph::Logical {
+            input: bytes.into(),
+            tokens: Arc::clone(&tokens),
+        },
+    );
+    Ok(tokens)
 }
 
 /// Encodes one node of `kind` into `staging` and returns it. Placed leaves,

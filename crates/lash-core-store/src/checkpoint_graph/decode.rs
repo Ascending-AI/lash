@@ -129,6 +129,36 @@ impl Family {
     }
 }
 
+// Keep a prepared expansion shared until the typed decoder finishes. Bodies
+// without slots still borrow their checked source; streamed and unplaced
+// bodies own their receiving decoder's materialization.
+enum LogicalBody<'a> {
+    Borrowed(&'a [u8]),
+    Prepared(std::sync::Arc<[u8]>),
+    Owned(Vec<u8>),
+}
+
+impl LogicalBody<'_> {
+    fn into_owned(self) -> Vec<u8> {
+        match self {
+            Self::Borrowed(bytes) => bytes.to_vec(),
+            Self::Prepared(bytes) => bytes.to_vec(),
+            Self::Owned(bytes) => bytes,
+        }
+    }
+}
+
+impl std::ops::Deref for LogicalBody<'_> {
+    type Target = [u8];
+    fn deref(&self) -> &[u8] {
+        match self {
+            Self::Borrowed(bytes) => bytes,
+            Self::Prepared(bytes) => bytes,
+            Self::Owned(bytes) => bytes,
+        }
+    }
+}
+
 /// Reads nodes from one source within one set of limits.
 pub struct GraphDecoder<'s> {
     source: &'s dyn NodeSource,
@@ -270,14 +300,15 @@ impl<'s> GraphDecoder<'s> {
         id: NodeId,
         expected: NodeKind,
     ) -> Result<Vec<u8>, GraphRefusal> {
-        self.materialized_body(id, expected).map(Cow::into_owned)
+        self.materialized_body(id, expected)
+            .map(LogicalBody::into_owned)
     }
 
     fn materialized_body(
         &mut self,
         id: NodeId,
         expected: NodeKind,
-    ) -> Result<Cow<'s, [u8]>, GraphRefusal> {
+    ) -> Result<LogicalBody<'s>, GraphRefusal> {
         let envelope = self.envelope(id)?;
         if envelope.kind != expected {
             return Err(GraphRefusal::KindMismatch {
@@ -329,11 +360,11 @@ impl<'s> GraphDecoder<'s> {
                     {
                         return Err(non_canonical(id, CanonicalFault::InvalidBodyForm));
                     }
-                    Cow::Owned(placed)
+                    LogicalBody::Owned(placed)
                 };
                 let logical = match self.unplace(id, &placed)? {
                     Cow::Borrowed(_) => placed,
-                    Cow::Owned(logical) => Cow::Owned(logical),
+                    Cow::Owned(logical) => LogicalBody::Owned(logical),
                 };
                 let mut check = verifier();
                 if check.encode(expected, TypedBody::logical(&logical))? != id {
@@ -659,30 +690,14 @@ fn to_logical<'b>(
     envelope: &NodeEnvelope<'_>,
     body: &'b [u8],
     id: NodeId,
-) -> Result<Cow<'b, [u8]>, GraphRefusal> {
-    let refuse = |error| GraphRefusal::from_token(error, Some(id), Some(envelope.kind.0));
-    let mut reader = TokenReader::with_form(body, RefForm::Physical);
+) -> Result<LogicalBody<'b>, GraphRefusal> {
+    // Envelope admission has already checked every token, even for a body
+    // without child slots. Such bodies can continue borrowing the source.
     if envelope.children.is_empty() {
-        while !reader.is_empty() {
-            reader.next_event().map_err(refuse)?;
-        }
-        return Ok(Cow::Borrowed(body));
+        return Ok(LogicalBody::Borrowed(body));
     }
-    let mut out = TokenWriter::with_capacity(body.len() + 32 * envelope.children.len());
-    while !reader.is_empty() {
-        let start = reader.position();
-        match reader.next_event().map_err(refuse)? {
-            TokenEvent::Slot(slot) => {
-                let child = envelope
-                    .children
-                    .get(slot)
-                    .ok_or(non_canonical(id, CanonicalFault::ChildSlotOutOfRange(slot)))?;
-                out.child(child.child_ref());
-            }
-            _ => out.raw(&body[start..reader.position()]),
-        }
-    }
-    Ok(Cow::Owned(out.into_bytes()))
+    let skip = envelope.body.len() - body.len();
+    Ok(LogicalBody::Prepared(envelope.logical_tokens(skip, id)?))
 }
 
 fn leaf_payload<'s>(

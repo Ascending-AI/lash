@@ -217,6 +217,7 @@ impl<'a> ChildTable<'a> {
 /// A parsed envelope, borrowing the node's bytes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct NodeEnvelope<'a> {
+    bytes: &'a [u8],
     pub kind: NodeKind,
     pub children: ChildTable<'a>,
     /// The physical body: child references are slots.
@@ -224,6 +225,35 @@ pub struct NodeEnvelope<'a> {
 }
 
 impl<'a> NodeEnvelope<'a> {
+    /// Expands the physical body's suffix after `skip` to logical tokens.
+    /// Pure expansion is shared by complete actual envelope bytes; store
+    /// presence, receiving limits and child availability are never cached.
+    ///
+    /// # Errors
+    /// A canonical token or child-slot refusal, or an offset outside the body.
+    pub fn logical_tokens(&self, skip: usize, node: NodeId) -> Result<Arc<[u8]>, GraphRefusal> {
+        let body = self.body.get(skip..).ok_or(GraphRefusal::Truncated)?;
+        super::encode::prepare_logical(self.bytes, skip, || {
+            let refuse = |error| GraphRefusal::from_token(error, Some(node), Some(self.kind.0));
+            let mut reader = TokenReader::with_form(body, RefForm::Physical);
+            let mut out = TokenWriter::with_capacity(body.len() + 32 * self.children.len());
+            while !reader.is_empty() {
+                let start = reader.position();
+                match reader.next_event().map_err(refuse)? {
+                    TokenEvent::Slot(slot) => {
+                        let child = self.children.get(slot).ok_or(GraphRefusal::NonCanonical {
+                            node: Some(node),
+                            reason: CanonicalFault::ChildSlotOutOfRange(slot),
+                        })?;
+                        out.child(child.child_ref());
+                    }
+                    _ => out.raw(&body[start..reader.position()]),
+                }
+            }
+            Ok(out.into_bytes())
+        })
+    }
+
     /// A physical reader over the body.
     #[must_use]
     pub fn reader(&self) -> TokenReader<'a> {
@@ -564,6 +594,7 @@ impl Framing {
 
     fn envelope<'a>(&self, bytes: &'a [u8]) -> NodeEnvelope<'a> {
         NodeEnvelope {
+            bytes,
             kind: self.kind,
             children: self.children(bytes),
             body: &bytes[self.body_start..],
@@ -659,6 +690,7 @@ fn parse_uncached(bytes: &[u8], node: Option<NodeId>) -> Result<NodeEnvelope<'_>
     }
     check_slots(body, children.len(), node)?;
     Ok(NodeEnvelope {
+        bytes,
         kind: NodeKind(kind),
         children: ChildTable(children),
         body,
