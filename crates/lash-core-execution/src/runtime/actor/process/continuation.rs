@@ -1,19 +1,5 @@
-//! What a process activation keeps of its own acknowledged commits between
-//! passes (FIG-7046): the registry record, the driver and the engine state
-//! it decoded, each with the stored identity it was decoded from, and the
-//! facts of the runs it holds in flight with the waits their admissions
-//! pinned.
-//!
-//! It is a postimage of durable rows, never a grant: every write stays
-//! fenced, and nothing here outlives the activation. Each pass reads its
-//! [`ProcessView`](lash_durable::domain::ProcessView) fresh, and a piece is
-//! used only while that view proves it current: a decoded record or driver
-//! while the stored text is the text it was decoded from, an engine state
-//! while the root row names the root it was hydrated from or written as,
-//! and the facts while the actor's revision is the one this activation's
-//! own acknowledged commits left. Any other commit (a lost acknowledgement,
-//! a write of another path) moves the revision past them, and the runs in
-//! flight are read again.
+//! The sole acknowledged process projection, retained under the claim's
+//! OwnerState. External registry facts refresh separately from owner state.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
@@ -30,8 +16,13 @@ use lash_vocabulary::identity::ProcessId;
 
 /// One activation's acknowledged process state. See the module
 /// documentation.
-#[derive(Default)]
-pub(super) struct Continuation {
+#[derive(Clone, Default)]
+pub(crate) struct Continuation {
+    pub(crate) view: Option<lash_durable::domain::ProcessView>,
+    pub(crate) resolutions: BTreeMap<
+        lash_core_store::resolutions::ResolutionKey,
+        lash_core_store::resolutions::ResolutionRecord,
+    >,
     record: Option<(String, Arc<ProcessRecord>)>,
     driver: Option<(String, Driver)>,
     engine: Option<HeldEngine>,
@@ -40,6 +31,7 @@ pub(super) struct Continuation {
 
 /// The engine state the execution root `root` holds, with the engine that
 /// wrote it.
+#[derive(Clone)]
 struct HeldEngine {
     root: NodeId,
     written_by: String,
@@ -49,6 +41,7 @@ struct HeldEngine {
 /// The facts of the runs in flight, each run's with the waits its
 /// admissions pinned, current at actor revision `current`; `None` once a
 /// commit this activation did not see acknowledged may have moved them.
+#[derive(Clone)]
 struct HeldFacts {
     current: Option<StateRevision>,
     read_limits: DecodeLimits,
@@ -56,6 +49,205 @@ struct HeldFacts {
 }
 
 impl Continuation {
+    pub(crate) fn loaded(view: lash_durable::domain::ProcessView) -> Self {
+        Self {
+            view: Some(view),
+            ..Self::default()
+        }
+    }
+    pub(crate) fn refresh_frontier(
+        &mut self,
+        frontier: lash_durable::domain::ProcessFrontier,
+    ) -> Result<(), DurableError> {
+        let Some(view) = &mut self.view else {
+            return Ok(());
+        };
+        let ProcessRegistryRow::Retained(json) = &view.registry else {
+            return Ok(());
+        };
+        let mut record = match &self.record {
+            Some((held, record)) if held == json => Arc::clone(record),
+            _ => Arc::new(
+                lash_execution_contracts::process::registry_transitions::decode_record(json)
+                    .map_err(|error| registry_failure(&error))?,
+            ),
+        };
+        let external_ref = frontier
+            .external_ref
+            .map(|json| serde_json::from_str(&json))
+            .transpose()
+            .map_err(|error| corrupt("external process reference", error))?;
+        if record.last_event_sequence != frontier.last_event_sequence
+            || record.updated_at_ms != frontier.updated_at_ms
+            || record.cancel_request.as_deref() != frontier.cancel.as_ref()
+            || record.external_ref != external_ref
+        {
+            let next = Arc::make_mut(&mut record);
+            next.last_event_sequence = frontier.last_event_sequence;
+            next.updated_at_ms = frontier.updated_at_ms;
+            next.cancel_request = frontier.cancel.map(Box::new);
+            next.external_ref = external_ref;
+            let json =
+                lash_execution_contracts::process::registry_transitions::encode_view_record(next)
+                    .map_err(|error| registry_failure(&error))?;
+            view.registry = ProcessRegistryRow::Retained(json);
+            if let Some(row) = &mut view.row {
+                row.cancel_requested_at = next
+                    .cancel_request
+                    .as_ref()
+                    .map(|cancel| {
+                        i64::try_from(cancel.requested_at_ms).map(lash_durable::DurableInstant)
+                    })
+                    .transpose()
+                    .map_err(|error| corrupt("process cancellation time", error))?;
+            }
+        }
+        if let ProcessRegistryRow::Retained(json) = &view.registry {
+            self.record = Some((json.clone(), record));
+        }
+        Ok(())
+    }
+
+    pub(super) fn facts_current(&self, revision: StateRevision) -> bool {
+        self.facts
+            .as_ref()
+            .is_some_and(|held| held.current == Some(revision))
+    }
+
+    /// Fold only publications newly written by this candidate, and checkpoint
+    /// their exact namespace frontier in that same transaction.
+    pub(crate) fn prepare(&self, tx: &mut lash_durable::ActorTx) -> Result<(), DurableError> {
+        if tx.domain().iter().any(|write| {
+            matches!(
+                write,
+                lash_durable::DomainWrite::Process(
+                    lash_durable::domain::ProcessWrite::Terminal { .. }
+                )
+            )
+        }) {
+            return Ok(());
+        }
+        let resolutions = tx.process_publications();
+        if resolutions.is_empty() {
+            return Ok(());
+        }
+        let Some(row) = self.view.as_ref().and_then(|view| view.row.as_ref()) else {
+            return Err(corrupt("namespace checkpoint", "no process row"));
+        };
+        let mut expected_rev = row.state_rev;
+        let mut driver = Driver::decode(row.driver_json.as_deref())
+            .map_err(|error| corrupt("namespace checkpoint", error))?;
+        // Respect the candidate's own driver, including admissions and consumed
+        // runs. No engine or plugin callback runs inside the commit owner.
+        for write in tx.domain() {
+            match write {
+                lash_durable::DomainWrite::Process(
+                    lash_durable::domain::ProcessWrite::Advance {
+                        process,
+                        expected_rev: expected,
+                        driver_json,
+                    },
+                ) if process == row.process => {
+                    driver = Driver::decode(Some(driver_json))
+                        .map_err(|error| corrupt("namespace checkpoint", error))?;
+                    expected_rev = expected + 1;
+                }
+                lash_durable::DomainWrite::Process(
+                    lash_durable::domain::ProcessWrite::ComponentFormats {
+                        process,
+                        driver_json,
+                        ..
+                    },
+                ) if process == row.process => {
+                    driver = Driver::decode(Some(driver_json))
+                        .map_err(|error| corrupt("namespace checkpoint", error))?;
+                }
+                _ => {}
+            }
+        }
+        let state = driver
+            .namespace_state
+            .take()
+            .or_else(|| {
+                driver
+                    .component_formats
+                    .as_ref()
+                    .map(|cut| cut.state.clone())
+            })
+            .unwrap_or_default();
+        driver.namespace_state = Some(
+            crate::plugin::ComponentState::replay_snapshot(state, resolutions)
+                .map_err(|error| corrupt("namespace checkpoint", error))?,
+        );
+        tx.write(lash_durable::DomainWrite::Process(
+            lash_durable::domain::ProcessWrite::ComponentFormats {
+                process: row.process.clone(),
+                expected_rev,
+                driver_json: driver.encode(),
+            },
+        ));
+        Ok(())
+    }
+
+    pub(crate) fn acknowledge(
+        mut self,
+        receipt: &lash_durable::ActorCommit,
+        actor: &lash_durable::ActorKey,
+        appended: bool,
+    ) -> Result<Self, DurableError> {
+        let [view] = receipt.process_views.as_slice() else {
+            return Err(DurableError::ProcessPostimage {
+                actor: actor.clone(),
+                message: "expected exactly one process view".into(),
+            });
+        };
+        let process = ProcessId::parse(actor.id())
+            .map_err(|error| corrupt("process receipt identity", error))?;
+        if view
+            .row
+            .as_ref()
+            .is_some_and(|row| row.process.as_str() != actor.id())
+            || !receipt.session_heads.is_empty()
+            || view
+                .root
+                .as_ref()
+                .is_some_and(|root| root.exec != lash_durable::domain::ExecKey::Process(process))
+        {
+            return Err(DurableError::ProcessPostimage {
+                actor: actor.clone(),
+                message: "receipt names another owner".into(),
+            });
+        }
+        // Decode and validate the entire record before replacing any field.
+        if let ProcessRegistryRow::Retained(json) = &view.registry {
+            let record =
+                lash_execution_contracts::process::registry_transitions::decode_record(json)
+                    .map_err(|error| registry_failure(&error))?;
+            if record.id.as_str() != actor.id() {
+                return Err(DurableError::ProcessPostimage {
+                    actor: actor.clone(),
+                    message: "registry names another process".into(),
+                });
+            }
+        }
+        self.view = Some(view.clone());
+        if let Some(held) = &mut self.facts {
+            if appended {
+                held.current = None;
+            } else if held.current.map(|rev| rev.0 + 1) == Some(receipt.revision.0) {
+                held.current = Some(receipt.revision);
+            }
+        }
+        Ok(self)
+    }
+
+    pub(crate) fn enrich(&mut self, derived: Self) {
+        self.record = derived.record;
+        self.driver = derived.driver;
+        self.engine = derived.engine;
+        self.facts = derived.facts;
+    }
+
     /// The live process record `stored` holds: the one decoded last while
     /// the stored text is the same.
     ///
@@ -136,9 +328,8 @@ impl Continuation {
     }
 
     /// The facts the fold of a pass opened at actor revision `revision`
-    /// reads, with the waits their admissions pinned: on `restore`, every
-    /// fact `process` holds, read once to restore its history; else those
-    /// of the runs `driver` holds in flight, from the store only when this
+    /// reads, with the waits their admissions pinned: only the runs `driver`
+    /// holds in flight, from the store only when this
     /// activation's acknowledged commits did not leave them current at
     /// `revision`.
     ///
@@ -151,16 +342,9 @@ impl Continuation {
         process: &ProcessId,
         driver: &Driver,
         revision: StateRevision,
-        restore: bool,
     ) -> Result<(RunFacts, PinnedWaits), DurableError> {
         let owner = OwnerKey::Process(process.clone());
         let live = in_flight(driver);
-        if restore {
-            let facts = reads.run_facts(&owner).await?;
-            let waits = PinnedWaits::read(reads, &facts).await?;
-            self.facts = Some(HeldFacts::of(&facts, &live, reads, revision).await?);
-            return Ok((facts, waits));
-        }
         let current = self
             .facts
             .as_ref()
@@ -251,26 +435,6 @@ impl HeldFacts {
             read_limits: lash_durable::domain::graph::OWNER_READ_LIMITS,
             runs: BTreeMap::new(),
         }
-    }
-
-    /// `facts`, every fact restored at `revision`, kept for the runs in
-    /// `live`.
-    async fn of(
-        facts: &RunFacts,
-        live: &BTreeSet<RunSeq>,
-        reads: &dyn DurableReads,
-        revision: StateRevision,
-    ) -> Result<Self, DurableError> {
-        let mut held = Self {
-            current: Some(revision),
-            read_limits: facts.read_limits,
-            runs: BTreeMap::new(),
-        };
-        for (run, facts) in by_run(facts.clone(), live) {
-            let waits = PinnedWaits::read(reads, &facts).await?;
-            held.runs.insert(run, (facts, waits));
-        }
-        Ok(held)
     }
 
     /// The facts of every run held, in run and ordinal order, with their

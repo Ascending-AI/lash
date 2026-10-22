@@ -276,9 +276,7 @@ pub async fn a_panicking_session_turn_process_parks_at_its_budget_and_resumes_or
                 eventually(
                     SETTLE,
                     "the repaired process waits on its child",
-                    || async {
-                        Ok(actor_state(&backend, &process).await? == Some(ActorState::Waiting))
-                    },
+                    || async { super::settled_waiting(&backend, &process).await },
                 )
                 .await?;
                 ensure!(

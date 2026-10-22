@@ -7,9 +7,9 @@
 use std::collections::BTreeSet;
 use std::sync::Arc;
 
+use super::activation::Claim as Owned;
 use lash_core_store::tool_run::{MaterialLocation, MaterialOwner, MaterialPayload, MaterialRole};
 use lash_durable::domain::{OwnerKey, ProcessActorRow, ProcessWrite, RunSeq, ScopeKey};
-use lash_durable::runner::Owned;
 use lash_durable::{ActorTx, CommitLabel, DomainWrite, DurableError, DurableInstant};
 use lash_protocol_types::{ToolCallAdmission, ToolCallPosition};
 
@@ -126,7 +126,7 @@ impl ProcessActivation {
     /// the path again; one before it is recomputed from the same rows.
     pub(super) async fn hand_off(
         &self,
-        owned: &Owned,
+        owned: &Owned<'_>,
         mut tx: ActorTx,
         consumed: &Consumed<'_>,
         mut driver: Driver,
@@ -204,7 +204,25 @@ impl ProcessActivation {
         self.record_published(&mut tx, process, row);
         self.rewrite_requires(&mut tx, record, &driver, fold, &fresh, live)
             .await?;
-        owned.commit(tx, CommitLabel::PROCESS_ADVANCE).await?;
+        if owned.cx.process_revision().await? != tx.revision() {
+            return Ok(Pass::Again);
+        }
+        let appended =
+            lash_durable::domain::RunFacts::appended(tx.domain(), tx.graph(), owned.epoch());
+        let mut continuation = owned.cx.process_continuation().await?;
+        let committed = owned.commit(tx, CommitLabel::PROCESS_ADVANCE).await?;
+        continuation
+            .committed(
+                owned.store().as_ref(),
+                committed.revision,
+                appended,
+                &driver,
+            )
+            .await?;
+        owned
+            .cx
+            .enrich_process(committed.revision, continuation)
+            .await?;
         live.lifecycle.admitted(&fresh);
         Ok(Pass::Again)
     }
@@ -212,7 +230,7 @@ impl ProcessActivation {
     /// End `process` with `outcome`, which lash decided for it.
     pub(super) async fn end_with(
         &self,
-        owned: &Owned,
+        owned: &Owned<'_>,
         mut tx: ActorTx,
         process: &ProcessId,
         record: &ProcessRecord,
@@ -260,6 +278,19 @@ impl ProcessActivation {
                 Err(StepRefusal::Unavailable { reason, .. }) => {
                     return Err(unavailable(reason));
                 }
+                Err(StepRefusal::Resolution(error)) => {
+                    return Err(match error {
+                        crate::runtime::actor::resolutions::ResolutionError::Durable(error) => {
+                            error
+                        }
+                        crate::runtime::actor::resolutions::ResolutionError::Provider(fault) => {
+                            DurableError::ResolutionDiscovery {
+                                message: fault.message,
+                            }
+                        }
+                        error => unavailable(error.to_string()),
+                    });
+                }
                 Err(refusal) => return Ok(Admission::Refused(refusal)),
             };
             // A run is held whole while any of its steps is in
@@ -306,9 +337,22 @@ impl ProcessActivation {
                 Err(StepRefusal::Unavailable { reason, .. }) => {
                     return Err(unavailable(reason));
                 }
+                Err(StepRefusal::Resolution(error)) => {
+                    return Err(match error {
+                        crate::runtime::actor::resolutions::ResolutionError::Durable(error) => {
+                            error
+                        }
+                        crate::runtime::actor::resolutions::ResolutionError::Provider(fault) => {
+                            DurableError::ResolutionDiscovery {
+                                message: fault.message,
+                            }
+                        }
+                        error => unavailable(error.to_string()),
+                    });
+                }
                 Err(refusal) => return Ok(Admission::Refused(refusal)),
             };
-            let current = runtime.cx().begin().await?.revision();
+            let current = runtime.cx().process_revision().await?;
             if current != tx.revision() {
                 // First-use pinning commits before invocation fitting. The
                 // engine transition must be replayed over that committed revision.
@@ -528,6 +572,20 @@ impl ProcessActivation {
                 {
                     Admission::Admitted => {}
                     Admission::Ended(outcome) => return Ok(Some(outcome)),
+                    Admission::Refused(StepRefusal::CompositionUnavailable { reason }) => {
+                        super::terminal::record_park(
+                            tx,
+                            &ProcessParkReason::CompositionUnavailable { message: reason },
+                        );
+                        return Ok(None);
+                    }
+                    Admission::Refused(StepRefusal::EnvRefused { refusal }) => {
+                        super::terminal::record_park(
+                            tx,
+                            &ProcessParkReason::EnvRefused { refusal },
+                        );
+                        return Ok(None);
+                    }
                     Admission::Refused(refusal) => {
                         return Ok(Some(refused(refusal.to_string())));
                     }

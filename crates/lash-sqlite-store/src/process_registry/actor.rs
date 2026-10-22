@@ -59,10 +59,10 @@ impl SqliteProcessRegistry {
         epoch: u64,
         now_ms: u64,
         fleet_format: lash_core_store::store::FleetFormat,
-    ) -> Result<bool, lash_execution_contracts::plugin_error::PluginError> {
+    ) -> Result<(bool, ProcessRecord), lash_execution_contracts::plugin_error::PluginError> {
         let mut record = Self::require_process_conn(conn, process_id)?;
         if record.is_terminal() {
-            return Ok(false);
+            return Ok((false, record));
         }
         let authority =
             lash_execution_contracts::process::ProcessCompletionAuthority::ActorEpoch { epoch };
@@ -74,7 +74,7 @@ impl SqliteProcessRegistry {
         );
         batch.stage(conn, &mut record, request, now_ms)?;
         batch.commit(conn, &record)?;
-        Ok(true)
+        Ok((true, record))
     }
 
     /// Append `request`, replay-keyed, to `process_id` on a durable
@@ -85,9 +85,9 @@ impl SqliteProcessRegistry {
         request: ProcessEventAppendRequest,
         now_ms: u64,
         fleet_format: lash_core_store::store::FleetFormat,
-    ) -> Result<(), lash_execution_contracts::plugin_error::PluginError> {
+    ) -> Result<ProcessRecord, lash_execution_contracts::plugin_error::PluginError> {
         let mut record = Self::require_process_conn(conn, process_id)?;
         Self::append_event_conn(conn, &mut record, request, now_ms, fleet_format)?;
-        Ok(())
+        Ok(record)
     }
 }

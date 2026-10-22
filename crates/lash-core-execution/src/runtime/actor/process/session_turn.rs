@@ -11,7 +11,7 @@
 //!    that it did (`process.advance`). Both writes are idempotent by the
 //!    child's id and the turn's, so a pass that did not commit mails the
 //!    same input again.
-//! 3. It releases as `waiting`. The child's session actor admits the input
+//! 3. It waits quietly under the host's retention policy. The child's session actor admits the input
 //!    and runs the turn with the deployment's turn services; the
 //!    transaction that ends the turn (its commit, or its cancel) resolves
 //!    the wait and wakes the process.
@@ -22,8 +22,8 @@
 //! process ends `Cancelled` at once; once a run took it, the cancel is the
 //! child turn's own cancel request, and the process ends with that turn.
 
+use super::activation::Claim as Owned;
 use lash_durable::domain::{ProcessActorRow, ProcessWrite, ScopeKey, WaitState};
-use lash_durable::runner::Owned;
 use lash_durable::{ActorTx, CommitLabel, DomainWrite, DurableError, Release};
 use serde::{Deserialize, Serialize};
 
@@ -108,6 +108,14 @@ struct ChildTurnDriver {
     cancel_requested: bool,
 }
 
+#[cfg(any(test, feature = "testing"))]
+pub(crate) fn waiting_driver(stored: Option<&str>) -> bool {
+    ChildTurnDriver::decode(stored)
+        .ok()
+        .flatten()
+        .is_some_and(|driver| driver.mailed)
+}
+
 impl ChildTurnDriver {
     fn decode(stored: Option<&str>) -> Result<Option<Self>, serde_json::Error> {
         stored.map(serde_json::from_str).transpose()
@@ -134,7 +142,7 @@ impl ProcessActivation {
     )]
     pub(super) async fn session_turn_pass(
         &self,
-        owned: &Owned,
+        owned: &Owned<'_>,
         mut tx: ActorTx,
         process: &ProcessId,
         row: &ProcessActorRow,
@@ -222,9 +230,9 @@ impl ProcessActivation {
                     driver.cancel_requested = true;
                     driver.advance(&mut tx, process, row.state_rev);
                     self.record_published(&mut tx, process, row);
-                    tx.ack_seen().give_up(Release::Waiting { next_due: None });
+                    tx.ack_seen();
                     owned.commit(tx, CommitLabel::PROCESS_ADVANCE).await?;
-                    return Ok(Pass::Released);
+                    return Ok(Pass::Again);
                 }
             }
         }
@@ -246,15 +254,35 @@ impl ProcessActivation {
                 }
             }
         }
-        // The child turn runs on its session's actor; its end wakes this one.
-        tx.ack_seen().give_up(Release::Waiting { next_due: None });
-        owned.commit(tx, CommitLabel::PROCESS_ADVANCE).await?;
-        Ok(Pass::Released)
+        // The child turn runs on its session's actor. Keep this acknowledged
+        // record resident while quiet; its durable end still wakes this owner.
+        if owned.draining() {
+            owned
+                .cx
+                .commit_draining(tx, CommitLabel::DRAIN_RELEASE, Release::Ready)
+                .await?;
+            return Ok(Pass::Released);
+        }
+        if live.evict
+            || live.idle_since.is_some_and(|since| {
+                owned.clock().now().saturating_duration_since(since)
+                    >= self.backend.owner_retention().idle
+            })
+        {
+            tx.ack_seen().give_up(Release::Waiting { next_due: None });
+            owned.commit(tx, CommitLabel::PROCESS_ADVANCE).await?;
+            return Ok(Pass::Released);
+        }
+        if tx.woken() {
+            tx.ack_seen();
+            owned.commit(tx, CommitLabel::PROCESS_ADVANCE).await?;
+        }
+        Ok(Pass::Quiet(None))
     }
 
     async fn end(
         &self,
-        owned: &Owned,
+        owned: &Owned<'_>,
         mut tx: ActorTx,
         process: &ProcessId,
         outcome: &ProcessOutcome,

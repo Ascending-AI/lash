@@ -377,9 +377,11 @@
         "tests/core_node_processes/process_endstates.rs",
         "tests/core_node_processes/read_tools.rs",
         "tests/core_node_processes/session_and_isolated_envs.rs",
+        "tests/support/callback_carry.rs",
         "tests/support/kernel_namespace.rs",
         "tests/support/kernel_process.rs",
-        "tests/support/operations.rs"
+        "tests/support/operations.rs",
+        "tests/support/served.rs"
       ],
       "declared_start": [
         "tests/declared_start.rs",
@@ -432,6 +434,7 @@
         "tests/kernel_step_crash_laws.rs",
         "tests/kernel_step_crash_laws/carried_callback.rs",
         "tests/kernel_step_crash_laws/paged_carry.rs",
+        "tests/support/callback_carry.rs",
         "tests/support/kernel_namespace.rs",
         "tests/support/kernel_process.rs",
         "tests/support/matrix.rs",

@@ -415,7 +415,8 @@ impl Call {
     ) -> Option<Self> {
         // Root-lease work uses the explicit transaction, which returns the
         // acquired leases and applies releases under the owner fence.
-        if tx.requires().is_some()
+        if tx.process_preimage().is_some()
+            || tx.requires().is_some()
             || !tx.root_leases().is_empty()
             || !tx.released_root_leases().is_empty()
         {
@@ -849,6 +850,7 @@ pub(super) fn answer(
         _ => None,
     };
     Ok(ActorCommit {
+        process_views: Vec::new(),
         session_heads: recorded["session_heads"]
             .as_array()
             .ok_or_else(corrupt)?

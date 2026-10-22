@@ -6,9 +6,7 @@ use std::collections::BTreeMap;
 use lash_core_store::resolutions::{ExecutionId, ResolutionEntry, ResolutionKey, ResolutionRecord};
 use lash_core_store::tool_surface::{ExecutionEnvironment, RouteSource, UseBinding};
 use lash_durable::DurableError;
-use lash_durable::resolutions::{
-    CommitResolution, ExecutionRegistration, ExecutionResolutions, ResolutionOwner,
-};
+use lash_durable::resolutions::ExecutionRegistration;
 use lash_execution_contracts::process::linking::{
     AdmissionRefusal, EnginePortError, LinkInspection, OperationNeed,
 };
@@ -28,7 +26,7 @@ pub enum CommittedUse {
     },
 }
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 pub enum ResolutionError {
     #[error(transparent)]
     Durable(#[from] DurableError),
@@ -57,8 +55,7 @@ pub trait ResolutionValidator: Send + Sync {
 }
 
 pub struct FirstUse<'a> {
-    pub store: &'a dyn ExecutionResolutions,
-    pub owner: ResolutionOwner,
+    pub cx: &'a crate::ActorContext,
     pub execution: ExecutionId,
     pub environment: &'a ExecutionEnvironment,
     pub capabilities: &'a NodeCapabilities,
@@ -72,7 +69,7 @@ pub struct FirstUse<'a> {
 impl FirstUse<'_> {
     /// Load before discovery; commit before fitting or executing any call.
     pub async fn resolve(
-        mut self,
+        self,
         use_: OperationUse,
         requested: QualifiedName,
     ) -> Result<CommittedUse, ResolutionError> {
@@ -83,7 +80,7 @@ impl FirstUse<'_> {
         let Some(UseBinding::Deferred(grant)) = self.environment.uses.get(&use_) else {
             return Err(EnginePortError::Refused(AdmissionRefusal::MissingRoute { use_ }).into());
         };
-        if let Some(record) = self.store.load(&key).await? {
+        if let Some(record) = self.cx.retained_resolution(&key).await? {
             return self.consume(record, &key, &requested);
         }
         validate_requested(grant, &requested).map_err(|message| {
@@ -95,25 +92,11 @@ impl FirstUse<'_> {
             requested: requested.clone(),
             entry,
         };
-        loop {
-            if self.cancel.is_cancelled() {
-                return Err(ResolutionError::Cancelled);
-            }
-            match self.store.commit(&self.owner, candidate.clone()).await {
-                Ok(CommitResolution::Inserted(winner) | CommitResolution::Existing(winner)) => {
-                    return self.consume(winner, &key, &requested);
-                }
-                Err(DurableError::ResolutionRevisionConflict { current, .. }) => {
-                    // Another write advanced the actor. Re-read the winner;
-                    // keep this validated candidate if still unresolved.
-                    if let Some(winner) = self.store.load(&key).await? {
-                        return self.consume(winner, &key, &requested);
-                    }
-                    self.owner.expected_revision = current;
-                }
-                Err(error) => return Err(error.into()),
-            }
+        if self.cancel.is_cancelled() {
+            return Err(ResolutionError::Cancelled);
         }
+        let winner = self.cx.commit_resolution(candidate).await?;
+        self.consume(winner, &key, &requested)
     }
 
     async fn discover(

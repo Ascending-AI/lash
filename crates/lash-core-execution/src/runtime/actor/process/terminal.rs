@@ -76,12 +76,12 @@ impl super::activation::ProcessActivation {
     /// or the read, reports nothing.
     pub(super) async fn commit_terminal(
         &self,
-        owned: &lash_durable::runner::Owned,
+        owned: &super::activation::Claim<'_>,
         tx: ActorTx,
         process: &ProcessId,
         nodes: super::node_trace::NodeCloses,
     ) -> Result<(), DurableError> {
-        owned
+        let receipt = owned
             .commit(tx, lash_durable::CommitLabel::PROCESS_TERMINAL)
             .await?;
         let Some(tracing) = self
@@ -91,7 +91,15 @@ impl super::activation::ProcessActivation {
         else {
             return Ok(());
         };
-        let Ok(Some(record)) = self.backend.process_registry().get_process(process).await else {
+        let Some(view) = receipt.process_views.first() else {
+            return Ok(());
+        };
+        let Some(record) = lash_execution_contracts::process::registry_transitions::stored_record(
+            process,
+            &view.registry,
+        )
+        .map_err(|error| super::activation::registry_failure(&error))?
+        else {
             return Ok(());
         };
         if let lash_execution_contracts::process::ProcessLifecycleState::Terminal {

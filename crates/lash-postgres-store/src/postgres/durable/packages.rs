@@ -46,8 +46,8 @@ pub(super) async fn actor_requirements(
 
 use super::{CommitCapacity, PostgresDurableStore, finish};
 use lash_durable::resolutions::{
-    CommitResolution, ExecutionRegistration, ExecutionResolutions, ResolutionKey, ResolutionOwner,
-    ResolutionRecord,
+    AcknowledgedResolution, CommitResolution, ExecutionRegistration, ExecutionResolutions,
+    ResolutionKey, ResolutionOwner, ResolutionRecord,
 };
 
 pub(super) async fn register(
@@ -138,11 +138,11 @@ impl ExecutionResolutions for PostgresDurableStore {
         })
         .await
     }
-    async fn commit(
+    async fn commit_acknowledged(
         &self,
         owner: &ResolutionOwner,
         candidate: ResolutionRecord,
-    ) -> Result<CommitResolution, DurableError> {
+    ) -> Result<AcknowledgedResolution, DurableError> {
         self.within(CommitCapacity::Work, async {
             let (mut tx, _) = self
                 .open(lash_durable::CommitLabel::RESOLUTION_COMMIT)
@@ -158,7 +158,7 @@ async fn commit_resolution(
     tx: &mut PgConnection,
     owner: &ResolutionOwner,
     candidate: ResolutionRecord,
-) -> Result<CommitResolution, DurableError> {
+) -> Result<AcknowledgedResolution, DurableError> {
     let row: Option<(i64, String, i64, Option<String>)> =
         crate::observed_sql::query_as(POSTGRES.owner.sql())
             .bind(owner.actor.as_str())
@@ -204,9 +204,6 @@ async fn commit_resolution(
             lash_durable::packages::PackageRefusal::ReferrerEnded(registration.referrer).into(),
         );
     }
-    if let Some(winner) = load(tx, &candidate.key).await? {
-        return Ok(CommitResolution::Existing(winner));
-    }
     if revision != owner.expected_revision.0 {
         return Err(DurableError::ResolutionRevisionConflict {
             actor: owner.actor.clone(),
@@ -214,13 +211,33 @@ async fn commit_resolution(
             current: lash_durable::StateRevision(revision),
         });
     }
-    crate::observed_sql::query(SQL.resolution_fence.sql())
+    let fence = crate::observed_sql::query(SQL.resolution_fence.sql())
         .bind(owner.actor.as_str())
         .bind(owner.epoch.0)
         .bind(revision)
         .fetch_one(crate::observed_sql::executor(&mut *tx))
         .await
         .map_err(sqlx_failure)?;
+    let revision = super::get::<i64>(&fence, 0)?;
+    let process_view =
+        super::process_view::refresh_view(tx, &owner.actor, owner.process_view.clone()).await?;
+    let process_views =
+        lash_durable::domain::processes::ProcessPostimages::from_view(process_view).into_views();
+    let turn_cancel = super::turns::current_cancel(tx, &owner.actor).await?;
+    let acknowledge = |result| AcknowledgedResolution {
+        result,
+        actor: lash_durable::ActorCommit {
+            process_views: process_views.clone(),
+            root_leases: Vec::new(),
+            session_heads: Vec::new(),
+            revision: lash_durable::StateRevision(revision),
+            state: lash_durable::ActorState::Owned,
+            turn_cancel: turn_cancel.clone(),
+        },
+    };
+    if let Some(winner) = load(tx, &candidate.key).await? {
+        return Ok(acknowledge(CommitResolution::Existing(winner)));
+    }
     let json = serde_json::to_string(&candidate)
         .map_err(|error| super::corrupt("resolution", &error.to_string()))?;
     crate::observed_sql::query(SQL.insert_resolution.sql())
@@ -238,7 +255,7 @@ async fn commit_resolution(
         .execute(crate::observed_sql::executor(&mut *tx))
         .await
         .map_err(sqlx_failure)?;
-    Ok(CommitResolution::Inserted(candidate))
+    Ok(acknowledge(CommitResolution::Inserted(candidate)))
 }
 
 pub(super) async fn end_execution(

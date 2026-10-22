@@ -411,7 +411,16 @@ pub(super) fn apply(tx: &Connection, commit: &Committing<'_>, write: &ProcessWri
                 millis(commit.now)?,
                 commit.fleet,
             )
-            .map_err(|error| registry_failure(&error)))
+            .map_err(|error| registry_failure(&error))
+            .and_then(|record| {
+                let json =
+                    lash_execution_contracts::process::registry_transitions::encode_view_record(
+                        &record,
+                    )
+                    .map_err(|error| registry_failure(&error))?;
+                commit.process_views.registry(process, json);
+                Ok(())
+            }))
         }
         ProcessWrite::Terminal {
             process,
@@ -422,7 +431,7 @@ pub(super) fn apply(tx: &Connection, commit: &Committing<'_>, write: &ProcessWri
                     Ok(output) => output,
                     Err(_) => return Ok(Err(super::corrupt("process terminal", outcome_json))),
                 };
-            let ended = match SqliteProcessRegistry::record_terminal_conn(
+            let (ended, record) = match SqliteProcessRegistry::record_terminal_conn(
                 tx,
                 process,
                 &output,
@@ -433,6 +442,15 @@ pub(super) fn apply(tx: &Connection, commit: &Committing<'_>, write: &ProcessWri
                 Ok(ended) => ended,
                 Err(error) => return Ok(Err(registry_failure(&error))),
             };
+            let json =
+                match lash_execution_contracts::process::registry_transitions::encode_view_record(
+                    &record,
+                ) {
+                    Ok(json) => json,
+                    Err(error) => return Ok(Err(registry_failure(&error))),
+                };
+            commit.process_views.registry(process, json);
+            commit.process_views.terminal(process, ended, commit.epoch);
             crate::obligation_ledger::end_execution_tx(
                 tx,
                 &lash_protocol_types::ExecutionScope::process(process.clone()),
@@ -668,6 +686,7 @@ mod tests {
         crate::observed_sql::enable(&conn);
         let actor = ActorKey::session("session").expect("actor");
         let commit = Committing {
+            process_views: Default::default(),
             actor: &actor,
             epoch: Epoch(1),
             now: DurableInstant(42),
@@ -728,6 +747,7 @@ mod tests {
             conn.execute("UPDATE session_runs SET terminal_kind = 'answered', terminal_cause_json = '{\"cause\":\"commands_applied\"}', terminal_at_ms = 42", [])?;
             let actor = ActorKey::session("held-session").expect("actor");
             let commit = Committing {
+            process_views: Default::default(),
                 actor: &actor, epoch: Epoch(1), now: DurableInstant(42),
                 fleet: lash_core_store::store::FleetFormat::current(), blob_profile: crate::BuiltinBlobProfile::default(),
                 retired: Default::default(), open_roots: Default::default(),

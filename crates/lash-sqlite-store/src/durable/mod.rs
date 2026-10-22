@@ -357,6 +357,7 @@ pub(crate) type Answer<T> = rusqlite::Result<Result<T, DurableError>>;
 
 /// The owner commit a domain write is applied in: after its fence.
 pub(crate) struct Committing<'a> {
+    pub(crate) process_views: lash_durable::domain::processes::ProcessPostimages,
     /// The actor whose fence matched.
     pub(crate) actor: &'a ActorKey,
     /// The epoch it matched at; domain rows record it as `written_epoch`.
@@ -1456,6 +1457,17 @@ impl DurableStore for SqliteDurableStore {
             })
             .await
             .map_err(store_failure)?
+    }
+
+    async fn begin_process_retained(
+        &self,
+        actor: &ActorKey,
+        epoch: Epoch,
+        expected: StateRevision,
+        max_mail_bytes: u64,
+    ) -> Result<(ActorTx, lash_durable::domain::ProcessFrontier), DurableError> {
+        self.process_frontier(actor, epoch, expected, max_mail_bytes)
+            .await
     }
 
     async fn open_process(

@@ -51,10 +51,9 @@ impl RuntimeSessionServices {
         let environment = Arc::new(env.execution().clone());
         let execution = lash_core_store::resolutions::ExecutionId::process(&process.id);
         let mut pins = std::collections::BTreeMap::new();
-        let resolution_store = cx.backend().stores().execution_resolutions();
         for use_ in environment.uses.keys() {
-            if let Some(record) = resolution_store
-                .load(&lash_core_store::resolutions::ResolutionKey {
+            if let Some(record) = cx
+                .retained_resolution(&lash_core_store::resolutions::ResolutionKey {
                     execution: execution.clone(),
                     use_: *use_,
                 })
@@ -250,15 +249,8 @@ impl lash_core_execution::runtime::process::steps::ProcessStepContext for Runtim
             .execution_owner()
             .map_err(|error| ResolutionError::Corrupt(error.to_string()))?;
         let config = crate::plugin::OwnerConfigView::components(Arc::clone(&engine.env));
-        let tx = cx.begin().await?;
-        let store = cx.backend().stores().execution_resolutions();
         FirstUse {
-            store: store.as_ref(),
-            owner: lash_durable::resolutions::ResolutionOwner {
-                actor: cx.actor().clone(),
-                epoch: cx.epoch(),
-                expected_revision: tx.revision(),
-            },
+            cx,
             execution: lash_core_store::resolutions::ExecutionId::process(&process.id),
             environment,
             capabilities: cx.capabilities(),

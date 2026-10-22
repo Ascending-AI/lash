@@ -319,6 +319,9 @@ impl SessionProjection {
         receipt: &ActorCommit,
         prompt: Option<lash_core_store::prompt_sections::OwnerPromptState>,
     ) -> Result<Self, DurableError> {
+        if !receipt.process_views.is_empty() {
+            return Err(invalid("session acknowledgement contains a process view"));
+        }
         let heads: Vec<_> = receipt
             .session_heads
             .iter()
@@ -375,6 +378,7 @@ mod tests {
     }
     fn receipt(revision: i64, state: ActorState) -> ActorCommit {
         ActorCommit {
+            process_views: Vec::new(),
             revision: StateRevision(revision),
             state,
             session_heads: Vec::new(),

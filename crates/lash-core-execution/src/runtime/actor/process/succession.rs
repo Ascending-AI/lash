@@ -19,8 +19,8 @@
 //! after it, the new pair whole. A refusal at the apply records
 //! `process.successor_refused`, and the process goes on as written.
 
+use super::activation::Claim as Owned;
 use lash_durable::domain::{ExecRootRow, ProcessActorRow, ProcessWrite};
-use lash_durable::runner::Owned;
 use lash_durable::{
     ActorTx, CommitLabel, DomainWrite, DurableError, Release, StoreFailure, StoreFailureKind,
 };
@@ -72,7 +72,7 @@ impl ProcessActivation {
     /// apply it at once to a process whose engine has not started.
     pub(super) async fn record_successor(
         &self,
-        owned: &Owned,
+        owned: &Owned<'_>,
         mut tx: ActorTx,
         current: &Current<'_>,
         driver: &Driver,
@@ -109,9 +109,16 @@ impl ProcessActivation {
             }
         };
         if current.row.state_rev == 0 {
-            return self
-                .apply_successor(owned, tx, current, driver.clone(), request, None, None)
-                .await;
+            return Box::pin(self.apply_successor(
+                owned,
+                tx,
+                current,
+                driver.clone(),
+                request,
+                None,
+                None,
+            ))
+            .await;
         }
         let mut driver = driver.clone();
         driver.successor = Some(request);
@@ -132,7 +139,7 @@ impl ProcessActivation {
     )]
     pub(super) async fn apply_recorded_successor(
         &self,
-        owned: &Owned,
+        owned: &Owned<'_>,
         tx: ActorTx,
         current: &Current<'_>,
         driver: &Driver,
@@ -148,7 +155,7 @@ impl ProcessActivation {
         }
         let mut driver = driver.clone();
         driver.successor = None;
-        self.apply_successor(owned, tx, current, driver, request, Some(state), Some(fold))
+        Box::pin(self.apply_successor(owned, tx, current, driver, request, Some(state), Some(fold)))
             .await
     }
 
@@ -160,7 +167,7 @@ impl ProcessActivation {
     )]
     async fn apply_successor(
         &self,
-        owned: &Owned,
+        owned: &Owned<'_>,
         mut tx: ActorTx,
         current: &Current<'_>,
         mut driver: Driver,
@@ -331,7 +338,7 @@ impl ProcessActivation {
             (
                 carried,
                 own_formats,
-                correspondence,
+                _correspondence,
                 resolutions,
                 mut requirements,
                 _artifacts,
@@ -398,19 +405,6 @@ impl ProcessActivation {
             known.clone(),
             lash_vocabulary::claims::RegistryKind::Process,
         );
-        for (use_, entry) in &context.resolutions {
-            if let Some(target) = correspondence.uses.get(use_) {
-                if let Some(lash_execution_contracts::process::linking::OperationNeed::Deferred {
-                    name,
-                    ..
-                }) = inspection.operations.get(target)
-                {
-                    // The live inspection already authors every successor use once.
-                    let _ = name;
-                }
-                let _ = entry;
-            }
-        }
         tx.adopt_execution(registration);
         for resolution in resolutions {
             tx.seed_resolution(resolution);
@@ -418,8 +412,11 @@ impl ProcessActivation {
         let mut next = current.record.clone();
         lash_execution_contracts::process::validation::apply_successor_input(&mut next, &request)
             .map_err(|error| corrupt("a successor request", error))?;
-        match self.steps.convert_components(&next).await {
-            Ok(Some(cut)) => driver.component_formats = Some(cut),
+        match self.steps.convert_components(&owned.cx, &next).await {
+            Ok(Some(cut)) => {
+                driver.namespace_state = Some(cut.state.clone());
+                driver.component_formats = Some(cut);
+            }
             Ok(None) => {}
             Err(lash_execution_contracts::plugin_error::PluginError::Format(refusal)) => {
                 return self

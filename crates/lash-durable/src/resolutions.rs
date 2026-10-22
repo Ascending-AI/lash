@@ -9,7 +9,7 @@ pub use lash_vocabulary::claims::ClaimRequirements;
 use lash_vocabulary::names::{OperationUse, QualifiedName};
 use serde::{Deserialize, Serialize};
 
-use crate::{ActorKey, DurableError, Epoch, StateRevision};
+use crate::{ActorCommit, ActorKey, DurableError, Epoch, StateRevision};
 
 /// Facts recorded by the admitting owner, before any deferred use can resolve.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -37,9 +37,18 @@ pub enum CommitResolution {
     Existing(ResolutionRecord),
 }
 
+/// The winner and the actor authority acknowledged by the same transaction.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AcknowledgedResolution {
+    pub result: CommitResolution,
+    pub actor: ActorCommit,
+}
+
 /// A resolution commit has exactly the actor's existing ownership authority.
 #[derive(Clone, Debug)]
 pub struct ResolutionOwner {
+    /// A retained process preimage at exactly expected_revision.
+    pub process_view: Option<crate::domain::ProcessView>,
     pub actor: ActorKey,
     pub epoch: Epoch,
     pub expected_revision: StateRevision,
@@ -49,11 +58,22 @@ pub struct ResolutionOwner {
 pub trait ExecutionResolutions: Send + Sync {
     async fn requirements(&self, actor: &ActorKey) -> Result<ClaimRequirements, DurableError>;
     async fn load(&self, key: &ResolutionKey) -> Result<Option<ResolutionRecord>, DurableError>;
+    /// Compatibility result over the same fenced acknowledgement path.
     async fn commit(
         &self,
         owner: &ResolutionOwner,
         candidate: ResolutionRecord,
-    ) -> Result<CommitResolution, DurableError>;
+    ) -> Result<CommitResolution, DurableError> {
+        Ok(self.commit_acknowledged(owner, candidate).await?.result)
+    }
+
+    /// Fence and advance authority once, even when returning an existing winner.
+    /// A retained winner needs neither this call nor a new revision.
+    async fn commit_acknowledged(
+        &self,
+        owner: &ResolutionOwner,
+        candidate: ResolutionRecord,
+    ) -> Result<AcknowledgedResolution, DurableError>;
 }
 
 impl ExecutionRegistration {

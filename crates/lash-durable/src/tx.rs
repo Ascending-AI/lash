@@ -84,6 +84,8 @@ pub enum Release {
 /// when a referenced node is neither staged nor stored.
 #[derive(Clone, Debug)]
 pub struct ActorTx {
+    process_preimage: Option<Box<crate::domain::ProcessView>>,
+    process_publications: Vec<lash_core_store::tool_run::StateResolution>,
     // Prepared in process, never encoded or interpreted by storage adapters.
     session_postimage: Option<Box<lash_core_store::session_state::RuntimeSessionState>>,
     phase_surface: Option<(
@@ -142,6 +144,8 @@ impl ActorTx {
     #[must_use]
     pub fn opened(read: OpenedActor) -> Self {
         Self {
+            process_preimage: None,
+            process_publications: Vec::new(),
             session_postimage: None,
             phase_surface: None,
             actor: read.actor,
@@ -204,6 +208,29 @@ impl ActorTx {
         Option<std::sync::Arc<lash_core_store::tool_surface::RecordedSurface>>,
     )> {
         self.phase_surface.as_ref()
+    }
+
+    /// Carry the acknowledged preimage under this transaction's unchanged basis.
+    pub fn retain_process(&mut self, view: crate::domain::ProcessView) {
+        self.process_preimage = Some(Box::new(view));
+    }
+
+    #[must_use]
+    pub fn process_preimage(&self) -> Option<&crate::domain::ProcessView> {
+        self.process_preimage.as_deref()
+    }
+
+    /// Carry the outcome producer's original namespace publications into
+    /// process checkpoint preparation, before candidate pages are published.
+    #[doc(hidden)]
+    pub fn publish_process_state(&mut self, state: &[lash_core_store::tool_run::StateResolution]) {
+        self.process_publications.extend_from_slice(state);
+    }
+
+    /// Transient publications, in the same order as their outcome writes.
+    #[doc(hidden)]
+    pub fn process_publications(&self) -> &[lash_core_store::tool_run::StateResolution] {
+        &self.process_publications
     }
 
     /// The actor.
@@ -446,10 +473,24 @@ impl ActorTx {
                 actual: self.revision,
             });
         }
+        if let Some(preimage) = held.process_preimage {
+            if self
+                .process_preimage
+                .as_ref()
+                .is_some_and(|current| current != &preimage)
+            {
+                return Err(crate::DurableError::Store(crate::StoreFailure {
+                    kind: crate::StoreFailureKind::Corrupt,
+                    message: "composed process preimages disagree".into(),
+                }));
+            }
+            self.process_preimage = Some(preimage);
+        }
         if held.prompt_postimage.is_some() {
             self.prompt_postimage = held.prompt_postimage;
         }
         self.domain.extend(held.domain);
+        self.process_publications.extend(held.process_publications);
         if held.session_postimage.is_some() {
             self.session_postimage = held.session_postimage;
         }

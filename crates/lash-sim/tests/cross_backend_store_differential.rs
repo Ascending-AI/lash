@@ -1463,7 +1463,7 @@ impl BackendRunner {
                 self.assert_session_deleted(&error, "stale-handle commit");
                 Err(error)
             }
-            StoreOperation::DriveSurface { method } => self.drive_surface(*method).await,
+            StoreOperation::DriveSurface { method } => Box::pin(self.drive_surface(*method)).await,
             StoreOperation::SeedCorruptRecord { target } => self.seed_corrupt_record(*target).await,
             StoreOperation::RestoreCorruptRecord { target } => {
                 self.restore_corrupt_record(*target).await

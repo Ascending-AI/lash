@@ -275,7 +275,7 @@ impl DurableProcessWorker {
     > {
         runtime
             .tools(|| async {
-                self.engine_runtime(process)
+                self.engine_runtime(runtime.cx(), process)
                     .await?
                     .step_tools(runtime.cx().clone(), process)
                     .await
@@ -405,6 +405,7 @@ impl ProcessSteps for WorkerSteps {
 
     async fn convert_components(
         &self,
+        cx: &lash_core_execution::ActorContext,
         process: &ProcessRecord,
     ) -> Result<
         Option<lash_core_execution::runtime::actor::process::component_formats::ComponentFormatCut>,
@@ -418,7 +419,7 @@ impl ProcessSteps for WorkerSteps {
         let Some(env_ref) = process.env_ref() else {
             return Ok(None);
         };
-        let cut = recorded_component_cut(backend.durable().as_ref(), process)
+        let cut = recorded_component_cut(cx, process)
             .await
             .map_err(registry_error)?;
         let (env, state) = match cut {
@@ -432,7 +433,7 @@ impl ProcessSteps for WorkerSteps {
                 None,
             ),
         };
-        let state = recorded_component_state(backend.durable().as_ref(), process, &env, state)
+        let state = recorded_component_state(cx, process, &env, state)
             .await
             .map_err(registry_error)?;
         let (decoded_env, decoded_state) = self
@@ -483,7 +484,7 @@ impl ProcessSteps for WorkerSteps {
             // its catalog and tools build on the next claim, as before.
             None => self
                 .0
-                .engine_runtime(process)
+                .engine_runtime(runtime.cx(), process)
                 .await
                 .map_err(unavailable)?
                 .step_context(),
@@ -579,9 +580,7 @@ impl ProcessSteps for WorkerSteps {
                         .context
                         .resolve_use(runtime.cx(), process, *effect)
                         .await
-                        .map_err(|error| StepRefusal::CompositionUnavailable {
-                            reason: error.to_string(),
-                        })?;
+                        .map_err(StepRefusal::Resolution)?;
                     let record = match winner {
                         lash_core_execution::runtime::actor::resolutions::CommittedUse::Ready(record) => record,
                         lash_core_execution::runtime::actor::resolutions::CommittedUse::Parked { unmet, .. } => return Err(StepRefusal::CompositionUnavailable { reason: unmet.to_string() }),

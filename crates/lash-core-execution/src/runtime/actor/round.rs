@@ -1142,6 +1142,9 @@ fn record_outcome(
     state: Vec<crate::plugin::StateResolution>,
     pages: Option<lash_core_store::checkpoint_graph::NodeId>,
 ) -> StagedRecord {
+    if !matches!(output, SettledOutput::Waiting(_)) {
+        tx.publish_process_state(&state);
+    }
     let id = admitted.id();
     let body = OutcomeBody {
         start: id.ordinal.0,

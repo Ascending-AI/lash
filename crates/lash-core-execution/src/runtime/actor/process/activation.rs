@@ -176,6 +176,8 @@ pub(super) enum Pass {
     /// claim counts it against the activation-loop budget and runs the
     /// step again ([`CapacityVerdict`]).
     Backoff(CapacityVerdict),
+    /// A durable quiet phase remains resident until mail, due work or eviction.
+    Quiet(Option<DurableInstant>),
     /// The actor was released or ended.
     Released,
 }
@@ -187,6 +189,32 @@ enum Waited {
     /// The node's lease lapsed under a step's body: stop, recording
     /// nothing.
     Stopping,
+}
+
+/// Every process commit enters the same claim coordinator as its step bodies.
+pub(super) struct Claim<'a> {
+    owned: &'a Owned,
+    pub(super) cx: ActorContext,
+}
+impl std::ops::Deref for Claim<'_> {
+    type Target = Owned;
+    fn deref(&self) -> &Owned {
+        self.owned
+    }
+}
+impl Claim<'_> {
+    pub(super) async fn commit(
+        &self,
+        tx: ActorTx,
+        label: CommitLabel,
+    ) -> Result<lash_durable::ActorCommit, DurableError> {
+        self.cx.commit(tx, label).await
+    }
+    async fn drain_release(&self, tx: ActorTx) -> Result<lash_durable::ActorCommit, DurableError> {
+        self.cx
+            .commit_draining(tx, CommitLabel::DRAIN_RELEASE, Release::Ready)
+            .await
+    }
 }
 
 /// What one activation keeps in memory: never a grant, rebuilt from rows
@@ -202,7 +230,8 @@ pub(super) struct Live {
     /// The claims in a row that committed nothing, as of the claim.
     failed_activations: u32,
     first_pass: bool,
-    history_restored: bool,
+    pub(super) idle_since: Option<std::time::Instant>,
+    pub(super) evict: bool,
     /// Whether this activation ended the process for a corrupt refusal.
     ended_refused: bool,
     /// The process's durable publication mark as the last pass read it:
@@ -213,8 +242,6 @@ pub(super) struct Live {
     /// or of the state its last commit wrote: what every rewrite of
     /// `requires` keeps (FIG-6993).
     pub(super) record: lash_vocabulary::claims::ClaimRequirements,
-    /// What this activation keeps of its own acknowledged commits.
-    continuation: super::continuation::Continuation,
 }
 
 impl Live {
@@ -232,7 +259,7 @@ pub(super) fn corrupt(what: &str, error: impl std::fmt::Display) -> DurableError
     })
 }
 
-pub(super) fn registry_failure(
+pub(crate) fn registry_failure(
     error: &lash_execution_contracts::plugin_error::PluginError,
 ) -> DurableError {
     DurableError::Store(StoreFailure {
@@ -266,6 +293,19 @@ impl Activation for ProcessActivation {
 
 impl ProcessActivation {
     async fn run(&self, owned: &Owned, process: &ProcessId) -> Exit {
+        let cx = ActorContext::claimed(
+            self.backend.clone(),
+            owned,
+            AdmittedScope::process(process.clone()),
+            CancellationToken::new(),
+            Arc::clone(&self.probe),
+        );
+        let _guard = cx.session_claim_guard();
+        let claimed = Claim { owned, cx };
+        self.run_claim(&claimed, process).await
+    }
+
+    async fn run_claim(&self, owned: &Claim<'_>, process: &ProcessId) -> Exit {
         let (park, failed_activations) = match activation_loop::claimed_row(owned).await {
             Ok(snapshot) => (snapshot.park, snapshot.failed_activations),
             Err(exit) => return exit,
@@ -289,11 +329,11 @@ impl ProcessActivation {
             park,
             failed_activations,
             first_pass: true,
-            history_restored: false,
+            idle_since: None,
+            evict: false,
             ended_refused: false,
             published: None,
             record: lash_vocabulary::claims::ClaimRequirements::default(),
-            continuation: super::continuation::Continuation::default(),
         };
         let mut retried_conflict = false;
         let mut acknowledged = (
@@ -312,7 +352,34 @@ impl ProcessActivation {
             }
             self.publish(process, &live).await;
             match passed {
-                Ok(Pass::Again) => {}
+                Ok(Pass::Again) => {
+                    live.idle_since = None;
+                    owned.busy();
+                }
+                Ok(Pass::Quiet(due)) => {
+                    let since = *live.idle_since.get_or_insert_with(|| owned.clock().now());
+                    let clock = Arc::clone(owned.clock());
+                    let sleep = async {
+                        if let Some(due) = due {
+                            let now = i64::try_from(clock.timestamp_ms()).unwrap_or(i64::MAX);
+                            clock
+                                .sleep(std::time::Duration::from_millis(
+                                    u64::try_from(due.0.saturating_sub(now)).unwrap_or(0),
+                                ))
+                                .await;
+                        } else {
+                            std::future::pending::<()>().await;
+                        }
+                    };
+                    tokio::select! {
+                        wake = owned.wait_idle(since) => match wake {
+                            Wake::Yield => live.evict = true,
+                            Wake::Hint | Wake::Deadline => { live.idle_since = None; owned.busy(); }
+                            _ => {}
+                        },
+                        () = sleep => { live.idle_since = None; owned.busy(); }
+                    }
+                }
                 Ok(Pass::Wait(idle, due)) => match self.wait(owned, &mut live, &idle, due).await {
                     Err(DurableError::OwnershipLost(_)) => return Exit::Released,
                     Ok(Waited::Stopping) => return Exit::Abandoned,
@@ -323,11 +390,22 @@ impl ProcessActivation {
                     return Exit::Abandoned;
                 }
                 Ok(Pass::Released) | Err(DurableError::OwnershipLost(_)) => return Exit::Released,
+                Err(DurableError::ResolutionDiscovery { message }) => {
+                    tracing::debug!(%message, process_id = %process, "discovery will retry without a terminal pin");
+                    owned.wait_for_mail().await;
+                }
+                Err(DurableError::ResolutionRevisionConflict { current, .. }) => {
+                    // This claim's own resolution acknowledgement advanced the
+                    // projection. Recompute the invocation draft from that exact
+                    // postimage; an external conflict requires coherent reload.
+                    if steps_cx.process_revision().await.ok() != Some(current) {
+                        steps_cx.invalidate_process_projection().await;
+                    }
+                }
                 Err(DurableError::RevisionConflict { .. }) => {
                     // Admitted bodies and held outcomes survive one conflict;
                     // the fresh fold reclassifies them by admission identity.
-                    live.continuation = super::continuation::Continuation::default();
-                    live.history_restored = false;
+                    steps_cx.invalidate_process_projection().await;
                     steps_cx.discard_conflicted_attempt().await;
                     if retried_conflict {
                         return Exit::Abandoned;
@@ -355,6 +433,7 @@ impl ProcessActivation {
                 // from them.
                 Err(error) => {
                     tracing::debug!(%error, process_id = %process, "process activation pass failed; reloading");
+                    steps_cx.invalidate_process_projection().await;
                     owned.wait_for_mail().await;
                 }
             }
@@ -367,7 +446,7 @@ impl ProcessActivation {
     /// `retry_after`, doubled for each claim in a row that made no progress,
     /// or until mail or the node's drain may need the actor sooner. A poll
     /// tick alone does not end it.
-    async fn back_off(&self, owned: &Owned, live: &Live, verdict: &CapacityVerdict) {
+    async fn back_off(&self, owned: &Claim<'_>, live: &Live, verdict: &CapacityVerdict) {
         let delay = capacity_backoff(verdict.retry_after, live.failed_activations);
         tracing::debug!(
             actor = %owned.actor(),
@@ -449,14 +528,9 @@ impl ProcessActivation {
     /// The context the steps' lifecycle commits and runs bodies under. Its
     /// token is never cancelled: a cancel reaches the steps through the
     /// lifecycle, and the bodies end with the activation that holds them.
-    pub(super) fn steps_context(&self, owned: &Owned, process: &ProcessId) -> ActorContext {
-        ActorContext::claimed(
-            self.backend.clone(),
-            owned,
-            AdmittedScope::process(process.clone()),
-            CancellationToken::new(),
-            Arc::clone(&self.probe),
-        )
+    pub(super) fn steps_context(&self, owned: &Claim<'_>, process: &ProcessId) -> ActorContext {
+        let _ = process;
+        owned.cx.clone()
     }
 
     /// Wait for what the steps' lifecycle waits on (a body to finish, a
@@ -464,7 +538,7 @@ impl ProcessActivation {
     /// mail or for `due`.
     async fn wait(
         &self,
-        owned: &Owned,
+        owned: &Claim<'_>,
         live: &mut Live,
         idle: &Idle,
         due: Option<DurableInstant>,
@@ -498,19 +572,15 @@ impl ProcessActivation {
 
     async fn pass(
         &self,
-        owned: &Owned,
+        owned: &Claim<'_>,
         process: &ProcessId,
         live: &mut Live,
     ) -> Result<Pass, DurableError> {
         let reads: &dyn DurableReads = owned.store().as_ref();
-        // One read opens the pass: the fenced open with its mail and the
-        // store's clock, the process row, its registry record and its
-        // engine state's root. Each is decoded where it decides, in the
-        // order the pass meets them.
-        let (mut tx, view) = owned
-            .store()
-            .open_process(owned.actor(), owned.epoch())
-            .await?;
+        // Hydrate once per coherent claim. Warm passes refresh only the
+        // fenced external frontier; acknowledged own state stays resident.
+        let (mut tx, view) = owned.cx.open_process_projection().await?;
+        let mut continuation = owned.cx.process_continuation().await?;
         let Some(row) = view.row else {
             // The row is gone: nothing is left to run or to end.
             tx.ack_seen().give_up(Release::Terminal);
@@ -529,7 +599,11 @@ impl ProcessActivation {
                 .end_undecodable(owned, tx, process, live, &view.registry)
                 .await;
         }
-        let record = live.continuation.record(process, &view.registry)?;
+        let record = continuation.record(process, &view.registry)?;
+        owned
+            .cx
+            .enrich_process(tx.revision(), continuation.clone())
+            .await?;
         let cancel = record
             .cancel_request
             .as_deref()
@@ -576,7 +650,7 @@ impl ProcessActivation {
                     &row,
                     view.root.as_ref(),
                     engine.as_ref(),
-                    &mut live.continuation,
+                    &mut continuation,
                 )
                 .await?
             }
@@ -585,7 +659,11 @@ impl ProcessActivation {
         // The driver row is decoded with the engine state, before anything
         // of the process runs: one this node does not decode parks the
         // process with its typed reason, and a cancel ends it unread.
-        let driver = live.continuation.driver(row.driver_json.as_deref());
+        let driver = continuation.driver(row.driver_json.as_deref());
+        owned
+            .cx
+            .enrich_process(tx.revision(), continuation.clone())
+            .await?;
         if let Some(origin) = cancel
             && (loaded.is_err() || driver.is_err())
         {
@@ -613,6 +691,26 @@ impl ProcessActivation {
                 return self.park(owned, tx, &reason).await;
             }
         };
+        let restoring = !continuation.facts_current(tx.revision());
+        let (rows, waits) = continuation
+            .facts(reads, process, &driver, tx.revision())
+            .await?;
+        if restoring {
+            owned
+                .store()
+                .begin_process_retained(owned.actor(), owned.epoch(), tx.revision(), 0)
+                .await?;
+            self.probe.owner_read(
+                owned.actor(),
+                owned.epoch(),
+                lash_durable::OwnerRead::ActiveRunRows,
+                rows.rows.len() as u64,
+            );
+        }
+        owned
+            .cx
+            .enrich_process(tx.revision(), continuation.clone())
+            .await?;
         live.record = state.requirements.clone();
         let tx = match self
             .component_format_cut(owned, tx, &record, &row, &driver, live)
@@ -672,16 +770,6 @@ impl ProcessActivation {
                 .await?;
             return Ok(Pass::Again);
         }
-        let (rows, waits) = live
-            .continuation
-            .facts(
-                reads,
-                process,
-                &driver,
-                tx.revision(),
-                !live.history_restored,
-            )
-            .await?;
         let mut policies = Vec::with_capacity(driver.steps.len());
         let mut link_failures = BTreeMap::new();
         for step in driver.steps.values() {
@@ -702,13 +790,15 @@ impl ProcessActivation {
                 }
             }
         }
+        if owned.cx.process_revision().await? != tx.revision() {
+            return Ok(Pass::Again);
+        }
         let policies = PolicyView::new(policies);
         let fold = round::fold(&rows, &policies, &waits)
             .map_err(|error| corrupt("a process's run records", error))?;
         live.lifecycle
             .publish_committed(&fold)
             .map_err(steps_failure)?;
-        live.history_restored = true;
         let environment = self
             .steps
             .requirements(
@@ -774,8 +864,12 @@ impl ProcessActivation {
             live.bodies.stage_commit(&mut tx, owned.epoch())?;
             let appended = RunFacts::appended(tx.domain(), tx.graph(), owned.epoch());
             let committed = owned.commit(tx, CommitLabel::STEP_OUTCOME).await?;
-            live.continuation
+            continuation
                 .committed(reads, committed.revision, appended, &driver)
+                .await?;
+            owned
+                .cx
+                .enrich_process(committed.revision, continuation.clone())
                 .await?;
             return Ok(Pass::Again);
         }
@@ -792,8 +886,12 @@ impl ProcessActivation {
                 .map_err(steps_failure)?
             {
                 Act::Committed(committed) => {
-                    live.continuation
+                    continuation
                         .committed(reads, committed.revision, committed.appended, &driver)
+                        .await?;
+                    owned
+                        .cx
+                        .enrich_process(committed.revision, continuation.clone())
                         .await?;
                     return Ok(Pass::Again);
                 }
@@ -862,8 +960,12 @@ impl ProcessActivation {
                     .map_err(steps_failure)?
                 {
                     Act::Committed(committed) => {
-                        live.continuation
+                        continuation
                             .committed(reads, committed.revision, committed.appended, &driver)
+                            .await?;
+                        owned
+                            .cx
+                            .enrich_process(committed.revision, continuation.clone())
                             .await?;
                         return Ok(Pass::Again);
                     }
@@ -876,14 +978,26 @@ impl ProcessActivation {
                 if let Some(verdict) = idle.capacity() {
                     return Ok(Pass::Backoff(verdict.clone()));
                 }
-                // Only rows are left to wait on: release as `waiting` until
-                // the earliest of them, holding nothing.
+                // Only durable waits remain. Retain the acknowledged view
+                // while quiet until the host's idle or resident-count limit.
                 let steps_due = live.lifecycle.due(&idle).await.map_err(steps_failure)?;
                 let next_due = due.into_iter().chain(steps_due).min();
                 super::waiting::project(&mut tx, process, &record, &driver, &fold, now.0);
-                tx.ack_seen().give_up(Release::Waiting { next_due });
-                owned.commit(tx, CommitLabel::PROCESS_ADVANCE).await?;
-                return Ok(Pass::Released);
+                if live.evict
+                    || live.idle_since.is_some_and(|since| {
+                        owned.clock().now().saturating_duration_since(since)
+                            >= self.backend.owner_retention().idle
+                    })
+                {
+                    tx.ack_seen().give_up(Release::Waiting { next_due });
+                    owned.commit(tx, CommitLabel::PROCESS_ADVANCE).await?;
+                    return Ok(Pass::Released);
+                }
+                if !tx.domain().is_empty() || tx.woken() {
+                    tx.ack_seen();
+                    owned.commit(tx, CommitLabel::PROCESS_ADVANCE).await?;
+                }
+                return Ok(Pass::Quiet(next_due));
             }
         };
         let nodes = match (&event, &held) {
@@ -970,6 +1084,13 @@ impl ProcessActivation {
                 &mut fresh,
             )
             .await?;
+        if owned.cx.process_revision().await? != tx.revision() {
+            return Ok(Pass::Again);
+        }
+        if tx.release() == Some(Release::Parked) {
+            owned.commit(tx, CommitLabel::PROCESS_ADVANCE).await?;
+            return Ok(Pass::Released);
+        }
         if let Some(outcome) = applied {
             super::waiting::end(&mut tx, process, &record, ending);
             record_omitted_effects(&mut tx, process, &driver, self.fleet());
@@ -1006,11 +1127,14 @@ impl ProcessActivation {
             super::state_graph::write_engine_state(&mut tx, process, kind, &next, root.as_ref())?;
         let committed = owned.commit(tx, CommitLabel::PROCESS_ADVANCE).await?;
         nodes.publish(self.tracing.as_ref(), &record, millis(now));
-        live.continuation
+        continuation
             .committed(reads, committed.revision, appended, &driver)
             .await?;
-        live.continuation
-            .wrote(written, kind, next, driver_json, driver);
+        continuation.wrote(written, kind, next, driver_json, driver);
+        owned
+            .cx
+            .enrich_process(committed.revision, continuation)
+            .await?;
         // The steps this transition admitted run once the next pass folds
         // their rows.
         live.lifecycle.admitted(&fresh);
@@ -1071,7 +1195,7 @@ impl ProcessActivation {
 
     pub(super) async fn park(
         &self,
-        owned: &Owned,
+        owned: &Claim<'_>,
         mut tx: ActorTx,
         reason: &ProcessParkReason,
     ) -> Result<Pass, DurableError> {
@@ -1100,7 +1224,7 @@ impl ProcessActivation {
     /// recurs after it ended.
     async fn end_refused(
         &self,
-        owned: &Owned,
+        owned: &Claim<'_>,
         process: &ProcessId,
         live: &mut Live,
         message: String,
@@ -1136,7 +1260,7 @@ impl ProcessActivation {
     /// cancel kept (FIG-6099): ending it failed every time.
     async fn end_undecodable(
         &self,
-        owned: &Owned,
+        owned: &Claim<'_>,
         mut tx: ActorTx,
         process: &ProcessId,
         live: &mut Live,
@@ -1179,7 +1303,7 @@ impl ProcessActivation {
     /// undecodable here, or never started.
     pub(super) async fn end_engine_free(
         &self,
-        owned: &Owned,
+        owned: &Claim<'_>,
         mut tx: ActorTx,
         process: &ProcessId,
         live: &mut Live,
@@ -1200,7 +1324,7 @@ impl ProcessActivation {
     /// cascade is done.
     async fn cascade(
         &self,
-        owned: &Owned,
+        owned: &Claim<'_>,
         reads: &dyn DurableReads,
         mut tx: ActorTx,
         process: &ProcessId,

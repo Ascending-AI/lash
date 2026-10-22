@@ -737,6 +737,7 @@ mod tests {
         let owner = OwnerKey::Turn("session".into(), "turn".into());
         let actor = lash_durable::ActorKey::session("session").expect("actor");
         let commit = Committing {
+            process_views: Default::default(),
             actor: &actor,
             epoch: Epoch(1),
             now: lash_durable::DurableInstant(1),

@@ -679,3 +679,6 @@ mod paged_carry;
 
 #[path = "kernel_step_crash_laws/carried_callback.rs"]
 mod carried_callback;
+
+#[path = "support/callback_carry.rs"]
+mod callback_carry;

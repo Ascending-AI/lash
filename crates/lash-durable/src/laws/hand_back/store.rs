@@ -119,6 +119,18 @@ impl DurableStore for ObservedStore {
         answer
     }
 
+    async fn begin_process_retained(
+        &self,
+        actor: &crate::ActorKey,
+        epoch: crate::Epoch,
+        expected: crate::StateRevision,
+        max_mail_bytes: u64,
+    ) -> Result<(crate::ActorTx, crate::domain::ProcessFrontier), crate::DurableError> {
+        self.inner
+            .begin_process_retained(actor, epoch, expected, max_mail_bytes)
+            .await
+    }
+
     async fn open_process(
         &self,
         actor: &ActorKey,

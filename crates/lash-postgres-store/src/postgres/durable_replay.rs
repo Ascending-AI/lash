@@ -356,7 +356,9 @@ pub(super) async fn apply_owner(
             }
         }
     }
+    let process_view = super::process_view::refresh_preimage(tx, write).await?;
     let committing = Committing {
+        process_views: lash_durable::domain::processes::ProcessPostimages::from_view(process_view),
         checkpoint_ref_chunk: pools.maintenance.checkpoint_ref_chunk as usize,
         actor: write.actor(),
         epoch: write.epoch(),
@@ -380,7 +382,9 @@ pub(super) async fn apply_owner(
             }
             domain => apply_domain(tx, &committing, domain).await?,
         }
+        committing.process_views.applied(domain, write.epoch());
     }
+    let process_views = committing.process_views.into_views();
     let mut root_leases = Vec::new();
     for request in write.root_leases() {
         root_leases.push(pages::acquire_in(tx, request.clone(), now).await?);
@@ -503,6 +507,7 @@ pub(super) async fn apply_owner(
         }
     };
     Ok(ActorCommit {
+        process_views,
         session_heads,
         root_leases,
         revision: fence.revision,

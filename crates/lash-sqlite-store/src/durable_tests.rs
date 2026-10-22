@@ -1775,3 +1775,17 @@ mod lo_postimage_receipt_matches_reopen {
         run(true).await;
     }
 }
+
+// LO-RESOLUTION shares the package winner/debt/holds law.
+law!(lo_resolution_winner_is_atomic, |store, _advance| {
+    laws::a_resolution_winner_and_its_claim_debt_commit_atomically(store, store)
+});
+
+law!(
+    lo_process_frontier_preserves_unexamined_mail,
+    |store, _advance| { laws::lo_process_frontier_preserves_unexamined_mail(store) }
+);
+
+law!(lo_succession_postimage_is_atomic, |store, _advance| {
+    laws::lo_succession_postimage_is_atomic(store, store)
+});

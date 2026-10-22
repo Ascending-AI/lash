@@ -17,7 +17,10 @@ use lash_vocabulary::identity::ProcessId;
 /// The driver's state of one process.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub(super) struct Driver {
+pub(crate) struct Driver {
+    /// Current namespace postimage, committed with outcomes before active runs
+    /// can be consumed. Recovery never needs completed run records.
+    pub(super) namespace_state: Option<crate::plugin::PluginState>,
     /// Evidence cut pinned by the run's first transition. Required on reopen;
     /// a missing recorded value is never inferred from the current host.
     pub(super) effect_occurrence_cap: u64,
@@ -222,9 +225,12 @@ pub async fn engine_status(
 }
 
 impl Driver {
+    pub(crate) fn idle(&self) -> bool {
+        matches!(self.blocked, Some(Blocked::Idle))
+    }
     /// The driver state stored on a process row, or the state before the
     /// first transition.
-    pub(super) fn decode(stored: Option<&str>) -> Result<Self, serde_json::Error> {
+    pub(crate) fn decode(stored: Option<&str>) -> Result<Self, serde_json::Error> {
         stored.map_or_else(|| Ok(Self::default()), serde_json::from_str)
     }
 
@@ -233,7 +239,7 @@ impl Driver {
         clippy::expect_used,
         reason = "the driver state is plain data whose encoding cannot fail"
     )]
-    pub(super) fn encode(&self) -> String {
+    pub(crate) fn encode(&self) -> String {
         serde_json::to_string(self).expect("the driver state encodes")
     }
 }

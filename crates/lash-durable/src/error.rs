@@ -86,9 +86,27 @@ pub enum DurableError {
         /// The store's configured served-node count.
         served_nodes: u32,
     },
+    /// A necessary mailbox body cannot fit in the requested page.
+    #[error("mailbox body for {actor} has {bytes} bytes, exceeding page limit {limit}")]
+    MailPageTooSmall {
+        actor: ActorKey,
+        bytes: u64,
+        limit: u64,
+    },
     /// A mailbox transaction broke a mailbox rule.
     #[error(transparent)]
     MailRefused(MailRefusal),
+    /// Repeatable first-use discovery failed without recording a terminal pin.
+    #[error("resolution discovery failed: {message}")]
+    ResolutionDiscovery { message: String },
+
+    /// A process receipt did not contain exactly its complete acknowledged view.
+    #[error("invalid process acknowledgement for {actor}: {message}")]
+    ProcessPostimage {
+        actor: crate::ActorKey,
+        message: String,
+    },
+
     /// An owner transaction acknowledged mail it never read.
     #[error("{actor} acknowledged mail it never read")]
     AckBeyondRead {

@@ -457,6 +457,7 @@ pub async fn a_resolution_winner_and_its_claim_debt_commit_atomically(
         },
     };
     let stale_revision = ResolutionOwner {
+        process_view: None,
         actor: actor.clone(),
         epoch,
         expected_revision: crate::StateRevision(revision.0 - 1),
@@ -474,6 +475,7 @@ pub async fn a_resolution_winner_and_its_claim_debt_commit_atomically(
         "revision refusal stored an outcome"
     );
     let owner = ResolutionOwner {
+        process_view: None,
         actor: actor.clone(),
         epoch,
         expected_revision: revision,
@@ -490,11 +492,34 @@ pub async fn a_resolution_winner_and_its_claim_debt_commit_atomically(
         ),
         "foreign use answered {refused:?}"
     );
+    let mut competing = candidate.clone();
+    if let ResolutionEntry::Resolved {
+        definition, route, ..
+    } = &mut competing.entry
+    {
+        definition.manifest.id = lash_vocabulary::ToolId::from("tool:competing");
+        route.tool = definition.manifest.id.clone();
+        route.source = RouteSource::Resolved {
+            definition: definition.clone(),
+        };
+    }
     let first = resolutions.commit(&owner, candidate.clone());
-    let second = resolutions.commit(&owner, candidate.clone());
+    let second = resolutions.commit(&owner, competing);
     let (first, second) = tokio::join!(first, second);
-    let first = first?;
-    let second = second?;
+    let retry = |result| async {
+        match result {
+            Err(DurableError::ResolutionRevisionConflict { .. }) => {
+                let owner = ResolutionOwner {
+                    expected_revision: store.begin(&actor, epoch).await?.revision(),
+                    ..owner.clone()
+                };
+                resolutions.commit(&owner, candidate.clone()).await
+            }
+            result => result,
+        }
+    };
+    let first = retry(first).await?;
+    let second = retry(second).await?;
     let (winner, loser) = match (first, second) {
         (CommitResolution::Inserted(winner), CommitResolution::Existing(loser))
         | (CommitResolution::Existing(loser), CommitResolution::Inserted(winner)) => {
@@ -526,8 +551,29 @@ pub async fn a_resolution_winner_and_its_claim_debt_commit_atomically(
     );
     let after = store.begin(&actor, epoch).await?.revision();
     super::ensure!(
-        after.0 == revision.0 + 1,
-        "more than one resolution committed: {after:?}"
+        after.0 == revision.0 + 2,
+        "each fenced resolution acknowledgement must advance authority, including Existing: {after:?}"
+    );
+    let acknowledgement = resolutions
+        .commit_acknowledged(
+            &ResolutionOwner {
+                expected_revision: after,
+                ..owner.clone()
+            },
+            candidate.clone(),
+        )
+        .await?;
+    super::ensure!(
+        acknowledgement.result == CommitResolution::Existing(winner.clone())
+            && acknowledgement.actor.revision.0 == after.0 + 1
+            && acknowledgement.actor.state == crate::ActorState::Owned
+            && acknowledgement.actor.root_leases.is_empty()
+            && acknowledgement.actor.turn_cancel.is_none(),
+        "existing winner did not return the complete fenced acknowledgement: {acknowledgement:?}"
+    );
+    super::ensure!(
+        store.begin(&actor, epoch).await?.revision() == acknowledgement.actor.revision,
+        "the acknowledgement differs from committed authority"
     );
     // Normal owner record replacement cannot erase a live resolved target.
     let mut replace = store.begin(&actor, epoch).await?;
@@ -560,7 +606,7 @@ pub async fn a_resolution_winner_and_its_claim_debt_commit_atomically(
             discovery: ClaimRequirements::default(),
         },
     );
-    let mut carried = candidate.clone();
+    let mut carried = winner.clone();
     carried.key.use_ = successor_use;
     let mut adoption = store.begin(&actor, epoch).await?;
     adoption
@@ -645,6 +691,7 @@ pub async fn a_resolution_winner_and_its_claim_debt_commit_atomically(
         .commit(admit, CommitLabel::new("law.resolution.fresh"))
         .await?;
     let fresh_owner = ResolutionOwner {
+        process_view: None,
         actor: actor.clone(),
         epoch,
         expected_revision: store.begin(&actor, epoch).await?.revision(),
@@ -666,6 +713,10 @@ pub async fn a_resolution_winner_and_its_claim_debt_commit_atomically(
     let mut changed = unavailable.clone();
     changed.entry = ResolutionEntry::Refused {
         note: "later answer".into(),
+    };
+    let fresh_owner = ResolutionOwner {
+        expected_revision: store.begin(&actor, epoch).await?.revision(),
+        ..fresh_owner
     };
     super::ensure!(
         matches!(resolutions.commit(&fresh_owner, changed).await?, CommitResolution::Existing(record) if record == unavailable),
@@ -930,6 +981,71 @@ pub async fn a_publication_retains_its_complete_content_dag(
             ))
         ),
         "ended referrer resurrected content: {refused:?}"
+    );
+    Ok(())
+}
+
+/// LO-FRONTIER: an examined mailbox prefix advances alone; current cancellation
+/// and authority are refreshed independently of the retained process projection.
+pub async fn lo_process_frontier_preserves_unexamined_mail(store: &dyn DurableStore) -> LawOutcome {
+    let writer = node(store, "frontier-owner", NodeCapabilities::default()).await?;
+    let actor = ActorKey::process("frontier-owner").map_err(|e| LawBroken(e.to_string()))?;
+    let mut mail = MailTx::new();
+    mail.create_actor(actor.clone(), FormatSet::new("law:packages"));
+    mail.append(actor.clone(), MailKind::new("first"), "1234");
+    mail.append(actor.clone(), MailKind::new("second"), "5678");
+    store
+        .commit_mail(mail, CommitLabel::new("law.frontier.mail"))
+        .await?;
+    let claimed = store.claim(&writer, 1).await?;
+    let epoch = claimed[0].epoch;
+    let revision = store.begin(&actor, epoch).await?.revision();
+    let (control, frontier) = store
+        .begin_process_retained(&actor, epoch, revision, 0)
+        .await?;
+    super::ensure!(
+        control.mail().is_empty() && !control.woken() && frontier.cancel.is_none(),
+        "control probe consumed pending mail"
+    );
+    let (mut tx, _) = store
+        .begin_process_retained(&actor, epoch, revision, 4)
+        .await?;
+    super::ensure!(
+        tx.mail().len() == 1 && tx.mail()[0].body == "1234",
+        "frontier materialized beyond its page"
+    );
+    tx.ack_seen();
+    let receipt = store
+        .commit(tx, CommitLabel::new("law.frontier.ack"))
+        .await?;
+    super::ensure!(
+        matches!(
+            store
+                .begin_process_retained(&actor, epoch, revision, 4)
+                .await,
+            Err(DurableError::RevisionConflict { .. })
+        ),
+        "stale retained basis was refreshed instead of refused"
+    );
+    let (tx, _) = store
+        .begin_process_retained(&actor, epoch, receipt.revision, 4)
+        .await?;
+    super::ensure!(
+        tx.mail().len() == 1 && tx.mail()[0].body == "5678",
+        "unexamined mail was lost"
+    );
+    super::ensure!(
+        matches!(
+            store
+                .begin_process_retained(&actor, epoch, receipt.revision, 3)
+                .await,
+            Err(DurableError::MailPageTooSmall {
+                bytes: 4,
+                limit: 3,
+                ..
+            })
+        ),
+        "an oversized first body must refuse before materialization"
     );
     Ok(())
 }

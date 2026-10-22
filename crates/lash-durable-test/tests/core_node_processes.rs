@@ -2452,3 +2452,55 @@ async fn process_outcome_projections_are_readable_on_sqlite_memory() {
 
 #[path = "core_node_processes/read_tools.rs"]
 mod read_tools;
+
+#[path = "support/callback_carry.rs"]
+mod live_owner_pins;
+#[path = "support/served.rs"]
+mod served;
+
+async fn lo_resolution(tier: served::Tier) {
+    let (stores, _keep) = served::stores(tier).await.unwrap();
+    let backend = served::backend(stores);
+    lash_core_execution::runtime::actor::process_laws::lo_process_retains_acknowledged_state(
+        &backend,
+    )
+    .await
+    .unwrap();
+    Box::pin(
+        lash_durable::laws::a_resolution_winner_and_its_claim_debt_commit_atomically(
+            backend.durable().as_ref(),
+            backend.stores().execution_resolutions().as_ref(),
+        ),
+    )
+    .await
+    .unwrap();
+    live_owner_pins::lo_resolution(tier).await;
+}
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn lo_resolution_on_sqlite_memory() {
+    lo_resolution(served::Tier::SqliteMemory).await;
+}
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn lo_resolution_on_sqlite_file() {
+    lo_resolution(served::Tier::SqliteFile).await;
+}
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "requires a private PostgreSQL service"]
+async fn lo_resolution_on_postgres_when_configured() {
+    let _ = lash_postgres_store::testing::required_database_url();
+    lo_resolution(served::Tier::Postgres).await;
+}
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn lo_succession_on_sqlite_memory() {
+    live_owner_pins::lo_succession(served::Tier::SqliteMemory).await;
+}
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn lo_succession_on_sqlite_file() {
+    live_owner_pins::lo_succession(served::Tier::SqliteFile).await;
+}
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "requires a private PostgreSQL service"]
+async fn lo_succession_on_postgres_when_configured() {
+    let _ = lash_postgres_store::testing::required_database_url();
+    live_owner_pins::lo_succession(served::Tier::Postgres).await;
+}
