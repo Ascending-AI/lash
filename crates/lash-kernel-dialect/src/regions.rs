@@ -114,10 +114,10 @@ fn terminal_operations(document: &k::Document) -> BTreeSet<lash_vocabulary::Impo
                 &document.imports
             }
             lash_vocabulary::sites::Unit::Library(function) => {
-                &document.functions[&function]
-                    .body()
-                    .expect("units only yields guest bodies")
-                    .imports
+                let Some(body) = document.functions.get(&function).and_then(|f| f.body()) else {
+                    continue;
+                };
+                &body.imports
             }
         };
         let mut pending = vec![k::Node::Block(block)];
