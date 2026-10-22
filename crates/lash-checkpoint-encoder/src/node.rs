@@ -665,13 +665,13 @@ fn parse_uncached(bytes: &[u8], node: Option<NodeId>) -> Result<NodeEnvelope<'_>
     })
 }
 
-/// Reads every token of a physical body: each must be canonical, each slot
-/// in range, and each child referenced at least once.
 #[cfg(test)]
 thread_local! {
     static SLOT_SCAN_EVENTS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
 }
 
+/// Reads every token of a physical body: each must be canonical, each slot
+/// in range, and each child referenced at least once.
 fn check_slots(body: &[u8], children: usize, node: Option<NodeId>) -> Result<(), GraphRefusal> {
     let mut used = vec![false; children];
     let mut reader = TokenReader::with_form(body, RefForm::Physical);
@@ -762,6 +762,44 @@ mod frame_tests {
             check_envelope(&bytes, id, &smaller),
             Err(GraphRefusal::DecodeLimit { .. })
         ));
+    }
+
+    /// The preparation's check and publication have one synchronization
+    /// owner. Racing misses for different actual bytes cannot substitute
+    /// framing even if their lookup digests coincide (FIG-7135).
+    #[test]
+    fn racing_envelope_preparations_keep_each_inputs_framing() {
+        let rendezvous = std::sync::Barrier::new(2);
+        // Exercise the inventory's byte comparison independently of hashing.
+        let lookup = NodeId([0x71; 32]);
+        let bodies = [
+            write_envelope(NodeKind(1_002), &[], &[0x00]),
+            write_envelope(NodeKind(1_003), &[[0x35; 32]], &[0x0b, 0]),
+        ];
+        std::thread::scope(|scope| {
+            for bytes in &bodies {
+                let rendezvous = &rendezvous;
+                scope.spawn(move || {
+                    let framing = super::super::encode::prepare_envelope(lookup, bytes, || {
+                        let framing = Framing::of(bytes, parse_uncached(bytes, None)?);
+                        // Both misses prepare outside the inventory mutex,
+                        // before either can publish its result.
+                        rendezvous.wait();
+                        Ok(framing)
+                    })
+                    .unwrap();
+                    assert_eq!(
+                        framing.envelope(bytes),
+                        parse_uncached(bytes, None).unwrap()
+                    );
+                    // A later lookup must still check this caller's bytes.
+                    assert_eq!(
+                        parse_prepared(bytes, None, lookup).unwrap(),
+                        parse_uncached(bytes, None).unwrap()
+                    );
+                });
+            }
+        });
     }
 
     /// The framing a logical body's envelope had before FIG-6932, built
