@@ -155,14 +155,20 @@ impl SessionReadView {
     /// A derived view rewrites its base's current-frame tail on first use.
     /// The base is a resident graph, which holds the current frame and its
     /// pending suffix (ADR 0112 §9), so the rewrite costs O(frame).
-    pub fn session_graph(&self) -> &crate::SessionGraph {
+    pub fn session_graph(&self) -> Result<&crate::SessionGraph, crate::StoreError> {
         match &self.0.graph {
-            SessionReadGraph::Owned(graph) => graph,
-            SessionReadGraph::Derived { cache, base_graph } => cache.get_or_init(|| {
+            SessionReadGraph::Owned(graph) => Ok(graph),
+            SessionReadGraph::Derived { cache, base_graph } => {
+                if let Some(graph) = cache.get() {
+                    return Ok(graph);
+                }
                 let mut graph = (**base_graph).clone();
-                graph.rewrite_active_read_tail(self.0.read_model.messages.as_slice());
-                graph
-            }),
+                graph.rewrite_active_read_tail(self.0.read_model.messages.as_slice())?;
+                let _ = cache.set(graph);
+                Ok(cache
+                    .get()
+                    .unwrap_or_else(|| unreachable!("derived graph just published")))
+            }
         }
     }
 
@@ -255,10 +261,10 @@ impl SessionReadView {
 
     /// Projects this `SessionReadView` into snapshot form for store, effect-host, and protocol
     /// implementors while materializing, executing, or persisting a session turn.
-    pub fn to_snapshot(&self) -> SessionSnapshot {
+    pub fn to_snapshot(&self) -> Result<SessionSnapshot, crate::StoreError> {
         self.0
             .meta
-            .to_snapshot(self.session_graph().clone(), self.current_frame().cloned())
+            .to_snapshot(self.session_graph()?.clone(), self.current_frame().cloned())
     }
 }
 
@@ -357,24 +363,9 @@ impl SessionReadMeta {
         &self,
         session_graph: crate::SessionGraph,
         current_frame_node_id: Option<crate::FrameNodeId>,
-    ) -> SessionSnapshot {
-        // An unreadable frame set is the same blind state this projection just
-        // stopped producing, so it is reported rather than silently defaulted.
-        // `to_snapshot` is infallible on every read-view consumer (stores,
-        // protocols, plugins, the facade), and widening it to a `Result` for a
-        // derived convenience field would spread through all of them.
-        let agent_frames = session_graph
-            .try_agent_frame_records(&self.session_id)
-            .unwrap_or_else(|error| {
-                tracing::warn!(
-                    session_id = %self.session_id,
-                    %error,
-                    "session read view could not derive agent frame records; \
-                     projecting a snapshot without them"
-                );
-                Vec::new()
-            });
-        SessionSnapshot {
+    ) -> Result<SessionSnapshot, crate::StoreError> {
+        let agent_frames = session_graph.try_agent_frame_records(&self.session_id)?;
+        Ok(SessionSnapshot {
             session_id: self.session_id.clone(),
             policy: self.policy.clone(),
             agent_frames,
@@ -388,7 +379,7 @@ impl SessionReadMeta {
             plugin_state_generations: Default::default(),
             execution_state_ref: None,
             checkpoint_ref: None,
-        }
+        })
     }
 }
 #[derive(Debug)]

@@ -603,7 +603,11 @@ impl GeneratedRuntimeWorld {
                     event.boundary_id, event.actor_alias
                 ))
             })?;
-        let graph_node_count = read_view.session_graph().nodes.len();
+        let graph_node_count = read_view
+            .session_graph()
+            .map_err(|error| FixedScriptRunnerError::Runtime(error.to_string()))?
+            .nodes
+            .len();
         let transcript_message_count = read_view.messages().len();
         let graph_non_empty = graph_node_count > 0;
         let observer_ok = *read_view.session_id() == event.actor_alias
@@ -615,7 +619,11 @@ impl GeneratedRuntimeWorld {
                 event.boundary_id,
                 read_view.session_id(),
                 read_view.turn_index(),
-                read_view.session_graph().nodes.len()
+                read_view
+                    .session_graph()
+                    .map_err(|error| FixedScriptRunnerError::Runtime(error.to_string()))?
+                    .nodes
+                    .len()
             )));
         }
         Ok(json!({

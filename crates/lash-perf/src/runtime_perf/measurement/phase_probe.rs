@@ -834,7 +834,7 @@ async fn run_once_inner(
                     .read()
                     .await?
                     .ok_or_else(|| anyhow::anyhow!("missing committed head"))?
-                    .to_snapshot()
+                    .to_snapshot()?
             } else {
                 runtime.export_state().await?
             };

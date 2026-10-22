@@ -1200,7 +1200,13 @@ impl Scenario for PromptUsage {
             other => violations.push(format!("the turn did not complete: {other:?}")),
         }
         let committed = match self.core().session(usage_session()).open().await {
-            Ok(session) => session.admin().state().export().await,
+            Ok(session) => match session.admin().state().export().await {
+                Ok(snapshot) => snapshot,
+                Err(error) => {
+                    violations.push(format!("the session snapshot was refused: {error}"));
+                    return violations;
+                }
+            },
             Err(error) => {
                 violations.push(format!("the session does not open: {error}"));
                 return violations;

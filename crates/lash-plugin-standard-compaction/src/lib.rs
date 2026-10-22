@@ -578,7 +578,7 @@ pub fn pressure_compaction_request_ids(
     if summarized.is_empty() {
         return Ok(None);
     }
-    let state = ctx.state.to_snapshot();
+    let state = ctx.state.to_snapshot().map_err(PluginError::from)?;
     let (snapshot, prompt_text) = prepare_compaction_request(&state, summarized, None, config)?;
     compaction_request_ids(
         &ctx.session_id,
@@ -948,12 +948,7 @@ impl ContextPressureHook for StandardCompactionPressureHook {
         // terminal records say whether recovery is pending; a completed or
         // exhausted record below the marker closes it.
         let recovery_state = OverflowRecoveryState::derive(
-            history_recovery_records(&ctx.state).map_err(|error| {
-                ContextError::Plugin(PluginError::StoredDataCorrupt {
-                    record_kind: error.record_kind,
-                    message: error.message,
-                })
-            })?,
+            history_recovery_records(&ctx.state).map_err(ContextError::Plugin)?,
         );
         if self.config.overflow_recovery && recovery_state.pending() {
             return overflow_recovery_decision(ctx, recovery_state, &self.config).await;
@@ -990,7 +985,7 @@ impl ContextPressureHook for StandardCompactionPressureHook {
         }
         let Some(summary) = summarize_compaction_prefix(
             &ctx.session_id,
-            &ctx.state.to_snapshot(),
+            &ctx.state.to_snapshot().map_err(PluginError::from)?,
             summarized,
             None,
             &self.config,
@@ -1088,7 +1083,7 @@ impl ContextCompactor for StandardContextCompactor {
 
         let compaction = compact_messages_core(
             &session_id,
-            &ctx.state.to_snapshot(),
+            &ctx.state.to_snapshot().map_err(PluginError::from)?,
             ctx.state.messages(),
             ctx.instructions.as_deref(),
             &self.config,

@@ -1142,7 +1142,7 @@ impl EmbedRun {
                         .read()
                         .await?
                         .ok_or_else(|| anyhow::anyhow!("missing committed head"))?
-                        .to_snapshot(),
+                        .to_snapshot()?,
                 )?;
                 Ok(())
             })

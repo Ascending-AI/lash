@@ -81,10 +81,13 @@ struct Entry {
 }
 
 impl Entry {
-    fn reader_graph(&self) -> Option<SessionGraph> {
+    fn reader_graph(&self) -> Result<Option<SessionGraph>, crate::StoreError> {
         let mut graph = self.window.clone();
-        graph.set_read_owner(Some(self.readers.upgrade()?));
-        Some(graph)
+        let Some(readers) = self.readers.upgrade() else {
+            return Ok(None);
+        };
+        graph.set_read_owner(Some(readers))?;
+        Ok(Some(graph))
     }
 }
 
@@ -95,6 +98,7 @@ impl Entry {
 pub(crate) struct WindowReaders {
     cache: Weak<WindowCache>,
     session: SessionId,
+    _allocation: lash_protocol_types::allocation::AllocationHold,
 }
 
 impl Drop for WindowReaders {
@@ -251,7 +255,7 @@ impl WindowCacheRead {
             return Ok(WindowReuse::Miss);
         }
         entry.used = used;
-        let Some(window) = entry.reader_graph() else {
+        let Some(window) = entry.reader_graph()? else {
             return Ok(WindowReuse::Miss);
         };
         let (cached_generation, bytes) = (entry.leaf_generation, entry.bytes);
@@ -274,10 +278,11 @@ impl WindowCacheRead {
             .ok()
             .and_then(|offset| window.window_prefix(offset + 1, leaf));
         match prefix {
-            Some(prefix) => prefix.map(|mut prefix| {
-                prefix.set_read_owner(window.read_owner().clone());
-                WindowReuse::Whole(prefix)
-            }),
+            Some(prefix) => {
+                let mut prefix = prefix?;
+                prefix.set_read_owner(window.read_owner().clone())?;
+                Ok(WindowReuse::Whole(prefix))
+            }
             None => Ok(WindowReuse::Miss),
         }
     }
@@ -292,7 +297,7 @@ impl WindowCacheRead {
         window: &SessionGraph,
         leaf_generation: u64,
         bytes: u64,
-    ) -> SessionGraph {
+    ) -> Result<SessionGraph, crate::StoreError> {
         let mut entries = self.cache.entries.lock_recover();
         if entries.invalidation != self.invalidation {
             drop(entries);
@@ -342,7 +347,7 @@ impl WindowCacheRead {
             entries.remove(&oldest);
         }
         let mut cached = window.clone();
-        cached.set_read_owner(None);
+        cached.set_read_owner(None)?;
         let used = entries.tick();
         entries.bytes += bytes;
         entries.by_session.insert(
@@ -363,7 +368,11 @@ impl WindowCacheRead {
     /// the empty head an open session holds before its first turn. The same
     /// lease keeps later anchored windows warm until the last reader drops.
     /// A read invalidated by deletion owns its result without retaining it.
-    pub fn attach(&self, session: &SessionId, mut graph: SessionGraph) -> SessionGraph {
+    pub fn attach(
+        &self,
+        session: &SessionId,
+        mut graph: SessionGraph,
+    ) -> Result<SessionGraph, crate::StoreError> {
         let mut entries = self.cache.entries.lock_recover();
         // This lease owns cache lifetime only. Source attribution is checked
         // in reuse_in; sharing a session lease never authorizes a buffer edit
@@ -387,12 +396,18 @@ impl WindowCacheRead {
                     })
             })
             .flatten()
+            .map(Ok)
             .unwrap_or_else(|| {
-                Arc::new(WindowReaders {
+                let allocation = graph
+                    .nodes
+                    .allocation_budget()
+                    .reserve((std::mem::size_of::<WindowReaders>() + session.len() + 64) as u64)?;
+                Ok::<_, crate::StoreError>(Arc::new(WindowReaders {
                     cache: Arc::downgrade(&self.cache),
                     session: session.clone(),
-                })
-            });
+                    _allocation: allocation,
+                }))
+            })?;
         if retain {
             let used = entries.tick();
             let entry = entries
@@ -410,8 +425,8 @@ impl WindowCacheRead {
         // Replacing a graph's previous lease can drop its last reader, whose
         // destructor takes this lock. Ownership is changed only after unlock.
         drop(entries);
-        graph.set_read_owner(Some(readers));
-        graph
+        graph.set_read_owner(Some(readers))?;
+        Ok(graph)
     }
 }
 
@@ -453,13 +468,17 @@ mod tests {
         let cache = Arc::new(WindowCache::new(1024));
         let empty = cache
             .read()
-            .remember(&state.session_id, &SessionGraph::default(), 0, 0);
+            .remember(&state.session_id, &SessionGraph::default(), 0, 0)
+            .unwrap();
         assert!(
             empty.read_owner().is_some(),
             "an empty reader owns the session lease"
         );
         assert_eq!(cache.entries.lock_recover().bytes, 0);
-        let anchored = cache.read().remember(&state.session_id, &graph, 0, 512);
+        let anchored = cache
+            .read()
+            .remember(&state.session_id, &graph, 0, 512)
+            .unwrap();
         drop(anchored);
         assert_eq!(
             cache.entries.lock_recover().bytes,
@@ -469,7 +488,8 @@ mod tests {
         // A read of the earlier empty head cannot replace the newest window.
         let earlier = cache
             .read()
-            .remember(&state.session_id, &SessionGraph::default(), 0, 0);
+            .remember(&state.session_id, &SessionGraph::default(), 0, 0)
+            .unwrap();
         assert_eq!(cache.entries.lock_recover().bytes, 512);
         drop(earlier);
         drop(empty);
@@ -512,10 +532,10 @@ mod tests {
         .expect("window");
         let cache = Arc::new(WindowCache::new(1024));
         let read = cache.read();
-        let old_reader = read.remember(&state.session_id, &graph, 0, 512);
+        let old_reader = read.remember(&state.session_id, &graph, 0, 512).unwrap();
         assert_eq!(cache.entries.lock_recover().bytes, 512);
         cache.forget(&state.session_id);
-        read.remember(&state.session_id, &graph, 0, 512);
+        read.remember(&state.session_id, &graph, 0, 512).unwrap();
         assert_eq!(
             cache.entries.lock_recover().bytes,
             0,
@@ -525,7 +545,7 @@ mod tests {
         // Invalidation stores no session tombstone: an unrelated live
         // session (or a cache-only eviction) can load and retain afresh.
         let fresh = cache.read();
-        let fresh_reader = fresh.remember(&state.session_id, &graph, 0, 512);
+        let fresh_reader = fresh.remember(&state.session_id, &graph, 0, 512).unwrap();
         assert_eq!(cache.entries.lock_recover().bytes, 512);
         drop(old_reader);
         assert_eq!(
@@ -534,7 +554,7 @@ mod tests {
             "a pre-close reader cannot evict the new reader's window"
         );
         cache.forget_all();
-        fresh.remember(&state.session_id, &graph, 0, 512);
+        fresh.remember(&state.session_id, &graph, 0, 512).unwrap();
         assert_eq!(cache.entries.lock_recover().bytes, 0);
         drop(fresh_reader);
     }

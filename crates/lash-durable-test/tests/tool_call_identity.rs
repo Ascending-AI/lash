@@ -392,7 +392,13 @@ async fn head(world: &World, session: &str) -> lash_core::store::SessionHeadMeta
 
 /// The settled session's history nodes, by id.
 fn nodes(view: &lash::persistence::SessionReadView) -> BTreeMap<String, serde_json::Value> {
-    let graph = serde_json::to_value(&view.to_snapshot().session_graph).expect("the graph encodes");
+    let graph = serde_json::to_value(
+        &view
+            .to_snapshot()
+            .expect("source snapshot is admitted")
+            .session_graph,
+    )
+    .expect("the graph encodes");
     graph["nodes"]
         .as_array()
         .expect("the graph's nodes")

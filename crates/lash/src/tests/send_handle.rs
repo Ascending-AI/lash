@@ -35,8 +35,8 @@ async fn graphless_session_reads_are_identical() -> Result<()> {
         serde_json::to_vec(&again.state.to_snapshot())?,
         "window reads adopted the wall clock"
     );
-    let first = session.read().await?.expect("created head").to_snapshot();
-    let again = session.read().await?.expect("created head").to_snapshot();
+    let first = session.read().await?.expect("created head").to_snapshot()?;
+    let again = session.read().await?.expect("created head").to_snapshot()?;
     assert_eq!(
         serde_json::to_vec(&first)?,
         serde_json::to_vec(&again)?,
@@ -49,8 +49,8 @@ async fn graphless_session_reads_are_identical() -> Result<()> {
         .await?
         .expect("created head");
     assert_eq!(
-        serde_json::to_vec(&first.to_snapshot())?,
-        serde_json::to_vec(&again.to_snapshot())?,
+        serde_json::to_vec(&first.to_snapshot()?)?,
+        serde_json::to_vec(&again.to_snapshot()?)?,
         "observation reads adopted the wall clock"
     );
     let open = fixture
@@ -59,8 +59,8 @@ async fn graphless_session_reads_are_identical() -> Result<()> {
         .open()
         .await?;
     let admin = open.admin().state();
-    let first = admin.export().await;
-    let again = admin.export().await;
+    let first = admin.export().await?;
+    let again = admin.export().await?;
     assert!(
         first.session_graph.nodes.is_empty(),
         "admin invented an uncommitted frame"

@@ -47,7 +47,8 @@ pub(super) async fn prove_runtime_facade_turn() -> Result<RuntimeFacadeProof, Fi
         .await
         .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?
         .ok_or_else(|| FixedScriptRunnerError::Assertion("missing committed head".into()))?
-        .to_snapshot();
+        .to_snapshot()
+        .map_err(|error| FixedScriptRunnerError::Runtime(error.to_string()))?;
     let assistant_message = output.assistant_message().unwrap_or_default().to_string();
     let runtime_ok = output.is_success()
         && snapshot.session_id == "sim-runtime-session"
@@ -414,7 +415,8 @@ pub(crate) async fn prove_pending_tool_completion_on(
         .await
         .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?
         .ok_or_else(|| FixedScriptRunnerError::Assertion("missing committed head".into()))?
-        .to_snapshot();
+        .to_snapshot()
+        .map_err(|error| FixedScriptRunnerError::Runtime(error.to_string()))?;
     let session_id = snapshot.session_id.clone();
     let turn_index = snapshot.turn_index;
 
@@ -599,7 +601,8 @@ pub(super) async fn prove_final_value_semantic_channel()
         .await
         .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?
         .ok_or_else(|| FixedScriptRunnerError::Assertion("missing committed head".into()))?
-        .to_snapshot();
+        .to_snapshot()
+        .map_err(|error| FixedScriptRunnerError::Runtime(error.to_string()))?;
     let final_value = result
         .finished()
         .map(|(_, value)| value)

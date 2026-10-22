@@ -344,7 +344,8 @@ impl GeneratedRuntimeWorld {
             .await
             .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?
             .ok_or_else(|| FixedScriptRunnerError::Assertion("missing committed head".into()))?
-            .to_snapshot();
+            .to_snapshot()
+            .map_err(|error| FixedScriptRunnerError::Runtime(error.to_string()))?;
         let read_view = snapshot.read_view();
         let graph_invariant = runtime_graph_invariant_facts(&snapshot.session_graph);
         let usage_invariant = runtime_usage_invariant_facts(

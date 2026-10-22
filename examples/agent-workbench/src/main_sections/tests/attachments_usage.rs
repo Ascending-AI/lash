@@ -183,7 +183,7 @@ async fn attachment_usage_gate() {
         .await
         .expect("open gate session");
     let read_view = session.read_view();
-    let graph = read_view.session_graph();
+    let graph = read_view.session_graph().expect("source graph is admitted");
     let latest_node_ms = graph
         .leaf_node_id
         .as_deref()

@@ -39,7 +39,7 @@ fn intent_fixture() -> RuntimeCommit {
         ))
     };
     state.ensure_agent_frame_initialized().unwrap();
-    let graph_data = state.session_graph.data_mut();
+    let graph_data = state.session_graph.data_mut().unwrap();
     std::sync::Arc::make_mut(&mut graph_data.nodes.make_mut().unwrap()[0]).timestamp =
         "2026-07-26T10:00:00.000000000Z"
             .parse()

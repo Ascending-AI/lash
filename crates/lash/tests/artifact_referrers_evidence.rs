@@ -79,6 +79,7 @@ async fn wait_edges_waits_for_condition_past_former_deadline(backend: Backend) {
 
 fn last_cell_finish(view: &lash::persistence::SessionReadView) -> Option<serde_json::Value> {
     view.to_snapshot()
+        .expect("source snapshot is admitted")
         .session_graph
         .nodes
         .iter()

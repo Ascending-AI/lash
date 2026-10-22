@@ -28,7 +28,7 @@ async fn read_every_admin_surface(session: &crate::LashSession) -> Result<AdminR
     );
     let admin = session.admin();
     let execution = admin.state().snapshot_execution().await?;
-    let _ = admin.state().export().await;
+    let _ = admin.state().export().await.expect("snapshot is admitted");
     admin.state().persist_current().await?;
     admin.state().session_state_service().await?;
     admin.config().revision().await?;

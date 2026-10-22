@@ -117,13 +117,13 @@ impl RuntimeSessionState {
         {
             let frame_node_id = crate::FrameNodeId::new(base.node_id.as_str())
                 .map_err(|_| corrupt("acknowledged root frame has an invalid identity"))?;
-            self.session_graph.data_mut().anchor =
-                Some(crate::session_graph_window::WindowAnchor {
+            self.session_graph
+                .set_anchor(crate::session_graph_window::WindowAnchor {
                     frame_node_id,
                     generation: 0,
                     external_parent: None,
                     previous_frame_node_id: None,
-                });
+                })?;
         }
         self.retire_below_current_frame();
         self.agent_frames = self

@@ -201,6 +201,7 @@ impl AfterTurnPlugin {
                         let snapshot = ctx.sessions.snapshot_current().await?;
                         let leaf = lash::persistence::SessionReadView::from_snapshot(&snapshot)
                             .session_graph()
+                            .expect("source graph is admitted")
                             .leaf_node_id
                             .clone();
                         Ok(lash::plugins::AfterTurnContributions {

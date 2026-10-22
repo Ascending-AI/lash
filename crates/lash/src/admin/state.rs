@@ -14,8 +14,13 @@ impl SessionStateAdmin {
     /// Export this handle's resident state. Read the committed head explicitly
     /// with [`DurableSession::read`](crate::DurableSession::read) or
     /// [`ObservableSession::snapshot`](crate::ObservableSession::snapshot).
-    pub async fn export(&self) -> lash_core::SessionSnapshot {
-        self.context.runtime.observe().read_view.to_snapshot()
+    pub async fn export(&self) -> Result<lash_core::SessionSnapshot> {
+        self.context
+            .runtime
+            .observe()
+            .read_view
+            .to_snapshot()
+            .map_err(EmbedError::from)
     }
 
     pub async fn append_messages(

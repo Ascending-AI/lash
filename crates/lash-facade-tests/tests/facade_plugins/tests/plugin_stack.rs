@@ -618,7 +618,7 @@ console.log("abcdefghijklmnopqrstuvwxyz");"#,
             .iter()
             .any(|message| message.parts.iter().any(|part| part.content() == "com…"))
     );
-    let snapshot = read.to_snapshot();
+    let snapshot = read.to_snapshot().expect("source snapshot is admitted");
     let admitted: lash::rlm::RlmRecordedConfig = serde_json::from_value(
         snapshot
             .plugin_config

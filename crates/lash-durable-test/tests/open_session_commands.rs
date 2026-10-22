@@ -130,7 +130,14 @@ async fn a_merging_config_command_composes_with_the_head_another_writer_committe
         "the merge resolves over the head the other writer committed"
     );
     assert_eq!(
-        stale.admin().state().export().await.policy.generation,
+        stale
+            .admin()
+            .state()
+            .export()
+            .await
+            .expect("snapshot is admitted")
+            .policy
+            .generation,
         composed,
         "the open session reads the composed config"
     );
@@ -206,7 +213,7 @@ async fn opening_a_historical_frame_is_refused_and_keeps_the_changed_config(tier
     .await
     .expect("the engine retires the delivered config change");
     assert_eq!(before.config.generation, seeded(7));
-    let resident_before = state.export().await;
+    let resident_before = state.export().await.expect("snapshot is admitted");
 
     let refused = state
         .open_agent_frame(frame("first-frame"), "reopen-first-frame".to_owned())
@@ -226,7 +233,7 @@ async fn opening_a_historical_frame_is_refused_and_keeps_the_changed_config(tier
         lash_core::RuntimeErrorCode::HistoricalAgentFrameSwitchUnsupported
     );
     assert_eq!(kept().await, before, "the refusal commits nothing");
-    let resident = state.export().await;
+    let resident = state.export().await.expect("snapshot is admitted");
     assert_eq!(
         resident.policy.generation,
         seeded(7),
