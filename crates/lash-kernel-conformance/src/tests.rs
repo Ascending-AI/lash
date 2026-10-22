@@ -59,6 +59,7 @@ pub(super) fn corpus_registry() -> lash_kernel_doc::FunctionRegistry {
     lash_kernel_lib::register_numbers(&mut registry).expect("register numeric natives");
     lash_kernel_lib::register_text_json(&mut registry).expect("register text and JSON natives");
     lash_kernel_lib::register_collections(&mut registry).expect("register collection functions");
+    protocol::register_probes(&mut registry);
     lash_ext_regex_ecma::register(&mut registry).expect("register regex natives");
     lash_ext_regex_ecma::implement(
         &mut registry,

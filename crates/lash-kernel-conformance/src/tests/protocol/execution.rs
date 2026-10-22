@@ -22,7 +22,7 @@ pub(super) fn check(rule: &str, case: &Case) {
     match rule {
         "K-CHG-003" => formula(case),
         "K-EFF-011" => committed(case),
-        "K-CHG-004" | "K-CHG-005" | "K-CHG-006" => measure(rule, case),
+        "K-CHG-004" | "K-CHG-005" | "K-CHG-006" => measure(case),
         "K-SES-001" | "K-SES-002" | "K-SES-003" => session(rule, case),
         "K-SITE-001" | "K-SITE-002" | "K-SITE-003" => sites(rule, case),
         "K-BND-003" | "K-LIB-010" => {
@@ -37,19 +37,19 @@ pub(super) fn check(rule: &str, case: &Case) {
     }
 }
 
-fn measure(rule: &str, case: &Case) {
-    let (name, formula) = match rule {
-        "K-CHG-004" => ("size", "size(x)"),
-        "K-CHG-005" => ("deep", "deep(x)"),
-        "K-CHG-006" => ("magnitude", "magnitude(x)"),
-        _ => unreachable!(),
-    };
+pub(super) fn register_probes(registry: &mut FunctionRegistry) {
+    for name in ["size", "deep", "magnitude"] {
+        let definition = parse_definition(&format!(
+            "function probe.{name}(x: Any) -> Any\nkernel 1\ncharge {name}(x)\nnative\n"
+        ))
+        .unwrap();
+        registry.register(definition, Some(Arc::new(Null))).unwrap();
+    }
+}
+
+fn measure(case: &Case) {
     let mut registry = FunctionRegistry::new();
-    let definition = parse_definition(&format!(
-        "function probe.{name}(x: Any) -> Any\nkernel 1\ncharge {formula}\nnative\n"
-    ))
-    .unwrap();
-    registry.register(definition, Some(Arc::new(Null))).unwrap();
+    register_probes(&mut registry);
     let mut runner = crate::MachineRunner::<KernelMachine>::new(Arc::new(registry));
     crate::check_case(&mut runner, case).expect("the formula measures the written value");
 }
