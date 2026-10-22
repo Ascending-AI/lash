@@ -1758,7 +1758,6 @@ fn root(libs: &Libs<'_>, summary: &Summary, id: StmtId) -> Option<nodes::Node> {
             Some(nodes::import_result(libs, callee, node))
         }
         (_, Some(guest)) => nodes::root_call(libs, guest, callee, args),
-        _ => None,
     }
 }
 
