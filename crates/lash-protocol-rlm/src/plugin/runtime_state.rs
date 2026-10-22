@@ -86,7 +86,6 @@ impl RlmRuntimeState {
         let provenance = index.provenance.clone();
         let package_surface = self.dialect.package_surface(packages).await?;
         let mut execution = self.execution.lock().await;
-        execution.shows_packages(packages.clone());
         let (bound_variables, globals, inferred_names) = execution
             .prepare_bound_variables_prompt(&exclude, params.preview, provenance, pages)
             .await?
@@ -209,6 +208,10 @@ impl RlmRuntimeState {
         // the cell to finish instead of being told the state is busy, and a
         // cell cancelled mid-flight leaves the state where it was.
         let mut guard = self.execution.lock().await;
+        // Restore replaces the dialect session and model admission may replay
+        // without rendering its prompt. The recorded round is the authority
+        // for imports on every execution, including a cold restored cell.
+        guard.shows_packages(ctx.recorded_packages().clone());
         guard
             .execute(ctx, request, session_projected_bindings)
             .await

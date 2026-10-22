@@ -897,6 +897,7 @@ PACKAGE_DEPS = {
             "lash_tool_presenter_python": "//crates/lash-tool-presenter-python:lash-tool-presenter-python",
             "lash_tool_presenter_typescript": "//crates/lash-tool-presenter-typescript:lash-tool-presenter-typescript",
             "lash_tool_shape": "//crates/lash-tool-shape:lash-tool-shape",
+            "lash_tool_support": "//crates/lash-tool-support:lash-tool-support",
             "lash_trace": "//crates/lash-trace:lash-trace",
             "lash_vm_broker": "//crates/lash-vm-broker:lash-vm-broker",
             "lash_vm_client": "//crates/lash-vm-client:lash-vm-client",

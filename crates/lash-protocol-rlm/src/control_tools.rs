@@ -13,6 +13,125 @@ use std::sync::Arc;
 
 use crate::projection::RlmSeed;
 
+/// Both runners share the control root. Register its publisher once and
+/// derive code members from the same providers that supply model tools.
+pub(crate) fn register(
+    reg: &mut lash_core::plugin::PluginRegistrar<crate::plugin::RlmProtocolPlugin>,
+) -> Result<(), lash_execution_contracts::PluginError> {
+    type MakeProvider = fn(crate::dialect::DialectPromptVocabulary) -> Arc<dyn ToolProvider>;
+    let providers: [(lash_core::plugin::ToolProviderKey, MakeProvider); 2] = [
+        (lash_core::tool_provider_key!("control"), |vocabulary| {
+            Arc::new(RlmControlToolsProvider { vocabulary })
+        }),
+        (lash_core::tool_provider_key!("finish"), |vocabulary| {
+            Arc::new(RlmFinishProvider { vocabulary })
+        }),
+    ];
+    for (key, make) in providers {
+        reg.tools().provider(key, move |owner, _| {
+            Ok(make(owner.dialect.prompt_vocabulary()))
+        })?;
+    }
+    reg.package_provider_bound(lash_core::tool_provider_key!("control"), move |owner, _| {
+        let root = control_root();
+        Ok(Arc::new(RlmControlPackages {
+            providers: providers
+                .into_iter()
+                .map(|(key, make)| {
+                    lash_tool_support::ToolPackageProvider::new(
+                        crate::RLM_PROTOCOL_PLUGIN_ID,
+                        key,
+                        [root.clone()].into(),
+                        make(owner.dialect.prompt_vocabulary()),
+                    )
+                })
+                .collect(),
+        }))
+    })
+}
+
+fn control_root() -> lash_vocabulary::names::Segment {
+    lash_vocabulary::names::Segment::new("control")
+        .unwrap_or_else(|_| unreachable!("static control root"))
+}
+
+struct RlmControlPackages {
+    providers: Vec<lash_tool_support::ToolPackageProvider>,
+}
+
+#[async_trait]
+impl lash_core::plugin::packages::PackageProvider for RlmControlPackages {
+    fn roots(&self) -> std::collections::BTreeSet<lash_vocabulary::names::Segment> {
+        [control_root()].into()
+    }
+
+    fn advertise(
+        &self,
+        config: &lash_core::OwnerConfigView,
+        context: &lash_vocabulary::package::PublicationContext,
+    ) -> Result<
+        Vec<lash_core::plugin::packages::PackageContribution>,
+        lash_execution_contracts::PluginError,
+    > {
+        use lash_core::plugin::packages::{PackageContribution, operation_publication};
+        use lash_execution_contracts::process::linking::{AdmissionRefusal, EnginePortError};
+        use lash_vocabulary::package::PackageAdvertisement;
+        use std::collections::{BTreeMap, btree_map::Entry};
+
+        let mut packages: BTreeMap<_, PackageContribution> = BTreeMap::new();
+        for provider in &self.providers {
+            for contribution in provider.advertise(config, context)? {
+                let PackageAdvertisement::Enumerated(package) = &contribution.advertisement else {
+                    unreachable!("tool providers advertise operation packages");
+                };
+                match packages.entry(package.path.clone()) {
+                    Entry::Vacant(entry) => {
+                        entry.insert(contribution);
+                    }
+                    Entry::Occupied(mut entry) => {
+                        let combined = entry.get_mut();
+                        let PackageAdvertisement::Enumerated(target) = &mut combined.advertisement
+                        else {
+                            unreachable!("tool providers advertise operation packages");
+                        };
+                        for (name, member) in &package.members {
+                            if target
+                                .members
+                                .insert(name.clone(), member.clone())
+                                .is_some()
+                            {
+                                return Err(lash_execution_contracts::PluginError::Package(
+                                    Box::new(EnginePortError::Refused(
+                                        AdmissionRefusal::PathConflict {
+                                            path: package.path.clone(),
+                                        },
+                                    )),
+                                ));
+                            }
+                        }
+                        combined.routes.extend(contribution.routes);
+                        combined.publication =
+                            operation_publication(context, &combined.advertisement).map_err(
+                                |error| {
+                                    lash_execution_contracts::PluginError::Package(Box::new(error))
+                                },
+                            )?;
+                    }
+                }
+            }
+        }
+        Ok(packages.into_values().collect())
+    }
+
+    async fn hold(
+        &self,
+        _: &lash_core_store::artifact_referrer::ReferrerClaim,
+        _: &[&lash_vocabulary::package::PackageAdvertisement],
+    ) -> Result<(), lash_execution_contracts::process::linking::EnginePortError> {
+        Ok(())
+    }
+}
+
 pub(crate) struct RlmControlToolsProvider {
     /// The dialect this session's model writes, so the control tools' docs
     /// show calls it can actually make.
