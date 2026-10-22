@@ -571,7 +571,10 @@ impl Compiler<'_> {
                     None => Callee::Value(Var::Unbound(Name::new(function.to_string()))),
                 },
             },
-            doc::Callee::Import(slot) => Callee::Import(*slot),
+            doc::Callee::Import(slot) => Callee::Import(
+                *slot,
+                self.imports.get(&(self.unit.clone(), *slot)).copied(),
+            ),
             doc::Callee::Value(name) => Callee::Value(self.resolve(name)),
         }
     }
@@ -882,7 +885,7 @@ impl Compiler<'_> {
                 let mut runs = |callee: &doc::Callee| match self.callee(callee) {
                     Callee::Declared(code) => NestedCallee::Declared(code),
                     Callee::Library(lib) => NestedCallee::Library(lib),
-                    Callee::Import(slot) => NestedCallee::Import(slot),
+                    Callee::Import(slot, lib) => NestedCallee::Import(slot, lib),
                     Callee::Value(var) => {
                         read = Some(var);
                         NestedCallee::Read

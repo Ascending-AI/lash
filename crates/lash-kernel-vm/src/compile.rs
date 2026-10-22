@@ -961,7 +961,7 @@ impl NestedKind {
 
 /// What a nested call or `spawn` runs.
 pub(crate) enum NestedCallee {
-    Import(lash_vocabulary::names::ImportSlot),
+    Import(lash_vocabulary::names::ImportSlot, Option<LibId>),
     Declared(CodeId),
     Library(LibId),
     /// A closure or function reference held in a variable, read into the
@@ -1141,7 +1141,16 @@ pub(crate) enum Callee {
     Declared(CodeId),
     Value(Var),
     Library(LibId),
-    Import(lash_vocabulary::names::ImportSlot),
+    Import(lash_vocabulary::names::ImportSlot, Option<LibId>),
+}
+
+impl Callee {
+    pub(crate) fn library(&self) -> Option<LibId> {
+        match self {
+            Self::Library(lib) | Self::Import(_, Some(lib)) => Some(*lib),
+            _ => None,
+        }
+    }
 }
 
 pub(crate) enum Atom {
@@ -1280,6 +1289,7 @@ struct Compiler<'a> {
     sites: u32,
     declared: BTreeMap<FunctionId, CodeId>,
     resolve: Resolve<'a>,
+    imports: BTreeMap<(Unit, lash_vocabulary::ImportSlot), LibId>,
     /// The codes being compiled, the outermost first; each closure adds one.
     scopes: Vec<Scopes>,
     unit: Unit,
@@ -1380,6 +1390,7 @@ impl<'a> Compiler<'a> {
             sites: base.sites,
             declared: BTreeMap::new(),
             resolve,
+            imports: BTreeMap::new(),
             scopes: Vec::new(),
             unit: Unit::Main,
             path: Vec::new(),
@@ -1553,4 +1564,24 @@ impl From<doc::Literal> for Constant {
         };
         resident.map_or_else(|| Self::Deferred(literal), Self::Resident)
     }
+}
+
+/// The public result kinds checked without reading or warming an arena object.
+pub(crate) fn import_result_check(ty: &lash_vocabulary::Type) -> Option<fn(doc::Value) -> bool> {
+    use doc::Value;
+    use lash_vocabulary::Type;
+    Some(match ty {
+        Type::Any => |_| true,
+        Type::Null => |v| matches!(v, Value::Null),
+        Type::Absent => |v| matches!(v, Value::Absent),
+        Type::Bool => |v| matches!(v, Value::Bool(_)),
+        Type::Int => |v| matches!(v, Value::Int(_)),
+        Type::Float => |v| matches!(v, Value::Float(_)),
+        Type::Number => |v| matches!(v, Value::Int(_) | Value::Float(_)),
+        _ => return None,
+    })
+}
+
+pub(crate) fn import_result_fits(ty: &lash_vocabulary::Type, value: doc::Value) -> bool {
+    import_result_check(ty).is_some_and(|fits| fits(value))
 }

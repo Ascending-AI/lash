@@ -212,6 +212,7 @@ pub(super) enum Depth {
 
 /// A compiled operator or helper call.
 pub(super) struct OperatorSite {
+    pub(super) imported: bool,
     pub(super) lib: LibId,
     pub(super) entry: Entry,
     pub(super) table: ScalarTable,
@@ -814,6 +815,7 @@ fn operator_site(expr: &Expr, exe: &Executable) -> Option<OperatorSite> {
     let table = fast.scalar()?.clone();
     let close = closes.first().copied();
     let site = OperatorSite {
+        imported: invoke.is_some_and(|invoke| invoke.imported),
         lib: *lib,
         entry: entry.clone(),
         floats: table.units(0),

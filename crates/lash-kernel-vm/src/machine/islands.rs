@@ -472,7 +472,13 @@ impl<'a> Island<'a> {
         let Some((result, units)) = charge else {
             return Err(self.at_operands(site.pc, site.reg, args));
         };
-        if !self.fits(units) {
+        if !self.fits(units)
+            || (site.imported
+                && !crate::compile::import_result_fits(
+                    &self.exe.lib(site.lib).header.signature.result,
+                    result,
+                ))
+        {
             return Err(self.at_operands(site.pc, site.reg, args));
         }
         if let Some(occurrence) = site.counted {
@@ -497,7 +503,13 @@ impl<'a> Island<'a> {
         value: Value,
         units: Option<u64>,
     ) -> Option<Answer> {
-        if !self.admits(site) {
+        if !self.admits(site)
+            || (site.imported
+                && !crate::compile::import_result_fits(
+                    &self.exe.lib(site.lib).header.signature.result,
+                    value,
+                ))
+        {
             return None;
         }
         let units = if self.charging { units? } else { 0 };
