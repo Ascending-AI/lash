@@ -486,7 +486,12 @@ async fn open_with_state_keeps_supplied_policy_without_rewriting_frame_history()
         .open_with_state(persisted)
         .await
         .expect("open with state");
-    let state = opened.admin().state().export().await;
+    let state = opened
+        .admin()
+        .state()
+        .export()
+        .await
+        .expect("snapshot is admitted");
     assert_eq!(state.policy.model, supplied_model);
     let frames = state.session_graph.agent_frame_records(&session_id);
     assert_eq!(

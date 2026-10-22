@@ -395,7 +395,8 @@ async fn admitted_switch_is_seeded_queued_after_earlier_work_and_exactly_once() 
         .await
         .expect("committed read")
         .expect("head")
-        .to_snapshot();
+        .to_snapshot()
+        .expect("source snapshot is admitted");
     assert_eq!(
         snapshot.current_frame_node_id.as_deref(),
         Some(frame_node_id.as_str())
@@ -837,6 +838,7 @@ await control.finish({ baton: baton });
         .expect("committed read")
         .expect("head")
         .to_snapshot()
+        .expect("source snapshot is admitted")
         .session_graph
         .nodes
         .iter()

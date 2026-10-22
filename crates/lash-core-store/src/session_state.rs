@@ -879,7 +879,7 @@ impl RuntimeSessionState {
         messages: &[Message],
     ) -> Result<(), crate::StoreError> {
         self.ensure_agent_frame_initialized()?;
-        self.session_graph.rewrite_active_read_tail(messages);
+        self.session_graph.rewrite_active_read_tail(messages)?;
         self.refresh_current_frame_projection();
         Ok(())
     }
@@ -1117,11 +1117,10 @@ impl RuntimeSessionState {
         }) else {
             return Ok(());
         };
-        let record = self.session_graph.data_mut().node_mut(position)?;
-        if let crate::SessionNodePayload::FrameOpen { assignment, .. } = &mut record.payload {
-            assignment.policy = policy;
-            assignment.plugin_config = plugin_config;
-        }
+        self.session_graph.replace_frame_assignment(
+            position,
+            crate::AgentFrameAssignment::new(policy, plugin_config),
+        )?;
         self.agent_frames = self.session_graph.agent_frame_records(&self.session_id);
         Ok(())
     }

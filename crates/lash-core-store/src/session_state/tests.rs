@@ -572,7 +572,10 @@ fn assert_read_views_current_frame(
         assert_eq!(view.current_frame(), expected);
         assert_eq!(
             view.current_frame(),
-            view.to_snapshot().current_frame_node_id.as_ref()
+            view.to_snapshot()
+                .expect("source fixture graph is admitted")
+                .current_frame_node_id
+                .as_ref()
         );
     }
 }

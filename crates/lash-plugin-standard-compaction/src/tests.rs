@@ -960,7 +960,8 @@ fn snapshot_with_messages(messages: &[Message]) -> SessionSnapshot {
     SessionSnapshot {
         session_id: SessionId::from("root"),
         policy: lash_core::testing::mock_session_policy(),
-        session_graph: SessionGraph::from_active_read_state(messages),
+        session_graph: SessionGraph::from_active_read_state(messages)
+            .expect("source fixture graph is admitted"),
         ..SessionSnapshot::new(
             SessionId::from("root"),
             lash_core::testing::mock_session_policy(),
@@ -1116,7 +1117,8 @@ fn compactable_state(messages: Vec<Message>) -> SessionSnapshot {
     SessionSnapshot {
         session_id: SessionId::from("root"),
         policy: lash_core::testing::mock_session_policy(),
-        session_graph: SessionGraph::from_active_read_state(&messages),
+        session_graph: SessionGraph::from_active_read_state(&messages)
+            .expect("source fixture graph is admitted"),
         ..SessionSnapshot::new(
             SessionId::from("root"),
             lash_core::testing::mock_session_policy(),

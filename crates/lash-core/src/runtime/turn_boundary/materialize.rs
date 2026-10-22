@@ -158,7 +158,8 @@ mod tests {
             crate::MaxToolCalls::new(1024),
             crate::NoProgressBudget::bounded(12),
         ));
-        state.session_graph = crate::SessionGraph::from_active_read_state(messages);
+        state.session_graph = crate::SessionGraph::from_active_read_state(messages)
+            .expect("source fixture graph is admitted");
         state
     }
 

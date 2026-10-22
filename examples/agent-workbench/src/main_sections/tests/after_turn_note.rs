@@ -9,6 +9,7 @@ fn plugin_bodies(
 ) -> Vec<serde_json::Value> {
     use lash::persistence::SessionNodeProjection as _;
     view.session_graph()
+        .expect("source graph is admitted")
         .nodes
         .iter()
         .filter_map(|node| {
@@ -113,6 +114,7 @@ async fn the_after_turn_note_commits_with_the_turn_after_the_one_it_summarizes()
     let notes = plugin_bodies(&leaves[1], WORKBENCH_DERIVED_NOTE_PLUGIN_TYPE);
     let first_leaf = leaves[0]
         .session_graph()
+        .expect("source graph is admitted")
         .leaf_node_id
         .clone()
         .expect("the first turn's commit has a leaf");

@@ -149,6 +149,7 @@ async fn every_standard_message_names_its_turn() {
     let (view, turn_id) = two_round_turn().await;
     let messages: Vec<_> = view
         .session_graph()
+        .expect("source graph is admitted")
         .nodes
         .iter()
         .filter_map(|node| node.message())

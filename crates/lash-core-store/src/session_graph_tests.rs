@@ -105,7 +105,8 @@ fn rejected_graph_appends_leave_nodes_leaf_and_cached_reads_unchanged() {
         "resident-message",
         MessageRole::User,
         "resident",
-    )]);
+    )])
+    .expect("source fixture graph is admitted");
     let resident_leaf = graph.leaf_node_id.clone().expect("resident leaf");
     let before_graph = serde_json::to_value(&graph).expect("serialize graph preimage");
     let before_read = graph.read_model();
@@ -656,11 +657,13 @@ fn active_read_rewrite_preserves_draft_node_id_sequence() {
     graph = SessionGraph::from_shared_nodes(nodes, Some(leaf_node_id))
         .expect("pre-existing draft branches are structurally valid");
 
-    graph.rewrite_active_read_tail(&[
-        first,
-        text_message("m2", MessageRole::Assistant, "second"),
-        text_message("m3", MessageRole::User, "third"),
-    ]);
+    graph
+        .rewrite_active_read_tail(&[
+            first,
+            text_message("m2", MessageRole::Assistant, "second"),
+            text_message("m3", MessageRole::User, "third"),
+        ])
+        .expect("source fixture graph is admitted");
 
     let emitted_ids = graph
         .nodes
@@ -825,7 +828,9 @@ fn the_tail_rewrite_covers_only_the_current_frame() {
     let b1 = text_message("b1", MessageRole::User, "b1");
     graph.append_message(b1.clone()).unwrap();
 
-    graph.rewrite_active_read_tail(&[b1, text_message("b2", MessageRole::Assistant, "b2")]);
+    graph
+        .rewrite_active_read_tail(&[b1, text_message("b2", MessageRole::Assistant, "b2")])
+        .expect("source fixture graph is admitted");
     let read = graph.read_model();
     assert_eq!(
         read.messages
@@ -2068,6 +2073,21 @@ fn source_edit_refusal_leaves_graph_and_readers_unchanged() {
         &budget,
     )
     .unwrap();
+    // A private draft owns new storage and cache metadata even though its
+    // immutable source slots and records remain shared with the reader.
+    let held = ledger.used.load(Ordering::SeqCst);
+    let mut metadata_draft = graph.clone();
+    let measurement = crate::history_growth_law::allocation_counter::Measurement::start();
+    let _ = metadata_draft.data_mut().unwrap();
+    let counts = measurement.finish();
+    let metadata_charge = ledger.used.load(Ordering::SeqCst) - held;
+    assert!(
+        metadata_charge >= counts.allocated as u64,
+        "detached graph metadata admission {metadata_charge} must bound its actual {} bytes",
+        counts.allocated
+    );
+    drop(metadata_draft);
+    assert_eq!(ledger.used.load(Ordering::SeqCst), held);
     let reader = graph.read_model();
     let before = serde_json::to_vec(&graph).unwrap();
     let held = ledger.used.load(Ordering::SeqCst);

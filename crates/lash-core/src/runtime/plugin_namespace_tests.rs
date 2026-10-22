@@ -108,7 +108,10 @@ async fn plugin_context_host_exports_cannot_escape_namespaces() {
                                     "public refresh must respect restricted namespace exports"
                                 );
                             }
-                            let snapshot = serde_json::to_string(&ctx.state.to_snapshot()).unwrap();
+                            let snapshot = serde_json::to_string(
+                                &ctx.state.to_snapshot().expect("snapshot is admitted"),
+                            )
+                            .unwrap();
                             assert!(!snapshot.contains("neighbor-secret-key"));
                             Ok(Default::default())
                         })

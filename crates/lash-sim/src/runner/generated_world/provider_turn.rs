@@ -445,7 +445,8 @@ async fn run_provider_turn_task(
         .await
         .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?
         .ok_or_else(|| FixedScriptRunnerError::Assertion("missing committed head".into()))?
-        .to_snapshot();
+        .to_snapshot()
+        .map_err(|error| FixedScriptRunnerError::Runtime(error.to_string()))?;
     let assistant_message = output.assistant_message().unwrap_or_default().to_string();
     let read_view = snapshot.read_view();
     let graph_node_count = snapshot.session_graph.nodes.len();

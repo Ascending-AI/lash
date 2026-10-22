@@ -126,7 +126,7 @@ async fn measure_writer_operation(
                 .read()
                 .await?
                 .ok_or_else(|| anyhow::anyhow!("missing committed head"))?
-                .to_snapshot(),
+                .to_snapshot()?,
         )?,
     }
     Ok((operation_ms, elapsed_ms(validation_started)))

@@ -1102,6 +1102,7 @@ fn tool_result_visible_text(content: &[ModelToolReturnPart]) -> Cow<'_, str> {
 /// (FIG-4059).
 #[derive(Debug, Default)]
 pub struct BaseRenderCache {
+    _allocation: crate::allocation::AllocationHold,
     rendered: std::sync::Mutex<
         Option<(
             HistoryPresentation,
@@ -1128,7 +1129,30 @@ impl BaseRenderCache {
         Self {
             rendered: std::sync::Mutex::new(None),
             extends: std::sync::Mutex::new(Some((previous, prefix_len))),
+            _allocation: Default::default(),
         }
+    }
+
+    pub fn new_in(
+        budget: &crate::allocation::AllocationBudget,
+    ) -> Result<Self, crate::allocation::AllocationError> {
+        let allocation = budget.reserve((std::mem::size_of::<Self>() + 64) as u64)?;
+        Ok(Self {
+            _allocation: allocation,
+            ..Self::new()
+        })
+    }
+
+    pub fn extending_in(
+        previous: Arc<Self>,
+        prefix_len: usize,
+        budget: &crate::allocation::AllocationBudget,
+    ) -> Result<Self, crate::allocation::AllocationError> {
+        let allocation = budget.reserve((std::mem::size_of::<Self>() + 64) as u64)?;
+        Ok(Self {
+            _allocation: allocation,
+            ..Self::extending(previous, prefix_len)
+        })
     }
 
     /// The render of `base`, the messages this cache was made for.

@@ -97,8 +97,11 @@ fn assert_resident_in_fresh_compaction_frame(
     after: &lash_core::SessionReadView,
     summary: &str,
 ) -> lash_core::FrameNodeId {
-    let before_frame = before.to_snapshot().current_frame_node_id;
-    let after_snapshot = after.to_snapshot();
+    let before_frame = before
+        .to_snapshot()
+        .expect("source snapshot is admitted")
+        .current_frame_node_id;
+    let after_snapshot = after.to_snapshot().expect("source snapshot is admitted");
     let frame = after_snapshot
         .current_frame_node_id
         .clone()
@@ -202,7 +205,12 @@ async fn explicit_compaction_opens_a_summary_frame_the_next_turn_continues_in() 
         .output()
         .await?;
     let next = committed(&session).await;
-    assert_eq!(next.to_snapshot().current_frame_node_id, Some(frame));
+    assert_eq!(
+        next.to_snapshot()
+            .expect("source snapshot is admitted")
+            .current_frame_node_id,
+        Some(frame)
+    );
     assert_eq!(
         next.messages().iter().map(message_text).collect::<Vec<_>>()[1..],
         ["after request", "after response"]
@@ -335,6 +343,7 @@ async fn overflow_recovery_failures_record_failed_then_exhausted_without_a_frame
     let first_frame = committed(&session)
         .await
         .to_snapshot()
+        .expect("source snapshot is admitted")
         .current_frame_node_id;
 
     for attempt in 1..=usize::try_from(
@@ -356,6 +365,7 @@ async fn overflow_recovery_failures_record_failed_then_exhausted_without_a_frame
             committed(&session)
                 .await
                 .to_snapshot()
+                .expect("source snapshot is admitted")
                 .current_frame_node_id,
             first_frame,
             "a failed attempt opens no frame"

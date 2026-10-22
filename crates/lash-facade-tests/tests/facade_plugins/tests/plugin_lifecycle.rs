@@ -167,7 +167,8 @@ async fn finalization_identifies_a_committed_turn_readable_on_another_node() -> 
             .read_run(&run)
             .await?
             .expect("window")
-            .to_snapshot(),
+            .to_snapshot()
+            .expect("source snapshot is admitted"),
     )?;
     let target = lash::Target::Turn(first.turn_id.clone());
     session.pin(target.clone()).await?;
@@ -252,7 +253,8 @@ async fn finalization_identifies_a_committed_turn_readable_on_another_node() -> 
             .read_run(&later_run)
             .await?
             .expect("later window")
-            .to_snapshot(),
+            .to_snapshot()
+            .expect("source snapshot is admitted"),
     )?;
     let later_prompt = lash::prompt::PromptCallKey {
         session: first.session_id.clone(),
@@ -274,6 +276,7 @@ async fn finalization_identifies_a_committed_turn_readable_on_another_node() -> 
                 .await?
                 .expect("pinned window")
                 .to_snapshot()
+                .expect("source snapshot is admitted")
         )?,
         window
     );
@@ -337,6 +340,7 @@ async fn finalization_identifies_a_committed_turn_readable_on_another_node() -> 
                 .await?
                 .expect("the other pin keeps only its own window")
                 .to_snapshot()
+                .expect("source snapshot is admitted")
         )?,
         later_window
     );

@@ -29,6 +29,7 @@ use crate::session_model::{ConversationRecord, ProtocolEvent, SessionHistoryReco
 use crate::{BaseRenderCache, ClockWallTime, LlmUsage, Message};
 use facade_ops::{SessionGraphFacadeOps, SessionNodeProjection};
 use lash_protocol_types::AppendVec;
+use lash_protocol_types::allocation::{AllocationBudget, AllocationHold};
 use lash_protocol_types::core_support::MessageCoreSupport;
 
 #[derive(
@@ -198,7 +199,7 @@ pub use crate::session_graph_window::WindowAnchor;
 #[derive(Debug)]
 pub struct SessionGraph {
     inner: Arc<SessionGraphStorage>,
-    cache: Arc<OnceLock<SessionGraphCache>>,
+    cache: Arc<SessionGraphCacheStorage>,
     /// How many leading resident nodes are durable (FIG-6910). Durable
     /// nodes form a prefix of the resident sequence by construction: every
     /// append lands past the end, a commit carries the pending suffix and
@@ -216,13 +217,50 @@ pub struct SessionGraph {
 struct SessionGraphStorage {
     data: SessionGraphData,
     read_owner: Option<Arc<crate::store_backend_support::window_cache::WindowReaders>>,
+    allocation: AllocationHold,
+}
+
+/// The obligation belongs to the actual cache allocation, including while
+/// another graph snapshot keeps it after a writer detaches.
+#[derive(Debug, Default)]
+struct SessionGraphCacheStorage {
+    value: OnceLock<SessionGraphCache>,
+    _allocation: AllocationHold,
+}
+impl std::ops::Deref for SessionGraphCacheStorage {
+    type Target = OnceLock<SessionGraphCache>;
+    fn deref(&self) -> &Self::Target {
+        &self.value
+    }
+}
+impl std::ops::DerefMut for SessionGraphCacheStorage {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.value
+    }
+}
+impl SessionGraphCacheStorage {
+    fn new_in(budget: &AllocationBudget) -> Result<Arc<Self>, crate::StoreError> {
+        let allocation = budget.reserve((std::mem::size_of::<Self>() + 64) as u64)?;
+        Ok(Arc::new(Self {
+            value: OnceLock::new(),
+            _allocation: allocation,
+        }))
+    }
+    fn with_cache_in(
+        cache: SessionGraphCache,
+        budget: &AllocationBudget,
+    ) -> Result<Arc<Self>, crate::StoreError> {
+        let storage = Self::new_in(budget)?;
+        let _ = storage.set(cache);
+        Ok(storage)
+    }
 }
 
 impl Default for SessionGraph {
     fn default() -> Self {
         Self {
             inner: Arc::new(SessionGraphStorage::default()),
-            cache: Arc::new(OnceLock::new()),
+            cache: Arc::new(SessionGraphCacheStorage::default()),
             durable_len: 0,
         }
     }
@@ -1068,9 +1106,13 @@ impl SessionGraph {
         leaf_node_id: Option<NodeId>,
         anchor: Option<WindowAnchor>,
     ) -> Result<Self, crate::StoreError> {
-        let graph = Self::from_shared_validated_parts(nodes, leaf_node_id, anchor);
+        let graph = Self::from_shared_validated_parts(nodes, leaf_node_id, anchor)?;
         graph.validate_structural_integrity()?;
         Ok(graph)
+    }
+
+    pub fn empty_in(budget: &AllocationBudget) -> Result<Self, crate::StoreError> {
+        Self::from_shared_anchored_nodes(AppendVec::try_with_capacity(0, budget)?, None, None)
     }
 
     /// Build a serving graph from records admitted under this claim.
@@ -1089,42 +1131,75 @@ impl SessionGraph {
     /// This is deliberately crate-private and named for auditability. It is only appropriate when
     /// the nodes are derived from an already-validated resident graph by an operation that
     /// preserves identity, parent topology, and leaf membership.
+    #[expect(
+        clippy::expect_used,
+        reason = "the independent cold constructor has an unowned budget"
+    )]
     pub fn from_validated_nodes(
         nodes: Vec<SessionNodeRecord>,
         leaf_node_id: Option<NodeId>,
     ) -> Self {
-        Self::from_shared_validated_nodes(
+        Self::from_shared_validated_parts(
             nodes.into_iter().map(Arc::new).collect::<Vec<_>>(),
             leaf_node_id,
+            None,
         )
-    }
-
-    /// [`Self::from_validated_nodes`] for callers that already hold shared
-    /// records — the same restricted-use contract applies.
-    pub(crate) fn from_shared_validated_nodes(
-        nodes: impl Into<AppendVec<Arc<SessionNodeRecord>>>,
-        leaf_node_id: Option<NodeId>,
-    ) -> Self {
-        Self::from_shared_validated_parts(nodes, leaf_node_id, None)
+        .expect("independent cold graph")
     }
 
     fn from_shared_validated_parts(
         nodes: impl Into<AppendVec<Arc<SessionNodeRecord>>>,
         leaf_node_id: Option<NodeId>,
         anchor: Option<WindowAnchor>,
-    ) -> Self {
-        Self {
+    ) -> Result<Self, crate::StoreError> {
+        let nodes = nodes.into();
+        let budget = nodes.allocation_budget();
+        let allocation = budget.reserve(Self::storage_capacity(&leaf_node_id, anchor.as_ref()))?;
+        let cache = SessionGraphCacheStorage::new_in(budget)?;
+        Ok(Self {
             inner: Arc::new(SessionGraphStorage {
                 data: SessionGraphData {
-                    nodes: nodes.into(),
+                    nodes,
                     leaf_node_id,
                     anchor,
                 },
                 read_owner: None,
+                allocation,
             }),
-            cache: Arc::new(OnceLock::new()),
+            cache,
             durable_len: 0,
+        })
+    }
+
+    fn storage_capacity(leaf: &Option<NodeId>, anchor: Option<&WindowAnchor>) -> u64 {
+        let ids = leaf.as_ref().map_or(0, |id| id.len())
+            + anchor.map_or(0, |anchor| {
+                anchor.frame_node_id.as_str().len()
+                    + anchor.external_parent.as_ref().map_or(0, |id| id.len())
+                    + anchor
+                        .previous_frame_node_id
+                        .as_ref()
+                        .map_or(0, |id| id.as_str().len())
+            });
+        (std::mem::size_of::<SessionGraphStorage>() as u64)
+            .saturating_add(ids as u64)
+            .saturating_add(256)
+    }
+
+    fn storage_mut(&mut self) -> Result<&mut SessionGraphStorage, crate::StoreError> {
+        if Arc::get_mut(&mut self.inner).is_none() {
+            let allocation = self
+                .nodes
+                .allocation_budget()
+                .reserve(Self::storage_capacity(
+                    &self.leaf_node_id,
+                    self.anchor.as_ref(),
+                ))?;
+            let mut storage = (*self.inner).clone();
+            storage.allocation = allocation;
+            self.inner = Arc::new(storage);
         }
+        Ok(Arc::get_mut(&mut self.inner).unwrap_or_else(|| unreachable!("private graph storage")))
     }
 
     #[cfg(any(test, feature = "testing"))]
@@ -1148,6 +1223,7 @@ impl SessionGraph {
     fn validate_structural_integrity(&self) -> Result<(), crate::StoreError> {
         if let Some(cache) = self.cache.get() {
             if !cache.proven() {
+                let _scratch = SessionGraphCache::construction_scratch(self)?;
                 crate::session_graph_integrity::validate_structure(self)?;
                 cache.prove();
             }
@@ -1202,17 +1278,29 @@ impl SessionGraph {
     pub(crate) fn set_read_owner(
         &mut self,
         owner: Option<Arc<crate::store_backend_support::window_cache::WindowReaders>>,
-    ) {
-        Arc::make_mut(&mut self.inner).read_owner = owner;
+    ) -> Result<(), crate::StoreError> {
+        if match (&self.inner.read_owner, &owner) {
+            (None, None) => true,
+            (Some(current), Some(next)) => Arc::ptr_eq(current, next),
+            _ => false,
+        } {
+            return Ok(());
+        }
+        self.storage_mut()?.read_owner = owner;
+        Ok(())
     }
 
-    fn invalidate_cache(&mut self) {
-        self.cache = Arc::new(OnceLock::new());
+    fn invalidate_cache(&mut self) -> Result<(), crate::StoreError> {
+        self.cache = SessionGraphCacheStorage::new_in(self.nodes.allocation_budget())?;
+        Ok(())
     }
 
-    pub fn data_mut(&mut self) -> &mut SessionGraphData {
-        self.invalidate_cache();
-        &mut Arc::make_mut(&mut self.inner).data
+    pub fn data_mut(&mut self) -> Result<&mut SessionGraphData, crate::StoreError> {
+        // Admit both proposals before changing either pointer.
+        let cache = SessionGraphCacheStorage::new_in(self.nodes.allocation_budget())?;
+        self.storage_mut()?;
+        self.cache = cache;
+        Ok(&mut self.storage_mut()?.data)
     }
 
     #[expect(
@@ -1294,11 +1382,14 @@ impl SessionGraph {
             .filter(|node| matches!(node.event(), Some(SessionHistoryRecord::Conversation(_))))
             .count();
         self.reserve_append_capacity(nodes.len(), messages)?;
-        self.detach_initialized_cache_for_append();
+        self.detach_initialized_cache_for_append()?;
+        self.storage_mut()?;
         if let Some(cache_lock) = Arc::get_mut(&mut self.cache)
             && let Some(cache) = cache_lock.get_mut()
         {
-            let data = &mut Arc::make_mut(&mut self.inner).data;
+            let data = &mut Arc::get_mut(&mut self.inner)
+                .unwrap_or_else(|| unreachable!("admitted private storage"))
+                .data;
             for node in nodes {
                 let extends_leaf = node.parent_node_id == data.leaf_node_id;
                 if cache.proven()
@@ -1327,7 +1418,7 @@ impl SessionGraph {
             return Ok(());
         }
 
-        let data = self.data_mut();
+        let data = self.data_mut()?;
         for node in nodes {
             data.leaf_node_id = Some(node.node_id.clone());
             data.nodes.push(Arc::new(node))?;
@@ -1547,7 +1638,7 @@ impl SessionGraph {
         if extends_active_leaf {
             self.append_prebuilt_nodes(append.nodes().to_vec())?;
         } else {
-            let data = self.data_mut();
+            let data = self.data_mut()?;
             data.nodes
                 .extend(append.nodes().iter().cloned().map(Arc::new))?;
             data.leaf_node_id = append.leaf_node_id().cloned();
@@ -1593,6 +1684,7 @@ impl SessionGraph {
                 predicate,
             );
         }
+        let _scratch = SessionGraphCache::construction_scratch(self)?;
         let by_id = graph_node_indices(self)?;
         nearest_ancestor_index(
             self,

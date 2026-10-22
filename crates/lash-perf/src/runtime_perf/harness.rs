@@ -541,7 +541,7 @@ impl BenchmarkRuntime {
             .read()
             .await?
             .ok_or_else(|| anyhow::anyhow!("benchmark session has no committed head"))?
-            .to_snapshot())
+            .to_snapshot()?)
     }
 }
 pub(crate) fn validate_runtime_perf_turn(

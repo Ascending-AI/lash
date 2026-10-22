@@ -196,7 +196,9 @@ impl WorkbenchSessionPlugin {
                         let state = lash::persistence::SessionReadView::from_snapshot(&snapshot);
                         Ok(lash::plugins::AfterTurnContributions {
                             session: lash::plugins::SessionContributions {
-                                graph_appends: workbench_derived_note(&state).into_iter().collect(),
+                                graph_appends: workbench_derived_note(&state)?
+                                    .into_iter()
+                                    .collect(),
                             },
                             ..Default::default()
                         })
@@ -503,12 +505,14 @@ impl WorkbenchConfigChanges {
 /// Its ancestor fence keeps the summary on the branch it describes.
 pub(crate) fn workbench_derived_note(
     state: &lash::persistence::SessionReadView,
-) -> Option<lash::plugins::AppendSessionNodesRequest> {
+) -> Result<Option<lash::plugins::AppendSessionNodesRequest>, lash::persistence::StoreError> {
     if state.turn_index() == 0 {
-        return None;
+        return Ok(None);
     }
-    let base_node_id = state.session_graph().leaf_node_id.clone()?;
-    Some(lash::plugins::AppendSessionNodesRequest {
+    let Some(base_node_id) = state.session_graph()?.leaf_node_id.clone() else {
+        return Ok(None);
+    };
+    Ok(Some(lash::plugins::AppendSessionNodesRequest {
         operation_id: format!("workbench-derived-note:{base_node_id}"),
         nodes: vec![lash::plugins::SessionAppendNode::plugin(
             WORKBENCH_DERIVED_NOTE_PLUGIN_TYPE,
@@ -518,7 +522,7 @@ pub(crate) fn workbench_derived_note(
             }),
         )],
         requires_ancestor_node_id: Some(base_node_id),
-    })
+    }))
 }
 
 pub(crate) const WORKBENCH_DERIVED_NOTE_PLUGIN_TYPE: &str = "workbench.turn_note";

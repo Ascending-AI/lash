@@ -1360,6 +1360,7 @@ await control.finish("done");"#,
     assert_eq!(
         read_view
             .session_graph()
+            .expect("source graph is admitted")
             .clone()
             .active_path_nodes()
             .into_iter()

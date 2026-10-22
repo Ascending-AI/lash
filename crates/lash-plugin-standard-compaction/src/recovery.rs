@@ -164,16 +164,20 @@ impl OverflowRecoveryState {
 
 pub(crate) fn history_recovery_records(
     state: &lash_core::plugin::SessionReadView,
-) -> Result<Vec<OverflowRecoveryRecord>, lash_core::StoredDataCorruption> {
+) -> Result<Vec<OverflowRecoveryRecord>, PluginError> {
     use lash_core::facade_support::{SessionGraphFacadeOps as _, SessionNodeProjection as _};
     state
-        .session_graph()
+        .session_graph()?
         .active_path_nodes()
         .into_iter()
         .filter_map(|node| {
             let (plugin_type, body) = node.plugin()?;
-            (plugin_type == OVERFLOW_RECOVERY_PLUGIN_TYPE)
-                .then(|| decode_recovery_body(body.clone()))
+            (plugin_type == OVERFLOW_RECOVERY_PLUGIN_TYPE).then(|| {
+                decode_recovery_body(body.clone()).map_err(|error| PluginError::StoredDataCorrupt {
+                    record_kind: error.record_kind,
+                    message: error.message,
+                })
+            })
         })
         .collect()
 }
@@ -336,7 +340,7 @@ pub(crate) async fn overflow_recovery_decision(
     }
     let attempt_no = state.attempts() + 1;
     let history_messages = ctx.state.messages();
-    let history_snapshot = ctx.state.to_snapshot();
+    let history_snapshot = ctx.state.to_snapshot().map_err(PluginError::from)?;
 
     let prefix_len = leading_system_prefix_len(history_messages);
     let summary_prefix: Vec<Message> =

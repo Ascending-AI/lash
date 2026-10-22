@@ -468,7 +468,7 @@ async fn a_retried_admin_mutation_with_the_same_host_key_applies_once() {
         1,
         "the retry retains exactly one durable append"
     );
-    let snapshot = state.export().await;
+    let snapshot = state.export().await.expect("snapshot is admitted");
     assert_eq!(
         snapshot
             .session_graph
