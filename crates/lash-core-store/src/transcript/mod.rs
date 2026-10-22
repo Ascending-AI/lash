@@ -248,12 +248,7 @@ impl SessionTranscript {
         decoders: &TranscriptDecoders,
     ) -> Result<Self, crate::StoreError> {
         use crate::session_graph::facade_ops::SessionGraphFacadeOps;
-        Self::from_records(view.session_graph()?.active_path_nodes(), decoders).map_err(|error| {
-            crate::StoreError::StoredDataCorrupt {
-                record_kind: "SessionTranscript",
-                message: error.to_string(),
-            }
-        })
+        Self::from_records(view.session_graph()?.active_path_nodes(), decoders)
     }
     /// Decode retained committed records in source order, across frame
     /// boundaries.

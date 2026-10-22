@@ -889,16 +889,8 @@ impl DurableSession {
             .await?
             .load_committed_turns(after, limit)
             .await?;
-        crate::transcript::CommittedTurnsPage::decode(page, &self.transcript_decoders).map_err(
-            |error| {
-                crate::EmbedError::Plugin(
-                    lash_execution_contracts::plugin_error::PluginError::StoredDataCorrupt {
-                        record_kind: error.record_kind,
-                        message: error.message,
-                    },
-                )
-            },
-        )
+        crate::transcript::CommittedTurnsPage::decode(page, &self.transcript_decoders)
+            .map_err(crate::EmbedError::from)
     }
 
     /// Read a committed-turn page with each returned turn's tool-call bodies.

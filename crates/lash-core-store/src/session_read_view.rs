@@ -226,16 +226,31 @@ impl SessionReadView {
 
     /// Interleaves active messages and protocol events by graph position for protocol implementors
     /// building a chronological turn view.
-    pub fn chronological_projection(&self) -> crate::ChronologicalProjection {
-        crate::ChronologicalProjection::from_read_model(&self.0.read_model)
+    pub fn chronological_projection(
+        &self,
+    ) -> Result<crate::ChronologicalProjection, lash_protocol_types::allocation::AllocationError>
+    {
+        crate::ChronologicalProjection::from_read_model_in(
+            &self.0.read_model,
+            self.0.read_model.messages.allocation_budget(),
+        )
     }
 
-    pub fn shared_chronological_projection(&self) -> Arc<crate::ChronologicalProjection> {
-        Arc::clone(self.0.chronological_projection.get_or_init(|| {
-            Arc::new(crate::ChronologicalProjection::from_read_model(
-                &self.0.read_model,
-            ))
-        }))
+    pub fn shared_chronological_projection(
+        &self,
+    ) -> Result<Arc<crate::ChronologicalProjection>, lash_protocol_types::allocation::AllocationError>
+    {
+        if let Some(projection) = self.0.chronological_projection.get() {
+            return Ok(Arc::clone(projection));
+        }
+        let projection = Arc::new(self.chronological_projection()?);
+        let _ = self.0.chronological_projection.set(projection);
+        Ok(Arc::clone(
+            self.0
+                .chronological_projection
+                .get()
+                .unwrap_or_else(|| unreachable!("projection just published")),
+        ))
     }
 
     pub fn turn_index(&self) -> usize {

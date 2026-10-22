@@ -251,7 +251,7 @@ fn attachment_feedback_preserves_its_tag_and_attachment() {
     let fallback = crate::responses_shared::attachment_feedback(&feedback).unwrap();
     assert_eq!(fallback.role, LlmRole::User);
     assert_eq!(
-        fallback.blocks.as_ref(),
+        fallback.blocks.as_ref().as_ref(),
         &vec![
             LlmContentBlock::Text {
                 text: "<runtime_feedback>read failed; retry</runtime_feedback>".into(),

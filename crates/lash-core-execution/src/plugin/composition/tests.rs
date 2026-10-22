@@ -601,8 +601,10 @@ fn transcript_decoder_is_inventory() {
         fn decode_event(
             &self,
             _: &crate::ProtocolEvent,
-        ) -> Result<Option<lash_core_store::transcript::TranscriptItem>, lash_core_store::StoreError>
-        {
+        ) -> Result<
+            Option<lash_core_store::transcript::TranscriptItem>,
+            lash_core_store::store::StoreError,
+        > {
             Ok(None)
         }
     }
