@@ -23,9 +23,11 @@ use lash_vocabulary::tokens::TokenReader;
 use lash_vocabulary::tokens::TokenWriter;
 
 use super::commit::{EncodeBudget, ExplicitLimit};
-use super::encode::{GraphStaging, TypedBody, to_physical, token_len};
+use super::encode::{
+    GraphStaging, LogicalScan, Placement, TypedBody, inline_envelope_len, token_len,
+};
 use super::node::{
-    EncodedNode, INDEX_FANOUT, INLINE_TOKEN_MAX, NodeEnvelope, NodeId, check_envelope, envelope_len,
+    EncodedNode, INDEX_FANOUT, INLINE_TOKEN_MAX, NodeEnvelope, NodeId, check_envelope,
 };
 use super::refusal::{DecodeLimits, GraphRefusal};
 use super::registry::{BodyShape, NodeKind};
@@ -354,10 +356,7 @@ impl<'s> GraphDecoder<'s> {
                         .get(slot)
                         .ok_or(non_canonical(id, CanonicalFault::ChildSlotOutOfRange(slot)))?;
                     let placed = self.stream(id, stream, expected)?;
-                    let (children, physical) = to_physical(&placed, expected)?;
-                    if envelope_len(expected, children.len(), physical.len() + 3) as u64
-                        <= spec.bound.bytes()
-                    {
+                    if inline_envelope_len(&placed, expected)? <= spec.bound.bytes() {
                         return Err(non_canonical(id, CanonicalFault::InvalidBodyForm));
                     }
                     LogicalBody::Owned(placed)
@@ -617,20 +616,21 @@ impl<'s> GraphDecoder<'s> {
     /// Puts every placed value of `placed` back inline, refusing an inline
     /// value over the bound and a placed one under it.
     fn unplace<'p>(&mut self, id: NodeId, placed: &'p [u8]) -> Result<Cow<'p, [u8]>, GraphRefusal> {
-        let refuse = |error| GraphRefusal::from_token(error, Some(id), None);
-        let mut reader = TokenReader::new(placed);
+        let scan = LogicalScan::scan(placed, NodeKind(0)).map_err(|error| match error {
+            lash_checkpoint_encoder::GraphRefusal::NonCanonical { reason, .. } => {
+                non_canonical(id, reason)
+            }
+            other => GraphRefusal::from(other),
+        })?;
         let mut out: Option<TokenWriter> = None;
         let mut copied = 0;
-        while !reader.is_empty() {
-            let start = reader.position();
-            match reader.next_event().map_err(refuse)? {
-                TokenEvent::Text(text) if token_len(text.len()) > INLINE_TOKEN_MAX => {
+        for step in scan.placement_steps() {
+            let start = step.start;
+            match step.placement {
+                Placement::Oversized => {
                     return Err(non_canonical(id, CanonicalFault::InvalidPlacement));
                 }
-                TokenEvent::Bytes(bytes) if token_len(bytes.len()) > INLINE_TOKEN_MAX => {
-                    return Err(non_canonical(id, CanonicalFault::InvalidPlacement));
-                }
-                TokenEvent::Child(child) => {
+                Placement::Child(child) => {
                     let child = NodeId::from(child);
                     let stored = self
                         .source
@@ -640,37 +640,34 @@ impl<'s> GraphDecoder<'s> {
                         BlobEncoding::Graph => Some(self.envelope(child)?.kind),
                         BlobEncoding::Opaque => None,
                     };
-                    match kind.and_then(Family::of) {
-                        Some((family, _)) => {
-                            let value = self.placed(child, family)?;
-                            if token_len(value.len()) <= INLINE_TOKEN_MAX {
-                                return Err(non_canonical(id, CanonicalFault::InvalidPlacement));
-                            }
-                            let writer = out.get_or_insert_with(|| {
-                                let capacity = placed.len() - (reader.position() - start)
-                                    + token_len(value.len()) as usize;
-                                TokenWriter::with_capacity(capacity)
-                            });
-                            writer.raw(&placed[copied..start]);
-                            match family {
-                                Family::Text => writer.text(
-                                    std::str::from_utf8(&value)
-                                        .map_err(|_| GraphRefusal::InvalidUtf8)?,
-                                ),
-                                Family::Bytes => writer.bytes(&value),
-                            }
-                            copied = reader.position();
+                    if let Some((family, _)) = kind.and_then(Family::of) {
+                        let value = self.placed(child, family)?;
+                        if token_len(value.len()) <= INLINE_TOKEN_MAX {
+                            return Err(non_canonical(id, CanonicalFault::InvalidPlacement));
                         }
-                        None => {}
+                        let writer = out.get_or_insert_with(|| {
+                            let capacity =
+                                placed.len() - (step.end - start) + token_len(value.len()) as usize;
+                            TokenWriter::with_capacity(capacity)
+                        });
+                        writer.raw(&placed[copied..start]);
+                        match family {
+                            Family::Text => writer.text(
+                                std::str::from_utf8(&value)
+                                    .map_err(|_| GraphRefusal::InvalidUtf8)?,
+                            ),
+                            Family::Bytes => writer.bytes(&value),
+                        }
+                        copied = step.end;
                     }
                 }
-                _ => {}
+                Placement::Inline => {}
             }
             self.limit(
                 DecodeDimension::LogicalBytes,
-                out.as_ref().map_or(reader.position(), |writer| {
-                    writer.len() + reader.position() - copied
-                }) as u64,
+                out.as_ref()
+                    .map_or(step.end, |writer| writer.len() + step.end - copied)
+                    as u64,
                 self.limits.logical_bytes,
             )?;
         }
@@ -715,6 +712,101 @@ fn leaf_payload<'s>(
 mod preparation_tests {
     use super::super::node::write_envelope;
     use super::*;
+
+    /// FIG-7135: unplacement consumes ordered prepared token facts, rather
+    /// than parsing the same checked logical content for every cold read.
+    #[test]
+    fn unplacement_token_scans_do_not_grow_with_read_count() {
+        let mut tokens = TokenWriter::new();
+        tokens.seq(3);
+        tokens.text("FIG-7135 unplacement scan work");
+        tokens.unsigned(7341);
+        tokens.bool(true);
+        let placed = tokens.into_bytes();
+        let nodes = BTreeMap::<NodeId, EncodedNode>::new();
+        let id = NodeId([0xa9; 32]);
+        let limits = DecodeLimits::within_total(1 << 20);
+        let before = super::super::encode::logical_scan_events();
+        for _ in 0..12 {
+            let mut decoder = GraphDecoder::new(&nodes, limits);
+            assert_eq!(&*decoder.unplace(id, &placed.clone()).unwrap(), placed);
+        }
+        let scanned = super::super::encode::logical_scan_events() - before;
+        assert_eq!(
+            scanned, 4,
+            "one parse of the four-token content across twelve reads"
+        );
+    }
+
+    /// Prepared unplacement retains event order, but no child existence or
+    /// caller-specific admission. A prefix refusal precedes a missing child;
+    /// at the child event its read precedes that event's byte-limit check.
+    #[test]
+    fn prepared_unplacement_keeps_child_reads_and_limit_failure_order() {
+        let id = NodeId([0xa7; 32]);
+        let child = NodeId([0xa8; 32]);
+        let mut tokens = TokenWriter::new();
+        tokens.seq(2);
+        tokens.text("FIG-7135 prepared unplacement order");
+        let prefix_end = tokens.len() as u64;
+        tokens.child(child.child_ref());
+        let placed = tokens.into_bytes();
+        let limits = DecodeLimits::within_total(1 << 20);
+        let opaque = BTreeMap::from([(
+            child,
+            EncodedNode {
+                id: child,
+                bytes: [0x00].into(),
+            },
+        )]);
+        struct OpaqueSource(BTreeMap<NodeId, EncodedNode>);
+        impl NodeSource for OpaqueSource {
+            fn fetch(&self, id: &NodeId) -> Option<StoredNode<'_>> {
+                self.0.get(id).map(|node| StoredNode {
+                    encoding: BlobEncoding::Opaque,
+                    bytes: &node.bytes,
+                })
+            }
+        }
+        // Warm the plan with the referenced opaque child present.
+        assert_eq!(
+            &*GraphDecoder::new(&OpaqueSource(opaque), limits)
+                .unplace(id, &placed)
+                .unwrap(),
+            placed
+        );
+        let missing = BTreeMap::<NodeId, EncodedNode>::new();
+        assert_eq!(
+            GraphDecoder::new(&missing, limits).unplace(id, &placed),
+            Err(GraphRefusal::MissingNode(child))
+        );
+        assert_eq!(
+            GraphDecoder::new(
+                &missing,
+                DecodeLimits {
+                    logical_bytes: prefix_end - 1,
+                    ..limits
+                }
+            )
+            .unplace(id, &placed),
+            Err(GraphRefusal::DecodeLimit {
+                dimension: DecodeDimension::LogicalBytes,
+                actual: prefix_end,
+                limit: prefix_end - 1
+            })
+        );
+        assert_eq!(
+            GraphDecoder::new(
+                &missing,
+                DecodeLimits {
+                    logical_bytes: prefix_end,
+                    ..limits
+                }
+            )
+            .unplace(id, &placed),
+            Err(GraphRefusal::MissingNode(child))
+        );
+    }
 
     /// A physical body's pure expansion is shared across cold readers;
     /// acquiring it never memoizes the receiving reader's admission.

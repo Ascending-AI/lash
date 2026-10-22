@@ -97,7 +97,7 @@ enum EncodingKind {
     Bytes,
     Envelope,
     Logical(usize),
-    References(NodeKind),
+    LogicalScan,
 }
 
 type EncodingKey = (EncodingKind, [u8; 32]);
@@ -121,9 +121,9 @@ enum PreparedGraph {
         input: Box<[u8]>,
         tokens: Arc<[u8]>,
     },
-    References {
+    LogicalScan {
         input: Box<[u8]>,
-        references: Arc<References>,
+        references: Arc<LogicalScan>,
     },
 }
 
@@ -133,7 +133,7 @@ impl PreparedGraph {
             Self::Encoding(prepared) => &prepared.input,
             Self::Envelope { input, .. }
             | Self::Logical { input, .. }
-            | Self::References { input, .. } => input,
+            | Self::LogicalScan { input, .. } => input,
         }
     }
 
@@ -142,11 +142,12 @@ impl PreparedGraph {
             Self::Encoding(prepared) => prepared.bytes,
             Self::Envelope { input, .. } => input.len() + std::mem::size_of::<Framing>(),
             Self::Logical { input, tokens } => input.len() + tokens.len(),
-            Self::References { input, references } => {
+            Self::LogicalScan { input, references } => {
                 input.len()
                     + references.at.capacity() * std::mem::size_of::<(usize, [u8; 32])>()
                     + references.children.capacity() * std::mem::size_of::<[u8; 32]>()
-                    + std::mem::size_of::<References>()
+                    + references.ends.capacity() * std::mem::size_of::<usize>()
+                    + std::mem::size_of::<LogicalScan>()
             }
         }
     }
@@ -184,7 +185,7 @@ impl EncodingCache {
             PreparedGraph::Encoding(prepared) => Some(Arc::clone(prepared)),
             PreparedGraph::Envelope { .. }
             | PreparedGraph::Logical { .. }
-            | PreparedGraph::References { .. } => None,
+            | PreparedGraph::LogicalScan { .. } => None,
         }
     }
 
@@ -193,7 +194,7 @@ impl EncodingCache {
             PreparedGraph::Envelope { framing, .. } => Some(*framing),
             PreparedGraph::Encoding(_)
             | PreparedGraph::Logical { .. }
-            | PreparedGraph::References { .. } => None,
+            | PreparedGraph::LogicalScan { .. } => None,
         }
     }
 
@@ -202,13 +203,13 @@ impl EncodingCache {
             PreparedGraph::Logical { tokens, .. } => Some(Arc::clone(tokens)),
             PreparedGraph::Encoding(_)
             | PreparedGraph::Envelope { .. }
-            | PreparedGraph::References { .. } => None,
+            | PreparedGraph::LogicalScan { .. } => None,
         }
     }
 
-    fn references(&mut self, key: &EncodingKey, input: &[u8]) -> Option<Arc<References>> {
+    fn references(&mut self, key: &EncodingKey, input: &[u8]) -> Option<Arc<LogicalScan>> {
         match self.get_prepared(key, input)? {
-            PreparedGraph::References { references, .. } => Some(Arc::clone(references)),
+            PreparedGraph::LogicalScan { references, .. } => Some(Arc::clone(references)),
             _ => None,
         }
     }
@@ -784,32 +785,72 @@ pub fn to_physical(
     logical: &[u8],
     kind: NodeKind,
 ) -> Result<(Vec<[u8; 32]>, Vec<u8>), GraphRefusal> {
-    let references = References::scan(logical, kind)?;
+    let references = LogicalScan::scan(logical, kind)?;
     let mut body = Vec::with_capacity(references.physical_len(logical.len()));
     references.write_physical(logical, &mut body);
     Ok((references.children.clone(), body))
 }
 
+/// An enveloped kind's size if `placed` were inline, without writing the
+/// physical body. References and their lengths come from its logical scan.
+///
+/// # Errors
+/// A token refusal if `placed` is not canonical logical tokens.
+pub fn inline_envelope_len(placed: &[u8], kind: NodeKind) -> Result<u64, GraphRefusal> {
+    let scan = LogicalScan::scan(placed, kind)?;
+    Ok(envelope_len(
+        kind,
+        scan.children.len(),
+        scan.physical_len(placed.len()) + 3,
+    ) as u64)
+}
+
 /// A logical reference's length: its tag and its child's digest.
 const LOGICAL_REF_LEN: usize = 1 + 32;
 
-/// The child references of a logical body, read in one pass: where each
-/// starts and what it names, and the body's children, sorted and unique.
-pub(crate) struct References {
+/// Pure facts from one canonical logical token stream: ordered token
+/// boundaries, child references, and the first oversized inline value.
+/// These facts grant no store presence, receiving limits or child authority.
+pub struct LogicalScan {
     at: Vec<(usize, [u8; 32])>,
     pub(crate) children: Vec<[u8; 32]>,
+    ends: Vec<usize>,
+    oversized_inline: Option<usize>,
 }
 
-#[cfg(test)]
+/// One validated logical token event, retained in its original order.
+#[derive(Clone, Copy, Debug)]
+pub struct PlacementStep {
+    pub start: usize,
+    pub end: usize,
+    pub placement: Placement,
+}
+
+/// The part of a canonical token event graph placement needs.
+#[derive(Clone, Copy, Debug)]
+pub enum Placement {
+    Inline,
+    Oversized,
+    Child(ChildRef),
+}
+
+#[cfg(any(test, feature = "testing"))]
 thread_local! {
+    static LOGICAL_SCAN_EVENTS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
     static REFERENCE_SCANS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+
+/// Token events parsed by logical preparation on this testing thread.
+#[cfg(any(test, feature = "testing"))]
+pub fn logical_scan_events() -> u64 {
+    LOGICAL_SCAN_EVENTS.with(std::cell::Cell::get)
 }
 
 fn prepare_references(
     key: EncodingKey,
     logical: &[u8],
-    scan: impl FnOnce() -> Result<References, GraphRefusal>,
-) -> Result<Arc<References>, GraphRefusal> {
+    scan: impl FnOnce() -> Result<LogicalScan, GraphRefusal>,
+) -> Result<Arc<LogicalScan>, GraphRefusal> {
     let cache = encoding_cache();
     if let Some(references) = cache
         .lock()
@@ -819,7 +860,7 @@ fn prepare_references(
         return Ok(references);
     }
     let references = Arc::new(scan()?);
-    let prepared = PreparedGraph::References {
+    let prepared = PreparedGraph::LogicalScan {
         input: logical.into(),
         references: Arc::clone(&references),
     };
@@ -833,37 +874,82 @@ fn prepare_references(
     Ok(references)
 }
 
-impl References {
-    /// Reads every token of `logical`, each of which must be canonical.
-    pub(crate) fn scan(logical: &[u8], kind: NodeKind) -> Result<Arc<Self>, GraphRefusal> {
+impl LogicalScan {
+    /// Reads canonical logical tokens once, retaining their references and
+    /// ordered placement facts in the bounded graph preparation owner.
+    ///
+    /// # Errors
+    /// A token refusal if the supplied logical bytes are not canonical.
+    pub fn scan(logical: &[u8], kind: NodeKind) -> Result<Arc<Self>, GraphRefusal> {
         if logical.len() > CACHE_BYTES {
             return Self::scan_uncached(logical, kind).map(Arc::new);
         }
         let key = (
-            EncodingKind::References(kind),
+            EncodingKind::LogicalScan,
             TypedBody::logical(logical).digest(),
         );
         prepare_references(key, logical, || Self::scan_uncached(logical, kind))
     }
 
     fn scan_uncached(logical: &[u8], kind: NodeKind) -> Result<Self, GraphRefusal> {
-        #[cfg(test)]
+        #[cfg(any(test, feature = "testing"))]
         REFERENCE_SCANS.with(|count| count.set(count.get() + 1));
         let mut at = Vec::new();
+        let mut ends = Vec::new();
+        let mut oversized_inline = None;
         let mut reader = TokenReader::new(logical);
         while !reader.is_empty() {
             let start = reader.position();
-            if let TokenEvent::Child(ChildRef(digest)) = reader
+            let event = reader
                 .next_event()
-                .map_err(|error| GraphRefusal::from_token(error, None, Some(kind.0)))?
-            {
-                at.push((start, digest));
+                .map_err(|error| GraphRefusal::from_token(error, None, Some(kind.0)))?;
+            #[cfg(any(test, feature = "testing"))]
+            LOGICAL_SCAN_EVENTS.with(|count| count.set(count.get() + 1));
+            match event {
+                TokenEvent::Child(child) => at.push((start, child.0)),
+                TokenEvent::Text(text) if token_len(text.len()) > INLINE_TOKEN_MAX => {
+                    oversized_inline.get_or_insert(start);
+                }
+                TokenEvent::Bytes(bytes) if token_len(bytes.len()) > INLINE_TOKEN_MAX => {
+                    oversized_inline.get_or_insert(start);
+                }
+                _ => {}
             }
+            ends.push(reader.position());
         }
         let mut children: Vec<[u8; 32]> = at.iter().map(|(_, digest)| *digest).collect();
         children.sort_unstable();
         children.dedup();
-        Ok(Self { at, children })
+        Ok(Self {
+            at,
+            children,
+            ends,
+            oversized_inline,
+        })
+    }
+
+    /// Placement facts in validated token order. The first oversized inline
+    /// value is marked; a consumer must refuse at it before later events.
+    #[must_use]
+    pub fn placement_steps(&self) -> impl Iterator<Item = PlacementStep> + '_ {
+        let mut references = self.at.iter().peekable();
+        let mut start = 0;
+        self.ends.iter().map(move |end| {
+            let placement = if self.oversized_inline == Some(start) {
+                Placement::Oversized
+            } else if let Some((_, digest)) = references.next_if(|(at, _)| *at == start) {
+                Placement::Child(ChildRef(*digest))
+            } else {
+                Placement::Inline
+            };
+            let step = PlacementStep {
+                start,
+                end: *end,
+                placement,
+            };
+            start = *end;
+            step
+        })
     }
 
     fn slot(&self, digest: &[u8; 32]) -> u64 {
@@ -990,6 +1076,8 @@ mod cache_tests {
                 to_physical(&logical.clone(), NodeKind::FROZEN_VALUE).unwrap();
             assert_eq!(children, [[0x61; 32], [0x62; 32]]);
             assert!(!physical.is_empty());
+            let scan = LogicalScan::scan(&logical.clone(), NodeKind(0)).unwrap();
+            assert_eq!(scan.placement_steps().count(), 5);
         }
         assert_eq!(
             REFERENCE_SCANS.with(std::cell::Cell::get),
@@ -1003,7 +1091,7 @@ mod cache_tests {
     #[test]
     fn racing_reference_preparations_keep_each_inputs_children() {
         let barrier = std::sync::Barrier::new(2);
-        let key = (EncodingKind::References(NodeKind(1_002)), [0x94; 32]);
+        let key = (EncodingKind::LogicalScan, [0x94; 32]);
         let bodies: Vec<_> = [0x81, 0x82]
             .into_iter()
             .map(|byte| {
@@ -1017,7 +1105,7 @@ mod cache_tests {
                 let barrier = &barrier;
                 scope.spawn(move || {
                     let refs = prepare_references(key, body, || {
-                        let refs = References::scan_uncached(body, NodeKind(1_002))?;
+                        let refs = LogicalScan::scan_uncached(body, NodeKind(1_002))?;
                         barrier.wait();
                         Ok(refs)
                     })
@@ -1028,7 +1116,7 @@ mod cache_tests {
         });
         for body in &bodies {
             let refs = prepare_references(key, body, || {
-                References::scan_uncached(body, NodeKind(1_002))
+                LogicalScan::scan_uncached(body, NodeKind(1_002))
             })
             .unwrap();
             assert_eq!(refs.children, [<[u8; 32]>::try_from(&body[1..]).unwrap()]);
