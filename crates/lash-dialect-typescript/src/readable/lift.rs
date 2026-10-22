@@ -28,10 +28,15 @@ pub(super) struct Lifted {
 }
 
 pub(super) enum Main {
-    /// A module: its entries, in the order `main` binds them.
-    Module(Vec<Name>),
+    /// A module: declarations interleaved with its executable statements.
+    Module(Vec<ModulePart>),
     /// A cell: `main`'s statements.
     Cell(Vec<Stmt>),
+}
+
+pub(super) enum ModulePart {
+    Export(Name),
+    Statements(Vec<Stmt>),
 }
 
 pub(super) fn document(
@@ -67,11 +72,39 @@ pub(super) fn document(
             .block(block, &Site::new(Unit::Main, Vec::new()))
             .map(Main::Cell)
     } else {
-        lash_kernel_dialect::regions::export_order(document)
-            .map(Main::Module)
-            .ok_or_else(|| "module has executable work outside its declarations".to_owned())
+        module_main(document, captions, library).map(Main::Module)
     };
     Lifted { functions, main }
+}
+
+fn module_main(
+    document: &k::Document,
+    captions: Option<&k::Captions>,
+    library: &dyn lash_kernel_dialect::Library,
+) -> Lift<Vec<ModulePart>> {
+    let parts = lash_kernel_dialect::regions::module_parts(document)
+        .ok_or_else(|| "module exports do not match their Main bindings".to_owned())?;
+    let main = document.main.as_deref().unwrap_or_default();
+    let mut lifter = Lifter::new(document, captions, Unit::Main, library);
+    parts
+        .into_iter()
+        .filter_map(|part| {
+            use lash_kernel_dialect::regions::ModulePart as Part;
+            match part {
+                Part::Export(name) => Some(Ok(ModulePart::Export(name))),
+                Part::Statements(range) => Some(
+                    lifter
+                        .block_at(
+                            &main[range.clone()],
+                            &Site::new(Unit::Main, Vec::new()),
+                            range.start,
+                        )
+                        .map(ModulePart::Statements),
+                ),
+                Part::Implicit => None,
+            }
+        })
+        .collect()
 }
 
 /// What [`Lifter::enter`] set aside.
@@ -96,6 +129,8 @@ pub(super) struct Lifter<'a> {
     taken_captions: Vec<Caption>,
     /// The names some statement of the unit assigns.
     assigned: BTreeSet<Name>,
+    /// Original names retained in lowered function tokens, keyed by binding identity.
+    pub(super) bindings: BTreeMap<Name, String>,
 }
 
 impl<'a> Lifter<'a> {
@@ -117,6 +152,44 @@ impl<'a> Lifter<'a> {
         if let Some(body) = body {
             assigned_in(body, &mut assigned);
         }
+        let mut bindings = BTreeMap::new();
+        if let Some(body) = body {
+            let mut pending = vec![k::Node::Block(body)];
+            while let Some(node) = pending.pop() {
+                let binding = match node {
+                    k::Node::Stmt(k::Stmt::Let {
+                        name,
+                        value: k::Rhs::Expr(value),
+                    })
+                    | k::Node::Stmt(k::Stmt::Assign {
+                        place: k::Place::Variable(name),
+                        value: k::Rhs::Expr(value),
+                        ..
+                    }) => Some((name, value)),
+                    _ => None,
+                };
+                if let Some((name, k::Expr::Tuple(parts))) = binding
+                    && let [
+                        k::Expr::Literal(k::Literal::Text(tag)),
+                        _,
+                        k::Expr::Literal(k::Literal::Text(original)),
+                        _,
+                        k::Expr::Closure(_),
+                        _,
+                    ] = parts.as_slice()
+                    && tag == "ts.function"
+                    && source::identifier(original)
+                    && name.as_str().strip_prefix(original).is_some_and(|suffix| {
+                        suffix.strip_prefix('_').is_some_and(|number| {
+                            !number.is_empty() && number.bytes().all(|b| b.is_ascii_digit())
+                        })
+                    })
+                {
+                    bindings.insert(name.clone(), original.clone());
+                }
+                pending.extend(node.children());
+            }
+        }
         Self {
             document,
             library,
@@ -124,6 +197,7 @@ impl<'a> Lifter<'a> {
             pending: Vec::new(),
             taken_captions: Vec::new(),
             assigned,
+            bindings,
         }
     }
 

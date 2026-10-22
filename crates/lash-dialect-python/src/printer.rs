@@ -16,10 +16,10 @@ pub(crate) use names::{attribute_identifier, identifier, legal_identifier};
 use std::collections::{BTreeMap, BTreeSet};
 use std::ops::Range;
 
-/// Authored regions, ordered by their public export names.
+/// Authored exports and the ordered parts of their Main body.
 pub(crate) struct Regions {
     pub(crate) authored: BTreeSet<Name>,
-    pub(crate) whole: Vec<Name>,
+    pub(crate) whole: Vec<lash_kernel_dialect::regions::ModulePart>,
 }
 pub(crate) fn print_regions(
     document: &k::Document,
@@ -64,55 +64,31 @@ pub(crate) fn print_regions(
     }
     let signatures = r.typed_dicts(document, &regions.authored);
     let mut written = BTreeMap::new();
-    for (index, name) in regions.whole.iter().enumerate() {
-        let Some(k::Export::Function(export)) = document.exports.get(name) else {
-            return Err(PrintError::Invalid(
-                "a non-function export has no Python declaration".into(),
-            ));
-        };
-        let definition = document
-            .functions
-            .get(&export.function)
-            .ok_or_else(|| PrintError::Invalid("missing exported function".into()))?;
-        let body = definition
-            .body()
-            .ok_or_else(|| PrintError::Invalid("native export has no Python body".into()))?;
-        let params = definition
-            .signature
-            .params
-            .iter()
-            .map(|p| p.name.clone())
-            .collect::<Vec<_>>();
-        if index > 0 {
-            r.out.write("\n");
+    let main = document.main.as_deref().unwrap_or_default();
+    r.out.begin_node(Some(&lash_vocabulary::sites::Unit::Main));
+    let body_start = r.out.len();
+    for part in &regions.whole {
+        use lash_kernel_dialect::regions::ModulePart;
+        match part {
+            ModulePart::Export(name) => {
+                if r.out.len() > body_start {
+                    r.out.write("\n");
+                }
+                r.out.begin_node(None); // the Main binding
+                let range = r.export_function(name, &signatures)?;
+                r.implicit(); // its function literal
+                r.out.end_node();
+                written.insert(name.clone(), range);
+                r.scope.bind(name, Some(true));
+            }
+            ModulePart::Statements(range) => {
+                r.main = true;
+                r.authored_statement_range(main, range.clone());
+            }
+            ModulePart::Implicit => r.implicit(),
         }
-        let start = r.out.len();
-        let unit = lash_vocabulary::sites::Unit::Library(export.function);
-        r.caption_of(lash_vocabulary::sites::Site::new(unit.clone(), Vec::new()));
-        if !export.asynchronous {
-            r.sync.insert(name.clone());
-        }
-        r.out.write(if export.asynchronous {
-            "async def "
-        } else {
-            "def "
-        });
-        r.name(name);
-        r.signature(&signatures, name, &params);
-        r.out.write(":\n");
-        r.scope = BindingScope::new(&params);
-        r.root_block(&body.block, Some(&unit));
-        written.insert(name.clone(), start..r.out.len());
     }
-    if let Some(main) = document
-        .main
-        .as_ref()
-        .filter(|_| document.exports.is_empty())
-    {
-        r.main = true;
-        r.scope = Default::default();
-        r.root_block(main, Some(&lash_vocabulary::sites::Unit::Main));
-    }
+    r.out.end_node();
     r.out
         .finish(document, SourceFormat::PythonV1)
         .map(|printed| (printed, written))
@@ -141,6 +117,52 @@ struct Renderer<'a> {
     max_depth: usize,
 }
 impl Renderer<'_> {
+    fn export_function(
+        &mut self,
+        name: &Name,
+        signatures: &signature::Signatures,
+    ) -> Result<Range<usize>, PrintError> {
+        let Some(k::Export::Function(export)) = self.document.exports.get(name) else {
+            return Err(PrintError::Invalid(
+                "a non-function export has no Python declaration".into(),
+            ));
+        };
+        let definition = self
+            .document
+            .functions
+            .get(&export.function)
+            .ok_or_else(|| PrintError::Invalid("missing exported function".into()))?;
+        let body = definition
+            .body()
+            .ok_or_else(|| PrintError::Invalid("native export has no Python body".into()))?;
+        let params = definition
+            .signature
+            .params
+            .iter()
+            .map(|p| p.name.clone())
+            .collect::<Vec<_>>();
+        let start = self.out.len();
+        let unit = lash_vocabulary::sites::Unit::Library(export.function);
+        self.caption_of(lash_vocabulary::sites::Site::new(unit.clone(), Vec::new()));
+        if !export.asynchronous {
+            self.sync.insert(name.clone());
+        }
+        self.out.write(if export.asynchronous {
+            "async def "
+        } else {
+            "def "
+        });
+        self.name(name);
+        self.signature(signatures, name, &params);
+        self.out.write(":\n");
+        let scope = std::mem::replace(&mut self.scope, BindingScope::new(&params));
+        let main = std::mem::replace(&mut self.main, false);
+        self.root_block(&body.block, Some(&unit));
+        self.main = main;
+        self.scope = scope;
+        Ok(start..self.out.len())
+    }
+
     /// The caption of the node the writer opens next, taken to be spelled.
     fn next_caption(&mut self) -> Option<k::Caption> {
         let site = self.captions.then(|| self.out.next_site(None)).flatten()?;

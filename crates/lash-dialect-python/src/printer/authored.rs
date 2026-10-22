@@ -317,13 +317,21 @@ impl Renderer<'_> {
     /// Invert statement-only lowering before rendering an authored suite.
     /// Each proposal is admitted only by the complete readback oracle.
     pub(super) fn authored_statements(&mut self, block: &[k::Stmt]) {
+        self.authored_statement_range(block, 0..block.len());
+    }
+
+    pub(super) fn authored_statement_range(
+        &mut self,
+        block: &[k::Stmt],
+        range: std::ops::Range<usize>,
+    ) {
         let substitutions = self.substitutions.clone();
         let comprehensions = self.comprehensions.clone();
         let mut pending_caption = None;
-        let mut index = 0;
-        while index < block.len() {
+        let mut index = range.start;
+        while index < range.end {
             let statement = &block[index];
-            if self.try_else(&block[index..]) {
+            if self.try_else(&block[index..range.end]) {
                 index += 3;
                 continue;
             }
@@ -339,7 +347,7 @@ impl Renderer<'_> {
                 index += 1;
                 continue;
             }
-            if let Some((name, comprehension)) = self.lift_comprehension(&block[index..]) {
+            if let Some((name, comprehension)) = self.lift_comprehension(&block[index..range.end]) {
                 pending_caption = self.hoist_caption(pending_caption);
                 self.implicit(); // collection allocation
                 self.implicit(); // generator loop
