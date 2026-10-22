@@ -258,6 +258,10 @@
       "pattern": "^[0-9a-f]{64}$",
       "type": "string"
     },
+    "FunctionName": {
+      "pattern": "^[A-Za-z_][A-Za-z0-9_]*(\\.[A-Za-z_][A-Za-z0-9_]*)*$",
+      "type": "string"
+    },
     "ImportSlot": {
       "description": "A stable document-local Import coordinate. Names are diagnostic, never dispatch keys.",
       "format": "uint32",
@@ -444,7 +448,7 @@
                   "$ref": "#/$defs/FunctionId"
                 },
                 "name": {
-                  "$ref": "#/$defs/QualifiedName"
+                  "$ref": "#/$defs/FunctionName"
                 }
               },
               "required": [
@@ -469,7 +473,7 @@
                   "$ref": "#/$defs/FunctionId"
                 },
                 "name": {
-                  "$ref": "#/$defs/QualifiedName"
+                  "$ref": "#/$defs/FunctionName"
                 },
                 "required": {
                   "format": "uint32",
@@ -997,10 +1001,6 @@
       ],
       "type": "object"
     },
-    "QualifiedName": {
-      "pattern": "^[A-Za-z_][A-Za-z0-9_]*(\\.[A-Za-z_][A-Za-z0-9_]*)*$",
-      "type": "string"
-    },
     "RecordType": {
       "additionalProperties": false,
       "properties": {
@@ -1126,7 +1126,7 @@
                   "$ref": "#/$defs/FunctionId"
                 },
                 "name": {
-                  "$ref": "#/$defs/QualifiedName"
+                  "$ref": "#/$defs/FunctionName"
                 }
               },
               "required": [

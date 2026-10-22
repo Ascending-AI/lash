@@ -7,8 +7,6 @@
 /// reserved so it cannot be silently reused.
 /// version_reservations = "hash-domain reservations generated from the release inventory, including retired names"
 pub(crate) const BLAKE3_DOMAINS: &[&str] = &[
-    "lash package artifact 2026-10 v1",
-    "lash package set 2026-10 v1",
     "lash request body slot marker v1",
     "lash request segment context v1",
     "lash request segment key v1",

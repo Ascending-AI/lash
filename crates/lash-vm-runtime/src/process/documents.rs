@@ -25,13 +25,13 @@ pub(crate) fn document_artifact(document: &DocumentId) -> ArtifactName {
 pub(crate) fn link_artifact(link: LinkId) -> ArtifactName {
     ArtifactName {
         store: ArtifactStoreId::KernelDocument,
-        artifact_ref: format!("link:v1:{link}"),
+        artifact_ref: lash_durable::packages::link_reference(&link),
     }
 }
 pub(crate) fn package_artifact(package: PackageId) -> ArtifactName {
     ArtifactName {
         store: ArtifactStoreId::KernelDocument,
-        artifact_ref: format!("package:v1:{package}"),
+        artifact_ref: lash_durable::packages::package_reference(&package),
     }
 }
 #[derive(Clone, Debug, PartialEq, Eq)]

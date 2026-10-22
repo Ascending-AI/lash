@@ -151,6 +151,16 @@ pub trait PackageStore: Send + Sync {
     ) -> Result<(), DurableError>;
 }
 
+/// version_surface = "coexist"
+/// version_guard(items(LINK_REF_PREFIX, link_reference, content_dependencies, is_package_reference))
+const LINK_REF_PREFIX: &str = "link:v1:";
+/// version_surface = "coexist"
+/// version_guard(items(PACKAGE_REF_PREFIX, package_reference, content_dependencies, is_package_reference))
+const PACKAGE_REF_PREFIX: &str = "package:v1:";
+/// version_surface = "coexist"
+/// version_guard(items(PUBLICATION_REF_PREFIX, publication_reference, content_dependencies, is_package_reference))
+const PUBLICATION_REF_PREFIX: &str = "publication:v1:";
+
 /// Backend primitive: every dependency must still exist when the root and
 /// complete closure are acquired in one transaction under the referrer fence.
 #[async_trait::async_trait]
@@ -190,16 +200,16 @@ struct StoredLink {
 
 #[must_use]
 pub fn link_reference(id: &LinkId) -> String {
-    format!("link:v1:{id}")
+    format!("{LINK_REF_PREFIX}{id}")
 }
 #[must_use]
 pub fn package_reference(id: &PackageId) -> String {
-    format!("package:v1:{id}")
+    format!("{PACKAGE_REF_PREFIX}{id}")
 }
 #[must_use]
 pub fn publication_reference(key: &PublicationKey) -> String {
     let bytes = lash_vocabulary::tokens::encode_body(key);
-    format!("publication:v1:{}", blake3::hash(&bytes).to_hex())
+    format!("{PUBLICATION_REF_PREFIX}{}", blake3::hash(&bytes).to_hex())
 }
 
 fn encode<T: serde::Serialize>(record: &T) -> Result<Vec<u8>, DurableError> {
@@ -222,7 +232,7 @@ fn module_reference(artifact: &ArtifactName) -> Result<String, DurableError> {
 pub fn content_dependencies(reference: &str, bytes: &[u8]) -> Result<Vec<String>, DurableError> {
     use lash_vocabulary::package::{Fill, MemberKind, PublishedContent};
     let mut children = Vec::new();
-    if let Some(id) = reference.strip_prefix("link:v1:") {
+    if let Some(id) = reference.strip_prefix(LINK_REF_PREFIX) {
         let stored: StoredLink = decode(bytes)?;
         if stored.record.id.to_string() != id || stored.record.link.identity() != stored.record.id {
             return Err(PackageRefusal::Identity(reference.to_owned()).into());
@@ -246,7 +256,7 @@ pub fn content_dependencies(reference: &str, bytes: &[u8]) -> Result<Vec<String>
                     _ => None,
                 }),
         );
-    } else if let Some(id) = reference.strip_prefix("package:v1:") {
+    } else if let Some(id) = reference.strip_prefix(PACKAGE_REF_PREFIX) {
         let record: PackageRecord = decode(bytes)?;
         if record.id.to_string() != id || record.package.identity() != record.id {
             return Err(PackageRefusal::Identity(reference.to_owned()).into());
@@ -261,7 +271,7 @@ pub fn content_dependencies(reference: &str, bytes: &[u8]) -> Result<Vec<String>
                     _ => None,
                 }),
         );
-    } else if reference.starts_with("publication:v1:") {
+    } else if reference.starts_with(PUBLICATION_REF_PREFIX) {
         let record: PublicationRecord = decode(bytes)?;
         if publication_reference(&record.key()) != reference
             || record.path.as_slice().first() != Some(&record.context.root)
@@ -533,7 +543,7 @@ impl<S: PackageStorage + ?Sized> PackageStore for S {
 /// Whether a module-store reference owns immutable package dependencies.
 #[must_use]
 pub fn is_package_reference(reference: &str) -> bool {
-    ["link:v1:", "package:v1:", "publication:v1:"]
+    [LINK_REF_PREFIX, PACKAGE_REF_PREFIX, PUBLICATION_REF_PREFIX]
         .iter()
         .any(|prefix| reference.starts_with(prefix))
 }

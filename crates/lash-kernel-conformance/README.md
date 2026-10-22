@@ -44,7 +44,10 @@ literal library identities in its `use` lines; the test injects its registry.
 identities in admitted corpus cases. Refresh K-VAL-033's unordered-sort
 document with `kiln run //crates/lash-kernel-conformance:sort_corpus__example -- "$PWD"`;
 the recorder derives its manifest from the current library and preserves its
-expected observations.
+expected observations. Numeric native identities are refreshed with the same
+recorder and `--native-identities`; it preserves arguments, results, charges
+and work bounds. `--regex` refreshes regex guard identities without changing
+their limits or cleanup oracles.
 
 `environment` defaults to no host reads or deliveries, a charge bound of
 1,000,000, 16 MiB of memory, call depth 64, and 128 live tasks, requests per

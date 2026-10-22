@@ -474,7 +474,7 @@
         "performs": {
           "description": "Every canonical effect this action reaches, including calls through\nlibrary bodies and statically known declared callees. Derived from the\nchecker's effect derivation, in canonical order with duplicates removed.",
           "items": {
-            "$ref": "#/$defs/ImportSlot"
+            "$ref": "#/$defs/OperationUse"
           },
           "type": "array"
         },
@@ -804,7 +804,7 @@
             "library": {
               "properties": {
                 "exports": {
-                  "description": "Every installed surface member backed by this identity in the\ncell's package set. A private definition has no members.",
+                  "description": "Every visible Export backed by this identity in the retained\nPackages. A private definition has no Exports.",
                   "items": {
                     "$ref": "#/$defs/ExportName"
                   },
@@ -813,12 +813,16 @@
                 "id": {
                   "$ref": "#/$defs/FunctionId"
                 },
+                "link": {
+                  "$ref": "#/$defs/LinkId"
+                },
                 "name": {
-                  "$ref": "#/$defs/QualifiedName"
+                  "$ref": "#/$defs/FunctionName"
                 }
               },
               "required": [
                 "id",
+                "link",
                 "name",
                 "exports"
               ],
@@ -845,8 +849,28 @@
         {
           "additionalProperties": false,
           "properties": {
+            "timer": {
+              "properties": {
+                "use_": {
+                  "$ref": "#/$defs/OperationUse"
+                }
+              },
+              "required": [
+                "use_"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "timer"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
             "effect": {
-              "$ref": "#/$defs/ImportSlot"
+              "$ref": "#/$defs/OperationUse"
             }
           },
           "required": [
@@ -1729,6 +1753,10 @@
       "pattern": "^[0-9a-f]{64}$",
       "type": "string"
     },
+    "FunctionName": {
+      "pattern": "^[A-Za-z_][A-Za-z0-9_]*(\\.[A-Za-z_][A-Za-z0-9_]*)*$",
+      "type": "string"
+    },
     "FunctionRepresentation": {
       "description": "How a dialect holds a function as a value.",
       "oneOf": [
@@ -1886,6 +1914,10 @@
         "last"
       ],
       "type": "object"
+    },
+    "LinkId": {
+      "pattern": "^[0-9a-f]{64}$",
+      "type": "string"
     },
     "Literal": {
       "oneOf": [
@@ -2099,6 +2131,23 @@
       ],
       "type": "object"
     },
+    "OperationUse": {
+      "additionalProperties": false,
+      "description": "One operation Import in one immutable Link. All dispatch, modes and pins use this identity.",
+      "properties": {
+        "link": {
+          "$ref": "#/$defs/LinkId"
+        },
+        "slot": {
+          "$ref": "#/$defs/ImportSlot"
+        }
+      },
+      "required": [
+        "link",
+        "slot"
+      ],
+      "type": "object"
+    },
     "Param": {
       "additionalProperties": false,
       "properties": {
@@ -2211,10 +2260,6 @@
         "open"
       ],
       "type": "object"
-    },
-    "QualifiedName": {
-      "pattern": "^[A-Za-z_][A-Za-z0-9_]*(\\.[A-Za-z_][A-Za-z0-9_]*)*$",
-      "type": "string"
     },
     "ReadableLens": {
       "description": "A failed readable lens does not invalidate canonical membership or ranges.",
@@ -2648,6 +2693,11 @@
             "spawn",
             "cancel"
           ],
+          "type": "string"
+        },
+        {
+          "const": "sleep",
+          "description": "A call of the runtime timer symbol, directly or through one wrapper.",
           "type": "string"
         },
         {

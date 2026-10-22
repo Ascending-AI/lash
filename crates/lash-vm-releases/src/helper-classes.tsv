@@ -85,6 +85,7 @@ py.no_attribute	total
 py.number_text	total
 py.number_underscores	total
 py.operand_error	total
+py.operation_input	total
 py.ord	total
 py.pos	total
 py.pow	total
@@ -109,6 +110,7 @@ py.text.printable	total
 py.text.whitespace	total
 py.text_of	total
 py.text_repr	total
+py.time	body
 py.to_dict	total
 py.to_list	total
 py.to_set	total
@@ -210,6 +212,7 @@ ts.date.UTC	operation
 ts.date.call	body
 ts.date.construct	body
 ts.date.day_from_year	total
+ts.date.from_parts	operation
 ts.date.getDate	total
 ts.date.getDay	total
 ts.date.getFullYear	total
@@ -252,7 +255,6 @@ ts.date.toISOString	total
 ts.date.toJSON	operation
 ts.date.toString	total
 ts.date.toUTCString	total
-ts.date.utc	operation
 ts.date.valueOf	total
 ts.delete	operation
 ts.div	operation
@@ -292,6 +294,7 @@ ts.function_from_text	total
 ts.ge	operation
 ts.get	operation
 ts.get_computed	body
+ts.get_numeric	operation
 ts.gt	operation
 ts.has	operation
 ts.has_own	operation
@@ -620,6 +623,7 @@ ts.number.NaN	total
 ts.number.POSITIVE_INFINITY	total
 ts.number.convert	operation
 ts.number.digit	total
+ts.number.format_value	total
 ts.number.global_isFinite	operation
 ts.number.global_isNaN	operation
 ts.number.isFinite	total
@@ -631,7 +635,7 @@ ts.number.parse	total
 ts.number.parseFloat	operation
 ts.number.parseInt	operation
 ts.number.parse_decimal	total
-ts.number.parse_int	total
+ts.number.parse_integer	total
 ts.number.parts	total
 ts.number.ratio	total
 ts.number.receiver	total
@@ -640,7 +644,6 @@ ts.number.toExponential	operation
 ts.number.toFixed	operation
 ts.number.toPrecision	operation
 ts.number.toString	operation
-ts.number.to_string	total
 ts.number.valueOf	total
 ts.number_index	total
 ts.object.assign	operation
@@ -765,6 +768,7 @@ ts.set.values	body
 ts.shift_count	operation
 ts.shl	operation
 ts.shr	operation
+ts.sleep_duration	total
 ts.spread	total
 ts.strict_equals	total
 ts.strict_not_equals	total

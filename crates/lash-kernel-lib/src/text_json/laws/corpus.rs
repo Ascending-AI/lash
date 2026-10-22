@@ -401,6 +401,42 @@ fn k_lib_006_native_corpus_pins_results_charges_and_determinism() {
         vec![t("aa😀aaa"), t("a"), Datum::Bool(true), Datum::Bool(true)],
         Ok(t("😀")),
     ));
+    // K-VAL-008/009: byte indexing is strict and timestamp extraction
+    // preserves the signed nanosecond count, without a host read.
+    cases.extend([
+        (
+            "K-VAL-008",
+            "bytes.at".to_owned(),
+            vec![b(&[0, 255]), i(1)],
+            Ok(i(255)),
+        ),
+        (
+            "K-VAL-008",
+            "bytes.at".to_owned(),
+            vec![b(&[0, 255]), i(-1)],
+            Err("index"),
+        ),
+        (
+            "K-VAL-008",
+            "bytes.at".to_owned(),
+            vec![b(&[0, 255]), i(2)],
+            Err("index"),
+        ),
+        (
+            "K-VAL-009",
+            "timestamp.nanoseconds".to_owned(),
+            vec![Datum::Timestamp(lash_kernel_doc::Timestamp {
+                nanoseconds: (-123).into(),
+            })],
+            Ok(i(-123)),
+        ),
+        (
+            "K-VAL-009",
+            "timestamp.nanoseconds".to_owned(),
+            vec![i(-123)],
+            Err("type_error"),
+        ),
+    ]);
     let mut registry = FunctionRegistry::new();
     register_text_json(&mut registry).unwrap();
     let mut exercised = std::collections::BTreeSet::new();

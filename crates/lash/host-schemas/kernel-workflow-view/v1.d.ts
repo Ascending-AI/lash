@@ -196,7 +196,7 @@ export type ActionView = {
    * library bodies and statically known declared callees. Derived from the
    * checker's effect derivation, in canonical order with duplicates removed.
    */
-  "performs": Array<ImportSlot>;
+  "performs": Array<OperationUse>;
   /**
    * A `perform`'s declared result, else the checker's facet.
    */
@@ -358,18 +358,24 @@ export type Callee = ({
 export type CalleeView = ({
   "library": {
     /**
-     * Every installed surface member backed by this identity in the
-     * cell's package set. A private definition has no members.
+     * Every visible Export backed by this identity in the retained
+     * Packages. A private definition has no Exports.
      */
     "exports": Array<ExportName>;
     "id": FunctionId;
-    "name": QualifiedName;
+    "link": LinkId;
+    "name": FunctionName;
     [key: string]: unknown;
   };
 } | {
   "import": ImportSlot;
 } | {
-  "effect": ImportSlot;
+  "timer": {
+    "use_": OperationUse;
+    [key: string]: unknown;
+  };
+} | {
+  "effect": OperationUse;
 });
 
 export type Catch = {
@@ -670,6 +676,8 @@ export type FlowTarget = (("leave" | "end") | {
 
 export type FunctionId = string;
 
+export type FunctionName = string;
+
 /**
  * How a dialect holds a function as a value.
  */
@@ -718,6 +726,8 @@ export type LineRange = {
   "first": number;
   "last": number;
 };
+
+export type LinkId = string;
 
 export type Literal = (("null" | "absent") | {
   "bool": boolean;
@@ -779,6 +789,14 @@ export type NodeCoverage = {
   "site": Site;
 };
 
+/**
+ * One operation Import in one immutable Link. All dispatch, modes and pins use this identity.
+ */
+export type OperationUse = {
+  "link": LinkId;
+  "slot": ImportSlot;
+};
+
 export type Param = {
   "name": Name;
   /**
@@ -834,8 +852,6 @@ export type Protocol = {
    */
   "open": FunctionTarget;
 };
-
-export type QualifiedName = string;
 
 /**
  * A failed readable lens does not invalidate canonical membership or ranges.
@@ -988,7 +1004,7 @@ export type Site = {
 /**
  * What an action does.
  */
-export type SiteKind = (("call" | "perform" | "join" | "join_many" | "yield" | "spawn" | "cancel") | "await");
+export type SiteKind = (("call" | "perform" | "join" | "join_many" | "yield" | "spawn" | "cancel") | "sleep" | "await");
 
 export type StartConvention = ({
   "kind": "direct";

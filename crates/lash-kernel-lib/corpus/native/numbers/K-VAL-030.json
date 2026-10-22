@@ -3,7 +3,7 @@
   "cases": [
     {
       "name": "compare: K-VAL-030 edge",
-      "function": "a64b7137573be490848eb987237515f1e79671eabf043408caf9a83196c7cb77",
+      "function": "06fafae84c379c4870606ae482072fe667a1ae7e07b766bd09a88a5cf75719eb",
       "args": [
         {
           "text": "𐀀"
