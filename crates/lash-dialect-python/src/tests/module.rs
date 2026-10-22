@@ -111,10 +111,10 @@ async def digest(
     );
 }
 
-/// Every top-level `async def` is an entry. One defined inside a block, a
-/// plain `def` and a nested `async def` are ordinary code.
+/// Top-level sync and async defs are Exports; block and nested definitions
+/// remain ordinary code. Each Export preserves its source async flag.
 #[test]
-fn top_level_async_defs_are_the_entries_and_block_local_ones_are_not() {
+fn top_level_function_exports_keep_async_flags_and_exclude_block_locals() {
     let source = "\
 async def first():
     async def nested():
@@ -134,9 +134,25 @@ if helper():
     async def in_block():
         return 5
 ";
+    let lowered = module(source).unwrap();
+    let exported = lowered
+        .document
+        .exports
+        .iter()
+        .filter_map(|(name, export)| match export {
+            lash_kernel_doc::Export::Function(function) => {
+                Some((name.clone(), function.asynchronous))
+            }
+            _ => None,
+        })
+        .collect::<BTreeMap<_, _>>();
     assert_eq!(
-        entries(source).into_keys().collect::<Vec<_>>(),
-        ["first", "second"].map(Name::new)
+        exported,
+        BTreeMap::from([
+            (Name::new("first"), true),
+            (Name::new("helper"), false),
+            (Name::new("second"), true),
+        ])
     );
 }
 
@@ -345,7 +361,10 @@ fn task_cleanup_follows_resolved_calls_and_belongs_to_the_entry_root() {
             .imports
             .values()
             .any(|import| import.name.package.to_string() == "tasks"
-                && import.name.member.as_str() == "cancel_all")
+                && import.name
+                    == lash_kernel_dialect::authoring::helper_name(
+                        &lash_vocabulary::FunctionName::new("tasks.cancel_all").unwrap()
+                    ))
     );
     let tasks = module("import asyncio\nasync def run():\n    async def child():\n        try:\n            await asyncio.sleep(1)\n        finally:\n            print('cleanup')\n    def launch():\n        return asyncio.ensure_future(child())\n    launch()\n    await asyncio.sleep(0)\n    print('done')\n    return 7\n").unwrap();
     let document = &tasks.document;
@@ -360,7 +379,10 @@ fn task_cleanup_follows_resolved_calls_and_belongs_to_the_entry_root() {
                 document.imports[slot].name.to_string(),
             lash_kernel_doc::FunctionTarget::Local(id) => document.functions[id].name.to_string(),
         },
-        "tasks.cancel_all"
+        lash_kernel_dialect::authoring::helper_name(
+            &lash_vocabulary::FunctionName::new("tasks.cancel_all").unwrap()
+        )
+        .to_string()
     );
     let no_try = |body: &[lash_kernel_doc::Stmt]| {
         !body

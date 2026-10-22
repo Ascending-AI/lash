@@ -498,22 +498,44 @@ impl Lowerer<'_> {
                     .iter()
                     .any(|atom| matches!(atom, Atom::Variable(read) if read == name))
         }
-        fn mentions(node: lash_kernel_doc::Node<'_>, name: &Name) -> bool {
-            match node {
-                lash_kernel_doc::Node::Expr(Expr::Variable(read)) if read == name => true,
-                lash_kernel_doc::Node::Expr(Expr::Act(act)) if matches!(&act.kind, ActKind::Call(Callee::Value(read)) | ActKind::Spawn(Callee::Value(read)) if read == name) => {
-                    true
+        fn mentions(
+            node: lash_kernel_doc::Node<'_>,
+            name: &Name,
+            definitions: &BTreeMap<FunctionId, lash_kernel_doc::FunctionDefinition>,
+        ) -> bool {
+            let mut pending = vec![node];
+            let mut closures = BTreeSet::new();
+            while let Some(node) = pending.pop() {
+                match node {
+                    lash_kernel_doc::Node::Expr(Expr::Variable(read)) if read == name => {
+                        return true;
+                    }
+                    lash_kernel_doc::Node::Expr(Expr::Act(act))
+                        if matches!(&act.kind,
+                        ActKind::Call(Callee::Value(read)) | ActKind::Spawn(Callee::Value(read)) if read == name) =>
+                    {
+                        return true;
+                    }
+                    lash_kernel_doc::Node::Stmt(Stmt::Assign {
+                        place: Place::Variable(write),
+                        ..
+                    }) if write == name => return true,
+                    lash_kernel_doc::Node::Action(action) if action_mentions(action, name) => {
+                        return true;
+                    }
+                    lash_kernel_doc::Node::Expr(Expr::Closure(closure)) => {
+                        if closures.insert(closure.function)
+                            && let Some(body) = definitions
+                                .get(&closure.function)
+                                .and_then(|definition| definition.body())
+                        {
+                            pending.push(lash_kernel_doc::Node::Block(&body.block));
+                        }
+                    }
+                    _ => pending.extend(node.children()),
                 }
-                lash_kernel_doc::Node::Stmt(Stmt::Assign {
-                    place: Place::Variable(write),
-                    ..
-                }) if write == name => true,
-                lash_kernel_doc::Node::Action(action) => action_mentions(action, name),
-                _ => node
-                    .children()
-                    .into_iter()
-                    .any(|child| mentions(child, name)),
             }
+            false
         }
         let mut remove = BTreeSet::new();
         for index in 0..body.stmts.len() {
@@ -534,7 +556,11 @@ impl Lowerer<'_> {
                     && write == &name
                 {
                     let mentioned = match value {
-                        Rhs::Expr(value) => mentions(lash_kernel_doc::Node::Expr(value), &name),
+                        Rhs::Expr(value) => mentions(
+                            lash_kernel_doc::Node::Expr(value),
+                            &name,
+                            &self.local_functions,
+                        ),
                         Rhs::Action(action) => action_mentions(action, &name),
                     };
                     if !mentioned {
@@ -554,25 +580,47 @@ impl Lowerer<'_> {
                     ..
                 } = &body.stmts[next]
                     && !carried.is_some_and(|names| names.contains(name.as_str()))
-                    && !mentions(lash_kernel_doc::Node::Expr(iterable), &name)
-                    && !mentions(lash_kernel_doc::Node::Block(else_block), &name)
+                    && !mentions(
+                        lash_kernel_doc::Node::Expr(iterable),
+                        &name,
+                        &self.local_functions,
+                    )
+                    && !mentions(
+                        lash_kernel_doc::Node::Block(else_block),
+                        &name,
+                        &self.local_functions,
+                    )
                     && matches!(pass.first(), Some(Stmt::Assign {
                         place: Place::Variable(write), value: Rhs::Expr(Expr::Variable(read)), ..
                     }) if write == &name && read == binding)
-                    && !body.stmts[next + 1..]
-                        .iter()
-                        .any(|stmt| mentions(lash_kernel_doc::Node::Stmt(stmt), &name))
+                    && !body.stmts[next + 1..].iter().any(|stmt| {
+                        mentions(
+                            lash_kernel_doc::Node::Stmt(stmt),
+                            &name,
+                            &self.local_functions,
+                        )
+                    })
                 {
-                    fn captured(node: lash_kernel_doc::Node<'_>, name: &Name) -> bool {
+                    fn captured(
+                        node: lash_kernel_doc::Node<'_>,
+                        name: &Name,
+                        definitions: &BTreeMap<FunctionId, lash_kernel_doc::FunctionDefinition>,
+                    ) -> bool {
                         match node {
-                            lash_kernel_doc::Node::Expr(Expr::Closure(_)) => mentions(node, name),
+                            lash_kernel_doc::Node::Expr(Expr::Closure(_)) => {
+                                mentions(node, name, definitions)
+                            }
                             _ => node
                                 .children()
                                 .into_iter()
-                                .any(|child| captured(child, name)),
+                                .any(|child| captured(child, name, definitions)),
                         }
                     }
-                    if !captured(lash_kernel_doc::Node::Block(pass), &name) {
+                    if !captured(
+                        lash_kernel_doc::Node::Block(pass),
+                        &name,
+                        &self.local_functions,
+                    ) {
                         if let Stmt::For {
                             binding,
                             body: pass,
@@ -607,7 +655,11 @@ impl Lowerer<'_> {
                     }
                     break;
                 }
-                if mentions(lash_kernel_doc::Node::Stmt(&body.stmts[next]), &name) {
+                if mentions(
+                    lash_kernel_doc::Node::Stmt(&body.stmts[next]),
+                    &name,
+                    &self.local_functions,
+                ) {
                     break;
                 }
             }

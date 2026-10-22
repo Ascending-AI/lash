@@ -129,13 +129,15 @@ pub(crate) fn kernel_text(source: &str) -> String {
     let printed = lash_kernel_doc::print_document(&lowered.document);
     let mut text = String::new();
     for definition in lowered.document.functions.values() {
-        if matches!(
-            definition.implementation,
-            lash_kernel_doc::Implementation::Guest {
-                metering: lash_kernel_doc::Metering::Statements,
-                ..
-            }
-        ) {
+        if lash_kernel_doc::FunctionCatalog::header(library(), &definition.identity()).is_none()
+            && matches!(
+                definition.implementation,
+                lash_kernel_doc::Implementation::Guest {
+                    metering: lash_kernel_doc::Metering::Statements,
+                    ..
+                }
+            )
+        {
             text.push_str(&lash_kernel_doc::print_definition(definition));
         }
     }
@@ -147,9 +149,45 @@ pub(crate) fn kernel_text(source: &str) -> String {
 
 /// Whether authored code invokes this exact imported helper.
 pub(crate) fn calls_helper(source: &str, helper: &str) -> bool {
+    use lash_kernel_dialect::Library as _;
+    use lash_kernel_doc::{ActKind, Action, Callee, Expr, Node};
     let lowered = lower(source).unwrap_or_else(|error| panic!("{error}"));
-    super::linked::helper_slot(&lowered.document, helper)
-        .is_some_and(|slot| kernel_text(source).contains(&format!("invoke import {}(", slot.0)))
+    let document = &lowered.document;
+    let function = library().resolve(helper).expect("known helper");
+    let slot = super::linked::helper_slot(document, helper);
+    let matches = |callee: &Callee| match callee {
+        Callee::Local(id) => *id == function,
+        Callee::Import(found) => Some(*found) == slot,
+        _ => false,
+    };
+    let mut pending = document
+        .units()
+        .filter(|(unit, _)| match unit {
+            lash_vocabulary::sites::Unit::Library(id) => {
+                lash_kernel_doc::FunctionCatalog::header(library(), id).is_none()
+            }
+            lash_vocabulary::sites::Unit::Main => true,
+            _ => false,
+        })
+        .map(|(_, body)| Node::Block(body))
+        .collect::<Vec<_>>();
+    while let Some(node) = pending.pop() {
+        pending.extend(node.children());
+        if match node {
+            Node::Expr(Expr::Call {
+                function: called, ..
+            }) => *called == function,
+            Node::Expr(Expr::Act(action)) => match &action.kind {
+                ActKind::Call(callee) => matches(callee),
+                _ => false,
+            },
+            Node::Action(Action::Call { callee, .. }) => matches(callee),
+            _ => false,
+        } {
+            return true;
+        }
+    }
+    false
 }
 
 pub(super) const BOUNDS: Bounds = Bounds {
@@ -881,7 +919,11 @@ fn paged_arithmetic_keeps_held_definitions_and_exact_charge() {
         .iter()
         .map(|name| library().resolve(name).unwrap())
         .collect();
-    let mut previous = NamedLibrary::resolving(current, |id| !ids.contains(id)).unwrap();
+    let roots = lash_vm_releases::helper_release()
+        .expect("helper release")
+        .resolver_roots();
+    let mut previous =
+        NamedLibrary::resolving(current, |id| roots.contains(id) && !ids.contains(id)).unwrap();
     let definitions = lash_kernel_dialect::define_functions(PREVIOUS_ARITHMETIC, &mut previous)
         .expect("the previous arithmetic definitions resolve");
     let mut registry = current.as_ref().clone();

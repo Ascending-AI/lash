@@ -148,7 +148,7 @@
  },
  "tests/basics/int_bytes.py": {
   "status": "refused",
-  "qualifier": "PY_IMPORT_UNSUPPORTED"
+  "qualifier": "PY_METHOD_UNSUPPORTED"
  },
  "tests/basics/int_divmod.py": {
   "status": "pass",
