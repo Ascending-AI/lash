@@ -256,7 +256,6 @@ struct Freezer<'a> {
     depth: usize,
     named: &'a BTreeSet<EntityId>,
     functions: BTreeSet<EntityId>,
-    seen: BTreeMap<EntityId, u64>,
 }
 impl Freezer<'_> {
     fn sequence(&self, values: Vec<PageValue>, nested: bool) -> Result<Tree<PageValue>, HeapFault> {
@@ -340,41 +339,23 @@ impl Freezer<'_> {
         result
     }
     fn object(&mut self, id: EntityId, value: &PageValue) -> Result<PageValue, HeapWriteError> {
-        if let Some(ordinal) = self.seen.get(&id).copied() {
-            if self.active.contains(&id) && !self.named.contains(&id) {
-                return Err(nondata());
-            }
-            let id = EntityId {
-                family: RELATIVE,
-                ordinal,
-            };
-            return Ok(match value {
-                PageValue::Closure(_) => PageValue::Closure(id),
-                PageValue::List(_) => PageValue::List(id),
-                PageValue::Map(_) => PageValue::Map(id),
-                PageValue::Set(_) => PageValue::Set(id),
-                _ => PageValue::Record(id),
-            });
-        }
+        // D-FAM / ADR 0145 §9: each mutable occurrence gets its own ordinal.
+        // Only an ancestor is a cycle; a prior sibling is copied again.
+        // Named closure environments are retained separately by value().
         if !self.active.insert(id) {
             return Err(nondata());
         }
         let ordinal = self.entities;
         self.entities = plus(self.entities, 1)?;
-        self.seen.insert(id, ordinal);
         let mut elements = Vec::new();
-        if !matches!(value, PageValue::Closure(_)) {
-            self.heap.visit(id, &mut |e| {
-                elements.push(match e {
-                    Element::Item(v) => (v.clone(), PageValue::Absent),
-                    Element::Entry { key, value } => (key.clone(), value.clone()),
-                    Element::Field { name, value } => {
-                        (PageValue::Text(name.clone()), value.clone())
-                    }
-                });
-                ControlFlow::Continue(())
-            })?;
-        }
+        self.heap.visit(id, &mut |e| {
+            elements.push(match e {
+                Element::Item(v) => (v.clone(), PageValue::Absent),
+                Element::Entry { key, value } => (key.clone(), value.clone()),
+                Element::Field { name, value } => (PageValue::Text(name.clone()), value.clone()),
+            });
+            ControlFlow::Continue(())
+        })?;
         let body = if matches!(value, PageValue::List(_)) {
             let values = elements
                 .iter()
@@ -441,7 +422,6 @@ impl Freezer<'_> {
             PageValue::List(_) => PageValue::List(id),
             PageValue::Map(_) => PageValue::Map(id),
             PageValue::Set(_) => PageValue::Set(id),
-            PageValue::Closure(_) => PageValue::Closure(id),
             _ => PageValue::Record(id),
         })
     }
@@ -494,7 +474,6 @@ impl PagedHeap {
             depth: 0,
             named,
             functions: BTreeSet::new(),
-            seen: BTreeMap::new(),
         };
         let value = freezer.value(value)?;
         freezer.finish(value)

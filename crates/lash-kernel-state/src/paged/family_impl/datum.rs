@@ -10,7 +10,6 @@ impl PagedHeap {
             heap: self,
             objects: Tree::new(false),
             active: BTreeSet::new(),
-            seen: BTreeMap::new(),
             entities: 0,
             cost: 0,
             charge: 0,

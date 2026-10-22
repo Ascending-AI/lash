@@ -296,8 +296,8 @@ pub struct CheckpointRoot {
 impl CheckpointRoot {
     /// The encoded host-name list's byte budget (S1, FIG-6499).
     ///
-    /// The 4096-byte root reserves 797 token bytes for its fixed fields:
-    /// struct header (2), kernel (6), document (34), closure/owner (66),
+    /// The 4096-byte root reserves 831 token bytes for its fixed fields:
+    /// struct header (2), kernel (6), link (34), document (34), closure/owner (66),
     /// limits (24), target (3), nine full tree roots (9 * 58), heap (33), largest ended
     /// status (66), and meters (41). All integers use their maximum widths.
     /// Another 256 bytes cover the envelope: each of at most 13 distinct

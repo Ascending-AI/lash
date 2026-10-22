@@ -585,13 +585,6 @@ migration_refusal_law!(
     "state_not_carried"
 );
 
-/// FN-UPGRADE: a function value a host holds, written in the version
-/// before the synthetic successor, upgrades as a stored workflow's document
-/// does: its code is rewritten onto the successor's helpers and its
-/// identity follows. A value whose code calls a helper the build does not
-/// hold is refused, typed, rather than rebound to a helper of that name.
-#[cfg(feature = "synthetic-next")]
-
 /// A withdrawn operation wait never receives the later step's outcome.
 #[test]
 fn withdrawn_operation_waits_drop_late_outcomes() {
@@ -599,7 +592,14 @@ fn withdrawn_operation_waits_drop_late_outcomes() {
     let (state, action) = settle(
         state,
         &run,
-        parked(vec![effect(1, element(0)), effect(2, element(1))], vec![]),
+        parked(
+            vec![
+                effect(1, element(0)),
+                effect(2, element(1)),
+                effect(3, element(2)),
+            ],
+            vec![],
+        ),
     );
     assert_eq!(state.pages, Some(sealed().root));
     let EngineAction::Steps { steps, .. } = action else {
@@ -607,15 +607,25 @@ fn withdrawn_operation_waits_drop_late_outcomes() {
     };
     let late = steps[0].step().clone();
     let live = steps[1].step().clone();
+    let pending = steps[2].step().clone();
     let (state, action) = settle(state, &live, completed("null".into()));
     let (run, _, _) = run_of(&action);
-    let (state, _) = settle(
+    let (state, action) = settle(
         state,
         &run,
         parked(vec![], vec![lash_vocabulary::sites::testkit::wait_id(1)]),
     );
+    assert!(matches!(action, EngineAction::Idle));
     assert_eq!(state.pages, Some(sealed().root));
     let (state, action) = settle(state, &late, completed("null".into()));
-    assert!(!matches!(action, EngineAction::Steps { .. }));
+    assert!(matches!(action, EngineAction::Idle));
     assert_eq!(state.pages, Some(sealed().root));
+    let (_, action) = settle(state, &pending, completed("null".into()));
+    let (_, input, effects) = run_of(&action);
+    assert!(effects.is_empty());
+    assert_eq!(input.deliver.len(), 1);
+    assert_eq!(
+        input.deliver[0].wait,
+        lash_vocabulary::sites::testkit::wait_id(3)
+    );
 }

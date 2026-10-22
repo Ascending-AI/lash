@@ -247,7 +247,7 @@ struct Report;
 #[async_trait::async_trait]
 impl Activation for Report {
     async fn activate(&self, owned: Owned) -> Exit {
-        report(&format!("owns {}", owned.actor()));
+        let mut announced = false;
         loop {
             let Ok(mut tx) = owned.begin().await else {
                 return Exit::Released;
@@ -261,6 +261,12 @@ impl Activation for Report {
                 for seq in seqs {
                     report(&format!("acked {} {seq}", owned.actor()));
                 }
+            }
+            if !announced {
+                // The parent mails only after the initial scan is finished,
+                // so it observes delivery through the wait below.
+                report(&format!("owns {}", owned.actor()));
+                announced = true;
             }
             owned.wait_for_mail().await;
         }
@@ -311,7 +317,6 @@ fn swept() -> lash_protocol_types::attachment::AttachmentId {
 enum WakeEvidence {
     Listening(Box<NodeLease>),
     Watched(Vec<BootLiveness>),
-    Woke(Vec<ActorKey>),
     Dropped(Vec<ActorKey>),
     Reaped(Vec<Reaped>),
 }
@@ -322,12 +327,14 @@ struct ObservedWakes {
     inner: Arc<dyn NodeWakes>,
     evidence: mpsc::UnboundedSender<WakeEvidence>,
     drop_owned: bool,
+    report_owned: bool,
 }
 
 struct ObservedFeed {
     inner: Box<dyn NodeWakeFeed>,
     evidence: mpsc::UnboundedSender<WakeEvidence>,
     drop_owned: bool,
+    report_owned: bool,
 }
 
 #[async_trait::async_trait]
@@ -340,7 +347,13 @@ impl NodeWakeFeed for ObservedFeed {
                     let _ = self.evidence.send(WakeEvidence::Dropped(actors.clone()));
                     continue;
                 }
-                let _ = self.evidence.send(WakeEvidence::Woke(actors.clone()));
+                if self.report_owned {
+                    // Report before the runner can wake the owner. Forwarding
+                    // through another task would race the owner's ack report.
+                    for actor in actors {
+                        report(&format!("woke {actor}"));
+                    }
+                }
             }
             return event;
         }
@@ -370,6 +383,7 @@ impl NodeWakes for ObservedWakes {
             inner,
             evidence: self.evidence.clone(),
             drop_owned: self.drop_owned,
+            report_owned: self.report_owned,
         }))
     }
 
@@ -463,20 +477,12 @@ async fn run_child(role: &str, database: &Path) {
         std::future::pending::<()>().await;
     }
     let node_wakes = if role == "hot" || role == "rung" {
-        let (send, mut evidence) = mpsc::unbounded_channel();
-        tokio::spawn(async move {
-            while let Some(event) = evidence.recv().await {
-                if let WakeEvidence::Woke(actors) = event {
-                    for actor in actors {
-                        report(&format!("woke {actor}"));
-                    }
-                }
-            }
-        });
+        let (send, _) = mpsc::unbounded_channel();
         let observed: Arc<dyn NodeWakes> = Arc::new(ObservedWakes {
             inner: stores.node_wakes().expect("file node wakes"),
             evidence: send,
             drop_owned: false,
+            report_owned: true,
         });
         Some(observed)
     } else {
@@ -572,6 +578,7 @@ async fn a_wake_crosses_processes_and_a_killed_process_is_reaped_by_its_lock() {
             inner: stores.node_wakes().expect("file node wakes"),
             evidence: send,
             drop_owned: false,
+            report_owned: false,
         })),
         "parent",
         DurableSettings::default(),
