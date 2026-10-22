@@ -1377,3 +1377,32 @@ fn spool_bytes_exclude_an_overlapping_runtime() {
         "only the measured runtime's two activations wrote these bytes"
     );
 }
+
+/// D-GRANT: publishing the first root preserves capabilities already issued
+/// by the same activation; it acquires storage protection, not a new identity.
+#[test]
+fn acquiring_the_first_root_lease_preserves_issued_capabilities() {
+    let dir = tempfile::tempdir().expect("dir");
+    let root = SpoolRoot::open(dir.path(), 1 << 20).expect("root");
+    let store = Arc::new(Committed::default());
+    let base = page("base", &[]);
+    let mut pages = ActivationPages::new(
+        store,
+        None,
+        Duration::from_secs(20),
+        CapabilityKey::fresh(),
+        3,
+        Box::new(root.spool(StageLeaseId(11)).expect("spool")),
+        Arc::new(SystemClock),
+        Duration::from_secs(60),
+        PageLimits::within(ProtocolBounds::standard().decode),
+    );
+    let capability = pages.issue(base.id);
+    pages.lease_on(lease(base.id));
+    assert_eq!(pages.verify(&capability), Ok(base.id));
+    let mut forged = capability;
+    forged.mac = [0; 32];
+    assert_eq!(pages.verify(&forged), Err(PageRefusal::Unauthorized));
+    pages.end();
+    assert_eq!(pages.verify(&capability), Err(PageRefusal::Unauthorized));
+}

@@ -570,6 +570,12 @@ impl KernelMachine {
         let saved = saved?;
         let mut functions = functions;
         for (name, record) in saved.functions {
+            let key = lash_kernel_state::kernel_internals::metadata::metadata_key(&name);
+            if functions.get(&key, self.heap.pages())?.is_some_and(|held| {
+                held.environment == record.environment && held.callable == record.callable
+            }) {
+                continue;
+            }
             functions.write(
                 lash_kernel_state::kernel_internals::metadata::metadata_key(&name),
                 record,

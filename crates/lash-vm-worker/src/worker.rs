@@ -537,7 +537,15 @@ impl<'embedding> Server<'embedding> {
             .transpose()?;
         let captions = save
             .as_ref()
-            .map(|save| lash_kernel_dialect::function_captions(&program.document, &save.written))
+            .map(|save| {
+                let mut captions = std::collections::BTreeMap::new();
+                for document in program.documents.values() {
+                    for entry in lash_kernel_dialect::function_captions(document, &save.written) {
+                        captions.insert(entry.target.clone(), entry);
+                    }
+                }
+                captions.into_values().collect()
+            })
             .unwrap_or_default();
         let mut machine = match start.from {
             StartFrom::Fresh(payload) => {

@@ -33,10 +33,9 @@ pub struct Written {
     /// none.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub call: Option<CallShape>,
-    /// Statement and arm captions, relative to this function's body.
-    /// Saving and crossing shift these paths alongside the code they copy.
+    /// Statement and arm captions at their immutable defining function sites.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub captions: Vec<(Vec<u32>, lash_kernel_doc::Caption)>,
+    pub captions: Vec<lash_kernel_doc::CaptionEntry>,
 }
 
 /// The parameters a call places arguments by, and whether the call makes a
@@ -174,28 +173,23 @@ pub fn closure_site(statement: &Stmt, site: &Site) -> Option<Site> {
 }
 
 /// Captions carried by the written table, at the running document's sites.
-/// A closure's body is its first block child; a saved declaration's row is
-/// keyed by its function block directly.
+/// Closure bodies and saved declarations name their defining function unit.
 #[must_use]
 pub fn function_captions(
     document: &lash_kernel_doc::Document,
     written: &BTreeMap<Site, Written>,
 ) -> Vec<lash_kernel_doc::CaptionEntry> {
     let mut captions = BTreeMap::new();
-    for (site, written) in written {
-        let body = match document.node(site) {
-            Some(Node::Expr(Expr::Closure(_))) => site.child(0),
-            Some(Node::Block(_)) => site.clone(),
-            _ => continue,
-        };
-        for (path, caption) in &written.captions {
-            let mut target = body.clone();
-            target.path.extend(path);
-            captions.insert(target, caption.clone());
+    for written in written.values() {
+        for entry in &written.captions {
+            if entry
+                .target
+                .site()
+                .is_some_and(|site| document.node(site).is_some())
+            {
+                captions.insert(entry.target.clone(), entry.clone());
+            }
         }
     }
-    captions
-        .into_iter()
-        .map(|(site, caption)| lash_kernel_doc::CaptionEntry::site(site, caption))
-        .collect()
+    captions.into_values().collect()
 }

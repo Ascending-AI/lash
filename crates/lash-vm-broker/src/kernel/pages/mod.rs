@@ -221,6 +221,9 @@ pub struct ActivationPages<R: ?Sized> {
     /// held activation renews on.
     clock: Arc<dyn Clock>,
     key: CapabilityKey,
+    /// Capability identity is fixed for this activation, including before its
+    /// first publication acquires a storage lease.
+    root_authority: PageAuthority,
     epoch: u64,
     spool: Box<dyn StageSpool>,
     /// The budget of host work `spent` may reach across every exchange of
@@ -277,6 +280,7 @@ impl<R: LeasedReads + ?Sized> ActivationPages<R> {
     ) -> Self {
         Self {
             renewed: clock.now(),
+            root_authority: PageAuthority::Root(lease.as_ref().map_or(0, |lease| lease.id.0)),
             store,
             lease,
             published: Vec::new(),
@@ -479,6 +483,7 @@ impl<R: LeasedReads + ?Sized> ActivationPages<R> {
     /// Ends the activation's reads: the leases its broker took, which the
     /// caller releases; never the host's own.
     pub fn end(&mut self) -> Vec<RootLease> {
+        self.key = CapabilityKey::fresh();
         let owned = std::mem::take(&mut self.owned);
         let lease = self.lease.take().filter(|_| owned);
         lease
@@ -510,8 +515,7 @@ impl<R: LeasedReads + ?Sized> ActivationPages<R> {
     }
 
     fn root_authority(&self) -> PageAuthority {
-        // An activation with no lease issues root authority nothing reads.
-        PageAuthority::Root(self.lease.as_ref().map_or(0, |lease| lease.id.0))
+        self.root_authority
     }
 
     fn stage_authority(&self) -> PageAuthority {

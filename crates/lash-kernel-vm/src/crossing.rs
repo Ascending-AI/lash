@@ -35,6 +35,7 @@ pub(crate) struct CrossingHeap<'m> {
 }
 
 pub(crate) struct CrossingRun<'a> {
+    pub captions: &'a [lash_kernel_doc::CaptionEntry],
     pub documents: &'a BTreeMap<DocumentId, Arc<lash_kernel_doc::Document>>,
     pub instances: &'a BTreeMap<LinkId, crate::interface::PreparedInstance>,
     pub catalog: &'a dyn FunctionCatalog,
@@ -285,7 +286,14 @@ fn copy(
             )
             .into());
         }
-        let function = extract_function(heap, run, value, budget, path)?;
+        let function =
+            extract_function(heap, run, value, budget, path).map_err(|error| match error {
+                CopyError::Raised(mut raised) => {
+                    raised.message = format!("a function cannot leave the run: {}", raised.message);
+                    CopyError::Raised(raised)
+                }
+                other => other,
+            })?;
         return Ok(Datum::FunctionValue(Box::new(function)));
     }
     Ok(match value {

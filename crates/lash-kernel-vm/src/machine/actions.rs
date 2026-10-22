@@ -1,6 +1,7 @@
 //! Actions: calls, waits and tasks (`K-TASK`), as a statement's own action
 //! or nested in its expression (`K-EVAL-008`).
 
+use lash_kernel_state::paged::HeapLifecycle;
 use lash_vocabulary::package::OperationMode;
 use lash_vocabulary::sites::EffectIdentity;
 use std::collections::BTreeSet;
@@ -856,6 +857,41 @@ impl KernelMachine {
                         (code, identity.callable.link)
                     }
                 };
+                // Saved environments are immutable templates. Each invocation owns
+                // fresh cells and fresh instances of its frozen data.
+                let entity = self.in_arena(|arena| Ok(arena.facts(closure)?.entity))?;
+                if let Some(entity) = entity {
+                    let functions = super::session::open_tree::<
+                        lash_kernel_state::paged::FunctionRecord,
+                    >(self.functions);
+                    let mut saved = None;
+                    functions.visit(self.heap.pages(), &mut |_, record| {
+                        if record.environment == entity {
+                            saved = Some(record.clone());
+                            false
+                        } else {
+                            true
+                        }
+                    })?;
+                    if let Some(saved) = saved {
+                        cells.clear();
+                        let compiled = exe.code(code);
+                        for name in compiled
+                            .captures
+                            .iter()
+                            .map(|capture| &compiled.slots[capture.inner as usize].name)
+                            .chain(compiled.free.iter().map(|(name, _)| name))
+                        {
+                            let frozen = saved
+                                .captures
+                                .get(name)
+                                .ok_or_else(|| fault("saved capture is missing"))?;
+                            let page = self.heap.instantiate(frozen).map_err(Interrupt::from)?;
+                            let value = self.admit_page(&page)?;
+                            cells.push(self.new_cell(value));
+                        }
+                    }
+                }
                 Ok(Target::Code(code, cells, link))
             }
             Value::Function(handle) => {

@@ -132,6 +132,8 @@ struct Pending {
 /// Why a cell's saved functions could not be relinked against its Namespaces.
 #[derive(Debug, thiserror::Error)]
 pub(super) enum RelinkError {
+    #[error(transparent)]
+    Package(#[from] lash_execution_contracts::process::linking::EnginePortError),
     #[error("the cell's Namespaces do not assemble: {0}")]
     Library(String),
     #[error(transparent)]
@@ -588,7 +590,7 @@ impl CodeModeExecutionState {
             documents
                 .admit_identified_document(claim, &function.document)
                 .await
-                .map_err(|error| RelinkError::Library(error.to_string()))?;
+                .map_err(RelinkError::Package)?;
             let fulfilled = documents
                 .fulfil(&lash_execution_contracts::process::linking::FulfilRequest {
                     document: function.document.id(),
@@ -598,7 +600,7 @@ impl CodeModeExecutionState {
                     purpose: lash_execution_contracts::process::linking::LinkPurpose::Cell,
                 })
                 .await
-                .map_err(|error| RelinkError::Library(error.to_string()))?;
+                .map_err(RelinkError::Package)?;
             documents
                 .hold(
                     claim,
@@ -607,7 +609,7 @@ impl CodeModeExecutionState {
                     ),
                 )
                 .await
-                .map_err(|error| RelinkError::Library(error.to_string()))?;
+                .map_err(RelinkError::Package)?;
             match lash_kernel_dialect::relink_saved(&saved, &fulfilled.content) {
                 Ok(relinked) if relinked.callable == function.callable => {}
                 Ok(relinked) => {

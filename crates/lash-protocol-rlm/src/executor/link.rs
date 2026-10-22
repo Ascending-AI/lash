@@ -127,7 +127,10 @@ pub(super) async fn link_cell(
                 .map_err(|error| host_failure(error.to_string()))?,
         )
         .await
-        .map_err(|error| host_failure(error.to_string()))?;
+        .map_err(|error| match error {
+            session::RelinkError::Package(error) => package_error(error),
+            other => host_failure(other.to_string()),
+        })?;
     let namespaces = boundary
         .namespaces(&documents)
         .await
@@ -145,7 +148,7 @@ pub(super) async fn link_cell(
             functions: state.lowering_functions(),
         })
         .await;
-    let (document, source_map, written, function_values) = match lowered {
+    let (document, source_map, mut written, function_values) = match lowered {
         Ok(Response::Lowered {
             document,
             source_map,
@@ -281,6 +284,17 @@ pub(super) async fn link_cell(
         .await
         .map_err(|error| host_failure(error.to_string()))?;
     ctx.cell_execution_registered(execution);
+    for function in state.lowering_functions().values() {
+        if let Some(facts) = &function.written {
+            written.insert(
+                lash_vocabulary::sites::Site::new(
+                    lash_vocabulary::sites::Unit::Library(function.callable.function),
+                    Vec::new(),
+                ),
+                facts.clone(),
+            );
+        }
+    }
     let envelope = CellEnvelope {
         code: CellEnvelope::code_digest(code),
         dialect: state.dialect().to_owned(),

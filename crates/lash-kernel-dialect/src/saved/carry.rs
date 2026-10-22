@@ -142,12 +142,22 @@ pub fn save(
         .max()
         .map_or(0, |index| index + 1);
     let mut saved = Saved::default();
+    let mut refusals = BTreeMap::new();
     for (next, found) in (first..).zip(found) {
         let name = names
             .entry(found.closure)
             .or_insert_with(|| Name::saved(next))
             .clone();
         let result = (|| -> Result<SavedFunction, SaveError> {
+            let callable = heap.closure(found.closure)?.callable;
+            let defining = if callable.link == left.link {
+                Some(left.document)
+            } else {
+                left.documents.get(&callable.link)
+            };
+            if defining.is_none_or(|document| document.main.is_none()) {
+                return Err(SaveError::Refused(NotSaved::MadeByLibrary));
+            }
             let gathered = gather(
                 &mut Saving {
                     heap: &mut *heap,
@@ -207,6 +217,7 @@ pub fn save(
                 saved.functions.insert(name, function);
             }
             Err(SaveError::Refused(why)) => {
+                refusals.insert(found.closure, why.clone());
                 saved.refused.insert(name, why);
             }
             Err(SaveError::Heap(fault)) => return Err(fault),
@@ -254,7 +265,10 @@ pub fn save(
             saved.refused.insert(name.clone(), NotSaved::Task);
             continue;
         };
-        match holds(heap, value, &named)? {
+        match holds(heap, value, &named, &refusals)? {
+            Holds::Refused(why) => {
+                saved.refused.insert(name.clone(), why);
+            }
             Holds::Task => {
                 saved.refused.insert(name.clone(), NotSaved::Task);
             }
@@ -269,6 +283,7 @@ pub fn save(
     Ok(saved)
 }
 enum Holds {
+    Refused(NotSaved),
     Task,
     Keyed,
     Closures,
@@ -277,6 +292,7 @@ fn holds(
     heap: &PagedHeap,
     value: &PageValue,
     named: &BTreeSet<EntityId>,
+    refusals: &BTreeMap<EntityId, NotSaved>,
 ) -> Result<Holds, HeapFault> {
     let mut keyed = false;
     let mut objects = BTreeSet::new();
@@ -285,6 +301,9 @@ fn holds(
     while let Some((value, fixed)) = pending.pop() {
         match &value {
             PageValue::Task(_) | PageValue::Ref(Identity::Task(_)) => return Ok(Holds::Task),
+            PageValue::Closure(id) if refusals.contains_key(id) => {
+                return Ok(Holds::Refused(refusals[id].clone()));
+            }
             PageValue::Closure(id) if fixed || !named.contains(id) => keyed = true,
             PageValue::Closure(_) => {}
             PageValue::Ref(Identity::Object(id)) => {

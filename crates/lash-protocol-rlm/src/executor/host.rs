@@ -165,7 +165,7 @@ impl CellHostLedgers {
                 let record = call.record()?;
                 Some(lash_core::ExecutedCall {
                     result_summary: None,
-                    operation: call.operation.to_string(),
+                    operation: record.tool.clone(),
                     outcome: lash_core::ExecutedCallOutcome::from(&record.output.outcome),
                     call_id: Some(record.call_id.clone()),
                 })

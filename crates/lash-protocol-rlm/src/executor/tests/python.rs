@@ -376,28 +376,22 @@ async fn a_saved_function_is_refused_where_a_tool_it_calls_is_missing() {
     restored
         .restore_execution_graph(&saved, lash_core::plugin::ExecutionGraphPurpose::Working)
         .expect("restore");
+    let ctx = cell_context(
+        &host,
+        SESSION,
+        TURN,
+        "exec-code:1",
+        Arc::new(super::saved_functions::NoTools),
+    );
     let refused = run_cell(
         &mut restored,
-        cell_context(
-            &host,
-            SESSION,
-            TURN,
-            "exec-code:1",
-            Arc::new(super::saved_functions::NoTools),
-        ),
+        ctx.clone(),
         &python_services(),
         "await control.finish(await shout('b'))",
     )
     .await;
-    let error = refused.error().expect("missing tool refuses the cell");
-    assert!(
-        error.message.contains("PY_SAVED_FUNCTION_UNUSABLE")
-            && error.message.contains(
-                "the saved function `shout` calls `echo.say`, which this session does not offer"
-            ),
-        "{}",
-        error.message
-    );
+    assert!(refused.error().is_some(), "missing tool refuses the cell");
+    super::saved_functions::assert_package_refusal(&ctx, false);
     assert_eq!(tools.answered(), ["a"]);
 }
 

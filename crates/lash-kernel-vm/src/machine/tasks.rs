@@ -774,7 +774,12 @@ pub(super) fn source_body(
             .rank_get(index, access)?
             .ok_or_else(|| HeapFault::Malformed("a task frame is missing".into()))?;
         let statement = frame.statement.resolve(access)?;
-        if matches!(statement.unit, lash_vocabulary::sites::Unit::Library(_)) {
+        if matches!(statement.unit, lash_vocabulary::sites::Unit::Library(_))
+            && exe
+                .instances
+                .get(&frame.link)
+                .is_none_or(|document| document.main.is_none())
+        {
             continue;
         }
         let body = (0..=statement.path.len())

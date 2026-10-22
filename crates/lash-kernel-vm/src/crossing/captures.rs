@@ -81,8 +81,9 @@ impl Graph {
             let closure = heap.heap.closure(*id)?;
             let site = closure.site.resolve(heap.heap.pages())?;
             creation = Some(site.as_ref().clone());
-            if let Some(start) = lash_kernel_doc::snapshot::closure_at(document, &site)
+            let start = lash_kernel_doc::snapshot::closure_at(document, &site)
                 .and_then(|c| c.presentation.as_ref())
+                .ok_or_else(|| raised("not_data", "the function states no start signature"))?;
             {
                 signature = start.signature.clone();
                 convention = start.convention.clone();
@@ -97,6 +98,26 @@ impl Graph {
                     name.resolve(heap.heap.pages())?,
                     heap.heap.variable_get(cell)?,
                 );
+            }
+            if site.unit == lash_vocabulary::sites::Unit::Main {
+                if let Some(body) = definition.body() {
+                    let params = definition
+                        .signature
+                        .params
+                        .iter()
+                        .map(|p| p.name.clone())
+                        .collect::<Vec<_>>();
+                    for name in
+                        lash_kernel_doc::snapshot::CodeReads::of(&params, &body.block, run.catalog)
+                            .free
+                    {
+                        if !captured.contains_key(&name) {
+                            if let Some(value) = heap.heap.session_binding(&name)? {
+                                captured.insert(name, value);
+                            }
+                        }
+                    }
+                }
             }
         } else if let Some(export) = document.exports.values().find_map(|export| match export {
             lash_kernel_doc::Export::Function(export) if export.function == callable.function => {
@@ -127,6 +148,20 @@ impl Graph {
         } else {
             representation = FunctionRepresentation::Bare;
         }
+        let mut captioned = std::collections::BTreeSet::new();
+        let mut pending = vec![callable.function];
+        while let Some(function) = pending.pop() {
+            if !captioned.insert(function) {
+                continue;
+            }
+            if let Some(body) = document
+                .functions
+                .get(&function)
+                .and_then(|definition| definition.body())
+            {
+                pending.extend(lash_kernel_doc::Node::Block(&body.block).functions_within());
+            }
+        }
         let mut captures = BTreeMap::new();
         for (name, value) in captured {
             captures.insert(name, self.value(heap, run, &value, budget, path)?);
@@ -139,9 +174,10 @@ impl Graph {
             representation,
             creation,
             token,
-            captions: lash_kernel_doc::Captions::empty(
-                defining_document(run, callable)?.identity(),
-            ),
+            captions: lash_kernel_doc::Captions::new(
+                defining_document(run, callable)?,
+                run.captions.iter().filter(|entry| entry.target.site().is_some_and(|site| matches!(&site.unit, lash_vocabulary::sites::Unit::Library(function) if captioned.contains(function)))).cloned().collect(),
+            ).map_err(|error| raised("not_data", error.to_string()))?,
         })))
     }
 
@@ -160,6 +196,11 @@ impl Graph {
             return self.function(heap, run, value, budget, path);
         }
         Ok(match value {
+            PageValue::Task(_) | PageValue::Ref(lash_kernel_doc::heap::Identity::Task(_)) => {
+                return Err(
+                    raised("not_data", "the function holds a task or a pending promise").into(),
+                );
+            }
             PageValue::Tuple(tuple) => CaptureValue::Tuple(
                 members(heap.heap, tuple)?
                     .iter()

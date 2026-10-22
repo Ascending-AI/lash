@@ -124,6 +124,7 @@ impl DurableHost {
             .hold_helper_release(&content_claim, &release.content, &release.labels)
             .await
             .expect("hold the fixture's deployment code");
+        super::packages::deploy_helpers(&backend, &content_claim).await;
         Self {
             documents,
             backend,
@@ -297,7 +298,18 @@ async fn register(backend: &lash_execution_contracts::backend::Backend, index: u
             .natives
             .extend(&document.requires.natives);
     }
+    capabilities.machine.natives.extend(
+        lash_vm_releases::PACKAGES
+            .iter()
+            .flat_map(|package| package.natives.iter().map(|(id, _)| *id)),
+    );
     let tools = lash_core::testing::test_tools_provider();
+    capabilities
+        .callbacks
+        .insert(lash_vocabulary::claims::CallbackRequirement {
+            registry: lash_vocabulary::claims::RegistryKind::Session,
+            callback: tools.callback_identity(),
+        });
     capabilities
         .providers
         .insert(lash_vocabulary::ProviderName {
@@ -331,8 +343,21 @@ async fn claim(
         .expect("claim the law's session actor")
         .into_iter()
         .find(|claimed| &claimed.actor == actor)
-        .map(|claimed| claimed.epoch)
-        .expect("the law's session actor is claimable");
+        .map(|claimed| claimed.epoch);
+    let Some(epoch) = epoch else {
+        let required = backend
+            .durable()
+            .actor_requirements(None, 16)
+            .await
+            .expect("requirements");
+        let missing = required
+            .into_iter()
+            .filter(|(owner, _)| owner == actor)
+            .flat_map(|(_, required)| required)
+            .filter(|required| !lease.serves.contains(required))
+            .collect::<Vec<_>>();
+        panic!("the law's session actor is not claimable; unserved: {missing:?}");
+    };
     lash_core::ActorContext::new(
         backend.clone(),
         actor.clone(),
