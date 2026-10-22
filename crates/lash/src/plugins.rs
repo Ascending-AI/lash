@@ -11,6 +11,7 @@ pub use lash_core::plugin::{
     ProcessStartPort, ProcessTransferPort, ProcessValidateVisiblePort, RecordedToolCatalogPort,
     ServiceBindings, SessionCreatePort, SessionGraphAppendPort, TurnScopePort,
 };
+pub use lash_core_store::source_map::{MapKey, MapValue, SharedSourceMap};
 pub use lash_core_store::tool_run::{StateAuthority, StateCommandLimits};
 // The vocabulary this module's signatures name (the facade-completeness rule).
 pub use lash_core::ArtifactReferrerPorts;
