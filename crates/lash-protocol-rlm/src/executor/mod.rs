@@ -363,6 +363,7 @@ async fn run_cell(
         ));
     }
     state.begin_code_execution();
+    state.page_clock(Arc::clone(ctx.actor_context().clock()));
     state.note_pages(ctx.session_pages());
     // The wall time the cell held workers before this activation counts
     // against its cap (FIG-6786).

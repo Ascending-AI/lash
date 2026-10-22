@@ -88757,6 +88757,7 @@
       ],
       "dependencies": [
         "async-trait",
+        "chrono",
         "insta",
         "lash-dialect-typescript",
         "lash-internal-core",
