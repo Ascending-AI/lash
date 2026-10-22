@@ -70,6 +70,7 @@ mod session_policy_serde;
 pub mod session_read_view;
 pub mod session_state;
 pub mod session_store_factory_types;
+pub mod source_map;
 pub mod store;
 pub mod store_failure;
 pub mod tool_run;
