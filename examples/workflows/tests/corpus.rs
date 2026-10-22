@@ -492,13 +492,13 @@ fn every_python_corpus_case_has_one_body_per_source_loop_and_no_statement_inflat
                     lash_kernel_doc::Stmt::For { .. } | lash_kernel_doc::Stmt::While { .. }
                 )
             ));
-            if let Node::Expr(lash_kernel_doc::Expr::Closure(closure)) = node {
-                if !deferred.contains(&closure.function) {
-                    pending.push((
-                        lash_vocabulary::sites::Unit::Library(closure.function),
-                        Node::Block(&document.functions[&closure.function].body().unwrap().block),
-                    ));
-                }
+            if let Node::Expr(lash_kernel_doc::Expr::Closure(closure)) = node
+                && !deferred.contains(&closure.function)
+            {
+                pending.push((
+                    lash_vocabulary::sites::Unit::Library(closure.function),
+                    Node::Block(&document.functions[&closure.function].body().unwrap().block),
+                ));
             }
             pending.extend(
                 node.children()
