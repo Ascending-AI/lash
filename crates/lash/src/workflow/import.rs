@@ -4,7 +4,8 @@ use lash_kernel_dialect::workflow::WorkflowSourceLimits;
 use lash_kernel_doc::{Captions, DocumentBytes, SourceLanguage, SourceMap};
 
 pub use lash_kernel_dialect::{
-    Diagnostic as WorkflowSourceDiagnostic, DiagnosticKind as WorkflowSourceDiagnosticKind,
+    Diagnostic as WorkflowSourceDiagnostic, DiagnosticFact as WorkflowSourceDiagnosticFact,
+    DiagnosticKind as WorkflowSourceDiagnosticKind,
 };
 
 /// The outcome of importing a host-authored workflow module against a
@@ -92,7 +93,8 @@ pub(crate) fn source_refusal(
                 },
                 repairs: refusal.repairs,
                 operand_type: refusal.operand_type,
-                namespace_shadowing: refusal.namespace_shadowing,
+
+                fact: refusal.fact,
             }]))
         }
         lash_vm_client::service::SourceServiceError::UnknownDialect { dialect } => Ok(

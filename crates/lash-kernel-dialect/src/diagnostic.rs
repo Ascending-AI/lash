@@ -5,9 +5,10 @@ use std::fmt;
 use lash_kernel_doc::Span;
 
 /// Whose fault a rejection is.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum DiagnosticKind {
     /// The dialect or the host's source admission policy refuses this construct.
+    #[default]
     Refusal,
     /// The construct is supported; this instance of it is wrong.
     ProgramDefect,
@@ -18,7 +19,7 @@ pub enum DiagnosticKind {
 /// `code` is the dialect's stable name for the rejection; a caller matches
 /// on it, never on the message. `repairs` say what to write instead, apart
 /// from the message, so a consumer finds the rewrite without parsing prose.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Diagnostic {
     pub code: String,
     pub message: String,
@@ -27,7 +28,8 @@ pub struct Diagnostic {
     pub repairs: Vec<String>,
     /// Static operand facts for an implicit text conversion; no repair prose.
     pub operand_type: Option<Box<SourceOperandType>>,
-    pub namespace_shadowing: Option<Box<lash_vocabulary::NamespaceShadowing>>,
+    /// Structured source refusal; presentation belongs to the host.
+    pub fact: Option<Box<DiagnosticFact>>,
 }
 
 impl Diagnostic {
@@ -46,7 +48,7 @@ impl Diagnostic {
             kind: DiagnosticKind::ProgramDefect,
             repairs: Vec::new(),
             operand_type: None,
-            namespace_shadowing: Some(Box::new(shadowing)),
+            fact: Some(Box::new(DiagnosticFact::NamespaceShadowing(shadowing))),
         }
     }
 }
@@ -85,4 +87,24 @@ pub enum SourceOperandType {
     Function { result: Box<Self> },
     Union(Vec<Self>),
     Package { package: String, name: String },
+}
+
+/// Typed facts emitted by a front end before executable admission.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+#[non_exhaustive]
+pub enum DiagnosticFact {
+    SignatureRequired(lash_kernel_doc::SignatureRequired),
+    NamespaceShadowing(lash_vocabulary::NamespaceShadowing),
+}
+
+impl From<lash_kernel_doc::SignatureRequired> for Diagnostic {
+    fn from(required: lash_kernel_doc::SignatureRequired) -> Self {
+        Self {
+            code: "SIGNATURE_REQUIRED".to_owned(),
+            span: required.span,
+            fact: Some(Box::new(DiagnosticFact::SignatureRequired(required))),
+            ..Self::default()
+        }
+    }
 }

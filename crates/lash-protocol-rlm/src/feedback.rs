@@ -342,9 +342,9 @@ impl CellObservation {
                     },
                     message,
                 );
-                if let Some(shadowing) = &refusal.namespace_shadowing {
+                if let Some(lash_kernel_dialect::DiagnosticFact::NamespaceShadowing(shadowing)) = refusal.fact.as_deref() {
                     failure = failure.with_defect(CellDefect::NamespaceShadowedByLocal {
-                        shadowing: shadowing.clone(),
+                        shadowing: Box::new(shadowing.clone()),
                         span: refusal.span,
                     });
                 }

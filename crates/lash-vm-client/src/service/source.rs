@@ -136,7 +136,8 @@ impl Service {
                 unsupported: true,
                 repairs: diagnostic.repairs,
                 operand_type: diagnostic.operand_type,
-                namespace_shadowing: diagnostic.namespace_shadowing,
+
+                fact: diagnostic.fact,
             })));
         }
         let response = self

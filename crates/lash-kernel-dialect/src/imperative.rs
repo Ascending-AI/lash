@@ -92,8 +92,7 @@ impl From<PrintError> for crate::Diagnostic {
             span: None,
             kind: crate::DiagnosticKind::Refusal,
             repairs: vec![],
-            operand_type: None,
-            namespace_shadowing: None,
+            ..Default::default()
         }
     }
 }
