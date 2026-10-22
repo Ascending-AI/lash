@@ -104,7 +104,7 @@ pub(crate) fn compose(plugins: &[lash_core::plugin::PluginRecipe], call: Call) -
             RLM_PROTOCOL_PLUGIN_ID,
             serde_json::to_value(recorded).expect("the recorded namespace encodes"),
         )
-        .expect("cold fixture config has no owner cap");
+        .expect("fixture allocation admitted");
     let cut = lash_core::testing::prompt::cut_with(
         PromptCutParts {
             call: PromptCall {

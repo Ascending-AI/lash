@@ -302,7 +302,12 @@ impl SqliteStore {
         // every component exists, beside the execution's descriptor when
         // the checkpoint holds it.
         let (root, mut nodes) = manifest.to_graph().map_err(graph_store_error)?;
-        nodes.extend(checkpoint.namespace_nodes.clone());
+        nodes.extend(
+            checkpoint
+                .namespace_nodes
+                .iter()
+                .map(|(id, node)| (*id, node.clone())),
+        );
         if let Some(node) = checkpoint
             .execution
             .as_ref()
@@ -536,7 +541,7 @@ impl SqliteStore {
         }
         Ok(HydratedSessionCheckpoint {
             turn_state: record.turn_state,
-            components,
+            components: components.into(),
             execution,
             namespace_nodes: record
                 .components

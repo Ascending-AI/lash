@@ -452,7 +452,12 @@ fn checkpoint_graph_parts(
     // edges once every component exists, beside the execution's descriptor
     // when the checkpoint holds it: a missing component is refused as one.
     let (root, mut nodes) = manifest.to_graph().map_err(graph_store_error)?;
-    nodes.extend(checkpoint.namespace_nodes.clone());
+    nodes.extend(
+        checkpoint
+            .namespace_nodes
+            .iter()
+            .map(|(id, node)| (*id, node.clone())),
+    );
     if let Some(node) = checkpoint
         .execution
         .as_ref()
@@ -600,7 +605,7 @@ pub(crate) async fn get_checkpoint_tx(
     }
     Ok(Some(HydratedSessionCheckpoint {
         turn_state: manifest.turn_state,
-        components,
+        components: components.into(),
         execution,
         namespace_nodes: manifest
             .components

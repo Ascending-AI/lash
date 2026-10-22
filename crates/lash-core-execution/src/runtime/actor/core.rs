@@ -698,7 +698,7 @@ impl ActorContext {
                 let store = lash_core_store::store::SessionStore::new(runtime, id.clone())
                     .map_err(failed)?;
                 let (allocation_budget, allocations) =
-                    super::owner_allocation::OwnerAllocation::budget(
+                    super::owner_allocation::OwnerAllocation::hydration_budget(
                         self.owner_memory().cloned().ok_or_else(|| {
                             failed(lash_core_store::store::StoreError::Backend(
                                 "missing owner ledger".into(),

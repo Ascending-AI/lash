@@ -82,10 +82,14 @@ async fn commit_waits_for_delete(branch: ReuseBranch) {
         .ensure_agent_frame_initialized()
         .expect("source fixture edit is admitted");
     let mut victim_commit = RuntimeCommit::persisted_state_for_test(&victim_state);
-    victim_commit.checkpoint.components.insert(
-        "law/commit-delete-shared".to_string(),
-        HydratedCheckpointComponent::changed(b"commit-delete-shared".to_vec()),
-    );
+    victim_commit
+        .checkpoint
+        .components
+        .insert(
+            "law/commit-delete-shared".to_string(),
+            HydratedCheckpointComponent::changed(b"commit-delete-shared".to_vec()),
+        )
+        .expect("fixture allocation admitted");
     let victim_receipt = factory
         .commit_runtime_state(victim_commit)
         .await
@@ -108,22 +112,30 @@ async fn commit_waits_for_delete(branch: ReuseBranch) {
         .ensure_agent_frame_initialized()
         .expect("source fixture edit is admitted");
     let mut target_commit = RuntimeCommit::persisted_state_for_test(&target_state);
-    target_commit.checkpoint.components.insert(
-        "law/commit-delete-shared".to_string(),
-        match branch {
-            ReuseBranch::ChangedComponent => {
-                HydratedCheckpointComponent::changed(b"commit-delete-shared".to_vec())
-            }
-            ReuseBranch::UnchangedComponent | ReuseBranch::ExistingRoot => {
-                HydratedCheckpointComponent::unchanged(&shared)
-            }
-        },
-    );
+    target_commit
+        .checkpoint
+        .components
+        .insert(
+            "law/commit-delete-shared".to_string(),
+            match branch {
+                ReuseBranch::ChangedComponent => {
+                    HydratedCheckpointComponent::changed(b"commit-delete-shared".to_vec())
+                }
+                ReuseBranch::UnchangedComponent | ReuseBranch::ExistingRoot => {
+                    HydratedCheckpointComponent::unchanged(&shared)
+                }
+            },
+        )
+        .expect("fixture allocation admitted");
     if !matches!(branch, ReuseBranch::ExistingRoot) {
-        target_commit.checkpoint.components.insert(
-            "law/commit-delete-target-only".to_string(),
-            HydratedCheckpointComponent::changed(b"commit-delete-target-only".to_vec()),
-        );
+        target_commit
+            .checkpoint
+            .components
+            .insert(
+                "law/commit-delete-target-only".to_string(),
+                HydratedCheckpointComponent::changed(b"commit-delete-target-only".to_vec()),
+            )
+            .expect("fixture allocation admitted");
     }
 
     let held_ref = match branch {

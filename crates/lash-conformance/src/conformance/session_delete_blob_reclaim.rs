@@ -113,12 +113,16 @@ async fn committed_checkpoint(
         .clone()
         .expect("initialized session has a leaf");
     let mut commit = crate::RuntimeCommit::persisted_state_for_test(&state);
-    commit.checkpoint.components.insert(
-        "conformance/session-delete-owned".to_string(),
-        crate::HydratedCheckpointComponent::changed(
-            format!("session-delete-owned:{session_id}").into_bytes(),
-        ),
-    );
+    commit
+        .checkpoint
+        .components
+        .insert(
+            "conformance/session-delete-owned".to_string(),
+            crate::HydratedCheckpointComponent::changed(
+                format!("session-delete-owned:{session_id}").into_bytes(),
+            ),
+        )
+        .expect("fixture allocation admitted");
     let receipt = store
         .commit_runtime_state(commit)
         .await
@@ -230,17 +234,25 @@ pub(super) async fn commit_content_aliased_checkpoint_roots(
         .ensure_agent_frame_initialized()
         .expect("source fixture edit is admitted");
     let mut commit = crate::RuntimeCommit::persisted_state_for_test(&state);
-    commit.checkpoint.components.insert(
-        "conformance/content-aliased-root".to_string(),
-        crate::HydratedCheckpointComponent::changed(aliased_root_bytes),
-    );
+    commit
+        .checkpoint
+        .components
+        .insert(
+            "conformance/content-aliased-root".to_string(),
+            crate::HydratedCheckpointComponent::changed(aliased_root_bytes),
+        )
+        .expect("fixture allocation admitted");
 
     let predicted_dependent_root = (0_u64..10_000)
         .find_map(|nonce| {
-            commit.checkpoint.components.insert(
-                "conformance/content-alias-order".to_string(),
-                crate::HydratedCheckpointComponent::changed(nonce.to_be_bytes().to_vec()),
-            );
+            commit
+                .checkpoint
+                .components
+                .insert(
+                    "conformance/content-alias-order".to_string(),
+                    crate::HydratedCheckpointComponent::changed(nonce.to_be_bytes().to_vec()),
+                )
+                .expect("fixture allocation admitted");
             let manifest = commit
                 .checkpoint
                 .manifest(store.fleet_format())
@@ -323,7 +335,8 @@ async fn advance_checkpoint(
         commit
             .checkpoint
             .components
-            .remove("conformance/session-delete-owned");
+            .remove("conformance/session-delete-owned")
+            .expect("fixture allocation admitted");
     }
     lash_core::testing::store_fixtures::commit_runtime_state_for_test(
         store,

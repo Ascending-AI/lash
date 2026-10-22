@@ -1016,7 +1016,7 @@ pub struct EncodedSessionCommit {
     pub json: String,
     pub execution: Option<crate::checkpoint_graph::NodeId>,
     pub descriptor: Option<crate::checkpoint_graph::EncodedNode>,
-    pub namespace_nodes: std::collections::BTreeMap<
+    pub namespace_nodes: crate::source_map::SharedSourceMap<
         crate::checkpoint_graph::NodeId,
         crate::checkpoint_graph::EncodedNode,
     >,

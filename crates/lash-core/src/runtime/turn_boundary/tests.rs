@@ -193,7 +193,7 @@ fn open_agent_frame_seeds_compaction_frame_and_is_replay_idempotent() {
     assignment
         .plugin_config
         .insert("protocol", serde_json::json!({ "mode": "test" }))
-        .unwrap();
+        .expect("fixture allocation admitted");
     state.authority.plugin_config = assignment.plugin_config.clone();
     state.session_graph = SessionGraph::from_shared_nodes(nodes, leaf_node_id)
         .expect("frame-compaction fixture graph is valid");
