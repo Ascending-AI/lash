@@ -325,7 +325,7 @@ pub(crate) fn start(
     let count = args.len();
     machine.regs = args.into();
     if let Some(code) = code {
-        let mut call = exec::Call::new(code, 0, count);
+        let mut call = exec::Call::new(code, 0, count).exported(descriptor.as_ref());
         if let Some(descriptor) = &descriptor
             && !exe.code(code).charging
             && let Some(lib) = exe.lib_of(&descriptor.function)
@@ -352,6 +352,7 @@ pub(crate) fn start(
             0,
             count,
             None,
+            Some(descriptor.into()),
         ) {
             Ok(super::ops::Flow::Done) => {
                 let value = machine.take(0);
@@ -376,18 +377,6 @@ pub(crate) fn start(
                     .map_err(|e| start_interrupt("start native", e.into()))?;
             }
         }
-    }
-    if let Some(descriptor) = &descriptor
-        && machine.end.is_none()
-    {
-        machine
-            .frame(TaskId::MAIN)
-            .map_err(|e| start_interrupt("start frame", e.into()))?
-            .convention = Some(descriptor.convention.clone());
-        machine
-            .frame(TaskId::MAIN)
-            .map_err(|e| start_interrupt("start result", e.into()))?
-            .public_result = Some(descriptor.signature.result.clone());
     }
     if let Target::Callable(function) = &start.target
         && let Some(code) = code

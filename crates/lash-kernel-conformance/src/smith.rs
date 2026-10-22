@@ -63,7 +63,7 @@ fn library() -> &'static Library {
         lash_kernel_lib::register_collections(&mut registry)
             .unwrap_or_else(|error| panic!("collection bodies: {error}"));
         let header = String::from(
-            "kernel 1\nnumbers by_spelling\nimport 0 operation host.echo(x: Any) -> Any\nimport 1 operation typescript.sleep(milliseconds: Int) -> Null\n",
+            "kernel 1\nnumbers by_spelling\nimport 0 operation host.echo(x: Any) -> Any\nimport 1 operation typescript.sleep(milliseconds: Int) -> Null\nimport 2 operation typescript.clock() -> Timestamp\nimport 3 operation typescript.random() -> Bytes\n",
         );
         let registry = Arc::new(registry);
         Library {
@@ -165,7 +165,7 @@ fn fragment(kind: u8, width: u8, trips: u8, value: i16, mode: u8) -> String {
         16 => format!("let text = text.repeat(\"abcdλ\", {}) print json.stringify({{text: text, xs: [{xs}]}})", u16::from(width) * u16::from(trips)),
         17 => format!("let xs = [{xs}] let f = fn(x) {{ set acc = num.add(acc, 1) let y = perform 0(x) as Any return y }} try {{ let ys = invoke collection.map(xs, f) print ys }} catch e {{ print e }}"),
         18 => format!("let xs = [{xs}] do invoke list.insert(xs, 0, {value}) let old = invoke list.pop(xs) print old do invoke list.clear(xs) print xs"),
-        19 => "print clock print random try { print read(projection, \"request\") } catch e { print e }".into(),
+        19 => "let now = perform 2() as Timestamp print now let bits = perform 3() as Bytes print bits try { print read(projection, \"request\") } catch e { print e }".into(),
         20 => "let f = &quick let h = spawn apply f(7) let joined = join h print joined".into(),
         // The child yields before asking, so the spawner's own request is
         // issued first. Slicing must preserve that request order (G1).

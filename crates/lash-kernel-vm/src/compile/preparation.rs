@@ -5,7 +5,7 @@
 //! document nor its library, so the cache has no ownership cycle.
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::sync::{Arc, OnceLock, Weak};
+use std::sync::{Arc, Mutex, OnceLock, Weak};
 
 use lash_kernel_doc::{Document, Invalid, validate_document_with_limits};
 
@@ -31,6 +31,22 @@ const VALIDATED: usize = 4096;
 pub(crate) struct Admission {
     document: Weak<Document>,
     identity: OnceLock<DocumentId>,
+    code: Mutex<BTreeMap<CodeContent, Arc<OnceLock<Result<PreparedCode, Missing>>>>>,
+}
+
+/// Link fills are per execution. Only retained document content and the
+/// admitted function selection affect immutable compilation over this library.
+#[derive(PartialEq, Eq, PartialOrd, Ord)]
+struct CodeContent {
+    documents: Vec<DocumentId>,
+    functions: Vec<FunctionId>,
+}
+
+struct PreparedCode {
+    own: Arc<DocumentCode>,
+    /// Present only if compilation extended the registry. Holding the original
+    /// library here would cycle through its admission cache.
+    library: Option<PreparedLibrary>,
 }
 
 pub(crate) enum Refused {
@@ -132,6 +148,7 @@ impl PreparedLibrary {
         let admitted = Arc::new(Admission {
             document: Arc::downgrade(document),
             identity: identity.map_or_else(OnceLock::new, OnceLock::from),
+            code: Mutex::new(BTreeMap::new()),
         });
         documents.0.insert(key, Arc::clone(&admitted));
         Ok(admitted)
@@ -154,17 +171,56 @@ impl Admission {
             crate::interface::PreparedInstance,
         >,
     ) -> Result<Arc<Executable>, Missing> {
+        let content = CodeContent {
+            documents: documents.keys().copied().collect(),
+            functions: functions.iter().copied().collect(),
+        };
+        let code = {
+            let mut compiled = self.code.lock().unwrap_or_else(|error| error.into_inner());
+            Arc::clone(compiled.entry(content).or_default())
+        };
+        // One producer compiles this content; no admission map lock is held
+        // while registry preparation or compilation runs.
+        let code = code
+            .get_or_init(|| Self::prepare_code(document, library, documents, functions))
+            .as_ref()
+            .map_err(|missing| *missing)?;
+        let library = code.library.as_ref().unwrap_or(library);
+        Ok(Arc::new(Executable {
+            code_base: library.0.tables.codes.len(),
+            block_base: library.0.tables.blocks.len(),
+            stmt_base: library.0.tables.stmts.len(),
+            instances: instances
+                .iter()
+                .filter_map(|(link, instance)| {
+                    documents
+                        .get(&instance.document)
+                        .map(|doc| (*link, Arc::clone(doc)))
+                })
+                .collect(),
+            library: library.clone(),
+            document: Arc::clone(document),
+            own: Arc::clone(&code.own),
+            admission: Arc::clone(self),
+        }))
+    }
+
+    fn prepare_code(
+        document: &Document,
+        library: &PreparedLibrary,
+        documents: &BTreeMap<DocumentId, Arc<Document>>,
+        functions: &BTreeSet<FunctionId>,
+    ) -> Result<PreparedCode, Missing> {
         // Link tables are instance-specific; compile the reached documents together,
         // deduplicating identical FunctionIds while keeping frame Links separate.
-        let mut reached = document.as_ref().clone();
+        let mut reached = document.clone();
         for loaded in documents.values() {
             reached.functions.extend(loaded.functions.clone());
         }
         reached
             .functions
             .retain(|function, _| functions.contains(function));
-        let loaded;
-        let library = if reached
+        let loaded = if reached
             .functions
             .keys()
             .any(|id| library.registry().get(id).is_none())
@@ -191,38 +247,145 @@ impl Admission {
                     .map_err(|_| Missing(id))?;
                 pending.remove(&id);
             }
-            loaded = PreparedLibrary::with_layout_and_charge(
+            Some(PreparedLibrary::with_layout_and_charge(
                 Arc::new(registry),
                 library.0.layout,
                 library.0.charge,
-            );
-            &loaded
+            ))
         } else {
-            library
+            None
         };
+        let library = loaded.as_ref().unwrap_or(library);
         let own = Arc::new(compile_document(&reached, document, library)?);
-        Ok(Arc::new(Executable {
-            code_base: library.0.tables.codes.len(),
-            block_base: library.0.tables.blocks.len(),
-            stmt_base: library.0.tables.stmts.len(),
-            instances: instances
-                .iter()
-                .filter_map(|(link, instance)| {
-                    documents
-                        .get(&instance.document)
-                        .map(|doc| (*link, Arc::clone(doc)))
-                })
-                .collect(),
-            library: library.clone(),
-            document: Arc::clone(document),
+        Ok(PreparedCode {
             own,
-            admission: Arc::clone(self),
-        }))
+            library: loaded,
+        })
     }
 }
 
 impl Executable {
     pub(crate) fn identity(&self) -> DocumentId {
         self.admission.identity(&self.document)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{PreparedInstance, PreparedSlot};
+    use lash_vocabulary::{
+        ContractId, Import, ImportKind, ImportSlot, OperationRequirement, OperationUse,
+        QualifiedName, Signature, Type,
+        package::{Fill, Link},
+    };
+
+    /// FIG-6931's compile-once rule survives linked preparation: equal code
+    /// content shares immutable tables, while each execution keeps its own
+    /// operation uses. Selected function sets remain part of the code key.
+    #[test]
+    fn immutable_linked_code_is_compiled_once_and_instance_links_stay_distinct() {
+        let mut document = Document::new(doc::NumberPolicy::BySpelling, vec![]);
+        let signature = Signature {
+            params: vec![],
+            result: Type::Null,
+        };
+        document.imports.insert(
+            ImportSlot(0),
+            Import {
+                name: QualifiedName {
+                    package: lash_vocabulary::PackagePath::parse("host").expect("package"),
+                    member: lash_vocabulary::Segment::new("tick").expect("member"),
+                    type_member: None,
+                },
+                kind: ImportKind::Operation {
+                    signature: signature.clone(),
+                },
+            },
+        );
+        let definition = doc::parse_definition(
+            "function retained() -> Null\nkernel 1\nmetering statements\nbody { return null }",
+        )
+        .expect("retained function");
+        let function = definition.identity();
+        document.functions.insert(function, definition);
+        let document = Arc::new(document);
+        let identity = document.identity();
+        let documents = BTreeMap::from([(identity, Arc::clone(&document))]);
+        let functions = BTreeSet::from([function]);
+        let mut instances = Vec::new();
+        for contract in ["first", "second"] {
+            let link = Link {
+                document: identity,
+                fills: BTreeMap::from([(
+                    ImportSlot(0),
+                    Fill::Operation(OperationRequirement::new(
+                        signature.clone(),
+                        ContractId::new(contract),
+                    )),
+                )]),
+            };
+            let link = link.identity();
+            instances.push(BTreeMap::from([(
+                link,
+                PreparedInstance {
+                    link,
+                    document: identity,
+                    slots: BTreeMap::from([(
+                        ImportSlot(0),
+                        PreparedSlot::Operation(OperationUse {
+                            link,
+                            slot: ImportSlot(0),
+                        }),
+                    )]),
+                },
+            )]));
+        }
+        let library = PreparedLibrary::new(Arc::new(doc::FunctionRegistry::default()));
+        let admission = library
+            .admit(&document, KernelDataLimits::standard())
+            .unwrap_or_else(|_| panic!("valid linked code"));
+        let first = admission
+            .executable(&document, &library, &documents, &functions, &instances[0])
+            .unwrap_or_else(|missing| panic!("first executable: {}", missing.0));
+        let second = admission
+            .executable(&document, &library, &documents, &functions, &instances[1])
+            .unwrap_or_else(|missing| panic!("same code under another Link: {}", missing.0));
+        assert!(
+            Arc::ptr_eq(&first.own, &second.own),
+            "immutable linked code was compiled again"
+        );
+        assert_eq!(
+            first.instances.keys().copied().collect::<Vec<_>>(),
+            instances[0].keys().copied().collect::<Vec<_>>()
+        );
+        assert_eq!(
+            second.instances.keys().copied().collect::<Vec<_>>(),
+            instances[1].keys().copied().collect::<Vec<_>>()
+        );
+        assert_ne!(
+            first.instances.keys().next(),
+            second.instances.keys().next()
+        );
+        let narrowed = admission
+            .executable(
+                &document,
+                &library,
+                &documents,
+                &BTreeSet::new(),
+                &instances[0],
+            )
+            .unwrap_or_else(|missing| {
+                panic!("an execution without the retained function: {}", missing.0)
+            });
+        assert!(first.own.declared.contains_key(&function));
+        assert!(!narrowed.own.declared.contains_key(&function));
+        assert!(!Arc::ptr_eq(&first.own, &narrowed.own));
+        let lifetime = Arc::downgrade(&document);
+        drop((first, second, narrowed, admission, documents, document));
+        assert!(
+            lifetime.upgrade().is_none(),
+            "code preparation must not retain its source Document"
+        );
     }
 }

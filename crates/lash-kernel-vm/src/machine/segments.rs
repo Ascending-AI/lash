@@ -43,7 +43,7 @@ use lash_vocabulary::sites::Site;
 use lash_vocabulary::types::Type;
 
 use super::actions::Target;
-use super::exec::{Call, ResultOrigin};
+use super::exec::{Call, ExportBoundary, ResultOrigin};
 use super::frames::Role;
 use super::islands::{Ran, SteadyIsland};
 use super::loops::Header;
@@ -496,6 +496,7 @@ impl KernelMachine {
         task: TaskId,
         exe: &Executable,
         awaiting: Option<crate::compile::StmtId>,
+        export: Option<ExportBoundary<'_>>,
     ) -> Status {
         let standing = std::mem::take(&mut self.segments.standing);
         let callee = self
@@ -508,7 +509,7 @@ impl KernelMachine {
         };
         let charging = std::mem::replace(&mut self.charging, false);
         let paced = std::mem::replace(&mut self.paced, false);
-        let stood = self.stand_all(task, exe, standing, callee, awaiting);
+        let stood = self.stand_all(task, exe, standing, callee, awaiting, export);
         (self.charging, self.paced) = (charging, paced);
         // What the plans' registers held is the frames' now.
         self.regs.release(release);
@@ -523,9 +524,17 @@ impl KernelMachine {
         standing: Vec<Standing>,
         callee: Callee,
         mut awaiting: Option<crate::compile::StmtId>,
+        mut export: Option<ExportBoundary<'_>>,
     ) -> Status {
         for standing in standing {
             let stmt = self.stand_frame(task, exe, standing, awaiting)?;
+            // The first standing frame is the imported helper's own body.
+            // Install its contract before entering any nested callback frame.
+            if let Some(export) = export.take() {
+                let frame = self.frame(task)?;
+                frame.convention = Some(export.convention.clone());
+                frame.public_result = Some(export.result.clone());
+            }
             awaiting = Some(stmt);
         }
         match callee {
@@ -537,7 +546,7 @@ impl KernelMachine {
             } => {
                 let caller = self.active_link;
                 self.active_link = link;
-                let result = self.enter_body(task, exe, lib, admitted, args, awaiting);
+                let result = self.enter_body(task, exe, lib, admitted, args, awaiting, None);
                 self.active_link = caller;
                 result
             }
@@ -988,7 +997,12 @@ impl KernelMachine {
         self.plans -= 1;
         (self.charging, self.paced) = (charging, paced);
         if matches!(outcome, Err(PlanExit::Yield)) && halt.is_none() {
-            self.stand_segments(task, exe, None)?;
+            let boundary = frame
+                .convention
+                .as_ref()
+                .zip(frame.public_result.as_ref())
+                .map(|(convention, result)| ExportBoundary { convention, result });
+            self.stand_segments(task, exe, None, boundary)?;
             return Ok(None);
         }
         self.regs.release(args);

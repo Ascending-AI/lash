@@ -93,7 +93,7 @@ fn prepared_typescript_conversions_agree_with_their_general_paths() {
             .find(|(_, registered)| registered.name() == name)
             .unwrap()
     };
-    for name in ["ts.number.to_string", "ts.to_boolean"] {
+    for name in ["ts.number.format_value", "ts.to_boolean"] {
         let (_, registered) = function(name);
         assert!(
             registered
@@ -107,7 +107,7 @@ fn prepared_typescript_conversions_agree_with_their_general_paths() {
     // Longer spellings and object kinds are compared through their bodies below.
     for (name, values) in [
         (
-            "ts.number.to_string",
+            "ts.number.format_value",
             vec![
                 -0.0,
                 0.0,
@@ -153,7 +153,7 @@ fn prepared_typescript_conversions_agree_with_their_general_paths() {
             }
         }
     }
-    let (number, _) = function("ts.number.to_string");
+    let (number, _) = function("ts.number.format_value");
     let (boolean, _) = function("ts.to_boolean");
     let named = |name| *function(name).0;
     let sources = [

@@ -1,9 +1,59 @@
 //! Public argument validation before adapting a source-language calling convention.
+use super::actions::Target;
+use super::exec::Call;
 use super::ops::Reg;
+use super::ops::{Flow, Status};
 use super::{Eval, KernelMachine, fault, raise};
 use crate::compile::Executable;
 use lash_kernel_doc::{NewObject, Value};
 impl KernelMachine {
+    pub(super) fn call_export(
+        &mut self,
+        task: lash_kernel_doc::TaskId,
+        exe: &Executable,
+        callable: lash_vocabulary::CallableId,
+        descriptor: &lash_kernel_doc::FunctionExport,
+        args: Reg,
+        count: usize,
+        awaiting: Option<crate::compile::StmtId>,
+    ) -> Status {
+        let count = self.export_arguments(exe, descriptor, args, count)?;
+        let flow = match self.callable_target(exe, callable)? {
+            Target::Library(lib, link) => self.call_lib_linked(
+                task,
+                exe,
+                (lib, link),
+                args,
+                count,
+                awaiting,
+                Some(descriptor.into()),
+            )?,
+            Target::Code(code, captures, link) => {
+                let pushed = self.push_frame(
+                    task,
+                    exe,
+                    Call::new(code, args, count)
+                        .in_link(link)
+                        .sharing(&captures)
+                        .awaited_by(awaiting)
+                        .exported(Some(descriptor)),
+                );
+                self.spent_captures(captures);
+                pushed?;
+                Flow::Step
+            }
+            Target::Export(..) => return Err(fault("an export resolved to another export").into()),
+        };
+        match flow {
+            Flow::Done => {
+                let value = self.regs[args];
+                self.check_public_result(exe, &value, &descriptor.signature.result)?;
+            }
+            Flow::Step => {}
+        }
+        Ok(flow)
+    }
+
     pub(super) fn export_arguments(
         &mut self,
         exe: &Executable,

@@ -40,9 +40,37 @@ pub enum HostCall {
 struct World {
     calls: Vec<HostCall>,
     fail: bool,
+    seed: u64,
 }
 
 impl Host for World {
+    fn perform(
+        &mut self,
+        use_: &lash_vocabulary::OperationUse,
+        _: &[Datum],
+        _: &lash_vocabulary::sites::PositionLabel,
+        _: &lash_vocabulary::sites::Site,
+    ) -> Result<Result<Datum, ErrorDatum>, lash_kernel_vm::HostFault> {
+        let value = match use_.slot.0 {
+            2 => Datum::Timestamp(lash_kernel_doc::Timestamp {
+                nanoseconds: lash_kernel_doc::Integer::new(self.seed),
+            }),
+            3 => {
+                let value = Datum::Bytes(lash_kernel_doc::Bytes::new(
+                    self.seed.to_be_bytes().to_vec(),
+                ));
+                self.seed = self.seed.wrapping_add(1);
+                value
+            }
+            _ => {
+                return Err(lash_kernel_vm::HostFault {
+                    problem: "the Smith fixture has no other read operation".into(),
+                });
+            }
+        };
+        Ok(Ok(value))
+    }
+
     fn read(&mut self, handle: &Handle, request: &Datum) -> Result<Datum, ErrorDatum> {
         let result = if self.fail {
             Err(error(request.clone()))
@@ -126,7 +154,24 @@ fn observe_in<M: Machine>(
         target: Target::Main,
         args: Vec::new(),
         session: session.root,
-        modes: Default::default(),
+        modes: smith
+            .document
+            .imports
+            .iter()
+            .filter_map(|(slot, import)| {
+                matches!(
+                    import.name.to_string().as_str(),
+                    "typescript.clock" | "typescript.random"
+                )
+                .then_some((
+                    lash_vocabulary::OperationUse {
+                        link: program.link,
+                        slot: *slot,
+                    },
+                    lash_vocabulary::OperationMode::Read,
+                ))
+            })
+            .collect(),
         host: Vec::new(),
     };
     let mut machine = match M::start(
@@ -141,6 +186,7 @@ fn observe_in<M: Machine>(
     let mut host = World {
         calls: Vec::new(),
         fail: smith.schedule.fail_effects,
+        seed: smith.schedule.host_seed,
     };
     let mut observations = Vec::new();
     // At least one statement is executed per positive slice. This exceeds

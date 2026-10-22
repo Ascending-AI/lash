@@ -20,6 +20,23 @@ use crate::observe::Event;
 use lash_kernel_doc::heap::HeapFault;
 use lash_kernel_state::paged::HeapLifecycle;
 
+/// Borrowed public ABI carried to the activation that owns it, including when
+/// a standing segment is replaced after another yield.
+#[derive(Clone, Copy)]
+pub(super) struct ExportBoundary<'a> {
+    pub(super) convention: &'a lash_kernel_doc::StartConvention,
+    pub(super) result: &'a lash_vocabulary::types::Type,
+}
+
+impl<'a> From<&'a lash_kernel_doc::FunctionExport> for ExportBoundary<'a> {
+    fn from(export: &'a lash_kernel_doc::FunctionExport) -> Self {
+        Self {
+            convention: &export.convention,
+            result: &export.signature.result,
+        }
+    }
+}
+
 /// A function about to run in a new frame.
 pub(super) struct Call<'a> {
     pub(super) code: CodeId,
@@ -34,6 +51,8 @@ pub(super) struct Call<'a> {
     pub(super) library: Option<LibId>,
     /// The statement of the caller's frame that waits in the call.
     pub(super) awaited_by: Option<StmtId>,
+    /// The public contract belongs to this activation, before any callbacks enter.
+    pub(super) export: Option<ExportBoundary<'a>>,
 }
 
 impl<'a> Call<'a> {
@@ -46,7 +65,18 @@ impl<'a> Call<'a> {
             captures: &[],
             library: None,
             awaited_by: None,
+            export: None,
         }
+    }
+
+    pub(super) fn exported(mut self, export: Option<&'a lash_kernel_doc::FunctionExport>) -> Self {
+        self.export = export.map(ExportBoundary::from);
+        self
+    }
+
+    pub(super) fn with_boundary(mut self, boundary: Option<ExportBoundary<'a>>) -> Self {
+        self.export = boundary;
+        self
     }
 
     pub(super) fn in_link(mut self, link: lash_vocabulary::content_ids::LinkId) -> Self {
@@ -662,6 +692,8 @@ impl KernelMachine {
         frame.awaiting = None;
         frame.nested = None;
         frame.library = None;
+        frame.convention = None;
+        frame.public_result = None;
         frame.cleaning = None;
         frame.held.clear();
         frame.owned = false;
@@ -883,6 +915,7 @@ impl KernelMachine {
             count: given,
             captures,
             awaited_by,
+            export,
         } = call;
         let code = exe.code(code_id);
         if given > code.params.len() {
@@ -914,8 +947,8 @@ impl KernelMachine {
         };
         let mut frame = self.fresh_frame(exe, code_id)?;
         frame.link = defining_link;
-        frame.convention = None;
-        frame.public_result = None;
+        frame.convention = export.map(|export| export.convention.clone());
+        frame.public_result = export.map(|export| export.result.clone());
         frame.slots.fresh(code.slots_by_at.len());
         frame.control.push(Control::Block {
             block: code.body,

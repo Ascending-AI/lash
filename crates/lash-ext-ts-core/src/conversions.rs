@@ -163,7 +163,7 @@ impl NativeFunction for NumberToString {
             pair: None,
             entry: number_to_string,
             charged_entry: None,
-            operation: "ts.number.to_string(value: Number) -> Text",
+            operation: "ts.number.format_value(value: Number) -> Text",
         })
     }
 }

@@ -62,7 +62,7 @@ pub const OPERATIONS: [&str; 11] = [
     "ts.sub",
     "ts.to_number",
     "ts.to_boolean",
-    "ts.number.to_string",
+    "ts.number.format_value",
     "ts.lt",
     "ts.le",
     "ts.gt",
@@ -138,7 +138,7 @@ pub fn native(
         }),
         "ts.to_number" => Arc::new(ToNumber),
         "ts.to_boolean" => Arc::new(conversions::ToBoolean),
-        "ts.number.to_string" => Arc::new(conversions::NumberToString),
+        "ts.number.format_value" => Arc::new(conversions::NumberToString),
         "ts.lt" | "ts.le" | "ts.gt" | "ts.ge" => Arc::new(Relate {
             relation: match name {
                 "ts.lt" => Relation::Lt,

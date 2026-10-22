@@ -1011,6 +1011,11 @@ mod tests {
                 "const subtotal = 1 + 2; const total = subtotal + 3; total;",
             ),
             (SourceTooLarge, "const invoice = 1;"),
+            (GeneratedSourceBytes, "const invoice = 1;"),
+            (
+                GeneratedSourceDepth,
+                "const subtotal = 1; const total = subtotal + 1;",
+            ),
             (ReservedIdentifier, "const invoice = 1; invoice;"),
             (ShadowsBuiltin, "const URL_ = 1; URL_;"),
             (PackageNamespaceValue, "await host.echo(1);"),

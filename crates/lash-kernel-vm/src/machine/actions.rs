@@ -225,11 +225,11 @@ impl KernelMachine {
                             super::ops::Answer::Done => Flow::Done,
                             super::ops::Answer::Body(code) => {
                                 self.capture(task, entry, act, PhaseRecord::Called)?;
-                                self.enter_body(task, exe, lib, code, at, Some(stmt))?
+                                self.enter_body(task, exe, lib, code, at, Some(stmt), None)?
                             }
                             super::ops::Answer::Yielded => {
                                 self.capture(task, entry, act, PhaseRecord::Called)?;
-                                self.stand_segments(task, exe, Some(stmt))?
+                                self.stand_segments(task, exe, Some(stmt), None)?
                             }
                         }
                     }
@@ -531,11 +531,11 @@ impl KernelMachine {
             super::ops::Answer::Done => Ok(Flow::Done),
             super::ops::Answer::Body(code) => {
                 self.capture(task, entry, act, PhaseRecord::Called)?;
-                self.enter_body(task, exe, lib, code, args, Some(stmt))
+                self.enter_body(task, exe, lib, code, args, Some(stmt), None)
             }
             super::ops::Answer::Yielded => {
                 self.capture(task, entry, act, PhaseRecord::Called)?;
-                self.stand_segments(task, exe, Some(stmt))
+                self.stand_segments(task, exe, Some(stmt), None)
             }
         }
     }
@@ -618,18 +618,7 @@ impl KernelMachine {
     ) -> Status {
         match target {
             Target::Export(callable, descriptor) => {
-                let count = self.export_arguments(exe, &descriptor, args, count)?;
-                let target = self.callable_target(exe, callable)?;
-                let flow = self.call(task, exe, stmt, target, args, count)?;
-                if flow == Flow::Done {
-                    let value = self.regs[args];
-                    self.check_public_result(exe, &value, &descriptor.signature.result)?;
-                }
-                if flow == Flow::Step {
-                    self.frame(task)?.convention = Some(descriptor.convention);
-                    self.frame(task)?.public_result = Some(descriptor.signature.result.clone());
-                }
-                Ok(flow)
+                self.call_export(task, exe, callable, &descriptor, args, count, Some(stmt))
             }
             Target::Code(code, captures, link) => {
                 let call = Call::new(code, args, count)
@@ -642,7 +631,7 @@ impl KernelMachine {
                 Ok(Flow::Step)
             }
             Target::Library(lib, link) => {
-                self.call_lib_linked(task, exe, (lib, link), args, count, Some(stmt))
+                self.call_lib_linked(task, exe, (lib, link), args, count, Some(stmt), None)
             }
         }
     }
@@ -665,31 +654,10 @@ impl KernelMachine {
         };
         match target {
             Target::Export(callable, descriptor) => {
-                let count = self.export_arguments(exe, &descriptor, args, count)?;
-                let target = self.callable_target(exe, callable)?;
-                match target {
-                    Target::Library(lib, link) => {
-                        self.call_lib_linked(task, exe, (lib, link), args, count, awaiting)
-                    }
-                    Target::Code(code, captures, link) => {
-                        self.push_frame(
-                            task,
-                            exe,
-                            Call::new(code, args, count)
-                                .in_link(link)
-                                .sharing(&captures)
-                                .awaited_by(awaiting),
-                        )?;
-                        self.spent_captures(captures);
-                        self.frame(task)?.convention = Some(descriptor.convention);
-                        self.frame(task)?.public_result = Some(descriptor.signature.result.clone());
-                        Ok(Flow::Step)
-                    }
-                    Target::Export(..) => Err(fault("an export resolved to another export").into()),
-                }
+                self.call_export(task, exe, callable, &descriptor, args, count, awaiting)
             }
             Target::Library(lib, link) => {
-                self.call_lib_linked(task, exe, (lib, link), args, count, awaiting)
+                self.call_lib_linked(task, exe, (lib, link), args, count, awaiting, None)
             }
             Target::Code(code, captures, link) => {
                 let result = self.push_frame(
@@ -765,7 +733,7 @@ impl KernelMachine {
         }
     }
 
-    fn callable_target(
+    pub(super) fn callable_target(
         &self,
         exe: &Executable,
         callable: lash_vocabulary::names::CallableId,
@@ -1088,13 +1056,13 @@ impl KernelMachine {
         args: Reg,
         count: usize,
     ) -> Status {
-        let (target, count, convention) = match target {
+        let (target, count, export) = match target {
             Target::Export(callable, descriptor) => {
                 let count = self.export_arguments(exe, &descriptor, args, count)?;
                 (
                     self.callable_target(exe, callable)?,
                     count,
-                    Some(descriptor.convention),
+                    Some(descriptor),
                 )
             }
             target => (target, count, None),
@@ -1148,23 +1116,31 @@ impl KernelMachine {
                     exe,
                     Call::new(code, args, count)
                         .in_link(link)
-                        .sharing(&captures),
+                        .sharing(&captures)
+                        .exported(export.as_deref()),
                 );
                 self.spent_captures(captures);
                 pushed.map(|()| Flow::Step)
             }
-            Target::Library(lib, link) => {
-                self.call_lib_linked(child, exe, (lib, link), args, count, None)
-            }
+            Target::Library(lib, link) => self.call_lib_linked(
+                child,
+                exe,
+                (lib, link),
+                args,
+                count,
+                None,
+                export.as_deref().map(Into::into),
+            ),
             Target::Export(..) => Err(fault("an export resolved to another export").into()),
         };
         match started {
-            Ok(Flow::Step) => {
-                self.frame(child)?.convention = convention;
-            }
+            Ok(Flow::Step) => {}
             // A function with no frame has run to its end already.
             Ok(Flow::Done) => {
                 let value = self.take(args);
+                if let Some(export) = &export {
+                    self.check_public_result(exe, &value, &export.signature.result)?;
+                }
                 self.end_task(child, Ok(value))?;
                 self.put(args, handle);
                 self.refresh_charging(task)?;

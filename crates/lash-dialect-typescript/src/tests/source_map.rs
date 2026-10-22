@@ -27,13 +27,14 @@ fn code_sites(document: &Document) -> Vec<(Site, String)> {
     let mut out = Vec::new();
     for (unit, block) in document.units() {
         if let Unit::Library(id) = unit
-            && !matches!(
-                document.functions[&id].implementation,
-                lash_kernel_doc::Implementation::Guest {
-                    metering: lash_kernel_doc::Metering::Statements,
-                    ..
-                }
-            )
+            && (lash_kernel_doc::FunctionCatalog::header(super::library(), &id).is_some()
+                || !matches!(
+                    document.functions[&id].implementation,
+                    lash_kernel_doc::Implementation::Guest {
+                        metering: lash_kernel_doc::Metering::Statements,
+                        ..
+                    }
+                ))
         {
             continue;
         }
