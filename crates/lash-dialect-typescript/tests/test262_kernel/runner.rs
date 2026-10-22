@@ -101,14 +101,9 @@ pub(crate) fn executor() -> Box<dyn Executor> {
 fn registry() -> &'static Arc<FunctionRegistry> {
     static REGISTRY: std::sync::OnceLock<Arc<FunctionRegistry>> = std::sync::OnceLock::new();
     REGISTRY.get_or_init(|| {
-        let built = lash_ext_helper_compiler::library::Library::of(
-            lash_ext_helper_compiler::library::Dialect::TypeScript,
-        )
-        .expect("built packages");
-        let mut registry = built.registry;
-        let helpers = built.helpers;
-        lash_ext_ts_core::implement(&mut registry, helpers).expect("TypeScript operation natives");
-        Arc::new(registry)
+        let embedding =
+            lash_vm_worker::built_embedding(&Default::default()).expect("built packages");
+        Arc::clone(embedding.registry().expect("installed package natives"))
     })
 }
 
