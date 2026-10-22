@@ -332,7 +332,10 @@ pub(crate) fn function_ddl() -> String {
     let ancestor_retire = inline(session_sql().graph_postgres.retire.sql(), &["v_node"]);
     let wake = inline(SQL.actor.wake.sql(), &["v_owner", "v_now"]);
     let stamp_formats = inline(SQL.actor.stamp_formats.sql(), &["p_actor", "p_formats"]);
-    let stamp_requires = inline(SQL.actor.stamp_requires.sql(), &["p_actor", "p_requires"]);
+    let stamp_requires = inline(
+        executor.stamp_unregistered_requires.sql(),
+        &["p_actor", "p_requires"],
+    );
     let ack_through = inline(SQL.postgres.ack_through.sql(), &["p_actor", "p_ack"]);
     let delete_mail = inline(SQL.mail.delete_all.sql(), &["p_actor"]);
     let end = inline(SQL.actor.end.sql(), &["p_actor"]);
@@ -565,6 +568,11 @@ BEGIN
     END IF;
     IF p_requires IS NOT NULL THEN
         {stamp_requires};
+        GET DIAGNOSTICS v_rows = ROW_COUNT;
+        IF v_rows <> 1 THEN
+            RAISE EXCEPTION 'lash_owner_commit: live execution requirements need decoding'
+                USING ERRCODE = 'LX007';
+        END IF;
     END IF;
     IF p_ack IS NOT NULL THEN
         {ack_through};

@@ -792,9 +792,12 @@ CREATE INDEX IF NOT EXISTS idx_lash_lash_vm_artifacts_graph_ref
     ON lash_lash_vm_artifacts (graph_ref) WHERE graph_ref IS NOT NULL;
 -- JSON sidecars belong to Package content, outside its structural identity.
 CREATE TABLE IF NOT EXISTS lash_package_labels (
-    namespace TEXT NOT NULL CHECK (namespace = 'kernel_document'),
-    package_ref TEXT NOT NULL CHECK (package_ref LIKE 'package:v1:%'),
-    label_digest BYTEA NOT NULL CHECK (octet_length(label_digest) = 32),
+    namespace TEXT NOT NULL CONSTRAINT lash_package_labels_namespace_check
+        CHECK (namespace = 'kernel_document'),
+    package_ref TEXT NOT NULL CONSTRAINT lash_package_labels_package_ref_check
+        CHECK (package_ref LIKE 'package:v1:%'),
+    label_digest BYTEA NOT NULL CONSTRAINT lash_package_labels_label_digest_check
+        CHECK (octet_length(label_digest) = 32),
     labels_json TEXT NOT NULL,
     PRIMARY KEY (namespace, package_ref, label_digest),
     FOREIGN KEY (namespace, package_ref) REFERENCES lash_lash_vm_artifacts(namespace, artifact_ref) ON DELETE CASCADE
@@ -948,13 +951,15 @@ CREATE TABLE IF NOT EXISTS lash_package_executions (
     execution TEXT PRIMARY KEY,
     actor_key TEXT NOT NULL REFERENCES lash_actors(actor_key) ON DELETE CASCADE,
     registration_json TEXT NOT NULL,
-    ended INTEGER NOT NULL DEFAULT 0 CHECK (ended IN (0, 1))
+    ended INTEGER NOT NULL DEFAULT 0 CONSTRAINT lash_package_executions_ended_check
+        CHECK (ended IN (0, 1))
 );
 CREATE INDEX IF NOT EXISTS idx_lash_package_executions_actor ON lash_package_executions(actor_key);
 CREATE TABLE IF NOT EXISTS lash_execution_resolutions (
     execution TEXT NOT NULL REFERENCES lash_package_executions(execution) ON DELETE CASCADE,
     link TEXT NOT NULL,
-    slot BIGINT NOT NULL CHECK (slot >= 0 AND slot <= 4294967295),
+    slot BIGINT NOT NULL CONSTRAINT lash_execution_resolutions_slot_check
+        CHECK (slot >= 0 AND slot <= 4294967295),
     record_json TEXT NOT NULL,
     PRIMARY KEY (execution, link, slot)
 );
@@ -1386,9 +1391,9 @@ DECLARE
     v_answer JSONB;
     v_frame TEXT;
 BEGIN
-    -- Generated from this build's statements (registry 3f7d59736fd33635); a call
+    -- Generated from this build's statements (registry 3ac6f02cff580c54); a call
     -- built from others is refused, as is any isolation but read committed.
-    IF p_registry IS DISTINCT FROM '3f7d59736fd33635'
+    IF p_registry IS DISTINCT FROM '3ac6f02cff580c54'
         OR current_setting('transaction_isolation') <> 'read committed' THEN
         RAISE EXCEPTION 'lash_owner_commit: registry or isolation refused' USING ERRCODE = 'LX000';
     END IF;
@@ -2734,7 +2739,15 @@ BEGIN
         UPDATE lash_actors SET formats = (p_formats) WHERE actor_key = (p_actor);
     END IF;
     IF p_requires IS NOT NULL THEN
-        UPDATE lash_actors SET base_requires = (p_requires), requires = (p_requires) WHERE actor_key = (p_actor);
+        UPDATE lash_actors SET base_requires = (p_requires), requires = (p_requires)
+             WHERE actor_key = (p_actor) AND NOT EXISTS (
+                 SELECT 1 FROM lash_package_executions WHERE actor_key = (p_actor) AND ended = 0
+             );
+        GET DIAGNOSTICS v_rows = ROW_COUNT;
+        IF v_rows <> 1 THEN
+            RAISE EXCEPTION 'lash_owner_commit: live execution requirements need decoding'
+                USING ERRCODE = 'LX007';
+        END IF;
     END IF;
     IF p_ack IS NOT NULL THEN
         WITH acked AS (

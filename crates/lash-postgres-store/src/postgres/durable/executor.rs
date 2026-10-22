@@ -78,6 +78,14 @@ lash_store_sql::statements! {
              FROM unnest(?1::bytea[], ?2::bytea[]) AS staged(digest, content)
              WHERE staged.digest = ANY(?3::bytea[])";
 
+        /// Replace base and effective requirements together only when actor
+        /// `?1` has no live execution debt. Otherwise the explicit owner
+        /// transaction must decode and merge its registrations and resolutions.
+        stamp_unregistered_requires = "UPDATE actors SET base_requires = ?2, requires = ?2
+             WHERE actor_key = ?1 AND NOT EXISTS (
+                 SELECT 1 FROM package_executions WHERE actor_key = ?1 AND ended = 0
+             )";
+
         /// Record the answer `?3` of call `?1` at `?2`: the call's last
         /// write.
         latch_record = "INSERT INTO owner_commit_latches (token, created_ms, answer)
@@ -348,7 +356,7 @@ fn mechanics() -> Vec<&'static str> {
         super::pages::hold_statements().0.sql(),
         super::pages::hold_statements().1.sql(),
         SQL.actor.stamp_formats.sql(),
-        SQL.actor.stamp_requires.sql(),
+        executor.stamp_unregistered_requires.sql(),
         SQL.postgres.ack_through.sql(),
         SQL.mail.delete_all.sql(),
         SQL.actor.end.sql(),
@@ -415,10 +423,7 @@ impl Call {
     ) -> Option<Self> {
         // Root-lease work uses the explicit transaction, which returns the
         // acquired leases and applies releases under the owner fence.
-        if tx.requires().is_some()
-            || !tx.root_leases().is_empty()
-            || !tx.released_root_leases().is_empty()
-        {
+        if !tx.root_leases().is_empty() || !tx.released_root_leases().is_empty() {
             return None;
         }
         let mut call = Self {
