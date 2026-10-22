@@ -60,19 +60,32 @@ pub fn print_document_with_ranges(
     for function in document.functions.values() {
         printer.out.push_str("definition ");
         let (source, ranges) = definition_with_ranges(function);
-        let base = printer.out.len();
-        write_quoted(&source, '"', &mut printer.out);
+        // Statement spans can overlap (nested closures), so order their
+        // boundaries before quoting. Each disjoint source slice is escaped
+        // once with the canonical writer; ranges only look up its offsets.
+        let mut offsets: BTreeMap<usize, usize> = ranges
+            .values()
+            .flat_map(|span| [span.start, span.end])
+            .chain([source.len()])
+            .map(|offset| (offset, 0))
+            .collect();
+        printer.out.push('"');
+        let mut previous = 0;
+        let mut quoted = String::new();
+        for (offset, encoded) in &mut offsets {
+            quoted.clear();
+            quote_definition(&source[previous..*offset], &mut quoted);
+            printer.out.push_str(&quoted[1..quoted.len() - 1]);
+            *encoded = printer.out.len();
+            previous = *offset;
+        }
+        printer.out.push('"');
         for (statement, span) in ranges {
-            let encoded_offset = |offset| {
-                let mut prefix = String::new();
-                write_quoted(&source[..offset], '"', &mut prefix);
-                base + prefix.len() - 1
-            };
             printer.ranges.insert(
                 statement,
                 crate::Span {
-                    start: encoded_offset(span.start),
-                    end: encoded_offset(span.end),
+                    start: offsets[&span.start],
+                    end: offsets[&span.end],
                 },
             );
         }
@@ -830,5 +843,71 @@ impl<'a> Printer<'a> {
             Operand::Param(name) => self.name(name),
         }
         self.out.push(')');
+    }
+}
+
+#[cfg(test)]
+thread_local! {
+    static DEFINITION_QUOTE_BYTES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+fn quote_definition(source: &str, out: &mut String) {
+    #[cfg(test)]
+    DEFINITION_QUOTE_BYTES.with(|bytes| bytes.set(bytes.get() + source.len()));
+    write_quoted(source, '"', out);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// FIG-7135: mapping statement spans into a quoted definition must scan
+    /// its source once, independent of how many statement boundaries it has.
+    #[test]
+    fn definition_range_mapping_quotes_each_source_byte_once() {
+        let definition = crate::parse_definition(&format!(
+            "function probe() -> Any\nkernel 1\nmetering statements\nbody {{ {} return null }}",
+            r#"print "é\n\t\\\"" "#.repeat(128),
+        ))
+        .unwrap();
+        let (source, original_ranges) = definition_with_ranges(&definition);
+        let mut document = Document::new(NumberPolicy::Float, Vec::new());
+        document.functions.insert(definition.identity(), definition);
+        DEFINITION_QUOTE_BYTES.with(|bytes| bytes.set(0));
+        let (text, ranges) = print_document_with_ranges(&document);
+        let quoted = DEFINITION_QUOTE_BYTES.with(|bytes| bytes.get());
+        assert_eq!(crate::parse_document(&text).unwrap(), document);
+        assert_eq!(ranges.len(), 129);
+        let base = text.find("definition ").unwrap() + "definition ".len();
+        let expected: std::collections::BTreeSet<_> = original_ranges
+            .values()
+            .map(|span| {
+                let offset = |boundary| {
+                    let mut prefix = String::new();
+                    write_quoted(&source[..boundary], '"', &mut prefix);
+                    base + prefix.len() - 1
+                };
+                (offset(span.start), offset(span.end))
+            })
+            .collect();
+        assert_eq!(
+            ranges
+                .values()
+                .map(|span| (span.start, span.end))
+                .collect::<std::collections::BTreeSet<_>>(),
+            expected,
+        );
+        for span in ranges.values() {
+            let statement = &text[span.start..span.end];
+            assert!(
+                statement.starts_with("print ") || statement == "return null",
+                "{statement}"
+            );
+        }
+        assert_eq!(
+            quoted,
+            source.len(),
+            "statement boundaries must not re-quote source prefixes"
+        );
     }
 }
