@@ -365,3 +365,152 @@ impl LashCore {
         }
     }
 }
+
+#[cfg(all(test, feature = "codemode"))]
+mod tests {
+    use super::*;
+    use futures_util::StreamExt as _;
+
+    /// Observe committed process events until the engine reaches its first sleep.
+    async fn first_park(
+        core: &LashCore,
+        process: &lash_core::ProcessId,
+    ) -> Result<i64, Box<dyn std::error::Error + Send + Sync>> {
+        let observable = core.processes().observe(process);
+        let snapshot = observable.snapshot().await?;
+        let mut events = observable.subscribe_and_recover(snapshot.cursor);
+        loop {
+            let record = core
+                .processes()
+                .get(process)
+                .await?
+                .ok_or("the process is retained")?;
+            for wait in record.lifecycle.waits() {
+                if let lash_execution_contracts::process::WaitKind::Sleep { until_ms } = wait.kind {
+                    return Ok(until_ms);
+                }
+            }
+            tokio::select! {
+                event = events.next() => { event.ok_or("the process feed remains open")??; }
+                stopped = core.node_stopped() => return Err(format!("the live node stopped before the process parked: {stopped:?}").into()),
+            }
+        }
+    }
+
+    /// FIG-7137: a serving node must survive its own expiry scan after a wall
+    /// clock jump, then run a newly admitted process. Execute the ordinary
+    /// reaper operation explicitly so the scan precedes the new start without
+    /// a sleep or a race against the heartbeat timer.
+    #[tokio::test]
+    async fn a_node_starts_new_work_after_its_clock_jumps_past_its_lease() {
+        let clock = Arc::new(lash_core::testing::TestClock::new(1_700_000_000_000));
+        let stores = Arc::new(
+            lash_sqlite_store::SqliteStoreSet::memory_with_clock(clock.clone())
+                .await
+                .unwrap(),
+        );
+        let workers = crate::vm::WorkerService::default();
+        let bounds = workers.config().run_bounds;
+        let core = LashCore::standard_builder(lash_conformance::backend_over(stores))
+            .plugin(Arc::new(crate::vm::KernelProcessPluginFactory::new(
+                workers,
+                crate::vm::TYPESCRIPT_DIALECT,
+                bounds,
+            )))
+            .commit_budget(crate::CommitBudget::bounded(1024 * 1024, 512))
+            .data_retention(crate::DataRetention::standard())
+            .queued_work_batching(crate::QueuedWorkBatchingConfig::new(1))
+            .execution_budgets(crate::ExecutionBudgets::recommended())
+            .delta_coalescing(crate::DeltaCoalescing::recommended())
+            .build(crate::tests::host::runtime_lease_owner())
+            .unwrap();
+        let artifacts = core.host_artifacts();
+        let pin = crate::process::HostArtifactPin::mint();
+        let environment = crate::process::ProcessEnv::builder(crate::MaxToolCalls::new(16))
+            .build()
+            .unwrap();
+        let env_ref = artifacts
+            .publish_process_env(&pin, &environment)
+            .await
+            .unwrap();
+        let document = crate::workflow::document::parse_document(
+            r#"kernel 1
+numbers float
+entry nap() -> Any
+fn nap() {
+  do sleep 600000
+  return null
+}
+main {
+  finish null
+}
+"#,
+        )
+        .unwrap();
+        let crate::workflow::WorkflowPublish::Published(publication) = artifacts
+            .publish_workflow(
+                &pin,
+                &crate::workflow::document::DocumentBytes::from(document),
+                &crate::workflow::document::Name::new("nap"),
+                &environment,
+                artifacts.cell_packages().await.unwrap().declare_all(),
+                None,
+            )
+            .await
+            .unwrap()
+        else {
+            panic!("the workflow publishes")
+        };
+        let start = || async {
+            core.processes()
+                .start(
+                    crate::process::ProcessStartRequest::definition(
+                        publication.definition.id.clone(),
+                        Some(publication.definition.signature.clone()),
+                        serde_json::Map::new(),
+                        crate::process::EngineLaunch::new(
+                            env_ref.clone(),
+                            Some(
+                                core.processes()
+                                    .kernel_engine_defaults()
+                                    .unwrap()
+                                    .into_engine_settings(),
+                            ),
+                        ),
+                        crate::process::ProcessOriginator::host(),
+                        crate::process::Lifetime::Detached,
+                    ),
+                    core.effect_host(),
+                )
+                .await
+                .unwrap()
+                .process_id
+        };
+        let before = start().await;
+        assert_eq!(first_park(&core, &before).await.unwrap(), 1_700_000_600_000);
+        let lease = core
+            .node
+            .registration
+            .snapshot()
+            .expect("the first park proves the node registered");
+        let jumped = 1_700_000_060_000;
+        assert!(jumped > lease.expires_at.0);
+        clock.set(u64::try_from(jumped).unwrap());
+        core.backend().durable().reap(&lease).await.unwrap();
+        let after = start().await;
+        let parked = tokio::time::timeout(
+            std::time::Duration::from_secs(120),
+            first_park(&core, &after),
+        )
+        .await
+        .expect("new work reaches its first park")
+        .expect("the process observation reads");
+        assert_eq!(parked, jumped + 600_000);
+        assert!(matches!(
+            core.backend().durable().heartbeat(&lease).await.unwrap(),
+            lash_core::durable_port::HeartbeatOutcome::Renewed { expires_at }
+                if expires_at.0 == jumped + lease.ttl_millis
+        ));
+        core.shutdown().await.unwrap();
+    }
+}
