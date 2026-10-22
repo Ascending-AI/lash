@@ -114,31 +114,52 @@ impl Renderer<'_> {
         self.out.end_node();
     }
     pub(super) fn inline_expr(&mut self, expr: &k::Expr) {
+        if self.expression_depth >= self.max_depth {
+            self.out.refuse(PrintError::Depth {
+                limit: self.max_depth,
+            });
+            return;
+        }
+        self.expression_depth += 1;
         self.out.begin_node(None);
         self.inline_body(expr);
         self.out.end_node();
+        self.expression_depth -= 1;
     }
     pub(super) fn inline_body(&mut self, expr: &k::Expr) {
-        if let Some(task) = self.inline.tasks.get(&(expr as *const _)).cloned() {
-            let k::ActKind::Perform { slot, .. } = task.kind else {
-                unreachable!("task operation")
-            };
-            let Some(import) = self.document.imports.get(&slot) else {
-                self.out
-                    .refuse(PrintError::Invalid("missing task operation".into()));
-                return;
-            };
-            self.out.write("asyncio.create_task(");
-            self.operation_path(&import.name.to_string());
-            self.out.write("(");
-            self.authored_args(&task.args, true);
-            self.out.write("))");
-            return;
-        }
         match expr {
             k::Expr::Literal(l) => self.literal(l),
             k::Expr::Act(act) => self.nested_action(act, true),
-            k::Expr::Variable(n) => self.name(n),
+            k::Expr::Variable(n) => {
+                if let Some(value) = self.substitutions.remove(n) {
+                    self.inline_expr(&value);
+                    self.substitutions.insert(n.clone(), value);
+                } else if let Some(comprehension) = self.comprehensions.remove(n) {
+                    self.comprehension(&comprehension);
+                    self.comprehensions.insert(n.clone(), comprehension);
+                } else {
+                    self.name(n);
+                }
+            }
+            k::Expr::If { cond, then, r#else } => {
+                self.out.write("(");
+                self.inline_expr(then);
+                self.out.write(" if ");
+                self.inline_expr(cond);
+                self.out.write(" else ");
+                self.inline_expr(r#else);
+                self.out.write(")");
+            }
+            k::Expr::Let { name, value, body } => {
+                let previous = self.substitutions.insert(name.clone(), *value.clone());
+                self.inline_expr(body);
+                if let Some(previous) = previous {
+                    self.substitutions.insert(name.clone(), previous);
+                } else {
+                    self.substitutions.remove(name);
+                }
+            }
+            k::Expr::Closure(closure) => self.lambda(closure),
             k::Expr::Call { function, args } => {
                 if let Some(token) = self.operators.token(function, args, &self.scope.types) {
                     match token {
@@ -285,6 +306,11 @@ impl Renderer<'_> {
                         self.out.write(")");
                     } else if self.operators.is(&target, "py.time") {
                         self.out.write("time.time()");
+                    } else if self.operators.is(&target, "py.gather") {
+                        self.gather(&act.args);
+                    } else if self.name_check(&target, &act.args) {
+                    } else if let Some(token) = self.operators.action_token(&target, &act.args) {
+                        self.operator(token, &act.args);
                     } else if !self.authored_call(&target, &act.args, true) {
                         self.helper(&target);
                         self.out.write("(");
@@ -321,6 +347,14 @@ impl Renderer<'_> {
                 self.out.write("await ");
                 self.authored_args(&act.args, true);
             }
+            k::ActKind::Spawn(callee)
+                if super::task::target(callee)
+                    .is_some_and(|target| self.operators.is(&target, "py.task.run")) =>
+            {
+                self.out.write("asyncio.create_task(");
+                self.task_coroutine(act);
+                self.out.write(")");
+            }
             _ => self.out.refuse(PrintError::Invalid(
                 "action has no authored Python spelling".into(),
             )),
@@ -337,9 +371,7 @@ impl Renderer<'_> {
         if block.is_empty() {
             self.empty();
         }
-        for stmt in block {
-            self.node(k::Node::Stmt(stmt), None);
-        }
+        self.authored_statements(block);
         self.indent -= 1;
         self.out.end_node();
     }
@@ -434,18 +466,24 @@ impl Renderer<'_> {
                     Some(start) if self.authored => self.annotated(&params, start),
                     _ => self.parameters(&params),
                 }
-                let (_, annotation) = self
-                    .scope
+                self.scope
                     .bind(name, Some(matches!(stmt, k::Stmt::Let { .. })));
-                if let Some(annotation) = annotation {
+                if let Some(annotation) = c
+                    .presentation
+                    .as_ref()
+                    .and_then(|start| super::authored::annotation(&start.signature.result))
+                {
                     self.out.write(" -> ");
-                    self.out.write(annotation);
+                    self.out.write(&annotation);
                 }
                 let parent = std::mem::replace(&mut self.scope, BindingScope::new(&params));
                 let outer_main = self.main;
                 self.main = false;
                 self.out.write(":\n");
-                self.readable_block(&body.block);
+                self.root_block(
+                    &body.block,
+                    Some(&lash_vocabulary::sites::Unit::Library(c.function)),
+                );
                 self.main = outer_main;
                 self.scope = parent;
                 self.out.end_node();
@@ -623,11 +661,7 @@ impl Renderer<'_> {
         true
     }
     fn binding_annotation(&mut self, name: &Name, declaration: bool) {
-        let (_, annotation) = self.scope.bind(name, Some(declaration));
-        if let Some(annotation) = annotation {
-            self.out.write(": ");
-            self.out.write(annotation);
-        }
+        self.scope.bind(name, Some(declaration));
     }
 
     /// An operation as its dotted path: Python spells canonical names

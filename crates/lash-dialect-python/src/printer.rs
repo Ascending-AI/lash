@@ -1,5 +1,5 @@
 //! Exported Python: plain source whose environment stays in the base
-//! document; paired inverses live in generated.rs.
+//! document. Lowering inverses are verified by the readable export path.
 use crate::generated_scope::BindingScope;
 mod authored;
 mod names;
@@ -31,7 +31,7 @@ pub(crate) fn print_regions(
     check_document_depth(document, options.limits)?;
     let plan = NamePlan::new(document, legal_identifier);
     let operators = crate::generated_operators::Operators::new(document, library);
-    let inline = InlinePlan::new(document, &operators);
+    let inline = InlinePlan::new(document);
     let mut r = Renderer {
         out: SourceWriter::with_captions(options, document, captions)?,
         plan: &plan,
@@ -44,14 +44,23 @@ pub(crate) fn print_regions(
         captions: captions.is_some_and(|c| !c.is_empty()),
         authored: true,
         sync: BTreeSet::new(),
+        substitutions: BTreeMap::new(),
+        comprehensions: BTreeMap::new(),
+        expression_depth: 0,
+        max_depth: options.limits.max_depth.min(k::MAX_NESTING_DEPTH),
     };
-    // These imports are ordinary authored Python, resolved by the front end.
-    if document
-        .imports
-        .values()
-        .any(|i| i.name.package.to_string() == "python")
-    {
-        r.out.write("import asyncio\nimport time\n\n");
+    let asyncio = ["py.task.run", "py.gather", "py.sleep"]
+        .iter()
+        .any(|helper| r.operators.uses(helper));
+    let time = r.operators.uses("py.time");
+    if asyncio {
+        r.out.write("import asyncio\n");
+    }
+    if time {
+        r.out.write("import time\n");
+    }
+    if asyncio || time {
+        r.out.write("\n");
     }
     let signatures = r.typed_dicts(document, &regions.authored);
     let mut written = BTreeMap::new();
@@ -126,6 +135,10 @@ struct Renderer<'a> {
     /// The local functions an authored region writes as plain `def`s,
     /// whose calls take no `await`.
     sync: BTreeSet<Name>,
+    substitutions: BTreeMap<Name, k::Expr>,
+    comprehensions: BTreeMap<Name, authored::Comprehension>,
+    expression_depth: usize,
+    max_depth: usize,
 }
 impl Renderer<'_> {
     /// The caption of the node the writer opens next, taken to be spelled.
@@ -167,16 +180,16 @@ impl Renderer<'_> {
         self.out.write(")");
     }
     fn root_block(&mut self, block: &k::Block, root: Option<&lash_vocabulary::sites::Unit>) {
+        let sync = self.sync.clone();
         self.out.begin_node(root);
         self.indent += 1;
         if block.is_empty() {
             self.empty();
         }
-        for stmt in block {
-            self.node(k::Node::Stmt(stmt), None);
-        }
+        self.authored_statements(block);
         self.indent -= 1;
         self.out.end_node();
+        self.sync = sync;
     }
     fn name(&mut self, n: &Name) {
         // Authored source spells the document's names; only the kernel
@@ -253,7 +266,9 @@ impl Renderer<'_> {
     fn literal(&mut self, literal: &k::Literal) {
         match literal {
             k::Literal::Null => self.out.write("None"),
-            k::Literal::Absent => self.out.write("k.absent"),
+            k::Literal::Absent => self.out.refuse(PrintError::Invalid(
+                "an absent value has no authored Python spelling".into(),
+            )),
             k::Literal::Bool(b) => self.out.write(if *b { "True" } else { "False" }),
             k::Literal::Text(s) => self.out.json(s),
             k::Literal::Int(n) => {
@@ -380,20 +395,18 @@ impl Renderer<'_> {
 /// rendering work even with maps off; it creates no Sites or source tree.
 struct InlinePlan {
     expressions: std::collections::HashSet<*const k::Expr>,
-    tasks: std::collections::HashMap<*const k::Expr, k::ActExpr>,
 }
 impl InlinePlan {
-    fn new(document: &k::Document, operators: &crate::generated_operators::Operators) -> Self {
+    fn new(document: &k::Document) -> Self {
         let mut plan = Self {
             expressions: Default::default(),
-            tasks: Default::default(),
         };
         if let Some(main) = &document.main {
-            plan.collect(k::Node::Block(main), document, operators);
+            plan.collect(k::Node::Block(main));
         }
         for f in document.functions.values() {
             if let Some(body) = f.body() {
-                plan.collect(k::Node::Block(&body.block), document, operators);
+                plan.collect(k::Node::Block(&body.block));
             }
         }
         plan
@@ -401,42 +414,37 @@ impl InlinePlan {
     fn contains(&self, expr: &k::Expr) -> bool {
         self.expressions.contains(&(expr as *const _))
     }
-    fn collect(
-        &mut self,
-        node: k::Node<'_>,
-        document: &k::Document,
-        operators: &crate::generated_operators::Operators,
-    ) {
+    fn collect(&mut self, node: k::Node<'_>) {
         for child in node.children() {
-            self.collect(child, document, operators);
+            self.collect(child);
         }
         if let k::Node::Expr(expr) = node {
-            let task = task::operation(document, operators, expr);
-            let eligible = task.is_some()
-                || match expr {
-                    k::Expr::Literal(_) | k::Expr::Variable(_) => true,
-                    k::Expr::Member(member) => match member.as_ref() {
-                        k::Member::Field { target, .. } => self.contains(target),
-                        k::Member::Index { target, index } => {
-                            self.contains(target) && self.contains(index)
-                        }
-                    },
-                    k::Expr::Call { args, .. } => args.iter().all(|arg| self.contains(arg)),
-                    k::Expr::Act(act) => act.args.iter().all(|arg| self.contains(arg)),
-                    k::Expr::List(items) | k::Expr::Tuple(items) | k::Expr::Set(items) => {
-                        items.iter().all(|e| self.contains(e))
+            let eligible = match expr {
+                k::Expr::Literal(_) | k::Expr::Variable(_) => true,
+                k::Expr::Member(member) => match member.as_ref() {
+                    k::Member::Field { target, .. } => self.contains(target),
+                    k::Member::Index { target, index } => {
+                        self.contains(target) && self.contains(index)
                     }
-                    k::Expr::Map(items) => items
-                        .iter()
-                        .all(|e| self.contains(&e.key) && self.contains(&e.value)),
-                    k::Expr::Record(items) => items.iter().all(|e| self.contains(&e.value)),
-                    _ => false,
-                };
+                },
+                k::Expr::Call { args, .. } => args.iter().all(|arg| self.contains(arg)),
+                k::Expr::Act(act) => act.args.iter().all(|arg| self.contains(arg)),
+                k::Expr::List(items) | k::Expr::Tuple(items) | k::Expr::Set(items) => {
+                    items.iter().all(|e| self.contains(e))
+                }
+                k::Expr::Map(items) => items
+                    .iter()
+                    .all(|e| self.contains(&e.key) && self.contains(&e.value)),
+                k::Expr::Record(items) => items.iter().all(|e| self.contains(&e.value)),
+                k::Expr::If { cond, then, r#else } => {
+                    self.contains(cond) && self.contains(then) && self.contains(r#else)
+                }
+                k::Expr::Let { value, body, .. } => self.contains(value) && self.contains(body),
+                k::Expr::Closure(_) => true,
+                _ => false,
+            };
             if eligible {
                 self.expressions.insert(expr as *const _);
-                if let Some(task) = task {
-                    self.tasks.insert(expr as *const _, task);
-                }
             }
         }
     }

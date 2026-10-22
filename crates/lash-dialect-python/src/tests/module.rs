@@ -28,6 +28,41 @@ fn module(source: &str) -> Result<Lowered, lash_kernel_dialect::Diagnostic> {
     Ok(lowered)
 }
 
+/// FIG-7135: the fan-out printer inverts captured task thunks back to
+/// coroutine calls inside gather, retaining the entire kernel identity.
+#[test]
+fn gathered_local_coroutines_print_without_task_thunks() {
+    let source = "import asyncio\n#: Echo twice\nasync def demo() -> list[str]:\n    #: Echo once\n    async def work(value: str):\n        return await host.echo(value)\n    #: Together\n    return await asyncio.gather(work('a'), work('b'))\n";
+    let lowered = module(source).expect("fan-out module");
+    let printed = crate::print(
+        &lowered.document,
+        Some(&lowered.captions),
+        machine::library(),
+        lash_kernel_dialect::PrintOptions {
+            source_map: true,
+            ..Default::default()
+        },
+    )
+    .unwrap_or_else(|error| panic!("{error}: {:?}", lowered.document));
+    let (read, captions) = crate::read(
+        &printed.source,
+        &lowered.document,
+        machine::library(),
+        Default::default(),
+    )
+    .expect("authored fan-out readback");
+    assert_eq!(
+        lash_kernel_doc::print_document(&read),
+        lash_kernel_doc::print_document(&lowered.document)
+    );
+    assert_eq!(captions, lowered.captions);
+    printed
+        .source_map
+        .expect("printed map")
+        .validate(&read, &printed.source)
+        .expect("map matches exact readback");
+}
+
 fn entries(source: &str) -> BTreeMap<Name, Signature> {
     module(source)
         .unwrap_or_else(|diagnostic| panic!("{diagnostic}\n{source}"))

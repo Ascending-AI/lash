@@ -751,20 +751,24 @@ impl Lowerer<'_> {
         let has_else = !attempt.orelse.is_empty();
         let passed = has_else.then(|| {
             let flag = self.fresh("passed");
+            self.span = None;
             self.emit(Stmt::Let {
                 name: flag.clone(),
                 value: Rhs::Expr(Expr::Literal(Literal::Bool(false))),
             });
+            self.span = span;
             flag
         });
         let body = self.block(|this| {
             this.statements(&attempt.body)?;
             if let Some(flag) = &passed {
+                let span = this.span.take();
                 this.emit(Stmt::Assign {
                     place: Place::Variable(flag.clone()),
                     value: Rhs::Expr(Expr::Literal(Literal::Bool(true))),
                     order: AssignOrder::ValueFirst,
                 });
+                this.span = span;
             }
             Ok(())
         })?;
@@ -776,8 +780,9 @@ impl Lowerer<'_> {
         self.caption_arm(Arm::Last, finally_caption);
         if let Some(flag) = passed {
             let orelse = self.suite(&attempt.orelse)?;
-            self.span = span;
+            self.span = None;
             self.emit_if(Expr::Variable(flag), orelse, Buf::default());
+            self.span = span;
         }
         Ok(())
     }
@@ -1080,11 +1085,7 @@ impl Lowerer<'_> {
         let variable = self.written(name, def.name.range)?;
         self.span_of(def);
         let closure = self.emit_closure(params, body, start);
-        self.emit(Stmt::Assign {
-            place: Place::Variable(variable),
-            value: Rhs::Expr(closure.expr),
-            order: AssignOrder::ValueFirst,
-        });
+        self.store(Place::Variable(variable), closure);
         if let Some(note) = self.buf.notes.last_mut() {
             note.written = Some(written);
         }
@@ -1191,12 +1192,16 @@ impl Lowerer<'_> {
         });
         let span = self.span;
         let block = self.block(|this| {
+            // Scope slots are synthetic. The first authored assignment (or
+            // captured read) owns its range, never this absent initialization.
+            let authored_span = this.span.take();
             for local in &declared {
                 this.emit(Stmt::Let {
                     name: Name::new(local.as_str()),
                     value: Rhs::Expr(Expr::Literal(Literal::Absent)),
                 });
             }
+            this.span = authored_span;
             // Arguments fill parameters in order, so the last parameter
             // without a default tells whether any is missing.
             let required = params
