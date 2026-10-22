@@ -218,6 +218,7 @@ impl<'a> ChildTable<'a> {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct NodeEnvelope<'a> {
     bytes: &'a [u8],
+    framing: Framing,
     pub kind: NodeKind,
     pub children: ChildTable<'a>,
     /// The physical body: child references are slots.
@@ -230,13 +231,28 @@ impl<'a> NodeEnvelope<'a> {
     /// presence, receiving limits and child availability are never cached.
     ///
     /// # Errors
-    /// A canonical token or child-slot refusal, or an offset outside the body.
+    /// A canonical token or child-slot refusal, an offset outside the body,
+    /// or [`CanonicalFault::InvalidBodyForm`] if the public view was altered.
     pub fn logical_tokens(&self, skip: usize, node: NodeId) -> Result<Arc<[u8]>, GraphRefusal> {
-        let body = self.body.get(skip..).ok_or(GraphRefusal::Truncated)?;
+        let original = self.framing.envelope(self.bytes);
+        if self.kind != original.kind
+            || !(std::ptr::eq(self.children.0, original.children.0)
+                || self.children == original.children)
+            || !(std::ptr::eq(self.body, original.body) || self.body == original.body)
+        {
+            return Err(GraphRefusal::NonCanonical {
+                node: Some(node),
+                reason: CanonicalFault::InvalidBodyForm,
+            });
+        }
+        let body = original.body.get(skip..).ok_or(GraphRefusal::Truncated)?;
         super::encode::prepare_logical(self.bytes, skip, || {
+            #[cfg(test)]
+            LOGICAL_EXPANSIONS.with(|count| count.set(count.get() + 1));
             let refuse = |error| GraphRefusal::from_token(error, Some(node), Some(self.kind.0));
             let mut reader = TokenReader::with_form(body, RefForm::Physical);
             let mut out = TokenWriter::with_capacity(body.len() + 32 * self.children.len());
+            let mut copied = 0;
             while !reader.is_empty() {
                 let start = reader.position();
                 match reader.next_event().map_err(refuse)? {
@@ -245,11 +261,14 @@ impl<'a> NodeEnvelope<'a> {
                             node: Some(node),
                             reason: CanonicalFault::ChildSlotOutOfRange(slot),
                         })?;
+                        out.raw(&body[copied..start]);
                         out.child(child.child_ref());
+                        copied = reader.position();
                     }
-                    _ => out.raw(&body[start..reader.position()]),
+                    _ => {}
                 }
             }
+            out.raw(&body[copied..]);
             Ok(out.into_bytes())
         })
     }
@@ -595,6 +614,7 @@ impl Framing {
     fn envelope<'a>(&self, bytes: &'a [u8]) -> NodeEnvelope<'a> {
         NodeEnvelope {
             bytes,
+            framing: *self,
             kind: self.kind,
             children: self.children(bytes),
             body: &bytes[self.body_start..],
@@ -691,6 +711,12 @@ fn parse_uncached(bytes: &[u8], node: Option<NodeId>) -> Result<NodeEnvelope<'_>
     check_slots(body, children.len(), node)?;
     Ok(NodeEnvelope {
         bytes,
+        framing: Framing {
+            kind: NodeKind(kind),
+            children_start: table_end - table_len,
+            children_len: table_len,
+            body_start: pos,
+        },
         kind: NodeKind(kind),
         children: ChildTable(children),
         body,
@@ -699,6 +725,7 @@ fn parse_uncached(bytes: &[u8], node: Option<NodeId>) -> Result<NodeEnvelope<'_>
 
 #[cfg(test)]
 thread_local! {
+    static LOGICAL_EXPANSIONS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
     static SLOT_SCAN_EVENTS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
 }
 
@@ -832,6 +859,68 @@ mod frame_tests {
                 });
             }
         });
+    }
+
+    /// FIG-7135: a caller's altered envelope view cannot poison or borrow
+    /// the preparation keyed by the original bytes, on either miss or hit.
+    #[test]
+    fn altered_envelope_views_cannot_publish_or_reuse_logical_preparation() {
+        for warm in [false, true] {
+            for field in 0..3 {
+                let children = [[0x31 + field; 32]];
+                let mut body = TokenWriter::new();
+                body.seq(2);
+                body.slot(0);
+                body.bool(warm);
+                let bytes = write_envelope(NodeKind(1_002), &children, body.as_bytes());
+                let id = NodeId::of_envelope(&bytes);
+                let original = parse_envelope(&bytes, Some(id)).unwrap();
+                if warm {
+                    original.logical_tokens(0, id).unwrap();
+                }
+                let mut altered = original;
+                let other_children = [[0xf1; 32]];
+                match field {
+                    0 => altered.body = &[0x00],
+                    1 => altered.children = ChildTable(&other_children),
+                    _ => altered.kind = NodeKind(1_003),
+                }
+                assert_eq!(
+                    altered.logical_tokens(0, id),
+                    Err(GraphRefusal::NonCanonical {
+                        node: Some(id),
+                        reason: CanonicalFault::InvalidBodyForm,
+                    })
+                );
+                let logical = original.logical_tokens(0, id).unwrap();
+                let mut reader = TokenReader::new(&logical);
+                assert_eq!(reader.seq().unwrap(), 2);
+                assert_eq!(reader.child().unwrap(), ChildRef(children[0]));
+                assert_eq!(reader.bool().unwrap(), warm);
+                reader.finish().unwrap();
+            }
+        }
+    }
+
+    /// FIG-7135: physical expansion is bounded by content, even when each
+    /// read supplies freshly allocated bytes rather than a resident object.
+    #[test]
+    fn physical_expansions_are_bounded_by_content_not_reads() {
+        let bytes = write_envelope(
+            NodeKind(1_002),
+            &[[0x71; 32]],
+            &[0x09, 2, 0x0b, 0, 0x03, 91],
+        );
+        let id = NodeId::of_envelope(&bytes);
+        LOGICAL_EXPANSIONS.with(|count| count.set(0));
+        for _ in 0..12 {
+            let current = bytes.clone();
+            let envelope =
+                check_envelope(&current, id, &DecodeLimits::within_total(1 << 20)).unwrap();
+            let tokens = envelope.logical_tokens(0, id).unwrap();
+            assert_eq!(TokenReader::new(&tokens).seq().unwrap(), 2);
+        }
+        assert_eq!(LOGICAL_EXPANSIONS.with(std::cell::Cell::get), 1);
     }
 
     /// The framing a logical body's envelope had before FIG-6932, built
