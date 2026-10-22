@@ -76,6 +76,77 @@ fn every_print_reads_back_and_its_whole_prints_lower_to_their_documents() -> any
     Ok(())
 }
 
+/// FIG-7135: replacing a non-ASCII workflow argument through the canvas
+/// preserves the document's exact authored Python print/read identity.
+#[test]
+fn a_canvas_edited_non_ascii_python_document_reads_back_identically() -> anyhow::Result<()> {
+    use lash_kernel_doc::{Expr, Literal, Node};
+    use lash_kernel_edit::authoring::{DataValue, Operation, ValueTarget};
+
+    let embedding = lash_vm_worker::built_embedding(&Default::default())?;
+    let signatures = corpus_tool_signatures()?;
+    let namespaces = workflow_corpus::corpus_namespaces(&signatures, &Default::default())?;
+    let environment = lash_kernel_dialect::Environment::new(embedding.library(), &namespaces);
+    let lowered = lash_dialect_python::lower(
+        include_str!("../non-ascii/source.py"),
+        &environment,
+        lash_kernel_dialect::Mode::Module,
+    )?;
+    let document = &lowered.document;
+    let action = document
+        .action_ordinals()
+        .into_keys()
+        .find(|site| {
+            matches!(document.node(site), Some(Node::Expr(Expr::Act(action)))
+                if matches!(action.kind, lash_kernel_doc::ActKind::Perform { .. }))
+        })
+        .expect("the authored echo operation");
+    let base = document.identity();
+    let mut draft = lash_kernel_edit::Draft::open((**document).clone())?;
+    let applied = draft.apply(
+        &lash_kernel_edit::Transaction {
+            base,
+            edits: vec![Operation::SetValue {
+                base,
+                target: ValueTarget::ToolArgument {
+                    action,
+                    index: 0,
+                    path: vec![],
+                },
+                value: DataValue::Literal(Literal::Text("edited λ".into())),
+            }],
+        },
+        &lash_kernel_check::Environment::new(embedding.library()),
+    )?;
+    let captions = lowered
+        .captions
+        .rekey(&applied.correspondence, document, draft.document())
+        .expect("caption correspondence");
+    let printed = lash_dialect_python::print(
+        draft.document(),
+        Some(&captions.captions),
+        embedding.library(),
+        lash_kernel_dialect::PrintOptions {
+            source_map: true,
+            ..Default::default()
+        },
+    )?;
+    let (read, read_captions) = lash_dialect_python::read(
+        &printed.source,
+        draft.document(),
+        embedding.library(),
+        Default::default(),
+    )?;
+    assert_eq!(read.canonical_bytes(), draft.document().canonical_bytes());
+    assert_eq!(read_captions, captions.captions);
+    assert!(printed.source.contains("edited λ"));
+    printed
+        .source_map
+        .expect("requested map")
+        .validate(draft.document(), &printed.source)?;
+    Ok(())
+}
+
 /// FIG-6953 READABLE-STYLE: a workflow edited through the canvas API prints
 /// as the source the authoring guide teaches, with none of the kernel
 /// surface's scaffolding.
