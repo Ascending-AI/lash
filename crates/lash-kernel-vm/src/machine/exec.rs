@@ -918,6 +918,16 @@ impl KernelMachine {
             export,
         } = call;
         let code = exe.code(code_id);
+        // Native start frames hold the completion formula just like library
+        // fallback frames, whether reached by a root, import, or spawn.
+        let library = library.or_else(|| match &code.site.unit {
+            lash_vocabulary::sites::Unit::Library(function)
+                if exe.native_starts.get(function) == Some(&code_id) =>
+            {
+                exe.lib_of(function)
+            }
+            _ => None,
+        });
         if given > code.params.len() {
             return raise(
                 "arity",
