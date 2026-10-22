@@ -12,9 +12,10 @@ use lash_kernel_package::{LinkRefusal, LinkedContent, Namespace, ReachSelection,
 use lash_vocabulary::data_limits::KernelDataLimits;
 use lash_vocabulary::names::DocumentId;
 use lash_vocabulary::names::SourceMapId;
+use lash_vocabulary::tokens::{TokenCodec as _, TokenWriter, logical_digest};
 use lash_vocabulary::{names::*, package::*};
 use std::collections::{BTreeMap, BTreeSet};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 
 pub(crate) fn document_artifact(document: &DocumentId) -> ArtifactName {
     ArtifactName {
@@ -54,8 +55,128 @@ pub struct KernelDocuments {
     store: Arc<dyn ModuleArtifactStore>,
     packages: Arc<dyn PackageStore>,
     /// Unpublished, deterministic fulfilments only; never a replacement for an existing stored read.
-    prepared: Arc<Mutex<LinkedContent>>,
+    prepared: Arc<Mutex<DocumentPreparations>>,
 }
+// Pure preparations belong to the same document owner as unpublished Links.
+// A per-content slot serializes first preparation without holding the inventory
+// mutex during decoding or checking. It contains no store or referrer authority.
+type HelperPreparation = OnceLock<Result<Arc<PreparedHelperRelease>, EnginePortError>>;
+#[derive(Default)]
+struct DocumentPreparations {
+    linked: LinkedContent,
+    helpers: BTreeMap<[u8; 32], Arc<HelperPreparation>>,
+}
+struct PreparedHelperRelease {
+    documents: Vec<IdentifiedDocument>,
+    links: Vec<LinkRecord>,
+    packages: Vec<PackageRecord>,
+    labels: BTreeMap<PackageId, String>,
+}
+
+impl PreparedHelperRelease {
+    fn new(
+        content: &LinkedContent,
+        labels: &BTreeMap<PackageId, String>,
+    ) -> Result<Self, EnginePortError> {
+        for (id, document) in &content.documents {
+            if document.identity() != *id {
+                return Err(map_link_refusal(LinkRefusal::InvalidDocument {
+                    message: "helper Document hash differs".into(),
+                }));
+            }
+            lash_kernel_doc::validate_document(document, &document.functions).map_err(|e| {
+                map_link_refusal(LinkRefusal::InvalidDocument {
+                    message: e.to_string(),
+                })
+            })?;
+        }
+        for id in content.links.keys() {
+            content.retain_reach(*id).map_err(map_link_refusal)?;
+        }
+        for (id, package) in &content.packages {
+            if package.identity() != *id {
+                return Err(map_link_refusal(LinkRefusal::InvalidDocument {
+                    message: "helper Package hash differs".into(),
+                }));
+            }
+            for member in package.members.values() {
+                if let MemberKind::Export { link, export } = &member.kind {
+                    content.export(*link, export).map_err(map_link_refusal)?;
+                }
+            }
+        }
+        let documents = content
+            .documents
+            .values()
+            .map(|document| {
+                let document = DocumentBytes::from(document.clone())
+                    .decode(KernelDataLimits::standard())
+                    .map_err(|error| {
+                        map_link_refusal(LinkRefusal::InvalidDocument {
+                            message: error.to_string(),
+                        })
+                    })?;
+                lash_kernel_check::derive(&document, &document.functions).map_err(|error| {
+                    map_link_refusal(LinkRefusal::InvalidDocument {
+                        message: error.to_string(),
+                    })
+                })?;
+                Ok(document)
+            })
+            .collect::<Result<Vec<_>, EnginePortError>>()?;
+        let mut links = Vec::with_capacity(content.links.len());
+        let mut pending: BTreeSet<_> = content.links.keys().copied().collect();
+        let mut written = BTreeSet::new();
+        while !pending.is_empty() {
+            let ready = pending
+                .iter()
+                .copied()
+                .find(|id| {
+                    content.links[id].fills.values().all(|fill| match fill {
+                        Fill::Export { link, .. } => written.contains(link),
+                        _ => true,
+                    })
+                })
+                .ok_or_else(|| {
+                    map_link_refusal(LinkRefusal::InvalidDocument {
+                        message: "cyclic helper Link graph".into(),
+                    })
+                })?;
+            links.push(LinkRecord {
+                id: ready,
+                link: content.links[&ready].clone(),
+            });
+            pending.remove(&ready);
+            written.insert(ready);
+        }
+        for (id, json) in labels {
+            let package = content.packages.get(id).ok_or_else(|| {
+                map_link_refusal(LinkRefusal::InvalidDocument {
+                    message: "labels name an absent Package".into(),
+                })
+            })?;
+            lash_kernel_package::read_labels(content, package, json).map_err(|error| {
+                map_link_refusal(LinkRefusal::InvalidDocument {
+                    message: error.to_string(),
+                })
+            })?;
+        }
+        Ok(Self {
+            documents,
+            links,
+            packages: content
+                .packages
+                .iter()
+                .map(|(id, package)| PackageRecord {
+                    id: *id,
+                    package: package.clone(),
+                })
+                .collect(),
+            labels: labels.clone(),
+        })
+    }
+}
+
 #[derive(Default)]
 pub(crate) struct ProcessPreparations;
 impl ProcessPreparations {
@@ -172,7 +293,7 @@ impl KernelDocuments {
         Self {
             store,
             packages,
-            prepared: Arc::new(Mutex::new(LinkedContent::default())),
+            prepared: Arc::new(Mutex::new(DocumentPreparations::default())),
         }
     }
     /// Bootstrap build-owned helper content under the receiving owner's existing claim.
@@ -183,92 +304,52 @@ impl KernelDocuments {
         content: &LinkedContent,
         labels: &BTreeMap<PackageId, String>,
     ) -> Result<(), EnginePortError> {
-        for (id, document) in &content.documents {
-            if document.identity() != *id {
-                return Err(map_link_refusal(LinkRefusal::InvalidDocument {
-                    message: "helper Document hash differs".into(),
-                }));
-            }
-            lash_kernel_doc::validate_document(document, &document.functions).map_err(|e| {
-                map_link_refusal(LinkRefusal::InvalidDocument {
-                    message: e.to_string(),
-                })
-            })?;
-        }
-        for id in content.links.keys() {
-            content.retain_reach(*id).map_err(map_link_refusal)?;
-        }
-        for (id, package) in &content.packages {
-            if package.identity() != *id {
-                return Err(map_link_refusal(LinkRefusal::InvalidDocument {
-                    message: "helper Package hash differs".into(),
-                }));
-            }
-            for member in package.members.values() {
-                if let MemberKind::Export { link, export } = &member.kind {
-                    content.export(*link, export).map_err(map_link_refusal)?;
-                }
-            }
-        }
-        for document in content.documents.values() {
-            self.admit_document(claim, &DocumentBytes::from(document.clone()))
-                .await?;
-        }
-        let mut pending: BTreeSet<_> = content.links.keys().copied().collect();
-        let mut written = BTreeSet::new();
-        while !pending.is_empty() {
-            let ready = pending
-                .iter()
-                .copied()
-                .find(|id| {
-                    content.links[id].fills.values().all(|fill| match fill {
-                        Fill::Export { link, .. } => written.contains(link),
-                        _ => true,
-                    })
-                })
-                .ok_or_else(|| {
-                    map_link_refusal(LinkRefusal::InvalidDocument {
-                        message: "cyclic helper Link graph".into(),
-                    })
-                })?;
-            let link = &content.links[&ready];
-            self.packages
-                .put_link(
+        // Hash actual canonical content, including supplied ids and sidecars:
+        // a mismatched body or label cannot hit a previously validated release.
+        let mut out = TokenWriter::new();
+        out.seq(4);
+        content.documents.encode(&mut out);
+        content.links.encode(&mut out);
+        content.packages.encode(&mut out);
+        labels.encode(&mut out);
+        let identity = logical_digest(&out.into_bytes());
+        let slot = self
+            .prepared
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .helpers
+            .entry(identity)
+            .or_default()
+            .clone();
+        let release = slot
+            .get_or_init(|| PreparedHelperRelease::new(content, labels).map(Arc::new))
+            .clone()?;
+        for document in &release.documents {
+            let artifact = document_artifact(&document.id());
+            self.store
+                .hold_module_artifacts(
                     claim,
-                    &LinkRecord {
-                        id: ready,
-                        link: link.clone(),
-                    },
-                    &[document_artifact(&link.document)],
+                    &[ModuleArtifactHold::Publish {
+                        module_ref: &artifact.artifact_ref,
+                        body: ModuleArtifactBody::Document(document.body()),
+                    }],
                 )
                 .await
-                .map_err(store_error)?;
-            pending.remove(&ready);
-            written.insert(ready);
+                .map_err(artifact_error)?;
         }
-        for (id, package) in &content.packages {
+        for record in &release.links {
             self.packages
-                .put_package(
-                    claim,
-                    &PackageRecord {
-                        id: *id,
-                        package: package.clone(),
-                    },
-                )
+                .put_link(claim, record, &[document_artifact(&record.link.document)])
                 .await
                 .map_err(store_error)?;
         }
-        for (id, json) in labels {
-            let package = content.packages.get(id).ok_or_else(|| {
-                map_link_refusal(LinkRefusal::InvalidDocument {
-                    message: "labels name an absent Package".into(),
-                })
-            })?;
-            lash_kernel_package::read_labels(content, package, json).map_err(|error| {
-                map_link_refusal(LinkRefusal::InvalidDocument {
-                    message: error.to_string(),
-                })
-            })?;
+        for record in &release.packages {
+            self.packages
+                .put_package(claim, record)
+                .await
+                .map_err(store_error)?;
+        }
+        for (id, json) in &release.labels {
             self.packages
                 .put_labels(claim, id, json)
                 .await
@@ -435,6 +516,7 @@ impl KernelDocuments {
         self.prepared
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .linked
             .links
             .insert(link.identity(), link);
         Ok(())
@@ -465,7 +547,7 @@ impl KernelDocuments {
                 .prepared
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
-            prepared.links.insert(id, link.clone());
+            prepared.linked.links.insert(id, link.clone());
         }
         Ok(Fulfilled {
             content: link,
@@ -669,6 +751,7 @@ impl KernelDocuments {
                         .prepared
                         .lock()
                         .unwrap_or_else(std::sync::PoisonError::into_inner)
+                        .linked
                         .links
                         .get(id)
                         .cloned()
@@ -706,6 +789,7 @@ impl KernelDocuments {
                     self.prepared
                         .lock()
                         .unwrap_or_else(std::sync::PoisonError::into_inner)
+                        .linked
                         .links
                         .remove(id);
                     return Ok(());
