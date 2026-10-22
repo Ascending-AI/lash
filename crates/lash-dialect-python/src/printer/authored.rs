@@ -264,7 +264,7 @@ fn clauses<'a>(
 }
 
 /// A type as a plain annotation, when it has one.
-fn annotation(ty: &Type) -> Option<String> {
+pub(super) fn annotation(ty: &Type) -> Option<String> {
     Some(match ty {
         Type::Bool => "bool".into(),
         Type::Int => "int".into(),
@@ -300,4 +300,377 @@ pub(super) fn authored_awaits(body: &k::Block, sync: &BTreeSet<Name>) -> bool {
         of.children().into_iter().any(|child| node(child, sync))
     }
     body.iter().any(|stmt| node(k::Node::Stmt(stmt), sync))
+}
+
+/// A collection and its generator clauses, recovered from the exact append
+/// loop emitted by lowering. This is a print proposal, never executable IR.
+#[derive(Clone)]
+pub(super) struct Comprehension {
+    element: k::Expr,
+    binding: Name,
+    source_binding: Name,
+    iterable: k::Expr,
+    view: Option<&'static str>,
+}
+
+impl Renderer<'_> {
+    /// Invert statement-only lowering before rendering an authored suite.
+    /// Each proposal is admitted only by the complete readback oracle.
+    pub(super) fn authored_statements(&mut self, block: &[k::Stmt]) {
+        let substitutions = self.substitutions.clone();
+        let comprehensions = self.comprehensions.clone();
+        let mut pending_caption = None;
+        let mut index = 0;
+        while index < block.len() {
+            let statement = &block[index];
+            if self.try_else(&block[index..]) {
+                index += 3;
+                continue;
+            }
+            if let k::Stmt::Let {
+                name,
+                value: k::Rhs::Expr(k::Expr::Literal(k::Literal::Absent)),
+            } = statement
+                && assigned(&block[index + 1..], name)
+            {
+                // A Python local exists for its whole scope. Its first
+                // authored assignment supplies the declaration's spelling.
+                self.implicit();
+                index += 1;
+                continue;
+            }
+            if let Some((name, comprehension)) = self.lift_comprehension(&block[index..]) {
+                pending_caption = self.hoist_caption(pending_caption);
+                self.implicit(); // collection allocation
+                self.implicit(); // generator loop
+                self.comprehensions.insert(name, comprehension);
+                index += 2;
+                continue;
+            }
+            if let k::Stmt::Let { name, value } = statement
+                && temporary_name(name)
+                && reads(&block[index + 1..], name) == 1
+                && !assigned(&block[index + 1..], name)
+                && !matches!(value, k::Rhs::Expr(k::Expr::Closure(_)))
+            {
+                let expression = match value {
+                    k::Rhs::Expr(value) => value.clone(),
+                    k::Rhs::Action(action) => action.clone().into(),
+                };
+                pending_caption = self.hoist_caption(pending_caption);
+                self.implicit();
+                self.substitutions.insert(name.clone(), expression);
+                index += 1;
+                continue;
+            }
+            if let Some(caption) = pending_caption.take() {
+                self.spell(&caption);
+            }
+            if let Some((name, k::Rhs::Expr(value))) = binding_value(statement)
+                && matches!(value, k::Expr::Let { name, value, body }
+                    if matches!(value.as_ref(), k::Expr::Closure(_))
+                        && matches!(body.as_ref(), k::Expr::Variable(read) if read == name))
+            {
+                // A lambda is synchronous. Its call is already the apply
+                // expression; adding `await` would introduce an await policy.
+                self.sync.insert(name.clone());
+            }
+            self.node(k::Node::Stmt(statement), None);
+            index += 1;
+        }
+        if pending_caption.is_some() {
+            self.out.refuse(super::PrintError::Invalid(
+                "a hoisted caption has no authored statement".into(),
+            ));
+        }
+        self.substitutions = substitutions;
+        self.comprehensions = comprehensions;
+    }
+
+    fn hoist_caption(&mut self, previous: Option<k::Caption>) -> Option<k::Caption> {
+        let caption = self.next_caption();
+        if previous.is_some() && caption.is_some() {
+            self.out.refuse(super::PrintError::Invalid(
+                "two lowered statements claim one authored caption".into(),
+            ));
+        }
+        previous.or(caption)
+    }
+
+    /// The success flag is the lowering of `try … except … else`, not an
+    /// authored boolean variable. Its complete def/use chain identifies it.
+    fn try_else(&mut self, statements: &[k::Stmt]) -> bool {
+        let [
+            k::Stmt::Let {
+                name: flag,
+                value: k::Rhs::Expr(k::Expr::Literal(k::Literal::Bool(false))),
+            },
+            k::Stmt::Try(scope),
+            k::Stmt::If {
+                condition: k::Expr::Variable(test),
+                then_block,
+                else_block,
+            },
+            rest @ ..,
+        ] = statements
+        else {
+            return false;
+        };
+        let Some(k::Stmt::Assign {
+            place: k::Place::Variable(set),
+            value: k::Rhs::Expr(k::Expr::Literal(k::Literal::Bool(true))),
+            order: k::AssignOrder::ValueFirst,
+        }) = scope.body.last()
+        else {
+            return false;
+        };
+        if flag != test
+            || flag != set
+            || !else_block.is_empty()
+            || scope.catch.is_none()
+            || scope.finally.is_some()
+            || reads(rest, flag) != 0
+        {
+            return false;
+        }
+        let Some(catch) = &scope.catch else {
+            return false;
+        };
+        let Some(clauses) = clauses(self, &catch.binding, &catch.body) else {
+            return false;
+        };
+        self.implicit(); // initial success flag
+        self.caption_next();
+        self.out.begin_node(None); // try statement
+        self.padding();
+        self.out.write("try:\n");
+        self.out.begin_node(None); // try body
+        self.indent += 1;
+        if scope.body.len() == 1 {
+            self.empty();
+        }
+        self.authored_statements(&scope.body[..scope.body.len() - 1]);
+        self.implicit(); // success assignment
+        self.indent -= 1;
+        self.out.end_node();
+        self.caption_next();
+        self.out.begin_node(None); // catch body
+        self.except(&clauses);
+        self.out.end_node();
+        self.out.end_node();
+        self.out.begin_node(None); // success test
+        self.implicit();
+        self.padding();
+        self.out.write("else:\n");
+        self.readable_block(then_block);
+        self.out.end_node();
+        true
+    }
+
+    fn lift_comprehension(&self, statements: &[k::Stmt]) -> Option<(Name, Comprehension)> {
+        let [
+            k::Stmt::Let {
+                name,
+                value: k::Rhs::Expr(k::Expr::List(empty)),
+            },
+            k::Stmt::For {
+                binding,
+                iterable,
+                via,
+                body,
+                else_block,
+                metered: 0,
+            },
+            rest @ ..,
+        ] = statements
+        else {
+            return None;
+        };
+        if !temporary_name(name)
+            || !empty.is_empty()
+            || !else_block.is_empty()
+            || reads(rest, name) != 1
+            || assigned(rest, name)
+        {
+            return None;
+        }
+        let [
+            k::Stmt::Assign {
+                place:
+                    k::Place::Member(k::Member::Index {
+                        target: k::Expr::Variable(target),
+                        index: k::Expr::Call { function, args },
+                    }),
+                value,
+                order: k::AssignOrder::ValueFirst,
+            },
+        ] = body.as_slice()
+        else {
+            return None;
+        };
+        if target != name
+            || self.operators.unique("list.len") != Some(*function)
+            || args.as_slice() != [k::Expr::Variable(name.clone())]
+        {
+            return None;
+        }
+        // Lowering gives comprehension-local bindings a fresh suffix and
+        // then folds the iteration assignment into the loop's own binding.
+        // Recover that alpha-renaming only for this complete generator shape;
+        // the readback must reproduce the exact original binding and body ID.
+        let (source, suffix) = binding.as_str().rsplit_once('_')?;
+        if suffix.is_empty() || !suffix.bytes().all(|byte| byte.is_ascii_digit()) {
+            return None;
+        }
+        let element = match value {
+            k::Rhs::Expr(value) => value.clone(),
+            k::Rhs::Action(action) => action.clone().into(),
+        };
+        Some((
+            name.clone(),
+            Comprehension {
+                element,
+                binding: binding.clone(),
+                source_binding: Name::new(source),
+                iterable: iterable.clone(),
+                view: self.operators.native_loop(via.as_ref())?,
+            },
+        ))
+    }
+
+    pub(super) fn comprehension(&mut self, comprehension: &Comprehension) {
+        let previous = self.substitutions.insert(
+            comprehension.binding.clone(),
+            k::Expr::Variable(comprehension.source_binding.clone()),
+        );
+        self.out.write("[");
+        self.inline_expr(&comprehension.element);
+        self.out.write(" for ");
+        self.name(&comprehension.source_binding);
+        self.out.write(" in ");
+        // The first iterable is outside the comprehension's local scope.
+        if let Some(previous) = previous {
+            self.substitutions
+                .insert(comprehension.binding.clone(), previous);
+        } else {
+            self.substitutions.remove(&comprehension.binding);
+        }
+        self.inline_expr(&comprehension.iterable);
+        if let Some(view) = comprehension.view {
+            self.out.write(".");
+            self.out.write(view);
+            self.out.write("()");
+        }
+        self.out.write("]");
+    }
+
+    pub(super) fn name_check(&mut self, target: &k::FunctionTarget, args: &[k::Expr]) -> bool {
+        if !self.operators.is(target, "py.name_check") {
+            return false;
+        }
+        let [
+            k::Expr::Variable(name),
+            k::Expr::Literal(k::Literal::Text(spelling)),
+            k::Expr::Literal(k::Literal::Bool(_)),
+        ] = args
+        else {
+            return false;
+        };
+        if name.as_str() != spelling {
+            return false;
+        }
+        self.name(name);
+        true
+    }
+
+    pub(super) fn operator(&mut self, token: &str, args: &[k::Expr]) {
+        self.out.write("(");
+        if matches!(token, "neg" | "not") {
+            self.out.write(if token == "neg" { "-" } else { "not " });
+            self.out.write("(");
+            self.inline_expr(&args[0]);
+            self.out.write(")");
+        } else {
+            self.out.write("(");
+            self.inline_expr(&args[0]);
+            self.out.write(") ");
+            self.out.write(token);
+            self.out.write(" (");
+            self.inline_expr(&args[1]);
+            self.out.write(")");
+        }
+        self.out.write(")");
+    }
+
+    pub(super) fn lambda(&mut self, closure: &k::Closure) {
+        let Some(definition) = self.document.functions.get(&closure.function) else {
+            self.out
+                .refuse(super::PrintError::Invalid("missing lambda body".into()));
+            return;
+        };
+        let Some(body) = definition.body() else {
+            self.out
+                .refuse(super::PrintError::Invalid("native lambda body".into()));
+            return;
+        };
+        let [k::Stmt::Return { value }] = body.block.as_slice() else {
+            self.out.refuse(super::PrintError::Invalid(
+                "a lambda needs an expression body".into(),
+            ));
+            return;
+        };
+        self.out.write("(lambda ");
+        for (index, param) in definition.signature.params.iter().enumerate() {
+            if index > 0 {
+                self.out.write(", ");
+            }
+            self.name(&param.name);
+        }
+        self.out.write(": ");
+        self.inline_expr(value);
+        self.out.write(")");
+    }
+}
+
+fn temporary_name(name: &Name) -> bool {
+    name.as_str().strip_prefix('t').is_some_and(|suffix| {
+        !suffix.is_empty() && suffix.bytes().all(|byte| byte.is_ascii_digit())
+    })
+}
+
+fn binding_value(statement: &k::Stmt) -> Option<(&Name, &k::Rhs)> {
+    match statement {
+        k::Stmt::Let { name, value }
+        | k::Stmt::Assign {
+            place: k::Place::Variable(name),
+            value,
+            ..
+        } => Some((name, value)),
+        _ => None,
+    }
+}
+
+fn assigned(block: &[k::Stmt], name: &Name) -> bool {
+    fn visits(item: k::Node<'_>, name: &Name) -> bool {
+        matches!(item, k::Node::Stmt(k::Stmt::Assign { place: k::Place::Variable(written), .. }) if written == name)
+            || item.children().into_iter().any(|child| visits(child, name))
+    }
+    block
+        .iter()
+        .any(|statement| visits(k::Node::Stmt(statement), name))
+}
+
+fn reads(block: &[k::Stmt], name: &Name) -> usize {
+    fn count(node: k::Node<'_>, name: &Name) -> usize {
+        usize::from(matches!(node, k::Node::Expr(k::Expr::Variable(read)) if read == name))
+            + node
+                .children()
+                .into_iter()
+                .map(|child| count(child, name))
+                .sum::<usize>()
+    }
+    block
+        .iter()
+        .map(|statement| count(k::Node::Stmt(statement), name))
+        .sum()
 }
