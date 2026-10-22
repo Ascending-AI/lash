@@ -516,20 +516,23 @@ fn authored_surface(lowered: &Lowered, source: &str) -> Result<Captions, Harness
             .iter()
             .map(|site| depths[&site.unit])
             .min()
-            .expect("a construct");
+            .ok_or_else(|| HarnessError("an authored construct has no mapped sites".into()))?;
         sites.retain(|site| depths[&site.unit] == depth);
         let path_depth = sites
             .iter()
             .map(|site| site.path.len())
             .min()
-            .expect("a construct");
+            .ok_or_else(|| HarnessError("an authored construct has no mapped sites".into()))?;
         sites.retain(|site| site.path.len() == path_depth);
         sites.sort();
         // K-CAP-003: the first action, otherwise the final binding.
         let owner = sites
             .iter()
             .find(|site| {
-                let mut nodes = vec![document.node(site).expect("mapped statement")];
+                let Some(node) = document.node(site) else {
+                    return false;
+                };
+                let mut nodes = vec![node];
                 while let Some(node) = nodes.pop() {
                     if matches!(
                         node,
@@ -546,7 +549,7 @@ fn authored_surface(lowered: &Lowered, source: &str) -> Result<Captions, Harness
                 false
             })
             .or_else(|| sites.last())
-            .expect("a construct owner");
+            .ok_or_else(|| HarnessError("an authored construct has no owner".into()))?;
         mapped.insert(owner.clone());
     }
     let entries = everywhere(document)?
