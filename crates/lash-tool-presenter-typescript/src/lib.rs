@@ -306,3 +306,31 @@ pub fn tool_signature(
 
 #[cfg(test)]
 mod tests;
+
+/// Render an entry's public signature in this dialect.
+pub fn render_entry_signature(signature: &lash_vocabulary::Signature) -> String {
+    lash_tool_presenter_api::entry::render_entry_signature(
+        signature,
+        0,
+        lash_tool_presenter_api::entry::TYPESCRIPT_SPELLING,
+    )
+}
+
+/// Render missing-annotation facts from the entry contract owner.
+pub use lash_tool_presenter_api::entry::render_signature_required;
+
+/// Render the entry mismatch's typed components in this dialect.
+pub fn render_entry_type_mismatch(
+    callable: &lash_vocabulary::CallableId,
+    path: &str,
+    expected: &lash_vocabulary::Type,
+    actual: &lash_vocabulary::Type,
+) -> String {
+    lash_tool_presenter_api::entry::render_entry_type_mismatch(
+        callable,
+        path,
+        expected,
+        actual,
+        lash_tool_presenter_api::entry::TYPESCRIPT_SPELLING,
+    )
+}

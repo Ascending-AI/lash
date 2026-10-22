@@ -1093,7 +1093,16 @@ pub mod testing;
 pub mod schema {
     /// Shipped JSON Schema and TypeScript text for every host contract.
     pub mod host;
+    pub use lash_vocabulary::Name;
+    pub use lash_vocabulary::entry_schema::{
+        EntrySchemaPolicy, EntrySchemas, TypeSchemaRefusal, TypeSchemaRefusalReason, entry_schemas,
+        json_schema_of_type,
+    };
+    pub use lash_vocabulary::schema::{Widening, WideningReason};
     pub use lash_vocabulary::schema_contract::*;
+    pub use lash_vocabulary::types::{
+        MapType, Param, RecordType, RecordTypeField, Signature, Type,
+    };
 }
 
 /// SQLite durable store backend. Enable with `features = ["sqlite"]`.

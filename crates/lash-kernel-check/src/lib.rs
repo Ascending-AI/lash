@@ -54,9 +54,13 @@ pub use manifest::{
 pub use refusal::{Refusal, RefusalReason, Refused, SignatureMismatch, SignatureSide};
 pub use schema::{
     MAX_PROJECTED_TYPE_NODES, MAX_RESOLVED_REFERENCES, SchemaConflict, SchemaProjectionRefusal,
-    result_type_of_schema, signature_mismatch, signature_serves, tool_signature, type_of_schema,
+    Widening, WideningReason, result_type_of_schema, signature_mismatch, signature_serves,
+    tool_signature, type_of_schema,
 };
 pub use workflow::{
     StartBoundaryRefusal, StartRefusal, WorkflowDocument, WorkflowDocumentError, startable_export,
     validate_start_input, validate_start_result,
 };
+
+pub use lash_vocabulary::entry_schema::*;
+pub use lash_vocabulary::type_relations::type_mismatch;

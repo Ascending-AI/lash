@@ -1155,6 +1155,7 @@ PACKAGE_DEPS = {
         "build": {},
         "dev": {},
         "normal": {
+            "lash_kernel_dialect": "//crates/lash-kernel-dialect:lash-kernel-dialect",
             "lash_protocol_types": "//crates/lash-protocol-types:lash-protocol-types",
             "lash_tool_shape": "//crates/lash-tool-shape:lash-tool-shape",
             "lash_vocabulary": "//crates/lash-vocabulary:lash-vocabulary",

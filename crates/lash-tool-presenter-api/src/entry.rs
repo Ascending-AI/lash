@@ -1,0 +1,362 @@
+//! What the prompt shows of Current (§2.3, P3): each host
+//! package's code exports under its path, in the session dialect's
+//! spelling. Its operations are the tool declarations the prompt already
+//! shows; lash's own packages export nothing and are not listed.
+
+use std::fmt::Write as _;
+
+use lash_kernel_dialect::{
+    BRAND_FIELD, NamespaceKind, Namespaces, SpellKind, Spelling, TypeMember,
+};
+use lash_vocabulary::{Signature, Type};
+/// Canonical dialect spelling used by the TypeScript presenter.
+pub const TYPESCRIPT_SPELLING: Spelling = Spelling::TypeScript;
+/// Canonical dialect spelling used by the Python presenter.
+pub const PYTHON_SPELLING: Spelling = Spelling::Python;
+
+pub fn render_package_surface(view: &Namespaces, spelling: Spelling) -> String {
+    let mut out = String::new();
+    for (package, members) in view.packages() {
+        let path = package
+            .iter()
+            .map(|segment| spelling.spell(SpellKind::PathSegment, segment))
+            .collect::<Vec<_>>()
+            .join(".");
+        let mut lines = Vec::new();
+        for (segment, member) in members {
+            if member.visibility != lash_vocabulary::Visibility::Public {
+                continue;
+            }
+            match &member.kind {
+                NamespaceKind::Operation(_) => {}
+                NamespaceKind::Function(member) => lines.push(format!(
+                    "`{path}.{}{}`",
+                    spelling.spell(SpellKind::Member, segment),
+                    call(&member.signature, 0, spelling)
+                )),
+                NamespaceKind::Type(value_type) => {
+                    let ty = format!("{path}.{}", spelling.spell(SpellKind::TypeName, segment));
+                    lines.push(format!("`{ty}`: a sealed value type"));
+                    for (name, member) in &value_type.members {
+                        let name = spelling.spell(SpellKind::Member, name);
+                        lines.push(match member {
+                            TypeMember::Static(member) => {
+                                format!("`{ty}.{name}{}`", call(&member.signature, 0, spelling))
+                            }
+                            TypeMember::Method(member) => {
+                                format!("`{ty}#{name}{}`", call(&member.signature, 1, spelling))
+                            }
+                            TypeMember::Property(member) => format!(
+                                "`{ty}#{name}: {}`",
+                                type_text(&member.signature.result, spelling)
+                            ),
+                        });
+                    }
+                }
+                NamespaceKind::Error => lines.push(format!(
+                    "`{path}.{}`: an error",
+                    spelling.spell(SpellKind::TypeName, segment)
+                )),
+            }
+        }
+        if lines.is_empty() {
+            continue;
+        }
+        let _ = writeln!(out, "#### `{path}`\n");
+        for line in lines {
+            let _ = writeln!(out, "- {line}");
+        }
+        out.push('\n');
+    }
+    out.trim_end().to_owned()
+}
+
+/// Render a public entry signature, optionally omitting a method receiver.
+pub fn render_entry_signature(signature: &Signature, skip: usize, spelling: Spelling) -> String {
+    call(signature, skip, spelling)
+}
+
+fn call(signature: &Signature, skip: usize, spelling: Spelling) -> String {
+    let params = signature
+        .params
+        .iter()
+        .skip(skip)
+        .map(|param| {
+            let name = param.name.as_str();
+            let ty = type_text(&param.ty, spelling);
+            match spelling {
+                Spelling::TypeScript => {
+                    format!("{name}{}: {ty}", if param.optional { "?" } else { "" })
+                }
+                Spelling::Python => {
+                    format!("{name}: {ty}{}", if param.optional { " = ..." } else { "" })
+                }
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+    let result = type_text(&signature.result, spelling);
+    match spelling {
+        Spelling::TypeScript => format!("({params}): {result}"),
+        Spelling::Python => format!("({params}) -> {result}"),
+    }
+}
+
+/// Render a type using source-language notation and canonical package brands.
+pub fn render_entry_type(ty: &Type, spelling: Spelling) -> String {
+    type_text(ty, spelling)
+}
+
+fn type_text(ty: &Type, spelling: Spelling) -> String {
+    let ts = spelling == Spelling::TypeScript;
+    let render = |ty: &Type| type_text(ty, spelling);
+    match ty {
+        Type::Record(record) if branded(record).is_some() => {
+            let (path, name) = branded(record).unwrap_or(("", ""));
+            let path = path
+                .split('.')
+                .map(|segment| spelled(spelling, SpellKind::PathSegment, segment))
+                .collect::<Vec<_>>()
+                .join(".");
+            format!("{path}.{}", spelled(spelling, SpellKind::TypeName, name))
+        }
+        Type::Record(record) => {
+            let mut fields = record
+                .fields
+                .iter()
+                .map(|field| {
+                    let name = serde_json::Value::String(field.name.clone());
+                    let ty = render(&field.ty);
+                    if ts {
+                        format!("{name}{}: {ty}", if field.optional { "?" } else { "" })
+                    } else {
+                        format!(
+                            "{name}: {}",
+                            if field.optional {
+                                format!("NotRequired[{ty}]")
+                            } else {
+                                ty
+                            }
+                        )
+                    }
+                })
+                .collect::<Vec<_>>();
+            if ts {
+                if let Some(rest) = &record.rest {
+                    fields.push(format!("[key: string]: {}", render(rest)));
+                }
+                format!("{{ {} }}", fields.join("; "))
+            } else {
+                let rest = record.rest.as_ref().map_or_else(String::new, |rest| {
+                    format!(", extra_items={}", render(rest))
+                });
+                format!("TypedDict(\"Entry\", {{{}}}{rest})", fields.join(", "))
+            }
+        }
+        Type::List(item) => {
+            if ts {
+                format!("Array<{}>", render(item))
+            } else {
+                format!("list[{}]", render(item))
+            }
+        }
+        Type::Set(item) => {
+            if ts {
+                format!("Set<{}>", render(item))
+            } else {
+                format!("set[{}]", render(item))
+            }
+        }
+        Type::Map(map) => {
+            if ts {
+                format!("Map<{}, {}>", render(&map.key), render(&map.value))
+            } else {
+                format!("dict[{}, {}]", render(&map.key), render(&map.value))
+            }
+        }
+        Type::Tuple(items) => {
+            let items = items.iter().map(render).collect::<Vec<_>>().join(", ");
+            if ts {
+                format!("[{items}]")
+            } else if items.is_empty() {
+                "tuple[()]".into()
+            } else {
+                format!("tuple[{items}]")
+            }
+        }
+        Type::Union(members) => members.iter().map(render).collect::<Vec<_>>().join(" | "),
+        Type::Enum(values) => {
+            let values = values
+                .iter()
+                .map(|value| serde_json::Value::String(value.clone()).to_string())
+                .collect::<Vec<_>>();
+            if ts {
+                values.join(" | ")
+            } else {
+                format!("Literal[{}]", values.join(", "))
+            }
+        }
+        Type::Function(signature) => {
+            if ts {
+                format!(
+                    "({}) => {}",
+                    signature
+                        .params
+                        .iter()
+                        .map(|param| format!("{}: {}", param.name, render(&param.ty)))
+                        .collect::<Vec<_>>()
+                        .join(", "),
+                    render(&signature.result)
+                )
+            } else {
+                format!(
+                    "Callable[[{}], {}]",
+                    signature
+                        .params
+                        .iter()
+                        .map(|param| render(&param.ty))
+                        .collect::<Vec<_>>()
+                        .join(", "),
+                    render(&signature.result)
+                )
+            }
+        }
+        Type::Any => if ts { "any" } else { "Any" }.into(),
+        Type::Json => "JsonValue".into(),
+        Type::Absent => if ts { "undefined" } else { "Absent" }.into(),
+        Type::Null => if ts { "null" } else { "None" }.into(),
+        Type::Bool => if ts { "boolean" } else { "bool" }.into(),
+        Type::Int => if ts { "number" } else { "int" }.into(),
+        Type::Number | Type::Float => if ts { "number" } else { "float" }.into(),
+        Type::Text => if ts { "string" } else { "str" }.into(),
+        Type::Bytes => if ts { "Uint8Array" } else { "bytes" }.into(),
+        Type::Timestamp => "Timestamp".into(),
+        Type::Task(item) => {
+            if ts {
+                format!("Promise<{}>", render(item))
+            } else {
+                format!("Awaitable[{}]", render(item))
+            }
+        }
+        Type::Error => if ts { "Error" } else { "Exception" }.into(),
+        Type::Handle(name) => name.clone(),
+    }
+}
+
+/// Render the pinned SIGNATURE_REQUIRED facts. The diagnostic owner supplies
+/// the function and position; source coordinates remain available separately.
+pub fn render_signature_required(function: Option<&str>, parameter: Option<(&str, u32)>) -> String {
+    let function = function.unwrap_or("<anonymous>");
+    match parameter {
+        Some((name, index)) => format!(
+            "SIGNATURE_REQUIRED: {function} parameter {index} ({name}) needs a written type annotation"
+        ),
+        None => {
+            format!("SIGNATURE_REQUIRED: {function} needs a written settled-result type annotation")
+        }
+    }
+}
+
+/// Render the pinned EntryTypeMismatch components without erasing typed facts
+/// in the runtime. Wiring to its owning struct follows the contract lane.
+pub fn render_entry_type_mismatch(
+    callable: &lash_vocabulary::CallableId,
+    path: &str,
+    expected: &Type,
+    actual: &Type,
+    spelling: Spelling,
+) -> String {
+    format!(
+        "ENTRY_TYPE_MISMATCH: {callable:?} at {path}: expected {}, actual {}",
+        type_text(expected, spelling),
+        type_text(actual, spelling)
+    )
+}
+
+/// The `(package, type)` a package value's record type names.
+fn branded(record: &lash_vocabulary::RecordType) -> Option<(&str, &str)> {
+    let field = record
+        .fields
+        .iter()
+        .find(|field| field.name == BRAND_FIELD)?;
+    let Type::Tuple(parts) = &field.ty else {
+        return None;
+    };
+    match parts.as_slice() {
+        [Type::Enum(path), Type::Enum(name)] => match (path.as_slice(), name.as_slice()) {
+            ([path], [name]) => Some((path, name)),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+fn spelled(spelling: Spelling, kind: SpellKind, text: &str) -> String {
+    lash_vocabulary::names::Segment::new(text).map_or_else(
+        |_| text.to_owned(),
+        |segment| spelling.spell(kind, &segment),
+    )
+}
+
+#[cfg(test)]
+mod laws {
+    use super::*;
+    use lash_vocabulary::{Name, Param};
+
+    /// ENTRY-PRESENTATION: signature optionality and diagnostic facts retain
+    /// their meanings in both source languages.
+    #[test]
+    fn entry_signatures_and_diagnostics_use_the_dialect_spelling() {
+        let signature = Signature {
+            params: vec![Param {
+                name: Name::new("event"),
+                ty: Type::Text,
+                optional: true,
+            }],
+            result: Type::Bool,
+        };
+        assert_eq!(
+            render_entry_signature(&signature, 0, Spelling::TypeScript),
+            "(event?: string): boolean"
+        );
+        assert_eq!(
+            render_entry_signature(&signature, 0, Spelling::Python),
+            "(event: str = ...) -> bool"
+        );
+        assert_eq!(
+            render_entry_type(&Type::Tuple(vec![]), Spelling::Python),
+            "tuple[()]"
+        );
+        assert_eq!(
+            render_signature_required(Some("entry"), Some(("event", 0))),
+            "SIGNATURE_REQUIRED: entry parameter 0 (event) needs a written type annotation"
+        );
+        assert_eq!(
+            render_signature_required(None, None),
+            "SIGNATURE_REQUIRED: <anonymous> needs a written settled-result type annotation"
+        );
+        let callable = lash_vocabulary::CallableId {
+            link: lash_vocabulary::LinkId::from_bytes([1; 32]),
+            function: lash_vocabulary::FunctionId::from_bytes([2; 32]),
+        };
+        for (spelling, expected, actual) in [
+            (Spelling::TypeScript, "string", "number"),
+            (Spelling::Python, "str", "float"),
+        ] {
+            let text = render_entry_type_mismatch(
+                &callable,
+                "/output/id",
+                &Type::Text,
+                &Type::Number,
+                spelling,
+            );
+            assert!(
+                text.contains(&format!(
+                    "at /output/id: expected {expected}, actual {actual}"
+                )),
+                "{text}"
+            );
+            assert!(text.contains(&callable.function.to_string()), "{text}");
+        }
+    }
+}
