@@ -208,7 +208,7 @@ pub use lash_core::store::PluginWriterRangesFuture;
 pub use lash_core::store::SessionFaultStore;
 pub use lash_core::store::plugin_writers::{
     AdmittedPlugin, PluginAdmission, PluginPublication, PluginWriterRanges,
-    PluginWriterRegistration, PluginWriterStamp,
+    PluginWriterRegistration, PluginWriterSelection, PluginWriterStamp,
 };
 /// A run's admission, what its checkpoints admit, how a commit settles
 /// the rows its run holds, and the session's one unfinished run

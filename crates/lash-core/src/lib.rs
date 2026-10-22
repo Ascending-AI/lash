@@ -678,10 +678,10 @@ pub use plugin::PluginStateView;
 pub use plugin::PluginTransitionBase;
 pub use plugin::PluginTransitionId;
 pub use plugin::PluginTransitionRecord;
-pub use plugin::PluginTransitionRequest;
 pub use plugin::ProcessEngineContributionContext;
 pub use plugin::ProtocolBeforeLlmCallContext;
 pub use plugin::ProtocolLlmCallAction;
+pub use plugin::{PluginTransitionRequest, PluginTransitionRequestData};
 
 pub use plugin::SessionGraphService;
 pub use plugin::SessionLineage;

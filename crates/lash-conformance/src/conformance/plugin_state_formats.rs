@@ -185,11 +185,15 @@ pub(super) async fn plugin_format_boundary(
         },
     );
     state.set_plugin_state(Some(snapshot));
-    state.authority.plugin_config.insert_versioned(
-        "format-state",
-        lash_core::FormatVersion::new(version).unwrap(),
-        serde_json::json!({"count": 17}),
-    );
+    state
+        .authority
+        .plugin_config
+        .insert_versioned(
+            "format-state",
+            lash_core::FormatVersion::new(version).unwrap(),
+            serde_json::json!({"count": 17}),
+        )
+        .unwrap();
     // The fleet record permits what the plugin's registration provisions
     // (FIG-4746): the fixture's stored format stands for a build that wrote
     // it, so that build's registration is what the store is provisioned from.
@@ -306,7 +310,7 @@ pub(super) async fn plugin_format_boundary(
         // stored shape.
         let admission = host.admit_plugins(store.as_ref()).await.unwrap();
         assert_eq!(admission.writer("format-state").unwrap().get(), 1);
-        decoded.adopt_plugin_admission(admission);
+        decoded.adopt_plugin_admission(admission).unwrap();
         durable.refresh_plugin_states(&decoded).unwrap();
         commit(&store, &mut durable).await;
         let after =
@@ -330,7 +334,7 @@ pub(super) async fn plugin_format_boundary(
     // it.
     let admission = host.admit_plugins(store.as_ref()).await.unwrap();
     assert_eq!(admission.writer("format-state").unwrap().get(), 2);
-    decoded.adopt_plugin_admission(admission);
+    decoded.adopt_plugin_admission(admission).unwrap();
     durable.refresh_plugin_states(&decoded).unwrap();
     commit(&store, &mut durable).await;
     let after =

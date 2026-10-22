@@ -7,6 +7,7 @@ use std::sync::Arc;
 pub use transition::{
     PLUGIN_ADMISSION_CHECKPOINT_VERSION, PluginNativeView, PluginTransitionBase,
     PluginTransitionId, PluginTransitionRecord, PluginTransitionRequest,
+    PluginTransitionRequestData,
 };
 
 use crate::ToolProvider;

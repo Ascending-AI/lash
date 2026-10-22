@@ -56,36 +56,37 @@ pub(super) async fn transition(
     state: &crate::PluginState,
     config: &crate::PluginConfig,
 ) -> crate::plugin::PluginTransitionRecord {
-    let request = crate::plugin::PluginTransitionRequest {
-        id: crate::plugin::PluginTransitionId(
-            crate::EffectAddress::new(
-                crate::ExecutionScope::turn(SessionId::fixture(id), "plugin-state-law"),
-                "plugin-transition",
-            )
-            .unwrap(),
-        ),
-        owner: crate::RuntimeOwner::Session(SessionId::fixture(id)),
-        base: crate::plugin::PluginTransitionBase::Session {
-            head: crate::store::SessionHeadRef {
-                generation: 0,
-                revision: 0,
-                leaf: None,
-                checkpoint: None,
+    let request =
+        crate::plugin::PluginTransitionRequest::new(crate::plugin::PluginTransitionRequestData {
+            id: crate::plugin::PluginTransitionId(
+                crate::EffectAddress::new(
+                    crate::ExecutionScope::turn(SessionId::fixture(id), "plugin-state-law"),
+                    "plugin-transition",
+                )
+                .unwrap(),
+            ),
+            owner: crate::RuntimeOwner::Session(SessionId::fixture(id)),
+            base: crate::plugin::PluginTransitionBase::Session {
+                head: crate::store::SessionHeadRef {
+                    generation: 0,
+                    revision: 0,
+                    leaf: None,
+                    checkpoint: None,
+                },
             },
-        },
-        target: crate::store::plugin_writers::PluginAdmission::from_plugins(
-            host.factories()
-                .iter()
-                .map(|factory| {
-                    let declaration = factory.plugin_declaration();
-                    crate::store::plugin_writers::AdmittedPlugin {
-                        plugin: factory.id().into(),
-                        writer: declaration.format_version,
-                    }
-                })
-                .collect(),
-        ),
-    };
+            target: crate::store::plugin_writers::PluginAdmission::from_plugins(
+                host.factories()
+                    .iter()
+                    .map(|factory| {
+                        let declaration = factory.plugin_declaration();
+                        crate::store::plugin_writers::AdmittedPlugin {
+                            plugin: factory.id().into(),
+                            writer: declaration.format_version,
+                        }
+                    })
+                    .collect(),
+            ),
+        });
     let address = request.id.0.clone();
     let host = host.clone();
     let state = state.clone();

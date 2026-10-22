@@ -415,7 +415,7 @@ fn apply_owner_options(
                 RunResolveError::RecordedCorrupt(corrupt)
             }
         })?;
-    config.plugin_config.insert(owner.to_string(), applied)?;
+    config.plugin_config.insert(owner, applied)?;
     Ok(())
 }
 
