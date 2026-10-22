@@ -2,9 +2,10 @@
 //! lowered from.
 
 use super::RequestSegment;
-use crate::llm::types::{LlmContentBlock, LlmMessage, LlmRole};
+use crate::allocation::{Allocated, AllocationBudget, AllocationError, AllocationHold};
+use crate::llm::types::{LlmMessage, LlmRole};
 use std::any::Any;
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
@@ -79,28 +80,22 @@ impl SegmentContext {
 /// identity, and the modifiers its wire form reads (its position where a
 /// provider numbers by position, where a cache breakpoint falls, mapped
 /// ids). Build it, then hand it to [`SegmentCache::segments`].
-pub struct SegmentKey<'a> {
+pub struct SegmentKey {
     hasher: blake3::Hasher,
-    messages: Vec<&'a Arc<crate::llm::types::LlmMessageBlocks>>,
 }
 
-impl<'a> SegmentKey<'a> {
+impl SegmentKey {
     pub fn new(context: &SegmentContextKey) -> Self {
         let mut hasher = blake3::Hasher::new_derive_key(SEGMENT_KEY_DOMAIN);
         hasher.update(&context.0);
-        Self {
-            hasher,
-            messages: Vec::new(),
-        }
+        Self { hasher }
     }
 
-    /// A source message, by the identity of its shared blocks, its role and
-    /// its user-segment marker. The cache holds the blocks while the entry
-    /// lives, so the identity cannot be reused for other content.
+    /// A source message, by its never-reused block identity, role and
+    /// user-segment marker. Naming it retains none of its source allocation.
     #[must_use]
-    pub fn message(mut self, message: &'a LlmMessage) -> Self {
-        let address = Arc::as_ptr(&message.blocks) as usize as u64;
-        self.hasher.update(&address.to_be_bytes());
+    pub fn message(mut self, message: &LlmMessage) -> Self {
+        self.hasher.update(&message.blocks.identity().to_be_bytes());
         self.hasher.update(&[
             match message.role {
                 LlmRole::System => 0,
@@ -109,7 +104,6 @@ impl<'a> SegmentKey<'a> {
             },
             u8::from(message.starts_user_segment),
         ]);
-        self.messages.push(&message.blocks);
         self
     }
 
@@ -148,16 +142,16 @@ impl<'a> SegmentKey<'a> {
 ///     RequestSegment::item_json(&serde_json::json!({"text": "hello"})).map(|item| vec![item])
 /// };
 /// let first = cache
-///     .segments(SegmentKey::new(&context).message(&message), || lower(&message))
+///     .segments(SegmentKey::new(&context).message(&message), 4096, |_| lower(&message))
 ///     .unwrap();
 /// let again = cache
-///     .segments(SegmentKey::new(&context).message(&message), || lower(&message))
+///     .segments(SegmentKey::new(&context).message(&message), 4096, |_| lower(&message))
 ///     .unwrap();
 /// assert!(RequestSegment::same(&first[0], &again[0]));
 /// assert_eq!(cache.stats().hits, 1);
 /// ```
 #[derive(Clone)]
-pub struct SegmentCache(Option<Arc<Shared>>);
+pub struct SegmentCache(Option<Arc<Shared>>, AllocationBudget);
 
 struct Shared {
     _metadata: crate::allocation::AllocationHold,
@@ -169,14 +163,14 @@ struct Shared {
 
 #[derive(Clone, Default)]
 struct Entries {
-    map: HashMap<[u8; 32], Entry>,
+    map: BTreeMap<[u8; 32], Entry>,
     bytes: usize,
     clock: u64,
 }
 
 #[derive(Clone)]
 struct Entry {
-    sources: Box<[Arc<crate::llm::types::LlmMessageBlocks>]>,
+    _metadata: AllocationHold,
     value: Arc<dyn Any + Send + Sync>,
     bytes: usize,
     used: u64,
@@ -216,13 +210,16 @@ impl SegmentCache {
 
     /// A cache keeping `budget` bytes of segment text.
     pub fn with_budget(budget: usize) -> Self {
-        Self(Some(Arc::new(Shared {
-            _metadata: Default::default(),
-            budget,
-            entries: Mutex::new(Entries::default()),
-            hits: AtomicU64::new(0),
-            misses: AtomicU64::new(0),
-        })))
+        Self(
+            Some(Arc::new(Shared {
+                _metadata: Default::default(),
+                budget,
+                entries: Mutex::new(Entries::default()),
+                hits: AtomicU64::new(0),
+                misses: AtomicU64::new(0),
+            })),
+            AllocationBudget::unowned(),
+        )
     }
 
     /// A private candidate cache sharing immutable lowered units. Preparing a
@@ -232,34 +229,46 @@ impl SegmentCache {
         budget: &crate::allocation::AllocationBudget,
     ) -> Result<Self, crate::allocation::AllocationError> {
         let Some(shared) = &self.0 else {
-            return Ok(Self::disabled());
+            return Ok(Self(None, budget.clone()));
         };
         let entries = shared.lock();
-        let bytes = std::mem::size_of::<Shared>()
-            + 16
-            + entries.map.capacity().max(4) * (std::mem::size_of::<Entry>() + 32 + 24)
-            + entries
-                .map
-                .values()
-                .map(|entry| {
-                    entry.sources.len()
-                        * std::mem::size_of::<Arc<crate::llm::types::LlmMessageBlocks>>()
-                })
-                .sum::<usize>();
-        let metadata = budget.reserve(bytes as u64)?;
-        Ok(Self(Some(Arc::new(Shared {
-            _metadata: metadata,
-            budget: shared.budget,
-            entries: Mutex::new(entries.clone()),
-            hits: AtomicU64::new(0),
-            misses: AtomicU64::new(0),
-        }))))
+        let metadata = budget.reserve((std::mem::size_of::<Shared>() + 16) as u64)?;
+        let mut copied = Entries {
+            bytes: 0,
+            clock: entries.clock,
+            ..Default::default()
+        };
+        // An unowned/foreign lowering has no proof under this ledger. Cache
+        // loss only rebuilds it; it must not import another owner's source.
+        if self.1.identity() == budget.identity() {
+            for (digest, entry) in &entries.map {
+                let metadata = budget.reserve(ENTRY_ALLOCATION_BYTES)?;
+                let mut entry = entry.clone();
+                entry._metadata = metadata;
+                copied.bytes = copied.bytes.saturating_add(entry.bytes);
+                copied.map.insert(*digest, entry);
+            }
+        }
+        Ok(Self(
+            Some(Arc::new(Shared {
+                _metadata: metadata,
+                budget: shared.budget,
+                entries: Mutex::new(copied),
+                hits: AtomicU64::new(0),
+                misses: AtomicU64::new(0),
+            })),
+            budget.clone(),
+        ))
+    }
+
+    pub fn allocation_budget(&self) -> AllocationBudget {
+        self.1.clone()
     }
 
     /// A cache that keeps nothing: every unit lowers afresh. For a call
     /// outside admission, whose lowering is never reused.
     pub fn disabled() -> Self {
-        Self(None)
+        Self(None, AllocationBudget::unowned())
     }
 
     pub fn stats(&self) -> SegmentCacheStats {
@@ -277,100 +286,114 @@ impl SegmentCache {
     /// # Errors
     ///
     /// What `lower` refuses with; a refusal is not kept.
-    pub fn segments<E>(
+    pub fn segments<E: From<AllocationError>>(
         &self,
-        key: SegmentKey<'_>,
-        lower: impl FnOnce() -> Result<Vec<RequestSegment>, E>,
-    ) -> Result<Arc<Vec<RequestSegment>>, E> {
-        self.lowered(key, lower)
+        key: SegmentKey,
+        allocation_bytes: u64,
+        lower: impl FnOnce(AllocationHold) -> Result<Vec<RequestSegment>, E>,
+    ) -> Result<Arc<Allocated<Vec<RequestSegment>>>, E> {
+        self.lowered(key, allocation_bytes, lower)
     }
 
-    /// [`Self::segments`] for a unit that keeps more than its segments.
-    ///
-    /// # Errors
-    ///
-    /// What `lower` refuses with; a refusal is not kept.
-    pub fn lowered<T: LoweredUnit, E>(
+    /// Admit the callback's declared allocation bound before invoking it.
+    /// The bound includes transient work and owned result fields; separately
+    /// admitted immutable sources keep their own obligations. The callback
+    /// must transfer the supplied hold into any nested escaping allocation.
+    pub fn lowered<T: LoweredUnit, E: From<AllocationError>>(
         &self,
-        key: SegmentKey<'_>,
-        lower: impl FnOnce() -> Result<T, E>,
-    ) -> Result<Arc<T>, E> {
-        let Some(shared) = &self.0 else {
-            return lower().map(Arc::new);
-        };
-        let SegmentKey { hasher, messages } = key;
-        let digest: [u8; 32] = hasher.finalize().into();
-        if let Some(value) = shared.get(&digest, &messages) {
+        key: SegmentKey,
+        allocation_bytes: u64,
+        lower: impl FnOnce(AllocationHold) -> Result<T, E>,
+    ) -> Result<Arc<Allocated<T>>, E> {
+        let digest = key.hasher.finalize().into();
+        if let Some(value) = self.0.as_ref().and_then(|shared| shared.get(&digest)) {
             return Ok(value);
         }
-        let value = Arc::new(lower()?);
-        shared.insert(digest, messages, &value);
-        Ok(value)
-    }
-
-    /// Carry a lowering across calls under one retained source identity.
-    /// Updating works on an immutable snapshot outside the cache lock. A
-    /// concurrent call may publish another branch; the next update checks
-    /// its sources again, so publication order cannot supply stale content.
-    pub(super) fn carried<T: LoweredUnit, E>(
-        &self,
-        key: SegmentKey<'_>,
-        update: impl FnOnce(Option<Arc<T>>) -> Result<Arc<T>, E>,
-    ) -> Result<Arc<T>, E> {
-        let Some(shared) = &self.0 else {
-            return update(None);
+        let budget = self.allocation_budget();
+        let metadata = match &self.0 {
+            Some(_) => budget.reserve(ENTRY_ALLOCATION_BYTES)?,
+            None => AllocationHold::default(),
         };
-        let SegmentKey { hasher, messages } = key;
-        let digest = hasher.finalize().into();
-        let prior = shared.get(&digest, &messages);
-        let value = update(prior.clone())?;
-        if !prior
-            .as_ref()
-            .is_some_and(|prior| Arc::ptr_eq(prior, &value))
-        {
-            shared.insert(digest, messages, &value);
+        let hold = budget.reserve(
+            allocation_bytes.saturating_add((std::mem::size_of::<Allocated<T>>() + 16) as u64),
+        )?;
+        let value = Arc::new(Allocated::new(lower(hold.clone())?, hold, budget));
+        if let Some(shared) = &self.0 {
+            shared.insert(digest, &value, metadata);
         }
         Ok(value)
     }
-    /// An asynchronous provider's carried history; no cache lock spans I/O.
+
+    /// A carried update reads an immutable snapshot outside the cache lock.
+    /// Its reservation precedes the callback and belongs to the actual Arc
+    /// returned to readers. Concurrent branches can publish independently.
+    pub(super) fn carried<T: LoweredUnit, E: From<AllocationError>>(
+        &self,
+        key: SegmentKey,
+        allocation_bytes: u64,
+        update: impl FnOnce(Option<Arc<Allocated<T>>>, AllocationHold) -> Result<T, E>,
+    ) -> Result<Arc<Allocated<T>>, E> {
+        let digest = key.hasher.finalize().into();
+        let budget = self.allocation_budget();
+        let metadata = match &self.0 {
+            Some(_) => budget.reserve(ENTRY_ALLOCATION_BYTES)?,
+            None => AllocationHold::default(),
+        };
+        let hold = budget.reserve(
+            allocation_bytes.saturating_add((std::mem::size_of::<Allocated<T>>() + 16) as u64),
+        )?;
+        let prior = self.0.as_ref().and_then(|shared| shared.get(&digest));
+        let value = Arc::new(Allocated::new(update(prior, hold.clone())?, hold, budget));
+        if let Some(shared) = &self.0 {
+            shared.insert(digest, &value, metadata);
+        }
+        Ok(value)
+    }
+
+    /// No cache lock spans I/O. Dropping the future before publication drops
+    /// the same reservations acquired before entering the callback.
     pub async fn carried_async<
         T: LoweredUnit,
-        E,
-        F: std::future::Future<Output = Result<Arc<T>, E>>,
+        E: From<AllocationError>,
+        F: std::future::Future<Output = Result<T, E>>,
     >(
         &self,
-        key: SegmentKey<'_>,
-        update: impl FnOnce(Option<Arc<T>>) -> F,
-    ) -> Result<Arc<T>, E> {
-        let Some(shared) = &self.0 else {
-            return update(None).await;
+        key: SegmentKey,
+        allocation_bytes: u64,
+        update: impl FnOnce(Option<Arc<Allocated<T>>>, AllocationHold) -> F,
+    ) -> Result<Arc<Allocated<T>>, E> {
+        let digest = key.hasher.finalize().into();
+        let budget = self.allocation_budget();
+        let metadata = match &self.0 {
+            Some(_) => budget.reserve(ENTRY_ALLOCATION_BYTES)?,
+            None => AllocationHold::default(),
         };
-        let SegmentKey { hasher, messages } = key;
-        let digest = hasher.finalize().into();
-        let prior = shared.get(&digest, &messages);
-        let value = update(prior).await?;
-        shared.insert(digest, messages, &value);
+        let hold = budget.reserve(
+            allocation_bytes.saturating_add((std::mem::size_of::<Allocated<T>>() + 16) as u64),
+        )?;
+        let prior = self.0.as_ref().and_then(|shared| shared.get(&digest));
+        let value = Arc::new(Allocated::new(
+            update(prior, hold.clone()).await?,
+            hold,
+            budget,
+        ));
+        if let Some(shared) = &self.0 {
+            shared.insert(digest, &value, metadata);
+        }
         Ok(value)
     }
 }
 
+// A full sparse B-tree node, its key/value slots and allocator metadata.
+const ENTRY_ALLOCATION_BYTES: u64 = 2048;
+
 impl Shared {
-    fn get<T: LoweredUnit>(
-        &self,
-        digest: &[u8; 32],
-        messages: &[&Arc<crate::llm::types::LlmMessageBlocks>],
-    ) -> Option<Arc<T>> {
+    fn get<T: LoweredUnit>(&self, digest: &[u8; 32]) -> Option<Arc<Allocated<T>>> {
         let mut entries = self.lock();
-        entries.clock += 1;
+        entries.clock = entries.clock.wrapping_add(1);
         let clock = entries.clock;
         if let Some(entry) = entries.map.get_mut(digest)
-            && entry.sources.len() == messages.len()
-            && entry
-                .sources
-                .iter()
-                .zip(messages)
-                .all(|(held, message)| Arc::ptr_eq(held, message))
-            && let Ok(value) = Arc::clone(&entry.value).downcast::<T>()
+            && let Ok(value) = Arc::clone(&entry.value).downcast::<Allocated<T>>()
         {
             entry.used = clock;
             self.hits.fetch_add(1, Ordering::Relaxed);
@@ -383,20 +406,20 @@ impl Shared {
     fn insert<T: LoweredUnit>(
         &self,
         digest: [u8; 32],
-        messages: Vec<&Arc<crate::llm::types::LlmMessageBlocks>>,
-        value: &Arc<T>,
+        value: &Arc<Allocated<T>>,
+        metadata: AllocationHold,
     ) {
         let bytes = value.retained_bytes().max(1);
         if bytes > self.budget {
             return;
         }
         let mut entries = self.lock();
-        entries.clock += 1;
+        entries.clock = entries.clock.wrapping_add(1);
         let used = entries.clock;
         let replaced = entries.map.insert(
             digest,
             Entry {
-                sources: messages.into_iter().cloned().collect(),
+                _metadata: metadata,
                 value: Arc::clone(value) as Arc<dyn Any + Send + Sync>,
                 bytes,
                 used,
@@ -406,46 +429,38 @@ impl Shared {
         if let Some(replaced) = &replaced {
             entries.bytes = entries.bytes.saturating_sub(replaced.bytes);
         }
-        let evicted = if entries.bytes > self.budget {
-            entries.evict(self.budget / 4 * 3)
+        let target = if entries.bytes > self.budget {
+            self.budget / 4 * 3
         } else {
-            Vec::new()
+            self.budget
         };
         drop(entries);
-        // A carried history can release many source and segment Arcs.
-        // Release them after relinquishing the cache's synchronization owner.
         drop(replaced);
-        drop(evicted);
+        // No scratch directory or eviction vector: each removal is decided
+        // under the synchronization owner, then released outside it.
+        loop {
+            let mut entries = self.lock();
+            if entries.bytes <= target {
+                break;
+            }
+            let oldest = entries
+                .map
+                .iter()
+                .min_by_key(|(_, entry)| entry.used)
+                .map(|(digest, _)| *digest);
+            let evicted = oldest.and_then(|digest| entries.map.remove(&digest));
+            if let Some(evicted) = &evicted {
+                entries.bytes = entries.bytes.saturating_sub(evicted.bytes);
+            }
+            drop(entries);
+            drop(evicted);
+        }
     }
 
     fn lock(&self) -> std::sync::MutexGuard<'_, Entries> {
         self.entries
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
-    }
-}
-
-impl Entries {
-    /// Drop the least recently used entries until at most `target` bytes
-    /// remain.
-    fn evict(&mut self, target: usize) -> Vec<Entry> {
-        let mut evicted = Vec::new();
-        let mut order: Vec<([u8; 32], u64)> = self
-            .map
-            .iter()
-            .map(|(digest, entry)| (*digest, entry.used))
-            .collect();
-        order.sort_unstable_by_key(|(_, used)| *used);
-        for (digest, _) in order {
-            if self.bytes <= target {
-                break;
-            }
-            if let Some(entry) = self.map.remove(&digest) {
-                self.bytes = self.bytes.saturating_sub(entry.bytes);
-                evicted.push(entry);
-            }
-        }
-        evicted
     }
 }
 
@@ -464,45 +479,160 @@ mod tests {
     use std::sync::Barrier;
 
     #[test]
-    fn racing_carried_lowerings_keep_each_call_and_prior_snapshot_immutable() {
+    fn dropping_an_async_lowering_releases_its_preadmitted_growth() {
+        use crate::allocation::{AllocationError, testing::Ledger};
+        use std::future::Future;
+        let ledger = Ledger::default();
+        ledger.limit(u64::MAX);
+        let cache = SegmentCache::new().draft(&ledger.budget()).unwrap();
+        let before = ledger.used();
+        let context = SegmentContext::new("cache-cancel").finish();
+        let mut future =
+            Box::pin(
+                cache.carried_async(SegmentKey::new(&context), 8192, |_, _| async {
+                    std::future::pending::<()>().await;
+                    Ok::<_, AllocationError>(Vec::<RequestSegment>::new())
+                }),
+            );
+        let mut task = std::task::Context::from_waker(std::task::Waker::noop());
+        assert!(future.as_mut().poll(&mut task).is_pending());
+        assert!(
+            ledger.used() >= before + 8192,
+            "the callback's claimed region must already own its reservation"
+        );
+        drop(future);
+        assert_eq!(
+            ledger.used(),
+            before,
+            "cancellation releases every preclaimed obligation"
+        );
+        drop(cache);
+        assert_eq!(ledger.used(), 0);
+    }
+
+    #[test]
+    fn segment_identity_does_not_retain_source_blocks() {
         let cache = SegmentCache::new();
-        let context = SegmentContext::new("carried-race").finish();
-        let source = LlmMessage::text(LlmRole::User, "shared source");
-        let key = || SegmentKey::new(&context).message(&source);
-        let unit = |text: &str| {
-            Arc::new(vec![
-                RequestSegment::item_json(&serde_json::json!(text)).unwrap(),
+        let context = SegmentContext::new("source-lifetime").finish();
+        let source = LlmMessage::text(LlmRole::User, "source");
+        let first = cache
+            .segments(SegmentKey::new(&context).message(&source), 4096, |hold| {
+                Ok::<_, crate::allocation::AllocationError>(vec![
+                    RequestSegment::item_json(&serde_json::json!("first"))
+                        .unwrap()
+                        .with_allocation(hold),
+                ])
+            })
+            .unwrap();
+        assert_eq!(
+            Arc::strong_count(&source.blocks),
+            1,
+            "cache identity must not keep source blocks alive"
+        );
+        let same = cache
+            .segments(
+                SegmentKey::new(&context).message(&source),
+                4096,
+                |_| -> Result<_, crate::allocation::AllocationError> { unreachable!() },
+            )
+            .unwrap();
+        assert!(Arc::ptr_eq(&first, &same));
+        drop(source);
+        let next = LlmMessage::text(LlmRole::User, "source");
+        let fresh = cache
+            .segments(SegmentKey::new(&context).message(&next), 4096, |hold| {
+                Ok::<_, crate::allocation::AllocationError>(vec![
+                    RequestSegment::item_json(&serde_json::json!("fresh"))
+                        .unwrap()
+                        .with_allocation(hold),
+                ])
+            })
+            .unwrap();
+        assert!(
+            !Arc::ptr_eq(&first, &fresh),
+            "a fresh allocation has a fresh identity even for equal content"
+        );
+    }
+
+    #[test]
+    fn cache_refuses_growth_before_calling_the_lowerer() {
+        use crate::allocation::{AllocationError, testing::Ledger};
+        let ledger = Ledger::default();
+        ledger.limit(u64::MAX);
+        let cache = SegmentCache::new().draft(&ledger.budget()).unwrap();
+        ledger.limit(ledger.used());
+        let context = SegmentContext::new("cache-admission").finish();
+        let source = LlmMessage::text(LlmRole::User, "source");
+        let called = std::sync::atomic::AtomicBool::new(false);
+        let result = cache.segments(SegmentKey::new(&context).message(&source), 4096, |hold| {
+            called.store(true, Ordering::SeqCst);
+            Ok::<_, AllocationError>(vec![
+                RequestSegment::item_json(&serde_json::json!("lowered"))
+                    .unwrap()
+                    .with_allocation(hold),
             ])
-        };
-        let original = unit("original");
-        cache
-            .carried(key(), |_| Ok::<_, ()>(Arc::clone(&original)))
+        });
+        assert!(
+            result.is_err(),
+            "new lowering and cache metadata require admission"
+        );
+        assert!(
+            !called.load(Ordering::SeqCst),
+            "refusal precedes the callback"
+        );
+        drop(cache);
+        assert_eq!(ledger.used(), 0);
+    }
+
+    #[test]
+    fn concurrent_admitted_updates_keep_reader_snapshots_and_escaped_segments_charged() {
+        use crate::allocation::testing::Ledger;
+        let ledger = Ledger::default();
+        ledger.limit(u64::MAX);
+        let cache = SegmentCache::new().draft(&ledger.budget()).unwrap();
+        let context = SegmentContext::new("admitted-carried-race").finish();
+        let key = || SegmentKey::new(&context);
+        let initial = cache
+            .carried(key(), 4096, |_, hold| {
+                Ok::<_, AllocationError>(vec![
+                    RequestSegment::item_json(&serde_json::json!("initial"))
+                        .unwrap()
+                        .with_allocation(hold),
+                ])
+            })
             .unwrap();
         let barrier = Barrier::new(2);
-        let update = |text| {
-            let own = unit(text);
-            let returned = cache
-                .carried(key(), |prior| {
-                    assert!(Arc::ptr_eq(&prior.unwrap(), &original));
-                    // Both calls captured the same prior before either publishes.
+        let update = |text: &str| {
+            cache
+                .carried(key(), 4096, |prior, hold| {
+                    assert!(Arc::ptr_eq(&prior.unwrap(), &initial));
                     barrier.wait();
-                    Ok::<_, ()>(Arc::clone(&own))
+                    Ok::<_, AllocationError>(vec![
+                        RequestSegment::item_json(&serde_json::json!(text))
+                            .unwrap()
+                            .with_allocation(hold),
+                    ])
                 })
-                .unwrap();
-            assert!(Arc::ptr_eq(&returned, &own));
-            own
+                .unwrap()
         };
         let (left, right) = std::thread::scope(|scope| {
-            let left = scope.spawn(|| update("left branch"));
-            let right = scope.spawn(|| update("right branch"));
+            let left = scope.spawn(|| update("left"));
+            let right = scope.spawn(|| update("right"));
             (left.join().unwrap(), right.join().unwrap())
         });
-        let current = cache
-            .carried(key(), |prior| Ok::<_, ()>(prior.unwrap()))
-            .unwrap();
-        assert!(Arc::ptr_eq(&current, &left) || Arc::ptr_eq(&current, &right));
-        assert_eq!(original[0].text_lossy(), "\"original\"");
-        assert_eq!(left[0].text_lossy(), "\"left branch\"");
-        assert_eq!(right[0].text_lossy(), "\"right branch\"");
+        assert_eq!(initial[0].text_lossy(), "\"initial\"");
+        assert_eq!(left[0].text_lossy(), "\"left\"");
+        assert_eq!(right[0].text_lossy(), "\"right\"");
+        let escaped = left[0].clone();
+        drop(cache);
+        drop(initial);
+        drop(left);
+        drop(right);
+        assert!(
+            ledger.used() >= 4096,
+            "a segment can outlive the cache and its returned unit"
+        );
+        drop(escaped);
+        assert_eq!(ledger.used(), 0);
     }
 }

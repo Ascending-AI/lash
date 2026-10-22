@@ -25,7 +25,7 @@ fn request(messages: Vec<LlmMessage>) -> LlmRequest {
         .with_reasoning(Default::default()),
         messages,
 
-        tools: Arc::new(vec![]),
+        tools: Arc::new((vec![]).into()),
         tool_choice: Default::default(),
         attachment_acceptance: Default::default(),
         generation: Default::default(),

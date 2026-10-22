@@ -612,7 +612,8 @@ impl TraceEvent {
                                 reference,
                                 ..
                             } => text(C::CodeOutput, "code_output.error.reference", reference, f),
-                            lash_protocol_types::SchemaAdmissionError::InvalidKind { .. } => {}
+                            lash_protocol_types::SchemaAdmissionError::InvalidKind { .. }
+                            | lash_protocol_types::SchemaAdmissionError::Allocation(_) => {}
                         }
                     }
                 }

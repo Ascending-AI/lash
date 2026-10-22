@@ -652,7 +652,7 @@ pub(crate) fn empty_request() -> LlmRequest {
         .with_reasoning(Default::default()),
         messages: Vec::new(),
 
-        tools: std::sync::Arc::new(Vec::new()),
+        tools: std::sync::Arc::new((Vec::new()).into()),
         tool_choice: Default::default(),
         generation: Default::default(),
         attachment_acceptance: Default::default(),

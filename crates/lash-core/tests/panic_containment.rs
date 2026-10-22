@@ -114,7 +114,7 @@ fn request() -> LlmRequest {
         .with_reasoning(Default::default()),
         messages: Vec::new(),
 
-        tools: Arc::new(Vec::new()),
+        tools: Arc::new((Vec::new()).into()),
         tool_choice: Default::default(),
         attachment_acceptance: Default::default(),
         generation: GenerationOptions::default(),

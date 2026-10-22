@@ -53,7 +53,7 @@ fn test_execution_context_with_env_store(
         config: crate::plugin::OwnerConfigView::session((plugins).admitted_plugin_config()),
         execution_budgets: (plugins).execution_budgets(),
         state: plugins,
-        tools: Arc::new(NoopTools),
+        tools: Arc::new((NoopTools).into()),
         routes: crate::SurfaceTools::default(),
         tool_catalog: Arc::new(crate::ToolCatalog::from_tool_definitions(Vec::new())),
         sessions: Arc::new(crate::testing::MockSessionManager::default()),
@@ -257,4 +257,59 @@ fn a_call_id_repeated_across_iterations_mints_distinct_ids() {
     assert_ne!(ids[0], ids[1], "iterations qualify the reused call id");
     assert!(ids[0].ends_with(":call:0:0:dup:directives:before#0"));
     assert!(ids[1].ends_with(":call:1:0:dup:directives:before#0"));
+}
+
+struct ProjectionRefusalLedger {
+    attempts: Arc<std::sync::atomic::AtomicUsize>,
+    refuse: Arc<std::sync::atomic::AtomicBool>,
+}
+impl lash_protocol_types::allocation::AllocationLedger for ProjectionRefusalLedger {
+    fn reserve(
+        &self,
+        bytes: u64,
+    ) -> Result<
+        lash_protocol_types::allocation::AllocationHold,
+        lash_protocol_types::allocation::AllocationError,
+    > {
+        self.attempts
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        if !self.refuse.load(std::sync::atomic::Ordering::SeqCst) {
+            return Ok(Default::default());
+        }
+        Err(lash_protocol_types::allocation::AllocationError {
+            kind: lash_protocol_types::allocation::ReserveError::Pressure,
+            actor: "projection-law".into(),
+            requested: bytes,
+            capacity: 0,
+        })
+    }
+    fn reserve_shared(
+        &self,
+        _: usize,
+        bytes: u64,
+    ) -> Result<
+        lash_protocol_types::allocation::AllocationHold,
+        lash_protocol_types::allocation::AllocationError,
+    > {
+        self.reserve(bytes)
+    }
+}
+
+#[test]
+fn chronological_cache_attempts_admission_before_materializing_a_turn_projection() {
+    let attempts = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let refuse = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let budget = lash_protocol_types::allocation::AllocationBudget::new(ProjectionRefusalLedger {
+        attempts: attempts.clone(),
+        refuse: refuse.clone(),
+    });
+    let messages = crate::MessageSequence::default().clone_in(&budget).unwrap();
+    let context = test_execution_context().with_turn_history(Default::default(), messages);
+    attempts.store(0, std::sync::atomic::Ordering::SeqCst);
+    refuse.store(true, std::sync::atomic::Ordering::SeqCst);
+    let _projection = context.chronological_projection();
+    assert!(
+        attempts.load(std::sync::atomic::Ordering::SeqCst) > 0,
+        "chronological cache must ask the serving ledger before materializing"
+    );
 }

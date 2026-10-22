@@ -291,7 +291,7 @@ pub(super) async fn run(
             receipt.take();
             *unsettled = false;
             let waits = round::PinnedWaits::read(reads, &facts).await?;
-            stored.committed(&mut *drive);
+            stored.committed(&mut *drive)?;
             drive.run_changes_committed(&written);
             drive.phase_committed(cx).await?;
             release_cell_emissions(cx, drive, held, CommitLabel::MODEL_DONE).await?;

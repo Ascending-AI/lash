@@ -55,7 +55,7 @@ fn request() -> LlmRequest {
         .with_reasoning(Default::default()),
         messages: vec![LlmMessage::text(LlmRole::User, "hello")],
 
-        tools: Arc::new(Vec::<LlmToolSpec>::new()),
+        tools: Arc::new((Vec::<LlmToolSpec>::new()).into()),
         tool_choice: LlmToolChoice::Auto,
         attachment_acceptance: Default::default(),
         scope: LlmRequestScope::new(

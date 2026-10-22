@@ -15,17 +15,20 @@ fn codex_tool_schema_prompt_cache_key_is_not_cache_emission() {
         }],
     )]);
     req.model.metadata_mut().request_defaults.cache_retention = CacheRetention::None;
-    req.tools = Arc::new(vec![LlmToolSpec {
-        name: "cache-shaped-input".to_string(),
-        description: "Host tool with a provider-looking property".to_string(),
-        input_schema: lash_protocol_types::SchemaContract::admit(json!({
-            "type": "object",
-            "properties": { "prompt_cache_key": { "type": "string" } }
-        }))
-        .expect("valid declared schema"),
-        output_schema: lash_protocol_types::SchemaContract::admit(json!({}))
+    req.tools = Arc::new(
+        (vec![LlmToolSpec {
+            name: "cache-shaped-input".to_string(),
+            description: "Host tool with a provider-looking property".to_string(),
+            input_schema: lash_protocol_types::SchemaContract::admit(json!({
+                "type": "object",
+                "properties": { "prompt_cache_key": { "type": "string" } }
+            }))
             .expect("valid declared schema"),
-    }]);
+            output_schema: lash_protocol_types::SchemaContract::admit(json!({}))
+                .expect("valid declared schema"),
+        }])
+        .into(),
+    );
 
     let built = provider.build_request(&req, false).unwrap().redacted();
 

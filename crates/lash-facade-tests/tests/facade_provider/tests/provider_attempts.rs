@@ -664,7 +664,7 @@ mod facade_settings {
                 lash::provider::LlmRole::User,
                 "hello policy",
             )],
-            tools: Arc::new(Vec::new()),
+            tools: Arc::new((Vec::new()).into()),
             tool_choice: lash::provider::LlmToolChoice::None,
             attachment_acceptance: Default::default(),
             scope: LlmRequestScope::new("facade-policy", "frame", "request"),

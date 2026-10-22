@@ -1439,7 +1439,7 @@ impl<'a> TurnRestore<'a> {
         self.cx.probe().checkpoint_restored(&row.session, &row.run);
         let mut machine = TurnMachine::restore_from_checkpoint(config, saved, window)?;
         // The turn's next phase builds on the content this one stored.
-        stored.restored(&mut machine);
+        stored.restored(&mut machine)?;
         let pending = next_work(&mut machine);
         Ok(RestoredTurn {
             machine,

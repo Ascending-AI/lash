@@ -743,7 +743,7 @@ mod error_detail_tests {
                 "hello",
             )],
 
-            tools: Arc::new(Vec::<lash_core::llm::types::LlmToolSpec>::new()),
+            tools: Arc::new((Vec::<lash_core::llm::types::LlmToolSpec>::new()).into()),
             tool_choice: LlmToolChoice::Auto,
             attachment_acceptance: Default::default(),
             scope: lash_core::LlmRequestScope::new(

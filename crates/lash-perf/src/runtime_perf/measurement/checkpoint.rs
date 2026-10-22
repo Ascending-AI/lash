@@ -580,7 +580,7 @@ impl CheckpointConfigs {
     fn new() -> Self {
         Self {
             llm: Arc::new(CheckpointDriver::Llm),
-            tools: Arc::new(CheckpointDriver::Tools),
+            tools: Arc::new((CheckpointDriver::Tools).into()),
             exec: Arc::new(CheckpointDriver::Exec),
         }
     }

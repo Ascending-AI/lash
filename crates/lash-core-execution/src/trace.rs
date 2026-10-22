@@ -332,6 +332,9 @@ pub fn trace_cell_failure(
         defect: failure.defect.clone(),
         schema_admission: failure.schema_admission.as_deref().map(|error| {
             Box::new(match error {
+                SchemaAdmissionError::Allocation(error) => {
+                    SchemaAdmissionError::Allocation(error.clone())
+                }
                 SchemaAdmissionError::InvalidKind { actual } => {
                     SchemaAdmissionError::InvalidKind { actual: *actual }
                 }

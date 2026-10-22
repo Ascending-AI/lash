@@ -245,15 +245,27 @@ pub(super) struct PhaseStored {
 
 impl PhaseStored {
     /// Tell `drive`, and its machine, the phase is stored.
-    pub(super) fn committed(self, drive: &mut dyn super::session::TurnDrive) {
-        drive.machine().checkpoint_stored(self.content);
+    pub(super) fn committed(
+        self,
+        drive: &mut dyn super::session::TurnDrive,
+    ) -> Result<(), crate::RuntimeError> {
+        drive
+            .machine()
+            .checkpoint_stored(self.content)
+            .map_err(crate::RuntimeError::allocation)?;
         drive.run_config_stored(&self.config);
+        Ok(())
     }
 
     /// Tell `machine`, restored from this phase, what the phase stored: its
     /// configuration's nodes came back with the checkpoint.
-    pub(super) fn restored(self, machine: &mut crate::TurnMachine) {
-        machine.checkpoint_stored(self.content);
+    pub(super) fn restored(
+        self,
+        machine: &mut crate::TurnMachine,
+    ) -> Result<(), crate::RuntimeError> {
+        machine
+            .checkpoint_stored(self.content)
+            .map_err(crate::RuntimeError::allocation)
     }
 }
 

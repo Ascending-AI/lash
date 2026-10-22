@@ -915,4 +915,16 @@ impl TurnProtocol for RlmTurnProtocol {
     type Event = RlmProtocolEvent;
     type Termination = TerminationMode;
     type DriverState = serde_json::Value;
+
+    fn adopt_event(
+        event: &Self::Event,
+        budget: &lash_protocol_types::allocation::AllocationBudget,
+    ) -> Result<Self::Event, lash_protocol_types::allocation::AllocationError> {
+        Ok(match event {
+            RlmProtocolEvent::RlmTrajectoryEntry(cell) => RlmProtocolEvent::RlmTrajectoryEntry(
+                lash_protocol_types::allocation::Allocated::adopt_in(cell, budget)?,
+            ),
+            event => event.clone(),
+        })
+    }
 }

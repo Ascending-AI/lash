@@ -1502,7 +1502,8 @@ fn omitted_schema_admission_diagnostics_keep_classification_without_text() {
             | lash_protocol_types::SchemaAdmissionError::Unprojectable { schema_path, .. } => {
                 schema_path.clone()
             }
-            lash_protocol_types::SchemaAdmissionError::InvalidKind { .. } => unreachable!(),
+            lash_protocol_types::SchemaAdmissionError::InvalidKind { .. }
+            | lash_protocol_types::SchemaAdmissionError::Allocation(_) => unreachable!(),
         };
         let mut event = exec_code_completed_event();
         let TraceEvent::ExecCodeCompleted { error, .. } = &mut event else {

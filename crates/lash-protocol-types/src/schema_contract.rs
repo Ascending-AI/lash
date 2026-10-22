@@ -54,6 +54,27 @@ impl SchemaContract {
         self
     }
 
+    pub fn adopt_in(
+        &self,
+        budget: &crate::allocation::AllocationBudget,
+    ) -> Result<Self, crate::allocation::AllocationError> {
+        let canonical = self.canonical.adopt_in(budget)?;
+        let mut overrides = Vec::with_capacity(self.projection.overrides.len());
+        for entry in &self.projection.overrides {
+            overrides.push(SchemaProjectionOverride {
+                dialect: entry.dialect,
+                schema: entry.schema.adopt_in(budget)?,
+            });
+        }
+        Ok(Self {
+            canonical,
+            projection: SchemaProjectionPolicy {
+                mode: self.projection.mode,
+                overrides,
+            },
+        })
+    }
+
     pub fn canonical(&self) -> &Value {
         self.canonical.as_value()
     }

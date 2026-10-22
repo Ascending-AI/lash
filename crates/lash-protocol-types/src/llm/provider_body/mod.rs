@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
 mod cache;
-mod canonical;
+pub(crate) mod canonical;
 mod segment;
 #[cfg(test)]
 mod tests;

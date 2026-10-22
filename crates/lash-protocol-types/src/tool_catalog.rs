@@ -59,7 +59,7 @@ pub struct ToolCatalog(Arc<CatalogGeneration>);
 #[derive(Default)]
 struct CatalogGeneration {
     tools: Vec<ToolCatalogEntry>,
-    model_tool_specs: OnceLock<Arc<Vec<LlmToolSpec>>>,
+    model_tool_specs: OnceLock<Arc<crate::llm::types::LlmToolSpecs>>,
     tool_names: OnceLock<Arc<Vec<String>>>,
     /// Documents a downstream crate derives from this membership, one per
     /// document type.
@@ -232,7 +232,7 @@ impl ToolCatalog {
         }))
     }
 
-    pub fn model_tool_specs(&self) -> Arc<Vec<LlmToolSpec>> {
+    pub fn model_tool_specs(&self) -> Arc<crate::llm::types::LlmToolSpecs> {
         Arc::clone(self.0.model_tool_specs.get_or_init(|| {
             Arc::new(
                 self.entries()
@@ -244,7 +244,8 @@ impl ToolCatalog {
                         input_schema: model_tool.input_schema,
                         output_schema: model_tool.output_schema,
                     })
-                    .collect(),
+                    .collect::<Vec<_>>()
+                    .into(),
             )
         }))
     }

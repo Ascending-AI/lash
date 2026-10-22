@@ -242,7 +242,7 @@ fn a_checkpoint_restores_the_step_with_its_expansion() {
     });
     let (id, calls, expansion) = tool_calls_effect(&drain_effects(&mut machine));
 
-    let checkpoint = roundtrip_checkpoint(machine.checkpoint());
+    let checkpoint = roundtrip_checkpoint(machine.checkpoint().unwrap());
     let mut restored = TurnMachine::restore_from_checkpoint(test_config(driver), checkpoint, None)
         .expect("supported checkpoint");
     let (restored_id, restored_calls, restored_expansion) =
@@ -283,7 +283,7 @@ fn checkpoint_resume_keeps_prompt_view_edits_out_of_progress_and_done() {
         });
         let mut resumed = TurnMachine::restore_from_checkpoint(
             test_config(Arc::new(ProseDriver)),
-            roundtrip_checkpoint(machine.checkpoint()),
+            roundtrip_checkpoint(machine.checkpoint().unwrap()),
             None,
         )
         .expect("restore");

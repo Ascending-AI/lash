@@ -689,7 +689,7 @@ pub(super) fn empty_request() -> LlmRequest {
         )
         .with_reasoning(Default::default()),
         messages: Vec::new(),
-        tools: Arc::new(Vec::new()),
+        tools: Arc::new((Vec::new()).into()),
         tool_choice: LlmToolChoice::None,
         attachment_acceptance: Default::default(),
         scope: crate::LlmRequestScope::new(

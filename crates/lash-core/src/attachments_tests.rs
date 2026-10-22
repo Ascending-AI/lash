@@ -1641,7 +1641,7 @@ fn attachment_request(
             crate::llm::types::LlmRole::User,
             blocks,
         )],
-        tools: Arc::new(Vec::new()),
+        tools: Arc::new((Vec::new()).into()),
         tool_choice: crate::llm::types::LlmToolChoice::None,
         attachment_acceptance: lash_core_store::attachments::attachment_test_acceptance(),
         generation: crate::llm::types::GenerationOptions::default(),

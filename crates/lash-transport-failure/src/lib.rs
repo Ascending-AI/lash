@@ -96,6 +96,19 @@ pub struct LlmTransportError {
     pub partial_response: Option<Box<LlmResponse>>,
 }
 
+impl From<lash_protocol_types::allocation::AllocationError> for LlmTransportError {
+    fn from(refusal: lash_protocol_types::allocation::AllocationError) -> Self {
+        let mut failure = Self::new(format!("request template unavailable: {refusal}"))
+            .with_kind(ProviderFailureKind::Validation)
+            .with_lash_code(TurnFailureCode::AdmittedRequestUnavailable)
+            .with_retry_verdict(TransportRetryVerdict::Forbidden);
+        failure.context = Box::new(HttpFailureContext::OwnerAllocation {
+            refusal: Box::new(refusal),
+        });
+        failure
+    }
+}
+
 impl LlmTransportError {
     pub fn allocation_refusal(&self) -> Option<&lash_protocol_types::allocation::AllocationError> {
         match self.context.as_ref() {

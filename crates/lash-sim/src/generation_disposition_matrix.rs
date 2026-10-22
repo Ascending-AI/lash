@@ -231,7 +231,7 @@ impl Dialect {
             .with_reasoning(ReasoningSelection::ProviderDefault),
             messages: vec![LlmMessage::text(LlmRole::User, "answer directly")],
 
-            tools: Arc::new(Vec::new()),
+            tools: Arc::new((Vec::new()).into()),
             tool_choice: LlmToolChoice::Auto,
             attachment_acceptance: Default::default(),
             generation: Default::default(),
@@ -274,16 +274,19 @@ impl Setting {
                 json!(["END"])
             }
             Self::Parallel => {
-                request.tools = Arc::new(vec![LlmToolSpec {
-                    name: "lookup".into(),
-                    description: "Lookup".into(),
-                    input_schema: lash_protocol_types::SchemaContract::admit(
-                        json!({"type":"object"}),
-                    )
-                    .expect("valid declared schema"),
-                    output_schema: lash_protocol_types::SchemaContract::admit(json!({}))
+                request.tools = Arc::new(
+                    (vec![LlmToolSpec {
+                        name: "lookup".into(),
+                        description: "Lookup".into(),
+                        input_schema: lash_protocol_types::SchemaContract::admit(
+                            json!({"type":"object"}),
+                        )
                         .expect("valid declared schema"),
-                }]);
+                        output_schema: lash_protocol_types::SchemaContract::admit(json!({}))
+                            .expect("valid declared schema"),
+                    }])
+                    .into(),
+                );
                 request.generation.parallel_tool_calls = Some(false);
                 json!(false)
             }

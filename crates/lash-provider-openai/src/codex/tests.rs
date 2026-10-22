@@ -81,7 +81,7 @@ fn request(messages: Vec<LlmMessage>) -> LlmRequest {
         ),
         messages,
 
-        tools: Arc::new(Vec::<LlmToolSpec>::new()),
+        tools: Arc::new((Vec::<LlmToolSpec>::new()).into()),
         tool_choice: LlmToolChoice::Auto,
         attachment_acceptance: crate::attachment_test_acceptance(),
         scope: LlmRequestScope::new(
@@ -427,14 +427,17 @@ fn codex_request_body_exposes_reasoning_summary_only_when_configured() {
 #[test]
 fn codex_request_uses_openai_schema_projection() {
     let mut req = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
-    req.tools = Arc::new(vec![LlmToolSpec {
-        name: "empty".to_string(),
-        description: "Empty".to_string(),
-        input_schema: lash_protocol_types::SchemaContract::admit(json!({"type": "object"}))
-            .expect("valid declared schema"),
-        output_schema: lash_protocol_types::SchemaContract::admit(json!({}))
-            .expect("valid declared schema"),
-    }]);
+    req.tools = Arc::new(
+        (vec![LlmToolSpec {
+            name: "empty".to_string(),
+            description: "Empty".to_string(),
+            input_schema: lash_protocol_types::SchemaContract::admit(json!({"type": "object"}))
+                .expect("valid declared schema"),
+            output_schema: lash_protocol_types::SchemaContract::admit(json!({}))
+                .expect("valid declared schema"),
+        }])
+        .into(),
+    );
     req.output_spec = Some(LlmOutputSpec::JsonSchema(LlmJsonSchema {
         name: "result".to_string(),
         schema: lash_protocol_types::SchemaContract::admit(json!({

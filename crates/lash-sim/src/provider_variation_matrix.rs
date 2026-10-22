@@ -949,7 +949,7 @@ fn matrix_request(
         .with_reasoning(Default::default()),
         messages: vec![LlmMessage::text(LlmRole::User, "answer directly")],
 
-        tools: Arc::new(Vec::new()),
+        tools: Arc::new((Vec::new()).into()),
         tool_choice: LlmToolChoice::Auto,
         attachment_acceptance: Default::default(),
         generation: lash_core::GenerationOptions {

@@ -75,7 +75,7 @@ fn request(model: &str, messages: Vec<LlmMessage>) -> LlmRequest {
         .with_reasoning(Default::default()),
         messages,
 
-        tools: Arc::new(Vec::new()),
+        tools: Arc::new((Vec::new()).into()),
         tool_choice: Default::default(),
         attachment_acceptance: Default::default(),
         scope: lash_core::LlmRequestScope::new(

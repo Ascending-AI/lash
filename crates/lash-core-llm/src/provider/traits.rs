@@ -166,13 +166,13 @@ pub trait Provider: Send + Sync + std::fmt::Debug {
             .reserve(lash_protocol_types::allocation::payload_capacity(
                 request, 1024,
             ))
-            .map_err(super::attachment_wire::allocation_error)?;
+            .map_err(LlmTransportError::from)?;
         let template = self.lower(&request.materialize(), cache).await?;
         let hold = budget
             .reserve(lash_protocol_types::allocation::payload_capacity(
                 &template, 1024,
             ))
-            .map_err(super::attachment_wire::allocation_error)?;
+            .map_err(LlmTransportError::from)?;
         Ok(template.with_allocation(hold))
     }
 

@@ -351,7 +351,7 @@ impl Session {
             host: open_host().await,
             services,
             gate,
-            tools: Arc::new(CellTools::default()),
+            tools: Arc::new((CellTools::default()).into()),
             held: Arc::clone(held),
             cells: 0,
         };

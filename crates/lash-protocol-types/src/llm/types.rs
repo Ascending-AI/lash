@@ -488,16 +488,38 @@ pub enum LlmContentBlock {
 /// Immutable model blocks. The actual Arc a reader retains carries admission;
 /// serialization remains the plain block list. Independently constructed flat
 /// requests are adopted through `adopt_in` before an owner retains them.
-#[derive(Debug, Default, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
 #[serde(transparent)]
 pub struct LlmMessageBlocks {
+    #[serde(skip, default = "next_message_blocks_identity")]
+    identity: u64,
     blocks: Vec<LlmContentBlock>,
     #[serde(skip)]
     _holds: Vec<crate::allocation::AllocationHold>,
     #[serde(skip)]
     budget: crate::allocation::AllocationBudget,
 }
+// Identities never repeat within a process, including after all source readers
+// drop. A cache can therefore name a source without retaining its allocation.
+fn next_message_blocks_identity() -> u64 {
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+    NEXT.fetch_update(
+        std::sync::atomic::Ordering::Relaxed,
+        std::sync::atomic::Ordering::Relaxed,
+        |next| next.checked_add(1),
+    )
+    .unwrap_or_else(|_| std::process::abort())
+}
+impl Default for LlmMessageBlocks {
+    fn default() -> Self {
+        Vec::new().into()
+    }
+}
 impl LlmMessageBlocks {
+    /// The immutable source's process-local identity, never reused on drop.
+    pub fn identity(&self) -> u64 {
+        self.identity
+    }
     pub fn adopt_in(
         source: &Arc<Self>,
         budget: &crate::allocation::AllocationBudget,
@@ -523,6 +545,7 @@ impl LlmMessageBlocks {
         budget: crate::allocation::AllocationBudget,
     ) -> Self {
         Self {
+            identity: next_message_blocks_identity(),
             blocks,
             _holds: holds,
             budget,
@@ -532,6 +555,7 @@ impl LlmMessageBlocks {
 impl From<Vec<LlmContentBlock>> for LlmMessageBlocks {
     fn from(blocks: Vec<LlmContentBlock>) -> Self {
         Self {
+            identity: next_message_blocks_identity(),
             blocks,
             _holds: Vec::new(),
             budget: Default::default(),
@@ -1011,6 +1035,35 @@ impl GenerationReceipt {
     }
 }
 
+/// Immutable tool directory. Its actual Arc carries the directory obligation;
+/// each schema carries its own prepared JSON, validator and type obligations.
+pub type LlmToolSpecs = crate::allocation::Allocated<Vec<LlmToolSpec>>;
+
+impl LlmToolSpecs {
+    pub fn adopt_tools_in(
+        source: &Arc<Self>,
+        budget: &crate::allocation::AllocationBudget,
+    ) -> Result<Arc<Self>, crate::allocation::AllocationError> {
+        if source.allocation_budget().identity() == budget.identity() {
+            return Ok(Arc::clone(source));
+        }
+        let allocation = budget.reserve(crate::allocation::payload_capacity(
+            source.as_ref(),
+            std::mem::size_of::<Self>() + 16,
+        ))?;
+        let mut tools = Vec::with_capacity(source.len());
+        for tool in source.iter() {
+            tools.push(LlmToolSpec {
+                name: tool.name.clone(),
+                description: tool.description.clone(),
+                input_schema: tool.input_schema.adopt_in(budget)?,
+                output_schema: tool.output_schema.adopt_in(budget)?,
+            });
+        }
+        Ok(Arc::new(Self::new(tools, allocation, budget.clone())))
+    }
+}
+
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct LlmRequest {
     /// Initial session instructions, separate from runtime feedback in messages.
@@ -1018,7 +1071,7 @@ pub struct LlmRequest {
     pub instructions: Option<Arc<str>>,
     pub model: crate::llm_profile::LlmProfileConfig,
     pub messages: Vec<LlmMessage>,
-    pub tools: Arc<Vec<LlmToolSpec>>,
+    pub tools: Arc<crate::llm::types::LlmToolSpecs>,
     pub tool_choice: LlmToolChoice,
     /// The session's recorded attachment-acceptance rules (ADR 0026). They
     /// are session config, not model metadata: they decide whether an

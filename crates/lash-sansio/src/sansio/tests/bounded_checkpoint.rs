@@ -105,7 +105,7 @@ fn checkpoint_restore_checkpoint_is_byte_identical() {
             ("llm", waiting_on_llm(count)),
             ("tools", waiting_on_tools(count)),
         ] {
-            let saved = machine.checkpoint();
+            let saved = machine.checkpoint().unwrap();
             let (body, content) = encode(&saved);
             let decoded: SavedTurn =
                 serde_json::from_slice(&serde_json::to_vec(&saved).expect("saved turn"))
@@ -117,7 +117,7 @@ fn checkpoint_restore_checkpoint_is_byte_identical() {
             )
             .expect("supported checkpoint");
             assert_eq!(
-                encode(&restored.checkpoint()),
+                encode(&restored.checkpoint().unwrap()),
                 (body, content),
                 "{count} messages, waiting on {state}"
             );
@@ -134,7 +134,7 @@ fn checkpoint_body_size_is_independent_of_message_count() {
     ] {
         let mut body_sizes = Vec::new();
         for count in [1, 10, 50] {
-            let saved = build(count).checkpoint();
+            let saved = build(count).checkpoint().unwrap();
             let (body, content) = encode(&saved);
             rows.push(format!(
                 "waiting on {state}, {count:>2} messages: before {} bytes inline; after {} body + {} content bytes in {} blobs",
@@ -155,7 +155,7 @@ fn checkpoint_body_size_is_independent_of_message_count() {
 
 #[test]
 fn restore_refuses_missing_or_corrupt_checkpoint_content() {
-    let saved = waiting_on_llm(10).checkpoint();
+    let saved = waiting_on_llm(10).checkpoint().unwrap();
     let (missing, _) = saved.content.iter().next().expect("stored content");
     let missing = missing.clone();
     let mut without = TurnCheckpointContent::default();
@@ -374,7 +374,7 @@ fn a_windowed_checkpoint_holds_only_the_turn_and_restores_over_its_window() {
         for count in [0, 10, 300] {
             let window = window(count);
             let machine = waiting(&window);
-            let saved = machine.checkpoint();
+            let saved = machine.checkpoint().unwrap();
             assert_eq!(
                 saved.checkpoint.window_pin(),
                 Some(window.pin()),
@@ -384,7 +384,7 @@ fn a_windowed_checkpoint_holds_only_the_turn_and_restores_over_its_window() {
 
             let mut restored = restored(&saved, Some(window.clone()));
             assert_eq!(
-                encode(&restored.checkpoint()),
+                encode(&restored.checkpoint().unwrap()),
                 encode(&saved),
                 "{count} window messages, waiting on {state}"
             );
@@ -423,7 +423,7 @@ fn a_windowed_checkpoint_holds_only_the_turn_and_restores_over_its_window() {
 #[test]
 fn a_windowed_checkpoint_refuses_any_window_but_its_own() {
     let window = window(10);
-    let saved = windowed_llm_pending(&window).0.checkpoint();
+    let saved = windowed_llm_pending(&window).0.checkpoint().unwrap();
     let decoded = || -> SavedTurn {
         serde_json::from_slice(&serde_json::to_vec(&saved).expect("saved turn"))
             .expect("decoded saved turn")
@@ -557,7 +557,7 @@ fn decided_completion_candidates_are_checkpoint_content_not_body() {
         "each BeforeCompletion decided its candidate"
     );
 
-    let saved = machine.checkpoint();
+    let saved = machine.checkpoint().unwrap();
     let body = serde_json::to_string(&saved.checkpoint).expect("checkpoint body");
     assert!(
         !body.contains(FINISH_VALUE),
@@ -592,8 +592,8 @@ impl PhaseStore {
     /// its content holds every blob of that one it does not hold by a pin,
     /// and it holds only blobs an earlier phase stored, by their pins.
     fn phase(&mut self, machine: &mut TurnMachine, phase: &str) -> usize {
-        let full = machine.checkpoint();
-        let delta = machine.checkpoint_delta();
+        let full = machine.checkpoint().unwrap();
+        let delta = machine.checkpoint_delta().unwrap();
         assert_eq!(
             serde_json::to_vec(&delta.saved.checkpoint).expect("delta body"),
             serde_json::to_vec(&full.checkpoint).expect("full body"),
@@ -630,7 +630,7 @@ impl PhaseStore {
             self.blobs.insert(digest.clone(), bytes.to_vec());
             pins.push((digest.clone(), Self::pin(digest)));
         }
-        machine.checkpoint_stored(pins);
+        machine.checkpoint_stored(pins).unwrap();
         delta.encoded
     }
 }
@@ -696,7 +696,7 @@ fn encoded_per_phase(count: usize, rounds: usize) -> Vec<usize> {
     }
     // A cold owner restores the stored checkpoint, learns the pins of what
     // it is stored as, and builds on it as the uncut owner does.
-    let saved = machine.checkpoint();
+    let saved = machine.checkpoint().unwrap();
     let mut cold_store = PhaseStore {
         blobs: store.blobs.clone(),
     };
@@ -709,7 +709,8 @@ fn encoded_per_phase(count: usize, rounds: usize) -> Vec<usize> {
             .content
             .iter()
             .map(|(digest, _)| (digest.clone(), PhaseStore::pin(digest))),
-    );
+    )
+    .unwrap();
     let uncut = round(&mut machine, &mut store, rounds);
     let resumed = round(&mut cold, &mut cold_store, rounds);
     // Its first model call stores the request whole once: the request an
@@ -818,7 +819,7 @@ fn a_narrowed_prompt_view_stores_only_where_it_differs() {
         "the request is projected from the narrowed view"
     );
     store.phase(&mut machine, "the model call");
-    let saved = machine.checkpoint();
+    let saved = machine.checkpoint().unwrap();
     let body = serde_json::to_value(&saved.checkpoint).expect("checkpoint body");
     assert_eq!(body["prompt_messages"]["from_window"], 3);
     assert_eq!(
@@ -831,7 +832,7 @@ fn a_narrowed_prompt_view_stores_only_where_it_differs() {
     assert_eq!(own.len(), 1, "the view stores only its narrowed message");
 
     let mut restored = restored(&saved, Some(window.clone()));
-    assert_eq!(encode(&restored.checkpoint()), encode(&saved));
+    assert_eq!(encode(&restored.checkpoint().unwrap()), encode(&saved));
     assert_eq!(
         serde_json::to_value(restored.prompt_message_sequence().as_slice()).expect("view"),
         serde_json::to_value(machine.prompt_message_sequence().as_slice()).expect("view"),
@@ -883,7 +884,7 @@ fn a_mode_history_policy_reconstructs_the_recorded_request_prefix() {
     .unwrap();
     let effects = drain_effects(&mut machine);
     let (_, request) = find_llm_call(&effects).expect("the recorded model request");
-    let saved = machine.checkpoint();
+    let saved = machine.checkpoint().unwrap();
     let mut restored = TurnMachine::restore_from_checkpoint(
         config(),
         roundtrip_checkpoint(saved.clone()),
@@ -900,5 +901,5 @@ fn a_mode_history_policy_reconstructs_the_recorded_request_prefix() {
         serde_json::to_value(restored.messages().as_slice()).unwrap(),
         serde_json::to_value(machine.messages().as_slice()).unwrap()
     );
-    assert_eq!(encode(&restored.checkpoint()), encode(&saved));
+    assert_eq!(encode(&restored.checkpoint().unwrap()), encode(&saved));
 }

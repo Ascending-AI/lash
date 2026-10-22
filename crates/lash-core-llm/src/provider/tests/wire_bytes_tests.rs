@@ -75,7 +75,7 @@ fn variants(messages: Vec<LlmMessage>) -> Vec<(&'static str, LlmRequest)> {
     });
     let mut instructed = base.clone();
     instructed.instructions = Some("You are a careful coding agent.".into());
-    instructed.tools = Arc::new(vec![corpus_tool()]);
+    instructed.tools = Arc::new((vec![corpus_tool()]).into());
     instructed.tool_choice = LlmToolChoice::Auto;
     vec![("base", base), ("instructed", instructed)]
 }

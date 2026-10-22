@@ -27,7 +27,7 @@ pub(super) fn request_with_capability(
         ),
         messages: vec![LlmMessage::text(LlmRole::User, "hello")],
 
-        tools: Arc::new(Vec::<LlmToolSpec>::new()),
+        tools: Arc::new((Vec::<LlmToolSpec>::new()).into()),
         tool_choice: LlmToolChoice::Auto,
         attachment_acceptance: crate::attachment_test_acceptance(),
         scope: lash_core::LlmRequestScope::new(

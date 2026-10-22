@@ -847,6 +847,8 @@
       "src/sansio/checkpoint_content.rs",
       "src/sansio/checkpoint_ledger.rs",
       "src/sansio/helpers.rs",
+      "src/sansio/machine_admission.rs",
+      "src/sansio/machine_checkpoint.rs",
       "src/sansio/machine_state.rs",
       "src/sansio/mod.rs",
       "src/sansio/tests.rs",

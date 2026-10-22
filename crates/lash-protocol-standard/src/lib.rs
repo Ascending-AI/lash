@@ -856,14 +856,14 @@ impl ProtocolDriverPlugin for StandardProtocolDriver {
         let tool_specs = match self.config.batch {
             BatchSugar::Enabled { max_members } => {
                 let model_tool = batch_tool_definition(max_members).model_tool();
-                let mut specs = catalog_specs.as_ref().clone();
+                let mut specs = catalog_specs.as_ref().as_ref().clone();
                 specs.push(lash_core::llm::types::LlmToolSpec {
                     name: batch::BATCH_TOOL_NAME.to_owned(),
                     description: model_tool.description,
                     input_schema: model_tool.input_schema,
                     output_schema: model_tool.output_schema,
                 });
-                Arc::new(specs)
+                Arc::new(specs.into())
             }
             BatchSugar::Disabled => catalog_specs,
         };

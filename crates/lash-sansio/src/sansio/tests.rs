@@ -215,7 +215,7 @@ fn turn_checkpoint_restore_refuses_every_non_current_version() {
         lash_protocol_types::AppendVec::new(),
         0,
     );
-    let encoded = serde_json::to_value(machine.checkpoint()).expect("checkpoint json");
+    let encoded = serde_json::to_value(machine.checkpoint().unwrap()).expect("checkpoint json");
 
     for actual in [0, 2, 5, 99, u32::MAX] {
         let mut incompatible = encoded.clone();
@@ -248,7 +248,7 @@ fn current_checkpoint_decoder_refuses_unknown_fields_as_incompatible_format() {
         0,
     );
     let mut encoded =
-        serde_json::to_value(machine.checkpoint().checkpoint).expect("checkpoint JSON");
+        serde_json::to_value(machine.checkpoint().unwrap().checkpoint).expect("checkpoint JSON");
     encoded["termination"] = serde_json::json!({"turn_limit_final_scheduled": false});
     let bytes = serde_json::to_vec(&encoded).expect("checkpoint bytes");
 
@@ -322,7 +322,7 @@ fn checkpoint_roundtrips_report_tool_calls_before_accounting() {
         )],
     }]);
 
-    let checkpoint = machine.checkpoint();
+    let checkpoint = machine.checkpoint().unwrap();
     let Effect::ReportToolCalls {
         id: recorded_id, ..
     } = &checkpoint.checkpoint.pending_effects[0]
@@ -585,8 +585,10 @@ fn machine_at_protocol_iteration(
         lash_protocol_types::AppendVec::new(),
         protocol_run_offset,
     );
-    let mut checkpoint = machine.checkpoint();
-    checkpoint.checkpoint.protocol_iteration = protocol_iteration;
+    let mut checkpoint = machine.checkpoint().unwrap();
+    Arc::get_mut(&mut checkpoint.checkpoint.0)
+        .unwrap()
+        .protocol_iteration = protocol_iteration;
 
     let mut config = test_config(Arc::new(CellEveryIterationDriver));
     config.turn_budget = turn_budget;
@@ -1057,7 +1059,7 @@ fn checkpoint_after_llm_result_replays_checkpoint_without_second_llm() {
         }),
     });
 
-    let checkpoint = roundtrip_checkpoint(machine.checkpoint());
+    let checkpoint = roundtrip_checkpoint(machine.checkpoint().unwrap());
     let mut restored =
         TurnMachine::restore_from_checkpoint(test_config(Arc::new(ProseDriver)), checkpoint, None)
             .expect("supported checkpoint");
@@ -1344,7 +1346,8 @@ fn provider_error_is_live_but_absent_from_the_turn_checkpoint() {
             partial_response: None,
         }),
     });
-    let checkpoint = serde_json::to_string(&machine.checkpoint()).expect("serialize checkpoint");
+    let checkpoint =
+        serde_json::to_string(&machine.checkpoint().unwrap()).expect("serialize checkpoint");
     assert!(!checkpoint.contains(SECRET));
     assert!(!checkpoint.contains("Basic abc"));
     let live = drain_effects(&mut machine);
@@ -1560,7 +1563,7 @@ fn checkpoint_after_mixed_tool_batch_results_replays_model_feedback_once() {
         ],
     });
 
-    let checkpoint = roundtrip_checkpoint(machine.checkpoint());
+    let checkpoint = roundtrip_checkpoint(machine.checkpoint().unwrap());
     let mut restored = TurnMachine::restore_from_checkpoint(
         test_config(Arc::new(ToolBatchDriver)),
         checkpoint,
@@ -1600,7 +1603,7 @@ fn checkpoint_round_trips_waiting_exec_driver_state() {
     let effects = drain_effects(&mut machine);
     let (exec_id, _) = find_exec_call(&effects).expect("exec call");
 
-    let decoded = roundtrip_checkpoint(machine.checkpoint());
+    let decoded = roundtrip_checkpoint(machine.checkpoint().unwrap());
 
     let mut restored =
         TurnMachine::restore_from_checkpoint(test_config(Arc::new(ExecDriver)), decoded, None)
@@ -1640,7 +1643,7 @@ fn turn_checkpoint_pins_the_waiting_state_encoding() {
         delivered: &Effect,
         expected_state: serde_json::Value,
     ) {
-        let saved = machine.checkpoint();
+        let saved = machine.checkpoint().unwrap();
         let encoded = serde_json::to_value(&saved.checkpoint).expect("checkpoint json");
         assert_eq!(encoded["state"], expected_state);
 
@@ -1858,7 +1861,7 @@ fn stale_response_does_not_cancel_checkpoint_redelivery() {
     let effects = drain_effects(&mut machine);
     let llm_id = *find_llm_call(&effects).expect("llm call").0;
 
-    let checkpoint = roundtrip_checkpoint(machine.checkpoint());
+    let checkpoint = roundtrip_checkpoint(machine.checkpoint().unwrap());
     let mut restored =
         TurnMachine::restore_from_checkpoint(test_config(Arc::new(ProseDriver)), checkpoint, None)
             .expect("supported checkpoint");
@@ -1877,18 +1880,21 @@ fn stale_response_does_not_cancel_checkpoint_redelivery() {
 
 fn recorded_environment(tool: &str) -> ExecutionEnvironmentSync {
     ExecutionEnvironmentSync {
-        tool_specs: Arc::new(vec![lash_protocol_types::llm::types::LlmToolSpec {
-            name: tool.to_string(),
-            description: "desc".to_string(),
-            input_schema: lash_protocol_types::SchemaContract::admit(
-                serde_json::json!({ "type": "object" }),
-            )
-            .expect("valid declared schema"),
-            output_schema: lash_protocol_types::SchemaContract::admit(
-                serde_json::json!({ "type": "object" }),
-            )
-            .expect("valid declared schema"),
-        }]),
+        tool_specs: Arc::new(
+            (vec![lash_protocol_types::llm::types::LlmToolSpec {
+                name: tool.to_string(),
+                description: "desc".to_string(),
+                input_schema: lash_protocol_types::SchemaContract::admit(
+                    serde_json::json!({ "type": "object" }),
+                )
+                .expect("valid declared schema"),
+                output_schema: lash_protocol_types::SchemaContract::admit(
+                    serde_json::json!({ "type": "object" }),
+                )
+                .expect("valid declared schema"),
+            }])
+            .into(),
+        ),
         turn_controls: Default::default(),
         truncated_names: Default::default(),
     }
@@ -1913,7 +1919,7 @@ fn a_restored_machine_projects_from_the_environment_its_checkpoint_recorded() {
         result: Ok(recorded_environment("recorded_tool")),
     });
 
-    let encoded = serde_json::to_value(machine.checkpoint()).expect("checkpoint json");
+    let encoded = serde_json::to_value(machine.checkpoint().unwrap()).expect("checkpoint json");
     assert_eq!(
         encoded["checkpoint"]["environment"]["protocol_iteration"],
         0
@@ -1955,7 +1961,7 @@ fn a_checkpoint_waiting_on_driver_work_without_an_environment_is_refused() {
     );
     let effects = drain_effects(&mut machine);
     assert!(find_llm_call(&effects).is_some());
-    let mut encoded = serde_json::to_value(machine.checkpoint()).expect("checkpoint json");
+    let mut encoded = serde_json::to_value(machine.checkpoint().unwrap()).expect("checkpoint json");
     encoded["checkpoint"]["environment"] = serde_json::Value::Null;
     let checkpoint: SavedTurn = serde_json::from_value(encoded).expect("checkpoint");
 
@@ -2077,4 +2083,312 @@ fn iteration_execution_environment_sync_can_refresh_tools() {
             .iter()
             .all(|message| message.role != lash_protocol_types::llm::types::LlmRole::System)
     );
+}
+
+#[derive(Clone)]
+struct MachineCapLedger {
+    used: Arc<AtomicU64>,
+    calls: Arc<AtomicU64>,
+    limit: u64,
+}
+struct MachineCapHold(Arc<AtomicU64>, u64);
+impl lash_protocol_types::allocation::AllocationReservation for MachineCapHold {
+    fn retain(&self) {}
+}
+impl Drop for MachineCapHold {
+    fn drop(&mut self) {
+        self.0.fetch_sub(self.1, Ordering::SeqCst);
+    }
+}
+impl lash_protocol_types::allocation::AllocationLedger for MachineCapLedger {
+    fn reserve(
+        &self,
+        bytes: u64,
+    ) -> Result<
+        lash_protocol_types::allocation::AllocationHold,
+        lash_protocol_types::allocation::AllocationError,
+    > {
+        self.calls.fetch_add(1, Ordering::SeqCst);
+        self.used
+            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |used| {
+                used.checked_add(bytes).filter(|next| *next <= self.limit)
+            })
+            .map_err(|_| lash_protocol_types::allocation::AllocationError {
+                kind: lash_protocol_types::allocation::ReserveError::Pressure,
+                actor: "machine-law".into(),
+                requested: bytes,
+                capacity: self.limit,
+            })?;
+        Ok(lash_protocol_types::allocation::AllocationHold::new(
+            MachineCapHold(Arc::clone(&self.used), bytes),
+        ))
+    }
+    fn reserve_shared(
+        &self,
+        _: usize,
+        bytes: u64,
+    ) -> Result<
+        lash_protocol_types::allocation::AllocationHold,
+        lash_protocol_types::allocation::AllocationError,
+    > {
+        self.reserve(bytes)
+    }
+}
+
+#[test]
+fn machine_adoption_refuses_unadmitted_history_and_keeps_escaped_parts_charged() {
+    use lash_protocol_types::allocation::AllocationBudget;
+    let events = vec![conversation_event(user_message(&"x".repeat(16 * 1024)))];
+    let mut machine = TurnMachine::new(
+        test_config(Arc::new(ProseDriver)),
+        Vec::new(),
+        events.into(),
+        0,
+    );
+    let used = Arc::new(AtomicU64::new(0));
+    let small = AllocationBudget::new(MachineCapLedger {
+        used: Arc::clone(&used),
+        calls: Default::default(),
+        limit: 4096,
+    });
+    assert!(
+        machine.set_allocation_budget(small).is_err(),
+        "history must be admitted before adoption"
+    );
+    assert_eq!(
+        used.load(Ordering::SeqCst),
+        0,
+        "refusal releases the private draft"
+    );
+    assert_eq!(machine.events().allocation_budget().identity(), 0);
+    let budget = AllocationBudget::new(MachineCapLedger {
+        used: Arc::clone(&used),
+        calls: Default::default(),
+        limit: 1024 * 1024,
+    });
+    machine.set_allocation_budget(budget.clone()).unwrap();
+    assert_eq!(
+        machine.events().allocation_budget().identity(),
+        budget.identity()
+    );
+    let history = machine.events();
+    let SessionHistoryRecord::Conversation(record) = &history[0] else {
+        unreachable!()
+    };
+    let parts = Arc::clone(&record.parts);
+    drop(history);
+    drop(machine);
+    assert!(
+        used.load(Ordering::SeqCst) >= 16 * 1024,
+        "the actual parts Arc keeps its obligation"
+    );
+    drop(parts);
+    assert_eq!(used.load(Ordering::SeqCst), 0);
+}
+
+fn counting_machine_budget() -> (
+    lash_protocol_types::allocation::AllocationBudget,
+    Arc<AtomicU64>,
+) {
+    let calls = Arc::new(AtomicU64::new(0));
+    (
+        lash_protocol_types::allocation::AllocationBudget::new(MachineCapLedger {
+            used: Default::default(),
+            calls: calls.clone(),
+            limit: u64::MAX,
+        }),
+        calls,
+    )
+}
+
+#[test]
+fn checkpoint_record_admits_its_retained_content_before_encoding() {
+    let (budget, calls) = counting_machine_budget();
+    let mut machine = TurnMachine::new(
+        test_config(Arc::new(ProseDriver)),
+        Vec::new(),
+        Vec::new().into(),
+        0,
+    );
+    machine.config.allocation_budget = budget;
+    let _saved = machine.checkpoint().unwrap();
+    assert!(
+        calls.load(Ordering::SeqCst) > 0,
+        "record must admit its encoded content and checkpoint source"
+    );
+}
+
+#[test]
+fn checkpoint_stage_admits_its_owned_chains_and_pin_directory_before_publication() {
+    let machine = TurnMachine::new(
+        test_config(Arc::new(ProseDriver)),
+        Vec::new(),
+        Vec::new().into(),
+        0,
+    );
+    let (_, mut content, chains, _) = machine.record(None, Floors::default()).unwrap();
+    let (budget, calls) = counting_machine_budget();
+    let mut ledger = ContentLedger::default();
+    ledger.budget = budget;
+    let _held = ledger.stage(chains, &mut content).unwrap();
+    assert!(
+        calls.load(Ordering::SeqCst) > 0,
+        "staging must admit the chains and directory it keeps"
+    );
+}
+
+#[test]
+fn checkpoint_stored_admits_pin_growth_before_acknowledging_the_ledger() {
+    let machine = TurnMachine::new(
+        test_config(Arc::new(ProseDriver)),
+        Vec::new(),
+        Vec::new().into(),
+        0,
+    );
+    let (_, mut content, chains, _) = machine.record(None, Floors::default()).unwrap();
+    let pins: Vec<_> = content
+        .iter()
+        .map(|(digest, _)| (digest.clone(), CheckpointContentPin::new([7; 32])))
+        .collect();
+    let mut ledger = ContentLedger::default();
+    ledger.stage(chains, &mut content).unwrap();
+    let (budget, calls) = counting_machine_budget();
+    ledger.budget = budget;
+    ledger.stored(pins).unwrap();
+    assert!(
+        calls.load(Ordering::SeqCst) > 0,
+        "stored must admit its retained pin growth"
+    );
+}
+
+#[test]
+fn tool_schema_source_adoption_refuses_before_serving_and_follows_escaped_schema() {
+    let mut machine = TurnMachine::new(
+        test_config(Arc::new(ProseDriver)),
+        Vec::new(),
+        Vec::new().into(),
+        0,
+    );
+    let input_schema = lash_protocol_types::SchemaContract::admit(
+        serde_json::json!({"type":"string", "description":"x".repeat(16 * 1024)}),
+    )
+    .unwrap();
+    let sync = ExecutionEnvironmentSync {
+        tool_specs: Arc::new(
+            (vec![lash_protocol_types::llm::types::LlmToolSpec {
+                name: "tool".into(),
+                description: String::new(),
+                input_schema,
+                output_schema: Default::default(),
+            }])
+            .into(),
+        ),
+        ..Default::default()
+    };
+    machine.environment = Some(SyncedEnvironment {
+        protocol_iteration: 0,
+        sync,
+    });
+    let used = Arc::new(AtomicU64::new(0));
+    let budget = lash_protocol_types::allocation::AllocationBudget::new(MachineCapLedger {
+        used: used.clone(),
+        calls: Default::default(),
+        limit: 4096,
+    });
+    assert!(
+        machine.set_allocation_budget(budget).is_err(),
+        "the prepared schema source must fit before serving retains it"
+    );
+    assert_eq!(used.load(Ordering::SeqCst), 0);
+    let budget = lash_protocol_types::allocation::AllocationBudget::new(MachineCapLedger {
+        used: used.clone(),
+        calls: Default::default(),
+        limit: 1024 * 1024 * 1024,
+    });
+    machine.set_allocation_budget(budget).unwrap();
+    let schema = machine.environment.as_ref().unwrap().sync.tool_specs[0]
+        .input_schema
+        .canonical
+        .clone();
+    drop(machine);
+    assert!(
+        used.load(Ordering::SeqCst) >= 16 * 1024,
+        "an escaped schema keeps all its prepared source admitted"
+    );
+    drop(schema);
+    assert_eq!(used.load(Ordering::SeqCst), 0);
+}
+
+#[test]
+fn machine_phase_growth_refuses_before_publishing_work() {
+    let mut machine = TurnMachine::new(
+        test_config(Arc::new(ProseDriver)),
+        Vec::new(),
+        Vec::new().into(),
+        0,
+    );
+    machine.config.allocation_budget =
+        lash_protocol_types::allocation::AllocationBudget::new(MachineCapLedger {
+            used: Default::default(),
+            calls: Default::default(),
+            limit: 4096,
+        });
+    machine.apply_actions(vec![DriverAction::Start(PendingWork::Exec {
+        language: "test".into(),
+        code: "x".repeat(16 * 1024),
+        driver_state: Value::Null,
+    })]);
+    assert!(
+        machine.try_poll_effect().is_err(),
+        "phase growth must refuse before publishing work"
+    );
+    assert!(machine.waiting_exec().is_none());
+}
+
+#[test]
+fn machine_phase_adoption_includes_surface_and_completion_scalars() {
+    let mut machine = TurnMachine::new(
+        test_config(Arc::new(ProseDriver)),
+        Vec::new(),
+        Vec::new().into(),
+        0,
+    );
+    machine.resume_with(PendingWork::Exec {
+        language: "test".into(),
+        code: "x".repeat(16 * 1024),
+        driver_state: Value::Null,
+    });
+    let budget = lash_protocol_types::allocation::AllocationBudget::new(MachineCapLedger {
+        used: Default::default(),
+        calls: Default::default(),
+        limit: 4096,
+    });
+    assert!(
+        machine.set_allocation_budget(budget).is_err(),
+        "adoption must include phase/resume storage"
+    );
+}
+
+#[test]
+fn machine_cancellation_growth_refuses_before_retaining_evidence() {
+    let mut machine = TurnMachine::new(
+        test_config(Arc::new(ProseDriver)),
+        Vec::new(),
+        Vec::new().into(),
+        0,
+    );
+    machine.config.allocation_budget =
+        lash_protocol_types::allocation::AllocationBudget::new(MachineCapLedger {
+            used: Default::default(),
+            calls: Default::default(),
+            limit: 4096,
+        });
+    machine.record_cancellation_evidence(lash_protocol_types::TurnCancellationEvidence::internal(
+        "x".repeat(16 * 1024),
+    ));
+    assert!(
+        machine.try_poll_effect().is_err(),
+        "cancellation source must be admitted before retention"
+    );
+    assert!(machine.observed_cancellation.is_none());
 }

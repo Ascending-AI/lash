@@ -541,14 +541,17 @@ fn replay_request_with_canonical_call() -> LlmRequest {
             replay: None,
         }],
     )]);
-    req.tools = Arc::new(vec![LlmToolSpec {
-        name: TOOL_NAME.to_string(),
-        description: "Capture strict omission behavior.".to_string(),
-        input_schema: lash_protocol_types::SchemaContract::admit(tool_input_schema())
-            .expect("valid declared schema"),
-        output_schema: lash_protocol_types::SchemaContract::admit(json!({ "type": "object" }))
-            .expect("valid declared schema"),
-    }]);
+    req.tools = Arc::new(
+        (vec![LlmToolSpec {
+            name: TOOL_NAME.to_string(),
+            description: "Capture strict omission behavior.".to_string(),
+            input_schema: lash_protocol_types::SchemaContract::admit(tool_input_schema())
+                .expect("valid declared schema"),
+            output_schema: lash_protocol_types::SchemaContract::admit(json!({ "type": "object" }))
+                .expect("valid declared schema"),
+        }])
+        .into(),
+    );
     req
 }
 
@@ -599,22 +602,25 @@ fn strict_decoder_leaves_override_and_ref_backed_ambiguous_union_nulls_untouched
         "additionalProperties": false
     });
     let mut req = request(Vec::new());
-    req.tools = Arc::new(vec![LlmToolSpec {
-        name: "override_probe".to_string(),
-        description: "override".to_string(),
-        input_schema: lash_protocol_types::SchemaContract::admit(json!({
-            "type": "object",
-            "properties": { "value": { "type": "integer" } }
-        }))
-        .expect("valid declared schema")
-        .with_override(
-            lash_protocol_types::SchemaDialect::OpenaiStrictToolParameters,
-            lash_protocol_types::JsonSchema::admit(override_schema)
-                .expect("valid declared projection schema"),
-        ),
-        output_schema: lash_protocol_types::SchemaContract::admit(json!({}))
-            .expect("valid declared schema"),
-    }]);
+    req.tools = Arc::new(
+        (vec![LlmToolSpec {
+            name: "override_probe".to_string(),
+            description: "override".to_string(),
+            input_schema: lash_protocol_types::SchemaContract::admit(json!({
+                "type": "object",
+                "properties": { "value": { "type": "integer" } }
+            }))
+            .expect("valid declared schema")
+            .with_override(
+                lash_protocol_types::SchemaDialect::OpenaiStrictToolParameters,
+                lash_protocol_types::JsonSchema::admit(override_schema)
+                    .expect("valid declared projection schema"),
+            ),
+            output_schema: lash_protocol_types::SchemaContract::admit(json!({}))
+                .expect("valid declared schema"),
+        }])
+        .into(),
+    );
     let capabilities = lash_protocol_types::ProviderSchemaCapabilities::openai(true);
     let override_decoder = crate::responses_shared::ToolArgumentDecoder::for_contract(
         "test",
@@ -627,45 +633,48 @@ fn strict_decoder_leaves_override_and_ref_backed_ambiguous_union_nulls_untouched
         r#"{"value":null}"#
     );
 
-    req.tools = Arc::new(vec![LlmToolSpec {
-        name: "union_probe".to_string(),
-        description: "union".to_string(),
-        input_schema: lash_protocol_types::SchemaContract::admit(json!({
-            "type": "object",
-            "properties": {
-                "choice": {
-                    "anyOf": [
-                        { "$ref": "#/$defs/Left" },
-                        { "$ref": "#/$defs/Right" }
-                    ]
-                }
-            },
-            "required": ["choice"],
-            "$defs": {
-                "Left": {
-                    "type": "object",
-                    "properties": {
-                        "kind": { "const": "left" },
-                        "value": { "type": "integer" }
-                    },
-                    "required": ["kind"],
-                    "additionalProperties": false
+    req.tools = Arc::new(
+        (vec![LlmToolSpec {
+            name: "union_probe".to_string(),
+            description: "union".to_string(),
+            input_schema: lash_protocol_types::SchemaContract::admit(json!({
+                "type": "object",
+                "properties": {
+                    "choice": {
+                        "anyOf": [
+                            { "$ref": "#/$defs/Left" },
+                            { "$ref": "#/$defs/Right" }
+                        ]
+                    }
                 },
-                "Right": {
-                    "type": "object",
-                    "properties": {
-                        "kind": { "const": "right" },
-                        "value": { "type": ["integer", "null"] }
+                "required": ["choice"],
+                "$defs": {
+                    "Left": {
+                        "type": "object",
+                        "properties": {
+                            "kind": { "const": "left" },
+                            "value": { "type": "integer" }
+                        },
+                        "required": ["kind"],
+                        "additionalProperties": false
                     },
-                    "required": ["kind", "value"],
-                    "additionalProperties": false
+                    "Right": {
+                        "type": "object",
+                        "properties": {
+                            "kind": { "const": "right" },
+                            "value": { "type": ["integer", "null"] }
+                        },
+                        "required": ["kind", "value"],
+                        "additionalProperties": false
+                    }
                 }
-            }
-        }))
-        .expect("valid declared schema"),
-        output_schema: lash_protocol_types::SchemaContract::admit(json!({}))
+            }))
             .expect("valid declared schema"),
-    }]);
+            output_schema: lash_protocol_types::SchemaContract::admit(json!({}))
+                .expect("valid declared schema"),
+        }])
+        .into(),
+    );
     let union_decoder = crate::responses_shared::ToolArgumentDecoder::for_contract(
         "test",
         &lash_core::llm::types::ResponseContract::of_request(&req),
@@ -682,48 +691,51 @@ fn strict_decoder_leaves_override_and_ref_backed_ambiguous_union_nulls_untouched
 #[test]
 fn strict_decoder_preserves_nested_ref_union_omission_null() {
     let mut req = request(Vec::new());
-    req.tools = Arc::new(vec![LlmToolSpec {
-        name: "nested_union_probe".to_string(),
-        description: "nested union".to_string(),
-        input_schema: lash_protocol_types::SchemaContract::admit(json!({
-            "type": "object",
-            "properties": {
-                "choice": {
-                    "anyOf": [
-                        {
-                            "type": "object",
-                            "properties": { "v": { "$ref": "#/$defs/A" } },
-                            "required": ["v"],
-                            "additionalProperties": false
-                        },
-                        {
-                            "type": "object",
-                            "properties": { "v": { "$ref": "#/$defs/B" } },
-                            "required": ["v"],
-                            "additionalProperties": false
-                        }
-                    ]
-                }
-            },
-            "required": ["choice"],
-            "$defs": {
-                "A": {
-                    "type": "object",
-                    "properties": { "n": { "type": "integer" } },
-                    "additionalProperties": false
+    req.tools = Arc::new(
+        (vec![LlmToolSpec {
+            name: "nested_union_probe".to_string(),
+            description: "nested union".to_string(),
+            input_schema: lash_protocol_types::SchemaContract::admit(json!({
+                "type": "object",
+                "properties": {
+                    "choice": {
+                        "anyOf": [
+                            {
+                                "type": "object",
+                                "properties": { "v": { "$ref": "#/$defs/A" } },
+                                "required": ["v"],
+                                "additionalProperties": false
+                            },
+                            {
+                                "type": "object",
+                                "properties": { "v": { "$ref": "#/$defs/B" } },
+                                "required": ["v"],
+                                "additionalProperties": false
+                            }
+                        ]
+                    }
                 },
-                "B": {
-                    "type": "object",
-                    "properties": { "n": { "type": ["integer", "null"] } },
-                    "required": ["n"],
-                    "additionalProperties": false
+                "required": ["choice"],
+                "$defs": {
+                    "A": {
+                        "type": "object",
+                        "properties": { "n": { "type": "integer" } },
+                        "additionalProperties": false
+                    },
+                    "B": {
+                        "type": "object",
+                        "properties": { "n": { "type": ["integer", "null"] } },
+                        "required": ["n"],
+                        "additionalProperties": false
+                    }
                 }
-            }
-        }))
-        .expect("valid declared schema"),
-        output_schema: lash_protocol_types::SchemaContract::admit(json!({}))
+            }))
             .expect("valid declared schema"),
-    }]);
+            output_schema: lash_protocol_types::SchemaContract::admit(json!({}))
+                .expect("valid declared schema"),
+        }])
+        .into(),
+    );
     let decoder = crate::responses_shared::ToolArgumentDecoder::for_contract(
         "test",
         &lash_core::llm::types::ResponseContract::of_request(&req),
@@ -741,22 +753,25 @@ fn strict_decoder_preserves_nested_ref_union_omission_null() {
 #[test]
 fn strict_decoder_strips_single_branch_all_of_omission_null() {
     let mut req = request(Vec::new());
-    req.tools = Arc::new(vec![LlmToolSpec {
-        name: "all_of_probe".to_string(),
-        description: "single-branch allOf".to_string(),
-        input_schema: lash_protocol_types::SchemaContract::admit(json!({
-            "type": "object",
-            "properties": {
-                "limit": {
-                    "allOf": [{ "type": "integer" }],
-                    "default": 37
+    req.tools = Arc::new(
+        (vec![LlmToolSpec {
+            name: "all_of_probe".to_string(),
+            description: "single-branch allOf".to_string(),
+            input_schema: lash_protocol_types::SchemaContract::admit(json!({
+                "type": "object",
+                "properties": {
+                    "limit": {
+                        "allOf": [{ "type": "integer" }],
+                        "default": 37
+                    }
                 }
-            }
-        }))
-        .expect("valid declared schema"),
-        output_schema: lash_protocol_types::SchemaContract::admit(json!({}))
+            }))
             .expect("valid declared schema"),
-    }]);
+            output_schema: lash_protocol_types::SchemaContract::admit(json!({}))
+                .expect("valid declared schema"),
+        }])
+        .into(),
+    );
     let decoder = crate::responses_shared::ToolArgumentDecoder::for_contract(
         "test",
         &lash_core::llm::types::ResponseContract::of_request(&req),

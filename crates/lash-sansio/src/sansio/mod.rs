@@ -40,6 +40,13 @@ pub trait TurnProtocol: Send + Sync + 'static {
         + 'static;
     type Termination: Clone + Default + Debug + Send + Sync + 'static;
     type DriverState: Clone + Default + Serialize + DeserializeOwned + Debug + Send + Sync + 'static;
+
+    /// Admit every immutable allocation nested in a history event before the
+    /// machine retains it. The caller admits scalar copying and buffer slots.
+    fn adopt_event(
+        event: &Self::Event,
+        budget: &lash_protocol_types::allocation::AllocationBudget,
+    ) -> Result<Self::Event, lash_protocol_types::allocation::AllocationError>;
 }
 
 #[derive(Clone, Debug, Serialize, serde::Deserialize)]
@@ -67,9 +74,10 @@ use checkpoint_ledger::{
 mod turn_window;
 pub use turn_window::{TurnWindow, TurnWindowPin};
 mod machine_state;
+use machine_state::CheckpointData;
 use machine_state::{
-    CheckpointState, CheckpointWindow, EffectDeliveryStatus, MachineState, ProgressBoundary,
-    RunAbort,
+    CheckpointState, CheckpointWindow, EffectDeliveryStatus, MachineAdmission, MachineState,
+    ProgressBoundary, RunAbort,
 };
 pub use machine_state::{SavedTurn, TurnCheckpoint, TurnCheckpointRestoreError, TurnMachine};
 mod helpers;

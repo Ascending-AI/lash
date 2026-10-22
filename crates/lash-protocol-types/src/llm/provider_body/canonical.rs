@@ -106,7 +106,9 @@ const HISTORY_CHUNK_MESSAGES: usize = 32;
 
 #[derive(Clone)]
 struct LoweredMessage {
-    source: LlmMessage,
+    role: crate::llm::types::LlmRole,
+    starts_user_segment: bool,
+    source_identity: u64,
     item: RequestSegment,
 }
 
@@ -115,19 +117,7 @@ struct HistoryChunk {
     messages: Vec<LoweredMessage>,
     end: usize,
     bytes: usize,
-}
-
-impl Clone for HistoryChunk {
-    fn clone(&self) -> Self {
-        let mut messages = Vec::with_capacity(HISTORY_CHUNK_MESSAGES);
-        messages.extend_from_slice(&self.messages);
-        Self {
-            previous: self.previous.clone(),
-            messages,
-            end: self.end,
-            bytes: self.bytes,
-        }
-    }
+    _allocation: crate::allocation::AllocationHold,
 }
 
 impl Drop for HistoryChunk {
@@ -145,7 +135,7 @@ impl Drop for HistoryChunk {
 
 /// The bounded segment cache owns the latest immutable history. Calls and
 /// concurrent branches can hold earlier snapshots without copying history.
-#[derive(Default)]
+#[derive(Clone, Default)]
 struct LoweredHistory {
     tail: Option<Arc<HistoryChunk>>,
 }
@@ -186,9 +176,9 @@ impl LoweredHistory {
                     .iter()
                     .zip(&messages[start..end])
                     .take_while(|(held, message)| {
-                        held.source.role == message.role
-                            && held.source.starts_user_segment == message.starts_user_segment
-                            && Arc::ptr_eq(&held.source.blocks, &message.blocks)
+                        held.role == message.role
+                            && held.starts_user_segment == message.starts_user_segment
+                            && held.source_identity == message.blocks.identity()
                     })
                     .count();
                 if matched < end - start {
@@ -204,16 +194,21 @@ impl LoweredHistory {
         self.records().map(|record| &record.item)
     }
 
-    fn prefix(&self, len: usize) -> Self {
+    fn prefix(
+        &self,
+        len: usize,
+        budget: &crate::allocation::AllocationBudget,
+    ) -> Result<Self, crate::allocation::AllocationError> {
         let mut chunk = self.tail.as_ref();
         while let Some(held) = chunk {
             let start = held.end - held.messages.len();
             if len == held.end {
-                return Self {
+                return Ok(Self {
                     tail: Some(held.clone()),
-                };
+                });
             }
             if len > start {
+                let allocation = Self::chunk_allocation(budget)?;
                 let mut messages = Vec::with_capacity(HISTORY_CHUNK_MESSAGES);
                 messages.extend_from_slice(&held.messages[..len - start]);
                 let bytes = held.previous.as_ref().map_or(0, |previous| previous.bytes)
@@ -221,21 +216,38 @@ impl LoweredHistory {
                         .iter()
                         .map(|message| message.item.literal_len())
                         .sum::<usize>();
-                return Self {
+                return Ok(Self {
                     tail: Some(Arc::new(HistoryChunk {
+                        _allocation: allocation,
                         previous: held.previous.clone(),
                         messages,
                         end: len,
                         bytes,
                     })),
-                };
+                });
             }
             chunk = held.previous.as_ref();
         }
-        Self::default()
+        Ok(Self::default())
     }
 
-    fn push(&mut self, source: LlmMessage, item: RequestSegment) {
+    fn chunk_allocation(
+        budget: &crate::allocation::AllocationBudget,
+    ) -> Result<crate::allocation::AllocationHold, crate::allocation::AllocationError> {
+        budget.reserve(
+            (std::mem::size_of::<HistoryChunk>()
+                + 16
+                + HISTORY_CHUNK_MESSAGES * std::mem::size_of::<LoweredMessage>())
+                as u64,
+        )
+    }
+
+    fn push(
+        &mut self,
+        source: &LlmMessage,
+        item: RequestSegment,
+        budget: &crate::allocation::AllocationBudget,
+    ) -> Result<(), crate::allocation::AllocationError> {
         let end = self.len();
         let bytes = self.retained_bytes();
         let previous = if self
@@ -247,23 +259,45 @@ impl LoweredHistory {
         } else {
             None
         };
-        let tail = self.tail.get_or_insert_with(|| {
-            Arc::new(HistoryChunk {
+        if self.tail.is_none() {
+            let allocation = Self::chunk_allocation(budget)?;
+            self.tail = Some(Arc::new(HistoryChunk {
+                _allocation: allocation,
                 end,
                 bytes,
                 previous,
                 messages: Vec::with_capacity(HISTORY_CHUNK_MESSAGES),
-            })
-        });
-        let tail = Arc::make_mut(tail);
+            }));
+        }
+        let tail = self.tail.as_mut().unwrap_or_else(|| unreachable!());
+        if Arc::get_mut(tail).is_none() {
+            let allocation = Self::chunk_allocation(budget)?;
+            let mut messages = Vec::with_capacity(HISTORY_CHUNK_MESSAGES);
+            messages.extend_from_slice(&tail.messages);
+            *tail = Arc::new(HistoryChunk {
+                _allocation: allocation,
+                previous: tail.previous.clone(),
+                messages,
+                end: tail.end,
+                bytes: tail.bytes,
+            });
+        }
+        let tail = Arc::get_mut(tail).unwrap_or_else(|| unreachable!());
         tail.end += 1;
         tail.bytes += item.literal_len();
-        tail.messages.push(LoweredMessage { source, item });
+        tail.messages.push(LoweredMessage {
+            role: source.role.clone(),
+            starts_user_segment: source.starts_user_segment,
+            source_identity: source.blocks.identity(),
+            item,
+        });
+        Ok(())
     }
 
     fn extend(
         prior: Option<Arc<Self>>,
         messages: &[LlmMessage],
+        budget: &crate::allocation::AllocationBudget,
         slot: &mut impl FnMut(
             &crate::AttachmentRef,
             AttachmentPosition,
@@ -278,22 +312,27 @@ impl LoweredHistory {
         {
             return Ok(Arc::clone(prior));
         }
-        Self::from_suffix(prior.as_deref(), shared, messages, slot)
+        Self::from_suffix(prior.as_deref(), shared, messages, budget, slot)
     }
 
     fn from_suffix(
         prior: Option<&Self>,
         shared: usize,
         messages: &[LlmMessage],
+        budget: &crate::allocation::AllocationBudget,
         slot: &mut impl FnMut(
             &crate::AttachmentRef,
             AttachmentPosition,
         ) -> Result<AttachmentSlot, TemplateError>,
     ) -> Result<Arc<Self>, TemplateError> {
-        let mut history = prior.map_or_else(Self::default, |prior| prior.prefix(shared));
+        let mut history = match prior {
+            Some(prior) => prior.prefix(shared, budget)?,
+            None => Self::default(),
+        };
         for message in &messages[shared..] {
-            let item = message_item(message, slot)?;
-            history.push(message.clone(), item);
+            let allocation = budget.reserve(crate::allocation::payload_capacity(message, 1024))?;
+            let item = message_item(message, slot)?.with_allocation(allocation);
+            history.push(message, item, budget)?;
         }
         Ok(Arc::new(history))
     }
@@ -355,7 +394,8 @@ impl RecordedRequestTemplate {
         let history = match request.messages().iter().next() {
             Some(first) => cache.carried(
                 SegmentKey::new(&context).str("history").message(first),
-                |prior: Option<Arc<RetainedHistory>>| {
+                0,
+                |prior: Option<Arc<crate::allocation::Allocated<RetainedHistory>>>, _| {
                     let metadata =
                         budget.reserve((std::mem::size_of::<RetainedHistory>() + 256) as u64)?;
                     let shared = prior
@@ -375,15 +415,19 @@ impl RecordedRequestTemplate {
                     }
                     items = items.append(&tail, budget)?;
                     let bytes = items.bytes;
-                    Ok::<_, TemplateError>(Arc::new(RetainedHistory {
+                    Ok::<_, TemplateError>(RetainedHistory {
                         source: request.messages().clone(),
                         items,
                         bytes,
                         _hold: metadata,
-                    }))
+                    })
                 },
             )?,
-            None => Arc::new(RetainedHistory::default()),
+            None => Arc::new(crate::allocation::Allocated::new(
+                RetainedHistory::default(),
+                Default::default(),
+                budget.clone(),
+            )),
         };
         let value =
             serde_json::to_value(envelope).map_err(|error| not_canonical(error.to_string()))?;
@@ -473,9 +517,20 @@ impl RecordedRequestTemplate {
         let history = match request.messages.first() {
             Some(first) => cache.carried(
                 SegmentKey::new(&context).str("history").message(first),
-                |prior| LoweredHistory::extend(prior, &request.messages, &mut slot),
+                (std::mem::size_of::<LoweredHistory>() + 16) as u64,
+                |prior: Option<Arc<crate::allocation::Allocated<LoweredHistory>>>, _| {
+                    let budget = cache.allocation_budget();
+                    let prior = prior.as_ref().map(|prior| Arc::new((***prior).clone()));
+                    let history =
+                        LoweredHistory::extend(prior, &request.messages, &budget, &mut slot)?;
+                    Ok::<_, TemplateError>((*history).clone())
+                },
             )?,
-            None => Arc::new(LoweredHistory::default()),
+            None => Arc::new(crate::allocation::Allocated::new(
+                LoweredHistory::default(),
+                Default::default(),
+                cache.allocation_budget(),
+            )),
         };
         let value = serde_json::to_value(envelope(request))
             .map_err(|error| not_canonical(error.to_string()))?;
@@ -659,7 +714,7 @@ fn messages_array_at(envelope: &str, splice: usize) -> bool {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::llm::types::LlmRole;
     use allocation_counter::Measurement;
@@ -675,16 +730,34 @@ mod tests {
             let mut slot = |_: &crate::AttachmentRef, _: AttachmentPosition| {
                 panic!("this history has no attachments")
             };
-            let prior = LoweredHistory::extend(None, &messages[..len], &mut slot).unwrap();
+            let prior = LoweredHistory::extend(
+                None,
+                &messages[..len],
+                &crate::allocation::AllocationBudget::unowned(),
+                &mut slot,
+            )
+            .unwrap();
             let measurement = Measurement::start();
-            let next = LoweredHistory::extend(Some(prior.clone()), &messages, &mut slot).unwrap();
+            let next = LoweredHistory::extend(
+                Some(prior.clone()),
+                &messages,
+                &crate::allocation::AllocationBudget::unowned(),
+                &mut slot,
+            )
+            .unwrap();
             let counts = measurement.finish();
             assert_eq!(prior.items().count(), len);
             assert_eq!(next.items().count(), len + 1);
             for (held, next) in prior.items().zip(next.items()) {
                 assert!(RequestSegment::same(held, next));
             }
-            let rebuilt = LoweredHistory::extend(None, &messages, &mut slot).unwrap();
+            let rebuilt = LoweredHistory::extend(
+                None,
+                &messages,
+                &crate::allocation::AllocationBudget::unowned(),
+                &mut slot,
+            )
+            .unwrap();
             assert_eq!(next.retained_bytes(), rebuilt.retained_bytes());
             for (next, rebuilt) in next.items().zip(rebuilt.items()) {
                 assert_eq!(next.text_lossy(), rebuilt.text_lossy());
@@ -694,9 +767,20 @@ mod tests {
             for edit in [0, len / 2, len - 1] {
                 let mut branch = messages.clone();
                 branch[edit] = LlmMessage::text(LlmRole::Assistant, "rewritten");
-                let changed =
-                    LoweredHistory::extend(Some(prior.clone()), &branch, &mut slot).unwrap();
-                let rebuilt = LoweredHistory::extend(None, &branch, &mut slot).unwrap();
+                let changed = LoweredHistory::extend(
+                    Some(prior.clone()),
+                    &branch,
+                    &crate::allocation::AllocationBudget::unowned(),
+                    &mut slot,
+                )
+                .unwrap();
+                let rebuilt = LoweredHistory::extend(
+                    None,
+                    &branch,
+                    &crate::allocation::AllocationBudget::unowned(),
+                    &mut slot,
+                )
+                .unwrap();
                 assert_eq!(changed.retained_bytes(), rebuilt.retained_bytes());
                 for (changed, rebuilt) in changed.items().zip(rebuilt.items()) {
                     assert_eq!(changed.text_lossy(), rebuilt.text_lossy());
@@ -706,9 +790,13 @@ mod tests {
                 }
             }
             for end in [0, 1, len / 2] {
-                let compacted =
-                    LoweredHistory::extend(Some(prior.clone()), &messages[..end], &mut slot)
-                        .unwrap();
+                let compacted = LoweredHistory::extend(
+                    Some(prior.clone()),
+                    &messages[..end],
+                    &crate::allocation::AllocationBudget::unowned(),
+                    &mut slot,
+                )
+                .unwrap();
                 assert_eq!(compacted.items().count(), end);
                 assert_eq!(
                     compacted.retained_bytes(),
@@ -748,6 +836,7 @@ mod tests {
         pub(crate) struct Counts {
             pub(crate) allocated: usize,
             pub(crate) allocations: usize,
+            pub(crate) retained: i64,
         }
 
         thread_local! {
@@ -757,8 +846,18 @@ mod tests {
         fn charge(bytes: usize) {
             let _ = COUNTS.try_with(|cell| {
                 if let Some(mut counts) = cell.get() {
+                    counts.retained += bytes as i64;
                     counts.allocated += bytes;
                     counts.allocations += 1;
+                    cell.set(Some(counts));
+                }
+            });
+        }
+
+        fn release(bytes: usize) {
+            let _ = COUNTS.try_with(|cell| {
+                if let Some(mut counts) = cell.get() {
+                    counts.retained -= bytes as i64;
                     cell.set(Some(counts));
                 }
             });
@@ -787,12 +886,14 @@ mod tests {
             }
 
             unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
+                release(layout.size());
                 // SAFETY: Allocations came from System with the same layout.
                 unsafe { System.dealloc(ptr, layout) }
             }
 
             unsafe fn realloc(&self, ptr: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
                 charge(new_size);
+                release(layout.size());
                 // SAFETY: The pointer, layout and new size keep the caller's contract.
                 unsafe { System.realloc(ptr, layout, new_size) }
             }

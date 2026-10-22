@@ -8,6 +8,13 @@ impl TurnProtocol for UnitTurnProtocol {
     type Event = ();
     type Termination = ();
     type DriverState = serde_json::Value;
+
+    fn adopt_event(
+        _: &(),
+        _: &lash_protocol_types::allocation::AllocationBudget,
+    ) -> Result<(), lash_protocol_types::allocation::AllocationError> {
+        Ok(())
+    }
 }
 
 /// Opaque identifier linking an effect to its response.
@@ -149,6 +156,7 @@ pub enum LogEvent {
 #[derive(Debug, Serialize, serde::Deserialize)]
 // justification: effects are short-lived machine states whose generic protocol payload remains inline for checkpoint cloning.
 #[allow(clippy::large_enum_variant)]
+#[serde(bound = "")]
 pub enum Effect<M: TurnProtocol = UnitTurnProtocol> {
     /// Sync the execution environment the next protocol iteration runs
     /// under: the system prompt, tool schema and projector inputs its model
@@ -278,6 +286,8 @@ impl<M: TurnProtocol> Clone for Effect<M> {
 }
 
 /// A response to a previously emitted effect.
+#[derive(serde::Serialize)]
+#[serde(bound(serialize = "I: Serialize"))]
 pub enum Response<I = ()> {
     /// Live execution environment sync completed.
     ExecutionEnvironmentSynced {
@@ -319,7 +329,7 @@ pub enum Response<I = ()> {
 #[derive(Clone, Debug, Default, Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ExecutionEnvironmentSync {
-    pub tool_specs: Arc<Vec<LlmToolSpec>>,
+    pub tool_specs: Arc<lash_protocol_types::llm::types::LlmToolSpecs>,
     /// The tools of the surface whose call ends the turn, with the turn
     /// controls each declares. A protocol orders a step's control call by
     /// them, and a turn that must end through a control checks one can.
@@ -492,6 +502,7 @@ impl PartialEq for CheckpointResumeAction {
 // `Clone` is implemented by hand below for the same reason as on `Effect`:
 // the derive would demand `M: Clone`.
 #[derive(Debug, Serialize, serde::Deserialize)]
+#[serde(bound = "")]
 pub enum PendingWork<M: TurnProtocol = UnitTurnProtocol> {
     /// Sync the execution environment the next protocol iteration runs
     /// under. The machine requests this itself at each iteration boundary.
@@ -1041,7 +1052,7 @@ impl<M: TurnProtocol> ContextProjector<M> for ChatContextProjector {
             tools: if ctx.use_tools {
                 Arc::clone(&ctx.environment.tool_specs)
             } else {
-                Arc::new(Vec::new())
+                Arc::new(Vec::new().into())
             },
             tool_choice: if ctx.use_tools {
                 LlmToolChoice::Auto

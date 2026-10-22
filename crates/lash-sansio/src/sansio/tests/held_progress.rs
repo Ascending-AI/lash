@@ -172,7 +172,7 @@ fn a_record_appended_while_a_call_is_unanswered_rides_the_next_resume_safe_bound
     // record as one no boundary has delivered.
     let mut restored = TurnMachine::restore_from_checkpoint(
         test_config(Arc::new(MidCallNoteDriver)),
-        roundtrip_checkpoint(machine.checkpoint()),
+        roundtrip_checkpoint(machine.checkpoint().unwrap()),
         None,
     )
     .expect("the round's checkpoint restores");

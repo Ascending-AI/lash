@@ -687,24 +687,27 @@ mod tests {
     fn tool_input_schema_uses_anthropic_projection() {
         let provider = AnthropicProvider::new("key");
         let mut req = request(vec![LlmMessage::text(LlmRole::User, "rank")]);
-        req.tools = Arc::new(vec![LlmToolSpec {
-            name: "rank".to_string(),
-            description: "Rank".to_string(),
-            input_schema: lash_protocol_types::SchemaContract::admit(json!({
-                "type": "object",
-                "properties": {
-                    "ids": {
-                        "type": "array",
-                        "minItems": 1,
-                        "maxItems": 3,
-                        "items": { "type": "string" }
+        req.tools = Arc::new(
+            (vec![LlmToolSpec {
+                name: "rank".to_string(),
+                description: "Rank".to_string(),
+                input_schema: lash_protocol_types::SchemaContract::admit(json!({
+                    "type": "object",
+                    "properties": {
+                        "ids": {
+                            "type": "array",
+                            "minItems": 1,
+                            "maxItems": 3,
+                            "items": { "type": "string" }
+                        }
                     }
-                }
-            }))
-            .expect("valid declared schema"),
-            output_schema: lash_protocol_types::SchemaContract::admit(json!({}))
+                }))
                 .expect("valid declared schema"),
-        }]);
+                output_schema: lash_protocol_types::SchemaContract::admit(json!({}))
+                    .expect("valid declared schema"),
+            }])
+            .into(),
+        );
 
         let body = provider.build_request_body(&req).expect("body");
         let ids = &body["tools"][0]["input_schema"]["properties"]["ids"];

@@ -88,7 +88,7 @@ fn variants(messages: Vec<LlmMessage>) -> Vec<(&'static str, LlmRequest)> {
     };
     let mut instructed = base.clone();
     instructed.instructions = Some("You are a careful coding agent.".into());
-    instructed.tools = Arc::new(vec![corpus_tool()]);
+    instructed.tools = Arc::new((vec![corpus_tool()]).into());
     let mut gemini3 = base.clone();
     gemini3.model.metadata_mut().capability.google_dialect = lash_core::GoogleDialect::Gemini3;
     let mut vertex_claude = base.clone();

@@ -16,6 +16,7 @@ pub(super) enum EffectDeliveryStatus {
 }
 
 #[derive(Debug, Serialize, serde::Deserialize)]
+#[serde(bound = "")]
 pub(super) enum MachineState<M: TurnProtocol = UnitTurnProtocol> {
     PreparingProtocol,
     PrepareIteration,
@@ -34,6 +35,7 @@ pub(super) enum MachineState<M: TurnProtocol = UnitTurnProtocol> {
 /// The machine state a checkpoint records. A wait on a model call names its
 /// request by content digest; every other wait is held as it is.
 #[derive(Debug, Serialize, serde::Deserialize)]
+#[serde(bound = "")]
 pub(super) enum CheckpointState<M: TurnProtocol = UnitTurnProtocol> {
     PreparingProtocol,
     PrepareIteration,
@@ -46,6 +48,7 @@ pub(super) enum CheckpointState<M: TurnProtocol = UnitTurnProtocol> {
 
 #[derive(Debug, Serialize, serde::Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
+#[serde(bound = "")]
 pub(super) enum CheckpointWork<M: TurnProtocol = UnitTurnProtocol> {
     /// A model call: its request's frame, the request without its
     /// messages, and the chain of its messages after the leading
@@ -98,7 +101,8 @@ impl<M: TurnProtocol> CheckpointState<M> {
         window: Option<&TurnWindow<M::Event>>,
         base: Option<&StoredRequest>,
         encoded: &mut usize,
-    ) -> (Self, Option<StoredRequest>) {
+    ) -> Result<(Self, Option<StoredRequest>), lash_protocol_types::allocation::AllocationError>
+    {
         let recorded = match state {
             MachineState::PreparingProtocol => Self::PreparingProtocol,
             MachineState::PrepareIteration => Self::PrepareIteration,
@@ -109,7 +113,7 @@ impl<M: TurnProtocol> CheckpointState<M> {
                     request,
                     driver_state,
                 } => {
-                    let stored = StoredRequest::record(request, window, base, content, encoded);
+                    let stored = StoredRequest::record(request, window, base, content, encoded)?;
                     let recorded = Self::Waiting {
                         effect_id: *effect_id,
                         work: CheckpointWork::Llm {
@@ -119,7 +123,7 @@ impl<M: TurnProtocol> CheckpointState<M> {
                             driver_state: driver_state.clone(),
                         },
                     };
-                    return (recorded, Some(stored));
+                    return Ok((recorded, Some(stored)));
                 }
                 work => Self::Waiting {
                     effect_id: *effect_id,
@@ -128,7 +132,7 @@ impl<M: TurnProtocol> CheckpointState<M> {
             },
             MachineState::Finished => Self::Finished,
         };
-        (recorded, None)
+        Ok((recorded, None))
     }
 
     /// The machine state this records, its model request read back from
@@ -204,8 +208,22 @@ impl<M: TurnProtocol> CheckpointState<M> {
 /// the transcript named by content digest. Its size does not grow with the
 /// transcript; the content it names is [`TurnCheckpointContent`].
 #[derive(Clone, Debug, Serialize, serde::Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct TurnCheckpoint<M: TurnProtocol = UnitTurnProtocol> {
+#[serde(transparent, bound = "")]
+pub struct TurnCheckpoint<M: TurnProtocol = UnitTurnProtocol>(pub(super) Arc<CheckpointData<M>>);
+
+impl<M: TurnProtocol> std::ops::Deref for TurnCheckpoint<M> {
+    type Target = CheckpointData<M>;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+#[doc(hidden)]
+#[derive(Debug, Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields, bound = "")]
+pub struct CheckpointData<M: TurnProtocol = UnitTurnProtocol> {
+    #[serde(skip)]
+    pub(super) allocation: lash_protocol_types::allocation::AllocationHold,
     #[serde(default = "legacy_turn_checkpoint_schema_version")]
     pub(super) schema_version: u32,
     pub(super) state: CheckpointState<M>,
@@ -237,6 +255,29 @@ pub struct TurnCheckpoint<M: TurnProtocol = UnitTurnProtocol> {
     /// The turn's decided completion candidates, in decision order: content,
     /// as the history records are, since each holds its control.
     pub(super) decided_completions: CheckpointContentRef,
+}
+impl<M: TurnProtocol> Clone for CheckpointData<M> {
+    fn clone(&self) -> Self {
+        Self {
+            allocation: self.allocation.clone(),
+            schema_version: self.schema_version.clone(),
+            state: self.state.clone(),
+            pending_effects: self.pending_effects.clone(),
+            next_effect_id: self.next_effect_id.clone(),
+            window: self.window.clone(),
+            messages: self.messages.clone(),
+            prompt_messages: self.prompt_messages.clone(),
+            events: self.events.clone(),
+            progress_event_cursor: self.progress_event_cursor.clone(),
+            progress_boundaries: self.progress_boundaries.clone(),
+            protocol_iteration: self.protocol_iteration.clone(),
+            protocol_run_offset: self.protocol_run_offset.clone(),
+            cumulative_usage: self.cumulative_usage.clone(),
+            last_call_usage: self.last_call_usage.clone(),
+            environment: self.environment.clone(),
+            decided_completions: self.decided_completions.clone(),
+        }
+    }
 }
 
 /// A progress boundary that delivered protocol records: how many messages
@@ -527,6 +568,8 @@ impl<M: TurnProtocol> MachineState<M> {
 
 /// Sans-IO state machine for a single session run (multi-turn).
 pub struct TurnMachine<M: TurnProtocol = UnitTurnProtocol> {
+    pub(super) retained: MachineAdmission,
+
     pub(super) projection_refusal: Option<lash_protocol_types::allocation::ProjectionError>,
     pub(super) config: TurnMachineConfig<M>,
     pub(super) state: MachineState<M>,
@@ -570,6 +613,16 @@ pub struct TurnMachine<M: TurnProtocol = UnitTurnProtocol> {
     /// builds on (FIG-5955). Runtime-only: a restore starts it from the
     /// content it reads.
     pub(super) content: ContentLedger,
+}
+
+#[derive(Debug, Default)]
+pub(super) struct MachineAdmission {
+    pub(super) adoption: lash_protocol_types::allocation::AllocationHold,
+    pub(super) state: lash_protocol_types::allocation::AllocationHold,
+    pub(super) resume: lash_protocol_types::allocation::AllocationHold,
+    pub(super) cancellation: lash_protocol_types::allocation::AllocationHold,
+    pub(super) environment: lash_protocol_types::allocation::AllocationHold,
+    pub(super) growth: Vec<lash_protocol_types::allocation::AllocationHold>,
 }
 
 /// The Run control a tool result carried: the namespaced code and message

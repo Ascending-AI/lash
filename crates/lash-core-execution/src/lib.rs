@@ -526,6 +526,15 @@ impl lash_sansio::TurnProtocol for HostTurnProtocol {
     type Event = crate::session_model::ProtocolEvent;
     type Termination = ProtocolTurnOptions;
     type DriverState = ProtocolDriverState;
+
+    fn adopt_event(
+        event: &Self::Event,
+        budget: &lash_protocol_types::allocation::AllocationBudget,
+    ) -> Result<Self::Event, lash_protocol_types::allocation::AllocationError> {
+        let mut event = event.clone();
+        event.payload = event.payload.adopt_in(budget)?;
+        Ok(event)
+    }
 }
 
 /// Host-specialized effect vocabulary for protocol-engine implementors.

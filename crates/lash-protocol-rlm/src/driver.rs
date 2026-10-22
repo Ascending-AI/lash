@@ -72,7 +72,7 @@ pub(crate) fn build_rlm_preamble_with_dialect(
                 dialect: Arc::clone(&dialect),
             }),
         },
-        tool_specs: Arc::new(Vec::new()),
+        tool_specs: Arc::new((Vec::new()).into()),
         tool_names,
         writer_formats: input.writer_formats,
     }
@@ -116,7 +116,7 @@ impl ContextProjector<lash_core::HostTurnProtocol> for RlmContextProjector {
             model: ctx.config.model.clone(),
             messages,
 
-            tools: Arc::new(Vec::new()),
+            tools: Arc::new((Vec::new()).into()),
             tool_choice: LlmToolChoice::None,
             attachment_acceptance: Arc::clone(&ctx.config.attachment_acceptance),
             scope: LlmRequestScope::new(

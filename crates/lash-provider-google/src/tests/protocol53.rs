@@ -21,13 +21,16 @@ fn projected_contract() -> SchemaContract {
 fn tool_request(model: &str) -> LlmRequest {
     let mut req = request(None);
     req.model.metadata_mut().wire_model = model.into();
-    req.tools = Arc::new(vec![LlmToolSpec {
-        name: "lookup".into(),
-        description: "lookup".into(),
-        input_schema: projected_contract(),
-        output_schema: lash_protocol_types::SchemaContract::admit(json!({}))
-            .expect("valid declared schema"),
-    }]);
+    req.tools = Arc::new(
+        (vec![LlmToolSpec {
+            name: "lookup".into(),
+            description: "lookup".into(),
+            input_schema: projected_contract(),
+            output_schema: lash_protocol_types::SchemaContract::admit(json!({}))
+                .expect("valid declared schema"),
+        }])
+        .into(),
+    );
     req
 }
 fn request_body(req: &LlmRequest) -> Value {
@@ -84,13 +87,16 @@ fn protocol53_schema_contract_modes_apply_to_every_dialect_and_site() {
                         },
                     ));
                 } else {
-                    req.tools = Arc::new(vec![LlmToolSpec {
-                        name: "lookup".into(),
-                        description: "lookup".into(),
-                        input_schema: contract,
-                        output_schema: lash_protocol_types::SchemaContract::admit(json!({}))
-                            .expect("valid declared schema"),
-                    }]);
+                    req.tools = Arc::new(
+                        (vec![LlmToolSpec {
+                            name: "lookup".into(),
+                            description: "lookup".into(),
+                            input_schema: contract,
+                            output_schema: lash_protocol_types::SchemaContract::admit(json!({}))
+                                .expect("valid declared schema"),
+                        }])
+                        .into(),
+                    );
                 }
                 let result = GoogleOAuthProvider::build_request(&provider(), &req, vec![], None);
                 if mode == ProjectionMode::Auto {
@@ -120,7 +126,7 @@ fn protocol53_schema_contract_modes_apply_to_every_dialect_and_site() {
                 let mut contract = projected_contract();
                 contract.projection.mode = mode;
                 if output {
-                    req.tools = Arc::new(vec![]);
+                    req.tools = Arc::new((vec![]).into());
                     req.output_spec = Some(LlmOutputSpec::JsonSchema(
                         lash_core::llm::types::LlmJsonSchema {
                             name: "answer".into(),
@@ -129,7 +135,9 @@ fn protocol53_schema_contract_modes_apply_to_every_dialect_and_site() {
                         },
                     ));
                 } else {
-                    Arc::make_mut(&mut req.tools)[0].input_schema = contract;
+                    let mut tools = req.tools.as_ref().as_ref().clone();
+                    tools[0].input_schema = contract;
+                    req.tools = Arc::new((tools.into()).into());
                 }
                 let body = request_body(&req);
                 let schema = if output {

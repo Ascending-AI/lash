@@ -72,7 +72,7 @@ macro_rules! driver_writer_version {
 #[derive(Clone)]
 pub struct TurnDriverPreamble<M: TurnProtocol = UnitTurnProtocol> {
     pub config: TurnDriverConfig<M>,
-    pub tool_specs: Arc<Vec<LlmToolSpec>>,
+    pub tool_specs: Arc<lash_protocol_types::llm::types::LlmToolSpecs>,
     pub tool_names: Arc<Vec<String>>,
     /// The fleet's writer-version table (FIG-3796): the turn machine hands it
     /// to `DriverContextView` so drivers stamp durable envelopes at the

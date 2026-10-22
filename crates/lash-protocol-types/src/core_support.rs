@@ -198,7 +198,7 @@ pub trait ToolCatalogCoreSupport: Sized {
         contracts: BTreeMap<ToolId, Arc<ToolContract>>,
     ) -> Result<Self, crate::ToolCatalogBuildError>;
     fn tool_names(&self) -> Arc<Vec<String>>;
-    fn model_tool_specs(&self) -> Arc<Vec<LlmToolSpec>>;
+    fn model_tool_specs(&self) -> Arc<crate::llm::types::LlmToolSpecs>;
 }
 
 #[doc(hidden)]
@@ -218,7 +218,7 @@ impl ToolCatalogCoreSupport for ToolCatalog {
         ToolCatalog::tool_names(self)
     }
 
-    fn model_tool_specs(&self) -> Arc<Vec<LlmToolSpec>> {
+    fn model_tool_specs(&self) -> Arc<crate::llm::types::LlmToolSpecs> {
         ToolCatalog::model_tool_specs(self)
     }
 }

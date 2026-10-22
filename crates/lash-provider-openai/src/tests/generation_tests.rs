@@ -293,7 +293,7 @@ async fn unsupported_settings_are_refused_before_any_transport_call() {
             OpenAiCompat::local(),
             ProviderOptions::default(),
             with(|req| {
-                req.tools = Arc::new(vec![tool("lookup")]);
+                req.tools = Arc::new((vec![tool("lookup")]).into());
                 req.generation.parallel_tool_calls = Some(false);
             }),
             "lash:unsupported_generation_option",
@@ -389,7 +389,7 @@ async fn unsupported_settings_are_refused_before_any_transport_call() {
 #[test]
 fn no_cap_verbosity_or_parallel_tool_calls_are_sent_unless_the_host_sets_them() {
     let mut req = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
-    req.tools = Arc::new(vec![tool("lookup")]);
+    req.tools = Arc::new((vec![tool("lookup")]).into());
 
     let chat = openrouter_provider()
         .build_chat_request_body(&req, true)
@@ -428,7 +428,7 @@ fn no_cap_verbosity_or_parallel_tool_calls_are_sent_unless_the_host_sets_them() 
 #[test]
 fn parallel_tool_calls_is_sent_as_the_host_set_it() {
     let mut req = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
-    req.tools = Arc::new(vec![tool("lookup")]);
+    req.tools = Arc::new((vec![tool("lookup")]).into());
     req.generation.parallel_tool_calls = Some(false);
 
     let (chat, _) = openrouter_provider()

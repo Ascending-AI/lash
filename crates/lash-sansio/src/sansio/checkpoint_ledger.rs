@@ -20,7 +20,8 @@
 //! once it knows the nodes that content is stored as. A ledger that cannot
 //! pin every blob it names is dropped, and the next checkpoint stores all.
 
-use std::collections::{BTreeMap, BTreeSet};
+use lash_protocol_types::allocation::{AllocationError, AllocationHold};
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use super::checkpoint_content::{
@@ -92,7 +93,7 @@ impl StoredRequest {
         base: Option<&StoredRequest>,
         content: &mut TurnCheckpointContent,
         encoded: &mut usize,
-    ) -> Self {
+    ) -> Result<Self, AllocationError> {
         let shared = window.map_or(0, |window| window.shared_retained_render(&request.messages));
         let own: Vec<_> = request.messages.iter_from(shared).collect();
         let base = base.filter(|base| base.rendered_from_window == shared);
@@ -111,14 +112,14 @@ impl StoredRequest {
             stable,
             content,
             encoded,
-        );
+        )?;
         *encoded += 1;
-        Self {
+        Ok(Self {
             request: Arc::clone(request),
             rendered_from_window: shared,
-            frame: content.put_value(&frame(request)),
+            frame: content.put_value(&frame(request))?,
             messages,
-        }
+        })
     }
 
     /// The request a checkpoint stored as `frame` and `messages`, after the
@@ -208,7 +209,7 @@ impl CheckpointMessages {
         floor: usize,
         content: &mut TurnCheckpointContent,
         encoded: &mut usize,
-    ) -> (Self, StoredMessages) {
+    ) -> Result<(Self, StoredMessages), AllocationError> {
         let from_window = window.map_or(0, |window| window.shared_messages(sequence));
         let (base, stable) = rest_base(base, from_window, floor);
         let rest = Chain::of(
@@ -218,14 +219,14 @@ impl CheckpointMessages {
             stable,
             content,
             encoded,
-        );
-        (
+        )?;
+        Ok((
             Self {
                 from_window,
                 rest: rest.head().clone(),
             },
             (from_window, rest),
-        )
+        ))
     }
 
     /// The sequence this records, its leading messages read from `window`.
@@ -267,7 +268,7 @@ impl CheckpointPrompt {
         floor: usize,
         content: &mut TurnCheckpointContent,
         encoded: &mut usize,
-    ) -> (Self, StoredMessages) {
+    ) -> Result<(Self, StoredMessages), AllocationError> {
         let from_window = window.map_or(0, |window| window.shared_messages(prompt));
         let view = &prompt.as_slice()[from_window..];
         let shared = view
@@ -278,15 +279,15 @@ impl CheckpointPrompt {
             .count();
         let own = &view[..view.len() - shared];
         let (base, stable) = rest_base(base, from_window, floor);
-        let rest = Chain::of(own.iter(), own.len(), base, stable, content, encoded);
-        (
+        let rest = Chain::of(own.iter(), own.len(), base, stable, content, encoded)?;
+        Ok((
             Self {
                 from_window,
                 rest: rest.head().clone(),
                 messages_from: messages.len() - shared,
             },
             (from_window, rest),
-        )
+        ))
     }
 
     /// The prompt view this records over `messages`, the turn's, restored.
@@ -362,7 +363,7 @@ pub(super) struct StoredChains {
 }
 
 impl StoredChains {
-    fn blobs(&self) -> BTreeSet<&CheckpointContentRef> {
+    fn blobs(&self) -> impl Iterator<Item = &CheckpointContentRef> {
         self.messages
             .1
             .blobs()
@@ -370,13 +371,13 @@ impl StoredChains {
             .chain(self.events.blobs())
             .chain(self.completions.blobs())
             .chain(self.request.iter().flat_map(StoredRequest::blobs))
-            .collect()
     }
 }
 
 /// Chains a checkpoint was stored as, with the host's pin of each blob.
 #[derive(Debug)]
 struct Stored {
+    _allocation: Vec<AllocationHold>,
     chains: StoredChains,
     pins: BTreeMap<CheckpointContentRef, CheckpointContentPin>,
 }
@@ -385,6 +386,7 @@ struct Stored {
 /// checkpoint in flight would store once its commit is acknowledged.
 #[derive(Debug, Default)]
 pub(super) struct ContentLedger {
+    pub(super) budget: lash_protocol_types::allocation::AllocationBudget,
     committed: Option<Stored>,
     staged: Option<Stored>,
     /// The unchanged prefixes since the committed checkpoint was taken.
@@ -394,6 +396,50 @@ pub(super) struct ContentLedger {
 }
 
 impl ContentLedger {
+    pub(super) fn adopt_in(
+        &self,
+        budget: &lash_protocol_types::allocation::AllocationBudget,
+    ) -> Result<Self, AllocationError> {
+        fn adopt(
+            stored: &Stored,
+            budget: &lash_protocol_types::allocation::AllocationBudget,
+        ) -> Result<Stored, AllocationError> {
+            let capacity = stored.chains.blobs().fold(4096u64, |bytes, digest| {
+                bytes.saturating_add(digest.as_str().len() as u64 + 4096)
+            });
+            let allocation = budget.reserve(capacity)?;
+            let mut chains = stored.chains.clone();
+            chains.messages.1 = chains.messages.1.adopt_in(budget)?;
+            chains.prompt.1 = chains.prompt.1.adopt_in(budget)?;
+            chains.events = chains.events.adopt_in(budget)?;
+            chains.completions = chains.completions.adopt_in(budget)?;
+            if let Some(request) = &mut chains.request {
+                request.request = Arc::new(request.request.adopt_in(budget)?);
+                request.messages = request.messages.adopt_in(budget)?;
+            }
+            Ok(Stored {
+                chains,
+                pins: stored.pins.clone(),
+                _allocation: vec![allocation],
+            })
+        }
+        Ok(Self {
+            budget: budget.clone(),
+            committed: self
+                .committed
+                .as_ref()
+                .map(|stored| adopt(stored, budget))
+                .transpose()?,
+            staged: self
+                .staged
+                .as_ref()
+                .map(|stored| adopt(stored, budget))
+                .transpose()?,
+            floors: self.floors,
+            staged_floors: self.staged_floors,
+        })
+    }
+
     /// A sequence's items from `at` on changed.
     pub(super) fn rewrote(&mut self, sequence: Sequence, at: usize) {
         self.floors.lower(sequence, at);
@@ -416,7 +462,12 @@ impl ContentLedger {
         &mut self,
         chains: StoredChains,
         content: &mut TurnCheckpointContent,
-    ) -> Vec<(CheckpointContentRef, CheckpointContentPin)> {
+    ) -> Result<Vec<(CheckpointContentRef, CheckpointContentPin)>, AllocationError> {
+        let allocation = self.budget.reserve(
+            (chains.blobs().count() as u64)
+                .saturating_mul(4096)
+                .saturating_add(4096),
+        )?;
         let committed = self.committed.as_ref().map(|committed| &committed.pins);
         let mut held = BTreeMap::new();
         for digest in chains.blobs() {
@@ -424,14 +475,18 @@ impl ContentLedger {
                 held.insert(digest.clone(), *pin);
             }
         }
-        content.retain(|digest| !held.contains_key(digest));
+        content.retain(|digest| !held.contains_key(digest))?;
         let answer = held
             .iter()
             .map(|(digest, pin)| (digest.clone(), *pin))
             .collect();
-        self.staged = Some(Stored { chains, pins: held });
+        self.staged = Some(Stored {
+            chains,
+            pins: held,
+            _allocation: vec![allocation],
+        });
         self.staged_floors = Floors::default();
-        answer
+        Ok(answer)
     }
 
     /// Stage `chains`, read back from a restored checkpoint, for the host
@@ -441,6 +496,7 @@ impl ContentLedger {
         self.staged = Some(Stored {
             chains,
             pins: BTreeMap::new(),
+            _allocation: Vec::new(),
         });
         self.floors = Floors::default();
         self.staged_floors = Floors::default();
@@ -452,25 +508,45 @@ impl ContentLedger {
     pub(super) fn stored(
         &mut self,
         pins: impl IntoIterator<Item = (CheckpointContentRef, CheckpointContentPin)>,
-    ) {
-        let Some(mut staged) = self.staged.take() else {
-            return;
+    ) -> Result<(), AllocationError> {
+        // Build a private directory. Refusal leaves the staged/committed
+        // checkpoint and every acknowledgement unchanged.
+        let Some(staged) = self.staged.as_ref() else {
+            return Ok(());
         };
-        staged.pins.extend(pins);
+        let directory = self.budget.reserve(
+            (staged.pins.len() as u64)
+                .saturating_mul(4096)
+                .saturating_add(4096),
+        )?;
+        let mut held = staged.pins.clone();
+        let mut allocations = vec![directory];
+        for (digest, pin) in pins {
+            let allocation = self
+                .budget
+                .reserve(4096u64.saturating_add(digest.as_str().len() as u64))?;
+            held.insert(digest, pin);
+            allocations.push(allocation);
+        }
         let complete = staged
             .chains
             .blobs()
-            .into_iter()
-            .all(|digest| staged.pins.contains_key(digest));
+            .all(|digest| held.contains_key(digest));
+        held.retain(|digest, _| staged.chains.blobs().any(|blob| blob == digest));
+        let mut staged = self
+            .staged
+            .take()
+            .expect("staged checkpoint remains under this exclusive borrow");
         if complete {
-            let blobs: BTreeSet<_> = staged.chains.blobs().into_iter().cloned().collect();
-            staged.pins.retain(|digest, _| blobs.contains(digest));
+            staged.pins = held;
+            staged._allocation = allocations;
             self.committed = Some(staged);
             self.floors = self.staged_floors;
         } else {
             self.committed = None;
             self.floors = Floors::default();
         }
+        Ok(())
     }
 }
 

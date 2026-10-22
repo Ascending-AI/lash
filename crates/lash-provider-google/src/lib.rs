@@ -1104,17 +1104,20 @@ mod tests {
                 cache_breakpoint: true,
             }],
         )];
-        req.tools = Arc::new(vec![LlmToolSpec {
-            name: "cache-shaped-input".to_string(),
-            description: "Host tool with a provider-looking property".to_string(),
-            input_schema: lash_protocol_types::SchemaContract::admit(json!({
-                "type": "object",
-                "properties": { "cachedContent": { "type": "string" } }
-            }))
-            .expect("valid declared schema"),
-            output_schema: lash_protocol_types::SchemaContract::admit(json!({}))
+        req.tools = Arc::new(
+            (vec![LlmToolSpec {
+                name: "cache-shaped-input".to_string(),
+                description: "Host tool with a provider-looking property".to_string(),
+                input_schema: lash_protocol_types::SchemaContract::admit(json!({
+                    "type": "object",
+                    "properties": { "cachedContent": { "type": "string" } }
+                }))
                 .expect("valid declared schema"),
-        }]);
+                output_schema: lash_protocol_types::SchemaContract::admit(json!({}))
+                    .expect("valid declared schema"),
+            }])
+            .into(),
+        );
 
         let provider = GoogleOAuthProvider::for_test();
         let contents = provider
@@ -1292,27 +1295,30 @@ mod tests {
             .metadata_mut()
             .capability
             .google_dialect = lash_core::GoogleDialect::ClaudeOnVertex;
-        claude_on_vertex.tools = Arc::new(vec![LlmToolSpec {
-            name: "lookup".to_string(),
-            description: "Lookup".to_string(),
-            input_schema: lash_protocol_types::SchemaContract::admit(json!({
-                "$schema": "https://json-schema.org/draft/2020-12/schema",
-                "$id": "tool.schema.json",
-                "$defs": { "unused": { "type": "string" } },
-                "definitions": { "old": { "type": "string" } },
-                "type": "object",
-                "properties": {
-                    "nested": {
-                        "$id": "nested",
-                        "$defs": { "x": { "type": "string" } },
-                        "type": "object"
+        claude_on_vertex.tools = Arc::new(
+            (vec![LlmToolSpec {
+                name: "lookup".to_string(),
+                description: "Lookup".to_string(),
+                input_schema: lash_protocol_types::SchemaContract::admit(json!({
+                    "$schema": "https://json-schema.org/draft/2020-12/schema",
+                    "$id": "tool.schema.json",
+                    "$defs": { "unused": { "type": "string" } },
+                    "definitions": { "old": { "type": "string" } },
+                    "type": "object",
+                    "properties": {
+                        "nested": {
+                            "$id": "nested",
+                            "$defs": { "x": { "type": "string" } },
+                            "type": "object"
+                        }
                     }
-                }
-            }))
-            .expect("valid declared schema"),
-            output_schema: lash_protocol_types::SchemaContract::admit(json!({}))
+                }))
                 .expect("valid declared schema"),
-        }]);
+                output_schema: lash_protocol_types::SchemaContract::admit(json!({}))
+                    .expect("valid declared schema"),
+            }])
+            .into(),
+        );
         let claude_on_vertex_body =
             GoogleOAuthProvider::build_request(&provider, &claude_on_vertex, Vec::new(), None)
                 .expect("schema projection");

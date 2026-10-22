@@ -23,23 +23,12 @@ pub fn template_error(error: impl std::fmt::Display) -> LlmTransportError {
         .with_retry_verdict(TransportRetryVerdict::Forbidden)
 }
 
-pub fn allocation_error(
-    error: lash_protocol_types::allocation::AllocationError,
-) -> LlmTransportError {
-    let mut failure = template_error(&error);
-    failure.context = Box::new(
-        lash_transport_failure::HttpFailureContext::OwnerAllocation {
-            refusal: Box::new(error),
-        },
-    );
-    failure
-}
 pub fn retained_template_error(
     error: lash_protocol_types::llm::types::TemplateError,
 ) -> LlmTransportError {
     match error {
         lash_protocol_types::llm::types::TemplateError::Allocation(error) => {
-            allocation_error(error)
+            LlmTransportError::from(error)
         }
         error => template_error(error),
     }
@@ -227,11 +216,11 @@ impl<'a> UnitWriter<'a> {
 
     /// Admit a changed provider group before building its JSON. Its source
     /// range remains attached to each item, including reused cache entries.
-    pub fn unit_at<'m>(
+    pub fn unit_at(
         &mut self,
         messages: &[lash_protocol_types::llm::types::LlmMessage],
         range: std::ops::Range<usize>,
-        key: impl FnOnce(SegmentKey<'m>) -> SegmentKey<'m>,
+        key: impl FnOnce(SegmentKey) -> SegmentKey,
         build: impl FnOnce() -> Result<Vec<TemplateJson>, LlmTransportError>,
     ) -> Result<Vec<TemplateJson>, LlmTransportError> {
         let Self::Cached {
@@ -249,12 +238,13 @@ impl<'a> UnitWriter<'a> {
             key(SegmentKey::new(context))
                 .u64(budget.identity() as u64)
                 .u64(global.start as u64),
-            || {
+            0,
+            |_| {
                 let bound = lash_protocol_types::allocation::payload_capacity(
                     &&messages[range.clone()],
                     1024,
                 );
-                let hold = budget.reserve(bound).map_err(allocation_error)?;
+                let hold = budget.reserve(bound).map_err(LlmTransportError::from)?;
                 build()?
                     .iter()
                     .map(|json| {
@@ -297,9 +287,10 @@ impl<'a> UnitWriter<'a> {
     /// # Errors
     ///
     /// What `build` or pinning a slot refuses with.
-    pub fn unit<'m>(
+    pub fn unit(
         &mut self,
-        key: impl FnOnce(SegmentKey<'m>) -> SegmentKey<'m>,
+        key: impl FnOnce(SegmentKey) -> SegmentKey,
+        allocation_bytes: u64,
         build: impl FnOnce() -> Result<Vec<TemplateJson>, LlmTransportError>,
     ) -> Result<Vec<TemplateJson>, LlmTransportError> {
         match self {
@@ -310,16 +301,18 @@ impl<'a> UnitWriter<'a> {
                 pin,
                 ..
             } => {
-                let segments = cache.segments(key(SegmentKey::new(context)), || {
-                    build()?
-                        .iter()
-                        .map(|json| {
-                            RequestSegment::item(json, &mut |reference, position| {
-                                pin(reference, position)
+                let segments =
+                    cache.segments(key(SegmentKey::new(context)), allocation_bytes, |hold| {
+                        build()?
+                            .iter()
+                            .map(|json| {
+                                RequestSegment::item(json, &mut |reference, position| {
+                                    pin(reference, position)
+                                })
+                                .map(|segment| segment.with_allocation(hold.clone()))
                             })
-                        })
-                        .collect::<Result<Vec<_>, _>>()
-                })?;
+                            .collect::<Result<Vec<_>, _>>()
+                    })?;
                 lowered_items(&segments)
             }
         }
@@ -527,7 +520,7 @@ where
             request.envelope(),
             4096,
         ))
-        .map_err(allocation_error)?;
+        .map_err(LlmTransportError::from)?;
     let context = SegmentContext::new(namespace)
         .json(configuration)
         .u64(budget.identity() as u64)
@@ -548,7 +541,11 @@ where
     let history = cache
         .carried_async(
             SegmentKey::new(&context).message(first),
-            |prior: Option<std::sync::Arc<ProviderHistory>>| async {
+            0,
+            |prior: Option<
+                std::sync::Arc<lash_protocol_types::allocation::Allocated<ProviderHistory>>,
+            >,
+             _| async {
                 let prior = prior.filter(|prior| {
                     !request.has_history_dependencies()
                         && prior.source.shared_prefix(request.messages()) >= prior.stable_source
@@ -565,7 +562,7 @@ where
                         });
                 let hold = budget
                     .reserve(suffix_bytes.saturating_add(4096))
-                    .map_err(allocation_error)?;
+                    .map_err(LlmTransportError::from)?;
                 let mut suffix = request.envelope().clone();
                 suffix.messages = request.messages().iter_from(start).cloned().collect();
                 let template = build(suffix, start).await?;
@@ -604,13 +601,13 @@ where
                 }
                 let stable_items = lo;
                 fresh_template = Some(template);
-                Ok::<_, LlmTransportError>(std::sync::Arc::new(ProviderHistory {
+                Ok::<_, LlmTransportError>(ProviderHistory {
                     source: request.messages().clone(),
                     items,
                     stable_source,
                     stable_items,
                     _hold: hold,
-                }))
+                })
             },
         )
         .await?;

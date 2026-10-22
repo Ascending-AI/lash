@@ -632,7 +632,7 @@ async fn summarize_compaction_prefix(
         instructions: None,
         model: model.clone(),
         messages: rendered.messages,
-        tools: Arc::new(Vec::new()),
+        tools: Arc::new((Vec::new()).into()),
         tool_choice: lash_protocol_types::llm::types::LlmToolChoice::None,
         attachment_acceptance: Arc::clone(&snapshot.policy.attachment_acceptance),
         generation: snapshot.policy.generation.clone(),

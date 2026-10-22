@@ -53,21 +53,24 @@ fn tool_schema_cache_key_does_not_count_as_adapter_cache_emission() {
             cache_breakpoint: true,
         }],
     )]);
-    req.tools = Arc::new(vec![LlmToolSpec {
-        name: "cache-shaped-input".to_string(),
-        description: "Host tool with provider-looking property names".to_string(),
-        input_schema: lash_protocol_types::SchemaContract::admit(json!({
-            "type": "object",
-            "properties": {
-                "cache_control": { "type": "string" },
-                "prompt_cache_key": { "type": "string" },
-                "cachedContent": { "type": "string" }
-            }
-        }))
-        .expect("valid declared schema"),
-        output_schema: lash_protocol_types::SchemaContract::admit(json!({}))
+    req.tools = Arc::new(
+        (vec![LlmToolSpec {
+            name: "cache-shaped-input".to_string(),
+            description: "Host tool with provider-looking property names".to_string(),
+            input_schema: lash_protocol_types::SchemaContract::admit(json!({
+                "type": "object",
+                "properties": {
+                    "cache_control": { "type": "string" },
+                    "prompt_cache_key": { "type": "string" },
+                    "cachedContent": { "type": "string" }
+                }
+            }))
             .expect("valid declared schema"),
-    }]);
+            output_schema: lash_protocol_types::SchemaContract::admit(json!({}))
+                .expect("valid declared schema"),
+        }])
+        .into(),
+    );
 
     let (chat, _) = provider
         .build_chat_request_body_with_diagnostics(&req, false)

@@ -1,3 +1,7 @@
+#[path = "machine_admission.rs"]
+mod admission;
+#[path = "machine_checkpoint.rs"]
+mod checkpoint;
 use super::checkpoint_content::Chain;
 use super::*;
 use lash_protocol_types::ReportedFailure;
@@ -111,6 +115,7 @@ impl<M: TurnProtocol> TurnMachine<M> {
     ) -> Self {
         Self {
             projection_refusal: None,
+            retained: MachineAdmission::default(),
             config,
             state: MachineState::PreparingProtocol,
             side_effect_outbox: VecDeque::new(),
@@ -165,7 +170,17 @@ impl<M: TurnProtocol> TurnMachine<M> {
     /// machine syncs its environment first, as every turn does, and then
     /// waits on `work` where the driver would have prepared an iteration.
     pub fn resume_with(&mut self, work: PendingWork<M>) {
+        let hold = match self.config.allocation_budget.reserve(
+            lash_protocol_types::allocation::payload_capacity(&work, 1024).saturating_mul(2),
+        ) {
+            Ok(hold) => hold,
+            Err(error) => {
+                self.projection_refusal = Some(error.into());
+                return;
+            }
+        };
         self.resume_work = Some(work);
+        self.retained.resume = hold;
     }
 
     /// The code execution the machine waits on, if that is what it waits on:
@@ -216,6 +231,13 @@ impl<M: TurnProtocol> TurnMachine<M> {
     /// re-delivers it unchanged. Answers `false`, changing nothing, when the
     /// machine waits on no model call under `id`.
     pub fn admit_request(&mut self, id: EffectId, request: Arc<RetainedLlmRequest>) -> bool {
+        let request = match request.adopt_in(&self.config.allocation_budget) {
+            Ok(request) => Arc::new(request),
+            Err(error) => {
+                self.projection_refusal = Some(error.into());
+                return false;
+            }
+        };
         match &mut self.state {
             MachineState::Waiting {
                 effect_id,
@@ -238,7 +260,17 @@ impl<M: TurnProtocol> TurnMachine<M> {
         evidence: lash_protocol_types::TurnCancellationEvidence,
     ) {
         if self.observed_cancellation.is_none() {
+            let hold = match self.config.allocation_budget.reserve(
+                lash_protocol_types::allocation::payload_capacity(&evidence, 128),
+            ) {
+                Ok(hold) => hold,
+                Err(error) => {
+                    self.projection_refusal = Some(error.into());
+                    return;
+                }
+            };
             self.observed_cancellation = Some(evidence);
+            self.retained.cancellation = hold;
         }
     }
 
@@ -400,12 +432,14 @@ impl<M: TurnProtocol> TurnMachine<M> {
 
     /// The machine's bounded checkpoint, with the transcript content it
     /// names by digest: what the turn added to the window it started from.
-    pub fn checkpoint(&self) -> SavedTurn<M> {
-        let (checkpoint, content, _, _) = self.record(None, Floors::default());
-        SavedTurn {
+    pub fn checkpoint(
+        &self,
+    ) -> Result<SavedTurn<M>, lash_protocol_types::allocation::AllocationError> {
+        let (checkpoint, content, _, _) = self.record(None, Floors::default())?;
+        Ok(SavedTurn {
             checkpoint,
             content,
-        }
+        })
     }
 
     /// The machine's checkpoint as a phase stores it (FIG-5955): the same
@@ -416,18 +450,20 @@ impl<M: TurnProtocol> TurnMachine<M> {
     /// acknowledged reports the pins of what it added
     /// ([`Self::checkpoint_stored`]); until then the turn's checkpoints
     /// still build on the committed one.
-    pub fn checkpoint_delta(&mut self) -> CheckpointDelta<M> {
+    pub fn checkpoint_delta(
+        &mut self,
+    ) -> Result<CheckpointDelta<M>, lash_protocol_types::allocation::AllocationError> {
         let (base, floors) = self.content.base();
-        let (checkpoint, mut content, chains, encoded) = self.record(base, floors);
-        let held = self.content.stage(chains, &mut content);
-        CheckpointDelta {
+        let (checkpoint, mut content, chains, encoded) = self.record(base, floors)?;
+        let held = self.content.stage(chains, &mut content)?;
+        Ok(CheckpointDelta {
             saved: SavedTurn {
                 checkpoint,
                 content,
             },
             held,
             encoded,
-        }
+        })
     }
 
     /// The checkpoint [`Self::checkpoint_delta`] took last, or the one the
@@ -436,126 +472,14 @@ impl<M: TurnProtocol> TurnMachine<M> {
     pub fn checkpoint_stored(
         &mut self,
         stored: impl IntoIterator<Item = (CheckpointContentRef, CheckpointContentPin)>,
-    ) {
-        self.content.stored(stored);
+    ) -> Result<(), lash_protocol_types::allocation::AllocationError> {
+        self.content.stored(stored)
     }
 
     /// The checkpoint over `base`, the chains a committed checkpoint stored,
     /// whose sequences are unchanged through `floors`; its content every
     /// blob it did not keep from `base`, the chains it is stored as and how
     /// many items it encoded.
-    fn record(
-        &self,
-        base: Option<&StoredChains>,
-        floors: Floors,
-    ) -> (
-        TurnCheckpoint<M>,
-        TurnCheckpointContent,
-        StoredChains,
-        usize,
-    ) {
-        let mut content = TurnCheckpointContent::default();
-        let mut encoded = 0;
-        let window = self.window.as_ref();
-        let window_events = window.map_or(0, |window| window.events().len());
-        let (state, request) = CheckpointState::record(
-            &self.state,
-            &mut content,
-            window,
-            base.and_then(|base| base.request.as_ref()),
-            &mut encoded,
-        );
-        let (messages, stored_messages) = CheckpointMessages::record(
-            &self.messages,
-            window,
-            base.map(|base| &base.messages),
-            floors.messages,
-            &mut content,
-            &mut encoded,
-        );
-        let (prompt_messages, stored_prompt) = CheckpointPrompt::record(
-            &self.prompt_messages,
-            &self.messages,
-            window,
-            base.map(|base| &base.prompt),
-            floors.prompt,
-            &mut content,
-            &mut encoded,
-        );
-        // The machine only appends to its history, so the window's records
-        // lead it.
-        let turn_events = self
-            .events
-            .as_slice()
-            .get(window_events..)
-            .unwrap_or_default();
-        let events = Chain::of(
-            turn_events.iter(),
-            turn_events.len(),
-            base.map(|base| &base.events),
-            floors.events.saturating_sub(window_events),
-            &mut content,
-            &mut encoded,
-        );
-        let completions = Chain::of(
-            self.decided_completions.iter(),
-            self.decided_completions.len(),
-            base.map(|base| &base.completions),
-            usize::MAX,
-            &mut content,
-            &mut encoded,
-        );
-        let checkpoint = TurnCheckpoint {
-            schema_version: TURN_CHECKPOINT_SCHEMA_VERSION,
-            state,
-            pending_effects: self
-                .side_effect_outbox
-                .iter()
-                .cloned()
-                .map(|effect| match effect {
-                    Effect::Emit(SessionStreamEvent::Error(ReportedFailure {
-                        message: _,
-                        envelope: Some(mut envelope),
-                    })) if matches!(
-                        envelope.kind,
-                        lash_protocol_types::session_model::TurnFailureKind::LlmProvider
-                    ) =>
-                    {
-                        envelope.raw = None;
-                        envelope.user_message = "provider call failed".to_string();
-                        Effect::Emit(SessionStreamEvent::Error(ReportedFailure {
-                            message: envelope.user_message.clone(),
-                            envelope: Some(envelope),
-                        }))
-                    }
-                    effect => effect,
-                })
-                .collect(),
-            next_effect_id: self.next_effect_id,
-            window: window.map(CheckpointWindow::of),
-            messages,
-            prompt_messages,
-            events: events.head().clone(),
-            progress_event_cursor: self.progress_event_cursor,
-            progress_boundaries: self.progress_boundaries.clone(),
-            protocol_iteration: self.protocol_iteration,
-            protocol_run_offset: self.protocol_run_offset,
-            cumulative_usage: self.cumulative_usage.clone(),
-            last_call_usage: self.last_call_usage.clone(),
-            environment: self.environment.clone(),
-            decided_completions: completions.head().clone(),
-        };
-        let chains = StoredChains {
-            messages: stored_messages,
-            prompt: stored_prompt,
-            events,
-            completions,
-            // A turn between model calls keeps its last request stored: the
-            // next one builds on it.
-            request: request.or_else(|| base.and_then(|base| base.request.clone())),
-        };
-        (checkpoint, content, chains, encoded)
-    }
 
     /// Re-hydrate a machine from a checkpoint, the content it names and the
     /// committed window it started from ([`TurnCheckpoint::window_pin`]). The
@@ -586,6 +510,16 @@ impl<M: TurnProtocol> TurnMachine<M> {
             });
         }
         CheckpointWindow::check(checkpoint.window.as_ref(), window.as_ref())?;
+        let capacity = lash_protocol_types::allocation::payload_capacity(
+            &checkpoint,
+            std::mem::size_of::<CheckpointData<M>>(),
+        );
+        let allocation = config
+            .allocation_budget
+            .reserve(capacity)
+            .map_err(TurnCheckpointRestoreError::Allocation)?;
+        let mut checkpoint = (*checkpoint.0).clone();
+        checkpoint.allocation = allocation;
         let side_effect_outbox = checkpoint
             .pending_effects
             .into_iter()
@@ -622,6 +556,7 @@ impl<M: TurnProtocol> TurnMachine<M> {
         });
         let machine = Self {
             projection_refusal: None,
+            retained: MachineAdmission::default(),
             config,
             state,
             side_effect_outbox,
@@ -719,6 +654,9 @@ impl<M: TurnProtocol> TurnMachine<M> {
     }
 
     fn emit(&mut self, event: SessionStreamEvent) {
+        if !self.admit_growth(&event) {
+            return;
+        }
         self.side_effect_outbox.push_back(Effect::Emit(event));
     }
 
@@ -728,6 +666,23 @@ impl<M: TurnProtocol> TurnMachine<M> {
     /// boundary's delta, or the turn's `Done`, in the order they were
     /// appended.
     fn emit_progress(&mut self) {
+        // The snapshot's scalar delta, outbox slot and boundary directory
+        // are reserved before copying the delta or growing either vector.
+        let bound = lash_protocol_types::allocation::payload_capacity(
+            &&self.events.as_slice()[self.progress_event_cursor.min(self.events.len())..],
+            1024,
+        );
+        match self
+            .config
+            .allocation_budget
+            .reserve(bound.saturating_mul(4))
+        {
+            Ok(hold) => self.retained.growth.push(hold),
+            Err(error) => {
+                self.projection_refusal = Some(error.into());
+                return;
+            }
+        }
         if !lash_protocol_types::session_model::messages_are_prompt_resume_safe(
             self.messages.iter(),
         ) {
@@ -811,6 +766,9 @@ impl<M: TurnProtocol> TurnMachine<M> {
     /// records, edits the one buffer they share in place instead of copying
     /// the window around a record this machine still sees (FIG-6910).
     fn finish(&mut self, outcome: TurnOutcome) {
+        if !self.admit_growth(&outcome) {
+            return;
+        }
         self.emit(SessionStreamEvent::TurnOutcome { outcome });
         self.emit(SessionStreamEvent::Done);
         let msgs = std::mem::take(&mut self.messages);
@@ -844,25 +802,7 @@ impl<M: TurnProtocol> TurnMachine<M> {
 
     /// Drain the next pending effect. Returns `None` when the host must call
     /// `handle_response()` before more effects become available.
-    pub fn set_allocation_budget(
-        &mut self,
-        budget: lash_protocol_types::allocation::AllocationBudget,
-    ) -> Result<(), lash_protocol_types::allocation::AllocationError> {
-        let same = lash_protocol_types::AppendVec::ptr_eq(
-            &self.messages.shared(),
-            &self.prompt_messages.shared(),
-        );
-        let messages = self.messages.clone_in(&budget)?;
-        let prompt = if same {
-            messages.clone()
-        } else {
-            self.prompt_messages.clone_in(&budget)?
-        };
-        self.messages = messages;
-        self.prompt_messages = prompt;
-        self.config.allocation_budget = budget;
-        Ok(())
-    }
+
     pub fn try_poll_effect(
         &mut self,
     ) -> Result<Option<Effect<M>>, lash_protocol_types::allocation::ProjectionError> {
@@ -940,6 +880,32 @@ impl<M: TurnProtocol> TurnMachine<M> {
     /// already queued, so the model call's `LlmRequest` emit and any pending
     /// progress reach the host first.
     fn start(&mut self, work: PendingWork<M>) {
+        let hold = match self.config.allocation_budget.reserve(
+            lash_protocol_types::allocation::payload_capacity(&work, 1024).saturating_mul(4),
+        ) {
+            Ok(hold) => hold,
+            Err(error) => {
+                self.projection_refusal = Some(error.into());
+                return;
+            }
+        };
+        let work = match work {
+            PendingWork::Llm {
+                request,
+                driver_state,
+            } => match request.adopt_in(&self.config.allocation_budget) {
+                Ok(request) => PendingWork::Llm {
+                    request: Arc::new(request),
+                    driver_state,
+                },
+                Err(error) => {
+                    self.projection_refusal = Some(error.into());
+                    return;
+                }
+            },
+            work => work,
+        };
+        self.retained.state = hold;
         if matches!(work, PendingWork::Llm { .. }) {
             let tool_list = self
                 .environment
@@ -962,10 +928,17 @@ impl<M: TurnProtocol> TurnMachine<M> {
         };
     }
 
+    /// Prepare the actual parts/payload carrier and scalar copy before the
+    /// history buffer claims it. The temporary obligation lives until that
+    /// buffer has admitted its own copy; escaped sources own their own holds.
+    /// A conversation also prepares its two message projections before their
+    /// buffers claim them, so admit all three scalar copies up front.
+
     pub(super) fn append_event(
         &mut self,
         event: SessionHistoryRecord<M::Event>,
     ) -> Result<(), lash_protocol_types::allocation::AllocationError> {
+        let (event, _copy) = Self::adopt_history_record(&event, &self.config.allocation_budget)?;
         let mut events = self.events.clone();
         let mut prompt = self.prompt_messages.clone();
         let mut messages = self.messages.clone();
@@ -1017,6 +990,9 @@ impl<M: TurnProtocol> TurnMachine<M> {
                     self.start(work);
                 }
                 DriverAction::ReportToolCalls { completed } => {
+                    if !self.admit_growth(&completed) {
+                        return;
+                    }
                     let accounting = completed
                         .iter()
                         .map(|outcome| SessionStreamEvent::ToolCall {
@@ -1088,6 +1064,9 @@ impl<M: TurnProtocol> TurnMachine<M> {
         &mut self,
         response: Response<M::IntentOutcome>,
     ) -> Result<(), TokenUsageOverflow> {
+        if !self.admit_growth(&response) {
+            return Ok(());
+        }
         let Some(answered) = self.state.take_waiting(response) else {
             return Ok(());
         };
@@ -1126,6 +1105,23 @@ impl<M: TurnProtocol> TurnMachine<M> {
     ) {
         match result {
             Ok(sync) => {
+                let hold = match self.config.allocation_budget.reserve(
+                    lash_protocol_types::allocation::payload_capacity(&sync, 1024),
+                ) {
+                    Ok(hold) => hold,
+                    Err(error) => {
+                        self.projection_refusal = Some(error.into());
+                        return;
+                    }
+                };
+                let sync = match Self::admit_environment(&sync, &self.config.allocation_budget) {
+                    Ok(sync) => sync,
+                    Err(error) => {
+                        self.projection_refusal = Some(error.into());
+                        return;
+                    }
+                };
+                self.retained.environment = hold;
                 self.environment = Some(SyncedEnvironment {
                     protocol_iteration: self.protocol_iteration,
                     sync,

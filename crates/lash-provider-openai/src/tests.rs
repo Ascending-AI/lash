@@ -775,14 +775,17 @@ fn anthropic_cache_dialect_marks_canonical_breakpoints_for_an_arbitrary_model() 
     );
     req.model.metadata_mut().wire_model = "custom/model-v1".to_string();
     enable_cache_control(&mut req, CacheControlDialect::Anthropic);
-    req.tools = Arc::new(vec![LlmToolSpec {
-        name: "search".to_string(),
-        description: "Search".to_string(),
-        input_schema: lash_protocol_types::SchemaContract::admit(json!({"type": "object"}))
-            .expect("valid declared schema"),
-        output_schema: lash_protocol_types::SchemaContract::admit(json!({}))
-            .expect("valid declared schema"),
-    }]);
+    req.tools = Arc::new(
+        (vec![LlmToolSpec {
+            name: "search".to_string(),
+            description: "Search".to_string(),
+            input_schema: lash_protocol_types::SchemaContract::admit(json!({"type": "object"}))
+                .expect("valid declared schema"),
+            output_schema: lash_protocol_types::SchemaContract::admit(json!({}))
+                .expect("valid declared schema"),
+        }])
+        .into(),
+    );
 
     let body = OpenAiCompatibleProvider::new("key", "https://router-proxy.example/v1")
         .build_chat_request_body(&req, true)
@@ -830,14 +833,17 @@ fn gemini_cache_dialect_emits_one_ephemeral_explicit_breakpoint() {
     req.model.metadata_mut().request_defaults.cache_retention = CacheRetention::Long;
     req.model.metadata_mut().wire_model = "custom/model-v1".to_string();
     enable_cache_control(&mut req, CacheControlDialect::Gemini);
-    req.tools = Arc::new(vec![LlmToolSpec {
-        name: "search".to_string(),
-        description: "Search".to_string(),
-        input_schema: lash_protocol_types::SchemaContract::admit(json!({"type": "object"}))
-            .expect("valid declared schema"),
-        output_schema: lash_protocol_types::SchemaContract::admit(json!({}))
-            .expect("valid declared schema"),
-    }]);
+    req.tools = Arc::new(
+        (vec![LlmToolSpec {
+            name: "search".to_string(),
+            description: "Search".to_string(),
+            input_schema: lash_protocol_types::SchemaContract::admit(json!({"type": "object"}))
+                .expect("valid declared schema"),
+            output_schema: lash_protocol_types::SchemaContract::admit(json!({}))
+                .expect("valid declared schema"),
+        }])
+        .into(),
+    );
 
     let body = openrouter_provider()
         .build_chat_request_body(&req, true)
@@ -1171,17 +1177,20 @@ fn provider_routing_config_rejects_unknown_sibling_keys() {
 #[test]
 fn chat_body_honors_compat_max_token_field_streaming_usage_and_strict_tools() {
     let mut req = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
-    req.tools = Arc::new(vec![LlmToolSpec {
-        name: "lookup".to_string(),
-        description: "Lookup".to_string(),
-        input_schema: lash_protocol_types::SchemaContract::admit(json!({
-            "type": "object",
-            "properties": { "q": { "type": "string" } }
-        }))
-        .expect("valid declared schema"),
-        output_schema: lash_protocol_types::SchemaContract::admit(json!({}))
+    req.tools = Arc::new(
+        (vec![LlmToolSpec {
+            name: "lookup".to_string(),
+            description: "Lookup".to_string(),
+            input_schema: lash_protocol_types::SchemaContract::admit(json!({
+                "type": "object",
+                "properties": { "q": { "type": "string" } }
+            }))
             .expect("valid declared schema"),
-    }]);
+            output_schema: lash_protocol_types::SchemaContract::admit(json!({}))
+                .expect("valid declared schema"),
+        }])
+        .into(),
+    );
 
     req.generation.output_token_cap = std::num::NonZeroUsize::new(2_048);
 
@@ -1209,14 +1218,17 @@ fn chat_body_honors_compat_max_token_field_streaming_usage_and_strict_tools() {
 fn local_preset_suppresses_optional_openai_fields() {
     let mut req = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
     req.model.metadata_mut().capability = reasoning_capability();
-    req.tools = Arc::new(vec![LlmToolSpec {
-        name: "lookup".to_string(),
-        description: "Lookup".to_string(),
-        input_schema: lash_protocol_types::SchemaContract::admit(json!({"type": "object"}))
-            .expect("valid declared schema"),
-        output_schema: lash_protocol_types::SchemaContract::admit(json!({}))
-            .expect("valid declared schema"),
-    }]);
+    req.tools = Arc::new(
+        (vec![LlmToolSpec {
+            name: "lookup".to_string(),
+            description: "Lookup".to_string(),
+            input_schema: lash_protocol_types::SchemaContract::admit(json!({"type": "object"}))
+                .expect("valid declared schema"),
+            output_schema: lash_protocol_types::SchemaContract::admit(json!({}))
+                .expect("valid declared schema"),
+        }])
+        .into(),
+    );
 
     let local = OpenAiCompatibleProvider::new("key", "https://gpu-box.example/v1")
         .with_compat(OpenAiCompat::local());

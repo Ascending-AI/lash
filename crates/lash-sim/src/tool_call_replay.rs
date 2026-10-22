@@ -53,7 +53,7 @@ fn malformed_history_request(model: &str) -> LlmRequest {
             LlmMessage::text(LlmRole::User, "try again with valid JSON"),
         ],
 
-        tools: Arc::new(Vec::new()),
+        tools: Arc::new((Vec::new()).into()),
         tool_choice: Default::default(),
         attachment_acceptance: Default::default(),
         scope: lash_core::LlmRequestScope::new("replay-session", "replay-frame", "replay-request"),

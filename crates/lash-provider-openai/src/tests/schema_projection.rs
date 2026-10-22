@@ -4,57 +4,60 @@ use super::*;
 fn chat_tools_use_projected_openai_schema_and_preserve_override() {
     let mut req = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
     req.model.metadata_mut().wire_model = "anthropic/claude-sonnet-4.6".to_string();
-    req.tools = Arc::new(vec![
-        LlmToolSpec {
-            name: "empty".to_string(),
-            description: "Empty".to_string(),
-            input_schema: lash_protocol_types::SchemaContract::admit(json!({"type": "object"}))
-                .expect("valid declared schema"),
-            output_schema: lash_protocol_types::SchemaContract::admit(json!({}))
-                .expect("valid declared schema"),
-        },
-        LlmToolSpec {
-            name: "override".to_string(),
-            description: "Override".to_string(),
-            input_schema: lash_core::SchemaContract::admit(json!({
-                "type": "object",
-                "properties": {"raw": {"const": "x"}}
-            }))
-            .expect("valid declared schema")
-            .with_override(
-                lash_core::SchemaDialect::OpenaiToolParameters,
-                lash_protocol_types::JsonSchema::admit(json!({
+    req.tools = Arc::new(
+        (vec![
+            LlmToolSpec {
+                name: "empty".to_string(),
+                description: "Empty".to_string(),
+                input_schema: lash_protocol_types::SchemaContract::admit(json!({"type": "object"}))
+                    .expect("valid declared schema"),
+                output_schema: lash_protocol_types::SchemaContract::admit(json!({}))
+                    .expect("valid declared schema"),
+            },
+            LlmToolSpec {
+                name: "override".to_string(),
+                description: "Override".to_string(),
+                input_schema: lash_core::SchemaContract::admit(json!({
                     "type": "object",
-                    "properties": { "raw": { "type": "string", "enum": ["x"] } }
+                    "properties": {"raw": {"const": "x"}}
                 }))
-                .expect("valid declared projection schema"),
-            ),
-            output_schema: lash_protocol_types::SchemaContract::admit(json!({}))
-                .expect("valid declared schema"),
-        },
-        LlmToolSpec {
-            name: "schemars".to_string(),
-            description: "Schemars".to_string(),
-            input_schema: lash_protocol_types::SchemaContract::admit(json!({
-                "type": "object",
-                "properties": {
-                    "limit": {
-                        "description": "Maximum number of results.",
-                        "allOf": [
-                            {
-                                "type": "integer",
-                                "minimum": 1,
-                                "maximum": 100
-                            }
-                        ]
+                .expect("valid declared schema")
+                .with_override(
+                    lash_core::SchemaDialect::OpenaiToolParameters,
+                    lash_protocol_types::JsonSchema::admit(json!({
+                        "type": "object",
+                        "properties": { "raw": { "type": "string", "enum": ["x"] } }
+                    }))
+                    .expect("valid declared projection schema"),
+                ),
+                output_schema: lash_protocol_types::SchemaContract::admit(json!({}))
+                    .expect("valid declared schema"),
+            },
+            LlmToolSpec {
+                name: "schemars".to_string(),
+                description: "Schemars".to_string(),
+                input_schema: lash_protocol_types::SchemaContract::admit(json!({
+                    "type": "object",
+                    "properties": {
+                        "limit": {
+                            "description": "Maximum number of results.",
+                            "allOf": [
+                                {
+                                    "type": "integer",
+                                    "minimum": 1,
+                                    "maximum": 100
+                                }
+                            ]
+                        }
                     }
-                }
-            }))
-            .expect("valid declared schema"),
-            output_schema: lash_protocol_types::SchemaContract::admit(json!({}))
+                }))
                 .expect("valid declared schema"),
-        },
-    ]);
+                output_schema: lash_protocol_types::SchemaContract::admit(json!({}))
+                    .expect("valid declared schema"),
+            },
+        ])
+        .into(),
+    );
 
     let body = openrouter_provider()
         .build_chat_request_body(&req, true)

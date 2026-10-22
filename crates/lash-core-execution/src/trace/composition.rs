@@ -21,7 +21,12 @@ type ToolContractFingerprints = Arc<Vec<[u8; 32]>>;
 #[derive(Default)]
 pub(super) struct CompositionMemory {
     /// The latest tool lists fingerprinted, oldest first.
-    tool_fingerprints: Mutex<Vec<(Arc<Vec<LlmToolSpec>>, ToolContractFingerprints)>>,
+    tool_fingerprints: Mutex<
+        Vec<(
+            Arc<lash_protocol_types::llm::types::LlmToolSpecs>,
+            ToolContractFingerprints,
+        )>,
+    >,
     /// Each session's last reported composition fingerprint.
     reported: Mutex<HashMap<SessionId, [u8; 32]>>,
 }
@@ -31,7 +36,7 @@ impl CompositionMemory {
     /// `generations` tool lists.
     pub(super) fn tool_fingerprints(
         &self,
-        tools: &Arc<Vec<LlmToolSpec>>,
+        tools: &Arc<lash_protocol_types::llm::types::LlmToolSpecs>,
         generations: usize,
     ) -> ToolContractFingerprints {
         let mut cache = self.tool_fingerprints.lock_recover();

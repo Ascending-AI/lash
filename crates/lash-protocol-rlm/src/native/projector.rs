@@ -24,7 +24,7 @@ pub(crate) fn build_rlm_preamble_with_dialect(
                 dialect: Arc::clone(&dialect),
             }),
         },
-        tool_specs: Arc::new(vec![super::tool::tool_spec(dialect.as_ref())]),
+        tool_specs: Arc::new((vec![super::tool::tool_spec(dialect.as_ref())]).into()),
         tool_names,
         writer_formats: input.writer_formats,
     }
@@ -65,7 +65,7 @@ impl ContextProjector<lash_core::HostTurnProtocol> for NativeContextProjector {
             instructions: None,
             messages,
 
-            tools: Arc::new(vec![super::tool::tool_spec(self.dialect.as_ref())]),
+            tools: Arc::new((vec![super::tool::tool_spec(self.dialect.as_ref())]).into()),
             tool_choice: LlmToolChoice::Auto,
             attachment_acceptance: Arc::clone(&ctx.config.attachment_acceptance),
             scope: LlmRequestScope::new(

@@ -339,6 +339,24 @@ struct AdmittedEnvelope {
 }
 
 impl RetainedLlmRequest {
+    pub fn adopt_in(
+        &self,
+        budget: &crate::allocation::AllocationBudget,
+    ) -> Result<Self, crate::allocation::AllocationError> {
+        let hold = budget.reserve(crate::allocation::payload_capacity(
+            self.envelope(),
+            std::mem::size_of::<AdmittedEnvelope>() + 256,
+        ))?;
+        let mut messages = RequestMessages::default();
+        for message in self.messages.iter() {
+            messages = messages.append(std::slice::from_ref(message), budget)?;
+        }
+        let tools = LlmToolSpecs::adopt_tools_in(&self.tools, budget)?;
+        let mut request = self.envelope().clone();
+        request.tools = tools;
+        Ok(Self::admitted_envelope(request, messages, hold))
+    }
+
     pub fn estimated_tokens(&self) -> u32 {
         (((self.messages.1.chars + self.model.wire_model().len() as u128) / 4).max(1))
             .try_into()
@@ -427,6 +445,7 @@ impl RetainedLlmRequest {
         ))?;
         let messages =
             RequestMessages::from_messages(std::mem::take(&mut request.messages), budget)?;
+        request.tools = LlmToolSpecs::adopt_tools_in(&request.tools, budget)?;
         Ok(Self::admitted_envelope(request, messages, hold))
     }
     /// Admit a borrowed callback result before cloning any owned envelope fields.
@@ -457,7 +476,7 @@ impl RetainedLlmRequest {
             instructions: instructions.clone(),
             model: model.clone(),
             messages: Vec::new(),
-            tools: tools.clone(),
+            tools: LlmToolSpecs::adopt_tools_in(tools, budget)?,
             tool_choice: tool_choice.clone(),
             attachment_acceptance: attachment_acceptance.clone(),
             generation: generation.clone(),

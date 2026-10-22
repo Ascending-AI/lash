@@ -21,7 +21,9 @@
 //!
 //! [`TurnCheckpoint`]: super::TurnCheckpoint
 
+use lash_protocol_types::allocation::{AllocationBudget, AllocationError, AllocationHold};
 use std::collections::BTreeMap;
+use std::sync::Arc;
 
 use serde::de::DeserializeOwned;
 
@@ -105,30 +107,73 @@ struct Chunk<T> {
 /// does not already hold beside the checkpoint row, in the same transaction.
 #[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(transparent)]
-pub struct TurnCheckpointContent(BTreeMap<CheckpointContentRef, String>);
+pub struct TurnCheckpointContent(Arc<ContentData>);
+
+#[derive(Debug, Default, serde::Serialize, serde::Deserialize)]
+#[serde(transparent)]
+struct ContentData {
+    map: BTreeMap<CheckpointContentRef, String>,
+    #[serde(skip)]
+    allocation: AllocationHold,
+    #[serde(skip)]
+    budget: AllocationBudget,
+}
+impl PartialEq for ContentData {
+    fn eq(&self, other: &Self) -> bool {
+        self.map == other.map
+    }
+}
+impl Eq for ContentData {}
 
 impl TurnCheckpointContent {
+    pub(super) fn admitted(allocation: AllocationHold, budget: AllocationBudget) -> Self {
+        Self(Arc::new(ContentData {
+            map: BTreeMap::new(),
+            allocation,
+            budget,
+        }))
+    }
+    pub(super) fn allocation(&self) -> AllocationHold {
+        self.0.allocation.clone()
+    }
+    fn data_mut(&mut self) -> Result<&mut ContentData, AllocationError> {
+        if Arc::get_mut(&mut self.0).is_none() {
+            let allocation =
+                self.0
+                    .budget
+                    .reserve(lash_protocol_types::allocation::payload_capacity(
+                        &self.0, 2048,
+                    ))?;
+            self.0 = Arc::new(ContentData {
+                map: self.0.map.clone(),
+                allocation,
+                budget: self.0.budget.clone(),
+            });
+        }
+        Ok(Arc::get_mut(&mut self.0).expect("content directory is unique after detachment"))
+    }
     /// Every blob, by digest.
     pub fn iter(&self) -> impl Iterator<Item = (&CheckpointContentRef, &[u8])> {
         self.0
+            .map
             .iter()
             .map(|(digest, text)| (digest, text.as_bytes()))
     }
 
     #[must_use]
     pub fn len(&self) -> usize {
-        self.0.len()
+        self.0.map.len()
     }
 
     #[must_use]
     pub fn is_empty(&self) -> bool {
-        self.0.is_empty()
+        self.0.map.is_empty()
     }
 
     /// Total bytes over every blob.
     #[must_use]
     pub fn byte_len(&self) -> usize {
-        self.0.values().map(String::len).sum()
+        self.0.map.values().map(String::len).sum()
     }
 
     /// Add a blob read back from a store, refusing bytes that are not the
@@ -149,19 +194,23 @@ impl TurnCheckpointContent {
             String::from_utf8(bytes).map_err(|_| TurnCheckpointRestoreError::CorruptContent {
                 content: digest.0.clone(),
             })?;
-        self.0.insert(digest, text);
+        self.data_mut()
+            .map_err(TurnCheckpointRestoreError::Allocation)?
+            .map
+            .insert(digest, text);
         Ok(())
     }
 
-    fn put(&mut self, text: String) -> CheckpointContentRef {
+    fn put(&mut self, text: String) -> Result<CheckpointContentRef, AllocationError> {
         let digest = CheckpointContentRef::of_bytes(text.as_bytes());
-        self.0.entry(digest.clone()).or_insert(text);
-        digest
+        self.data_mut()?.map.entry(digest.clone()).or_insert(text);
+        Ok(digest)
     }
 
     fn get(&self, digest: &CheckpointContentRef) -> Result<&str, TurnCheckpointRestoreError> {
         let text =
             self.0
+                .map
                 .get(digest)
                 .ok_or_else(|| TurnCheckpointRestoreError::MissingContent {
                     content: digest.0.clone(),
@@ -175,7 +224,10 @@ impl TurnCheckpointContent {
     }
 
     /// Store `value` as one blob.
-    pub(super) fn put_value<T: serde::Serialize>(&mut self, value: &T) -> CheckpointContentRef {
+    pub(super) fn put_value<T: serde::Serialize>(
+        &mut self,
+        value: &T,
+    ) -> Result<CheckpointContentRef, AllocationError> {
         self.put(encode(value))
     }
 
@@ -190,12 +242,16 @@ impl TurnCheckpointContent {
     /// Whether a blob is held under `digest`.
     #[must_use]
     pub fn contains(&self, digest: &CheckpointContentRef) -> bool {
-        self.0.contains_key(digest)
+        self.0.map.contains_key(digest)
     }
 
     /// Keep only the blobs `keep` answers `true` for.
-    pub(super) fn retain(&mut self, mut keep: impl FnMut(&CheckpointContentRef) -> bool) {
-        self.0.retain(|digest, _| keep(digest));
+    pub(super) fn retain(
+        &mut self,
+        mut keep: impl FnMut(&CheckpointContentRef) -> bool,
+    ) -> Result<(), AllocationError> {
+        self.data_mut()?.map.retain(|digest, _| keep(digest));
+        Ok(())
     }
 
     /// The items of the chain whose last chunk is `head`, in order, with the
@@ -207,7 +263,7 @@ impl TurnCheckpointContent {
         let mut chunks = Vec::new();
         let mut next = Some(head.clone());
         while let Some(digest) = next {
-            if chunks.len() > self.0.len() {
+            if chunks.len() > self.0.map.len() {
                 return Err(TurnCheckpointRestoreError::CorruptContent { content: digest.0 });
             }
             let chunk: Chunk<T> = self.value(&digest)?;
@@ -234,11 +290,12 @@ impl TurnCheckpointContent {
             items.extend(chunk);
             closed.push((digest, items.len()));
         }
-        let chain = Chain {
+        let chain = Chain(Arc::new(ChainData {
             closed,
             tail,
             head: head.clone(),
-        };
+            _allocation: self.allocation(),
+        }));
         Ok((items, chain))
     }
 }
@@ -246,14 +303,44 @@ impl TurnCheckpointContent {
 /// A sequence chain as a store holds it: its closed chunks, each with the
 /// count of items through it, the encodings of the items of its open tail,
 /// and its last chunk's digest, which names it.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(super) struct Chain {
+#[derive(Clone, Debug)]
+pub(super) struct Chain(Arc<ChainData>);
+
+#[derive(Debug)]
+pub(super) struct ChainData {
     closed: Vec<(CheckpointContentRef, usize)>,
     tail: Vec<String>,
     head: CheckpointContentRef,
+    _allocation: AllocationHold,
 }
 
+impl PartialEq for Chain {
+    fn eq(&self, other: &Self) -> bool {
+        self.closed == other.closed && self.tail == other.tail && self.head == other.head
+    }
+}
+impl Eq for Chain {}
+impl std::ops::Deref for Chain {
+    type Target = ChainData;
+    fn deref(&self) -> &ChainData {
+        &self.0
+    }
+}
 impl Chain {
+    pub(super) fn adopt_in(&self, budget: &AllocationBudget) -> Result<Self, AllocationError> {
+        let capacity = lash_protocol_types::allocation::payload_capacity(
+            &(&self.closed, &self.tail, &self.head),
+            1024,
+        );
+        let allocation = budget.reserve(capacity)?;
+        Ok(Self(Arc::new(ChainData {
+            closed: self.closed.clone(),
+            tail: self.tail.clone(),
+            head: self.head.clone(),
+            _allocation: allocation,
+        })))
+    }
+
     /// The digest of the chain's last chunk: what a checkpoint names.
     pub(super) fn head(&self) -> &CheckpointContentRef {
         &self.head
@@ -284,12 +371,13 @@ impl Chain {
         stable: usize,
         content: &mut TurnCheckpointContent,
         encoded: &mut usize,
-    ) -> Self {
-        let empty = Chain {
+    ) -> Result<Self, AllocationError> {
+        let empty = Chain(Arc::new(ChainData {
             closed: Vec::new(),
             tail: Vec::new(),
             head: CheckpointContentRef::of_bytes(chunk_text(None, &[]).as_bytes()),
-        };
+            _allocation: content.allocation(),
+        }));
         let base = base.unwrap_or(&empty);
         let stable = stable.min(base.len()).min(len);
         let kept = base.closed.partition_point(|(_, end)| *end <= stable);
@@ -305,7 +393,7 @@ impl Chain {
             open.push(encode(item));
             *encoded += 1;
             if closes(&open) {
-                let digest = content.put(chunk_text(prev.as_ref(), &open));
+                let digest = content.put(chunk_text(prev.as_ref(), &open))?;
                 closed.push((digest.clone(), start_of(&closed) + open.len()));
                 prev = Some(digest);
                 open.clear();
@@ -313,13 +401,14 @@ impl Chain {
         }
         let head = match closed.last() {
             Some((digest, _)) if open.is_empty() => digest.clone(),
-            _ => content.put(chunk_text(prev.as_ref(), &open)),
+            _ => content.put(chunk_text(prev.as_ref(), &open))?,
         };
-        Self {
+        Ok(Self(Arc::new(ChainData {
             closed,
             tail: open,
             head,
-        }
+            _allocation: content.allocation(),
+        })))
     }
 }
 

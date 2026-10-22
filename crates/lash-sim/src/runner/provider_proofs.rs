@@ -134,7 +134,7 @@ fn codex_request(tools: bool, stream_events: Option<LlmEventSender>) -> LlmReque
         .with_reasoning(Default::default()),
         messages: vec![LlmMessage::text(LlmRole::User, "lookup x")],
 
-        tools: Arc::new(tool_specs),
+        tools: Arc::new((tool_specs).into()),
         tool_choice: LlmToolChoice::Auto,
         attachment_acceptance: Default::default(),
         generation: lash_core::GenerationOptions::default(),
@@ -938,19 +938,22 @@ fn openai_compatible_request_with_events(stream_events: Option<LlmEventSender>) 
         .with_reasoning(Default::default()),
         messages: vec![LlmMessage::text(LlmRole::User, "lookup x")],
 
-        tools: Arc::new(vec![LlmToolSpec {
-            name: "lookup".to_string(),
-            description: "Lookup".to_string(),
-            input_schema: lash_protocol_types::SchemaContract::admit(json!({
-                "type": "object",
-                "properties": {
-                    "q": { "type": "string" }
-                }
-            }))
-            .expect("valid declared schema"),
-            output_schema: lash_protocol_types::SchemaContract::admit(json!({}))
+        tools: Arc::new(
+            (vec![LlmToolSpec {
+                name: "lookup".to_string(),
+                description: "Lookup".to_string(),
+                input_schema: lash_protocol_types::SchemaContract::admit(json!({
+                    "type": "object",
+                    "properties": {
+                        "q": { "type": "string" }
+                    }
+                }))
                 .expect("valid declared schema"),
-        }]),
+                output_schema: lash_protocol_types::SchemaContract::admit(json!({}))
+                    .expect("valid declared schema"),
+            }])
+            .into(),
+        ),
         tool_choice: LlmToolChoice::Auto,
         attachment_acceptance: Default::default(),
         generation: lash_core::GenerationOptions::default(),
@@ -993,7 +996,7 @@ fn openai_responses_request() -> LlmRequest {
         .with_reasoning(Default::default()),
         messages: vec![LlmMessage::text(LlmRole::User, "answer directly")],
 
-        tools: Arc::new(Vec::new()),
+        tools: Arc::new((Vec::new()).into()),
         tool_choice: LlmToolChoice::Auto,
         attachment_acceptance: Default::default(),
         generation: lash_core::GenerationOptions::default(),
@@ -1033,7 +1036,7 @@ fn anthropic_messages_request() -> LlmRequest {
         .with_reasoning(Default::default()),
         messages: vec![LlmMessage::text(LlmRole::User, "answer directly")],
 
-        tools: Arc::new(Vec::new()),
+        tools: Arc::new((Vec::new()).into()),
         tool_choice: LlmToolChoice::Auto,
         attachment_acceptance: Default::default(),
         generation: lash_core::GenerationOptions::default(),
@@ -1067,7 +1070,7 @@ fn google_request(stream: bool) -> LlmRequest {
         .with_reasoning(Default::default()),
         messages: vec![LlmMessage::text(LlmRole::User, "answer directly")],
 
-        tools: Arc::new(Vec::new()),
+        tools: Arc::new((Vec::new()).into()),
         tool_choice: LlmToolChoice::Auto,
         attachment_acceptance: Default::default(),
         generation: lash_core::GenerationOptions::default(),

@@ -1078,7 +1078,7 @@ pub struct LlmRequestSpec {
     pub instructions: Option<Arc<str>>,
     pub model: lash_protocol_types::llm_profile::LlmProfileConfig,
     pub messages: lash_protocol_types::llm::types::RequestMessages,
-    pub tools: Arc<Vec<LlmToolSpec>>,
+    pub tools: Arc<lash_protocol_types::llm::types::LlmToolSpecs>,
     pub tool_choice: LlmToolChoice,
     /// The session's recorded attachment-acceptance rules the request
     /// renders its attachments under.

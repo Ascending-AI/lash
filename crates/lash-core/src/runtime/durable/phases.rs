@@ -75,7 +75,10 @@ use std::sync::Arc;
 /// The phase checkpoint of `drive` as it stands: its machine's checkpoint
 /// and the input its checkpoints delivered, staged as its PhaseRoot.
 fn encode_checkpoint(drive: &mut dyn TurnDrive) -> Result<StagedPhase, TurnError> {
-    let delta = drive.machine().checkpoint_delta();
+    let delta = drive
+        .machine()
+        .checkpoint_delta()
+        .map_err(crate::RuntimeError::allocation)?;
     encode_phase(drive, delta)
 }
 
@@ -628,7 +631,10 @@ async fn phase_loop(
                 {
                     pin.attempt = pin.attempt.max(reservation.attempt);
                 }
-                let delta = drive.machine().checkpoint_delta();
+                let delta = drive
+                    .machine()
+                    .checkpoint_delta()
+                    .map_err(crate::RuntimeError::allocation)?;
                 let start = model_call::start(
                     &services.execution_budgets(&session),
                     tx.opened_at(),
@@ -706,7 +712,7 @@ async fn phase_loop(
                     )
                     .await?;
                     boundary.committed(cx, drive.as_mut()).await?;
-                    stored.committed(drive.as_mut());
+                    stored.committed(drive.as_mut())?;
                     drive.run_changes_committed(&written);
                     drive.phase_committed(cx).await?;
                     tool_round::release_cell_emissions(cx, drive.as_mut(), held, label).await?;
@@ -1023,7 +1029,7 @@ async fn phase_loop(
                     None,
                 )
                 .await?;
-                stored.committed(drive.as_mut());
+                stored.committed(drive.as_mut())?;
                 drive.run_changes_committed(&written);
                 drive.phase_committed(cx).await?;
                 tool_round::release_cell_emissions(
@@ -1264,7 +1270,7 @@ impl AfterModelDone {
         cx: &ActorContext,
         drive: &mut dyn TurnDrive,
     ) -> Result<(), TurnError> {
-        self.stored.committed(drive);
+        self.stored.committed(drive)?;
         drive.run_changes_committed(&self.written);
         drive.phase_committed(cx).await
     }

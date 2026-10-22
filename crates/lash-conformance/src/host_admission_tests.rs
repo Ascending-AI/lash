@@ -140,7 +140,7 @@ async fn host_admission_permit_releases_on_cancellation_and_forwards_close() {
         instructions: None,
         messages: vec![],
 
-        tools: Arc::new(vec![]),
+        tools: Arc::new((vec![]).into()),
         tool_choice: lash_core::llm::types::LlmToolChoice::None,
         attachment_acceptance: Default::default(),
         generation: Default::default(),

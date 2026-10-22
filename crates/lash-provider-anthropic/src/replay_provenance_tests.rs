@@ -51,7 +51,7 @@ fn request(messages: Vec<LlmMessage>) -> LlmRequest {
         .with_reasoning(Default::default()),
         messages,
 
-        tools: Arc::new(Vec::<LlmToolSpec>::new()),
+        tools: Arc::new((Vec::<LlmToolSpec>::new()).into()),
         tool_choice: LlmToolChoice::Auto,
         attachment_acceptance: crate::attachment_test_acceptance(),
         scope: LlmRequestScope::new(

@@ -671,7 +671,7 @@ impl TestRuntime {
         Self {
             attachment_acceptance: Default::default(),
             plugins: crate::testing::test_standard_protocol_factories(),
-            tools: Arc::new(EmptyTools),
+            tools: Arc::new((EmptyTools).into()),
             transport,
             host: test_host_config(backend),
             store: None,

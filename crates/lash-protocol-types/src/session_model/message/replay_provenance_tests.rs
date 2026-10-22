@@ -76,7 +76,7 @@ fn replay_request_from_reopened_message(
         .with_reasoning(Default::default()),
         messages: render_prompt(&reopened).messages,
 
-        tools: Arc::new(Vec::new()),
+        tools: Arc::new((Vec::new()).into()),
         tool_choice: crate::llm::types::LlmToolChoice::Auto,
         attachment_acceptance: Default::default(),
         generation: Default::default(),
