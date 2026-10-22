@@ -36,7 +36,7 @@ use lash_kernel_state::arena::{Arena, Key};
 use super::exec::Call;
 use super::operation_entry::AdmittedBody;
 use super::{Eval, Halt, Interrupt, KernelMachine, Refusal, bound, fault, raise};
-use crate::compile::{Charge, Executable, Lib, LibId, LibRun, StmtId};
+use crate::compile::{Charge, Executable, Lib, LibId, LibRun};
 use crate::functions::MachineFunction;
 use crate::interface::Bound;
 use crate::observe::Event;
