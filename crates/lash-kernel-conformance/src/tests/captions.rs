@@ -573,11 +573,19 @@ fn signature_view(dialect: &CaptionDialect<'_>) -> Result<(), crate::HarnessErro
                 link,
                 selector: lash_vocabulary::StartSelector::Main,
             };
-            let context =
-                lash_kernel_view::ViewContext::new(reference.clone(), content, Default::default())
-                    .map_err(|error| fail(&case.name, error.to_string()))?;
-            let holder = lash_kernel_check::WorkflowDocument::entered(document.clone(), reference)
-                .map_err(|error| fail(&case.name, error.to_string()))?;
+            let context = lash_kernel_view::ViewContext::new(
+                reference.clone(),
+                content,
+                Default::default(),
+                std::sync::Arc::clone(&lash_vm_releases::helper_release().unwrap().helpers),
+            )
+            .map_err(|error| fail(&case.name, error.to_string()))?;
+            let holder = lash_kernel_check::WorkflowDocument::entered(
+                document.clone(),
+                reference,
+                dialect.environment.library,
+            )
+            .map_err(|error| fail(&case.name, error.to_string()))?;
             let view = lash_kernel_view::derive_callable(
                 &holder,
                 &Unit::Library(entry.function),

@@ -365,6 +365,7 @@ impl PreparedLibrary {
             self.clone()
         } else {
             Self::with_layout_and_charge(Arc::clone(&self.0.registry), layout, self.0.charge)
+                .with_helper_handle(Arc::clone(self.helpers()))
         }
     }
 }
@@ -447,6 +448,17 @@ impl std::ops::Deref for Executable {
 }
 
 impl Executable {
+    pub(crate) fn admits_callable(&self, callable: &lash_vocabulary::CallableId) -> bool {
+        self.instances.get(&callable.link).is_some_and(|document| {
+            document.functions.contains_key(&callable.function)
+                || self
+                    .selection()
+                    .admits_helper(callable, &document.library, self.helpers())
+        })
+    }
+    pub(crate) fn selection(&self) -> &doc::Selection {
+        &self.admission.selection
+    }
     pub(crate) fn helpers(&self) -> &Arc<doc::BuildHelpers> {
         self.library.helpers()
     }

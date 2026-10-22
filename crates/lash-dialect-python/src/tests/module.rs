@@ -402,17 +402,10 @@ fn entry_convention_keeps_python_positional_and_keyword_arguments() {
 #[test]
 fn task_cleanup_follows_resolved_calls_and_belongs_to_the_entry_root() {
     let plain = module("# create_task gather\nasync def run():\n    def gather():\n        return 'create_task'\n    return gather()\n").unwrap();
-    assert!(
-        !plain
-            .document
-            .imports
-            .values()
-            .any(|import| import.name.package.to_string() == "tasks"
-                && import.name
-                    == lash_kernel_dialect::authoring::helper_name(
-                        &lash_vocabulary::FunctionName::new("tasks.cancel_all").unwrap()
-                    ))
-    );
+    let cleanup_id =
+        lash_kernel_dialect::Library::resolve(super::machine::library(), "tasks.cancel_all")
+            .unwrap();
+    assert!(!plain.document.library.contains(&cleanup_id));
     let tasks = module("import asyncio\nasync def run():\n    async def child():\n        try:\n            await asyncio.sleep(1)\n        finally:\n            print('cleanup')\n    def launch():\n        return asyncio.ensure_future(child())\n    launch()\n    await asyncio.sleep(0)\n    print('done')\n    return 7\n").unwrap();
     let document = &tasks.document;
     let lash_kernel_doc::StartConvention::PyDirect { cleanup } =
@@ -420,17 +413,7 @@ fn task_cleanup_follows_resolved_calls_and_belongs_to_the_entry_root() {
     else {
         panic!("the entry declares no root cleanup");
     };
-    assert_eq!(
-        match cleanup {
-            lash_kernel_doc::FunctionTarget::Import(slot) =>
-                document.imports[slot].name.to_string(),
-            lash_kernel_doc::FunctionTarget::Local(id) => document.functions[id].name.to_string(),
-        },
-        lash_kernel_dialect::authoring::helper_name(
-            &lash_vocabulary::FunctionName::new("tasks.cancel_all").unwrap()
-        )
-        .to_string()
-    );
+    assert_eq!(cleanup, &lash_kernel_doc::FunctionTarget::Local(cleanup_id));
     let no_try = |body: &[lash_kernel_doc::Stmt]| {
         !body
             .iter()

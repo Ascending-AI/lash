@@ -87,18 +87,9 @@ fn a_program_reaches_only_the_built_ins_it_names() {
         "function twice(f, x) { return f(f(x)); } const o = { scale: 2 }; o.scale; o.missing; twice(Math.abs, -3);",
     )
     .unwrap();
-    let listed: Vec<_> = lowered
-        .document
-        .imports
-        .values()
-        .map(|import| &import.name)
-        .collect();
-    let name = |name: &str| {
-        lash_kernel_dialect::authoring::helper_name(
-            &lash_vocabulary::FunctionName::new(name).unwrap(),
-        )
-    };
-    assert!(listed.contains(&&name("ts.math.abs")), "{listed:?}");
+    let listed: Vec<_> = lowered.document.library.iter().copied().collect();
+    let name = |name: &str| lash_kernel_dialect::Library::resolve(super::library(), name).unwrap();
+    assert!(listed.contains(&name("ts.math.abs")), "{listed:?}");
     for unnamed in [
         "ts.math.max",
         "ts.array.map",
@@ -106,7 +97,7 @@ fn a_program_reaches_only_the_built_ins_it_names() {
         "ts.map.construct",
     ] {
         assert!(
-            !listed.contains(&&name(unnamed)),
+            !listed.contains(&name(unnamed)),
             "{unnamed} is reached: {listed:?}"
         );
     }

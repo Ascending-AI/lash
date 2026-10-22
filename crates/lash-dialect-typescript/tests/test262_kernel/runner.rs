@@ -138,7 +138,14 @@ pub(crate) struct OnMachine<M> {
 impl<M: Machine> OnMachine<M> {
     pub(crate) fn new(registry: Arc<FunctionRegistry>) -> Self {
         Self {
-            library: PreparedLibrary::new(registry),
+            library: PreparedLibrary::with_helpers(
+                registry,
+                Arc::clone(
+                    &lash_vm_releases::helper_release()
+                        .expect("build helpers")
+                        .helpers,
+                ),
+            ),
             machine: std::marker::PhantomData,
         }
     }

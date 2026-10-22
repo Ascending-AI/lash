@@ -347,14 +347,17 @@ impl FunctionValue {
     pub fn check_definition(
         &self,
         document: &crate::Document,
+        helpers: &crate::BuildHelpers,
+        selection: &crate::Selection,
     ) -> Result<CallablePresentation, FunctionValueRefusal> {
         let defining = if let Some(site) = &self.creation {
-            let closure = crate::snapshot::closure_at(document, site)
-                .filter(|closure| closure.function == self.callable.function)
-                .ok_or(FunctionValueRefusal::Identity)?;
+            let closure =
+                crate::snapshot::closure_at(document, site, self.callable.link, helpers, selection)
+                    .filter(|closure| closure.function == self.callable.function)
+                    .ok_or(FunctionValueRefusal::Identity)?;
             match &closure.presentation {
                 Some(presentation) => presentation.clone(),
-                None => self.direct_presentation(document)?,
+                None => self.direct_presentation(document, helpers, selection)?,
             }
         } else if let Some(export) = document.exports.values().find_map(|export| match export {
             crate::Export::Function(export) if export.function == self.callable.function => {
@@ -368,9 +371,12 @@ impl FunctionValue {
                 representation: FunctionRepresentation::Bare,
             }
         } else {
-            self.direct_presentation(document)?
+            self.direct_presentation(document, helpers, selection)?
         };
-        if self.signature != defining.signature || self.convention != defining.convention {
+        if self.signature != defining.signature
+            || self.convention != defining.convention
+            || self.representation != defining.representation
+        {
             return Err(FunctionValueRefusal::Identity);
         }
         Ok(defining)
@@ -379,10 +385,23 @@ impl FunctionValue {
     fn direct_presentation(
         &self,
         document: &crate::Document,
+        helpers: &crate::BuildHelpers,
+        selection: &crate::Selection,
     ) -> Result<CallablePresentation, FunctionValueRefusal> {
         let definition = document
             .functions
             .get(&self.callable.function)
+            .map(|definition| std::sync::Arc::new(crate::FunctionHeader::of(definition)))
+            .or_else(|| {
+                selection
+                    .admits_helper(&self.callable, &document.library, helpers)
+                    .then(|| {
+                        helpers
+                            .registered(&self.callable.function)
+                            .map(|registered| std::sync::Arc::clone(registered.header()))
+                    })
+                    .flatten()
+            })
             .ok_or(FunctionValueRefusal::Identity)?;
         if self.convention != StartConvention::Direct
             || self.representation != FunctionRepresentation::Bare
@@ -400,8 +419,10 @@ impl FunctionValue {
     pub fn entry_export(
         &self,
         document: &crate::Document,
+        helpers: &crate::BuildHelpers,
+        selection: &crate::Selection,
     ) -> Result<crate::FunctionExport, FunctionValueRefusal> {
-        self.check_definition(document)?
+        self.check_definition(document, helpers, selection)?
             .promote_entry(
                 self.callable.function,
                 FunctionLocation {

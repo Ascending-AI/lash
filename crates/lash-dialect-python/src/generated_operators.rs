@@ -9,7 +9,6 @@ pub(crate) struct Operators {
     functions: BTreeMap<FunctionId, FunctionName>,
     /// Only identities selected by the same library as authored lowering.
     helpers: BTreeMap<FunctionId, FunctionName>,
-    source_names: BTreeMap<ImportSlot, String>,
     candidates: BTreeMap<&'static str, Vec<FunctionId>>,
 }
 impl Operators {
@@ -34,7 +33,6 @@ impl Operators {
             }
         }
         Self {
-            source_names: BTreeMap::new(),
             functions,
             helpers,
             candidates,
@@ -234,8 +232,8 @@ impl Reference for FunctionId {
     }
 }
 impl Reference for ImportSlot {
-    fn label(&self, operators: &Operators) -> Option<String> {
-        operators.source_names.get(self).cloned()
+    fn label(&self, _operators: &Operators) -> Option<String> {
+        None
     }
     fn target(&self) -> k::FunctionTarget {
         k::FunctionTarget::Import(*self)
@@ -264,16 +262,10 @@ impl Operators {
     }
     fn target(&self, label: &str) -> Option<k::FunctionTarget> {
         let mut found = self
-            .source_names
+            .helpers
             .iter()
             .filter(|(_, name)| name.as_str() == label)
-            .map(|(slot, _)| k::FunctionTarget::Import(*slot))
-            .chain(
-                self.helpers
-                    .iter()
-                    .filter(|(_, name)| name.as_str() == label)
-                    .map(|(id, _)| k::FunctionTarget::Local(*id)),
-            );
+            .map(|(id, _)| k::FunctionTarget::Local(*id));
         let target = found.next()?;
         found.next().is_none().then_some(target)
     }

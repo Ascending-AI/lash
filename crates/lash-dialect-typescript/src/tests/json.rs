@@ -152,6 +152,7 @@ fn program(
         &content.links,
         super::pages::CLOSURE,
         library,
+        lash_kernel_doc::Selection::Fresh,
     )
     .expect("JSON inputs retain their producing Links")
 }

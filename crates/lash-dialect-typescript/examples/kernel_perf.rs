@@ -480,7 +480,14 @@ fn main() -> Result<(), String> {
 
     // Prepared once, as in a worker: helper bodies compile only on use;
     // each live document's preparation is reused at start.
-    let prepared = PreparedLibrary::new(Arc::clone(&registry));
+    let prepared = PreparedLibrary::with_helpers(
+        Arc::clone(&registry),
+        Arc::clone(
+            &lash_vm_releases::helper_release()
+                .expect("build helpers")
+                .helpers,
+        ),
+    );
     let release = lash_vm_releases::helper_release().map_err(|error| error.to_string())?;
     let library = NamedLibrary::resolving(&registry, |id| release.resolver_roots().contains(id))
         .expect("unique library names");
@@ -1122,7 +1129,14 @@ fn host_json_probe() -> Result<(), String> {
     let release = lash_vm_releases::helper_release().map_err(|error| error.to_string())?;
     let library =
         NamedLibrary::resolving(&registry, |id| release.resolver_roots().contains(id)).unwrap();
-    let prepared = PreparedLibrary::new(Arc::clone(&registry));
+    let prepared = PreparedLibrary::with_helpers(
+        Arc::clone(&registry),
+        Arc::clone(
+            &lash_vm_releases::helper_release()
+                .expect("build helpers")
+                .helpers,
+        ),
+    );
     let effects = effects();
     let env_namespaces = crate::linked::namespaces(&effects, &Default::default()).unwrap();
     let env = Environment::new(&library, &env_namespaces);

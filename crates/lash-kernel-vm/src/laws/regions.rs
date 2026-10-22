@@ -24,7 +24,7 @@ fn checked(text: &str, check: impl FnOnce(&LoopPlan, &dyn Fn(&LoopPlan) -> Resul
     let (program, _) = Embedder::new(text).program(true);
     let admitted = program
         .library
-        .admit(&program.document, Default::default())
+        .admit(&program.document, Default::default(), &program.selection)
         .unwrap_or_else(|_| panic!("the loop program is admitted"));
     let exe = admitted
         .executable(
@@ -236,7 +236,7 @@ fn lowering_admits_an_island_plan_only_as_its_stream_states_it() {
     let (program, _) = Embedder::new(ISLAND).program(true);
     let admitted = program
         .library
-        .admit(&program.document, Default::default())
+        .admit(&program.document, Default::default(), &program.selection)
         .unwrap_or_else(|_| panic!("the island program is admitted"));
     let exe = admitted
         .executable(

@@ -159,6 +159,7 @@ pub fn loop_regions(program: &Program) -> Result<usize, StartError> {
     let admitted = program.library.admit(
         &program.document,
         lash_vocabulary::data_limits::KernelDataLimits::default(),
+        &program.selection,
     )?;
     let exe = admitted
         .executable(
@@ -186,6 +187,7 @@ pub fn call_islands(program: &Program) -> Result<usize, StartError> {
     let admitted = program.library.admit(
         &program.document,
         lash_vocabulary::data_limits::KernelDataLimits::default(),
+        &program.selection,
     )?;
     let exe = admitted
         .executable(

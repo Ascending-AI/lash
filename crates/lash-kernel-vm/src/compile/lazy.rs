@@ -25,6 +25,7 @@ pub(super) struct LibraryTables {
     pub(super) stmts: FrameArray<usize>,
     pub(super) occurrence_at: BTreeMap<Site, usize>,
     pub(super) occurrence_keys: Box<[Vec<u8>]>,
+    pub(super) occurrence_units: Box<[Unit]>,
 }
 
 /// A library function with no body to compile.
@@ -386,6 +387,7 @@ impl PreparedLibrary {
             })
             .collect();
         tables.occurrence_keys = by_key.keys().cloned().collect();
+        tables.occurrence_units = by_key.values().map(|site| site.unit.clone()).collect();
         tables.occurrence_at = by_key
             .into_values()
             .enumerate()

@@ -17,7 +17,7 @@ use crate::{OpenError, StartError};
 
 #[derive(Default)]
 pub(super) struct Documents(
-    BTreeMap<(usize, usize), Arc<Admission>>,
+    BTreeMap<(usize, usize, doc::Selection), Arc<Admission>>,
     /// The identities validated against this library, with the document
     /// depth they were validated under: a later admission of one skips
     /// validation (FIG-6931).
@@ -39,6 +39,7 @@ const VALIDATED: usize = 4096;
 type CodeCell = Arc<OnceLock<Result<PreparedCode, Missing>>>;
 
 pub(crate) struct Admission {
+    pub(super) selection: doc::Selection,
     document: Weak<Document>,
     identity: OnceLock<DocumentId>,
     code: Mutex<BTreeMap<CodeContent, CodeCell>>,
@@ -245,8 +246,9 @@ impl PreparedLibrary {
         &self,
         document: &Arc<Document>,
         limits: KernelDataLimits,
+        selection: &doc::Selection,
     ) -> Result<Arc<Admission>, Refused> {
-        self.admit_as(document, None, limits)
+        self.admit_as(document, None, limits, selection)
     }
 
     /// Records that the document of `identity` was validated against this
@@ -275,8 +277,10 @@ impl PreparedLibrary {
         document: &Arc<Document>,
         identity: DocumentId,
         limits: KernelDataLimits,
+        selection: &doc::Selection,
     ) -> bool {
-        self.admit_as(document, Some(identity), limits).is_ok()
+        self.admit_as(document, Some(identity), limits, selection)
+            .is_ok()
     }
 
     fn admit_as(
@@ -284,6 +288,7 @@ impl PreparedLibrary {
         document: &Arc<Document>,
         identity: Option<DocumentId>,
         limits: KernelDataLimits,
+        selection: &doc::Selection,
     ) -> Result<Arc<Admission>, Refused> {
         let mut documents = self
             .0
@@ -292,7 +297,11 @@ impl PreparedLibrary {
             .unwrap_or_else(|error| error.into_inner());
         // Only document depth affects structural validation. Runtime value
         // and inline limits are applied by each run's heap, not admission.
-        let key = (Arc::as_ptr(document) as usize, limits.document_depth());
+        let key = (
+            Arc::as_ptr(document) as usize,
+            limits.document_depth(),
+            selection.clone(),
+        );
         if let Some(admitted) = documents.0.get(&key) {
             return Ok(Arc::clone(admitted));
         }
@@ -302,29 +311,47 @@ impl PreparedLibrary {
         documents
             .0
             .retain(|_, admitted| admitted.document.strong_count() != 0);
-        let validated = identity
-            .is_some_and(|identity| documents.1.contains(&(identity, limits.document_depth())));
+        let validated = matches!(selection, doc::Selection::Fresh)
+            && identity
+                .is_some_and(|identity| documents.1.contains(&(identity, limits.document_depth())));
         if !validated {
-            for function in document.library.iter() {
-                if !self.helpers().contains(function) {
-                    return Err(Refused::Invalid(lash_kernel_doc::Invalid {
-                        site: None,
-                        reason: Box::new(lash_kernel_doc::InvalidReason::FunctionNotResolved {
-                            function: *function,
-                        }),
-                    }));
+            match selection {
+                doc::Selection::Fresh => {
+                    for function in document.library.iter() {
+                        if !self.helpers().contains(function) {
+                            return Err(Refused::Invalid(lash_kernel_doc::Invalid {
+                                site: None,
+                                reason: Box::new(
+                                    lash_kernel_doc::InvalidReason::FunctionNotResolved {
+                                        function: *function,
+                                    },
+                                ),
+                            }));
+                        }
+                    }
+                    validate_document_with_limits(document, self.registry().as_ref(), limits)
+                        .map_err(Refused::Invalid)?;
+                    if let Some(identity) = identity {
+                        if documents.1.len() >= VALIDATED {
+                            documents.1.clear();
+                        }
+                        documents.1.insert((identity, limits.document_depth()));
+                    }
                 }
-            }
-            validate_document_with_limits(document, self.registry().as_ref(), limits)
-                .map_err(Refused::Invalid)?;
-            if let Some(identity) = identity {
-                if documents.1.len() >= VALIDATED {
-                    documents.1.clear();
+                doc::Selection::Restored(restored) => {
+                    doc::validate_restored_document_with_limits(
+                        document,
+                        self.helpers(),
+                        self.registry().as_ref(),
+                        restored,
+                        limits,
+                    )
+                    .map_err(Refused::Invalid)?;
                 }
-                documents.1.insert((identity, limits.document_depth()));
             }
         }
         let admitted = Arc::new(Admission {
+            selection: selection.clone(),
             document: Arc::downgrade(document),
             identity: identity.map_or_else(OnceLock::new, OnceLock::from),
             code: Mutex::new(BTreeMap::new()),
@@ -448,15 +475,21 @@ impl Admission {
             for export in loaded.exports.values() {
                 match export {
                     doc::Export::Function(function) => {
-                        pending.insert(function.function);
+                        if functions.contains(&function.function) {
+                            pending.insert(function.function);
+                        }
                     }
                     doc::Export::Type(ty) => {
-                        pending.insert(ty.checker);
+                        if functions.contains(&ty.checker) {
+                            pending.insert(ty.checker);
+                        }
                         for member in ty.members.values() {
                             let (doc::TypeMember::Static(function)
                             | doc::TypeMember::Method(function)
                             | doc::TypeMember::Property(function)) = member;
-                            pending.insert(function.function);
+                            if functions.contains(&function.function) {
+                                pending.insert(function.function);
+                            }
                         }
                     }
                     doc::Export::Error { .. } => {}
@@ -582,7 +615,7 @@ mod tests {
         )]);
         let library = PreparedLibrary::new(Arc::new(doc::FunctionRegistry::default()));
         let admission = library
-            .admit(&root, KernelDataLimits::standard())
+            .admit(&root, KernelDataLimits::standard(), &doc::Selection::Fresh)
             .unwrap_or_else(|_| panic!("valid root"));
         IMPORT_SOURCE_VISITS.with(|count| count.set(0));
         DEFINITION_COPIES.with(|count| count.set(0));
@@ -721,6 +754,7 @@ mod tests {
                 ]),
                 doc::heap::PageId([8; 32]),
                 library.clone(),
+                lash_kernel_doc::Selection::Fresh,
             )
             .expect("linked program");
             let unused = ids[usize::from(name == "first")];
@@ -729,7 +763,7 @@ mod tests {
                 "retaining a helper document made its unselected export executable"
             );
             let admission = library
-                .admit(&root, KernelDataLimits::standard())
+                .admit(&root, KernelDataLimits::standard(), &doc::Selection::Fresh)
                 .unwrap_or_else(|_| panic!("admitted"));
             let exe = admission
                 .executable(
@@ -779,6 +813,7 @@ mod tests {
             &BTreeMap::from([(root, link)]),
             doc::heap::PageId([3; 32]),
             library,
+            lash_kernel_doc::Selection::Fresh,
         )
         .expect("valid immutable program");
         DOCUMENT_ENCODINGS.with(|count| count.set(0));
@@ -875,7 +910,11 @@ mod tests {
         }
         let library = PreparedLibrary::new(Arc::new(doc::FunctionRegistry::default()));
         let admission = library
-            .admit(&document, KernelDataLimits::standard())
+            .admit(
+                &document,
+                KernelDataLimits::standard(),
+                &doc::Selection::Fresh,
+            )
             .unwrap_or_else(|_| panic!("valid linked code"));
         let first = admission
             .executable(&document, &library, &documents, &functions, &instances[0])

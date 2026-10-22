@@ -370,7 +370,13 @@ pub(crate) fn closure_code(
             // then uses the declared function's free-variable layout, while
             // its immutable lexical origin remains in the defining Link.
             let document = exe.instances.get(&callable.link)?;
-            let origin = lash_kernel_doc::snapshot::closure_at(document, site)?;
+            let origin = lash_kernel_doc::snapshot::closure_at(
+                document,
+                site,
+                callable.link,
+                exe.helpers(),
+                exe.selection(),
+            )?;
             if origin.function != callable.function {
                 return None;
             }

@@ -2,10 +2,7 @@
 use crate::library::{Dialect, Library};
 use lash_kernel_dialect::{Environment, Library as _, Mode, NamedLibrary, Namespaces};
 use lash_kernel_doc::heap::{HeapFault, PageGrant, PageId, PageRef};
-use lash_kernel_doc::{
-    Datum, Document, ErrorDatum, Export, FunctionCatalog, FunctionExport, FunctionRegistry, Handle,
-    NumberPolicy, StartConvention,
-};
+use lash_kernel_doc::{Datum, Document, ErrorDatum, FunctionCatalog, FunctionRegistry, Handle};
 
 use lash_kernel_state::paged::{PageAnswer, PageBody, PageSource};
 use lash_kernel_vm::{
@@ -58,24 +55,18 @@ impl PageSource for Pages {
 struct Fixture {
     library: NamedLibrary,
     registry: Arc<FunctionRegistry>,
-    helpers: Document,
+    helpers: Arc<lash_kernel_doc::BuildHelpers>,
 }
 impl Fixture {
     fn new(dialect: Dialect) -> Self {
         let built = Library::of(dialect).expect("dialect definitions");
-        let mut helpers = Document::new(NumberPolicy::BySpelling, vec![]);
-        helpers.main = None;
-        for (id, registered) in built.registry.iter() {
-            let definition = registered.definition().as_ref().clone();
-            if let Some(body) = definition.body() {
-                for (slot, import) in &body.imports {
-                    if let Some(prior) = helpers.imports.insert(*slot, import.clone()) {
-                        assert_eq!(prior, *import);
-                    }
-                }
-            }
-            helpers.functions.insert(*id, definition);
-        }
+        let helpers = Arc::new(
+            lash_kernel_doc::BuildHelpers::new(
+                built.registry.clone(),
+                built.registry.iter().map(|(id, _)| *id),
+            )
+            .expect("closed helper image"),
+        );
         let library = built.names;
         Self {
             registry: Arc::new(built.registry),
@@ -103,85 +94,31 @@ impl Fixture {
                 lash_kernel_doc::print_document(&document)
             );
         }
-        let mut helpers = self.helpers.clone();
-        let mut fills = BTreeMap::new();
-        for (slot, import) in &document.imports {
-            match &import.kind {
-                ImportKind::Operation { .. } => {
-                    fills.insert(
-                        *slot,
-                        Fill::Operation(
-                            lash_kernel_dialect::authoring::service_requirement(&import.name)
-                                .expect("service"),
-                        ),
-                    );
-                }
-                ImportKind::Code { .. } => {
-                    let (id, f) = self
-                        .registry
-                        .iter()
-                        .find(|(_, f)| {
-                            lash_kernel_dialect::authoring::helper_name(&f.definition().name)
-                                == import.name
-                        })
-                        .expect("helper name");
-                    let name = Name::new(format!("helper_{id}"));
-                    helpers.exports.insert(
-                        name.clone(),
-                        Export::Function(FunctionExport {
-                            function: *id,
-                            signature: f.definition().signature.clone(),
-                            convention: StartConvention::Direct,
-                            asynchronous: false,
-                            rest: false,
-                        }),
-                    );
-                    fills.insert(
-                        *slot,
-                        Fill::Export {
-                            link: lash_vocabulary::LinkId::from_bytes([0; 32]),
-                            export: lash_vocabulary::ExportName { name, member: None },
-                        },
-                    );
-                }
-                _ => panic!("this fixture imports helpers and operations"),
-            }
-        }
-        let helper_link = Link {
-            document: helpers.identity(),
-            fills: helpers
-                .imports
-                .iter()
-                .map(|(slot, import)| {
-                    (
-                        *slot,
-                        Fill::Operation(
-                            lash_kernel_dialect::authoring::service_requirement(&import.name)
-                                .expect("helper service"),
-                        ),
-                    )
-                })
-                .collect(),
-        };
-        let helper_id = helper_link.identity();
-        for fill in fills.values_mut() {
-            if let Fill::Export { link, .. } = fill {
-                *link = helper_id;
-            }
-        }
+        let fills = document
+            .imports
+            .iter()
+            .map(|(slot, import)| {
+                assert!(matches!(import.kind, ImportKind::Operation { .. }));
+                (
+                    *slot,
+                    Fill::Operation(
+                        lash_kernel_dialect::authoring::service_requirement(&import.name)
+                            .expect("service"),
+                    ),
+                )
+            })
+            .collect();
         let root = Link {
             document: document.identity(),
             fills,
         };
         Program::prepare(
             root.identity(),
-            BTreeMap::from([
-                (helpers.identity(), Arc::new(helpers)),
-                (document.identity(), Arc::new(document)),
-            ]),
-            &BTreeMap::from([(helper_id, helper_link), (root.identity(), root)]),
+            BTreeMap::from([(document.identity(), Arc::new(document))]),
+            &BTreeMap::from([(root.identity(), root)]),
             PageId([7; 32]),
-            PreparedLibrary::new(Arc::clone(&self.registry)),
+            PreparedLibrary::with_helpers(Arc::clone(&self.registry), Arc::clone(&self.helpers)),
+            lash_kernel_doc::Selection::Fresh,
         )
         .expect("prepared linked program")
     }

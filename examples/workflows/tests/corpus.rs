@@ -684,8 +684,8 @@ fn every_python_corpus_case_has_one_body_per_source_loop_and_no_statement_inflat
             };
         let is_run = |action: &lash_kernel_doc::ActExpr| {
             matches!(&action.kind,
-            lash_kernel_doc::ActKind::Spawn(lash_kernel_doc::Callee::Import(slot))
-                if document.imports[slot].name == lash_kernel_dialect::authoring::helper_name(&lash_vocabulary::FunctionName::new("py.task.run").unwrap()))
+            lash_kernel_doc::ActKind::Spawn(lash_kernel_doc::Callee::Local(function))
+                if lash::vm::helper_release().unwrap().helpers.registered(function).is_some_and(|registered| registered.name() == "py.task.run"))
         };
         let mut deferred = std::collections::BTreeSet::new();
         for (unit, body) in document.units() {
@@ -744,13 +744,13 @@ fn every_python_corpus_case_has_one_body_per_source_loop_and_no_statement_inflat
                         },
                     ],
                 ) = attempt.finally.as_deref()
-                && let ActKind::Call(Callee::Import(function)) = &action.kind
-                && document.imports.get(function).is_some_and(|import| {
-                    import.name
-                        == lash_kernel_dialect::authoring::helper_name(
-                            &lash_vocabulary::FunctionName::new("tasks.cancel_all").unwrap(),
-                        )
-                })
+                && let ActKind::Call(Callee::Local(function)) = &action.kind
+                && document.library.contains(function)
+                && lash::vm::helper_release()
+                    .unwrap()
+                    .helpers
+                    .registered(function)
+                    .is_some_and(|registered| registered.name() == "tasks.cancel_all")
             {
                 entry_cleanup += 2;
                 pending.push((unit.clone(), Node::Block(&attempt.body)));
@@ -1020,18 +1020,14 @@ fn every_typescript_corpus_case_has_source_shaped_statements_and_one_body_per_lo
                     .unwrap()
                     .block
                     .as_slice()
-                && let lash_kernel_doc::ActKind::Call(lash_kernel_doc::Callee::Import(function)) =
+                && let lash_kernel_doc::ActKind::Call(lash_kernel_doc::Callee::Local(function)) =
                     action.kind
-                && lowered
-                    .document
-                    .imports
-                    .get(&function)
-                    .is_some_and(|import| {
-                        import.name
-                            == lash_kernel_dialect::authoring::helper_name(
-                                &lash_vocabulary::FunctionName::new("ts.promise.start").unwrap(),
-                            )
-                    })
+                && lowered.document.library.contains(&function)
+                && lash::vm::helper_release()
+                    .unwrap()
+                    .helpers
+                    .registered(&function)
+                    .is_some_and(|registered| registered.name() == "ts.promise.start")
                 && matches!(action.args.first(), Some(lash_kernel_doc::Expr::Closure(_)))
             {
                 adapters += 1;

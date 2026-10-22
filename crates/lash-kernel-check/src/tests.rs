@@ -83,10 +83,18 @@ fn incomplete_entry_requires_signature_without_restricting_ordinary_functions() 
         token: None,
     };
     captured
-        .check_definition(&document)
+        .check_definition(
+            &document,
+            &lash_kernel_doc::BuildHelpers::empty(),
+            &lash_kernel_doc::Selection::Fresh,
+        )
         .expect("an ordinary captured kernel closure needs no dialect presentation");
     assert!(matches!(
-        captured.entry_export(&document),
+        captured.entry_export(
+            &document,
+            &lash_kernel_doc::BuildHelpers::empty(),
+            &lash_kernel_doc::Selection::Fresh
+        ),
         Err(lash_kernel_doc::FunctionValueRefusal::SignatureRequired { .. })
     ));
     let refusal = crate::startable_export(&document, &Name::new("entry")).unwrap_err();
@@ -176,12 +184,25 @@ fn entry_promotion_verifies_the_defining_callable_contract() {
         token: None,
     };
     assert_eq!(
-        value.entry_export(&document).unwrap().signature,
+        value
+            .entry_export(
+                &document,
+                &lash_kernel_doc::BuildHelpers::empty(),
+                &lash_kernel_doc::Selection::Fresh
+            )
+            .unwrap()
+            .signature,
         value.signature
     );
     value.signature.result = lash_vocabulary::Type::Text;
     assert_eq!(
-        value.entry_export(&document).unwrap_err(),
+        value
+            .entry_export(
+                &document,
+                &lash_kernel_doc::BuildHelpers::empty(),
+                &lash_kernel_doc::Selection::Fresh
+            )
+            .unwrap_err(),
         lash_kernel_doc::FunctionValueRefusal::Identity
     );
 }

@@ -234,6 +234,7 @@ pub(crate) fn prepare_document(
         &BTreeMap::from([(link.identity(), link)]),
         crate::pages::CLOSURE,
         library.clone(),
+        lash_kernel_doc::Selection::Fresh,
     )
     .ok()
 }

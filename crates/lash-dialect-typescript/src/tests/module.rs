@@ -367,6 +367,7 @@ fn selected_operations(source: &str, entry: &str) -> Vec<String> {
                 name: Name::new(entry),
                 member: None,
             }),
+            super::library(),
         )
         .expect("selected Link reach");
     reach

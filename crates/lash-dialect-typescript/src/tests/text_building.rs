@@ -30,7 +30,7 @@ fn a_float_key_lowers_to_its_spelling_and_one_concatenation() {
             "{key}:\n{text}"
         );
         assert!(
-            super::linked_inspection::helper_slot(
+            super::linked_inspection::helper_reference(
                 &super::lower(&format!(
                     "function f(n: number) {{ const key = {key}; return key; }}"
                 ))
@@ -62,7 +62,7 @@ fn an_unproven_operand_keeps_the_general_form() {
     let unknown = main_text("function f(x) { return String(x) + `k${x}`; }");
     assert!(unknown.contains("ts.to_string(x)"), "{unknown}");
     assert!(
-        super::linked_inspection::helper_slot(
+        super::linked_inspection::helper_reference(
             &super::lower("function f(x) { return String(x) + `k${x}`; }")
                 .unwrap()
                 .document,
@@ -74,15 +74,13 @@ fn an_unproven_operand_keeps_the_general_form() {
     // A spread has no fixed position: it keeps the argument list.
     let spread = main_text("function f(xs) { return String(...xs); }");
     assert!(
-        super::lower("function f(xs) { return String(...xs); }")
-            .unwrap()
-            .document
-            .imports
-            .values()
-            .any(|import| import.name
-                == lash_kernel_dialect::authoring::helper_name(
-                    &lash_vocabulary::FunctionName::new("ts.string.create").unwrap()
-                )),
+        super::linked_inspection::helper_reference(
+            &super::lower("function f(xs) { return String(...xs); }")
+                .unwrap()
+                .document,
+            "ts.string.create"
+        )
+        .is_some(),
         "{spread}"
     );
     // Three or more parts are one join.

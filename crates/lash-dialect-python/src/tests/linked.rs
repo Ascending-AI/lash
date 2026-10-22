@@ -2,7 +2,7 @@
 use lash_kernel_dialect::{
     EffectControl, NamespaceKind, NamespaceMember, Namespaces, OperationSignature,
 };
-use lash_vocabulary::package::{Fill, Link, MemberKind, Visibility};
+use lash_vocabulary::package::{Fill, Link, Visibility};
 use lash_vocabulary::{
     EffectName, ImportKind, Name, OperationMode, OperationUse, QualifiedName, QualifiedOperation,
     Signature, TurnControls,
@@ -67,8 +67,7 @@ pub(super) fn program(
     document: Arc<lash_kernel_doc::Document>,
     library: lash_kernel_vm::PreparedLibrary,
 ) -> lash_kernel_vm::Program {
-    let release = lash_vm_releases::helper_release().expect("helper release");
-    let mut content = release.content.clone();
+    let mut content = lash_kernel_package::LinkedContent::default();
     let mut fills = BTreeMap::new();
     for (slot, import) in &document.imports {
         let fill = match &import.kind {
@@ -80,23 +79,7 @@ pub(super) fn program(
                     },
                 ),
             ),
-            _ => {
-                let member = content
-                    .packages
-                    .values()
-                    .find(|package| package.path == import.name.package)
-                    .and_then(|package| package.members.get(&import.name.member))
-                    .expect("helper package export");
-                let MemberKind::Export { link, export } = &member.kind else {
-                    panic!("code export")
-                };
-                let mut export = export.clone();
-                export.member = import.name.type_member.clone();
-                Fill::Export {
-                    link: *link,
-                    export,
-                }
-            }
+            _ => panic!("ordinary code fixtures supply their own Link graph"),
         };
         fills.insert(*slot, fill);
     }
@@ -118,6 +101,7 @@ pub(super) fn program(
         &content.links,
         super::pages::CLOSURE,
         library,
+        lash_kernel_doc::Selection::Fresh,
     )
     .expect("linked fixture");
     OPERATIONS.with(|operations| {
@@ -198,17 +182,14 @@ pub(super) fn exported<'a>(
     function
 }
 
-/// The document-local slot of exactly this code helper, when it is imported.
-pub(super) fn helper_slot(
+/// The exact build library reference selected by lowering.
+pub(super) fn helper_reference(
     document: &lash_kernel_doc::Document,
     helper: &str,
-) -> Option<lash_vocabulary::ImportSlot> {
-    let name = lash_kernel_dialect::authoring::helper_name(
-        &lash_vocabulary::FunctionName::new(helper).expect("helper name"),
-    );
-    document.imports.iter().find_map(|(slot, import)| {
-        (import.name == name && matches!(import.kind, ImportKind::Code { .. })).then_some(*slot)
-    })
+) -> Option<lash_vocabulary::FunctionId> {
+    use lash_kernel_dialect::Library as _;
+    let id = super::machine::library().resolve(helper)?;
+    document.library.contains(&id).then_some(id)
 }
 
 /// An operation's diagnostic name identifies its declaration, never its call syntax.

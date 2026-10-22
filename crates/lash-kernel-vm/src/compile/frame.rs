@@ -159,6 +159,7 @@ impl PreparedLibrary {
             })
             .collect();
         tables.occurrence_keys = by_key.keys().cloned().collect();
+        tables.occurrence_units = by_key.values().map(|site| site.unit.clone()).collect();
         tables.occurrence_at = by_key
             .into_values()
             .enumerate()

@@ -116,18 +116,38 @@ pub struct Ordinals {
 
 /// Ephemeral admission facts produced by the single live-code walk after a
 /// helper-library mismatch. It is not part of any saved document or checkpoint.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RestoreSelection {
     pub pins: BTreeSet<FunctionId>,
+    /// Reached authored and helper callables, each with its operation Link.
     pub live: BTreeSet<CallableId>,
 }
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub enum Selection {
     #[default]
     Fresh,
     Restored(RestoreSelection),
+}
+
+impl Selection {
+    /// One owner of helper provenance for frames, captures and public callables.
+    pub fn admits_helper(
+        &self,
+        callable: &CallableId,
+        manifest: &LibraryDependencies,
+        helpers: &crate::BuildHelpers,
+    ) -> bool {
+        match self {
+            Self::Fresh => helpers.admits(manifest, &callable.function),
+            Self::Restored(selection) => {
+                selection.live.contains(callable)
+                    && selection.pins.contains(&callable.function)
+                    && helpers.contains(&callable.function)
+            }
+        }
+    }
 }
 
 /// A document's admitted code origins: local definitions first, then only its
@@ -593,4 +613,80 @@ impl Document {
             .copied()
             .unwrap_or_else(|| unreachable!("validated Document has one kernel"))
     }
+}
+
+/// After a mismatch proof, admit only retained authored code and exact pins.
+/// Dead manifest roots are structurally checked but never resolved.
+pub fn validate_restored_document_with_limits(
+    document: &Document,
+    helpers: &crate::BuildHelpers,
+    catalog: &dyn crate::FunctionCatalog,
+    selection: &RestoreSelection,
+    limits: lash_vocabulary::KernelDataLimits,
+) -> Result<(), crate::Invalid> {
+    crate::validate_document_structure_with_limits(document, limits)?;
+    let missing = |function| crate::Invalid {
+        site: None,
+        reason: Box::new(crate::InvalidReason::FunctionNotResolved { function }),
+    };
+    struct Pinned<'a> {
+        catalog: &'a dyn crate::FunctionCatalog,
+        pins: &'a BTreeSet<FunctionId>,
+    }
+    impl crate::FunctionCatalog for Pinned<'_> {
+        fn definition(&self, id: &FunctionId) -> Option<&FunctionDefinition> {
+            self.pins
+                .contains(id)
+                .then(|| self.catalog.definition(id))
+                .flatten()
+        }
+        fn header(&self, id: &FunctionId) -> Option<std::sync::Arc<crate::FunctionHeader>> {
+            self.pins
+                .contains(id)
+                .then(|| self.catalog.header(id))
+                .flatten()
+        }
+        fn registered(&self, id: &FunctionId) -> Option<&crate::RegisteredFunction> {
+            self.pins
+                .contains(id)
+                .then(|| self.catalog.registered(id))
+                .flatten()
+        }
+    }
+    // The Program checks each pinned helper's operation declarations under its
+    // exact saved Link. Document-local validation cannot infer a Link from bytes.
+    for function in &selection.pins {
+        helpers
+            .registered(function)
+            .ok_or_else(|| missing(*function))?;
+    }
+    let pinned = Pinned {
+        catalog,
+        pins: &selection.pins,
+    };
+    let context = DocumentCatalog::new(document, &pinned);
+    let mut pending: Vec<_> = selection
+        .live
+        .iter()
+        .map(|callable| callable.function)
+        .collect();
+    let mut seen = BTreeSet::new();
+    while let Some(function) = pending.pop() {
+        if !seen.insert(function) {
+            continue;
+        }
+        let Some(definition) = document.functions.get(&function) else {
+            continue;
+        };
+        crate::validate_definition_with_limits(definition, &context, limits)?;
+        if let Some(body) = definition.body() {
+            pending.extend(
+                body.functions
+                    .keys()
+                    .filter(|id| document.functions.contains_key(id))
+                    .copied(),
+            );
+        }
+    }
+    Ok(())
 }

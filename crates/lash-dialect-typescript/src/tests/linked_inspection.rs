@@ -55,7 +55,8 @@ pub(super) fn definitions(
                 .flat_map(|body| lash_kernel_doc::Node::Block(&body.block).functions_within())
         })
         .collect();
-    lash_kernel_dialect::authoring::include_native_definitions(&mut document, used, &names);
+    lash_kernel_dialect::authoring::include_library_dependencies(&mut document, used, &names)
+        .expect("library references");
     document
 }
 
@@ -82,17 +83,13 @@ pub(super) fn main(
     document
 }
 
-/// The document-local slot of exactly this code helper, when it is imported.
-pub(super) fn helper_slot(
+/// The exact build library reference selected by lowering.
+pub(super) fn helper_reference(
     document: &lash_kernel_doc::Document,
     helper: &str,
-) -> Option<lash_vocabulary::ImportSlot> {
-    let name = lash_kernel_dialect::authoring::helper_name(
-        &lash_vocabulary::FunctionName::new(helper).expect("helper name"),
-    );
-    document.imports.iter().find_map(|(slot, import)| {
-        (import.name == name && matches!(import.kind, ImportKind::Code { .. })).then_some(*slot)
-    })
+) -> Option<lash_vocabulary::FunctionId> {
+    let id = super::library().resolve(helper)?;
+    document.library.contains(&id).then_some(id)
 }
 
 /// An operation's diagnostic name identifies its declaration, never its call syntax.

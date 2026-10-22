@@ -34,6 +34,51 @@ impl ViewContext {
             timers: Default::default(),
         })
     }
+    /// Install build-owned display facts for exact helpers in each Link's
+    /// admitted library reach. Labels confer no code or operation authority.
+    pub fn add_helper_labels(
+        &mut self,
+        labels: &BTreeMap<lash_vocabulary::FunctionId, String>,
+    ) -> Result<(), lash_helper_labels::LabelError> {
+        for (function, json) in labels {
+            if !self.helpers.contains(function) {
+                return Err(lash_helper_labels::LabelError::at(
+                    "/definitions",
+                    &function.to_string(),
+                    "helper is not installed",
+                ));
+            }
+            let label = lash_helper_labels::read_json(&format!(
+                "{{\"definitions\":{{\"helper\":{json}}}}}"
+            ))?
+            .definitions
+            .remove("helper")
+            .ok_or_else(|| {
+                lash_helper_labels::LabelError::at(
+                    "/definitions",
+                    "helper",
+                    "missing helper display",
+                )
+            })?;
+            for (link, instance) in &self.content.links {
+                let document = self.document(*link).ok_or_else(|| {
+                    lash_helper_labels::LabelError::at("", "link", "missing document")
+                })?;
+                if self.helpers.admits(&document.library, function) {
+                    self.labels.insert(
+                        CallableId {
+                            link: *link,
+                            function: *function,
+                        },
+                        label.clone(),
+                    );
+                }
+                let _ = instance;
+            }
+        }
+        Ok(())
+    }
+
     pub fn reference(&self) -> &LinkedStart {
         &self.reference
     }

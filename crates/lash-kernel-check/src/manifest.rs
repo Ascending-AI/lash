@@ -20,24 +20,6 @@ fn scan(
     while let Some(node) = pending.pop() {
         imports.extend(node.imports());
         functions.extend(node.functions());
-        if let Node::Action(action) = node {
-            let atoms: &[lash_kernel_doc::Atom] = match action {
-                lash_kernel_doc::Action::Call { args, .. }
-                | lash_kernel_doc::Action::Spawn { args, .. }
-                | lash_kernel_doc::Action::Perform { args, .. } => args,
-                lash_kernel_doc::Action::Await { value, .. } => std::slice::from_ref(value),
-                lash_kernel_doc::Action::Join { task }
-                | lash_kernel_doc::Action::Cancel { task } => std::slice::from_ref(task),
-                lash_kernel_doc::Action::JoinMany { tasks, .. } => std::slice::from_ref(tasks),
-                lash_kernel_doc::Action::Yield => &[],
-            };
-            for atom in atoms {
-                if let lash_kernel_doc::Atom::Literal(lash_kernel_doc::Literal::Function(id)) = atom
-                {
-                    functions.insert(*id);
-                }
-            }
-        }
         pending.extend(node.children());
     }
 }

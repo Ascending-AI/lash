@@ -279,7 +279,7 @@ impl KernelMachine {
             ..bounds
         };
         let library = program.library.in_charge(bounds.charge).in_layout(layout);
-        let admitted = library.admit(&program.document, limits)?;
+        let admitted = library.admit(&program.document, limits, &program.selection)?;
         let exe = admitted
             .executable(
                 &program.document,

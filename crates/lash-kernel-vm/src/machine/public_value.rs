@@ -125,10 +125,14 @@ impl KernelMachine {
                     let Some(document) = exe.instances.get(&identity.callable.link) else {
                         continue;
                     };
-                    let Some(presentation) =
-                        lash_kernel_doc::snapshot::closure_at(document, &identity.site.site)
-                            .and_then(|closure| closure.presentation.as_ref())
-                    else {
+                    let Some(presentation) = lash_kernel_doc::snapshot::closure_at(
+                        document,
+                        &identity.site.site,
+                        identity.callable.link,
+                        exe.helpers(),
+                        exe.selection(),
+                    )
+                    .and_then(|closure| closure.presentation.as_ref()) else {
                         continue;
                     };
                     let lash_kernel_doc::FunctionRepresentation::Token { tag, callable } =
@@ -172,7 +176,15 @@ impl KernelMachine {
             };
             let signature = site
                 .as_ref()
-                .and_then(|site| lash_kernel_doc::snapshot::closure_at(document, &site.site))
+                .and_then(|site| {
+                    lash_kernel_doc::snapshot::closure_at(
+                        document,
+                        &site.site,
+                        callable.link,
+                        exe.helpers(),
+                        exe.selection(),
+                    )
+                })
                 .and_then(|closure| closure.presentation.as_ref())
                 .map(|presentation| &presentation.signature)
                 .or_else(|| {

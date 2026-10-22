@@ -50,7 +50,6 @@ pub enum Lowered {
 
 pub struct Runner {
     library: NamedLibrary,
-    helper_names: BTreeMap<lash_vocabulary::QualifiedName, String>,
     prepared: PreparedLibrary,
     charge: lash_kernel_vm::Charge,
 }
@@ -88,20 +87,18 @@ impl Runner {
             }
             _ => lash_ext_py_core::implement(&mut registry, helpers).map_err(|e| e.to_string())?,
         }
-        // Index the library's authored-name projection once for the corpus.
-        // Its ordered names retain the same first match as Library::imported.
-        let mut helper_names = BTreeMap::new();
-        for (name, _) in library.iter() {
-            let name = lash_vocabulary::FunctionName::new(name).map_err(|e| e.to_string())?;
-            helper_names
-                .entry(lash_kernel_dialect::authoring::helper_name(&name))
-                .or_insert_with(|| name.to_string());
-        }
+        let build_helpers = Arc::new(
+            lash_kernel_doc::BuildHelpers::new(
+                registry.clone(),
+                registry.iter().map(|(id, _)| *id),
+            )
+            .map_err(|e| e.to_string())?,
+        );
         Ok(Self {
             library,
-            helper_names,
             charge,
-            prepared: PreparedLibrary::with_charge(Arc::new(registry), charge),
+            prepared: PreparedLibrary::with_charge(Arc::new(registry), charge)
+                .with_helper_handle(build_helpers),
         })
     }
 
@@ -189,15 +186,11 @@ impl Runner {
         .map_err(|e| e.to_string())?;
         let helpers = program
             .document
-            .imports
-            .values()
-            // Comparisons classify the authored helper identity, not its
-            // encoded package member. Use the library's own name projection.
-            .map(|import| {
-                self.helper_names
-                    .get(&import.name)
-                    .cloned()
-                    .unwrap_or_else(|| import.name.to_string())
+            .library
+            .iter()
+            .filter_map(|id| {
+                lash_kernel_doc::FunctionCatalog::header(&self.library, id)
+                    .map(|header| header.name.to_string())
             })
             .collect();
         let mut host = ScriptHost {

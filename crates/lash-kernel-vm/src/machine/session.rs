@@ -25,7 +25,7 @@ pub(crate) fn start(
     CellStart::admit_host_metadata(start.host.iter().map(|(name, _)| name.as_str()))?;
     program.validate_links()?;
     let library = program.library.in_charge(bounds.charge).in_layout(layout);
-    let admitted = library.admit(&program.document, limits)?;
+    let admitted = library.admit(&program.document, limits, &program.selection)?;
     let exe = admitted
         .executable(
             &program.document,
@@ -212,7 +212,11 @@ pub(crate) fn start(
             // Starting an ordinary exported callable is not workflow promotion.
             // Workflow hosts apply entry_export before reaching the machine.
             let defining = function
-                .check_definition(&machine.program.document)
+                .check_definition(
+                    &machine.program.document,
+                    machine.program.helpers(),
+                    &machine.program.selection,
+                )
                 .map_err(StartError::FunctionValue)?;
             Some(lash_kernel_doc::FunctionExport {
                 function: function.callable.function,

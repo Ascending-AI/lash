@@ -95,7 +95,7 @@ pub use continuation::{LiveRolesError, live_roles, live_roles_in};
 pub use document::{
     DecodeError, Document, DocumentCatalog, EncodeError, Export, FunctionExport, KERNEL_VERSION,
     LibraryDependencies, MAX_NESTING_DEPTH, Ordinals, RestoreSelection, Selection, TypeDef,
-    TypeMember,
+    TypeMember, validate_restored_document_with_limits,
 };
 pub use function::{
     FIRST_NATIVE_VERSION, Formula, FunctionBody, FunctionDeclarations, FunctionDefinition,

@@ -83,13 +83,18 @@ fn an_identity_validated_against_the_library_is_admitted_without_validating_it_a
     let identity = document.identity();
     let limits = lash_vocabulary::data_limits::KernelDataLimits::standard();
     assert!(
-        !prepared.admit_identified(&document, identity, limits),
+        !prepared.admit_identified(
+            &document,
+            identity,
+            limits,
+            &lash_kernel_doc::Selection::Fresh
+        ),
         "validation refuses it"
     );
     prepared.note_validated(identity, limits);
     let copy = Arc::new((*document).clone());
     assert!(
-        prepared.admit_identified(&copy, identity, limits),
+        prepared.admit_identified(&copy, identity, limits, &lash_kernel_doc::Selection::Fresh),
         "an identity validated before is not validated again"
     );
 }

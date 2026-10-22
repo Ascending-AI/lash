@@ -40,6 +40,8 @@ pub(crate) struct CrossingRun<'a> {
     pub documents: &'a BTreeMap<DocumentId, Arc<lash_kernel_doc::Document>>,
     pub instances: &'a BTreeMap<LinkId, crate::interface::PreparedInstance>,
     pub catalog: &'a dyn FunctionCatalog,
+    pub helpers: &'a lash_kernel_doc::BuildHelpers,
+    pub selection: &'a lash_kernel_doc::Selection,
     pub data: KernelDataLimits,
 }
 
@@ -82,8 +84,14 @@ fn function_root(
         let closure = heap.heap.closure(*id)?;
         let document = defining_document(run, closure.callable)?;
         let site = closure.site.resolve(heap.heap.pages())?;
-        if let Some(start) = lash_kernel_doc::snapshot::closure_at(document, &site)
-            .and_then(|c| c.presentation.as_ref())
+        if let Some(start) = lash_kernel_doc::snapshot::closure_at(
+            document,
+            &site,
+            closure.callable.link,
+            run.helpers,
+            run.selection,
+        )
+        .and_then(|c| c.presentation.as_ref())
             && let lash_kernel_doc::FunctionRepresentation::Token { tag, callable } =
                 &start.representation
             && *callable as usize == index

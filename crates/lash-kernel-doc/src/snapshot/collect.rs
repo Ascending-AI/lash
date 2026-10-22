@@ -353,10 +353,39 @@ fn no_constant_kind(value: &PageValue) -> ValueKind {
 }
 
 /// The closure expression at `site` of `document`'s own code.
-pub fn closure_at<'a>(document: &'a Document, site: &Site) -> Option<&'a Closure> {
+pub fn closure_at<'a>(
+    document: &'a Document,
+    site: &Site,
+    link: lash_vocabulary::LinkId,
+    helpers: &'a crate::BuildHelpers,
+    selection: &crate::Selection,
+) -> Option<&'a Closure> {
     let body: &[Stmt] = match &site.unit {
         Unit::Main => document.main.as_deref()?,
-        Unit::Library(id) => &document.functions.get(id)?.body()?.block,
+        Unit::Library(id) => {
+            &document
+                .functions
+                .get(id)
+                .or_else(|| {
+                    selection
+                        .admits_helper(
+                            &lash_vocabulary::CallableId {
+                                link,
+                                function: *id,
+                            },
+                            &document.library,
+                            helpers,
+                        )
+                        .then(|| {
+                            helpers
+                                .registered(id)
+                                .map(|registered| &**registered.definition())
+                        })
+                        .flatten()
+                })?
+                .body()?
+                .block
+        }
         Unit::Function(_) => return None,
     };
     let mut node = Node::Block(body);

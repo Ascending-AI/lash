@@ -882,6 +882,7 @@ pub(crate) fn program(document: Arc<Document>, library: PreparedLibrary) -> Prog
         &BTreeMap::from([(link.identity(), link)]),
         PageId([8; 32]),
         library,
+        lash_kernel_doc::Selection::Fresh,
     )
     .unwrap()
 }

@@ -112,9 +112,15 @@ impl Graph {
                         .get(&(callable.link, site.as_ref().clone()))
                 })
                 .cloned();
-            let start = lash_kernel_doc::snapshot::closure_at(document, &site)
-                .and_then(|c| c.presentation.as_ref())
-                .ok_or_else(|| raised("not_data", "the function states no start signature"))?;
+            let start = lash_kernel_doc::snapshot::closure_at(
+                document,
+                &site,
+                callable.link,
+                run.helpers,
+                run.selection,
+            )
+            .and_then(|c| c.presentation.as_ref())
+            .ok_or_else(|| raised("not_data", "the function states no start signature"))?;
             {
                 signature = start.signature.clone();
                 convention = start.convention.clone();
