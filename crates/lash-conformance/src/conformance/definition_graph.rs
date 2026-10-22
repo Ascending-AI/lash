@@ -90,14 +90,25 @@ impl Published {
             .expect("the helper registers");
         // 96 KiB of text: past a Document node's bound, so the body streams.
         let text = format!("{tag}-{}", "d".repeat(96 * 1024));
-        let document = lash_kernel_doc::IdentifiedDocument::new(
-            lash_kernel_doc::parse_document(&format!(
-                "kernel 1\nnumbers float\nuse helper = @{helper}\nentry run() -> Any\n\
-                 fn run() {{ let n = invoke helper() let pair = (n, \"{text}\") return pair }}\n\
-                 main {{ }}"
-            ))
-            .expect("a document"),
+        // Package-model Documents retain their local functions by identity;
+        // only calls outside the Document require an Import and fulfilment.
+        let mut document = lash_kernel_doc::parse_document(&format!(
+            "kernel 1\nnumbers float\n\
+             main {{ let n = invoke @{helper}() let pair = (n, \"{text}\") finish pair }}",
+        ))
+        .expect("a document");
+        document.functions.insert(
+            helper,
+            registry
+                .get(&helper)
+                .expect("the registered helper")
+                .definition()
+                .as_ref()
+                .clone(),
         );
+        lash_kernel_doc::validate_document(&document, &registry)
+            .expect("the document validates against its registered helper");
+        let document = lash_kernel_doc::IdentifiedDocument::new(document);
         let declarations = lash_kernel_doc::CheckedDeclarations::required(&document, &registry)
             .expect("the document's helper is declared");
         let (function_id, function) = declarations
@@ -113,8 +124,8 @@ impl Published {
         }
     }
 
-    /// The definition of entry `n` of the document: another definition,
-    /// the same manifest.
+    /// Definition variant `n`: another descriptor over the same Document
+    /// and local-function artifacts.
     #[expect(clippy::expect_used, reason = "fixture drafts are well formed")]
     fn draft(&self, n: u32) -> crate::ProcessDefinitionDraft {
         crate::ProcessDefinitionDraft::new(
