@@ -18,7 +18,9 @@ pub use lash_core_store::store::plugin_writers::{
     declared_tool_provider,
 };
 
-pub use lash_core_store::plugin_state::{FormatNamespace, FormatRefusal, PluginConfigNamespace};
+pub use lash_core_store::plugin_state::{
+    ConfigAdmissionError, ConfigJson, FormatNamespace, FormatRefusal, PluginConfigNamespace,
+};
 
 pub use lash_protocol_types::{
     CheckpointKind, ControlPhaseExpired, PluginMessage, PluginRuntimeEvent, ToolCatalogContribution,

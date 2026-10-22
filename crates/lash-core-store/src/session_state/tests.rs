@@ -175,6 +175,7 @@ fn incomplete_checkpoint_component_projection_is_a_typed_error() {
         .build_checkpoint(
             crate::PersistedTurnState::default(),
             crate::store::FleetFormat::current(),
+            &lash_protocol_types::allocation::AllocationBudget::unowned(),
         )
         .expect_err("snapshot projection cannot prove the complete keyed set");
 
@@ -228,7 +229,7 @@ fn initial_frame_payload(state: &RuntimeSessionState) -> (crate::NodeId, serde_j
 /// A plugin configuration whose protocol namespace is `payload`.
 fn protocol_config(payload: serde_json::Value) -> crate::PluginConfig {
     let mut config = crate::PluginConfig::for_protocol(Some("protocol".to_string()));
-    config.insert("protocol", payload);
+    config.insert("protocol", payload).unwrap();
     config
 }
 
@@ -680,7 +681,9 @@ fn a_durable_frame_switch_leaves_only_the_new_frame_resident() {
 
 fn capped_plugin_config(cap: u64) -> crate::PluginConfig {
     let mut config = crate::PluginConfig::default();
-    config.insert("cap_owner", serde_json::json!({ "cap": cap }));
+    config
+        .insert("cap_owner", serde_json::json!({ "cap": cap }))
+        .unwrap();
     config
 }
 
@@ -758,8 +761,8 @@ fn a_checkpoint_naming_the_retired_tool_state_component_is_refused() {
             crate::store::RETIRED_TOOL_STATE_CHECKPOINT_COMPONENT.to_owned(),
             crate::store::HydratedCheckpointComponent::Changed {
                 encoding_version: crate::store::CHECKPOINT_COMPONENT_ENCODING_VERSION,
-                body_ref: crate::BlobRef::for_content(body),
-                body: std::sync::Arc::from(&body[..]),
+                body_ref: crate::BlobRef::for_content(body).into(),
+                body: (&body[..]).into(),
             },
         )]
         .into_iter()

@@ -61,7 +61,7 @@ impl NamespaceEncoding {
 pub struct NamespaceBody {
     pub values: BlobRef,
     /// Root envelope, carried as the checkpoint component's body.
-    pub bytes: Arc<[u8]>,
+    pub bytes: lash_kernel_doc::allocation::SharedBytes,
     /// Complete read closure. Node bodies are shared, never re-encoded.
     pub graph: BTreeMap<NodeId, EncodedNode>,
     /// Only nodes not held by the preceding durable root.
@@ -257,7 +257,7 @@ impl NamespaceBody {
         tree.collect(&mut graph);
         Self {
             values: BlobRef(tree.root.to_hex()),
-            bytes: Arc::clone(&graph[&tree.root].bytes),
+            bytes: graph[&tree.root].bytes.clone(),
             published: graph.clone(),
             graph,
             snapshot: values,
@@ -325,7 +325,7 @@ impl NamespaceBody {
         let tree = load_trie(&mut decoder, &graph, root, &mut Vec::new(), &mut values)?;
         Ok(Self {
             values: BlobRef(root.to_hex()),
-            bytes: Arc::clone(&graph[&root].bytes),
+            bytes: graph[&root].bytes.clone(),
             graph,
             published: BTreeMap::new(),
             snapshot: Arc::new(values),

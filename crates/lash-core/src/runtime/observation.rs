@@ -63,7 +63,7 @@ pub(in crate::runtime) enum QueryPlugins {
     Built(Arc<crate::PluginSession>),
     Recorded {
         plugins: Arc<crate::PluginSession>,
-        view: Arc<[u8]>,
+        view: lash_kernel_doc::allocation::SharedBytes,
         fleet: crate::FleetFormat,
     },
     Head(Arc<crate::PluginSession>),

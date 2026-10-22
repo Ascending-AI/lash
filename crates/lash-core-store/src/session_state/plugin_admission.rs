@@ -6,7 +6,7 @@ use super::{
 
 impl RuntimeSessionState {
     /// The recorded native plugin view published with the current checkpoint.
-    pub fn plugin_admission_snapshot(&self) -> Option<std::sync::Arc<[u8]>> {
+    pub fn plugin_admission_snapshot(&self) -> Option<lash_kernel_doc::allocation::SharedBytes> {
         self.checkpoint_components
             .component(crate::store::PLUGIN_ADMISSION_CHECKPOINT_COMPONENT)
             .and_then(ResidentCheckpointComponent::opaque_body)
@@ -19,7 +19,10 @@ impl RuntimeSessionState {
             .remove(crate::store::PLUGIN_ADMISSION_CHECKPOINT_COMPONENT);
     }
 
-    pub fn set_plugin_admission_snapshot(&mut self, bytes: std::sync::Arc<[u8]>) {
+    pub fn set_plugin_admission_snapshot(
+        &mut self,
+        bytes: lash_kernel_doc::allocation::SharedBytes,
+    ) {
         let key = crate::store::PLUGIN_ADMISSION_CHECKPOINT_COMPONENT.to_owned();
         let previous = self.checkpoint_components.entries.get(&key);
         if previous

@@ -242,7 +242,7 @@ pub(crate) fn encode_json<T: serde::Serialize>(value: &T) -> Result<String, Stor
 
 async fn put_checkpoint_blobs_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    blobs: &std::collections::BTreeMap<String, std::sync::Arc<[u8]>>,
+    blobs: &std::collections::BTreeMap<String, lash_core_store::checkpoint_graph::SharedBytes>,
     chunk_size: usize,
 ) -> Result<(), StoreError> {
     let blobs = blobs.iter().collect::<Vec<_>>();
@@ -372,7 +372,8 @@ async fn checkpoint_component_bodies_tx(
 pub(crate) struct CheckpointParts {
     pub(crate) checkpoint_ref: BlobRef,
     pub(crate) manifest: SessionCheckpoint,
-    pub(crate) supplied: std::collections::BTreeMap<String, std::sync::Arc<[u8]>>,
+    pub(crate) supplied:
+        std::collections::BTreeMap<String, lash_core_store::checkpoint_graph::SharedBytes>,
     pub(crate) nodes: std::collections::BTreeMap<
         lash_core_store::checkpoint_graph::NodeId,
         lash_core_store::checkpoint_graph::EncodedNode,
@@ -383,7 +384,7 @@ pub(crate) struct CheckpointParts {
 /// components' lock order: what its put writes before its graph.
 type CheckpointComponents = (
     SessionCheckpoint,
-    std::collections::BTreeMap<String, std::sync::Arc<[u8]>>,
+    std::collections::BTreeMap<String, lash_core_store::checkpoint_graph::SharedBytes>,
     Vec<(String, Option<String>)>,
 );
 
@@ -421,7 +422,9 @@ fn checkpoint_components(
             continue;
         }
         let (stored_ref, body) = match component {
-            HydratedCheckpointComponent::Changed { body_ref, body, .. } => (body_ref.clone(), body),
+            HydratedCheckpointComponent::Changed { body_ref, body, .. } => {
+                (body_ref.as_ref().clone(), body)
+            }
             HydratedCheckpointComponent::Hydrated { body, .. } => {
                 let stored_ref = BlobRef::for_content(body);
                 #[cfg(feature = "perf-witness")]
@@ -435,9 +438,7 @@ fn checkpoint_components(
             &stored_ref,
             &descriptor.blob_ref,
         )?;
-        supplied
-            .entry(stored_ref.0)
-            .or_insert_with(|| std::sync::Arc::clone(body));
+        supplied.entry(stored_ref.0).or_insert_with(|| body.clone());
     }
     Ok((manifest, supplied, acquisition_order))
 }
@@ -563,13 +564,11 @@ pub(crate) async fn get_checkpoint_tx(
                 })?;
             // The descriptor alone: its heap pages are read on demand
             // under a root lease (ADR 0145 §10).
-            let descriptor = lash_core_store::checkpoint_graph::NodeSource::fetch(&closure, &root)
-                .map(|node| std::sync::Arc::from(node.bytes))
-                .ok_or_else(|| {
-                    graph_store_error(
-                        lash_core_store::checkpoint_graph::GraphRefusal::MissingNode(root),
-                    )
-                })?;
+            let descriptor = closure.shared_bytes(&root).ok_or_else(|| {
+                graph_store_error(
+                    lash_core_store::checkpoint_graph::GraphRefusal::MissingNode(root),
+                )
+            })?;
             Ok::<_, StoreError>(lash_core_store::store::CheckpointExecution {
                 root,
                 descriptor: Some(descriptor),
@@ -581,23 +580,22 @@ pub(crate) async fn get_checkpoint_tx(
     for (key, descriptor) in &manifest.components {
         let graph_body =
             lash_core_store::checkpoint_graph::NodeId::from_hex(descriptor.blob_ref.as_str())
-                .and_then(|id| lash_core_store::checkpoint_graph::NodeSource::fetch(&closure, &id))
-                .map(|node| std::sync::Arc::<[u8]>::from(node.bytes));
+                .and_then(|id| closure.shared_bytes(&id));
         let body = if lash_core_store::plugin_state::namespace_component_plugin(key).is_some() {
-            graph_body.as_ref()
+            graph_body
         } else {
-            bodies.get(descriptor.blob_ref.as_str())
+            bodies
+                .get(descriptor.blob_ref.as_str())
+                .cloned()
+                .map(lash_core_store::checkpoint_graph::SharedBytes::from)
         }
         .ok_or_else(|| StoreError::CheckpointComponentMissing {
             key: key.clone(),
-            blob_ref: descriptor.blob_ref.clone(),
+            blob_ref: descriptor.blob_ref.as_ref().clone(),
         })?;
         components.insert(
             key.clone(),
-            lash_core_store::store::HydratedCheckpointComponent::hydrated(
-                descriptor.clone(),
-                std::sync::Arc::clone(body),
-            ),
+            lash_core_store::store::HydratedCheckpointComponent::hydrated(descriptor.clone(), body),
         );
     }
     Ok(Some(HydratedSessionCheckpoint {

@@ -473,6 +473,16 @@ pub(crate) struct GraphClosure {
     opaque: BTreeSet<NodeId>,
 }
 
+impl GraphClosure {
+    /// Share the immutable envelope and its admission, without a borrowed-byte copy.
+    pub(crate) fn shared_bytes(
+        &self,
+        id: &NodeId,
+    ) -> Option<lash_core_store::checkpoint_graph::SharedBytes> {
+        self.nodes.get(id).map(|node| node.bytes.clone())
+    }
+}
+
 impl NodeSource for GraphClosure {
     fn fetch(&self, id: &NodeId) -> Option<StoredNode<'_>> {
         match self.nodes.get(id) {

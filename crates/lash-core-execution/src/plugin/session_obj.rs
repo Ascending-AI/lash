@@ -540,7 +540,7 @@ impl PluginSession {
     pub fn committed_plugin_config(
         &self,
         config: &PluginConfig,
-    ) -> Result<Option<PluginConfig>, FormatRefusal> {
+    ) -> Result<Option<PluginConfig>, lash_core_store::plugin_state::ConfigAdmissionError> {
         let Some(writers) = self.recorded_writers() else {
             return Ok(None);
         };
@@ -1150,7 +1150,7 @@ impl lash_core_store::session_state::SessionPluginStateSource for PluginSession 
         &self,
         config: &PluginConfig,
         fleet: crate::FleetFormat,
-    ) -> Result<Option<Arc<[u8]>>, crate::RuntimeError> {
+    ) -> Result<Option<lash_kernel_doc::allocation::SharedBytes>, crate::RuntimeError> {
         self.capture_native_view(Some(config), fleet)
             .map_err(|error| crate::RuntimeEffectControllerError::from(error).into_runtime_error())
     }

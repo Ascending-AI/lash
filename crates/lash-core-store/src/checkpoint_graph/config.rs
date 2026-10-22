@@ -199,12 +199,15 @@ mod tests {
     #[test]
     fn recorded_config_shares_unchanged_objects_with_revisions() {
         let mut head = crate::store::SessionHeadPayload::default();
-        head.config.plugin_config.insert(
-            "sticky",
-            serde_json::json!({
-                "schema": "large sticky plugin configuration ".repeat(8192)
-            }),
-        );
+        head.config
+            .plugin_config
+            .insert(
+                "sticky",
+                serde_json::json!({
+                    "schema": "large sticky plugin configuration ".repeat(8192)
+                }),
+            )
+            .unwrap();
         let mut staging = GraphStaging::new(EncodeBudget::new(ExplicitLimit::new(u64::MAX)));
         let head_root = stage(&mut staging, &head).expect("head graph");
         let base_root = stage(&mut staging, &head.config).expect("base graph");

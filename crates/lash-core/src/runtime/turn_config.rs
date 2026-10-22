@@ -223,6 +223,9 @@ fn run_resolve_fault(
     error: crate::RunResolveError,
 ) -> RuntimeEffectControllerError {
     match error {
+        crate::RunResolveError::Allocation(error) => {
+            RuntimeEffectControllerError::from(crate::StoreError::Allocation(error))
+        }
         crate::RunResolveError::Model(error) => {
             RuntimeEffectControllerError::llm_profile_unavailable(
                 &error.key,
@@ -245,8 +248,11 @@ fn run_resolve_fault(
 
 /// A config judgment's fault: a refusal is the run's shape refusal, and a
 /// corrupt recorded namespace is corruption.
-fn config_fault(fault: crate::ConfigFault) -> RuntimeEffectControllerError {
+pub(crate) fn config_fault(fault: crate::ConfigFault) -> RuntimeEffectControllerError {
     match fault {
+        crate::ConfigFault::Allocation(error) => {
+            RuntimeEffectControllerError::from(crate::StoreError::Allocation(error))
+        }
         crate::ConfigFault::Refused(refusal) => {
             RuntimeEffectControllerError::run_shape_refused(crate::RunShapeRefusal::Owner {
                 refusal,

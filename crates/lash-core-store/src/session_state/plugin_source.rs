@@ -10,7 +10,7 @@ pub trait SessionPluginStateSource {
         &self,
         config: &crate::PluginConfig,
         fleet: crate::store::FleetFormat,
-    ) -> Result<Option<std::sync::Arc<[u8]>>, crate::RuntimeError>;
+    ) -> Result<Option<lash_kernel_doc::allocation::SharedBytes>, crate::RuntimeError>;
 
     /// Namespace-filtered export, as a plugin-facing handle sees it, in the
     /// formats the source's admission recorded.
@@ -36,7 +36,7 @@ where
         &self,
         config: &crate::PluginConfig,
         fleet: crate::store::FleetFormat,
-    ) -> Result<Option<std::sync::Arc<[u8]>>, crate::RuntimeError> {
+    ) -> Result<Option<lash_kernel_doc::allocation::SharedBytes>, crate::RuntimeError> {
         T::capture_plugin_admission(self, config, fleet)
     }
 

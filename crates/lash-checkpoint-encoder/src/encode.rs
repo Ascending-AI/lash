@@ -41,6 +41,7 @@ use super::node::{
 use super::refusal::GraphRefusal;
 use super::registry::{BodyShape, NodeKind};
 use crate::EncodeBudget;
+use crate::allocation::{AllocationBudget, AllocationHold};
 
 /// A logical body: one typed value's canonical tokens, references as
 /// digests, values unplaced.
@@ -74,6 +75,7 @@ pub struct GraphStaging {
     budget: EncodeBudget,
     cache: Arc<Mutex<EncodingCache>>,
     recorded: Option<Vec<EncodedNode>>,
+    allocation_budget: AllocationBudget,
 }
 
 // Canonical encoding depends only on the operation and its complete input,
@@ -106,6 +108,7 @@ struct EncodingCache {
     entries: BTreeMap<EncodingKey, (Arc<PreparedEncoding>, u64)>,
     bytes: usize,
     clock: u64,
+    _allocation: AllocationHold,
 }
 
 impl std::fmt::Debug for EncodingCache {
@@ -207,7 +210,31 @@ impl GraphStaging {
             budget,
             cache: encoding_cache(),
             recorded: None,
+            allocation_budget: AllocationBudget::unowned(),
         }
+    }
+
+    /// Construct serving staging under the same ledger as its source owner.
+    pub fn new_in(
+        budget: EncodeBudget,
+        allocation_budget: &AllocationBudget,
+    ) -> Result<Self, GraphRefusal> {
+        let allocation =
+            allocation_budget.reserve((std::mem::size_of::<EncodingCache>() + 64) as u64)?;
+        Ok(Self {
+            nodes: BTreeMap::new(),
+            budget,
+            cache: Arc::new(Mutex::new(EncodingCache {
+                _allocation: allocation,
+                ..EncodingCache::default()
+            })),
+            recorded: None,
+            allocation_budget: allocation_budget.clone(),
+        })
+    }
+
+    pub fn allocation_budget(&self) -> &AllocationBudget {
+        &self.allocation_budget
     }
 
     #[cfg(any(test, feature = "testing"))]
@@ -365,7 +392,7 @@ impl GraphStaging {
         let id = NodeId::of_envelope(&bytes);
         self.stage_prepared(EncodedNode {
             id,
-            bytes: Arc::from(bytes),
+            bytes: bytes.into(),
         })?;
         Ok(id)
     }
@@ -768,6 +795,79 @@ fn longest_block(events: &[Event], start: usize) -> usize {
 #[cfg(test)]
 mod cache_tests {
     use super::*;
+
+    /// LO-EVICT-ENCODER: refuse cache metadata before claiming its allocation;
+    /// the obligation remains live until the final shared staging is dropped.
+    #[test]
+    fn serving_staging_admits_its_cache_before_claiming_it() {
+        use crate::allocation::{
+            AllocationError, AllocationLedger, AllocationReservation, ReserveError,
+        };
+        use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+        #[derive(Clone)]
+        struct Ledger {
+            refused: Arc<AtomicBool>,
+            used: Arc<AtomicU64>,
+        }
+        struct Hold {
+            used: Arc<AtomicU64>,
+            bytes: u64,
+        }
+        impl AllocationReservation for Hold {
+            fn retain(&self) {}
+        }
+        impl Drop for Hold {
+            fn drop(&mut self) {
+                self.used.fetch_sub(self.bytes, Ordering::SeqCst);
+            }
+        }
+        impl AllocationLedger for Ledger {
+            fn reserve(&self, bytes: u64) -> Result<AllocationHold, AllocationError> {
+                if self.refused.load(Ordering::SeqCst) {
+                    return Err(AllocationError {
+                        kind: ReserveError::Pressure,
+                        actor: "encoder".into(),
+                        requested: bytes,
+                        capacity: 1,
+                    });
+                }
+                self.used.fetch_add(bytes, Ordering::SeqCst);
+                Ok(AllocationHold::new(Hold {
+                    used: self.used.clone(),
+                    bytes,
+                }))
+            }
+            fn reserve_shared(
+                &self,
+                _: usize,
+                bytes: u64,
+            ) -> Result<AllocationHold, AllocationError> {
+                self.reserve(bytes)
+            }
+        }
+        let ledger = Ledger {
+            refused: Arc::new(AtomicBool::new(true)),
+            used: Arc::new(AtomicU64::new(0)),
+        };
+        let budget = AllocationBudget::new(ledger.clone());
+        let encoding = || EncodeBudget::new(crate::ExplicitLimit::new(u64::MAX));
+        assert!(matches!(
+            GraphStaging::new_in(encoding(), &budget),
+            Err(GraphRefusal::Allocation(AllocationError {
+                kind: ReserveError::Pressure,
+                ..
+            }))
+        ));
+        ledger.refused.store(false, Ordering::SeqCst);
+        let staging = GraphStaging::new_in(encoding(), &budget).expect("admitted cache");
+        assert_eq!(staging.allocation_budget().identity(), budget.identity());
+        assert!(ledger.used.load(Ordering::SeqCst) >= std::mem::size_of::<EncodingCache>() as u64);
+        let shared = staging.clone();
+        drop(staging);
+        assert!(ledger.used.load(Ordering::SeqCst) > 0);
+        drop(shared);
+        assert_eq!(ledger.used.load(Ordering::SeqCst), 0);
+    }
 
     /// Preparation residency is bounded by both retained bytes and entries;
     /// eviction cannot change an encoding and an oversized input runs uncached.

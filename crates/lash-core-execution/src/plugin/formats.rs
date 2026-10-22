@@ -6,6 +6,7 @@ use super::FormatVersion;
 use super::PluginConfig;
 use super::PluginHost;
 use super::PluginState;
+use lash_core_store::plugin_state::ConfigAdmissionError;
 use lash_execution_contracts::plugin_error::PluginError;
 
 impl PluginHost {
@@ -109,7 +110,10 @@ impl PluginHost {
         Ok(namespace)
     }
 
-    pub fn decode_config(&self, config: &PluginConfig) -> Result<PluginConfig, FormatRefusal> {
+    pub fn decode_config(
+        &self,
+        config: &PluginConfig,
+    ) -> Result<PluginConfig, ConfigAdmissionError> {
         decode_config_for(self.factories(), config)
     }
 
@@ -159,7 +163,7 @@ impl PluginHost {
         &self,
         config: &PluginConfig,
         writers: &BTreeMap<String, FormatVersion>,
-    ) -> Result<PluginConfig, FormatRefusal> {
+    ) -> Result<PluginConfig, ConfigAdmissionError> {
         let decoded = self.decode_config(config)?;
         let mut encoded = decoded.clone();
         for factory in self.factories() {
@@ -182,7 +186,7 @@ impl PluginHost {
                 factory.id(),
                 to,
                 factory.encode_format(to, FormatNamespace::Config, &namespace.value)?,
-            );
+            )?;
         }
         Ok(encoded)
     }
@@ -191,7 +195,7 @@ impl PluginHost {
 pub(super) fn decode_config_for(
     factories: &[std::sync::Arc<dyn super::PluginFactory>],
     config: &PluginConfig,
-) -> Result<PluginConfig, FormatRefusal> {
+) -> Result<PluginConfig, ConfigAdmissionError> {
     for factory in factories {
         if let Some(namespace) = config.namespace(factory.id())
             && namespace.format_version > factory.plugin_declaration().format_version
@@ -201,7 +205,8 @@ pub(super) fn decode_config_for(
                 namespace: FormatNamespace::Config,
                 stored: namespace.format_version,
                 readable: factory.plugin_declaration().format_version,
-            });
+            }
+            .into());
         }
     }
     let mut decoded = config.clone();
@@ -218,7 +223,7 @@ pub(super) fn decode_config_for(
                 factory.id(),
                 factory.plugin_declaration().format_version,
                 value,
-            );
+            )?;
         }
     }
     Ok(decoded)

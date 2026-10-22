@@ -264,11 +264,11 @@ async fn an_out_of_range_plugin_write_is_refused_with_zero_publication_on_every_
 
     // A plugin the record does not name publishes only its first format.
     let mut request = root_session_request(&SessionId::from("unprovisioned"));
-    request.config.plugin_config.insert_versioned(
-        PLUGIN,
-        version(2),
-        serde_json::json!({"count": 1}),
-    );
+    request
+        .config
+        .plugin_config
+        .insert_versioned(PLUGIN, version(2), serde_json::json!({"count": 1}))
+        .unwrap();
     let before = published(&n).await;
     let error = store
         .admit_session(&request)
@@ -293,11 +293,11 @@ async fn an_out_of_range_plugin_write_is_refused_with_zero_publication_on_every_
         .expect("admit the session");
     let mut state = state("writer");
     state.set_plugin_state(Some(plugin_state(1, 1)));
-    state.authority.plugin_config.insert_versioned(
-        PLUGIN,
-        version(1),
-        serde_json::json!({"count": 1}),
-    );
+    state
+        .authority
+        .plugin_config
+        .insert_versioned(PLUGIN, version(1), serde_json::json!({"count": 1}))
+        .unwrap();
     commit(&store, &mut state)
         .await
         .expect("the first format is admitted");
@@ -305,11 +305,11 @@ async fn an_out_of_range_plugin_write_is_refused_with_zero_publication_on_every_
 
     // Session creation.
     let mut request = root_session_request(&SessionId::from("created-at-2"));
-    request.config.plugin_config.insert_versioned(
-        PLUGIN,
-        version(2),
-        serde_json::json!({"count": 1}),
-    );
+    request
+        .config
+        .plugin_config
+        .insert_versioned(PLUGIN, version(2), serde_json::json!({"count": 1}))
+        .unwrap();
     let before = published(&n).await;
     let error = store
         .admit_session(&request)
@@ -329,11 +329,11 @@ async fn an_out_of_range_plugin_write_is_refused_with_zero_publication_on_every_
 
     // A commit's plugin config.
     let mut next_state = state.clone();
-    next_state.authority.plugin_config.insert_versioned(
-        PLUGIN,
-        version(2),
-        serde_json::json!({"count": 2}),
-    );
+    next_state
+        .authority
+        .plugin_config
+        .insert_versioned(PLUGIN, version(2), serde_json::json!({"count": 2}))
+        .unwrap();
     let error = commit(&store, &mut next_state)
         .await
         .expect_err("a commit refuses plugin config outside the range");
@@ -386,7 +386,8 @@ async fn a_malformed_writer_range_refuses_every_plugin_publication() {
     request
         .config
         .plugin_config
-        .insert_versioned(PLUGIN, version(1), serde_json::json!({}));
+        .insert_versioned(PLUGIN, version(1), serde_json::json!({}))
+        .unwrap();
     let before = published(&n).await;
     let error = store
         .admit_session(&request)

@@ -627,10 +627,12 @@ mod tests {
         let mut namespace = recorded(Some("typescript"));
         namespace.behaviour = behaviour.clone();
         let mut stored = lash_core::PluginConfig::default();
-        stored.insert(
-            RLM_PROTOCOL_PLUGIN_ID,
-            serde_json::to_value(&namespace).expect("the recorded namespace encodes"),
-        );
+        stored
+            .insert(
+                RLM_PROTOCOL_PLUGIN_ID,
+                serde_json::to_value(&namespace).expect("the recorded namespace encodes"),
+            )
+            .unwrap();
 
         let reopening = presenting_host(
             CellDialect::typescript(),
@@ -679,7 +681,7 @@ mod tests {
             .expect("a recorded behaviour")
             .remove("tool_presenter");
         let mut stored = lash_core::PluginConfig::default();
-        stored.insert(RLM_PROTOCOL_PLUGIN_ID, unpresented);
+        stored.insert(RLM_PROTOCOL_PLUGIN_ID, unpresented).unwrap();
         let missing = reopening
             .session_behaviour(&stored, Rematerialization)
             .expect_err("a record that names no presenter");

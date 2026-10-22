@@ -51,7 +51,7 @@ struct Version {
     /// The descriptor page; none for a session that holds nothing.
     descriptor: Option<NodeId>,
     /// Its bytes, which a host that hydrates the state is handed.
-    bytes: Option<Arc<[u8]>>,
+    bytes: Option<lash_kernel_doc::allocation::SharedBytes>,
     session: Option<SessionRoot>,
     cells: u64,
     /// The session's notes, keyed by name beside the bindings: unbounded
@@ -1184,11 +1184,10 @@ impl CodeModeExecutionState {
                 found: read.kernel,
             });
         }
-        self.pages
-            .preload([(graph.root, Arc::clone(&graph.descriptor))]);
+        self.pages.preload([(graph.root, graph.descriptor.clone())]);
         self.current = Version {
             descriptor: Some(graph.root),
-            bytes: Some(Arc::clone(&graph.descriptor)),
+            bytes: Some(graph.descriptor.clone()),
             session: Some(read.session),
             cells: read.cells,
             notes: read.notes,

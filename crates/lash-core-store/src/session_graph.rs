@@ -1009,7 +1009,11 @@ impl SessionNodeRecord {
                     })?;
             }
             SessionNodePayload::Plugin { body, .. } => body.decoded_in(allocation.clone())?,
-            SessionNodePayload::FrameOpen { .. } => {}
+            SessionNodePayload::FrameOpen { assignment, .. } => {
+                assignment
+                    .plugin_config
+                    .decoded_in(allocation.clone(), budget.clone())?;
+            }
         }
         record.allocation = allocation;
         Ok(record)

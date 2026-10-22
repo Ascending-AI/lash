@@ -13,7 +13,7 @@
 )]
 #[serde(transparent)]
 pub struct ProtocolTurnOptions {
-    pub payload: std::sync::Arc<serde_json::Value>,
+    pub payload: crate::plugin_state::ConfigJson,
 }
 
 impl Default for ProtocolTurnOptions {
@@ -26,7 +26,7 @@ impl ProtocolTurnOptions {
         Self::from_payload(serde_json::Value::Object(serde_json::Map::new()))
     }
 
-    pub fn from_payload(payload: impl Into<std::sync::Arc<serde_json::Value>>) -> Self {
+    pub fn from_payload(payload: impl Into<crate::plugin_state::ConfigJson>) -> Self {
         Self {
             payload: payload.into(),
         }

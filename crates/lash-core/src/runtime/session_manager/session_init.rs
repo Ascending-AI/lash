@@ -275,6 +275,11 @@ pub(in crate::runtime::session_manager) fn resolve_child_facts(
             &starter.plugin_admission,
         )
         .map_err(|error| match error {
+            crate::CreationConfigError::Allocation(error) => {
+                lash_execution_contracts::plugin_error::PluginError::RuntimeEffectController(
+                    crate::RuntimeEffectControllerError::from(crate::StoreError::Allocation(error)),
+                )
+            }
             crate::CreationConfigError::Recipe(error) => *error,
             crate::CreationConfigError::Format(refusal) => {
                 lash_execution_contracts::plugin_error::PluginError::Format(refusal)

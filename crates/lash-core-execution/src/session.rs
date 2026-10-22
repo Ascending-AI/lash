@@ -172,6 +172,10 @@ impl From<crate::FormatRefusal> for SessionError {
 impl From<crate::plugin::CreationConfigError> for SessionError {
     fn from(error: crate::plugin::CreationConfigError) -> Self {
         match error {
+            crate::plugin::CreationConfigError::Allocation(error) => Self::Store {
+                context: "admitting a session's creation config".into(),
+                source: crate::StoreError::Allocation(error),
+            },
             crate::plugin::CreationConfigError::Recipe(error) => Self::Plugin(*error),
             crate::plugin::CreationConfigError::Format(refusal) => refusal.into(),
             crate::plugin::CreationConfigError::Refused(refusal) => {
