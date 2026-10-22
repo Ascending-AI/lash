@@ -28,6 +28,7 @@ use lash_vocabulary::tool_contract::ToolId;
 use lash_vocabulary::tool_contract::ToolManifest;
 use serde_json::Value;
 
+pub mod entry;
 pub mod listing;
 mod projection;
 mod wrap;

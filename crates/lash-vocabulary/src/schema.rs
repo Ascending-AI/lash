@@ -62,14 +62,15 @@ pub const MAX_RESOLVED_REFERENCES: usize = 4096;
 /// The kernel type a JSON schema describes. A JSON schema describes data:
 /// a form the grammar has no exact type for is [`Type::Json`], which
 /// admits no function, and only a slot an `x-lash` declaration marks
-/// admits one. The tool still validates its own input.
+/// admits one. The tool still validates its own input. The returned widenings
+/// name every loss of evidence; entry-registration proof must refuse any loss.
 ///
 /// # Errors
 ///
 /// [`SchemaProjectionRefusal`]: a composition with no member, or members
 /// whose meet no kernel type states or grows past its bound.
-pub fn type_of_schema(schema: &Value) -> Result<Type, SchemaProjectionRefusal> {
-    Projector::of(schema).project(schema, Openness::Closed, &Pointer::Root)
+pub fn type_of_schema(schema: &Value) -> Result<(Type, Vec<Widening>), SchemaProjectionRefusal> {
+    project_schema(schema, Openness::Closed)
 }
 
 /// The kernel type a tool's result schema describes: [`type_of_schema`],
@@ -78,8 +79,43 @@ pub fn type_of_schema(schema: &Value) -> Result<Type, SchemaProjectionRefusal> {
 /// # Errors
 ///
 /// As [`type_of_schema`].
-pub fn result_type_of_schema(schema: &Value) -> Result<Type, SchemaProjectionRefusal> {
-    Projector::of(schema).project(schema, Openness::Open, &Pointer::Root)
+pub fn result_type_of_schema(
+    schema: &Value,
+) -> Result<(Type, Vec<Widening>), SchemaProjectionRefusal> {
+    project_schema(schema, Openness::Open)
+}
+
+/// Evidence discarded by the structural projection. A host proving entry
+/// compatibility must refuse a projection with any widening; ordinary tools
+/// may use the type and retain JSON Schema validation as their authority.
+#[derive(
+    Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
+#[serde(deny_unknown_fields)]
+pub struct Widening {
+    pub schema_path: String,
+    pub reason: WideningReason,
+}
+
+/// Why the type cannot state the full schema contract.
+#[derive(
+    Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum WideningReason {
+    UnresolvedReference,
+    Cycle,
+    Budget,
+    UnsupportedKeyword(String),
+}
+
+fn project_schema(
+    schema: &Value,
+    openness: Openness,
+) -> Result<(Type, Vec<Widening>), SchemaProjectionRefusal> {
+    let mut projector = Projector::of(schema);
+    let ty = projector.project(schema, openness, &Pointer::Root)?;
+    Ok((ty, projector.widenings))
 }
 
 /// The signature a tool is performed under, from its input's
@@ -233,6 +269,8 @@ type Projected = Result<Type, SchemaProjectionRefusal>;
 /// it resolves against, and what resolving them has claimed so far.
 struct Projector<'a> {
     root: &'a Value,
+    widenings: Vec<Widening>,
+    depth: usize,
     /// A nested `$id` moves the base references resolve against
     /// ([`has_scoped_references`]): none of this root's is resolved.
     scoped: bool,
@@ -250,6 +288,8 @@ impl<'a> Projector<'a> {
     fn of(root: &'a Value) -> Self {
         Self {
             root,
+            widenings: Vec::new(),
+            depth: 0,
             scoped: has_scoped_references(root),
             resolving: vec![""],
             resolved: 0,
@@ -257,20 +297,144 @@ impl<'a> Projector<'a> {
         }
     }
 
-    /// Every keyword of a schema at once: its `x-lash` declaration alone
-    /// when it has one, otherwise the meet of its own type, its local
-    /// reference and its compositions.
+    /// Retain one loss at its schema location.
+    fn widen(&mut self, at: &Pointer<'_>, reason: WideningReason) {
+        self.widenings.push(Widening {
+            schema_path: at.to_string(),
+            reason,
+        });
+    }
+
     fn project(&mut self, schema: &'a Value, openness: Openness, at: &Pointer<'_>) -> Projected {
+        if self.depth >= 64 {
+            self.widen(at, WideningReason::Budget);
+            return Ok(if self.reaches_marker("") {
+                Type::Any
+            } else {
+                Type::Json
+            });
+        }
+        self.depth += 1;
+        let result = self.project_inner(schema, openness, at);
+        self.depth -= 1;
+        result
+    }
+
+    fn project_inner(
+        &mut self,
+        schema: &'a Value,
+        openness: Openness,
+        at: &Pointer<'_>,
+    ) -> Projected {
         let Some(object) = schema.as_object() else {
+            if schema != &Value::Bool(true) {
+                self.widen(
+                    at,
+                    WideningReason::UnsupportedKeyword("false_schema".into()),
+                );
+            }
             return Ok(Type::Json);
         };
+        // Keywords absent here constrain values beyond this type grammar.
+        // Metadata and definitions alone do not narrow the admitted values.
+        let fixed_tuple = fixed_tuple_items(object).is_some();
+        for key in object.keys() {
+            if fixed_tuple && matches!(key.as_str(), "prefixItems" | "minItems" | "maxItems") {
+                continue;
+            }
+            if key == "pattern"
+                && match object.get("x-lash").and_then(XLashType::decode) {
+                    Some(XLashType::Bytes) => object[key] == "^(?:[0-9a-f]{2})*$",
+                    Some(XLashType::Timestamp) => object[key] == "^-?[0-9]+$",
+                    _ => false,
+                }
+            {
+                continue;
+            }
+            if !matches!(
+                key.as_str(),
+                "$schema"
+                    | "$id"
+                    | "$anchor"
+                    | "$comment"
+                    | "$defs"
+                    | "definitions"
+                    | "title"
+                    | "description"
+                    | "default"
+                    | "examples"
+                    | "deprecated"
+                    | "readOnly"
+                    | "writeOnly"
+                    | "type"
+                    | "enum"
+                    | "const"
+                    | "$ref"
+                    | "allOf"
+                    | "anyOf"
+                    | "properties"
+                    | "required"
+                    | "additionalProperties"
+                    | "items"
+                    | "x-lash"
+            ) {
+                self.widen(
+                    &at.key(key),
+                    WideningReason::UnsupportedKeyword(key.clone()),
+                );
+            }
+        }
+        if let Some(value) = object.get("const")
+            && !value.is_string()
+            && !value.is_null()
+        {
+            self.widen(
+                &at.key("const"),
+                WideningReason::UnsupportedKeyword("const".into()),
+            );
+        }
+        if let Some(values) = object.get("enum").and_then(Value::as_array)
+            && (values.is_empty()
+                || values
+                    .iter()
+                    .any(|value| !value.is_string() && !value.is_null()))
+        {
+            self.widen(
+                &at.key("enum"),
+                WideningReason::UnsupportedKeyword("enum".into()),
+            );
+        }
         if let Some(declaration) = object.get(X_LASH_KEYWORD) {
+            // The marker owns the kernel kind. Constraints beside it must not
+            // silently disappear from registration evidence.
+            for key in [
+                "enum",
+                "const",
+                "$ref",
+                "allOf",
+                "anyOf",
+                "properties",
+                "required",
+                "additionalProperties",
+                "items",
+            ] {
+                if object.contains_key(key) {
+                    self.widen(&at.key(key), WideningReason::UnsupportedKeyword(key.into()));
+                }
+            }
             return self.lash_type(declaration, &at.key(X_LASH_KEYWORD));
+        }
+        if !object.contains_key("type") {
+            for key in ["properties", "required", "additionalProperties", "items"] {
+                if object.contains_key(key) {
+                    self.widen(&at.key(key), WideningReason::UnsupportedKeyword(key.into()));
+                }
+            }
         }
         let mut ty = self.own_type(object, openness, at)?;
         if let Some(reference) = object.get("$ref").and_then(Value::as_str) {
             let at = at.key("$ref");
-            let target = self.reference(reference, openness)?;
+            let target = self.reference(reference, openness, &at)?;
             ty = meet(ty, target, &mut Vec::new()).map_err(|conflict| at.refuse(conflict))?;
         }
         for keyword in ["allOf", "anyOf", "oneOf"] {
@@ -305,14 +469,24 @@ impl<'a> Projector<'a> {
     /// The type a local `$ref` names: its target's, and `Json` for any
     /// other reference. At a cycle, and past [`MAX_RESOLVED_REFERENCES`],
     /// it is `Json`, or `Any` when its target may carry a marked slot.
-    fn reference(&mut self, reference: &'a str, openness: Openness) -> Projected {
+    fn reference(&mut self, reference: &'a str, openness: Openness, at: &Pointer<'_>) -> Projected {
         let Some(pointer) = local_reference_pointer(reference).filter(|_| !self.scoped) else {
+            self.widen(at, WideningReason::UnresolvedReference);
             return Ok(Type::Json);
         };
         let Some(target) = self.root.pointer(pointer) else {
+            self.widen(at, WideningReason::UnresolvedReference);
             return Ok(Type::Json);
         };
         if self.resolving.contains(&pointer) || self.resolved == MAX_RESOLVED_REFERENCES {
+            self.widen(
+                at,
+                if self.resolving.contains(&pointer) {
+                    WideningReason::Cycle
+                } else {
+                    WideningReason::Budget
+                },
+            );
             return Ok(if self.reaches_marker(pointer) {
                 Type::Any
             } else {
@@ -417,11 +591,32 @@ impl<'a> Projector<'a> {
             "integer" => Type::Int,
             "number" => Type::Number,
             "string" => Type::Text,
+            "array" if fixed_tuple_items(object).is_some() => {
+                let items = fixed_tuple_items(object).unwrap_or_default();
+                Type::Tuple(
+                    items
+                        .iter()
+                        .enumerate()
+                        .map(|(index, item)| {
+                            self.project(item, openness, &at.key("prefixItems").index(index))
+                        })
+                        .collect::<Result<Vec<_>, _>>()?,
+                )
+            }
             "array" => Type::List(Box::new(match object.get("items") {
                 Some(items) => self.project(items, openness, &at.key("items"))?,
                 None => Type::Json,
             })),
-            "object" => self.record_of(object, openness, at)?,
+            "object" => {
+                let ty = self.record_of(object, openness, at)?;
+                if ty == Type::Json {
+                    self.widen(
+                        &at.key("type"),
+                        WideningReason::UnsupportedKeyword("type".into()),
+                    );
+                }
+                ty
+            }
             _ => Type::Json,
         })
     }
@@ -451,6 +646,16 @@ impl<'a> Projector<'a> {
             _ => Some(Type::Json),
         };
         let Some(properties) = properties else {
+            if object
+                .get("required")
+                .and_then(Value::as_array)
+                .is_some_and(|fields| !fields.is_empty())
+            {
+                self.widen(
+                    &at.key("required"),
+                    WideningReason::UnsupportedKeyword("required".into()),
+                );
+            }
             return Ok(match (additional, rest) {
                 (Some(Value::Bool(false) | Value::Object(_)), rest) => Type::Record(RecordType {
                     fields: Vec::new(),
@@ -466,6 +671,14 @@ impl<'a> Projector<'a> {
             .flatten()
             .filter_map(Value::as_str)
             .collect();
+        for field in &required {
+            if !properties.contains_key(*field) {
+                self.widen(
+                    &at.key("required"),
+                    WideningReason::UnsupportedKeyword("required".into()),
+                );
+            }
+        }
         let properties_at = at.key("properties");
         let mut fields = Vec::with_capacity(properties.len());
         for (field, schema) in properties {
@@ -487,6 +700,10 @@ impl<'a> Projector<'a> {
     /// stays open. A declaration this vocabulary has no kind for is data.
     fn lash_type(&mut self, declaration: &'a Value, at: &Pointer<'_>) -> Projected {
         let Some(declared) = XLashType::decode(declaration) else {
+            self.widen(
+                at,
+                WideningReason::UnsupportedKeyword(X_LASH_KEYWORD.into()),
+            );
             return Ok(Type::Json);
         };
         Ok(match declared {
@@ -527,6 +744,19 @@ impl<'a> Projector<'a> {
             | XLashType::ProcessUnknown => Type::Any,
         })
     }
+}
+
+// The exact tuple profile, rather than arbitrary prefixItems with a tail.
+fn fixed_tuple_items(object: &serde_json::Map<String, Value>) -> Option<&[Value]> {
+    let items = match object.get("prefixItems") {
+        Some(Value::Array(items)) => items.as_slice(),
+        None => &[],
+        _ => return None,
+    };
+    (object.get("items") == Some(&Value::Bool(false))
+        && object.get("minItems").and_then(Value::as_u64) == Some(items.len() as u64)
+        && object.get("maxItems").and_then(Value::as_u64) == Some(items.len() as u64))
+    .then_some(items)
 }
 
 /// A text enum, nullable when `null` is among its values; any other enum
@@ -742,4 +972,40 @@ pub fn signature_mismatch(
     expected: &Signature,
 ) -> Option<crate::SignatureMismatch> {
     crate::type_relations::serves(provided, expected)
+}
+
+#[cfg(test)]
+mod entry_projection_laws {
+    use super::*;
+
+    /// ENTRY-SCHEMA-EVIDENCE: an unresolved reference cannot establish containment.
+    #[test]
+    fn unresolved_reference_keeps_evidence_of_widening() {
+        let (ty, widenings) = type_of_schema(&serde_json::json!({"$ref": "#/missing"})).unwrap();
+        assert_eq!(ty, Type::Json);
+        assert_eq!(
+            widenings,
+            vec![Widening {
+                schema_path: "/$ref".into(),
+                reason: WideningReason::UnresolvedReference
+            }]
+        );
+    }
+}
+
+#[cfg(test)]
+mod entry_wire_laws {
+    use super::*;
+
+    /// ENTRY-SCHEMA-ROUNDTRIP: fixed tuples preserve their members and arity.
+    #[test]
+    fn fixed_tuple_schema_keeps_arity_and_members() {
+        let schema = serde_json::json!({"$schema": "https://json-schema.org/draft/2020-12/schema",
+            "type": "array", "prefixItems": [{"type": "string"}, {"type": "integer"}],
+            "items": false, "minItems": 2, "maxItems": 2});
+        assert_eq!(
+            type_of_schema(&schema).unwrap(),
+            (Type::Tuple(vec![Type::Text, Type::Int]), vec![])
+        );
+    }
 }

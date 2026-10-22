@@ -83,6 +83,8 @@ pub struct JsonSchema {
 struct KernelTypes {
     input: crate::Type,
     result: crate::Type,
+    input_widenings: Vec<crate::schema::Widening>,
+    result_widenings: Vec<crate::schema::Widening>,
 }
 
 impl JsonSchema {
@@ -131,9 +133,13 @@ impl JsonSchema {
                     }
                 }
             })?;
+        let (input, input_widenings) = crate::schema::type_of_schema(&value)?;
+        let (result, result_widenings) = crate::schema::result_type_of_schema(&value)?;
         let types = KernelTypes {
-            input: crate::schema::type_of_schema(&value)?,
-            result: crate::schema::result_type_of_schema(&value)?,
+            input,
+            result,
+            input_widenings,
+            result_widenings,
         };
         Ok(Self {
             value: Arc::new(value),
@@ -169,6 +175,17 @@ impl JsonSchema {
     /// record of it open ([`crate::schema::result_type_of_schema`]).
     pub fn result_type(&self) -> &crate::Type {
         &self.types.result
+    }
+
+    /// Losses retained with the cached input projection. Entry-registration
+    /// proof must refuse when this is nonempty.
+    pub fn input_widenings(&self) -> &[crate::schema::Widening] {
+        &self.types.input_widenings
+    }
+
+    /// Losses retained with the ordinary open-result projection.
+    pub fn result_widenings(&self) -> &[crate::schema::Widening] {
+        &self.types.result_widenings
     }
 
     pub fn into_value(self) -> Value {

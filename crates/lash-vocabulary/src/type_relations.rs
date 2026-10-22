@@ -182,6 +182,19 @@ fn property(path: &str, name: &str) -> String {
     )
 }
 
+/// Establish `provided <: expected` using the signature relation's own
+/// containment rules. For entry registration pass the event as `provided`
+/// and the parameter as `expected`. Failure means compatibility was not
+/// established; the path describes the type structure, rooted at `/input`.
+pub fn type_mismatch(provided: &Type, expected: &Type) -> Option<crate::SignatureMismatch> {
+    subtype_at(provided, expected, "/input").map(|mismatch| crate::SignatureMismatch {
+        side: crate::SignatureSide::Input,
+        path: mismatch.path,
+        expected: mismatch.sup,
+        provided: mismatch.sub,
+    })
+}
+
 fn subtype_at(sub: &Type, sup: &Type, path: &str) -> Option<TypeMismatch> {
     match (sub, sup) {
         (_, Type::Any) => None,

@@ -1,6 +1,11 @@
 //! Parsing for the typed-output schema witness vocabulary.
 
-use serde_json::{Value, json};
+use crate::{
+    EntrySchemaPolicy, RecordType, RecordTypeField, Type, TypeSchemaRefusal, json_schema_of_type,
+};
+use serde_json::Value;
+#[cfg(test)]
+use serde_json::json;
 use thiserror::Error;
 
 /// Marker key that wraps a Type literal at its outermost level so a host-side
@@ -87,6 +92,8 @@ pub enum OutputSchemaError {
     UnsupportedTypeSchema { kind: String },
     #[error("unknown scalar type `{kind}`")]
     UnknownScalar { kind: String },
+    #[error("{0}")]
+    Projection(TypeSchemaRefusal),
 }
 
 /// Host narrowing of the recursive Type-schema validator's 32-level safety ceiling.
@@ -146,23 +153,32 @@ pub fn parse_output_schema_with_limits(
         return Ok(Some(schema.clone()));
     }
 
-    let mut properties = serde_json::Map::new();
-    let mut required = Vec::new();
+    let mut fields = Vec::new();
     for (name, descriptor) in output {
         let type_str = descriptor
             .as_str()
             .ok_or_else(|| OutputSchemaError::InvalidDescriptor {
                 field: name.clone(),
             })?;
-        properties.insert(name.clone(), type_descriptor_to_json_schema(type_str)?);
-        required.push(Value::String(name.clone()));
+        fields.push(RecordTypeField {
+            name: name.clone(),
+            ty: type_descriptor(type_str)?,
+            optional: false,
+        });
     }
-    Ok(Some(json!({
-        "type": SchemaScalarKind::Object.as_schema_name(),
-        "properties": properties,
-        "required": required,
-        "additionalProperties": false,
-    })))
+    json_schema_of_type(
+        &Type::Record(RecordType { fields, rest: None }),
+        EntrySchemaPolicy::default(),
+    )
+    .map(|schema| {
+        // The witness grammar historically returns an unlabelled subschema.
+        let mut value = schema.into_value();
+        if let Some(object) = value.as_object_mut() {
+            object.remove("$schema");
+        }
+        Some(value)
+    })
+    .map_err(OutputSchemaError::Projection)
 }
 
 fn validate_lash_type_schema(
@@ -216,47 +232,26 @@ fn validate_lash_type_schema_at_depth(
     }
 }
 
-fn type_descriptor_to_json_schema(descriptor: &str) -> Result<Value, OutputSchemaError> {
-    let scalar = |ty: &str| -> Result<Value, OutputSchemaError> {
-        let kind = match ty {
-            "str" => Some(SchemaScalarKind::String),
-            "int" => Some(SchemaScalarKind::Integer),
-            "float" => Some(SchemaScalarKind::Number),
-            "bool" => Some(SchemaScalarKind::Boolean),
-            "record" | "dict" => Some(SchemaScalarKind::Object),
-            other => SchemaScalarKind::from_schema_name(other).filter(|kind| {
-                matches!(
-                    kind,
-                    SchemaScalarKind::String
-                        | SchemaScalarKind::Integer
-                        | SchemaScalarKind::Number
-                        | SchemaScalarKind::Boolean
-                        | SchemaScalarKind::Object
-                )
+fn type_descriptor(descriptor: &str) -> Result<Type, OutputSchemaError> {
+    let scalar = |ty: &str| -> Result<Type, OutputSchemaError> {
+        Ok(match ty {
+            "str" | "string" => Type::Text,
+            "int" | "integer" => Type::Int,
+            "float" | "number" => Type::Number,
+            "bool" | "boolean" => Type::Bool,
+            "record" | "dict" | "object" => Type::Record(RecordType {
+                fields: vec![],
+                rest: Some(Box::new(Type::Json)),
             }),
-        };
-        match kind {
-            Some(SchemaScalarKind::Object) if matches!(ty, "record" | "dict" | "object") => {
-                Ok(json!({
-                    "type": SchemaScalarKind::Object.as_schema_name(),
-                    "additionalProperties": true
-                }))
-            }
-            Some(kind) => Ok(json!({"type": kind.as_schema_name()})),
-            None => Err(OutputSchemaError::UnknownScalar {
-                kind: ty.to_string(),
-            }),
-        }
+            _ => return Err(OutputSchemaError::UnknownScalar { kind: ty.into() }),
+        })
     };
     let trimmed = descriptor.trim();
     if let Some(inner) = trimmed
         .strip_prefix("list[")
         .and_then(|rest| rest.strip_suffix(']'))
     {
-        return Ok(json!({
-            "type": SchemaScalarKind::Array.as_schema_name(),
-            "items": scalar(inner.trim())?,
-        }));
+        return Ok(Type::List(Box::new(scalar(inner.trim())?)));
     }
     scalar(trimmed)
 }
@@ -301,6 +296,8 @@ mod tests {
                 "properties": {
                     "value": {
                         "type": "object",
+                        "properties": {},
+                        "required": [],
                         "additionalProperties": true
                     }
                 },

@@ -3030,6 +3030,7 @@ dependencies = [
  "lash-internal-protocol-types",
  "lash-internal-tool-shape",
  "lash-internal-vocabulary",
+ "lash-kernel-dialect",
  "serde",
  "serde_json",
  "thiserror 2.0.18",

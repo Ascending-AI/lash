@@ -21,12 +21,14 @@ use lash_vocabulary::schema::signature_serves;
 fn type_of_schema(schema: &Value) -> Type {
     lash_vocabulary::schema::type_of_schema(schema)
         .unwrap_or_else(|refusal| panic!("{schema}: {refusal}"))
+        .0
 }
 
 /// The kernel type `schema` projects to as a result.
 fn result_type_of_schema(schema: &Value) -> Type {
     lash_vocabulary::schema::result_type_of_schema(schema)
         .unwrap_or_else(|refusal| panic!("{schema}: {refusal}"))
+        .0
 }
 
 /// Some value of `ty` holds a function somewhere: what the crossing walk

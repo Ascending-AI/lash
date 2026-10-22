@@ -410,7 +410,10 @@ impl SessionDialect {
                     error,
                 )))
             })?;
-        let text = crate::package_surface::render(&namespaces, self.language().spelling());
+        let text = lash_tool_presenter_api::entry::render_package_surface(
+            &namespaces,
+            self.language().spelling(),
+        );
         Ok((!text.is_empty()).then_some(text))
     }
 

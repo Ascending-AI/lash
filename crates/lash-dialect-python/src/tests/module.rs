@@ -233,7 +233,9 @@ fn tool_keywords_name_the_declared_input_fields() {
 
     let show = EffectName::new("display.show_message").expect("a tool's name");
     let projected = |schema: serde_json::Value| {
-        lash_vocabulary::schema::type_of_schema(&schema).expect("a tool's input type")
+        lash_vocabulary::schema::type_of_schema(&schema)
+            .expect("a tool's input type")
+            .0
     };
     let signature = lash_vocabulary::schema::tool_signature(
         projected(serde_json::json!({

@@ -4,6 +4,8 @@
 pub mod claims;
 pub mod content_ids;
 pub mod data_limits;
+pub mod entry_schema;
+pub use entry_schema::*;
 pub mod identity;
 pub mod json_schema;
 
