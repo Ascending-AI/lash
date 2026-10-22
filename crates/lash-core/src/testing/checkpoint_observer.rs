@@ -247,14 +247,14 @@ impl CheckpointWriteCollector {
             .insert(key, committed_attachment_ids);
     }
 
-    fn apply_mutation(&self, commit: &mut RuntimeCommit) {
+    fn apply_mutation(&self, commit: &mut RuntimeCommit) -> Result<(), StoreError> {
         let Some(mutation) = &self.ref_only_mutation else {
-            return;
+            return Ok(());
         };
         if commit.session_id != mutation.session_id
             || commit.expected_head_revision != mutation.revision_before
         {
-            return;
+            return Ok(());
         }
         let prior_components = self
             .state
@@ -263,13 +263,18 @@ impl CheckpointWriteCollector {
             .get(&commit.session_id)
             .cloned()
             .unwrap_or_default();
-        for (key, component) in &mut commit.checkpoint.components {
+        let original = commit.checkpoint.components.clone();
+        for (key, component) in &original {
             if component.body().is_some()
                 && let Some(descriptor) = prior_components.get(key).cloned()
             {
-                *component = crate::HydratedCheckpointComponent::Unchanged { descriptor };
+                commit.checkpoint.components.insert_ref(
+                    key,
+                    crate::HydratedCheckpointComponent::Unchanged { descriptor },
+                )?;
             }
         }
+        Ok(())
     }
 
     fn record_manifest(&self, session_id: &SessionId, manifest: &crate::SessionCheckpoint) {
@@ -348,7 +353,7 @@ async fn observe_commit(
     collector: &CheckpointWriteCollector,
     mut commit: RuntimeCommit,
 ) -> Result<RuntimeCommitReceipt, StoreError> {
-    collector.apply_mutation(&mut commit);
+    collector.apply_mutation(&mut commit)?;
     let event = checkpoint_write_event(&commit);
     let budget = crate::testing::measure_runtime_commit_budget(&commit)?;
     let committed_attachment_ids = commit.committed_attachment_ids.clone();

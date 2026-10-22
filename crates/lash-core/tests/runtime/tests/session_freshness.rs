@@ -404,7 +404,8 @@ async fn an_invalidation_reload_restores_the_heads_plugin_config() {
         state
             .authority
             .plugin_config
-            .insert("dialect_owner", expected.clone());
+            .insert("dialect_owner", expected.clone())
+            .expect("fixture allocation admitted");
     })
     .await;
 

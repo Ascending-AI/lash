@@ -105,3 +105,126 @@ async fn a_held_base_serves_only_the_window_it_is() {
         "the held base serves its own window"
     );
 }
+
+fn retention(total: u64, dirty: u64) -> lash_durable::OwnerRetentionSettings {
+    lash_durable::OwnerRetentionSettings {
+        idle_evict: std::time::Duration::from_secs(60),
+        max_owner_bytes: std::num::NonZeroU64::new(total).unwrap(),
+        max_node_bytes: std::num::NonZeroU64::new(total).unwrap(),
+        max_owner_dirty_bytes: std::num::NonZeroU64::new(dirty).unwrap(),
+        max_node_dirty_bytes: std::num::NonZeroU64::new(dirty).unwrap(),
+    }
+}
+
+async fn claim(backend: &Backend, session: &SessionId) -> ActorContext {
+    let actor = ActorKey::session(session.as_str()).unwrap();
+    let formats = backend
+        .durable()
+        .actor(&actor)
+        .await
+        .unwrap()
+        .unwrap()
+        .formats;
+    let mut wake = lash_durable::MailTx::new();
+    wake.wake(actor.clone());
+    backend
+        .durable()
+        .commit_mail(wake, lash_durable::CommitLabel::new("law.wake"))
+        .await
+        .unwrap();
+    let lease = backend
+        .durable()
+        .register_node(&lash_durable::NodeSpec {
+            node: lash_durable::NodeId::new("head-hydration-law"),
+            decodes: vec![formats],
+            serves: Vec::new(),
+            capabilities: Default::default(),
+            ttl_millis: 600_000,
+        })
+        .await
+        .unwrap();
+    let owned = backend
+        .durable()
+        .claim(&lease, 16)
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|owned| owned.actor == actor)
+        .unwrap();
+    ActorContext::new(
+        backend.clone(),
+        actor,
+        owned.epoch,
+        crate::AdmittedScope::runtime_operation("head-hydration-law"),
+        tokio_util::sync::CancellationToken::new(),
+        Arc::new(lash_durable::NoProbe),
+    )
+}
+
+/// COLD-HEAD-CLASS: committed source bytes fit the retained cap even when
+/// the host permits almost no new uncommitted work. Future edits still use
+/// the dirty cap after the coherent hydration is installed.
+#[tokio::test]
+async fn cold_head_hydrates_against_retained_capacity() {
+    let backend = Backend::for_testing(
+        crate::testing::sqlite_memory_store_set().await,
+        retention(64 << 20, 1),
+    );
+    let session = SessionId::fixture("retained-hydration");
+    crate::testing::runtime_helpers::recording_session_store(&backend, session.clone()).await;
+    let mut state = SessionHead::load(&backend, &session)
+        .await
+        .unwrap()
+        .state()
+        .clone();
+    advance(&backend, &mut state, 1).await;
+    let cx = claim(&backend, &session).await;
+    let mut owner = SessionOwner::default();
+    let head = owner
+        .head(&cx, &session)
+        .await
+        .expect("committed head fits retained capacity");
+    assert_eq!(head.revision(), state.head_revision);
+    let usage = cx.owner_memory().unwrap().usage();
+    assert!(usage.retained > 0);
+    assert_eq!(usage.dirty, 0);
+    let projection = cx.session_projection().await.unwrap().unwrap();
+    assert!(
+        projection.allocation_budget.reserve(2).is_err(),
+        "new work still obeys dirty cap"
+    );
+}
+
+/// REFUSED-HYDRATION-RELEASE: when a later source cannot fit, the earlier
+/// sources and their pending acknowledgement entries release together.
+#[tokio::test]
+async fn refused_head_hydration_releases_pending_sources() {
+    let backend = crate::testing::sqlite_recording_backend().await;
+    let session = SessionId::fixture("refused-hydration");
+    crate::testing::runtime_helpers::recording_session_store(&backend, session.clone()).await;
+    let mut state = SessionHead::load(&backend, &session)
+        .await
+        .unwrap()
+        .state()
+        .clone();
+    advance(&backend, &mut state, 1).await;
+    // Admit a root-sized reservation, then refuse a later source. The
+    // ledger remains live to detect metadata left behind by failed loads.
+    let memory = lash_durable::owner_memory::NodeMemory::new(retention(32768, 32768))
+        .owner(&ActorKey::session(session.as_str()).unwrap(), Epoch(1));
+    let (budget, _allocations) =
+        lash_core_execution::runtime::actor::owner_allocation::OwnerAllocation::budget(
+            memory.clone(),
+            session.to_string(),
+        );
+    assert!(
+        SessionHead::load_in(&backend, &session, &budget)
+            .await
+            .is_err()
+    );
+    assert_eq!(
+        memory.usage().total(),
+        0,
+        "a refused load retains no source or pending metadata"
+    );
+}

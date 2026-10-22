@@ -690,7 +690,7 @@ fn checkpoint_bodies() -> HydratedSessionCheckpoint {
         },
         components,
         execution: Some(differential_execution()),
-        namespace_nodes: namespace_body.graph,
+        namespace_nodes: namespace_body.graph.into(),
     }
 }
 

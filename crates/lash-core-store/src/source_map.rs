@@ -32,6 +32,12 @@ pub trait MapValue: Clone {
     fn clone_in(&self, budget: &AllocationBudget) -> Result<Self, AllocationError>;
 }
 
+impl MapValue for u64 {
+    fn clone_in(&self, _: &AllocationBudget) -> Result<Self, AllocationError> {
+        Ok(*self)
+    }
+}
+
 /// A complete immutable map. The serde representation remains a flat map.
 ///
 /// Integrator class (ADR 0051): **store and durable-substrate implementors**.
@@ -189,6 +195,26 @@ impl<K: MapKey, V: MapValue> SharedSourceMap<K, V> {
         *self = Self::from_admitted(entries, hold, budget.clone());
         Ok(previous)
     }
+    /// Admit a borrowed key before copying it for a new entry.
+    pub fn insert_ref(&mut self, key: &K, value: V) -> Result<Option<V>, AllocationError> {
+        let budget = &self.0.budget;
+        let hold = budget
+            .reserve(Self::capacity(&self.0.entries).saturating_add(Self::entry_capacity(key)))?;
+        let mut entries = self
+            .0
+            .entries
+            .iter()
+            .map(|(key, value)| Ok((key.clone(), MapValue::clone_in(value, budget)?)))
+            .collect::<Result<BTreeMap<_, _>, AllocationError>>()?;
+        let value = MapValue::clone_in(&value, budget)?;
+        let previous = entries.insert(key.clone(), value);
+        *self = Self::from_admitted(entries, hold, budget.clone());
+        Ok(previous)
+    }
+    pub fn clear(&mut self) -> Result<(), AllocationError> {
+        *self = Self::empty_in(&self.0.budget)?;
+        Ok(())
+    }
     pub fn remove<Q: Ord + ?Sized>(&mut self, key: &Q) -> Result<Option<V>, AllocationError>
     where
         K: Borrow<Q>,
@@ -266,6 +292,32 @@ impl<K: MapKey, V: MapValue> MapValue for SharedSourceMap<K, V> {
     }
 }
 
+impl crate::checkpoint_graph::NodeSource
+    for SharedSourceMap<crate::checkpoint_graph::NodeId, crate::checkpoint_graph::EncodedNode>
+{
+    fn fetch(
+        &self,
+        id: &crate::checkpoint_graph::NodeId,
+    ) -> Option<crate::checkpoint_graph::StoredNode<'_>> {
+        crate::checkpoint_graph::NodeSource::fetch(&self.0.entries, id)
+    }
+}
+
+impl<K, V> schemars::JsonSchema for SharedSourceMap<K, V>
+where
+    BTreeMap<K, V>: schemars::JsonSchema,
+{
+    fn inline_schema() -> bool {
+        <BTreeMap<K, V>>::inline_schema()
+    }
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        <BTreeMap<K, V>>::schema_name()
+    }
+    fn json_schema(generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        <BTreeMap<K, V>>::json_schema(generator)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -333,7 +385,14 @@ mod tests {
         );
         assert_eq!(source, reader);
         drop(blocker);
+        let before = used.load(Ordering::SeqCst);
+        let measurement = crate::history_growth_law::allocation_counter::Measurement::start();
         source.insert("second".into(), Value(2)).unwrap();
+        let replacement = measurement.finish();
+        assert!(
+            replacement.allocated as u64 <= used.load(Ordering::SeqCst) - before,
+            "the admitted map capacity bounds its allocation: {replacement:?}"
+        );
         assert_eq!(reader.len(), 1);
         assert_eq!(source.len(), 2);
         drop(source);

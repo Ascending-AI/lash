@@ -67,10 +67,13 @@ async fn a_checkpoint_read_keeps_its_snapshot_while_the_checkpoint_is_peeled() {
     let pauses = SqlitePauses::default();
     let store = paused_file_store(&path, &pauses).await;
     let mut checkpoint = HydratedSessionCheckpoint::default();
-    checkpoint.components.insert(
-        "snapshot/component".to_owned(),
-        lash_core_store::store::HydratedCheckpointComponent::changed(vec![7; 129]),
-    );
+    checkpoint
+        .components
+        .insert(
+            "snapshot/component".to_owned(),
+            lash_core_store::store::HydratedCheckpointComponent::changed(vec![7; 129]),
+        )
+        .expect("fixture allocation admitted");
     let stored = store
         .put_checkpoint(&checkpoint)
         .await

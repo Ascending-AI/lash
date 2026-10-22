@@ -306,7 +306,7 @@ impl RuntimeCheckpointComponents {
         if self.completeness != CheckpointComponentCompleteness::Complete {
             return Err(crate::StoreError::IncompleteCheckpointComponentSet);
         }
-        let mut components = std::collections::BTreeMap::new();
+        let mut components = crate::source_map::SharedSourceMap::empty_in(budget)?;
         for (key, component) in &self.entries {
             let pending = match component {
                 ResidentCheckpointComponent::Changed { body, .. } => {
@@ -326,7 +326,7 @@ impl RuntimeCheckpointComponents {
                     crate::HydratedCheckpointComponent::unchanged(&descriptor.clone_in(budget)?)
                 }
             };
-            components.insert(key.clone(), pending);
+            components.insert_ref(key, pending)?;
         }
         let execution = match &self.execution {
             ResidentExecution::None => None,

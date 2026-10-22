@@ -639,20 +639,26 @@ mod tests {
             .entry(crate::plugin_state::NamespaceBody::encode(&BTreeMap::new()).values),
         );
         let mut checkpoint = super::super::HydratedSessionCheckpoint::default();
-        checkpoint.components.insert(
-            super::super::PLUGIN_STATE_CHECKPOINT_COMPONENT.to_owned(),
-            super::super::HydratedCheckpointComponent::changed(
-                rmp_serde::to_vec_named(&state).expect("encode plugin state"),
-            ),
-        );
+        checkpoint
+            .components
+            .insert(
+                super::super::PLUGIN_STATE_CHECKPOINT_COMPONENT.to_owned(),
+                super::super::HydratedCheckpointComponent::changed(
+                    rmp_serde::to_vec_named(&state).expect("encode plugin state"),
+                ),
+            )
+            .expect("fixture allocation admitted");
         let mut found = PluginPublication::default();
         found.add_checkpoint(&checkpoint).expect("readable stamps");
         assert_eq!(found, publication(&[("probe", FormatNamespace::State, 2)]));
 
-        checkpoint.components.insert(
-            super::super::PLUGIN_STATE_CHECKPOINT_COMPONENT.to_owned(),
-            super::super::HydratedCheckpointComponent::changed(b"not a plugin state".to_vec()),
-        );
+        checkpoint
+            .components
+            .insert(
+                super::super::PLUGIN_STATE_CHECKPOINT_COMPONENT.to_owned(),
+                super::super::HydratedCheckpointComponent::changed(b"not a plugin state".to_vec()),
+            )
+            .expect("fixture allocation admitted");
         assert!(matches!(
             PluginPublication::default().add_checkpoint(&checkpoint),
             Err(StoreError::StoredDataCorrupt { .. })

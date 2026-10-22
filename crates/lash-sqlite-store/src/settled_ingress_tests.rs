@@ -57,10 +57,14 @@ async fn head_commit(store: &SqliteStore, session: &SessionId) -> RuntimeCommit 
         )
     };
     let mut commit = RuntimeCommit::persisted_state_for_test(&state);
-    commit.checkpoint.components.insert(
-        format!("settled-ingress/{head_revision}"),
-        HydratedCheckpointComponent::changed(format!("revision {head_revision}").into_bytes()),
-    );
+    commit
+        .checkpoint
+        .components
+        .insert(
+            format!("settled-ingress/{head_revision}"),
+            HydratedCheckpointComponent::changed(format!("revision {head_revision}").into_bytes()),
+        )
+        .expect("fixture allocation admitted");
     commit
 }
 

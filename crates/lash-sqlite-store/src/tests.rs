@@ -969,10 +969,14 @@ async fn real_page_exhaustion_rolls_back_and_the_exact_retry_commits_once() {
         .expect("head before")
         .expect("created head");
     let mut commit = RuntimeCommit::persisted_state_for_test(&state);
-    commit.checkpoint.components.insert(
-        "full/body".to_owned(),
-        lash_core_store::store::HydratedCheckpointComponent::changed(vec![b'x'; 524_288]),
-    );
+    commit
+        .checkpoint
+        .components
+        .insert(
+            "full/body".to_owned(),
+            lash_core_store::store::HydratedCheckpointComponent::changed(vec![b'x'; 524_288]),
+        )
+        .expect("fixture allocation admitted");
     store
         .conn
         .call(|conn| {
@@ -1735,10 +1739,14 @@ async fn receipt_replay_uses_scalar_columns_and_preserves_the_original_answer() 
         .expect("commit");
     state.head_revision = original.head_revision;
     let mut later = RuntimeCommit::persisted_state_for_test(&state);
-    later.checkpoint.components.insert(
-        "receipt/later-head".to_owned(),
-        HydratedCheckpointComponent::changed(b"a different retained manifest".to_vec()),
-    );
+    later
+        .checkpoint
+        .components
+        .insert(
+            "receipt/later-head".to_owned(),
+            HydratedCheckpointComponent::changed(b"a different retained manifest".to_vec()),
+        )
+        .expect("fixture allocation admitted");
     let later = store.commit_runtime_state(later).await.expect("later head");
     assert_ne!(original.checkpoint_ref, later.checkpoint_ref);
     let limit = std::num::NonZeroU32::new(10).expect("page limit");

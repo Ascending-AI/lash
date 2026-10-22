@@ -147,14 +147,18 @@ pub async fn session_plugin_config_round_trips_through_the_committed_head(
     store: Arc<dyn RuntimeStore>,
 ) {
     let mut expected = crate::PluginConfig::for_protocol(Some("conformance-protocol".to_string()));
-    expected.insert(
-        "conformance-protocol",
-        serde_json::json!({
-            "dialect": "conformance-dialect",
-            "termination": {"kind": "conformance-termination"},
-        }),
-    );
-    expected.insert("conformance-plugin", serde_json::json!({"turn_cap": 12}));
+    expected
+        .insert(
+            "conformance-protocol",
+            serde_json::json!({
+                "dialect": "conformance-dialect",
+                "termination": {"kind": "conformance-termination"},
+            }),
+        )
+        .expect("fixture allocation admitted");
+    expected
+        .insert("conformance-plugin", serde_json::json!({"turn_cap": 12}))
+        .expect("fixture allocation admitted");
     let mut state = RuntimeSessionState {
         session_id: SessionId::from("session-plugin-config"),
         ..RuntimeSessionState::fixture(crate::SessionPolicy::new(
@@ -333,10 +337,14 @@ pub async fn commit_rejects_carried_nondefault_byte_budget(store: Arc<dyn Runtim
         crate::CommitBudgetLimit::Unbounded,
     );
     let mut commit = RuntimeCommit::persisted_state_for_test_with_budget(&state, budget);
-    commit.checkpoint.components.insert(
-        "arbitrary/oversized".to_string(),
-        crate::HydratedCheckpointComponent::changed(vec![0; CONFIGURED_BYTE_LIMIT * 2]),
-    );
+    commit
+        .checkpoint
+        .components
+        .insert(
+            "arbitrary/oversized".to_string(),
+            crate::HydratedCheckpointComponent::changed(vec![0; CONFIGURED_BYTE_LIMIT * 2]),
+        )
+        .expect("fixture allocation admitted");
 
     let error = store
         .commit_runtime_state(commit)

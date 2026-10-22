@@ -243,7 +243,7 @@ impl SessionOwner {
                             1,
                         );
                         let memory = cx.owner_memory().cloned().ok_or_else(|| TurnError::Exec("session claim has no allocation ledger".into()))?;
-                        let (allocation_budget, allocations) = lash_core_execution::runtime::actor::owner_allocation::OwnerAllocation::budget(memory, cx.actor().to_string());
+                        let (allocation_budget, allocations) = lash_core_execution::runtime::actor::owner_allocation::OwnerAllocation::hydration_budget(memory, cx.actor().to_string());
                         let mut head = SessionHead::load_in(cx.backend(), session, &allocation_budget).await?;
                         Arc::make_mut(&mut head.state).session_graph.detach_owner_prompt_rendering().map_err(refused)?;
                         let turn = cx.durable_reads()?.turn(session).await?;

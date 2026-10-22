@@ -576,10 +576,15 @@ fn plugin_state_refusals_are_distinct_typed_and_pre_callback() {
         serde_json::json!({"format-probe": {"generation": 7, "format_version": 0, "fork": "copy", "publication": {"owner_segment": 0, "settled": null, "recent": []}, "values": {"native": 17}}}),
     ] {
         let mut checkpoint = crate::HydratedSessionCheckpoint::default();
-        checkpoint.components.insert(
-            crate::store::PLUGIN_STATE_CHECKPOINT_COMPONENT.into(),
-            crate::HydratedCheckpointComponent::changed(rmp_serde::to_vec_named(&body).unwrap()),
-        );
+        checkpoint
+            .components
+            .insert(
+                crate::store::PLUGIN_STATE_CHECKPOINT_COMPONENT.into(),
+                crate::HydratedCheckpointComponent::changed(
+                    rmp_serde::to_vec_named(&body).unwrap(),
+                ),
+            )
+            .expect("fixture allocation admitted");
         let error = checkpoint
             .decode_component::<PluginState>(crate::store::PLUGIN_STATE_CHECKPOINT_COMPONENT)
             .expect_err("a namespace without a readable stamp is corrupt");
