@@ -26,6 +26,8 @@ enum SequenceMode {
 pub struct MessageSequence {
     mode: SequenceMode,
     base_rendered: Option<Arc<BaseRenderCache>>,
+    // Raw mutable edits can introduce foreign parts or scalar allocations.
+    admitted: bool,
 }
 
 impl Default for MessageSequence {
@@ -72,6 +74,7 @@ impl MessageSequence {
         Self {
             mode: SequenceMode::Owned(AppendVec::from(messages)),
             base_rendered: None,
+            admitted: false,
         }
     }
 
@@ -83,6 +86,7 @@ impl MessageSequence {
                 joined: None,
             },
             base_rendered: None,
+            admitted: false,
         }
     }
 
@@ -104,9 +108,10 @@ impl MessageSequence {
         fn buffer(
             source: &AppendVec<Message>,
             budget: &crate::allocation::AllocationBudget,
+            admitted: bool,
         ) -> Result<AppendVec<Message>, crate::allocation::AllocationError> {
             use crate::allocation::SourceCapacity;
-            if source.allocation_budget().identity() == budget.identity() {
+            if admitted && source.allocation_budget().identity() == budget.identity() {
                 return Ok(source.clone());
             }
             let mut next = AppendVec::try_with_capacity(source.len(), budget)?;
@@ -125,21 +130,28 @@ impl MessageSequence {
         }
         match &self.mode {
             SequenceMode::Owned(owned) => Ok(Self {
-                mode: SequenceMode::Owned(buffer(owned, budget)?),
+                mode: SequenceMode::Owned(buffer(owned, budget, self.admitted)?),
                 base_rendered: self.base_rendered.clone(),
+                admitted: true,
             }),
             SequenceMode::Layered {
                 base,
                 delta,
                 joined,
             } => {
-                if base.allocation_budget().identity() == budget.identity() {
+                if self.admitted && base.allocation_budget().identity() == budget.identity() {
                     return Ok(self.clone());
                 }
-                let mut next = Self::from_base(buffer(base, budget)?);
+                let mut next = Self::from_base(buffer(base, budget, self.admitted)?);
+                next.admitted = true;
                 if let Some(delta) = delta {
                     // Admit its own parts before the join clones any scalar.
-                    next.extend(buffer(delta, budget)?.as_slice().iter().cloned())?;
+                    next.extend(
+                        buffer(delta, budget, self.admitted)?
+                            .as_slice()
+                            .iter()
+                            .cloned(),
+                    )?;
                 }
                 let _ = joined;
                 Ok(next)
@@ -267,6 +279,7 @@ impl MessageSequence {
             self.mode = SequenceMode::Owned(owned);
         }
         self.base_rendered = None;
+        self.admitted = false;
         match &mut self.mode {
             SequenceMode::Owned(owned) => owned.make_mut(),
             SequenceMode::Layered { .. } => {
@@ -302,6 +315,19 @@ impl MessageSequence {
         }
     }
 
+    /// Ledger for preparing replacement input before its owner retains it.
+    pub fn allocation_budget(&self) -> &crate::allocation::AllocationBudget {
+        self.materialize().allocation_budget()
+    }
+
+    fn adopt_message(
+        mut message: Message,
+        budget: &crate::allocation::AllocationBudget,
+    ) -> Result<Message, crate::allocation::AllocationError> {
+        message.parts = MessageParts::adopt_in(&message.parts, budget)?;
+        Ok(message)
+    }
+
     pub fn push(&mut self, message: Message) -> Result<(), crate::allocation::AllocationError> {
         self.extend(std::iter::once(message))
     }
@@ -317,7 +343,10 @@ impl MessageSequence {
         match &mut self.mode {
             SequenceMode::Owned(owned) => {
                 let mut draft = owned.clone();
-                draft.extend(messages)?;
+                for message in messages {
+                    let message = Self::adopt_message(message, draft.allocation_budget())?;
+                    draft.push(message)?;
+                }
                 *owned = draft;
             }
             SequenceMode::Layered {
@@ -332,6 +361,7 @@ impl MessageSequence {
                 };
                 let mut next_joined = joined.as_ref().unwrap_or(base).clone();
                 for message in messages {
+                    let message = Self::adopt_message(message, budget)?;
                     next_joined.push_cloned_adopting(&message, same_message)?;
                     next_delta.push(message)?;
                 }
@@ -348,8 +378,11 @@ impl MessageSequence {
     ) -> Result<(), crate::allocation::AllocationError> {
         let budget = self.materialize().allocation_budget();
         let mut next = AppendVec::try_with_capacity(messages.len(), budget)?;
-        next.extend(messages)?;
+        for message in messages {
+            next.push(Self::adopt_message(message, budget)?)?;
+        }
         self.mode = SequenceMode::Owned(next);
+        self.admitted = true;
         self.base_rendered = None;
         Ok(())
     }

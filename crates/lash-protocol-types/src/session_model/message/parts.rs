@@ -61,15 +61,37 @@ impl MessageParts {
         self.budget = budget;
     }
 
-    /// An editor detaches only after reserving the new private parts.
-    pub fn make_mut(parts: &mut Arc<Self>) -> Result<&mut Vec<Part>, AllocationError> {
-        if Arc::get_mut(parts).is_none() {
-            *parts = Self::clone_in(parts.as_slice(), &parts.budget)?;
-        }
-        match Arc::get_mut(parts) {
-            Some(parts) => Ok(&mut parts.parts),
-            None => unreachable!("the editor just made its parts private"),
-        }
+    /// Reserve the complete private rewrite before copying or calling `edit`.
+    /// `additional_bytes` bounds new field allocation (including temporary
+    /// growth); `additional_parts` bounds new vector slots. The callback must
+    /// not retain mutable references or exceed those declared growth bounds.
+    /// Readers keep their original parts and obligations on refusal or unwind.
+    pub fn edit<R>(
+        parts: &mut Arc<Self>,
+        additional_bytes: u64,
+        additional_parts: usize,
+        edit: impl FnOnce(&mut Vec<Part>) -> R,
+    ) -> Result<R, AllocationError> {
+        let budget = parts.budget.clone();
+        let slots = parts.len().saturating_add(additional_parts);
+        let allocation = budget.reserve(
+            crate::allocation::payload_capacity(
+                &parts.parts,
+                std::mem::size_of::<Self>()
+                    + 16
+                    + slots.saturating_mul(std::mem::size_of::<Part>()),
+            )
+            .saturating_add(additional_bytes),
+        )?;
+        let mut next = Vec::with_capacity(slots);
+        next.extend(parts.iter().cloned());
+        let result = edit(&mut next);
+        *parts = Arc::new(Self {
+            parts: next,
+            allocation,
+            budget,
+        });
+        Ok(result)
     }
 }
 impl From<Vec<Part>> for MessageParts {

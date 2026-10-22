@@ -111,7 +111,9 @@ pub(super) fn render_history_messages(
                     ));
                 }
                 if let Some(message) = messages.last_mut() {
-                    append_step_image_blocks(step, Arc::make_mut(&mut message.blocks));
+                    let mut blocks = message.blocks.to_vec();
+                    append_step_image_blocks(step, &mut blocks);
+                    message.blocks = Arc::new(blocks.into());
                 }
             }
             BorrowedChronologicalPayload::Message(message) => {

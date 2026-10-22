@@ -19,7 +19,6 @@ struct MessageTotals {
 #[derive(Clone, Debug)]
 pub(crate) struct AdmittedMessage {
     pub(crate) message: LlmMessage,
-    pub(crate) _holds: Arc<[crate::allocation::AllocationHold]>,
 }
 
 impl MessageTotals {
@@ -233,16 +232,10 @@ impl RequestMessages {
         let admitted = tail
             .iter()
             .map(|message| {
-                let capacity = crate::allocation::payload_capacity(
-                    message.blocks.as_ref(),
-                    message.blocks.capacity() * std::mem::size_of::<LlmContentBlock>(),
-                );
-                let hold =
-                    budget.reserve_shared(Arc::as_ptr(&message.blocks) as usize, capacity)?;
-                Ok(AdmittedMessage {
-                    message: message.clone(),
-                    _holds: vec![hold].into(),
-                })
+                let blocks = LlmMessageBlocks::adopt_in(&message.blocks, budget)?;
+                let mut message = message.clone();
+                message.blocks = blocks;
+                Ok(AdmittedMessage { message })
             })
             .collect::<Result<Vec<_>, crate::allocation::AllocationError>>()?;
         Ok(Self(

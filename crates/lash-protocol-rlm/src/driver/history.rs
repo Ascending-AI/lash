@@ -422,9 +422,7 @@ fn text_block(text: impl Into<Arc<str>>, cache_breakpoint: bool) -> LlmContentBl
 
 fn mark_last_history_text_cache_breakpoint(messages: &mut [LlmMessage]) {
     for message in messages.iter_mut().rev() {
-        let Some(blocks) = Arc::get_mut(&mut message.blocks) else {
-            continue;
-        };
+        let mut blocks = message.blocks.to_vec();
         for block in blocks.iter_mut().rev() {
             if let LlmContentBlock::Text {
                 text,
@@ -434,6 +432,7 @@ fn mark_last_history_text_cache_breakpoint(messages: &mut [LlmMessage]) {
                 && !text.trim().is_empty()
             {
                 *cache_breakpoint = true;
+                message.blocks = Arc::new(blocks.into());
                 return;
             }
         }

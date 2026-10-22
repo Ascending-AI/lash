@@ -1230,7 +1230,8 @@ pub mod provider {
     /// stable contract a capability catalog can branch on.
     pub use lash_core::facade_support::LlmProfileEffortValidationCategory;
     pub use lash_core::llm::types::{
-        LlmContentBlock, LlmJsonSchema, LlmMessage, LlmOutputSpec, LlmRole, LlmToolChoice,
+        LlmContentBlock, LlmJsonSchema, LlmMessage, LlmMessageBlocks, LlmOutputSpec, LlmRole,
+        LlmToolChoice,
     };
     pub use lash_core::provider::LlmProfileEffortValidationError;
     /// Provider completion, caching, failure, retry, and rate-limiting contracts.

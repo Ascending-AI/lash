@@ -222,17 +222,23 @@ fn strip_all_attachments(
 ) -> Result<bool, ContextError> {
     let mut changed = false;
     for message in messages {
-        for part in
-            lash_protocol_types::session_model::message::MessageParts::make_mut(&mut message.parts)
-                .map_err(|error| {
-                    lash_execution_contracts::PluginError::Runtime(
-                        lash_core::RuntimeError::allocation(error),
-                    )
-                })?
-                .iter_mut()
-        {
-            changed |= omit_part_attachments(part, placeholder);
-        }
+        let growth = message.parts.iter().fold(0u64, |bytes, part| {
+            let copies = part.tool_result_content().map_or(1, <[_]>::len);
+            bytes.saturating_add((placeholder.len() as u64 + 32).saturating_mul(copies as u64))
+        });
+        changed |=
+            lash_protocol_types::MessageParts::edit(&mut message.parts, growth, 0, |parts| {
+                let mut changed = false;
+                for part in parts {
+                    changed |= omit_part_attachments(part, placeholder);
+                }
+                changed
+            })
+            .map_err(|error| {
+                lash_execution_contracts::PluginError::Runtime(lash_core::RuntimeError::allocation(
+                    error,
+                ))
+            })?;
     }
     Ok(changed)
 }

@@ -370,7 +370,7 @@ pub fn place_prompt(
     request.instructions = instructions;
     if let Some(context) = current_context {
         if has_current_context_prefix && let Some(prefix) = request.messages.last_mut() {
-            let blocks = Arc::make_mut(&mut prefix.blocks);
+            let mut blocks = prefix.blocks.to_vec();
             match blocks.last_mut() {
                 Some(lash_protocol_types::llm::types::LlmContentBlock::Text { text, .. }) => {
                     *text = Arc::from(format!("{text}\n\n\n{context}"));
@@ -381,6 +381,7 @@ pub fn place_prompt(
                     cache_breakpoint: false,
                 }),
             }
+            prefix.blocks = Arc::new(blocks.into());
         } else {
             request
                 .messages

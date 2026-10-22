@@ -21,8 +21,7 @@ use std::sync::{Arc, OnceLock};
 ///
 /// `parts` is `Arc`-shared so cloning a `Message` is one Arc bump per message field rather
 /// than a deep-clone of every `Part`.
-/// Mutate via `MessageParts::make_mut(&mut message.parts)` when truly needed; most plugin pipelines
-/// should produce a fresh `Vec<Part>` and assign it.
+/// Use `MessageParts::edit` for a preadmitted private rewrite.
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct Message {
     pub id: String,
@@ -1597,9 +1596,17 @@ fn render_structured_message_owned(
         (msg.role, msg.origin.as_ref()),
         (MessageRole::User, Some(MessageOrigin::TurnInput { .. }))
     );
+    projected.blocks = Arc::new(crate::llm::types::LlmMessageBlocks::admitted(
+        // The vector was constructed under the reservations above.
+        match Arc::try_unwrap(projected.blocks) {
+            Ok(blocks) => blocks.into_blocks(),
+            Err(_) => unreachable!("fresh render blocks are private"),
+        },
+        holds,
+        budget.clone(),
+    ));
     Ok(Some(crate::llm::types::AdmittedMessage {
         message: projected,
-        _holds: holds.into(),
     }))
 }
 

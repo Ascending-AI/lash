@@ -184,11 +184,15 @@ pub fn render_transcript_prompt(msgs: &[Message]) -> RenderedPrompt {
     );
 
     let mut message = LlmMessage::text(LlmRole::User, text);
-    Arc::make_mut(&mut message.blocks).extend(attachments.into_iter().map(|source| {
-        LlmContentBlock::Attachment {
-            reference: Box::new(source),
-        }
-    }));
+    let mut blocks = message.blocks.to_vec();
+    blocks.extend(
+        attachments
+            .into_iter()
+            .map(|source| LlmContentBlock::Attachment {
+                reference: Box::new(source),
+            }),
+    );
+    message.blocks = Arc::new(blocks.into());
     RenderedPrompt {
         messages: vec![message],
     }

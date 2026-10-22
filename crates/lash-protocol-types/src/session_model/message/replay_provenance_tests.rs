@@ -205,11 +205,13 @@ fn partially_stripped_replay_provenance_loads_and_drops_as_unstamped() {
         );
         let mut request =
             replay_request_from_reopened_message(Some(route.clone()), "claude-sonnet-4-6");
-        for block in Arc::make_mut(&mut request.messages[0].blocks) {
+        let mut blocks = request.messages[0].blocks.to_vec();
+        for block in &mut blocks {
             if let LlmContentBlock::Reasoning { text, .. } = block {
                 text.clear();
             }
         }
+        request.messages[0].blocks = Arc::new(blocks.into());
         let mut persisted =
             serde_json::to_value(&request.messages).expect("prompt history serializes");
         remove_json_field(&mut persisted, stripped_field);

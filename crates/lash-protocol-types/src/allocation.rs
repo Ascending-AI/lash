@@ -255,3 +255,54 @@ impl SourceCapacity for crate::llm::types::LlmMessage {
         0
     }
 }
+
+#[cfg(test)]
+pub(crate) mod testing {
+    use super::*;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    #[derive(Clone, Default)]
+    pub(crate) struct Ledger {
+        pub used: Arc<AtomicU64>,
+        pub limit: Arc<AtomicU64>,
+    }
+    struct Hold(Ledger, u64);
+    impl AllocationReservation for Hold {
+        fn retain(&self) {}
+    }
+    impl Drop for Hold {
+        fn drop(&mut self) {
+            self.0.used.fetch_sub(self.1, Ordering::SeqCst);
+        }
+    }
+    impl Ledger {
+        pub fn budget(&self) -> AllocationBudget {
+            AllocationBudget::new(self.clone())
+        }
+        pub fn used(&self) -> u64 {
+            self.used.load(Ordering::SeqCst)
+        }
+        pub fn limit(&self, limit: u64) {
+            self.limit.store(limit, Ordering::SeqCst);
+        }
+    }
+    impl AllocationLedger for Ledger {
+        fn reserve(&self, bytes: u64) -> Result<AllocationHold, AllocationError> {
+            let limit = self.limit.load(Ordering::SeqCst);
+            self.used
+                .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |used| {
+                    used.checked_add(bytes).filter(|next| *next <= limit)
+                })
+                .map_err(|_| AllocationError {
+                    kind: ReserveError::Pressure,
+                    actor: "payload-law".into(),
+                    requested: bytes,
+                    capacity: limit,
+                })?;
+            Ok(AllocationHold::new(Hold(self.clone(), bytes)))
+        }
+        fn reserve_shared(&self, _: usize, bytes: u64) -> Result<AllocationHold, AllocationError> {
+            self.reserve(bytes)
+        }
+    }
+}

@@ -31,7 +31,8 @@ pub fn degrade_unmaterializable_request_attachments(
         return notices;
     }
     for message in &mut Arc::make_mut(request).messages {
-        for block in Arc::make_mut(&mut message.blocks) {
+        let mut blocks = message.blocks.to_vec();
+        for block in &mut blocks {
             match block {
                 LlmContentBlock::Attachment { reference }
                     if omitted(reference, AttachmentPosition::Message) =>
@@ -68,6 +69,7 @@ pub fn degrade_unmaterializable_request_attachments(
                 _ => {}
             }
         }
+        message.blocks = Arc::new(blocks.into());
     }
     notices
 }

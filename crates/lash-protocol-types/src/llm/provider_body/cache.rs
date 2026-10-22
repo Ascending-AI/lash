@@ -81,7 +81,7 @@ impl SegmentContext {
 /// ids). Build it, then hand it to [`SegmentCache::segments`].
 pub struct SegmentKey<'a> {
     hasher: blake3::Hasher,
-    messages: Vec<&'a Arc<Vec<LlmContentBlock>>>,
+    messages: Vec<&'a Arc<crate::llm::types::LlmMessageBlocks>>,
 }
 
 impl<'a> SegmentKey<'a> {
@@ -176,7 +176,7 @@ struct Entries {
 
 #[derive(Clone)]
 struct Entry {
-    sources: Box<[Arc<Vec<LlmContentBlock>>]>,
+    sources: Box<[Arc<crate::llm::types::LlmMessageBlocks>]>,
     value: Arc<dyn Any + Send + Sync>,
     bytes: usize,
     used: u64,
@@ -241,7 +241,10 @@ impl SegmentCache {
             + entries
                 .map
                 .values()
-                .map(|entry| entry.sources.len() * std::mem::size_of::<Arc<Vec<LlmContentBlock>>>())
+                .map(|entry| {
+                    entry.sources.len()
+                        * std::mem::size_of::<Arc<crate::llm::types::LlmMessageBlocks>>()
+                })
                 .sum::<usize>();
         let metadata = budget.reserve(bytes as u64)?;
         Ok(Self(Some(Arc::new(Shared {
@@ -355,7 +358,7 @@ impl Shared {
     fn get<T: LoweredUnit>(
         &self,
         digest: &[u8; 32],
-        messages: &[&Arc<Vec<LlmContentBlock>>],
+        messages: &[&Arc<crate::llm::types::LlmMessageBlocks>],
     ) -> Option<Arc<T>> {
         let mut entries = self.lock();
         entries.clock += 1;
@@ -380,7 +383,7 @@ impl Shared {
     fn insert<T: LoweredUnit>(
         &self,
         digest: [u8; 32],
-        messages: Vec<&Arc<Vec<LlmContentBlock>>>,
+        messages: Vec<&Arc<crate::llm::types::LlmMessageBlocks>>,
         value: &Arc<T>,
     ) {
         let bytes = value.retained_bytes().max(1);

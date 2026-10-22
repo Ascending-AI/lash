@@ -97,22 +97,30 @@ pub fn apply_attachment_omissions(
     }
     let mut omitted = 0;
     for message in messages {
-        let named = omissions
-            .iter()
-            .filter(|(id, _)| id.message == message.id)
-            .map(|(id, text)| (id.part, text))
-            .collect::<Vec<_>>();
-        if named.is_empty() {
+        let named = || omissions.iter().filter(|(id, _)| id.message == message.id);
+        if named().next().is_none() {
             continue;
         }
-        let parts = lash_protocol_types::session_model::message::MessageParts::make_mut(
-            &mut message.parts,
-        )?;
-        for (index, placeholder) in named {
-            if let Some(part) = parts.get_mut(index) {
-                omitted += usize::from(omit_part_attachments(part, placeholder));
-            }
-        }
+        // One placeholder may replace every block of a tool result. Include
+        // both live strings and replacement scratch before the edit begins.
+        let growth = named().fold(0u64, |bytes, (id, text)| {
+            let copies = message
+                .parts
+                .get(id.part)
+                .and_then(Part::tool_result_content)
+                .map_or(1, <[_]>::len);
+            bytes.saturating_add((text.len() as u64 + 32).saturating_mul(copies as u64))
+        });
+        omitted +=
+            lash_protocol_types::MessageParts::edit(&mut message.parts, growth, 0, |parts| {
+                let mut count = 0;
+                for (id, placeholder) in named() {
+                    if let Some(part) = parts.get_mut(id.part) {
+                        count += usize::from(omit_part_attachments(part, placeholder));
+                    }
+                }
+                count
+            })?;
     }
     Ok(omitted)
 }
