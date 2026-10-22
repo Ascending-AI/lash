@@ -332,7 +332,9 @@ async fn commit_frame_opens(
         .await
         .expect("commit frame opens");
     state.apply_persisted_commit_result(receipt).unwrap();
-    state.mark_node_ids_persisted(appended);
+    state
+        .mark_node_ids_persisted(appended)
+        .expect("admitted durable source retirement");
 }
 
 fn open_resident_frame(

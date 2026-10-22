@@ -564,7 +564,7 @@ async fn commit_initialized_session(
             lash_execution_contracts::plugin_error::PluginError::Session(err.to_string())
         })?;
     persisted_state.apply_persisted_commit_result(result)?;
-    persisted_state.mark_node_ids_persisted(persisted_node_ids);
+    persisted_state.mark_node_ids_persisted(persisted_node_ids)?;
     materialized
         .runtime
         .install_resident_state(persisted_state)?;

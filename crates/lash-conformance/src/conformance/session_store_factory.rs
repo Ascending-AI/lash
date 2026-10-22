@@ -1188,7 +1188,9 @@ async fn session_store_factory_fork_semantics(factory: Arc<dyn crate::Deployment
     state
         .apply_persisted_commit_result(first)
         .expect("source fixture edit is admitted");
-    state.mark_node_ids_persisted(root_ids);
+    state
+        .mark_node_ids_persisted(root_ids)
+        .expect("admitted durable source retirement");
 
     let source_id = source_request.session_id.clone();
     let root_revision = state.head_revision;

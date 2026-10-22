@@ -70,7 +70,9 @@ async fn commit_with_evidence(
     state
         .apply_persisted_commit_result(receipt)
         .expect("source fixture edit is admitted");
-    state.mark_node_ids_persisted(new_ids);
+    state
+        .mark_node_ids_persisted(new_ids)
+        .expect("admitted durable source retirement");
 }
 
 fn open_frame(state: &mut RuntimeSessionState, name: &str) -> FrameNodeId {

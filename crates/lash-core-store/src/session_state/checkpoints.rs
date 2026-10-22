@@ -131,7 +131,7 @@ impl RuntimeSessionState {
                     previous_frame_node_id: None,
                 })?;
         }
-        self.retire_below_current_frame();
+        self.retire_below_current_frame()?;
         self.agent_frames = self
             .session_graph
             .try_agent_frame_records(&self.session_id)?;
@@ -163,13 +163,14 @@ impl RuntimeSessionState {
     /// Record the nodes an accepted commit receipt made durable, then retire
     /// the durable nodes below the current frame
     /// ([`Self::retire_below_current_frame`]).
-    pub fn mark_node_ids_persisted<I>(&mut self, node_ids: I)
+    pub fn mark_node_ids_persisted<I>(&mut self, node_ids: I) -> Result<(), crate::StoreError>
     where
         I: IntoIterator<Item = crate::NodeId>,
     {
         let node_ids = node_ids.into_iter().collect::<Vec<_>>();
         self.session_graph.mark_durable(&node_ids);
-        self.retire_below_current_frame();
+        self.retire_below_current_frame()?;
+        Ok(())
     }
 
     /// Whether the resident node `node_id` is durable.
@@ -187,11 +188,15 @@ impl RuntimeSessionState {
     /// a pending node stays until it is durable, and the trim waits while a
     /// pending node still hangs off a node it would drop. When the base is
     /// already current, this does nothing.
-    pub fn retire_below_current_frame(&mut self) {
-        if self.session_graph.retire_below_current_frame().is_none() {
-            return;
+    pub fn retire_below_current_frame(&mut self) -> Result<(), crate::StoreError> {
+        let mut graph = self.session_graph.clone();
+        if graph.retire_below_current_frame()?.is_none() {
+            return Ok(());
         }
-        self.agent_frames = self.session_graph.agent_frame_records(&self.session_id);
+        let frames = graph.try_agent_frame_records(&self.session_id)?;
+        self.session_graph = graph;
+        self.agent_frames = frames;
+        Ok(())
     }
 
     /// Clears in-memory tool, plugin, and execution-state snapshots for protocol implementors after

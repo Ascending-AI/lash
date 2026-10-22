@@ -1497,7 +1497,9 @@ async fn a_terminal_writes_its_window_in_constant_bytes_at_every_history_positio
             .await
             .expect("commit a longer history");
         state.apply_persisted_commit_result(receipt).unwrap();
-        state.mark_node_ids_persisted(appended);
+        state
+            .mark_node_ids_persisted(appended)
+            .expect("admitted durable source retirement");
         let before = terminal_window_bytes(&store).await;
         store
             .end_command_run(&session, &run, position)
@@ -2329,7 +2331,9 @@ async fn serving_window_refuses_source_before_decoding_a_cold_cached_payload() {
         .unwrap();
         let receipt = store.commit_runtime_state(commit).await.unwrap();
         state.apply_persisted_commit_result(receipt).unwrap();
-        state.mark_node_ids_persisted(appended);
+        state
+            .mark_node_ids_persisted(appended)
+            .expect("admitted durable source retirement");
     };
     persist(&mut state, "source-first").await;
     let cold = store

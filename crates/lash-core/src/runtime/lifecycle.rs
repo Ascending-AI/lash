@@ -780,7 +780,13 @@ impl LashRuntime {
                     ),
                 )
             })?;
-        flushed.mark_node_ids_persisted(persisted_node_ids);
+        flushed
+            .mark_node_ids_persisted(persisted_node_ids)
+            .map_err(|error| {
+                SessionError::Plugin(lash_execution_contracts::plugin_error::PluginError::from(
+                    error,
+                ))
+            })?;
         self.state = flushed;
         Ok(())
     }

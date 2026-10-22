@@ -917,6 +917,7 @@ fn retiring_below_the_current_frame_re_anchors_the_graph() {
     graph.mark_durable(&durable);
     let retired = graph
         .retire_below_current_frame()
+        .unwrap()
         .expect("the durable frame switch retires the old frame");
     assert_eq!(retired.len(), 3);
     assert_eq!(graph.durable_len(), 1, "the new FrameOpen stays durable");
@@ -941,7 +942,7 @@ fn retiring_below_the_current_frame_re_anchors_the_graph() {
     assert_eq!(graph.read_model().messages.len(), 1);
 
     // The base is current now: a second trim does nothing.
-    assert!(graph.retire_below_current_frame().is_none());
+    assert!(graph.retire_below_current_frame().unwrap().is_none());
 }
 
 /// A pending `FrameOpen` keeps everything below it until it is durable.
@@ -965,7 +966,7 @@ fn a_pending_frame_switch_retires_nothing() {
         "frame-b",
         crate::AgentFrameReason::continue_as(),
     );
-    assert!(graph.retire_below_current_frame().is_none());
+    assert!(graph.retire_below_current_frame().unwrap().is_none());
     assert_eq!(graph.nodes.len(), 3);
     assert!(graph.anchor().is_none());
 }
@@ -2152,6 +2153,77 @@ fn source_edit_refusal_leaves_graph_and_readers_unchanged() {
         );
     }
     assert!(completed, "the rename eventually passes all admission cuts");
+    // A committed frame switch is also a source replacement. Refusal must
+    // preserve the original anchored graph and its budgeted reader.
+    let session = SessionId::from("source-retirement");
+    let mut cold = SessionGraph::default();
+    open_test_frame(
+        &mut cold,
+        &session,
+        "frame-a",
+        crate::AgentFrameReason::initial(),
+    );
+    cold.append_message(text_message("a1", MessageRole::User, "old frame"))
+        .unwrap();
+    open_test_frame(
+        &mut cold,
+        &session,
+        "frame-b",
+        crate::AgentFrameReason::continue_as(),
+    );
+    cold.append_message(text_message("b1", MessageRole::User, "current frame"))
+        .unwrap();
+    let nodes = cold
+        .nodes
+        .iter()
+        .map(|node| {
+            let body = node
+                .encode_storage_body(crate::store::FleetFormat::current())
+                .unwrap();
+            Arc::new(
+                SessionNodeRecord::decode_storage_body_in(
+                    &node.node_id,
+                    node.parent_node_id.as_deref(),
+                    &body,
+                    crate::store::FleetFormat::current(),
+                    &budget,
+                )
+                .unwrap(),
+            )
+        })
+        .collect::<Vec<_>>();
+    let mut retiring =
+        SessionGraph::from_shared_nodes_in(nodes, cold.leaf_node_id.clone(), &budget).unwrap();
+    retiring.mark_all_durable();
+    let old_reader = retiring.read_model();
+    let before_retirement = serde_json::to_vec(&retiring).unwrap();
+    ledger.refuse.store(true, Ordering::SeqCst);
+    assert!(matches!(
+        retiring.retire_below_current_frame(),
+        Err(crate::StoreError::Allocation(AllocationError {
+            kind: ReserveError::Pressure,
+            ..
+        }))
+    ));
+    assert_eq!(
+        serde_json::to_vec(&retiring).unwrap(),
+        before_retirement,
+        "refused frame retirement preserves its source and owner ledger"
+    );
+    ledger.refuse.store(false, Ordering::SeqCst);
+    let retired = retiring
+        .retire_below_current_frame()
+        .unwrap()
+        .expect("retired frame");
+    assert_eq!(
+        retiring.nodes.allocation_budget().identity(),
+        budget.identity()
+    );
+    assert_eq!(retired.allocation_budget().identity(), budget.identity());
+    assert_eq!(retired.len(), 2);
+    drop(retiring);
+    drop(retired);
+    drop(old_reader);
     drop(graph);
     assert!(
         ledger.used.load(Ordering::SeqCst) > 0,

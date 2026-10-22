@@ -280,7 +280,9 @@ fn a_persisted_initial_frame_keeps_the_config_it_opened_under() {
         .iter()
         .map(|node| node.node_id.clone())
         .collect::<Vec<_>>();
-    state.mark_node_ids_persisted(persisted);
+    state
+        .mark_node_ids_persisted(persisted)
+        .expect("admitted durable source retirement");
     state.authority.plugin_config = protocol_config(serde_json::json!({ "channel": "cell" }));
     state
         .open_unpersisted_initial_frame_under_current_assignment()
@@ -622,7 +624,9 @@ fn a_durable_frame_switch_leaves_only_the_new_frame_resident() {
         .iter()
         .map(|node| node.node_id.clone())
         .collect::<Vec<_>>();
-    state.mark_node_ids_persisted(durable);
+    state
+        .mark_node_ids_persisted(durable)
+        .expect("admitted durable source retirement");
     assert_eq!(
         state.session_graph.nodes.len(),
         3,
@@ -659,7 +663,9 @@ fn a_durable_frame_switch_leaves_only_the_new_frame_resident() {
         .iter()
         .map(|node| node.node_id.clone())
         .collect::<Vec<_>>();
-    state.mark_node_ids_persisted(committed);
+    state
+        .mark_node_ids_persisted(committed)
+        .expect("admitted durable source retirement");
 
     assert_eq!(state.current_frame_node_id.as_ref(), Some(&new_frame));
     assert_ne!(new_frame, old_frame);
@@ -870,7 +876,9 @@ fn a_commit_carries_the_pending_suffix_and_its_receipt_makes_only_that_durable()
         .append_active_conversation_messages(&[projection_text("a3")])
         .unwrap();
     let in_flight = state.session_graph.leaf_node_id.clone().expect("a3's node");
-    state.mark_node_ids_persisted(first_ids.clone());
+    state
+        .mark_node_ids_persisted(first_ids.clone())
+        .expect("admitted durable source retirement");
     assert!(first_ids.iter().all(|id| state.is_node_persisted(id)));
     assert!(!state.is_node_persisted(&in_flight));
     let second = state.pending_graph_commit();
@@ -880,7 +888,9 @@ fn a_commit_carries_the_pending_suffix_and_its_receipt_makes_only_that_durable()
         "the node appended behind the first commit rides the next one alone"
     );
 
-    state.mark_node_ids_persisted(ids(&second));
+    state
+        .mark_node_ids_persisted(ids(&second))
+        .expect("admitted durable source retirement");
     assert!(state.is_node_persisted(&in_flight));
     assert!(matches!(
         state.pending_graph_commit(),

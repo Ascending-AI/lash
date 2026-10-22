@@ -474,7 +474,9 @@ fn a_committed_frame_open_clears_execution_state_and_ends_the_last_committed_fra
         committed_frame_transition(&state, None, SeedCarries::none(), &committing, &[]).unwrap(),
         None
     );
-    state.mark_node_ids_persisted([crate::NodeId::fixture(committed.as_str().to_string())]);
+    state
+        .mark_node_ids_persisted([crate::NodeId::fixture(committed.as_str().to_string())])
+        .expect("admitted durable source retirement");
     assert_eq!(
         committed_frame_transition(&state, None, SeedCarries::none(), &committing, &[]).unwrap(),
         None,

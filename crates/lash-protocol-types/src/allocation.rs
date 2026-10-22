@@ -197,6 +197,11 @@ macro_rules! inline_source {
     })* };
 }
 inline_source!((), usize, u64, u32, u16, u8, i64, i32, bool);
+impl SourceCapacity for crate::NodeId {
+    fn owned_capacity(&self) -> u64 {
+        self.len() as u64
+    }
+}
 impl SourceCapacity for String {
     fn owned_capacity(&self) -> u64 {
         self.capacity() as u64 + 32
