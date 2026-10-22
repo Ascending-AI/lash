@@ -787,13 +787,9 @@ impl Lowerer<'_> {
     fn handlers(&mut self, handlers: &[ast::ExceptHandler], caught: &Name) -> Lowering<()> {
         let Some((ast::ExceptHandler::ExceptHandler(handler), rest)) = handlers.split_first()
         else {
-            // The unmatched exception is rethrown by the dispatch adapter,
-            // not by the last statement of the preceding handler suite.
-            let span = self.span.take();
             self.emit(Stmt::Throw {
                 value: Expr::Variable(caught.clone()),
             });
-            self.span = span;
             return Ok(());
         };
         self.span_of(handler);
@@ -834,7 +830,13 @@ impl Lowerer<'_> {
             }
         };
         let then_block = self.block(body)?;
-        let else_block = self.block(|this| this.handlers(rest, caught))?;
+        let else_block = self.block(|this| {
+            // Unmatched dispatch belongs to this except clause, not to
+            // the last statement emitted by its suite. Preserve the range
+            // while keeping authored caption ownership on that statement.
+            this.span = span;
+            this.handlers(rest, caught)
+        })?;
         self.span = span;
         self.emit_if(matched.expr, then_block, else_block);
         Ok(())
