@@ -255,17 +255,14 @@ impl<'a> NodeEnvelope<'a> {
             let mut copied = 0;
             while !reader.is_empty() {
                 let start = reader.position();
-                match reader.next_event().map_err(refuse)? {
-                    TokenEvent::Slot(slot) => {
-                        let child = self.children.get(slot).ok_or(GraphRefusal::NonCanonical {
-                            node: Some(node),
-                            reason: CanonicalFault::ChildSlotOutOfRange(slot),
-                        })?;
-                        out.raw(&body[copied..start]);
-                        out.child(child.child_ref());
-                        copied = reader.position();
-                    }
-                    _ => {}
+                if let TokenEvent::Slot(slot) = reader.next_event().map_err(refuse)? {
+                    let child = self.children.get(slot).ok_or(GraphRefusal::NonCanonical {
+                        node: Some(node),
+                        reason: CanonicalFault::ChildSlotOutOfRange(slot),
+                    })?;
+                    out.raw(&body[copied..start]);
+                    out.child(child.child_ref());
+                    copied = reader.position();
                 }
             }
             out.raw(&body[copied..]);
@@ -344,7 +341,7 @@ pub fn frame_semantic(
     if !SEMANTIC_KINDS.contains(&kind.0) {
         return Err(GraphRefusal::UnsupportedKind(kind.0));
     }
-    let references = super::encode::References::scan(logical, kind)?;
+    let references = super::encode::LogicalScan::scan(logical, kind)?;
     let children = references.children.len();
     let body = references.physical_len(logical.len());
     let len = envelope_len(kind, children, body);
