@@ -340,6 +340,15 @@ async fn closure<S: PackageStorage + ?Sized>(
         if !active.insert(reference.clone()) {
             return Err(PackageRefusal::Cycle.into());
         }
+        // Only package records describe further dependencies. A Document or
+        // definition is a terminal artifact: carry its identity to the atomic
+        // hold below, which checks presence under the same fence as acquiring
+        // the complete closure. Hydrating its body discovers no extra edges.
+        if !is_package_reference(&reference) {
+            active.remove(&reference);
+            found.insert(reference);
+            continue;
+        }
         let bytes = store
             .load_package_record(&reference)
             .await?
@@ -602,4 +611,141 @@ pub async fn expand_package_cleanup<S: PackageStorage + ?Sized>(
         }
     }
     Ok(expanded)
+}
+
+#[cfg(test)]
+#[expect(
+    clippy::expect_used,
+    reason = "work-law fixtures fail at their broken assumption"
+)]
+mod work_laws {
+    use super::*;
+    use std::collections::BTreeMap;
+    use std::sync::Mutex;
+
+    #[derive(Default)]
+    struct CountedStorage {
+        records: Mutex<BTreeMap<String, Vec<u8>>>,
+        reads: Mutex<Vec<String>>,
+        holds: Mutex<Vec<String>>,
+    }
+
+    #[async_trait::async_trait]
+    impl PackageStorage for CountedStorage {
+        async fn package_referrer_ended(
+            &self,
+            _: &lash_core_store::artifact_referrer::ArtifactReferrer,
+        ) -> Result<bool, DurableError> {
+            Ok(false)
+        }
+        async fn hold_package_record(
+            &self,
+            _: &ReferrerClaim,
+            reference: &str,
+            _: Option<&[u8]>,
+            dependencies: &[String],
+        ) -> Result<(), DurableError> {
+            let records = self.records.lock().expect("work-law fixture");
+            for dependency in dependencies.iter().map(String::as_str).chain([reference]) {
+                if !records.contains_key(dependency) {
+                    return Err(PackageRefusal::Missing(dependency.into()).into());
+                }
+            }
+            *self.holds.lock().expect("work-law fixture") = dependencies.to_vec();
+            Ok(())
+        }
+        async fn put_package_labels(
+            &self,
+            _: &ReferrerClaim,
+            _: &str,
+            _: &[u8; 32],
+            _: &str,
+        ) -> Result<(), DurableError> {
+            unreachable!("retention does not publish labels")
+        }
+        async fn package_labels(&self, _: &str) -> Result<Vec<String>, DurableError> {
+            unreachable!("retention does not read labels")
+        }
+        async fn load_package_record(
+            &self,
+            reference: &str,
+        ) -> Result<Option<Vec<u8>>, DurableError> {
+            self.reads
+                .lock()
+                .expect("work-law fixture")
+                .push(reference.into());
+            Ok(self
+                .records
+                .lock()
+                .expect("work-law fixture")
+                .get(reference)
+                .cloned())
+        }
+        async fn end_package_records(
+            &self,
+            _: &ResolvedArtifactCleanup,
+        ) -> Result<(), DurableError> {
+            unreachable!("retention does not end a referrer")
+        }
+    }
+
+    /// FIG-7135: retaining code discovers dependencies from package records,
+    /// without hydrating terminal code bodies. Their presence is checked by
+    /// the same atomic hold that acquires their identities.
+    #[tokio::test]
+    async fn retaining_a_link_never_materializes_terminal_artifact_bodies() {
+        use lash_core_store::artifact_referrer::{ArtifactReferrer, HostArtifactPin};
+        let store = CountedStorage::default();
+        let document = lash_vocabulary::names::DocumentId::from_bytes([0x71; 32]);
+        let link = lash_vocabulary::package::Link {
+            document,
+            fills: BTreeMap::new(),
+        };
+        let reference = link_reference(&link.identity());
+        let stored = StoredLink {
+            record: LinkRecord {
+                id: link.identity(),
+                link,
+            },
+            artifacts: Default::default(),
+        };
+        store.records.lock().expect("work-law fixture").extend([
+            (
+                reference.clone(),
+                encode(&stored).expect("work-law fixture"),
+            ),
+            (document.to_string(), vec![0x71; 1 << 20]),
+        ]);
+        let claim = ReferrerClaim::unguarded(ArtifactReferrer::HostPin(HostArtifactPin::mint()))
+            .expect("work-law fixture");
+        for _ in 0..3 {
+            acquire_content(&store, &claim, &reference)
+                .await
+                .expect("work-law fixture");
+        }
+        assert_eq!(
+            *store.reads.lock().expect("work-law fixture"),
+            vec![reference.clone(); 3],
+            "retention must not read leaf payloads to discover that they have no dependencies"
+        );
+        assert!(
+            store
+                .holds
+                .lock()
+                .expect("work-law fixture")
+                .contains(&document.to_string())
+        );
+        // Cleanup between discovery and acquisition cannot turn an absent
+        // leaf into a successful hold: the transaction remains the oracle.
+        store
+            .records
+            .lock()
+            .expect("work-law fixture")
+            .remove(&document.to_string());
+        assert!(matches!(
+            acquire_content(&store, &claim, &reference).await,
+            Err(DurableError::Package(PackageRefusal::Missing(missing)))
+                if missing == document.to_string()
+        ));
+    }
 }
