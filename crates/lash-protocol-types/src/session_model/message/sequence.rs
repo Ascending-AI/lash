@@ -128,7 +128,11 @@ impl MessageSequence {
         match &self.mode {
             SequenceMode::Owned(owned) => Ok(Self {
                 mode: SequenceMode::Owned(buffer(owned, budget)?),
-                base_rendered: self.base_rendered.clone(),
+                base_rendered: self
+                    .base_rendered
+                    .as_ref()
+                    .map(|cache| BaseRenderCache::adopt_in(cache, budget))
+                    .transpose()?,
             }),
             SequenceMode::Layered {
                 base,
@@ -140,7 +144,13 @@ impl MessageSequence {
                         || (base.sources_admitted()
                             && delta.as_ref().is_none_or(AppendVec::sources_admitted)))
                 {
-                    return Ok(self.clone());
+                    let mut shared = self.clone();
+                    shared.base_rendered = self
+                        .base_rendered
+                        .as_ref()
+                        .map(|cache| BaseRenderCache::adopt_in(cache, budget))
+                        .transpose()?;
+                    return Ok(shared);
                 }
                 let mut next = Self::from_base(buffer(base, budget)?);
                 if let Some(delta) = delta {

@@ -1006,3 +1006,52 @@ fn sequence_replace_refuses_foreign_parts_before_publication() {
     );
     assert!(sequence.is_empty());
 }
+
+/// LO-EVICT-RENDER: adopting source must release a foreign render cache,
+/// including when the source buffers already belong to the target ledger.
+#[test]
+fn sequence_adoption_does_not_retain_foreign_render_sources() {
+    for layered in [false, true] {
+        let source_ledger = crate::allocation::testing::Ledger::default();
+        source_ledger.limit(1 << 24);
+        let target_ledger = crate::allocation::testing::Ledger::default();
+        target_ledger.limit(1 << 24);
+        let source_budget = source_ledger.budget();
+        let target_budget = target_ledger.budget();
+        let cache = Arc::new(BaseRenderCache::new_in(&source_budget).unwrap());
+        let weak = Arc::downgrade(&cache);
+        let sequence =
+            MessageSequence::from_owned(vec![witness_message("source", "render source")])
+                .clone_in(&target_budget)
+                .unwrap();
+        let sequence = if layered {
+            let base = sequence.shared();
+            drop(sequence);
+            MessageSequence::from_base(base)
+        } else {
+            sequence
+        };
+        let sequence = sequence.with_base_render_cache(cache.clone());
+        target_ledger.limit(target_ledger.used());
+        assert!(
+            sequence.clone_in(&target_budget).is_err(),
+            "foreign render cache must be admitted before adoption"
+        );
+        target_ledger.limit(1 << 24);
+        let adopted = sequence.clone_in(&target_budget).unwrap();
+        drop(sequence);
+        drop(cache);
+        assert!(
+            weak.upgrade().is_none(),
+            "adoption retained foreign cache for layered={layered}"
+        );
+        assert_eq!(source_ledger.used(), 0);
+        target_ledger.limit(target_ledger.used());
+        let reused = adopted
+            .clone_in(&target_budget)
+            .expect("same-ledger cache and source share without allocation");
+        drop(adopted);
+        drop(reused);
+        assert_eq!(target_ledger.used(), 0);
+    }
+}
