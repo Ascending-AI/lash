@@ -30,7 +30,7 @@ impl KernelProcessPluginFactory {
             workers,
             dialect: dialect.into(),
             bounds,
-            preparations: crate::process::ProcessPreparations,
+            preparations: crate::process::ProcessPreparations::default(),
             #[cfg(feature = "synthetic-next")]
             writes: None,
         }
