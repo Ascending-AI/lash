@@ -399,6 +399,7 @@ pub(super) async fn apply_owner(
                     | DomainWrite::EndExecution(_)
                     | DomainWrite::AdoptExecution(_)
                     | DomainWrite::SeedResolution(_)
+                    | DomainWrite::Process(lash_durable::domain::ProcessWrite::Terminal { .. })
             )
         })
     {

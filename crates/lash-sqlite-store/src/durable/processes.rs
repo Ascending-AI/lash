@@ -439,6 +439,8 @@ pub(super) fn apply(tx: &Connection, commit: &Committing<'_>, write: &ProcessWri
                 millis(commit.now)?,
             )
             .map_err(crate::sqlite_conversion_error)?;
+            // Package registration is optional; every terminal retires any live executions.
+            super::packages::end_actor_executions(tx, commit.actor)?;
             if ended {
                 cached_execute(
                     tx,
