@@ -787,9 +787,13 @@ impl Lowerer<'_> {
     fn handlers(&mut self, handlers: &[ast::ExceptHandler], caught: &Name) -> Lowering<()> {
         let Some((ast::ExceptHandler::ExceptHandler(handler), rest)) = handlers.split_first()
         else {
+            // The unmatched exception is rethrown by the dispatch adapter,
+            // not by the last statement of the preceding handler suite.
+            let span = self.span.take();
             self.emit(Stmt::Throw {
                 value: Expr::Variable(caught.clone()),
             });
+            self.span = span;
             return Ok(());
         };
         self.span_of(handler);

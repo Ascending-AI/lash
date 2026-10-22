@@ -58,7 +58,15 @@ Lines starting with `@` (JSDoc tags such as `@param`) are not caption text, `//`
 comments are ordinary comments, and a caption never contains `*/`.";
 
 /// Every kind a TypeScript source spells.
-pub(crate) const KINDS: &[CaptionKind] = &CaptionKind::ALL;
+pub(crate) const KINDS: &[CaptionKind] = &[
+    CaptionKind::Statement,
+    CaptionKind::ElseArm,
+    CaptionKind::CatchArm,
+    CaptionKind::FinallyArm,
+    CaptionKind::Function,
+    CaptionKind::Param,
+    CaptionKind::Field,
+];
 
 /// The fields of a written type that captions name, by path.
 pub(crate) type FieldCaptions = Vec<(Vec<String>, Caption)>;

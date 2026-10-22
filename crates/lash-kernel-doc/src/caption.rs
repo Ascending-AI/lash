@@ -564,15 +564,23 @@ impl Captions {
     /// Move surviving captions to their targets in `result`, the document
     /// the correspondence leads to, as [`crate::SourceMap::rekey`] moves
     /// locations. A site's caption follows its node. A parameter's or a
-    /// field's follows its function's body and keeps its name: it survives
+    /// field's follows its named Export's exact body and keeps its name: it survives
     /// exactly while that function still has the parameter, or its
     /// signature still resolves the path, and no edit touches it. A
     /// survivor that is no longer captionable there is dropped with the
     /// rest. `None` when the correspondence does not start at these
     /// captions' document or does not end at `result`.
     #[must_use]
-    pub fn rekey(&self, correspondence: &Correspondence, result: &Document) -> Option<Rekeyed> {
-        if correspondence.base != self.document || correspondence.result != result.identity() {
+    pub fn rekey(
+        &self,
+        correspondence: &Correspondence,
+        base: &Document,
+        result: &Document,
+    ) -> Option<Rekeyed> {
+        if correspondence.base != self.document
+            || base.identity() != self.document
+            || correspondence.result != result.identity()
+        {
             return None;
         }
         let mut entries: Vec<_> = self
@@ -584,9 +592,16 @@ impl Captions {
                         CaptionTarget::Site(correspondence.successor(site)?.clone())
                     }
                     other => {
-                        let function = other.function()?.clone();
-                        let body = Site::new(Unit::Function(function), Vec::new());
-                        other.of_function(correspondence.successor(&body)?)?
+                        let name = other.function()?;
+                        let crate::Export::Function(before) = base.exports.get(name)? else {
+                            return None;
+                        };
+                        let crate::Export::Function(after) = result.exports.get(name)? else {
+                            return None;
+                        };
+                        let body = Site::new(Unit::Library(before.function), []);
+                        let successor = Site::new(Unit::Library(after.function), []);
+                        (correspondence.successor(&body)? == &successor).then(|| other.clone())?
                     }
                 };
                 target.kind(result)?;

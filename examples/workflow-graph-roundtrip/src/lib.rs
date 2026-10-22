@@ -285,12 +285,15 @@ impl SavedWorkflow {
         correspondence: &lash::workflow::document::Correspondence,
         result: &lash::workflow::document::Document,
     ) -> Result<(Captions, Vec<Site>), ErrorResponse> {
-        let rekeyed = self.captions.rekey(correspondence, result).ok_or_else(|| {
-            ErrorResponse::invalid(
-                "captions",
-                "the edit does not start at the captions' document",
-            )
-        })?;
+        let rekeyed = self
+            .captions
+            .rekey(correspondence, self.draft.document(), result)
+            .ok_or_else(|| {
+                ErrorResponse::invalid(
+                    "captions",
+                    "the edit does not start at the captions' document",
+                )
+            })?;
         let mut review: Vec<Site> = self
             .review
             .iter()

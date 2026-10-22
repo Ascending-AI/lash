@@ -251,8 +251,14 @@ fn sites(rule: &str, case: &Case) {
                 assert_eq!(
                     *inner.statement.resolve(heap.pages()).unwrap(),
                     lash_vocabulary::sites::Site {
-                        unit: lash_vocabulary::sites::Unit::Function(
-                            lash_vocabulary::names::Name::new("f")
+                        unit: lash_vocabulary::sites::Unit::Library(
+                            at.program
+                                .document
+                                .functions
+                                .iter()
+                                .find(|(_, definition)| definition.name.as_str() == "f")
+                                .map(|(id, _)| *id)
+                                .expect("written f body")
                         ),
                         path: vec![0, 1, 0]
                     }

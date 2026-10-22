@@ -106,7 +106,56 @@ fn typescript() -> Dialect {
 
 fn library(dialect: lash_ext_helper_compiler::library::Dialect) -> NamedLibrary {
     let built = lash_ext_helper_compiler::library::Library::of(dialect).expect("built packages");
-    NamedLibrary::from_registry(&built.registry).expect("unique package names")
+    built.names
+}
+
+fn exported(document: &mut Document, name: &str, source: &str) -> lash_vocabulary::FunctionId {
+    let definition = lash_kernel_doc::parse_definition(source).expect("caption function");
+    let id = definition.identity();
+    document.exports.insert(
+        Name::new(name),
+        lash_kernel_doc::Export::Function(lash_kernel_doc::FunctionExport {
+            function: id,
+            signature: definition.signature.clone(),
+            convention: lash_kernel_doc::StartConvention::Direct,
+            asynchronous: false,
+            rest: false,
+        }),
+    );
+    document.functions.insert(id, definition);
+    id
+}
+
+fn signature_document(event: bool) -> Document {
+    let mut document = parse_document(
+        "kernel 1\nnumbers float\nimport 0 operation corpus.send(value: Any) -> Any\nmain {}",
+    )
+    .expect("caption document");
+    let event = if event {
+        "event: Record{answer: Record{choice: Text}}, "
+    } else {
+        ""
+    };
+    exported(
+        &mut document,
+        "flow",
+        &format!(
+            "function flow({event}items: List(Union(Record{{name: Text, tags: Map(Text, Record{{x: Int}})}}, Null)), n: Int) -> Record{{seen: Int}}\nkernel 1\nmetering statements\nimport 0 operation corpus.send(value: Any) -> Any\nbody {{ return {{seen: 1}} }}"
+        ),
+    );
+    exported(
+        &mut document,
+        "helper",
+        "function helper(x: Any) -> Any\nkernel 1\nmetering statements\nbody { return x }",
+    );
+    document
+}
+
+fn export_root(document: &Document, name: &str) -> Site {
+    let lash_kernel_doc::Export::Function(export) = &document.exports[&Name::new(name)] else {
+        panic!("function Export");
+    };
+    Site::new(Unit::Library(export.function), [])
 }
 
 fn effects() -> BTreeMap<EffectName, Signature> {
@@ -255,10 +304,15 @@ fn text_domain() {
         );
     }
 
-    let document = parse_document(
-        "kernel 1\nnumbers float\nfn helper() { return null }\nmain { let flag = true if flag { print 1 } else { print 2 } }\n",
+    let mut document = parse_document(
+        "kernel 1\nnumbers float\nmain { let flag = true if flag { print 1 } else { print 2 } }\n",
     )
     .expect("document");
+    exported(
+        &mut document,
+        "helper",
+        "function helper() -> Any\nkernel 1\nmetering statements\nbody { return null }",
+    );
     let entry = |site: Site| CaptionEntry::site(site, caption("Send"));
     let other = parse_document("kernel 1\nnumbers float\nmain { }\n").expect("document");
     let refusals = [
@@ -270,11 +324,14 @@ fn text_domain() {
         ),
         (
             vec![entry(Site::new(
-                Unit::Function(Name::new("missing")),
+                Unit::Library(lash_vocabulary::FunctionId::from_bytes([99; 32])),
                 Vec::new(),
             ))],
             CaptionsRefusal::Site {
-                site: Site::new(Unit::Function(Name::new("missing")), Vec::new()),
+                site: Site::new(
+                    Unit::Library(lash_vocabulary::FunctionId::from_bytes([99; 32])),
+                    Vec::new(),
+                ),
             },
         ),
         (
@@ -311,7 +368,7 @@ fn text_domain() {
         vec![
             entry(main_site(&[1, 2])),
             entry(main_site(&[0])),
-            entry(Site::new(Unit::Function(Name::new("helper")), Vec::new())),
+            entry(export_root(&document, "helper")),
             entry(main_site(&[1, 1, 0])),
         ],
     )
@@ -342,16 +399,7 @@ fn text_domain() {
 fn signature_targets() {
     use lash_kernel_doc::{FieldPath, FieldRoot, FieldTarget, ParamTarget};
 
-    let document = parse_document(concat!(
-        "kernel 1\nnumbers float\n",
-        "entry flow(event: Record{answer: Record{choice: Text}}, ",
-        "items: List(Union(Record{name: Text, tags: Map(Text, Record{x: Int})}, Null)), n: Int) ",
-        "-> Record{seen: Int}\n",
-        "fn flow(event, items, n) { return null }\n",
-        "fn helper(x) { return x }\n",
-        "main { }\n",
-    ))
-    .expect("document");
+    let document = signature_document(true);
     let param = |function: &str, param: &str| {
         CaptionTarget::Param(ParamTarget {
             function: Name::new(function),
@@ -390,7 +438,7 @@ fn signature_targets() {
         field("flow", Some("items"), &["tags", "x"]),
         field("flow", Some("event"), &[]),
         field("flow", Some("missing"), &["answer"]),
-        // A function that is no entry states no types.
+        // An Any parameter has no statically named fields.
         field("helper", Some("x"), &["y"]),
     ];
     for target in unresolved {
@@ -444,7 +492,7 @@ fn signature_targets() {
     let mut draft = Draft::open(document.clone()).expect("a draft");
     let insert = Operation::InsertStep {
         base,
-        at: Position::before(Site::new(Unit::Function(Name::new("flow")), [0]))
+        at: Position::before(export_root(&document, "flow").child(0))
             .expect("a statement of the body"),
         slot: lash_vocabulary::ImportSlot(0),
         args: vec![DataValue::Literal(Literal::Text("new".into()))],
@@ -461,35 +509,27 @@ fn signature_targets() {
         )
         .expect("a step inserted in the body");
     let rekeyed = captions
-        .rekey(&applied.correspondence, draft.document())
+        .rekey(&applied.correspondence, &document, draft.document())
         .expect("the edit starts at the captions");
     assert_eq!(rekeyed.captions.entries(), captions.entries());
     assert!(rekeyed.touched.is_empty());
 
     // A parameter removed takes its caption and its fields' with it; the
     // others keep theirs.
-    let removed = parse_document(concat!(
-        "kernel 1\nnumbers float\n",
-        "entry flow(items: List(Union(Record{name: Text, tags: Map(Text, Record{x: Int})}, Null)), n: Int) ",
-        "-> Record{seen: Int}\n",
-        "fn flow(items, n) { return null }\n",
-        "fn helper(x) { return x }\n",
-        "main { }\n",
-    ))
-    .expect("document");
-    let roots = ["flow", "helper"]
-        .map(|function| Site::new(Unit::Function(Name::new(function)), Vec::new()));
+    let removed = signature_document(false);
+    let roots =
+        ["flow", "helper"].map(|name| (export_root(&document, name), export_root(&removed, name)));
     let correspondence = lash_kernel_doc::Correspondence::of(
         base,
         removed.identity(),
         roots
             .iter()
-            .map(|root| lash_kernel_doc::Survivor::new(root.clone(), root.clone(), false))
+            .map(|(from, to)| lash_kernel_doc::Survivor::new(from.clone(), to.clone(), false))
             .collect(),
     )
     .expect("a correspondence");
     let rekeyed = captions
-        .rekey(&correspondence, &removed)
+        .rekey(&correspondence, &document, &removed)
         .expect("the correspondence starts at the captions");
     let kept: Vec<CaptionTarget> = rekeyed
         .captions
@@ -633,21 +673,23 @@ fn admitted() -> Vec<(String, Option<String>)> {
 /// exactly the survivors at their successors' sites, and `touched` names
 /// those beneath which the edit wrote.
 fn rekey() {
-    let document = parse_document(concat!(
-        "kernel 1\nnumbers float\neffect send(value: Any) -> Any contract \"1\"\n",
-        "entry helper(item: Record{title: Text}) -> Any\n",
-        "fn helper(item) { return null }\n",
+    let mut document = parse_document(concat!(
+        "kernel 1\nnumbers float\nimport 0 operation corpus.send(value: Any) -> Any\n",
         "main {\n",
-        " do perform send(\"a\") as Any\n",
+        " do perform 0(\"a\") as Any\n",
         " let flag = true\n",
-        " if flag { do perform send(\"b\") as Any } else { print 2 }\n",
-        " try { do perform send(\"d\") as Any } catch e { print e } finally { print 1 }\n",
+        " if flag { do perform 0(\"b\") as Any } else { print 2 }\n",
+        " try { do perform 0(\"d\") as Any } catch e { print e } finally { print 1 }\n",
         " for item in [1] { print item } else { print 2 }\n",
-        " if true { do perform send(\"u\") as Any }\n",
-        " finish null\n",
-        "}\n",
+        " if true { do perform 0(\"u\") as Any }\n",
+        " finish null\n}\n",
     ))
     .expect("document");
+    exported(
+        &mut document,
+        "helper",
+        "function helper(item: Record{title: Text}) -> Any\nkernel 1\nmetering statements\nbody { return null }",
+    );
     let registry = lash_kernel_doc::FunctionRegistry::new();
     let environment = lash_kernel_check::Environment::new(&registry);
     let captionable = CaptionKind::captionable(&document);
@@ -755,14 +797,14 @@ fn rekey() {
         let result = draft.document();
         let correspondence = &applied.correspondence;
         let rekeyed = captions
-            .rekey(correspondence, result)
+            .rekey(correspondence, &document, result)
             .unwrap_or_else(|| panic!("{name}: the correspondence starts at the captions"));
         let expected: Vec<CaptionEntry> = {
             let mut kept: Vec<_> = captions
                 .entries()
                 .iter()
                 .filter_map(|entry| {
-                    let target = successor(correspondence, &entry.target)?;
+                    let target = successor(correspondence, &document, result, &entry.target)?;
                     target.kind(result)?;
                     Some(CaptionEntry {
                         target,
@@ -813,8 +855,8 @@ fn rekey() {
     let foreign = Captions::empty(other.identity());
     let identity = lash_kernel_doc::Correspondence::identity(base, Vec::new())
         .expect("an empty correspondence");
-    assert!(foreign.rekey(&identity, &document).is_none());
-    assert!(captions.rekey(&identity, &other).is_none());
+    assert!(foreign.rekey(&identity, &document, &document).is_none());
+    assert!(captions.rekey(&identity, &document, &other).is_none());
 }
 
 /// `K-CAP-004`, for the captions a dialect imports: a step inserted ahead of
@@ -851,6 +893,8 @@ fn rekey_imported(dialect: &CaptionDialect<'_>) -> Result<(), crate::HarnessErro
             functions: dialect.environment.library,
             bindings: BTreeSet::new(),
         };
+        lash_kernel_check::admit(document, &environment)
+            .unwrap_or_else(|error| panic!("{} is admitted before editing: {error:?}", case.name));
         let base = lowered.document.id();
         let insert = Operation::InsertStep {
             base,
@@ -877,14 +921,14 @@ fn rekey_imported(dialect: &CaptionDialect<'_>) -> Result<(), crate::HarnessErro
         let result = draft.document();
         let rekeyed = lowered
             .captions
-            .rekey(&applied.correspondence, result)
+            .rekey(&applied.correspondence, document, result)
             .expect("the correspondence starts at the captions");
         let mut expected: Vec<CaptionEntry> = lowered
             .captions
             .entries()
             .iter()
             .map(|entry| CaptionEntry {
-                target: successor(&applied.correspondence, &entry.target)
+                target: successor(&applied.correspondence, document, result, &entry.target)
                     .expect("an insertion removes nothing"),
                 caption: entry.caption.clone(),
             })
@@ -906,7 +950,13 @@ fn rekey_imported(dialect: &CaptionDialect<'_>) -> Result<(), crate::HarnessErro
         let touched: Vec<Site> = lowered
             .captions
             .at(&root)
-            .map(|_| root)
+            .map(|_| {
+                applied
+                    .correspondence
+                    .successor(&root)
+                    .expect("surviving root")
+                    .clone()
+            })
             .into_iter()
             .collect();
         assert_eq!(rekeyed.touched, touched, "{}", case.name);
@@ -987,9 +1037,25 @@ fn rekey_canvas_edits(dialect: &CaptionDialect<'_>) -> Result<(), crate::Harness
                 .map_err(|refusal| fail(&case.name, format!("{refusal:?}")))?;
             let rekeyed = lowered
                 .captions
-                .rekey(&applied.correspondence, draft.document())
+                .rekey(&applied.correspondence, document, draft.document())
                 .ok_or_else(|| fail(&case.name, "the edit starts elsewhere".into()))?;
-            if rekeyed.captions.entries() != lowered.captions.entries() {
+            let mut expected: Vec<_> = lowered
+                .captions
+                .entries()
+                .iter()
+                .map(|entry| CaptionEntry {
+                    target: successor(
+                        &applied.correspondence,
+                        document,
+                        draft.document(),
+                        &entry.target,
+                    )
+                    .expect("a canvas edit removes no caption target"),
+                    caption: entry.caption.clone(),
+                })
+                .collect();
+            expected.sort_by(|a, b| a.target.cmp(&b.target));
+            if rekeyed.captions.entries() != expected {
                 return Err(fail(
                     &case.name,
                     format!("rekeyed {:?}", rekeyed.captions.entries()),
@@ -1001,6 +1067,13 @@ fn rekey_canvas_edits(dialect: &CaptionDialect<'_>) -> Result<(), crate::Harness
                 .iter()
                 .filter_map(|entry| entry.target.site().cloned())
                 .filter(|site| site.unit == written.unit && written.path.starts_with(&site.path))
+                .map(|site| {
+                    applied
+                        .correspondence
+                        .successor(&site)
+                        .expect("surviving caption")
+                        .clone()
+                })
                 .collect();
             if rekeyed.touched != above {
                 return Err(fail(
@@ -1022,41 +1095,17 @@ fn rekey_canvas_edits(dialect: &CaptionDialect<'_>) -> Result<(), crate::Harness
 /// body's successor.
 fn successor(
     correspondence: &lash_kernel_doc::Correspondence,
+    base: &Document,
+    result: &Document,
     target: &CaptionTarget,
 ) -> Option<CaptionTarget> {
-    Some(match target {
-        CaptionTarget::Site(site) => CaptionTarget::Site(correspondence.successor(site)?.clone()),
-        CaptionTarget::Param(param) => {
-            let Unit::Function(function) = &correspondence
-                .successor(&Site::new(
-                    Unit::Function(param.function.clone()),
-                    Vec::new(),
-                ))?
-                .unit
-            else {
-                return None;
-            };
-            CaptionTarget::Param(lash_kernel_doc::ParamTarget {
-                function: function.clone(),
-                param: param.param.clone(),
-            })
-        }
-        CaptionTarget::Field(field) => {
-            let Unit::Function(function) = &correspondence
-                .successor(&Site::new(
-                    Unit::Function(field.function.clone()),
-                    Vec::new(),
-                ))?
-                .unit
-            else {
-                return None;
-            };
-            CaptionTarget::Field(lash_kernel_doc::FieldTarget {
-                function: function.clone(),
-                path: field.path.clone(),
-            })
-        }
-    })
+    if let CaptionTarget::Site(site) = target {
+        return Some(CaptionTarget::Site(correspondence.successor(site)?.clone()));
+    }
+    let name = target.function()?;
+    let from = export_root(base, name.as_str());
+    let to = export_root(result, name.as_str());
+    (correspondence.successor(&from)? == &to).then(|| target.clone())
 }
 
 /// The Site of the first node of `document` that `wanted` picks, in a walk

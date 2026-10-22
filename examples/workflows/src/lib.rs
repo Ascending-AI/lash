@@ -477,7 +477,7 @@ pub(crate) fn render_with(root: &Path) -> Result<(BTreeMap<String, String>, Vec<
                 let applied = draft.apply(&transaction, &checker)?;
                 let rekeyed = lowered
                     .captions
-                    .rekey(&applied.correspondence, draft.document())
+                    .rekey(&applied.correspondence, document, draft.document())
                     .context("captions rekey through the canvas edit")?;
                 let edited = roundtrip(draft.document(), &rekeyed.captions, lang, &printing)?;
                 report.push(Lifted::of(
@@ -611,7 +611,7 @@ fn edit(
     // The host's sidecar follows the edit: survivors move with their steps,
     // and the ones whose step the edit wrote are marked for review.
     let rekeyed = captions
-        .rekey(&applied.correspondence, draft.document())
+        .rekey(&applied.correspondence, document, draft.document())
         .context("captions rekey through the edit's correspondence")?;
     writeln!(text, "\nCaptions to review:")?;
     for site in &rekeyed.touched {

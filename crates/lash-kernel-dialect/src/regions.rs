@@ -1,7 +1,7 @@
 //! Readable export by region, shared by the dialects (FIG-6953).
 //!
 //! Authored source is returned only when lowering it reproduces the complete
-//! document and captions. A refusal never exposes a private kernel codec.
+//! document and every spelled caption; unspellable targets are reported dropped. A refusal never exposes a private kernel codec.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::ops::Range;
@@ -133,7 +133,7 @@ pub trait Regions {
 }
 
 /// Print a whole authored module only when reading it reproduces the document
-/// and captions exactly.
+/// and every spelled caption exactly. Report unspellable targets as dropped.
 ///
 /// # Errors
 /// Refuses unrepresentable documents, unequal lowering identities and source
@@ -147,6 +147,7 @@ pub fn print_verified(
 ) -> Result<PrintedSource, PrintError> {
     let empty = k::Captions::empty(document.identity());
     let captions = captions.unwrap_or(&empty);
+    crate::imperative::check_captions(document, captions, options.limits)?;
     let whole = regions.whole(&lifted).ok_or_else(|| {
         PrintError::Invalid("the document cannot be expressed as authored source".to_owned())
     })?;
@@ -158,12 +159,29 @@ pub fn print_verified(
     let read = regions.read(&whole.source).map_err(|_| {
         PrintError::Invalid("authored source does not read as this document".to_owned())
     })?;
-    if !read.matches(document, captions) {
+    if read.document.canonical_bytes() != document.canonical_bytes()
+        || read
+            .captions
+            .entries()
+            .iter()
+            .any(|entry| captions.get(&entry.target) != Some(&entry.caption))
+    {
         return Err(PrintError::Invalid(
             "authored source changes the document".to_owned(),
         ));
     }
-    whole_printed(document, whole.source, read.map, regions.format(), options)
+    // A retained library body or synthetic binding has no authored syntax.
+    // Compare every caption that was spelled exactly, and report each input
+    // target absent from the source rather than silently losing its sidecar.
+    let dropped = captions
+        .entries()
+        .iter()
+        .filter(|entry| read.captions.get(&entry.target).is_none())
+        .map(|entry| entry.target.clone())
+        .collect();
+    let mut printed = whole_printed(document, whole.source, read.map, regions.format(), options)?;
+    printed.dropped = dropped;
+    Ok(printed)
 }
 
 /// The printed source of a module whose every region lifted.
