@@ -2,6 +2,24 @@
 use super::*;
 use lash_kernel_doc::{CaptureValue, FunctionRepresentation, FunctionValue};
 
+/// Capture discovery follows authored adapter bodies as well as the library.
+struct LinkedCatalog<'a> {
+    document: &'a lash_kernel_doc::Document,
+    base: &'a dyn FunctionCatalog,
+}
+
+impl FunctionCatalog for LinkedCatalog<'_> {
+    fn definition(
+        &self,
+        function: &lash_vocabulary::FunctionId,
+    ) -> Option<&lash_kernel_doc::FunctionDefinition> {
+        self.document
+            .functions
+            .get(function)
+            .or_else(|| self.base.definition(function))
+    }
+}
+
 #[derive(Default)]
 struct Graph {
     closures: BTreeMap<EntityId, u32>,
@@ -66,10 +84,12 @@ impl Graph {
             }
         }
         let document = defining_document(run, callable)?;
-        let definition = run
-            .catalog
+        let catalog = LinkedCatalog {
+            document,
+            base: run.catalog,
+        };
+        let definition = catalog
             .definition(&callable.function)
-            .or_else(|| document.functions.get(&callable.function))
             .ok_or_else(|| raised("not_data", "callable definition is not loaded"))?;
         let mut signature = definition.signature.clone();
         let mut convention = lash_kernel_doc::StartConvention::Direct;
@@ -108,7 +128,7 @@ impl Graph {
                         .map(|p| p.name.clone())
                         .collect::<Vec<_>>();
                     for name in
-                        lash_kernel_doc::snapshot::CodeReads::of(&params, &body.block, run.catalog)
+                        lash_kernel_doc::snapshot::CodeReads::of(&params, &body.block, &catalog)
                             .free
                     {
                         if !captured.contains_key(&name) {

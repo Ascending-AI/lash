@@ -338,6 +338,7 @@ fn settled_in(
                     let mut result = outcome(admitted, output)?;
                     if matches!(output, SettledOutput::Interrupted)
                         && let Outcome::Failed(error) = &mut result
+                        && error.kind == EFFECT_INTERRUPTED
                     {
                         let name = entry.effect.as_ref().map(ToString::to_string).unwrap_or_else(|| "operation".into());
                         error.message = format!(

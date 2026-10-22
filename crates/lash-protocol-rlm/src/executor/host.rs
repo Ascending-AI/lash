@@ -587,7 +587,7 @@ impl KernelEffects for CellHost<'_> {
         {
             trace.call_ended(at, &effect.call, &reply.output.outcome);
         }
-        let outcome = match &reply.output.outcome {
+        let mut outcome = match &reply.output.outcome {
             lash_core::ToolCallOutcome::Success(_) => {
                 let value = reply.output.value_for_projection().to_string();
                 match datum_from_json(&value) {
@@ -603,6 +603,43 @@ impl KernelEffects for CellHost<'_> {
                 Outcome::Failed(refused(EFFECT_CANCELLED, cancelled.message.clone()))
             }
         };
+        if matches!(
+            output,
+            lash_core_store::tool_run::SettledOutput::Interrupted
+        ) && let Outcome::Failed(error) = &mut outcome
+        {
+            let ledgers = self.ledgers.lock_recover();
+            if let Some(call) = ledgers
+                .calls
+                .iter()
+                .find(|call| call.call_id() == &effect.call)
+                && let Some(need) = self.envelope.inspection.operations.get(&call.operation)
+            {
+                let name = match need {
+                    lash_execution_contracts::process::linking::OperationNeed::Fixed {
+                        name,
+                        ..
+                    }
+                    | lash_execution_contracts::process::linking::OperationNeed::Deferred {
+                        name,
+                        ..
+                    } => name.to_string(),
+                };
+                let identity = &call.effect;
+                error.message = format!(
+                    "effect `{name}` at {identity} started and never settled; outside work may already have happened, so check outside state before calling again",
+                );
+                error.data = Datum::Record(vec![
+                    ("effect".to_owned(), Datum::Text(name)),
+                    (
+                        "position".to_owned(),
+                        Datum::Text(identity.position().to_string()),
+                    ),
+                    ("identity".to_owned(), Datum::Text(identity.to_string())),
+                    ("cause".to_owned(), error.data.clone()),
+                ]);
+            }
+        }
         if let Some(record) = reply.record {
             let mut ledgers = self.ledgers.lock_recover();
             if let Some(call) = ledgers

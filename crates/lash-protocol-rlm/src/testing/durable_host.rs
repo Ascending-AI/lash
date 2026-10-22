@@ -125,6 +125,7 @@ impl DurableHost {
             .await
             .expect("hold the fixture's deployment code");
         super::packages::deploy_helpers(&backend, &content_claim).await;
+        super::packages::deploy_services(&backend, &content_claim).await;
         Self {
             documents,
             backend,
@@ -299,9 +300,11 @@ async fn register(backend: &lash_execution_contracts::backend::Backend, index: u
             .extend(&document.requires.natives);
     }
     capabilities.machine.natives.extend(
-        lash_vm_releases::PACKAGES
+        release
+            .functions
             .iter()
-            .flat_map(|package| package.natives.iter().map(|(id, _)| *id)),
+            .filter(|(_, function)| function.states_native())
+            .map(|(id, _)| *id),
     );
     let tools = lash_core::testing::test_tools_provider();
     capabilities

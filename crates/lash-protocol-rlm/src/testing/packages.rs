@@ -174,3 +174,44 @@ pub(crate) async fn deploy_helpers(
     }
     accepted
 }
+
+/// Builtin dialect operation declarations are deployment facts too.
+pub(crate) async fn deploy_services(
+    backend: &lash_execution_contracts::backend::Backend,
+    claim: &lash_core::ReferrerClaim,
+) {
+    use lash_core::plugin::packages::PackageProvider as _;
+    let consumer = PublicationContext {
+        domain: PublicationDomain("cell-laws".into()),
+        scope: PublicationScope::Host,
+        publisher: PublisherInstance("cell-law-services".into()),
+        root: Segment::new("cell").unwrap(),
+    };
+    let config = lash_core::OwnerConfigView::default();
+    let store = backend.package_store();
+    for service in super::dialect_services() {
+        let context = PublicationContext {
+            root: service.roots().into_iter().next().unwrap(),
+            ..consumer.clone()
+        };
+        for contribution in service.advertise(&config, &context).unwrap() {
+            let PackageAdvertisement::Enumerated(package) = &contribution.advertisement else {
+                unreachable!()
+            };
+            store
+                .put_package(
+                    claim,
+                    &lash_core_store::packages::PackageRecord {
+                        id: package.identity(),
+                        package: package.clone(),
+                    },
+                )
+                .await
+                .unwrap();
+            store
+                .publish(claim, &contribution.publication)
+                .await
+                .unwrap();
+        }
+    }
+}

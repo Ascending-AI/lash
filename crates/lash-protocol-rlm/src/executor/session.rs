@@ -863,6 +863,10 @@ impl CodeModeExecutionState {
         self.stage_carry(carry, not_carried).await
     }
 
+    pub(super) fn hold_run(&mut self, run: super::pages::HeldRun) {
+        self.pages.hold(run);
+    }
+
     async fn stage_carry(
         &mut self,
         carry: SessionRoot,

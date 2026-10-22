@@ -1147,10 +1147,10 @@ mod tests {
                 // A second cell arrives while the first is still running. It
                 // makes no progress whatsoever: it is queued behind the running
                 // cell rather than answered — with a result or with an error.
-                let waiting_handler = crate::testing::DurableHost::open(admitted_scope()).await;
+                let waiting_handler = &running_handler;
                 {
                     let mut waiting = Box::pin(state.execute_code(
-                        admitted_context(&waiting_handler, "waiting", &resolver).await,
+                        admitted_context(waiting_handler, "waiting", &resolver).await,
                         cell("let second_cell = 2;"),
                     ));
                     for _ in 0..16 {
@@ -1179,10 +1179,10 @@ mod tests {
                     .expect("settle the first returned cell");
 
                 // The waiting cell, redriven, now runs — on that same state.
-                let handler = crate::testing::DurableHost::open(admitted_scope()).await;
+                let handler = &running_handler;
                 let second = state
                     .execute_code(
-                        admitted_context(&handler, "waiting", &resolver).await,
+                        admitted_context(handler, "waiting", &resolver).await,
                         cell("let second_cell = 2;"),
                     )
                     .await
@@ -1193,10 +1193,10 @@ mod tests {
                     .await
                     .expect("settle the second returned cell");
 
-                let handler = crate::testing::DurableHost::open(admitted_scope()).await;
+                let handler = &running_handler;
                 let total = state
                     .execute_code(
-                        admitted_context(&handler, "total", &resolver).await,
+                        admitted_context(handler, "total", &resolver).await,
                         cell("await control.finish(second_cell);"),
                     )
                     .await

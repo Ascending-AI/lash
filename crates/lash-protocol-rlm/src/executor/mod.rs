@@ -776,7 +776,23 @@ async fn run_linked_cell(
         },
         _ => None,
     };
-    let held = staged.is_some();
+    let held = staged.is_some()
+        || match &run {
+            Ok(KernelEnd::Ended {
+                pages: Some(pages), ..
+            }) => {
+                if let Some(store) = store.clone() {
+                    // Recording a failed cell can create and publish the
+                    // first session descriptor too. Retain its activation
+                    // before that publication, until a capture owns it.
+                    state.hold_run(pages::HeldRun::new(Arc::clone(pages), store));
+                    true
+                } else {
+                    false
+                }
+            }
+            _ => false,
+        };
     // A run that parked owes its end over its root: held for the commit
     // that consumes the cell's answer, or recorded with the session's
     // descriptor as the cell left it.
