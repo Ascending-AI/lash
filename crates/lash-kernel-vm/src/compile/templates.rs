@@ -12,7 +12,10 @@ impl super::NestedKind {
     /// expression or an invoke. Its kind still owns its action semantics.
     pub(crate) fn operator_lib(&self) -> Option<super::LibId> {
         match self {
-            Self::Body(lib) | Self::Call(super::NestedCallee::Library(lib)) => Some(*lib),
+            Self::Body(lib)
+            | Self::Call(
+                super::NestedCallee::Library(lib) | super::NestedCallee::Import(_, Some(lib)),
+            ) => Some(*lib),
             _ => None,
         }
     }
