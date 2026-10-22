@@ -34,12 +34,106 @@ pub(crate) struct Admission {
     code: Mutex<BTreeMap<CodeContent, Arc<OnceLock<Result<PreparedCode, Missing>>>>>,
 }
 
-/// Link fills are per execution. Only retained document content and the
-/// admitted function selection affect immutable compilation over this library.
+/// Operation fills stay per execution. Immutable compilation also keys the
+/// code Imports it resolves, over retained content and admitted functions.
 #[derive(PartialEq, Eq, PartialOrd, Ord)]
 struct CodeContent {
     documents: Vec<DocumentId>,
     functions: Vec<FunctionId>,
+    imports: Vec<(Unit, lash_vocabulary::ImportSlot, DocumentId, FunctionId)>,
+}
+
+/// Only a resolution shared by every loaded instance of a source unit is
+/// immutable code content. Distinct fills of the same document stay on dispatch.
+fn code_imports(
+    root: DocumentId,
+    documents: &BTreeMap<DocumentId, Arc<Document>>,
+    functions: &BTreeSet<FunctionId>,
+    instances: &BTreeMap<lash_vocabulary::LinkId, crate::interface::PreparedInstance>,
+) -> BTreeMap<(Unit, lash_vocabulary::ImportSlot), (DocumentId, FunctionId)> {
+    let mut units = BTreeMap::<_, Option<(DocumentId, FunctionId)>>::new();
+    for instance in instances.values() {
+        let Some(source) = documents.get(&instance.document) else {
+            continue;
+        };
+        let owners = source
+            .functions
+            .iter()
+            .filter_map(|(id, definition)| {
+                functions
+                    .contains(id)
+                    .then_some((Unit::Library(*id), &definition.body()?.imports))
+            })
+            .chain((instance.document == root).then_some((Unit::Main, &source.imports)));
+        // Resolve a document's slots once, then project them to the units that
+        // actually declare those Imports. Helpers without Imports add no work.
+        let resolved: BTreeMap<_, _> = source
+            .imports
+            .keys()
+            .map(|slot| {
+                let target = (|| {
+                    let crate::interface::PreparedSlot::Function { callable, export } =
+                        instance.slots.get(slot)?
+                    else {
+                        return None;
+                    };
+                    if !functions.contains(&callable.function) {
+                        return None;
+                    }
+                    let target = instances.get(&callable.link)?.document;
+                    let document = documents.get(&target)?;
+                    let descriptor = match (document.exports.get(&export.name)?, &export.member) {
+                        (doc::Export::Function(function), None) => function,
+                        (doc::Export::Type(ty), Some(member)) => match ty.members.get(member)? {
+                            doc::TypeMember::Static(function)
+                            | doc::TypeMember::Method(function)
+                            | doc::TypeMember::Property(function) => function,
+                        },
+                        _ => return None,
+                    };
+                    let definition = document.functions.get(&callable.function)?;
+                    // Other ABIs, typed arguments and nontrivial result fitting
+                    // belong to the public call boundary, before any helper work.
+                    if descriptor.function != callable.function
+                        || descriptor.signature != definition.signature
+                        || descriptor.convention != doc::StartConvention::Direct
+                        || descriptor.asynchronous
+                        || descriptor.rest
+                        || !descriptor
+                            .signature
+                            .params
+                            .iter()
+                            .all(|p| p.ty == lash_vocabulary::Type::Any)
+                        || super::import_result_check(&descriptor.signature.result).is_none()
+                        || definition
+                            .body()
+                            .is_none_or(|body| !body.imports.is_empty())
+                    {
+                        return None;
+                    }
+                    Some((target, callable.function))
+                })();
+                (*slot, target)
+            })
+            .collect();
+        for (unit, imports) in owners {
+            for slot in imports.keys() {
+                let target = resolved.get(slot).copied().flatten();
+                units
+                    .entry((unit.clone(), *slot))
+                    .and_modify(|old| {
+                        if *old != target {
+                            *old = None;
+                        }
+                    })
+                    .or_insert(target);
+            }
+        }
+    }
+    units
+        .into_iter()
+        .filter_map(|(key, value)| Some((key, value?)))
+        .collect()
 }
 
 struct PreparedCode {
@@ -171,9 +265,16 @@ impl Admission {
             crate::interface::PreparedInstance,
         >,
     ) -> Result<Arc<Executable>, Missing> {
+        let imports = code_imports(self.identity(document), documents, functions, instances);
         let content = CodeContent {
             documents: documents.keys().copied().collect(),
             functions: functions.iter().copied().collect(),
+            imports: imports
+                .iter()
+                .map(|((unit, slot), (document, function))| {
+                    (unit.clone(), *slot, *document, *function)
+                })
+                .collect(),
         };
         let code = {
             let mut compiled = self.code.lock().unwrap_or_else(|error| error.into_inner());
@@ -182,7 +283,7 @@ impl Admission {
         // One producer compiles this content; no admission map lock is held
         // while registry preparation or compilation runs.
         let code = code
-            .get_or_init(|| Self::prepare_code(document, library, documents, functions))
+            .get_or_init(|| Self::prepare_code(document, library, documents, functions, &imports))
             .as_ref()
             .map_err(|missing| *missing)?;
         let library = code.library.as_ref().unwrap_or(library);
@@ -210,6 +311,7 @@ impl Admission {
         library: &PreparedLibrary,
         documents: &BTreeMap<DocumentId, Arc<Document>>,
         functions: &BTreeSet<FunctionId>,
+        imports: &BTreeMap<(Unit, lash_vocabulary::ImportSlot), (DocumentId, FunctionId)>,
     ) -> Result<PreparedCode, Missing> {
         // Link tables are instance-specific; compile the reached documents together,
         // deduplicating identical FunctionIds while keeping frame Links separate.
@@ -256,7 +358,7 @@ impl Admission {
             None
         };
         let library = loaded.as_ref().unwrap_or(library);
-        let own = Arc::new(compile_document(&reached, document, library)?);
+        let own = Arc::new(compile_document(&reached, document, library, imports)?);
         Ok(PreparedCode {
             own,
             library: loaded,
@@ -279,6 +381,157 @@ mod tests {
         QualifiedName, Signature, Type,
         package::{Fill, Link},
     };
+
+    /// FIG-7109: imported pure helpers form a region, and repointing the
+    /// same retained documents and function selection cannot reuse its target.
+    #[test]
+    fn imported_helper_region_tracks_the_resolved_function() {
+        use crate::laws::embedder::{ROOMY, Setup, World, start_machine};
+        use crate::{End, Machine, Program, Step};
+        use lash_kernel_doc::plan::{HelperPlan, HelperTemplate};
+        let fixture = crate::laws::embedder::library(true);
+        let mut registry = (*fixture.registry).clone();
+        let mut definitions = BTreeMap::new();
+        let mut ids = Vec::new();
+        for (name, answer, entry) in [
+            (
+                "law.first",
+                1,
+                (|_: &[doc::Value], _: &[doc::PreparedNative]| Some(doc::Value::Int(1)))
+                    as doc::plan::ImmediateEntry,
+            ),
+            (
+                "law.second",
+                2,
+                (|_: &[doc::Value], _: &[doc::PreparedNative]| Some(doc::Value::Int(2)))
+                    as doc::plan::ImmediateEntry,
+            ),
+        ] {
+            let definition = doc::parse_definition(&format!(
+                "function {name}(x: Any) -> Any\nkernel 1\ncharge 3\nbody {{ return {answer} }}"
+            ))
+            .expect("helper");
+            let id = registry
+                .register(definition.clone(), None)
+                .expect("register helper");
+            definitions.insert(id, definition);
+            ids.push(id);
+            registry
+                .install_plans(&[Box::leak(Box::new(HelperPlan {
+                    name,
+                    function: id,
+                    callees: &[],
+                    literals: &[],
+                    fields: &[],
+                    records: &[],
+                    registers: 1,
+                    slots: &[],
+                    closures: &[],
+                    sites: &[],
+                    run: |_, _| unreachable!("the law uses the certified immediate path"),
+                    template: Some(HelperTemplate {
+                        entry: Some(entry),
+                        callees: &[],
+                        depth: 1,
+                        heap: None,
+                        forwards: Default::default(),
+                    }),
+                }))])
+                .expect("install template");
+        }
+        let mut helpers = Document::new(doc::NumberPolicy::BySpelling, vec![]);
+        helpers.main = None;
+        helpers.functions = definitions;
+        for (name, id) in ["first", "second"].into_iter().zip(&ids) {
+            helpers.exports.insert(
+                Name::new(name),
+                doc::Export::Function(doc::FunctionExport {
+                    function: *id,
+                    signature: registry
+                        .get(id)
+                        .expect("helper")
+                        .definition()
+                        .signature
+                        .clone(),
+                    convention: doc::StartConvention::Direct,
+                    asynchronous: false,
+                    rest: false,
+                }),
+            );
+        }
+        let helper_link = Link {
+            document: helpers.identity(),
+            fills: BTreeMap::new(),
+        };
+        let mut root = crate::laws::embedder::document(
+            "kernel 1\nnumbers by_spelling\nimport 0 code law.helper(x: Any) -> Any direct\nmain { let i = 0 let s = 0 while num.lt(i, 4) { let x = invoke import 0(i) set s = num.add(s, x) set i = num.add(i, 1) } return s }",
+            &registry,
+        );
+        root.imports.retain(|slot, _| *slot == ImportSlot(0));
+        let root = Arc::new(root);
+        let documents = BTreeMap::from([
+            (root.identity(), Arc::clone(&root)),
+            (helpers.identity(), Arc::new(helpers)),
+        ]);
+        let library = PreparedLibrary::new(Arc::new(registry));
+        let mut previous = None;
+        for (name, expected) in [("first", 4), ("second", 8)] {
+            let link = Link {
+                document: root.identity(),
+                fills: BTreeMap::from([(
+                    ImportSlot(0),
+                    Fill::Export {
+                        link: helper_link.identity(),
+                        export: lash_vocabulary::ExportName {
+                            name: Name::new(name),
+                            member: None,
+                        },
+                    },
+                )]),
+            };
+            let program = Program::prepare(
+                link.identity(),
+                documents.clone(),
+                &BTreeMap::from([
+                    (link.identity(), link),
+                    (helper_link.identity(), helper_link.clone()),
+                ]),
+                doc::heap::PageId([8; 32]),
+                library.clone(),
+            )
+            .expect("linked program");
+            let admission = library
+                .admit(&root, KernelDataLimits::standard())
+                .unwrap_or_else(|_| panic!("admitted"));
+            let exe = admission
+                .executable(
+                    &root,
+                    &library,
+                    &program.documents,
+                    &program.functions,
+                    &program.instances,
+                )
+                .unwrap_or_else(|_| panic!("compiled"));
+            assert_eq!(
+                exe.regions.len(),
+                1,
+                "the imported helper loop forms one region"
+            );
+            if let Some(previous) = previous.replace(Arc::clone(&exe.own)) {
+                assert!(
+                    !Arc::ptr_eq(&previous, &exe.own),
+                    "a repointed import recompiles even with the same retained documents and functions"
+                );
+            }
+            let mut machine = start_machine(program, ROOMY, Setup::default().start).expect("start");
+            match machine.run(&mut World::default(), u64::MAX).expect("run") {
+                Step::Ended(End::Finished(finished)) => {
+                    assert_eq!(finished.result, doc::Datum::Int(expected.into()))
+                }
+                other => panic!("helper loop did not finish: {other:?}"),
+            }
+        }
+    }
 
     /// FIG-6931's compile-once rule survives linked preparation: equal code
     /// content shares immutable tables, while each execution keeps its own

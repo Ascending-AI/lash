@@ -1086,7 +1086,7 @@ impl Formation<'_> {
     ) -> Option<(Walk, Shared, Option<Option<CodeId>>)> {
         let mut shared = Shared::default();
         let guest = match callee {
-            super::Callee::Import(_) | super::Callee::Library(_) => None,
+            super::Callee::Import(..) | super::Callee::Library(_) => None,
             super::Callee::Declared(code) => (self.lowered.island)(*code).then_some(Some(*code)),
             super::Callee::Value(var) => {
                 shared.reads.push(Self::var(var, gathered)?);
@@ -1100,7 +1100,7 @@ impl Formation<'_> {
         let units = 1 + args.len() as u64;
         let mut program = vec![Event::Fixed(Weight::Atomic(1)); 1 + args.len()];
         let walk = match callee {
-            super::Callee::Library(lib) => {
+            super::Callee::Library(lib) | super::Callee::Import(_, Some(lib)) => {
                 // A write its value then takes is the reference's: what
                 // the operator writes commits only with a `do`.
                 if writes(&self.lowered, *lib) {
@@ -1730,14 +1730,10 @@ fn library_invoke(form: &Form) -> Option<(&super::Action, LibId, &[super::Atom])
     let Form::Action(action) = form else {
         return None;
     };
-    let super::ActionKind::Call {
-        callee: super::Callee::Library(lib),
-        args,
-    } = &action.kind
-    else {
+    let super::ActionKind::Call { callee, args } = &action.kind else {
         return None;
     };
-    Some((action, *lib, args))
+    Some((action, callee.library()?, args))
 }
 
 /// The value a write or a declaration stores: its expression's, or a
@@ -1757,7 +1753,10 @@ fn value(stream: &Stream, libs: &Libs<'_>, summary: &Summary) -> Option<nodes::N
 fn root(libs: &Libs<'_>, summary: &Summary, id: StmtId) -> Option<nodes::Node> {
     let (_, callee, args) = root_call(&libs.exe.stmt(id).form)?;
     match (callee, &summary.guest) {
-        (super::Callee::Library(lib), None) => nodes::action(libs, *lib, args),
+        (callee, None) => {
+            let node = nodes::action(libs, callee.library()?, args)?;
+            Some(nodes::import_result(libs, callee, node))
+        }
         (_, Some(guest)) => nodes::root_call(libs, guest, callee, args),
         _ => None,
     }

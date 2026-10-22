@@ -13,6 +13,10 @@ pub(super) fn compile_document(
     document: &Document,
     observed: &Document,
     library: &PreparedLibrary,
+    imports: &BTreeMap<
+        (Unit, lash_vocabulary::ImportSlot),
+        (lash_vocabulary::DocumentId, FunctionId),
+    >,
 ) -> Result<DocumentCode, Missing> {
     let prepared = &library.0;
     if !prepared.missing.is_empty() {
@@ -74,6 +78,17 @@ pub(super) fn compile_document(
             sites: prepared.sites,
         },
     );
+    compiler.imports = imports
+        .iter()
+        .filter_map(|(key, (_, function))| {
+            let lib = prepared.lib_of(function)?;
+            let entry = prepared.lib(lib);
+            // Imported natives and uncertified bodies retain ordinary dispatch.
+            (!matches!(entry.run, LibRun::Native { .. } | LibRun::Machine(_))
+                && matches!(entry.prepared, Some((Entry::Template { .. }, _))))
+            .then_some((key.clone(), lib))
+        })
+        .collect();
     compiler.metered = prepared.charge == crate::Charge::Exact;
     let codes: Vec<CodeId> = units.iter().map(|_| compiler.reserve()).collect();
     let mut main = None;

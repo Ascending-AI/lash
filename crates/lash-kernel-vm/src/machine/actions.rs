@@ -725,7 +725,7 @@ impl KernelMachine {
         match callee {
             Callee::Declared(code) => Ok(Target::Code(*code, Vec::new(), self.current_link())),
             Callee::Library(lib) => Ok(Target::Library(*lib, self.current_link())),
-            Callee::Import(slot) => self.import_target(exe, *slot),
+            Callee::Import(slot, _) => self.import_target(exe, *slot),
             Callee::Value(var) => {
                 let value = self.read_var(task, exe, var)?;
                 self.target(exe, value)
@@ -847,7 +847,7 @@ impl KernelMachine {
                 (Target::Code(*code, Vec::new(), self.current_link()), args)
             }
             NestedCallee::Library(lib) => (Target::Library(*lib, self.current_link()), args),
-            NestedCallee::Import(slot) => (self.import_target(exe, *slot)?, args),
+            NestedCallee::Import(slot, _) => (self.import_target(exe, *slot)?, args),
             NestedCallee::Read => {
                 let value = self.take(args);
                 (self.target(exe, value)?, args + 1)
