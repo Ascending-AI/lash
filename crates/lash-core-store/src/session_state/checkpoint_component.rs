@@ -110,7 +110,7 @@ impl PluginStateRecord {
         let mut held = self.held_nodes.clone();
         let mut generations = crate::source_map::SharedSourceMap::empty_in(budget)?;
         for (plugin, entry) in &self.map.plugins {
-            generations.insert(plugin.clone(), entry.generation)?;
+            generations.insert_ref(plugin, entry.generation)?;
         }
         for (plugin, body) in self.body_iter() {
             // One sparse B-tree node per fixed-size address, plus source metadata.
@@ -124,7 +124,7 @@ impl PluginStateRecord {
                 allocation,
                 budget.clone(),
             );
-            held.insert(plugin.clone(), addresses)?;
+            held.insert_ref(plugin, addresses)?;
         }
         held.retain(|plugin, _| self.map.plugins.contains_key(plugin))?;
         self.prepared_held_nodes = held;
@@ -403,14 +403,20 @@ pub(super) fn assemble_plugin_state(
                     message: "invalid map root".into(),
                 }
             })?;
-        let body = crate::plugin_state::NamespaceBody::load(
+        let body = crate::plugin_state::NamespaceBody::load_in(
             namespace_nodes,
             root,
             crate::checkpoint_graph::DecodeLimits::within_total(1 << 32),
+            &budget,
         )
-        .map_err(|error| crate::StoreError::StoredDataCorrupt {
-            record_kind: "plugin namespace",
-            message: error.to_string(),
+        .map_err(|error| match error {
+            crate::checkpoint_graph::GraphRefusal::Allocation(error) => {
+                crate::StoreError::Allocation(error)
+            }
+            error => crate::StoreError::StoredDataCorrupt {
+                record_kind: "plugin namespace",
+                message: error.to_string(),
+            },
         })?;
         if body.bytes() != &bytes {
             return Err(crate::StoreError::StoredDataCorrupt {
@@ -423,7 +429,7 @@ pub(super) fn assemble_plugin_state(
         record.record_source(plugin.clone(), &values)?;
         let mut namespace = entry.namespace(values)?;
         namespace.encoding = crate::plugin_state::NamespaceEncoding::recorded(body)?;
-        state.plugins.insert(plugin.clone(), namespace)?;
+        state.plugins.insert_ref(plugin, namespace)?;
     }
     if let Some(stray) = entries.keys().find_map(|key| {
         crate::plugin_state::namespace_component_plugin(key)

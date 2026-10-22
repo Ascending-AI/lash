@@ -4,8 +4,6 @@
 //! [`PageGrant::NONE`]; bytes are still re-hashed and re-framed before the
 //! heap decodes them.
 
-use std::sync::Arc;
-
 use lash_core_store::checkpoint_graph::NodeId;
 use lash_core_store::checkpoint_graph::stage::{StageFault, StageSpool};
 use lash_kernel_doc::heap::{HeapFault, HostResource, PageGrant, PageId, PageRef};

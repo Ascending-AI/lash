@@ -565,10 +565,12 @@ impl StateDesk<'_> {
             .into_iter()
             .map(|Proposal { batch, proposer }| {
                 let plugin = batch.plugin.clone();
-                if !candidates.contains_key(&plugin) {
-                    candidates.insert(plugin.clone(), namespace_for(&registry.data, &plugin)?);
-                }
-                let namespace = candidates.get_mut(&plugin).expect("candidate installed");
+                let namespace = match candidates.entry(plugin.clone()) {
+                    std::collections::btree_map::Entry::Occupied(entry) => entry.into_mut(),
+                    std::collections::btree_map::Entry::Vacant(entry) => {
+                        entry.insert(namespace_for(&registry.data, &plugin)?)
+                    }
+                };
                 namespace.publication.owner_segment = registry.segment;
                 let mut outcome = match self.admit_batch(&batch, proposer.as_ref(), namespace) {
                     Err(refusal) => StateResolutionOutcome::Refused { refusal },
@@ -755,7 +757,7 @@ impl StateDesk<'_> {
                 let result = publish_one(&mut namespace, segment, resolution)?;
                 candidate
                     .plugins
-                    .insert(resolution.plugin.clone(), namespace)?;
+                    .insert_ref(&resolution.plugin, namespace)?;
                 match result {
                     Published::Applied | Published::AlreadyApplied => Ok(()),
                     Published::Ahead => {
@@ -809,7 +811,7 @@ impl StateDesk<'_> {
         for resolution in staged {
             let mut namespace = namespace_for(&data, &resolution.plugin)?;
             let result = publish_one(&mut namespace, registry.segment, resolution)?;
-            data.plugins.insert(resolution.plugin.clone(), namespace)?;
+            data.plugins.insert_ref(&resolution.plugin, namespace)?;
             match result {
                 Published::Applied | Published::AlreadyApplied => {}
                 // A staged resolution was reduced against the published
@@ -869,7 +871,7 @@ impl StateDesk<'_> {
         for (id, current) in &registry.data.plugins {
             let mut namespace = current.clone();
             namespace.publication.owner_segment = segment;
-            data.plugins.insert(id.clone(), namespace)?;
+            data.plugins.insert_ref(id, namespace)?;
         }
         registry.data = data;
         registry.segment = segment;
@@ -953,7 +955,7 @@ fn settle_owed(
                 }
             }
         }
-        candidate.plugins.insert(plugin.clone(), namespace)?;
+        candidate.plugins.insert_ref(plugin, namespace)?;
     }
     owed.retain(|_, queue| !queue.is_empty());
     Ok(())
@@ -1044,7 +1046,7 @@ pub(in crate::plugin) fn replay_state(
     for resolution in resolutions {
         let mut namespace = namespace_for(&state, &resolution.plugin)?;
         let result = publish_one(&mut namespace, resolution.segment, resolution)?;
-        state.plugins.insert(resolution.plugin.clone(), namespace)?;
+        state.plugins.insert_ref(&resolution.plugin, namespace)?;
         match result {
             Published::Ahead => {
                 if let Some(previous) = owed

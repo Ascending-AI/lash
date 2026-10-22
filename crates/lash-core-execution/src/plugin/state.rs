@@ -268,7 +268,7 @@ impl PluginStateRegistry {
         for (id, current) in &registry.data.plugins {
             let mut namespace = current.clone();
             namespace.publication.owner_segment = registry.segment;
-            data.plugins.insert(id.clone(), namespace)?;
+            data.plugins.insert_ref(id, namespace)?;
         }
         registry.data = data;
         Ok(registry)
@@ -287,7 +287,7 @@ impl PluginStateRegistry {
         };
         if namespace.fork != fork || !self.data.plugins.contains_key(plugin) {
             namespace.fork = fork;
-            self.data.plugins.insert(plugin.to_owned(), namespace)?;
+            self.data.insert_namespace(plugin, namespace)?;
             self.source = None;
         }
         Ok(())

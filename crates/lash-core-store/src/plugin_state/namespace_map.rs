@@ -10,7 +10,6 @@ use super::NamespaceValues;
 use crate::checkpoint_graph::{
     DecodeLimits, EncodeBudget, EncodedNode, ExplicitLimit, GraphDecoder, GraphRefusal,
     GraphStaging, NodeId, NodeKind, NodeSource, TokenCodec, TokenError, TokenReader, TokenWriter,
-    closure,
 };
 use crate::store::BlobRef;
 use lash_protocol_types::allocation::{
@@ -133,21 +132,21 @@ struct NamespaceBodyStorage {
 }
 
 #[derive(Clone, Debug)]
-struct NamespaceNodes(Arc<NamespaceNodeMap>);
-#[derive(Debug)]
-struct NamespaceNodeMap {
-    nodes: BTreeMap<NodeId, EncodedNode>,
-    _allocation: AllocationHold,
-}
+struct NamespaceNodes(crate::source_map::SharedSourceMap<NodeId, EncodedNode>);
 impl NamespaceNodes {
-    fn new(nodes: BTreeMap<NodeId, EncodedNode>, allocation: AllocationHold) -> Self {
-        Self(Arc::new(NamespaceNodeMap {
+    fn new(
+        nodes: BTreeMap<NodeId, EncodedNode>,
+        allocation: AllocationHold,
+        budget: &AllocationBudget,
+    ) -> Self {
+        Self(crate::source_map::SharedSourceMap::from_admitted(
             nodes,
-            _allocation: allocation,
-        }))
+            allocation,
+            budget.clone(),
+        ))
     }
     fn capacity(&self) -> u64 {
-        (self.0.nodes.len() as u64)
+        (self.0.len() as u64)
             .saturating_mul(2048)
             .saturating_add(512)
     }
@@ -236,16 +235,24 @@ impl TokenCodec for Body {
     }
 }
 
-#[expect(
-    clippy::expect_used,
-    reason = "typed namespace bodies encode within an unbounded staging budget"
-)]
-fn encode(body: &Body) -> (NodeId, BTreeMap<NodeId, EncodedNode>) {
-    let mut staging = GraphStaging::new(EncodeBudget::new(ExplicitLimit::new(u64::MAX)));
+// This codec is total for typed namespace bodies under an unbounded encode
+// work budget. Allocation admission is the serving path's only refusal.
+fn allocation_refusal(error: lash_checkpoint_encoder::GraphRefusal) -> AllocationError {
+    match error {
+        lash_checkpoint_encoder::GraphRefusal::Allocation(error) => error,
+        error => unreachable!("canonical namespace encoding refused: {error}"),
+    }
+}
+fn encode(
+    body: &Body,
+    budget: &AllocationBudget,
+) -> Result<(NodeId, BTreeMap<NodeId, EncodedNode>), AllocationError> {
+    let mut staging = GraphStaging::new_in(EncodeBudget::new(ExplicitLimit::new(u64::MAX)), budget)
+        .map_err(allocation_refusal)?;
     let root = staging
         .encode_value(NodeKind::NAMESPACE_VALUE, body)
-        .expect("namespace graph encodes");
-    (root, staging.into_nodes())
+        .map_err(allocation_refusal)?;
+    Ok((root, staging.into_nodes()))
 }
 
 impl Trie {
@@ -253,28 +260,32 @@ impl Trie {
         value: Option<Arc<Leaf>>,
         children: BTreeMap<u8, Arc<Self>>,
         allocation: AllocationHold,
-    ) -> Arc<Self> {
-        let (root, nodes) = encode(&Body::Index(
-            value.as_ref().map(|value| value.root),
-            children
-                .iter()
-                .map(|(byte, child)| (*byte, child.root))
-                .collect(),
-        ));
+        budget: &AllocationBudget,
+    ) -> Result<Arc<Self>, AllocationError> {
+        let (root, nodes) = encode(
+            &Body::Index(
+                value.as_ref().map(|value| value.root),
+                children
+                    .iter()
+                    .map(|(byte, child)| (*byte, child.root))
+                    .collect(),
+            ),
+            budget,
+        )?;
         let graph_nodes = children
             .values()
             .fold(nodes.len() as u64, |count, child| {
                 count.saturating_add(child.graph_nodes)
             })
             .saturating_add(value.as_ref().map_or(0, |value| value.nodes.len() as u64));
-        Arc::new(Self {
+        Ok(Arc::new(Self {
             root,
             nodes,
             value,
             children,
             _allocation: allocation,
             graph_nodes,
-        })
+        }))
     }
 
     fn change(
@@ -309,7 +320,7 @@ impl Trie {
         if held.is_none() && children.is_empty() {
             Ok(None)
         } else {
-            Ok(Some(Self::new(held, children, allocation)))
+            Ok(Some(Self::new(held, children, allocation, budget)?))
         }
     }
 
@@ -339,14 +350,13 @@ impl NamespaceBody {
         &self.0.bytes
     }
     pub fn graph(&self) -> &BTreeMap<NodeId, EncodedNode> {
-        &self.0.graph.0.nodes
+        &self.0.graph.0
     }
     pub fn published(&self) -> &BTreeMap<NodeId, EncodedNode> {
-        &self.0.published.0.nodes
+        &self.0.published.0
     }
 
     /// Encode an initial map. Mutations use the namespace's resident cache.
-    #[must_use]
     pub fn encode(
         values: &BTreeMap<String, Value>,
         budget: &AllocationBudget,
@@ -375,7 +385,7 @@ impl NamespaceBody {
                     .saturating_add(8192),
             )?;
             let bytes = rmp_serde::to_vec_named(value).expect("namespace value encodes");
-            let (root, nodes) = encode(&Body::Value(bytes));
+            let (root, nodes) = encode(&Body::Value(bytes), &budget)?;
             tree = Trie::change(
                 tree.as_ref(),
                 key.as_bytes(),
@@ -399,14 +409,14 @@ impl NamespaceBody {
         }
         let tree = match tree {
             Some(tree) => tree,
-            None => Trie::new(None, BTreeMap::new(), budget.reserve(12288)?),
+            None => Trie::new(None, BTreeMap::new(), budget.reserve(12288)?, &budget)?,
         };
         let graph_allocation =
             budget.reserve(tree.graph_nodes.saturating_mul(2048).saturating_add(512))?;
         let mut graph = BTreeMap::new();
         tree.collect(&mut graph);
         let bytes = graph[&tree.root].bytes.clone();
-        let graph = NamespaceNodes::new(graph, graph_allocation);
+        let graph = NamespaceNodes::new(graph, graph_allocation, &budget);
         Ok(Self(Arc::new(NamespaceBodyStorage {
             values: BlobRef(tree.root.to_hex()),
             bytes,
@@ -432,7 +442,6 @@ impl NamespaceBody {
     /// Restrict publication to the new path. A pending predecessor carries
     /// its own uncommitted nodes forward; a committed predecessor holds all
     /// of its nodes durably. No speculative encoding implies durability.
-    #[must_use]
     pub fn publication_after(
         &self,
         previous: Option<&Self>,
@@ -463,7 +472,7 @@ impl NamespaceBody {
             .map(|(id, node)| (*id, node.clone()))
             .collect();
         let mut body = (*self.0).clone();
-        body.published = NamespaceNodes::new(published, allocation.clone());
+        body.published = NamespaceNodes::new(published, allocation.clone(), &self.0.budget);
         body._allocation = allocation;
         Ok(Self(Arc::new(body)))
     }
@@ -477,127 +486,22 @@ impl NamespaceBody {
         tree.value.as_ref().map(|value| value.root)
     }
 
-    /// Read and check the keyed map under a durable root.
-    ///
-    /// # Errors
-    /// Any graph refusal, or a malformed trie or JSON value.
+    pub fn load_in(
+        source: &dyn NodeSource,
+        root: NodeId,
+        limits: DecodeLimits,
+        budget: &AllocationBudget,
+    ) -> Result<Self, GraphRefusal> {
+        load::load(source, root, limits, budget)
+    }
+    /// Read an independently owned namespace. Serving callers supply their
+    /// claim ledger through load_in before source materialization.
     pub fn load(
         source: &dyn NodeSource,
         root: NodeId,
         limits: DecodeLimits,
     ) -> Result<Self, GraphRefusal> {
-        let allocation = AllocationHold::default();
-        let graph = closure(source, root, &limits)?;
-        let mut decoder = GraphDecoder::new(source, limits);
-        let mut values = BTreeMap::new();
-        let tree = load_trie(
-            &mut decoder,
-            &graph,
-            root,
-            &mut Vec::new(),
-            &mut values,
-            &allocation,
-        )?;
-        Ok(Self(Arc::new(NamespaceBodyStorage {
-            values: BlobRef(root.to_hex()),
-            bytes: graph[&root].bytes.clone(),
-            graph: NamespaceNodes::new(graph, allocation.clone()),
-            published: NamespaceNodes::new(BTreeMap::new(), allocation.clone()),
-            snapshot: values.into(),
-            tree,
-            budget: AllocationBudget::unowned(),
-            _allocation: allocation,
-        })))
+        Self::load_in(source, root, limits, &AllocationBudget::unowned())
     }
 }
-
-fn invalid(reason: impl Into<String>) -> GraphRefusal {
-    GraphRefusal::InvalidBody {
-        kind: NodeKind::NAMESPACE_VALUE.0,
-        reason: reason.into(),
-    }
-}
-
-fn load_trie(
-    decoder: &mut GraphDecoder<'_>,
-    graph: &BTreeMap<NodeId, EncodedNode>,
-    root: NodeId,
-    prefix: &mut Vec<u8>,
-    values: &mut BTreeMap<String, Value>,
-    allocation: &AllocationHold,
-) -> Result<Arc<Trie>, GraphRefusal> {
-    if prefix.len() > 128 {
-        return Err(invalid("namespace key exceeds 128 bytes"));
-    }
-    let Body::Index(value, children) = decoder.decode(root, NodeKind::NAMESPACE_VALUE)? else {
-        return Err(invalid("namespace index holds a value"));
-    };
-    if !prefix.is_empty() && value.is_none() && children.is_empty() {
-        return Err(invalid("empty namespace branch"));
-    }
-    let value = value
-        .map(|root| {
-            let Body::Value(bytes) = decoder.decode(root, NodeKind::NAMESPACE_VALUE)? else {
-                return Err(invalid("namespace value holds an index"));
-            };
-            let key =
-                String::from_utf8(prefix.clone()).map_err(|error| invalid(error.to_string()))?;
-            let value = rmp_serde::from_slice(&bytes)
-                .map_err(|error| invalid(format!("namespace value: {error}")))?;
-            values.insert(key, value);
-            let nodes = owned_nodes(graph, root, &BTreeSet::new())?;
-            Ok::<_, GraphRefusal>(Arc::new(Leaf {
-                root,
-                nodes,
-                _allocation: allocation.clone(),
-            }))
-        })
-        .transpose()?;
-    let mut loaded = BTreeMap::new();
-    for (byte, child) in children {
-        prefix.push(byte);
-        let child = load_trie(decoder, graph, child, prefix, values, allocation)?;
-        prefix.pop();
-        loaded.insert(byte, child);
-    }
-    // Keep this index's placed/streamed structure, stopping at the logical
-    // namespace children. The initial closure checked every envelope once.
-    let boundaries = loaded
-        .values()
-        .map(|child| child.root)
-        .chain(value.iter().map(|value| value.root))
-        .collect();
-    let nodes = owned_nodes(graph, root, &boundaries)?;
-    let graph_nodes = loaded
-        .values()
-        .fold(nodes.len() as u64, |count, child: &Arc<Trie>| {
-            count.saturating_add(child.graph_nodes)
-        })
-        .saturating_add(value.as_ref().map_or(0, |value| value.nodes.len() as u64));
-    Ok(Arc::new(Trie {
-        root,
-        nodes,
-        value,
-        children: loaded,
-        _allocation: allocation.clone(),
-        graph_nodes,
-    }))
-}
-
-fn owned_nodes(
-    graph: &BTreeMap<NodeId, EncodedNode>,
-    root: NodeId,
-    boundaries: &BTreeSet<NodeId>,
-) -> Result<BTreeMap<NodeId, EncodedNode>, GraphRefusal> {
-    let mut nodes = BTreeMap::new();
-    let mut pending = vec![root];
-    while let Some(id) = pending.pop() {
-        if boundaries.contains(&id) || nodes.contains_key(&id) {
-            continue;
-        }
-        let node = graph.get(&id).ok_or(GraphRefusal::MissingNode(id))?;
-        pending.extend(node.children()?);
-        nodes.insert(id, node.clone());
-    }
-    Ok(nodes)
-}
+mod load;

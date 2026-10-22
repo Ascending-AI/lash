@@ -94,7 +94,7 @@ impl crate::PluginSession {
             if !current.publication.recent().is_empty() {
                 let mut namespace = current.clone();
                 namespace.publication.settle();
-                data.plugins.insert(id.clone(), namespace)?;
+                data.plugins.insert_ref(id, namespace)?;
             }
         }
         if data != registry.data {
@@ -226,7 +226,7 @@ impl crate::PluginSession {
             } else if let Some(base) = run.base.plugins.get(&row.plugin) {
                 namespace.encoding = base.encoding.clone();
             }
-            state.plugins.insert(row.plugin.clone(), namespace)?;
+            state.plugins.insert_ref(&row.plugin, namespace)?;
         }
         self.host.retired_plugins.check_state(&state)?;
         run.bodies = rows
@@ -249,7 +249,7 @@ impl crate::PluginSession {
         for (id, current) in &registry.data.plugins {
             let mut namespace = current.clone();
             namespace.publication.owner_segment = segment;
-            data.plugins.insert(id.clone(), namespace)?;
+            data.plugins.insert_ref(id, namespace)?;
         }
         registry.data = data;
         registry.source = None;

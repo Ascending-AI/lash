@@ -123,11 +123,16 @@ pub enum PluginStateError {
 }
 
 impl PluginStateError {
-    /// Every state failure is permanent for the same input: a codec or limit
-    /// refusal does not change, and a fenced or out-of-order publication is
-    /// resolved only by rebuilding from durable state.
+    /// Pressure can clear when readers release their allocations. Other state
+    /// failures require changed input, configuration or durable state.
     pub fn is_terminal(&self) -> bool {
-        true
+        !matches!(
+            self,
+            Self::Allocation(AllocationError {
+                kind: lash_protocol_types::allocation::ReserveError::Pressure,
+                ..
+            })
+        )
     }
 }
 
@@ -530,6 +535,15 @@ impl PluginState {
     pub fn allocation_budget(&self) -> &AllocationBudget {
         self.plugins.allocation_budget()
     }
+    pub fn insert_namespace(
+        &mut self,
+        plugin: &str,
+        namespace: PluginNamespaceState,
+    ) -> Result<(), AllocationError> {
+        let _key = self.allocation_budget().reserve(plugin.len() as u64 + 64)?;
+        self.plugins.insert(plugin.to_owned(), namespace)?;
+        Ok(())
+    }
     pub fn decoded_in(&mut self, allocation: AllocationHold, budget: AllocationBudget) -> bool {
         self.plugins
             .decoded_in_with(allocation, budget, PluginNamespaceState::decoded_in)
@@ -636,7 +650,6 @@ impl PluginNamespaceState {
 
     /// The persistent keyed graph of these values. Unchanged values reuse
     /// their encoded nodes; an edit encodes only its value and trie path.
-    #[must_use]
     pub fn body(&self) -> Result<NamespaceBody, lash_protocol_types::allocation::AllocationError> {
         self.encoding.body(&self.values)
     }
@@ -662,7 +675,6 @@ impl PluginNamespaceState {
     }
 
     /// The namespace's entry with its values stored at `values`.
-    #[must_use]
     pub fn entry(&self, values: &crate::store::BlobRef) -> Result<NamespaceEntry, AllocationError> {
         Ok(NamespaceEntry {
             values: crate::store::SharedCheckpointAddress::copy_from_ref_in(
@@ -708,7 +720,6 @@ impl NamespaceEntry {
             && self.publication.decoded_in(allocation, budget)
     }
     /// The namespace this entry records, with `values` its body decoded.
-    #[must_use]
     pub fn namespace(
         &self,
         values: NamespaceValues,
@@ -780,7 +791,7 @@ pub fn fork_checkpoint_plugin_state(
             StateFork::Reset => {
                 checkpoint
                     .components
-                    .remove(&namespace_component_key(&plugin));
+                    .remove(&namespace_component_key(plugin));
             }
         }
     }

@@ -170,24 +170,31 @@ pub(super) async fn plugin_format_boundary(
         ))
         .unwrap();
     let mut snapshot = seed.export_state();
-    snapshot.plugins.insert(
-        "format-state".into(),
-        lash_core::PluginNamespaceState {
-            format_version: lash_core::FormatVersion::new(version).unwrap(),
-            generation: 7,
-            publication: Default::default(),
-            fork: Default::default(),
-            values: std::collections::BTreeMap::from([("count".into(), serde_json::json!(17))])
-                .into(),
-            encoding: Default::default(),
-        },
-    );
+    snapshot
+        .plugins
+        .insert(
+            "format-state".into(),
+            lash_core::PluginNamespaceState {
+                format_version: lash_core::FormatVersion::new(version).unwrap(),
+                generation: 7,
+                publication: Default::default(),
+                fork: Default::default(),
+                values: std::collections::BTreeMap::from([("count".into(), serde_json::json!(17))])
+                    .into(),
+                encoding: Default::default(),
+            },
+        )
+        .unwrap();
     state.set_plugin_state(Some(snapshot)).unwrap();
-    state.authority.plugin_config.insert_versioned(
-        "format-state",
-        lash_core::FormatVersion::new(version).unwrap(),
-        serde_json::json!({"count": 17}),
-    );
+    state
+        .authority
+        .plugin_config
+        .insert_versioned(
+            "format-state",
+            lash_core::FormatVersion::new(version).unwrap(),
+            serde_json::json!({"count": 17}),
+        )
+        .unwrap();
     // The fleet record permits what the plugin's registration provisions
     // (FIG-4746): the fixture's stored format stands for a build that wrote
     // it, so that build's registration is what the store is provisioned from.

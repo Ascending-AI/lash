@@ -171,3 +171,112 @@ fn namespace_graph_and_publication_refuse_before_materialization() {
     drop(publication);
     assert_eq!(used.load(Ordering::SeqCst), 0);
 }
+
+/// LO-EVICT-NAMESPACE-LOAD: source admission precedes graph copies and JSON
+/// decoding; escaped values and root bytes keep their allocation obligations.
+#[test]
+fn namespace_load_admits_before_decode_and_holds_escaped_sources() {
+    let source = NamespaceBody::encode(
+        &BTreeMap::from([("key".into(), Value::String("x".repeat(4096)))]),
+        &AllocationBudget::unowned(),
+    )
+    .unwrap();
+    let used = Arc::new(AtomicU64::new(0));
+    let ledger = Ledger {
+        used: used.clone(),
+        limit: 1 << 28,
+    };
+    let budget = AllocationBudget::new(ledger.clone());
+    let limits = crate::checkpoint_graph::DecodeLimits::within_total(1 << 24);
+    let blocker = ledger.reserve(ledger.limit).unwrap();
+    let measurement = crate::history_growth_law::allocation_counter::Measurement::start();
+    let loaded = NamespaceBody::load_in(source.graph(), source.root(), limits, &budget);
+    let counts = measurement.finish();
+    assert!(
+        matches!(
+            loaded,
+            Err(crate::checkpoint_graph::GraphRefusal::Allocation(_))
+        ),
+        "unadmitted namespace load: {loaded:?}"
+    );
+    assert!(
+        counts.allocated < 256,
+        "refusal copied graph/JSON: {counts:?}"
+    );
+    drop(blocker);
+    let loaded = NamespaceBody::load_in(source.graph(), source.root(), limits, &budget).unwrap();
+    let snapshot = loaded.snapshot();
+    let bytes = loaded.bytes().clone();
+    drop(loaded);
+    assert_eq!(snapshot["key"], Value::String("x".repeat(4096)));
+    assert!(used.load(Ordering::SeqCst) >= 4096);
+    drop(snapshot);
+    assert!(
+        used.load(Ordering::SeqCst) > 0,
+        "escaped byte source lost admission"
+    );
+    drop(bytes);
+    assert_eq!(used.load(Ordering::SeqCst), 0);
+}
+
+/// LO-EVICT-NAMESPACE-ENCODED-BYTES: a root byte reader owns its admission
+/// independently of the namespace cache, trie and publication view.
+#[test]
+fn encoded_namespace_bytes_keep_admission_after_body_drop() {
+    let used = Arc::new(AtomicU64::new(0));
+    let ledger = Ledger {
+        used: used.clone(),
+        limit: 1 << 24,
+    };
+    let budget = AllocationBudget::new(ledger);
+    let body = NamespaceBody::encode(
+        &BTreeMap::from([("key".into(), Value::String("x".repeat(4096)))]),
+        &budget,
+    )
+    .unwrap();
+    let bytes = body.bytes().clone();
+    let length = bytes.len();
+    drop(body);
+    assert!(
+        used.load(Ordering::SeqCst) >= length as u64,
+        "escaped encoded source was uncharged"
+    );
+    assert_eq!(bytes.len(), length);
+    drop(bytes);
+    assert_eq!(used.load(Ordering::SeqCst), 0);
+}
+
+/// LO-EVICT-MESSAGEPACK-BOUND: the predecode formula covers sparse JSON
+/// collections and parser copies, and refuses truncated huge size hints.
+#[test]
+fn messagepack_preflight_bounds_json_and_rejects_truncated_size_hints() {
+    for value in [
+        serde_json::json!({"one":{"two":{"three":["long".repeat(1000),null,1,true]}}}),
+        Value::Array((0..100).map(|i| serde_json::json!({"key": i})).collect()),
+        Value::String("🦊\\\"\n".repeat(1000)),
+    ] {
+        let bytes = rmp_serde::to_vec_named(&value).unwrap();
+        let capacity = lash_protocol_types::allocation::msgpack_decode_capacity(
+            &bytes,
+            std::mem::size_of::<Value>(),
+        )
+        .unwrap();
+        let measure = crate::history_growth_law::allocation_counter::Measurement::start();
+        let decoded: Value = rmp_serde::from_slice(&bytes).unwrap();
+        let counts = measure.finish();
+        assert_eq!(decoded, value);
+        assert!(
+            counts.allocated as u64 <= capacity,
+            "decode {counts:?} exceeded reservation {capacity}"
+        );
+    }
+    for bytes in [
+        &[0xdd, 255, 255, 255, 255][..],
+        &[0xdf, 255, 255, 255, 255],
+        &[0xdb, 255, 255, 255, 255],
+    ] {
+        let measure = crate::history_growth_law::allocation_counter::Measurement::start();
+        assert!(lash_protocol_types::allocation::msgpack_decode_capacity(bytes, 512).is_none());
+        assert_eq!(measure.finish().allocated, 0);
+    }
+}

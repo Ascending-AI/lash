@@ -598,10 +598,10 @@ pub async fn every_root_source_retains_its_graph_and_shared_leaves_outlive_one_o
             &values,
             &lash_protocol_types::allocation::AllocationBudget::unowned(),
         )
-        .unwrap();
+        .map_err(|error| refused("namespace allocation", error))?;
         let entry = lash_core_store::plugin_state::PluginNamespaceState::default()
             .entry(body.values())
-            .unwrap();
+            .map_err(|error| refused("namespace allocation", error))?;
         (entry, body)
     };
     let namespace_root = NamespaceValue {

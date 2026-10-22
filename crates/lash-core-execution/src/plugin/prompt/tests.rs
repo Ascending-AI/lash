@@ -387,7 +387,12 @@ fn a_renderer_reads_one_namespace_generation() {
     {
         let mut registry = registry.lock_recover();
         for (plugin, key, value) in [("mem", "t", 1), ("neighbor", "secret", 7)] {
-            let namespace = registry.data.plugins.entry(plugin.into()).or_default();
+            let mut namespace = registry
+                .data
+                .plugins
+                .get(plugin)
+                .cloned()
+                .unwrap_or_default();
             namespace.generation = 1;
             namespace
                 .apply_changes(&[lash_core_store::tool_run::ResolvedStateChange::Put {
@@ -395,6 +400,7 @@ fn a_renderer_reads_one_namespace_generation() {
                     value: serde_json::json!(value),
                 }])
                 .unwrap();
+            registry.data.insert_namespace(plugin, namespace).unwrap();
         }
     }
     let owner = crate::RuntimeOwner::Session(crate::SessionId::from("prompt-laws"));
@@ -413,7 +419,7 @@ fn a_renderer_reads_one_namespace_generation() {
             let before = (input.state().generation(), input.state().get("t").cloned());
             {
                 let mut registry = registry.lock_recover();
-                let namespace = registry.data.plugins.get_mut("mem").expect("namespace");
+                let mut namespace = registry.data.plugins.get("mem").expect("namespace").clone();
                 namespace.generation = 2;
                 namespace
                     .apply_changes(&[lash_core_store::tool_run::ResolvedStateChange::Put {
@@ -421,6 +427,7 @@ fn a_renderer_reads_one_namespace_generation() {
                         value: serde_json::json!(2),
                     }])
                     .unwrap();
+                registry.data.insert_namespace("mem", namespace).unwrap();
             }
             let after = (input.state().generation(), input.state().get("t").cloned());
             observed.lock_recover().push((before, after));

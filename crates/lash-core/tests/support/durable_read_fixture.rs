@@ -309,7 +309,7 @@ pub async fn seed(handles: &FixtureHandles) -> ExpectedFixture {
     };
     loaded
         .set_plugin_state(Some(fixture_plugin_state()))
-        .unwrap();
+        .expect("fixture plugin state is admitted");
     loaded.set_execution_graph(fixture_execution());
     let legacy_operation = OperationId::new(
         ExecutionScope::runtime_operation("durable-read-legacy-commit"),

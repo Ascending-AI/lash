@@ -257,6 +257,7 @@ impl From<lash_checkpoint_encoder::GraphRefusal> for GraphRefusal {
     fn from(error: lash_checkpoint_encoder::GraphRefusal) -> Self {
         use lash_checkpoint_encoder::GraphRefusal as Codec;
         match error {
+            Codec::Allocation(error) => Self::Allocation(error),
             Codec::BadMagic => Self::BadMagic,
             Codec::UnsupportedKind(value) => Self::UnsupportedKind(value),
             Codec::RetiredFormat { node, kind, format } => {

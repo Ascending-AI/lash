@@ -144,7 +144,7 @@ pub async fn gc_blobs(factory: ReopenableRuntimeStore) {
         ))
     };
     v1.set_plugin_state(Some(super::plugin_state_at(1)))
-        .unwrap();
+        .expect("fixture plugin state is admitted");
     let v1_result = commit_runtime_state_for_test(
         &store,
         RuntimeCommit::persisted_state_for_test(&v1),
@@ -164,7 +164,7 @@ pub async fn gc_blobs(factory: ReopenableRuntimeStore) {
         ))
     };
     v2.set_plugin_state(Some(super::plugin_state_at(2)))
-        .unwrap();
+        .expect("fixture plugin state is admitted");
     commit_runtime_state_for_test(
         &store,
         RuntimeCommit::persisted_state_for_test(&v2),

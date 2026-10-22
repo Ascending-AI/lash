@@ -46,18 +46,24 @@ pub(super) async fn plugin_state_corrupt_boundary(store: Arc<dyn RuntimeStore>, 
     let mut snapshot = seed.export_state();
     // `bad key` fails `validate_key` at any stamp; recorded at the native
     // format so no migration runs and the payload itself is what refuses.
-    snapshot.plugins.insert(
-        plugin_id.into(),
-        lash_core::PluginNamespaceState {
-            format_version: native,
-            generation: 3,
-            publication: Default::default(),
-            fork: Default::default(),
-            values: std::collections::BTreeMap::from([("bad key".into(), serde_json::json!(17))])
+    snapshot
+        .plugins
+        .insert(
+            plugin_id.into(),
+            lash_core::PluginNamespaceState {
+                format_version: native,
+                generation: 3,
+                publication: Default::default(),
+                fork: Default::default(),
+                values: std::collections::BTreeMap::from([(
+                    "bad key".into(),
+                    serde_json::json!(17),
+                )])
                 .into(),
-            encoding: Default::default(),
-        },
-    );
+                encoding: Default::default(),
+            },
+        )
+        .unwrap();
     state.set_plugin_state(Some(snapshot)).unwrap();
     // Seed from the writer that produced this native-format fixture, whose
     // only writable format is native. Its floor permits the stamp even in a

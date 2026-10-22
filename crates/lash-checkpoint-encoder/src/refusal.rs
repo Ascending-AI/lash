@@ -5,6 +5,8 @@ use lash_kernel_doc::graph_tokens::{CanonicalFault, DecodeDimension, TokenError}
 
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 pub enum GraphRefusal {
+    #[error(transparent)]
+    Allocation(#[from] crate::allocation::AllocationError),
     #[error("the envelope does not start with LASH")]
     BadMagic,
     #[error("node kind {0} is not supported here")]

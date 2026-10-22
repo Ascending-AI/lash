@@ -518,20 +518,22 @@ mod tests {
         };
         let mut config =
             lash_core::PluginConfig::for_protocol(Some(crate::RLM_PROTOCOL_PLUGIN_ID.to_string()));
-        config.insert(
-            crate::RLM_PROTOCOL_PLUGIN_ID,
-            serde_json::to_value(crate::RlmRecordedConfig {
-                finish_value_schema: None,
-                render: None,
-                termination: None,
-                channel: Some(crate::RlmChannel::Cell),
-                dialect: Some("typescript".to_string()),
-                behaviour: creating
-                    .recorded_behaviour(&crate::CellDialect::typescript())
-                    .expect("the standard tool presentation admits"),
-            })
-            .expect("recorded namespace"),
-        );
+        config
+            .insert(
+                crate::RLM_PROTOCOL_PLUGIN_ID,
+                serde_json::to_value(crate::RlmRecordedConfig {
+                    finish_value_schema: None,
+                    render: None,
+                    termination: None,
+                    channel: Some(crate::RlmChannel::Cell),
+                    dialect: Some("typescript".to_string()),
+                    behaviour: creating
+                        .recorded_behaviour(&crate::CellDialect::typescript())
+                        .expect("the standard tool presentation admits"),
+                })
+                .expect("recorded namespace"),
+            )
+            .expect("fixture config is admitted");
         let recorded = lash_core::AdmittedPluginConfig::new(config, 1);
         let original = test_session(creating);
         let resumed = test_session(RlmProtocolPluginConfig {

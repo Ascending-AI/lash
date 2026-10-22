@@ -499,7 +499,7 @@ impl RuntimeCheckpointComponents {
             record
                 .map
                 .plugins
-                .insert(plugin.clone(), namespace.entry(&values)?)?;
+                .insert_ref(plugin, namespace.entry(&values)?)?;
             record.record_source(plugin.clone(), &namespace.values)?;
         }
         record

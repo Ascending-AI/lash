@@ -84,7 +84,7 @@ impl PluginHost {
         for (id, namespace) in &state.plugins {
             decoded
                 .plugins
-                .insert(id.clone(), self.decode_namespace(id, namespace)?)?;
+                .insert_ref(id, self.decode_namespace(id, namespace)?)?;
         }
         Ok(decoded)
     }

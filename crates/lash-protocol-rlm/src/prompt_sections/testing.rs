@@ -99,10 +99,12 @@ pub(crate) fn compose(plugins: &[lash_core::plugin::PluginRecipe], call: Call) -
         .expect("the recorded namespace reads")
         .expect("the recorded namespace is present");
     let mut config = lash_core::PluginConfig::default();
-    config.insert(
-        RLM_PROTOCOL_PLUGIN_ID,
-        serde_json::to_value(recorded).expect("the recorded namespace encodes"),
-    );
+    config
+        .insert(
+            RLM_PROTOCOL_PLUGIN_ID,
+            serde_json::to_value(recorded).expect("the recorded namespace encodes"),
+        )
+        .expect("fixture config is admitted");
     let cut = lash_core::testing::prompt::cut_with(
         PromptCutParts {
             call: PromptCall {

@@ -278,7 +278,7 @@ async fn commit_generation(
         .set_plugin_state(Some(super::runtime_persistence::plugin_state_at(
             generation,
         )))
-        .unwrap();
+        .expect("fixture plugin state is admitted");
     let commit = crate::RuntimeCommit::persisted_state_for_test(&state);
     super::runtime_persistence::commit_runtime_state_for_test(
         store,

@@ -238,7 +238,7 @@ impl PluginSession {
         }
         let (candidate, config) = record.candidate()?;
         let mut live = self.state.lock_recover();
-        live.hydrate_live(&candidate);
+        live.hydrate_live(&candidate)?;
         live.source = Some(record.source.clone());
         drop(live);
         self.adopt_plugin_admission(record.request.target.clone());
@@ -342,7 +342,7 @@ impl PluginSession {
         }
         self.host
             .validate_native_formats(&view.state, &view.config)?;
-        self.state.lock_recover().hydrate_live(&view.state);
+        self.state.lock_recover().hydrate_live(&view.state)?;
         self.adopt_plugin_admission(view.request.target.clone());
         self.authority.write_recover().plugin_config.config = Arc::new(view.config.clone());
         *self.native_view.lock_recover() = Some(view);

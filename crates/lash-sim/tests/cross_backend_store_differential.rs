@@ -651,11 +651,13 @@ fn checkpoint_bodies() -> HydratedSessionCheckpoint {
         &namespace.values,
         &lash_protocol_types::allocation::AllocationBudget::unowned(),
     )
-    .unwrap();
+    .expect("fixture namespace body");
     let plugin_state = PluginStateMap {
         plugins: [(
             DIFFERENTIAL_PLUGIN.to_string(),
-            namespace.entry(namespace_body.values()).unwrap(),
+            namespace
+                .entry(namespace_body.values())
+                .expect("fixture namespace entry"),
         )]
         .into_iter()
         .collect(),

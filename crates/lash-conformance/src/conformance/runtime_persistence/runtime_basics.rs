@@ -361,7 +361,7 @@ pub async fn load_hydrates_checkpoint(store: Arc<dyn RuntimeStore>) {
     };
     state
         .set_plugin_state(Some(super::plugin_state_at(9)))
-        .unwrap();
+        .expect("fixture plugin state is admitted");
     commit_runtime_state_for_test(
         &store,
         RuntimeCommit::persisted_state_for_test(&state),

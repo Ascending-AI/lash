@@ -195,17 +195,36 @@ impl<K: MapKey, V: MapValue> SharedSourceMap<K, V> {
     }
     /// Publish a complete replacement, or leave this map unchanged.
     pub fn insert(&mut self, key: K, value: V) -> Result<Option<V>, AllocationError> {
+        self.insert_ref(&key, value)
+    }
+    /// Admit a borrowed key before cloning any retained key or map entry.
+    pub fn insert_ref(&mut self, key: &K, value: V) -> Result<Option<V>, AllocationError> {
         let budget = &self.0.budget;
-        let hold = budget
-            .reserve(Self::capacity(&self.0.entries).saturating_add(Self::entry_capacity(&key)))?;
+        let capacity = self
+            .0
+            .entries
+            .keys()
+            .filter(|stored| *stored != key)
+            .fold(
+                (std::mem::size_of::<Storage<K, V>>() + 128) as u64,
+                |bytes, stored| bytes.saturating_add(Self::entry_capacity(stored)),
+            )
+            .saturating_add(Self::entry_capacity(key));
+        let hold = budget.reserve(capacity)?;
         let mut entries = self
             .0
             .entries
             .iter()
-            .map(|(key, value)| Ok((key.clone(), MapValue::clone_in(value, budget)?)))
+            .filter(|(stored, _)| *stored != key)
+            .map(|(stored, value)| Ok((stored.clone(), MapValue::clone_in(value, budget)?)))
             .collect::<Result<BTreeMap<_, _>, AllocationError>>()?;
-        let value = MapValue::clone_in(&value, budget)?;
-        let previous = entries.insert(key, value);
+        let previous = self
+            .0
+            .entries
+            .get(key)
+            .map(|value| MapValue::clone_in(value, budget))
+            .transpose()?;
+        entries.insert(key.clone(), MapValue::clone_in(&value, budget)?);
         *self = Self::from_admitted(entries, hold, budget.clone());
         Ok(previous)
     }
@@ -294,6 +313,29 @@ impl MapValue for u64 {
 impl MapValue for () {
     fn clone_in(&self, _: &AllocationBudget) -> Result<Self, AllocationError> {
         Ok(())
+    }
+}
+
+impl MapValue for crate::checkpoint_graph::EncodedNode {
+    fn clone_in(&self, budget: &AllocationBudget) -> Result<Self, AllocationError> {
+        Ok(Self {
+            id: self.id,
+            bytes: self.bytes.clone_in(budget)?,
+        })
+    }
+}
+impl crate::checkpoint_graph::NodeSource
+    for SharedSourceMap<crate::checkpoint_graph::NodeId, crate::checkpoint_graph::EncodedNode>
+{
+    fn fetch(
+        &self,
+        id: &crate::checkpoint_graph::NodeId,
+    ) -> Option<crate::checkpoint_graph::StoredNode<'_>> {
+        self.get(id)
+            .map(|node| crate::checkpoint_graph::StoredNode {
+                encoding: crate::checkpoint_graph::BlobEncoding::Graph,
+                bytes: &node.bytes,
+            })
     }
 }
 

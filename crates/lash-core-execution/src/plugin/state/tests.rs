@@ -242,7 +242,7 @@ fn plugin_view_cannot_capture_foreign_namespace() {
         ("run-changes", view.run_changes().unwrap()),
         (
             "execution-run-changes",
-            ExecutionState::run_changes(view.as_ref()),
+            ExecutionState::run_changes(view.as_ref()).unwrap(),
         ),
     ] {
         if changes.iter().any(|change| change.plugin == "plugin-b") {

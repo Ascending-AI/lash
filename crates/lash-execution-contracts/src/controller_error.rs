@@ -150,7 +150,7 @@ impl From<PluginError> for RuntimeEffectControllerError {
                 })
                 .into(),
             PluginError::ProcessEnvRefused {
-                refusal: crate::ProcessEnvRefusal::Allocation(error),
+                refusal: crate::ProcessEnvRefusal::Allocation { refusal: error },
             } => RuntimeError::allocation(error).into(),
             ref err @ PluginError::ProcessEnvRefused { ref refusal } => {
                 RuntimeError::new(RuntimeErrorCode::ProcessEnvRefused, err.to_string())

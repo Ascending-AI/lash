@@ -39,9 +39,13 @@
 //! spelling of any value.
 
 pub use lash_kernel_doc::allocation::SharedBytes;
+pub(crate) mod admission;
+mod admitted_decode;
 pub mod bodies;
 pub mod commit;
 pub mod config;
+pub use admission::closure_in;
+pub use admitted_decode::{AdmittedGraphDecoder, AdmittedValue};
 pub mod decode;
 pub use lash_checkpoint_encoder::encode;
 pub use lash_checkpoint_encoder::node;

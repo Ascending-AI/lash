@@ -156,3 +156,61 @@ impl SourceCapacity for crate::llm::types::LlmMessage {
         0
     }
 }
+/// Conservative typed MessagePack materialization bound, scanned in constant
+/// space before serde allocates. Container hints are validated against actual
+/// tokens, so a truncated large-count header never sizes a collection.
+/// Every scalar covers sparse map slots/array growth; encoded text and bytes
+/// cover parser copies. Returns None for malformed or trailing input.
+pub fn msgpack_decode_capacity(source: &[u8], inline: usize) -> Option<u64> {
+    fn take<'a>(source: &'a [u8], pos: &mut usize, len: usize) -> Option<&'a [u8]> {
+        let end = pos.checked_add(len)?;
+        let value = source.get(*pos..end)?;
+        *pos = end;
+        Some(value)
+    }
+    fn number(source: &[u8], pos: &mut usize, width: usize) -> Option<usize> {
+        take(source, pos, width)?.iter().try_fold(0usize, |n, b| {
+            n.checked_mul(256)?.checked_add(usize::from(*b))
+        })
+    }
+    let mut pos = 0usize;
+    let mut pending = 1u64;
+    let mut capacity = (inline as u64).saturating_add(512);
+    while pending != 0 {
+        let marker = *take(source, &mut pos, 1)?.first()?;
+        let mut children = 0u64;
+        let mut payload = 0usize;
+        let mut byte_array = false;
+        match marker {
+            0x00..=0x7f | 0xe0..=0xff | 0xc0 | 0xc2 | 0xc3 => {}
+            0x80..=0x8f => children = u64::from(marker & 15) * 2,
+            0x90..=0x9f => children = u64::from(marker & 15),
+            0xa0..=0xbf => payload = usize::from(marker & 31),
+            0xc4..=0xc6 => {
+                payload = number(source, &mut pos, 1 << (marker - 0xc4))?;
+                byte_array = true;
+            }
+            0xc7..=0xc9 => {
+                payload = number(source, &mut pos, 1 << (marker - 0xc7))?.checked_add(1)?
+            }
+            0xca => payload = 4,
+            0xcb => payload = 8,
+            0xcc..=0xcf => payload = 1 << (marker - 0xcc),
+            0xd0..=0xd3 => payload = 1 << (marker - 0xd0),
+            0xd4..=0xd8 => payload = (1usize << (marker - 0xd4)).checked_add(1)?,
+            0xd9..=0xdb => payload = number(source, &mut pos, 1 << (marker - 0xd9))?,
+            0xdc..=0xdd => children = number(source, &mut pos, 2 << (marker - 0xdc))? as u64,
+            0xde..=0xdf => {
+                children =
+                    (number(source, &mut pos, 2 << (marker - 0xde))? as u64).checked_mul(2)?
+            }
+            _ => return None,
+        }
+        take(source, &mut pos, payload)?;
+        pending = (pending - 1).checked_add(children)?;
+        capacity = capacity
+            .saturating_add(2048)
+            .saturating_add((payload as u64).saturating_mul(if byte_array { 128 } else { 8 }));
+    }
+    (pos == source.len()).then_some(capacity)
+}
