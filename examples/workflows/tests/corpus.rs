@@ -405,6 +405,43 @@ fn typescript_capturing_cell_prints_and_reads_identically() -> anyhow::Result<()
     Ok(())
 }
 
+/// FIG-7135: recover the typed operation input and indexed mutation in the
+/// capturing cell without changing its document, captions or mapped sites.
+#[test]
+fn python_capturing_cell_prints_and_reads_identically() -> anyhow::Result<()> {
+    let embedding = lash_vm_worker::built_embedding(&Default::default())?;
+    let signatures = corpus_tool_signatures()?;
+    let namespaces = workflow_corpus::corpus_namespaces(&signatures, &Default::default())?;
+    let environment = lash_kernel_dialect::Environment::new(embedding.library(), &namespaces);
+    let lowered = lash_dialect_python::lower(
+        include_str!("../capturing-cell/source.py"),
+        &environment,
+        lash_kernel_dialect::Mode::Cell(lash_kernel_dialect::CellEnvironment::first()),
+    )?;
+    let printed = lash_dialect_python::print(
+        &lowered.document,
+        Some(&lowered.captions),
+        embedding.library(),
+        lash_kernel_dialect::PrintOptions {
+            source_map: true,
+            ..Default::default()
+        },
+    )?;
+    let (read, captions) = lash_dialect_python::read(
+        &printed.source,
+        &lowered.document,
+        embedding.library(),
+        Default::default(),
+    )?;
+    assert_eq!(read.canonical_bytes(), lowered.document.canonical_bytes());
+    assert_eq!(captions, lowered.captions);
+    printed
+        .source_map
+        .ok_or_else(|| anyhow::anyhow!("requested map is absent"))?
+        .validate(&read, &printed.source)?;
+    Ok(())
+}
+
 /// FIG-6953 READABLE-STYLE: a workflow edited through the canvas API prints
 /// as the source the authoring guide teaches, with none of the kernel
 /// surface's scaffolding.

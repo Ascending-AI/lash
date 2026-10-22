@@ -235,18 +235,9 @@ impl Renderer<'_> {
                 }
                 self.out.write("}");
             }
-            k::Expr::Record(items) => {
-                self.out.write("record({");
-                for (i, item) in items.iter().enumerate() {
-                    if i > 0 {
-                        self.out.write(", ");
-                    }
-                    self.out.json(&item.field);
-                    self.out.write(": ");
-                    self.inline_expr(&item.value);
-                }
-                self.out.write("})");
-            }
+            k::Expr::Record(_) => self.out.refuse(PrintError::Invalid(
+                "record has no authored spelling outside a typed boundary".into(),
+            )),
             k::Expr::Member(member) if matches!(member.as_ref(), k::Member::Field { field, .. } if !attribute_identifier(field)) =>
             {
                 let k::Member::Field { target, field } = member.as_ref() else {
@@ -340,7 +331,7 @@ impl Renderer<'_> {
                 self.out.write("await ");
                 self.operation_path(&import.name.to_string());
                 self.out.write("(");
-                self.authored_args(&act.args, true);
+                self.operation_args(import, &act.args);
                 self.out.write(")");
             }
             k::ActKind::Await(policy) if self.operators.is(policy, "py.await") => {
@@ -363,6 +354,60 @@ impl Renderer<'_> {
             self.out.write(")");
         }
     }
+    /// The single record input of an operation is authored as keyword
+    /// fields. Resolve the retained operand binding without losing its order.
+    pub(super) fn operation_args(&mut self, import: &lash_vocabulary::Import, args: &[k::Expr]) {
+        if let lash_vocabulary::ImportKind::Operation { signature } = &import.kind
+            && let [param] = signature.params.as_slice()
+            && let lash_vocabulary::Type::Record(record) = &param.ty
+            && let [input] = args
+            && let Some(k::Expr::Record(fields)) = self.resolved(input).cloned()
+            && fields
+                .iter()
+                .all(|field| attribute_identifier(&field.field))
+        {
+            for (index, field) in fields.iter().enumerate() {
+                if index > 0 {
+                    self.out.write(", ");
+                }
+                self.out.write(&field.field);
+                self.out.write("=");
+                self.operation_input(&field.value, record_field(record, &field.field));
+            }
+        } else {
+            self.authored_args(args, true);
+        }
+    }
+
+    /// A dictionary literal at a declared record boundary lowers directly to
+    /// that record; dictionaries in untyped positions remain Python maps.
+    fn operation_input(&mut self, value: &k::Expr, ty: &lash_vocabulary::Type) {
+        if let lash_vocabulary::Type::Record(record) = ty
+            && let Some(k::Expr::Record(fields)) = self.resolved(value).cloned()
+        {
+            if self.expression_depth >= self.max_depth {
+                self.out.refuse(PrintError::Depth {
+                    limit: self.max_depth,
+                });
+                return;
+            }
+            self.expression_depth += 1;
+            self.out.write("{");
+            for (index, field) in fields.iter().enumerate() {
+                if index > 0 {
+                    self.out.write(", ");
+                }
+                self.out.json(&field.field);
+                self.out.write(": ");
+                self.operation_input(&field.value, record_field(record, &field.field));
+            }
+            self.out.write("}");
+            self.expression_depth -= 1;
+        } else {
+            self.inline_expr(value);
+        }
+    }
+
     // The caller owns the block's indentation and any clause label. Empty
     // suites spell pass, so every real block has a nonempty final-text range.
     pub(super) fn readable_block(&mut self, block: &k::Block) {
@@ -680,4 +725,17 @@ impl Renderer<'_> {
         }
         self.out.write(&path);
     }
+}
+
+fn record_field<'a>(
+    record: &'a lash_vocabulary::RecordType,
+    name: &str,
+) -> &'a lash_vocabulary::Type {
+    record
+        .fields
+        .iter()
+        .find(|field| field.name == name)
+        .map(|field| &field.ty)
+        .or(record.rest.as_deref())
+        .unwrap_or(&lash_vocabulary::Type::Any)
 }
