@@ -11,6 +11,8 @@ use std::sync::Arc;
 
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 pub enum StartRefusal {
+    #[error(transparent)]
+    SignatureRequired(#[from] Box<lash_kernel_doc::SignatureRequired>),
     #[error("the Document has no main")]
     MissingMain,
     #[error("Export {export:?} is not a function")]
@@ -29,6 +31,16 @@ pub fn startable_export<'a>(
     let Some(Export::Function(function)) = document.exports.get(name) else {
         return Err(StartRefusal::NotFunction { export });
     };
+    lash_kernel_doc::require_entry_signature(
+        &function.signature,
+        lash_kernel_doc::FunctionLocation {
+            name: Some(name.to_string()),
+            site: Some(lash_vocabulary::sites::Site::new(
+                Unit::Library(function.function),
+                [],
+            )),
+        },
+    )?;
     if !function
         .signature
         .params
@@ -111,20 +123,16 @@ pub enum StartBoundaryRefusal {
     UnexpectedArgument { name: Name },
     #[error("missing start argument {name}")]
     MissingArgument { name: Name },
-    #[error("start argument {name}: {mismatch}")]
-    Argument {
-        name: Name,
-        mismatch: lash_kernel_doc::DecodeMismatch,
-    },
-    #[error("settled result: {mismatch}")]
-    Result {
-        mismatch: lash_kernel_doc::DecodeMismatch,
-    },
+    #[error(transparent)]
+    TypeMismatch(#[from] Box<lash_vocabulary::EntryTypeMismatch>),
+    #[error(transparent)]
+    Decode(#[from] lash_kernel_doc::DecodeRefusal),
 }
 /// Runtime fitting is separate from static host eligibility, and runs before the function body.
 pub fn validate_start_input(
     document: &Document,
     selector: &StartSelector,
+    link: lash_vocabulary::LinkId,
     args: &std::collections::BTreeMap<Name, lash_kernel_doc::Datum>,
 ) -> Result<(), StartBoundaryRefusal> {
     let signature = match selector {
@@ -156,11 +164,16 @@ pub fn validate_start_input(
                     name: param.name.clone(),
                 });
             };
+            if param.optional && matches!(value, lash_kernel_doc::Datum::Absent) {
+                continue;
+            }
             decoder.decode(value, &param.ty).map_err(|mismatch| {
-                StartBoundaryRefusal::Argument {
-                    name: param.name.clone(),
-                    mismatch,
-                }
+                entry_decode_refusal(
+                    document,
+                    selector,
+                    link,
+                    mismatch.within(param.name.as_str()).within("input"),
+                )
             })?;
         }
     }
@@ -170,6 +183,7 @@ pub fn validate_start_input(
 pub fn validate_start_result(
     document: &Document,
     selector: &StartSelector,
+    link: lash_vocabulary::LinkId,
     result: &lash_kernel_doc::Datum,
 ) -> Result<(), StartBoundaryRefusal> {
     let StartSelector::Export(name) = selector else {
@@ -183,5 +197,32 @@ pub fn validate_start_result(
     }
     .decode(result, &function.signature.result)
     .map(|_| ())
-    .map_err(|mismatch| StartBoundaryRefusal::Result { mismatch })
+    .map_err(|mismatch| entry_decode_refusal(document, selector, link, mismatch.within("output")))
+}
+
+fn entry_decode_refusal(
+    document: &Document,
+    selector: &StartSelector,
+    link: lash_vocabulary::LinkId,
+    error: lash_kernel_doc::DecodeRefusal,
+) -> StartBoundaryRefusal {
+    let StartSelector::Export(name) = selector else {
+        return error.into();
+    };
+    let Some(Export::Function(function)) = document.exports.get(name) else {
+        return error.into();
+    };
+    match error {
+        lash_kernel_doc::DecodeRefusal::Type { mismatch } => {
+            Box::new(lash_vocabulary::EntryTypeMismatch {
+                callable: lash_vocabulary::CallableId {
+                    link,
+                    function: function.function,
+                },
+                mismatch,
+            })
+            .into()
+        }
+        other => other.into(),
+    }
 }

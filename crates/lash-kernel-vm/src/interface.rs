@@ -670,6 +670,14 @@ fn uncaught_text(error: &Datum) -> String {
 #[derive(Clone, Debug, PartialEq, thiserror::Error)]
 #[non_exhaustive]
 pub enum StartError {
+    #[error(transparent)]
+    TypeMismatch(Box<lash_vocabulary::EntryTypeMismatch>),
+    #[error(transparent)]
+    Decode(lash_kernel_doc::DecodeRefusal),
+    #[error(transparent)]
+    FunctionValue(lash_kernel_doc::FunctionValueRefusal),
+    #[error("missing start argument {name}")]
+    MissingArgument { name: Name },
     #[error("linked program is invalid: {problem}")]
     Linked { problem: String },
     #[error("the document is not admitted: {0}")]

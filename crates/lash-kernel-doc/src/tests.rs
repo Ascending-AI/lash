@@ -290,3 +290,55 @@ fn imports_and_function_exports_round_trip_without_main() {
         document
     );
 }
+
+/// FIG-7143 / K-EFF-005: value paths name fields and array positions; limits
+/// never manufacture a type mismatch, even within a union.
+#[test]
+fn decode_mismatch_retains_value_path_and_depth_is_a_limit() {
+    use lash_vocabulary::{RecordType, RecordTypeField, Type, TypeMismatch};
+    let expected = Type::Record(RecordType {
+        fields: vec![RecordTypeField {
+            name: "x/y~z".into(),
+            ty: Type::List(Box::new(Type::Text)),
+            optional: false,
+        }],
+        rest: None,
+    });
+    let value = crate::Datum::Record(vec![(
+        "x/y~z".into(),
+        crate::Datum::List(vec![crate::Datum::Bool(true)]),
+    )]);
+    let decoder = crate::Decoder {
+        max_depth: 64,
+        policy: crate::NumberPolicy::Float,
+        declared: &|_| false,
+    };
+    assert_eq!(
+        decoder.decode(&value, &expected),
+        Err(crate::DecodeRefusal::Type {
+            mismatch: TypeMismatch::new(Type::Text, Type::Bool)
+                .within("0")
+                .within("x/y~z")
+        })
+    );
+    let map = Type::Map(Box::new(lash_vocabulary::MapType {
+        key: Type::Text,
+        value: Type::List(Box::new(Type::Text)),
+    }));
+    assert_eq!(
+        decoder.decode(&value, &map),
+        Err(crate::DecodeRefusal::Type {
+            mismatch: TypeMismatch::new(Type::Text, Type::Bool)
+                .within("0")
+                .within("x/y~z")
+        })
+    );
+    let limited = crate::Decoder {
+        max_depth: 1,
+        ..decoder
+    };
+    assert_eq!(
+        limited.decode(&value, &Type::Union(vec![expected, Type::Json])),
+        Err(crate::DecodeRefusal::DepthLimit { limit: 1 })
+    );
+}

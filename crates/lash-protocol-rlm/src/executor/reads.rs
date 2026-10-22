@@ -26,7 +26,7 @@ use lash_kernel_doc::{Datum, ErrorDatum};
 
 use lash_protocol_types::sync::MutexExt;
 use lash_vm_broker::ParentFault;
-use lash_vm_broker::kernel::{EFFECT_CANCELLED, EFFECT_RESULT, EFFECT_TIMED_OUT, datum_from_json};
+use lash_vm_broker::kernel::{EFFECT_CANCELLED, EFFECT_TIMED_OUT, datum_from_json};
 use lash_vm_runtime::EffectReads;
 use lash_vocabulary::names::OperationUse;
 
@@ -141,7 +141,11 @@ impl CellReads {
             &route.definition.contract.output_schema.canonical,
         );
         let value = lash_vm_broker::kernel::value::datum_from_tool_json(&value, &signature.result)
-            .map_err(|invalid| refused(EFFECT_RESULT, invalid))?;
+            .map_err(|refusal| {
+                refusal
+                    .error_datum()
+                    .unwrap_or_else(|error| refused("diagnostic_encoding", error.to_string()))
+            })?;
         Ok((value, text.len()))
     }
 }

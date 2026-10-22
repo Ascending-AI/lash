@@ -4,7 +4,6 @@ use crate::Correspondence;
 use crate::SourceLanguage;
 use crate::SourceMap;
 use crate::SourceSite;
-use crate::Span;
 use crate::Survivor;
 use lash_vocabulary::names::DocumentId;
 use lash_vocabulary::sites::Site;
@@ -14,21 +13,6 @@ use lash_vocabulary::tokens::TokenError;
 use lash_vocabulary::tokens::TokenReader;
 use lash_vocabulary::tokens::TokenWriter;
 
-impl TokenCodec for Span {
-    fn encode(&self, out: &mut TokenWriter) {
-        out.seq(2);
-        out.unsigned(self.start as u64);
-        out.unsigned(self.end as u64);
-    }
-    fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
-        input.expect_struct(2)?;
-        Self::new(
-            lash_vocabulary::tokens::checked_usize(input.unsigned()?)?,
-            lash_vocabulary::tokens::checked_usize(input.unsigned()?)?,
-        )
-        .ok_or_else(|| TokenError::Invalid("source range ends before it starts".into()))
-    }
-}
 impl TokenCodec for SourceLanguage {
     fn encode(&self, out: &mut TokenWriter) {
         out.sum(self.codec_variant(), 0);

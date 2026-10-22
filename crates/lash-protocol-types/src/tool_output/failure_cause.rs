@@ -3,6 +3,14 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ToolFailureCause {
+    /// A workflow entry's supplied input or settled result violates its contract.
+    EntryTypeMismatch {
+        source: lash_vocabulary::EntryTypeMismatch,
+    },
+    /// An effect answer violates its declared result type.
+    TypeMismatch {
+        source: lash_vocabulary::TypeMismatch,
+    },
     /// A host-configured aggregate callback deadline passed without an answer.
     ControlPhaseExpired {
         expiry: Box<crate::ControlPhaseExpired>,

@@ -131,6 +131,11 @@ impl KernelProcessEngine {
                         .document,
                 )
                 .map_err(super::map_link_refusal)?;
+            callable.check_definition(document).map_err(|_| {
+                EnginePortError::Refused(AdmissionRefusal::CallableIdentity {
+                    callable: callable.callable,
+                })
+            })?;
             let definition = document
                 .functions
                 .get(&callable.callable.function)
@@ -176,6 +181,24 @@ impl KernelProcessEngine {
         }
         let mut inspection = super::documents::inspection(&content, root, &selector)?;
         if let super::InlineRequest::Callable { function, .. } = code {
+            let document = content
+                .document(
+                    content
+                        .link(function.callable.link)
+                        .map_err(super::map_link_refusal)?
+                        .document,
+                )
+                .map_err(super::map_link_refusal)?;
+            function
+                .entry_export(document)
+                .map_err(|error| match error {
+                    lash_kernel_doc::FunctionValueRefusal::SignatureRequired { source } => {
+                        EnginePortError::Refused(AdmissionRefusal::SignatureRequired { source })
+                    }
+                    _ => EnginePortError::Refused(AdmissionRefusal::CallableIdentity {
+                        callable: function.callable,
+                    }),
+                })?;
             if function
                 .signature
                 .params

@@ -420,46 +420,44 @@ impl Reader<'_> {
 pub fn datum_from_tool_json(
     value: &serde_json::Value,
     expected: &lash_vocabulary::types::Type,
-) -> Result<Datum, String> {
+) -> Result<Datum, lash_kernel_doc::DecodeRefusal> {
     fn decode(
         value: &serde_json::Value,
         expected: &lash_vocabulary::types::Type,
         depth: usize,
-    ) -> Result<Datum, String> {
-        use lash_kernel_doc::{Bytes, Integer, Timestamp};
+    ) -> Result<Datum, lash_kernel_doc::DecodeRefusal> {
+        use lash_kernel_doc::{Bytes, DecodeRefusal, Integer, Timestamp};
+        let mismatch = || DecodeRefusal::Type {
+            mismatch: lash_vocabulary::TypeMismatch::new(expected.clone(), json_value_type(value)),
+        };
 
         use lash_vocabulary::types::Type;
         if depth > KernelDataLimits::standard().document_depth() {
-            return Err("operation result exceeds data depth".into());
+            return Err(DecodeRefusal::DepthLimit {
+                limit: KernelDataLimits::standard().document_depth(),
+            });
         }
-        let array = || {
-            value
-                .as_array()
-                .ok_or_else(|| "operation result must be an array".to_owned())
-        };
+        let array = || value.as_array().ok_or_else(mismatch);
         match expected {
             Type::Timestamp => {
-                let text = value.as_str().ok_or_else(|| {
-                    "timestamp transport must be decimal nanoseconds text".to_owned()
-                })?;
-                let nanoseconds = Integer::parse(text).map_err(|error| error.to_string())?;
+                let text = value.as_str().ok_or_else(mismatch)?;
+                let nanoseconds = Integer::parse(text).map_err(|_| mismatch())?;
                 if nanoseconds.to_string() != text {
-                    return Err("timestamp transport is not canonical decimal text".into());
+                    return Err(mismatch());
                 }
                 Ok(Datum::Timestamp(Timestamp { nanoseconds }))
             }
             Type::Bytes => Ok(Datum::Bytes(
-                Bytes::parse_hex(
-                    value
-                        .as_str()
-                        .ok_or_else(|| "bytes transport must be hexadecimal text".to_owned())?,
-                )
-                .map_err(|error| error.to_string())?,
+                Bytes::parse_hex(value.as_str().ok_or_else(mismatch)?).map_err(|_| mismatch())?,
             )),
             Type::List(item) | Type::Set(item) => {
                 let values = array()?
                     .iter()
-                    .map(|value| decode(value, item, depth + 1))
+                    .enumerate()
+                    .map(|(index, value)| {
+                        decode(value, item, depth + 1)
+                            .map_err(|error| error.within(&index.to_string()))
+                    })
                     .collect::<Result<Vec<_>, _>>()?;
                 Ok(if matches!(expected, Type::Set(_)) {
                     Datum::Set(values)
@@ -470,20 +468,22 @@ pub fn datum_from_tool_json(
             Type::Tuple(items) => {
                 let values = array()?;
                 if items.len() != values.len() {
-                    return Err("operation result has the wrong tuple length".into());
+                    return Err(mismatch());
                 }
                 Ok(Datum::Tuple(
                     values
                         .iter()
                         .zip(items)
-                        .map(|(value, item)| decode(value, item, depth + 1))
+                        .enumerate()
+                        .map(|(index, (value, item))| {
+                            decode(value, item, depth + 1)
+                                .map_err(|error| error.within(&index.to_string()))
+                        })
                         .collect::<Result<_, _>>()?,
                 ))
             }
             Type::Record(record) => {
-                let object = value
-                    .as_object()
-                    .ok_or_else(|| "operation result must be an object".to_owned())?;
+                let object = value.as_object().ok_or_else(mismatch)?;
                 let mut fields = Vec::with_capacity(object.len());
                 for (name, value) in object {
                     let ty = record
@@ -492,46 +492,80 @@ pub fn datum_from_tool_json(
                         .find(|field| field.name == *name)
                         .map(|field| &field.ty)
                         .or(record.rest.as_deref())
-                        .ok_or_else(|| format!("unexpected operation result field `{name}`"))?;
-                    fields.push((name.clone(), decode(value, ty, depth + 1)?));
+                        .ok_or_else(|| DecodeRefusal::Type {
+                            mismatch: lash_vocabulary::TypeMismatch::new(
+                                Type::Absent,
+                                json_value_type(value),
+                            )
+                            .within(name),
+                        })?;
+                    fields.push((
+                        name.clone(),
+                        decode(value, ty, depth + 1).map_err(|error| error.within(name))?,
+                    ));
                 }
                 Ok(Datum::Record(fields))
             }
             Type::Map(map) if map.key == Type::Text => {
-                let object = value
-                    .as_object()
-                    .ok_or_else(|| "operation map result must be an object".to_owned())?;
+                let object = value.as_object().ok_or_else(mismatch)?;
                 Ok(Datum::Map(
                     object
                         .iter()
                         .map(|(key, value)| {
                             Ok((
                                 Datum::Text(key.clone()),
-                                decode(value, &map.value, depth + 1)?,
+                                decode(value, &map.value, depth + 1)
+                                    .map_err(|error| error.within(key))?,
                             ))
                         })
-                        .collect::<Result<_, String>>()?,
+                        .collect::<Result<_, DecodeRefusal>>()?,
                 ))
             }
             Type::Union(variants) => {
                 for variant in variants {
-                    if let Ok(datum) = decode(value, variant, depth + 1) {
+                    let datum = match decode(value, variant, depth + 1) {
+                        Ok(datum) => datum,
+                        Err(DecodeRefusal::Type { .. }) => continue,
+                        Err(other) => return Err(other),
+                    };
+                    {
                         let decoder = lash_kernel_doc::Decoder {
                             max_depth: KernelDataLimits::standard().document_depth(),
                             policy: lash_kernel_doc::NumberPolicy::BySpelling,
                             declared: &|_| false,
                         };
-                        if decoder.decode(&datum, variant).is_ok() {
-                            return Ok(datum);
+                        match decoder.decode(&datum, variant) {
+                            Ok(_) => return Ok(datum),
+                            Err(DecodeRefusal::Type { .. }) => {}
+                            Err(other) => return Err(other),
                         }
                     }
                 }
-                Err("operation result fits no declared union variant".into())
+                Err(mismatch())
             }
-            _ => datum_from_json(&value.to_string()).map_err(|error| error.to_string()),
+            _ => datum_from_json(&value.to_string()).map_err(|error| match error.depth_limit {
+                Some(limit) => DecodeRefusal::DepthLimit { limit },
+                None => mismatch(),
+            }),
         }
     }
     decode(value, expected, 0)
+}
+
+/// A bounded witness of the JSON value's kind; no data enters a diagnostic.
+fn json_value_type(value: &serde_json::Value) -> lash_vocabulary::Type {
+    use lash_vocabulary::{RecordType, Type};
+    match value {
+        serde_json::Value::Null => Type::Null,
+        serde_json::Value::Bool(_) => Type::Bool,
+        serde_json::Value::Number(_) => Type::Number,
+        serde_json::Value::String(_) => Type::Text,
+        serde_json::Value::Array(_) => Type::List(Box::new(Type::Json)),
+        serde_json::Value::Object(_) => Type::Record(RecordType {
+            fields: vec![],
+            rest: Some(Box::new(Type::Json)),
+        }),
+    }
 }
 
 #[cfg(test)]

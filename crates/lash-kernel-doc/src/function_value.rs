@@ -178,6 +178,10 @@ impl Default for FunctionValueLimits {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, thiserror::Error)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub enum FunctionValueRefusal {
+    #[error(transparent)]
+    SignatureRequired { source: Box<SignatureRequired> },
+    #[error("function value metadata differs from its defining callable")]
+    Identity,
     /// The JSON is not the one-key `$lash_function` wrapper.
     #[error("a function value is the one-key `{FUNCTION_VALUE_TAG}` record")]
     NotTagged,
@@ -296,5 +300,104 @@ impl FunctionValue {
         serde_json::from_value(payload.clone()).map_err(|error| FunctionValueRefusal::Decode {
             problem: error.to_string(),
         })
+    }
+}
+
+pub use lash_vocabulary::{
+    FunctionLocation, SignaturePosition, SignatureRequired, require_entry_signature,
+};
+
+impl CallablePresentation {
+    /// Promote this defining declaration, copying its resolved public signature.
+    /// This check never applies to ordinary closure creation or calls.
+    pub fn promote_entry(
+        &self,
+        function: FunctionId,
+        location: FunctionLocation,
+        asynchronous: bool,
+        rest: bool,
+    ) -> Result<crate::FunctionExport, Box<SignatureRequired>> {
+        require_entry_signature(&self.signature, location)?;
+        Ok(crate::FunctionExport {
+            function,
+            signature: self.signature.clone(),
+            convention: self.convention.clone(),
+            asynchronous,
+            rest,
+        })
+    }
+}
+
+impl FunctionValue {
+    /// Verify transported public metadata against the defining callable before
+    /// promoting it to an entry. A private dialect ABI never supplies a contract.
+    pub fn check_definition(
+        &self,
+        document: &crate::Document,
+    ) -> Result<CallablePresentation, FunctionValueRefusal> {
+        let defining = if let Some(site) = &self.creation {
+            let closure = crate::snapshot::closure_at(document, site)
+                .filter(|closure| closure.function == self.callable.function)
+                .ok_or(FunctionValueRefusal::Identity)?;
+            match &closure.presentation {
+                Some(presentation) => presentation.clone(),
+                None => self.direct_presentation(document)?,
+            }
+        } else if let Some(export) = document.exports.values().find_map(|export| match export {
+            crate::Export::Function(export) if export.function == self.callable.function => {
+                Some(export)
+            }
+            _ => None,
+        }) {
+            CallablePresentation {
+                signature: export.signature.clone(),
+                convention: export.convention.clone(),
+                representation: FunctionRepresentation::Bare,
+            }
+        } else {
+            self.direct_presentation(document)?
+        };
+        if self.signature != defining.signature || self.convention != defining.convention {
+            return Err(FunctionValueRefusal::Identity);
+        }
+        Ok(defining)
+    }
+
+    fn direct_presentation(
+        &self,
+        document: &crate::Document,
+    ) -> Result<CallablePresentation, FunctionValueRefusal> {
+        let definition = document
+            .functions
+            .get(&self.callable.function)
+            .ok_or(FunctionValueRefusal::Identity)?;
+        if self.convention != StartConvention::Direct
+            || self.representation != FunctionRepresentation::Bare
+        {
+            return Err(FunctionValueRefusal::Identity);
+        }
+        Ok(CallablePresentation {
+            signature: definition.signature.clone(),
+            convention: StartConvention::Direct,
+            representation: FunctionRepresentation::Bare,
+        })
+    }
+
+    /// Promote a verified defining signature, refusing missing annotations.
+    pub fn entry_export(
+        &self,
+        document: &crate::Document,
+    ) -> Result<crate::FunctionExport, FunctionValueRefusal> {
+        self.check_definition(document)?
+            .promote_entry(
+                self.callable.function,
+                FunctionLocation {
+                    name: None,
+                    site: self.creation.clone(),
+                },
+                false,
+                false,
+            )
+            .map_err(|source| FunctionValueRefusal::SignatureRequired { source })
     }
 }

@@ -234,6 +234,7 @@ fn store_error(error: lash_durable::DurableError) -> EnginePortError {
 }
 pub fn map_link_refusal(error: LinkRefusal) -> EnginePortError {
     let cause = match error {
+        LinkRefusal::SignatureRequired(source) => AdmissionRefusal::SignatureRequired { source },
         LinkRefusal::MissingImport { slot, name } => AdmissionRefusal::MissingImport { slot, name },
         LinkRefusal::KindMismatch { slot, name } => AdmissionRefusal::KindMismatch { slot, name },
         LinkRefusal::SignatureMismatch { slot, name } => {

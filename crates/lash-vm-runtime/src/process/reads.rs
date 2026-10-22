@@ -3,7 +3,7 @@
 use lash_execution_contracts::process::EngineReadError;
 use lash_kernel_doc::{Datum, ErrorDatum};
 
-use lash_vm_broker::kernel::{EFFECT_CANCELLED, EFFECT_RESULT, EFFECT_TIMED_OUT, datum_from_json};
+use lash_vm_broker::kernel::{EFFECT_CANCELLED, EFFECT_TIMED_OUT, datum_from_json};
 
 pub(super) fn error(kind: &str, message: String, data: serde_json::Value) -> ErrorDatum {
     ErrorDatum {
@@ -18,8 +18,15 @@ pub(super) fn answer(
     answer: Result<serde_json::Value, EngineReadError>,
 ) -> Result<Datum, ErrorDatum> {
     match answer {
-        Ok(value) => lash_vm_broker::kernel::value::datum_from_tool_json(&value, expected)
-            .map_err(|invalid| error(EFFECT_RESULT, invalid.to_string(), serde_json::Value::Null)),
+        Ok(value) => lash_vm_broker::kernel::value::datum_from_tool_json(&value, expected).map_err(
+            |refusal| {
+                refusal.error_datum().unwrap_or_else(|error| ErrorDatum {
+                    kind: "diagnostic_encoding".into(),
+                    message: error.to_string(),
+                    data: Datum::Null,
+                })
+            },
+        ),
         Err(EngineReadError::Arguments(message)) => Err(error(
             super::EFFECT_ARGUMENTS,
             message,

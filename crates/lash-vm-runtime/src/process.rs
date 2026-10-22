@@ -613,7 +613,20 @@ impl KernelProcessEngine {
                         message: e.to_string(),
                     })
                 })?;
-                Some(function.signature.clone())
+                let exported = function.entry_export(&document).map_err(|error| {
+                    use lash_execution_contracts::process::linking::{
+                        AdmissionRefusal, EnginePortError,
+                    };
+                    EnginePortError::Refused(match error {
+                        lash_kernel_doc::FunctionValueRefusal::SignatureRequired { source } => {
+                            AdmissionRefusal::SignatureRequired { source }
+                        }
+                        _ => AdmissionRefusal::CallableIdentity {
+                            callable: function.callable,
+                        },
+                    })
+                })?;
+                Some(exported.signature)
             }
             _ => reach.signature,
         };

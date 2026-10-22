@@ -1,6 +1,8 @@
 use lash_vocabulary::{names::*, operations::ContractId, package::*};
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 pub enum LinkRefusal {
+    #[error(transparent)]
+    SignatureRequired(Box<lash_kernel_doc::SignatureRequired>),
     #[error("Import {slot:?} ({name:?}) has no member")]
     MissingImport {
         slot: ImportSlot,
@@ -51,6 +53,9 @@ pub enum LinkRefusal {
 impl From<lash_kernel_check::StartRefusal> for LinkRefusal {
     fn from(error: lash_kernel_check::StartRefusal) -> Self {
         match error {
+            lash_kernel_check::StartRefusal::SignatureRequired(source) => {
+                Self::SignatureRequired(source)
+            }
             lash_kernel_check::StartRefusal::MissingMain => Self::MissingMain,
             lash_kernel_check::StartRefusal::NotFunction { export } => Self::NotFunction { export },
             lash_kernel_check::StartRefusal::NotDataOnly { export } => Self::NotDataOnly { export },
