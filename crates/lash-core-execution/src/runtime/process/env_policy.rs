@@ -78,8 +78,8 @@ pub struct EnclosingProcess {
         lash_core_store::resolutions::ResolutionEntry,
     >,
     pub engine_kind: String,
-    /// The process's start payload: what its engine reads the package set
-    /// it is linked under from.
+    /// The process's start payload, including its engine's retained Link and
+    /// Execution Environment when it uses linked code.
     pub payload: serde_json::Value,
     pub settings: Option<EngineSettings>,
 }

@@ -314,11 +314,9 @@ impl ProcessStartRequest {
         )
     }
 
-    /// A host's start of a function carried inline, `payload` being the
-    /// `engine_kind` engine's value of it (for the kernel engine, a function
-    /// value's `{"$lash_function": ..}` form), linked under the package set
-    /// `packages` (its producer's, recorded on the start: FIG-6993), with
-    /// `args`, under `launch`.
+    /// A host's start of a function carried inline. `request` contains the
+    /// `engine_kind` engine's function payload and its producer's retained
+    /// environment (recorded on the start: FIG-6993), with `args`, under `launch`.
     /// Realization checks and publishes the function under the start's
     /// referrer, then starts the definition it is; nothing is published
     /// before. An exact retry under the same host key answers the same

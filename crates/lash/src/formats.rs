@@ -541,8 +541,8 @@ pub fn previous_actor_state_surfaces() -> Vec<lash_core::durable_port::FormatSur
 }
 
 /// [`actor_state_surfaces`] as a build that parks kernel runs under kernel
-/// version `kernel` declares them. Which package set an actor's code was
-/// linked under is its own stamp, not a format (FIG-6918).
+/// version `kernel` declares them. The Link and Execution Environment
+/// retained by an actor are its own identities, not a format (FIG-6918).
 #[cfg(feature = "codemode")]
 pub fn kernel_actor_state_surfaces(kernel: u32) -> Vec<lash_core::durable_port::FormatSurface> {
     use lash_core::durable_port::FormatSurface;

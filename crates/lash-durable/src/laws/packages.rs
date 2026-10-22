@@ -40,7 +40,7 @@ async fn node(
 /// CLAIM-BY-REQUIREMENTS (FIG-6993): a node claims an actor to run it only
 /// when its capabilities serve every hard requirement the actor's record
 /// names (a native it reached, a kernel version, a linked provider, a
-/// codec version), whatever package set its code was linked under. A node
+/// codec version), whatever Packages its code was linked against. A node
 /// that lacks one claims it only for a pending cancel, and the strand read
 /// names what the closest live node lacks; an owned recovery judges by the
 /// same predicate, so an owner whose actor's record grew past its

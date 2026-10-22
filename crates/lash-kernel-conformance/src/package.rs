@@ -47,8 +47,8 @@ pub struct Witness {
     pub case: Case,
 }
 
-/// Both execution paths of a package set, prepared once and shared by its
-/// witnesses. The view fixes the set whose members the kit is checking.
+/// The native and body execution paths, prepared once and shared by their
+/// witnesses. The Document fixes the definitions the kit is checking.
 pub struct Kit {
     document: Arc<Document>,
     installed: PreparedLibrary,

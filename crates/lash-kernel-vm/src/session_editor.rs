@@ -325,8 +325,8 @@ impl SessionEditor {
         Ok(functions)
     }
 
-    /// Rewrites the saved function `name` as relinked to its next cell's
-    /// package set (K-LIB-009): its description, now `description`, and
+    /// Rewrites the saved function `name` as relinked against its next cell's
+    /// Namespaces (K-LIB-009): its description, now `description`, and
     /// the execution closure its code calls into, now `closure`. Its
     /// captures, token and binding stay as they are. Answers whether the
     /// session held it.
@@ -354,7 +354,7 @@ impl SessionEditor {
     }
 
     /// Drops the saved function `name` and the binding of its name: what a
-    /// cell start does with one its package set cannot serve
+    /// cell start does with one its Namespaces cannot fulfil
     /// (RELINK-CLOSURE). Answers whether the session held it.
     ///
     /// # Errors

@@ -74,10 +74,7 @@ pub(crate) struct CellServices {
     pub code_renderer: crate::render::CodeRendererSlot,
     /// How the session's dialect words what a model reads.
     pub prompts: Arc<dyn crate::dialect::DialectPrompts>,
-    /// Which package set the cell is lowered under; `None` is lash's own
-    /// (FIG-6918).
-    /// The library the workers hold, which a cell's document is retained
-    /// with the declarations of.
+    /// The workers' library declarations retained with a cell's Document.
     pub kernel: KernelCarry,
 }
 

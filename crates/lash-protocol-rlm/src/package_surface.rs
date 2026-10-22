@@ -1,4 +1,4 @@
-//! What the prompt shows of the cell's package set (§2.3, P3): each host
+//! What the prompt shows of Current (§2.3, P3): each host
 //! package's code exports under its path, in the session dialect's
 //! spelling. Its operations are the tool declarations the prompt already
 //! shows; lash's own packages export nothing and are not listed.

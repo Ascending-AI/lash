@@ -95,7 +95,7 @@ fn refused(detail: impl Into<String>) -> CarryFault {
     .into()
 }
 
-/// A carry cold-loads its exact pinned Link DAG; there is no package-set fallback.
+/// A carry cold-loads its exact pinned Link DAG.
 pub async fn carry_snapshot(
     documents: &super::KernelDocuments,
     link: lash_vocabulary::package::LinkId,

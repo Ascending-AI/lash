@@ -20,7 +20,7 @@ impl WorkbenchPluginFactory {
             mail_world: mail::MailWorld::new(),
             config_changes: WorkbenchConfigChanges::default(),
             deferred_tools: deferred_tools::WorkbenchDeferredTools::in_memory()
-                .expect("open in-memory deferred-tool grants"),
+                .expect("open in-memory deferred tool offers"),
             approvals: approvals::WorkbenchApprovals::in_memory()
                 .expect("open in-memory approval ledger"),
             host_triggers: host_triggers::HostTriggers::in_memory()

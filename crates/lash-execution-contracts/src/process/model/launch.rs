@@ -110,7 +110,7 @@ impl DeclaredInlineLaunch {
         &self.engine_kind
     }
 
-    /// The package set the function is linked under: its starter's,
+    /// The inline payload and retained environment supplied by its starter,
     /// recorded when the start was declared (FIG-6993).
     pub fn request(&self) -> &crate::process::engine::InlineRequest {
         &self.request

@@ -211,7 +211,7 @@ impl WorkbenchBuilder {
             mail_world: self.mail_world.clone(),
             child_spec: session_defaults.clone(),
             deferred_tools: deferred_tools::WorkbenchDeferredTools::in_memory()
-                .expect("open the deferred-tool grants"),
+                .expect("open the deferred tool offers"),
             approvals: approvals.clone(),
             host_triggers: host_triggers.clone(),
             mcp: Arc::new(mcp),

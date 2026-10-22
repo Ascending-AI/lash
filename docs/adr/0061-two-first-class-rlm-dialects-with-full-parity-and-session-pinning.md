@@ -23,7 +23,7 @@ execution-session services own artifact storage, resolvers, trace configuration,
 bounds and transport.
 
 A production dialect needs a front end and its own semantic evidence, selected
-consistently with prompt teaching, tool bindings and restored state. This does
+consistently with prompt teaching, Operation Routes and restored state. This does
 not require another dialect's examples or a source-language field on compiled
 IR artifacts. ADR 0096 owns shipped-dialect selection and extension work;
 ADR 0060 owns the machine/language separation.

@@ -238,7 +238,7 @@ lists, each under its own identity, and every read links it against those:
 never against the reading build's library. A process keeps them for as long
 as it keeps its document, and a code cell's frame keeps them for as long as
 the frame lives, across its cells, so a build that removed an artifact from
-its serving package set still reads and draws the document. A declaration that is
+its advertised Packages still reads and draws the document. A declaration that is
 gone or does not hash to its identity is `WorkflowUnavailable::Artifact` or
 `WorkflowUnavailable::Corrupt`, not a fallback to another definition.
 

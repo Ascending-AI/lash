@@ -75,7 +75,7 @@ the document or the parked state:
 The build emits helper Documents and ordinary Packages. The host publishes code
 under scoped provenance and retains its full Link DAG. Workers receive native
 declarations in WorkerLibrary; each run loads the reached Documents and Link
-slot tables before execution. No package set chooses a round's namespace.
+slot tables before execution. Current fixes the round's Namespaces at round start.
 
 ## Consequences
 

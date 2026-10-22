@@ -78,7 +78,7 @@ pub(crate) fn history_binding(
     Ok(binding)
 }
 
-/// The heading the code of the cell's package set is listed under.
+/// The heading the Current Packages' code exports are listed under.
 pub(crate) const PACKAGES_TITLE: &str = "Packages";
 
 /// The session behaviour every section renders under, fixed when the

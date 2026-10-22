@@ -1,5 +1,5 @@
 //! L-PIN: scoped publications remain immutable and retain linked code across
-//! installer loss. No fleet, installation sequence or package-set pin exists.
+//! installer loss. Current advertisements and immutable Links determine resolution.
 use super::*;
 use lash_core::{ArtifactReferrer, HostArtifactPin};
 use lash_core_store::artifact_referrer::ResolvedArtifactCleanup;

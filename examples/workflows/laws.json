@@ -241,13 +241,6 @@
     ]
   },
   {
-    "target": "//crates/lash-kernel-view:lash-kernel-view__unit_test",
-    "selector": "display_tests::comparisons_come_from_the_supplied_package_set",
-    "rules": [
-      "HELP-COMPARE"
-    ]
-  },
-  {
     "target": "//examples/workflows:corpus__test",
     "selector": "every_print_reads_back_and_its_whole_prints_lower_to_their_documents",
     "rules": [

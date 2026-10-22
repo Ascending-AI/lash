@@ -132,7 +132,7 @@ pub enum ProcessStartTarget {
     /// publish what it runs under the start's referrer, then publishes its
     /// descriptor and starts that definition exactly as a
     /// [`Self::Definition`] start does (FIG-6382). The committed start
-    /// carries the bytes and the package set its starter linked it under,
+    /// carries the bytes and the environment its starter supplied,
     /// so every redrive, on any node, realizes the same definition
     /// (FIG-6993).
     Inline {

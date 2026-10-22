@@ -1,4 +1,4 @@
-//! Link a fresh cell under its selected package set, or restore its admitted envelope.
+//! Link a fresh cell against Current, or restore its admitted envelope.
 use super::*;
 
 /// Lower a fresh cell against its surface, or restore its admitted envelope.

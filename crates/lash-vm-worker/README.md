@@ -81,9 +81,8 @@ package library before it reports ready, so its first run costs what a warm one
 does (FIG-5922).
 
 `prepare` runs pure work in a worker: `Request::Lower` lowers source in a
-dialect to a kernel document against the offered operations, the selected
-package set and the session bindings in scope. Namespace composition reads
-that set's package view. `Request::Print` renders a document in a selected
+dialect to a kernel document against Current and the session bindings in
+scope. Namespace composition reads the snapshot's visible Package Members. `Request::Print` renders a document in a selected
 exact source format with host limits and an optional disposable map;
 `Request::Read` separately decodes that source against the base Document it
 was printed from, without admission. Neither printing nor reading resolves

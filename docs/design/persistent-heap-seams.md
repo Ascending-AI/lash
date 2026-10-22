@@ -925,7 +925,8 @@ The integrator's end state, as ADR 0145 states it:
   kernel-version migrator remains FIG-6233. Package changes retain exact
   identities through execution closures. Document adoption preserves
   operation requirements; parked adoption refuses `state_not_carried`.
-  A session relinks its saved functions to each cell's package set. See the
+  A session relinks its saved functions against each cell's Namespaces while
+  preserving resolved pins. See the
   [host-package guide](../host-packages.md).
 
 ### S1/S4/S8 (amended): descriptor summaries and lifecycle attachment

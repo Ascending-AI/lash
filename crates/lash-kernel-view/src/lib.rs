@@ -334,8 +334,8 @@ pub enum CalleeView {
         id: FunctionId,
         link: lash_vocabulary::LinkId,
         name: FunctionName,
-        /// Every installed surface member backed by this identity in the
-        /// cell's package set. A private definition has no members.
+        /// Every visible Export backed by this identity in the retained
+        /// Packages. A private definition has no Exports.
         exports: Vec<ExportName>,
     },
     Import(ImportSlot),
@@ -481,8 +481,8 @@ pub enum ViewError {
 
 /// The view of `document` at the entry it is entered at, read from the
 /// graph the checker derived from it and the library declarations it linked
-/// against, with display and membership facts from the caller's selected
-/// package set. No engine or native code is needed.
+/// against, with display and membership facts from the caller's retained
+/// Packages. No engine or native code is needed.
 ///
 /// # Errors
 ///

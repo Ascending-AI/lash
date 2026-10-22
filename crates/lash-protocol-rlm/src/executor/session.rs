@@ -129,10 +129,10 @@ struct Pending {
     releases: bool,
 }
 
-/// Why a cell's saved functions could not be relinked to its package set.
+/// Why a cell's saved functions could not be relinked against its Namespaces.
 #[derive(Debug, thiserror::Error)]
 pub(super) enum RelinkError {
-    #[error("the cell's package set does not assemble: {0}")]
+    #[error("the cell's Namespaces do not assemble: {0}")]
     Library(String),
     #[error(transparent)]
     Pages(#[from] PageAccessError),
@@ -159,9 +159,8 @@ pub struct CodeModeExecutionState {
     closures: BTreeMap<NodeId, Closure>,
     /// The closures an acknowledged capture installed.
     installed_closures: BTreeSet<NodeId>,
-    /// The package set the session's latest prompt showed: the fleet
-    /// gate's answer for its round, which the round's cell is written
-    /// under while this node holds it (P3).
+    /// The Current advertisement snapshot shown by the session's latest
+    /// prompt and retained for its round's cell (P3).
     shown: Option<lash_core_store::tool_surface::RecordedPackages>,
     pending: Option<Pending>,
     /// Whether the state as it stands is a turn's working state no session
@@ -1071,8 +1070,7 @@ impl CodeModeExecutionState {
         }
     }
 
-    /// Notes that the round's prompt showed `packages`, the gate's answer
-    /// for the round.
+    /// Notes the Current advertisement snapshot shown by the round's prompt.
     pub(crate) fn shows_packages(
         &mut self,
         packages: lash_core_store::tool_surface::RecordedPackages,
@@ -1080,7 +1078,7 @@ impl CodeModeExecutionState {
         self.shown = Some(packages);
     }
 
-    /// The package set the session's latest prompt showed.
+    /// The Current advertisement snapshot the session's latest prompt showed.
     pub(crate) fn shown_packages(&self) -> Option<lash_core_store::tool_surface::RecordedPackages> {
         self.shown.clone()
     }

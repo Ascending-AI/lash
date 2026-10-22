@@ -397,8 +397,8 @@ impl TokenCodec for EffectTable {
 }
 
 /// Kind 15: what a cell is, staged once when it is lowered and named by
-/// every park's root: no park copies it. It names the package set the
-/// document was lowered against beside the document.
+/// every park's root: no park copies it. It retains the Document and its
+/// immutable Link alongside its source and execution metadata.
 struct EnvelopeBody {
     code: String,
     dialect: String,

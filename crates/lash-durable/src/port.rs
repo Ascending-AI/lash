@@ -444,8 +444,7 @@ pub trait DurableStore: DurableReads {
 
     /// Each live node's format sets and capabilities, one entry per node,
     /// by node id: what the fleet-format gate
-    /// ([`fleet_writable`](crate::fleet_writable)), the package gate and
-    /// the strand report read.
+    /// ([`fleet_writable`](crate::fleet_writable)) and the strand report read.
     async fn live_nodes(&self) -> Result<Vec<NodeCapability>, DurableError>;
 
     /// Up to `limit` actors that have not ended and carry claim
