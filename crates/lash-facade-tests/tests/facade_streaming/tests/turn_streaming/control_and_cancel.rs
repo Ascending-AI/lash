@@ -637,12 +637,16 @@ async fn accepted_active_steer_interrupt_is_not_requeued() -> Result<()> {
         .send(TurnInput::text("primary waits for active steer"))
         .id(lash::TurnId::parse(active_turn_id).expect("nonblank host identity"))
         .await?;
-    let turn = tokio::spawn(async move { primary.outcome().await });
+    let mut turn = tokio::spawn(async move { primary.outcome().await });
 
-    tokio::time::timeout(std::time::Duration::from_secs(1), first_started_rx)
-        .await
-        .expect("first provider call should start")
-        .expect("first provider signal");
+    // Build starts the node asynchronously; send accepts input before its
+    // actor necessarily runs. Order steering on the provider event, not a
+    // startup deadline that races scheduling on the shared test host.
+    tokio::select! {
+        started = first_started_rx => started.expect("first provider signal"),
+        outcome = &mut turn => panic!("turn ended before its first provider call: {outcome:?}"),
+        stopped = core.node_stopped() => panic!("node stopped before its first provider call: {stopped:?}"),
+    }
     let active = session
         .send(TurnInput::text("accepted active steer"))
         .id(lash::TurnId::parse("accepted-active-steer").expect("nonblank host identity"))
@@ -655,10 +659,11 @@ async fn accepted_active_steer_interrupt_is_not_requeued() -> Result<()> {
     release_first_tx
         .send(())
         .expect("release first provider response");
-    tokio::time::timeout(std::time::Duration::from_secs(2), second_started_rx)
-        .await
-        .expect("accepted active steer should start the follow-up provider call")
-        .expect("second provider signal");
+    tokio::select! {
+        started = second_started_rx => started.expect("second provider signal"),
+        outcome = &mut turn => panic!("turn ended before the accepted steer reached the provider: {outcome:?}"),
+        stopped = core.node_stopped() => panic!("node stopped before the accepted steer reached the provider: {stopped:?}"),
+    }
 
     let stopped = session
         .cancel(lash::CancelTarget::Run(
