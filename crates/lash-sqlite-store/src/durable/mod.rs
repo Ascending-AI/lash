@@ -1117,12 +1117,15 @@ impl DurableStore for SqliteDurableStore {
             }
             let dead = tx
                 .prepare_cached(SQL.node.delete_expired.sql())?
-                .query_map([now.0], |row| {
-                    Ok(Owner {
-                        node: NodeId::new(row.get::<_, String>(0)?),
-                        boot: BootId::new(row.get::<_, String>(1)?),
-                    })
-                })?
+                .query_map(
+                    rusqlite::params![now.0, reaper.node.as_str(), reaper.boot.as_str()],
+                    |row| {
+                        Ok(Owner {
+                            node: NodeId::new(row.get::<_, String>(0)?),
+                            boot: BootId::new(row.get::<_, String>(1)?),
+                        })
+                    },
+                )?
                 .collect::<rusqlite::Result<Vec<_>>>()?;
             let mut reaped = Vec::new();
             for from in dead {

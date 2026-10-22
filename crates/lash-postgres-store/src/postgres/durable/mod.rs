@@ -1074,6 +1074,8 @@ impl DurableStore for PostgresDurableStore {
                     let dead: Vec<(String, String)> =
                         crate::observed_sql::query_as(SQL.node.delete_expired.sql())
                             .bind(now.0)
+                            .bind(reaper.owner.node.as_str())
+                            .bind(reaper.owner.boot.as_str())
                             .fetch_all(crate::observed_sql::executor(&mut **tx))
                             .await
                             .map_err(sqlx_failure)?;

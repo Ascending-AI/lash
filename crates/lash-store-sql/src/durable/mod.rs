@@ -71,8 +71,11 @@ crate::statements! {
         /// Delete boot `?2` of node `?1`; no row when it holds no lease.
         delete_boot = "DELETE FROM nodes WHERE node_id = ?1 AND boot_id = ?2 RETURNING boot_id";
 
-        /// Delete every node whose lease expired before `?1`, returning each.
+        /// Delete other boots expired before `?1`, excluding reaper `?2`/`?3`.
+        /// A wall-clock jump must not let a serving boot reap itself before
+        /// its monotonic heartbeat or self-stop deadline.
         delete_expired = "DELETE FROM nodes WHERE heartbeat_expires_at_ms < ?1
+             AND NOT (node_id = ?2 AND boot_id = ?3)
              RETURNING node_id, boot_id";
 
         /// Renew boot `?2` of node `?1` to `?3`; no row when it holds no lease.

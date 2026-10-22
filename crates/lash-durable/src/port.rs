@@ -394,9 +394,11 @@ pub trait DurableStore: DurableReads {
     /// the lease is gone.
     async fn heartbeat(&self, node: &NodeLease) -> Result<HeartbeatOutcome, DurableError>;
 
-    /// Delete every node whose lease expired and release each one's actors
-    /// as ready with their epochs bumped, in one transaction. `reaper` is
-    /// the node doing it; it must hold a live lease.
+    /// Delete other boots whose leases expired and release their actors as
+    /// ready with their epochs bumped, in one transaction. `reaper` must
+    /// still hold its registered boot. Exclude that boot from the expiry
+    /// scan: a forward wall-clock jump cannot make a serving node reap itself
+    /// before its monotonic heartbeat or self-stop deadline.
     async fn reap(&self, reaper: &NodeLease) -> Result<Vec<Reaped>, DurableError>;
 
     /// End `node`'s lease on a clean shutdown, releasing its actors as
