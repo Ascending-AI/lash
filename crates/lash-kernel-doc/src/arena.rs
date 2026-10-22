@@ -635,6 +635,8 @@ const _: () = assert!(std::mem::size_of::<Body>() == 56);
 /// Immutable identity of a closure, shared by its resident projections.
 #[derive(Clone, Debug)]
 pub struct ClosureIdentity {
+    /// Exact lexical capture shape of the compiled body.
+    pub capture_names: Vec<lash_vocabulary::Name>,
     pub callable: lash_vocabulary::names::CallableId,
     pub site: crate::linked_site::LinkedSite,
 }

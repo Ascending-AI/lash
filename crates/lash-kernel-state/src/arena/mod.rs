@@ -159,6 +159,7 @@ static COLD_CLOSURE_SITE: LazyLock<Arc<lash_kernel_doc::arena::ClosureIdentity>>
     LazyLock::new(|| {
         let link = lash_vocabulary::content_ids::LinkId::from_bytes([0; 32]);
         Arc::new(lash_kernel_doc::arena::ClosureIdentity {
+            capture_names: Vec::new(),
             callable: lash_vocabulary::names::CallableId {
                 link,
                 function: lash_vocabulary::names::FunctionId::from_bytes([0; 32]),

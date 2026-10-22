@@ -253,11 +253,12 @@ fn reopen_all<const L: u64>(name: &str, program: &Program, library: &PreparedLib
     }
 }
 
-fn cross(dialect: &str, programs: &[(&str, &str)]) {
+fn cross(dialect: &str, programs: &[(&str, &str)]) -> Vec<Rest> {
     let started = std::time::Instant::now();
     let runner = runner::Runner::new(dialect).unwrap();
     let mut libraries = None;
     let mut cuts = 0;
+    let mut observed = Vec::new();
     for (name, source) in programs {
         let case = runner::Case {
             id: format!("{dialect}/{name}"),
@@ -307,9 +308,11 @@ fn cross(dialect: &str, programs: &[(&str, &str)]) {
             started.elapsed()
         );
         cuts += by_plan.images.len() + by_body.images.len();
+        observed.push(by_plan.whole);
     }
     assert!(cuts > 0);
     println!("{dialect}: segment cross-resumes={cuts}");
+    observed
 }
 
 /// §J invariant 2: a run cut after every statement, inside callbacks too,
@@ -326,6 +329,26 @@ fn typescript_segments_cross_resume_after_every_statement() {
 #[test]
 fn typescript_nested_and_raising_segments_cross_resume_after_every_statement() {
     cross("typescript", &TYPESCRIPT[3..]);
+}
+
+/// A nested callback keeps a session read when its lifted body also has a
+/// standalone compilation with a lexical free slot (FIG-7109).
+#[test]
+fn nested_typescript_callback_keeps_its_lexical_capture_shape() {
+    let observed = cross(
+        "typescript",
+        &[(
+            "nested-capture",
+            "const log = []; [1].forEach((x) => { [2].forEach((y) => { log.push(x + y); }); }); await host.observe(log);",
+        )],
+    );
+    assert_eq!(observed[0].end, crate::ExpectedEnd::Finished(Datum::Null));
+    assert_eq!(observed[0].requests.len(), 1);
+    let Request::Effect(effect) = &observed[0].requests[0];
+    assert_eq!(
+        effect.args,
+        vec![Datum::List(vec![Datum::Float(3.0.into())])]
+    );
 }
 
 /// §J invariant 2 for Python's segment helpers.

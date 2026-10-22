@@ -780,10 +780,13 @@ pub(super) fn source_body(
         let body = (0..=statement.path.len())
             .rev()
             .find_map(|length| {
-                exe.code_at(&lash_vocabulary::sites::Site::new(
-                    statement.unit.clone(),
-                    &statement.path[..length],
-                ))
+                exe.code_at(
+                    &lash_vocabulary::sites::Site::new(
+                        statement.unit.clone(),
+                        &statement.path[..length],
+                    ),
+                    &frame.capture_names,
+                )
             })
             .ok_or_else(|| HeapFault::Malformed("a frame has no admitted code body".into()))?;
         return Ok(Some(exe.code(body).site.clone()));

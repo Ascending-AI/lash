@@ -22,7 +22,12 @@ pub(super) fn frame(
     }
     let code_id = (0..=site.path.len())
         .rev()
-        .find_map(|length| exe.code_at(&Site::new(site.unit.clone(), &site.path[..length])))
+        .find_map(|length| {
+            exe.code_at(
+                &Site::new(site.unit.clone(), &site.path[..length]),
+                &record.capture_names,
+            )
+        })
         .ok_or_else(|| malformed("a frame has no admitted code body"))?;
     let code = exe.code(code_id);
     let pending = match &record.pending {
