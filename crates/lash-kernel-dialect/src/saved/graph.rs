@@ -114,7 +114,7 @@ impl Bundle {
     ) -> Result<ChildRef, E> {
         let mut members = Vec::with_capacity(self.members.len());
         for (name, function) in &self.members {
-            let document = stage(DOCUMENT_NODE_KIND, &encode_body(&function.document))?;
+            let document = stage(DOCUMENT_NODE_KIND, function.document.body())?;
             members.push(MemberBody {
                 name: name.clone(),
                 document,
@@ -148,7 +148,7 @@ impl Bundle {
         for member in body.members {
             let function = SavedFunction {
                 name: member.name.clone(),
-                document: document(member.document)?,
+                document: lash_kernel_doc::IdentifiedDocument::new(document(member.document)?),
                 captures: member.captures,
                 closure: member.closure,
                 link: member.link,

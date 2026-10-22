@@ -716,6 +716,10 @@ async fn helper_release_preparation_is_independent_of_snapshot_count() {
     // The preparation remains available, but the last exact hold has ended.
     for id in release.content.documents.keys() {
         assert!(backend_document_missing(&*store, id).await);
+        assert!(
+            documents.get_shared(id).await.unwrap().is_none(),
+            "resident preparation cannot hide physical reclamation"
+        );
     }
     // Reaccept after physical reclamation: preparation must republish, not lend
     // an old claim's retention or assume that cached bytes are still stored.

@@ -392,10 +392,12 @@ impl RlmProtocolPluginFactory {
         &self,
         ctx: &lash_core::plugin::ProcessEngineContributionContext<'_>,
     ) -> Result<lash_core::ProcessEngineRegistration, PluginError> {
-        let _ = self.documents.set(lash_vm_runtime::KernelDocuments::new(
-            ctx.backend().module_artifacts(),
-            ctx.backend().package_store(),
-        ));
+        self.documents.get_or_init(|| {
+            self.process_factory().documents(
+                ctx.backend().module_artifacts(),
+                ctx.backend().package_store(),
+            )
+        });
         self.process_factory().bind_process_engine(ctx)
     }
 

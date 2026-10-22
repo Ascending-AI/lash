@@ -194,6 +194,24 @@ fn identify_document(document: &Document) -> DocumentId {
 }
 
 impl PreparedLibrary {
+    pub(crate) fn note_identified_document(&self, document: &doc::IdentifiedDocument) {
+        let key = Arc::as_ptr(document.shared()) as usize;
+        let mut documents = self
+            .0
+            .documents
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        documents
+            .2
+            .retain(|_, known| known.document.strong_count() != 0);
+        documents.2.entry(key).or_insert_with(|| {
+            Arc::new(ImmutableIdentity {
+                document: Arc::downgrade(document.shared()),
+                identity: OnceLock::from(document.id()),
+            })
+        });
+    }
+
     pub(crate) fn document_identity(&self, document: &Arc<Document>) -> DocumentId {
         let key = Arc::as_ptr(document) as usize;
         let known = {

@@ -80,6 +80,31 @@ pub struct Program {
 }
 
 impl Program {
+    /// Prepare received immutable content without encoding its documents
+    /// again to recover their identities. This supplies identity facts only;
+    /// link validation and the machine's structural admission still apply.
+    pub fn prepare_identified(
+        link: LinkId,
+        documents: BTreeMap<DocumentId, lash_kernel_doc::IdentifiedDocument>,
+        links: &BTreeMap<LinkId, lash_vocabulary::package::Link>,
+        closure: lash_kernel_doc::heap::PageId,
+        library: PreparedLibrary,
+    ) -> Result<Self, StartError> {
+        for document in documents.values() {
+            library.note_identified_document(document);
+        }
+        Self::prepare(
+            link,
+            documents
+                .into_iter()
+                .map(|(id, document)| (id, Arc::clone(document.shared())))
+                .collect(),
+            links,
+            closure,
+            library,
+        )
+    }
+
     /// Projects admitted Link fills once, without linking any caller against live packages.
     pub fn prepare(
         link: LinkId,

@@ -79,6 +79,8 @@ struct PreparedDocument {
     id: DocumentId,
     bytes: Arc<[u8]>,
     checked: OnceLock<Result<IdentifiedDocument, EnginePortError>>,
+    decoded: OnceLock<Result<IdentifiedDocument, lash_vocabulary::tokens::TokenError>>,
+    derived: OnceLock<Result<(), EnginePortError>>,
 }
 
 impl DocumentPreparations {
@@ -208,15 +210,6 @@ impl PreparedHelperRelease {
 pub(crate) struct ProcessPreparations {
     prepared: Arc<Mutex<DocumentPreparations>>,
 }
-impl ProcessPreparations {
-    pub(crate) fn bind(
-        &self,
-        mut engine: super::KernelProcessEngine,
-    ) -> super::KernelProcessEngine {
-        engine.documents.prepared = Arc::clone(&self.prepared);
-        engine
-    }
-}
 fn artifact_error(error: ArtifactStoreError) -> EnginePortError {
     match error {
         ArtifactStoreError::ArtifactMissing { artifact_ref } => EnginePortError::Missing {
@@ -329,6 +322,10 @@ impl KernelDocuments {
             prepared: Arc::new(Mutex::new(DocumentPreparations::default())),
         }
     }
+    pub(crate) fn prepared_from(&mut self, owner: &ProcessPreparations) {
+        self.prepared = Arc::clone(&owner.prepared);
+    }
+
     /// A current runtime binding sharing only this owner's pure content
     /// preparations. Reads and retention always use the supplied ports.
     pub fn bind(
@@ -372,6 +369,12 @@ impl KernelDocuments {
             .get_or_init(|| PreparedHelperRelease::new(content, labels).map(Arc::new))
             .clone()?;
         for document in &release.documents {
+            // The release preparation derived and validated this immutable
+            // content. Keep those facts in this same owner's bounded residency.
+            let slot = Self::document_slot(&self.prepared, &document.id(), document.body());
+            slot.decoded.get_or_init(|| Ok(document.clone()));
+            slot.checked.get_or_init(|| Ok(document.clone()));
+            slot.derived.get_or_init(|| Ok(()));
             let artifact = document_artifact(&document.id());
             self.store
                 .hold_module_artifacts(
@@ -414,11 +417,33 @@ impl KernelDocuments {
                 message: e.to_string(),
             })
         })?;
-        lash_kernel_check::derive(&document, &document.functions).map_err(|e| {
-            EnginePortError::Refused(AdmissionRefusal::InvalidDocument {
-                message: e.to_string(),
+        self.admit_identified_document(claim, &document).await
+    }
+
+    /// Admit lash's immutable decoded content without losing its canonical
+    /// bytes. Identity is already established; structural and type admission
+    /// still run against the document's own definitions before publication.
+    pub async fn admit_identified_document(
+        &self,
+        claim: &ReferrerClaim,
+        document: &IdentifiedDocument,
+    ) -> Result<DocumentId, EnginePortError> {
+        let slot = Self::document_slot(&self.prepared, &document.id(), document.body());
+        slot.derived
+            .get_or_init(|| {
+                lash_kernel_check::derive(document, &document.functions)
+                    .map(|_| ())
+                    .map_err(|e| {
+                        EnginePortError::Refused(AdmissionRefusal::InvalidDocument {
+                            message: e.to_string(),
+                        })
+                    })
             })
-        })?;
+            .clone()?;
+        // Derivation includes structural validation. This immutable value can
+        // serve later reads only when their fetched bytes match in full.
+        slot.decoded.get_or_init(|| Ok(document.clone()));
+        slot.checked.get_or_init(|| Ok(document.clone()));
         let artifact = document_artifact(&document.id());
         self.store
             .hold_module_artifacts(
@@ -453,45 +478,9 @@ impl KernelDocuments {
         id: &DocumentId,
         bytes: &[u8],
     ) -> Result<IdentifiedDocument, EnginePortError> {
-        if bytes.len() > DOCUMENT_BYTES / 2 {
-            return Self::decode_current(prepared, id, bytes);
-        }
-        let known = prepared
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .document(id, bytes);
-        let slot = match known {
-            Some(known) => known,
-            None => {
-                // Copy outside the inventory lock, then reclassify under the
-                // same owner: concurrent first readers share one preparation.
-                let candidate = Arc::new(PreparedDocument {
-                    id: *id,
-                    bytes: bytes.into(),
-                    checked: OnceLock::new(),
-                });
-                let mut owner = prepared
-                    .lock()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner);
-                if let Some(known) = owner.document(id, bytes) {
-                    known
-                } else {
-                    let size = 2 * bytes.len();
-                    while owner.documents.len() >= DOCUMENTS
-                        || owner.document_bytes + size > DOCUMENT_BYTES
-                    {
-                        if let Some(old) = owner.documents.pop_front() {
-                            owner.document_bytes -= 2 * old.bytes.len();
-                        }
-                    }
-                    owner.document_bytes += size;
-                    owner.documents.push_back(Arc::clone(&candidate));
-                    candidate
-                }
-            }
-        };
+        let slot = Self::document_slot(prepared, id, bytes);
         // The slot is pure content, not a read or retention fact. Every caller
-        // fetched current bytes before lookup; equality above checks them all.
+        // fetched current bytes before lookup; equality checks them all.
         let checked = slot
             .checked
             .get_or_init(|| Self::decode_current(prepared, id, bytes))
@@ -512,18 +501,73 @@ impl KernelDocuments {
         checked
     }
 
+    fn document_slot(
+        prepared: &Mutex<DocumentPreparations>,
+        id: &DocumentId,
+        bytes: &[u8],
+    ) -> Arc<PreparedDocument> {
+        if bytes.len() > DOCUMENT_BYTES / 2 {
+            return Arc::new(PreparedDocument {
+                id: *id,
+                bytes: bytes.into(),
+                checked: OnceLock::new(),
+                decoded: OnceLock::new(),
+                derived: OnceLock::new(),
+            });
+        }
+        let known = prepared
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .document(id, bytes);
+        match known {
+            Some(known) => known,
+            None => {
+                // Copy outside the inventory lock, then reclassify under the
+                // same owner: concurrent first readers share one preparation.
+                let candidate = Arc::new(PreparedDocument {
+                    id: *id,
+                    bytes: bytes.into(),
+                    checked: OnceLock::new(),
+                    decoded: OnceLock::new(),
+                    derived: OnceLock::new(),
+                });
+                let mut owner = prepared
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                if let Some(known) = owner.document(id, bytes) {
+                    known
+                } else {
+                    let size = 2 * bytes.len();
+                    while owner.documents.len() >= DOCUMENTS
+                        || owner.document_bytes + size > DOCUMENT_BYTES
+                    {
+                        if let Some(old) = owner.documents.pop_front() {
+                            owner.document_bytes -= 2 * old.bytes.len();
+                        }
+                    }
+                    owner.document_bytes += size;
+                    owner.documents.push_back(Arc::clone(&candidate));
+                    candidate
+                }
+            }
+        }
+    }
+
     fn decode_current(
         prepared: &Mutex<DocumentPreparations>,
         id: &DocumentId,
         bytes: &[u8],
     ) -> Result<IdentifiedDocument, EnginePortError> {
         let artifact = document_artifact(id);
-        let document = IdentifiedDocument::decode_standard(bytes).map_err(|error| {
-            EnginePortError::Corrupt {
+        let slot = Self::document_slot(prepared, id, bytes);
+        let document = slot
+            .decoded
+            .get_or_init(|| IdentifiedDocument::decode_standard(bytes))
+            .clone()
+            .map_err(|error| EnginePortError::Corrupt {
                 artifact: artifact.clone(),
                 message: error.to_string(),
-            }
-        })?;
+            })?;
         if document.id() != *id {
             return Err(EnginePortError::Corrupt {
                 artifact,
@@ -628,9 +672,8 @@ impl KernelDocuments {
             .ok_or_else(|| EnginePortError::Missing {
                 artifact: document_artifact(&link.document),
             })?;
-        content
-            .insert_document(document)
-            .map_err(map_link_refusal)?;
+        // get() already checked these current bytes and their identity.
+        content.documents.insert(link.document, document);
         for fill in link.fills.values() {
             if let Fill::Export { link, .. } = fill {
                 let child = self.load_linked(*link).await?;
@@ -890,9 +933,8 @@ impl KernelDocuments {
                         }
                     })?;
                     let mut content = LinkedContent::default();
-                    content
-                        .insert_document(document)
-                        .map_err(map_link_refusal)?;
+                    // get() already checked these current bytes and identity.
+                    content.documents.insert(link.document, document);
                     for fill in link.fills.values() {
                         if let Fill::Export { link, .. } = fill {
                             let descendant = self.load_linked(*link).await?;

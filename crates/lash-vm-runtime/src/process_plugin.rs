@@ -93,6 +93,18 @@ impl KernelProcessPluginFactory {
         };
         Ok(crate::kernel_process_engine_registration(engine))
     }
+    /// Bind the current artifact ports to this hosting factory's one pure
+    /// document preparation owner. No store or referrer authority is shared.
+    pub fn documents(
+        &self,
+        store: Arc<dyn lash_execution_contracts::module_artifacts::ModuleArtifactStore>,
+        packages: Arc<dyn lash_durable::packages::PackageStore>,
+    ) -> crate::KernelDocuments {
+        let mut documents = crate::KernelDocuments::new(store, packages);
+        documents.prepared_from(&self.preparations);
+        documents
+    }
+
     /// Constructs one runtime binding without retaining its backend authority.
     /// The contribution boundary supplies trace and format policy separately.
     pub(crate) fn engine(
@@ -100,7 +112,7 @@ impl KernelProcessPluginFactory {
         store: Arc<dyn lash_execution_contracts::module_artifacts::ModuleArtifactStore>,
         packages: Arc<dyn lash_durable::packages::PackageStore>,
     ) -> Result<crate::KernelProcessEngine, PluginError> {
-        let documents = crate::KernelDocuments::new(store, packages);
+        let documents = self.documents(store, packages);
         let bounds = lash_kernel_vm::Bounds {
             memory_meter: match self.bounds.memory_meter {
                 lash_vm_protocol::MemoryMeter::On => lash_kernel_vm::MemoryMeter::On,
@@ -121,7 +133,7 @@ impl KernelProcessPluginFactory {
         let engine =
             crate::KernelProcessEngine::new(documents, &self.dialect, self.workers.clone(), bounds)
                 .map_err(|error| PluginError::Registration(error.to_string()))?;
-        Ok(self.preparations.bind(engine))
+        Ok(engine)
     }
 }
 

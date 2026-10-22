@@ -209,7 +209,16 @@ fn start(program: &Program) -> RunStart {
     RunStart {
         link: program.link,
         instances: program.instances.clone(),
-        documents: program.documents.clone(),
+        documents: program
+            .documents
+            .iter()
+            .map(|(id, document)| {
+                (
+                    *id,
+                    lash_kernel_doc::IdentifiedDocument::from_shared(Arc::clone(document)),
+                )
+            })
+            .collect(),
         target: Target::Main,
         args: Vec::new(),
         session: None,

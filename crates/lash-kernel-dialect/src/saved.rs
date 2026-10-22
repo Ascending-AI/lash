@@ -30,7 +30,7 @@ pub struct SavedFunction {
     pub link: LinkId,
     pub callable: CallableId,
     pub environment: EntityId,
-    pub document: Document,
+    pub document: lash_kernel_doc::IdentifiedDocument,
     pub captures: BTreeMap<Name, FrozenRef>,
     pub closure: PageRef,
     pub references: BTreeSet<lash_kernel_doc::heap::EntityId>,

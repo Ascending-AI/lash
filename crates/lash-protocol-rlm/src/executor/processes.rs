@@ -1,5 +1,4 @@
 //! Load retained linked reach without fulfilling against current advertisements.
-use lash_core::RuntimeExecutionContext;
 use lash_kernel_doc::FunctionRegistry;
 
 use lash_vocabulary::names::LinkedStart;
@@ -7,19 +6,19 @@ use std::sync::Arc;
 
 pub(super) struct PreparedExecution {
     pub content: lash_kernel_package::LinkedContent,
+    pub documents: std::collections::BTreeMap<
+        lash_vocabulary::DocumentId,
+        lash_kernel_doc::IdentifiedDocument,
+    >,
     pub loaded: lash_vm_broker::kernel::loader::Assembled,
 }
 
 pub(super) async fn prepare(
-    ctx: &RuntimeExecutionContext<'_>,
+    documents: &lash_vm_runtime::KernelDocuments,
     start: &LinkedStart,
     held: &Arc<FunctionRegistry>,
     authored: &std::collections::BTreeSet<lash_vocabulary::LinkId>,
 ) -> Result<PreparedExecution, String> {
-    let documents = lash_vm_runtime::KernelDocuments::new(
-        ctx.actor_context().backend().module_artifacts(),
-        ctx.actor_context().backend().stores().package_store(),
-    );
     let mut content = documents
         .load_linked(start.link)
         .await
@@ -69,5 +68,18 @@ pub(super) async fn prepare(
         held,
     )
     .map_err(|error| error.to_string())?;
-    Ok(PreparedExecution { content, loaded })
+    let mut identified = std::collections::BTreeMap::new();
+    for id in content.documents.keys() {
+        let document = documents
+            .get_shared(id)
+            .await
+            .map_err(|error| error.to_string())?
+            .ok_or_else(|| format!("Document {id} is absent"))?;
+        identified.insert(*id, document);
+    }
+    Ok(PreparedExecution {
+        content,
+        loaded,
+        documents: identified,
+    })
 }

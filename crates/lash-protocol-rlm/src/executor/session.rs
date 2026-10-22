@@ -147,6 +147,7 @@ pub(super) struct CellChanges {
 /// cells are written in, and the bookkeeping its captures are built from.
 pub struct CodeModeExecutionState {
     dialect: Arc<str>,
+    pub(super) documents: Option<lash_vm_runtime::KernelDocuments>,
     numbers: NumberPolicy,
     current: Version,
     /// The descriptor the store holds as of the last acknowledged capture
@@ -203,6 +204,7 @@ impl CodeModeExecutionState {
     pub(crate) fn new(dialect: impl Into<Arc<str>>, numbers: NumberPolicy) -> Self {
         Self {
             dialect: dialect.into(),
+            documents: None,
             numbers,
             current: Version::default(),
             installed: None,
@@ -537,15 +539,24 @@ impl CodeModeExecutionState {
     /// A saved function's description as a cell is lowered against it,
     /// carried to this build's kernel version.
     fn lower_function(&self, name: &Name, meta: &[u8]) -> Result<LowerFunction, String> {
-        let function = LowerFunction::from_description(
+        let function = LowerFunction::from_description_with(
             meta,
             lash_vocabulary::data_limits::KernelDataLimits::standard(),
+            |body| match self
+                .view
+                .functions
+                .as_ref()
+                .and_then(|known| known.get(name))
+            {
+                Some(known) if known.document.body() == body => Ok(known.document.clone()),
+                _ => lash_kernel_doc::IdentifiedDocument::decode_standard(body),
+            },
         )
         .map_err(|error| format!("the saved function `{name}` does not decode: {error}"))?;
         match self.kernel.saved_function(&function.clone().into_saved()) {
             Ok(None) => Ok(function),
             Ok(Some(carried)) => Ok(LowerFunction {
-                document: lash_kernel_doc::IdentifiedDocument::new(carried.document),
+                document: carried.document,
                 ..function
             }),
             Err(refusal) => Err(refusal.to_string()),
@@ -574,13 +585,8 @@ impl CodeModeExecutionState {
         let mut dropped = Vec::new();
         for (name, function) in &mut functions {
             let saved = function.clone().into_saved();
-            let bytes = lash_kernel_doc::DocumentBytes::from_parts(
-                lash_kernel_doc::DOCUMENT_GRAMMAR_VERSION,
-                function.document.id(),
-                function.document.body(),
-            );
             documents
-                .admit_document(claim, &bytes)
+                .admit_identified_document(claim, &function.document)
                 .await
                 .map_err(|error| RelinkError::Library(error.to_string()))?;
             let fulfilled = documents
