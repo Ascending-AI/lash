@@ -267,7 +267,7 @@ impl EmbeddedRuntimeBuilder {
                 &crate::PluginOptions::default(),
                 &admission,
             )?;
-            plugins.adopt_plugin_admission(admission);
+            plugins.adopt_plugin_admission(admission)?;
             plugins.publish_plugin_config(state.admitted_plugin_config())?;
         }
         let mut persistence = super::lifecycle::RuntimePersistenceBindings::new(self.store);

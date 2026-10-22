@@ -119,7 +119,8 @@ mod tests {
     async fn host_state_limits_survive_sqlite_reopen_and_transition() {
         use crate::plugin::{
             PluginDeclaration, PluginSpec, PluginTransitionBase, PluginTransitionId,
-            PluginTransitionRequest, SessionAuthorityContext, StaticPluginFactory,
+            PluginTransitionRequest, PluginTransitionRequestData, SessionAuthorityContext,
+            StaticPluginFactory,
         };
         use crate::tool_run::{StateCommandLimits, StateCommandRefusal, StateResolutionOutcome};
 
@@ -234,7 +235,7 @@ mod tests {
             crate::plugin_state_view(&reopened, "mock").get("value"),
             Some(wide)
         );
-        let request = PluginTransitionRequest {
+        let request = PluginTransitionRequest::new(PluginTransitionRequestData {
             id: PluginTransitionId(address("transition")),
             owner: crate::RuntimeOwner::Session("state-limits".into()),
             base: PluginTransitionBase::Session {
@@ -251,7 +252,7 @@ mod tests {
                     writer: crate::FormatVersion::ONE,
                 },
             ]),
-        };
+        });
         let record =
             reopened_host.transition_plugins(request.clone(), snapshot, &Default::default());
         assert_eq!(&record.candidate().unwrap().0, snapshot);

@@ -93,6 +93,7 @@ impl super::super::process::SessionTurns for PanickingTurns {
     async fn mail(
         &self,
         _: &lash_execution_contracts::process::ProcessRecord,
+        _: &lash_protocol_types::allocation::AllocationBudget,
     ) -> Result<
         super::super::process::SessionTurnMail,
         lash_execution_contracts::plugin_error::PluginError,
@@ -108,6 +109,7 @@ impl super::super::process::SessionTurns for PanickingTurns {
     async fn cancel(
         &self,
         _: &lash_execution_contracts::process::ProcessRecord,
+        _: &lash_protocol_types::allocation::AllocationBudget,
     ) -> Result<
         super::super::process::SessionTurnCancel,
         lash_execution_contracts::plugin_error::PluginError,
@@ -119,6 +121,7 @@ impl super::super::process::SessionTurns for PanickingTurns {
     async fn outcome(
         &self,
         _: &lash_execution_contracts::process::ProcessRecord,
+        _: &lash_protocol_types::allocation::AllocationBudget,
     ) -> Result<
         lash_execution_contracts::process::ProcessOutcome,
         lash_execution_contracts::plugin_error::PluginError,

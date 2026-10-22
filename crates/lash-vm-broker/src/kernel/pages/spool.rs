@@ -393,11 +393,11 @@ enum Pages {
 }
 
 impl Pages {
-    fn read(&self, id: &NodeId) -> Result<Arc<[u8]>, StageFault> {
+    fn read(&self, id: &NodeId) -> Result<lash_kernel_doc::allocation::SharedBytes, StageFault> {
         match self {
             Self::Resident(pages) => pages
                 .get(id)
-                .map(|page| Arc::clone(&page.bytes))
+                .map(|page| page.bytes.clone())
                 .ok_or(StageFault::Missing(*id)),
             Self::Files(dir) => match fs::read(dir.join(id.to_hex())) {
                 Ok(bytes) => Ok(bytes.into()),
@@ -552,11 +552,14 @@ impl DiskSpool {
     /// A staged page's bytes and children. A resident page's children are
     /// read from the framing its seal checked; a page on disk is parsed
     /// from its file again.
-    fn staged_page(&self, id: &NodeId) -> Result<(Arc<[u8]>, Vec<NodeId>), StageFault> {
+    fn staged_page(
+        &self,
+        id: &NodeId,
+    ) -> Result<(lash_kernel_doc::allocation::SharedBytes, Vec<NodeId>), StageFault> {
         match &self.tier {
             Tier::Resident(resident) => {
                 let page = resident.pages.get(id).ok_or(StageFault::Missing(*id))?;
-                Ok((Arc::clone(&page.bytes), page.children().iter().collect()))
+                Ok((page.bytes.clone(), page.children().iter().collect()))
             }
             Tier::Files => {
                 let bytes = Pages::Files(self.pages()).read(id)?;
@@ -744,12 +747,12 @@ impl StageSpool for DiskSpool {
         Ok(())
     }
 
-    fn read(&self, page: &NodeId) -> Result<Arc<[u8]>, StageFault> {
+    fn read(&self, page: &NodeId) -> Result<lash_kernel_doc::allocation::SharedBytes, StageFault> {
         match &self.tier {
             Tier::Resident(resident) => resident
                 .pages
                 .get(page)
-                .map(|page| Arc::clone(&page.bytes))
+                .map(|page| page.bytes.clone())
                 .ok_or(StageFault::Missing(*page)),
             Tier::Files => Pages::Files(self.pages()).read(page),
         }

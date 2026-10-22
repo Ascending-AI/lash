@@ -683,7 +683,7 @@ impl PageStore for SqliteDurableStore {
                 match found.get(&page.to_hex()) {
                     Some(bytes) => answered.push(StoredPage {
                         id: page,
-                        bytes: bytes.clone(),
+                        bytes: bytes.clone().into(),
                     }),
                     None => return Ok(Err(DurableError::Graph(GraphRefusal::MissingNode(page)))),
                 }

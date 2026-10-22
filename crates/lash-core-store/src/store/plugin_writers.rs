@@ -493,10 +493,36 @@ pub struct AdmittedPlugin {
 /// A plugin transition records this choice from the fleet record's ranges.
 /// A replay encodes with that recorded choice: widening a range changes a
 /// later admission's writer, never an already-recorded publication's format.
-#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
 #[serde(transparent)]
-pub struct PluginAdmission {
+pub struct PluginAdmission(std::sync::Arc<PluginAdmissionStorage>);
+#[derive(Debug, Default, serde::Serialize, serde::Deserialize)]
+#[serde(transparent)]
+struct PluginAdmissionStorage {
     plugins: Vec<AdmittedPlugin>,
+    #[serde(skip)]
+    allocation: lash_protocol_types::allocation::AllocationHold,
+    #[serde(skip)]
+    budget: lash_protocol_types::allocation::AllocationBudget,
+}
+impl PartialEq for PluginAdmission {
+    fn eq(&self, other: &Self) -> bool {
+        self.0.plugins == other.0.plugins
+    }
+}
+impl Eq for PluginAdmission {}
+
+/// An immutable writer projection whose map and identifiers remain admitted.
+#[derive(Debug)]
+pub struct PluginWriterSelection {
+    values: BTreeMap<String, FormatVersion>,
+    _allocation: lash_protocol_types::allocation::AllocationHold,
+}
+impl std::ops::Deref for PluginWriterSelection {
+    type Target = BTreeMap<String, FormatVersion>;
+    fn deref(&self) -> &Self::Target {
+        &self.values
+    }
 }
 
 impl PluginAdmission {
@@ -532,38 +558,104 @@ impl PluginAdmission {
                 writer,
             });
         }
-        Ok(Self { plugins })
+        Ok(Self::from_plugins(plugins))
     }
 
     /// An admission read back from its recorded plugins, in hook order.
     pub fn from_plugins(plugins: Vec<AdmittedPlugin>) -> Self {
-        Self { plugins }
+        Self(std::sync::Arc::new(PluginAdmissionStorage {
+            plugins,
+            ..Default::default()
+        }))
     }
 
     /// The admitted plugins, in hook order.
     pub fn plugins(&self) -> &[AdmittedPlugin] {
-        &self.plugins
+        &self.0.plugins
     }
 
     /// Whether the admission names no plugin.
     pub fn is_empty(&self) -> bool {
-        self.plugins.is_empty()
+        self.0.plugins.is_empty()
     }
 
     /// The writer the admission recorded for `plugin`, if it names it.
     pub fn writer(&self, plugin: &str) -> Option<FormatVersion> {
-        self.plugins
+        self.0
+            .plugins
             .iter()
             .find(|admitted| admitted.plugin == plugin)
             .map(|admitted| admitted.writer)
     }
 
-    /// The recorded writer of every admitted plugin, by plugin id.
-    pub fn writers(&self) -> BTreeMap<String, FormatVersion> {
-        self.plugins
+    /// Share this ledger's admitted composition; preadmit a foreign copy.
+    pub fn clone_in(
+        &self,
+        budget: &lash_protocol_types::allocation::AllocationBudget,
+    ) -> Result<Self, lash_protocol_types::allocation::AllocationError> {
+        if self.0.budget.identity() == budget.identity() {
+            return Ok(self.clone());
+        }
+        let bytes = self.0.plugins.iter().fold(
+            (self.0.plugins.capacity() * std::mem::size_of::<AdmittedPlugin>()) as u64
+                + std::mem::size_of::<PluginAdmissionStorage>() as u64
+                + 64,
+            |bytes, plugin| bytes.saturating_add(plugin.plugin.capacity() as u64 + 32),
+        );
+        let allocation = budget.reserve(bytes)?;
+        Ok(Self(std::sync::Arc::new(PluginAdmissionStorage {
+            plugins: self.0.plugins.clone(),
+            allocation,
+            budget: budget.clone(),
+        })))
+    }
+    /// Transfer whole-source admission before sharing a fresh decode.
+    pub fn decoded_in(
+        &mut self,
+        allocation: lash_protocol_types::allocation::AllocationHold,
+        budget: lash_protocol_types::allocation::AllocationBudget,
+    ) -> bool {
+        let Some(source) = std::sync::Arc::get_mut(&mut self.0) else {
+            return false;
+        };
+        source.allocation = allocation;
+        source.budget = budget;
+        true
+    }
+    /// The recorded writer of every plugin, with its map admitted before copies.
+    pub fn writers(
+        &self,
+    ) -> Result<PluginWriterSelection, lash_protocol_types::allocation::AllocationError> {
+        self.writers_with_defaults(std::iter::empty())
+    }
+    /// Include native defaults for plugins absent from the recorded composition.
+    pub fn writers_with_defaults<'a, I>(
+        &self,
+        defaults: I,
+    ) -> Result<PluginWriterSelection, lash_protocol_types::allocation::AllocationError>
+    where
+        I: Iterator<Item = (&'a str, FormatVersion)> + Clone,
+    {
+        let bytes = self.0.plugins.iter().fold(128_u64, |bytes, plugin| {
+            bytes.saturating_add(plugin.plugin.len() as u64 + 2048)
+        });
+        let bytes = defaults.clone().fold(bytes, |bytes, (id, _)| {
+            bytes.saturating_add(id.len() as u64 + 2048)
+        });
+        let allocation = self.0.budget.reserve(bytes)?;
+        let mut values: BTreeMap<_, _> = self
+            .0
+            .plugins
             .iter()
-            .map(|admitted| (admitted.plugin.clone(), admitted.writer))
-            .collect()
+            .map(|plugin| (plugin.plugin.clone(), plugin.writer))
+            .collect();
+        for (id, writer) in defaults {
+            values.entry(id.to_owned()).or_insert(writer);
+        }
+        Ok(PluginWriterSelection {
+            values,
+            _allocation: allocation,
+        })
     }
 }
 
@@ -659,7 +751,9 @@ mod tests {
         ));
 
         let mut config = crate::PluginConfig::default();
-        config.insert_versioned("probe", version(3), serde_json::json!({}));
+        config
+            .insert_versioned("probe", version(3), serde_json::json!({}))
+            .unwrap();
         let mut found = PluginPublication::default();
         found.add_config(&config);
         assert_eq!(found, publication(&[("probe", FormatNamespace::Config, 3)]));

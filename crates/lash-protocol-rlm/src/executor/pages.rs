@@ -260,7 +260,10 @@ impl SessionPageAccess {
 
     /// Keeps `pages`, the bytes of committed pages the host already holds
     /// (a restored descriptor), as read.
-    pub(crate) fn preload(&mut self, pages: impl IntoIterator<Item = (NodeId, Arc<[u8]>)>) {
+    pub(crate) fn preload(
+        &mut self,
+        pages: impl IntoIterator<Item = (NodeId, lash_kernel_doc::allocation::SharedBytes)>,
+    ) {
         self.cache.keep(pages);
     }
 
@@ -361,7 +364,7 @@ impl SessionPageAccess {
     async fn fetch_batch(
         &mut self,
         missing: &[NodeId],
-    ) -> Result<Vec<(NodeId, Arc<[u8]>)>, PageAccessError> {
+    ) -> Result<Vec<(NodeId, lash_kernel_doc::allocation::SharedBytes)>, PageAccessError> {
         self.fetches += missing.len() as u64;
         if self.handle.is_none()
             && let Some(run) = self.runs.back()
@@ -429,7 +432,7 @@ impl SessionPageAccess {
 }
 
 /// The bytes of committed pages a demand answered, by page.
-type Fetched = HashMap<NodeId, Result<Arc<[u8]>, HeapFault>>;
+type Fetched = HashMap<NodeId, Result<lash_kernel_doc::allocation::SharedBytes, HeapFault>>;
 
 /// Committed pages a host read explicitly demands, with where to answer
 /// their individual results.
@@ -456,7 +459,10 @@ fn abandoned() -> HeapFault {
 
 impl ParentPages {
     /// The bytes of `id` if the read holds them without a fetch.
-    fn held(&mut self, id: &NodeId) -> Result<Option<Arc<[u8]>>, HeapFault> {
+    fn held(
+        &mut self,
+        id: &NodeId,
+    ) -> Result<Option<lash_kernel_doc::allocation::SharedBytes>, HeapFault> {
         match &self.spool {
             Some(spool) if spool.contains(id) => spool
                 .read(id)

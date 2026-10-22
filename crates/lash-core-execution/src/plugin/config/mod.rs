@@ -420,7 +420,16 @@ fn unreadable(role: ConfigValueRole, error: impl std::fmt::Display) -> ConfigRef
     }
 }
 
-fn format_fault(refusal: super::FormatRefusal, at: RefusalSite) -> ConfigFault {
+fn format_fault(
+    error: impl Into<lash_core_store::plugin_state::ConfigAdmissionError>,
+    at: RefusalSite,
+) -> ConfigFault {
+    let refusal = match error.into() {
+        lash_core_store::plugin_state::ConfigAdmissionError::Format(refusal) => refusal,
+        lash_core_store::plugin_state::ConfigAdmissionError::Allocation(error) => {
+            return ConfigFault::Allocation(error);
+        }
+    };
     let owner = refusal.plugin.clone();
     refused(&owner, at, ConfigRefusalReason::Format { refusal })
 }
@@ -665,6 +674,8 @@ fn reduce_typed<C: ConfigCommand>(
 /// cannot stand.
 #[derive(Clone, Debug, thiserror::Error)]
 pub enum CreationConfigError {
+    #[error(transparent)]
+    Allocation(#[from] lash_protocol_types::allocation::AllocationError),
     #[error("recipe registration is invalid: {0}")]
     Recipe(Box<super::PluginError>),
     #[error(transparent)]
@@ -680,6 +691,7 @@ pub enum CreationConfigError {
 impl From<ConfigFault> for CreationConfigError {
     fn from(fault: ConfigFault) -> Self {
         match fault {
+            ConfigFault::Allocation(error) => Self::Allocation(error),
             ConfigFault::Refused(refusal) => Self::Refused(refusal),
             ConfigFault::RecordedCorrupt(corrupt) => Self::RecordedCorrupt(corrupt),
         }
@@ -884,7 +896,7 @@ impl ConfigRegistry {
                         &value,
                     )
                     .map_err(|refusal| format_fault(refusal, RefusalSite::Creation))?;
-                config.insert_versioned(plugin_id.clone(), writer, encoded);
+                config.insert_versioned(plugin_id.clone(), writer, encoded)?;
             }
         }
         Ok(config)
@@ -1009,13 +1021,15 @@ impl ConfigRegistry {
         models: &dyn crate::LlmProfiles,
         writers: &crate::store::plugin_writers::PluginAdmission,
         prompts: &super::prompt::PromptCatalogSnapshot,
-    ) -> Result<ConfigResolution, RecordedNamespaceCorrupt> {
+    ) -> Result<ConfigResolution, ConfigFault> {
         let base_revision = base.config_revision;
         let result = if transaction.expected_revision == base_revision {
             match self.reduce(base, transaction, models, writers, prompts) {
                 Ok(applied) => applied,
                 Err(ConfigFault::Refused(refusal)) => ConfigResolutionDecision::Refused { refusal },
-                Err(ConfigFault::RecordedCorrupt(corrupt)) => return Err(corrupt),
+                Err(error @ (ConfigFault::RecordedCorrupt(_) | ConfigFault::Allocation(_))) => {
+                    return Err(error);
+                }
             }
         } else {
             ConfigResolutionDecision::Stale {
@@ -1123,7 +1137,7 @@ impl ConfigRegistry {
         let final_core = core.clone().unwrap_or_else(|| base_core.clone());
         let mut final_plugins = base.plugin_config.clone();
         for (id, value) in &namespaces {
-            final_plugins.insert(id.clone(), value.clone());
+            final_plugins.insert(id.clone(), value.clone())?;
         }
         let facts = CandidateFacts {
             core: &final_core,
@@ -1283,3 +1297,16 @@ impl crate::RunOptionsOwner for ConfigRegistry {
 mod tests;
 
 use lash_execution_contracts::config_error::ConfigRegistrationError;
+
+impl From<lash_core_store::plugin_state::ConfigAdmissionError> for CreationConfigError {
+    fn from(error: lash_core_store::plugin_state::ConfigAdmissionError) -> Self {
+        match error {
+            lash_core_store::plugin_state::ConfigAdmissionError::Format(error) => {
+                Self::Format(error)
+            }
+            lash_core_store::plugin_state::ConfigAdmissionError::Allocation(error) => {
+                Self::Allocation(error)
+            }
+        }
+    }
+}

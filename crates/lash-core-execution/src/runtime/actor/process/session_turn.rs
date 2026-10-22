@@ -44,7 +44,9 @@ use lash_execution_contracts::waits::WaitSpec;
 /// The session work a node runs `SessionTurn` processes with: the child
 /// session's creation, the mail of its turn's input, the turn's cancel and
 /// the process's answer from the turn's end. A deployment implements it
-/// over its own plugins, models and stores.
+/// over its own plugins, models and stores. Each call receives the claimed
+/// process owner's allocation budget and must admit retained source data
+/// against it before installing or copying that data.
 #[async_trait::async_trait]
 pub trait SessionTurns: Send + Sync {
     /// Create `process`'s child session, or find the one an earlier pass
@@ -55,7 +57,11 @@ pub trait SessionTurns: Send + Sync {
     ///
     /// A failure another pass may not meet; nothing deterministic is an
     /// error ([`SessionTurnMail::Refused`]).
-    async fn mail(&self, process: &ProcessRecord) -> Result<SessionTurnMail, PluginError>;
+    async fn mail(
+        &self,
+        process: &ProcessRecord,
+        budget: &lash_protocol_types::allocation::AllocationBudget,
+    ) -> Result<SessionTurnMail, PluginError>;
 
     /// Stop `process`'s child turn: withdraw its input while no run has
     /// taken it, or else request the turn's cancel.
@@ -63,14 +69,22 @@ pub trait SessionTurns: Send + Sync {
     /// # Errors
     ///
     /// A store failure; nothing was withdrawn.
-    async fn cancel(&self, process: &ProcessRecord) -> Result<SessionTurnCancel, PluginError>;
+    async fn cancel(
+        &self,
+        process: &ProcessRecord,
+        budget: &lash_protocol_types::allocation::AllocationBudget,
+    ) -> Result<SessionTurnCancel, PluginError>;
 
     /// The process's answer from its child turn's committed end.
     ///
     /// # Errors
     ///
     /// A store failure, or a child turn that has not ended.
-    async fn outcome(&self, process: &ProcessRecord) -> Result<ProcessOutcome, PluginError>;
+    async fn outcome(
+        &self,
+        process: &ProcessRecord,
+        budget: &lash_protocol_types::allocation::AllocationBudget,
+    ) -> Result<ProcessOutcome, PluginError>;
 }
 
 /// What [`SessionTurns::mail`] did.
@@ -150,6 +164,15 @@ impl ProcessActivation {
                 .park(owned, tx, &ProcessParkReason::UnservedSessionTurn)
                 .await;
         };
+        // The same claim ledger the process's step context uses owns the
+        // session service's admitted metadata, including escaped readers.
+        let (budget, _allocations) =
+            crate::runtime::actor::owner_allocation::OwnerAllocation::budget(
+                self.backend
+                    .owner_memory()
+                    .owner(owned.actor(), owned.epoch()),
+                owned.actor().to_string(),
+            );
         let driver = match ChildTurnDriver::decode(row.driver_json.as_deref()) {
             Ok(driver) => driver,
             // A driver row this node does not decode: a cancel ends the
@@ -194,7 +217,7 @@ impl ProcessActivation {
         match wait.map(|wait| wait.lifecycle.state()) {
             Some(WaitState::Resolved) => {
                 let outcome = turns
-                    .outcome(record)
+                    .outcome(record, &budget)
                     .await
                     .map_err(|error| registry_failure(&error))?;
                 return self.end(owned, tx, process, &outcome).await;
@@ -211,7 +234,7 @@ impl ProcessActivation {
             && !driver.cancel_requested
         {
             match turns
-                .cancel(record)
+                .cancel(record, &budget)
                 .await
                 .map_err(|error| registry_failure(&error))?
             {
@@ -230,7 +253,7 @@ impl ProcessActivation {
         }
         if !driver.mailed {
             match turns
-                .mail(record)
+                .mail(record, &budget)
                 .await
                 .map_err(|error| registry_failure(&error))?
             {

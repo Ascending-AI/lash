@@ -153,7 +153,7 @@ impl RuntimeCheckpointComponents {
         fleet_format: crate::store::FleetFormat,
     ) -> crate::CheckpointComponentDescriptor {
         crate::CheckpointComponentDescriptor {
-            blob_ref,
+            blob_ref: blob_ref.into(),
             encoding_version: fleet_format.writer_version(crate::surface_format!(
                 crate::store::CHECKPOINT_COMPONENT_ENCODING_VERSION
             )),
@@ -256,7 +256,7 @@ impl RuntimeCheckpointComponents {
                 Some(descriptor) => {
                     ResidentExecution::Held(crate::plugin::HydratedExecutionGraph {
                         root: execution.root,
-                        descriptor: std::sync::Arc::clone(descriptor),
+                        descriptor: descriptor.clone(),
                     })
                 }
                 None => ResidentExecution::Named(execution.root),
@@ -301,6 +301,7 @@ impl RuntimeCheckpointComponents {
         &self,
         turn_state: crate::PersistedTurnState,
         fleet_format: crate::store::FleetFormat,
+        budget: &lash_protocol_types::allocation::AllocationBudget,
     ) -> Result<crate::store::HydratedSessionCheckpoint, crate::StoreError> {
         if self.completeness != CheckpointComponentCompleteness::Complete {
             return Err(crate::StoreError::IncompleteCheckpointComponentSet);
@@ -311,17 +312,18 @@ impl RuntimeCheckpointComponents {
                 ResidentCheckpointComponent::Changed { body, .. } => {
                     let body = match body {
                         PendingCheckpointComponentBody::PluginState { map, .. } => {
-                            crate::store::encode_checkpoint_component(key, &map.map)
-                                .map(std::sync::Arc::from)?
+                            crate::store::encode_checkpoint_component(key, &map.map, budget)?
                         }
-                        PendingCheckpointComponentBody::Opaque(bytes) => {
-                            std::sync::Arc::clone(bytes)
-                        }
+                        PendingCheckpointComponentBody::Opaque(bytes) => bytes.clone(),
                     };
-                    crate::HydratedCheckpointComponent::changed_for_fleet(body, fleet_format)
+                    crate::HydratedCheckpointComponent::changed_for_fleet_in(
+                        &body,
+                        fleet_format,
+                        budget,
+                    )?
                 }
                 ResidentCheckpointComponent::Unchanged { descriptor, .. } => {
-                    crate::HydratedCheckpointComponent::unchanged(descriptor)
+                    crate::HydratedCheckpointComponent::unchanged(&descriptor.clone_in(budget)?)
                 }
             };
             components.insert(key.clone(), pending);
@@ -330,7 +332,7 @@ impl RuntimeCheckpointComponents {
             ResidentExecution::None => None,
             ResidentExecution::Held(graph) => Some(crate::store::CheckpointExecution {
                 root: graph.root,
-                descriptor: Some(std::sync::Arc::clone(&graph.descriptor)),
+                descriptor: Some(graph.descriptor.clone_in(budget)?),
             }),
             ResidentExecution::Named(root) => Some(crate::store::CheckpointExecution {
                 root: *root,
@@ -368,7 +370,7 @@ impl RuntimeCheckpointComponents {
     fn component_ref(&self, key: &str) -> Option<&crate::store::BlobRef> {
         self.component(key)
             .and_then(|component| component.descriptor())
-            .map(|descriptor| &descriptor.blob_ref)
+            .map(|descriptor| descriptor.blob_ref.as_ref())
     }
 
     fn plugin_state(&self) -> Option<&crate::PluginState> {
@@ -439,7 +441,7 @@ impl RuntimeCheckpointComponents {
                 .get(&body_key)
                 .and_then(|entry| entry.descriptor().cloned());
             let values = match previous.known_values(plugin, &namespace.values) {
-                Some(values) if durable.as_ref().map(|d| &d.blob_ref) == Some(values) => {
+                Some(values) if durable.as_ref().map(|d| d.blob_ref.as_ref()) == Some(values) => {
                     if let Some(body) = previous.bodies.get(plugin) {
                         record.bodies.insert(plugin.clone(), body.clone());
                     }
@@ -547,19 +549,25 @@ impl RuntimeCheckpointComponents {
     fn manifest_matches_resident_commit_intent(
         &self,
         manifest: &crate::store::SessionCheckpoint,
-    ) -> bool {
+        budget: &lash_protocol_types::allocation::AllocationBudget,
+    ) -> Result<bool, crate::StoreError> {
         // This compares the store result with the complete intent already held
         // in process. It performs no store lookup and does not infer permission
         // from the bodiless descriptor shape produced after adoption.
-        self.build_checkpoint(
-            crate::PersistedTurnState::default(),
-            crate::store::FleetFormat::current(),
-        )
-        .and_then(|checkpoint| checkpoint.manifest(crate::store::FleetFormat::current()))
-        .is_ok_and(|resident| {
-            resident.components == manifest.components
-                && resident.execution_ref == manifest.execution_ref
-        })
+        let resident = self
+            .build_checkpoint(
+                crate::PersistedTurnState::default(),
+                crate::store::FleetFormat::current(),
+                budget,
+            )
+            .and_then(|checkpoint| checkpoint.manifest(crate::store::FleetFormat::current()));
+        match resident {
+            Err(crate::StoreError::Allocation(error)) => Err(error.into()),
+            resident => Ok(resident.is_ok_and(|resident| {
+                resident.components == manifest.components
+                    && resident.execution_ref == manifest.execution_ref
+            })),
+        }
     }
 
     fn discard_known_bodies(

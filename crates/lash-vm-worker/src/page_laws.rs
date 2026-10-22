@@ -44,7 +44,7 @@ use crate::worker::Fences;
 /// The committed pages behind the activation's root lease.
 #[derive(Default)]
 struct Store {
-    pages: Mutex<BTreeMap<NodeId, Arc<[u8]>>>,
+    pages: Mutex<BTreeMap<NodeId, lash_core_store::checkpoint_graph::SharedBytes>>,
 }
 
 impl Store {

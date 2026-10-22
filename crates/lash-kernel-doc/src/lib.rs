@@ -11,6 +11,7 @@
 //!
 //! It depends on no other lash crate.
 
+pub mod allocation;
 mod ast;
 mod capabilities;
 mod caption;

@@ -20,8 +20,6 @@
 //!   waits on no publication, lease or peel (the PostgreSQL lock order,
 //!   FIG-6193).
 
-use std::sync::Arc;
-
 use lash_core_store::checkpoint_graph::stage::CandidateManifest;
 use lash_core_store::checkpoint_graph::{CommitId, NodeId};
 
@@ -77,7 +75,7 @@ pub struct RootLease {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct StoredPage {
     pub id: NodeId,
-    pub bytes: Arc<[u8]>,
+    pub bytes: lash_kernel_doc::allocation::SharedBytes,
 }
 
 /// The one write of the owner commit that owns a candidate (FIG-6197 F1):

@@ -18,8 +18,6 @@
 //! roots it still needs ([`StageSpool::retain`]), and a settled candidate
 //! removes only its own pages.
 
-use std::sync::Arc;
-
 use super::commit::CommitId;
 use super::node::{EncodedNode, NodeId, VerifiedNode};
 
@@ -191,7 +189,7 @@ pub trait StageSpool: Send {
         protected: &dyn Fn(&NodeId) -> bool,
     ) -> Result<(), StageFault>;
     /// Reads a page this activation staged.
-    fn read(&self, page: &NodeId) -> Result<Arc<[u8]>, StageFault>;
+    fn read(&self, page: &NodeId) -> Result<lash_kernel_doc::allocation::SharedBytes, StageFault>;
     /// Whether `page` is staged here. A staged page's child that is not
     /// staged was a protected committed page when the page was sealed: its
     /// provenance, which decides the authority a reader is granted for it.

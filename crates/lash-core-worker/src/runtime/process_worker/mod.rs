@@ -179,25 +179,34 @@ impl DurableProcessWorker {
     async fn session_turn_runtime(
         &self,
         process: &ProcessRecord,
+        budget: &lash_protocol_types::allocation::AllocationBudget,
     ) -> Result<SessionTurnRuntime, PluginError> {
         let runtime = SessionTurnRuntime::for_record(self.runtime_ports(process), process)?;
         let plugins = self.admit_plugins().await?;
-        runtime.adopt_plugin_admission(plugins);
+        runtime.adopt_plugin_admission(plugins, budget)?;
         Ok(runtime)
     }
 }
 
 #[lash_core::async_trait]
 impl SessionTurns for DurableProcessWorker {
-    async fn mail(&self, process: &ProcessRecord) -> Result<SessionTurnMail, PluginError> {
-        self.session_turn_runtime(process)
+    async fn mail(
+        &self,
+        process: &ProcessRecord,
+        budget: &lash_protocol_types::allocation::AllocationBudget,
+    ) -> Result<SessionTurnMail, PluginError> {
+        self.session_turn_runtime(process, budget)
             .await?
             .mail_session_turn(process)
             .await
     }
 
-    async fn cancel(&self, process: &ProcessRecord) -> Result<SessionTurnCancel, PluginError> {
-        self.session_turn_runtime(process)
+    async fn cancel(
+        &self,
+        process: &ProcessRecord,
+        budget: &lash_protocol_types::allocation::AllocationBudget,
+    ) -> Result<SessionTurnCancel, PluginError> {
+        self.session_turn_runtime(process, budget)
             .await?
             .cancel_session_turn(process)
             .await
@@ -206,8 +215,9 @@ impl SessionTurns for DurableProcessWorker {
     async fn outcome(
         &self,
         process: &ProcessRecord,
+        budget: &lash_protocol_types::allocation::AllocationBudget,
     ) -> Result<lash_execution_contracts::process::ProcessOutcome, PluginError> {
-        self.session_turn_runtime(process)
+        self.session_turn_runtime(process, budget)
             .await?
             .session_turn_outcome(process)
             .await

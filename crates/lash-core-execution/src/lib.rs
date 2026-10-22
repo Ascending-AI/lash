@@ -654,10 +654,10 @@ pub use lash_core_store::execution_state::PluginOptions;
 pub use lash_core_store::plugin_state::FormatNamespace;
 pub use lash_core_store::plugin_state::FormatRefusal;
 pub use lash_core_store::plugin_state::KeyRejection;
-pub use lash_core_store::plugin_state::PluginConfigNamespace;
 pub use lash_core_store::plugin_state::PluginNamespaceState;
 pub use lash_core_store::plugin_state::PluginState;
 pub use lash_core_store::plugin_state::PluginStateError;
+pub use lash_core_store::plugin_state::{ConfigAdmissionError, ConfigJson, PluginConfigNamespace};
 pub use lash_core_store::session_identity::AgentFrameAssignment;
 pub use lash_core_store::session_identity::AgentFrameReason;
 pub use lash_core_store::session_identity::AgentFrameRecord;
@@ -675,7 +675,6 @@ pub use plugin::PluginStateView;
 pub use plugin::PluginTransitionBase;
 pub use plugin::PluginTransitionId;
 pub use plugin::PluginTransitionRecord;
-pub use plugin::PluginTransitionRequest;
 pub use plugin::ProcessEngineContributionContext;
 pub use plugin::ProtocolBeforeLlmCallContext;
 pub use plugin::ProtocolLlmCallAction;
@@ -683,6 +682,7 @@ pub use plugin::SessionGraphAppendResult;
 pub use plugin::SessionGraphService;
 pub use plugin::SessionReadView;
 pub use plugin::SessionStateService;
+pub use plugin::{PluginTransitionRequest, PluginTransitionRequestData};
 
 pub use lash_core_store::session_identity::OpenAgentFrameOutcome;
 pub use lash_core_store::session_identity::OpenAgentFrameRequest;
@@ -958,8 +958,8 @@ pub use store::{
     RuntimeTurnCommitStamp, ScanCoverage, SemanticBoundaryOperation, SessionAdmission,
     SessionBlobReclaimReport, SessionCatalogStore, SessionCommitStore, SessionHistoryStore,
     SessionLookup, SessionMeta, SessionReferrerState, SessionStateAdmission, SessionStore,
-    StoreBackend, StoreComponentVersion, StoreError, StoreMaintenance, StorePreflight,
-    StoreReleaseStamp, StoreReleaseState, StoreSchemaDatabase, StoreSchemaOutcome,
+    SharedCheckpointAddress, StoreBackend, StoreComponentVersion, StoreError, StoreMaintenance,
+    StorePreflight, StoreReleaseStamp, StoreReleaseState, StoreSchemaDatabase, StoreSchemaOutcome,
     StoreSchemaStatus, StoreSchemaVerdict, SurfaceFormat, TurnInputAdmission, TurnInputForsaking,
     TurnInputStore, VacuumReport, WriterPin, compare_releases, release_stamp_advances,
 };

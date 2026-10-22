@@ -392,7 +392,7 @@ fn a_stale_transaction_runs_no_reducer_and_publishes_nothing() {
     assert_eq!(first.load(Ordering::SeqCst), 0);
     let mut published = base.clone();
     assert_eq!(
-        resolution.publish(&mut published),
+        resolution.publish(&mut published).unwrap(),
         ConfigTransactionOutcome::Stale {
             expected: 3,
             actual: 4
@@ -427,7 +427,7 @@ fn ordered_commands_of_two_owners_publish_together_with_one_revision_step() {
         .expect("the recorded config reads");
     let mut published = base.clone();
     assert_eq!(
-        resolution.publish(&mut published),
+        resolution.publish(&mut published).unwrap(),
         ConfigTransactionOutcome::Applied {
             base_revision: 7,
             revision: 8,
@@ -470,7 +470,8 @@ fn a_refused_member_refuses_the_whole_transaction() {
         )
         .expect("the recorded config reads");
     let mut published = base.clone();
-    let ConfigTransactionOutcome::Refused { refusal } = resolution.publish(&mut published) else {
+    let ConfigTransactionOutcome::Refused { refusal } = resolution.publish(&mut published).unwrap()
+    else {
         panic!("the transaction is refused");
     };
     assert_eq!(refusal.owner, "second");
@@ -708,7 +709,9 @@ fn run_options_are_the_owners_typed_options_and_only_the_owner_applies_them() {
         ),
         "the core share is no owner a run's options apply to"
     );
-    let (protocol, mut namespaces) = base.plugin_config.clone().into_recorded_parts();
+    let (protocol, namespaces) = base.plugin_config.recorded_parts();
+    let protocol = protocol.map(str::to_owned);
+    let mut namespaces = namespaces.clone();
     namespaces.remove("first");
     let unrecorded = crate::PluginConfig::from_recorded_parts(protocol, namespaces);
     assert!(
@@ -844,7 +847,7 @@ fn core_commands_keep_what_they_do_not_name() {
     );
     let mut published = base.clone();
     assert!(matches!(
-        resolution.publish(&mut published),
+        resolution.publish(&mut published).unwrap(),
         ConfigTransactionOutcome::Applied { revision: 1, .. }
     ));
     assert_eq!(
@@ -881,7 +884,7 @@ fn a_profile_command_naming_the_recorded_key_mints_it_again() {
     );
     let mut published = base.clone();
     assert!(matches!(
-        resolution.publish(&mut published),
+        resolution.publish(&mut published).unwrap(),
         ConfigTransactionOutcome::Applied { .. }
     ));
     assert_eq!(published.model, Some(recorded("model", 4000, &[])));
@@ -1086,7 +1089,7 @@ fn config_namespaces_are_written_in_the_admissions_recorded_format() {
             .expect("the recorded config reads");
         let mut published = base.clone();
         assert!(matches!(
-            resolution.publish(&mut published),
+            resolution.publish(&mut published).unwrap(),
             ConfigTransactionOutcome::Applied { .. }
         ));
         (
@@ -1118,16 +1121,19 @@ fn an_unchanged_owner_judges_a_runs_change_to_another_owner() {
     let (registry, _, _) = counters();
     let base = head(&registry, 0);
     let mut derived = base.clone();
-    derived.plugin_config.insert(
-        "first",
-        registry
-            .apply_run_options(
-                &base.plugin_config,
-                "first",
-                &serde_json::json!({ "count": RESERVED, "limit": 100 }),
-            )
-            .expect("the first counter applies its options"),
-    );
+    derived
+        .plugin_config
+        .insert(
+            "first",
+            registry
+                .apply_run_options(
+                    &base.plugin_config,
+                    "first",
+                    &serde_json::json!({ "count": RESERVED, "limit": 100 }),
+                )
+                .expect("the first counter applies its options"),
+        )
+        .unwrap();
     let ConfigFault::Refused(refusal) = registry
         .validate_derived(&base, &derived)
         .expect_err("the unchanged second counter refuses")

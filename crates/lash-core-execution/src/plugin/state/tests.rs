@@ -416,11 +416,13 @@ fn plugin_formats_refuse_before_callbacks_and_preserve_bytes() {
     );
 
     let mut config = crate::PluginConfig::default();
-    config.insert_versioned(
-        "format-probe",
-        crate::FormatVersion::new(u32::MAX).unwrap(),
-        serde_json::json!({"old": 17}),
-    );
+    config
+        .insert_versioned(
+            "format-probe",
+            crate::FormatVersion::new(u32::MAX).unwrap(),
+            serde_json::json!({"old": 17}),
+        )
+        .unwrap();
     let config_bytes = rmp_serde::to_vec_named(&config).unwrap();
     let result = host.build_session(PluginSessionRequest::creation(
         "bad-config",
@@ -665,11 +667,13 @@ fn plugin_state_refusals_are_distinct_typed_and_pre_callback() {
     assert_eq!(refusal.stored.get(), 1);
     assert_eq!(refusal.readable.get(), 2);
     let mut config = crate::PluginConfig::default();
-    config.insert_versioned(
-        "no-migrate",
-        crate::FormatVersion::ONE,
-        serde_json::json!({"old": 17}),
-    );
+    config
+        .insert_versioned(
+            "no-migrate",
+            crate::FormatVersion::ONE,
+            serde_json::json!({"old": 17}),
+        )
+        .unwrap();
     let config_bytes = rmp_serde::to_vec_named(&config).unwrap();
     let result = host.build_session(PluginSessionRequest::creation(
         "unreadable-config",
@@ -756,11 +760,13 @@ fn plugin_formats_convert_only_in_recorded_transition() {
     .unwrap();
     let before = rmp_serde::to_vec_named(&snapshot).unwrap();
     let mut config = crate::PluginConfig::default();
-    config.insert_versioned(
-        "format-probe",
-        crate::FormatVersion::ONE,
-        serde_json::json!({"old": 17}),
-    );
+    config
+        .insert_versioned(
+            "format-probe",
+            crate::FormatVersion::ONE,
+            serde_json::json!({"old": 17}),
+        )
+        .unwrap();
     let mut results = Vec::new();
     for owner in ["first-decode", "replay-decode"] {
         let session = host
@@ -828,16 +834,20 @@ fn plugin_formats_stamp_every_state_write() {
     }))
     .unwrap();
     let mut config = crate::PluginConfig::default();
-    config.insert_versioned(
-        "format-probe",
-        crate::FormatVersion::new(2).unwrap(),
-        serde_json::json!({"native": 18}),
-    );
-    config.insert_versioned(
-        "inactive",
-        crate::FormatVersion::new(99).unwrap(),
-        serde_json::json!({"opaque": 5}),
-    );
+    config
+        .insert_versioned(
+            "format-probe",
+            crate::FormatVersion::new(2).unwrap(),
+            serde_json::json!({"native": 18}),
+        )
+        .unwrap();
+    config
+        .insert_versioned(
+            "inactive",
+            crate::FormatVersion::new(99).unwrap(),
+            serde_json::json!({"opaque": 5}),
+        )
+        .unwrap();
     for version in [1, 2] {
         let writer = crate::FormatVersion::new(version).unwrap();
         let writers = BTreeMap::from([("format-probe".into(), writer)]);
@@ -1052,7 +1062,7 @@ async fn a_session_writes_state_in_its_admissions_recorded_format_across_a_final
         (probe.plugin.as_str(), probe.writer.get()),
         ("format-probe", 1)
     );
-    session.adopt_plugin_admission(recorded.clone());
+    session.adopt_plugin_admission(recorded.clone()).unwrap();
     let before = session.committed_state().unwrap();
     assert_eq!(before.plugins["format-probe"].format_version.get(), 1);
     assert_eq!(
@@ -1071,14 +1081,14 @@ async fn a_session_writes_state_in_its_admissions_recorded_format_across_a_final
 
     // A retry of the admitted work adopts its record again and writes the
     // same bytes, whatever the fleet permits now.
-    session.adopt_plugin_admission(recorded);
+    session.adopt_plugin_admission(recorded).unwrap();
     assert_eq!(
         rmp_serde::to_vec_named(&session.committed_state().unwrap()).unwrap(),
         rmp_serde::to_vec_named(&before).unwrap()
     );
 
     // Work admitted after the finalize writes the native format.
-    session.adopt_plugin_admission(after);
+    session.adopt_plugin_admission(after).unwrap();
     assert_eq!(session.committed_state().unwrap(), native);
 
     // A plugin that writes nothing the fleet permits is not admitted.
@@ -1175,33 +1185,34 @@ fn recorded_transition_keeps_typed_refusal_and_publishes_neither_namespace() {
             .map(|id| (id.into(), PluginNamespaceState::default()))
             .collect(),
     };
-    let request = crate::plugin::PluginTransitionRequest {
-        id: crate::plugin::PluginTransitionId(
-            crate::EffectAddress::new(
-                crate::ExecutionScope::turn("transition-owner", "run"),
-                "plugin-transition",
-            )
-            .unwrap(),
-        ),
-        owner: crate::RuntimeOwner::Session("transition-owner".into()),
-        base: crate::plugin::PluginTransitionBase::Session {
-            head: crate::store::SessionHeadRef {
-                generation: 0,
-                revision: 7,
-                leaf: None,
-                checkpoint: Some(super::state_ref(&base)),
+    let request =
+        crate::plugin::PluginTransitionRequest::new(crate::plugin::PluginTransitionRequestData {
+            id: crate::plugin::PluginTransitionId(
+                crate::EffectAddress::new(
+                    crate::ExecutionScope::turn("transition-owner", "run"),
+                    "plugin-transition",
+                )
+                .unwrap(),
+            ),
+            owner: crate::RuntimeOwner::Session("transition-owner".into()),
+            base: crate::plugin::PluginTransitionBase::Session {
+                head: crate::store::SessionHeadRef {
+                    generation: 0,
+                    revision: 7,
+                    leaf: None,
+                    checkpoint: Some(super::state_ref(&base)),
+                },
             },
-        },
-        target: crate::store::plugin_writers::PluginAdmission::from_plugins(
-            host.factories()
-                .iter()
-                .map(|factory| crate::store::plugin_writers::AdmittedPlugin {
-                    plugin: factory.id().into(),
-                    writer: factory.plugin_declaration().format_version,
-                })
-                .collect(),
-        ),
-    };
+            target: crate::store::plugin_writers::PluginAdmission::from_plugins(
+                host.factories()
+                    .iter()
+                    .map(|factory| crate::store::plugin_writers::AdmittedPlugin {
+                        plugin: factory.id().into(),
+                        writer: factory.plugin_declaration().format_version,
+                    })
+                    .collect(),
+            ),
+        });
     let record = host.transition_plugins(request, &base, &crate::PluginConfig::default());
     assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 2);
     assert!(
@@ -1245,7 +1256,7 @@ fn transition_request(
     owner: &str,
     host: &crate::PluginHost,
 ) -> crate::plugin::PluginTransitionRequest {
-    crate::plugin::PluginTransitionRequest {
+    crate::plugin::PluginTransitionRequest::new(crate::plugin::PluginTransitionRequestData {
         id: crate::plugin::PluginTransitionId(
             crate::EffectAddress::new(
                 crate::ExecutionScope::turn(crate::SessionId::fixture(owner), "run"),
@@ -1274,7 +1285,7 @@ fn transition_request(
                 })
                 .collect(),
         ),
-    }
+    })
 }
 
 #[tokio::test]

@@ -134,10 +134,13 @@ fn snapshot() -> PersistedSessionConfig {
             .with_reasoning(ReasoningSelection::Effort("low".to_string())),
     );
     config.plugin_config = crate::PluginConfig::for_protocol(Some("protocol".to_string()));
-    config.plugin_config.insert(
-        "protocol",
-        serde_json::json!({ "keep": 1, "replace": "session" }),
-    );
+    config
+        .plugin_config
+        .insert(
+            "protocol",
+            serde_json::json!({ "keep": 1, "replace": "session" }),
+        )
+        .unwrap();
     config.config_revision = 7;
     config
 }
@@ -163,11 +166,13 @@ fn admitted_runs_share_immutable_config_json() {
     // FIG-6149: resolving and carrying a run must not deep-copy its owner's
     // immutable namespace, including the protocol's per-call view of it.
     let mut base = snapshot();
-    base.plugin_config.insert_versioned(
-        "protocol",
-        crate::plugin_state::FormatVersion::new(7).expect("nonzero format"),
-        serde_json::json!({"schema": "x".repeat(8192)}),
-    );
+    base.plugin_config
+        .insert_versioned(
+            "protocol",
+            crate::plugin_state::FormatVersion::new(7).expect("nonzero format"),
+            serde_json::json!({"schema": "x".repeat(8192)}),
+        )
+        .unwrap();
     let encoded = serde_json::to_vec(&base).expect("encode config");
     let run = RunSpec::default()
         .resolve(&base, None, &catalog(), &MapOwner)
@@ -202,7 +207,8 @@ fn admitted_runs_share_immutable_config_json() {
     );
     let mut next = base.clone();
     next.plugin_config
-        .insert("protocol", serde_json::json!({"schema": "next"}));
+        .insert("protocol", serde_json::json!({"schema": "next"}))
+        .unwrap();
     assert_eq!(carried.config().plugin_config.get("protocol"), Some(value));
     assert_ne!(next.plugin_config, carried.config().plugin_config);
 }

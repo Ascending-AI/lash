@@ -32,6 +32,13 @@ pub(super) async fn record_native_transition(
     crate::plugin::PluginTransitionRecord,
     lash_execution_contracts::plugin_error::PluginError,
 > {
+    let request = request
+        .clone_in(config.allocation_budget())
+        .map_err(|error| {
+            lash_execution_contracts::plugin_error::PluginError::from(
+                crate::StoreError::Allocation(error),
+            )
+        })?;
     let attribution = match &request.owner {
         crate::RuntimeOwner::Session(id) => crate::RuntimeAttribution::for_session(id.clone()),
         crate::RuntimeOwner::Process(_) => crate::RuntimeAttribution::none(),
@@ -189,19 +196,21 @@ impl crate::runtime::LashRuntime {
             "plugin-transition",
         )
         .map_err(crate::RuntimeError::from)?;
-        let request = crate::plugin::PluginTransitionRequest {
-            id: crate::plugin::PluginTransitionId(address),
-            owner: crate::RuntimeOwner::Session(self.state.session_id.clone()),
-            base: crate::plugin::PluginTransitionBase::Session {
-                head: crate::store::SessionHeadRef {
-                    generation: 0,
-                    revision: self.state.head_revision,
-                    leaf: self.state.session_graph.leaf_node_id.clone(),
-                    checkpoint: self.state.checkpoint_ref.clone(),
+        let request = crate::plugin::PluginTransitionRequest::new(
+            crate::plugin::PluginTransitionRequestData {
+                id: crate::plugin::PluginTransitionId(address),
+                owner: crate::RuntimeOwner::Session(self.state.session_id.clone()),
+                base: crate::plugin::PluginTransitionBase::Session {
+                    head: crate::store::SessionHeadRef {
+                        generation: 0,
+                        revision: self.state.head_revision,
+                        leaf: self.state.session_graph.leaf_node_id.clone(),
+                        checkpoint: self.state.checkpoint_ref.clone(),
+                    },
                 },
+                target,
             },
-            target,
-        };
+        );
         let record = crate::runtime::plugin_transition::record_native_transition(
             scoped_effect_controller,
             plugins.host().clone(),

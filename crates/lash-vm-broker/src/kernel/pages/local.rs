@@ -4,8 +4,6 @@
 //! [`PageGrant::NONE`]; bytes are still re-hashed and re-framed before the
 //! heap decodes them.
 
-use std::sync::Arc;
-
 use lash_core_store::checkpoint_graph::NodeId;
 use lash_core_store::checkpoint_graph::stage::{StageFault, StageSpool};
 use lash_kernel_doc::heap::{HeapFault, HostResource, PageGrant, PageId, PageRef};
@@ -17,7 +15,7 @@ use super::{answer_page, frame_page, staging};
 /// fixture, a test's map.
 pub trait CommittedPages {
     /// The envelope of `page`, if it is committed.
-    fn page(&self, page: &NodeId) -> Option<Arc<[u8]>>;
+    fn page(&self, page: &NodeId) -> Option<lash_kernel_doc::allocation::SharedBytes>;
 }
 
 /// An in-process [`PageSource`]: committed pages from `committed`, sealed

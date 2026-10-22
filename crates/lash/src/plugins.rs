@@ -170,7 +170,6 @@ pub use lash_core::plugin::PluginCallbackIdentity;
 pub use lash_core::plugin::PluginCommand;
 pub use lash_core::plugin::PluginCommandContext;
 pub use lash_core::plugin::PluginComposition;
-pub use lash_core::plugin::PluginConfigNamespace;
 pub use lash_core::plugin::PluginDeclaration;
 pub use lash_core::plugin::PluginFailureClass;
 pub use lash_core::plugin::PluginFailureOrigin;
@@ -269,10 +268,10 @@ pub use lash_core::plugin::{
     NamespaceEntry, NamespaceValues, PluginAbort, PluginNamespaceState,
     PluginSessionMaterializationRequest, PluginSessionRequest, PluginState, PluginStateEffect,
     PluginTransitionBase, PluginTransitionId, PluginTransitionRecord, PluginTransitionRequest,
-    ProtocolBeforeLlmCallContext, ProtocolDriverPlugin, ProtocolLlmCallAction,
-    ProtocolSessionContext, ProtocolSessionPlugin, ProtocolSessionRestoreView,
-    RecordedCallbackPhase, RecordedTurnContribution, SessionAuthorityContext, SessionPageReader,
-    SessionPages, StoredCell, TurnPreparation,
+    PluginTransitionRequestData, ProtocolBeforeLlmCallContext, ProtocolDriverPlugin,
+    ProtocolLlmCallAction, ProtocolSessionContext, ProtocolSessionPlugin,
+    ProtocolSessionRestoreView, RecordedCallbackPhase, RecordedTurnContribution,
+    SessionAuthorityContext, SessionPageReader, SessionPages, StoredCell, TurnPreparation,
 };
 /// The attachment-omission history policy (ADR 0133): a plugin names the
 /// attachments of a turn's projected history its request omits, and core
@@ -280,6 +279,7 @@ pub use lash_core::plugin::{
 pub use lash_core::plugin::{
     AttachmentOmissionContext, AttachmentOmissionPolicy, AttachmentOmissions, HistoryPartId,
 };
+pub use lash_core::plugin::{ConfigAdmissionError, ConfigJson, PluginConfigNamespace};
 /// The registration groups [`PluginRegistrar`]'s accessors return
 /// (`reg.tools()`, `reg.session()`, ...), nameable so a helper can take
 /// one as a parameter.

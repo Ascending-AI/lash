@@ -94,7 +94,10 @@ where
         .get("arbitrary/unchanged")
         .expect("ordinary commit carries unknown key");
     assert_eq!(carried.body(), None, "unknown component must ride ref-only");
-    assert_eq!(carried.blob_ref(), Some(&unchanged_descriptor.blob_ref));
+    assert_eq!(
+        carried.blob_ref(),
+        Some(unchanged_descriptor.blob_ref.as_ref())
+    );
     let measured = second_commit
         .measure_budget()
         .expect("measure ordinary complete-set commit");
@@ -194,7 +197,7 @@ where
     );
     assert_eq!(
         checkpoint.components["arbitrary/unchanged"].blob_ref(),
-        Some(&unchanged_descriptor.blob_ref),
+        Some(unchanged_descriptor.blob_ref.as_ref()),
         "round-trip must preserve the unknown component's content hash"
     );
     assert_eq!(
@@ -219,7 +222,7 @@ where
         "arbitrary/unknown-ref".to_string(),
         crate::HydratedCheckpointComponent::Unchanged {
             descriptor: crate::CheckpointComponentDescriptor {
-                blob_ref: crate::BlobRef("never-stored".to_string()),
+                blob_ref: crate::BlobRef("never-stored".to_string()).into(),
                 encoding_version: crate::FleetFormat::current().writer_version(
                     lash_core::surface_format!(CHECKPOINT_COMPONENT_ENCODING_VERSION),
                 ),
@@ -243,7 +246,7 @@ where
             encoding_version: crate::FleetFormat::current().writer_version(
                 lash_core::surface_format!(CHECKPOINT_COMPONENT_ENCODING_VERSION),
             ) + 1,
-            body_ref: crate::store::BlobRef::for_content(b"unsupported"),
+            body_ref: crate::store::BlobRef::for_content(b"unsupported").into(),
             body: b"unsupported".as_slice().into(),
         },
     );
@@ -284,7 +287,8 @@ pub async fn checkpoint_rejects_unknown_component_ref(store: Arc<dyn RuntimeStor
         "arbitrary/unknown-ref".to_string(),
         crate::HydratedCheckpointComponent::Unchanged {
             descriptor: crate::CheckpointComponentDescriptor {
-                blob_ref: crate::BlobRef("checkpoint-component-that-was-never-stored".to_string()),
+                blob_ref: crate::BlobRef("checkpoint-component-that-was-never-stored".to_string())
+                    .into(),
                 encoding_version: crate::FleetFormat::current().writer_version(
                     lash_core::surface_format!(CHECKPOINT_COMPONENT_ENCODING_VERSION),
                 ),

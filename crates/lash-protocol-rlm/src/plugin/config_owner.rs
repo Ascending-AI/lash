@@ -566,7 +566,10 @@ mod tests {
                 .expect("the recorded config reads")
                 .publish(config);
             assert!(
-                matches!(outcome, lash_core::ConfigTransactionOutcome::Applied { .. }),
+                matches!(
+                    outcome,
+                    Ok(lash_core::ConfigTransactionOutcome::Applied { .. })
+                ),
                 "{outcome:?}"
             );
         };

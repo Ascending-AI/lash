@@ -7,6 +7,7 @@ use std::sync::Arc;
 pub use transition::{
     PLUGIN_ADMISSION_CHECKPOINT_VERSION, PluginNativeView, PluginTransitionBase,
     PluginTransitionId, PluginTransitionRecord, PluginTransitionRequest,
+    PluginTransitionRequestData,
 };
 
 use crate::ToolProvider;
@@ -18,7 +19,9 @@ pub use lash_core_store::store::plugin_writers::{
     declared_tool_provider,
 };
 
-pub use lash_core_store::plugin_state::{FormatNamespace, FormatRefusal, PluginConfigNamespace};
+pub use lash_core_store::plugin_state::{
+    ConfigAdmissionError, ConfigJson, FormatNamespace, FormatRefusal, PluginConfigNamespace,
+};
 
 pub use lash_protocol_types::{
     CheckpointKind, ControlPhaseExpired, PluginMessage, PluginRuntimeEvent, ToolCatalogContribution,

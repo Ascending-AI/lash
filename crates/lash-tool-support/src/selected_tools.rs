@@ -322,10 +322,12 @@ mod advertisement_tests {
         )
         .unwrap();
         let mut config = lash_core::plugin::PluginConfig::default();
-        config.insert(
-            "selected",
-            serde_json::json!({ "tools": "invalid-selection" }),
-        );
+        config
+            .insert(
+                "selected",
+                serde_json::json!({ "tools": "invalid-selection" }),
+            )
+            .unwrap();
         let config =
             OwnerConfigView::session(lash_core::plugin::AdmittedPluginConfig::new(config, 1));
         assert!(

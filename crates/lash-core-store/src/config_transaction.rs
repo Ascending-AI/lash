@@ -329,6 +329,8 @@ impl RecordedNamespaceCorrupt {
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 pub enum ConfigFault {
     #[error(transparent)]
+    Allocation(#[from] lash_protocol_types::allocation::AllocationError),
+    #[error(transparent)]
     Refused(#[from] ConfigRefusal),
     #[error(transparent)]
     RecordedCorrupt(#[from] RecordedNamespaceCorrupt),
@@ -390,17 +392,22 @@ impl ConfigResolution {
     /// Publish this resolution onto `config`: the recorded replacements, and
     /// one revision step. A stale or refused resolution publishes nothing.
     /// Returns the outcome the command settles as.
-    pub fn publish(&self, config: &mut crate::PersistedSessionConfig) -> ConfigTransactionOutcome {
-        match &self.result {
+    pub fn publish(
+        &self,
+        config: &mut crate::PersistedSessionConfig,
+    ) -> Result<ConfigTransactionOutcome, lash_protocol_types::allocation::AllocationError> {
+        Ok(match &self.result {
             ConfigResolutionDecision::Applied {
                 core,
                 namespaces,
                 outputs,
             } => {
+                let mut plugins = config.plugin_config.clone();
+                plugins.apply_namespace_updates(namespaces)?;
                 if let Some(core) = core {
                     core.apply_to(config);
                 }
-                config.plugin_config.apply_namespace_updates(namespaces);
+                config.plugin_config = plugins;
                 config.config_revision = self.base_revision.saturating_add(1);
                 ConfigTransactionOutcome::Applied {
                     base_revision: self.base_revision,
@@ -417,7 +424,7 @@ impl ConfigResolution {
             ConfigResolutionDecision::Refused { refusal } => ConfigTransactionOutcome::Refused {
                 refusal: refusal.clone(),
             },
-        }
+        })
     }
 }
 

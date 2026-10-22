@@ -127,7 +127,7 @@ async fn committed_checkpoint(
         .manifest
         .components
         .values()
-        .map(|component| component.blob_ref.clone())
+        .map(|component| component.blob_ref.as_ref().clone())
         .collect();
     CommittedCheckpoint {
         request,
@@ -357,7 +357,7 @@ where
         third
             .manifest
             .component_ref("conformance/session-delete-owned"),
-        Some(&shared),
+        Some(shared.as_ref()),
         "{backend}: the advanced head shares a component with both dead roots"
     );
     let leaf = component_leaf(&first.manifest, "conformance/session-delete-owned");
@@ -514,7 +514,7 @@ where
                 .checkpoint
                 .expect("hydrated base")
                 .component_ref("conformance/session-delete-owned"),
-            Some(shared)
+            Some(shared.as_ref())
         );
         handles
             .factory

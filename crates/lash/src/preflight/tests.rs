@@ -191,7 +191,8 @@ fn checkpoint_item(session: &str, schema_version: u32, encoding: u32) -> Durable
                 blob_ref: lash_core::store::BlobRef(
                     lash_core::durable_port::domain::checkpoint_graph::NodeId::of_envelope(b"a")
                         .to_hex(),
-                ),
+                )
+                .into(),
                 encoding_version: encoding,
             },
         )]),

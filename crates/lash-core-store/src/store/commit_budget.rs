@@ -530,7 +530,7 @@ mod tests {
             "arbitrary/unchanged".to_string(),
             crate::HydratedCheckpointComponent::Unchanged {
                 descriptor: crate::CheckpointComponentDescriptor {
-                    blob_ref: crate::BlobRef("existing-content-ref".to_string()),
+                    blob_ref: crate::BlobRef("existing-content-ref".to_string()).into(),
                     encoding_version: crate::store::CHECKPOINT_COMPONENT_ENCODING_VERSION,
                 },
             },
