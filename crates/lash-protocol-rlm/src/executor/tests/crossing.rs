@@ -193,21 +193,30 @@ async fn a_capturing_function_in_a_tool_input_reaches_the_tool_as_a_function_val
             dialect.name()
         );
     }
+    // A later cell ships the saved environment with the defining source's
+    // coordinates, rather than the current cell's spelling or vector index.
+    let source = "const plan = (event) => event;";
+    let received = kept(
+        &CellDialect::typescript(),
+        &[source, "await keep.run({pick: plan});"],
+    )
+    .await;
+    let value = function_value(&received[0]["pick"]);
+    let origin = value
+        .signature_origin
+        .expect("saved annotation coordinates");
+    assert_eq!(origin.name.as_deref(), Some("plan"));
+    let span = origin.params[0].span.unwrap();
+    assert_eq!(&source[span.start..span.end], "event");
 }
 
 /// FN-CROSS, FN-FREEZE and FN-BOUND: a function that cannot cross raises
 /// `not_data` at the `perform`, before anything is requested or stored,
-/// naming its typed refusal: one that states no start signature (no stored
-/// reference stands in for it), one that captures a task, and one whose
+/// naming its typed refusal: one that captures a task, and one whose
 /// value would pass the 64 KiB canonical bound.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_function_that_cannot_cross_raises_before_the_call() {
     let cases = [
-        (
-            "const pick = async ({ a }: { a: number }) => a;",
-            "pick",
-            "states no start signature",
-        ),
         (
             "const task = (async () => 1)();\nconst pick = async () => await task;",
             "pick",

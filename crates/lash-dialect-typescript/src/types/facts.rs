@@ -120,7 +120,7 @@ struct Collector<'a> {
     names: HashMap<&'a str, Tally>,
     plain: super::plain::Collector<'a>,
     function_depth: usize,
-    aliases: Vec<(&'a str, &'a TypeAnnotation)>,
+    annotations: super::entry::Annotations,
     direct_calls: HashSet<&'a str>,
 }
 
@@ -137,6 +137,7 @@ pub(crate) struct Facts {
     named: HashSet<String>,
     narrowable: HashSet<String>,
     aliases: BTreeMap<String, Ty>,
+    annotations: super::entry::Annotations,
     direct_calls: HashSet<String>,
     /// Declared results of tools whose root no source or session binding shadows.
     effect_results: BTreeMap<String, Ty>,
@@ -157,10 +158,12 @@ impl Facts {
     ) -> Self {
         let mut collector = Collector::default();
         collector.scopes.push(HashMap::new());
+        collector.annotations.limits(program.annotation_limits);
+        collector.annotations.push();
         collector.declare_vars(&program.statements);
         collector.declare_block(&program.statements);
         collector.statements(&program.statements);
-        let mut aliases = resolve_aliases(&collector.aliases, &program.type_parameters);
+        let mut aliases = BTreeMap::new();
         // A package's value type is named by its dotted path, which no
         // local alias can spell.
         aliases.extend(
@@ -182,6 +185,7 @@ impl Facts {
         );
         let mut facts = Self {
             imported: program.imported.clone(),
+            annotations: std::mem::take(&mut collector.annotations),
             effect_results: effects
                 .iter()
                 .filter(|(name, _)| {
@@ -311,14 +315,34 @@ impl Facts {
 
     /// What an annotation lets the lowerer believe.
     pub(crate) fn believed(&self, annotation: &TypeAnnotation) -> Ty {
-        believed(annotation, &self.aliases)
+        self.annotations.fact(annotation, false).map_or_else(
+            |_| believed(annotation, &self.aliases),
+            |ty| Ty::annotated(&ty),
+        )
+    }
+
+    pub(crate) fn entry_annotation(
+        &self,
+        annotation: &TypeAnnotation,
+        settled: bool,
+    ) -> Result<
+        lash_vocabulary::Type,
+        (
+            crate::SourceSpan,
+            lash_vocabulary::AnnotationResolutionReason,
+        ),
+    > {
+        self.annotations.get(annotation, settled)
     }
 
     /// What a function's declared return type lets a call of it give.
     pub(crate) fn function(&self, return_ty: Option<&TypeAnnotation>) -> Ty {
-        Ty::Function(Box::new(
-            return_ty.map_or(Ty::Unknown, |annotation| self.believed(annotation)),
-        ))
+        Ty::Function(Box::new(return_ty.map_or(Ty::Unknown, |annotation| {
+            self.annotations.fact(annotation, true).map_or_else(
+                |_| believed(annotation, &self.aliases),
+                |ty| Ty::annotated(&ty),
+            )
+        })))
     }
 
     fn entry_type(&self, binding: usize, entry: &Entry<'_>) -> Ty {
@@ -531,32 +555,13 @@ impl Facts {
     }
 }
 
-/// What each `type` and `interface` of the source stands for. A name
-/// declared twice, one that refers to a name declared after it, and one a
-/// function's type parameter shares stand for nothing.
-fn resolve_aliases(
-    declared: &[(&str, &TypeAnnotation)],
-    type_parameters: &BTreeSet<String>,
-) -> BTreeMap<String, Ty> {
-    let mut aliases = BTreeMap::new();
-    let mut twice = BTreeSet::new();
-    for (name, annotation) in declared {
-        let ty = believed(annotation, &aliases);
-        if aliases.insert((*name).to_string(), ty).is_some() {
-            twice.insert((*name).to_string());
-        }
-    }
-    for name in twice.iter().chain(type_parameters) {
-        aliases.insert(name.clone(), Ty::Unknown);
-    }
-    aliases
-}
-
 impl<'a> Collector<'a> {
     /// Runs `walk` in a scope of its own.
     fn scoped(&mut self, walk: impl FnOnce(&mut Self)) {
         self.scopes.push(HashMap::new());
+        self.annotations.push();
         walk(self);
+        self.annotations.pop();
         self.scopes.pop();
     }
 
@@ -638,6 +643,12 @@ impl<'a> Collector<'a> {
     }
 
     fn name(&mut self, name: &'a str, role: Role, source: Source<'a>) {
+        match &source {
+            Source::Annotated(annotation) | Source::Returns(Some(annotation)) => {
+                self.annotations.record(annotation)
+            }
+            _ => {}
+        }
         let tally = self.names.entry(name).or_default();
         match role {
             Role::Declared { hoisted } => {
@@ -779,7 +790,7 @@ impl<'a> Collector<'a> {
         match statement {
             Stmt::Spanned(_, inner) => self.statement(inner),
             Stmt::Empty | Stmt::Break | Stmt::Continue => {}
-            Stmt::TypeAlias { name, ty } => self.aliases.push((name, ty)),
+            Stmt::TypeAlias { .. } => {}
             Stmt::Expr(expr) => self.expr(expr),
             Stmt::Throw(expr) => {
                 // A catch binding can expose the same guest heap value.
@@ -942,6 +953,7 @@ impl<'a> Collector<'a> {
     /// Declares what a block's own statements declare lexically, which
     /// exists for the whole block: `let`, `const`, functions and enums.
     fn declare_block(&mut self, statements: &'a [Stmt]) {
+        self.annotations.declare(statements);
         for statement in statements {
             match statement.unspanned() {
                 Stmt::Var { kind, declarations } if *kind != VarKind::Var => {
@@ -970,6 +982,11 @@ impl<'a> Collector<'a> {
     fn function(&mut self, function: &'a Function) {
         self.function_depth += 1;
         self.scoped(|this| {
+            this.annotations
+                .parameters(&function.type_parameters, function.result_span);
+            if let Some(annotation) = &function.return_ty {
+                this.annotations.record(annotation);
+            }
             for param in &function.params {
                 this.pattern(param, Role::Declared { hoisted: false });
             }
@@ -1088,7 +1105,8 @@ impl<'a> Collector<'a> {
                 self.plain.escape(value);
                 self.expr(value);
             }
-            Expr::As { value, .. } => {
+            Expr::As { value, ty } => {
+                self.annotations.record(ty);
                 self.expr(value);
             }
             Expr::Binary { left, right, .. } => {

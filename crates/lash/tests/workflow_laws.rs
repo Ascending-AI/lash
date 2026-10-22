@@ -1374,7 +1374,7 @@ async fn typescript_and_python_modules_share_one_entry_contract() {
         other => panic!("the module is refused: {other:?}\n{source}"),
     };
 
-    let typescript = "export async function first(inbox: string) { return inbox; }\nconst second = async (n: number) => n * 2;\nif (second) {\n  async function inBlock() { return 1; }\n}\n";
+    let typescript = "export async function first(inbox: string): any { return inbox; }\nconst second = async (n: number): number => n * 2;\nif (second) {\n  async function inBlock(): any { return 1; }\n}\n";
     let python = "async def first(inbox: str) -> str:\n    return inbox\n\n\nasync def second(n: int) -> int:\n    return n * 2\n\n\nif True:\n    async def in_block():\n        return 1\n";
     assert_eq!(
         entries(
@@ -1390,7 +1390,7 @@ async fn typescript_and_python_modules_share_one_entry_contract() {
 
     for (typescript, python, refusal) in [
         (
-            "export async function a() { return 1; }\nexport async function a() { return 2; }",
+            "export async function a(): any { return 1; }\nexport async function a(): any { return 2; }",
             "async def a() -> int:\n    return 1\n\n\nasync def a() -> int:\n    return 2\n",
             ModuleRefusal::DuplicateEntry,
         ),
@@ -1400,22 +1400,22 @@ async fn typescript_and_python_modules_share_one_entry_contract() {
             ModuleRefusal::EmptyModule,
         ),
         (
-            "const limit = 3;\nexport async function a() { return limit; }",
+            "const limit = 3;\nexport async function a(): any { return limit; }",
             "limit = 3\n\n\nasync def a() -> int:\n    return limit\n",
             ModuleRefusal::CapturedModuleBinding,
         ),
         (
-            "function helper() { return 1; }\nexport async function a() { return helper(); }",
+            "function helper(): any { return 1; }\nexport async function a(): any { return helper(); }",
             "def helper() -> int:\n    return 1\n\n\nasync def a() -> int:\n    return helper()\n",
             ModuleRefusal::CapturedModuleBinding,
         ),
         (
-            "export async function b() { return 1; }\nexport async function a() { return await b(); }",
+            "export async function b(): any { return 1; }\nexport async function a(): any { return await b(); }",
             "async def b() -> int:\n    return 1\n\n\nasync def a() -> int:\n    return await b()\n",
             ModuleRefusal::CapturedModuleBinding,
         ),
         (
-            "export async function a(limit: number = 3) { return limit; }",
+            "export async function a(limit: number = 3): any { return limit; }",
             "async def a(limit: int = 3) -> int:\n    return limit\n",
             ModuleRefusal::EntryDefault,
         ),
@@ -1438,7 +1438,7 @@ async fn typescript_and_python_modules_share_one_entry_contract() {
     for (language, source) in [
         (
             SourceLanguage::TypeScript,
-            "export async function entry() { return 0; }\nif (true) { const a = async () => 1; }",
+            "export async function entry(): any { return 0; }\nif (true) { const a = async () => 1; }",
         ),
         (
             SourceLanguage::Python,
@@ -1556,7 +1556,7 @@ async fn implicit_text_admission_preserves_operand_facts_for_hosts() {
     let pin = lash::process::HostArtifactPin::mint();
     let (_, request) = namespace(&core, &pin, &source_environment(false)).await;
     for (parameters, typed) in [
-        ("event", false),
+        ("event: any", false),
         (
             "event: { answered_by: { identity_id: string; kind: string } }",
             true,
@@ -1566,7 +1566,8 @@ async fn implicit_text_admission_preserves_operand_facts_for_hosts() {
             "`answered by ${event.answered_by}`",
             "'answered by ' + event.answered_by",
         ] {
-            let source = format!("export function answer({parameters}) {{ return {expression}; }}");
+            let source =
+                format!("export function answer({parameters}): any {{ return {expression}; }}");
             for policy in [
                 None,
                 Some(Policy::Refuse),

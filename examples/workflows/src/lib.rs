@@ -776,13 +776,6 @@ pub const SOURCES: &[SourceRow] = &[
         python_witness: None,
     },
     SourceRow {
-        name: "refusal-annotation",
-        typescript: Some(include_str!("../refusal-annotation/source.ts")),
-        python: Some(include_str!("../refusal-annotation/source.py")),
-        typescript_witness: None,
-        python_witness: None,
-    },
-    SourceRow {
         name: "refusal-default",
         typescript: Some(include_str!("../refusal-default/source.ts")),
         python: Some(include_str!("../refusal-default/source.py")),

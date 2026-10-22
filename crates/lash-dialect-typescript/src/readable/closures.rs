@@ -75,7 +75,7 @@ impl Lifter<'_> {
                 caption: None,
                 name: self.binding(&param.name)?,
                 optional: param.optional,
-                ty: annotation(&param.ty)?,
+                ty: self.callable_annotation(&param.ty)?,
             });
         }
         // The callable's body, at its site: the token's fifth part.
@@ -83,6 +83,7 @@ impl Lifter<'_> {
             lash_vocabulary::sites::Unit::Library(closure.function),
             Vec::new(),
         );
+        let wrapper = self.in_function(closure.function);
         let (is_async, args, body, site) = match definition
             .body()
             .ok_or_else(|| "closure has no body".to_owned())?
@@ -94,7 +95,7 @@ impl Lifter<'_> {
                     value: k::Expr::Act(act),
                 },
             ] if matches!(&act.kind, k::ActKind::Call(k::Callee::Import(id))
-                if self.is(id, "ts.promise.start")) =>
+                if wrapper.is(id, "ts.promise.start")) =>
             {
                 let [
                     k::Expr::Closure(inner),
@@ -107,7 +108,7 @@ impl Lifter<'_> {
                 else {
                     return refuse("an async function's start");
                 };
-                if !self.is(function, "list.copy")
+                if !wrapper.is(function, "list.copy")
                     || copied.as_slice() != [k::Expr::Variable(args.clone())]
                 {
                     return refuse("an async function's start");
@@ -143,11 +144,14 @@ impl Lifter<'_> {
             .iter()
             .map(|param| &param.name)
             .collect();
-        let saved = self.enter();
-        let body = self.function_body(is_async, args, &names, body, &site);
-        self.leave(saved);
+        let lash_vocabulary::sites::Unit::Library(body_function) = &site.unit else {
+            return refuse("a function body outside its defining unit");
+        };
+        let mut inner = self.in_function(*body_function);
+        let body = inner.function_body(is_async, args, &names, body, &site);
         Ok(Some(Function {
             is_async,
+            result: self.callable_annotation(&start.signature.result)?,
             params,
             body: body?,
         }))
@@ -311,20 +315,14 @@ fn arguments_before(
     Some(1 + names.len())
 }
 
-/// A function value's parameter annotation, `None` for `Any`.
-fn annotation(ty: &lash_vocabulary::Type) -> Lift<Option<Type>> {
-    Ok(Some(match ty {
-        lash_vocabulary::Type::Any => return Ok(None),
-        lash_vocabulary::Type::Text => Type::Word("string"),
-        lash_vocabulary::Type::Number => Type::Word("number"),
-        lash_vocabulary::Type::Bool => Type::Word("boolean"),
-        lash_vocabulary::Type::Null => Type::Word("null"),
-        lash_vocabulary::Type::List(item) => match annotation(item)? {
-            Some(item) => Type::Array(Box::new(item)),
-            None => Type::Array(Box::new(Type::Word("unknown"))),
-        },
-        _ => return refuse("a function value's parameter type no annotation writes"),
-    }))
+impl Lifter<'_> {
+    fn callable_annotation(&self, ty: &lash_vocabulary::Type) -> Lift<Option<Type>> {
+        if matches!(ty, lash_vocabulary::Type::Any) {
+            return Ok(None);
+        }
+        self.ts_type(None, ty, &k::FieldRoot::Result, &mut Vec::new())
+            .map(Some)
+    }
 }
 
 impl Expr {

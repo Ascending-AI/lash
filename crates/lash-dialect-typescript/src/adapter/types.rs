@@ -24,34 +24,28 @@ pub(crate) struct TypeAnnotation {
 /// cannot cross a durable entry boundary, plus one leaf for everything outside it.
 #[derive(Clone, Debug)]
 pub(crate) enum TypeShape {
-    /// `any` and `unknown`: the gradual type an unannotated parameter already
-    /// lowers to, so writing it changes nothing.
+    /// Explicit unconstrained annotations, distinct from an absent annotation.
+    Any,
     Unknown,
     String,
     Number,
     Boolean,
     Null,
-    /// `undefined` and `void`. The runtime's type language has no separate
-    /// absent type, so both land on `null` — the shape a missing durable input
-    /// arrives as.
+    /// `undefined` and `void`. Source facts retain absence; the entry
+    /// boundary separately records the convention's null normalization.
     Undefined,
-    /// A string literal type: some string.
-    StringLiteral,
+    /// A string literal retains its exact kernel Enum member.
+    StringLiteral(String),
     Array(Box<TypeAnnotation>),
-    Object(Vec<TypeAnnotationField>),
-    Dictionary(Box<TypeAnnotation>),
+    Object(Vec<TypeAnnotationField>, Option<Box<TypeAnnotation>>),
+    Generic(String, Vec<TypeAnnotation>),
     Union(Vec<TypeAnnotation>),
     Function(Box<TypeAnnotation>),
-    /// A named type: a local `type` alias or a host named-data type such as
-    /// `timer.Tick`. It is resolved against the artifact's alias table and the
-    /// host catalog at registration, not here.
+    /// A named type, resolved by declaration identity in the source scope.
     Reference(String),
     /// A construct the type analysis believes nothing about, carrying the
     /// words that name it.
-    Unsupported(
-        #[expect(dead_code, reason = "kept for a diagnostic that names the construct")]
-        &'static str,
-    ),
+    Unsupported(&'static str),
 }
 
 #[derive(Clone, Debug)]
@@ -73,12 +67,14 @@ pub(crate) fn convert_type(ty: &swc::TsType) -> TypeAnnotation {
             TypeShape::Array(Box::new(convert_type(&array.elem_type)))
         }
         swc::TsType::TsLitType(literal) => match &literal.lit {
-            swc::TsLit::Str(_) => TypeShape::StringLiteral,
+            swc::TsLit::Str(value) => {
+                TypeShape::StringLiteral(value.value.to_string_lossy().into_owned())
+            }
             swc::TsLit::Bool(_) => TypeShape::Boolean,
             _ => TypeShape::Unsupported("a numeric or template literal type"),
         },
         swc::TsType::TsTypeLit(literal) => match object_shape(literal) {
-            Some(fields) => TypeShape::Object(fields),
+            Some((fields, rest)) => TypeShape::Object(fields, rest),
             None => TypeShape::Unsupported("an object type with a non-property member"),
         },
         swc::TsType::TsUnionOrIntersectionType(ty) => match ty {
@@ -115,22 +111,6 @@ pub(crate) fn convert_type(ty: &swc::TsType) -> TypeAnnotation {
     TypeAnnotation { span, shape }
 }
 
-/// The declared result of an async process is the settled value of its promise.
-pub(crate) fn convert_return_type(ty: &swc::TsType) -> TypeAnnotation {
-    match ty {
-        swc::TsType::TsParenthesizedType(inner) => convert_return_type(&inner.type_ann),
-        swc::TsType::TsTypeRef(reference)
-            if entity_name(&reference.type_name).as_deref() == Some("Promise") =>
-        {
-            match &reference.type_params {
-                Some(params) if params.params.len() == 1 => convert_return_type(&params.params[0]),
-                _ => convert_type(ty),
-            }
-        }
-        _ => convert_type(ty),
-    }
-}
-
 fn keyword_shape(kind: swc::TsKeywordTypeKind) -> TypeShape {
     match kind {
         swc::TsKeywordTypeKind::TsStringKeyword => TypeShape::String,
@@ -140,9 +120,8 @@ fn keyword_shape(kind: swc::TsKeywordTypeKind) -> TypeShape {
         swc::TsKeywordTypeKind::TsUndefinedKeyword | swc::TsKeywordTypeKind::TsVoidKeyword => {
             TypeShape::Undefined
         }
-        swc::TsKeywordTypeKind::TsAnyKeyword | swc::TsKeywordTypeKind::TsUnknownKeyword => {
-            TypeShape::Unknown
-        }
+        swc::TsKeywordTypeKind::TsAnyKeyword => TypeShape::Any,
+        swc::TsKeywordTypeKind::TsUnknownKeyword => TypeShape::Unknown,
         swc::TsKeywordTypeKind::TsBigIntKeyword => TypeShape::Unsupported("a `bigint` type"),
         swc::TsKeywordTypeKind::TsSymbolKeyword => TypeShape::Unsupported("a `symbol` type"),
         swc::TsKeywordTypeKind::TsObjectKeyword => TypeShape::Unsupported("the `object` type"),
@@ -151,9 +130,26 @@ fn keyword_shape(kind: swc::TsKeywordTypeKind) -> TypeShape {
     }
 }
 
-fn object_shape(literal: &swc::TsTypeLit) -> Option<Vec<TypeAnnotationField>> {
+fn object_shape(
+    literal: &swc::TsTypeLit,
+) -> Option<(Vec<TypeAnnotationField>, Option<Box<TypeAnnotation>>)> {
+    let mut rest = None;
     let mut fields = Vec::with_capacity(literal.members.len());
     for member in &literal.members {
+        if let swc::TsTypeElement::TsIndexSignature(index) = member {
+            if rest.is_some() || index.params.len() != 1 {
+                return None;
+            }
+            let swc::TsFnParam::Ident(key) = &index.params[0] else {
+                return None;
+            };
+            if !matches!(key.type_ann.as_ref()?.type_ann.as_ref(), swc::TsType::TsKeywordType(keyword) if keyword.kind == swc::TsKeywordTypeKind::TsStringKeyword)
+            {
+                return None;
+            }
+            rest = Some(Box::new(convert_type(&index.type_ann.as_ref()?.type_ann)));
+            continue;
+        }
         let swc::TsTypeElement::TsPropertySignature(property) = member else {
             return None;
         };
@@ -166,7 +162,7 @@ fn object_shape(literal: &swc::TsTypeLit) -> Option<Vec<TypeAnnotationField>> {
             Some(annotation) => convert_type(&annotation.type_ann),
             None => TypeAnnotation {
                 span: source_span(property.span),
-                shape: TypeShape::Unknown,
+                shape: TypeShape::Unsupported("a property without an annotation"),
             },
         };
         fields.push(TypeAnnotationField {
@@ -175,27 +171,21 @@ fn object_shape(literal: &swc::TsTypeLit) -> Option<Vec<TypeAnnotationField>> {
             ty,
         });
     }
-    Some(fields)
+    Some((fields, rest))
 }
 
-/// Arrays and string-keyed records have data-only kernel shapes.
+/// Only built-in Array, Promise and string-keyed Record have structural
+/// boundary meanings; user generic instantiations are retained as unsupported.
 fn reference_shape(reference: &swc::TsTypeRef) -> TypeShape {
     let Some(name) = entity_name(&reference.type_name) else {
         return TypeShape::Unsupported("a qualified type reference");
     };
-    match (&reference.type_params, name.as_str()) {
-        (None, _) => TypeShape::Reference(name),
-        (Some(params), "Array" | "ReadonlyArray") if params.params.len() == 1 => {
-            TypeShape::Array(Box::new(convert_type(&params.params[0])))
-        }
-        (Some(params), "Record")
-            if params.params.len() == 2
-                && matches!(params.params[0].as_ref(), swc::TsType::TsKeywordType(keyword)
-                if keyword.kind == swc::TsKeywordTypeKind::TsStringKeyword) =>
-        {
-            TypeShape::Dictionary(Box::new(convert_type(&params.params[1])))
-        }
-        (Some(_), _) => TypeShape::Unsupported("a generic type reference"),
+    match &reference.type_params {
+        None => TypeShape::Reference(name),
+        Some(params) => TypeShape::Generic(
+            name,
+            params.params.iter().map(|ty| convert_type(ty)).collect(),
+        ),
     }
 }
 
@@ -241,7 +231,7 @@ pub(crate) fn convert_interface(interface: &swc::TsInterfaceDecl) -> TypeAnnotat
         members: interface.body.body.clone(),
     };
     let shape = match object_shape(&literal) {
-        Some(fields) => TypeShape::Object(fields),
+        Some((fields, rest)) => TypeShape::Object(fields, rest),
         None => TypeShape::Unsupported("an object type with a non-property member"),
     };
     TypeAnnotation {

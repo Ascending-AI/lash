@@ -30,7 +30,7 @@ impl Lowerer<'_> {
             signature.push_str(text(annotation.span));
         }
         Written {
-            signature_origin: None,
+            signature_origin: Some(self.entry_declaration(function).1),
             implicit_text_conversions: Vec::new(),
             captions: Vec::new(),
             language: SourceLanguage::TypeScript,
@@ -89,7 +89,16 @@ impl Lowerer<'_> {
             closure_expr,
             Expr::Record(Vec::new()),
         ]);
-        if let Some(note) = note {
+        if let Some(mut note) = note {
+            if let Some(origin) = note
+                .written
+                .as_mut()
+                .and_then(|written| written.signature_origin.as_mut())
+                && origin.name.is_none()
+                && !name.is_empty()
+            {
+                origin.name = Some(name.to_owned());
+            }
             let value = self.let_expr(token, closure.ty);
             if let Some(last) = self.buf.last_note_mut() {
                 last.blocks = note.blocks;

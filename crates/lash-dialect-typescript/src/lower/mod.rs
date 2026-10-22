@@ -1018,7 +1018,7 @@ impl Lowerer<'_> {
         &mut self,
         function: &ast::Function,
     ) -> Option<lash_kernel_doc::CallablePresentation> {
-        let signature = self.start_signature(function).ok()?;
+        let (signature, _) = self.entry_declaration(function);
         let convention = self.entry_convention(true).ok()?;
         Some(lash_kernel_doc::CallablePresentation {
             signature,

@@ -283,23 +283,6 @@
     "refusal": "WORKFLOW_CAPTURED_MODULE_BINDING"
   },
   {
-    "name": "refusal-annotation",
-    "mode": "module",
-    "entries": [],
-    "dialects": [
-      "ts",
-      "py"
-    ],
-    "exceptions": {
-      "ts": [],
-      "py": [
-        "absent-binding initialization",
-        "task finalizer"
-      ]
-    },
-    "refusal": "WORKFLOW_UNMAPPABLE_ENTRY_ANNOTATION"
-  },
-  {
     "name": "refusal-default",
     "mode": "module",
     "entries": [],

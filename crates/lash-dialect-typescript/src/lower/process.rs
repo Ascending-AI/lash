@@ -4,7 +4,9 @@ use std::collections::HashSet;
 
 use lash_kernel_doc::{Expr, Literal};
 
-use lash_vocabulary::{EffectName, Name, Param, RecordType, RecordTypeField, Signature, Type};
+use lash_vocabulary::{
+    AnnotationOrigin, EffectName, Name, Param, Signature, SignatureOrigin, Type,
+};
 
 use lash_kernel_dialect::workflow::{self, ModuleRefusal};
 
@@ -35,47 +37,93 @@ impl Lowerer<'_> {
         self.in_main() && self.lifting.is_none()
     }
 
-    /// The signature a host starts `function` under: each parameter a
-    /// plain name of a durable type. A module entry's annotations map under
-    /// the workflow contract: a default is refused, and so is an annotation
-    /// with no kernel type.
-    pub(super) fn start_signature(&self, function: &ast::Function) -> Lowering<Signature> {
-        let module = self.module.is_some();
-        let unmappable = DiagnosticCode::Module(ModuleRefusal::UnmappableEntryAnnotation);
-        let mut params = Vec::with_capacity(function.params.len());
-        for param in &function.params {
-            let (name, annotation) = match param {
-                ast::Pattern::Ident(name, annotation) => (name, annotation),
-                ast::Pattern::Assign { .. } if module => {
-                    return Err(Diagnostic::new(
-                        DiagnosticCode::Module(ModuleRefusal::EntryDefault),
-                        "an entry's parameter has no default: a start passes every argument",
-                        self.span,
-                    ));
-                }
-                _ => {
-                    return Err(Diagnostic::new(
-                        unmappable,
-                        "a process parameter is a plain name: start arguments are keyed by it",
-                        self.span,
-                    ));
-                }
+    /// One declaration supplies both callable presentation and module promotion.
+    /// Ordinary source can retain unresolved annotations; only promotion refuses.
+    pub(super) fn entry_declaration(
+        &self,
+        function: &ast::Function,
+    ) -> (Signature, SignatureOrigin) {
+        let mut params = Vec::new();
+        let mut origins = Vec::new();
+        for (index, pattern) in function.params.iter().enumerate() {
+            let pattern = match pattern {
+                ast::Pattern::Assign { target, .. } => target.as_ref(),
+                other => other,
             };
-            params.push(Param {
-                name: Name::new(name.as_str()),
-                ty: durable_type(annotation.as_ref(), unmappable)?,
-                // `name?: T` is written as `T` or `undefined`.
-                optional: annotation.as_ref().is_some_and(|annotation| {
-                    matches!(&annotation.shape, TypeShape::Union(members)
-                        if members.iter().any(|member| matches!(member.shape, TypeShape::Undefined)))
-                }),
-            });
+            let ast::Pattern::Ident(name, annotation) = pattern else {
+                let span = function.param_spans.get(index).copied();
+                // Retain this one authored public pattern and its position;
+                // never flatten private destructuring bindings into parameters.
+                let name = span
+                    .and_then(|span| self.source.get(span.start..span.end))
+                    .unwrap_or("");
+                params.push(Param {
+                    name: Name::new(ast::public_pattern(name)),
+                    ty: Type::Any,
+                    optional: false,
+                });
+                origins.push(AnnotationOrigin {
+                    span,
+                    refusal: Some(lash_vocabulary::AnnotationResolutionReason::Unsupported {
+                        construct: "a destructured or rest public parameter".into(),
+                    }),
+                });
+                continue;
+            };
+            let (ty, origin) = self.resolve_entry_annotation(
+                annotation.as_ref(),
+                function.param_spans.get(index).copied(),
+                false,
+            );
+            params.push(Param { name: Name::new(name), ty, optional: matches!(function.params[index], ast::Pattern::Assign { .. }) || annotation.as_ref().is_some_and(|annotation| matches!(&annotation.shape, TypeShape::Union(members) if members.iter().any(|member| matches!(member.shape, TypeShape::Undefined)))) });
+            origins.push(origin);
         }
-        let result = match function.return_ty.as_ref() {
-            Some(annotation) => durable_type(Some(annotation), unmappable)?,
-            None => Type::Any,
+        let (result, result_origin) = self.resolve_entry_annotation(
+            function.return_ty.as_ref(),
+            Some(function.result_span),
+            true,
+        );
+        (
+            Signature { params, result },
+            SignatureOrigin {
+                name: function.name.clone(),
+                params: origins,
+                result: result_origin,
+            },
+        )
+    }
+
+    fn resolve_entry_annotation(
+        &self,
+        annotation: Option<&TypeAnnotation>,
+        missing: Option<SourceSpan>,
+        settled: bool,
+    ) -> (Type, AnnotationOrigin) {
+        let Some(annotation) = annotation else {
+            return (
+                Type::Any,
+                AnnotationOrigin {
+                    span: missing,
+                    refusal: None,
+                },
+            );
         };
-        Ok(Signature { params, result })
+        match self.facts.entry_annotation(annotation, settled) {
+            Ok(ty) => (
+                ty,
+                AnnotationOrigin {
+                    span: Some(annotation.span),
+                    refusal: None,
+                },
+            ),
+            Err((span, reason)) => (
+                Type::Any,
+                AnnotationOrigin {
+                    span: Some(span),
+                    refusal: Some(reason),
+                },
+            ),
+        }
     }
 
     /// Lifts the module entry `function`, bound to `name` at the module's
@@ -87,7 +135,27 @@ impl Lowerer<'_> {
     ) -> Lowering<Operand> {
         let entry = Name::new(name);
         let span = self.span;
-        let signature = self.start_signature(function)?;
+        if function
+            .params
+            .iter()
+            .any(|param| matches!(param, ast::Pattern::Assign { .. }))
+        {
+            return Err(Diagnostic::new(
+                DiagnosticCode::Module(ModuleRefusal::EntryDefault),
+                "an entry parameter has no default",
+                self.span,
+            ));
+        }
+        let (signature, origin) = self.entry_declaration(function);
+        origin
+            .require(
+                &signature,
+                lash_vocabulary::FunctionLocation {
+                    name: Some(name.into()),
+                    site: None,
+                },
+            )
+            .map_err(Diagnostic::entry_signature)?;
         let names: Vec<Name> = signature
             .params
             .iter()
@@ -299,63 +367,3 @@ fn reference(entry: lash_vocabulary::FunctionId) -> Operand {
 
 /// No session binding: what a process body sees of the session.
 static NO_SESSION: std::collections::BTreeSet<Name> = std::collections::BTreeSet::new();
-
-/// The kernel type a durable annotation states. An absent annotation is
-/// every value.
-fn durable_type(annotation: Option<&TypeAnnotation>, refusal: DiagnosticCode) -> Lowering<Type> {
-    let Some(annotation) = annotation else {
-        return Ok(Type::Any);
-    };
-    Ok(match &annotation.shape {
-        // A named type is checked where its definition is known: the host's.
-        TypeShape::Unknown | TypeShape::Reference(_) => Type::Any,
-        TypeShape::String => Type::Text,
-        TypeShape::Number => Type::Number,
-        TypeShape::Boolean => Type::Bool,
-        TypeShape::Null => Type::Null,
-        // A missing argument is absent; JSON spells it null.
-        TypeShape::Undefined => Type::Union(vec![Type::Null, Type::Absent]),
-        TypeShape::StringLiteral => Type::Text,
-        TypeShape::Array(element) => Type::List(Box::new(durable_type(Some(element), refusal)?)),
-        TypeShape::Dictionary(value) => Type::Record(RecordType {
-            fields: Vec::new(),
-            rest: Some(Box::new(durable_type(Some(value), refusal)?)),
-        }),
-        TypeShape::Object(fields) => Type::Record(RecordType {
-            fields: fields
-                .iter()
-                .map(|field| {
-                    Ok(RecordTypeField {
-                        name: field.name.clone(),
-                        ty: durable_type(Some(&field.ty), refusal)?,
-                        optional: field.optional,
-                    })
-                })
-                .collect::<Lowering<_>>()?,
-            rest: None,
-        }),
-        TypeShape::Union(members) => {
-            let mut types = Vec::new();
-            for member in members {
-                match durable_type(Some(member), refusal)? {
-                    Type::Any => return Ok(Type::Any),
-                    Type::Union(inner) => types.extend(inner),
-                    other => types.push(other),
-                }
-            }
-            types.dedup();
-            match types.len() {
-                0 => Type::Any,
-                1 => types.remove(0),
-                _ => Type::Union(types),
-            }
-        }
-        TypeShape::Function(_) | TypeShape::Unsupported(_) => {
-            return Err(Diagnostic::new(
-                refusal,
-                "this type is not one a process is started or ended with",
-                Some(annotation.span),
-            ));
-        }
-    })
-}

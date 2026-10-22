@@ -290,6 +290,14 @@ fn start_with_bindings(source: &str, values: super::pages::Session) -> (KernelMa
     }
     let program =
         crate::tests::linked::program(Arc::clone(lowered.document.shared()), prepared().clone());
+    let function_origins = lash_kernel_vm::interface::FunctionOrigins {
+        sites: lowered
+            .written
+            .iter()
+            .map(|(site, written)| ((program.link, site.clone()), written.clone()))
+            .collect(),
+        ..Default::default()
+    };
     let start = CellStart {
         target: Target::Main,
         args: Vec::new(),
@@ -298,8 +306,12 @@ fn start_with_bindings(source: &str, values: super::pages::Session) -> (KernelMa
         modes: Default::default(),
         host: Vec::new(),
     };
-    let machine = super::pages::with_source(program, BOUNDS, start, &values.source)
+    let mut machine = super::pages::with_source(program, BOUNDS, start, &values.source)
         .unwrap_or_else(|error| panic!("{error}"));
+    machine.set_options(lash_kernel_vm::MachineOptions {
+        function_origins,
+        ..Default::default()
+    });
     (machine, text)
 }
 
@@ -623,7 +635,7 @@ fn sort_comparisons_are_bounded_by_n_log_n() {
 }
 
 /// ENTRY-CONV and FN-CROSS: a workflow Export and a packed frozen callable
-/// preserve the same source results, including missing and extra arguments.
+/// preserve source results under the declared public argument contract.
 #[test]
 fn a_function_crossing_to_a_tool_uses_its_source_entry_convention() {
     for (function, packed, args, expected) in [
@@ -634,37 +646,37 @@ fn a_function_crossing_to_a_tool_uses_its_source_entry_convention() {
             Datum::Float(lash_kernel_doc::Float::new(2.0)),
         ),
         (
-            "async function f(x) { return x; }",
+            "async function f(x: any, extra: any): any { return x; }",
             false,
             vec![Datum::Text("first".into()), Datum::Null],
             Datum::Text("first".into()),
         ),
         (
-            "async function f(x) { return x; }",
+            "async function f(x?: any): any { return x; }",
             false,
             vec![],
             Datum::Null,
         ),
         (
-            "async function f() { async function child() { return 7; } return child(); }",
+            "async function f(): any { async function child() { return 7; } return child(); }",
             false,
             vec![],
             Datum::Float(lash_kernel_doc::Float::new(7.0)),
         ),
         (
-            "function f() { return this === undefined; }",
+            "function f(unused: any): any { return this === undefined; }",
             true,
             vec![Datum::Null],
             Datum::Bool(true),
         ),
         (
-            "async function f(x) { function inner() { return arguments.length; } return inner(); }",
+            "async function f(x: any, extra: any): any { function inner() { return arguments.length; } return inner(); }",
             false,
             vec![Datum::Null, Datum::Null],
             Datum::Float(lash_kernel_doc::Float::new(0.0)),
         ),
         (
-            "function f() { return undefined; }",
+            "function f(): any { return undefined; }",
             false,
             vec![],
             Datum::Null,
@@ -672,7 +684,7 @@ fn a_function_crossing_to_a_tool_uses_its_source_entry_convention() {
         // FIG-6822: JSON.stringify leaves out a member that is undefined
         // and spells an undefined element null.
         (
-            "async function f(x) { return [x, { a: x, b: 1, c: [x] }]; }",
+            "async function f(x?: any): any { return [x, { a: x, b: 1, c: [x] }]; }",
             false,
             vec![],
             Datum::List(vec![
@@ -684,7 +696,7 @@ fn a_function_crossing_to_a_tool_uses_its_source_entry_convention() {
             ]),
         ),
         (
-            "async function f(x) { return [this === undefined, arguments.length, arguments[1], x]; }",
+            "async function f(x: any, extra: any): any { return [this === undefined, arguments.length, arguments[1], x]; }",
             true,
             vec![Datum::Null, Datum::Text("extra".into())],
             Datum::List(vec![
@@ -695,7 +707,7 @@ fn a_function_crossing_to_a_tool_uses_its_source_entry_convention() {
             ]),
         ),
         (
-            "async function f(x) { const read = () => arguments.length; return read(); }",
+            "async function f(x: any, extra: any): any { const read = () => arguments.length; return read(); }",
             true,
             vec![Datum::Null, Datum::Null],
             Datum::Float(lash_kernel_doc::Float::new(2.0)),

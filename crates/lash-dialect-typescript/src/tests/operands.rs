@@ -49,7 +49,7 @@ fn native_expression_depth_respects_the_document_limit() {
     let program = ast::Program {
         imported: Default::default(),
         statements: vec![ast::Stmt::Expr(expr)],
-        type_parameters: Default::default(),
+        annotation_limits: (64, 4096),
         captions: Default::default(),
         comments: Vec::new(),
     };

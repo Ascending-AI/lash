@@ -20,19 +20,16 @@ pub enum ModuleRefusal {
     /// An entry reads a binding of the module: another entry, a top-level
     /// helper or a top-level value.
     CapturedModuleBinding,
-    /// An entry's parameter or result annotation has no kernel type.
-    UnmappableEntryAnnotation,
     /// An entry's parameter has a default.
     EntryDefault,
 }
 
 impl ModuleRefusal {
     /// Every rule, for a caller that lists them.
-    pub const ALL: [Self; 5] = [
+    pub const ALL: [Self; 4] = [
         Self::DuplicateEntry,
         Self::EmptyModule,
         Self::CapturedModuleBinding,
-        Self::UnmappableEntryAnnotation,
         Self::EntryDefault,
     ];
 
@@ -43,7 +40,6 @@ impl ModuleRefusal {
             Self::DuplicateEntry => "WORKFLOW_DUPLICATE_ENTRY",
             Self::EmptyModule => "WORKFLOW_EMPTY_MODULE",
             Self::CapturedModuleBinding => "WORKFLOW_CAPTURED_MODULE_BINDING",
-            Self::UnmappableEntryAnnotation => "WORKFLOW_UNMAPPABLE_ENTRY_ANNOTATION",
             Self::EntryDefault => "WORKFLOW_ENTRY_DEFAULT",
         }
     }
@@ -54,10 +50,9 @@ impl ModuleRefusal {
     pub const fn kind(self) -> DiagnosticKind {
         match self {
             Self::DuplicateEntry => DiagnosticKind::ProgramDefect,
-            Self::EmptyModule
-            | Self::CapturedModuleBinding
-            | Self::UnmappableEntryAnnotation
-            | Self::EntryDefault => DiagnosticKind::Refusal,
+            Self::EmptyModule | Self::CapturedModuleBinding | Self::EntryDefault => {
+                DiagnosticKind::Refusal
+            }
         }
     }
 
@@ -69,9 +64,6 @@ impl ModuleRefusal {
             Self::EmptyModule => "declare the workflow as a top-level function",
             Self::CapturedModuleBinding => {
                 "pass the value as a parameter of the entry, or define the helper inside its body"
-            }
-            Self::UnmappableEntryAnnotation => {
-                "annotate with a primitive, a list, a record or dict, a union of those, or nothing"
             }
             Self::EntryDefault => {
                 "remove the default; a start passes every argument the entry declares"

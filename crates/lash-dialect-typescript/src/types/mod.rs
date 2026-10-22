@@ -29,6 +29,7 @@ use lash_vocabulary::Type;
 
 use crate::adapter::{BinaryOp, TypeAnnotation, TypeShape, UnaryOp};
 
+mod entry;
 mod facts;
 mod narrow;
 mod packages;
@@ -190,6 +191,36 @@ impl Ty {
         }
     }
 
+    /// Source annotations do not prove a runtime float or normalize undefined.
+    fn annotated(ty: &Type) -> Self {
+        match ty {
+            Type::Function(signature) => {
+                Self::Callable(Box::new(Self::annotated(&signature.result)))
+            }
+            Type::Number | Type::Float | Type::Int => Self::Number,
+            Type::List(element) => Self::List(Box::new(Self::annotated(element))),
+            Type::Record(record) => Self::Record(
+                record
+                    .fields
+                    .iter()
+                    .map(|field| {
+                        let ty = Self::annotated(&field.ty);
+                        (
+                            field.name.clone(),
+                            if field.optional {
+                                Self::one_of(vec![ty, Self::Undefined])
+                            } else {
+                                ty
+                            },
+                        )
+                    })
+                    .collect(),
+            ),
+            Type::Union(members) => Self::one_of(members.iter().map(Self::annotated).collect()),
+            _ => Self::decoded(ty),
+        }
+    }
+
     /// This type with the members of a union that `excluded` names taken
     /// out. A type that is not a union is unchanged: nothing says what else
     /// it could be.
@@ -227,14 +258,20 @@ impl Ty {
 pub(crate) fn believed(annotation: &TypeAnnotation, aliases: &BTreeMap<String, Ty>) -> Ty {
     match &annotation.shape {
         TypeShape::Function(result) => Ty::Callable(Box::new(believed(result, aliases))),
-        TypeShape::Unknown | TypeShape::Dictionary(_) | TypeShape::Unsupported(_) => Ty::Unknown,
-        TypeShape::String | TypeShape::StringLiteral => Ty::Text,
+        TypeShape::Any | TypeShape::Unknown | TypeShape::Unsupported(_) => Ty::Unknown,
+        TypeShape::String | TypeShape::StringLiteral(_) => Ty::Text,
         TypeShape::Number => Ty::Number,
         TypeShape::Boolean => Ty::Bool,
         TypeShape::Null => Ty::Null,
         TypeShape::Undefined => Ty::Undefined,
+        TypeShape::Generic(name, args) => match (name.as_str(), args.as_slice()) {
+            ("Array" | "ReadonlyArray", [element]) => {
+                Ty::List(Box::new(believed(element, aliases)))
+            }
+            _ => Ty::Unknown,
+        },
         TypeShape::Array(element) => Ty::List(Box::new(believed(element, aliases))),
-        TypeShape::Object(fields) => Ty::Record(
+        TypeShape::Object(fields, _) => Ty::Record(
             fields
                 .iter()
                 .map(|field| {

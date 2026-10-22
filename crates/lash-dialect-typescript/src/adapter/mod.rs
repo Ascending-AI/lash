@@ -13,6 +13,7 @@ mod early_errors;
 pub(crate) use early_errors::is_strict_reserved_word;
 mod enums;
 mod functions;
+pub(crate) use functions::public_pattern;
 mod goal;
 pub(crate) mod nesting;
 mod optional_chain;
@@ -40,10 +41,7 @@ pub const MAX_SOURCE_NESTING_DEPTH: usize = 28;
 pub(crate) struct Program {
     pub(crate) statements: Vec<Stmt>,
     pub(crate) imported: BTreeMap<String, Vec<String>>,
-    /// The name of every type parameter a function of the source declares.
-    /// Inside that function the name is the parameter, whatever `type` or
-    /// `interface` shares it.
-    pub(crate) type_parameters: BTreeSet<String>,
+    pub(crate) annotation_limits: (usize, usize),
     /// The captions the source spells.
     pub(crate) captions: Spelled,
     /// Each comment's bytes, ascending; a cell's are not collected.
@@ -207,6 +205,9 @@ pub(crate) enum PropertyKey {
 pub(crate) struct Function {
     pub(crate) name: Option<String>,
     pub(crate) params: Vec<Pattern>,
+    pub(crate) param_spans: Vec<SourceSpan>,
+    pub(crate) result_span: SourceSpan,
+    pub(crate) type_parameters: Vec<String>,
     pub(crate) body: FunctionBody,
     pub(crate) return_ty: Option<TypeAnnotation>,
     pub(crate) is_async: bool,
@@ -493,7 +494,7 @@ fn parse_from_goal(
     let program = Program {
         statements: converted?,
         imported: adapter.imported.take(),
-        type_parameters: adapter.type_parameters.take(),
+        annotation_limits: limits.entry_annotation_limits(),
         captions: adapter.captions.take(),
         comments: adapter.comments.ranges().to_vec(),
     };
@@ -529,7 +530,6 @@ struct Adapter<'a> {
     respellings: BTreeMap<u32, swc_ecma_parser::error::Error>,
     /// The respelled words the adapter has read as identifiers or names.
     validated_respellings: RefCell<BTreeSet<u32>>,
-    type_parameters: RefCell<BTreeSet<String>>,
     /// Whether the adapter stands in an async function's body or parameters.
     in_async_function: Cell<bool>,
     /// Set when `await` was refused as an identifier only because the Module
@@ -1185,52 +1185,7 @@ impl Adapter<'_> {
                 })?;
                 Expr::Function(self.convert_function(name, &function.function)?)
             }
-            swc::Expr::Arrow(function) => {
-                self.note_type_parameters(function.type_params.as_deref());
-                if function.is_generator {
-                    return Err(reject(
-                        DiagnosticCode::GeneratorUnsupported,
-                        "generators",
-                        span,
-                    ));
-                }
-                // An async arrow's parameters reserve `await`; a plain
-                // arrow's inherit the enclosing rule (§15.3, §15.9).
-                let parameter_rule = self.in_async_function.get() || function.is_async;
-                let params = self.in_function(parameter_rule, || {
-                    self.in_arrow_parameters(|| {
-                        function
-                            .params
-                            .iter()
-                            .enumerate()
-                            .filter(|(index, param)| !self.is_this_parameter(*index, param))
-                            .map(|(_, param)| self.convert_pattern(param))
-                            .collect::<Result<Vec<_>, _>>()
-                    })
-                })?;
-                let body = self.in_function(function.is_async, || {
-                    Ok(match function.body.as_ref() {
-                        swc::BlockStmtOrExpr::BlockStmt(block) => {
-                            FunctionBody::Block(self.convert_statements(&block.stmts)?)
-                        }
-                        swc::BlockStmtOrExpr::Expr(expr) => {
-                            FunctionBody::Expression(Box::new(self.convert_expr(expr)?))
-                        }
-                    })
-                })?;
-                Expr::Function(Function {
-                    name: None,
-                    params,
-                    body,
-                    return_ty: function
-                        .return_type
-                        .as_ref()
-                        .map(|annotation| types::convert_return_type(&annotation.type_ann)),
-                    is_async: function.is_async,
-                    is_arrow: true,
-                    captions: Default::default(),
-                })
-            }
+            swc::Expr::Arrow(function) => self.convert_arrow(function, span)?,
             swc::Expr::Unary(expr) => {
                 let op = match expr.op {
                     swc::UnaryOp::Plus => UnaryOp::Plus,

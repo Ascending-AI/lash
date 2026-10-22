@@ -311,6 +311,7 @@ impl Lifter<'_> {
             body => super::source::Body::Block(inner.block(body, &at)?),
         };
         let mut args = vec![Expr::arrow(super::source::Function {
+            result: None,
             is_async: false,
             params: parameters,
             body,

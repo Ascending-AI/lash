@@ -43,6 +43,7 @@ pub(super) enum Part {
 pub(super) struct Function {
     pub(super) is_async: bool,
     pub(super) params: Vec<Param>,
+    pub(super) result: Option<Type>,
     pub(super) body: Body,
 }
 
@@ -67,9 +68,10 @@ pub(super) struct Param {
 pub(super) enum Type {
     /// A keyword or literal type: `string`, `null`, `undefined`, …
     Word(&'static str),
+    Literal(String),
     Array(Box<Type>),
     Union(Vec<Type>),
-    Object(Vec<Property>),
+    Object(Vec<Property>, Option<Box<Type>>),
     /// `Promise<T>`, an async function's result.
     Promise(Box<Type>),
 }
@@ -264,6 +266,7 @@ impl Writer {
     fn ty(&mut self, ty: &Type) {
         match ty {
             Type::Word(word) => self.out.push_str(word),
+            Type::Literal(value) => self.out.push_str(&text_literal(value)),
             Type::Array(item) => {
                 let grouped = matches!(**item, Type::Union(_));
                 if grouped {
@@ -288,8 +291,8 @@ impl Writer {
                 self.ty(item);
                 self.out.push('>');
             }
-            Type::Object(properties) if !ty.has_caption() => {
-                if properties.is_empty() {
+            Type::Object(properties, rest) if !ty.has_caption() => {
+                if properties.is_empty() && rest.is_none() {
                     self.out.push_str("{}");
                     return;
                 }
@@ -300,9 +303,14 @@ impl Writer {
                     }
                     self.property(property);
                 }
+                if let Some(rest) = rest {
+                    self.out.push_str(" [key: string]: ");
+                    self.ty(rest);
+                    self.out.push(';');
+                }
                 self.out.push_str(" }");
             }
-            Type::Object(properties) => {
+            Type::Object(properties, rest) => {
                 self.out.push_str("{\n");
                 self.indent += 1;
                 for property in properties {
@@ -310,6 +318,12 @@ impl Writer {
                     self.caption(property.caption.as_ref());
                     self.property(property);
                     self.out.push('\n');
+                }
+                if let Some(rest) = rest {
+                    self.pad();
+                    self.out.push_str("[key: string]: ");
+                    self.ty(rest);
+                    self.out.push_str(";\n");
                 }
                 self.indent -= 1;
                 self.pad();
@@ -465,6 +479,14 @@ impl Writer {
                 self.out.push_str("function ");
                 self.out.push_str(name);
                 self.params(&function.params);
+                if let Some(result) = &function.result {
+                    self.out.push_str(": ");
+                    if function.is_async {
+                        self.ty(&Type::Promise(Box::new(result.clone())));
+                    } else {
+                        self.ty(result);
+                    }
+                }
                 self.out.push(' ');
                 match &function.body {
                     Body::Block(body) => self.block(body),
@@ -633,6 +655,14 @@ impl Writer {
                     self.out.push_str("async ");
                 }
                 self.params(&function.params);
+                if let Some(result) = &function.result {
+                    self.out.push_str(": ");
+                    if function.is_async {
+                        self.ty(&Type::Promise(Box::new(result.clone())));
+                    } else {
+                        self.ty(result);
+                    }
+                }
                 self.out.push_str(" => ");
                 match &function.body {
                     Body::Expr(value) => {
@@ -678,12 +708,15 @@ impl Writer {
 impl Type {
     fn has_caption(&self) -> bool {
         match self {
-            Self::Word(_) => false,
+            Self::Word(_) | Self::Literal(_) => false,
             Self::Array(item) | Self::Promise(item) => item.has_caption(),
             Self::Union(members) => members.iter().any(Self::has_caption),
-            Self::Object(properties) => properties
-                .iter()
-                .any(|property| property.caption.is_some() || property.ty.has_caption()),
+            Self::Object(properties, rest) => {
+                rest.as_ref().is_some_and(|rest| rest.has_caption())
+                    || properties
+                        .iter()
+                        .any(|property| property.caption.is_some() || property.ty.has_caption())
+            }
         }
     }
 }

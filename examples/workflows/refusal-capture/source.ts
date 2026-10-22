@@ -1,2 +1,2 @@
 const limit = 3;
-async function a() { return limit; }
+async function a(): any { return limit; }

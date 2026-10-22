@@ -287,8 +287,11 @@ impl<'a> Lifter<'a> {
         function: &k::FunctionDefinition,
         entry: &k::FunctionExport,
     ) -> Lift<Item> {
+        // An export's convention belongs to the document, while this lifter's
+        // ordinary references belong to the defining function's body imports.
+        let export_scope = Lifter::new(self.document, self.captions, Unit::Main, self.library);
         if !matches!(&entry.convention, k::StartConvention::TsDirect { await_fn }
-            if self.is(await_fn, "ts.await"))
+            if export_scope.is(await_fn, "ts.await"))
         {
             return refuse("an entry the dialect starts directly");
         }
@@ -365,19 +368,28 @@ impl<'a> Lifter<'a> {
     ) -> Lift<Option<Type>> {
         Ok(match ty {
             lash_vocabulary::Type::Any => None,
-            _ => Some(self.ts_type(function, ty, root, path)?),
+            _ => Some(self.ts_type(Some(function), ty, root, path)?),
         })
     }
 
-    fn ts_type(
+    pub(super) fn ts_type(
         &self,
-        function: &Name,
+        function: Option<&Name>,
         ty: &lash_vocabulary::Type,
         root: &FieldRoot,
         path: &mut Vec<String>,
     ) -> Lift<Type> {
         Ok(match ty {
-            lash_vocabulary::Type::Any => Type::Word("unknown"),
+            lash_vocabulary::Type::Json => Type::Word("JsonValue"),
+            lash_vocabulary::Type::Enum(values) => {
+                let mut values: Vec<_> = values.iter().cloned().map(Type::Literal).collect();
+                if values.len() == 1 {
+                    values.remove(0)
+                } else {
+                    Type::Union(values)
+                }
+            }
+            lash_vocabulary::Type::Any => return refuse("an unconstrained nested kernel type"),
             lash_vocabulary::Type::Text => Type::Word("string"),
             lash_vocabulary::Type::Number => Type::Word("number"),
             lash_vocabulary::Type::Bool => Type::Word("boolean"),
@@ -415,16 +427,18 @@ impl<'a> Lifter<'a> {
                 }
                 Type::Union(written)
             }
-            lash_vocabulary::Type::Record(record) if record.rest.is_none() => {
+            lash_vocabulary::Type::Record(record) => {
                 let mut properties = Vec::with_capacity(record.fields.len());
                 for field in &record.fields {
                     path.push(field.name.clone());
-                    let caption = self.caption(k::FieldTarget {
-                        function: function.clone(),
-                        path: FieldPath {
-                            root: root.clone(),
-                            fields: path.clone(),
-                        },
+                    let caption = function.and_then(|function| {
+                        self.caption(k::FieldTarget {
+                            function: function.clone(),
+                            path: FieldPath {
+                                root: root.clone(),
+                                fields: path.clone(),
+                            },
+                        })
                     });
                     let ty = self.ts_type(function, &field.ty, root, path);
                     path.pop();
@@ -435,7 +449,14 @@ impl<'a> Lifter<'a> {
                         ty: ty?,
                     });
                 }
-                Type::Object(properties)
+                Type::Object(
+                    properties,
+                    record
+                        .rest
+                        .as_ref()
+                        .map(|rest| self.ts_type(function, rest, root, path).map(Box::new))
+                        .transpose()?,
+                )
             }
             _ => return refuse("a type no annotation writes"),
         })

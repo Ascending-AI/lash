@@ -92,6 +92,8 @@ pub enum DiagnosticCode {
     LinkError,
     /// Host policy refused an implicit conversion to text.
     ImplicitTextConversion,
+    SignatureRequired,
+    EntryAnnotationRefused,
     /// A rule of the workflow contract every dialect shares, under the
     /// shared code ([`lash_kernel_dialect::workflow`]).
     Module(ModuleRefusal),
@@ -182,6 +184,8 @@ impl DiagnosticCode {
         Self::InvalidAst,
         Self::LinkError,
         Self::ImplicitTextConversion,
+        Self::SignatureRequired,
+        Self::EntryAnnotationRefused,
     ];
 
     /// The accepted in-dialect idiom for a construct this code refuses.
@@ -324,6 +328,7 @@ impl DiagnosticCode {
             Self::ShadowsBuiltin => {
                 "rename the binding and its references, preserving the built-in name"
             }
+            Self::SignatureRequired | Self::EntryAnnotationRefused => return None,
             Self::Module(refusal) => refusal.repair(),
             _ => return None,
         })
@@ -410,7 +415,7 @@ impl DiagnosticCode {
             | Self::OperationValue
  => CodeClassification::AlwaysRefusal,
 
-            Self::ImplicitTextConversion => CodeClassification::PolicyRefusal,
+            Self::ImplicitTextConversion | Self::SignatureRequired | Self::EntryAnnotationRefused => CodeClassification::PolicyRefusal,
 
             // Both families, decided per site.
             Self::MethodUnsupported
@@ -521,6 +526,8 @@ impl DiagnosticCode {
             Self::UnsupportedExpression => "TS_EXPRESSION_UNSUPPORTED",
             Self::InvalidAst => "TS_INVALID_SHARED_AST",
             Self::LinkError => "TS_LINK_ERROR",
+            Self::SignatureRequired => "SIGNATURE_REQUIRED",
+            Self::EntryAnnotationRefused => "ENTRY_ANNOTATION_REFUSED",
             Self::ImplicitTextConversion => lash_kernel_doc::ImplicitTextConversion::CODE,
         }
     }
@@ -562,6 +569,24 @@ pub struct Diagnostic {
 }
 
 impl Diagnostic {
+    pub(crate) fn entry_signature(refusal: lash_vocabulary::EntrySignatureRefusal) -> Self {
+        let (code, span, fact) = match refusal {
+            lash_vocabulary::EntrySignatureRefusal::Required(required) => (
+                DiagnosticCode::SignatureRequired,
+                required.span,
+                lash_kernel_dialect::DiagnosticFact::SignatureRequired(*required),
+            ),
+            lash_vocabulary::EntrySignatureRefusal::Annotation(refused) => (
+                DiagnosticCode::EntryAnnotationRefused,
+                refused.span,
+                lash_kernel_dialect::DiagnosticFact::EntryAnnotationRefused(*refused),
+            ),
+        };
+        let mut diagnostic = Self::new(code, "", span);
+        diagnostic.fact = Some(Box::new(fact));
+        diagnostic
+    }
+
     /// The crate's rejections were authored as `"Unsupported: <refusal>.
     /// <rewrite>"` — one string, two jobs. Splitting here rather than at 34 call
     /// sites keeps the convention in one place and makes the migration total:
@@ -1244,17 +1269,26 @@ mod tests {
         );
     }
 
-    /// Every listed code must render a distinct `TS_`-prefixed token, since the
-    /// prompt walker matches on exactly that shape.
+    /// SOURCE-CODES: shared entry facts retain their cross-dialect code;
+    /// every dialect-owned code retains its TS prefix and every token is unique.
     #[test]
-    fn every_code_renders_a_distinct_ts_token() {
+    fn source_codes_keep_shared_entry_tokens_and_distinct_dialect_tokens() {
         let mut seen = std::collections::BTreeSet::new();
         for code in DiagnosticCode::ALL {
             let token = code.as_str();
-            assert!(
-                token.starts_with("TS_"),
-                "{code:?} renders `{token}`, which the prompt walker cannot recognise"
-            );
+            match code {
+                DiagnosticCode::NamespaceShadowedByLocal => {
+                    assert_eq!(token, "NAMESPACE_SHADOWED_BY_LOCAL");
+                }
+                DiagnosticCode::SignatureRequired => assert_eq!(token, "SIGNATURE_REQUIRED"),
+                DiagnosticCode::EntryAnnotationRefused => {
+                    assert_eq!(token, "ENTRY_ANNOTATION_REFUSED");
+                }
+                _ => assert!(
+                    token.starts_with("TS_"),
+                    "{code:?} renders `{token}`, which the prompt walker cannot recognise"
+                ),
+            }
             assert!(seen.insert(token), "`{token}` is rendered by two variants");
         }
     }

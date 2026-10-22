@@ -853,14 +853,6 @@ async fn an_inline_start_retry_is_exact_and_a_conflicting_or_refused_one_starts_
         "a conflicting start publishes nothing"
     );
 
-    let mut unstartable = value.clone();
-    unstartable.signature.result = lash::schema::Type::Any;
-    let refused = host_start(&core, inline_request(&unstartable, 3, &launch, "refused"))
-        .await
-        .expect_err("a function with no such entry is refused");
-    assert!(
-        matches!(admission_refusal(refused),lash_execution_contracts::process::linking::AdmissionRefusal::InvalidDocument {message} if message == "host callable signature must contain only data")
-    );
     let ids: Vec<_> = every_process(&stores)
         .await
         .into_iter()

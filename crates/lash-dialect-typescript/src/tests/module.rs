@@ -54,7 +54,7 @@ fn filtering_records_then_mapping_the_result_admits() {
     let environment = Environment::new(super::library(), &environment_namespaces);
     let lowered = crate::lower(
         r#"
-export async function unread_subjects() {
+export async function unread_subjects(): any {
   const emails = await host.echo(null);
   const unread = emails.filter((email) => email.unread);
   const subjects = unread.map((email) => email.subject);
@@ -88,91 +88,22 @@ fn param(name: &str, ty: Type) -> Param {
     }
 }
 
-/// Each annotation's kernel meaning in TypeScript: primitives, arrays,
-/// object literals with optional fields, string-literal unions, `null`,
-/// `undefined` as an optional parameter, named types as any value, and a
-/// `Promise` result as what it resolves to.
-#[test]
-fn an_entry_signature_is_the_kernel_meaning_of_its_typescript_annotations() {
-    let source = r#"
-type Topic = { title: string };
-export async function digest(
-  inbox: string,
-  count: number,
-  flags: boolean[],
-  columns: Record<string, number[]>,
-  topic: { title: string; urgent?: boolean },
-  mode: "fast" | "slow" | null,
-  named: Topic,
-  limit?: number,
-): Promise<string[]> {
-  return [inbox];
-}
-"#;
-    assert_eq!(
-        entries(source),
-        BTreeMap::from([(
-            Name::new("digest"),
-            Signature {
-                params: vec![
-                    param("inbox", Type::Text),
-                    param("count", Type::Number),
-                    param("flags", Type::List(Box::new(Type::Bool))),
-                    param(
-                        "columns",
-                        Type::Record(RecordType {
-                            fields: vec![],
-                            rest: Some(Box::new(Type::List(Box::new(Type::Number)))),
-                        })
-                    ),
-                    param(
-                        "topic",
-                        Type::Record(RecordType {
-                            fields: vec![
-                                RecordTypeField {
-                                    name: "title".into(),
-                                    ty: Type::Text,
-                                    optional: false,
-                                },
-                                RecordTypeField {
-                                    name: "urgent".into(),
-                                    ty: Type::Bool,
-                                    optional: true,
-                                },
-                            ],
-                            rest: None,
-                        }),
-                    ),
-                    param("mode", Type::Union(vec![Type::Text, Type::Null])),
-                    param("named", Type::Any),
-                    Param {
-                        name: Name::new("limit"),
-                        ty: Type::Union(vec![Type::Number, Type::Null, Type::Absent]),
-                        optional: true,
-                    },
-                ],
-                result: Type::List(Box::new(Type::Text)),
-            },
-        )])
-    );
-}
-
 /// Top-level function declarations and const functions are Exports, whether
 /// synchronous or async. Block locals and mutable bindings stay ordinary code;
 /// the Export retains the source's async flag for its settled public ABI.
 #[test]
 fn top_level_function_exports_keep_async_flags_and_exclude_block_locals() {
     let source = r#"
-export async function declared() { return 1; }
-async function unexported() { return 2; }
-export const arrow = async (n: number) => n * 2;
-const expression = async function () { return 3; };
-let reassignable = async () => 4;
+export async function declared(): any { return 1; }
+async function unexported(): any { return 2; }
+export const arrow = async (n: number): number => n * 2;
+const expression = async function (): any { return 3; };
+let reassignable = async (): any => 4;
 if (reassignable) {
-  async function inBlock() { return 5; }
-  const alsoInBlock = async () => 6;
+  async function inBlock(): any { return 5; }
+  const alsoInBlock = async (): any => 6;
 }
-function helper() { return 7; }
+function helper(): any { return 7; }
 "#;
     let lowered = module(source).unwrap();
     let functions = lowered
@@ -223,35 +154,27 @@ fn the_contract_refuses_under_the_shared_codes() {
     }
     for (source, expected) in [
         (
-            "export async function a() { return 1; }\nexport async function a() { return 2; }",
+            "export async function a(): any { return 1; }\nexport async function a(): any { return 2; }",
             ModuleRefusal::DuplicateEntry,
         ),
         (
-            "const a = async () => 1;\nexport async function a() { return 2; }",
+            "const a = async (): any => 1;\nexport async function a(): any { return 2; }",
             ModuleRefusal::DuplicateEntry,
         ),
         (
-            "const limit = 3;\nexport async function a() { return limit; }",
+            "const limit = 3;\nexport async function a(): any { return limit; }",
             ModuleRefusal::CapturedModuleBinding,
         ),
         (
-            "function helper() { return 1; }\nexport async function a() { return helper(); }",
+            "function helper(): any { return 1; }\nexport async function a(): any { return helper(); }",
             ModuleRefusal::CapturedModuleBinding,
         ),
         (
-            "export async function b() { return 1; }\nexport async function a() { return await b(); }",
+            "export async function b(): any { return 1; }\nexport async function a(): any { return await b(); }",
             ModuleRefusal::CapturedModuleBinding,
         ),
         (
-            "export async function a(f: () => number) { return 1; }",
-            ModuleRefusal::UnmappableEntryAnnotation,
-        ),
-        (
-            "export async function a(): Promise<bigint> { return 1; }",
-            ModuleRefusal::UnmappableEntryAnnotation,
-        ),
-        (
-            "export async function a(limit: number = 3) { return limit; }",
+            "export async function a(limit: number = 3): any { return limit; }",
             ModuleRefusal::EntryDefault,
         ),
     ] {
@@ -266,28 +189,25 @@ fn the_contract_refuses_under_the_shared_codes() {
 /// ENTRY-CONV: host starts use JavaScript's arity and return boundary,
 /// while the entry executes the author's function body.
 #[test]
-fn entry_conventions_bind_source_arguments_and_normalize_absent() {
+fn complete_entry_conventions_bind_public_arguments_and_normalize_absent() {
     for (source, args, expected) in [
         (
-            "export async function run(x) { return x; }",
-            vec![
-                lash_kernel_doc::Datum::Text("first".into()),
-                lash_kernel_doc::Datum::Null,
-            ],
+            "export async function run(x: any): any { return x; }",
+            vec![lash_kernel_doc::Datum::Text("first".into())],
             lash_kernel_doc::Datum::Text("first".into()),
         ),
         (
-            "export async function run(x) { return x; }",
+            "export async function run(x?: any): any { return x; }",
             vec![],
             lash_kernel_doc::Datum::Null,
         ),
         (
-            "export async function run() { return undefined; }",
+            "export async function run(): any { return undefined; }",
             vec![],
             lash_kernel_doc::Datum::Null,
         ),
         (
-            "export async function run(x) { return [this === undefined, arguments.length, arguments[1], x]; }",
+            "export async function run(x: any, extra: any): any { return [this === undefined, arguments.length, arguments[1], x]; }",
             vec![
                 lash_kernel_doc::Datum::Null,
                 lash_kernel_doc::Datum::Text("extra".into()),
@@ -334,23 +254,11 @@ fn entry_conventions_bind_source_arguments_and_normalize_absent() {
     }
 }
 
-/// K-ADM-007: a function without a start signature does not add the
-/// dependencies of an entry adapter it cannot carry.
-#[test]
-fn a_function_without_a_start_signature_adds_no_entry_adapter_dependencies() {
-    let lowered = super::lower("function f(x = 1) { return x; } f();").unwrap();
-    lash_kernel_check::derive(&lowered.document, super::library()).unwrap_or_else(|error| {
-        panic!(
-            "{error}\n{}",
-            lash_kernel_doc::print_document(&lowered.document)
-        );
-    });
-}
-
 /// Async returns adopt a returned promise after source finalizers complete.
 #[test]
 fn an_async_return_adopts_a_promise_as_an_entry_and_as_a_nested_call() {
-    let source = "async function run() { async function child() { return 7; } return child(); }";
+    let source =
+        "async function run(): any { async function child(): any { return 7; } return child(); }";
     let document = module(&format!("export {source}"))
         .unwrap()
         .document
@@ -514,7 +422,7 @@ fn implicit_record_text_is_refused_at_its_operand() {
         "'answered by ' + event.answered_by",
     ] {
         let source = format!(
-            "export function answer(event: {{ answered_by: {{ identity_id: string; kind: string }} }}) {{ return {expression}; }}"
+            "export function answer(event: {{ answered_by: {{ identity_id: string; kind: string }} }}): any {{ return {expression}; }}"
         );
         let Err(diagnostic) = module(&source) else {
             panic!("implicit record text must be refused");
@@ -548,7 +456,7 @@ fn implicit_text_policy_admits_only_the_selected_static_operands() {
         )
     };
     for (parameters, expression, expected) in [
-        ("event", "event.answered_by", Static::Any),
+        ("event: any", "event.answered_by", Static::Any),
         (
             "event: { answered_by: { identity_id: string; kind: string } }",
             "event.answered_by",
@@ -598,7 +506,8 @@ fn implicit_text_policy_admits_only_the_selected_static_operands() {
             format!("'value ' + {expression}"),
             format!("{expression} + ' value'"),
         ] {
-            let source = format!("export function answer({parameters}) {{ return {expression}; }}");
+            let source =
+                format!("export function answer({parameters}): any {{ return {expression}; }}");
             assert!(lower(&source, Policy::Allow).is_ok(), "allow: {source}");
             for policy in [Policy::Refuse, Policy::Strict] {
                 let result = lower(&source, policy);
@@ -635,7 +544,7 @@ fn implicit_text_policy_admits_only_the_selected_static_operands() {
             format!("{expression} + ' value'"),
         ] {
             let source = format!(
-                "export function answer(event: {{ answered_by: {{ identity_id: string }} }}) {{ return {expression}; }}"
+                "export function answer(event: {{ answered_by: {{ identity_id: string }} }}): any {{ return {expression}; }}"
             );
             lower(&source, Policy::Strict)
                 .unwrap_or_else(|error| panic!("strict must admit {source}: {error}"));
@@ -643,7 +552,7 @@ fn implicit_text_policy_admits_only_the_selected_static_operands() {
     }
     // Explicit conversion facts survive binding, and cell conversion semantics stay available.
     lower(
-        "export function answer(event) { const text = JSON.stringify(event); return `${text}`; }",
+        "export function answer(event: any): any { const text = JSON.stringify(event); return `${text}`; }",
         Policy::Strict,
     )
     .expect("explicit result binding");
@@ -654,4 +563,370 @@ fn implicit_text_policy_admits_only_the_selected_static_operands() {
         crate::SourceLimits::standard().with_implicit_text_conversion(Policy::Strict),
     );
     assert!(cell.is_ok());
+}
+
+/// ENTRY-STRUCTURAL: forward aliases and interfaces keep the same public
+/// contract when exported directly or crossed as a callable and promoted.
+#[test]
+fn structural_entry_annotations_survive_crossing_and_promotion() {
+    let declarations = r#"
+type Event = Envelope;
+interface Envelope { answered_by: Actor; kind: "answer"; [key: string]: JsonValue }
+interface Actor { identity_id: string; kind: "human" | "agent" }
+"#;
+    let source = format!(
+        "{declarations}\nexport function handle(event: Event, columns: Record<string, number[]>): Actor {{ return event.answered_by; }}"
+    );
+    let exported = entries(&source).remove(&Name::new("handle")).unwrap();
+    let actor = Type::Record(RecordType {
+        fields: vec![
+            RecordTypeField {
+                name: "identity_id".into(),
+                ty: Type::Text,
+                optional: false,
+            },
+            RecordTypeField {
+                name: "kind".into(),
+                ty: Type::Enum(vec!["human".into(), "agent".into()]),
+                optional: false,
+            },
+        ],
+        rest: None,
+    });
+    assert_eq!(
+        exported,
+        Signature {
+            params: vec![
+                param(
+                    "event",
+                    Type::Record(RecordType {
+                        fields: vec![
+                            RecordTypeField {
+                                name: "answered_by".into(),
+                                ty: actor.clone(),
+                                optional: false
+                            },
+                            RecordTypeField {
+                                name: "kind".into(),
+                                ty: Type::Enum(vec!["answer".into()]),
+                                optional: false
+                            },
+                        ],
+                        rest: Some(Box::new(Type::Json)),
+                    })
+                ),
+                param(
+                    "columns",
+                    Type::Record(RecordType {
+                        fields: vec![],
+                        rest: Some(Box::new(Type::List(Box::new(Type::Number))))
+                    })
+                )
+            ],
+            result: actor
+        }
+    );
+    let lowered = module(&source).unwrap();
+    let printed = crate::print(
+        &lowered.document,
+        Some(&lowered.captions),
+        super::library(),
+        Default::default(),
+    )
+    .unwrap();
+    let (read, _) = crate::read(
+        &printed.source,
+        &lowered.document,
+        super::library(),
+        Default::default(),
+        None,
+    )
+    .unwrap();
+    assert_eq!(read.canonical_bytes(), lowered.document.canonical_bytes());
+    let spaced = source.replace("return event", "return     event");
+    assert_eq!(
+        module(&spaced).unwrap().document.identity(),
+        lowered.document.identity()
+    );
+    // A nested alias cannot rebind the outer alias's dependencies.
+    let shadowed = entries(
+        "type Actor = {id: string}; type Event = {actor: Actor}; export function handle(event: Event): any { type Actor = number; return event.actor; }",
+    );
+    assert!(
+        matches!(&shadowed[&Name::new("handle")].params[0].ty, Type::Record(event) if matches!(&event.fields[0].ty, Type::Record(_)))
+    );
+    let crossed = super::machine::end(&format!(
+        "{declarations}\nconst handle = (event: Event, columns: Record<string, number[]>): Actor => event.answered_by; await control.finish(handle);"
+    ));
+    let super::machine::Ended::Finished(lash_kernel_doc::Datum::FunctionValue(value)) = crossed
+    else {
+        panic!("{crossed:?}")
+    };
+    assert_eq!(value.signature, exported);
+    let presentation = lash_kernel_doc::CallablePresentation {
+        signature: value.signature.clone(),
+        representation: value.representation.clone(),
+        convention: value.convention.clone(),
+    };
+    let promoted = presentation
+        .promote_entry(
+            value.callable.function,
+            lash_vocabulary::FunctionLocation {
+                name: Some("handle".into()),
+                site: value.creation.clone(),
+            },
+            false,
+            false,
+            None,
+        )
+        .unwrap();
+    assert_eq!(promoted.signature, exported);
+}
+
+/// ENTRY-SETTLED: resolve aliases before unwrapping every Promise layer.
+#[test]
+fn promise_alias_entry_results_store_the_settled_structure() {
+    let signature = entries(
+        r#"
+type Pending = Promise<Later>;
+type Later = Promise<Answer>;
+interface Answer { value: "done" }
+export async function handle(): Pending { return {value: "done"}; }
+"#,
+    )
+    .remove(&Name::new("handle"))
+    .unwrap();
+    assert_eq!(
+        signature.result,
+        Type::Record(RecordType {
+            fields: vec![RecordTypeField {
+                name: "value".into(),
+                ty: Type::Enum(vec!["done".into()]),
+                optional: false
+            }],
+            rest: None
+        })
+    );
+}
+
+/// ENTRY-WRITTEN: explicit unconstrained annotations mean JSON data;
+/// ordinary omitted annotations stay free, but entries require written types.
+#[test]
+fn entry_annotations_distinguish_written_any_from_missing() {
+    let signature = entries("export function handle(event: {x: any; ys: unknown[]}, other: Record<string, any>): Promise<any> { return null; }").remove(&Name::new("handle")).unwrap();
+    assert_eq!(signature.result, Type::Json);
+    assert_eq!(
+        signature.params[1].ty,
+        Type::Record(RecordType {
+            fields: vec![],
+            rest: Some(Box::new(Type::Json))
+        })
+    );
+    assert_eq!(
+        signature.params[0].ty,
+        Type::Record(RecordType {
+            fields: vec![
+                RecordTypeField {
+                    name: "x".into(),
+                    ty: Type::Json,
+                    optional: false
+                },
+                RecordTypeField {
+                    name: "ys".into(),
+                    ty: Type::List(Box::new(Type::Json)),
+                    optional: false
+                },
+            ],
+            rest: None
+        })
+    );
+    super::lower("function ordinary(x) { return x; }").unwrap();
+    for (source, parameter) in [
+        ("export function handle(event): any { return event; }", true),
+        (
+            "export function handle(event: any) { return event; }",
+            false,
+        ),
+    ] {
+        let diagnostic = module(source).unwrap_err();
+        let Some(lash_kernel_dialect::DiagnosticFact::SignatureRequired(required)) =
+            diagnostic.fact.as_deref()
+        else {
+            panic!("typed missing annotation: {diagnostic:?}");
+        };
+        assert_eq!(required.function.name.as_deref(), Some("handle"));
+        let span = required.span.unwrap();
+        if parameter {
+            assert_eq!(&source[span.start..span.end], "event");
+        } else {
+            assert_eq!(span.start, source.find('{').unwrap());
+            assert_eq!(span.start, span.end);
+        }
+        let cell = format!(
+            "{} await control.finish(handle);",
+            source.replace("export ", "       ")
+        );
+        let super::machine::Ended::Finished(lash_kernel_doc::Datum::FunctionValue(value)) =
+            super::machine::end(&cell)
+        else {
+            panic!("callable crosses before promotion");
+        };
+        let lowered = super::lower_with_effects(&cell).unwrap();
+        let transported: lash_kernel_doc::FunctionValue =
+            serde_json::from_value(serde_json::to_value(value).unwrap()).unwrap();
+        let lash_kernel_doc::FunctionValueRefusal::SignatureRequired { source: saved } =
+            transported.entry_export(&lowered.document).unwrap_err()
+        else {
+            panic!("saved missing annotation stays typed");
+        };
+        assert_eq!(saved.span, required.span);
+        assert_eq!(saved.position, required.position);
+    }
+    let arrow = "export const handle = (event: any) /* => */ => /* => */ event;";
+    let error = module(arrow).unwrap_err();
+    assert_eq!(error.span.unwrap().start, arrow.find("=> /*").unwrap());
+    let error =
+        module("type Promise<T> = T; export async function f(): Promise<string> { return 'x'; }")
+            .unwrap_err();
+    assert!(matches!(
+        error.fact.as_deref(),
+        Some(lash_kernel_dialect::DiagnosticFact::EntryAnnotationRefused(
+            _
+        ))
+    ));
+    use lash_vocabulary::AnnotationResolutionReason as Reason;
+    for (declaration, annotation, reason) in [
+        (
+            "type Cycle = Cycle;",
+            "Cycle",
+            Reason::Cycle {
+                name: "Cycle".into(),
+            },
+        ),
+        (
+            "",
+            "Missing",
+            Reason::Unresolved {
+                name: "Missing".into(),
+            },
+        ),
+        (
+            "type Generic<T> = T;",
+            "Generic",
+            Reason::Unsupported {
+                construct: "a generic type alias".into(),
+            },
+        ),
+        (
+            "",
+            "() => number",
+            Reason::Unsupported {
+                construct: "a callable type".into(),
+            },
+        ),
+        (
+            "",
+            "bigint",
+            Reason::Unsupported {
+                construct: "a `bigint` type".into(),
+            },
+        ),
+        (
+            "",
+            "{[K in string]: number}",
+            Reason::Unsupported {
+                construct: "a mapped type".into(),
+            },
+        ),
+        (
+            "",
+            "string extends number ? string : number",
+            Reason::Unsupported {
+                construct: "a conditional type".into(),
+            },
+        ),
+    ] {
+        let source = format!(
+            "{declaration} export function handle(event: {annotation}): any {{ return event; }}"
+        );
+        let diagnostic = module(&source).unwrap_err();
+        let Some(lash_kernel_dialect::DiagnosticFact::EntryAnnotationRefused(refused)) =
+            diagnostic.fact.as_deref()
+        else {
+            panic!("typed resolution refusal: {diagnostic:?}");
+        };
+        let encoded = serde_json::to_value(refused).unwrap();
+        assert_eq!(
+            serde_json::from_value::<lash_vocabulary::EntryAnnotationRefusal>(encoded).unwrap(),
+            *refused
+        );
+        assert_eq!(refused.reason, reason);
+        assert!(refused.span.is_some());
+        let cell = format!(
+            "{} await control.finish(handle);",
+            source.replace("export ", "       ")
+        );
+        let super::machine::Ended::Finished(lash_kernel_doc::Datum::FunctionValue(value)) =
+            super::machine::end(&cell)
+        else {
+            panic!("ordinary unsupported annotations remain free");
+        };
+        let lowered = super::lower_with_effects(&cell).unwrap();
+        let lash_kernel_doc::FunctionValueRefusal::EntryAnnotation { source: saved } =
+            value.entry_export(&lowered.document).unwrap_err()
+        else {
+            panic!("saved resolution reason stays typed");
+        };
+        assert_eq!(saved.reason, reason);
+    }
+    let error =
+        module("export function handle({x}: {x: string}): string { return x; }").unwrap_err();
+    assert!(
+        matches!(error.fact.as_deref(), Some(lash_kernel_dialect::DiagnosticFact::EntryAnnotationRefused(refused)) if matches!(refused.position, lash_vocabulary::SignaturePosition::Parameter { index: 0, .. }))
+    );
+    let patterns = [
+        "const f = ({x}: {x: string}): string => x;",
+        "const f = ({ x } /* public */ : { x : string }): string => x;",
+    ]
+    .map(|source| super::lower(source).unwrap().document.identity());
+    assert_eq!(patterns[0], patterns[1]);
+    let namespaces = Default::default();
+    let environment = Environment::new(super::library(), &namespaces);
+    for (depth, nodes) in [(1, 4096), (64, 1)] {
+        let error = crate::lower_with_limits(
+            "export function f(x: {a: string}): any { return x; }",
+            &environment,
+            Mode::Module,
+            crate::SourceLimits::standard()
+                .with_entry_annotation_limits(depth, nodes)
+                .unwrap(),
+        )
+        .unwrap_err();
+        assert!(
+            matches!(error.fact.as_deref(), Some(lash_kernel_dialect::DiagnosticFact::EntryAnnotationRefused(refused)) if refused.reason == Reason::Limit)
+        );
+    }
+}
+
+/// ENTRY-FACTS: the implicit-text policy sees a nested actor through a
+/// forward alias, rather than losing its record shape to an unknown fact.
+#[test]
+fn forward_entry_aliases_supply_record_operand_facts() {
+    let diagnostic = module(
+        r#"
+type Event = Later;
+interface Later { answered_by: Actor }
+interface Actor { identity_id: string }
+export function handle(event: Event): string { return `${event.answered_by}`; }
+"#,
+    )
+    .unwrap_err();
+    assert_eq!(diagnostic.code, DiagnosticCode::ImplicitTextConversion);
+    assert!(
+        matches!(
+            diagnostic.operand_type.as_deref(),
+            Some(lash_kernel_dialect::SourceOperandType::Record(_))
+        ),
+        "{diagnostic:?}"
+    );
 }

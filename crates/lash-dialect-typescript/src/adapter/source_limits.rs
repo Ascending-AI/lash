@@ -8,6 +8,8 @@ use super::{Diagnostic, DiagnosticCode, MAX_SOURCE_BYTES, MAX_SOURCE_NESTING_DEP
 pub struct SourceLimits {
     max_bytes: usize,
     max_nesting: usize,
+    annotation_depth: usize,
+    annotation_nodes: usize,
     implicit_text_conversion: lash_kernel_dialect::workflow::ImplicitTextConversionPolicy,
 }
 impl SourceLimits {
@@ -16,6 +18,8 @@ impl SourceLimits {
         Self {
             max_bytes: MAX_SOURCE_BYTES,
             max_nesting: MAX_SOURCE_NESTING_DEPTH,
+            annotation_depth: 64,
+            annotation_nodes: 4096,
             implicit_text_conversion:
                 lash_kernel_dialect::workflow::ImplicitTextConversionPolicy::Refuse,
         }
@@ -38,9 +42,32 @@ impl SourceLimits {
         Ok(Self {
             max_bytes,
             max_nesting,
+            annotation_depth: 64,
+            annotation_nodes: 4096,
             implicit_text_conversion:
                 lash_kernel_dialect::workflow::ImplicitTextConversionPolicy::Refuse,
         })
+    }
+    /// Bound each entry annotation's expanded structure. Defaults are depth 64
+    /// and 4096 nodes. Hosts may lower either bound; parsing has its own limits.
+    pub fn with_entry_annotation_limits(
+        mut self,
+        depth: usize,
+        nodes: usize,
+    ) -> Result<Self, Diagnostic> {
+        if depth == 0 || depth > 64 || nodes == 0 || nodes > 4096 {
+            return Err(Diagnostic::new(
+                DiagnosticCode::ParseResourcesUnavailable,
+                "entry annotation limits require depth 1..=64 and nodes 1..=4096",
+                None,
+            ));
+        }
+        self.annotation_depth = depth;
+        self.annotation_nodes = nodes;
+        Ok(self)
+    }
+    pub(crate) const fn entry_annotation_limits(self) -> (usize, usize) {
+        (self.annotation_depth, self.annotation_nodes)
     }
     /// Select implicit text admission for authored workflows. Omission is `refuse`.
     /// Cells keep their ordinary JavaScript conversion behavior.
