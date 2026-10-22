@@ -640,15 +640,18 @@ async fn run_linked_cell(
         selector: lash_vocabulary::names::StartSelector::Main,
     };
     let prepared = match services.kernel.library() {
-        Ok(functions) => {
-            processes::prepare(
-                state.documents.as_ref().expect("cell document owner"),
-                &start,
-                &functions,
-                &host.envelope.environment.authored,
-            )
-            .await
-        }
+        Ok(functions) => match state.documents.as_ref() {
+            Some(documents) => {
+                processes::prepare(
+                    documents,
+                    &start,
+                    &functions,
+                    &host.envelope.environment.authored,
+                )
+                .await
+            }
+            None => Err("the cell has no document owner".into()),
+        },
         Err(error) => Err(error.to_string()),
     };
     let prepared = match prepared {
