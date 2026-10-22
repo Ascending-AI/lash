@@ -839,41 +839,53 @@ fn escaped_request_blocks_keep_their_admission() {
 /// LO-EVICT-PART-EDIT: even a uniquely held carrier reserves before editing.
 #[test]
 fn private_parts_refuse_growth_before_mutation() {
-    let ledger = crate::allocation::testing::Ledger::default();
-    ledger.limit(1 << 24);
-    let budget = ledger.budget();
-    let mut parts = MessageParts::clone_in(&[part(PartKind::Text, "before")], &budget).unwrap();
-    ledger.limit(ledger.used());
-    assert!(
-        MessageParts::edit(&mut parts, |parts| parts
-            .push(&part(PartKind::Text, "after")))
-        .is_err(),
-        "raw growth bypassed admission"
-    );
-    assert_eq!(parts[0].content(), "before");
+    for operation in 0..5 {
+        let ledger = crate::allocation::testing::Ledger::default();
+        ledger.limit(1 << 24);
+        let budget = ledger.budget();
+        let mut parts = MessageParts::clone_in(
+            &[part(PartKind::Text, "before"), attachment_part(b"image")],
+            &budget,
+        )
+        .unwrap();
+        let before = serde_json::to_vec(&parts).unwrap();
+        if operation == 0 {
+            ledger.limit(ledger.used());
+        }
+        let entered = std::cell::Cell::new(false);
+        let result = MessageParts::edit(&mut parts, |editor| {
+            entered.set(true);
+            // Refuse the operation only after the private draft is admitted.
+            ledger.limit(ledger.used());
+            match operation {
+                0 | 1 => editor.push(&part(PartKind::Text, "after")),
+                2 => editor
+                    .replace(0, &part(PartKind::Text, "after"))
+                    .map(|_| ()),
+                3 => editor.omit_attachments(1, "omitted").map(|_| ()),
+                _ => editor.elide_if(0, 1, "elided", |_| true).map(|_| ()),
+            }
+        });
+        assert!(result.is_err(), "operation {operation} bypassed admission");
+        assert_eq!(entered.get(), operation != 0);
+        assert_eq!(serde_json::to_vec(&parts).unwrap(), before);
+    }
 }
 
 /// LO-EVICT-SEQUENCE: publication adopts foreign immutable parts.
 #[test]
-fn sequence_push_and_replace_refuse_foreign_parts_before_publication() {
-    for replace in [false, true] {
-        let ledger = crate::allocation::testing::Ledger::default();
-        ledger.limit(1 << 24);
-        let budget = ledger.budget();
-        let mut sequence = MessageSequence::default().clone_in(&budget).unwrap();
-        ledger.limit(ledger.used() + 65536);
-        let foreign = witness_message("foreign", &"x".repeat(1 << 20));
-        let result = if replace {
-            sequence.replace(vec![foreign])
-        } else {
-            sequence.push(foreign)
-        };
-        assert!(
-            result.is_err(),
-            "foreign parts were retained without owner admission"
-        );
-        assert!(sequence.is_empty());
-    }
+fn sequence_push_refuses_foreign_parts_before_publication() {
+    let ledger = crate::allocation::testing::Ledger::default();
+    ledger.limit(1 << 24);
+    let budget = ledger.budget();
+    let mut sequence = MessageSequence::default().clone_in(&budget).unwrap();
+    ledger.limit(ledger.used() + 65536);
+    let foreign = witness_message("foreign", &"x".repeat(1 << 20));
+    assert!(
+        sequence.push(foreign).is_err(),
+        "foreign parts bypassed admission"
+    );
+    assert!(sequence.is_empty());
 }
 
 /// LO-EVICT-SEQUENCE: raw edits invalidate the same-ledger admission witness.

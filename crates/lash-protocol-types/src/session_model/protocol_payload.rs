@@ -10,8 +10,8 @@ use std::sync::Arc;
 /// derives from it (a plugin's decoded event) is kept beside it with
 /// [`Self::derived`] and reused by every later reader of the same retained
 /// event. A payload that changes ([`Self::replace`]) is a new payload with
-/// nothing derived, so a derived value never outlives what it was read
-/// from. It serializes as its JSON.
+/// nothing derived. Each derived Arc retains its own allocation obligation
+/// even after this source and its memo are dropped. It serializes as its JSON.
 ///
 /// ```
 /// use lash_protocol_types::ProtocolPayload;

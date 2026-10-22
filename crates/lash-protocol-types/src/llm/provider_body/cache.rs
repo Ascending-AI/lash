@@ -2,7 +2,7 @@
 //! lowered from.
 
 use super::RequestSegment;
-use crate::llm::types::{LlmContentBlock, LlmMessage, LlmRole};
+use crate::llm::types::{LlmMessage, LlmRole};
 use std::any::Any;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
