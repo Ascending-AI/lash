@@ -75,7 +75,9 @@ fn service(document: &Document, contract: &str, visibility: Visibility) -> Packa
 fn l_admit_contract_fresh_fulfilment_accepts_c2_but_existing_link_keeps_c1() {
     let doc = source();
     let mut content = LinkedContent::default();
-    let id = content.insert_document(doc.clone()).unwrap();
+    let id = content
+        .insert_document(doc.clone(), &doc.functions)
+        .unwrap();
     let owner = context("service", "provider");
     let consumer = context("app", "host");
     let a = PackageAdvertisement::Enumerated(service(&doc, "c1", Visibility::Public));
@@ -101,7 +103,9 @@ fn l_admit_contract_fresh_fulfilment_accepts_c2_but_existing_link_keeps_c1() {
 fn l_dispatch_one_document_linked_twice_keeps_independent_operation_uses() {
     let doc = source();
     let mut content = LinkedContent::default();
-    let id = content.insert_document(doc.clone()).unwrap();
+    let id = content
+        .insert_document(doc.clone(), &doc.functions)
+        .unwrap();
     let owner = context("service", "provider");
     let consumer = context("app", "host");
     let mut roots = vec![];
@@ -118,12 +122,14 @@ fn l_dispatch_one_document_linked_twice_keeps_independent_operation_uses() {
         .inspect(
             roots[0],
             &ReachSelection::Start(StartSelector::Export(Name::new("run"))),
+            &BTreeMap::new(),
         )
         .unwrap();
     let second = content
         .inspect(
             roots[1],
             &ReachSelection::Start(StartSelector::Export(Name::new("run"))),
+            &BTreeMap::new(),
         )
         .unwrap();
     let pins = first
@@ -146,7 +152,9 @@ fn l_dispatch_one_document_linked_twice_keeps_independent_operation_uses() {
 fn l_internal_requires_exact_package_and_publisher() {
     let doc = source();
     let mut content = LinkedContent::default();
-    let id = content.insert_document(doc.clone()).unwrap();
+    let id = content
+        .insert_document(doc.clone(), &doc.functions)
+        .unwrap();
     let owner = context("service", "owner");
     let foreign = context("service", "foreign");
     let ad = PackageAdvertisement::Enumerated(service(&doc, "c1", Visibility::Internal));
@@ -175,7 +183,9 @@ fn l_deferred_attach_pins_the_grant_without_resolving() {
     let function=parse_definition("function app.run(value: Json) -> Json\nkernel 1\ncharge 1\nimport 0 operation wip.fetch(value: Json) -> Json\nbody { let answer = perform 0(value) as Json return answer }").unwrap();
     let doc = document(function);
     let mut content = LinkedContent::default();
-    let id = content.insert_document(doc).unwrap();
+    let id = content
+        .insert_document(doc.clone(), &doc.functions)
+        .unwrap();
     let owner = context("wip", "resolver");
     let consumer = context("app", "host");
     let ad = PackageAdvertisement::Deferred(Box::new(DeferredPackage {
@@ -222,7 +232,9 @@ fn l_deferred_attach_pins_the_grant_without_resolving() {
 fn l_start_sync_data_export_needs_no_main() {
     let doc = source();
     let mut content = LinkedContent::default();
-    let id = content.insert_document(doc.clone()).unwrap();
+    let id = content
+        .insert_document(doc.clone(), &doc.functions)
+        .unwrap();
     let ad = PackageAdvertisement::Enumerated(service(&doc, "c1", Visibility::Public));
     let owner = context("service", "provider");
     let consumer = context("app", "host");
@@ -236,7 +248,8 @@ fn l_start_sync_data_export_needs_no_main() {
         content
             .inspect(
                 root,
-                &ReachSelection::Start(StartSelector::Export(Name::new("run")))
+                &ReachSelection::Start(StartSelector::Export(Name::new("run"))),
+                &BTreeMap::new()
             )
             .unwrap()
             .signature
@@ -244,7 +257,11 @@ fn l_start_sync_data_export_needs_no_main() {
     );
     assert_eq!(
         content
-            .inspect(root, &ReachSelection::Start(StartSelector::Main))
+            .inspect(
+                root,
+                &ReachSelection::Start(StartSelector::Main),
+                &BTreeMap::new()
+            )
             .unwrap_err(),
         LinkRefusal::MissingMain
     );
@@ -290,7 +307,9 @@ fn a4_matching_brand_with_stale_shape_is_catchable() {
 fn l_internal_forged_link_cannot_publish_another_owners_internal_fill() {
     let doc = source();
     let mut content = LinkedContent::default();
-    let document = content.insert_document(doc.clone()).unwrap();
+    let document = content
+        .insert_document(doc.clone(), &doc.functions)
+        .unwrap();
     let owner = context("service", "provider");
     let outsider = context("app", "foreign");
     let service = PackageAdvertisement::Enumerated(service(&doc, "c1", Visibility::Internal));
@@ -328,7 +347,9 @@ fn l_internal_forged_link_cannot_publish_another_owners_internal_fill() {
 fn label_keys_cannot_name_unknown_members_or_replace_public_member_labels() {
     let doc = source();
     let mut content = LinkedContent::default();
-    let document = content.insert_document(doc.clone()).unwrap();
+    let document = content
+        .insert_document(doc.clone(), &doc.functions)
+        .unwrap();
     let link = Link {
         document,
         fills: BTreeMap::from([(
@@ -373,7 +394,9 @@ fn label_keys_cannot_name_unknown_members_or_replace_public_member_labels() {
 fn authored_origin_requires_public_imports_and_the_accepted_contract_pin() {
     let doc = source();
     let mut content = LinkedContent::default();
-    let document = content.insert_document(doc.clone()).unwrap();
+    let document = content
+        .insert_document(doc.clone(), &doc.functions)
+        .unwrap();
     let provider = context("service", "provider");
     let public = PackageAdvertisement::Enumerated(service(&doc, "c1", Visibility::Public));
     let internal = PackageAdvertisement::Enumerated(service(&doc, "c1", Visibility::Internal));
@@ -416,7 +439,9 @@ fn label_definition_index_visits_each_document_once() {
     let expected = doc.functions.len();
     assert!(expected > 0);
     let mut content = LinkedContent::default();
-    let document = content.insert_document(doc.clone()).unwrap();
+    let document = content
+        .insert_document(doc.clone(), &doc.functions)
+        .unwrap();
     let mut members = BTreeMap::new();
     for contract in ["c1", "c2"] {
         let link = Link {

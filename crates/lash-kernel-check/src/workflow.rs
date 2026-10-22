@@ -69,9 +69,10 @@ impl WorkflowDocument {
     pub fn entered(
         document: Document,
         reference: LinkedStart,
+        catalog: &dyn lash_kernel_doc::FunctionCatalog,
     ) -> Result<Self, WorkflowDocumentError> {
-        crate::selected_reach(&document, &reference.selector)?;
-        let graph = crate::derive(&document, &document.functions)?;
+        crate::selected_reach(&document, &reference.selector, catalog)?;
+        let graph = crate::derive(&document, catalog)?;
         Ok(Self {
             document: Arc::new(document),
             graph: Arc::new(graph),

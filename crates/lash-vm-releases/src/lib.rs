@@ -1,12 +1,10 @@
-//! Build-generated helper Documents, ordinary package namespaces and native
-//! declarations. Runtime references retain their Link DAG; there is no set.
+//! Immutable build-owned helper code and native declarations, addressed by exact FunctionId.
 
 use std::sync::{Arc, OnceLock};
 
-use lash_kernel_doc::{Document, FunctionRegistry};
+use lash_kernel_doc::{BuildHelpers, FunctionRegistry};
 
-use lash_kernel_package::LinkedContent;
-use lash_vocabulary::{names::*, package::*};
+use lash_vocabulary::names::*;
 use std::collections::BTreeMap;
 
 /// The TypeScript dialect name recorded by sessions and runs.
@@ -96,36 +94,18 @@ impl LibraryError {
     }
 }
 
-/// The helper release is executable declarations plus its linked namespace.
-/// Native bodies are supplied separately by the worker embedding.
+/// This build's immutable helper image. Labels and source resolver roots are
+/// metadata; they create no Documents, Links, package exports or authority.
 #[derive(Clone, Debug)]
 pub struct HelperRelease {
-    pub content: LinkedContent,
+    pub helpers: Arc<BuildHelpers>,
     pub functions: FunctionRegistry,
-    /// Display sidecars keyed by exact Package identity, outside executable content.
-    pub labels: BTreeMap<PackageId, String>,
+    pub roots: std::collections::BTreeSet<FunctionId>,
+    pub labels: BTreeMap<FunctionId, String>,
 }
-
 impl HelperRelease {
-    /// Resolve only authored exports; lifted local functions remain reachable
-    /// by identity but never enter the global source-name resolver.
     pub fn resolver_roots(&self) -> std::collections::BTreeSet<FunctionId> {
-        self.content
-            .packages
-            .values()
-            .flat_map(|package| package.members.values())
-            .filter_map(|member| {
-                let MemberKind::Export { link, export } = &member.kind else {
-                    return None;
-                };
-                let link = self.content.links.get(link)?;
-                let document = self.content.documents.get(&link.document)?;
-                match document.exports.get(&export.name)? {
-                    lash_kernel_doc::Export::Function(function) => Some(function.function),
-                    _ => None,
-                }
-            })
-            .collect()
+        self.roots.clone()
     }
 }
 
@@ -136,16 +116,11 @@ fn standard_in(
     slot.get_or_init(assemble).clone()
 }
 
-/// Assemble the build's one helper Document, and retain registry declarations
-/// independently of package provenance. This does not install durable roots.
+/// Install this build's metadata once. Function images stay lazy; no helper
+/// body is decoded, hashed or published while opening the release.
 pub fn helper_release() -> Result<Arc<HelperRelease>, LibraryError> {
     static STANDARD: OnceLock<Result<Arc<HelperRelease>, LibraryError>> = OnceLock::new();
     standard_in(&STANDARD, || {
-        let document: Document = serde_json::from_str(include_str!(concat!(
-            env!("OUT_DIR"),
-            "/helpers.document.json"
-        )))
-        .map_err(LibraryError::new)?;
         let mut functions = FunctionRegistry::declarations();
         for built in PACKAGES {
             let image =
@@ -154,69 +129,36 @@ pub fn helper_release() -> Result<Arc<HelperRelease>, LibraryError> {
                 .register_released(image)
                 .map_err(LibraryError::new)?;
         }
-        let mut content = LinkedContent::default();
-        let document_id = document.identity();
-        let fills = document
-            .imports
-            .iter()
-            .map(|(slot, import)| {
-                lash_kernel_dialect::authoring::service_requirement(&import.name)
-                    .map(|requirement| (*slot, Fill::Operation(requirement)))
-                    .ok_or_else(|| {
-                        LibraryError::new(format!(
-                            "helper Import {:?} has no build-defined operation offer",
-                            import.name
-                        ))
-                    })
-            })
-            .collect::<Result<BTreeMap<_, _>, _>>()?;
-        let link = Link {
-            document: document_id,
-            fills,
-        };
-        let link_id = link.identity();
-        let packages: BTreeMap<PackagePath, BTreeMap<Segment, ExportName>> = serde_json::from_str(
-            include_str!(concat!(env!("OUT_DIR"), "/helpers.packages.json")),
-        )
+        let roots = serde_json::from_str(include_str!(concat!(
+            env!("OUT_DIR"),
+            "/helpers.roots.json"
+        )))
         .map_err(LibraryError::new)?;
-        for (path, exports) in packages {
-            let members = exports
-                .into_iter()
-                .map(|(name, export)| {
-                    (
-                        name,
-                        Member {
-                            visibility: Visibility::Public,
-                            kind: MemberKind::Export {
-                                link: link_id,
-                                export,
-                            },
-                        },
-                    )
-                })
-                .collect();
-            let package = Package { path, members };
-            content.packages.insert(package.identity(), package);
-        }
-        content.documents.insert(document_id, document);
-        content.links.insert(link_id, link);
-        let authored: BTreeMap<PackagePath, serde_json::Value> = serde_json::from_str(
-            include_str!(concat!(env!("OUT_DIR"), "/helpers.labels.json")),
-        )
+        let members = serde_json::from_str(include_str!(concat!(
+            env!("OUT_DIR"),
+            "/helpers.members.json"
+        )))
         .map_err(LibraryError::new)?;
-        let labels = content
-            .packages
-            .iter()
-            .filter_map(|(id, package)| {
-                authored
-                    .get(&package.path)
-                    .map(|labels| (*id, labels.to_string()))
-            })
-            .collect();
+        let helpers = Arc::new(
+            BuildHelpers::from_frame(
+                include!(concat!(env!("OUT_DIR"), "/helpers.identity.rs")),
+                functions.clone(),
+                members,
+            )
+            .map_err(LibraryError::new)?,
+        );
+        let labels: BTreeMap<FunctionId, serde_json::Value> = serde_json::from_str(include_str!(
+            concat!(env!("OUT_DIR"), "/helpers.labels.json")
+        ))
+        .map_err(LibraryError::new)?;
         Ok(Arc::new(HelperRelease {
-            content,
+            helpers,
             functions,
-            labels,
+            roots,
+            labels: labels
+                .into_iter()
+                .map(|(id, label)| (id, label.to_string()))
+                .collect(),
         }))
     })
 }

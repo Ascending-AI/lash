@@ -305,6 +305,16 @@ impl PreparedLibrary {
         let validated = identity
             .is_some_and(|identity| documents.1.contains(&(identity, limits.document_depth())));
         if !validated {
+            for function in document.library.iter() {
+                if !self.helpers().contains(function) {
+                    return Err(Refused::Invalid(lash_kernel_doc::Invalid {
+                        site: None,
+                        reason: Box::new(lash_kernel_doc::InvalidReason::FunctionNotResolved {
+                            function: *function,
+                        }),
+                    }));
+                }
+            }
             validate_document_with_limits(document, self.registry().as_ref(), limits)
                 .map_err(Refused::Invalid)?;
             if let Some(identity) = identity {
@@ -503,11 +513,14 @@ impl Admission {
                     .map_err(|_| Missing(id))?;
                 pending.remove(&id);
             }
-            Some(PreparedLibrary::with_layout_and_charge(
-                Arc::new(registry),
-                library.0.layout,
-                library.0.charge,
-            ))
+            Some(
+                PreparedLibrary::with_layout_and_charge(
+                    Arc::new(registry),
+                    library.0.layout,
+                    library.0.charge,
+                )
+                .with_helper_handle(Arc::clone(library.helpers())),
+            )
         } else {
             None
         };

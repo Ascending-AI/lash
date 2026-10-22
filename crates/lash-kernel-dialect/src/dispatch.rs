@@ -504,7 +504,7 @@ pub fn fill_placed<T>(
 mod tests {
     use std::collections::BTreeMap;
 
-    use lash_vocabulary::{FunctionName, Name, Param};
+    use lash_vocabulary::{Name, Param, QualifiedName};
 
     use super::*;
 
@@ -526,9 +526,14 @@ mod tests {
 
     fn member(name: &str, params: &[(&str, Type)], rest: bool) -> FunctionMember {
         FunctionMember {
-            name: crate::authoring::helper_name(
-                &FunctionName::new(name).expect("a qualified name"),
-            ),
+            name: {
+                let (package, member) = name.rsplit_once('.').expect("qualified test member");
+                QualifiedName {
+                    package: PackagePath::parse(package).expect("test package"),
+                    member: Segment::new(member).expect("test member"),
+                    type_member: None,
+                }
+            },
             convention: lash_vocabulary::Convention::Direct,
             signature: Signature {
                 params: params

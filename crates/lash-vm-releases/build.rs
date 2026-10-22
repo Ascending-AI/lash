@@ -18,11 +18,9 @@ mod sets;
 
 use std::collections::BTreeSet;
 
-use lash_kernel_doc::{Document, Export, FunctionExport, StartConvention};
-
 use lash_kernel_doc::{FunctionDefinition, FunctionRegistry};
 
-use lash_vocabulary::{claims::NodeRequirements, names::*};
+use lash_vocabulary::names::*;
 use std::collections::BTreeMap;
 
 struct ReleaseUnit {
@@ -99,7 +97,7 @@ fn main() -> Result<(), BuildError> {
         release_definitions.extend(python.definitions.clone());
         release_roots.extend(&python.roots);
     }
-    write_helper_document(&out, release_definitions, release_roots)?;
+    write_helper_library(&out, release_definitions, release_roots)?;
     println!("cargo:rerun-if-changed=build.rs");
     println!("cargo:rerun-if-changed=src");
     Ok(())
@@ -277,83 +275,47 @@ fn write_package(
 /// Helpers share one self-contained Document. Pure natives remain declarations
 /// in that document; package Imports never dispatch by a global helper name.
 #[expect(clippy::disallowed_methods, reason = "build-generated helper document")]
-fn write_helper_document(
+fn write_helper_library(
     out: &std::path::Path,
     definitions: Vec<FunctionDefinition>,
     roots: BTreeSet<FunctionId>,
 ) -> Result<(), BuildError> {
-    let mut functions = BTreeMap::new();
-    let mut exports = BTreeMap::new();
-    let mut requires = NodeRequirements::default();
-    let mut imports = BTreeMap::new();
-    let mut packages: BTreeMap<PackagePath, BTreeMap<Segment, ExportName>> = BTreeMap::new();
-    for definition in definitions {
-        let function = definition.identity();
-        if matches!(
-            definition.implementation,
-            lash_kernel_doc::Implementation::Native { .. }
-        ) {
-            requires.natives.insert(function);
-        }
-        requires.kernels.insert(definition.kernel);
-        if let Some(body) = definition.body() {
-            for (slot, import) in &body.imports {
-                if imports
-                    .insert(*slot, import.clone())
-                    .is_some_and(|prior| prior != *import)
-                {
-                    return Err(format!("helper Import slot collision at {slot:?}").into());
-                }
-            }
-        }
-        if roots.contains(&function) {
-            let name = Name::new(definition.name.as_str());
-            let public = lash_kernel_dialect::authoring::helper_name(&definition.name);
-            if packages
-                .entry(public.package)
-                .or_default()
-                .insert(
-                    public.member,
-                    ExportName {
-                        name: name.clone(),
-                        member: None,
-                    },
-                )
-                .is_some()
-            {
-                return Err(
-                    format!("canonical helper name collision for {}", definition.name).into(),
-                );
-            }
-            if exports
-                .insert(
-                    name,
-                    Export::Function(FunctionExport {
-                        function,
-                        signature: definition.signature.clone(),
-                        convention: StartConvention::Direct,
-                        asynchronous: false,
-                        rest: false,
-                    }),
-                )
-                .is_some()
-            {
-                return Err(format!("duplicate helper export {}", definition.name).into());
-            }
-        }
-        functions.insert(function, definition);
+    let mut registry = FunctionRegistry::declarations();
+    let mut pending: BTreeMap<_, _> = definitions
+        .into_iter()
+        .map(|definition| (definition.identity(), definition))
+        .collect();
+    while !pending.is_empty() {
+        let next = pending
+            .iter()
+            .find(|(_, definition)| {
+                definition
+                    .body()
+                    .is_none_or(|body| body.functions.keys().all(|id| registry.get(id).is_some()))
+            })
+            .map(|(id, _)| *id)
+            .ok_or("helper build image is not statically closed")?;
+        registry.register(
+            pending
+                .remove(&next)
+                .ok_or("helper definition disappeared")?,
+            None,
+        )?;
     }
-    let document = Document {
-        imports,
-        exports,
-        main: None,
-        functions,
-        requires,
-        numbers: lash_kernel_doc::NumberPolicy::BySpelling,
-        library: Default::default(),
-        private_bindings: BTreeSet::new(),
-    };
-    let mut labels = BTreeMap::<PackagePath, serde_json::Value>::new();
+    let helpers = lash_kernel_doc::BuildHelpers::new(registry, roots.iter().copied())?;
+    std::fs::write(
+        out.join("helpers.identity.rs"),
+        format!(
+            "lash_vocabulary::HelperLibraryId::from_bytes({:?})",
+            helpers.identity().as_bytes()
+        ),
+    )?;
+    std::fs::write(out.join("helpers.roots.json"), serde_json::to_vec(&roots)?)?;
+    std::fs::write(
+        out.join("helpers.members.json"),
+        serde_json::to_vec(&helpers.members().collect::<Vec<_>>())?,
+    )?;
+    let mut labels = BTreeMap::<FunctionId, serde_json::Value>::new();
     for source in [
         include_str!("labels/kernel.json"),
         include_str!("labels/typescript.json"),
@@ -364,40 +326,19 @@ fn write_helper_document(
     ] {
         let source: serde_json::Value = serde_json::from_str(source)?;
         for (name, display) in source["definitions"].as_object().into_iter().flatten() {
-            if let Some((id, definition)) = document
-                .functions
+            for (id, definition) in helpers
+                .functions()
                 .iter()
-                .find(|(_, definition)| definition.name.as_str() == name)
+                .filter(|(_, definition)| definition.name() == name)
             {
-                let public = lash_kernel_dialect::authoring::helper_name(&definition.name);
-                let key = if roots.contains(id) {
-                    "members"
-                } else {
-                    "definitions"
-                };
-                let name = if roots.contains(id) {
-                    public.member.to_string()
-                } else {
-                    name.clone()
-                };
-                labels
-                    .entry(public.package)
-                    .or_insert_with(|| serde_json::json!({"members":{}, "definitions":{}}))[key]
-                    [name] = display.clone();
+                let _ = definition;
+                labels.insert(*id, display.clone());
             }
         }
     }
     std::fs::write(
         out.join("helpers.labels.json"),
         serde_json::to_vec(&labels)?,
-    )?;
-    std::fs::write(
-        out.join("helpers.document.json"),
-        serde_json::to_vec(&document)?,
-    )?;
-    std::fs::write(
-        out.join("helpers.packages.json"),
-        serde_json::to_vec(&packages)?,
     )?;
     Ok(())
 }

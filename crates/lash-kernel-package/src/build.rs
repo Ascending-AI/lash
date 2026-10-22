@@ -533,32 +533,20 @@ pub(crate) fn follow_function(
     document: &Document,
     root: FunctionId,
     required: &mut lash_kernel_check::Requirements,
+    catalog: &dyn lash_kernel_doc::FunctionCatalog,
 ) {
-    let mut pending = vec![root];
-    while let Some(id) = pending.pop() {
-        if required.functions.contains_key(&id) {
-            continue;
-        }
-        let Some(function) = document.functions.get(&id) else {
-            continue;
-        };
-        required.functions.insert(id, function.name.clone());
-        if let Some(body) = function.body() {
-            let node = Node::Block(&body.block);
-            required.imports.extend(node.imports_within());
-            pending.extend(node.functions_within());
-        }
-    }
+    lash_kernel_check::follow(document, required, BTreeSet::from([root]), catalog);
 }
 pub(crate) fn function_reach(
     document: &Document,
     function: &FunctionExport,
+    catalog: &dyn lash_kernel_doc::FunctionCatalog,
 ) -> lash_kernel_check::Requirements {
     let mut required = lash_kernel_check::Requirements::default();
-    follow_function(document, function.function, &mut required);
+    follow_function(document, function.function, &mut required, catalog);
     for target in function.convention.targets() {
         match target {
-            FunctionTarget::Local(id) => follow_function(document, *id, &mut required),
+            FunctionTarget::Local(id) => follow_function(document, *id, &mut required, catalog),
             FunctionTarget::Import(slot) => {
                 required.imports.insert(*slot);
             }

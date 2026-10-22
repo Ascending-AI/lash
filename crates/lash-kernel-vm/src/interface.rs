@@ -243,7 +243,11 @@ impl Program {
             packages: BTreeMap::new(),
         };
         program.functions = content
-            .inspect(link, &lash_kernel_package::ReachSelection::AllExports)
+            .inspect(
+                link,
+                &lash_kernel_package::ReachSelection::AllExports,
+                program.helpers().as_ref(),
+            )
             .map_err(|error| StartError::Linked {
                 problem: error.to_string(),
             })?

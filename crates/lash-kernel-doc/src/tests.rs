@@ -395,3 +395,89 @@ fn unconstrained_decode_mismatches_keep_map_and_error_value_paths() {
         })
     );
 }
+
+/// Explicit library origin admits an exact reference without copying its body;
+/// an ambient registry entry alone never authorizes that reference.
+#[test]
+fn library_references_require_an_explicit_disjoint_manifest() {
+    use crate::{ActExpr, ActKind, Callee, Document, Expr, NumberPolicy, Stmt};
+    let helper = definition("law.helper", false);
+    let function = helper.identity();
+    let mut registry = FunctionRegistry::declarations();
+    registry.register(helper.clone(), None).unwrap();
+    let mut document = Document::new(
+        NumberPolicy::BySpelling,
+        vec![Stmt::Print {
+            value: Expr::Act(Box::new(ActExpr {
+                kind: ActKind::Call(Callee::Local(function)),
+                args: vec![Expr::Literal(crate::Literal::Null)],
+            })),
+        }],
+    );
+    assert!(crate::validate_document(&document, &registry).is_err());
+    document.library.insert(function);
+    crate::validate_document_structure(&document)
+        .expect("stored declared library refs need no installed helper");
+    crate::validate_document(&document, &registry).expect("explicit build reference is admitted");
+    document.functions.insert(function, helper);
+    assert!(
+        crate::validate_document(&document, &registry).is_err(),
+        "origins must be disjoint"
+    );
+}
+
+/// Release identity is the closed helper universe, independent of root order,
+/// duplicate roots and unrelated host functions; changing a member changes it.
+#[test]
+fn helper_library_identity_covers_only_the_closed_build_universe() {
+    use crate::{BuildHelpers, FunctionBody, Implementation};
+    let leaf = definition("law.leaf", false);
+    let leaf_id = leaf.identity();
+    let mut root = definition("law.root", false);
+    if let Implementation::Guest {
+        body: FunctionBody { functions, .. },
+        ..
+    } = &mut root.implementation
+    {
+        functions.insert(leaf_id, leaf.name.clone());
+    }
+    let root_id = root.identity();
+    let mut registry = FunctionRegistry::declarations();
+    registry.register(leaf.clone(), None).unwrap();
+    registry.register(root, None).unwrap();
+    let first = BuildHelpers::new(registry.clone(), [root_id]).unwrap();
+    registry
+        .register(definition("host.unrelated", false), None)
+        .unwrap();
+    let second = BuildHelpers::new(registry, [leaf_id, root_id, root_id]).unwrap();
+    assert_eq!(first.identity(), second.identity());
+    assert_eq!(
+        first
+            .members()
+            .copied()
+            .collect::<std::collections::BTreeSet<_>>(),
+        [leaf_id, root_id].into()
+    );
+    assert_ne!(
+        first.identity(),
+        BuildHelpers::new(first.functions().clone(), [leaf_id])
+            .unwrap()
+            .identity()
+    );
+    assert_eq!(
+        lash_vocabulary::HelperLibraryId::of_members([root_id, leaf_id]),
+        first.identity()
+    );
+    let _ = crate::document_work::helper_work();
+    let reopened = BuildHelpers::from_frame(
+        first.identity(),
+        first.functions().clone(),
+        first.members().copied().collect(),
+    )
+    .unwrap();
+    assert!(reopened.contains(&root_id));
+    assert_eq!(
+        crate::document_work::helper_work(),
+        crate::document_work::HelperWork::default()
+    );
+}

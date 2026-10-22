@@ -447,6 +447,10 @@ impl std::ops::Deref for Executable {
 }
 
 impl Executable {
+    pub(crate) fn helpers(&self) -> &Arc<doc::BuildHelpers> {
+        self.library.helpers()
+    }
+
     /// Whether the run charges its charged code (`Charge::Exact`); with
     /// charge Off, that code is paced.
     pub(crate) fn charging(&self) -> bool {

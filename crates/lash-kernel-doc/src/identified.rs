@@ -142,6 +142,30 @@ impl From<Document> for IdentifiedDocument {
 /// function. Only aggregate counts are retained, never documents,
 /// identities or guest values (ADR 0123).
 pub mod document_work {
+    #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+    pub struct HelperWork {
+        pub identity_hashes: u64,
+        pub body_decodes: u64,
+    }
+    std::thread_local! {
+        static HELPERS: std::cell::Cell<Option<HelperWork>> = const { std::cell::Cell::new(None) };
+    }
+    pub(crate) fn note_helper(change: impl FnOnce(&mut HelperWork)) {
+        let _ = HELPERS.try_with(|work| {
+            if let Some(mut counted) = work.get() {
+                change(&mut counted);
+                work.set(Some(counted));
+            }
+        });
+    }
+    /// Opt in on this thread and begin a fresh helper-work interval.
+    pub fn helper_work() -> HelperWork {
+        HELPERS.with(|work| {
+            work.replace(Some(HelperWork::default()))
+                .unwrap_or_default()
+        })
+    }
+
     use std::cell::Cell;
 
     std::thread_local! {

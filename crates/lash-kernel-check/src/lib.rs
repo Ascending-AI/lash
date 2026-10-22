@@ -49,7 +49,7 @@ pub use graph::{
     Target, UnitView,
 };
 pub use manifest::{
-    Requirements, entry_reachability, library_performs, requirements, selected_reach,
+    Requirements, entry_reachability, follow, library_performs, requirements, selected_reach,
 };
 pub use refusal::{Refusal, RefusalReason, Refused, SignatureMismatch, SignatureSide};
 pub use schema::{

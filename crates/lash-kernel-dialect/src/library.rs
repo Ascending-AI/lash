@@ -1,7 +1,7 @@
 //! Library functions by name.
 
 use std::collections::BTreeMap;
-use std::sync::{Arc, OnceLock};
+use std::sync::Arc;
 
 use lash_kernel_doc::{FunctionCatalog, FunctionDefinition, FunctionRegistry, RegisteredFunction};
 
@@ -16,18 +16,10 @@ use lash_vocabulary::{FunctionId, FunctionName};
 pub trait Library: FunctionCatalog + Send + Sync {
     /// The function `name` stands for.
     fn resolve(&self, name: &str) -> Option<FunctionId>;
-    /// Source spelling of a signature-only helper Import, projected from this library's authored names.
-    /// This supplies printer metadata and never fulfils executable code.
-    fn imported(&self, name: &lash_vocabulary::QualifiedName) -> Option<FunctionName>;
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 pub enum LibraryError {
-    #[error("helpers `{first}` and `{second}` project to the same package member")]
-    ImportCollision {
-        first: FunctionName,
-        second: FunctionName,
-    },
     #[error("`{name}` is already defined as {function}")]
     NameTaken {
         name: FunctionName,
@@ -48,13 +40,6 @@ pub struct NamedLibrary {
     /// The functions inserted by name beyond the registry's.
     inserted: BTreeMap<FunctionName, FunctionId>,
     definitions: BTreeMap<FunctionId, Arc<FunctionDefinition>>,
-    projected: OnceLock<BTreeMap<lash_vocabulary::QualifiedName, Projected>>,
-}
-
-#[derive(Clone, Debug)]
-struct Projected {
-    first: FunctionName,
-    guest: Option<FunctionName>,
 }
 
 /// The registry functions a library resolves names against.
@@ -129,30 +114,6 @@ impl NamedLibrary {
                 function: taken,
             });
         }
-        let projected = crate::authoring::helper_name(&definition.name);
-        let index = self.projected();
-        if !definition.has_native()
-            && let Some(first) = index.get(&projected).and_then(|entry| entry.guest.as_ref())
-        {
-            return Err(LibraryError::ImportCollision {
-                first: first.clone(),
-                second: definition.name.clone(),
-            });
-        }
-        let index = self
-            .projected
-            .get_mut()
-            .unwrap_or_else(|| unreachable!("initialized index"));
-        let entry = index.entry(projected).or_insert_with(|| Projected {
-            first: definition.name.clone(),
-            guest: None,
-        });
-        if definition.name < entry.first {
-            entry.first = definition.name.clone();
-        }
-        if !definition.has_native() {
-            entry.guest = Some(definition.name.clone());
-        }
         self.inserted.insert(definition.name.clone(), function);
         self.definitions.insert(function, definition);
         Ok(function)
@@ -184,30 +145,6 @@ impl NamedLibrary {
         );
         names.sort_unstable();
         names.into_iter()
-    }
-
-    fn projected(&self) -> &BTreeMap<lash_vocabulary::QualifiedName, Projected> {
-        self.projected.get_or_init(|| {
-            let mut projected = BTreeMap::<_, Projected>::new();
-            for (source, function) in self.iter() {
-                let name = FunctionName::new(source)
-                    .unwrap_or_else(|_| unreachable!("named functions have valid names"));
-                let entry = projected
-                    .entry(crate::authoring::helper_name(&name))
-                    .or_insert_with(|| Projected {
-                        first: name.clone(),
-                        guest: None,
-                    });
-                if entry.guest.is_none()
-                    && self
-                        .header(&function)
-                        .is_some_and(|header| !header.has_native())
-                {
-                    entry.guest = Some(name);
-                }
-            }
-            projected
-        })
     }
 
     /// The registry function `name` resolves to.
@@ -271,10 +208,6 @@ impl FunctionCatalog for NamedLibrary {
 }
 
 impl Library for NamedLibrary {
-    fn imported(&self, name: &lash_vocabulary::QualifiedName) -> Option<FunctionName> {
-        self.projected().get(name).map(|entry| entry.first.clone())
-    }
-
     fn resolve(&self, name: &str) -> Option<FunctionId> {
         // A name that is not a qualified name is no function's name: none
         // is registered or inserted under it.

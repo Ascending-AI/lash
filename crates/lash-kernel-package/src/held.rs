@@ -41,8 +41,12 @@ pub struct LinkedReach {
     pub signature: Option<lash_vocabulary::types::Signature>,
 }
 impl LinkedContent {
-    pub fn insert_document(&mut self, document: Document) -> Result<DocumentId, LinkRefusal> {
-        lash_kernel_doc::validate_document(&document, &document.functions).map_err(|e| {
+    pub fn insert_document(
+        &mut self,
+        document: Document,
+        catalog: &dyn lash_kernel_doc::FunctionCatalog,
+    ) -> Result<DocumentId, LinkRefusal> {
+        lash_kernel_doc::validate_document(&document, catalog).map_err(|e| {
             LinkRefusal::InvalidDocument {
                 message: e.to_string(),
             }
@@ -157,6 +161,7 @@ impl LinkedContent {
         &self,
         root: LinkId,
         selector: &ReachSelection,
+        catalog: &dyn lash_kernel_doc::FunctionCatalog,
     ) -> Result<LinkedReach, LinkRefusal> {
         let mut reach = LinkedReach {
             artifacts: self.retain_reach(root)?,
@@ -180,16 +185,18 @@ impl LinkedContent {
             let document = self.document(link.document)?;
             let required = match &selector {
                 ReachSelection::Start(selector) => {
-                    lash_kernel_check::selected_reach(document, selector)?
+                    lash_kernel_check::selected_reach(document, selector, catalog)?
                 }
                 ReachSelection::Callable(function) => {
-                    if !document.functions.contains_key(function) {
+                    if !document.functions.contains_key(function)
+                        && !document.library.contains(function)
+                    {
                         return Err(LinkRefusal::InvalidDocument {
                             message: format!("missing callable {function}"),
                         });
                     }
                     let mut required = lash_kernel_check::Requirements::default();
-                    crate::build::follow_function(document, *function, &mut required);
+                    crate::build::follow_function(document, *function, &mut required, catalog);
                     required
                 }
                 ReachSelection::AllExports => {
@@ -198,7 +205,7 @@ impl LinkedContent {
                 ReachSelection::Function(export) => {
                     // Imported functions may accept executable values; the host-only predicate does not apply.
                     let function = self.function_export(id, export)?;
-                    crate::build::function_reach(document, &function)
+                    crate::build::function_reach(document, &function, catalog)
                 }
                 ReachSelection::Type(export) => {
                     let Export::Type(ty) = self.export(id, export)? else {
@@ -207,9 +214,9 @@ impl LinkedContent {
                         });
                     };
                     let mut required = lash_kernel_check::Requirements::default();
-                    crate::build::follow_function(document, ty.checker, &mut required);
+                    crate::build::follow_function(document, ty.checker, &mut required, catalog);
                     for member in ty.members.values() {
-                        let r = crate::build::function_reach(document, member.function());
+                        let r = crate::build::function_reach(document, member.function(), catalog);
                         required.imports.extend(r.imports);
                         required.functions.extend(r.functions);
                     }

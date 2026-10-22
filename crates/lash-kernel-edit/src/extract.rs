@@ -37,18 +37,24 @@ pub fn extract_entry(
     entry: &Name,
     environment: &Environment<'_>,
 ) -> Result<Extraction, EditRefusal> {
-    let reached = entry_reachability(document, entry).map_err(|_error| EditRefusal {
-        diagnostics: vec![EditDiagnostic {
-            edit: None,
-            location: None,
-            kind: EditDiagnosticKind::NoSuchEntry {
-                name: entry.clone(),
-            },
-        }],
+    let reached = entry_reachability(document, entry, environment.functions).map_err(|_error| {
+        EditRefusal {
+            diagnostics: vec![EditDiagnostic {
+                edit: None,
+                location: None,
+                kind: EditDiagnosticKind::NoSuchEntry {
+                    name: entry.clone(),
+                },
+            }],
+        }
     })?;
     let mut extracted = document.clone();
     extracted.main = None;
     extracted.private_bindings.clear();
+    extracted
+        .library
+        .0
+        .retain(|id| reached.functions.contains_key(id));
     extracted.exports.retain(|name, _| name == entry);
     extracted
         .functions

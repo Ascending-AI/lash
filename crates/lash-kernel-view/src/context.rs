@@ -10,6 +10,7 @@ use std::collections::BTreeMap;
 #[derive(Clone, Debug)]
 pub struct ViewContext {
     pub(crate) reference: LinkedStart,
+    helpers: std::sync::Arc<lash_kernel_doc::BuildHelpers>,
     pub(crate) content: LinkedContent,
     timers: std::collections::BTreeSet<(lash_vocabulary::PackageId, lash_vocabulary::Segment)>,
     pub(crate) labels: BTreeMap<CallableId, MemberDisplay>,
@@ -19,6 +20,7 @@ impl ViewContext {
         reference: LinkedStart,
         content: LinkedContent,
         labels: BTreeMap<CallableId, MemberDisplay>,
+        helpers: std::sync::Arc<lash_kernel_doc::BuildHelpers>,
     ) -> Result<Self, LinkRefusal> {
         content.link(reference.link)?;
         for link in content.links.values() {
@@ -26,6 +28,7 @@ impl ViewContext {
         }
         Ok(Self {
             reference,
+            helpers,
             content,
             labels,
             timers: Default::default(),
@@ -75,9 +78,17 @@ impl ViewContext {
         })
     }
     pub(crate) fn function(&self, callable: &CallableId) -> Option<&FunctionDefinition> {
-        self.document(callable.link)?
-            .functions
-            .get(&callable.function)
+        let document = self.document(callable.link)?;
+        document.functions.get(&callable.function).or_else(|| {
+            self.helpers
+                .admits(&document.library, &callable.function)
+                .then(|| {
+                    self.helpers
+                        .registered(&callable.function)
+                        .map(|registered| &**registered.definition())
+                })
+                .flatten()
+        })
     }
 }
 impl ViewContext {
@@ -182,6 +193,7 @@ impl ViewContext {
             .inspect(
                 callable.link,
                 &lash_kernel_package::ReachSelection::Callable(callable.function),
+                self.helpers.as_ref(),
             )
             .ok()?;
         let mut uses = reach.operations.keys();
@@ -199,6 +211,7 @@ impl ViewContext {
             .inspect(
                 callable.link,
                 &lash_kernel_package::ReachSelection::Callable(callable.function),
+                self.helpers.as_ref(),
             )
             .map(|reach| reach.operations.into_keys().collect())
             .unwrap_or_default()

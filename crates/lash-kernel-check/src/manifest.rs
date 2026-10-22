@@ -61,6 +61,7 @@ fn convention(
 pub fn selected_reach(
     document: &Document,
     selector: &StartSelector,
+    catalog: &dyn FunctionCatalog,
 ) -> Result<Requirements, crate::StartRefusal> {
     let mut required = Requirements::default();
     let mut roots = BTreeSet::new();
@@ -79,28 +80,50 @@ pub fn selected_reach(
             convention(&export.convention, &mut required.imports, &mut roots);
         }
     }
-    follow(document, &mut required, roots);
+    follow(document, &mut required, roots, catalog);
     Ok(required)
 }
-fn follow(document: &Document, required: &mut Requirements, roots: BTreeSet<FunctionId>) {
+pub fn follow(
+    document: &Document,
+    required: &mut Requirements,
+    roots: BTreeSet<FunctionId>,
+    catalog: &dyn FunctionCatalog,
+) {
+    let mut allowed = document.library.0.clone();
     let mut pending: Vec<_> = roots.into_iter().collect();
     while let Some(id) = pending.pop() {
         if required.functions.contains_key(&id) {
             continue;
         }
-        let Some(function) = document.functions.get(&id) else {
-            continue;
-        };
-        required.functions.insert(id, function.name.clone());
-        if let Some(body) = function.body() {
-            let mut next = BTreeSet::new();
-            scan(&body.block, &mut required.imports, &mut next);
-            pending.extend(next);
+        if let Some(function) = document.functions.get(&id) {
+            required.functions.insert(id, function.name.clone());
+            if let Some(body) = function.body() {
+                let mut next = BTreeSet::new();
+                scan(&body.block, &mut required.imports, &mut next);
+                pending.extend(next);
+            }
+        } else if allowed.contains(&id) {
+            let Some(header) = catalog.header(&id) else {
+                continue;
+            };
+            required.functions.insert(id, header.name.clone());
+            if let Some(registered) = catalog.registered(&id) {
+                required.imports.extend(registered.imports().keys());
+                allowed.extend(registered.callees());
+                pending.extend(registered.callees());
+            } else if let Some(body) = catalog
+                .definition(&id)
+                .and_then(lash_kernel_doc::FunctionDefinition::body)
+            {
+                required.imports.extend(body.imports.keys());
+                allowed.extend(body.functions.keys());
+                pending.extend(body.functions.keys());
+            }
         }
     }
 }
 /// Reach of every offered Export and optional main, for publication and editor inspection.
-pub fn requirements(document: &Document, _catalog: &dyn FunctionCatalog) -> Requirements {
+pub fn requirements(document: &Document, catalog: &dyn FunctionCatalog) -> Requirements {
     let mut required = Requirements::default();
     let mut roots = BTreeSet::new();
     if let Some(main) = &document.main {
@@ -123,14 +146,15 @@ pub fn requirements(document: &Document, _catalog: &dyn FunctionCatalog) -> Requ
             lash_kernel_doc::Export::Error { .. } => {}
         }
     }
-    follow(document, &mut required, roots);
+    follow(document, &mut required, roots, catalog);
     required
 }
 pub fn entry_reachability(
     document: &Document,
     name: &Name,
+    catalog: &dyn FunctionCatalog,
 ) -> Result<Requirements, crate::StartRefusal> {
-    selected_reach(document, &StartSelector::Export(name.clone()))
+    selected_reach(document, &StartSelector::Export(name.clone()), catalog)
 }
 pub fn library_performs(catalog: &dyn FunctionCatalog, id: &FunctionId) -> BTreeSet<ImportSlot> {
     let mut imports = BTreeSet::new();

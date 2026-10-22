@@ -114,6 +114,63 @@ pub struct Ordinals {
     pub conditions: BTreeMap<Site, u32>,
 }
 
+/// Ephemeral admission facts produced by the single live-code walk after a
+/// helper-library mismatch. It is not part of any saved document or checkpoint.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RestoreSelection {
+    pub pins: BTreeSet<FunctionId>,
+    pub live: BTreeSet<CallableId>,
+}
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub enum Selection {
+    #[default]
+    Fresh,
+    Restored(RestoreSelection),
+}
+
+/// A document's admitted code origins: local definitions first, then only its
+/// explicit build-library references. Ambient registry membership grants nothing.
+pub struct DocumentCatalog<'a> {
+    document: &'a Document,
+    library: &'a dyn crate::FunctionCatalog,
+}
+impl<'a> DocumentCatalog<'a> {
+    pub fn new(document: &'a Document, library: &'a dyn crate::FunctionCatalog) -> Self {
+        Self { document, library }
+    }
+}
+impl crate::FunctionCatalog for DocumentCatalog<'_> {
+    fn definition(&self, function: &FunctionId) -> Option<&FunctionDefinition> {
+        self.document.functions.get(function).or_else(|| {
+            self.document
+                .library
+                .contains(function)
+                .then(|| self.library.definition(function))
+                .flatten()
+        })
+    }
+    fn header(&self, function: &FunctionId) -> Option<std::sync::Arc<crate::FunctionHeader>> {
+        self.document
+            .functions
+            .get(function)
+            .map(|definition| std::sync::Arc::new(crate::FunctionHeader::of(definition)))
+            .or_else(|| {
+                self.document
+                    .library
+                    .contains(function)
+                    .then(|| self.library.header(function))
+                    .flatten()
+            })
+    }
+    fn registered(&self, function: &FunctionId) -> Option<&crate::RegisteredFunction> {
+        (self.document.functions.contains_key(function) || self.document.library.contains(function))
+            .then(|| self.library.registered(function))
+            .flatten()
+    }
+}
+
 impl Document {
     /// A document with this `main` and nothing else.
     pub fn new(numbers: NumberPolicy, main: Block) -> Self {
@@ -440,7 +497,9 @@ impl Document {
             if let Some(body) = function.body_mut() {
                 let dependencies = crate::Node::Block(&body.block).functions_within();
                 for dependency in dependencies {
-                    one(dependency, source, visiting, done, out)?;
+                    if source.contains_key(&dependency) {
+                        one(dependency, source, visiting, done, out)?;
+                    }
                 }
                 let _: Result<(), std::convert::Infallible> =
                     crate::NodeMut::Block(&mut body.block).try_each_function_mut(

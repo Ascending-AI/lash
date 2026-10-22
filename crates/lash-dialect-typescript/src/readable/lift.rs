@@ -218,28 +218,7 @@ impl<'a> Lifter<'a> {
         let Ok(name) = lash_vocabulary::FunctionName::new(name) else {
             return false;
         };
-        let qualified = lash_kernel_dialect::authoring::helper_name(&name);
-        self.library(id)
-            .is_some_and(|found| found == name.as_str() || found == qualified.to_string())
-    }
-
-    /// Match the import contract authored for the library's selected helper.
-    /// Display labels do not establish a helper's identity or convention.
-    pub(super) fn helper_import(&self, slot: &lash_vocabulary::ImportSlot, name: &str) -> bool {
-        let Some(identity) = self.library.resolve(name) else {
-            return false;
-        };
-        let Some(header) = self.library.header(&identity) else {
-            return false;
-        };
-        !header.has_native()
-            && self.imports.get(slot).is_some_and(|import| {
-                import.name == lash_kernel_dialect::authoring::helper_name(&header.name)
-                    && matches!(&import.kind,
-                        lash_vocabulary::ImportKind::Code { signature, convention }
-                            if *signature == header.signature
-                                && *convention == lash_vocabulary::Convention::Direct)
-            })
+        self.library(id).is_some_and(|found| found == name.as_str())
     }
 
     fn caption(&self, target: impl Into<CaptionTarget>) -> Option<Caption> {
@@ -623,12 +602,9 @@ impl Reference for lash_vocabulary::FunctionId {
         document
             .functions
             .get(self)
-            .map(|function| function.name.to_string())
+            .map(|definition| definition.name.to_string())
             .or_else(|| {
-                document
-                    .requires
-                    .natives
-                    .contains(self)
+                (document.library.contains(self) || document.requires.natives.contains(self))
                     .then(|| library.header(self).map(|header| header.name.to_string()))
                     .flatten()
             })
@@ -642,11 +618,8 @@ impl Reference for lash_vocabulary::ImportSlot {
         library: &dyn lash_kernel_dialect::Library,
     ) -> Option<String> {
         let name = &imports.get(self)?.name;
-        Some(
-            library
-                .imported(name)
-                .map_or_else(|| name.to_string(), |source| source.to_string()),
-        )
+        let _ = library;
+        Some(name.to_string())
     }
 }
 impl Reference for k::FunctionTarget {

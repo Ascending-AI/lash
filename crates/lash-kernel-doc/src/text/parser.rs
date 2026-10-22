@@ -98,6 +98,9 @@ pub fn parse_document_over(
                     "function identity",
                 )?;
             }
+            "library" => {
+                document.library.insert(parser.function_reference()?);
+            }
             "native" => {
                 document
                     .requires

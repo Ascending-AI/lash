@@ -155,10 +155,10 @@ impl Lifter<'_> {
             let k::Expr::Act(conversion) = duration else {
                 return refuse("a sleep duration conversion");
             };
-            let k::ActKind::Call(k::Callee::Import(slot)) = &conversion.kind else {
-                return refuse("a sleep duration helper import");
+            let k::ActKind::Call(k::Callee::Local(function)) = &conversion.kind else {
+                return refuse("a sleep duration library reference");
             };
-            if !self.helper_import(slot, "ts.sleep_duration") {
+            if !self.is(function, "ts.sleep_duration") {
                 return refuse("the selected sleep duration helper");
             }
             let [authored] = conversion.args.as_slice() else {

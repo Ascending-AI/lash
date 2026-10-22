@@ -52,79 +52,6 @@ impl Imports {
     }
 }
 
-#[cfg(test)]
-thread_local! {
-    pub(crate) static HELPER_PROJECTIONS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
-}
-
-/// Canonical package name of a helper. All helpers under one source root
-/// share one package, so a helper and helpers beneath its name cannot make
-/// a member/namespace collision. Length-delimited canonical words preserve
-/// the original segment boundaries; canonical-name collisions are refused
-/// by the library at definition time.
-pub fn helper_name(name: &FunctionName) -> QualifiedName {
-    #[cfg(test)]
-    HELPER_PROJECTIONS.with(|count| count.set(count.get() + 1));
-    let mut parts = name
-        .as_str()
-        .split('.')
-        .map(canonical_segment)
-        .collect::<Vec<_>>();
-    let root = if parts.len() > 1 {
-        parts.remove(0)
-    } else {
-        Segment::new("kernel").unwrap_or_else(|error| panic!("canonical: {error}"))
-    };
-    let mut member = String::from("h");
-    for part in parts {
-        member.push_str(&format!("_n{}_{}", part.as_str().len(), part.as_str()));
-    }
-    QualifiedName {
-        package: PackagePath::new(root),
-        member: Segment::new(member)
-            .unwrap_or_else(|error| panic!("length-delimited canonical helper words: {error}")),
-        type_member: None,
-    }
-}
-
-fn canonical_segment(text: &str) -> Segment {
-    let chars = text.chars().collect::<Vec<_>>();
-    let mut result = String::new();
-    for (at, ch) in chars.iter().copied().enumerate() {
-        if ch == '_' {
-            if !result.is_empty() && !result.ends_with('_') {
-                result.push('_');
-            }
-            continue;
-        }
-        if ch.is_ascii_uppercase()
-            && !result.is_empty()
-            && !result.ends_with('_')
-            && (at > 0 && chars[at - 1].is_ascii_lowercase()
-                || chars.get(at + 1).is_some_and(char::is_ascii_lowercase)
-                    && at > 0
-                    && chars[at - 1].is_ascii_uppercase())
-        {
-            result.push('_');
-        }
-        result.push(ch.to_ascii_lowercase());
-    }
-    let result = result
-        .trim_matches('_')
-        .split('_')
-        .map(|word| {
-            if word.as_bytes().first().is_some_and(u8::is_ascii_digit) {
-                format!("n{word}")
-            } else {
-                word.to_owned()
-            }
-        })
-        .collect::<Vec<_>>()
-        .join("_");
-    Segment::new(&result)
-        .unwrap_or_else(|error| panic!("helper names have canonical word segments: {error}"))
-}
-
 /// Defines one authored body by content identity. Captures remain free
 /// variables in its code; closure construction captures them under its Link.
 pub fn local_function(
@@ -227,42 +154,62 @@ pub fn service_requirement(name: &QualifiedName) -> Option<lash_vocabulary::Oper
     ))
 }
 
-/// Retain the definitions behind native calls, including their reference bodies
-/// and identity-addressed local callees. Imported guest helpers retain their
-/// own defining document instead.
-pub fn include_native_definitions(
+/// Project direct build-library references and lift their transitive operation
+/// contracts into the caller's stable service slots. Hashed bodies stay in the build.
+pub fn include_library_dependencies(
     document: &mut lash_kernel_doc::Document,
     used: impl IntoIterator<Item = FunctionId>,
     library: &dyn crate::Library,
-) {
-    let mut pending = used.into_iter().collect::<Vec<_>>();
+) -> Result<(), String> {
+    let mut pending: Vec<_> = used
+        .into_iter()
+        .filter(|id| !document.functions.contains_key(id))
+        .collect();
+    document.library.0.extend(pending.iter().copied());
     let mut seen = std::collections::BTreeSet::new();
     while let Some(id) = pending.pop() {
         if !seen.insert(id) {
             continue;
         }
-        let Some(definition) = document
-            .functions
-            .get(&id)
-            .or_else(|| library.definition(&id))
-            .cloned()
-        else {
-            continue;
-        };
-        if definition.has_native() {
+        let header = library
+            .header(&id)
+            .ok_or_else(|| format!("missing build helper {id}"))?;
+        if header.has_native() {
             document.requires.natives.insert(id);
         }
-        if let Some(body) = definition.body() {
-            pending.extend(body.functions.keys().copied());
-            for (slot, import) in &body.imports {
-                if let Some(previous) = document.imports.insert(*slot, import.clone()) {
-                    assert_eq!(
-                        previous, *import,
-                        "native body import slots retain their owner"
-                    );
+        document.requires.kernels.insert(header.kernel);
+        let (callees, imports) = if let Some(registered) = library.registered(&id) {
+            (registered.callees().clone(), registered.imports().clone())
+        } else {
+            let definition = library
+                .definition(&id)
+                .ok_or_else(|| format!("missing build helper {id}"))?;
+            definition
+                .body()
+                .map(|body| {
+                    (
+                        body.functions.keys().copied().collect(),
+                        body.imports.clone(),
+                    )
+                })
+                .unwrap_or_default()
+        };
+        pending.extend(callees);
+        for (slot, import) in imports {
+            if service_slot(&import.name) != Some(slot) {
+                return Err(format!(
+                    "build helper operation {} has no stable service slot",
+                    import.name
+                ));
+            }
+            if let Some(previous) = document.imports.get(&slot) {
+                if previous != &import {
+                    return Err(format!("incompatible operation bindings at {slot:?}"));
                 }
+            } else {
+                document.imports.insert(slot, import);
             }
         }
-        document.functions.insert(id, definition);
     }
+    Ok(())
 }
