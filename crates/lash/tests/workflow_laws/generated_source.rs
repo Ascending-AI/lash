@@ -8,7 +8,7 @@ fn local(
     format: SourceFormat,
     maps: bool,
     library: &dyn lash::dialect::Library,
-) -> PrintedSource {
+) -> Result<PrintedSource, lash::dialect::PrintError> {
     let options = PrintOptions {
         source_map: maps,
         ..Default::default()
@@ -19,7 +19,6 @@ fn local(
         }
         SourceFormat::PythonV1 => lash::python::print(document.document(), None, library, options),
     }
-    .expect("local print succeeds")
 }
 
 fn decode(
@@ -61,9 +60,11 @@ fn sites(document: &Document) -> Vec<Site> {
     out
 }
 
-/// The same TS-origin, Python-origin and host-built documents survive both
-/// formats and both transport paths. Requested maps survive IPC unchanged;
-/// default printing sends no map and is independent of ordinary cell caps.
+/// FIG-6205: Cell documents round-trip exactly through their authored dialect
+/// and both transports, with complete optional maps and whole-source caps.
+/// FIG-7109: a foreign helper or number policy (TS Float, Python BySpelling)
+/// and a raw kernel tree have no faithful authored representation: both
+/// transports must preserve the typed PrintError::Unprintable refusal.
 #[tokio::test]
 async fn both_dialects_and_transports_preserve_exact_documents_and_optional_maps() {
     let embedding = lash_vm_worker::built_embedding(&Default::default()).expect("embedding");
@@ -97,8 +98,29 @@ async fn both_dialects_and_transports_preserve_exact_documents_and_optional_maps
             value: k::Rhs::Expr(k::Expr::Literal(k::Literal::Text("λ".repeat(40_000)))),
         },
     );
+    // Large authored cells retain the independent whole-source cap proof;
+    // the raw kernel fixture above independently pins refusal.
+    let large = "λ".repeat(40_000);
+    let large_ts = decode(
+        &format!("const 日本語 = {large:?};"),
+        &ts,
+        SourceFormat::TypeScriptV1,
+        embedding.library(),
+    );
+    let large_py = decode(
+        &format!("日本語 = {large:?}\n"),
+        &py,
+        SourceFormat::PythonV1,
+        embedding.library(),
+    );
     let service = lash::vm::WorkerService::default();
-    for document in [ts, py, host] {
+    for (document, authored) in [
+        (ts, Some(SourceFormat::TypeScriptV1)),
+        (py, Some(SourceFormat::PythonV1)),
+        (large_ts, Some(SourceFormat::TypeScriptV1)),
+        (large_py, Some(SourceFormat::PythonV1)),
+        (host, None),
+    ] {
         let link = lash::package::Link {
             document: document.identity(),
             fills: Default::default(),
@@ -115,6 +137,31 @@ async fn both_dialects_and_transports_preserve_exact_documents_and_optional_maps
             let mut without_map = None;
             for maps in [false, true] {
                 let printed = local(&view, format, maps, embedding.library());
+                if authored != Some(format) {
+                    let Err(lash::dialect::PrintError::Unprintable { site }) = printed else {
+                        panic!(
+                            "foreign helpers/policy or raw kernel must refuse: {format:?}: {printed:?}"
+                        );
+                    };
+                    let remote = service
+                        .print(
+                            &document,
+                            None,
+                            format,
+                            PrintOptions {
+                                source_map: maps,
+                                ..Default::default()
+                            },
+                        )
+                        .await;
+                    assert!(
+                        matches!(remote,
+                        Err(lash::vm::SourceServiceError::Print(lash::dialect::PrintError::Unprintable { site: actual })) if actual == site),
+                        "worker retains the local refusal site"
+                    );
+                    continue;
+                }
+                let printed = printed.unwrap_or_else(|error| panic!("{format:?}: {error:?}"));
                 exact(
                     &document,
                     &decode(&printed.source, &document, format, embedding.library()),

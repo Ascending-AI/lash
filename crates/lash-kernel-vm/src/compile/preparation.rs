@@ -455,7 +455,14 @@ impl Admission {
         }
         let mut authored = BTreeSet::new();
         while let Some(id) = pending.pop_first() {
-            let Some(definition) = reached.get(&id) else {
+            // Classification follows the retained lexical owner even when
+            // that owner is outside selected execution reach. A frozen child
+            // still needs its authored free-variable layout; compile_document
+            // below only emits definitions in `reached`.
+            let Some(definition) = std::iter::once(document)
+                .chain(documents.values().map(Arc::as_ref))
+                .find_map(|source| source.functions.get(&id))
+            else {
                 continue;
             };
             let doc::Implementation::Guest {

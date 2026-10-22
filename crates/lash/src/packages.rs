@@ -9,7 +9,7 @@ use lash_core::durable_port::packages::PackageStore;
 use lash_core::plugin::packages::{
     PackagePublisher, PublishPackage, package_store_error as store_error,
 };
-use lash_core_store::packages::PackageRecord;
+use lash_core_store::packages::{LinkRecord, PackageRecord};
 use lash_execution_contracts::process::ProcessDocumentProvider;
 use lash_execution_contracts::process::linking::{AdmissionRefusal, ContentRef, EnginePortError};
 use lash_vocabulary::package::*;
@@ -188,7 +188,17 @@ impl PackagePublisher for ScopedPackagePublisher {
         // under this publisher. Reusing a stored Link instead retains its
         // original publication and never relinks its internal Imports.
         let candidate = PackageAdvertisement::Enumerated(package.clone());
-        let mut advertisements = namespace.advertisements.clone();
+        // A publication replaces its own path in the authoring view. Keep
+        // the original namespace for ownership and provenance validation.
+        let mut advertisements: Vec<_> = namespace
+            .advertisements
+            .iter()
+            .copied()
+            .filter(|(_, advertisement)| match advertisement {
+                PackageAdvertisement::Enumerated(old) => old.path != package.path,
+                PackageAdvertisement::Deferred(old) => old.path != package.path,
+            })
+            .collect();
         advertisements.push((context, &candidate));
         let authoring = lash_kernel_package::Namespace { advertisements };
         for code in prepared.values() {
@@ -283,8 +293,41 @@ impl PackagePublisher for ScopedPackagePublisher {
                 imported_publications.push(key);
             }
         }
-        for id in &code_links {
-            self.runtime.hold(claim, &ContentRef::Link(*id)).await?;
+        // Fulfilled carries the validated content across runtime instances;
+        // publication must not depend on the producer's private preparation
+        // cache. Persist fresh Links, after all admission checks, before holds.
+        let mut pending: Vec<_> = code_links.iter().map(|id| (*id, false)).collect();
+        let mut retained = BTreeSet::new();
+        while let Some((id, children_retained)) = pending.pop() {
+            if retained.contains(&id) {
+                continue;
+            }
+            if let Some(code) = prepared.get(&id) {
+                if !children_retained {
+                    pending.push((id, true));
+                    pending.extend(code.content.fills.values().filter_map(|fill| match fill {
+                        Fill::Export { link, .. } => Some((*link, false)),
+                        Fill::Operation(_) | Fill::Deferred { .. } => None,
+                    }));
+                    continue;
+                }
+                self.store
+                    .put_link(
+                        claim,
+                        &LinkRecord {
+                            id,
+                            link: code.content.clone(),
+                        },
+                        &[lash_core::ArtifactName {
+                            store: lash_core::ArtifactStoreId::KernelDocument,
+                            artifact_ref: code.content.document.to_string(),
+                        }],
+                    )
+                    .await
+                    .map_err(store_error)?;
+            }
+            self.runtime.hold(claim, &ContentRef::Link(id)).await?;
+            retained.insert(id);
         }
         let id = package.identity();
         let path = package.path.clone();

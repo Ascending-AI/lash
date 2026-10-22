@@ -135,6 +135,9 @@ impl Lifter<'_> {
 
     /// `let name = value in body`: the scoped forms the front end writes.
     fn scoped(&mut self, name: &Name, value: &k::Expr, body: &k::Expr) -> Lift<Expr> {
+        if let Some(method) = self.array_callback_expression(name, value, body)? {
+            return Ok(method);
+        }
         let bound = k::Expr::Variable(name.clone());
         // `await sleep(ms)` gives undefined.
         if let k::Expr::Act(act) = value
@@ -143,7 +146,7 @@ impl Lifter<'_> {
                 then_yield: true,
                 ..
             } = act.kind
-            && self.document.imports.get(&slot).is_some_and(|import| {
+            && self.imports.get(&slot).is_some_and(|import| {
                 import.name == lash_kernel_dialect::service_name("typescript", "sleep")
             })
             && let [duration] = act.args.as_slice()
@@ -315,7 +318,6 @@ impl Lifter<'_> {
     /// The dotted path a call of `effect` is written as.
     fn operation(&self, slot: &lash_vocabulary::ImportSlot) -> Lift<Expr> {
         let name = &self
-            .document
             .imports
             .get(slot)
             .ok_or_else(|| "missing operation import".to_owned())?

@@ -211,3 +211,118 @@ impl Lifter<'_> {
             .then_some(args.as_slice())
     }
 }
+
+impl Lifter<'_> {
+    /// Invert call_array_callback's positional ABI. The final read-back
+    /// still proves the complete closure, temporary ordering and Imports.
+    pub(super) fn array_callback_expression(
+        &mut self,
+        receiver: &Name,
+        value: &k::Expr,
+        body: &k::Expr,
+    ) -> Lift<Option<Expr>> {
+        let k::Expr::Let {
+            name,
+            value: callback,
+            body,
+        } = body
+        else {
+            return Ok(None);
+        };
+        let k::Expr::Closure(closure) = &**callback else {
+            return Ok(None);
+        };
+        if closure.presentation.is_some() {
+            return Ok(None);
+        }
+        let k::Expr::Act(call) = &**body else {
+            return Ok(None);
+        };
+        let k::ActKind::Call(k::Callee::Import(slot)) = &call.kind else {
+            return Ok(None);
+        };
+        let Some(helper) = self.library(slot) else {
+            return Ok(None);
+        };
+        let Some(method) = crate::builtins::array_callback_method(&helper) else {
+            return Ok(None);
+        };
+        let (context, callable) = match call.args.as_slice() {
+            [target, k::Expr::Act(length), context, callable]
+                if *target == k::Expr::Variable(receiver.clone())
+                    && matches!(&length.kind, k::ActKind::Call(k::Callee::Import(slot)) if self.is(slot, "ts.array.length"))
+                    && length.args.as_slice() == [target.clone()] =>
+            {
+                (Some(context), callable)
+            }
+            [target, k::Expr::Act(length), callable]
+                if method == "sort"
+                    && *target == k::Expr::Variable(receiver.clone())
+                    && matches!(&length.kind, k::ActKind::Call(k::Callee::Import(slot)) if self.is(slot, "ts.array.length"))
+                    && length.args.as_slice() == [target.clone()] =>
+            {
+                (None, callable)
+            }
+            _ => return Ok(None),
+        };
+        if *callable != k::Expr::Variable(name.clone()) {
+            return Ok(None);
+        }
+        let definition = self
+            .document
+            .functions
+            .get(&closure.function)
+            .ok_or_else(|| "missing positional callback".to_owned())?;
+        let body = &definition
+            .body()
+            .ok_or_else(|| "positional callback has no body".to_owned())?
+            .block;
+        let [this, params @ ..] = definition.signature.params.as_slice() else {
+            return Ok(None);
+        };
+        // An arrow is faithful only when the callback does not use a dynamic
+        // receiver. Retain all positional slots, including unused ones: the
+        // read-back must reconstruct their exact binding identities.
+        let mut pending = vec![k::Node::Block(body)];
+        while let Some(node) = pending.pop() {
+            if matches!(node, k::Node::Expr(k::Expr::Variable(name)) if *name == this.name) {
+                return Ok(None);
+            }
+            pending.extend(node.children());
+        }
+        let mut inner = self.in_function(closure.function);
+        let parameters = params
+            .iter()
+            .map(|param| {
+                Ok(super::source::Param {
+                    caption: None,
+                    name: inner.binding(&param.name)?,
+                    optional: false,
+                    ty: None,
+                })
+            })
+            .collect::<Lift<Vec<_>>>()?;
+        let at = Site::new(
+            lash_vocabulary::sites::Unit::Library(closure.function),
+            Vec::new(),
+        );
+        let body = match body.as_slice() {
+            [k::Stmt::Return { value }] => super::source::Body::Expr(inner.expr(value)?),
+            body => super::source::Body::Block(inner.block(body, &at)?),
+        };
+        let mut args = vec![Expr::arrow(super::source::Function {
+            is_async: false,
+            params: parameters,
+            body,
+        })];
+        if let Some(context) =
+            context.filter(|value| !matches!(value, k::Expr::Literal(k::Literal::Absent)))
+        {
+            args.push(self.expr(context)?);
+        }
+        Ok(Some(Expr::Call(
+            Box::new(Expr::Field(Box::new(self.expr(value)?), method.to_owned())),
+            args,
+        )))
+    }
+}

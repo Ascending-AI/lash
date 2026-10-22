@@ -153,10 +153,17 @@ impl Packages {
             .admit_document(&claim, &document.clone().into())
             .await
             .unwrap();
-        let context = PublicationContext {
-            root: Segment::new(path).unwrap(),
-            ..self.namespace.context.clone()
-        };
+        let context = self
+            .packages
+            .snapshot
+            .advertisements
+            .iter()
+            .find(|accepted| accepted.publication.path.to_string() == path)
+            .map(|accepted| accepted.publication.context.clone())
+            .unwrap_or_else(|| PublicationContext {
+                root: Segment::new(path).unwrap(),
+                ..self.namespace.context.clone()
+            });
         let linked = documents
             .fulfil(&lash::package::FulfilRequest {
                 document: id,

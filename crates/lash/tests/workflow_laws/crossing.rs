@@ -198,14 +198,9 @@ async fn a_function_a_process_ships_runs_from_its_own_document_as_it_was() {
                 }
             })
             .collect();
-        assert_eq!(
-            names,
-            [
-                "typescript.clock".to_owned(),
-                "typescript.random".to_owned()
-            ]
-            .into(),
-            "computed-member helpers retain exactly their read-service reach; no capture operation is lent to the callback"
+        assert!(
+            names.is_empty(),
+            "K-DOC-002: arithmetic and list reads are pure; the callback inherits no operation from its enclosing capture call: {names:?}"
         );
         let mut execution = lash::package::ExecutionEnvironment::empty(
             lash_vocabulary::claims::RegistryKind::Process,

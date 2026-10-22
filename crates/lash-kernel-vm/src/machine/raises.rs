@@ -37,7 +37,8 @@ pub(super) enum Coordinate {
 }
 
 fn document(frame: &Frame, exe: &Executable) -> bool {
-    exe.code(frame.code).charged
+    let code = exe.code(frame.code);
+    code.charged && exe.authored_unit(&code.site.unit)
 }
 
 /// Where a raise unwinding through `frame` stands, when it is a document

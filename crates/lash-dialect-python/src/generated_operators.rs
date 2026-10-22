@@ -14,7 +14,16 @@ pub(crate) struct Operators {
 }
 impl Operators {
     pub(crate) fn new(document: &k::Document, library: &dyn lash_kernel_dialect::Library) -> Self {
-        let functions = document.function_names();
+        let mut functions = document.function_names();
+        // Native identities live in Requires rather than document bodies.
+        // Their spelling comes from the same library that lowered the cell.
+        functions.extend(
+            document
+                .requires
+                .natives
+                .iter()
+                .filter_map(|id| library.header(id).map(|header| (*id, header.name.clone()))),
+        );
         let helpers: BTreeMap<_, _> = functions
             .iter()
             .filter(|(id, name)| library.resolve(name.as_str()) == Some(**id))

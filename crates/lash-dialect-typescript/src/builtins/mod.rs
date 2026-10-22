@@ -47,13 +47,24 @@ pub(crate) use values::{member_reader, sources as value_sources};
 
 /// The array methods whose traversal accepts a fixed callback's operands.
 /// Both call discovery and lowering use this calling-convention recipe.
+const ARRAY_CALLBACKS: [(&str, &str, usize); 3] = [
+    ("sort", "ts.array.sort_slots", 2),
+    ("map", "ts.array.map_slots", 3),
+    ("filter", "ts.array.filter_slots", 3),
+];
+
 pub(crate) fn array_callback(method: &str) -> Option<(&'static str, usize)> {
-    match method {
-        "sort" => Some(("ts.array.sort_slots", 2)),
-        "map" => Some(("ts.array.map_slots", 3)),
-        "filter" => Some(("ts.array.filter_slots", 3)),
-        _ => None,
-    }
+    ARRAY_CALLBACKS
+        .iter()
+        .find(|(name, _, _)| *name == method)
+        .map(|(_, helper, arity)| (*helper, *arity))
+}
+
+pub(crate) fn array_callback_method(helper: &str) -> Option<&'static str> {
+    ARRAY_CALLBACKS
+        .iter()
+        .find(|(_, name, _)| *name == helper)
+        .map(|(method, _, _)| *method)
 }
 
 /// What calling a built-in function value does.

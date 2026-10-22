@@ -121,6 +121,7 @@ struct Pending {
 pub(super) struct Lifter<'a> {
     pub(super) document: &'a k::Document,
     library: &'a dyn lash_kernel_dialect::Library,
+    pub(super) imports: &'a BTreeMap<lash_vocabulary::ImportSlot, lash_vocabulary::Import>,
     captions: Option<&'a k::Captions>,
     /// The temporaries lifted and not yet read, in the order they were
     /// bound: the order the source evaluated them.
@@ -140,6 +141,14 @@ impl<'a> Lifter<'a> {
         unit: Unit,
         library: &'a dyn lash_kernel_dialect::Library,
     ) -> Self {
+        let imports = match &unit {
+            Unit::Library(id) => document
+                .functions
+                .get(id)
+                .and_then(|f| f.body())
+                .map_or(&document.imports, |body| &body.imports),
+            _ => &document.imports,
+        };
         let mut assigned = BTreeSet::new();
         let body = match &unit {
             Unit::Library(id) => document
@@ -193,6 +202,7 @@ impl<'a> Lifter<'a> {
         Self {
             document,
             library,
+            imports,
             captions,
             pending: Vec::new(),
             taken_captions: Vec::new(),
@@ -202,7 +212,7 @@ impl<'a> Lifter<'a> {
     }
 
     pub(super) fn library<R: Reference>(&self, id: &R) -> Option<String> {
-        id.name(self.document, self.library)
+        id.name(self.document, self.imports, self.library)
     }
     pub(super) fn is<R: Reference>(&self, id: &R, name: &str) -> bool {
         let Ok(name) = lash_vocabulary::FunctionName::new(name) else {
@@ -223,7 +233,7 @@ impl<'a> Lifter<'a> {
             return false;
         };
         !header.has_native()
-            && self.document.imports.get(slot).is_some_and(|import| {
+            && self.imports.get(slot).is_some_and(|import| {
                 import.name == lash_kernel_dialect::authoring::helper_name(&header.name)
                     && matches!(&import.kind,
                         lash_vocabulary::ImportKind::Code { signature, convention }
@@ -238,6 +248,17 @@ impl<'a> Lifter<'a> {
 
     pub(super) fn site_caption(&self, site: &Site) -> Option<Caption> {
         self.captions?.at(site).cloned()
+    }
+
+    pub(super) fn in_function(&self, function: lash_vocabulary::FunctionId) -> Self {
+        let mut inner = Self::new(
+            self.document,
+            self.captions,
+            Unit::Library(function),
+            self.library,
+        );
+        inner.bindings.extend(self.bindings.clone());
+        inner
     }
 
     /// Whether some statement of the unit assigns `name` after binding it.
@@ -588,6 +609,7 @@ pub(super) trait Reference {
     fn name(
         &self,
         document: &k::Document,
+        imports: &BTreeMap<lash_vocabulary::ImportSlot, lash_vocabulary::Import>,
         library: &dyn lash_kernel_dialect::Library,
     ) -> Option<String>;
 }
@@ -595,18 +617,31 @@ impl Reference for lash_vocabulary::FunctionId {
     fn name(
         &self,
         document: &k::Document,
-        _library: &dyn lash_kernel_dialect::Library,
+        _imports: &BTreeMap<lash_vocabulary::ImportSlot, lash_vocabulary::Import>,
+        library: &dyn lash_kernel_dialect::Library,
     ) -> Option<String> {
-        Some(document.functions.get(self)?.name.to_string())
+        document
+            .functions
+            .get(self)
+            .map(|function| function.name.to_string())
+            .or_else(|| {
+                document
+                    .requires
+                    .natives
+                    .contains(self)
+                    .then(|| library.header(self).map(|header| header.name.to_string()))
+                    .flatten()
+            })
     }
 }
 impl Reference for lash_vocabulary::ImportSlot {
     fn name(
         &self,
-        document: &k::Document,
+        _document: &k::Document,
+        imports: &BTreeMap<lash_vocabulary::ImportSlot, lash_vocabulary::Import>,
         library: &dyn lash_kernel_dialect::Library,
     ) -> Option<String> {
-        let name = &document.imports.get(self)?.name;
+        let name = &imports.get(self)?.name;
         Some(
             library
                 .imported(name)
@@ -618,11 +653,12 @@ impl Reference for k::FunctionTarget {
     fn name(
         &self,
         document: &k::Document,
+        imports: &BTreeMap<lash_vocabulary::ImportSlot, lash_vocabulary::Import>,
         library: &dyn lash_kernel_dialect::Library,
     ) -> Option<String> {
         match self {
-            Self::Local(id) => id.name(document, library),
-            Self::Import(slot) => slot.name(document, library),
+            Self::Local(id) => id.name(document, imports, library),
+            Self::Import(slot) => slot.name(document, imports, library),
         }
     }
 }

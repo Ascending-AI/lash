@@ -246,7 +246,7 @@ fn whole_printed(
     options: PrintOptions,
 ) -> Result<PrintedSource, PrintError> {
     let source_map = if options.source_map {
-        let sites = map.map(|map| map.sites).unwrap_or_default();
+        let sites = complete_source_sites(document, map.map(|map| map.sites).unwrap_or_default());
         Some(
             SourceMap::new(document, &source, format.language(), sites)
                 .map_err(|refused| PrintError::Invalid(refused.to_string()))?,
@@ -260,6 +260,44 @@ fn whole_printed(
         source_map,
         dropped: Vec::new(),
     })
+}
+
+/// Export maps cover the whole retained document, including unspelled helper
+/// bodies and lowering scaffolding. An absent spelling gets an implicit offset
+/// from its nearest located ancestor, never an invented authored source range.
+fn complete_source_sites(document: &k::Document, sites: Vec<k::SourceSite>) -> Vec<k::SourceSite> {
+    let mut located: BTreeMap<_, _> = sites
+        .into_iter()
+        .map(|entry| (entry.site.clone(), entry))
+        .collect();
+    for (unit, body) in document.units() {
+        let root = lash_vocabulary::sites::Site::new(unit, Vec::new());
+        let mut pending = vec![(k::Node::Block(body), root, 0)];
+        while let Some((node, site, inherited)) = pending.pop() {
+            let entry = located
+                .entry(site.clone())
+                .or_insert_with(|| k::SourceSite {
+                    site: site.clone(),
+                    ranges: Vec::new(),
+                    implicit: Some(inherited),
+                });
+            let offset = entry
+                .ranges
+                .first()
+                .map(|span| span.start)
+                .or(entry.implicit)
+                .unwrap_or(inherited);
+            if entry.ranges.is_empty() && entry.implicit.is_none() {
+                entry.implicit = Some(offset);
+            }
+            pending.extend(
+                (0u32..)
+                    .zip(node.children())
+                    .map(|(index, child)| (child, site.child(index), offset)),
+            );
+        }
+    }
+    located.into_values().collect()
 }
 
 /// Authored module parts in their Main statement order. Export bindings

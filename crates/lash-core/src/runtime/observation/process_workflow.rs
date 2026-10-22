@@ -345,11 +345,26 @@ impl ProcessWorkflowOverlayAccumulator {
             durable_state,
             timestamp: Some(timestamp),
         });
-        if (at.position() == held.value.at.position() && at.visit() > held.value.at.visit())
-            || ((at.position() != held.value.at.position() || at.visit() == held.value.at.visit())
-                && (sequence.is_some()
-                    || (!held.durable_state
-                        && held.timestamp.is_none_or(|held| timestamp >= held))))
+        // A waited operation may commit its outcome before the wait-cleared
+        // event. Resumption only says the caller runs again; it cannot erase
+        // the already settled outcome of that same occurrence.
+        let resumes_settled = at == &held.value.at
+            && matches!(state, ProcessWorkflowSiteState::Running)
+            && held.durable_state
+            && matches!(
+                held.value.state,
+                ProcessWorkflowSiteState::Completed
+                    | ProcessWorkflowSiteState::Failed
+                    | ProcessWorkflowSiteState::Recovered
+                    | ProcessWorkflowSiteState::Cancelled
+            );
+        if !resumes_settled
+            && ((at.position() == held.value.at.position() && at.visit() > held.value.at.visit())
+                || ((at.position() != held.value.at.position()
+                    || at.visit() == held.value.at.visit())
+                    && (sequence.is_some()
+                        || (!held.durable_state
+                            && held.timestamp.is_none_or(|held| timestamp >= held)))))
         {
             held.value.origin = origin.clone();
             held.value.at = at.clone();
