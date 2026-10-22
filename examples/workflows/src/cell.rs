@@ -218,3 +218,44 @@ fn render_datum(
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// FN-FREEZE: authored async adapter bodies contribute their free cell
+    /// bindings even when the embedding registry holds only shipped helpers.
+    #[test]
+    fn a_frozen_async_cell_function_keeps_its_authored_adapter_captures() -> Result<()> {
+        let embedding = lash_vm_worker::built_embedding(&Default::default())?;
+        let effects = tools()?
+            .into_iter()
+            .map(|definition| {
+                (
+                    definition.operation().effect_name(),
+                    lash_vocabulary::OperationRequirement::new(
+                        lash_vocabulary::json_schema::tool_signature(
+                            &definition.contract.input_schema.canonical,
+                            &definition.contract.output_schema.canonical,
+                        ),
+                        definition.contract_id(),
+                    ),
+                )
+            })
+            .collect();
+        let namespace = FixtureNamespace::new(effects, &Default::default())?;
+        let namespaces = namespace.namespaces()?;
+        let environment = Environment::new(embedding.library(), &namespaces);
+        let lowered = lash_dialect_typescript::lower(
+            "const limit=3; const shared=[1]; const add=async(x:number)=>x+limit+shared[0]; await corpus.capture({list:[1,add]}); shared[0]=9;",
+            &environment,
+            Mode::Cell(CellEnvironment::first()),
+        )?;
+        let crossed = crossing(&lowered, Arc::clone(embedding.registry()?), &namespace)?;
+        assert!(
+            crossed.contains("started with x=2: Float(Float(6.0))"),
+            "{crossed}"
+        );
+        Ok(())
+    }
+}
