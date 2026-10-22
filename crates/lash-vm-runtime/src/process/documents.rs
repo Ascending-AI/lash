@@ -596,7 +596,20 @@ impl KernelDocuments {
     }
     /// Full cold-load from immutable store records, including currently unused fills.
     pub async fn load_linked(&self, root: LinkId) -> Result<LinkedContent, EnginePortError> {
+        self.load_linked_identified(root)
+            .await
+            .map(|(content, _)| content)
+    }
+
+    /// Load current linked content together with the document identities and
+    /// canonical bodies validated by this same read. Consumers carry those
+    /// facts intact instead of fetching the documents again.
+    pub async fn load_linked_identified(
+        &self,
+        root: LinkId,
+    ) -> Result<(LinkedContent, BTreeMap<DocumentId, IdentifiedDocument>), EnginePortError> {
         let mut content = LinkedContent::default();
+        let mut identified = BTreeMap::new();
         let mut pending = vec![root];
         while let Some(id) = pending.pop() {
             if content.links.contains_key(&id) {
@@ -616,24 +629,32 @@ impl KernelDocuments {
                     message: "Link hash differs".into(),
                 });
             }
-            let document =
-                self.get(&record.link.document)
+            if let std::collections::btree_map::Entry::Vacant(entry) =
+                identified.entry(record.link.document)
+            {
+                let document = self
+                    .get_shared(&record.link.document)
                     .await?
                     .ok_or_else(|| EnginePortError::Missing {
                         artifact: document_artifact(&record.link.document),
                     })?;
-            content.documents.insert(record.link.document, document);
+                entry.insert(document);
+            }
             pending.extend(record.link.fills.values().filter_map(|f| match f {
                 Fill::Export { link, .. } => Some(*link),
                 _ => None,
             }));
             content.links.insert(id, record.link);
         }
+        content.documents = identified
+            .iter()
+            .map(|(id, document)| (*id, document.document().clone()))
+            .collect();
         for link in content.links.values() {
             content.check_link(link).map_err(map_link_refusal)?;
         }
         content.retain_reach(root).map_err(map_link_refusal)?;
-        Ok(content)
+        Ok((content, identified))
     }
     async fn content_for(
         &self,
