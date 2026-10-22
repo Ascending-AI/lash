@@ -70,7 +70,19 @@ pub(super) fn content(
 ) -> (lash_kernel_package::LinkedContent, lash_vocabulary::LinkId) {
     let release = lash_vm_releases::helper_release()
         .unwrap_or_else(|error| panic!("fixture helper release: {error}"));
+    HELPER_SNAPSHOTS.with(|copies| copies.set(copies.get() + 1));
     let mut content = release.content.clone();
+    let link = link(document, &content);
+    let root = link.identity();
+    content.documents.insert(link.document, document.clone());
+    content.links.insert(root, link);
+    (content, root)
+}
+
+fn link(
+    document: &lash_kernel_doc::Document,
+    content: &lash_kernel_package::LinkedContent,
+) -> Link {
     let mut fills = BTreeMap::new();
     for (slot, import) in &document.imports {
         let fill = match &import.kind {
@@ -102,76 +114,158 @@ pub(super) fn content(
         };
         fills.insert(*slot, fill);
     }
-    let id = document.identity();
-    content.documents.insert(id, document.clone());
-    let link = Link {
-        document: id,
+    Link {
+        document: document.identity(),
         fills,
-    };
-    let root = link.identity();
-    content.links.insert(root, link);
-    (content, root)
+    }
 }
 pub(super) fn program(
     document: Arc<lash_kernel_doc::Document>,
     library: lash_kernel_vm::PreparedLibrary,
 ) -> lash_kernel_vm::Program {
     let document_id = document.identity();
-    let (content, root) = content(&document);
-    let reach = content
-        .inspect(root, &lash_kernel_package::ReachSelection::AllExports)
-        .unwrap_or_else(|error| panic!("fixture executable reach: {error}"));
-    // Reuse the immutable helper allocations across roots; each root keeps its
-    // own Document and Link, and compilation takes exactly the inspected reach.
-    static HELPERS: std::sync::OnceLock<
-        BTreeMap<lash_vocabulary::DocumentId, Arc<lash_kernel_doc::Document>>,
-    > = std::sync::OnceLock::new();
-    let helpers = HELPERS.get_or_init(|| {
-        lash_vm_releases::helper_release()
-            .unwrap_or_else(|error| panic!("fixture helpers: {error}"))
+    FIXTURE_CONTENT.with(|content| {
+        let mut content = content.borrow_mut();
+        let link = link(&document, &content);
+        let root = link.identity();
+        let mut scope = RootContent {
+            previous_document: None,
+            previous_link: None,
+            document: document_id,
+            link: root,
+            content: &mut content,
+        };
+        scope.previous_document = scope
             .content
             .documents
-            .iter()
-            .map(|(id, document)| (*id, Arc::new(document.clone())))
-            .collect()
-    });
-    let mut program = lash_kernel_vm::Program::prepare(
-        root,
-        content
-            .documents
-            .into_iter()
-            .map(|(id, d)| {
-                (
-                    id,
-                    if id == document_id {
-                        Arc::clone(&document)
-                    } else {
-                        helpers.get(&id).cloned().unwrap_or_else(|| Arc::new(d))
-                    },
-                )
-            })
-            .collect(),
-        &content.links,
-        super::pages::CLOSURE,
-        library,
-    )
-    .unwrap_or_else(|error| panic!("linked fixture admission: {error:?}"));
-    program.functions = reach.functions.into_values().flatten().collect();
-    OPERATIONS.with(|operations| {
-        let mut operations = operations.borrow_mut();
-        for (link, instance) in &program.instances {
-            for (slot, import) in &program.documents[&instance.document].imports {
-                if matches!(import.kind, ImportKind::Operation { .. }) {
-                    operations.insert(
-                        OperationUse {
-                            link: *link,
-                            slot: *slot,
+            .insert(document_id, document.as_ref().clone());
+        scope.previous_link = scope.content.links.insert(root, link);
+        let content = &scope.content;
+
+        let reach = content
+            .inspect(root, &lash_kernel_package::ReachSelection::AllExports)
+            .unwrap_or_else(|error| panic!("fixture executable reach: {error}"));
+        // Reuse the immutable helper allocations across roots; each root keeps its
+        // own Document and Link, and compilation takes exactly the inspected reach.
+        static HELPERS: std::sync::OnceLock<
+            BTreeMap<lash_vocabulary::DocumentId, Arc<lash_kernel_doc::Document>>,
+        > = std::sync::OnceLock::new();
+        let helpers = HELPERS.get_or_init(|| {
+            lash_vm_releases::helper_release()
+                .unwrap_or_else(|error| panic!("fixture helpers: {error}"))
+                .content
+                .documents
+                .iter()
+                .map(|(id, document)| (*id, Arc::new(document.clone())))
+                .collect()
+        });
+        let mut program = lash_kernel_vm::Program::prepare(
+            root,
+            content
+                .documents
+                .iter()
+                .map(|(id, d)| {
+                    (
+                        *id,
+                        if *id == document_id {
+                            Arc::clone(&document)
+                        } else {
+                            helpers
+                                .get(id)
+                                .cloned()
+                                .unwrap_or_else(|| Arc::new(d.clone()))
                         },
-                        import.name.clone(),
-                    );
+                    )
+                })
+                .collect(),
+            &content.links,
+            super::pages::CLOSURE,
+            library,
+        )
+        .unwrap_or_else(|error| panic!("linked fixture admission: {error:?}"));
+        program.functions = reach.functions.into_values().flatten().collect();
+        OPERATIONS.with(|operations| {
+            let mut operations = operations.borrow_mut();
+            for (link, instance) in &program.instances {
+                for (slot, import) in &program.documents[&instance.document].imports {
+                    if matches!(import.kind, ImportKind::Operation { .. }) {
+                        operations.insert(
+                            OperationUse {
+                                link: *link,
+                                slot: *slot,
+                            },
+                            import.name.clone(),
+                        );
+                    }
                 }
             }
-        }
+        });
+        program
+    })
+}
+
+// The fixture host keeps its published helper graph for the thread's cases.
+// A cell is a scoped addition, not a copy of that graph. Program documents
+// retain the shared immutable helper allocations after the scope ends.
+thread_local! {
+    static FIXTURE_CONTENT: RefCell<lash_kernel_package::LinkedContent> = RefCell::new({
+        HELPER_SNAPSHOTS.with(|copies| copies.set(copies.get() + 1));
+        lash_vm_releases::helper_release().expect("fixture helpers").content.clone()
     });
-    program
+    static HELPER_SNAPSHOTS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// Own the temporary graph membership before inspection or admission can fail.
+struct RootContent<'a> {
+    content: &'a mut lash_kernel_package::LinkedContent,
+    document: lash_vocabulary::DocumentId,
+    link: lash_vocabulary::LinkId,
+    previous_document: Option<lash_kernel_doc::Document>,
+    previous_link: Option<Link>,
+}
+
+impl Drop for RootContent<'_> {
+    fn drop(&mut self) {
+        self.content.documents.remove(&self.document);
+        self.content.links.remove(&self.link);
+        if let Some(document) = self.previous_document.take() {
+            self.content.documents.insert(self.document, document);
+        }
+        if let Some(link) = self.previous_link.take() {
+            self.content.links.insert(self.link, link);
+        }
+    }
+}
+
+/// FIG-7135: preparing independent cells shares immutable helper source;
+/// the number of release graph snapshots cannot grow with the cell count.
+#[test]
+fn cell_preparation_shares_the_helper_release_without_copying_its_graph() {
+    let library = super::machine::prepared().clone();
+    HELPER_SNAPSHOTS.with(|copies| copies.set(0));
+    let programs: Vec<_> = [
+        "'first'.trim()",
+        "'second'.slice(1)",
+        "'third'.includes('h')",
+    ]
+    .into_iter()
+    .map(|source| {
+        program(
+            Arc::clone(super::lower(source).unwrap().document.shared()),
+            library.clone(),
+        )
+    })
+    .collect();
+    for (id, document) in &programs[0].documents {
+        if *id != programs[0].document.identity() {
+            for program in &programs[1..] {
+                assert!(Arc::ptr_eq(document, &program.documents[id]));
+            }
+        }
+    }
+    assert!(programs.windows(2).all(|pair| pair[0].link != pair[1].link));
+    assert!(
+        HELPER_SNAPSHOTS.with(|copies| copies.get()) <= 1,
+        "cell preparation must share one published helper graph"
+    );
 }
