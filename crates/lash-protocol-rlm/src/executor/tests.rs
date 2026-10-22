@@ -1228,3 +1228,49 @@ async fn a_cell_refused_before_registration_hands_off_no_execution() {
             .is_empty()
     );
 }
+
+/// FIG-7135 / FIG-6000: registration cannot advance the actor underneath
+/// a held model-response draft; first park commits both at one revision.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_held_response_registers_its_cell_in_the_first_park() {
+    use lash_core::core_internal::RuntimeExecutionContextRuntimeOps as _;
+    let host = open_host().await;
+    let services = typescript_services();
+    let _pool = services.workers.pool().expect("ready worker");
+    let context = host.context();
+    let held = lash_core::HeldResponse::holding(
+        context.begin().await.expect("the model response draft"),
+        |_| false,
+        |_| false,
+    );
+    let ctx = cell_context(
+        &host,
+        SESSION,
+        TURN,
+        "held-registration:0",
+        Arc::new(CellTools::default()),
+    )
+    .with_held_response(Some(held.clone()));
+    let response = run_cell(
+        &mut typescript_state(),
+        ctx,
+        &services,
+        r#"await echo.say({ text: "held response" });"#,
+    )
+    .await;
+    assert!(
+        response.error().is_none(),
+        "the first park must commit without a stale response draft: {:?}",
+        response.error()
+    );
+    assert_eq!(
+        held.committed_as(),
+        Some(lash_durable::CommitLabel::MODEL_DONE_CELL_SNAPSHOT_ADMIT),
+        "registration must retain the first-park coalescing boundary"
+    );
+    assert_eq!(
+        response.calls.len(),
+        1,
+        "one admitted call, without redriving the cell"
+    );
+}

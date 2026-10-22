@@ -98,6 +98,20 @@ impl HeldResponse {
         self.inner.state.lock_recover().writes.clone()
     }
 
+    /// Add the cell's registration to the same draft its first park will
+    /// carry. A committed response leaves registration to a fresh owner commit.
+    pub(super) fn register_execution(
+        &self,
+        registration: &lash_durable::resolutions::ExecutionRegistration,
+    ) -> bool {
+        let mut state = self.inner.state.lock_recover();
+        let Some(writes) = state.writes.as_mut() else {
+            return false;
+        };
+        writes.register_execution(registration.clone());
+        true
+    }
+
     /// Whether the response is still held: no commit holds it yet.
     #[must_use]
     pub fn is_held(&self) -> bool {

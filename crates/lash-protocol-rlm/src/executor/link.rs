@@ -1,5 +1,6 @@
 //! Link a fresh cell against Current, or restore its admitted envelope.
 use super::*;
+use lash_core::core_internal::RuntimeExecutionContextRuntimeOps as _;
 
 /// Lower a fresh cell against its surface, or restore its admitted envelope.
 pub(super) async fn link_cell(
@@ -267,22 +268,25 @@ pub(super) async fn link_cell(
         }
     }
     let execution = execution_id(snapshots.exec());
-    let mut tx = ctx
-        .actor_context()
-        .begin()
-        .await
-        .map_err(|error| host_failure(error.to_string()))?;
-    tx.register_execution(lash_core::facade_support::registration(
+    let registration = lash_core::facade_support::registration(
         execution.clone(),
         &fulfilled.inspection,
         claim.referrer(),
         environment.requirements.clone(),
         environment.registry,
-    ));
-    ctx.actor_context()
-        .commit(tx, lash_durable::CommitLabel::new("execution.register"))
-        .await
-        .map_err(|error| host_failure(error.to_string()))?;
+    );
+    if !ctx.hold_cell_registration(&registration) {
+        let mut tx = ctx
+            .actor_context()
+            .begin()
+            .await
+            .map_err(|error| host_failure(error.to_string()))?;
+        tx.register_execution(registration);
+        ctx.actor_context()
+            .commit(tx, lash_durable::CommitLabel::new("execution.register"))
+            .await
+            .map_err(|error| host_failure(error.to_string()))?;
+    }
     ctx.cell_execution_registered(execution);
     for function in state.lowering_functions().values() {
         if let Some(facts) = &function.written {

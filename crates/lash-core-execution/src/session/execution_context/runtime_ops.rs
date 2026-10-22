@@ -74,6 +74,13 @@ pub trait RuntimeExecutionContextRuntimeOps<'run>: Sized {
     #[must_use]
     fn with_held_response(self, held: Option<super::HeldResponse>) -> Self;
 
+    /// Stage registration in the held model response's draft when present.
+    /// False leaves the caller responsible for an independent owner commit.
+    fn hold_cell_registration(
+        &self,
+        registration: &lash_durable::resolutions::ExecutionRegistration,
+    ) -> bool;
+
     /// The opener state this context incorporates against and hands groups to.
     #[must_use]
     fn opener_state(&self) -> OpenerState;
@@ -199,6 +206,15 @@ impl<'run> RuntimeExecutionContextRuntimeOps<'run> for RuntimeExecutionContext<'
         self.held_response = held;
         self
     }
+    fn hold_cell_registration(
+        &self,
+        registration: &lash_durable::resolutions::ExecutionRegistration,
+    ) -> bool {
+        self.held_response
+            .as_ref()
+            .is_some_and(|held| held.register_execution(registration))
+    }
+
     fn opener_state(&self) -> OpenerState {
         OpenerState {
             ledger: Arc::clone(&self.incorporation_ledger),
