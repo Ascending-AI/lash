@@ -30,7 +30,7 @@ pub use lash_kernel_dialect::{
 pub use package::{builtin_names, define_helpers};
 pub use readable::{print, read};
 
-/// The captions the dialect spells: every kind, as a JSDoc block before the
+/// The captions the dialect spells: a JSDoc block before the
 /// statement, function, `else`/`catch`/`finally` keyword, parameter or
 /// property of an inline object type it names. A workflow module's front
 /// end, the reader of exported source and the printer spell them alike; a

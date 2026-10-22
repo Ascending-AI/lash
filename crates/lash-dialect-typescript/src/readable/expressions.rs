@@ -389,6 +389,15 @@ impl Lifter<'_> {
                 Ok(Expr::Call(Box::new(callee), args))
             }
 
+            // A captured lexical read checks its TDZ cell before returning
+            // the variable. The source read recreates that check on lowering.
+            (
+                "ts.tdz",
+                [
+                    k::Expr::Variable(name),
+                    k::Expr::Literal(k::Literal::Text(label)),
+                ],
+            ) if name.as_str() == label => self.variable(name),
             ("ts.strict_equals", [left, right]) => self.binary("===", left, right),
             ("ts.strict_not_equals", [left, right]) => self.binary("!==", left, right),
             ("ts.not", [value]) => Ok(Expr::Unary("!", Box::new(self.expr(value)?))),

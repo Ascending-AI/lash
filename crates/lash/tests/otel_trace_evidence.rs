@@ -249,25 +249,10 @@ Numeric sizes are bytes, durations milliseconds, other values counts.\n\n",
         writeln!(out, "| `{kind}` | {} |", attribute_reserve(kind))
             .unwrap_or_else(|error| panic!("write generated reference: {error}"));
     }
-    out.push_str("\n### Callback slot scopes\n\nGenerated from `callback_slots!` in `lash-core-store/src/tool_run/state_command.rs`.\n\n| Slot | Scope |\n|---|---|\n");
-    let slots = source("crates/lash-core-store/src/tool_run/state_command.rs");
-    let slots = slots
-        .split_once("callback_slots! {\n")
-        .unwrap_or_else(|| panic!("canonical callback_slots table exists"))
-        .1
-        .split_once("\n}\n")
-        .unwrap_or_else(|| panic!("canonical table has a closing brace"))
-        .0;
-    for line in slots.lines().map(str::trim) {
-        if let Some((slot, row)) = line.split_once(" => ") {
-            let scope = row
-                .rsplit_once(", ")
-                .unwrap_or_else(|| panic!("callback row declares a trace scope"))
-                .1
-                .trim_end_matches(';');
-            writeln!(out, "| `{slot}` | `{scope}` |")
-                .unwrap_or_else(|error| panic!("write generated reference: {error}"));
-        }
+    out.push_str("\n### Callback slot scopes\n\nGenerated from `CallbackSlot::ALL` and `CallbackSlot::trace_scope` in `lash-vocabulary/src/providers.rs`.\n\n| Slot | Scope |\n|---|---|\n");
+    for slot in lash::plugins::CallbackSlot::ALL {
+        writeln!(out, "| `{slot:?}` | `{:?}` |", slot.trace_scope())
+            .unwrap_or_else(|error| panic!("write generated reference: {error}"));
     }
     out.push_str("\n<!-- END GENERATED CONFIGURATION -->");
     out

@@ -46,8 +46,8 @@ impl Lifter<'_> {
         let Some(start) = &closure.presentation else {
             return refuse("a function value no host can start");
         };
-        if !matches!(&start.convention, k::StartConvention::TsDirect { await_fn }
-            if self.is(await_fn, "ts.await"))
+        if !matches!(&start.convention, k::StartConvention::TsArgsList { await_fn, same_fn }
+            if self.is(await_fn, "ts.await") && self.is(same_fn, "same"))
         {
             return refuse("a function value started another way");
         }

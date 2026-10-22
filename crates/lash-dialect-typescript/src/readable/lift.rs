@@ -354,6 +354,7 @@ impl<'a> Lifter<'a> {
         let outer = self.pending.len();
         let mut out = Vec::new();
         let mut index = 0;
+        let mut predeclared = BTreeSet::new();
         while index < block.len() {
             let here = site.child((first + index) as u32);
             let caption = self
@@ -397,7 +398,32 @@ impl<'a> Lifter<'a> {
                 index += 1;
                 continue;
             }
+            // The TDZ cell is emitted before a closure captures a declaration
+            // that appears later. Its source is that later declaration.
+            if let k::Stmt::Let {
+                name,
+                value: k::Rhs::Expr(k::Expr::Tuple(items)),
+            } = &block[index]
+                && items.is_empty()
+                && self.reassigned(name.as_str())
+            {
+                predeclared.insert(name.clone());
+                index += 1;
+                continue;
+            }
             let kind = self.statement(&block[index], &here)?;
+            let kind = match (&block[index], kind) {
+                (
+                    k::Stmt::Assign {
+                        place: k::Place::Variable(name),
+                        ..
+                    },
+                    source::StmtKind::Assign(_, "=", value),
+                ) if predeclared.remove(name) => {
+                    source::StmtKind::Let(self.binding(name)?, Some(value))
+                }
+                (_, kind) => kind,
+            };
             // A temporary's caption names the statement that reads it.
             let mut caption = caption;
             for pending in std::mem::take(&mut self.taken_captions) {

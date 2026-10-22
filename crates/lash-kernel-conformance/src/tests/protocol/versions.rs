@@ -11,8 +11,10 @@ pub(super) fn check(rule: &str, case: &Case) {
     if rule == "K-VER-003" {
         // Unsupported versions win over malformed payloads: none of these
         // readers may enter the unsupported version's decoder.
-        let refusal =
-            Document::from_json(r#"{"manifest":{"kernel":4294967295},"main":false}"#).unwrap_err();
+        let refusal = Document::from_json(
+            r#"{"requires":{"natives":[],"kernels":[4294967295]},"main":false}"#,
+        )
+        .unwrap_err();
         assert!(refusal.to_string().contains("4294967295"));
         let refusal =
             lash_kernel_doc::FunctionDefinition::from_json(r#"{"kernel":4294967295,"name":false}"#)
