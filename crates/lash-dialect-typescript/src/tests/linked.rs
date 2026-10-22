@@ -116,19 +116,47 @@ pub(super) fn program(
     document: Arc<lash_kernel_doc::Document>,
     library: lash_kernel_vm::PreparedLibrary,
 ) -> lash_kernel_vm::Program {
+    let document_id = document.identity();
     let (content, root) = content(&document);
-    let program = lash_kernel_vm::Program::prepare(
+    let reach = content
+        .inspect(root, &lash_kernel_package::ReachSelection::AllExports)
+        .unwrap_or_else(|error| panic!("fixture executable reach: {error}"));
+    // Reuse the immutable helper allocations across roots; each root keeps its
+    // own Document and Link, and compilation takes exactly the inspected reach.
+    static HELPERS: std::sync::OnceLock<
+        BTreeMap<lash_vocabulary::DocumentId, Arc<lash_kernel_doc::Document>>,
+    > = std::sync::OnceLock::new();
+    let helpers = HELPERS.get_or_init(|| {
+        lash_vm_releases::helper_release()
+            .unwrap_or_else(|error| panic!("fixture helpers: {error}"))
+            .content
+            .documents
+            .iter()
+            .map(|(id, document)| (*id, Arc::new(document.clone())))
+            .collect()
+    });
+    let mut program = lash_kernel_vm::Program::prepare(
         root,
         content
             .documents
             .into_iter()
-            .map(|(id, d)| (id, Arc::new(d)))
+            .map(|(id, d)| {
+                (
+                    id,
+                    if id == document_id {
+                        Arc::clone(&document)
+                    } else {
+                        helpers.get(&id).cloned().unwrap_or_else(|| Arc::new(d))
+                    },
+                )
+            })
             .collect(),
         &content.links,
         super::pages::CLOSURE,
         library,
     )
     .unwrap_or_else(|error| panic!("linked fixture admission: {error:?}"));
+    program.functions = reach.functions.into_values().flatten().collect();
     OPERATIONS.with(|operations| {
         let mut operations = operations.borrow_mut();
         for (link, instance) in &program.instances {

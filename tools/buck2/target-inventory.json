@@ -1,7 +1,7 @@
 {
   "cargo_only_target_count": 6,
   "cargo_package_count": 92,
-  "cargo_target_count": 367,
+  "cargo_target_count": 368,
   "facade_production_check_targets": [
     "//crates/lash-checkpoint-encoder:lash-checkpoint-encoder__fv_0200a96e__metadata[check]",
     "//crates/lash-core-effect:lash-core-effect__fv_72f14956__metadata[check]",
@@ -83581,7 +83581,7 @@
       "//third-party/vendored/lash-rmcp:lash-rmcp__fv_e2e7b48c"
     ]
   },
-  "generated_label_count": 469,
+  "generated_label_count": 470,
   "main_test_exclusions": {
     "//crates/lash-s3-store:lash-s3-store__unit_test": "requires an external service or credentials"
   },
@@ -84991,7 +84991,7 @@
     "//third-party/vendored/lash-rmcp:test_tool_routers__test",
     "//third-party/vendored/lash-rmcp:test_trace_context__test"
   ],
-  "metadata_target_count": 1545,
+  "metadata_target_count": 1546,
   "packages": [
     {
       "declared_features": [
@@ -87334,6 +87334,15 @@
           "kind": "unit-test",
           "label": "//crates/lash-kernel-conformance:lash-kernel-conformance__unit_test",
           "shard_count": 92,
+          "tags": []
+        },
+        {
+          "build_label": "//crates/lash-kernel-conformance:admission_corpus__example",
+          "cargo": "admission_corpus",
+          "check_label": "//crates/lash-kernel-conformance:admission_corpus__example__metadata[check]",
+          "clippy_label": "//crates/lash-kernel-conformance:admission_corpus__example__clippy[clippy.txt]",
+          "kind": "example",
+          "label": "//crates/lash-kernel-conformance:admission_corpus__example",
           "tags": []
         },
         {
@@ -93816,6 +93825,7 @@
     "//crates/lash-http-transport:lash-http-transport__unit_test",
     "//crates/lash-kernel-check:lash-kernel-check[static]",
     "//crates/lash-kernel-check:lash-kernel-check__unit_test",
+    "//crates/lash-kernel-conformance:admission_corpus__example",
     "//crates/lash-kernel-conformance:lash-kernel-conformance[static]",
     "//crates/lash-kernel-conformance:lash-kernel-conformance__unit_test",
     "//crates/lash-kernel-conformance:package_audit__example",
@@ -94314,6 +94324,7 @@
     "//crates/lash-kernel-check:lash-kernel-check__fv_6cd155f1__metadata[check]",
     "//crates/lash-kernel-check:lash-kernel-check__metadata[check]",
     "//crates/lash-kernel-check:lash-kernel-check__unit_test__rust_test__metadata[check]",
+    "//crates/lash-kernel-conformance:admission_corpus__example__metadata[check]",
     "//crates/lash-kernel-conformance:lash-kernel-conformance__metadata[check]",
     "//crates/lash-kernel-conformance:lash-kernel-conformance__unit_test__rust_test__metadata[check]",
     "//crates/lash-kernel-conformance:package_audit__example__metadata[check]",
@@ -94831,6 +94842,7 @@
     "//crates/lash-http-transport:lash-http-transport__unit_test__clippy[clippy.txt]",
     "//crates/lash-kernel-check:lash-kernel-check__clippy[clippy.txt]",
     "//crates/lash-kernel-check:lash-kernel-check__unit_test__clippy[clippy.txt]",
+    "//crates/lash-kernel-conformance:admission_corpus__example__clippy[clippy.txt]",
     "//crates/lash-kernel-conformance:lash-kernel-conformance__clippy[clippy.txt]",
     "//crates/lash-kernel-conformance:lash-kernel-conformance__unit_test__clippy[clippy.txt]",
     "//crates/lash-kernel-conformance:package_audit__example__clippy[clippy.txt]",
@@ -95218,6 +95230,7 @@
     "//crates/lash-http-transport:lash-http-transport__unit_test",
     "//crates/lash-kernel-check:lash-kernel-check",
     "//crates/lash-kernel-check:lash-kernel-check__unit_test",
+    "//crates/lash-kernel-conformance:admission_corpus__example",
     "//crates/lash-kernel-conformance:lash-kernel-conformance",
     "//crates/lash-kernel-conformance:lash-kernel-conformance__unit_test",
     "//crates/lash-kernel-conformance:package_audit__example",
@@ -95606,6 +95619,7 @@
     "//crates/lash-http-transport:lash-http-transport__unit_test",
     "//crates/lash-kernel-check:lash-kernel-check",
     "//crates/lash-kernel-check:lash-kernel-check__unit_test",
+    "//crates/lash-kernel-conformance:admission_corpus__example",
     "//crates/lash-kernel-conformance:lash-kernel-conformance",
     "//crates/lash-kernel-conformance:lash-kernel-conformance__unit_test",
     "//crates/lash-kernel-conformance:package_audit__example",

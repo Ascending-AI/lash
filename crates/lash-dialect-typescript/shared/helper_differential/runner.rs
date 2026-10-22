@@ -73,6 +73,16 @@ impl Runner {
         // does (FIG-6440).
         match dialect {
             lash_ext_helper_compiler::library::Dialect::TypeScript => {
+                let functions: Vec<_> = registry.iter().map(|(id, _)| *id).collect();
+                lash_ext_date_ecma::implement(&mut registry, functions.iter().copied())
+                    .map_err(|e| e.to_string())?;
+                lash_ext_url_whatwg::implement(&mut registry, functions)
+                    .map_err(|e| e.to_string())?;
+                lash_ext_regex_ecma::implement(
+                    &mut registry,
+                    &Arc::new(lash_ext_regex_ecma::Engine::new(4)),
+                )
+                .map_err(|e| e.to_string())?;
                 lash_ext_ts_core::implement(&mut registry, helpers).map_err(|e| e.to_string())?
             }
             _ => lash_ext_py_core::implement(&mut registry, helpers).map_err(|e| e.to_string())?,
@@ -161,7 +171,7 @@ impl Runner {
                 args: vec![],
                 session: None,
                 owner: crate::pages::OWNER,
-                modes: Default::default(),
+                modes: modes(program),
                 host: Vec::new(),
             },
         )
@@ -187,7 +197,14 @@ impl Runner {
                 Step::Parked(park) => {
                     for request in park.requests {
                         let Request::Effect(effect) = request;
-                        if crate::linked::operation(&effect.use_).as_str() != "host.observe" {
+                        let operation = crate::linked::operation(&effect.use_);
+                        if operation.as_str().ends_with(".sleep") {
+                            machine
+                                .deliver(effect.wait, Outcome::Completed(Datum::Null))
+                                .map_err(|e| e.to_string())?;
+                            continue;
+                        }
+                        if operation.as_str() != "host.observe" {
                             return Err("unexpected effect".into());
                         }
                         let value = effect.args.first().ok_or("observe needs a value")?;
@@ -218,6 +235,30 @@ impl Runner {
             charged: machine.meters().charged,
         })
     }
+}
+
+/// Bind the fixture's ordinary dialect reads by their exact linked uses.
+pub fn modes(program: &Program) -> lash_kernel_vm::EffectModes {
+    program
+        .instances
+        .iter()
+        .flat_map(|(link, instance)| {
+            program.documents[&instance.document]
+                .imports
+                .iter()
+                .filter_map(move |(slot, import)| {
+                    (lash_kernel_dialect::authoring::service_requirement(&import.name).is_some()
+                        && import.name.member.as_str() != "sleep")
+                        .then_some((
+                            lash_vocabulary::OperationUse {
+                                link: *link,
+                                slot: *slot,
+                            },
+                            lash_vocabulary::OperationMode::Read,
+                        ))
+                })
+        })
+        .collect()
 }
 
 struct ScriptHost {

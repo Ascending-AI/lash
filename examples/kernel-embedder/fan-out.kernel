@@ -1,17 +1,5 @@
 kernel 1
 numbers by_spelling
-effect echo(value: Int) -> Int contract "1"
-
-fn child(value) {
-  let answer = perform echo(value) as Int
-  print answer
-  return answer
-}
-
-main {
-  let a = spawn call child(1)
-  let b = spawn call child(2)
-  let tasks = [a, b]
-  let answers = join all tasks
-  finish answers
-}
+import 0 operation host.echo(value: Int) -> Int
+definition "function child(value: Int) -> Int\nkernel 1\nmetering statements\nimport 0 operation host.echo(value: Int) -> Int\nbody { let answer = perform 0(value) as Int print answer return answer }"
+main { let a = spawn call child(1) let b = spawn call child(2) let tasks = [a, b] let answers = join all tasks finish answers }

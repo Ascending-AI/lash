@@ -7,18 +7,15 @@
 const APPENDS: &[(&str, &str)] = &[
     (
         "appends in a body and an arm",
-        "fn build(n) { let i = 0 let xs = [] let ys = [] while num.lt(i, n) { set xs[list.len(xs)] = num.mul(i, 2) if num.lt(num.rem_trunc(i, 3), 1) { set ys[list.len(ys)] = [i, list.len(xs)] } set i = num.add(i, 1) } return (xs, ys) }\n\
-         main { let r = call build(12) finish r }",
+        "definition \"function build(n: Any) -> Any\\nkernel 1\\nmetering statements\\nbody { let i = 0 let xs = [] let ys = [] while num.lt(i, n) { set xs[list.len(xs)] = num.mul(i, 2) if num.lt(num.rem_trunc(i, 3), 1) { set ys[list.len(ys)] = [i, list.len(xs)] } set i = num.add(i, 1) } return (xs, ys) }\"\nmain { let r = call build(12) finish r }",
     ),
     (
         "appends over a list's items",
-        "fn double(src) { let out = [] for x in src { set out[list.len(out)] = num.mul(x, 2) } return out }\n\
-         main { let r = call double([1, 2, 3, 4, 5, 6, 7, 8]) finish r }",
+        "definition \"function double(src: Any) -> Any\\nkernel 1\\nmetering statements\\nbody { let out = [] for x in src { set out[list.len(out)] = num.mul(x, 2) } return out }\"\nmain { let r = call double([1, 2, 3, 4, 5, 6, 7, 8]) finish r }",
     ),
     (
         "an append whose variable stops holding a list",
-        "fn swap(n) { let i = 0 let t = [] while num.lt(i, n) { set t[list.len(t)] = i if num.lt(4, i) { set t = map{} } set i = num.add(i, 1) } return t }\n\
-         main { try { let r = call swap(9) finish r } catch e { finish e.kind } }",
+        "definition \"function swap(n: Any) -> Any\\nkernel 1\\nmetering statements\\nbody { let i = 0 let t = [] while num.lt(i, n) { set t[list.len(t)] = i if num.lt(4, i) { set t = map{} } set i = num.add(i, 1) } return t }\"\nmain { try { let r = call swap(9) finish r } catch e { finish e.kind } }",
     ),
 ];
 
@@ -47,23 +44,19 @@ fn list_appends_stop_where_the_reference_stops() {
 const RUNS: &[(&str, &str)] = &[
     (
         "runs around a list literal and an index write",
-        "fn rows(n) { let i = 0 let s = 0 let kept = [0, 0] while num.lt(i, n) { let a = num.mul(i, 2) let b = num.add(a, 1) set kept[0] = [a, b] set s = num.add(s, b) set i = num.add(i, 1) } return (s, kept) }\n\
-         main { let r = call rows(12) finish r }",
+        "definition \"function rows(n: Any) -> Any\\nkernel 1\\nmetering statements\\nbody { let i = 0 let s = 0 let kept = [0, 0] while num.lt(i, n) { let a = num.mul(i, 2) let b = num.add(a, 1) set kept[0] = [a, b] set s = num.add(s, b) set i = num.add(i, 1) } return (s, kept) }\"\nmain { let r = call rows(12) finish r }",
     ),
     (
         "a run whose big integer product measures past its most",
-        "fn grow(n) { let i = 0 let x = 3 let r = [0] while num.lt(i, n) { let a = num.add(i, 1) set x = num.mul(x, 7) set r = [a] set i = num.add(i, 1) } return (x, r) }\n\
-         main { let r = call grow(30) finish r }",
+        "definition \"function grow(n: Any) -> Any\\nkernel 1\\nmetering statements\\nbody { let i = 0 let x = 3 let r = [0] while num.lt(i, n) { let a = num.add(i, 1) set x = num.mul(x, 7) set r = [a] set i = num.add(i, 1) } return (x, r) }\"\nmain { let r = call grow(30) finish r }",
     ),
     (
         "runs ending in an if and a continue",
-        "fn mix(n) { let i = 0 let s = 0 let t = [0] while num.lt(i, n) { set i = num.add(i, 1) let a = num.mul(i, 3) if num.lt(num.rem_trunc(i, 3), 1) { let b = num.add(a, 2) set t = [b] set s = num.add(s, b) continue } set t = [a] set s = num.sub(s, a) } return (s, t) }\n\
-         main { let r = call mix(13) finish r }",
+        "definition \"function mix(n: Any) -> Any\\nkernel 1\\nmetering statements\\nbody { let i = 0 let s = 0 let t = [0] while num.lt(i, n) { set i = num.add(i, 1) let a = num.mul(i, 3) if num.lt(num.rem_trunc(i, 3), 1) { let b = num.add(a, 2) set t = [b] set s = num.add(s, b) continue } set t = [a] set s = num.sub(s, a) } return (s, t) }\"\nmain { let r = call mix(13) finish r }",
     ),
     (
         "runs between text concatenations",
-        "fn label(n) { let i = 0 let s = \"\" let k = [0] while num.lt(i, n) { let a = num.add(i, 2) set s = text.concat(s, num.to_text(a)) set k = [a, i] set i = num.add(i, 1) } return (s, k) }\n\
-         main { let r = call label(11) finish r }",
+        "definition \"function label(n: Any) -> Any\\nkernel 1\\nmetering statements\\nbody { let i = 0 let s = \\\"\\\" let k = [0] while num.lt(i, n) { let a = num.add(i, 2) set s = text.concat(s, num.to_text(a)) set k = [a, i] set i = num.add(i, 1) } return (s, k) }\"\nmain { let r = call label(11) finish r }",
     ),
 ];
 

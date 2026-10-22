@@ -123,7 +123,7 @@ struct Cut {
 }
 
 fn world() -> World {
-    World { prints: Vec::new() }
+    World::default()
 }
 
 /// Runs `machine` to its end statement by statement, answering each park
@@ -169,7 +169,7 @@ fn cut_all<const L: u64>(program: &Program) -> Cut {
             args: Vec::new(),
             session: None,
             owner: crate::pages::OWNER,
-            modes: Default::default(),
+            modes: runner::modes(program),
             host: Vec::new(),
         },
         Box::new(source.clone()),

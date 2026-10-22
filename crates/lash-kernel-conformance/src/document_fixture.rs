@@ -7,8 +7,25 @@ pub(crate) fn authored(
 ) -> lash_kernel_doc::Document {
     let mut definitions: BTreeMap<_, _> = registry
         .iter()
+        .filter(|(id, f)| text.contains(f.name()) || text.contains(&id.to_string()))
         .map(|(id, f)| (*id, (**f.definition()).clone()))
         .collect();
+    let mut required: Vec<_> = definitions.keys().copied().collect();
+    while let Some(id) = required.pop() {
+        let Some(body) = definitions[&id].body() else {
+            continue;
+        };
+        let callees: Vec<_> = body.functions.keys().copied().collect();
+        for callee in callees {
+            if let std::collections::btree_map::Entry::Vacant(entry) = definitions.entry(callee) {
+                let definition = registry
+                    .get(&callee)
+                    .unwrap_or_else(|| panic!("fixture dependency {callee}"));
+                entry.insert((**definition.definition()).clone());
+                required.push(callee);
+            }
+        }
+    }
     let mut pending = Vec::new();
     let mut main = String::new();
     for line in text.lines() {
@@ -24,11 +41,14 @@ pub(crate) fn authored(
     }
     while !pending.is_empty() {
         let before = pending.len();
-        let uses: String = definitions
-            .iter()
-            .map(|(id, f)| format!("use {} = @{id}\n", f.name))
-            .collect();
         pending.retain(|source| {
+            let uses: String = definitions
+                .iter()
+                .filter(|(id, f)| {
+                    source.contains(f.name.as_str()) || source.contains(&id.to_string())
+                })
+                .map(|(id, f)| format!("use {} = @{id}\n", f.name))
+                .collect();
             match lash_kernel_doc::parse_definition_with_locals(&format!("{source}\n{uses}")) {
                 Ok((definition, locals)) => {
                     definitions.extend(locals.into_iter().map(|f| (f.identity(), f)));

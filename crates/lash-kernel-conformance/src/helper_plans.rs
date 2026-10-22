@@ -76,10 +76,38 @@ fn generated_plan_indexes_are_in_function_identity_order() {
 #[path = "../../lash-dialect-typescript/shared/helper_differential/runner.rs"]
 pub(crate) mod runner;
 
+#[derive(Default)]
 pub(crate) struct World {
     pub(crate) prints: Vec<Datum>,
+    bits: u64,
+    stride: u64,
+    nanoseconds: i64,
 }
 impl Host for World {
+    fn perform(
+        &mut self,
+        use_: &lash_vocabulary::OperationUse,
+        _: &[Datum],
+        _: &lash_vocabulary::sites::PositionLabel,
+        _: &lash_vocabulary::sites::Site,
+    ) -> Result<Result<Datum, ErrorDatum>, lash_kernel_vm::HostFault> {
+        let operation = crate::linked::operation(use_);
+        Ok(Ok(match operation.as_str() {
+            "typescript.clock" | "python.clock" => Datum::Timestamp(lash_kernel_doc::Timestamp {
+                nanoseconds: self.nanoseconds.into(),
+            }),
+            "typescript.random" | "python.random" => {
+                let bits = self.bits;
+                self.bits = self.bits.wrapping_add(self.stride);
+                Datum::Bytes(lash_kernel_doc::Bytes::new(bits.to_be_bytes().as_slice()))
+            }
+            _ => {
+                return Err(lash_kernel_vm::HostFault::new(format!(
+                    "unexpected read {operation}"
+                )));
+            }
+        }))
+    }
     fn read(&mut self, _: &Handle, _: &Datum) -> Result<Datum, ErrorDatum> {
         Err(ErrorDatum {
             kind: "type_error".into(),
@@ -169,7 +197,7 @@ fn run_with_options<const L: u64>(
 
 /// [`run_with_options`], and the work its regions and islands ran.
 fn run_with_work<const L: u64>(
-    _case: &runner::Case,
+    case: &runner::Case,
     program: &Program,
     projector: &mut Projector<'_>,
     charge: u64,
@@ -199,7 +227,7 @@ fn run_with_work<const L: u64>(
             args: Vec::new(),
             session: None,
             owner: crate::pages::OWNER,
-            modes: Default::default(),
+            modes: runner::modes(program),
             host: Vec::new(),
         },
         Box::new(source.clone()),
@@ -207,7 +235,12 @@ fn run_with_work<const L: u64>(
     .unwrap();
     let tape = lash_kernel_vm::ChargeTape::new();
     machine.record_charges(tape.clone());
-    let mut world = World { prints: Vec::new() };
+    let mut world = World {
+        bits: case.bits,
+        stride: case.stride,
+        nanoseconds: case.nanoseconds,
+        ..World::default()
+    };
     let mut requests = Vec::new();
     let end = loop {
         match machine.run(&mut world, u64::MAX).unwrap() {
@@ -220,9 +253,10 @@ fn run_with_work<const L: u64>(
                 for request in park.requests {
                     let (wait, outcome) = match &request {
                         Request::Effect(effect) => {
-                            assert_eq!(
-                                crate::linked::operation(&effect.use_).as_str(),
-                                "host.observe"
+                            let operation = crate::linked::operation(&effect.use_);
+                            assert!(
+                                operation.as_str() == "host.observe"
+                                    || operation.as_str().ends_with(".sleep")
                             );
                             (effect.wait, Outcome::Completed(Datum::Null))
                         }
@@ -621,7 +655,7 @@ fn generated_closures_share_cells_and_keep_ordinary_charge_and_depth() {
     for depth in 190..=200 {
         compare_control(
             &format!(
-                "definition \"function descend(n: Any, f: Any) -> Any\\nkernel 1\\nmetering statements\\nimport 0 operation host.echo(x: Any) -> Any\\nbody {{ if eq(n, 0) {{ let value = apply f() return value }} let next = num.sub(n, 1) let value = call descend(next, f) return value }}\"\n main {{ let pair = invoke law.factory(5) let peek = pair.peek let value = call descend({depth}, peek) return value }}"
+                "definition \"function descend(self: Any, n: Any, f: Any) -> Any\\nkernel 1\\nmetering statements\\nimport 0 operation host.echo(x: Any) -> Any\\nbody {{ if eq(n, 0) {{ let value = apply f() return value }} let next = num.sub(n, 1) let value = apply self(self, next, f) return value }}\"\n main {{ let pair = invoke law.factory(5) let peek = pair.peek let value = call descend(&descend, {depth}, peek) return value }}"
             ),
             1_000_000,
         );
@@ -749,7 +783,7 @@ fn uri_decode_completion_price_bounds_delegated_work_on_return_and_raise() {
                     },
                 )
                 .unwrap();
-                let mut world = World { prints: Vec::new() };
+                let mut world = World::default();
                 machine.count_work();
                 let step = machine.run(&mut world, u64::MAX).unwrap();
                 let Step::Ended(end) = step else {
