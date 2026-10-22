@@ -533,7 +533,7 @@ mod tests {
                 })
                 .expect("recorded namespace"),
             )
-            .expect("cold fixture config has no owner cap");
+            .expect("fixture allocation admitted");
         let recorded = lash_core::AdmittedPluginConfig::new(config, 1);
         let original = test_session(creating);
         let resumed = test_session(RlmProtocolPluginConfig {

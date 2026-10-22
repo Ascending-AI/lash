@@ -640,14 +640,17 @@ pub fn ensure_checkpoint_component_encoding_version_for_fleet(
 pub struct HydratedSessionCheckpoint {
     pub turn_state: crate::PersistedTurnState,
     /// A key absent here is deleted.
-    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
-    pub components: std::collections::BTreeMap<String, HydratedCheckpointComponent>,
+    #[serde(
+        default,
+        skip_serializing_if = "crate::source_map::SharedSourceMap::is_empty"
+    )]
+    pub components: crate::source_map::SharedSourceMap<String, HydratedCheckpointComponent>,
     /// The session's protocol execution state as graph nodes, or none.
     #[serde(skip)]
     pub execution: Option<CheckpointExecution>,
     /// Keyed namespace nodes submitted with this checkpoint, or its loaded closure.
     #[serde(skip)]
-    pub namespace_nodes: std::collections::BTreeMap<
+    pub namespace_nodes: crate::source_map::SharedSourceMap<
         crate::checkpoint_graph::NodeId,
         crate::checkpoint_graph::EncodedNode,
     >,
@@ -688,7 +691,61 @@ impl CheckpointExecution {
     }
 }
 
+impl crate::source_map::MapValue for CheckpointComponentDescriptor {
+    fn clone_in(
+        &self,
+        budget: &lash_protocol_types::allocation::AllocationBudget,
+    ) -> Result<Self, lash_protocol_types::allocation::AllocationError> {
+        Self::clone_in(self, budget)
+    }
+}
+impl crate::source_map::MapValue for HydratedCheckpointComponent {
+    fn clone_in(
+        &self,
+        budget: &lash_protocol_types::allocation::AllocationBudget,
+    ) -> Result<Self, lash_protocol_types::allocation::AllocationError> {
+        Self::clone_in(self, budget)
+    }
+}
+impl crate::source_map::MapValue for crate::checkpoint_graph::EncodedNode {
+    fn clone_in(
+        &self,
+        budget: &lash_protocol_types::allocation::AllocationBudget,
+    ) -> Result<Self, lash_protocol_types::allocation::AllocationError> {
+        Ok(Self {
+            id: self.id,
+            bytes: self.bytes.clone_in(budget)?,
+        })
+    }
+}
+
 impl HydratedSessionCheckpoint {
+    /// Adopt foreign immutable metadata before copying it for a serving claim.
+    pub fn clone_in(
+        &self,
+        budget: &lash_protocol_types::allocation::AllocationBudget,
+    ) -> Result<Self, lash_protocol_types::allocation::AllocationError> {
+        Ok(Self {
+            turn_state: self.turn_state.clone(),
+            components: self.components.clone_in(budget)?,
+            execution: self
+                .execution
+                .as_ref()
+                .map(|execution| {
+                    Ok(CheckpointExecution {
+                        root: execution.root,
+                        descriptor: execution
+                            .descriptor
+                            .as_ref()
+                            .map(|bytes| bytes.clone_in(budget))
+                            .transpose()?,
+                    })
+                })
+                .transpose()?,
+            namespace_nodes: self.namespace_nodes.clone_in(budget)?,
+        })
+    }
+
     /// Looks up one entry in the checkpoint's authoritative component set.
     ///
     /// Integrator class (ADR 0051): **store and durable-substrate implementors**
@@ -1049,6 +1106,36 @@ mod checkpoint_tests {
         assert_eq!(clone.blob_ref, descriptor.blob_ref);
         drop(clone);
         assert_eq!(used.load(Ordering::SeqCst), 0);
+    }
+
+    /// CHECKPOINT-CLONE: retained immutable metadata shares the complete
+    /// component map and namespace index without fresh allocations. Turn
+    /// state is inline counters and needs no heap allocation.
+    #[test]
+    fn hydrated_checkpoint_clone_shares_outer_metadata() {
+        let checkpoint = HydratedSessionCheckpoint {
+            components: (0..64)
+                .map(|index| {
+                    (
+                        format!("component-{index}"),
+                        HydratedCheckpointComponent::unchanged(&CheckpointComponentDescriptor {
+                            blob_ref: BlobRef::for_content(format!("body-{index}").as_bytes())
+                                .into(),
+                            encoding_version: CHECKPOINT_COMPONENT_ENCODING_VERSION,
+                        }),
+                    )
+                })
+                .collect(),
+            ..HydratedSessionCheckpoint::default()
+        };
+        let measurement = crate::history_growth_law::allocation_counter::Measurement::start();
+        let copy = checkpoint.clone();
+        let counts = measurement.finish();
+        assert_eq!(copy.components.len(), 64);
+        assert_eq!(
+            counts.allocated, 0,
+            "checkpoint clone shares admitted outer metadata"
+        );
     }
 
     #[test]
