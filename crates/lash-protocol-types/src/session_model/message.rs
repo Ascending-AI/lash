@@ -1101,6 +1101,7 @@ fn tool_result_visible_text(content: &[ModelToolReturnPart]) -> Cow<'_, str> {
 /// (FIG-4059).
 #[derive(Debug, Default)]
 pub struct BaseRenderCache {
+    budget: crate::allocation::AllocationBudget,
     _allocation: crate::allocation::AllocationHold,
     rendered: std::sync::Mutex<
         Option<(
@@ -1129,6 +1130,30 @@ impl BaseRenderCache {
             rendered: std::sync::Mutex::new(None),
             extends: std::sync::Mutex::new(Some((previous, prefix_len))),
             _allocation: Default::default(),
+            budget: crate::allocation::AllocationBudget::unowned(),
+        }
+    }
+
+    pub fn allocation_budget(&self) -> &crate::allocation::AllocationBudget {
+        &self.budget
+    }
+
+    /// Keep same-owner immutable rendering; a foreign cache starts fresh so
+    /// adopting source never keeps a different owner's request allocations.
+    pub fn adopt_in(
+        source: &Arc<Self>,
+        budget: &crate::allocation::AllocationBudget,
+    ) -> Result<Arc<Self>, crate::allocation::AllocationError> {
+        let same_render = source
+            .rendered
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .as_ref()
+            .is_none_or(|(_, owner, _)| *owner == budget.identity());
+        if source.budget.identity() == budget.identity() && same_render {
+            Ok(Arc::clone(source))
+        } else {
+            Ok(Arc::new(Self::new_in(budget)?))
         }
     }
 
@@ -1138,6 +1163,7 @@ impl BaseRenderCache {
         let allocation = budget.reserve((std::mem::size_of::<Self>() + 64) as u64)?;
         Ok(Self {
             _allocation: allocation,
+            budget: budget.clone(),
             ..Self::new()
         })
     }
@@ -1148,8 +1174,10 @@ impl BaseRenderCache {
         budget: &crate::allocation::AllocationBudget,
     ) -> Result<Self, crate::allocation::AllocationError> {
         let allocation = budget.reserve((std::mem::size_of::<Self>() + 64) as u64)?;
+        let previous = Self::adopt_in(&previous, budget)?;
         Ok(Self {
             _allocation: allocation,
+            budget: budget.clone(),
             ..Self::extending(previous, prefix_len)
         })
     }
