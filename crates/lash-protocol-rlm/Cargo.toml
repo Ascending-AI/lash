@@ -67,6 +67,7 @@ tokio = { workspace = true, features = ["macros", "rt", "sync", "time"] }
 tracing = { workspace = true }
 
 [dev-dependencies]
+chrono = { workspace = true }
 lash-llm-transport = { workspace = true }
 # The `dataframe` fixture the Package laws publish (FIG-6926).
 lash-kernel-package = { workspace = true, features = ["testing"] }

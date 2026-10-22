@@ -862,6 +862,7 @@ PACKAGE_DEPS = {
     "lash-internal-protocol-rlm": {
         "build": {},
         "dev": {
+            "chrono": "//third-party/rust:p0048",
             "insta": "//third-party/rust:p0171",
             "lash_core": "//crates/lash-core:lash-core",
             "lash_core_store": "//crates/lash-core-store:lash-core-store",

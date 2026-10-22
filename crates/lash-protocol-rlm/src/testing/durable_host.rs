@@ -75,15 +75,30 @@ impl DurableHost {
         admitted: lash_core::AdmittedScope,
         probe: Arc<dyn lash_core::durable_port::DurableProbe>,
     ) -> Self {
-        Self::open_on(admitted, probe).await
+        Self::open_on(
+            admitted,
+            probe,
+            Arc::new(lash_core::facade_support::SystemClock),
+        )
+        .await
+    }
+
+    /// Opens the actor and SQLite store on the same controlled clock.
+    #[cfg(test)]
+    pub(crate) async fn open_with_clock(
+        admitted: lash_core::AdmittedScope,
+        clock: Arc<dyn lash_core::Clock>,
+    ) -> Self {
+        Self::open_on(admitted, Arc::new(lash_core::durable_port::NoProbe), clock).await
     }
 
     async fn open_on(
         admitted: lash_core::AdmittedScope,
         probe: Arc<dyn lash_core::durable_port::DurableProbe>,
+        clock: Arc<dyn lash_core::Clock>,
     ) -> Self {
         let backend = lash_execution_contracts::backend::Backend::for_testing(
-            super::sqlite_memory_store_set().await,
+            super::sqlite_memory_store_set_with_clock(clock).await,
         );
         let actor = match admitted.scope() {
             lash_core::ExecutionScope::Process { process_id } => {

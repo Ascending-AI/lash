@@ -258,6 +258,11 @@ impl CodeModeExecutionState {
         &self.dialect
     }
 
+    /// Uses the owning actor's clock for page-lease timing.
+    pub(super) fn page_clock(&mut self, clock: Arc<dyn lash_core::Clock>) {
+        self.pages.clock(clock);
+    }
+
     /// Takes `pages` as where the session's committed state stands.
     pub(crate) fn note_pages(&mut self, pages: Option<&SessionPages>) {
         self.pages.note(pages);

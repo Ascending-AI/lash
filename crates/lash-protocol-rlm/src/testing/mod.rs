@@ -12,11 +12,13 @@ std::thread_local! {
         const { std::cell::RefCell::new(Vec::new()) };
 }
 
-/// A fresh SQLite memory store set, storage only (no engine), held for the
-/// rest of the running test.
-pub(crate) async fn sqlite_memory_store_set() -> std::sync::Arc<lash_sqlite_store::SqliteStoreSet> {
+/// A fresh SQLite memory store set on the host's clock, storage only (no
+/// engine), held for the rest of the running test.
+pub(crate) async fn sqlite_memory_store_set_with_clock(
+    clock: Arc<dyn lash_core::Clock>,
+) -> Arc<lash_sqlite_store::SqliteStoreSet> {
     let stores = std::sync::Arc::new(
-        lash_sqlite_store::SqliteStoreSet::memory()
+        lash_sqlite_store::SqliteStoreSet::memory_with_clock(clock)
             .await
             .expect("open a SQLite memory store set"),
     );

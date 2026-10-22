@@ -248,15 +248,69 @@ async fn sessions_restored_from_one_descriptor_share_its_pages_but_not_their_hea
     assert_eq!(finish_of(&grown), serde_json::json!("n:more"));
 }
 
+/// Lease time advances only at the law's named boundary, independently of
+/// how long workers or the shared test host take to run a cell.
+#[derive(Debug)]
+struct LeaseClock {
+    epoch: std::time::Instant,
+    elapsed: tokio::sync::watch::Sender<std::time::Duration>,
+}
+
+impl LeaseClock {
+    fn new() -> Arc<Self> {
+        Arc::new(Self {
+            // A distinct origin also catches accidental OS-clock elapsed reads.
+            epoch: std::time::Instant::now() - super::super::pages::LEASE_TTL,
+            elapsed: tokio::sync::watch::channel(std::time::Duration::ZERO).0,
+        })
+    }
+
+    fn advance_to(&self, elapsed: std::time::Duration) {
+        self.elapsed.send_replace(elapsed);
+    }
+}
+
+#[async_trait::async_trait]
+impl lash_core::Clock for LeaseClock {
+    fn now(&self) -> std::time::Instant {
+        self.epoch + *self.elapsed.borrow()
+    }
+
+    fn timestamp_datetime(&self) -> chrono::DateTime<chrono::Utc> {
+        chrono::DateTime::from(
+            std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_000) + *self.elapsed.borrow(),
+        )
+    }
+
+    async fn sleep(&self, duration: std::time::Duration) {
+        self.sleep_until(self.now() + duration).await;
+    }
+
+    async fn sleep_until(&self, deadline: std::time::Instant) {
+        self.elapsed
+            .subscribe()
+            .wait_for(|elapsed| self.epoch + *elapsed >= deadline)
+            .await
+            .expect("the law owns its clock");
+    }
+}
+
+async fn lease_host(clock: Arc<LeaseClock>) -> DurableHost {
+    DurableHost::open_with_clock(lash_core::AdmittedScope::turn(SESSION, TURN), clock).await
+}
+
 /// Session page authority (FIG-6193): the cells of a turn read the
 /// session's committed pages under one lease, which the first read takes
-/// and every later cell reuses, so N cells make one lease write; and a
+/// and every later cell reuses before renewal is due, so N cells make
+/// one lease write; and a
 /// cell that rebinds one binding of many commits only the pages it
 /// changed, never the session's whole heap.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_turns_cells_share_one_lease_and_commit_only_the_pages_they_changed() {
-    let host = open_host().await;
+    let clock = LeaseClock::new();
+    let host = lease_host(clock.clone()).await;
     let mut state = typescript_state();
+    state.page_clock(clock);
     let mut patch = lash_rlm_types::RlmGlobalsPatchPluginBody::default();
     for index in 0..256 {
         patch.set_default.insert(
@@ -287,6 +341,55 @@ async fn a_turns_cells_share_one_lease_and_commit_only_the_pages_they_changed() 
         changed * 8 < whole,
         "the turn commits the pages its cells changed: {changed} of the session's {whole}"
     );
+}
+
+/// D-LEASE / FIG-7135: the host clock schedules one renewal at a third
+/// of the TTL, preserving the existing lease identity and extending its expiry.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_turns_page_lease_renews_on_its_host_clock_without_changing_identity() {
+    use super::super::pages::{LEASE_TTL, SessionPageAccess};
+
+    let clock = LeaseClock::new();
+    let host = lease_host(clock.clone()).await;
+    let mut state = typescript_state();
+    state.page_clock(clock.clone());
+    state
+        .patch_globals(
+            &lash_rlm_types::RlmGlobalsPatchPluginBody {
+                set_default: serde_json::Map::from_iter([(
+                    "kept".to_owned(),
+                    serde_json::json!(1),
+                )]),
+            },
+            &std::collections::BTreeSet::new(),
+        )
+        .await
+        .unwrap();
+    commit_working(&mut state, &host).await;
+    let handle = host.session_pages().unwrap();
+    let mut access = SessionPageAccess::default();
+    access.clock(clock.clone());
+    access.note(Some(&handle));
+    let first = access.lease().await.unwrap().unwrap();
+    let before_renewal = LEASE_TTL / 3 - std::time::Duration::from_millis(1);
+    clock.advance_to(before_renewal);
+    assert_eq!(access.lease().await.unwrap().unwrap(), first);
+    assert_eq!(access.lease_writes(), 1, "no renewal before it is due");
+
+    clock.advance_to(LEASE_TTL / 3);
+    let renewed = access.lease().await.unwrap().unwrap();
+    assert_eq!(renewed.id, first.id, "renew the turn's existing lease");
+    assert_eq!(renewed.root, first.root);
+    assert!(renewed.expires_at > first.expires_at);
+    assert_eq!(access.lease_writes(), 2, "one acquisition and one renewal");
+    assert_eq!(access.lease().await.unwrap().unwrap(), renewed);
+    assert_eq!(access.lease_writes(), 2, "reuse the confirmed renewal");
+    handle
+        .store
+        .read_pages(&renewed, &[handle.root])
+        .await
+        .unwrap();
+    access.release().await;
 }
 
 /// `len` letters whose pages never repeat one another, so content

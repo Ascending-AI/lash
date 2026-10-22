@@ -34,10 +34,11 @@ pub(crate) const LEASE_TTL: Duration = Duration::from_secs(60);
 
 /// The parent's access to a session's pages: the store it reads them from,
 /// the lease it reads under, the turn's spool and the pages it read.
-#[derive(Default)]
 pub(crate) struct SessionPageAccess {
     /// Where the session's committed state stands, as the turn last said.
     handle: Option<SessionPages>,
+    /// The host clock that schedules lease renewal.
+    clock: Arc<dyn lash_core::Clock>,
     /// The lease the session's reads go under, with when it was last
     /// renewed.
     lease: Option<(RootLease, Instant)>,
@@ -86,6 +87,21 @@ impl HeldRun {
     }
 }
 
+impl Default for SessionPageAccess {
+    fn default() -> Self {
+        Self {
+            handle: None,
+            clock: Arc::new(lash_core::facade_support::SystemClock),
+            lease: None,
+            spool: None,
+            runs: VecDeque::new(),
+            cache: PageCache::default(),
+            lease_writes: 0,
+            fetches: 0,
+        }
+    }
+}
+
 impl std::fmt::Debug for SessionPageAccess {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("SessionPageAccess")
@@ -116,6 +132,11 @@ pub(crate) enum PageAccessError {
 }
 
 impl SessionPageAccess {
+    /// Uses the owning actor's clock for lease timing.
+    pub(crate) fn clock(&mut self, clock: Arc<dyn lash_core::Clock>) {
+        self.clock = clock;
+    }
+
     /// Takes `pages` as where the session's committed state stands now. A
     /// lease already taken stays: every page the session reads stays
     /// owned by some root of it for the lease's life.
@@ -231,12 +252,12 @@ impl SessionPageAccess {
             };
         };
         if let Some((lease, renewed)) = &self.lease {
-            if renewed.elapsed() < LEASE_TTL / 3 {
+            if self.clock.now().saturating_duration_since(*renewed) < LEASE_TTL / 3 {
                 return Ok(Some(lease.clone()));
             }
             self.lease_writes += 1;
             if let Ok(renewed) = handle.store.renew_root_lease(lease).await {
-                self.lease = Some((renewed.clone(), Instant::now()));
+                self.lease = Some((renewed.clone(), self.clock.now()));
                 return Ok(Some(renewed));
             }
         }
@@ -253,7 +274,7 @@ impl SessionPageAccess {
                 ttl_millis: i64::try_from(LEASE_TTL.as_millis()).unwrap_or(i64::MAX),
             })
             .await?;
-        self.lease = Some((lease.clone(), Instant::now()));
+        self.lease = Some((lease.clone(), self.clock.now()));
         Ok(Some(lease))
     }
 
