@@ -485,6 +485,77 @@ pub enum LlmContentBlock {
     },
 }
 
+/// Immutable model blocks. The actual Arc a reader retains carries admission;
+/// serialization remains the plain block list. Independently constructed flat
+/// requests are adopted through `adopt_in` before an owner retains them.
+#[derive(Debug, Default, serde::Serialize, serde::Deserialize)]
+#[serde(transparent)]
+pub struct LlmMessageBlocks {
+    blocks: Vec<LlmContentBlock>,
+    #[serde(skip)]
+    _holds: Vec<crate::allocation::AllocationHold>,
+    #[serde(skip)]
+    budget: crate::allocation::AllocationBudget,
+}
+impl LlmMessageBlocks {
+    pub fn adopt_in(
+        source: &Arc<Self>,
+        budget: &crate::allocation::AllocationBudget,
+    ) -> Result<Arc<Self>, crate::allocation::AllocationError> {
+        if source.budget.identity() == budget.identity() {
+            return Ok(Arc::clone(source));
+        }
+        let hold = budget.reserve(crate::allocation::payload_capacity(
+            &source.blocks,
+            std::mem::size_of::<Self>()
+                + 16
+                + source.len() * std::mem::size_of::<LlmContentBlock>(),
+        ))?;
+        Ok(Arc::new(Self::admitted(
+            source.blocks.to_vec(),
+            vec![hold],
+            budget.clone(),
+        )))
+    }
+    pub(crate) fn admitted(
+        blocks: Vec<LlmContentBlock>,
+        holds: Vec<crate::allocation::AllocationHold>,
+        budget: crate::allocation::AllocationBudget,
+    ) -> Self {
+        Self {
+            blocks,
+            _holds: holds,
+            budget,
+        }
+    }
+}
+impl From<Vec<LlmContentBlock>> for LlmMessageBlocks {
+    fn from(blocks: Vec<LlmContentBlock>) -> Self {
+        Self {
+            blocks,
+            _holds: Vec::new(),
+            budget: Default::default(),
+        }
+    }
+}
+impl std::ops::Deref for LlmMessageBlocks {
+    type Target = Vec<LlmContentBlock>;
+    fn deref(&self) -> &Self::Target {
+        &self.blocks
+    }
+}
+impl AsRef<[LlmContentBlock]> for LlmMessageBlocks {
+    fn as_ref(&self) -> &[LlmContentBlock] {
+        &self.blocks
+    }
+}
+impl PartialEq for LlmMessageBlocks {
+    fn eq(&self, other: &Self) -> bool {
+        self.blocks == other.blocks
+    }
+}
+impl Eq for LlmMessageBlocks {}
+
 /// A single role turn in the LLM conversation. `blocks` holds structured
 /// content that maps 1:1 onto provider wire types. The old flat
 /// `content: String` + `kind` discriminator has been retired in favor of
@@ -497,7 +568,7 @@ pub struct LlmMessage {
     /// not receive the marker even when their provider role is `user`.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub starts_user_segment: bool,
-    pub blocks: Arc<Vec<LlmContentBlock>>,
+    pub blocks: Arc<LlmMessageBlocks>,
 }
 
 impl LlmMessage {
@@ -505,7 +576,7 @@ impl LlmMessage {
         Self {
             role,
             starts_user_segment: false,
-            blocks: Arc::new(blocks),
+            blocks: Arc::new(blocks.into()),
         }
     }
 
@@ -514,11 +585,14 @@ impl LlmMessage {
         Self {
             role,
             starts_user_segment: false,
-            blocks: Arc::new(vec![LlmContentBlock::Text {
-                text: text.into(),
-                response_meta: None,
-                cache_breakpoint: false,
-            }]),
+            blocks: Arc::new(
+                vec![LlmContentBlock::Text {
+                    text: text.into(),
+                    response_meta: None,
+                    cache_breakpoint: false,
+                }]
+                .into(),
+            ),
         }
     }
 
@@ -1003,7 +1077,8 @@ impl LlmRequest {
             {
                 continue;
             }
-            Arc::make_mut(&mut message.blocks).retain_mut(|block| {
+            let mut blocks = message.blocks.to_vec();
+            blocks.retain_mut(|block| {
                 match block {
                     LlmContentBlock::Text { response_meta, .. } => {
                         let Some(meta) = response_meta.as_ref() else {
@@ -1076,6 +1151,7 @@ impl LlmRequest {
                 }
                 true
             });
+            message.blocks = Arc::new(blocks.into());
         }
         drops
     }

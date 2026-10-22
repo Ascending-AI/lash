@@ -846,8 +846,8 @@ pub mod messages {
 
     pub use lash_core::session_graph::SharedJsonValue;
     pub use lash_core::{
-        InternalPartKind, Message, MessageOrigin, MessageParts, MessageRole, Part, PartKind,
-        TurnOutputSource, TurnReply, facade_support::MessageSequence,
+        InternalPartKind, Message, MessageOrigin, MessageParts, MessagePartsEditor, MessageRole,
+        Part, PartKind, TurnOutputSource, TurnReply, facade_support::MessageSequence,
         session_model::message::PartAttachment,
     };
     /// JSON map in integrator signatures, without a second direct dependency.
@@ -1167,8 +1167,9 @@ pub mod http_transport {
 /// Admission obligations carried by immutable request and prompt allocations.
 pub mod allocation {
     pub use lash_protocol_types::allocation::{
-        AllocationBudget, AllocationError, AllocationHold, AllocationLedger, AllocationReservation,
-        ProjectionError, ReserveError, SourceCapacity, json_decode_capacity, payload_capacity,
+        Allocated, AllocationBudget, AllocationError, AllocationHold, AllocationLedger,
+        AllocationReservation, ProjectionError, ReserveError, SourceCapacity, json_decode_capacity,
+        payload_capacity,
     };
 }
 
@@ -1230,7 +1231,8 @@ pub mod provider {
     /// stable contract a capability catalog can branch on.
     pub use lash_core::facade_support::LlmProfileEffortValidationCategory;
     pub use lash_core::llm::types::{
-        LlmContentBlock, LlmJsonSchema, LlmMessage, LlmOutputSpec, LlmRole, LlmToolChoice,
+        LlmContentBlock, LlmJsonSchema, LlmMessage, LlmMessageBlocks, LlmOutputSpec, LlmRole,
+        LlmToolChoice,
     };
     pub use lash_core::provider::LlmProfileEffortValidationError;
     /// Provider completion, caching, failure, retry, and rate-limiting contracts.

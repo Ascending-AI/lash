@@ -663,7 +663,7 @@ fn rlm_trajectory_entries(state: &SessionSnapshot) -> Vec<CellRecord> {
             };
             match lash_protocol_rlm::decode_rlm_protocol_event(event)
                 .as_ref()
-                .map(Option::as_deref)
+                .map(|event| event.as_deref().map(AsRef::as_ref))
             {
                 Ok(Some(RlmProtocolEvent::RlmTrajectoryEntry(entry))) => {
                     Some(CellRecord::clone(entry))

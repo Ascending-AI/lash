@@ -52,6 +52,9 @@ struct Buffer<T> {
 }
 
 struct BufferState {
+    /// A producer fact about every initialized slot. Raw mutable access
+    /// revokes it before exposing the slot; prefix reads never reconstruct it.
+    sources_admitted: bool,
     /// Slots `[0, initialized)` hold values; the rest are uninitialized.
     initialized: usize,
     /// Each subsequently claimed value's owned fields, alongside its slot.
@@ -125,6 +128,7 @@ impl<T> Buffer<T> {
         let mut owned = Vec::with_capacity(capacity);
         owned.resize_with(initialized, AllocationHold::default);
         let mut state = BufferState {
+            sources_admitted: initialized == 0,
             initialized,
             owned,
             handles: BTreeMap::new(),
@@ -162,6 +166,13 @@ impl<T> AppendVec<T> {
     /// The ledger that owns this buffer and every future detached buffer.
     pub fn allocation_budget(&self) -> &AllocationBudget {
         &self.buffer.budget
+    }
+
+    /// Whether every initialized value's nested immutable sources were
+    /// admitted by this buffer's ledger before publication. Raw mutable access
+    /// revokes the private producer witness before exposing any value.
+    pub fn sources_admitted(&self) -> bool {
+        self.buffer.state.lock_recover().sources_admitted
     }
 
     /// Allocate source slots and their handle registry under an owner budget.
@@ -290,11 +301,11 @@ impl<T> AppendVec<T> {
         unsafe_code,
         reason = "the slot at the initialized length is uninitialized and within capacity"
     )]
-    fn push_in_place(
-        &mut self,
-        value: T,
-        owned: AllocationHold,
-    ) -> Result<(), (T, AllocationHold)> {
+    fn push_in_place(&mut self, value: T, owned: AllocationHold) -> Result<(), (T, AllocationHold)>
+    where
+        T: SourceCapacity,
+    {
+        let sources_admitted = value.sources_admitted_in(&self.buffer.budget);
         self.reclaim_if_sole();
         let mut state = self.buffer.state.lock_recover();
         if state.initialized != self.len || self.len == self.buffer.capacity {
@@ -303,6 +314,7 @@ impl<T> AppendVec<T> {
         // SAFETY: `len < capacity`, and the slot at `initialized` is
         // uninitialized; no handle reads it until `initialized` covers it,
         // which it does only under this lock, after the write.
+        state.sources_admitted &= sources_admitted;
         unsafe { self.buffer.ptr.as_ptr().add(self.len).write(value) };
         state.owned.push(owned);
         state.initialized += 1;
@@ -452,9 +464,11 @@ impl<T: Clone + SourceCapacity> AppendVec<T> {
         };
         let allocation =
             budget.reserve(Self::buffer_capacity_bytes(capacity).saturating_add(owned))?;
+        let sources_admitted = self.sources_admitted();
         let mut values = Vec::with_capacity(capacity);
         values.extend_from_slice(self.as_slice());
         *self = Self::from_reserved(values, capacity, budget, allocation);
+        self.buffer.state.lock_recover().sources_admitted = sources_admitted;
         Ok(())
     }
 
@@ -500,12 +514,16 @@ impl<T: Clone + SourceCapacity> AppendVec<T> {
         }
         let incoming = prepared.len();
         let end = start.saturating_add(incoming);
+        let sources_admitted = prepared
+            .iter()
+            .all(|(value, _)| value.sources_admitted_in(&self.buffer.budget));
         let in_place = {
             let mut state = self.buffer.state.lock_recover();
             let unseen = state.initialized == self.len
                 && state.longest_other(self.len) <= start
                 && end <= self.buffer.capacity;
             if unseen {
+                state.sources_admitted &= sources_admitted;
                 let overlap = incoming.min(old_count);
                 for (offset, (value, owned)) in prepared[..overlap].iter_mut().enumerate() {
                     // SAFETY: these initialized slots are unseen by every
@@ -573,6 +591,7 @@ impl<T: Clone + SourceCapacity> AppendVec<T> {
         if Arc::get_mut(&mut self.buffer).is_none() {
             self.try_grow(0)?;
         }
+        self.buffer.state.lock_recover().sources_admitted = false;
         // SAFETY: this is the buffer's only handle (`grow` made a fresh
         // one), so nothing else reads its slots while the borrow lives.
         Ok(unsafe { std::slice::from_raw_parts_mut(self.buffer.ptr.as_ptr(), self.len) })

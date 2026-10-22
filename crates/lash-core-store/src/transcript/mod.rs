@@ -115,7 +115,7 @@ pub enum TranscriptItem {
     Message(TranscriptMessage),
     /// One code cell a protocol executed: the record its protocol committed,
     /// shared with the protocol's decoded event.
-    Cell(Arc<CellRecord>),
+    Cell(Arc<lash_protocol_types::allocation::Allocated<CellRecord>>),
     Suppressed(SuppressionReason),
 }
 
@@ -168,7 +168,7 @@ pub trait TranscriptDecoderPlugin: Send + Sync {
     fn decode_event(
         &self,
         event: &ProtocolEvent,
-    ) -> Result<Option<TranscriptItem>, crate::runtime_error::StoredDataCorruption>;
+    ) -> Result<Option<TranscriptItem>, crate::StoreError>;
 }
 
 #[derive(Clone, Default)]
@@ -191,7 +191,7 @@ impl TranscriptDecoders {
     pub fn decode_event(
         &self,
         event: &ProtocolEvent,
-    ) -> Result<Option<TranscriptItem>, crate::runtime_error::StoredDataCorruption> {
+    ) -> Result<Option<TranscriptItem>, crate::StoreError> {
         for decoder in &self.decoders {
             if let Some(item) = decoder.decode_event(event)? {
                 return Ok(Some(item));
@@ -248,19 +248,14 @@ impl SessionTranscript {
         decoders: &TranscriptDecoders,
     ) -> Result<Self, crate::StoreError> {
         use crate::session_graph::facade_ops::SessionGraphFacadeOps;
-        Self::from_records(view.session_graph()?.active_path_nodes(), decoders).map_err(|error| {
-            crate::StoreError::StoredDataCorrupt {
-                record_kind: "SessionTranscript",
-                message: error.to_string(),
-            }
-        })
+        Self::from_records(view.session_graph()?.active_path_nodes(), decoders)
     }
     /// Decode retained committed records in source order, across frame
     /// boundaries.
     pub fn from_records<'a>(
         records: impl IntoIterator<Item = &'a SessionNodeRecord>,
         decoders: &TranscriptDecoders,
-    ) -> Result<Self, crate::runtime_error::StoredDataCorruption> {
+    ) -> Result<Self, crate::StoreError> {
         Self::fold(records, decoders, None)
     }
 
@@ -274,7 +269,7 @@ impl SessionTranscript {
         base: &crate::SessionGraph,
         head: &crate::SessionGraph,
         decoders: &TranscriptDecoders,
-    ) -> Result<Self, crate::runtime_error::StoredDataCorruption> {
+    ) -> Result<Self, crate::StoreError> {
         use crate::session_graph::facade_ops::SessionGraphFacadeOps;
         let Some(base_leaf) = base.leaf_node_id.as_ref() else {
             return Self::from_records(head.active_path_nodes(), decoders);
@@ -318,7 +313,7 @@ impl SessionTranscript {
         records: impl IntoIterator<Item = &'a SessionNodeRecord>,
         decoders: &TranscriptDecoders,
         mut current_turn: Option<TurnId>,
-    ) -> Result<Self, crate::runtime_error::StoredDataCorruption> {
+    ) -> Result<Self, crate::StoreError> {
         let entries = records
             .into_iter()
             .map(|node| {
@@ -391,7 +386,7 @@ impl SessionTranscript {
                     item,
                 })
             })
-            .collect::<Result<Vec<_>, crate::runtime_error::StoredDataCorruption>>()?;
+            .collect::<Result<Vec<_>, crate::StoreError>>()?;
         Ok(Self { entries })
     }
     /// Every entry, suppressed ones included, in source order.
@@ -477,7 +472,7 @@ impl CommittedTurnsPage {
     pub fn decode(
         page: crate::store::CommittedTurnNodesPage,
         decoders: &TranscriptDecoders,
-    ) -> Result<Self, crate::runtime_error::StoredDataCorruption> {
+    ) -> Result<Self, crate::StoreError> {
         let turns = page
             .turns
             .into_iter()
@@ -495,7 +490,7 @@ impl CommittedTurnsPage {
                     outcome: turn.outcome,
                 })
             })
-            .collect::<Result<_, crate::runtime_error::StoredDataCorruption>>()?;
+            .collect::<Result<_, crate::StoreError>>()?;
         Ok(Self {
             turns,
             next: page.next,

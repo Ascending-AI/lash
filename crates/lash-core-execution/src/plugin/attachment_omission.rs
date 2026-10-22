@@ -12,7 +12,9 @@ use std::collections::BTreeMap;
 
 use super::PluginTraceEmitter;
 use super::SessionReadView;
-use crate::{Message, Part, PartKind, SessionId};
+use crate::{Message, SessionId};
+#[cfg(test)]
+use crate::{Part, PartKind};
 use lash_execution_contracts::plugin_error::PluginError;
 
 /// Part identities and plugin-authored replacement text, applied in history order.
@@ -58,32 +60,7 @@ pub trait AttachmentOmissionPolicy: Send + Sync {
     ) -> Result<AttachmentOmissions, PluginError>;
 }
 
-/// Replace `part`'s attachments with `placeholder`: an attachment part keeps
-/// its slot, empty, with the placeholder as its text, and a tool result's
-/// attachment blocks become placeholder text in place, so the result stays
-/// one part in its original order. Whether anything was replaced.
-pub fn omit_part_attachments(part: &mut Part, placeholder: &str) -> bool {
-    if let Some(blocks) = part.tool_result_content_mut() {
-        let mut changed = false;
-        for block in blocks.iter_mut() {
-            if block.attachment().is_some() {
-                *block = crate::ModelToolReturnPart::text(placeholder);
-                changed = true;
-            }
-        }
-        return changed;
-    }
-    if !matches!(part.kind(), PartKind::Attachment) || part.attachment().is_none() {
-        return false;
-    }
-    if let Some(slot) = part.attachment_mut() {
-        *slot = None;
-    }
-    if let Some(content) = part.content_mut() {
-        *content = placeholder.to_string();
-    }
-    true
-}
+pub use lash_protocol_types::session_model::message::omit_part_attachments;
 
 /// Apply `omissions` to the request's view of `messages`. A named part that
 /// carries no attachment, or names no part, is left alone. The count of
@@ -97,22 +74,17 @@ pub fn apply_attachment_omissions(
     }
     let mut omitted = 0;
     for message in messages {
-        let named = omissions
-            .iter()
-            .filter(|(id, _)| id.message == message.id)
-            .map(|(id, text)| (id.part, text))
-            .collect::<Vec<_>>();
-        if named.is_empty() {
+        let named = || omissions.iter().filter(|(id, _)| id.message == message.id);
+        if named().next().is_none() {
             continue;
         }
-        let parts = lash_protocol_types::session_model::message::MessageParts::make_mut(
-            &mut message.parts,
-        )?;
-        for (index, placeholder) in named {
-            if let Some(part) = parts.get_mut(index) {
-                omitted += usize::from(omit_part_attachments(part, placeholder));
+        omitted += lash_protocol_types::MessageParts::edit(&mut message.parts, |parts| {
+            let mut count = 0;
+            for (id, placeholder) in named() {
+                count += usize::from(parts.omit_attachments(id.part, placeholder)?);
             }
-        }
+            Ok(count)
+        })?;
     }
     Ok(omitted)
 }

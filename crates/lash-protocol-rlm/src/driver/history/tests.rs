@@ -53,7 +53,7 @@ fn assistant_reasoning_event(
 fn step_event(code: &str) -> SessionHistoryRecord {
     SessionHistoryRecord::Protocol(rlm_protocol_event(
         lash_rlm_types::RlmProtocolEvent::RlmTrajectoryEntry(std::sync::Arc::new(
-            lash_core::CellRecord {
+            (lash_core::CellRecord {
                 language: "typescript".to_string(),
                 prints_retained: None,
                 id: "lash_vm_step_0".to_string(),
@@ -64,7 +64,8 @@ fn step_event(code: &str) -> SessionHistoryRecord {
                 calls: Vec::new(),
                 bindings: Default::default(),
                 result: lash_core::CellOutcome::Completed,
-            },
+            })
+            .into(),
         )),
         lash_core::FleetFormat::current().writer_version(lash_core::surface_format!(
             crate::RLM_PROTOCOL_EVENT_VERSION
@@ -261,7 +262,7 @@ fn ordered_reasoning_replay_precedes_cell_in_folded_history_message() {
 fn failed_observation_lists_executed_calls_and_frames_retry() {
     let event = SessionHistoryRecord::Protocol(rlm_protocol_event(
         lash_rlm_types::RlmProtocolEvent::RlmTrajectoryEntry(std::sync::Arc::new(
-            lash_core::CellRecord {
+            (lash_core::CellRecord {
                 language: "typescript".to_string(),
                 prints_retained: None,
                 id: "lash_vm_step_failed".to_string(),
@@ -295,7 +296,8 @@ fn failed_observation_lists_executed_calls_and_frames_retry() {
                     lash_core::CellFailureKind::Program,
                     "read failed at secret.txt; cache failed at .cache/lash/state",
                 )),
-            },
+            })
+            .into(),
         )),
         lash_core::FleetFormat::current().writer_version(lash_core::surface_format!(
             crate::RLM_PROTOCOL_EVENT_VERSION
@@ -337,7 +339,7 @@ fn failed_step_event(id: &str, code: &str, error: &str) -> SessionHistoryRecord 
 fn step_failed_with(id: &str, code: &str, failure: lash_core::CellFailure) -> SessionHistoryRecord {
     SessionHistoryRecord::Protocol(rlm_protocol_event(
         lash_rlm_types::RlmProtocolEvent::RlmTrajectoryEntry(std::sync::Arc::new(
-            lash_core::CellRecord {
+            (lash_core::CellRecord {
                 language: "typescript".to_string(),
                 prints_retained: None,
                 id: id.to_string(),
@@ -348,7 +350,8 @@ fn step_failed_with(id: &str, code: &str, failure: lash_core::CellFailure) -> Se
                 calls: Vec::new(),
                 bindings: Default::default(),
                 result: lash_core::CellOutcome::Failed(failure),
-            },
+            })
+            .into(),
         )),
         lash_core::FleetFormat::current().writer_version(lash_core::surface_format!(
             crate::RLM_PROTOCOL_EVENT_VERSION

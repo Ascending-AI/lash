@@ -57,7 +57,7 @@ fn context(cell_id: &str, call: &str) -> SessionHistoryRecord {
 }
 fn trajectory(step: CellRecord) -> SessionHistoryRecord {
     SessionHistoryRecord::Protocol(crate::projection::rlm_protocol_event(
-        RlmProtocolEvent::RlmTrajectoryEntry(std::sync::Arc::new(step)),
+        RlmProtocolEvent::RlmTrajectoryEntry(std::sync::Arc::new((step).into())),
         lash_core::FleetFormat::current().writer_version(lash_core::surface_format!(
             crate::RLM_PROTOCOL_EVENT_VERSION
         )),
@@ -275,7 +275,9 @@ fn reloaded_null_finish_remains_terminal_in_reconstructed_history() {
     };
     let decoded =
         crate::projection::decode_rlm_protocol_event(event).expect("valid history fixture");
-    let Some(RlmProtocolEvent::RlmTrajectoryEntry(restored)) = decoded.as_deref() else {
+    let Some(RlmProtocolEvent::RlmTrajectoryEntry(restored)) =
+        decoded.as_deref().map(AsRef::as_ref)
+    else {
         panic!("decoded trajectory")
     };
     assert_eq!(

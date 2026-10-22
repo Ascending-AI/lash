@@ -105,7 +105,7 @@ impl PendingProse {
 
 pub(super) fn build_rlm_history_messages_from_turn(
     input: RlmHistoryRenderInput<'_>,
-) -> Result<Vec<LlmMessage>, lash_core::StoredDataCorruption> {
+) -> Result<Vec<LlmMessage>, lash_protocol_types::allocation::ProjectionError> {
     Ok(complete_history_messages(
         render_history_messages(&input)?,
         input.protocol_iteration,
@@ -142,7 +142,7 @@ pub(crate) fn complete_history_messages(
 )]
 pub(super) fn render_history_messages(
     input: &RlmHistoryRenderInput<'_>,
-) -> Result<Vec<LlmMessage>, lash_core::StoredDataCorruption> {
+) -> Result<Vec<LlmMessage>, lash_protocol_types::allocation::ProjectionError> {
     let mut messages = Vec::new();
     let history_projection = input
         .dialect
@@ -182,7 +182,8 @@ pub(super) fn render_history_messages(
                 else {
                     return;
                 };
-                let lash_rlm_types::RlmProtocolEvent::RlmTrajectoryEntry(step) = event.as_ref()
+                let lash_rlm_types::RlmProtocolEvent::RlmTrajectoryEntry(step) =
+                    event.as_ref().as_ref()
                 else {
                     return;
                 };
@@ -363,6 +364,7 @@ pub(crate) fn superseded_failure_indices(
                     .decode_history_event(event)
                     .expect("history projection validated every RLM event")
                     .as_deref()
+                    .map(AsRef::as_ref)
                 {
                     if step.result.is_failed() {
                         pending_failure_entries.append(&mut prose_entries);
@@ -422,9 +424,7 @@ fn text_block(text: impl Into<Arc<str>>, cache_breakpoint: bool) -> LlmContentBl
 
 fn mark_last_history_text_cache_breakpoint(messages: &mut [LlmMessage]) {
     for message in messages.iter_mut().rev() {
-        let Some(blocks) = Arc::get_mut(&mut message.blocks) else {
-            continue;
-        };
+        let mut blocks = message.blocks.to_vec();
         for block in blocks.iter_mut().rev() {
             if let LlmContentBlock::Text {
                 text,
@@ -434,6 +434,7 @@ fn mark_last_history_text_cache_breakpoint(messages: &mut [LlmMessage]) {
                 && !text.trim().is_empty()
             {
                 *cache_breakpoint = true;
+                message.blocks = Arc::new(blocks.into());
                 return;
             }
         }

@@ -1002,7 +1002,7 @@ impl SessionNodeRecord {
             } => {
                 event
                     .payload
-                    .decoded_in(allocation.clone())
+                    .decoded_in(allocation.clone(), budget.clone())
                     .map_err(|error| crate::StoreError::StoredDataCorrupt {
                         record_kind: "SessionGraph node",
                         message: error.to_string(),

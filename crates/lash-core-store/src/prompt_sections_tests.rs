@@ -403,14 +403,14 @@ fn lo_prefix_tail_work_matches_full_render() {
         let mut changed = next.messages().get(depth / 2).unwrap().clone();
         changed.role = lash_protocol_types::llm::types::LlmRole::Assistant;
         changed.starts_user_segment = true;
-        let mut blocks = changed.blocks.as_ref().clone();
+        let mut blocks = changed.blocks.to_vec();
         if let lash_protocol_types::llm::types::LlmContentBlock::Text {
             cache_breakpoint, ..
         } = &mut blocks[0]
         {
             *cache_breakpoint = true;
         }
-        changed.blocks = Arc::new(blocks);
+        changed.blocks = Arc::new(blocks.into());
         let reference = lash_protocol_types::AttachmentRef {
             id: lash_protocol_types::AttachmentId::parse("ab".repeat(32)).unwrap(),
             media_type: lash_protocol_types::MediaType::parse("image/png").unwrap(),

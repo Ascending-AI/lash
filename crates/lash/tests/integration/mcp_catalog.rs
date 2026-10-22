@@ -671,7 +671,7 @@ async fn turn_witness(store: Store, failure_law: bool) {
         .open()
         .await
         .expect("reopen committed session");
-    assert!(reopened.read_view().chronological_projection().into_entries().iter().any(|entry| {
+    assert!(reopened.read_view().chronological_projection().expect("admitted chronological projection").into_entries().iter().any(|entry| {
         matches!(&entry.payload, lash::persistence::ChronologicalPayload::Message(message) if message.parts.iter().any(|part| part.content().contains("storm done")))
     }), "the completed turn survives a store reload");
     factory.shutdown().await.expect("MCP shutdown");

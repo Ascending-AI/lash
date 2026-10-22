@@ -127,13 +127,7 @@ impl RuntimeTurnServices {
         let page = store
             .load_committed_turns(Some(&after), std::num::NonZeroU32::MIN)
             .await?;
-        let mut page =
-            crate::transcript::CommittedTurnsPage::decode(page, decoders).map_err(|error| {
-                lash_execution_contracts::plugin_error::PluginError::StoredDataCorrupt {
-                    record_kind: error.record_kind,
-                    message: error.message,
-                }
-            })?;
+        let mut page = crate::transcript::CommittedTurnsPage::decode(page, decoders)?;
         let read = page
             .turns
             .pop()

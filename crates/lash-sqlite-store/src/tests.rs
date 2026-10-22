@@ -1892,7 +1892,9 @@ async fn cache_release_population(delete: bool) {
                     .expect("window");
                 let view = SessionReadView::from_persisted_state(&loaded.state);
                 let transcript = view.transcript().expect("transcript");
-                let projection = view.shared_chronological_projection();
+                let projection = view
+                    .shared_chronological_projection()
+                    .expect("admitted chronological projection");
                 let render_cache = Arc::downgrade(&loaded.state.read_model().prompt_render_cache);
                 let expected = serde_json::to_vec(view.messages()).expect("recorded messages");
                 assert_eq!(view.messages().len(), depth);

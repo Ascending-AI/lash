@@ -1554,3 +1554,19 @@ pub fn registry_error(error: lash_durable::DurableError) -> crate::PluginError {
 
 #[cfg(test)]
 mod error_class_tests;
+
+impl From<lash_protocol_types::allocation::ProjectionError> for PluginError {
+    fn from(error: lash_protocol_types::allocation::ProjectionError) -> Self {
+        match error {
+            lash_protocol_types::allocation::ProjectionError::Allocation(error) => {
+                Self::Runtime(crate::RuntimeError::allocation(error))
+            }
+            lash_protocol_types::allocation::ProjectionError::Stored(error) => {
+                Self::StoredDataCorrupt {
+                    record_kind: error.record_kind,
+                    message: error.message,
+                }
+            }
+        }
+    }
+}

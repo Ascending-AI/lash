@@ -603,7 +603,7 @@ fn transcript_decoder_is_inventory() {
             _: &crate::ProtocolEvent,
         ) -> Result<
             Option<lash_core_store::transcript::TranscriptItem>,
-            lash_core_store::runtime_error::StoredDataCorruption,
+            lash_core_store::store::StoreError,
         > {
             Ok(None)
         }

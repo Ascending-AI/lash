@@ -69,14 +69,22 @@ pub(super) async fn record_cell_outputs(
     let renderer = Arc::clone(&code_renderer.0);
     let history_index = match crate::projection::HistoryIndex::from_context(ctx, events) {
         Ok(history) => history.len(),
-        Err(corruption) => {
-            let mut error = lash_core::RuntimeEffectControllerError::new(
-                lash_core::RuntimeErrorCode::RecordEncodingFailed,
-                corruption.to_string(),
-            );
-            error.cause = Some(lash_core::RuntimeErrorCause::StoredDataCorrupt {
-                corruption: Box::new(corruption),
-            });
+        Err(refusal) => {
+            let error = match refusal {
+                lash_protocol_types::allocation::ProjectionError::Allocation(error) => {
+                    lash_core::RuntimeError::allocation(error).into()
+                }
+                lash_protocol_types::allocation::ProjectionError::Stored(corruption) => {
+                    let mut error = lash_core::RuntimeEffectControllerError::new(
+                        lash_core::RuntimeErrorCode::RecordEncodingFailed,
+                        corruption.to_string(),
+                    );
+                    error.cause = Some(lash_core::RuntimeErrorCause::StoredDataCorrupt {
+                        corruption: Box::new(corruption),
+                    });
+                    error
+                }
+            };
             fail_cell_on_nested_error(ctx, response, error);
             return;
         }

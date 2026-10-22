@@ -813,3 +813,184 @@ fn sequence_slot_admission_precedes_join_publication_and_reads_do_not_allocate()
     assert_eq!(held.len(), 4);
     assert_eq!(held[0].parts[0].content(), "source");
 }
+
+/// LO-EVICT-PAYLOAD: the blocks a reader can retain own their charge.
+#[test]
+fn escaped_request_blocks_keep_their_admission() {
+    let ledger = crate::allocation::testing::Ledger::default();
+    ledger.limit(1 << 24);
+    let budget = ledger.budget();
+    let request = crate::llm::types::RequestMessages::from_messages(
+        vec![LlmMessage::text(LlmRole::User, "retained text".repeat(512))],
+        &budget,
+    )
+    .unwrap();
+    let blocks = request.iter().next().unwrap().blocks.clone();
+    drop(request);
+    assert!(
+        ledger.used() >= 512 * 13,
+        "escaped blocks released their charge"
+    );
+    assert_eq!(blocks.len(), 1);
+    drop(blocks);
+    assert_eq!(ledger.used(), 0);
+}
+
+/// LO-EVICT-PART-EDIT: even a uniquely held carrier reserves before editing.
+#[test]
+fn private_parts_refuse_growth_before_mutation() {
+    let ledger = crate::allocation::testing::Ledger::default();
+    ledger.limit(1 << 24);
+    let budget = ledger.budget();
+    let mut parts = MessageParts::clone_in(&[part(PartKind::Text, "before")], &budget).unwrap();
+    ledger.limit(ledger.used());
+    assert!(
+        MessageParts::edit(&mut parts, |parts| parts
+            .push(&part(PartKind::Text, "after")))
+        .is_err(),
+        "raw growth bypassed admission"
+    );
+    assert_eq!(parts[0].content(), "before");
+}
+
+/// LO-EVICT-SEQUENCE: publication adopts foreign immutable parts.
+#[test]
+fn sequence_push_and_replace_refuse_foreign_parts_before_publication() {
+    for replace in [false, true] {
+        let ledger = crate::allocation::testing::Ledger::default();
+        ledger.limit(1 << 24);
+        let budget = ledger.budget();
+        let mut sequence = MessageSequence::default().clone_in(&budget).unwrap();
+        ledger.limit(ledger.used() + 65536);
+        let foreign = witness_message("foreign", &"x".repeat(1 << 20));
+        let result = if replace {
+            sequence.replace(vec![foreign])
+        } else {
+            sequence.push(foreign)
+        };
+        assert!(
+            result.is_err(),
+            "foreign parts were retained without owner admission"
+        );
+        assert!(sequence.is_empty());
+    }
+}
+
+/// LO-EVICT-SEQUENCE: raw edits invalidate the same-ledger admission witness.
+#[test]
+fn sequence_raw_edit_cannot_reuse_same_ledger_trust() {
+    let ledger = crate::allocation::testing::Ledger::default();
+    ledger.limit(1 << 24);
+    let budget = ledger.budget();
+    let mut sequence = MessageSequence::from_owned(vec![witness_message("source", "before")])
+        .clone_in(&budget)
+        .unwrap();
+    sequence.make_mut().unwrap()[0].parts =
+        shared_parts(vec![part(PartKind::Text, &"x".repeat(1 << 20))]);
+    ledger.limit(ledger.used() + 65536);
+    assert!(
+        sequence.clone_in(&budget).is_err(),
+        "raw edit retained the old ledger witness"
+    );
+}
+/// LO-EVICT-DERIVED: an escaped derived value owns the source obligation too.
+#[test]
+fn escaped_protocol_derived_value_keeps_its_admission() {
+    let ledger = crate::allocation::testing::Ledger::default();
+    ledger.limit(1 << 24);
+    let budget = ledger.budget();
+    let mut payload = crate::ProtocolPayload::new(serde_json::json!({"text": "x".repeat(4096)}));
+    payload
+        .decoded_in(budget.reserve(16384).unwrap(), budget.clone())
+        .unwrap();
+    let derived = payload
+        .derived(0, |json, _| json["text"].as_str().unwrap().to_string())
+        .unwrap();
+    drop(payload);
+    assert!(ledger.used() >= 4096, "escaped decode released its charge");
+    assert_eq!(derived.len(), 4096);
+    drop(derived);
+    assert_eq!(ledger.used(), 0);
+}
+
+/// LO-EVICT-CAPACITY: short encoded strings still need full array slots.
+#[test]
+fn payload_admission_bounds_sparse_nested_array_slots() {
+    let summary = vec![String::new(); 1000];
+    let minimum = summary.capacity() * std::mem::size_of::<String>();
+    let replay = ProviderReasoningReplay {
+        summary,
+        ..Default::default()
+    };
+    assert!(crate::allocation::payload_capacity(&replay, 0) >= minimum as u64);
+}
+
+/// LO-EVICT-DERIVED: refusal happens before the decoder allocates.
+#[test]
+fn protocol_derivation_reserves_before_calling_decoder() {
+    let ledger = crate::allocation::testing::Ledger::default();
+    ledger.limit(1 << 24);
+    let budget = ledger.budget();
+    let mut payload = crate::ProtocolPayload::new(serde_json::json!({"text": "x".repeat(4096)}));
+    payload
+        .decoded_in(budget.reserve(16384).unwrap(), budget.clone())
+        .unwrap();
+    ledger.limit(ledger.used());
+    let called = std::cell::Cell::new(false);
+    let _derived = payload.derived(0, |json, _| {
+        called.set(true);
+        json["text"].as_str().unwrap().to_string()
+    });
+    assert!(!called.get(), "decoder ran without reserving its output");
+}
+
+/// LO-PREFIX: immutable admitted source carries its proof into a sequence.
+#[test]
+fn admitted_base_adoption_does_not_copy_history() {
+    let ledger = crate::allocation::testing::Ledger::default();
+    ledger.limit(1 << 24);
+    let budget = ledger.budget();
+    let mut base = AppendVec::try_with_capacity(8, &budget).unwrap();
+    let mut message = witness_message("source", "already admitted");
+    message.parts = MessageParts::adopt_in(&message.parts, &budget).unwrap();
+    base.push(message).unwrap();
+    let source = base.clone();
+    let sequence = MessageSequence::from_base(base);
+    ledger.limit(ledger.used());
+    let adopted = sequence
+        .clone_in(&budget)
+        .expect("an admitted immutable base needs no new allocation");
+    assert!(AppendVec::ptr_eq(&source, &adopted.shared()));
+}
+
+/// LO-EVICT-PAYLOAD-EDIT: no JSON rewrite runs before growth admission.
+#[test]
+fn protocol_payload_private_edit_refuses_growth_before_mutation() {
+    let ledger = crate::allocation::testing::Ledger::default();
+    ledger.limit(1 << 24);
+    let budget = ledger.budget();
+    let mut payload = crate::ProtocolPayload::new(serde_json::json!({"text": "before"}))
+        .adopt_in(&budget)
+        .unwrap();
+    ledger.limit(ledger.used());
+    let replacement = serde_json::json!({"text": "x".repeat(1 << 20)});
+    let result = payload.replace(&replacement);
+    assert!(result.is_err(), "private JSON growth bypassed admission");
+    assert_eq!(payload["text"], "before");
+}
+
+/// LO-EVICT-SEQUENCE: replacement has the same foreign-parts obligation as push.
+#[test]
+fn sequence_replace_refuses_foreign_parts_before_publication() {
+    let ledger = crate::allocation::testing::Ledger::default();
+    ledger.limit(1 << 24);
+    let budget = ledger.budget();
+    let mut sequence = MessageSequence::default().clone_in(&budget).unwrap();
+    ledger.limit(ledger.used() + 65536);
+    assert!(
+        sequence
+            .replace(vec![witness_message("replacement", &"x".repeat(1 << 20))])
+            .is_err()
+    );
+    assert!(sequence.is_empty());
+}

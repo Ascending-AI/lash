@@ -110,7 +110,8 @@ fn standard_history(request: &LlmRequest) -> Vec<LlmMessage> {
 fn stable_bytes(messages: &[LlmMessage]) -> Vec<u8> {
     let mut messages = messages.to_vec();
     for message in &mut messages {
-        for block in Arc::make_mut(&mut message.blocks).iter_mut() {
+        let mut blocks = message.blocks.to_vec();
+        for block in &mut blocks {
             if let LlmContentBlock::Text {
                 cache_breakpoint, ..
             } = block
@@ -118,6 +119,7 @@ fn stable_bytes(messages: &[LlmMessage]) -> Vec<u8> {
                 *cache_breakpoint = false;
             }
         }
+        message.blocks = Arc::new(blocks.into());
     }
     serde_json::to_vec(&messages).expect("history JSON")
 }

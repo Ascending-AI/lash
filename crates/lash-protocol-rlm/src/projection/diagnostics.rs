@@ -1,14 +1,15 @@
 /// Read committed extraction decisions in source order.
 pub fn recorded_extraction_decisions(
     records: &[lash_core::SessionHistoryRecord],
-) -> Result<Vec<String>, lash_core::StoredDataCorruption> {
+) -> Result<Vec<String>, lash_protocol_types::allocation::ProjectionError> {
     let mut decisions = Vec::new();
     for record in records {
         let lash_core::SessionHistoryRecord::Protocol(event) = record else {
             continue;
         };
         let decoded = super::context::decode_rlm_protocol_event(event)?;
-        let Some(lash_rlm_types::RlmProtocolEvent::RlmDiagnostic(diagnostic)) = decoded.as_deref()
+        let Some(lash_rlm_types::RlmProtocolEvent::RlmDiagnostic(diagnostic)) =
+            decoded.as_deref().map(AsRef::as_ref)
         else {
             continue;
         };
