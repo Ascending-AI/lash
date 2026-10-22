@@ -1594,6 +1594,8 @@ pub(crate) fn import_result_check(ty: &lash_vocabulary::Type) -> Option<fn(doc::
         Type::Null => |v| matches!(v, Value::Null),
         Type::Absent => |v| matches!(v, Value::Absent),
         Type::Bool => |v| matches!(v, Value::Bool(_)),
+        // Short texts need no warming or allocation at the public boundary.
+        Type::Text => |v| matches!(v, Value::Text(_)),
         Type::Int => |v| matches!(v, Value::Int(_)),
         Type::Float => |v| matches!(v, Value::Float(_)),
         Type::Number => |v| matches!(v, Value::Int(_) | Value::Float(_)),
