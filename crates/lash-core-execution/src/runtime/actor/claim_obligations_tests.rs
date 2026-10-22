@@ -352,10 +352,9 @@ fn an_execution_roots_hard_record_is_required_while_the_root_stands() {
     assert!(work.requires().is_empty(), "{:?}", work.requires());
 }
 
-/// DYNAMIC-MATCH (FIG-6993): a call admitted through a dynamic match owes
-/// the matched link's provider and the codec version of its payload, with
-/// its binding's callbacks, from the commit that admits it until the call
-/// settles; then nothing of it is required.
+/// STAGED-CLAIMS (package model §15.2): a resolved call owes the target's
+/// provider and payload codec, including both registry-qualified callbacks,
+/// alongside its admission binding until settlement retires that invocation.
 #[test]
 fn a_matched_call_owes_its_provider_and_codec_until_it_settles() {
     let provider = lash_vocabulary::providers::ToolProviderHandle::new(
@@ -368,6 +367,25 @@ fn a_matched_call_owes_its_provider_and_codec_until_it_settles() {
         "o",
         crate::tool_provider_key!("q"),
     );
+    let callbacks = [
+        lash_vocabulary::claims::CallbackRequirement {
+            registry: provider.registry(),
+            callback: provider.callback_identity(),
+        },
+        lash_vocabulary::claims::CallbackRequirement {
+            registry: codec.registry(),
+            callback: codec.callback_identity(),
+        },
+    ];
+    let definition = crate::ToolDefinition::raw(
+        "matched",
+        "tools.matched",
+        "",
+        serde_json::json!({}),
+        serde_json::json!({}),
+    )
+    .unwrap()
+    .with_execution(Duration::from_secs(60));
     let link = lash_core_store::tool_surface::OperationRoute {
         tool: ToolId::new("matched"),
         provider,
@@ -378,13 +396,16 @@ fn a_matched_call_owes_its_provider_and_codec_until_it_settles() {
             format: lash_vocabulary::providers::FormatVersion::new(2).unwrap(),
             payload: serde_json::json!({}),
         }),
-        source: lash_core_store::tool_surface::RouteSource::Advertised,
+        source: lash_core_store::tool_surface::RouteSource::Resolved {
+            definition: Box::new(definition),
+        },
     };
     let call = ToolCallId::fixture("matched");
     let binding = bound_to("o");
     let mut work = RecordedWork::session();
     work.admit_linked(owner(), call.clone(), Some(&binding), Some(&link));
     let mut owed = hard(&lash_vocabulary::claims::ClaimRequirements {
+        callbacks: callbacks.into(),
         providers: [lash_vocabulary::ProviderName {
             owner: "o".into(),
             key: "p".into(),

@@ -464,14 +464,20 @@ async fn before_tool_hook_receives_resolved_argument_projection_policy() {
     );
 }
 
-/// FIG-6217: a deferred-only provider owns its recorded definition and
-/// binding; catalogue membership cannot refuse its granted cell call.
+/// L-DEFERRED-PIN (§15.1–15.2): a published deferred package resolves through
+/// its registered resolver, but a retained target executes without rediscovery.
+/// Only its executor and readable payload are needed when the cell is restored.
 #[tokio::test]
-async fn a_deferred_only_granted_cell_call_executes_once_or_parks_for_missing_registration() {
-    use crate::DeferredToolProvider as _;
+async fn a_resolved_package_cell_call_needs_its_executor_and_codec_without_rediscovery() {
+    use crate::plugin::packages::{
+        DeferredAnswer, DeferredPackageProvider, PackageContribution, PackageProvider,
+        ResolverFault, operation_publication,
+    };
     use crate::runtime::actor::round::{self, MemberBodies as _};
     use crate::tool_dispatch::{CellCall, CellMember, CellMembers};
     use lash_durable::{ActorKey, CommitLabel, FormatSet, MailTx, NodeId, NodeSpec};
+    use lash_execution_contracts::process::linking::{AdmissionRefusal, EnginePortError};
+    use lash_vocabulary::{ProviderName, names::*, package::*};
 
     #[derive(Default)]
     struct DeferredOnly {
@@ -513,25 +519,76 @@ async fn a_deferred_only_granted_cell_call_executes_once_or_parks_for_missing_re
     }
 
     #[async_trait::async_trait]
-    impl crate::DeferredToolProvider for DeferredOnly {
+    impl PackageProvider for DeferredOnly {
+        fn roots(&self) -> std::collections::BTreeSet<Segment> {
+            [Segment::new("tools").unwrap()].into()
+        }
+
+        fn advertise(
+            &self,
+            _: &crate::plugin::OwnerConfigView,
+            context: &PublicationContext,
+        ) -> Result<Vec<PackageContribution>, lash_execution_contracts::PluginError> {
+            let advertisement = PackageAdvertisement::Deferred(Box::new(DeferredPackage {
+                path: PackagePath::parse("tools").unwrap(),
+                visibility: Visibility::Public,
+                provider: ProviderName {
+                    owner: "test_tools".into(),
+                    key: "deferred".into(),
+                },
+                config: ProviderConfig {
+                    component: None,
+                    format: lash_vocabulary::providers::FormatVersion::ONE,
+                    value: serde_json::Value::Null,
+                    payload: None,
+                },
+                resolution_policy: Default::default(),
+            }));
+            Ok(vec![PackageContribution {
+                publication: operation_publication(context, &advertisement).unwrap(),
+                advertisement,
+                routes: Vec::new(),
+            }])
+        }
+
+        async fn hold(
+            &self,
+            _: &lash_core_store::artifact_referrer::ReferrerClaim,
+            _: &[&PackageAdvertisement],
+        ) -> Result<(), EnginePortError> {
+            Ok(())
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl DeferredPackageProvider for DeferredOnly {
+        fn validate_grant(
+            &self,
+            grant: &DeferredGrant,
+            registry: crate::plugin::RegistryKind,
+        ) -> Result<(), AdmissionRefusal> {
+            assert_eq!(registry, crate::plugin::RegistryKind::Session);
+            assert_eq!(grant.provider.owner, "test_tools");
+            assert_eq!(grant.path, PackagePath::parse("tools").unwrap());
+            Ok(())
+        }
+
         async fn resolve(
             &self,
-            _cx: &crate::DeferredResolveContext<'_>,
-            paths: &[&str],
-        ) -> std::collections::BTreeMap<String, crate::DeferredOutcome> {
-            paths
-                .iter()
-                .map(|path| {
-                    (
-                        (*path).to_owned(),
-                        crate::DeferredOutcome::resolved(
-                            crate::testing::test_tools_provider(),
-                            named_beta_tool("send_email"),
-                            Some(granted_binding()),
-                        ),
-                    )
-                })
-                .collect()
+            _: &crate::DeferredResolveContext<'_>,
+            _: &DeferredGrant,
+            requested: &QualifiedName,
+        ) -> Result<DeferredAnswer, ResolverFault> {
+            assert_eq!(requested.member.as_str(), "send_email");
+            let definition = named_beta_tool("send_email");
+            Ok(DeferredAnswer::Resolved {
+                route: Box::new(crate::OperationRoute::resolved(
+                    crate::testing::test_tools_provider(),
+                    definition.clone(),
+                    Some(granted_binding()),
+                )),
+                definition: Box::new(definition),
+            })
         }
     }
 
@@ -567,16 +624,79 @@ async fn a_deferred_only_granted_cell_call_executes_once_or_parks_for_missing_re
         Arc::new(lash_durable::NoProbe),
     );
     let provider = Arc::new(DeferredOnly::default());
-    let deferred_key = lash_vocabulary::providers::ToolProviderHandle::new(
-        lash_vocabulary::claims::RegistryKind::Session,
-        "test_tools",
-        crate::tool_provider_key!("deferred"),
+    let mut registrar = crate::plugin::PluginRegistrar::new("test_tools");
+    registrar
+        .tools()
+        .provider_reading(
+            crate::tool_provider_key!("tools"),
+            &[lash_vocabulary::providers::FormatVersion::ONE],
+            {
+                let provider = provider.clone();
+                move |_, _| Ok(provider.clone() as Arc<dyn ToolProvider>)
+            },
+        )
+        .unwrap();
+    registrar
+        .package_provider(crate::tool_provider_key!("packages"), provider.clone())
+        .unwrap();
+    registrar
+        .deferred_package_provider(crate::tool_provider_key!("deferred"), provider.clone())
+        .unwrap();
+    let session =
+        crate::support::plugin_host(vec![Arc::new(crate::plugin::PluginRecipeFactory::new(
+            crate::plugin::PluginDeclaration::initial("test_tools"),
+            crate::plugin::PluginRecipe::from_registrar("test_tools", registrar),
+        ))])
+        .build_session(PluginSessionRequest::creation(
+            "test-session",
+            crate::plugin::SessionAuthorityContext::fixture(),
+        ))
+        .unwrap();
+    let surface = session.pin_resolved_tool_surface().unwrap();
+    assert!(
+        surface.catalog.entries().is_empty(),
+        "deferred packages add no model tools"
     );
+    let accepted = surface
+        .surface
+        .packages()
+        .snapshot
+        .advertisements
+        .iter()
+        .find(|accepted| accepted.publication.path == PackagePath::parse("tools").unwrap())
+        .expect("the registered tools publication");
+    let PackageAdvertisement::Deferred(package) = &accepted.advertisement else {
+        panic!("the registered provider advertises a deferred package");
+    };
+    let deferred_grant = DeferredGrant {
+        provider: package.provider.clone(),
+        context: accepted.publication.context.clone(),
+        path: package.path.clone(),
+        visibility: package.visibility,
+        signature: lash_vocabulary::Signature {
+            params: Vec::new(),
+            result: lash_vocabulary::Type::Json,
+        },
+        config: package.config.clone(),
+        resolution_policy: package.resolution_policy,
+    };
+    let composition = session.composition();
+    composition
+        .validate_deferred_grant(&deferred_grant, crate::plugin::RegistryKind::Session)
+        .unwrap();
+    let deferred_key = lash_vocabulary::providers::ToolProviderHandle::from_name(
+        crate::plugin::RegistryKind::Session,
+        &deferred_grant.provider,
+    )
+    .unwrap();
     let context = crate::testing::TestExecutionContextBuilder::new(
         crate::testing::TestExecutionPorts::of(&backend),
     )
     .provider(provider.clone())
-    .deferred_provider(deferred_key.clone(), provider.clone())
+    .routes(crate::SurfaceTools::of_surface(
+        &surface.surface,
+        composition.tool_registry().clone(),
+    ))
     .shared_effect_controller(controller.clone())
     .build()
     .into_runtime();
@@ -586,7 +706,14 @@ async fn a_deferred_only_granted_cell_call_executes_once_or_parks_for_missing_re
         agent_frame_id: crate::FrameNodeId::new("test-frame").unwrap(),
     };
     let config = crate::plugin::OwnerConfigView::default();
-    let resolved = provider
+    let requested = QualifiedName {
+        package: deferred_grant.path.clone(),
+        member: Segment::new("send_email").unwrap(),
+        type_member: None,
+    };
+    let resolved = composition
+        .deferred_package_provider(&deferred_grant.provider)
+        .unwrap()
         .resolve(
             &crate::DeferredResolveContext::new(
                 &deferred_key,
@@ -595,15 +722,24 @@ async fn a_deferred_only_granted_cell_call_executes_once_or_parks_for_missing_re
                 &capabilities,
                 &config,
             ),
-            &["tools.send_email"],
+            &deferred_grant,
+            &requested,
         )
-        .await;
-    let matched = crate::DeferredMatch {
-        requested: "tools.send_email".to_owned(),
-        outcome: resolved["tools.send_email"].clone(),
+        .await
+        .unwrap();
+    let DeferredAnswer::Resolved { definition, route } = resolved else {
+        panic!("the registered resolver serves send_email");
     };
-    let grant = crate::ToolExecutionGrant::of_link(matched.resolved().unwrap()).unwrap();
-    let definition = grant.definition().clone();
+    composition
+        .validate_resolved_route(
+            &deferred_grant,
+            &requested,
+            &definition,
+            &route,
+            crate::plugin::RegistryKind::Session,
+        )
+        .unwrap();
+    let grant = crate::ToolExecutionGrant::of_link(&route).unwrap();
     let member = CellMember::Tool(CellCall {
         id: crate::ToolCallId::fixture("deferred-cell"),
         tool_id: definition.manifest.id.clone(),
@@ -674,33 +810,48 @@ async fn a_deferred_only_granted_cell_call_executes_once_or_parks_for_missing_re
         crate::RuntimeErrorCode::ExecutionBindingUnreadable
     );
 
-    // The same retained match on a node without the recorded deferred
-    // registration still refuses before another body can run.
-    let surface = crate::RecordedSurface::new(Vec::new(), Some(deferred_key)).unwrap();
-    let registry = crate::ToolRegistry::from_tool_provider(
-        crate::testing::test_tools_provider(),
+    // A restored target needs its executor and codec, without the original
+    // resolver or its publication being present on this node.
+    let restored_session = provider_plugins(
         provider.clone(),
-    )
-    .unwrap();
-    let missing = crate::testing::TestExecutionContextBuilder::new(
+        crate::plugin::SessionAuthorityContext::fixture(),
+    );
+    let restored_composition = restored_session.composition();
+    assert!(
+        restored_composition
+            .validate_deferred_grant(&deferred_grant, crate::plugin::RegistryKind::Session)
+            .is_err(),
+        "an unresolved use still needs its registered resolver"
+    );
+    restored_composition
+        .validate_resolved_route(
+            &deferred_grant,
+            &requested,
+            &definition,
+            &route,
+            crate::plugin::RegistryKind::Session,
+        )
+        .expect("the retained target is valid without rediscovery");
+    let restored_surface = restored_session.pin_resolved_tool_surface().unwrap();
+    let restored = crate::testing::TestExecutionContextBuilder::new(
         crate::testing::TestExecutionPorts::of(&backend),
     )
     .provider(provider.clone())
     .routes(crate::SurfaceTools::of_surface(
-        &surface,
-        Arc::new(registry),
+        &restored_surface.surface,
+        restored_composition.tool_registry().clone(),
     ))
     .build()
     .into_runtime();
-    let missing = CellMembers::new(&missing, opener.clone()).unwrap();
-    let error = missing
+    let restored = CellMembers::new(&restored, opener.clone()).unwrap();
+    restored
         .require_capable(&member)
-        .expect_err("a missing deferred registration parks");
-    assert_eq!(error.code, crate::RuntimeErrorCode::LashVmCellBindingDrift);
-    assert!(error.message.contains("missing from"), "{error:?}");
+        .expect("a retained target does not require its original resolver");
+    restored
+        .require_capable(&unreadable)
+        .expect_err("restoration still checks payload readability");
 
-    // The deferred registration alone cannot serve a grant that names an
-    // execution provider absent from this node.
+    // Resolver presence cannot replace the target's executor registration.
     let mut unserved = member.clone();
     let CellMember::Tool(call) = &mut unserved;
     let grant = call.execution_grant.as_mut().unwrap();
