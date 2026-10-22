@@ -182,7 +182,11 @@ fn main() -> Outcome<()> {
         other => return Err(format!("unknown mode `{other}`").into()),
     };
     let roots = lash_vm_releases::helper_release()?.resolver_roots();
-    let image = WorkerLibrary::new(node, roots)?;
+    let image = WorkerLibrary::new(
+        node,
+        roots,
+        &lash_vm_releases::helper_release()?.content.documents,
+    )?;
     let embedding = lash_vm_worker::Embedder::new()
         .dialect(lash_vm_worker::typescript(
             &lash_vm_client::WorkerTuning::standard(),

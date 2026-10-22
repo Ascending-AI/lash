@@ -32,6 +32,7 @@ serde = { workspace = true, features = ["derive"] }
 lash-vocabulary = { workspace = true }
 lash-kernel-dialect = { workspace = true }
 lash-kernel-doc = { workspace = true }
+lash-kernel-package = { workspace = true }
 lash-kernel-exec = { workspace = true }
 lash-kernel-state = { workspace = true }
 num-bigint = { workspace = true }

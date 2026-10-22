@@ -219,7 +219,7 @@ impl Program {
             .values()
             .flat_map(|document| document.functions.keys().copied())
             .collect();
-        let program = Self {
+        let mut program = Self {
             functions,
             link,
             documents,
@@ -229,6 +229,24 @@ impl Program {
             library,
         };
         program.validate_links()?;
+        let content = lash_kernel_package::LinkedContent {
+            documents: program
+                .documents
+                .iter()
+                .map(|(id, document)| (*id, document.as_ref().clone()))
+                .collect(),
+            links: links.clone(),
+            packages: BTreeMap::new(),
+        };
+        program.functions = content
+            .inspect(link, &lash_kernel_package::ReachSelection::AllExports)
+            .map_err(|error| StartError::Linked {
+                problem: error.to_string(),
+            })?
+            .functions
+            .into_values()
+            .flatten()
+            .collect();
         Ok(program)
     }
 

@@ -116,6 +116,7 @@ impl RlmProtocolPluginFactory {
                 lash_vm_client::packages::WorkerLibrary::new(
                     &release.functions,
                     release.resolver_roots(),
+                    &release.content.documents,
                 )
                 .map(Arc::new)
                 .map_err(lash_vm_releases::LibraryError::new)
@@ -496,6 +497,7 @@ mod tests {
             lash_vm_client::packages::WorkerLibrary::new(
                 &lash_kernel_doc::FunctionRegistry::declarations(),
                 [],
+                &Default::default(),
             )
             .expect("native declaration library"),
         ));

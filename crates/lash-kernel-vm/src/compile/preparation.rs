@@ -703,6 +703,11 @@ mod tests {
                 library.clone(),
             )
             .expect("linked program");
+            let unused = ids[usize::from(name == "first")];
+            assert!(
+                !program.functions.contains(&unused),
+                "retaining a helper document made its unselected export executable"
+            );
             let admission = library
                 .admit(&root, KernelDataLimits::standard())
                 .unwrap_or_else(|_| panic!("admitted"));

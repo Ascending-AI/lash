@@ -78,6 +78,7 @@ fn a_host_native_library_binds_exact_declarations_and_runs_complete_documents() 
             .resolver_roots()
             .into_iter()
             .chain([width_id, guest_id]),
+        &release.content.documents,
     )
     .unwrap();
     for id in [guest_id, lash_vocabulary::FunctionId::from_bytes([0; 32])] {
@@ -356,7 +357,12 @@ fn a_run_from_stored_definitions_charges_exactly_as_the_writers_build() {
         let id = definition.identity();
         let mut registry = release.functions.clone();
         registry.register(definition, None).unwrap();
-        WorkerLibrary::new(&registry, release.resolver_roots().into_iter().chain([id])).unwrap()
+        WorkerLibrary::new(
+            &registry,
+            release.resolver_roots().into_iter().chain([id]),
+            &release.content.documents,
+        )
+        .unwrap()
     };
     let (writer, reader) = (install(w1), install(w2));
     let embed = |library: &WorkerLibrary| {

@@ -297,12 +297,14 @@ fn turn(parent: &mut Parent, bounds: RunBounds) {
         documents: program
             .documents
             .iter()
-            .map(|(id, document)| lash_vm_protocol::message::StoredDocument {
-                document: *id,
-                body: EncodedPayload(document.canonical_bytes()),
-            })
+            .map(
+                |(id, document)| lash_vm_protocol::message::StoredDocument::Supplied {
+                    document: *id,
+                    body: EncodedPayload(document.canonical_bytes()),
+                },
+            )
             .collect(),
-        document: EncodedPayload(document),
+        document: lash_vm_protocol::message::StoredDocument::supplied(EncodedPayload(document)),
         definitions: Vec::new(),
         functions: program.functions.clone(),
         from: StartFrom::Fresh(

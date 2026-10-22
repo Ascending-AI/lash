@@ -441,7 +441,12 @@ pub(crate) mod tests {
     /// lash's own packages, as the parent holds them.
     pub(crate) fn lash() -> WorkerLibrary {
         let release = lash_vm_releases::helper_release().expect("helper release");
-        WorkerLibrary::new(&release.functions, release.resolver_roots()).expect("native image")
+        WorkerLibrary::new(
+            &release.functions,
+            release.resolver_roots(),
+            &release.content.documents,
+        )
+        .expect("native image")
     }
 
     /// Fulfil a law's authored document against the same immutable helper

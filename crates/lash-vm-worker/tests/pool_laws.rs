@@ -299,15 +299,17 @@ fn fresh(document: &EncodedPayload, target: Target, args: Vec<Datum>) -> Start {
         documents: program
             .documents
             .iter()
-            .map(|(id, doc)| lash_vm_protocol::message::StoredDocument {
-                document: *id,
-                body: EncodedPayload(doc.canonical_bytes()),
-            })
+            .map(
+                |(id, doc)| lash_vm_protocol::message::StoredDocument::Supplied {
+                    document: *id,
+                    body: EncodedPayload(doc.canonical_bytes()),
+                },
+            )
             .collect(),
         functions: program.functions.clone(),
         owner: owner(),
         dialect: DIALECT.into(),
-        document: document.clone(),
+        document: lash_vm_protocol::message::StoredDocument::supplied(document.clone()),
         definitions: Vec::new(),
         from: StartFrom::Fresh(
             wire::encode(
@@ -351,15 +353,17 @@ fn resumed(
         documents: program
             .documents
             .iter()
-            .map(|(id, doc)| lash_vm_protocol::message::StoredDocument {
-                document: *id,
-                body: EncodedPayload(doc.canonical_bytes()),
-            })
+            .map(
+                |(id, doc)| lash_vm_protocol::message::StoredDocument::Supplied {
+                    document: *id,
+                    body: EncodedPayload(doc.canonical_bytes()),
+                },
+            )
             .collect(),
         functions: program.functions.clone(),
         owner: owner(),
         dialect: dialect.into(),
-        document: document.clone(),
+        document: lash_vm_protocol::message::StoredDocument::supplied(document.clone()),
         definitions: Vec::new(),
         from: StartFrom::Checkpoint(CheckpointStart { root, admissions }),
         bounds: bounds(),
@@ -2230,6 +2234,7 @@ fn pool_library(source: &str) -> Arc<lash_vm_client::packages::WorkerLibrary> {
         lash_vm_client::packages::WorkerLibrary::new(
             &registry,
             release.resolver_roots().into_iter().chain([id]),
+            &release.content.documents,
         )
         .expect("the linked worker fixture is valid"),
     )
@@ -2304,8 +2309,12 @@ fn a_shipped_packages_native_is_pure_across_warm_and_cold_workers() {
         PoolConfig::standard(WorkerEntry::helper(env!("CARGO_BIN_EXE_lash-vm-worker")));
     config.max_workers = 1;
     config.library = Some(Arc::new(
-        lash_vm_client::packages::WorkerLibrary::new(&held.functions, held.resolver_roots())
-            .expect("the linked worker fixture is valid"),
+        lash_vm_client::packages::WorkerLibrary::new(
+            &held.functions,
+            held.resolver_roots(),
+            &held.content.documents,
+        )
+        .expect("the linked worker fixture is valid"),
     ));
     let pool = WorkerPool::new(config.clone()).expect("warm pool");
     let mut worker = checkout(&pool);

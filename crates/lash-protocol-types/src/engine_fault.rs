@@ -640,6 +640,12 @@ impl std::fmt::Display for RunInput {
 #[derive(Clone, Debug, PartialEq, Eq, Error, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum RunRefusal {
+    /// The run names immutable code the worker's exact image does not own.
+    #[error("worker image does not own document {document}")]
+    ImageDocumentMissing {
+        document: lash_vocabulary::names::DocumentId,
+    },
+
     #[error("unusable payload schema: {source}")]
     UnusableSchema {
         source: Box<lash_vocabulary::json_schema::SchemaAdmissionError>,

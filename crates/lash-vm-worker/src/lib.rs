@@ -104,8 +104,11 @@ pub fn built_dialects(tuning: &lash_vm_client::WorkerTuning) -> Result<Embedder,
 pub fn built_embedding(tuning: &lash_vm_client::WorkerTuning) -> Result<Embedding, EmbedError> {
     let release = lash_vm_releases::helper_release()
         .map_err(|error| EmbedError::Registry(error.to_string()))?;
-    let library =
-        lash_vm_client::packages::WorkerLibrary::new(&release.functions, release.resolver_roots())?;
+    let library = lash_vm_client::packages::WorkerLibrary::new(
+        &release.functions,
+        release.resolver_roots(),
+        &release.content.documents,
+    )?;
     built_dialects(tuning)?.finish(&library)
 }
 

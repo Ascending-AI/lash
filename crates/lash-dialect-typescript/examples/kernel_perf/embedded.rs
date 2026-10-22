@@ -308,8 +308,11 @@ pub(super) fn write_frame() -> Result<(), String> {
         return Err("write-frame needs exactly one output path".into());
     }
     let release = lash_vm_releases::helper_release().map_err(|error| error.to_string())?;
-    let held =
-        lash_vm_client::packages::WorkerLibrary::new(&release.functions, release.resolver_roots())
-            .map_err(|error| error.to_string())?;
+    let held = lash_vm_client::packages::WorkerLibrary::new(
+        &release.functions,
+        release.resolver_roots(),
+        &release.content.documents,
+    )
+    .map_err(|error| error.to_string())?;
     std::fs::write(path, held.frame()).map_err(|error| error.to_string())
 }

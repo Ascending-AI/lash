@@ -41,7 +41,7 @@
     "//crates/lash-kernel-package:lash-kernel-package__fv_cd9a3752__metadata[check]",
     "//crates/lash-kernel-state:lash-kernel-state__fv_c14e533e__metadata[check]",
     "//crates/lash-kernel-view:lash-kernel-view__fv_21ccf4de__metadata[check]",
-    "//crates/lash-kernel-vm:lash-kernel-vm__fv_ab2114ee__metadata[check]",
+    "//crates/lash-kernel-vm:lash-kernel-vm__fv_283cf582__metadata[check]",
     "//crates/lash-llm-tools:lash-llm-tools__fv_475c0d28__metadata[check]",
     "//crates/lash-llm-transport:lash-llm-transport__fv_c22ecf29__metadata[check]",
     "//crates/lash-plugin-mcp:lash-plugin-mcp__fv_b1a06d23__metadata[check]",
@@ -422,6 +422,7 @@
     "//crates/lash-kernel-package:lash-kernel-package__fv_8f458ce2[static]",
     "//crates/lash-kernel-package:lash-kernel-package__fv_b041c251[static]",
     "//crates/lash-kernel-package:lash-kernel-package__fv_cd9a3752[static]",
+    "//crates/lash-kernel-package:lash-kernel-package__fv_ec23b3bc[static]",
     "//crates/lash-kernel-package:lash-kernel-package__fv_ed305dbb[static]",
     "//crates/lash-kernel-state:lash-kernel-state[static]",
     "//crates/lash-kernel-state:lash-kernel-state__fv_241c0cb1[static]",
@@ -436,14 +437,16 @@
     "//crates/lash-kernel-view:lash-kernel-view[static]",
     "//crates/lash-kernel-view:lash-kernel-view__fv_21ccf4de[static]",
     "//crates/lash-kernel-vm:lash-kernel-vm[static]",
-    "//crates/lash-kernel-vm:lash-kernel-vm__fv_38aea512[static]",
-    "//crates/lash-kernel-vm:lash-kernel-vm__fv_4100c81d[static]",
-    "//crates/lash-kernel-vm:lash-kernel-vm__fv_423920d0[static]",
-    "//crates/lash-kernel-vm:lash-kernel-vm__fv_51a4a739[static]",
-    "//crates/lash-kernel-vm:lash-kernel-vm__fv_6c2b852f[static]",
-    "//crates/lash-kernel-vm:lash-kernel-vm__fv_8571281a[static]",
-    "//crates/lash-kernel-vm:lash-kernel-vm__fv_a07ba2fe[static]",
-    "//crates/lash-kernel-vm:lash-kernel-vm__fv_ab2114ee[static]",
+    "//crates/lash-kernel-vm:lash-kernel-vm__fv_283cf582[static]",
+    "//crates/lash-kernel-vm:lash-kernel-vm__fv_2b06e70e[static]",
+    "//crates/lash-kernel-vm:lash-kernel-vm__fv_2fb87040[static]",
+    "//crates/lash-kernel-vm:lash-kernel-vm__fv_46f2e76f[static]",
+    "//crates/lash-kernel-vm:lash-kernel-vm__fv_94486856[static]",
+    "//crates/lash-kernel-vm:lash-kernel-vm__fv_a229043a[static]",
+    "//crates/lash-kernel-vm:lash-kernel-vm__fv_aa9515d5[static]",
+    "//crates/lash-kernel-vm:lash-kernel-vm__fv_b0bcc29c[static]",
+    "//crates/lash-kernel-vm:lash-kernel-vm__fv_bfe3238c[static]",
+    "//crates/lash-kernel-vm:lash-kernel-vm__fv_e832cd87[static]",
     "//crates/lash-llm-tools:lash-llm-tools[static]",
     "//crates/lash-llm-tools:lash-llm-tools__fv_1374f3a5[static]",
     "//crates/lash-llm-tools:lash-llm-tools__fv_224ee4ad[static]",
@@ -1557,6 +1560,7 @@
     "//crates/lash-kernel-package:lash-kernel-package__fv_8f458ce2__metadata[check]",
     "//crates/lash-kernel-package:lash-kernel-package__fv_b041c251__metadata[check]",
     "//crates/lash-kernel-package:lash-kernel-package__fv_cd9a3752__metadata[check]",
+    "//crates/lash-kernel-package:lash-kernel-package__fv_ec23b3bc__metadata[check]",
     "//crates/lash-kernel-package:lash-kernel-package__fv_ed305dbb__metadata[check]",
     "//crates/lash-kernel-state:lash-kernel-state__metadata[check]",
     "//crates/lash-kernel-state:lash-kernel-state__fv_241c0cb1__metadata[check]",
@@ -1571,14 +1575,16 @@
     "//crates/lash-kernel-view:lash-kernel-view__metadata[check]",
     "//crates/lash-kernel-view:lash-kernel-view__fv_21ccf4de__metadata[check]",
     "//crates/lash-kernel-vm:lash-kernel-vm__metadata[check]",
-    "//crates/lash-kernel-vm:lash-kernel-vm__fv_38aea512__metadata[check]",
-    "//crates/lash-kernel-vm:lash-kernel-vm__fv_4100c81d__metadata[check]",
-    "//crates/lash-kernel-vm:lash-kernel-vm__fv_423920d0__metadata[check]",
-    "//crates/lash-kernel-vm:lash-kernel-vm__fv_51a4a739__metadata[check]",
-    "//crates/lash-kernel-vm:lash-kernel-vm__fv_6c2b852f__metadata[check]",
-    "//crates/lash-kernel-vm:lash-kernel-vm__fv_8571281a__metadata[check]",
-    "//crates/lash-kernel-vm:lash-kernel-vm__fv_a07ba2fe__metadata[check]",
-    "//crates/lash-kernel-vm:lash-kernel-vm__fv_ab2114ee__metadata[check]",
+    "//crates/lash-kernel-vm:lash-kernel-vm__fv_283cf582__metadata[check]",
+    "//crates/lash-kernel-vm:lash-kernel-vm__fv_2b06e70e__metadata[check]",
+    "//crates/lash-kernel-vm:lash-kernel-vm__fv_2fb87040__metadata[check]",
+    "//crates/lash-kernel-vm:lash-kernel-vm__fv_46f2e76f__metadata[check]",
+    "//crates/lash-kernel-vm:lash-kernel-vm__fv_94486856__metadata[check]",
+    "//crates/lash-kernel-vm:lash-kernel-vm__fv_a229043a__metadata[check]",
+    "//crates/lash-kernel-vm:lash-kernel-vm__fv_aa9515d5__metadata[check]",
+    "//crates/lash-kernel-vm:lash-kernel-vm__fv_b0bcc29c__metadata[check]",
+    "//crates/lash-kernel-vm:lash-kernel-vm__fv_bfe3238c__metadata[check]",
+    "//crates/lash-kernel-vm:lash-kernel-vm__fv_e832cd87__metadata[check]",
     "//crates/lash-llm-tools:lash-llm-tools__metadata[check]",
     "//crates/lash-llm-tools:lash-llm-tools__fv_1374f3a5__metadata[check]",
     "//crates/lash-llm-tools:lash-llm-tools__fv_224ee4ad__metadata[check]",
@@ -2692,6 +2698,7 @@
     "//crates/lash-kernel-package:lash-kernel-package__fv_8f458ce2",
     "//crates/lash-kernel-package:lash-kernel-package__fv_b041c251",
     "//crates/lash-kernel-package:lash-kernel-package__fv_cd9a3752",
+    "//crates/lash-kernel-package:lash-kernel-package__fv_ec23b3bc",
     "//crates/lash-kernel-package:lash-kernel-package__fv_ed305dbb",
     "//crates/lash-kernel-state:lash-kernel-state",
     "//crates/lash-kernel-state:lash-kernel-state__fv_241c0cb1",
@@ -2706,14 +2713,16 @@
     "//crates/lash-kernel-view:lash-kernel-view",
     "//crates/lash-kernel-view:lash-kernel-view__fv_21ccf4de",
     "//crates/lash-kernel-vm:lash-kernel-vm",
-    "//crates/lash-kernel-vm:lash-kernel-vm__fv_38aea512",
-    "//crates/lash-kernel-vm:lash-kernel-vm__fv_4100c81d",
-    "//crates/lash-kernel-vm:lash-kernel-vm__fv_423920d0",
-    "//crates/lash-kernel-vm:lash-kernel-vm__fv_51a4a739",
-    "//crates/lash-kernel-vm:lash-kernel-vm__fv_6c2b852f",
-    "//crates/lash-kernel-vm:lash-kernel-vm__fv_8571281a",
-    "//crates/lash-kernel-vm:lash-kernel-vm__fv_a07ba2fe",
-    "//crates/lash-kernel-vm:lash-kernel-vm__fv_ab2114ee",
+    "//crates/lash-kernel-vm:lash-kernel-vm__fv_283cf582",
+    "//crates/lash-kernel-vm:lash-kernel-vm__fv_2b06e70e",
+    "//crates/lash-kernel-vm:lash-kernel-vm__fv_2fb87040",
+    "//crates/lash-kernel-vm:lash-kernel-vm__fv_46f2e76f",
+    "//crates/lash-kernel-vm:lash-kernel-vm__fv_94486856",
+    "//crates/lash-kernel-vm:lash-kernel-vm__fv_a229043a",
+    "//crates/lash-kernel-vm:lash-kernel-vm__fv_aa9515d5",
+    "//crates/lash-kernel-vm:lash-kernel-vm__fv_b0bcc29c",
+    "//crates/lash-kernel-vm:lash-kernel-vm__fv_bfe3238c",
+    "//crates/lash-kernel-vm:lash-kernel-vm__fv_e832cd87",
     "//crates/lash-llm-tools:lash-llm-tools",
     "//crates/lash-llm-tools:lash-llm-tools__fv_1374f3a5",
     "//crates/lash-llm-tools:lash-llm-tools__fv_224ee4ad",
@@ -30317,6 +30326,26 @@
       "package": "lash-helper-labels"
     },
     {
+      "build_label": "//crates/lash-helper-labels:lash-helper-labels[static]",
+      "check_label": "//crates/lash-helper-labels:lash-helper-labels__metadata[check]",
+      "clippy_label": "//crates/lash-helper-labels:lash-helper-labels__clippy[clippy.txt]",
+      "doc_label": "//crates/lash-helper-labels:lash-helper-labels[doc]",
+      "features": [],
+      "kind": "lib",
+      "label": "//crates/lash-helper-labels:lash-helper-labels",
+      "package": "lash-helper-labels"
+    },
+    {
+      "build_label": "//crates/lash-helper-labels:lash-helper-labels[static]",
+      "check_label": "//crates/lash-helper-labels:lash-helper-labels__metadata[check]",
+      "clippy_label": "//crates/lash-helper-labels:lash-helper-labels__clippy[clippy.txt]",
+      "doc_label": "//crates/lash-helper-labels:lash-helper-labels[doc]",
+      "features": [],
+      "kind": "lib",
+      "label": "//crates/lash-helper-labels:lash-helper-labels",
+      "package": "lash-helper-labels"
+    },
+    {
       "build_label": "//crates/lash-http-transport:lash-http-transport[static]",
       "check_label": "//crates/lash-http-transport:lash-http-transport__metadata[check]",
       "clippy_label": "//crates/lash-http-transport:lash-http-transport__clippy[clippy.txt]",
@@ -31767,13 +31796,13 @@
       "package": "lash-kernel-check"
     },
     {
-      "build_label": "//crates/lash-kernel-check:lash-kernel-check__fv_8422e714[static]",
-      "check_label": "//crates/lash-kernel-check:lash-kernel-check__fv_8422e714__metadata[check]",
-      "clippy_label": "//crates/lash-kernel-check:lash-kernel-check__fv_8422e714__clippy[clippy.txt]",
-      "doc_label": "//crates/lash-kernel-check:lash-kernel-check__fv_8422e714[doc]",
+      "build_label": "//crates/lash-kernel-check:lash-kernel-check__fv_7d1f50ed[static]",
+      "check_label": "//crates/lash-kernel-check:lash-kernel-check__fv_7d1f50ed__metadata[check]",
+      "clippy_label": "//crates/lash-kernel-check:lash-kernel-check__fv_7d1f50ed__clippy[clippy.txt]",
+      "doc_label": "//crates/lash-kernel-check:lash-kernel-check__fv_7d1f50ed[doc]",
       "features": [],
       "kind": "lib",
-      "label": "//crates/lash-kernel-check:lash-kernel-check__fv_8422e714",
+      "label": "//crates/lash-kernel-check:lash-kernel-check__fv_7d1f50ed",
       "package": "lash-kernel-check"
     },
     {
@@ -31824,6 +31853,26 @@
       "features": [],
       "kind": "lib",
       "label": "//crates/lash-kernel-check:lash-kernel-check__fv_8422e714",
+      "package": "lash-kernel-check"
+    },
+    {
+      "build_label": "//crates/lash-kernel-check:lash-kernel-check__fv_8422e714[static]",
+      "check_label": "//crates/lash-kernel-check:lash-kernel-check__fv_8422e714__metadata[check]",
+      "clippy_label": "//crates/lash-kernel-check:lash-kernel-check__fv_8422e714__clippy[clippy.txt]",
+      "doc_label": "//crates/lash-kernel-check:lash-kernel-check__fv_8422e714[doc]",
+      "features": [],
+      "kind": "lib",
+      "label": "//crates/lash-kernel-check:lash-kernel-check__fv_8422e714",
+      "package": "lash-kernel-check"
+    },
+    {
+      "build_label": "//crates/lash-kernel-check:lash-kernel-check__fv_f6c31f4a[static]",
+      "check_label": "//crates/lash-kernel-check:lash-kernel-check__fv_f6c31f4a__metadata[check]",
+      "clippy_label": "//crates/lash-kernel-check:lash-kernel-check__fv_f6c31f4a__clippy[clippy.txt]",
+      "doc_label": "//crates/lash-kernel-check:lash-kernel-check__fv_f6c31f4a[doc]",
+      "features": [],
+      "kind": "lib",
+      "label": "//crates/lash-kernel-check:lash-kernel-check__fv_f6c31f4a",
       "package": "lash-kernel-check"
     },
     {
@@ -36883,6 +36932,16 @@
       "package": "lash-kernel-package"
     },
     {
+      "build_label": "//crates/lash-kernel-package:lash-kernel-package__fv_36aa9c79[static]",
+      "check_label": "//crates/lash-kernel-package:lash-kernel-package__fv_36aa9c79__metadata[check]",
+      "clippy_label": "//crates/lash-kernel-package:lash-kernel-package__fv_36aa9c79__clippy[clippy.txt]",
+      "doc_label": "//crates/lash-kernel-package:lash-kernel-package__fv_36aa9c79[doc]",
+      "features": [],
+      "kind": "lib",
+      "label": "//crates/lash-kernel-package:lash-kernel-package__fv_36aa9c79",
+      "package": "lash-kernel-package"
+    },
+    {
       "build_label": "//crates/lash-kernel-package:lash-kernel-package__fv_546647e8[static]",
       "check_label": "//crates/lash-kernel-package:lash-kernel-package__fv_546647e8__metadata[check]",
       "clippy_label": "//crates/lash-kernel-package:lash-kernel-package__fv_546647e8__clippy[clippy.txt]",
@@ -37510,6 +37569,16 @@
       "features": [],
       "kind": "lib",
       "label": "//crates/lash-kernel-package:lash-kernel-package__fv_cd9a3752",
+      "package": "lash-kernel-package"
+    },
+    {
+      "build_label": "//crates/lash-kernel-package:lash-kernel-package__fv_ec23b3bc[static]",
+      "check_label": "//crates/lash-kernel-package:lash-kernel-package__fv_ec23b3bc__metadata[check]",
+      "clippy_label": "//crates/lash-kernel-package:lash-kernel-package__fv_ec23b3bc__clippy[clippy.txt]",
+      "doc_label": "//crates/lash-kernel-package:lash-kernel-package__fv_ec23b3bc[doc]",
+      "features": [],
+      "kind": "lib",
+      "label": "//crates/lash-kernel-package:lash-kernel-package__fv_ec23b3bc",
       "package": "lash-kernel-package"
     },
     {
@@ -39086,776 +39155,776 @@
       "package": "lash-kernel-vm"
     },
     {
-      "build_label": "//crates/lash-kernel-vm:lash-kernel-vm[static]",
-      "check_label": "//crates/lash-kernel-vm:lash-kernel-vm__metadata[check]",
-      "clippy_label": "//crates/lash-kernel-vm:lash-kernel-vm__clippy[clippy.txt]",
-      "doc_label": "//crates/lash-kernel-vm:lash-kernel-vm[doc]",
-      "features": [
-        "perf-witness"
-      ],
+      "build_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_283cf582[static]",
+      "check_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_283cf582__metadata[check]",
+      "clippy_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_283cf582__clippy[clippy.txt]",
+      "doc_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_283cf582[doc]",
+      "features": [],
       "kind": "lib",
-      "label": "//crates/lash-kernel-vm:lash-kernel-vm",
+      "label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_283cf582",
       "package": "lash-kernel-vm"
     },
     {
-      "build_label": "//crates/lash-kernel-vm:lash-kernel-vm[static]",
-      "check_label": "//crates/lash-kernel-vm:lash-kernel-vm__metadata[check]",
-      "clippy_label": "//crates/lash-kernel-vm:lash-kernel-vm__clippy[clippy.txt]",
-      "doc_label": "//crates/lash-kernel-vm:lash-kernel-vm[doc]",
-      "features": [
-        "perf-witness"
-      ],
+      "build_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_283cf582[static]",
+      "check_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_283cf582__metadata[check]",
+      "clippy_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_283cf582__clippy[clippy.txt]",
+      "doc_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_283cf582[doc]",
+      "features": [],
       "kind": "lib",
-      "label": "//crates/lash-kernel-vm:lash-kernel-vm",
+      "label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_283cf582",
       "package": "lash-kernel-vm"
     },
     {
-      "build_label": "//crates/lash-kernel-vm:lash-kernel-vm[static]",
-      "check_label": "//crates/lash-kernel-vm:lash-kernel-vm__metadata[check]",
-      "clippy_label": "//crates/lash-kernel-vm:lash-kernel-vm__clippy[clippy.txt]",
-      "doc_label": "//crates/lash-kernel-vm:lash-kernel-vm[doc]",
-      "features": [
-        "perf-witness"
-      ],
+      "build_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_283cf582[static]",
+      "check_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_283cf582__metadata[check]",
+      "clippy_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_283cf582__clippy[clippy.txt]",
+      "doc_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_283cf582[doc]",
+      "features": [],
       "kind": "lib",
-      "label": "//crates/lash-kernel-vm:lash-kernel-vm",
+      "label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_283cf582",
       "package": "lash-kernel-vm"
     },
     {
-      "build_label": "//crates/lash-kernel-vm:lash-kernel-vm[static]",
-      "check_label": "//crates/lash-kernel-vm:lash-kernel-vm__metadata[check]",
-      "clippy_label": "//crates/lash-kernel-vm:lash-kernel-vm__clippy[clippy.txt]",
-      "doc_label": "//crates/lash-kernel-vm:lash-kernel-vm[doc]",
-      "features": [
-        "perf-witness"
-      ],
+      "build_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_283cf582[static]",
+      "check_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_283cf582__metadata[check]",
+      "clippy_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_283cf582__clippy[clippy.txt]",
+      "doc_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_283cf582[doc]",
+      "features": [],
       "kind": "lib",
-      "label": "//crates/lash-kernel-vm:lash-kernel-vm",
+      "label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_283cf582",
       "package": "lash-kernel-vm"
     },
     {
-      "build_label": "//crates/lash-kernel-vm:lash-kernel-vm[static]",
-      "check_label": "//crates/lash-kernel-vm:lash-kernel-vm__metadata[check]",
-      "clippy_label": "//crates/lash-kernel-vm:lash-kernel-vm__clippy[clippy.txt]",
-      "doc_label": "//crates/lash-kernel-vm:lash-kernel-vm[doc]",
-      "features": [
-        "perf-witness"
-      ],
+      "build_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_283cf582[static]",
+      "check_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_283cf582__metadata[check]",
+      "clippy_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_283cf582__clippy[clippy.txt]",
+      "doc_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_283cf582[doc]",
+      "features": [],
       "kind": "lib",
-      "label": "//crates/lash-kernel-vm:lash-kernel-vm",
+      "label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_283cf582",
       "package": "lash-kernel-vm"
     },
     {
-      "build_label": "//crates/lash-kernel-vm:lash-kernel-vm[static]",
-      "check_label": "//crates/lash-kernel-vm:lash-kernel-vm__metadata[check]",
-      "clippy_label": "//crates/lash-kernel-vm:lash-kernel-vm__clippy[clippy.txt]",
-      "doc_label": "//crates/lash-kernel-vm:lash-kernel-vm[doc]",
-      "features": [
-        "perf-witness"
-      ],
+      "build_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_283cf582[static]",
+      "check_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_283cf582__metadata[check]",
+      "clippy_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_283cf582__clippy[clippy.txt]",
+      "doc_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_283cf582[doc]",
+      "features": [],
       "kind": "lib",
-      "label": "//crates/lash-kernel-vm:lash-kernel-vm",
+      "label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_283cf582",
       "package": "lash-kernel-vm"
     },
     {
-      "build_label": "//crates/lash-kernel-vm:lash-kernel-vm[static]",
-      "check_label": "//crates/lash-kernel-vm:lash-kernel-vm__metadata[check]",
-      "clippy_label": "//crates/lash-kernel-vm:lash-kernel-vm__clippy[clippy.txt]",
-      "doc_label": "//crates/lash-kernel-vm:lash-kernel-vm[doc]",
-      "features": [
-        "perf-witness"
-      ],
+      "build_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_283cf582[static]",
+      "check_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_283cf582__metadata[check]",
+      "clippy_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_283cf582__clippy[clippy.txt]",
+      "doc_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_283cf582[doc]",
+      "features": [],
       "kind": "lib",
-      "label": "//crates/lash-kernel-vm:lash-kernel-vm",
+      "label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_283cf582",
       "package": "lash-kernel-vm"
     },
     {
-      "build_label": "//crates/lash-kernel-vm:lash-kernel-vm[static]",
-      "check_label": "//crates/lash-kernel-vm:lash-kernel-vm__metadata[check]",
-      "clippy_label": "//crates/lash-kernel-vm:lash-kernel-vm__clippy[clippy.txt]",
-      "doc_label": "//crates/lash-kernel-vm:lash-kernel-vm[doc]",
-      "features": [
-        "perf-witness"
-      ],
+      "build_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_283cf582[static]",
+      "check_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_283cf582__metadata[check]",
+      "clippy_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_283cf582__clippy[clippy.txt]",
+      "doc_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_283cf582[doc]",
+      "features": [],
       "kind": "lib",
-      "label": "//crates/lash-kernel-vm:lash-kernel-vm",
+      "label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_283cf582",
       "package": "lash-kernel-vm"
     },
     {
-      "build_label": "//crates/lash-kernel-vm:lash-kernel-vm[static]",
-      "check_label": "//crates/lash-kernel-vm:lash-kernel-vm__metadata[check]",
-      "clippy_label": "//crates/lash-kernel-vm:lash-kernel-vm__clippy[clippy.txt]",
-      "doc_label": "//crates/lash-kernel-vm:lash-kernel-vm[doc]",
-      "features": [
-        "perf-witness"
-      ],
+      "build_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_283cf582[static]",
+      "check_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_283cf582__metadata[check]",
+      "clippy_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_283cf582__clippy[clippy.txt]",
+      "doc_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_283cf582[doc]",
+      "features": [],
       "kind": "lib",
-      "label": "//crates/lash-kernel-vm:lash-kernel-vm",
+      "label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_283cf582",
       "package": "lash-kernel-vm"
     },
     {
-      "build_label": "//crates/lash-kernel-vm:lash-kernel-vm[static]",
-      "check_label": "//crates/lash-kernel-vm:lash-kernel-vm__metadata[check]",
-      "clippy_label": "//crates/lash-kernel-vm:lash-kernel-vm__clippy[clippy.txt]",
-      "doc_label": "//crates/lash-kernel-vm:lash-kernel-vm[doc]",
-      "features": [
-        "perf-witness"
-      ],
+      "build_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_283cf582[static]",
+      "check_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_283cf582__metadata[check]",
+      "clippy_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_283cf582__clippy[clippy.txt]",
+      "doc_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_283cf582[doc]",
+      "features": [],
       "kind": "lib",
-      "label": "//crates/lash-kernel-vm:lash-kernel-vm",
+      "label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_283cf582",
       "package": "lash-kernel-vm"
     },
     {
-      "build_label": "//crates/lash-kernel-vm:lash-kernel-vm[static]",
-      "check_label": "//crates/lash-kernel-vm:lash-kernel-vm__metadata[check]",
-      "clippy_label": "//crates/lash-kernel-vm:lash-kernel-vm__clippy[clippy.txt]",
-      "doc_label": "//crates/lash-kernel-vm:lash-kernel-vm[doc]",
-      "features": [
-        "perf-witness"
-      ],
+      "build_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_283cf582[static]",
+      "check_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_283cf582__metadata[check]",
+      "clippy_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_283cf582__clippy[clippy.txt]",
+      "doc_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_283cf582[doc]",
+      "features": [],
       "kind": "lib",
-      "label": "//crates/lash-kernel-vm:lash-kernel-vm",
+      "label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_283cf582",
       "package": "lash-kernel-vm"
     },
     {
-      "build_label": "//crates/lash-kernel-vm:lash-kernel-vm[static]",
-      "check_label": "//crates/lash-kernel-vm:lash-kernel-vm__metadata[check]",
-      "clippy_label": "//crates/lash-kernel-vm:lash-kernel-vm__clippy[clippy.txt]",
-      "doc_label": "//crates/lash-kernel-vm:lash-kernel-vm[doc]",
-      "features": [
-        "perf-witness"
-      ],
+      "build_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_283cf582[static]",
+      "check_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_283cf582__metadata[check]",
+      "clippy_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_283cf582__clippy[clippy.txt]",
+      "doc_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_283cf582[doc]",
+      "features": [],
       "kind": "lib",
-      "label": "//crates/lash-kernel-vm:lash-kernel-vm",
+      "label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_283cf582",
       "package": "lash-kernel-vm"
     },
     {
-      "build_label": "//crates/lash-kernel-vm:lash-kernel-vm[static]",
-      "check_label": "//crates/lash-kernel-vm:lash-kernel-vm__metadata[check]",
-      "clippy_label": "//crates/lash-kernel-vm:lash-kernel-vm__clippy[clippy.txt]",
-      "doc_label": "//crates/lash-kernel-vm:lash-kernel-vm[doc]",
-      "features": [
-        "perf-witness"
-      ],
+      "build_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_283cf582[static]",
+      "check_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_283cf582__metadata[check]",
+      "clippy_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_283cf582__clippy[clippy.txt]",
+      "doc_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_283cf582[doc]",
+      "features": [],
       "kind": "lib",
-      "label": "//crates/lash-kernel-vm:lash-kernel-vm",
+      "label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_283cf582",
       "package": "lash-kernel-vm"
     },
     {
-      "build_label": "//crates/lash-kernel-vm:lash-kernel-vm[static]",
-      "check_label": "//crates/lash-kernel-vm:lash-kernel-vm__metadata[check]",
-      "clippy_label": "//crates/lash-kernel-vm:lash-kernel-vm__clippy[clippy.txt]",
-      "doc_label": "//crates/lash-kernel-vm:lash-kernel-vm[doc]",
-      "features": [
-        "perf-witness"
-      ],
+      "build_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_283cf582[static]",
+      "check_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_283cf582__metadata[check]",
+      "clippy_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_283cf582__clippy[clippy.txt]",
+      "doc_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_283cf582[doc]",
+      "features": [],
       "kind": "lib",
-      "label": "//crates/lash-kernel-vm:lash-kernel-vm",
+      "label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_283cf582",
       "package": "lash-kernel-vm"
     },
     {
-      "build_label": "//crates/lash-kernel-vm:lash-kernel-vm[static]",
-      "check_label": "//crates/lash-kernel-vm:lash-kernel-vm__metadata[check]",
-      "clippy_label": "//crates/lash-kernel-vm:lash-kernel-vm__clippy[clippy.txt]",
-      "doc_label": "//crates/lash-kernel-vm:lash-kernel-vm[doc]",
-      "features": [
-        "perf-witness"
-      ],
+      "build_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_283cf582[static]",
+      "check_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_283cf582__metadata[check]",
+      "clippy_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_283cf582__clippy[clippy.txt]",
+      "doc_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_283cf582[doc]",
+      "features": [],
       "kind": "lib",
-      "label": "//crates/lash-kernel-vm:lash-kernel-vm",
+      "label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_283cf582",
       "package": "lash-kernel-vm"
     },
     {
-      "build_label": "//crates/lash-kernel-vm:lash-kernel-vm[static]",
-      "check_label": "//crates/lash-kernel-vm:lash-kernel-vm__metadata[check]",
-      "clippy_label": "//crates/lash-kernel-vm:lash-kernel-vm__clippy[clippy.txt]",
-      "doc_label": "//crates/lash-kernel-vm:lash-kernel-vm[doc]",
-      "features": [
-        "perf-witness"
-      ],
+      "build_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_283cf582[static]",
+      "check_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_283cf582__metadata[check]",
+      "clippy_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_283cf582__clippy[clippy.txt]",
+      "doc_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_283cf582[doc]",
+      "features": [],
       "kind": "lib",
-      "label": "//crates/lash-kernel-vm:lash-kernel-vm",
+      "label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_283cf582",
       "package": "lash-kernel-vm"
     },
     {
-      "build_label": "//crates/lash-kernel-vm:lash-kernel-vm[static]",
-      "check_label": "//crates/lash-kernel-vm:lash-kernel-vm__metadata[check]",
-      "clippy_label": "//crates/lash-kernel-vm:lash-kernel-vm__clippy[clippy.txt]",
-      "doc_label": "//crates/lash-kernel-vm:lash-kernel-vm[doc]",
-      "features": [
-        "perf-witness"
-      ],
+      "build_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_283cf582[static]",
+      "check_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_283cf582__metadata[check]",
+      "clippy_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_283cf582__clippy[clippy.txt]",
+      "doc_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_283cf582[doc]",
+      "features": [],
       "kind": "lib",
-      "label": "//crates/lash-kernel-vm:lash-kernel-vm",
+      "label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_283cf582",
       "package": "lash-kernel-vm"
     },
     {
-      "build_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_38aea512[static]",
-      "check_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_38aea512__metadata[check]",
-      "clippy_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_38aea512__clippy[clippy.txt]",
-      "doc_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_38aea512[doc]",
-      "features": [
-        "perf-witness"
-      ],
+      "build_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_283cf582[static]",
+      "check_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_283cf582__metadata[check]",
+      "clippy_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_283cf582__clippy[clippy.txt]",
+      "doc_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_283cf582[doc]",
+      "features": [],
       "kind": "lib",
-      "label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_38aea512",
+      "label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_283cf582",
       "package": "lash-kernel-vm"
     },
     {
-      "build_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_4100c81d[static]",
-      "check_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_4100c81d__metadata[check]",
-      "clippy_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_4100c81d__clippy[clippy.txt]",
-      "doc_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_4100c81d[doc]",
+      "build_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_283cf582[static]",
+      "check_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_283cf582__metadata[check]",
+      "clippy_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_283cf582__clippy[clippy.txt]",
+      "doc_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_283cf582[doc]",
+      "features": [],
+      "kind": "lib",
+      "label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_283cf582",
+      "package": "lash-kernel-vm"
+    },
+    {
+      "build_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_283cf582[static]",
+      "check_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_283cf582__metadata[check]",
+      "clippy_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_283cf582__clippy[clippy.txt]",
+      "doc_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_283cf582[doc]",
+      "features": [],
+      "kind": "lib",
+      "label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_283cf582",
+      "package": "lash-kernel-vm"
+    },
+    {
+      "build_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_283cf582[static]",
+      "check_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_283cf582__metadata[check]",
+      "clippy_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_283cf582__clippy[clippy.txt]",
+      "doc_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_283cf582[doc]",
+      "features": [],
+      "kind": "lib",
+      "label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_283cf582",
+      "package": "lash-kernel-vm"
+    },
+    {
+      "build_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_283cf582[static]",
+      "check_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_283cf582__metadata[check]",
+      "clippy_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_283cf582__clippy[clippy.txt]",
+      "doc_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_283cf582[doc]",
+      "features": [],
+      "kind": "lib",
+      "label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_283cf582",
+      "package": "lash-kernel-vm"
+    },
+    {
+      "build_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_283cf582[static]",
+      "check_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_283cf582__metadata[check]",
+      "clippy_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_283cf582__clippy[clippy.txt]",
+      "doc_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_283cf582[doc]",
+      "features": [],
+      "kind": "lib",
+      "label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_283cf582",
+      "package": "lash-kernel-vm"
+    },
+    {
+      "build_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_283cf582[static]",
+      "check_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_283cf582__metadata[check]",
+      "clippy_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_283cf582__clippy[clippy.txt]",
+      "doc_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_283cf582[doc]",
+      "features": [],
+      "kind": "lib",
+      "label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_283cf582",
+      "package": "lash-kernel-vm"
+    },
+    {
+      "build_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_283cf582[static]",
+      "check_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_283cf582__metadata[check]",
+      "clippy_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_283cf582__clippy[clippy.txt]",
+      "doc_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_283cf582[doc]",
+      "features": [],
+      "kind": "lib",
+      "label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_283cf582",
+      "package": "lash-kernel-vm"
+    },
+    {
+      "build_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_283cf582[static]",
+      "check_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_283cf582__metadata[check]",
+      "clippy_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_283cf582__clippy[clippy.txt]",
+      "doc_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_283cf582[doc]",
+      "features": [],
+      "kind": "lib",
+      "label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_283cf582",
+      "package": "lash-kernel-vm"
+    },
+    {
+      "build_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_283cf582[static]",
+      "check_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_283cf582__metadata[check]",
+      "clippy_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_283cf582__clippy[clippy.txt]",
+      "doc_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_283cf582[doc]",
+      "features": [],
+      "kind": "lib",
+      "label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_283cf582",
+      "package": "lash-kernel-vm"
+    },
+    {
+      "build_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_283cf582[static]",
+      "check_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_283cf582__metadata[check]",
+      "clippy_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_283cf582__clippy[clippy.txt]",
+      "doc_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_283cf582[doc]",
+      "features": [],
+      "kind": "lib",
+      "label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_283cf582",
+      "package": "lash-kernel-vm"
+    },
+    {
+      "build_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_283cf582[static]",
+      "check_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_283cf582__metadata[check]",
+      "clippy_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_283cf582__clippy[clippy.txt]",
+      "doc_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_283cf582[doc]",
+      "features": [],
+      "kind": "lib",
+      "label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_283cf582",
+      "package": "lash-kernel-vm"
+    },
+    {
+      "build_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_283cf582[static]",
+      "check_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_283cf582__metadata[check]",
+      "clippy_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_283cf582__clippy[clippy.txt]",
+      "doc_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_283cf582[doc]",
+      "features": [],
+      "kind": "lib",
+      "label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_283cf582",
+      "package": "lash-kernel-vm"
+    },
+    {
+      "build_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_283cf582[static]",
+      "check_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_283cf582__metadata[check]",
+      "clippy_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_283cf582__clippy[clippy.txt]",
+      "doc_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_283cf582[doc]",
+      "features": [],
+      "kind": "lib",
+      "label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_283cf582",
+      "package": "lash-kernel-vm"
+    },
+    {
+      "build_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_2b06e70e[static]",
+      "check_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_2b06e70e__metadata[check]",
+      "clippy_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_2b06e70e__clippy[clippy.txt]",
+      "doc_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_2b06e70e[doc]",
       "features": [
         "synthetic-next"
       ],
       "kind": "lib",
-      "label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_4100c81d",
+      "label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_2b06e70e",
       "package": "lash-kernel-vm"
     },
     {
-      "build_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_4100c81d[static]",
-      "check_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_4100c81d__metadata[check]",
-      "clippy_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_4100c81d__clippy[clippy.txt]",
-      "doc_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_4100c81d[doc]",
+      "build_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_2b06e70e[static]",
+      "check_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_2b06e70e__metadata[check]",
+      "clippy_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_2b06e70e__clippy[clippy.txt]",
+      "doc_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_2b06e70e[doc]",
       "features": [
         "synthetic-next"
       ],
       "kind": "lib",
-      "label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_4100c81d",
+      "label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_2b06e70e",
       "package": "lash-kernel-vm"
     },
     {
-      "build_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_4100c81d[static]",
-      "check_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_4100c81d__metadata[check]",
-      "clippy_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_4100c81d__clippy[clippy.txt]",
-      "doc_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_4100c81d[doc]",
+      "build_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_2b06e70e[static]",
+      "check_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_2b06e70e__metadata[check]",
+      "clippy_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_2b06e70e__clippy[clippy.txt]",
+      "doc_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_2b06e70e[doc]",
       "features": [
         "synthetic-next"
       ],
       "kind": "lib",
-      "label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_4100c81d",
+      "label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_2b06e70e",
       "package": "lash-kernel-vm"
     },
     {
-      "build_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_4100c81d[static]",
-      "check_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_4100c81d__metadata[check]",
-      "clippy_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_4100c81d__clippy[clippy.txt]",
-      "doc_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_4100c81d[doc]",
+      "build_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_2b06e70e[static]",
+      "check_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_2b06e70e__metadata[check]",
+      "clippy_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_2b06e70e__clippy[clippy.txt]",
+      "doc_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_2b06e70e[doc]",
       "features": [
         "synthetic-next"
       ],
       "kind": "lib",
-      "label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_4100c81d",
+      "label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_2b06e70e",
       "package": "lash-kernel-vm"
     },
     {
-      "build_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_423920d0[static]",
-      "check_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_423920d0__metadata[check]",
-      "clippy_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_423920d0__clippy[clippy.txt]",
-      "doc_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_423920d0[doc]",
+      "build_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_2fb87040[static]",
+      "check_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_2fb87040__metadata[check]",
+      "clippy_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_2fb87040__clippy[clippy.txt]",
+      "doc_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_2fb87040[doc]",
       "features": [],
       "kind": "lib",
-      "label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_423920d0",
+      "label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_2fb87040",
       "package": "lash-kernel-vm"
     },
     {
-      "build_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_423920d0[static]",
-      "check_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_423920d0__metadata[check]",
-      "clippy_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_423920d0__clippy[clippy.txt]",
-      "doc_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_423920d0[doc]",
+      "build_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_2fb87040[static]",
+      "check_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_2fb87040__metadata[check]",
+      "clippy_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_2fb87040__clippy[clippy.txt]",
+      "doc_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_2fb87040[doc]",
       "features": [],
       "kind": "lib",
-      "label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_423920d0",
+      "label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_2fb87040",
       "package": "lash-kernel-vm"
     },
     {
-      "build_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_51a4a739[static]",
-      "check_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_51a4a739__metadata[check]",
-      "clippy_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_51a4a739__clippy[clippy.txt]",
-      "doc_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_51a4a739[doc]",
+      "build_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_46f2e76f[static]",
+      "check_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_46f2e76f__metadata[check]",
+      "clippy_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_46f2e76f__clippy[clippy.txt]",
+      "doc_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_46f2e76f[doc]",
       "features": [],
       "kind": "lib",
-      "label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_51a4a739",
+      "label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_46f2e76f",
       "package": "lash-kernel-vm"
     },
     {
-      "build_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_51a4a739[static]",
-      "check_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_51a4a739__metadata[check]",
-      "clippy_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_51a4a739__clippy[clippy.txt]",
-      "doc_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_51a4a739[doc]",
+      "build_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_46f2e76f[static]",
+      "check_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_46f2e76f__metadata[check]",
+      "clippy_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_46f2e76f__clippy[clippy.txt]",
+      "doc_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_46f2e76f[doc]",
       "features": [],
       "kind": "lib",
-      "label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_51a4a739",
+      "label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_46f2e76f",
       "package": "lash-kernel-vm"
     },
     {
-      "build_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_51a4a739[static]",
-      "check_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_51a4a739__metadata[check]",
-      "clippy_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_51a4a739__clippy[clippy.txt]",
-      "doc_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_51a4a739[doc]",
+      "build_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_46f2e76f[static]",
+      "check_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_46f2e76f__metadata[check]",
+      "clippy_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_46f2e76f__clippy[clippy.txt]",
+      "doc_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_46f2e76f[doc]",
       "features": [],
       "kind": "lib",
-      "label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_51a4a739",
+      "label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_46f2e76f",
       "package": "lash-kernel-vm"
     },
     {
-      "build_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_51a4a739[static]",
-      "check_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_51a4a739__metadata[check]",
-      "clippy_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_51a4a739__clippy[clippy.txt]",
-      "doc_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_51a4a739[doc]",
+      "build_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_46f2e76f[static]",
+      "check_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_46f2e76f__metadata[check]",
+      "clippy_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_46f2e76f__clippy[clippy.txt]",
+      "doc_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_46f2e76f[doc]",
       "features": [],
       "kind": "lib",
-      "label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_51a4a739",
+      "label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_46f2e76f",
       "package": "lash-kernel-vm"
     },
     {
-      "build_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_51a4a739[static]",
-      "check_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_51a4a739__metadata[check]",
-      "clippy_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_51a4a739__clippy[clippy.txt]",
-      "doc_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_51a4a739[doc]",
+      "build_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_46f2e76f[static]",
+      "check_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_46f2e76f__metadata[check]",
+      "clippy_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_46f2e76f__clippy[clippy.txt]",
+      "doc_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_46f2e76f[doc]",
       "features": [],
       "kind": "lib",
-      "label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_51a4a739",
+      "label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_46f2e76f",
       "package": "lash-kernel-vm"
     },
     {
-      "build_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_51a4a739[static]",
-      "check_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_51a4a739__metadata[check]",
-      "clippy_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_51a4a739__clippy[clippy.txt]",
-      "doc_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_51a4a739[doc]",
+      "build_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_46f2e76f[static]",
+      "check_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_46f2e76f__metadata[check]",
+      "clippy_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_46f2e76f__clippy[clippy.txt]",
+      "doc_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_46f2e76f[doc]",
       "features": [],
       "kind": "lib",
-      "label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_51a4a739",
+      "label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_46f2e76f",
       "package": "lash-kernel-vm"
     },
     {
-      "build_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_51a4a739[static]",
-      "check_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_51a4a739__metadata[check]",
-      "clippy_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_51a4a739__clippy[clippy.txt]",
-      "doc_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_51a4a739[doc]",
-      "features": [],
-      "kind": "lib",
-      "label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_51a4a739",
-      "package": "lash-kernel-vm"
-    },
-    {
-      "build_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_51a4a739[static]",
-      "check_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_51a4a739__metadata[check]",
-      "clippy_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_51a4a739__clippy[clippy.txt]",
-      "doc_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_51a4a739[doc]",
-      "features": [],
-      "kind": "lib",
-      "label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_51a4a739",
-      "package": "lash-kernel-vm"
-    },
-    {
-      "build_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_51a4a739[static]",
-      "check_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_51a4a739__metadata[check]",
-      "clippy_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_51a4a739__clippy[clippy.txt]",
-      "doc_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_51a4a739[doc]",
-      "features": [],
-      "kind": "lib",
-      "label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_51a4a739",
-      "package": "lash-kernel-vm"
-    },
-    {
-      "build_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_6c2b852f[static]",
-      "check_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_6c2b852f__metadata[check]",
-      "clippy_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_6c2b852f__clippy[clippy.txt]",
-      "doc_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_6c2b852f[doc]",
+      "build_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_94486856[static]",
+      "check_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_94486856__metadata[check]",
+      "clippy_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_94486856__clippy[clippy.txt]",
+      "doc_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_94486856[doc]",
       "features": [
         "synthetic-next"
       ],
       "kind": "lib",
-      "label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_6c2b852f",
+      "label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_94486856",
       "package": "lash-kernel-vm"
     },
     {
-      "build_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_8571281a[static]",
-      "check_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_8571281a__metadata[check]",
-      "clippy_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_8571281a__clippy[clippy.txt]",
-      "doc_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_8571281a[doc]",
+      "build_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_a229043a[static]",
+      "check_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_a229043a__metadata[check]",
+      "clippy_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_a229043a__clippy[clippy.txt]",
+      "doc_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_a229043a[doc]",
+      "features": [
+        "perf-witness"
+      ],
+      "kind": "lib",
+      "label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_a229043a",
+      "package": "lash-kernel-vm"
+    },
+    {
+      "build_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_a229043a[static]",
+      "check_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_a229043a__metadata[check]",
+      "clippy_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_a229043a__clippy[clippy.txt]",
+      "doc_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_a229043a[doc]",
+      "features": [
+        "perf-witness"
+      ],
+      "kind": "lib",
+      "label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_a229043a",
+      "package": "lash-kernel-vm"
+    },
+    {
+      "build_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_a229043a[static]",
+      "check_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_a229043a__metadata[check]",
+      "clippy_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_a229043a__clippy[clippy.txt]",
+      "doc_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_a229043a[doc]",
+      "features": [
+        "perf-witness"
+      ],
+      "kind": "lib",
+      "label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_a229043a",
+      "package": "lash-kernel-vm"
+    },
+    {
+      "build_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_a229043a[static]",
+      "check_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_a229043a__metadata[check]",
+      "clippy_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_a229043a__clippy[clippy.txt]",
+      "doc_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_a229043a[doc]",
+      "features": [
+        "perf-witness"
+      ],
+      "kind": "lib",
+      "label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_a229043a",
+      "package": "lash-kernel-vm"
+    },
+    {
+      "build_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_a229043a[static]",
+      "check_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_a229043a__metadata[check]",
+      "clippy_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_a229043a__clippy[clippy.txt]",
+      "doc_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_a229043a[doc]",
+      "features": [
+        "perf-witness"
+      ],
+      "kind": "lib",
+      "label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_a229043a",
+      "package": "lash-kernel-vm"
+    },
+    {
+      "build_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_a229043a[static]",
+      "check_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_a229043a__metadata[check]",
+      "clippy_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_a229043a__clippy[clippy.txt]",
+      "doc_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_a229043a[doc]",
+      "features": [
+        "perf-witness"
+      ],
+      "kind": "lib",
+      "label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_a229043a",
+      "package": "lash-kernel-vm"
+    },
+    {
+      "build_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_a229043a[static]",
+      "check_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_a229043a__metadata[check]",
+      "clippy_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_a229043a__clippy[clippy.txt]",
+      "doc_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_a229043a[doc]",
+      "features": [
+        "perf-witness"
+      ],
+      "kind": "lib",
+      "label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_a229043a",
+      "package": "lash-kernel-vm"
+    },
+    {
+      "build_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_a229043a[static]",
+      "check_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_a229043a__metadata[check]",
+      "clippy_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_a229043a__clippy[clippy.txt]",
+      "doc_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_a229043a[doc]",
+      "features": [
+        "perf-witness"
+      ],
+      "kind": "lib",
+      "label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_a229043a",
+      "package": "lash-kernel-vm"
+    },
+    {
+      "build_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_a229043a[static]",
+      "check_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_a229043a__metadata[check]",
+      "clippy_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_a229043a__clippy[clippy.txt]",
+      "doc_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_a229043a[doc]",
+      "features": [
+        "perf-witness"
+      ],
+      "kind": "lib",
+      "label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_a229043a",
+      "package": "lash-kernel-vm"
+    },
+    {
+      "build_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_a229043a[static]",
+      "check_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_a229043a__metadata[check]",
+      "clippy_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_a229043a__clippy[clippy.txt]",
+      "doc_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_a229043a[doc]",
+      "features": [
+        "perf-witness"
+      ],
+      "kind": "lib",
+      "label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_a229043a",
+      "package": "lash-kernel-vm"
+    },
+    {
+      "build_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_a229043a[static]",
+      "check_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_a229043a__metadata[check]",
+      "clippy_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_a229043a__clippy[clippy.txt]",
+      "doc_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_a229043a[doc]",
+      "features": [
+        "perf-witness"
+      ],
+      "kind": "lib",
+      "label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_a229043a",
+      "package": "lash-kernel-vm"
+    },
+    {
+      "build_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_a229043a[static]",
+      "check_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_a229043a__metadata[check]",
+      "clippy_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_a229043a__clippy[clippy.txt]",
+      "doc_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_a229043a[doc]",
+      "features": [
+        "perf-witness"
+      ],
+      "kind": "lib",
+      "label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_a229043a",
+      "package": "lash-kernel-vm"
+    },
+    {
+      "build_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_a229043a[static]",
+      "check_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_a229043a__metadata[check]",
+      "clippy_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_a229043a__clippy[clippy.txt]",
+      "doc_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_a229043a[doc]",
+      "features": [
+        "perf-witness"
+      ],
+      "kind": "lib",
+      "label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_a229043a",
+      "package": "lash-kernel-vm"
+    },
+    {
+      "build_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_a229043a[static]",
+      "check_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_a229043a__metadata[check]",
+      "clippy_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_a229043a__clippy[clippy.txt]",
+      "doc_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_a229043a[doc]",
+      "features": [
+        "perf-witness"
+      ],
+      "kind": "lib",
+      "label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_a229043a",
+      "package": "lash-kernel-vm"
+    },
+    {
+      "build_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_a229043a[static]",
+      "check_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_a229043a__metadata[check]",
+      "clippy_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_a229043a__clippy[clippy.txt]",
+      "doc_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_a229043a[doc]",
+      "features": [
+        "perf-witness"
+      ],
+      "kind": "lib",
+      "label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_a229043a",
+      "package": "lash-kernel-vm"
+    },
+    {
+      "build_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_a229043a[static]",
+      "check_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_a229043a__metadata[check]",
+      "clippy_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_a229043a__clippy[clippy.txt]",
+      "doc_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_a229043a[doc]",
+      "features": [
+        "perf-witness"
+      ],
+      "kind": "lib",
+      "label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_a229043a",
+      "package": "lash-kernel-vm"
+    },
+    {
+      "build_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_a229043a[static]",
+      "check_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_a229043a__metadata[check]",
+      "clippy_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_a229043a__clippy[clippy.txt]",
+      "doc_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_a229043a[doc]",
+      "features": [
+        "perf-witness"
+      ],
+      "kind": "lib",
+      "label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_a229043a",
+      "package": "lash-kernel-vm"
+    },
+    {
+      "build_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_aa9515d5[static]",
+      "check_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_aa9515d5__metadata[check]",
+      "clippy_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_aa9515d5__clippy[clippy.txt]",
+      "doc_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_aa9515d5[doc]",
       "features": [
         "synthetic-next"
       ],
       "kind": "lib",
-      "label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_8571281a",
+      "label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_aa9515d5",
       "package": "lash-kernel-vm"
     },
     {
-      "build_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_a07ba2fe[static]",
-      "check_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_a07ba2fe__metadata[check]",
-      "clippy_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_a07ba2fe__clippy[clippy.txt]",
-      "doc_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_a07ba2fe[doc]",
+      "build_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_b0bcc29c[static]",
+      "check_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_b0bcc29c__metadata[check]",
+      "clippy_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_b0bcc29c__clippy[clippy.txt]",
+      "doc_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_b0bcc29c[doc]",
+      "features": [],
+      "kind": "lib",
+      "label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_b0bcc29c",
+      "package": "lash-kernel-vm"
+    },
+    {
+      "build_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_b0bcc29c[static]",
+      "check_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_b0bcc29c__metadata[check]",
+      "clippy_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_b0bcc29c__clippy[clippy.txt]",
+      "doc_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_b0bcc29c[doc]",
+      "features": [],
+      "kind": "lib",
+      "label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_b0bcc29c",
+      "package": "lash-kernel-vm"
+    },
+    {
+      "build_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_b0bcc29c[static]",
+      "check_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_b0bcc29c__metadata[check]",
+      "clippy_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_b0bcc29c__clippy[clippy.txt]",
+      "doc_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_b0bcc29c[doc]",
+      "features": [],
+      "kind": "lib",
+      "label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_b0bcc29c",
+      "package": "lash-kernel-vm"
+    },
+    {
+      "build_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_bfe3238c[static]",
+      "check_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_bfe3238c__metadata[check]",
+      "clippy_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_bfe3238c__clippy[clippy.txt]",
+      "doc_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_bfe3238c[doc]",
       "features": [
         "perf-witness",
         "synthetic-next"
       ],
       "kind": "lib",
-      "label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_a07ba2fe",
+      "label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_bfe3238c",
       "package": "lash-kernel-vm"
     },
     {
-      "build_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_a07ba2fe[static]",
-      "check_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_a07ba2fe__metadata[check]",
-      "clippy_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_a07ba2fe__clippy[clippy.txt]",
-      "doc_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_a07ba2fe[doc]",
+      "build_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_bfe3238c[static]",
+      "check_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_bfe3238c__metadata[check]",
+      "clippy_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_bfe3238c__clippy[clippy.txt]",
+      "doc_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_bfe3238c[doc]",
       "features": [
         "perf-witness",
         "synthetic-next"
       ],
       "kind": "lib",
-      "label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_a07ba2fe",
+      "label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_bfe3238c",
       "package": "lash-kernel-vm"
     },
     {
-      "build_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_a07ba2fe[static]",
-      "check_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_a07ba2fe__metadata[check]",
-      "clippy_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_a07ba2fe__clippy[clippy.txt]",
-      "doc_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_a07ba2fe[doc]",
+      "build_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_bfe3238c[static]",
+      "check_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_bfe3238c__metadata[check]",
+      "clippy_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_bfe3238c__clippy[clippy.txt]",
+      "doc_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_bfe3238c[doc]",
       "features": [
         "perf-witness",
         "synthetic-next"
       ],
       "kind": "lib",
-      "label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_a07ba2fe",
+      "label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_bfe3238c",
       "package": "lash-kernel-vm"
     },
     {
-      "build_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_a07ba2fe[static]",
-      "check_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_a07ba2fe__metadata[check]",
-      "clippy_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_a07ba2fe__clippy[clippy.txt]",
-      "doc_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_a07ba2fe[doc]",
+      "build_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_bfe3238c[static]",
+      "check_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_bfe3238c__metadata[check]",
+      "clippy_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_bfe3238c__clippy[clippy.txt]",
+      "doc_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_bfe3238c[doc]",
       "features": [
         "perf-witness",
         "synthetic-next"
       ],
       "kind": "lib",
-      "label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_a07ba2fe",
+      "label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_bfe3238c",
       "package": "lash-kernel-vm"
     },
     {
-      "build_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_a07ba2fe[static]",
-      "check_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_a07ba2fe__metadata[check]",
-      "clippy_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_a07ba2fe__clippy[clippy.txt]",
-      "doc_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_a07ba2fe[doc]",
+      "build_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_bfe3238c[static]",
+      "check_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_bfe3238c__metadata[check]",
+      "clippy_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_bfe3238c__clippy[clippy.txt]",
+      "doc_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_bfe3238c[doc]",
       "features": [
         "perf-witness",
         "synthetic-next"
       ],
       "kind": "lib",
-      "label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_a07ba2fe",
+      "label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_bfe3238c",
       "package": "lash-kernel-vm"
     },
     {
-      "build_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_ab2114ee[static]",
-      "check_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_ab2114ee__metadata[check]",
-      "clippy_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_ab2114ee__clippy[clippy.txt]",
-      "doc_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_ab2114ee[doc]",
-      "features": [],
+      "build_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_e832cd87[static]",
+      "check_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_e832cd87__metadata[check]",
+      "clippy_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_e832cd87__clippy[clippy.txt]",
+      "doc_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_e832cd87[doc]",
+      "features": [
+        "perf-witness"
+      ],
       "kind": "lib",
-      "label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_ab2114ee",
-      "package": "lash-kernel-vm"
-    },
-    {
-      "build_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_ab2114ee[static]",
-      "check_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_ab2114ee__metadata[check]",
-      "clippy_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_ab2114ee__clippy[clippy.txt]",
-      "doc_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_ab2114ee[doc]",
-      "features": [],
-      "kind": "lib",
-      "label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_ab2114ee",
-      "package": "lash-kernel-vm"
-    },
-    {
-      "build_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_ab2114ee[static]",
-      "check_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_ab2114ee__metadata[check]",
-      "clippy_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_ab2114ee__clippy[clippy.txt]",
-      "doc_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_ab2114ee[doc]",
-      "features": [],
-      "kind": "lib",
-      "label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_ab2114ee",
-      "package": "lash-kernel-vm"
-    },
-    {
-      "build_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_ab2114ee[static]",
-      "check_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_ab2114ee__metadata[check]",
-      "clippy_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_ab2114ee__clippy[clippy.txt]",
-      "doc_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_ab2114ee[doc]",
-      "features": [],
-      "kind": "lib",
-      "label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_ab2114ee",
-      "package": "lash-kernel-vm"
-    },
-    {
-      "build_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_ab2114ee[static]",
-      "check_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_ab2114ee__metadata[check]",
-      "clippy_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_ab2114ee__clippy[clippy.txt]",
-      "doc_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_ab2114ee[doc]",
-      "features": [],
-      "kind": "lib",
-      "label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_ab2114ee",
-      "package": "lash-kernel-vm"
-    },
-    {
-      "build_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_ab2114ee[static]",
-      "check_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_ab2114ee__metadata[check]",
-      "clippy_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_ab2114ee__clippy[clippy.txt]",
-      "doc_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_ab2114ee[doc]",
-      "features": [],
-      "kind": "lib",
-      "label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_ab2114ee",
-      "package": "lash-kernel-vm"
-    },
-    {
-      "build_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_ab2114ee[static]",
-      "check_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_ab2114ee__metadata[check]",
-      "clippy_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_ab2114ee__clippy[clippy.txt]",
-      "doc_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_ab2114ee[doc]",
-      "features": [],
-      "kind": "lib",
-      "label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_ab2114ee",
-      "package": "lash-kernel-vm"
-    },
-    {
-      "build_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_ab2114ee[static]",
-      "check_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_ab2114ee__metadata[check]",
-      "clippy_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_ab2114ee__clippy[clippy.txt]",
-      "doc_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_ab2114ee[doc]",
-      "features": [],
-      "kind": "lib",
-      "label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_ab2114ee",
-      "package": "lash-kernel-vm"
-    },
-    {
-      "build_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_ab2114ee[static]",
-      "check_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_ab2114ee__metadata[check]",
-      "clippy_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_ab2114ee__clippy[clippy.txt]",
-      "doc_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_ab2114ee[doc]",
-      "features": [],
-      "kind": "lib",
-      "label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_ab2114ee",
-      "package": "lash-kernel-vm"
-    },
-    {
-      "build_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_ab2114ee[static]",
-      "check_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_ab2114ee__metadata[check]",
-      "clippy_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_ab2114ee__clippy[clippy.txt]",
-      "doc_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_ab2114ee[doc]",
-      "features": [],
-      "kind": "lib",
-      "label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_ab2114ee",
-      "package": "lash-kernel-vm"
-    },
-    {
-      "build_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_ab2114ee[static]",
-      "check_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_ab2114ee__metadata[check]",
-      "clippy_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_ab2114ee__clippy[clippy.txt]",
-      "doc_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_ab2114ee[doc]",
-      "features": [],
-      "kind": "lib",
-      "label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_ab2114ee",
-      "package": "lash-kernel-vm"
-    },
-    {
-      "build_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_ab2114ee[static]",
-      "check_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_ab2114ee__metadata[check]",
-      "clippy_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_ab2114ee__clippy[clippy.txt]",
-      "doc_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_ab2114ee[doc]",
-      "features": [],
-      "kind": "lib",
-      "label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_ab2114ee",
-      "package": "lash-kernel-vm"
-    },
-    {
-      "build_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_ab2114ee[static]",
-      "check_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_ab2114ee__metadata[check]",
-      "clippy_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_ab2114ee__clippy[clippy.txt]",
-      "doc_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_ab2114ee[doc]",
-      "features": [],
-      "kind": "lib",
-      "label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_ab2114ee",
-      "package": "lash-kernel-vm"
-    },
-    {
-      "build_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_ab2114ee[static]",
-      "check_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_ab2114ee__metadata[check]",
-      "clippy_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_ab2114ee__clippy[clippy.txt]",
-      "doc_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_ab2114ee[doc]",
-      "features": [],
-      "kind": "lib",
-      "label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_ab2114ee",
-      "package": "lash-kernel-vm"
-    },
-    {
-      "build_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_ab2114ee[static]",
-      "check_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_ab2114ee__metadata[check]",
-      "clippy_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_ab2114ee__clippy[clippy.txt]",
-      "doc_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_ab2114ee[doc]",
-      "features": [],
-      "kind": "lib",
-      "label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_ab2114ee",
-      "package": "lash-kernel-vm"
-    },
-    {
-      "build_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_ab2114ee[static]",
-      "check_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_ab2114ee__metadata[check]",
-      "clippy_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_ab2114ee__clippy[clippy.txt]",
-      "doc_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_ab2114ee[doc]",
-      "features": [],
-      "kind": "lib",
-      "label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_ab2114ee",
-      "package": "lash-kernel-vm"
-    },
-    {
-      "build_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_ab2114ee[static]",
-      "check_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_ab2114ee__metadata[check]",
-      "clippy_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_ab2114ee__clippy[clippy.txt]",
-      "doc_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_ab2114ee[doc]",
-      "features": [],
-      "kind": "lib",
-      "label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_ab2114ee",
-      "package": "lash-kernel-vm"
-    },
-    {
-      "build_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_ab2114ee[static]",
-      "check_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_ab2114ee__metadata[check]",
-      "clippy_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_ab2114ee__clippy[clippy.txt]",
-      "doc_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_ab2114ee[doc]",
-      "features": [],
-      "kind": "lib",
-      "label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_ab2114ee",
-      "package": "lash-kernel-vm"
-    },
-    {
-      "build_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_ab2114ee[static]",
-      "check_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_ab2114ee__metadata[check]",
-      "clippy_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_ab2114ee__clippy[clippy.txt]",
-      "doc_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_ab2114ee[doc]",
-      "features": [],
-      "kind": "lib",
-      "label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_ab2114ee",
-      "package": "lash-kernel-vm"
-    },
-    {
-      "build_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_ab2114ee[static]",
-      "check_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_ab2114ee__metadata[check]",
-      "clippy_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_ab2114ee__clippy[clippy.txt]",
-      "doc_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_ab2114ee[doc]",
-      "features": [],
-      "kind": "lib",
-      "label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_ab2114ee",
-      "package": "lash-kernel-vm"
-    },
-    {
-      "build_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_ab2114ee[static]",
-      "check_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_ab2114ee__metadata[check]",
-      "clippy_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_ab2114ee__clippy[clippy.txt]",
-      "doc_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_ab2114ee[doc]",
-      "features": [],
-      "kind": "lib",
-      "label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_ab2114ee",
-      "package": "lash-kernel-vm"
-    },
-    {
-      "build_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_ab2114ee[static]",
-      "check_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_ab2114ee__metadata[check]",
-      "clippy_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_ab2114ee__clippy[clippy.txt]",
-      "doc_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_ab2114ee[doc]",
-      "features": [],
-      "kind": "lib",
-      "label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_ab2114ee",
-      "package": "lash-kernel-vm"
-    },
-    {
-      "build_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_ab2114ee[static]",
-      "check_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_ab2114ee__metadata[check]",
-      "clippy_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_ab2114ee__clippy[clippy.txt]",
-      "doc_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_ab2114ee[doc]",
-      "features": [],
-      "kind": "lib",
-      "label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_ab2114ee",
-      "package": "lash-kernel-vm"
-    },
-    {
-      "build_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_ab2114ee[static]",
-      "check_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_ab2114ee__metadata[check]",
-      "clippy_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_ab2114ee__clippy[clippy.txt]",
-      "doc_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_ab2114ee[doc]",
-      "features": [],
-      "kind": "lib",
-      "label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_ab2114ee",
-      "package": "lash-kernel-vm"
-    },
-    {
-      "build_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_ab2114ee[static]",
-      "check_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_ab2114ee__metadata[check]",
-      "clippy_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_ab2114ee__clippy[clippy.txt]",
-      "doc_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_ab2114ee[doc]",
-      "features": [],
-      "kind": "lib",
-      "label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_ab2114ee",
-      "package": "lash-kernel-vm"
-    },
-    {
-      "build_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_ab2114ee[static]",
-      "check_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_ab2114ee__metadata[check]",
-      "clippy_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_ab2114ee__clippy[clippy.txt]",
-      "doc_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_ab2114ee[doc]",
-      "features": [],
-      "kind": "lib",
-      "label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_ab2114ee",
-      "package": "lash-kernel-vm"
-    },
-    {
-      "build_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_ab2114ee[static]",
-      "check_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_ab2114ee__metadata[check]",
-      "clippy_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_ab2114ee__clippy[clippy.txt]",
-      "doc_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_ab2114ee[doc]",
-      "features": [],
-      "kind": "lib",
-      "label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_ab2114ee",
-      "package": "lash-kernel-vm"
-    },
-    {
-      "build_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_ab2114ee[static]",
-      "check_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_ab2114ee__metadata[check]",
-      "clippy_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_ab2114ee__clippy[clippy.txt]",
-      "doc_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_ab2114ee[doc]",
-      "features": [],
-      "kind": "lib",
-      "label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_ab2114ee",
-      "package": "lash-kernel-vm"
-    },
-    {
-      "build_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_ab2114ee[static]",
-      "check_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_ab2114ee__metadata[check]",
-      "clippy_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_ab2114ee__clippy[clippy.txt]",
-      "doc_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_ab2114ee[doc]",
-      "features": [],
-      "kind": "lib",
-      "label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_ab2114ee",
-      "package": "lash-kernel-vm"
-    },
-    {
-      "build_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_ab2114ee[static]",
-      "check_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_ab2114ee__metadata[check]",
-      "clippy_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_ab2114ee__clippy[clippy.txt]",
-      "doc_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_ab2114ee[doc]",
-      "features": [],
-      "kind": "lib",
-      "label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_ab2114ee",
-      "package": "lash-kernel-vm"
-    },
-    {
-      "build_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_ab2114ee[static]",
-      "check_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_ab2114ee__metadata[check]",
-      "clippy_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_ab2114ee__clippy[clippy.txt]",
-      "doc_label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_ab2114ee[doc]",
-      "features": [],
-      "kind": "lib",
-      "label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_ab2114ee",
+      "label": "//crates/lash-kernel-vm:lash-kernel-vm__fv_e832cd87",
       "package": "lash-kernel-vm"
     },
     {
@@ -61180,6 +61249,26 @@
       "package": "lash-internal-tool-shape"
     },
     {
+      "build_label": "//crates/lash-tool-shape:lash-tool-shape__fv_af996fe8[static]",
+      "check_label": "//crates/lash-tool-shape:lash-tool-shape__fv_af996fe8__metadata[check]",
+      "clippy_label": "//crates/lash-tool-shape:lash-tool-shape__fv_af996fe8__clippy[clippy.txt]",
+      "doc_label": "//crates/lash-tool-shape:lash-tool-shape__fv_af996fe8[doc]",
+      "features": [],
+      "kind": "lib",
+      "label": "//crates/lash-tool-shape:lash-tool-shape__fv_af996fe8",
+      "package": "lash-internal-tool-shape"
+    },
+    {
+      "build_label": "//crates/lash-tool-shape:lash-tool-shape__fv_af996fe8[static]",
+      "check_label": "//crates/lash-tool-shape:lash-tool-shape__fv_af996fe8__metadata[check]",
+      "clippy_label": "//crates/lash-tool-shape:lash-tool-shape__fv_af996fe8__clippy[clippy.txt]",
+      "doc_label": "//crates/lash-tool-shape:lash-tool-shape__fv_af996fe8[doc]",
+      "features": [],
+      "kind": "lib",
+      "label": "//crates/lash-tool-shape:lash-tool-shape__fv_af996fe8",
+      "package": "lash-internal-tool-shape"
+    },
+    {
       "build_label": "//crates/lash-tool-shape:lash-tool-shape__fv_eaf3aec9[static]",
       "check_label": "//crates/lash-tool-shape:lash-tool-shape__fv_eaf3aec9__metadata[check]",
       "clippy_label": "//crates/lash-tool-shape:lash-tool-shape__fv_eaf3aec9__clippy[clippy.txt]",
@@ -81302,7 +81391,7 @@
       "//crates/lash-kernel-package:lash-kernel-package__fv_cd9a3752",
       "//crates/lash-kernel-state:lash-kernel-state__fv_668c808a",
       "//crates/lash-kernel-state:lash-kernel-state__fv_c14e533e",
-      "//crates/lash-kernel-vm:lash-kernel-vm__fv_ab2114ee",
+      "//crates/lash-kernel-vm:lash-kernel-vm__fv_283cf582",
       "//crates/lash-protocol-types:lash-protocol-types__fv_b01291d9",
       "//crates/lash-regress:lash-regress",
       "//crates/lash-sansio:lash-sansio__fv_7a325f72",
@@ -81411,7 +81500,8 @@
       "//crates/lash-kernel-state:lash-kernel-state__fv_241c0cb1",
       "//crates/lash-kernel-view:lash-kernel-view",
       "//crates/lash-kernel-vm:lash-kernel-vm",
-      "//crates/lash-kernel-vm:lash-kernel-vm__fv_51a4a739",
+      "//crates/lash-kernel-vm:lash-kernel-vm__fv_46f2e76f",
+      "//crates/lash-kernel-vm:lash-kernel-vm__fv_b0bcc29c",
       "//crates/lash-llm-tools:lash-llm-tools__fv_224ee4ad",
       "//crates/lash-llm-tools:lash-llm-tools__fv_f3892960",
       "//crates/lash-llm-transport:lash-llm-transport__fv_04a843e2",
@@ -81514,7 +81604,7 @@
       "//crates/lash-kernel-package:lash-kernel-package__fv_cd9a3752",
       "//crates/lash-kernel-state:lash-kernel-state__fv_c14e533e",
       "//crates/lash-kernel-view:lash-kernel-view__fv_21ccf4de",
-      "//crates/lash-kernel-vm:lash-kernel-vm__fv_ab2114ee",
+      "//crates/lash-kernel-vm:lash-kernel-vm__fv_283cf582",
       "//crates/lash-llm-tools:lash-llm-tools__fv_475c0d28",
       "//crates/lash-llm-transport:lash-llm-transport__fv_c22ecf29",
       "//crates/lash-plugin-mcp:lash-plugin-mcp__fv_b1a06d23",
@@ -81602,7 +81692,7 @@
       "//crates/lash-kernel-state:lash-kernel-state",
       "//crates/lash-kernel-state:lash-kernel-state__fv_241c0cb1",
       "//crates/lash-kernel-vm:lash-kernel-vm",
-      "//crates/lash-kernel-vm:lash-kernel-vm__fv_51a4a739",
+      "//crates/lash-kernel-vm:lash-kernel-vm__fv_b0bcc29c",
       "//crates/lash-llm-tools:lash-llm-tools__fv_224ee4ad",
       "//crates/lash-llm-tools:lash-llm-tools__fv_f3892960",
       "//crates/lash-llm-transport:lash-llm-transport__fv_04a843e2",
@@ -81817,6 +81907,7 @@
       "//crates/lash-kernel-package:lash-kernel-package__fv_8f458ce2",
       "//crates/lash-kernel-package:lash-kernel-package__fv_b041c251",
       "//crates/lash-kernel-package:lash-kernel-package__fv_cd9a3752",
+      "//crates/lash-kernel-package:lash-kernel-package__fv_ec23b3bc",
       "//crates/lash-kernel-package:lash-kernel-package__fv_ed305dbb",
       "//crates/lash-kernel-state:lash-kernel-state__fv_4f6294bf",
       "//crates/lash-kernel-state:lash-kernel-state__fv_668c808a",
@@ -81825,12 +81916,12 @@
       "//crates/lash-kernel-state:lash-kernel-state__fv_c14e533e",
       "//crates/lash-kernel-state:lash-kernel-state__fv_ea1436a9",
       "//crates/lash-kernel-state:lash-kernel-state__fv_f7e5ae4b",
-      "//crates/lash-kernel-vm:lash-kernel-vm__fv_4100c81d",
-      "//crates/lash-kernel-vm:lash-kernel-vm__fv_423920d0",
-      "//crates/lash-kernel-vm:lash-kernel-vm__fv_6c2b852f",
-      "//crates/lash-kernel-vm:lash-kernel-vm__fv_8571281a",
-      "//crates/lash-kernel-vm:lash-kernel-vm__fv_a07ba2fe",
-      "//crates/lash-kernel-vm:lash-kernel-vm__fv_ab2114ee",
+      "//crates/lash-kernel-vm:lash-kernel-vm__fv_283cf582",
+      "//crates/lash-kernel-vm:lash-kernel-vm__fv_2b06e70e",
+      "//crates/lash-kernel-vm:lash-kernel-vm__fv_2fb87040",
+      "//crates/lash-kernel-vm:lash-kernel-vm__fv_94486856",
+      "//crates/lash-kernel-vm:lash-kernel-vm__fv_aa9515d5",
+      "//crates/lash-kernel-vm:lash-kernel-vm__fv_bfe3238c",
       "//crates/lash-llm-tools:lash-llm-tools__fv_740d8238",
       "//crates/lash-llm-transport:lash-llm-transport__fv_192cc14d",
       "//crates/lash-plugin-process-controls:lash-plugin-process-controls__fv_d5d4c430",
@@ -81939,9 +82030,9 @@
       "//crates/lash-kernel-state:lash-kernel-state__fv_241c0cb1",
       "//crates/lash-kernel-state:lash-kernel-state__fv_369ed362",
       "//crates/lash-kernel-state:lash-kernel-state__fv_c14e533e",
-      "//crates/lash-kernel-vm:lash-kernel-vm__fv_38aea512",
-      "//crates/lash-kernel-vm:lash-kernel-vm__fv_51a4a739",
-      "//crates/lash-kernel-vm:lash-kernel-vm__fv_ab2114ee",
+      "//crates/lash-kernel-vm:lash-kernel-vm__fv_283cf582",
+      "//crates/lash-kernel-vm:lash-kernel-vm__fv_46f2e76f",
+      "//crates/lash-kernel-vm:lash-kernel-vm__fv_e832cd87",
       "//crates/lash-protocol-types:lash-protocol-types",
       "//crates/lash-protocol-types:lash-protocol-types__fv_b01291d9",
       "//crates/lash-sansio:lash-sansio__fv_2d1d71d3",
@@ -82008,8 +82099,8 @@
       "//crates/lash-kernel-package:lash-kernel-package__fv_ed305dbb",
       "//crates/lash-kernel-state:lash-kernel-state__fv_241c0cb1",
       "//crates/lash-kernel-state:lash-kernel-state__fv_ea1436a9",
-      "//crates/lash-kernel-vm:lash-kernel-vm__fv_51a4a739",
-      "//crates/lash-kernel-vm:lash-kernel-vm__fv_a07ba2fe",
+      "//crates/lash-kernel-vm:lash-kernel-vm__fv_b0bcc29c",
+      "//crates/lash-kernel-vm:lash-kernel-vm__fv_bfe3238c",
       "//crates/lash-llm-tools:lash-llm-tools__fv_1374f3a5",
       "//crates/lash-llm-tools:lash-llm-tools__fv_740d8238",
       "//crates/lash-plugin-process-controls:lash-plugin-process-controls__fv_7829d40f",
@@ -82158,7 +82249,7 @@
       "//crates/lash-kernel-state:lash-kernel-state",
       "//crates/lash-kernel-state:lash-kernel-state__fv_ea1436a9",
       "//crates/lash-kernel-vm:lash-kernel-vm",
-      "//crates/lash-kernel-vm:lash-kernel-vm__fv_a07ba2fe",
+      "//crates/lash-kernel-vm:lash-kernel-vm__fv_bfe3238c",
       "//crates/lash-postgres-store:lash-postgres-store__fv_668d476b",
       "//crates/lash-postgres-store:lash-postgres-store__fv_7cd988a0",
       "//crates/lash-protocol-types:lash-protocol-types",
@@ -82341,7 +82432,7 @@
       "//crates/lash-kernel-migrate:lash-kernel-migrate",
       "//crates/lash-kernel-package:lash-kernel-package__fv_546647e8",
       "//crates/lash-kernel-state:lash-kernel-state",
-      "//crates/lash-kernel-vm:lash-kernel-vm",
+      "//crates/lash-kernel-vm:lash-kernel-vm__fv_a229043a",
       "//crates/lash-llm-transport:lash-llm-transport__fv_04a843e2",
       "//crates/lash-plugin-process-controls:lash-plugin-process-controls__fv_5b203eb5",
       "//crates/lash-plugin-process-controls:lash-plugin-process-controls__fv_7c4f712d",
@@ -82616,8 +82707,8 @@
       "//crates/lash-kernel-state:lash-kernel-state__fv_241c0cb1",
       "//crates/lash-kernel-state:lash-kernel-state__fv_c14e533e",
       "//crates/lash-kernel-vm:lash-kernel-vm",
-      "//crates/lash-kernel-vm:lash-kernel-vm__fv_51a4a739",
-      "//crates/lash-kernel-vm:lash-kernel-vm__fv_ab2114ee",
+      "//crates/lash-kernel-vm:lash-kernel-vm__fv_283cf582",
+      "//crates/lash-kernel-vm:lash-kernel-vm__fv_46f2e76f",
       "//crates/lash-llm-transport:lash-llm-transport__fv_13431448",
       "//crates/lash-protocol-rlm:lash-protocol-rlm__fv_42919715",
       "//crates/lash-protocol-rlm:lash-protocol-rlm__fv_6b40b167",
@@ -82734,7 +82825,7 @@
       "//crates/lash-kernel-migrate:lash-kernel-migrate__fv_f767055e",
       "//crates/lash-kernel-package:lash-kernel-package__fv_546647e8",
       "//crates/lash-kernel-state:lash-kernel-state__fv_241c0cb1",
-      "//crates/lash-kernel-vm:lash-kernel-vm__fv_51a4a739",
+      "//crates/lash-kernel-vm:lash-kernel-vm__fv_46f2e76f",
       "//crates/lash-llm-transport:lash-llm-transport__fv_17a70c02",
       "//crates/lash-llm-transport:lash-llm-transport__fv_4b03c0ce",
       "//crates/lash-llm-transport:lash-llm-transport__fv_51bd2d2b",
@@ -82872,7 +82963,8 @@
       "//crates/lash-kernel-state:lash-kernel-state__fv_c14e533e",
       "//crates/lash-kernel-view:lash-kernel-view__fv_21ccf4de",
       "//crates/lash-kernel-vm:lash-kernel-vm",
-      "//crates/lash-kernel-vm:lash-kernel-vm__fv_ab2114ee",
+      "//crates/lash-kernel-vm:lash-kernel-vm__fv_283cf582",
+      "//crates/lash-kernel-vm:lash-kernel-vm__fv_a229043a",
       "//crates/lash-llm-tools:lash-llm-tools__fv_866ed627",
       "//crates/lash-llm-tools:lash-llm-tools__fv_df013ca1",
       "//crates/lash-llm-transport:lash-llm-transport__fv_8c644a57",
@@ -83299,8 +83391,8 @@
       "//crates/lash-kernel-package:lash-kernel-package__fv_cd9a3752",
       "//crates/lash-kernel-state:lash-kernel-state__fv_241c0cb1",
       "//crates/lash-kernel-state:lash-kernel-state__fv_c14e533e",
-      "//crates/lash-kernel-vm:lash-kernel-vm__fv_51a4a739",
-      "//crates/lash-kernel-vm:lash-kernel-vm__fv_ab2114ee",
+      "//crates/lash-kernel-vm:lash-kernel-vm__fv_283cf582",
+      "//crates/lash-kernel-vm:lash-kernel-vm__fv_46f2e76f",
       "//crates/lash-plugin-mcp:lash-plugin-mcp__fv_4e14180c",
       "//crates/lash-plugin-mcp:lash-plugin-mcp__fv_53e5f55d",
       "//crates/lash-plugin-mcp:lash-plugin-mcp__fv_8fdf8473",
@@ -83467,9 +83559,9 @@
       "//crates/lash-kernel-state:lash-kernel-state__fv_c14e533e",
       "//crates/lash-kernel-state:lash-kernel-state__fv_ea1436a9",
       "//crates/lash-kernel-state:lash-kernel-state__fv_f7e5ae4b",
-      "//crates/lash-kernel-vm:lash-kernel-vm__fv_4100c81d",
-      "//crates/lash-kernel-vm:lash-kernel-vm__fv_a07ba2fe",
-      "//crates/lash-kernel-vm:lash-kernel-vm__fv_ab2114ee",
+      "//crates/lash-kernel-vm:lash-kernel-vm__fv_283cf582",
+      "//crates/lash-kernel-vm:lash-kernel-vm__fv_2b06e70e",
+      "//crates/lash-kernel-vm:lash-kernel-vm__fv_bfe3238c",
       "//crates/lash-llm-transport:lash-llm-transport__fv_d83dd7bf",
       "//crates/lash-plugin-mcp:lash-plugin-mcp__fv_5b3215dd",
       "//crates/lash-plugin-mcp:lash-plugin-mcp__fv_5c144c2e",
@@ -85065,7 +85157,7 @@
     "//third-party/vendored/lash-rmcp:test_tool_routers__test",
     "//third-party/vendored/lash-rmcp:test_trace_context__test"
   ],
-  "metadata_target_count": 1545,
+  "metadata_target_count": 1548,
   "packages": [
     {
       "declared_features": [
@@ -94426,7 +94518,7 @@
     "//crates/lash-kernel-view:lash-kernel-view__fv_21ccf4de__metadata[check]",
     "//crates/lash-kernel-view:lash-kernel-view__metadata[check]",
     "//crates/lash-kernel-view:lash-kernel-view__unit_test__rust_test__metadata[check]",
-    "//crates/lash-kernel-vm:lash-kernel-vm__fv_ab2114ee__metadata[check]",
+    "//crates/lash-kernel-vm:lash-kernel-vm__fv_283cf582__metadata[check]",
     "//crates/lash-kernel-vm:lash-kernel-vm__metadata[check]",
     "//crates/lash-kernel-vm:lash-kernel-vm__unit_test__rust_test__metadata[check]",
     "//crates/lash-kernel-vm:linked_dispatch__test__rust_test__metadata[check]",

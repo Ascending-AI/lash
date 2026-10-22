@@ -7,8 +7,9 @@ use std::time::Instant;
 use crate::PoolError;
 use crate::embedding::Embedding;
 use crate::host::{PagePort, Wire, WireHost, WireLimiter, WirePageSource, grant_of, link_grant};
+use lash_kernel_doc::Datum;
 use lash_kernel_doc::heap::{PageId, PageRef};
-use lash_kernel_doc::{Datum, IdentifiedDocument};
+use lash_vm_client::packages::WorkerLibraryRuntimeOps as _;
 
 use lash_kernel_state::paged::{Checkpoint, PageSource};
 use lash_kernel_vm::{Bounds, CellStart, KernelMachine, Machine, OpenError, Program, Step};
@@ -669,19 +670,15 @@ impl<'embedding> Server<'embedding> {
         start: &lash_vm_protocol::message::Start,
         fresh: bool,
     ) -> Result<Program, PoolError> {
-        let encoded = &start.document;
         let definitions = &start.definitions;
         let functions = &start.functions;
         let link = start.link;
         let encoded_instances = &start.instances;
         let supplied_documents = &start.documents;
-        let document = IdentifiedDocument::decode(&encoded.0, self.bootstrap.tuning.kernel_data)
-            .map_err(|error| {
-                PoolError::refused(RunRefusal::Undecodable {
-                    input: RunInput::Document,
-                    detail: Detail::new(error),
-                })
-            })?;
+        let document = self
+            .embedding
+            .library_image()
+            .resolve_document(&start.document, self.bootstrap.tuning.kernel_data)?;
         let supplied: Vec<(lash_vocabulary::names::FunctionId, &[u8])> = definitions
             .iter()
             .map(|definition| {
@@ -707,18 +704,13 @@ impl<'embedding> Server<'embedding> {
         }
         let mut documents = std::collections::BTreeMap::new();
         for supplied in supplied_documents {
-            let loaded =
-                IdentifiedDocument::decode(&supplied.body.0, self.bootstrap.tuning.kernel_data)
-                    .map_err(|error| {
-                        PoolError::payload(
-                            lash_protocol_types::engine_fault::PayloadKind::Start,
-                            error,
-                        )
-                    })?;
-            if loaded.id() != supplied.document
-                || documents
-                    .insert(supplied.document, Arc::clone(loaded.shared()))
-                    .is_some()
+            let loaded = self
+                .embedding
+                .library_image()
+                .resolve_document(supplied, self.bootstrap.tuning.kernel_data)?;
+            if documents
+                .insert(supplied.identity(), Arc::clone(loaded.shared()))
+                .is_some()
             {
                 return Err(PoolError::payload(
                     lash_protocol_types::engine_fault::PayloadKind::Start,
@@ -726,6 +718,9 @@ impl<'embedding> Server<'embedding> {
                 ));
             }
         }
+        documents
+            .entry(document.id())
+            .or_insert_with(|| Arc::clone(document.shared()));
         let root = indexed.get(&link).ok_or_else(|| {
             PoolError::payload(
                 lash_protocol_types::engine_fault::PayloadKind::Start,
@@ -1241,10 +1236,12 @@ mod tests {
         let start = Start {
             owner: VmOwner::new("process:law"),
             dialect: lash_vm_releases::TYPESCRIPT.to_owned(),
-            document: EncodedPayload(document.canonical_bytes()),
+            document: lash_vm_protocol::message::StoredDocument::supplied(EncodedPayload(
+                document.canonical_bytes(),
+            )),
             link: link_id,
             instances: wire::encode(PayloadKind::Start, &instances).unwrap(),
-            documents: vec![lash_vm_protocol::message::StoredDocument {
+            documents: vec![lash_vm_protocol::message::StoredDocument::Supplied {
                 document: document.identity(),
                 body: EncodedPayload(document.canonical_bytes()),
             }],

@@ -48,6 +48,7 @@ struct Pool {
     /// The pool start's frames, encoded once from the parent and shared by
     /// prewarm and replacement workers.
     packages: Vec<Vec<u8>>,
+    library: Arc<crate::packages::WorkerLibrary>,
     /// The most workers the pool runs at once, within its memory budget.
     capacity: usize,
     state: Mutex<State>,
@@ -59,6 +60,9 @@ struct Pool {
 #[derive(Clone)]
 pub struct WorkerPool(Arc<Pool>);
 impl WorkerPool {
+    pub(crate) fn prepare_start(&self, start: &mut Start) -> Result<(), PoolError> {
+        self.0.library.prepare_start(start)
+    }
     pub fn new(config: PoolConfig) -> Result<Self, PoolError> {
         Self::new_observed(config, None)
     }
@@ -82,6 +86,7 @@ impl WorkerPool {
         let pool = Self(Arc::new(Pool {
             phases,
             packages,
+            library: held,
             epoch: NEXT_EPOCH.fetch_add(1, Ordering::Relaxed),
             measurements: Arc::new(Mutex::new(Measurements::default())),
             capacity: config.worker_capacity(),
@@ -551,7 +556,7 @@ impl Checkout {
     /// [`RunRefusal::AboveCeiling`] before anything crosses.
     pub fn start(
         &mut self,
-        start: Start,
+        mut start: Start,
         document: &str,
         class: ExecutionClass,
     ) -> Result<(), PoolError> {
@@ -563,6 +568,7 @@ impl Checkout {
         if let Some(refusal) = start.bounds.past(&self.pool.config.run_bounds) {
             return Err(PoolError::refused(refusal));
         }
+        self.pool.library.prepare_start(&mut start)?;
         // The start crosses within what the checkout reserved for it, as
         // if it crossed alone.
         let worker = self.worker.as_ref().ok_or_else(PoolError::eof)?;

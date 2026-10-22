@@ -272,15 +272,16 @@ pub struct Start {
     /// ([`lash_protocol_types::engine_fault::RunRefusal::DialectNotInstalled`], FIG-5990); it runs any
     /// other, which needs no dialect (FIG-6985).
     pub dialect: String,
-    /// The admitted document, as its canonical token body (`K-ID-003`),
-    /// the body of its checkpoint graph node. The worker decodes, validates
-    /// and compiles it: the parent never compiles model code.
-    pub document: EncodedPayload,
+    /// The admitted root document, either owned by the exact pool image or
+    /// supplied as canonical tokens (`K-ID-003`). The worker resolves and
+    /// validates it before compilation.
+    pub document: StoredDocument,
     /// The immutable root Link and the reached linked-instance table.
     pub link: lash_vocabulary::content_ids::LinkId,
     /// PreparedInstance rows in the runtime's bounded encoding.
     pub instances: EncodedPayload,
-    /// Every reached document, including the root, keyed by content identity.
+    /// Retained documents keyed by content identity; the primary document
+    /// may be omitted here because it already crosses in `document`.
     pub documents: Vec<StoredDocument>,
     /// The stored definition of each library function the document reaches
     /// that the parent's node does not hold, read from the store
@@ -329,12 +330,33 @@ pub struct Start {
     pub charge_limiter: bool,
 }
 
-/// One reached document; the worker checks its content identity before execution.
+/// One exact document, already owned by the worker image or supplied by
+/// this execution. Image content never falls back to supplied content.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct StoredDocument {
-    pub document: lash_vocabulary::names::DocumentId,
-    pub body: EncodedPayload,
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub enum StoredDocument {
+    Image {
+        document: lash_vocabulary::names::DocumentId,
+    },
+    Supplied {
+        document: lash_vocabulary::names::DocumentId,
+        body: EncodedPayload,
+    },
+}
+impl StoredDocument {
+    pub fn supplied(body: EncodedPayload) -> Self {
+        Self::Supplied {
+            document: lash_vocabulary::names::DocumentId::from_bytes(
+                lash_vocabulary::tokens::logical_digest(&body.0),
+            ),
+            body,
+        }
+    }
+    pub fn identity(&self) -> lash_vocabulary::names::DocumentId {
+        match self {
+            Self::Image { document } | Self::Supplied { document, .. } => *document,
+        }
+    }
 }
 
 /// A library function's definition as the store keeps it: the token body

@@ -70,6 +70,7 @@ pub(super) fn retired_reader(stores: Arc<lash_sqlite_store::SqliteStoreSet>) -> 
                 lash::vm::WorkerLibrary::new(
                     &lash::workflow::document::FunctionRegistry::default(),
                     [],
+                    &Default::default(),
                 )
                 .unwrap(),
             )),

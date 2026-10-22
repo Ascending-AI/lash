@@ -259,10 +259,12 @@ impl RemoteMachines {
             .warm(roots, lash_vm_broker::kernel::pages::WARM_BYTES)
             .await
             .unwrap_or_default();
-        let start = lash_vm_protocol::Start {
+        let mut start = lash_vm_protocol::Start {
             owner: self.owner.clone(),
             dialect: self.dialect.clone(),
-            document: EncodedPayload(self.body.to_vec()),
+            document: lash_vm_protocol::message::StoredDocument::supplied(EncodedPayload(
+                self.body.to_vec(),
+            )),
             link: self.start.link,
             instances: wire::encode(
                 PayloadKind::Start,
@@ -274,7 +276,7 @@ impl RemoteMachines {
                 .documents
                 .iter()
                 .map(
-                    |(document, body)| lash_vm_protocol::message::StoredDocument {
+                    |(document, body)| lash_vm_protocol::message::StoredDocument::Supplied {
                         document: *document,
                         body: EncodedPayload(body.body().to_vec()),
                     },
@@ -322,11 +324,6 @@ impl RemoteMachines {
             memory_limiter: self.host.memory_limiter().is_some(),
             charge_limiter: self.host.charge_limiter().is_some(),
         };
-        let reservation = start_reservation(
-            &start,
-            &lash_vm_protocol::FrameCodec::new(self.service.config().protocol.decode),
-        )
-        .map_err(worker)?;
         let service = self.service.clone();
         let (owner_epoch, frame_epoch) = (self.owner_epoch, self.frame_epoch);
         let document = self.document.to_string();
@@ -338,6 +335,12 @@ impl RemoteMachines {
         };
         let held = CallHeld::of(Some(&self.service));
         let checkout = blocking(move || {
+            let pool = service.pool()?;
+            pool.prepare_start(&mut start)?;
+            let reservation = start_reservation(
+                &start,
+                &lash_vm_protocol::FrameCodec::new(service.config().protocol.decode),
+            )?;
             let mut checkout = match service.take_retained(owner_epoch, frame_epoch) {
                 Some(mut retained) => match retained.readmit(reservation) {
                     Ok(()) => retained,
@@ -349,7 +352,7 @@ impl RemoteMachines {
                         return Err(refused);
                     }
                 },
-                None => service.pool()?.checkout(
+                None => pool.checkout(
                     reservation,
                     owner_epoch,
                     frame_epoch,
@@ -923,7 +926,10 @@ mod reservation_tests {
         let start = lash_vm_protocol::Start {
             owner: VmOwner::new("reservation-law"),
             dialect: "typescript".to_owned(),
-            document: EncodedPayload(vec![0; 16]),
+            document: lash_vm_protocol::message::StoredDocument::supplied(EncodedPayload(vec![
+                0;
+                16
+            ])),
             documents: Vec::new(),
             instances: EncodedPayload(Vec::new()),
             link: lash_vocabulary::LinkId::from_bytes([1; 32]),
