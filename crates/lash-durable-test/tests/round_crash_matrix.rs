@@ -401,6 +401,7 @@ struct RoundOwner {
     limit_ms: u64,
     /// The turn's cancel, fired this long after the round starts running.
     cancel_after_ms: Option<u64>,
+    cancel_on_timeout: Option<CancellationToken>,
     bodies: Arc<Catalog>,
     tripwire: Arc<Tripwire>,
     presentations: Arc<Mutex<Vec<round::Presentation>>>,
@@ -473,18 +474,24 @@ impl RoundOwner {
                 .map_err(Pass::from)?;
             RoundRunner::admitted(cx, &admitted, self.policies(), bodies).unwrap()
         };
-        let runner = match self.cancel_after_ms {
-            Some(after) => {
-                let cancel = CancellationToken::new();
-                let fire = cancel.clone();
-                let clock = Arc::clone(cx.clock());
-                tokio::spawn(async move {
-                    clock.sleep(Duration::from_millis(after)).await;
-                    fire.cancel();
-                });
-                runner.cancelled_by(cancel)
+        let runner = if let Some(cancel) = &self.cancel_on_timeout {
+            runner.cancelled_by(cancel.clone())
+        } else {
+            match self.cancel_after_ms {
+                Some(after) => {
+                    let cancel = CancellationToken::new();
+                    let fire = cancel.clone();
+                    let clock = Arc::clone(cx.clock());
+                    let deadline = self.bodies.clock.logical_ms() + after;
+                    tokio::spawn(async move {
+                        clock.sleep(Duration::from_millis(after)).await;
+                        fire.cancel();
+                    });
+                    self.bodies.clock.wait_for_sleep(deadline).await;
+                    runner.cancelled_by(cancel)
+                }
+                None => runner,
             }
-            None => runner,
         };
         let end = match runner.run().await.map_err(Pass::from)? {
             RoundEnd::Settled(end) => end,
@@ -588,6 +595,7 @@ struct RoundScenario {
     members: Vec<Member>,
     limit_ms: u64,
     cancel_after_ms: Option<u64>,
+    cancel_on_timeout: CancellationToken,
     world: Arc<ExternalWorld>,
     tripwire: Arc<Tripwire>,
     backend: Mutex<Option<(Backend, Arc<SimClock>)>>,
@@ -605,6 +613,7 @@ impl RoundScenario {
             members,
             limit_ms: 60_000,
             cancel_after_ms: None,
+            cancel_on_timeout: CancellationToken::new(),
             world: Arc::default(),
             tripwire: Arc::default(),
             backend: Mutex::default(),
@@ -617,6 +626,14 @@ impl RoundScenario {
     fn limit_ms(mut self, limit_ms: u64) -> Self {
         self.limit_ms = limit_ms;
         self
+    }
+
+    fn cancels_on_timeout(&self) -> bool {
+        self.cancel_after_ms.is_some_and(|after| {
+            self.members.iter().any(|member| {
+                matches!(member.tool, Tool::Timer { after: timer } if u64::try_from(timer).ok() == Some(after))
+            })
+        })
     }
 }
 
@@ -649,6 +666,9 @@ impl Scenario for RoundScenario {
             members: self.members.clone(),
             limit_ms: self.limit_ms,
             cancel_after_ms: self.cancel_after_ms,
+            cancel_on_timeout: self
+                .cancels_on_timeout()
+                .then(|| self.cancel_on_timeout.clone()),
             bodies: Arc::new(Catalog {
                 world: Arc::clone(&self.world),
                 tools: self
@@ -665,6 +685,17 @@ impl Scenario for RoundScenario {
     }
 
     async fn start(&self, nodes: &Arc<SimNodes>) -> Result<(), String> {
+        // At an equal deadline, order cancellation at the timeout's actual
+        // store boundary. Two independent clock sleepers otherwise discover
+        // different cut censuses depending on which select arm Tokio polls.
+        if self.cancels_on_timeout() {
+            let cancel = self.cancel_on_timeout.clone();
+            nodes.script().observe_commits(Arc::new(move |label, _| {
+                if label == CommitLabel::WAIT_TIMEOUT {
+                    cancel.cancel();
+                }
+            }));
+        }
         let mut seed = MailTx::new();
         seed.create_actor(actor(), FormatSet::new(FORMATS));
         nodes
