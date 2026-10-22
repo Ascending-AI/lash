@@ -54,13 +54,21 @@ pub fn namespaces(document: &k::Document) -> Result<Namespaces, NamespaceRefusal
         lash_vocabulary::PackagePath,
         BTreeMap<lash_vocabulary::Segment, crate::NamespaceMember>,
     >::new();
-    for import in document.imports.values() {
+    let terminal = terminal_operations(document);
+    for (slot, import) in &document.imports {
         let name = &import.name;
         let kind = match &import.kind {
             ImportKind::Operation { signature } => {
                 crate::NamespaceKind::Operation(crate::OperationSignature {
                     signature: signature.clone(),
-                    controls: lash_vocabulary::TurnControls::none(),
+                    // Both host control kinds lower to this same terminal
+                    // wrapper. Reconstruct its lowering fact, not the host's
+                    // declaration (which is outside the document).
+                    controls: if terminal.contains(slot) {
+                        lash_vocabulary::TurnControls::finish(lash_vocabulary::JsonSchema::any())
+                    } else {
+                        lash_vocabulary::TurnControls::none()
+                    },
                     mode: lash_vocabulary::OperationMode::Waited,
                 })
             }
@@ -89,6 +97,28 @@ pub fn namespaces(document: &k::Document) -> Result<Namespaces, NamespaceRefusal
         );
     }
     Namespaces::new(packages, BTreeSet::new(), &|_| false)
+}
+
+/// The exact terminal-call shape authored lowering emits, keyed by the
+/// retained import slot. A display name never supplies a control fact.
+fn terminal_operations(document: &k::Document) -> BTreeSet<lash_vocabulary::ImportSlot> {
+    let mut terminal = BTreeSet::new();
+    for (_, block) in document.units() {
+        let mut pending = vec![k::Node::Block(block)];
+        while let Some(node) = pending.pop() {
+            if let k::Node::Stmt(k::Stmt::Finish {
+                value: k::Expr::Let { value, body, .. },
+            }) = node
+                && matches!(&**body, k::Expr::Literal(k::Literal::Null))
+                && let k::Expr::Act(action) = &**value
+                && let k::ActKind::Perform { slot, .. } = action.kind
+            {
+                terminal.insert(slot);
+            }
+            pending.extend(node.children());
+        }
+    }
+    terminal
 }
 
 /// A printed module, read back.

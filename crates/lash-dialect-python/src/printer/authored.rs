@@ -19,6 +19,29 @@ enum Clause<'a> {
 impl Renderer<'_> {
     pub(super) fn authored_statement(&mut self, stmt: &k::Stmt) -> bool {
         match stmt {
+            // An awaited terminal operation keeps its perform inside Finish;
+            // the discarded reply and null result have no authored spelling.
+            k::Stmt::Finish {
+                value: k::Expr::Let { name, value, body },
+            } if self.main
+                && temporary_name(name)
+                && matches!(&**body, k::Expr::Literal(k::Literal::Null))
+                && self.inline.contains(value)
+                && matches!(&**value, k::Expr::Act(action)
+                    if matches!(action.kind, k::ActKind::Perform { .. })) =>
+            {
+                let k::Expr::Act(action) = &**value else {
+                    unreachable!()
+                };
+                self.out.begin_node(None); // expression binding
+                self.out.begin_node(None); // performed operation
+                self.nested_action(action, false);
+                self.out.end_node();
+                self.implicit(); // null result
+                self.out.end_node();
+                self.out.write("\n");
+                true
+            }
             k::Stmt::Assign {
                 place:
                     k::Place::Member(k::Member::Index {

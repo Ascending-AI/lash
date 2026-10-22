@@ -252,6 +252,119 @@ fn python_module_main_preserves_block_local_functions() -> anyhow::Result<()> {
     )
 }
 
+/// FIG-7135: a terminal operation is recovered from its typed import use,
+/// even with a neutral name; a control-looking ordinary operation stays ordinary.
+fn terminal_operation_roundtrip(language: lash_kernel_doc::SourceLanguage) -> anyhow::Result<()> {
+    use lash_kernel_dialect::{CellEnvironment, Mode};
+    use lash_kernel_doc::SourceLanguage;
+    use lash_vocabulary::{EffectName, Param, Signature, Type};
+
+    let embedding = lash_vm_worker::built_embedding(&Default::default())?;
+    let mut signatures = corpus_tool_signatures()?;
+    let signature = Signature {
+        params: vec![Param {
+            name: "input".into(),
+            ty: Type::Any,
+            optional: false,
+        }],
+        result: Type::Any,
+    };
+    signatures.insert(EffectName::new("corpus.stop")?, signature.clone());
+    signatures.insert(EffectName::new("control.finish")?, signature);
+    for control in [
+        lash_kernel_dialect::EffectControl::Finish,
+        lash_kernel_dialect::EffectControl::SwitchAgentFrame,
+    ] {
+        let controls = std::collections::BTreeMap::from([(
+            EffectName::new("corpus.stop")?,
+            std::collections::BTreeSet::from([control]),
+        )]);
+        let namespaces = workflow_corpus::corpus_namespaces(&signatures, &controls)?;
+        let environment = lash_kernel_dialect::Environment::new(embedding.library(), &namespaces);
+        let (source, lowered) = match language {
+            SourceLanguage::TypeScript => {
+                let source = "await control.finish(\"ordinary\");\nawait corpus.stop(\"done\");\nawait corpus.echo(\"unreachable\");\n";
+                (
+                    source,
+                    lash_dialect_typescript::lower(
+                        source,
+                        &environment,
+                        Mode::Cell(CellEnvironment::first()),
+                    )?,
+                )
+            }
+            SourceLanguage::Python => {
+                let source = "await control.finish(\"ordinary\")\nawait corpus.stop(\"done\")\nawait corpus.echo(\"unreachable\")\n";
+                (
+                    source,
+                    lash_dialect_python::lower(
+                        source,
+                        &environment,
+                        Mode::Cell(CellEnvironment::first()),
+                    )?,
+                )
+            }
+        };
+        let main = lowered.document.main.as_ref().expect("cell main");
+        assert!(matches!(main[1], lash_kernel_doc::Stmt::Finish { .. }));
+        assert!(!matches!(main[0], lash_kernel_doc::Stmt::Finish { .. }));
+        let options = lash_kernel_dialect::PrintOptions {
+            source_map: true,
+            ..Default::default()
+        };
+        let printed = match language {
+            SourceLanguage::TypeScript => lash_dialect_typescript::print(
+                &lowered.document,
+                Some(&lowered.captions),
+                embedding.library(),
+                options,
+            )?,
+            SourceLanguage::Python => lash_dialect_python::print(
+                &lowered.document,
+                Some(&lowered.captions),
+                embedding.library(),
+                options,
+            )?,
+        };
+        let (read, captions) = match language {
+            SourceLanguage::TypeScript => lash_dialect_typescript::read(
+                &printed.source,
+                &lowered.document,
+                embedding.library(),
+                Default::default(),
+            )?,
+            SourceLanguage::Python => lash_dialect_python::read(
+                &printed.source,
+                &lowered.document,
+                embedding.library(),
+                Default::default(),
+            )?,
+        };
+        assert_eq!(
+            read.canonical_bytes(),
+            lowered.document.canonical_bytes(),
+            "{source} -> {}",
+            printed.source
+        );
+        assert_eq!(captions, lowered.captions);
+        printed
+            .source_map
+            .expect("requested map")
+            .validate(&read, &printed.source)?;
+    }
+    Ok(())
+}
+
+#[test]
+fn typescript_terminal_operations_read_back_by_import_identity() -> anyhow::Result<()> {
+    terminal_operation_roundtrip(lash_kernel_doc::SourceLanguage::TypeScript)
+}
+
+#[test]
+fn python_terminal_operations_read_back_by_import_identity() -> anyhow::Result<()> {
+    terminal_operation_roundtrip(lash_kernel_doc::SourceLanguage::Python)
+}
+
 /// FIG-6953 READABLE-STYLE: a workflow edited through the canvas API prints
 /// as the source the authoring guide teaches, with none of the kernel
 /// surface's scaffolding.
