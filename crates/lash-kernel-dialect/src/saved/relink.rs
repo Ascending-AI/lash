@@ -18,7 +18,7 @@ pub fn relink_saved(function: &SavedFunction, link: &Link) -> Result<SavedFuncti
         callee: function.callable.function.to_string(),
         gap,
     };
-    if link.document != function.document.identity() {
+    if link.document != function.document.id() {
         return Err(refuse(RelinkGap::Document));
     }
     if !function

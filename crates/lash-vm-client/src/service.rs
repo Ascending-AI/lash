@@ -104,7 +104,7 @@ impl From<&lash_kernel_dialect::SavedFunction> for LowerFunction {
     fn from(function: &lash_kernel_dialect::SavedFunction) -> Self {
         Self {
             name: function.name.clone(),
-            document: lash_kernel_doc::IdentifiedDocument::new(function.document.clone()),
+            document: function.document.clone(),
             link: function.link,
             callable: function.callable,
             environment: function.environment,
@@ -123,7 +123,7 @@ impl LowerFunction {
     pub fn into_saved(self) -> lash_kernel_dialect::SavedFunction {
         lash_kernel_dialect::SavedFunction {
             name: self.name,
-            document: self.document.into_document(),
+            document: self.document,
             captures: BTreeMap::new(),
             closure: lash_kernel_doc::heap::PageRef {
                 id: lash_kernel_doc::heap::PageId([0; 32]),
@@ -174,11 +174,35 @@ impl LowerFunction {
         description: &[u8],
         limits: lash_vocabulary::data_limits::KernelDataLimits,
     ) -> Result<Self, lash_vocabulary::tokens::TokenError> {
+        Self::from_description_with(description, limits, |body| {
+            lash_kernel_doc::IdentifiedDocument::decode(body, limits)
+        })
+    }
+
+    /// Read a current description while its host's existing content owner
+    /// supplies canonical decoding of the document subtree. Metadata and link
+    /// checks always read this description; the decoder must honor `limits`.
+    pub fn from_description_with(
+        description: &[u8],
+        limits: lash_vocabulary::data_limits::KernelDataLimits,
+        decode_document: impl FnOnce(
+            &[u8],
+        ) -> Result<
+            lash_kernel_doc::IdentifiedDocument,
+            lash_vocabulary::tokens::TokenError,
+        >,
+    ) -> Result<Self, lash_vocabulary::tokens::TokenError> {
         use lash_vocabulary::tokens::{TokenCodec as _, TokenReader};
         let mut input = TokenReader::new(description).with_data_limits(limits);
         input.expect_struct(9)?;
         let name = Name::decode(&mut input)?;
-        let document = lash_kernel_doc::IdentifiedDocument::decode(input.tree()?, limits)?;
+        let body = input.tree()?;
+        let document = decode_document(body)?;
+        if document.body() != body {
+            return Err(lash_vocabulary::tokens::TokenError::Invalid(
+                "the decoded document differs from the current description".into(),
+            ));
+        }
         let function = Self {
             name,
             document,

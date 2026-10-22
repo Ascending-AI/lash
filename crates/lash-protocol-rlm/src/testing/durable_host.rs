@@ -50,6 +50,7 @@ impl Candidates for crate::executor::CodeModeExecutionState {
 
 /// A session actor claimed on a SQLite memory durable store.
 pub(crate) struct DurableHost {
+    pub(crate) documents: lash_vm_runtime::KernelDocuments,
     backend: lash_execution_contracts::backend::Backend,
     actor: ActorKey,
     admitted: lash_core::AdmittedScope,
@@ -115,11 +116,16 @@ impl DurableHost {
                 .journal_identity()
                 .expect("the fixture's execution journal"),
         ));
-        lash_vm_runtime::KernelDocuments::new(backend.module_artifacts(), backend.package_store())
+        let documents = lash_vm_runtime::KernelDocuments::new(
+            backend.module_artifacts(),
+            backend.package_store(),
+        );
+        documents
             .hold_helper_release(&content_claim, &release.content, &release.labels)
             .await
             .expect("hold the fixture's deployment code");
         Self {
+            documents,
             backend,
             actor,
             admitted,

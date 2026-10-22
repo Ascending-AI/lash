@@ -436,7 +436,16 @@ async fn kernel_run(
         lash_vm_client::RunStart {
             link: program.link,
             instances: program.instances,
-            documents: program.documents,
+            documents: program
+                .documents
+                .into_iter()
+                .map(|(id, document)| {
+                    (
+                        id,
+                        lash_kernel_doc::IdentifiedDocument::from_shared(document),
+                    )
+                })
+                .collect(),
             target: process_input.code.target().map_err(RunFault)?,
             args,
             session: None,

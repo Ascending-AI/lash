@@ -529,7 +529,16 @@ impl KernelProcessEngine {
             lash_vm_client::RunStart {
                 link: program.link,
                 instances: program.instances,
-                documents: program.documents,
+                documents: program
+                    .documents
+                    .into_iter()
+                    .map(|(id, document)| {
+                        (
+                            id,
+                            lash_kernel_doc::IdentifiedDocument::from_shared(document),
+                        )
+                    })
+                    .collect(),
                 target: input.code.target().map_err(ReplayFault)?,
                 args,
                 session: None,

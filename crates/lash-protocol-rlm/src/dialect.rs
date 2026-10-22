@@ -882,6 +882,7 @@ impl DialectSession {
             ctx,
             request,
             &CellServices {
+                documents: self.services.documents.clone(),
                 events: Arc::clone(&self.events),
                 workers: self.services.workers.clone(),
                 execution_bounds: self.services.execution_bounds,

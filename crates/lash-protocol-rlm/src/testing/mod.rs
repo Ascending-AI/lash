@@ -81,6 +81,7 @@ pub(crate) fn cell_services(
     workers: lash_vm_client::service::Service,
 ) -> crate::executor::CellServices {
     crate::executor::CellServices {
+        documents: None,
         events: Arc::default(),
         workers,
         execution_bounds: crate::plugin::ExecutionBounds::unbounded(),

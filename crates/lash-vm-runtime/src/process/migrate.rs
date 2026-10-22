@@ -62,7 +62,7 @@ pub fn migrate_saved_function(
     if function.document.kernel() == writes.number() {
         return Ok(None);
     }
-    Err(KernelMigrationRefusal::NotAdmitted {document:function.document.identity(),reason:"saved callable format carry requires an explicit successor defining Link and capture correspondence".into()})
+    Err(KernelMigrationRefusal::NotAdmitted {document:function.document.id(),reason:"saved callable format carry requires an explicit successor defining Link and capture correspondence".into()})
 }
 /// An escaped callable is pinned to its defining Link. Its consumer supplies a validated successor explicitly.
 pub fn migrate_function_value(

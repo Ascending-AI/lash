@@ -2006,7 +2006,16 @@ fn a_host_read_past_its_deadline_ends_the_run_with_its_typed_limit() {
         RunStart {
             link: program.link,
             instances: program.instances.clone(),
-            documents: program.documents.clone(),
+            documents: program
+                .documents
+                .iter()
+                .map(|(id, document)| {
+                    (
+                        *id,
+                        lash_kernel_doc::IdentifiedDocument::from_shared(Arc::clone(document)),
+                    )
+                })
+                .collect(),
             target: Target::Entry(Name::new("go")),
             args: Vec::new(),
             session: None,

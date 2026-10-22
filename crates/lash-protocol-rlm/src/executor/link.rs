@@ -85,10 +85,11 @@ pub(super) async fn link_cell(
         .consumer
         .clone()
         .ok_or_else(|| host_failure("the round recorded no trusted consumer context"))?;
-    let documents = lash_vm_runtime::KernelDocuments::new(
-        ctx.actor_context().backend().module_artifacts(),
-        ctx.actor_context().backend().stores().package_store(),
-    );
+    let documents = state
+        .documents
+        .as_ref()
+        .expect("cell document owner")
+        .clone();
     let boundary = HostBoundary {
         snapshot: packages.snapshot.clone(),
         context: context.clone(),
@@ -184,13 +185,8 @@ pub(super) async fn link_cell(
     let claim = ctx
         .execution_claim()
         .map_err(|error| host_failure(error.to_string()))?;
-    let bytes = lash_kernel_doc::DocumentBytes::from_parts(
-        lash_kernel_doc::DOCUMENT_GRAMMAR_VERSION,
-        document.id(),
-        document.body(),
-    );
     let id = documents
-        .admit_document(&claim, &bytes)
+        .admit_identified_document(&claim, &document)
         .await
         .map_err(package_error)?;
     let mut fulfilled = documents

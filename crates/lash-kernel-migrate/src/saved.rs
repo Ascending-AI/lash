@@ -9,7 +9,7 @@ pub fn saved_function(
     link: &Link,
     function_id: FunctionId,
 ) -> Result<SavedFunction, DocumentRefusal> {
-    if link.document != function.document.identity()
+    if link.document != function.document.id()
         || !function.document.functions.contains_key(&function_id)
     {
         return Err(DocumentRefusal::FormNotCarried {

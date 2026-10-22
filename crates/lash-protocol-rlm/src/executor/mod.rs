@@ -65,6 +65,7 @@ use crate::projection::CodeModeProjectedBindings;
 /// What a cell needs of the session that runs it, beside its state.
 #[derive(Clone)]
 pub(crate) struct CellServices {
+    pub documents: Option<lash_vm_runtime::KernelDocuments>,
     pub events: Arc<crate::projection::EventDecoder>,
     /// The workers that lower the cell and host its machine.
     pub workers: lash_vm_client::service::Service,
@@ -86,6 +87,15 @@ pub(crate) async fn execute_cell(
     services: &CellServices,
     session_projected_bindings: CodeModeProjectedBindings,
 ) -> ExecResponse {
+    let backend = ctx.actor_context().backend();
+    let previous = services.documents.as_ref().or(state.documents.as_ref());
+    state.documents = Some(match previous {
+        Some(owner) => owner.bind(backend.module_artifacts(), backend.package_store()),
+        None => lash_vm_runtime::KernelDocuments::new(
+            backend.module_artifacts(),
+            backend.package_store(),
+        ),
+    });
     let clean_code = clean_model_code(&request.code);
     let opened = cell_run::CellRun::open(&ctx);
     let identities = match &opened {
@@ -632,7 +642,7 @@ async fn run_linked_cell(
     let prepared = match services.kernel.library() {
         Ok(functions) => {
             processes::prepare(
-                &ctx,
+                state.documents.as_ref().expect("cell document owner"),
                 &start,
                 &functions,
                 &host.envelope.environment.authored,
@@ -652,14 +662,9 @@ async fn run_linked_cell(
         }
     };
     let closure = prepared.loaded.closure;
-    let mut program = match lash_kernel_vm::Program::prepare(
+    let mut program = match lash_kernel_vm::Program::prepare_identified(
         start.link,
-        prepared
-            .content
-            .documents
-            .iter()
-            .map(|(id, document)| (*id, Arc::new(document.clone())))
-            .collect(),
+        prepared.documents.clone(),
         &prepared.content.links,
         lash_kernel_doc::heap::PageId(closure.reference().0),
         lash_kernel_vm::PreparedLibrary::with_charge(prepared.loaded.registry, bounds.charge),
@@ -687,7 +692,7 @@ async fn run_linked_cell(
         lash_vm_client::RunStart {
             link: program.link,
             instances: program.instances,
-            documents: program.documents,
+            documents: prepared.documents,
             target: Target::Main,
             args: Vec::new(),
             session: state.session(),

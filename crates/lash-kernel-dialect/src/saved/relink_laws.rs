@@ -60,7 +60,7 @@ fn relink_preserves_document_function_environment_and_nested_membership() {
             function,
         },
         environment,
-        document: document.clone(),
+        document: lash_kernel_doc::IdentifiedDocument::new(document.clone()),
         captures: BTreeMap::new(),
         closure: PageRef {
             id: PageId([1; 32]),
@@ -75,7 +75,7 @@ fn relink_preserves_document_function_environment_and_nested_membership() {
         held: None,
     };
     let relinked = relink_saved(&saved, &after).unwrap();
-    assert_eq!(relinked.document, document);
+    assert_eq!(relinked.document.document(), &document);
     assert_eq!(relinked.callable.function, function);
     assert_eq!(relinked.link, after.identity());
     assert_eq!(relinked.callable.link, after.identity());

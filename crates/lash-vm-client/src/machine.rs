@@ -50,10 +50,8 @@ pub struct RunStart {
         lash_vocabulary::content_ids::LinkId,
         lash_kernel_vm::interface::PreparedInstance,
     >,
-    pub documents: std::collections::BTreeMap<
-        lash_vocabulary::names::DocumentId,
-        Arc<lash_kernel_doc::Document>,
-    >,
+    pub documents:
+        std::collections::BTreeMap<lash_vocabulary::names::DocumentId, IdentifiedDocument>,
     pub target: Target,
     /// The entry's arguments. Empty for `main`.
     pub args: Vec<Datum>,
@@ -278,7 +276,7 @@ impl RemoteMachines {
                 .map(
                     |(document, body)| lash_vm_protocol::message::StoredDocument {
                         document: *document,
-                        body: EncodedPayload(lash_vocabulary::tokens::encode_body(body.as_ref())),
+                        body: EncodedPayload(body.body().to_vec()),
                     },
                 )
                 .collect(),

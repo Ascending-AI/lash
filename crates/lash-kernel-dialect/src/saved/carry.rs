@@ -172,7 +172,7 @@ pub fn save(
                 link: callable.link,
                 callable,
                 environment: found.closure,
-                document,
+                document: lash_kernel_doc::IdentifiedDocument::new(document),
                 captures: gathered.captures,
                 closure: left.closure,
                 references: gathered.references,
