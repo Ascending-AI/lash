@@ -584,6 +584,26 @@ impl KernelMachine {
         self.active_link
     }
 
+    /// The defining Link owns this call, including unwind and early error exits.
+    fn in_link<R>(&mut self, link: lash_vocabulary::LinkId, run: impl FnOnce(&mut Self) -> R) -> R {
+        struct Restore<'a> {
+            machine: &'a mut KernelMachine,
+            previous: lash_vocabulary::LinkId,
+        }
+        impl Drop for Restore<'_> {
+            fn drop(&mut self) {
+                self.machine.active_link = self.previous;
+            }
+        }
+        let previous = self.active_link;
+        let scope = Restore {
+            machine: self,
+            previous,
+        };
+        scope.machine.active_link = link;
+        run(&mut *scope.machine)
+    }
+
     /// Read bindings are pinned by use; unresolved uses always wait.
     fn bind_modes(&mut self, modes: crate::interface::EffectModes) -> Result<(), StartError> {
         for (use_, mode) in modes {
