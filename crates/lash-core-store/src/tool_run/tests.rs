@@ -657,10 +657,10 @@ fn the_state_frontier_applies_each_publication_once_in_order() {
     );
     let mut applied = StateFrontier::default();
     applied.owner_segment = SegmentOrdinal(1);
-    applied.record(&resolution(1, None, 1));
+    applied.record(&resolution(1, None, 1)).unwrap();
     applied.settle();
-    applied.record(&resolution(2, Some(1), 1));
-    applied.record(&resolution(3, Some(2), 1));
+    applied.record(&resolution(2, Some(1), 1)).unwrap();
+    applied.record(&resolution(3, Some(2), 1)).unwrap();
     assert_eq!(applied.applied(), Some(PublicationOrdinal(3)));
     assert_eq!(applied.recent().len(), 2);
     assert_eq!(

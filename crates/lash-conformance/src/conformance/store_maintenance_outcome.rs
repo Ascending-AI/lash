@@ -274,9 +274,11 @@ async fn commit_generation(
             lash_core::NoProgressBudget::bounded(12),
         ))
     };
-    state.set_plugin_state(Some(super::runtime_persistence::plugin_state_at(
-        generation,
-    )));
+    state
+        .set_plugin_state(Some(super::runtime_persistence::plugin_state_at(
+            generation,
+        )))
+        .expect("fixture plugin state is admitted");
     let commit = crate::RuntimeCommit::persisted_state_for_test(&state);
     super::runtime_persistence::commit_runtime_state_for_test(
         store,

@@ -361,6 +361,11 @@ impl ProcessComponentConfig {
 #[serde(tag = "kind", rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum ProcessEnvRefusal {
+    #[error("{refusal}")]
+    Allocation {
+        #[source]
+        refusal: lash_protocol_types::allocation::AllocationError,
+    },
     #[error("{issue}")]
     PluginPreflight {
         issue: crate::plugin_registrations::PreflightIssue,
@@ -797,6 +802,12 @@ fn capture_missing(effect: &str, tool: &str) -> String {
         )
     } else {
         refusal
+    }
+}
+
+impl From<lash_protocol_types::allocation::AllocationError> for ProcessEnvRefusal {
+    fn from(refusal: lash_protocol_types::allocation::AllocationError) -> Self {
+        Self::Allocation { refusal }
     }
 }
 

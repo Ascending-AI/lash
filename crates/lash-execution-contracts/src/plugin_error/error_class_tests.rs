@@ -306,6 +306,23 @@ fn samples() -> Vec<PluginError> {
             }],
         });
     }
+    for kind in [
+        lash_protocol_types::allocation::ReserveError::Pressure,
+        lash_protocol_types::allocation::ReserveError::TooLarge,
+    ] {
+        let error = lash_protocol_types::allocation::AllocationError {
+            kind,
+            requested: 64,
+            actor: "sample".into(),
+            capacity: 32,
+        };
+        samples.push(PluginError::State(crate::PluginStateError::Allocation(
+            error.clone(),
+        )));
+        samples.push(PluginError::ProcessEnvRefused {
+            refusal: crate::ProcessEnvRefusal::Allocation { refusal: error },
+        });
+    }
     samples.extend(
         crate::StoreError::samples_for_testing()
             .into_iter()
@@ -359,6 +376,26 @@ fn every_plugin_error_has_one_class_on_every_boundary() {
             serde_json::from_slice(&serde_json::to_vec(&error).expect("encode plugin journal"))
                 .expect("replay plugin journal");
         for error in [error, replayed] {
+            if let PluginError::State(crate::PluginStateError::Allocation(expected))
+            | PluginError::ProcessEnvRefused {
+                refusal: crate::ProcessEnvRefusal::Allocation { refusal: expected },
+            } = &error
+            {
+                for runtime in [
+                    RuntimeEffectControllerError::from(error.clone()).into_runtime_error(),
+                    error.clone().into_turn_failure(RuntimeErrorCode::Plugin),
+                ] {
+                    assert_eq!(
+                        runtime.cause,
+                        Some(
+                            lash_core_store::runtime_error::RuntimeErrorCause::OwnerAllocation {
+                                refusal: Box::new(expected.clone())
+                            }
+                        ),
+                        "allocation cause must survive every host boundary"
+                    );
+                }
+            }
             if let PluginError::ProcessSuccessorRefused { process, refusal } = &error {
                 for runtime in [
                     RuntimeEffectControllerError::from(error.clone()).into_runtime_error(),

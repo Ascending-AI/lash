@@ -474,7 +474,7 @@ mod tests {
                 lash_core::NoProgressBudget::bounded(12),
             ))
         };
-        state.set_plugin_state(Some(plugin_state(1)));
+        state.set_plugin_state(Some(plugin_state(1))).unwrap();
         state.set_execution_graph(lash_core::testing::store_fixtures::execution_graph(
             "first execution state",
         ));
@@ -485,7 +485,7 @@ mod tests {
         state.apply_persisted_commit_result(first).unwrap();
 
         state.turn_index = 2;
-        state.set_plugin_state(Some(plugin_state(2)));
+        state.set_plugin_state(Some(plugin_state(2))).unwrap();
         state.set_execution_graph(lash_core::testing::store_fixtures::execution_graph(
             "changed execution state",
         ));
@@ -512,7 +512,8 @@ mod tests {
                     generation,
                     ..Default::default()
                 },
-            )]),
+            )])
+            .into(),
         }
     }
 

@@ -610,11 +610,14 @@ impl LashRuntime {
             plugin_config: state.admitted_plugin_config(),
         };
         let plugin_session = match state.plugin_state() {
-            Some(snapshot) => plugin_host.defer_session(PluginSessionRequest::rematerialization(
-                state.session_id.clone(),
-                snapshot,
-                authority,
-            )),
+            Some(snapshot) => plugin_host.defer_session(
+                PluginSessionRequest::rematerialization(
+                    state.session_id.clone(),
+                    snapshot,
+                    authority,
+                )
+                .with_allocation_budget(state.session_graph.nodes.allocation_budget().clone()),
+            ),
             None => plugin_host.defer_session(PluginSessionRequest::creation(
                 state.session_id.clone(),
                 authority,

@@ -801,9 +801,14 @@ impl DurableSnapshotStore {
         // outcome first.
         let oldest = ledger.oldest_reachable();
         let changes = match (&self.exec, members.bodies()) {
-            (ExecKey::Cell(session, run, _), Some(bodies)) if oldest > 0 => {
-                Some((session.clone(), run.clone(), bodies.run_changes(), bodies))
-            }
+            (ExecKey::Cell(session, run, _), Some(bodies)) if oldest > 0 => Some((
+                session.clone(),
+                run.clone(),
+                bodies
+                    .run_changes()
+                    .map_err(QuietPointRefusal::Allocation)?,
+                bodies,
+            )),
             _ => None,
         };
         if let Some((session, run, namespaces, _)) = &changes

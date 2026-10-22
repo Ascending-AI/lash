@@ -80,15 +80,13 @@ impl PluginHost {
     /// retain their original format and values.
     pub fn decode_state(&self, state: &PluginState) -> Result<PluginState, PluginError> {
         self.validate_state_formats(state)?;
-        let plugins = state
-            .plugins
-            .iter()
-            .map(|(id, namespace)| {
-                self.decode_namespace(id, namespace)
-                    .map(|decoded| (id.clone(), decoded))
-            })
-            .collect::<Result<_, _>>()?;
-        Ok(PluginState { plugins })
+        let mut decoded = PluginState::empty_in(state.allocation_budget())?;
+        for (id, namespace) in &state.plugins {
+            decoded
+                .plugins
+                .insert_ref(id, self.decode_namespace(id, namespace)?)?;
+        }
+        Ok(decoded)
     }
 
     pub(super) fn decode_namespace(
@@ -125,7 +123,7 @@ impl PluginHost {
     ) -> Result<PluginState, PluginError> {
         let mut encoded = self.decode_state(state)?;
         for factory in self.factories() {
-            let Some(namespace) = encoded.plugins.get_mut(factory.id()) else {
+            let Some(mut namespace) = encoded.plugins.get(factory.id()).cloned() else {
                 continue;
             };
             let to = writers
@@ -152,9 +150,10 @@ impl PluginHost {
                     record_kind: "plugin_state".into(),
                     message: error.to_string(),
                 }
-            })?);
+            })?)?;
             super::state::validate_namespace(&namespace.values, self.data_limits().plugin_state)?;
             namespace.format_version = to;
+            encoded.plugins.insert(factory.id().to_owned(), namespace)?;
         }
         Ok(encoded)
     }
@@ -253,7 +252,7 @@ fn decode_namespace_for(
         message: error.to_string(),
     })?;
     super::state::validate_namespace(&values, limits)?;
-    namespace.replace_values(std::sync::Arc::new(values));
+    namespace.replace_values(values.into())?;
     namespace.format_version = native;
     namespace.generation = namespace.generation.checked_add(1).ok_or_else(|| {
         PluginError::MonotonicCounterOverflow {
@@ -293,13 +292,15 @@ impl super::ProcessComponentRegistry {
             })?;
             let declaration = &registered.declaration;
             let native = declaration.format_version;
-            let namespace = decoded
-                .plugins
-                .entry(entry.id().to_string())
-                .or_insert_with(|| super::PluginNamespaceState {
-                    format_version: entry.config().format_version(),
-                    ..Default::default()
-                });
+            let mut namespace = match decoded.plugins.get(entry.id().as_str()) {
+                Some(namespace) => namespace.clone(),
+                None => {
+                    let mut namespace =
+                        super::PluginNamespaceState::empty_in(decoded.allocation_budget())?;
+                    namespace.format_version = entry.config().format_version();
+                    namespace
+                }
+            };
             for (kind, stored) in [
                 (FormatNamespace::State, namespace.format_version),
                 (FormatNamespace::Config, entry.config().format_version()),
@@ -316,7 +317,7 @@ impl super::ProcessComponentRegistry {
             }
             decode_namespace_for(
                 entry.id().as_str(),
-                namespace,
+                &mut namespace,
                 native,
                 limits,
                 |from, value| {
@@ -325,6 +326,7 @@ impl super::ProcessComponentRegistry {
                         .migrate_format(from, FormatNamespace::State, value)
                 },
             )?;
+            decoded.plugins.insert(entry.id().to_string(), namespace)?;
             let config = if entry.config().format_version() == native {
                 entry.config().value().clone()
             } else {

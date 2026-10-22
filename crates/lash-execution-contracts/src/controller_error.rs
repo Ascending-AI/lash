@@ -57,6 +57,9 @@ impl From<PluginError> for RuntimeEffectControllerError {
                 error
             }
             PluginError::Format(refusal) => refusal.into(),
+            PluginError::State(crate::PluginStateError::Allocation(error)) => {
+                RuntimeError::allocation(error).into()
+            }
             PluginError::State(crate::PluginStateError::Unrecorded { plugin }) => {
                 let mut error = Self::new(
                     RuntimeErrorCode::Plugin,
@@ -146,6 +149,9 @@ impl From<PluginError> for RuntimeEffectControllerError {
                     parent: Box::new(parent.clone()),
                 })
                 .into(),
+            PluginError::ProcessEnvRefused {
+                refusal: crate::ProcessEnvRefusal::Allocation { refusal: error },
+            } => RuntimeError::allocation(error).into(),
             ref err @ PluginError::ProcessEnvRefused { ref refusal } => {
                 RuntimeError::new(RuntimeErrorCode::ProcessEnvRefused, err.to_string())
                     .with_cause(crate::RuntimeErrorCause::ProcessEnvRefused {

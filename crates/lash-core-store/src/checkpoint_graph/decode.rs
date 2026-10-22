@@ -11,6 +11,7 @@
 //! block boundaries. The final check re-encodes the decoded body and
 //! requires the node's own identity back.
 
+use super::AdmittedGraphDecoder;
 use std::borrow::Cow;
 use std::collections::BTreeMap;
 
@@ -64,31 +65,13 @@ pub fn closure(
     root: NodeId,
     limits: &DecodeLimits,
 ) -> Result<BTreeMap<NodeId, EncodedNode>, GraphRefusal> {
-    let mut nodes = BTreeMap::new();
-    let mut pending = vec![root];
-    while let Some(id) = pending.pop() {
-        if nodes.contains_key(&id) {
-            continue;
-        }
-        let stored = source.fetch(&id).ok_or(GraphRefusal::MissingNode(id))?;
-        if stored.encoding != BlobEncoding::Graph {
-            continue;
-        }
-        let envelope = check_envelope(stored.bytes, id, limits)?;
-        // A persistent-heap page is the closure's leaf: what it reaches is
-        // read through its heap, never as host graph (FIG-6193).
-        if !super::node::is_semantic(envelope.kind) {
-            pending.extend(envelope.children.iter());
-        }
-        nodes.insert(
-            id,
-            EncodedNode {
-                id,
-                bytes: stored.bytes.into(),
-            },
-        );
-    }
-    Ok(nodes)
+    super::admission::closure_parts(
+        source,
+        root,
+        limits,
+        &lash_protocol_types::allocation::AllocationBudget::unowned(),
+    )
+    .map(|(nodes, _)| nodes)
 }
 
 impl NodeSource for BTreeMap<NodeId, EncodedNode> {
@@ -131,10 +114,7 @@ pub struct GraphDecoder<'s> {
     limits: DecodeLimits,
     nodes_read: u64,
     bytes_read: u64,
-}
-
-fn verifier() -> GraphStaging {
-    GraphStaging::new(EncodeBudget::new(ExplicitLimit::new(u64::MAX)))
+    pub(super) admission: super::admission::DecodeAdmission,
 }
 
 fn non_canonical(node: NodeId, reason: CanonicalFault) -> GraphRefusal {
@@ -152,7 +132,65 @@ impl<'s> GraphDecoder<'s> {
             limits,
             nodes_read: 0,
             bytes_read: 0,
+            admission: super::admission::DecodeAdmission::unowned(),
         }
+    }
+
+    /// A bounded decoder returns immutable results carrying their admission.
+    /// It never exposes a raw owned materialization without its obligation.
+    pub fn new_in(
+        source: &'s dyn NodeSource,
+        limits: DecodeLimits,
+        budget: &lash_protocol_types::allocation::AllocationBudget,
+    ) -> Result<AdmittedGraphDecoder<'s>, GraphRefusal> {
+        Ok(AdmittedGraphDecoder {
+            inner: Self {
+                source,
+                limits,
+                nodes_read: 0,
+                bytes_read: 0,
+                admission: super::admission::DecodeAdmission::new_in(budget)?,
+            },
+        })
+    }
+    fn verifier(&self) -> Result<GraphStaging, GraphRefusal> {
+        Ok(GraphStaging::new_in(
+            EncodeBudget::new(ExplicitLimit::new(u64::MAX)),
+            self.admission.budget(),
+        )?)
+    }
+    fn admit(&mut self, bytes: u64) -> Result<(), GraphRefusal> {
+        Ok(self.admission.reserve(bytes)?)
+    }
+    fn materialize_logical<'b>(
+        &mut self,
+        envelope: &NodeEnvelope<'_>,
+        body: &'b [u8],
+        id: NodeId,
+    ) -> Result<Cow<'b, [u8]>, GraphRefusal> {
+        self.admit(
+            (body.len() as u64)
+                .saturating_mul(66)
+                .saturating_add((envelope.children.len() as u64).saturating_mul(64))
+                .saturating_add(512),
+        )?;
+        materialize_logical(envelope, body, id)
+    }
+    fn writer_growth(
+        &mut self,
+        writer: &TokenWriter,
+        additional: usize,
+    ) -> Result<(), GraphRefusal> {
+        if writer.len().saturating_add(additional) > writer.capacity() {
+            self.admit(
+                (writer
+                    .capacity()
+                    .saturating_mul(2)
+                    .max(writer.len().saturating_add(additional)) as u64)
+                    .saturating_add(128),
+            )?;
+        }
+        Ok(())
     }
 
     /// The limits every read of this decoder is held to.
@@ -191,6 +229,11 @@ impl<'s> GraphDecoder<'s> {
             DecodeDimension::TotalBytes,
             self.bytes_read,
             self.limits.total_bytes,
+        )?;
+        self.admit(
+            (stored.bytes.len() as u64)
+                .saturating_mul(64)
+                .saturating_add(512),
         )?;
         Ok(check_envelope(stored.bytes, id, &self.limits)?)
     }
@@ -248,6 +291,23 @@ impl<'s> GraphDecoder<'s> {
         crate::perf_witness::record_graph_decoded_body(logical.len());
         let refuse = |error| GraphRefusal::from_token(error, Some(id), Some(expected.0));
         let mut reader = TokenReader::new(&logical).with_data_limits(self.limits.kernel_data);
+        let mut preflight = TokenReader::new(&logical).with_data_limits(self.limits.kernel_data);
+        let mut pending = 1u64;
+        let mut tokens = 0u64;
+        while pending != 0 {
+            let event = preflight.next_event().map_err(refuse)?;
+            pending = (pending - 1)
+                .checked_add(event.contents())
+                .ok_or(GraphRefusal::LengthOverflow)?;
+            tokens = tokens.saturating_add(1);
+        }
+        preflight.finish().map_err(refuse)?;
+        self.admit(
+            tokens
+                .saturating_mul(2048)
+                .saturating_add((logical.len() as u64).saturating_mul(4))
+                .saturating_add(std::mem::size_of::<T>() as u64 + 512),
+        )?;
         let value = T::decode(&mut reader).map_err(refuse)?;
         reader.finish().map_err(refuse)?;
         Ok(value)
@@ -266,7 +326,9 @@ impl<'s> GraphDecoder<'s> {
         id: NodeId,
         expected: NodeKind,
     ) -> Result<Vec<u8>, GraphRefusal> {
-        self.materialized_body(id, expected).map(Cow::into_owned)
+        let body = self.materialized_body(id, expected)?;
+        self.admit((body.len() as u64).saturating_add(128))?;
+        Ok(body.into_owned())
     }
 
     fn materialized_body(
@@ -287,7 +349,7 @@ impl<'s> GraphDecoder<'s> {
             .ok_or(GraphRefusal::UnsupportedKind(expected.0))?;
         let refuse = |error| GraphRefusal::from_token(error, Some(id), Some(expected.0));
         match spec.shape {
-            BodyShape::Direct => to_logical(&envelope, envelope.body, id),
+            BodyShape::Direct => self.materialize_logical(&envelope, envelope.body, id),
             BodyShape::Enveloped => {
                 let mut reader = envelope.reader();
                 let (variant, fields) = reader.sum().map_err(refuse)?;
@@ -300,7 +362,7 @@ impl<'s> GraphDecoder<'s> {
                 TokenReader::expect_fields(fields, 1).map_err(refuse)?;
                 let rest = &envelope.body[reader.position()..];
                 let placed = if variant == 0 {
-                    let placed = to_logical(&envelope, rest, id)?;
+                    let placed = self.materialize_logical(&envelope, rest, id)?;
                     let mut tree = TokenReader::new(&placed);
                     tree.skip_tree().map_err(refuse)?;
                     if !tree.is_empty() {
@@ -319,6 +381,11 @@ impl<'s> GraphDecoder<'s> {
                         .get(slot)
                         .ok_or(non_canonical(id, CanonicalFault::ChildSlotOutOfRange(slot)))?;
                     let placed = self.stream(id, stream, expected)?;
+                    self.admit(
+                        (placed.len() as u64)
+                            .saturating_mul(256)
+                            .saturating_add(512),
+                    )?;
                     let (children, physical) = to_physical(&placed, expected)?;
                     if envelope_len(expected, children.len(), physical.len() + 3) as u64
                         <= spec.bound.bytes()
@@ -331,7 +398,12 @@ impl<'s> GraphDecoder<'s> {
                     Cow::Borrowed(_) => placed,
                     Cow::Owned(logical) => Cow::Owned(logical),
                 };
-                let mut check = verifier();
+                self.admit(
+                    (logical.len() as u64)
+                        .saturating_mul(64)
+                        .saturating_add(4096),
+                )?;
+                let mut check = self.verifier()?;
                 if check.encode(expected, TypedBody::logical(&logical))? != id {
                     return Err(non_canonical(id, CanonicalFault::InvalidBodyForm));
                 }
@@ -347,6 +419,7 @@ impl<'s> GraphDecoder<'s> {
     /// A wrong kind, a non-canonical chunking, or any node read's refusal.
     pub fn text(&mut self, id: NodeId) -> Result<String, GraphRefusal> {
         let bytes = self.placed(id, Family::Text)?;
+        self.admit((bytes.len() as u64).saturating_add(128))?;
         String::from_utf8(bytes.into_owned()).map_err(|_| GraphRefusal::InvalidUtf8)
     }
 
@@ -356,7 +429,9 @@ impl<'s> GraphDecoder<'s> {
     ///
     /// A wrong kind, a non-canonical chunking, or any node read's refusal.
     pub fn bytes(&mut self, id: NodeId) -> Result<Vec<u8>, GraphRefusal> {
-        self.placed(id, Family::Bytes).map(Cow::into_owned)
+        let bytes = self.placed(id, Family::Bytes)?;
+        self.admit((bytes.len() as u64).saturating_add(128))?;
+        Ok(bytes.into_owned())
     }
 
     /// A placed value, assembled and then required to be exactly what
@@ -377,7 +452,8 @@ impl<'s> GraphDecoder<'s> {
             self.assemble_envelope(id, family, 0, envelope, &mut value)?;
             Cow::Owned(value)
         };
-        let mut check = verifier();
+        self.admit((value.len() as u64).saturating_mul(64).saturating_add(4096))?;
+        let mut check = self.verifier()?;
         let again = match family {
             Family::Text => {
                 let text = std::str::from_utf8(&value).map_err(|_| GraphRefusal::InvalidUtf8)?;
@@ -461,13 +537,21 @@ impl<'s> GraphDecoder<'s> {
         Ok(total)
     }
 
-    fn grow(&self, out: &mut Vec<u8>, bytes: &[u8]) -> Result<(), GraphRefusal> {
+    fn grow(&mut self, out: &mut Vec<u8>, bytes: &[u8]) -> Result<(), GraphRefusal> {
         let len = (out.len() + bytes.len()) as u64;
         self.limit(
             DecodeDimension::LogicalBytes,
             len,
             self.limits.logical_bytes,
         )?;
+        if out.len().saturating_add(bytes.len()) > out.capacity() {
+            self.admit(
+                (out.capacity()
+                    .saturating_mul(2)
+                    .max(out.len().saturating_add(bytes.len())) as u64)
+                    .saturating_add(128),
+            )?;
+        }
         out.extend_from_slice(bytes);
         Ok(())
     }
@@ -536,7 +620,7 @@ impl<'s> GraphDecoder<'s> {
         let envelope = self.envelope(node)?;
         match envelope.kind {
             NodeKind::STRUCTURE_BLOCK => {
-                let logical = to_logical(&envelope, envelope.body, node)?;
+                let logical = self.materialize_logical(&envelope, envelope.body, node)?;
                 self.grow(out, &logical)?;
                 Ok(1)
             }
@@ -610,13 +694,18 @@ impl<'s> GraphDecoder<'s> {
                             if token_len(value.len()) <= INLINE_TOKEN_MAX {
                                 return Err(non_canonical(id, CanonicalFault::InvalidPlacement));
                             }
-                            let writer = out.get_or_insert_with(|| {
+                            if out.is_none() {
                                 let capacity = placed.len() - (reader.position() - start)
                                     + token_len(value.len()) as usize;
+                                self.admit((capacity as u64).saturating_add(128))?;
                                 let mut writer = TokenWriter::with_capacity(capacity);
                                 writer.raw(&placed[..start]);
-                                writer
-                            });
+                                out = Some(writer);
+                            }
+                            let writer = out
+                                .as_mut()
+                                .unwrap_or_else(|| unreachable!("writer initialized"));
+                            self.writer_growth(writer, token_len(value.len()) as usize)?;
                             match family {
                                 Family::Text => writer.text(
                                     std::str::from_utf8(&value)
@@ -627,6 +716,7 @@ impl<'s> GraphDecoder<'s> {
                         }
                         None => {
                             if let Some(writer) = &mut out {
+                                self.writer_growth(writer, reader.position() - start)?;
                                 writer.raw(&placed[start..reader.position()]);
                             }
                         }
@@ -634,6 +724,7 @@ impl<'s> GraphDecoder<'s> {
                 }
                 _ => {
                     if let Some(writer) = &mut out {
+                        self.writer_growth(writer, reader.position() - start)?;
                         writer.raw(&placed[start..reader.position()]);
                     }
                 }
@@ -651,7 +742,7 @@ impl<'s> GraphDecoder<'s> {
 }
 
 /// A physical body's logical form: each slot its child's digest.
-fn to_logical<'b>(
+fn materialize_logical<'b>(
     envelope: &NodeEnvelope<'_>,
     body: &'b [u8],
     id: NodeId,

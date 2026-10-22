@@ -742,7 +742,7 @@ impl ProcessComponentRegistry {
                     format_version: entry.config().format_version(),
                     ..Default::default()
                 },
-            );
+            )?;
         }
         self.compose_with_state(env, process, &snapshot)
     }
@@ -757,7 +757,10 @@ impl ProcessComponentRegistry {
     ) -> Result<ProcessComposition, ProcessEnvRefusal> {
         let env = &self.sealed(env, snapshot)?;
         let state = Arc::new(std::sync::Mutex::new(
-            state::PluginStateRegistry::from_snapshot(Some(snapshot)),
+            state::PluginStateRegistry::from_snapshot(
+                Some(snapshot),
+                snapshot.allocation_budget(),
+            )?,
         ));
         let BuiltComponents { owners, parts } = self.contributions(env, process, &state)?;
         if let Some(process) = process

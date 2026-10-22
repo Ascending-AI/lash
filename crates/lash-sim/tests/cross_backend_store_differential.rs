@@ -647,11 +647,17 @@ fn checkpoint_bodies() -> HydratedSessionCheckpoint {
         .into(),
         encoding: Default::default(),
     };
-    let namespace_body = NamespaceBody::encode(&namespace.values);
+    let namespace_body = NamespaceBody::encode(
+        &namespace.values,
+        &lash_protocol_types::allocation::AllocationBudget::unowned(),
+    )
+    .expect("fixture namespace body");
     let plugin_state = PluginStateMap {
         plugins: [(
             DIFFERENTIAL_PLUGIN.to_string(),
-            namespace.entry(namespace_body.values.clone()),
+            namespace
+                .entry(namespace_body.values())
+                .expect("fixture namespace entry"),
         )]
         .into_iter()
         .collect(),
@@ -666,7 +672,7 @@ fn checkpoint_bodies() -> HydratedSessionCheckpoint {
         ),
         (
             namespace_component_key(DIFFERENTIAL_PLUGIN),
-            lash_core::HydratedCheckpointComponent::changed(namespace_body.bytes.to_vec()),
+            lash_core::HydratedCheckpointComponent::changed(namespace_body.bytes().to_vec()),
         ),
         (
             "arbitrary/differential".to_string(),
@@ -690,7 +696,7 @@ fn checkpoint_bodies() -> HydratedSessionCheckpoint {
         },
         components,
         execution: Some(differential_execution()),
-        namespace_nodes: namespace_body.graph.into(),
+        namespace_nodes: namespace_body.graph().clone().into(),
     }
 }
 

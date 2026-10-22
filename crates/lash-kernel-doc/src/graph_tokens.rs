@@ -375,6 +375,11 @@ impl TokenWriter {
         }
     }
 
+    /// Allocated output capacity, for producers that reserve before growth.
+    pub fn capacity(&self) -> usize {
+        self.out.capacity()
+    }
+
     fn tag(&mut self, tag: Tag) {
         self.out.push(tag.byte());
     }

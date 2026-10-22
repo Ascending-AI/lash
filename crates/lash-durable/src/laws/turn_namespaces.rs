@@ -11,15 +11,20 @@ use lash_protocol_types::{SessionId, TurnId};
 
 /// A namespace at `generation` holding `value` under `key`: its entry and
 /// its values body.
-fn namespace(generation: u64, value: &str) -> (NamespaceEntry, NamespaceBody) {
+fn namespace(generation: u64, value: &str) -> Result<(NamespaceEntry, NamespaceBody), LawBroken> {
     let values = std::collections::BTreeMap::from([("key".to_owned(), value.into())]);
-    let body = NamespaceBody::encode(&values);
+    let body = NamespaceBody::encode(
+        &values,
+        &lash_protocol_types::allocation::AllocationBudget::unowned(),
+    )
+    .map_err(|error| LawBroken(error.to_string()))?;
     let entry = PluginNamespaceState {
         generation,
         ..PluginNamespaceState::default()
     }
-    .entry(body.values.clone());
-    (entry, body)
+    .entry(body.values())
+    .map_err(|error| LawBroken(error.to_string()))?;
+    Ok((entry, body))
 }
 
 /// A run's typed namespace writes have one body per current value: Body
@@ -83,7 +88,7 @@ pub async fn a_runs_namespace_write_modes_keep_only_current_values_and_end_with_
         turn_deadline: None,
     })
     .await?;
-    let (first, first_body) = namespace(1, "first");
+    let (first, first_body) = namespace(1, "first")?;
     write(first.clone(), RunValuesWrite::Body(first_body.clone())).await?;
     let read = rows().await?;
     ensure!(
@@ -107,7 +112,7 @@ pub async fn a_runs_namespace_write_modes_keep_only_current_values_and_end_with_
         "a held body read back {read:?}"
     );
 
-    let (second, second_body) = namespace(3, "second");
+    let (second, second_body) = namespace(3, "second")?;
     write(second.clone(), RunValuesWrite::Body(second_body.clone())).await?;
     let read = rows().await?;
     ensure!(

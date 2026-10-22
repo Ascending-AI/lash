@@ -38,6 +38,12 @@ impl MapValue for u64 {
     }
 }
 
+impl MapValue for () {
+    fn clone_in(&self, _: &AllocationBudget) -> Result<Self, AllocationError> {
+        Ok(())
+    }
+}
+
 /// A complete immutable map. The serde representation remains a flat map.
 ///
 /// Integrator class (ADR 0051): **store and durable-substrate implementors**.
@@ -133,6 +139,26 @@ impl<K, V> SharedSourceMap<K, V> {
     pub fn allocation_budget(&self) -> &AllocationBudget {
         &self.0.budget
     }
+    /// Attach a pre-admitted fresh decode and transfer that same source
+    /// obligation into every escaping value before exposing a reader.
+    pub fn decoded_in_with(
+        &mut self,
+        allocation: AllocationHold,
+        budget: AllocationBudget,
+        mut adopt: impl FnMut(&mut V, AllocationHold, AllocationBudget) -> bool,
+    ) -> bool {
+        let Some(storage) = Arc::get_mut(&mut self.0) else {
+            return false;
+        };
+        for value in storage.entries.values_mut() {
+            if !adopt(value, allocation.clone(), budget.clone()) {
+                return false;
+            }
+        }
+        storage.allocation = allocation;
+        storage.budget = budget;
+        true
+    }
     /// Fresh decoders attach their already acquired source obligation before
     /// sharing the map. An unexpectedly shared decode cannot be adopted.
     pub fn decoded_in(&mut self, allocation: AllocationHold, budget: AllocationBudget) -> bool {
@@ -181,33 +207,36 @@ impl<K: MapKey, V: MapValue> SharedSourceMap<K, V> {
     }
     /// Publish a complete replacement, or leave this map unchanged.
     pub fn insert(&mut self, key: K, value: V) -> Result<Option<V>, AllocationError> {
-        let budget = &self.0.budget;
-        let hold = budget
-            .reserve(Self::capacity(&self.0.entries).saturating_add(Self::entry_capacity(&key)))?;
-        let mut entries = self
-            .0
-            .entries
-            .iter()
-            .map(|(key, value)| Ok((key.clone(), MapValue::clone_in(value, budget)?)))
-            .collect::<Result<BTreeMap<_, _>, AllocationError>>()?;
-        let value = MapValue::clone_in(&value, budget)?;
-        let previous = entries.insert(key, value);
-        *self = Self::from_admitted(entries, hold, budget.clone());
-        Ok(previous)
+        self.insert_ref(&key, value)
     }
-    /// Admit a borrowed key before copying it for a new entry.
+    /// Admit a borrowed key before cloning any retained key or map entry.
     pub fn insert_ref(&mut self, key: &K, value: V) -> Result<Option<V>, AllocationError> {
         let budget = &self.0.budget;
-        let hold = budget
-            .reserve(Self::capacity(&self.0.entries).saturating_add(Self::entry_capacity(key)))?;
+        let capacity = self
+            .0
+            .entries
+            .keys()
+            .filter(|stored| *stored != key)
+            .fold(
+                (std::mem::size_of::<Storage<K, V>>() + 128) as u64,
+                |bytes, stored| bytes.saturating_add(Self::entry_capacity(stored)),
+            )
+            .saturating_add(Self::entry_capacity(key));
+        let hold = budget.reserve(capacity)?;
         let mut entries = self
             .0
             .entries
             .iter()
-            .map(|(key, value)| Ok((key.clone(), MapValue::clone_in(value, budget)?)))
+            .filter(|(stored, _)| *stored != key)
+            .map(|(stored, value)| Ok((stored.clone(), MapValue::clone_in(value, budget)?)))
             .collect::<Result<BTreeMap<_, _>, AllocationError>>()?;
-        let value = MapValue::clone_in(&value, budget)?;
-        let previous = entries.insert(key.clone(), value);
+        let previous = self
+            .0
+            .entries
+            .get(key)
+            .map(|value| MapValue::clone_in(value, budget))
+            .transpose()?;
+        entries.insert(key.clone(), MapValue::clone_in(&value, budget)?);
         *self = Self::from_admitted(entries, hold, budget.clone());
         Ok(previous)
     }

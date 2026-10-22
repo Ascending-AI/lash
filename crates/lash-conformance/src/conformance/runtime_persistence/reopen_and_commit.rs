@@ -143,7 +143,8 @@ pub async fn gc_blobs(factory: ReopenableRuntimeStore) {
             lash_core::NoProgressBudget::bounded(12),
         ))
     };
-    v1.set_plugin_state(Some(super::plugin_state_at(1)));
+    v1.set_plugin_state(Some(super::plugin_state_at(1)))
+        .expect("fixture plugin state is admitted");
     let v1_result = commit_runtime_state_for_test(
         &store,
         RuntimeCommit::persisted_state_for_test(&v1),
@@ -162,7 +163,8 @@ pub async fn gc_blobs(factory: ReopenableRuntimeStore) {
             lash_core::NoProgressBudget::bounded(12),
         ))
     };
-    v2.set_plugin_state(Some(super::plugin_state_at(2)));
+    v2.set_plugin_state(Some(super::plugin_state_at(2)))
+        .expect("fixture plugin state is admitted");
     commit_runtime_state_for_test(
         &store,
         RuntimeCommit::persisted_state_for_test(&v2),

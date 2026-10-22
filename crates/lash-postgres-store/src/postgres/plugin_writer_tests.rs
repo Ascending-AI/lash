@@ -152,7 +152,8 @@ fn plugin_state(format: u32, value: u64) -> PluginState {
                 values: BTreeMap::from([("count".to_owned(), serde_json::json!(value))]).into(),
                 encoding: Default::default(),
             },
-        )]),
+        )])
+        .into(),
     }
 }
 
@@ -292,7 +293,7 @@ async fn an_out_of_range_plugin_write_is_refused_with_zero_publication_on_every_
         .await
         .expect("admit the session");
     let mut state = state("writer");
-    state.set_plugin_state(Some(plugin_state(1, 1)));
+    state.set_plugin_state(Some(plugin_state(1, 1))).unwrap();
     state
         .authority
         .plugin_config
@@ -320,7 +321,9 @@ async fn an_out_of_range_plugin_write_is_refused_with_zero_publication_on_every_
 
     // A commit's plugin state.
     let mut next_state = state.clone();
-    next_state.set_plugin_state(Some(plugin_state(2, 2)));
+    next_state
+        .set_plugin_state(Some(plugin_state(2, 2)))
+        .unwrap();
     let error = commit(&store, &mut next_state)
         .await
         .expect_err("a commit refuses plugin state outside the range");
@@ -359,7 +362,7 @@ async fn an_out_of_range_plugin_write_is_refused_with_zero_publication_on_every_
     assert_eq!(published(&n).await, before);
 
     assert_eq!(recorded_range(&n).await, Some((1, 1)));
-    state.set_plugin_state(Some(plugin_state(1, 3)));
+    state.set_plugin_state(Some(plugin_state(1, 3))).unwrap();
     commit(&store, &mut state)
         .await
         .expect("the permitted format still commits");

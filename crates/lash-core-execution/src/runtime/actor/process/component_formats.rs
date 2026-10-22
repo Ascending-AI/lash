@@ -59,13 +59,16 @@ pub async fn recorded_component_state(
         }
     };
     for entry in env.components() {
-        state
-            .plugins
-            .entry(entry.id().to_string())
-            .or_insert_with(|| crate::plugin::PluginNamespaceState {
-                format_version: entry.config().format_version(),
-                ..Default::default()
-            });
+        if !state.plugins.contains_key(entry.id().as_str()) {
+            let mut namespace =
+                crate::plugin::PluginNamespaceState::empty_in(state.allocation_budget())
+                    .map_err(lash_core_store::checkpoint_graph::GraphRefusal::from)?;
+            namespace.format_version = entry.config().format_version();
+            state
+                .plugins
+                .insert(entry.id().to_string(), namespace)
+                .map_err(lash_core_store::checkpoint_graph::GraphRefusal::from)?;
+        }
     }
     let facts = reads
         .run_facts(&OwnerKey::Process(process.id.clone()))
