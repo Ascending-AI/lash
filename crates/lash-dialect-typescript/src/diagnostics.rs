@@ -558,7 +558,7 @@ pub struct Diagnostic {
     /// these hold the rewrite, and no text appears in both.
     pub suggestions: Vec<String>,
     pub operand_type: Option<Box<lash_kernel_dialect::SourceOperandType>>,
-    pub namespace_shadowing: Option<Box<lash_vocabulary::NamespaceShadowing>>,
+    pub fact: Option<Box<lash_kernel_dialect::DiagnosticFact>>,
 }
 
 impl Diagnostic {
@@ -623,7 +623,7 @@ impl Diagnostic {
             kind: diagnostic.kind,
             suggestions: Vec::new(),
             operand_type: None,
-            namespace_shadowing: diagnostic.namespace_shadowing,
+            fact: diagnostic.fact,
         }
     }
 
@@ -661,7 +661,7 @@ impl Diagnostic {
             kind,
             suggestions,
             operand_type: None,
-            namespace_shadowing: None,
+            fact: None,
         }
     }
 
@@ -684,7 +684,7 @@ impl Diagnostic {
             kind: kind_from_code(code),
             suggestions: vec![repair.into()],
             operand_type: None,
-            namespace_shadowing: None,
+            fact: None,
         }
     }
 }
@@ -754,7 +754,7 @@ impl From<Diagnostic> for lash_kernel_dialect::Diagnostic {
             kind: diagnostic.kind,
             repairs: diagnostic.suggestions,
             operand_type: diagnostic.operand_type,
-            namespace_shadowing: diagnostic.namespace_shadowing,
+            fact: diagnostic.fact,
         }
     }
 }

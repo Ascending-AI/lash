@@ -263,7 +263,8 @@ fn refusal(diagnostic: Diagnostic) -> DialectRefusal {
         unsupported: matches!(diagnostic.kind, DiagnosticKind::Refusal),
         repairs: diagnostic.repairs,
         operand_type: diagnostic.operand_type,
-        namespace_shadowing: diagnostic.namespace_shadowing,
+
+        fact: diagnostic.fact,
     }
 }
 
@@ -337,7 +338,11 @@ mod tests {
             assert_eq!(refusal.span.unwrap().0, 6);
             assert!(!refusal.unsupported);
             assert!(refusal.repairs.is_empty());
-            let facts = refusal.namespace_shadowing.unwrap();
+            let Some(lash_kernel_dialect::DiagnosticFact::NamespaceShadowing(facts)) =
+                refusal.fact.as_deref()
+            else {
+                panic!("typed namespace facts");
+            };
             assert_eq!(facts.binding_name, "jev");
             assert_eq!(facts.binding_origin, None);
             assert_eq!(facts.namespace, "jev");
@@ -457,6 +462,46 @@ mod tests {
             matches!(response, Response::Unprintable { site } if site == expected),
             "the callable site must survive IPC without parsing diagnostic prose"
         );
+    }
+
+    /// FIG-7145: typed entry annotation refusals survive the worker boundary,
+    /// with source coordinates intact and no prose needed to recover the fact.
+    #[test]
+    fn signature_required_facts_cross_the_worker_wire() {
+        let required = lash_kernel_doc::SignatureRequired {
+            function: lash_kernel_doc::FunctionLocation {
+                name: Some("handle".into()),
+                site: None,
+            },
+            position: lash_kernel_doc::SignaturePosition::Parameter {
+                index: 0,
+                name: lash_vocabulary::Name::new("event"),
+            },
+            span: Some(lash_kernel_doc::Span { start: 17, end: 22 }),
+        };
+        let mut unknown = serde_json::to_value(&required).expect("fact JSON");
+        unknown["unexpected"] = true.into();
+        assert!(serde_json::from_value::<lash_kernel_doc::SignatureRequired>(unknown).is_err());
+        let mut wrong_code = serde_json::to_value(&required).expect("fact JSON");
+        wrong_code["code"] = "OTHER".into();
+        assert!(serde_json::from_value::<lash_kernel_doc::SignatureRequired>(wrong_code).is_err());
+        let response = Response::DialectRefused(refusal(required.clone().into()));
+        let wire = rmp_serde::to_vec_named(&response).expect("refusal wire");
+        let Response::DialectRefused(decoded) =
+            rmp_serde::from_slice(&wire).expect("typed refusal")
+        else {
+            panic!("a dialect refusal");
+        };
+        assert_eq!(decoded.code, "SIGNATURE_REQUIRED");
+        assert_eq!(decoded.span, Some((17, 22)));
+        assert_eq!(
+            decoded.fact,
+            Some(Box::new(
+                lash_kernel_dialect::DiagnosticFact::SignatureRequired(required)
+            ))
+        );
+        assert!(decoded.message.is_empty());
+        assert!(decoded.repairs.is_empty());
     }
 
     std::thread_local! {

@@ -111,8 +111,7 @@ impl ModuleError {
             span: self.span,
             kind: self.refusal.kind(),
             repairs: vec![self.refusal.repair().to_owned()],
-            operand_type: None,
-            namespace_shadowing: None,
+            ..Default::default()
         }
     }
 }

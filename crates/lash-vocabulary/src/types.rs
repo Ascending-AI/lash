@@ -232,13 +232,40 @@ pub enum SignaturePosition {
 
 /// Only entry promotion requires a written parameter and settled-result type.
 /// Producers resolve explicit any/unknown to Json before calling this seam.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema, thiserror::Error)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, JsonSchema, thiserror::Error)]
 #[serde(tag = "code", rename = "SIGNATURE_REQUIRED", deny_unknown_fields)]
 #[error("SIGNATURE_REQUIRED: {function:?} {position:?}")]
 pub struct SignatureRequired {
     pub function: FunctionLocation,
     pub position: SignaturePosition,
     pub span: Option<crate::sites::Span>,
+}
+
+// A tagged struct's derived deserializer treats its serialized tag as an
+// unknown field. An internally tagged enum consumes and validates that tag.
+impl<'de> Deserialize<'de> for SignatureRequired {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(tag = "code", deny_unknown_fields)]
+        enum Wire {
+            #[serde(rename = "SIGNATURE_REQUIRED")]
+            Required {
+                function: FunctionLocation,
+                position: SignaturePosition,
+                span: Option<crate::sites::Span>,
+            },
+        }
+        let Wire::Required {
+            function,
+            position,
+            span,
+        } = Wire::deserialize(deserializer)?;
+        Ok(Self {
+            function,
+            position,
+            span,
+        })
+    }
 }
 
 /// Check a resolved entry signature. Any denotes missing annotation evidence;

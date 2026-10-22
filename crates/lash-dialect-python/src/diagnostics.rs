@@ -95,8 +95,7 @@ pub(crate) fn diagnostic(code: Code, message: impl Into<String>, range: TextRang
         span: Some(span(range)),
         kind: code.kind(),
         repairs: Vec::new(),
-        operand_type: None,
-        namespace_shadowing: None,
+        ..Default::default()
     }
 }
 
@@ -120,8 +119,7 @@ pub(crate) fn unplaced(code: Code, message: impl Into<String>) -> Diagnostic {
         span: None,
         kind: code.kind(),
         repairs: Vec::new(),
-        operand_type: None,
-        namespace_shadowing: None,
+        ..Default::default()
     }
 }
 

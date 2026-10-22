@@ -264,7 +264,11 @@ fn a_cell_local_shadowing_a_discovered_namespace_is_diagnosed() {
         .expect_err("shadowing is diagnosed before execution");
         assert_eq!(error.code, "NAMESPACE_SHADOWED_BY_LOCAL");
         assert!(error.repairs.is_empty());
-        let shadowing = error.namespace_shadowing.as_ref().expect("typed facts");
+        let Some(lash_kernel_dialect::DiagnosticFact::NamespaceShadowing(shadowing)) =
+            error.fact.as_deref()
+        else {
+            panic!("typed namespace facts");
+        };
         assert_eq!(shadowing.binding_name, "jev");
         assert_eq!(shadowing.binding_origin, None); // CellEnvironment has names, not cell provenance.
         assert_eq!(shadowing.namespace, "jev");

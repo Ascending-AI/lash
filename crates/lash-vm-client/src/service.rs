@@ -255,7 +255,7 @@ pub struct DialectRefusal {
     pub unsupported: bool,
     pub repairs: Vec<String>,
     pub operand_type: Option<Box<lash_kernel_dialect::SourceOperandType>>,
-    pub namespace_shadowing: Option<Box<lash_vocabulary::NamespaceShadowing>>,
+    pub fact: Option<Box<lash_kernel_dialect::DiagnosticFact>>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
