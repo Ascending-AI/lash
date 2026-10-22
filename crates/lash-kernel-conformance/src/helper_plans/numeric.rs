@@ -309,10 +309,8 @@ fn python_floor_forwards_agree_with_their_bodies_on_edge_pairs() {
                     &source,
                     base.library.registry(),
                 ));
-                let program = Program {
-                    document,
-                    ..base.clone()
-                };
+                let program = crate::machine::prepare_document(&base.library, document, None)
+                    .expect("prepare numeric witness");
                 let expected = run::<0>(&case, &program, &mut Projector::default());
                 assert_eq!(
                     run::<1>(

@@ -59,6 +59,24 @@ lash_rust_unit_test(
 )
 
 lash_rust_binary(
+    name = "admission_corpus__example",
+    crate_features = [],
+    crate_name = "admission_corpus",
+    crate_root = "examples/admission_corpus.rs",
+    declared_features = [],
+    exec_properties = sized_exec_properties("lash-kernel-conformance", "admission_corpus"),
+    extra_compile_data = [],
+    include_dev_deps = True,
+    library = ":lash-kernel-conformance",
+    library_crate_name = "lash_kernel_conformance",
+    manifest_dir = "crates/lash-kernel-conformance",
+    package_name = "lash-kernel-conformance",
+    rustc_env = {},
+    tags = [],
+    version = "0.0.0-dev",
+)
+
+lash_rust_binary(
     name = "package_audit__example",
     crate_features = [],
     crate_name = "package_audit",

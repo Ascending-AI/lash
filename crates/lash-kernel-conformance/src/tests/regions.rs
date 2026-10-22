@@ -138,32 +138,32 @@ const ISLANDS: &[(&str, &str, u32)] = &[
     ),
     (
         "mutual recursion",
-        "definition \"function even(n: Any) -> Any\\nkernel 1\\nmetering statements\\nimport 0 operation host.echo(x: Any) -> Any\\nbody { if num.lt(n, 1) { return true } return call odd(num.sub(n, 1)) }\"\n\ndefinition \"function odd(n: Any) -> Any\\nkernel 1\\nmetering statements\\nimport 0 operation host.echo(x: Any) -> Any\\nbody { if num.lt(n, 1) { return false } return call even(num.sub(n, 1)) }\"\n\nmain { let r = call even(17) finish r }",
+        "definition \"function even(even: Any, odd: Any, n: Any) -> Any\\nkernel 1\\nmetering statements\\nimport 0 operation host.echo(x: Any) -> Any\\nbody { if num.lt(n, 1) { return true } return apply odd(even, odd, num.sub(n, 1)) }\"\n\ndefinition \"function odd(even: Any, odd: Any, n: Any) -> Any\\nkernel 1\\nmetering statements\\nimport 0 operation host.echo(x: Any) -> Any\\nbody { if num.lt(n, 1) { return false } return apply even(even, odd, num.sub(n, 1)) }\"\n\nmain { let r = call even(&even, &odd, 17) finish r }",
         64,
     ),
     (
         "a depth bound crossed inside recursion",
-        "definition \"function down(n: Any) -> Any\\nkernel 1\\nmetering statements\\nimport 0 operation host.echo(x: Any) -> Any\\nbody { if num.lt(n, 1) { return 0 } return num.add(call down(num.sub(n, 1)), 1) }\"\n\nmain { let r = call down(40) finish r }",
+        "definition \"function down(self: Any, n: Any) -> Any\\nkernel 1\\nmetering statements\\nimport 0 operation host.echo(x: Any) -> Any\\nbody { if num.lt(n, 1) { return 0 } return num.add(apply self(self, num.sub(n, 1)), 1) }\"\n\nmain { let r = call down(&down, 40) finish r }",
         24,
     ),
     (
         "a raise deep in recursion, caught",
-        "definition \"function f(n: Any) -> Any\\nkernel 1\\nmetering statements\\nimport 0 operation host.echo(x: Any) -> Any\\nbody { if num.lt(n, 1) { return num.div(1, n) } return num.add(call f(num.sub(n, 1)), 1) }\"\n\nmain { try { let r = call f(9) finish r } catch e { finish e.kind } }",
+        "definition \"function f(self: Any, n: Any) -> Any\\nkernel 1\\nmetering statements\\nimport 0 operation host.echo(x: Any) -> Any\\nbody { if num.lt(n, 1) { return num.div(1, n) } return num.add(apply self(self, num.sub(n, 1)), 1) }\"\n\nmain { try { let r = call f(&f, 9) finish r } catch e { finish e.kind } }",
         64,
     ),
     (
         "an integer overflowing into a big integer after a call returns",
-        "definition \"function fact(n: Any) -> Any\\nkernel 1\\nmetering statements\\nimport 0 operation host.echo(x: Any) -> Any\\nbody { if num.lt(n, 2) { return 1 } return num.mul(n, call fact(num.sub(n, 1))) }\"\n\nmain { let r = call fact(23) finish r }",
+        "definition \"function fact(self: Any, n: Any) -> Any\\nkernel 1\\nmetering statements\\nimport 0 operation host.echo(x: Any) -> Any\\nbody { if num.lt(n, 2) { return 1 } return num.mul(n, apply self(self, num.sub(n, 1))) }\"\n\nmain { let r = call fact(&fact, 23) finish r }",
         64,
     ),
     (
         "variables, writes and nested blocks in island bodies",
-        "definition \"function g(n: Any) -> Any\\nkernel 1\\nmetering statements\\nimport 0 operation host.echo(x: Any) -> Any\\nbody { let a = num.add(n, 1) set a = num.mul(a, 2) if num.lt(a, 12) { let b = num.add(a, 3) if num.lt(b, 9) { return b } set a = b } return num.sub(a, 1) }\"\n\ndefinition \"function h(n: Any) -> Any\\nkernel 1\\nmetering statements\\nimport 0 operation host.echo(x: Any) -> Any\\nbody { if num.lt(n, 1) { return 0 } return num.add(call g(n), call h(num.sub(n, 1))) }\"\n\nmain { let r = call h(5) finish r }",
+        "definition \"function g(n: Any) -> Any\\nkernel 1\\nmetering statements\\nimport 0 operation host.echo(x: Any) -> Any\\nbody { let a = num.add(n, 1) set a = num.mul(a, 2) if num.lt(a, 12) { let b = num.add(a, 3) if num.lt(b, 9) { return b } set a = b } return num.sub(a, 1) }\"\n\ndefinition \"function h(self: Any, n: Any) -> Any\\nkernel 1\\nmetering statements\\nimport 0 operation host.echo(x: Any) -> Any\\nbody { if num.lt(n, 1) { return 0 } return num.add(call g(n), apply self(self, num.sub(n, 1))) }\"\n\nmain { let r = call h(&h, 5) finish r }",
         64,
     ),
     (
         "a body that falls off its end, and helper calls",
-        "definition \"function p(n: Any) -> Any\\nkernel 1\\nmetering statements\\nimport 0 operation host.echo(x: Any) -> Any\\nbody { if num.lt(n, 0) { return 1 } }\"\n\ndefinition \"function q(n: Any) -> Any\\nkernel 1\\nmetering statements\\nimport 0 operation host.echo(x: Any) -> Any\\nbody { if num.lt(n, 1) { return 0 } let x = num.add(invoke num.add(n, 1), 0) return invoke num.add(call q(num.sub(n, 1)), num.sub(x, n)) }\"\n\ndefinition \"function r(n: Any) -> Any\\nkernel 1\\nmetering statements\\nimport 0 operation host.echo(x: Any) -> Any\\nbody { if num.lt(n, 1) { return call p(3) } return call r(num.sub(n, 1)) }\"\n\nmain { let a = call q(5) let c = call r(4) finish (a, c) }",
+        "definition \"function p(n: Any) -> Any\\nkernel 1\\nmetering statements\\nimport 0 operation host.echo(x: Any) -> Any\\nbody { if num.lt(n, 0) { return 1 } }\"\n\ndefinition \"function q(self: Any, n: Any) -> Any\\nkernel 1\\nmetering statements\\nimport 0 operation host.echo(x: Any) -> Any\\nbody { if num.lt(n, 1) { return 0 } let x = num.add(invoke num.add(n, 1), 0) return invoke num.add(apply self(self, num.sub(n, 1)), num.sub(x, n)) }\"\n\ndefinition \"function r(self: Any, n: Any) -> Any\\nkernel 1\\nmetering statements\\nimport 0 operation host.echo(x: Any) -> Any\\nbody { if num.lt(n, 1) { return call p(3) } return apply self(self, num.sub(n, 1)) }\"\n\nmain { let a = call q(&q, 5) let c = call r(&r, 4) finish (a, c) }",
         64,
     ),
     (
@@ -288,7 +288,7 @@ const SESSIONS: &[(&str, &str, bool)] = &[
     ),
     (
         "a park between two top-level loops",
-        "main { let i = 0 let s = 0 while num.lt(i, 10) { set s = num.add(s, i) set i = num.add(i, 1) } do sleep 0 while num.lt(i, 20) { set s = num.sub(s, i) set i = num.add(i, 1) } finish (s, i) }",
+        "import 0 operation typescript.sleep(milliseconds: Int) -> Null\nmain { let i = 0 let s = 0 while num.lt(i, 10) { set s = num.add(s, i) set i = num.add(i, 1) } do perform 0(0) as Null while num.lt(i, 20) { set s = num.sub(s, i) set i = num.add(i, 1) } finish (s, i) }",
         true,
     ),
     (
@@ -1250,7 +1250,7 @@ fn finished<const L: u64>(
         Box::new(crate::pages::Source::default()),
     )
     .unwrap_or_else(|error| panic!("{}: {error}", case.name));
-    let mut world = crate::helper_plans::World { prints: Vec::new() };
+    let mut world = crate::helper_plans::World::default();
     let mut returns = Vec::new();
     loop {
         match machine.run(&mut world, slice) {
@@ -1622,7 +1622,7 @@ fn limited<const L: u64>(
             }),
             ..Default::default()
         });
-        let mut world = crate::helper_plans::World { prints: Vec::new() };
+        let mut world = crate::helper_plans::World::default();
         loop {
             match machine.run(&mut world, u64::MAX) {
                 Ok(lash_kernel_vm::Step::Ended(end)) => {

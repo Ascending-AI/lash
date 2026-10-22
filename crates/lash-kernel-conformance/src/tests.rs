@@ -244,9 +244,11 @@ fn admitted_corpus_library_identities_are_current() {
                 continue;
             }
             let document = parse_document(&case.document).expect("admitted case parses");
-            for (id, name) in &document.functions {
+            // Guest definitions are document-local code, including lifted closures.
+            // Only the explicit native requirements must be installed by the host.
+            for id in &document.requires.natives {
                 if registry.get(id).is_none() {
-                    missing.push(format!("{} {}: {name:?} = @{id}", shard.rule, case.name));
+                    missing.push(format!("{} {}: native @{id}", shard.rule, case.name));
                 }
             }
         }

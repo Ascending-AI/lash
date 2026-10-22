@@ -165,6 +165,11 @@ fn refused() -> Observations {
 /// the prepared library reuse its executable across a law's sweep points.
 pub(crate) fn case_program(library: &PreparedLibrary, case: &Case) -> Option<Program> {
     let document = parse_document(&case.document).ok()?;
+    lash_kernel_check::admit(
+        &document,
+        &lash_kernel_check::Environment::new(library.registry().as_ref()),
+    )
+    .ok()?;
     prepare_document(
         library,
         Arc::new(document),
@@ -181,6 +186,16 @@ pub(crate) fn prepare_document(
         ContractId, ImportKind, OperationRequirement,
         package::{Fill, Link},
     };
+    // Dialect witnesses retain the helper release that fulfils their Code Imports.
+    // The independently authored machine corpus has only Operation Imports.
+    #[cfg(test)]
+    if document
+        .imports
+        .values()
+        .any(|import| !matches!(import.kind, ImportKind::Operation { .. }))
+    {
+        return Some(crate::linked::program(document, library.clone()));
+    }
     let fills = document
         .imports
         .iter()
@@ -207,6 +222,12 @@ pub(crate) fn prepare_document(
         document: document.identity(),
         fills,
     };
+    lash_kernel_package::LinkedContent {
+        documents: BTreeMap::from([(document.identity(), (*document).clone())]),
+        ..Default::default()
+    }
+    .check_link(&link)
+    .ok()?;
     Program::prepare(
         link.identity(),
         BTreeMap::from([(document.identity(), document)]),
@@ -227,6 +248,14 @@ pub(crate) fn run_program_in<M: Machine>(
     mut projection: Option<&mut crate::projection::Projector<'_>>,
 ) -> Result<Observations, HarnessError> {
     let env = &case.environment;
+    if env.reads.iter().any(|name| {
+        !program.document.imports.values().any(|import| {
+            matches!(import.kind, lash_vocabulary::ImportKind::Operation { .. })
+                && name.as_str() == import.name.to_string()
+        })
+    }) {
+        return Ok(refused());
+    }
     let mut bounds: lash_kernel_vm::Bounds = env.bounds.into();
     if let Some(charge) = run.charge {
         bounds.charge_limit = charge;

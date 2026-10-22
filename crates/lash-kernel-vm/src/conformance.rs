@@ -65,6 +65,7 @@ pub fn checkpoint(
     };
     reader.put(&root.kernel);
     reader.put(&root.document);
+    reader.put(&root.link);
     reader.put(&root.closure);
     reader.put(&root.owner);
     reader.put(&root.target);
@@ -93,10 +94,13 @@ pub fn checkpoint(
     reader.plain(&Tree::<lash_kernel_doc::TaskId>::of_sequence(&root.ready))?;
     reader.plain(&Tree::<u64>::of_sequence(&root.unreported))?;
     reader.plain(&Tree::<u64>::of_keyed(&root.withdrawn))?;
-    reader.tree(&Tree::<NameRef>::of_keyed(&root.reads), |r, name| {
-        r.put(&name.resolve(r.heap.pages())?);
-        Ok(())
-    })?;
+    reader.tree(
+        &Tree::<lash_vocabulary::OperationUse>::of_keyed(&root.reads),
+        |r, use_| {
+            r.put(use_);
+            Ok(())
+        },
+    )?;
     reader.tree(&Tree::<WaitRecord>::of_keyed(&root.waits), |r, wait| {
         r.put(&wait.task);
         r.put(&wait.kind);
@@ -194,6 +198,9 @@ pub fn checkpoint(
                     .map_err(|e| HeapFault::Malformed(e.to_string()))?,
             );
             frame_index += 1;
+            r.put(&frame.link);
+            r.put(&frame.convention);
+            r.put(&frame.public_result);
             r.put(site.as_ref());
             r.bindings(&frame.bindings)?;
             r.plain(&frame.loops)?;
@@ -283,8 +290,10 @@ impl Reader {
     }
     fn functions(&mut self, tree: &Tree<FunctionRecord>) -> Result<(), HeapFault> {
         self.tree(tree, |r, f| {
+            r.put(&f.callable);
             r.put(&f.name.resolve(r.heap.pages())?);
             r.value(&f.meta)?;
+            r.entity(f.environment)?;
             r.put(&f.closure.id);
             r.put(&(f.captures.len() as u64));
             for (name, value) in &f.captures {
@@ -415,6 +424,7 @@ impl Reader {
             ObjectKind::Variable => self.value(&self.heap.variable_get(id)?)?,
             ObjectKind::Closure => {
                 let closure = self.heap.closure(id)?;
+                self.put(&closure.callable);
                 self.put(closure.site.resolve(self.heap.pages())?.as_ref());
                 self.tree(&closure.captures, |r, (name, cell)| {
                     r.put(&name.resolve(r.heap.pages())?);

@@ -29,7 +29,7 @@
     },
     {
       "name": "entry arity agrees with the declaration",
-      "document": "kernel 1\nnumbers by_spelling\nexport start \"{\\\"kind\\\":\\\"function\\\",\\\"value\\\":{\\\"function\\\":\\\"f01911d03b93ad61c1869be9b87c99ab0eeda0167b85ce6fc5566f1fdbc990bb\\\",\\\"signature\\\":{\\\"params\\\":[{\\\"name\\\":\\\"x\\\",\\\"ty\\\":\\\"int\\\"}],\\\"result\\\":\\\"int\\\"},\\\"convention\\\":{\\\"kind\\\":\\\"direct\\\"},\\\"asynchronous\\\":false,\\\"rest\\\":false}}\"\ndefinition \"function start(x: Int) -> Int\\nkernel 1\\nmetering statements\\nbody {\\n  return null\\n}\\n\"\nmain {\n  finish null\n}\n",
+      "document": "kernel 1\nnumbers by_spelling\nexport start \"{\\\"kind\\\":\\\"function\\\",\\\"value\\\":{\\\"function\\\":\\\"aa737dfe165f766ce4dbfe2905905aa2fd65ca8688c7589887a89ab93d096d0d\\\",\\\"signature\\\":{\\\"params\\\":[{\\\"name\\\":\\\"x\\\",\\\"ty\\\":\\\"int\\\"}],\\\"result\\\":\\\"int\\\"},\\\"convention\\\":{\\\"kind\\\":\\\"direct\\\"},\\\"asynchronous\\\":false,\\\"rest\\\":false}}\"\ndefinition \"function start() -> Int\\nkernel 1\\nmetering statements\\nbody {\\n  return null\\n}\\n\"\nmain {\n  finish null\n}\n",
       "expected": {
         "end": "refused"
       }
