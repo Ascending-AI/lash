@@ -675,7 +675,9 @@ impl KernelDocuments {
         // get() already checked these current bytes and their identity.
         content.documents.insert(link.document, document);
         for fill in link.fills.values() {
-            if let Fill::Export { link, .. } = fill {
+            if let Fill::Export { link, .. } = fill
+                && !content.links.contains_key(link)
+            {
                 let child = self.load_linked(*link).await?;
                 content.documents.extend(child.documents);
                 content.links.extend(child.links);
@@ -939,7 +941,9 @@ impl KernelDocuments {
                     // get() already checked these current bytes and identity.
                     content.documents.insert(link.document, document);
                     for fill in link.fills.values() {
-                        if let Fill::Export { link, .. } = fill {
+                        if let Fill::Export { link, .. } = fill
+                            && !content.links.contains_key(link)
+                        {
                             let descendant = self.load_linked(*link).await?;
                             content.documents.extend(descendant.documents);
                             content.links.extend(descendant.links);

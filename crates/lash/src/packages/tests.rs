@@ -842,4 +842,85 @@ async fn holding_package_aliases_loads_each_distinct_link_once() {
             "a package hold must read each distinct Link's current document once, including subsequent holds"
         );
     }
+    // The same package aliases imported in distinct document-local slots
+    // still name one dependency. Publishing the new root must not start
+    // another complete cold load for each fill.
+    let context = PublicationContext {
+        domain: PublicationDomain(backend.binding_identity().to_string()),
+        scope: PublicationScope::Host,
+        publisher: PublisherInstance("fixture".into()),
+        root: Segment::new("fixture").unwrap(),
+    };
+    let package = content.packages[&package_id].clone();
+    let publication = PublicationRecord {
+        context: context.clone(),
+        path: package.path.clone(),
+        content: PublishedContent::Package(package_id),
+        code_links: [link_id].into(),
+        imported_publications: Vec::new(),
+    };
+    backend
+        .package_store()
+        .publish(&claim, &publication)
+        .await
+        .unwrap();
+    let snapshot = NamespaceSnapshot {
+        advertisements: vec![AcceptedAdvertisement {
+            publication,
+            advertisement: PackageAdvertisement::Enumerated(package.clone()),
+        }],
+    };
+    let signature = match &content.documents[&document_id].exports[&Name::new("run")] {
+        lash_kernel_doc::Export::Function(function) => function.signature.clone(),
+        _ => unreachable!("fixture function"),
+    };
+    let mut root =
+        lash_kernel_doc::parse_document("kernel 1\nnumbers float\nmain { return null }").unwrap();
+    root.imports = package
+        .members
+        .keys()
+        .enumerate()
+        .map(|(slot, name)| {
+            (
+                ImportSlot(slot as u32),
+                Import {
+                    name: QualifiedName {
+                        package: package.path.clone(),
+                        member: name.clone(),
+                        type_member: None,
+                    },
+                    kind: ImportKind::Code {
+                        signature: signature.clone(),
+                        convention: Convention::Direct,
+                    },
+                },
+            )
+        })
+        .collect();
+    let root_id = documents
+        .admit_document(&claim, &root.into())
+        .await
+        .unwrap();
+    let fulfilled = documents
+        .fulfil(&lash_execution_contracts::process::linking::FulfilRequest {
+            document: root_id,
+            selector: lash_execution_contracts::process::linking::ReachSelector::AllExports,
+            snapshot,
+            context,
+            purpose: lash_execution_contracts::process::linking::LinkPurpose::Cell,
+        })
+        .await
+        .unwrap();
+    for _ in 0..2 {
+        reads.lock().unwrap().clear();
+        documents
+            .hold(&claim, &ContentRef::Link(fulfilled.inspection.link))
+            .await
+            .unwrap();
+        assert_eq!(
+            reads.lock().unwrap().get(&document_id.to_string()),
+            Some(&1),
+            "a linked document must read a shared dependency once per hold, rather than once per import"
+        );
+    }
 }

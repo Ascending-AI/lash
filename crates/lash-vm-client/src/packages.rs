@@ -264,11 +264,13 @@ fn read_documents(
     Ok(documents)
 }
 
+fn image_document_missing(document: DocumentId) -> PoolError {
+    PoolError::refused(
+        lash_protocol_types::engine_fault::RunRefusal::ImageDocumentMissing { document },
+    )
+}
+
 #[cfg(test)]
-#[expect(
-    clippy::expect_used,
-    reason = "the work law names broken fixture assumptions"
-)]
 mod document_work_laws {
     use super::*;
     use lash_vm_protocol::{EncodedPayload, message::StoredDocument};
@@ -337,10 +339,4 @@ mod document_work_laws {
             "per-run document bytes grew with image-owned helper content"
         );
     }
-}
-
-fn image_document_missing(document: DocumentId) -> PoolError {
-    PoolError::refused(
-        lash_protocol_types::engine_fault::RunRefusal::ImageDocumentMissing { document },
-    )
 }
