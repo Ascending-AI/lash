@@ -31,13 +31,18 @@ pub(super) struct RunRows {
 }
 
 impl RunRows {
-    fn base_values(&mut self, plugin: &str) -> Option<&crate::BlobRef> {
+    fn base_values(
+        &mut self,
+        plugin: &str,
+    ) -> Result<Option<&crate::BlobRef>, lash_protocol_types::allocation::AllocationError> {
         if !self.base_values.contains_key(plugin) {
-            let namespace = self.base.plugins.get(plugin)?;
-            let values = namespace.body().values;
+            let Some(namespace) = self.base.plugins.get(plugin) else {
+                return Ok(None);
+            };
+            let values = namespace.body()?.values().clone();
             self.base_values.insert(plugin.to_owned(), values);
         }
-        self.base_values.get(plugin)
+        Ok(self.base_values.get(plugin))
     }
 }
 
@@ -55,7 +60,7 @@ fn is_base(namespace: &PluginNamespaceState, base: &PluginNamespaceState) -> boo
         && namespace.format_version == base.format_version
         && namespace.fork == base.fork
         && same_publication(&namespace.publication, &base.publication)
-        && (Arc::ptr_eq(&namespace.values, &base.values) || namespace.values == base.values)
+        && (namespace.values.ptr_eq(&base.values) || namespace.values == base.values)
 }
 
 /// Whether the run's `row` records `namespace`.
@@ -81,21 +86,28 @@ impl crate::PluginSession {
     /// names what the run changed. Every namespace's frontier settles what
     /// the head holds, so the run keeps only the receipts it applies itself
     /// ([`StateFrontier`]).
-    pub fn begin_run(&self) {
+    pub fn begin_run(&self) -> Result<(), lash_protocol_types::allocation::AllocationError> {
         let mut guard = self.state.lock_recover();
         let registry = &mut *guard;
-        for namespace in registry.data.plugins.values_mut() {
-            if !namespace.publication.recent().is_empty() {
+        let mut data = registry.data.clone();
+        for (id, current) in &registry.data.plugins {
+            if !current.publication.recent().is_empty() {
+                let mut namespace = current.clone();
                 namespace.publication.settle();
-                registry.source = None;
+                data.plugins.insert(id.clone(), namespace)?;
             }
         }
+        if data != registry.data {
+            registry.source = None;
+        }
+        registry.data = data;
         registry.run = Some(RunRows {
             base: registry.data.clone(),
             base_values: BTreeMap::new(),
             rows: BTreeMap::new(),
             bodies: BTreeMap::new(),
         });
+        Ok(())
     }
 
     /// The namespaces whose published state the run's durable rows do not
@@ -103,14 +115,16 @@ impl crate::PluginSession {
     /// values: what the run's next commit writes. An unchanged namespace
     /// costs nothing, however large. Empty outside a durable run and on
     /// plugin-facing handles, as with [`Self::export_state`].
-    pub fn run_changes(&self) -> Vec<TurnNamespaceWrite> {
+    pub fn run_changes(
+        &self,
+    ) -> Result<Vec<TurnNamespaceWrite>, lash_protocol_types::allocation::AllocationError> {
         if !self.host.export_plugin_namespaces {
-            return Vec::new();
+            return Ok(Vec::new());
         }
         let mut guard = self.state.lock_recover();
         let registry = &mut *guard;
         let Some(run) = registry.run.as_mut() else {
-            return Vec::new();
+            return Ok(Vec::new());
         };
         let mut changes = Vec::new();
         for (plugin, namespace) in &registry.data.plugins {
@@ -119,30 +133,34 @@ impl crate::PluginSession {
                 (None, Some(base)) if is_base(namespace, base) => continue,
                 _ => {}
             }
-            let body = namespace.body();
-            let values = if run.base_values(plugin) == Some(&body.values) {
+            let body = namespace.body()?;
+            let values = if run.base_values(plugin)? == Some(body.values()) {
                 RunValuesWrite::Base
             } else if run
                 .rows
                 .get(plugin)
-                .is_some_and(|row| row.values == body.values)
+                .is_some_and(|row| row.values.as_ref() == body.values())
             {
                 RunValuesWrite::Held
             } else {
-                let previous = run
-                    .bodies
-                    .get(plugin)
-                    .cloned()
-                    .or_else(|| run.base.plugins.get(plugin).map(PluginNamespaceState::body));
-                RunValuesWrite::Body(body.publication_after(previous.as_ref(), true))
+                let previous = match run.bodies.get(plugin) {
+                    Some(body) => Some(body.clone()),
+                    None => run
+                        .base
+                        .plugins
+                        .get(plugin)
+                        .map(PluginNamespaceState::body)
+                        .transpose()?,
+                };
+                RunValuesWrite::Body(body.publication_after(previous.as_ref(), true)?)
             };
             changes.push(TurnNamespaceWrite {
                 plugin: plugin.clone(),
-                entry: namespace.entry(body.values.clone()),
+                entry: namespace.entry(body.values())?,
                 values,
             });
         }
-        changes
+        Ok(changes)
     }
 
     /// Record that a commit wrote `written`, rows [`Self::run_changes`]
@@ -193,22 +211,22 @@ impl crate::PluginSession {
             let values = match &row.body {
                 Some(body) if body.root().to_hex() == row.entry.values.as_str() => body.snapshot(),
                 Some(_) => return Err(unrecorded_values(&row.plugin)),
-                None if run.base_values(&row.plugin) == Some(&row.entry.values) => run
+                None if run.base_values(&row.plugin)? == Some(row.entry.values.as_ref()) => run
                     .base
                     .plugins
                     .get(&row.plugin)
-                    .map(|base| Arc::clone(&base.values))
+                    .map(|base| base.values.clone())
                     .ok_or_else(|| unrecorded_values(&row.plugin))?,
                 _ => return Err(unrecorded_values(&row.plugin)),
             };
-            let mut namespace = row.entry.namespace(values);
+            let mut namespace = row.entry.namespace(values)?;
             if let Some(body) = &row.body {
                 namespace.encoding =
-                    lash_core_store::plugin_state::NamespaceEncoding::recorded(body.clone());
+                    lash_core_store::plugin_state::NamespaceEncoding::recorded(body.clone())?;
             } else if let Some(base) = run.base.plugins.get(&row.plugin) {
                 namespace.encoding = base.encoding.clone();
             }
-            state.plugins.insert(row.plugin.clone(), namespace);
+            state.plugins.insert(row.plugin.clone(), namespace)?;
         }
         self.host.retired_plugins.check_state(&state)?;
         run.bodies = rows
@@ -222,14 +240,18 @@ impl crate::PluginSession {
         // The turn's preparation adopted its segment before the restore;
         // the restored namespaces are owned by it as the rest are.
         let segment = registry.segment;
-        registry.hydrate_live(&state);
+        registry.hydrate_live(&state)?;
         if registry.segment < segment {
             registry.segment = segment;
         }
         let segment = registry.segment;
-        for namespace in registry.data.plugins.values_mut() {
+        let mut data = registry.data.clone();
+        for (id, current) in &registry.data.plugins {
+            let mut namespace = current.clone();
             namespace.publication.owner_segment = segment;
+            data.plugins.insert(id.clone(), namespace)?;
         }
+        registry.data = data;
         registry.source = None;
         Ok(())
     }

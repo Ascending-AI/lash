@@ -307,7 +307,9 @@ pub async fn seed(handles: &FixtureHandles) -> ExpectedFixture {
         reasoning_output_tokens: 2,
         unknown_calls: 0,
     };
-    loaded.set_plugin_state(Some(fixture_plugin_state()));
+    loaded
+        .set_plugin_state(Some(fixture_plugin_state()))
+        .unwrap();
     loaded.set_execution_graph(fixture_execution());
     let legacy_operation = OperationId::new(
         ExecutionScope::runtime_operation("durable-read-legacy-commit"),
@@ -1049,7 +1051,8 @@ fn fixture_plugin_state() -> PluginState {
                 )])
                 .into(),
             },
-        )]),
+        )])
+        .into(),
     }
 }
 

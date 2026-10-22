@@ -133,6 +133,13 @@ impl PluginTransitionRecord {
             .iter()
             .map(|(id, result)| result.clone().map(|namespace| (id.clone(), namespace)))
             .collect::<Result<BTreeMap<_, _>, _>>()?;
+        let budget = plugins
+            .values()
+            .next()
+            .map(|namespace| namespace.values.allocation_budget())
+            .cloned()
+            .unwrap_or_default();
+        let plugins = lash_core_store::source_map::SharedSourceMap::from_map_in(&plugins, &budget)?;
         Ok((PluginState { plugins }, config))
     }
 }
@@ -210,7 +217,7 @@ impl PluginHost {
                                     generation: 0,
                                     publication: Default::default(),
                                     fork: declaration.state_fork,
-                                    values: Arc::new(values),
+                                    values: values.into(),
                                     encoding: Default::default(),
                                 })
                             })
@@ -263,6 +270,7 @@ impl PluginSession {
             .host
             .isolated_registry()
             .defer_session(PluginSessionRequest {
+                allocation_budget: self.state.lock_recover().data.allocation_budget().clone(),
                 owner: self.owner.clone(),
                 materialization,
                 tool_catalog_overlay: self.tool_catalog_overlay.clone(),
@@ -552,6 +560,7 @@ impl PluginSession {
             .host
             .isolated_registry()
             .defer_session(PluginSessionRequest {
+                allocation_budget: self.state.lock_recover().data.allocation_budget().clone(),
                 owner: self.owner.clone(),
                 materialization: PluginSessionMaterializationRequest::Rematerialization {
                     snapshot: state,

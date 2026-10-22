@@ -177,14 +177,12 @@ pub(super) async fn plugin_format_boundary(
             generation: 7,
             publication: Default::default(),
             fork: Default::default(),
-            values: std::sync::Arc::new(std::collections::BTreeMap::from([(
-                "count".into(),
-                serde_json::json!(17),
-            )])),
+            values: std::collections::BTreeMap::from([("count".into(), serde_json::json!(17))])
+                .into(),
             encoding: Default::default(),
         },
     );
-    state.set_plugin_state(Some(snapshot));
+    state.set_plugin_state(Some(snapshot)).unwrap();
     state
         .authority
         .plugin_config

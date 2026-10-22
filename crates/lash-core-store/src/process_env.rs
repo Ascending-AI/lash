@@ -361,6 +361,8 @@ impl ProcessComponentConfig {
 #[serde(tag = "kind", rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum ProcessEnvRefusal {
+    #[error(transparent)]
+    Allocation(#[from] lash_protocol_types::allocation::AllocationError),
     #[error("{issue}")]
     PluginPreflight {
         issue: crate::plugin_registrations::PreflightIssue,

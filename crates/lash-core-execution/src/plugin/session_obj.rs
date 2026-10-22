@@ -997,7 +997,7 @@ impl PluginSession {
             .validate_native_formats(snapshot, &self.admitted_plugin_config().config)?;
         let snapshot = snapshot.clone();
         let mut live = self.state.lock_recover();
-        live.hydrate_live(&snapshot);
+        live.hydrate_live(&snapshot)?;
         for factory in self.host.factories() {
             if self
                 .capabilities()
@@ -1005,7 +1005,7 @@ impl PluginSession {
                 .iter()
                 .any(|plugin| plugin.id() == factory.id())
             {
-                live.declare_fork(factory.id(), factory.plugin_declaration().state_fork);
+                live.declare_fork(factory.id(), factory.plugin_declaration().state_fork)?;
             }
         }
         Ok(())
@@ -1019,6 +1019,7 @@ impl PluginSession {
         self.require_runtime_owner()?;
         let snapshot = self.capture_state();
         self.host.build_session(PluginSessionRequest {
+            allocation_budget: self.state.lock_recover().data.allocation_budget().clone(),
             tool_catalog_overlay: self.tool_catalog_overlay.clone(),
             materialization: PluginSessionMaterializationRequest::Creation {
                 config,

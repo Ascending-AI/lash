@@ -53,14 +53,12 @@ pub(super) async fn plugin_state_corrupt_boundary(store: Arc<dyn RuntimeStore>, 
             generation: 3,
             publication: Default::default(),
             fork: Default::default(),
-            values: std::sync::Arc::new(std::collections::BTreeMap::from([(
-                "bad key".into(),
-                serde_json::json!(17),
-            )])),
+            values: std::collections::BTreeMap::from([("bad key".into(), serde_json::json!(17))])
+                .into(),
             encoding: Default::default(),
         },
     );
-    state.set_plugin_state(Some(snapshot));
+    state.set_plugin_state(Some(snapshot)).unwrap();
     // Seed from the writer that produced this native-format fixture, whose
     // only writable format is native. Its floor permits the stamp even in a
     // rollback window: the refusal must come from the payload, not the range.

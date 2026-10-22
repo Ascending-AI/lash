@@ -481,7 +481,7 @@ define_plugin_errors! {
         => match source {
             lash_core_store::plugin_state::PluginStateError::InvalidKey { .. } | lash_core_store::plugin_state::PluginStateError::ValueTooLarge { .. } | lash_core_store::plugin_state::PluginStateError::StoreTooLarge { .. } => crate::ToolFailureClass::InvalidRequest,
             lash_core_store::plugin_state::PluginStateError::Unrecorded { .. } | lash_core_store::plugin_state::PluginStateError::EffectOwnerMismatch | lash_core_store::plugin_state::PluginStateError::Frontier { .. } | lash_core_store::plugin_state::PluginStateError::Encode { .. } | lash_core_store::plugin_state::PluginStateError::Decode { .. } => crate::ToolFailureClass::Internal,
-            lash_core_store::plugin_state::PluginStateError::PublicationFenced { .. } => crate::ToolFailureClass::Unavailable,
+            lash_core_store::plugin_state::PluginStateError::Allocation(_) | lash_core_store::plugin_state::PluginStateError::PublicationFenced { .. } => crate::ToolFailureClass::Unavailable,
         };
 /// A factory's [`super::PluginDeclaration`] failed the composition's owner
     /// and format checks (FIG-4732): a session cannot materialize under a
@@ -1581,5 +1581,11 @@ impl From<lash_core_store::plugin_state::ConfigAdmissionError> for PluginError {
                 Self::Runtime(crate::RuntimeError::allocation(error))
             }
         }
+    }
+}
+
+impl From<lash_protocol_types::allocation::AllocationError> for PluginError {
+    fn from(error: lash_protocol_types::allocation::AllocationError) -> Self {
+        Self::Runtime(crate::RuntimeError::allocation(error))
     }
 }

@@ -265,7 +265,7 @@ pub use lash_core::plugin::{
     AfterTurnDecisions, CellCallReferences, CheckpointApplication, CheckpointComponentKey,
     CodeExecutionOutcome, CodeExecutorPlugin, ExecutionCandidate, ExecutionGraphCapture,
     ExecutionGraphPurpose, HydratedExecutionGraph, NamespaceBody, NamespaceEncoding,
-    NamespaceEntry, NamespaceValues, PluginAbort, PluginNamespaceState,
+    NamespaceEntry, NamespaceValues, NamespaceValuesWeak, PluginAbort, PluginNamespaceState,
     PluginSessionMaterializationRequest, PluginSessionRequest, PluginState, PluginStateEffect,
     PluginTransitionBase, PluginTransitionId, PluginTransitionRecord, PluginTransitionRequest,
     PluginTransitionRequestData, ProtocolBeforeLlmCallContext, ProtocolDriverPlugin,

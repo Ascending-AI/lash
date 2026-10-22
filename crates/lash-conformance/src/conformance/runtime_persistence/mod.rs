@@ -22,7 +22,8 @@ pub(crate) fn plugin_state_at(generation: u64) -> crate::PluginState {
                 generation,
                 ..Default::default()
             },
-        )]),
+        )])
+        .into(),
     }
 }
 

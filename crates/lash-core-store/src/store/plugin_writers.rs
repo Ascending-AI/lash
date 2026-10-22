@@ -728,7 +728,15 @@ mod tests {
                 generation: 1,
                 ..Default::default()
             }
-            .entry(crate::plugin_state::NamespaceBody::encode(&BTreeMap::new()).values),
+            .entry(
+                crate::plugin_state::NamespaceBody::encode(
+                    &BTreeMap::new(),
+                    &lash_protocol_types::allocation::AllocationBudget::unowned(),
+                )
+                .unwrap()
+                .values(),
+            )
+            .unwrap(),
         );
         let mut checkpoint = super::super::HydratedSessionCheckpoint::default();
         checkpoint

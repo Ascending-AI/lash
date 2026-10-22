@@ -22,8 +22,11 @@ impl RuntimeSessionState {
 
     /// Record `snapshot` as the head's plugin state, or delete it. Only a
     /// namespace whose values changed writes its body at the next commit.
-    pub fn set_plugin_state(&mut self, snapshot: Option<crate::PluginState>) {
-        self.checkpoint_components.set_plugin_state(snapshot);
+    pub fn set_plugin_state(
+        &mut self,
+        snapshot: Option<crate::PluginState>,
+    ) -> Result<(), lash_protocol_types::allocation::AllocationError> {
+        self.checkpoint_components.set_plugin_state(snapshot)
     }
 
     pub fn plugin_state_is_dirty(&self) -> bool {
@@ -299,7 +302,8 @@ impl RuntimeSessionState {
         // descriptor; ownership and receipt evidence change only the map.
         let snapshot = capture(plugins)?;
         if !snapshot.plugins.is_empty() {
-            self.set_plugin_state(Some(snapshot));
+            self.set_plugin_state(Some(snapshot))
+                .map_err(crate::RuntimeError::allocation)?;
         }
         // The config a commit writes is the recorded one too (FIG-4747): the
         // sticky config under a run view and the view the state runs under

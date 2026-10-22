@@ -127,7 +127,13 @@ impl LashRuntime {
         })?;
         self.services
             .plugins
-            .adopt_state_segment(crate::tool_run::SegmentOrdinal(state_segment));
+            .adopt_state_segment(crate::tool_run::SegmentOrdinal(state_segment))
+            .map_err(|error| {
+                crate::RuntimeEffectControllerError::from(
+                    lash_execution_contracts::plugin_error::PluginError::from(error),
+                )
+                .into_runtime_error()
+            })?;
         let mut turn_delta = Vec::new();
         let mut user_messages = Vec::new();
         for pending in admissions

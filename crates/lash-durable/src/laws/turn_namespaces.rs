@@ -13,12 +13,17 @@ use lash_protocol_types::{SessionId, TurnId};
 /// its values body.
 fn namespace(generation: u64, value: &str) -> (NamespaceEntry, NamespaceBody) {
     let values = std::collections::BTreeMap::from([("key".to_owned(), value.into())]);
-    let body = NamespaceBody::encode(&values);
+    let body = NamespaceBody::encode(
+        &values,
+        &lash_protocol_types::allocation::AllocationBudget::unowned(),
+    )
+    .unwrap();
     let entry = PluginNamespaceState {
         generation,
         ..PluginNamespaceState::default()
     }
-    .entry(body.values.clone());
+    .entry(body.values())
+    .unwrap();
     (entry, body)
 }
 

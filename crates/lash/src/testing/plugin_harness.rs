@@ -462,7 +462,9 @@ impl PluginHarness {
                 .durable()
                 .turn_namespaces(&self.session, &run)
                 .await?;
-            plugins.begin_run();
+            plugins
+                .begin_run()
+                .map_err(crate::plugins::PluginError::from)?;
             plugins.restore_run(namespaces)?;
         }
         Ok(plugins.committed_state()?)

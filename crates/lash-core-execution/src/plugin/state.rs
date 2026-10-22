@@ -84,12 +84,6 @@ impl PluginStateView {
         plugin_id: &str,
         state: Arc<Mutex<PluginStateRegistry>>,
     ) -> Self {
-        state
-            .lock_recover()
-            .data
-            .plugins
-            .entry(plugin_id.to_owned())
-            .or_default();
         Self {
             owner,
             plugin_id: plugin_id.into(),
@@ -237,34 +231,47 @@ pub(crate) struct PluginStateRegistry {
     run: Option<run::RunRows>,
     /// Each namespace's encoded size, by the values it was measured from:
     /// what the session budget sums without encoding unchanged values again.
-    sizes: BTreeMap<String, (std::sync::Weak<BTreeMap<String, Value>>, usize)>,
+    sizes: BTreeMap<String, (lash_core_store::plugin_state::NamespaceValuesWeak, usize)>,
 }
 
 impl PluginStateRegistry {
     // Hydrate before admission so register calls validate durable membership and
     // size.
-    pub(super) fn from_snapshot(snapshot: Option<&PluginState>) -> Self {
-        let data = snapshot.cloned().unwrap_or_default();
+    pub(super) fn from_snapshot(
+        snapshot: Option<&PluginState>,
+        budget: &lash_protocol_types::allocation::AllocationBudget,
+    ) -> Result<Self, lash_protocol_types::allocation::AllocationError> {
+        let data = match snapshot {
+            Some(snapshot) => snapshot.clone_in(budget)?,
+            None => PluginState::empty_in(budget)?,
+        };
         let segment = data
             .plugins
             .values()
             .map(|namespace| namespace.publication.owner_segment)
             .max()
             .unwrap_or_default();
-        Self {
+        Ok(Self {
             data,
             segment,
             ..Self::default()
-        }
+        })
     }
 
-    pub(super) fn from_fork(snapshot: Option<&PluginState>) -> Self {
-        let mut registry = Self::from_snapshot(snapshot);
+    pub(super) fn from_fork(
+        snapshot: Option<&PluginState>,
+        budget: &lash_protocol_types::allocation::AllocationBudget,
+    ) -> Result<Self, lash_protocol_types::allocation::AllocationError> {
+        let mut registry = Self::from_snapshot(snapshot, budget)?;
         registry.segment = SegmentOrdinal::default();
-        for namespace in registry.data.plugins.values_mut() {
+        let mut data = registry.data.clone();
+        for (id, current) in &registry.data.plugins {
+            let mut namespace = current.clone();
             namespace.publication.owner_segment = registry.segment;
+            data.plugins.insert(id.clone(), namespace)?;
         }
-        registry
+        registry.data = data;
+        Ok(registry)
     }
 
     /// Record `fork`, what `plugin` declares a fork does with its namespace,
@@ -273,12 +280,17 @@ impl PluginStateRegistry {
         &mut self,
         plugin: &str,
         fork: lash_core_store::plugin_state::StateFork,
-    ) {
-        let namespace = self.data.plugins.entry(plugin.to_owned()).or_default();
-        if namespace.fork != fork {
+    ) -> Result<(), lash_protocol_types::allocation::AllocationError> {
+        let mut namespace = match self.data.plugins.get(plugin) {
+            Some(namespace) => namespace.clone(),
+            None => PluginNamespaceState::empty_in(self.data.allocation_budget())?,
+        };
+        if namespace.fork != fork || !self.data.plugins.contains_key(plugin) {
             namespace.fork = fork;
+            self.data.plugins.insert(plugin.to_owned(), namespace)?;
             self.source = None;
         }
+        Ok(())
     }
 
     pub(super) fn matches_ref(&self, reference: &crate::BlobRef) -> bool {
@@ -293,11 +305,14 @@ impl PluginStateRegistry {
     /// generations are the applied frontier the journal's recorded
     /// resolutions are delivered against; nothing unrecorded is resident to
     /// drop, and a rebuild from durable state lifts every fence.
-    pub(super) fn hydrate_live(&mut self, snapshot: &PluginState) {
+    pub(super) fn hydrate_live(
+        &mut self,
+        snapshot: &PluginState,
+    ) -> Result<(), lash_protocol_types::allocation::AllocationError> {
         if self.was_hydrated_from(snapshot) && self.fenced.is_empty() {
-            return;
+            return Ok(());
         }
-        self.data = snapshot.clone();
+        self.data = snapshot.clone_in(self.data.allocation_budget())?;
         self.segment = self
             .data
             .plugins
@@ -310,6 +325,7 @@ impl PluginStateRegistry {
         self.owed.clear();
         self.source = Some(state_ref(snapshot));
         self.settled.notify_waiters();
+        Ok(())
     }
 }
 

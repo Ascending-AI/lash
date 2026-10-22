@@ -594,9 +594,14 @@ pub async fn every_root_source_retains_its_graph_and_shared_leaves_outlive_one_o
     });
     let (entry, body) = {
         let values = BTreeMap::from([("key".to_owned(), "value".into())]);
-        let body = lash_core_store::plugin_state::NamespaceBody::encode(&values);
+        let body = lash_core_store::plugin_state::NamespaceBody::encode(
+            &values,
+            &lash_protocol_types::allocation::AllocationBudget::unowned(),
+        )
+        .unwrap();
         let entry = lash_core_store::plugin_state::PluginNamespaceState::default()
-            .entry(body.values.clone());
+            .entry(body.values())
+            .unwrap();
         (entry, body)
     };
     let namespace_root = NamespaceValue {

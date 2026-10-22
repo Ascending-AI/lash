@@ -1210,6 +1210,10 @@ fn broker_failure(
         }
         // The parent's own store or host faulted: the attempt fails
         // retryably, and the cell resumes from its last checkpoint.
+        KernelFailure::Checkpoint(lash_vm_broker::QuietPointRefusal::Allocation(error)) => {
+            ctx.record_nested_effect_error(lash_core::RuntimeError::allocation(error).into());
+            host(message)
+        }
         KernelFailure::Checkpoint(_) | KernelFailure::Parent(_) => {
             ctx.record_nested_effect_error(
                 lash_core::RuntimeEffectControllerError::retryable_response_derivation(

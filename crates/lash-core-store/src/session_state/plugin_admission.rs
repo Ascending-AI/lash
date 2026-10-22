@@ -68,7 +68,10 @@ impl RuntimeSessionState {
         let config = crate::store::persisted_session_config_from_state(self).plugin_config;
         let admission = plugins.capture_plugin_admission(&config, fleet)?;
         let captured = plugins.capture_plugin_state()?;
-        let state_matches = self.checkpoint_components.records_plugin_state(&captured);
+        let state_matches = self
+            .checkpoint_components
+            .records_plugin_state(&captured)
+            .map_err(crate::RuntimeError::allocation)?;
         let entries = &mut self.checkpoint_components.entries;
         let admission_matches = match (
             entries.get(crate::store::PLUGIN_ADMISSION_CHECKPOINT_COMPONENT),
