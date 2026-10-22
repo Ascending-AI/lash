@@ -511,23 +511,26 @@ pub(crate) mod tests {
             .flat_map(|document| document.functions.iter())
             .map(|(id, definition)| (*id, Arc::new(definition.clone())))
             .collect();
-        let closure = lash_vm_broker::kernel::closure::derive(
-            documents
-                .values()
-                .flat_map(|document| document.functions.keys().chain(&document.requires.natives))
-                .copied(),
-            library.registry(),
-            &stored,
-        )
-        .expect("linked definitions");
-        lash_kernel_vm::Program::prepare(
+        let mut program = lash_kernel_vm::Program::prepare(
             link,
             documents,
             &links,
-            lash_kernel_doc::heap::PageId(closure.reference().0),
+            lash_kernel_doc::heap::PageId([0; 32]),
             library,
         )
-        .expect("linked law document")
+        .expect("linked law document");
+        let closure = lash_vm_broker::kernel::closure::derive(
+            program
+                .functions
+                .iter()
+                .chain(&program.document.requires.natives)
+                .copied(),
+            program.library.registry(),
+            &stored,
+        )
+        .expect("linked definitions");
+        program.closure = lash_kernel_doc::heap::PageId(closure.reference().0);
+        program
     }
 
     /// A host that names TypeScript alone.
