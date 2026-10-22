@@ -130,7 +130,8 @@ fn protocol_reply_tracking_allocates_independently_of_history_depth() {
         // boundary's base is a shorter immutable view of that same buffer.
         let mut all = history;
         all.extend(suffix.iter().cloned());
-        let graph = crate::SessionGraph::from_active_read_state(&all);
+        let graph = crate::SessionGraph::from_active_read_state(&all)
+            .expect("source fixture graph is admitted");
         let mut prefix = graph.read_model().messages;
         prefix.truncate(turns);
         let before = crate::MessageSequence::from_base(prefix);

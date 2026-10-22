@@ -385,7 +385,8 @@ await task.fail({ reason: "parent observed child failure" });
         .await
         .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?
         .ok_or_else(|| FixedScriptRunnerError::Assertion("missing committed head".into()))?
-        .to_snapshot();
+        .to_snapshot()
+        .map_err(|error| FixedScriptRunnerError::Runtime(error.to_string()))?;
     let recorded = events.snapshot().await;
     let process_observations = agent_contract_process_observations(&core).await?;
     let process_facts = agent_contract_process_facts(&process_observations);
@@ -555,7 +556,8 @@ async fn facade_final_value_execution_inner(
         .await
         .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?
         .ok_or_else(|| FixedScriptRunnerError::Assertion("missing committed head".into()))?
-        .to_snapshot();
+        .to_snapshot()
+        .map_err(|error| FixedScriptRunnerError::Runtime(error.to_string()))?;
     let recorded = events.snapshot().await;
     let final_value_events = events.final_value_events().await;
     let assistant_prose_delta_count = events.assistant_prose_delta_count().await;
@@ -1047,7 +1049,8 @@ async fn agent_process_execution_result(
         .await
         .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?
         .ok_or_else(|| FixedScriptRunnerError::Assertion("missing committed head".into()))?
-        .to_snapshot();
+        .to_snapshot()
+        .map_err(|error| FixedScriptRunnerError::Runtime(error.to_string()))?;
     let final_value = result
         .finished()
         .map(|(_, value)| value)

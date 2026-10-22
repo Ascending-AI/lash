@@ -16,11 +16,15 @@ pub fn runtime_error_from_store_commit(error: crate::StoreError) -> crate::Runti
 
 /// Raw graph mutation for corruption fixtures, available only with test support.
 pub trait SessionGraphConformanceAccess {
-    fn data_mut(&mut self) -> &mut crate::session_graph::SessionGraphData;
+    fn data_mut(
+        &mut self,
+    ) -> Result<&mut crate::session_graph::SessionGraphData, crate::StoreError>;
 }
 
 impl SessionGraphConformanceAccess for crate::SessionGraph {
-    fn data_mut(&mut self) -> &mut crate::session_graph::SessionGraphData {
+    fn data_mut(
+        &mut self,
+    ) -> Result<&mut crate::session_graph::SessionGraphData, crate::StoreError> {
         crate::SessionGraph::data_mut(self)
     }
 }

@@ -114,7 +114,23 @@ impl Clone for SessionGraphCache {
 }
 
 impl SessionGraphCache {
+    pub(crate) fn construction_scratch(
+        graph: &SessionGraph,
+    ) -> Result<lash_protocol_types::allocation::AllocationHold, crate::StoreError> {
+        // Hash tables reserve load-factor slack; path vectors and topology
+        // marks coexist with the source id clones until the cache is built.
+        let ids = graph.nodes.iter().fold(0u64, |bytes, node| {
+            bytes.saturating_add(node.node_id.len() as u64)
+        });
+        Ok(graph.nodes.allocation_budget().reserve(
+            (graph.nodes.len() as u64)
+                .saturating_mul(512)
+                .saturating_add(ids)
+                .saturating_add(512),
+        )?)
+    }
     pub(crate) fn build(graph: &SessionGraph) -> Result<Self, crate::StoreError> {
+        let _scratch = Self::construction_scratch(graph)?;
         let by_id = graph_node_indices(graph)?;
         let active_path_indices = ancestry_indices(graph, &by_id, graph.leaf_node_id.as_deref())?;
         Self::from_indices(graph, by_id, active_path_indices, false)
@@ -123,6 +139,7 @@ impl SessionGraphCache {
     /// The cache of a graph that passes the full structural-integrity check
     /// ([`validate_structure`]), holding the proof.
     pub(crate) fn build_validated(graph: &SessionGraph) -> Result<Self, crate::StoreError> {
+        let _scratch = Self::construction_scratch(graph)?;
         let (by_id, active_path_indices) = validate_structure(graph)?;
         Self::from_indices(graph, by_id, active_path_indices, true)
     }
@@ -164,7 +181,7 @@ impl SessionGraphCache {
                 active_messages: AppendVec::try_with_capacity(0, budget)?,
                 assistant_ids: PersistentMap::default(),
                 attachments: PersistentMap::default(),
-                prompt_render_cache: Arc::new(BaseRenderCache::new()),
+                prompt_render_cache: Arc::new(BaseRenderCache::new_in(budget)?),
             },
         };
         cache.rebuild_read_model(graph)?;
@@ -257,7 +274,7 @@ impl SessionGraphCache {
             active_messages,
             assistant_ids,
             attachments,
-            prompt_render_cache: Arc::new(BaseRenderCache::new()),
+            prompt_render_cache: Arc::new(BaseRenderCache::new_in(&self.budget)?),
         };
         Ok(())
     }
@@ -344,7 +361,7 @@ impl SessionGraphCache {
                 active_messages: AppendVec::try_with_capacity(0, budget)?,
                 assistant_ids: PersistentMap::default(),
                 attachments: PersistentMap::default(),
-                prompt_render_cache: Arc::new(BaseRenderCache::new()),
+                prompt_render_cache: Arc::new(BaseRenderCache::new_in(&self.budget)?),
             };
         }
         if let Some(event) = node.event() {
@@ -369,16 +386,18 @@ impl SessionGraphCache {
             count_attachments(&mut read.attachments, &message, &self.budget)?;
             let prefix_len = read.active_messages.len();
             read.active_messages.push_adopting(message, same_message)?;
-            read.prompt_render_cache = Arc::new(BaseRenderCache::extending(
+            read.prompt_render_cache = Arc::new(BaseRenderCache::extending_in(
                 Arc::clone(&read.prompt_render_cache),
                 prefix_len,
-            ));
+                &self.budget,
+            )?);
         }
         Ok(())
     }
 
-    pub(crate) fn detach_prompt_render_cache(&mut self) {
-        self.active_read.prompt_render_cache = Arc::new(BaseRenderCache::new());
+    pub(crate) fn detach_prompt_render_cache(&mut self) -> Result<(), crate::StoreError> {
+        self.active_read.prompt_render_cache = Arc::new(BaseRenderCache::new_in(&self.budget)?);
+        Ok(())
     }
 
     pub(crate) fn attachment_ids(&self) -> Vec<crate::AttachmentId> {

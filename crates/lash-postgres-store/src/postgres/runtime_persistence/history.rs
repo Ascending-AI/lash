@@ -425,7 +425,7 @@ async fn window_graph(
             let from = i64::try_from(from_generation).unwrap_or(i64::MAX);
             let (nodes, added, _transport) = rows.read(conn, from, leaf_generation).await?;
             if let Some(graph) = window.extend_window(nodes, &leaf)? {
-                return Ok(windows.remember(session_id, &graph, leaf_at, bytes + added));
+                return windows.remember(session_id, &graph, leaf_at, bytes + added);
             }
         }
         WindowReuse::Miss => {}
@@ -467,7 +467,7 @@ async fn window_graph(
         anchor,
         rows.budget,
     )?;
-    Ok(windows.remember(session_id, &graph, leaf_at, bytes))
+    windows.remember(session_id, &graph, leaf_at, bytes)
 }
 
 /// Select and admit raw head facts in the caller's snapshot. Hydration is
@@ -660,9 +660,9 @@ pub(crate) async fn window_conn(
         }
         graph
     } else {
-        lash_core_store::session_graph::SessionGraph::default()
+        lash_core_store::session_graph::SessionGraph::empty_in(budget)?
     };
-    let window = windows.attach(session_id, window);
+    let window = windows.attach(session_id, window)?;
     let read = SessionWindowRead::new(
         session_id.clone(),
         revision,

@@ -730,7 +730,11 @@ impl ActorContext {
                         },
                     )
                     .await?;
-                loaded.state.session_graph.detach_owner_prompt_rendering();
+                loaded
+                    .state
+                    .session_graph
+                    .detach_owner_prompt_rendering()
+                    .map_err(failed)?;
                 allocations.acknowledged();
                 *owner = super::owner_state::OwnerState::loaded(
                     self.actor().clone(),

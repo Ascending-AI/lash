@@ -23,7 +23,8 @@ fn text_message(id: &str, role: MessageRole, content: &str) -> Message {
 fn turn_draft_appends_resident_nodes_not_yet_durable() {
     let durable = text_message("durable", MessageRole::User, "already durable");
     let pending = text_message("pending", MessageRole::Assistant, "not durable yet");
-    let graph = SessionGraph::from_active_read_state(&[durable, pending]);
+    let graph = SessionGraph::from_active_read_state(&[durable, pending])
+        .expect("source fixture graph is admitted");
     let durable_node_id = graph.nodes[0].node_id.clone();
     let pending_node_id = graph.nodes[1].node_id.clone();
     let mut state = state_with_graph(graph);
@@ -107,7 +108,8 @@ fn outcome_switch(
 #[test]
 fn agent_frame_switch_seeds_the_new_frame_without_a_tool_call_event() {
     let graph =
-        SessionGraph::from_active_read_state(&[text_message("u0", MessageRole::User, "old frame")]);
+        SessionGraph::from_active_read_state(&[text_message("u0", MessageRole::User, "old frame")])
+            .expect("source fixture graph is admitted");
     let mut state = state_with_graph(graph);
     state.ensure_agent_frame_initialized().unwrap();
     let previous_frame_node_id = state.current_frame_node_id.clone();
@@ -168,7 +170,8 @@ fn open_agent_frame_seeds_compaction_frame_and_is_replay_idempotent() {
         "u0",
         MessageRole::User,
         "old durable frame",
-    )]);
+    )])
+    .expect("source fixture graph is admitted");
     let mut state = state_with_graph(graph);
     state.ensure_agent_frame_initialized().unwrap();
     let previous_frame_node_id = state.current_frame_node_id.clone();

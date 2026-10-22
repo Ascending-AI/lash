@@ -438,7 +438,7 @@ fn window_graph(
                 budget,
             )?;
             if let Some(graph) = window.extend_window(nodes, &leaf)? {
-                return Ok(windows.remember(session, &graph, leaf_generation, bytes + added));
+                return windows.remember(session, &graph, leaf_generation, bytes + added);
             }
         }
         WindowReuse::Miss => {}
@@ -473,7 +473,7 @@ fn window_graph(
     };
     let graph =
         lash_core_store::session_graph::SessionGraph::from_window_in(nodes, leaf, anchor, budget)?;
-    Ok(windows.remember(session, &graph, leaf_generation, bytes))
+    windows.remember(session, &graph, leaf_generation, bytes)
 }
 
 struct WindowReadContext {
@@ -598,9 +598,9 @@ fn window(
         }
         graph
     } else {
-        lash_core_store::session_graph::SessionGraph::default()
+        lash_core_store::session_graph::SessionGraph::empty_in(budget)?
     };
-    let graph = windows.attach(session, graph);
+    let graph = windows.attach(session, graph)?;
     SessionWindowRead::new(
         session.clone(),
         revision,

@@ -98,7 +98,8 @@ async fn terminal_windows_follow_the_session_retention(
         let (checkpoint, _) = window_roots(&stores, session_name, None, run.as_str());
         ended.push(Ended {
             run,
-            window: serde_json::to_value(window.to_snapshot()).expect("snapshot"),
+            window: serde_json::to_value(window.to_snapshot().expect("snapshot is admitted"))
+                .expect("snapshot"),
             checkpoint,
         });
     }
@@ -129,7 +130,8 @@ async fn terminal_windows_follow_the_session_retention(
         if index == 0 || index == 3 {
             let window = read?.expect("a pinned or head window stays readable");
             assert_eq!(
-                serde_json::to_value(window.to_snapshot()).expect("snapshot"),
+                serde_json::to_value(window.to_snapshot().expect("snapshot is admitted"))
+                    .expect("snapshot"),
                 run.window,
                 "{retention:?}: window {index} reads exactly as it ended"
             );

@@ -160,17 +160,92 @@ impl SessionGraph {
             cache.by_id.rename(&draft, derived, index, &budget)?;
         }
         cache.withdraw_proof();
-        let cache_lock = OnceLock::new();
-        let _ = cache_lock.set(cache);
-        let cache = Arc::new(cache_lock);
+        let cache = SessionGraphCacheStorage::with_cache_in(cache, &budget)?;
         // Buffer replacement is the final fallible operation. If its tail
         // is unseen, it rewrites in place after all reservations succeed.
-        let data = &mut Arc::make_mut(&mut self.inner).data;
-        replace_node_records(&mut data.nodes, edits)?;
-        if let Some(leaf) = leaf {
-            data.leaf_node_id = Some(leaf);
-        }
+        self.replace_records(edits, leaf)?;
         self.cache = cache;
+        Ok(())
+    }
+
+    /// Prepare a detached storage proposal only when another graph owns
+    /// this metadata. A private graph can rewrite an unseen buffer tail in
+    /// place; no extra snapshot is introduced while preparing its edit.
+    fn replace_records(
+        &mut self,
+        edits: std::collections::BTreeMap<usize, SessionNodeRecord>,
+        leaf: Option<NodeId>,
+    ) -> Result<(), crate::StoreError> {
+        let shared = Arc::get_mut(&mut self.inner).is_none();
+        let allocation = if shared || leaf.is_some() {
+            Some(
+                self.nodes.allocation_budget().reserve(
+                    Self::storage_capacity(&self.leaf_node_id, self.anchor.as_ref())
+                        .saturating_add(leaf.as_ref().map_or(0, |id| id.len() as u64)),
+                )?,
+            )
+        } else {
+            None
+        };
+        if shared {
+            let mut storage = (*self.inner).clone();
+            if let Some(allocation) = allocation {
+                storage.allocation = allocation;
+            }
+            replace_node_records(&mut storage.data.nodes, edits)?;
+            if let Some(leaf) = leaf {
+                storage.data.leaf_node_id = Some(leaf);
+            }
+            self.inner = Arc::new(storage);
+        } else {
+            let storage = Arc::get_mut(&mut self.inner)
+                .unwrap_or_else(|| unreachable!("private graph storage"));
+            replace_node_records(&mut storage.data.nodes, edits)?;
+            if let Some(leaf) = leaf {
+                storage.data.leaf_node_id = Some(leaf);
+            }
+            if let Some(allocation) = allocation {
+                storage.allocation = allocation;
+            }
+        }
+        Ok(())
+    }
+
+    pub(crate) fn replace_frame_assignment(
+        &mut self,
+        index: usize,
+        assignment: crate::AgentFrameAssignment,
+    ) -> Result<(), crate::StoreError> {
+        let budget = self.nodes.allocation_budget();
+        let mut record = self.nodes[index].clone_for_edit_in(
+            budget,
+            lash_protocol_types::allocation::payload_capacity(&assignment, 0),
+        )?;
+        let SessionNodePayload::FrameOpen {
+            assignment: current,
+            ..
+        } = &mut record.payload
+        else {
+            return Err(crate::StoreError::StoredDataCorrupt {
+                record_kind: "SessionGraph",
+                message: "frame assignment replacement names a non-frame node".into(),
+            });
+        };
+        *current = assignment;
+        self.replace_records([(index, record)].into(), None)
+    }
+
+    pub(crate) fn set_anchor(&mut self, anchor: WindowAnchor) -> Result<(), crate::StoreError> {
+        let allocation = self
+            .nodes
+            .allocation_budget()
+            .reserve(Self::storage_capacity(&self.leaf_node_id, Some(&anchor)))?;
+        // Anchor changes happen at initial receipt adoption. The records and
+        // projection indexes stay valid; publish their new metadata together.
+        let mut storage = (*self.inner).clone();
+        storage.data.anchor = Some(anchor);
+        storage.allocation = allocation;
+        self.inner = Arc::new(storage);
         Ok(())
     }
 
@@ -216,7 +291,7 @@ impl SessionGraph {
                 record.timestamp = realized.timestamp;
             }
         }
-        replace_node_records(&mut Arc::make_mut(&mut self.inner).data.nodes, edits)?;
+        self.replace_records(edits, None)?;
         Ok(())
     }
 
@@ -228,11 +303,8 @@ impl SessionGraph {
         if additional_nodes == 0 {
             return Ok(());
         }
-        self.detach_initialized_cache_for_append();
-        Arc::make_mut(&mut self.inner)
-            .data
-            .nodes
-            .reserve(additional_nodes)?;
+        self.detach_initialized_cache_for_append()?;
+        self.storage_mut()?.data.nodes.reserve(additional_nodes)?;
         if let Some(cache_lock) = Arc::get_mut(&mut self.cache)
             && let Some(cache) = cache_lock.get_mut()
         {
@@ -241,30 +313,30 @@ impl SessionGraph {
         Ok(())
     }
 
-    pub(super) fn detach_initialized_cache_for_append(&mut self) {
+    pub(super) fn detach_initialized_cache_for_append(&mut self) -> Result<(), crate::StoreError> {
         if Arc::get_mut(&mut self.cache).is_some() {
-            return;
+            return Ok(());
         }
         let Some(cache) = self.cache.get().cloned() else {
-            self.invalidate_cache();
-            return;
+            return self.invalidate_cache();
         };
-        let lock = OnceLock::new();
-        let _ = lock.set(cache);
-        self.cache = Arc::new(lock);
+        self.cache =
+            SessionGraphCacheStorage::with_cache_in(cache, self.nodes.allocation_budget())?;
+        Ok(())
     }
 
     /// Isolate claim-owned rendering from the store's independent window
     /// cache. Immutable source nodes and indexes stay shared; only the memoized
     /// render starts empty, so store readers cannot pin an owner's allocations.
     #[doc(hidden)]
-    pub fn detach_owner_prompt_rendering(&mut self) {
-        self.detach_initialized_cache_for_append();
+    pub fn detach_owner_prompt_rendering(&mut self) -> Result<(), crate::StoreError> {
+        self.detach_initialized_cache_for_append()?;
         if let Some(lock) = Arc::get_mut(&mut self.cache)
             && let Some(cache) = lock.get_mut()
         {
-            cache.detach_prompt_render_cache();
+            cache.detach_prompt_render_cache()?;
         }
+        Ok(())
     }
 
     /// Rewrites the current frame's readable tail and moves the resident leaf
@@ -277,7 +349,10 @@ impl SessionGraph {
     ///
     /// The resulting graph is a read projection. It must never be committed against an existing
     /// session head because the rewritten tail is not parented from that durable head.
-    pub fn rewrite_active_read_tail(&mut self, messages: &[Message]) {
+    pub fn rewrite_active_read_tail(
+        &mut self,
+        messages: &[Message],
+    ) -> Result<(), crate::StoreError> {
         let active_path = self.active_path_nodes();
         let frame_start = active_path
             .iter()
@@ -292,7 +367,7 @@ impl SessionGraph {
             messages,
             crate::SystemClock.node_timestamp(),
         );
-        let data = self.data_mut();
+        let data = self.data_mut()?;
         data.leaf_node_id = replacement.leaf_node_id;
         // A read projection: its tail is a copy of its own, so it never
         // takes the tip of the resident graph's buffer from the graph that
@@ -300,12 +375,13 @@ impl SessionGraph {
         let mut nodes = data.nodes.to_vec();
         nodes.extend(replacement.new_tail_nodes.into_iter().map(Arc::new));
         data.nodes = AppendVec::from(nodes);
+        Ok(())
     }
 
-    pub fn from_active_read_state(messages: &[Message]) -> Self {
+    pub fn from_active_read_state(messages: &[Message]) -> Result<Self, crate::StoreError> {
         let mut graph = Self::default();
-        graph.rewrite_active_read_tail(messages);
-        graph
+        graph.rewrite_active_read_tail(messages)?;
+        Ok(graph)
     }
 
     pub(crate) fn mark_conversation_reply(
@@ -341,13 +417,8 @@ impl SessionGraph {
         let event = SessionHistoryRecord::Conversation(message.clone());
         let mut cache = self.try_cache()?.clone();
         cache.replace_conversation_reply(&event)?;
-        let cache_lock = OnceLock::new();
-        let _ = cache_lock.set(cache);
-        let cache = Arc::new(cache_lock);
-        replace_node_records(
-            &mut Arc::make_mut(&mut self.inner).data.nodes,
-            [(index, record)].into(),
-        )?;
+        let cache = SessionGraphCacheStorage::with_cache_in(cache, &budget)?;
+        self.replace_records([(index, record)].into(), None)?;
         self.cache = cache;
         Ok(true)
     }

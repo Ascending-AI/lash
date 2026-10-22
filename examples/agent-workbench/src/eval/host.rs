@@ -173,7 +173,7 @@ pub(super) async fn worker(job_path: &Path, phase: &str, fixture: bool) -> Resul
         let evidence = Evidence {
             messages: view.messages().to_vec(),
             turn_index: view.turn_index(),
-            settled_view: serde_json::to_value(view.to_snapshot())?,
+            settled_view: serde_json::to_value(view.to_snapshot()?)?,
             trace: trace(&trace_path)?,
         };
         write_json(&job.directory.join("evidence.json"), &evidence)?;
