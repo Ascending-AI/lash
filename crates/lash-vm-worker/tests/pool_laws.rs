@@ -581,8 +581,8 @@ impl PageSource for Staged {
 }
 
 /// The one effect the park requests: its wait and its argument.
-fn requested(step: RunStep) -> (lash_vocabulary::sites::WaitId, Datum) {
-    let (wait, argument, _, _) = admitted(step);
+fn requested(step: RunStep, document: &EncodedPayload) -> (lash_vocabulary::sites::WaitId, Datum) {
+    let (wait, argument, _, _) = admitted(step, document);
     (wait, argument)
 }
 
@@ -590,6 +590,7 @@ fn requested(step: RunStep) -> (lash_vocabulary::sites::WaitId, Datum) {
 /// and the checkpoint root the park sealed.
 fn admitted(
     step: RunStep,
+    document: &EncodedPayload,
 ) -> (
     lash_vocabulary::sites::WaitId,
     Datum,
@@ -607,7 +608,23 @@ fn admitted(
     let [Request::Effect(request)] = &park.requests[..] else {
         panic!("one effect: {park:?}")
     };
-    assert_eq!(request.use_.slot, lash_vocabulary::ImportSlot(0));
+    let document = lash_kernel_doc::IdentifiedDocument::decode_standard(&document.0)
+        .expect("the fixture document decodes");
+    let (slot, _) = document
+        .imports
+        .iter()
+        .find(|(_, import)| {
+            import.name.package.to_string() == "host" && import.name.member.as_str() == "echo"
+        })
+        .expect("the fixture imports host.echo");
+    let expected = lash_vocabulary::OperationUse {
+        link: linked(document.shared().as_ref().clone()).link,
+        slot: *slot,
+    };
+    assert_eq!(
+        request.use_, expected,
+        "the park requests the document's host.echo use"
+    );
     let admission = lash_vm_broker::kernel::state::admission(&lash_kernel_state::AdmittedWait {
         identity: request.identity.clone(),
         request: lash_kernel_state::AdmittedRequest::Effect {
@@ -678,11 +695,11 @@ fn killed_at_a_park_and_resumed(
     first
         .start(start, identity, ExecutionClass::Cell)
         .expect("start");
-    let (wait, argument) = requested(parent.run(&mut first, SLICE, false).expect("run"));
+    let (wait, argument) = requested(parent.run(&mut first, SLICE, false).expect("run"), document);
     asked.push(argument.clone());
     first.deliver(wait, completed(argument)).expect("deliver");
     let (wait, argument, admission, root) =
-        admitted(parent.run(&mut first, SLICE, false).expect("run"));
+        admitted(parent.run(&mut first, SLICE, false).expect("run"), document);
     let root = parent.granted(root);
     asked.push(argument.clone());
     // Killed at the park: the worker is discarded, not reset.
@@ -703,7 +720,7 @@ fn killed_at_a_park_and_resumed(
         if !matches!(step, RunStep::Parked { .. }) {
             break ended_wire(step);
         }
-        let (wait, argument) = requested(step);
+        let (wait, argument) = requested(step, document);
         asked.push(argument.clone());
         second.deliver(wait, completed(argument)).expect("deliver");
     };
@@ -763,7 +780,10 @@ main {{
             ExecutionClass::Cell,
         )
         .expect("start");
-    let (wait, _, admission, root) = admitted(parent.run(&mut first, SLICE, false).expect("run"));
+    let (wait, _, admission, root) = admitted(
+        parent.run(&mut first, SLICE, false).expect("run"),
+        &document,
+    );
     let root = parent.granted(root);
     drop(first);
 
@@ -779,7 +799,10 @@ main {{
         .deliver(wait, completed(large.clone()))
         .expect("deliver");
     let before = (sent(), parent.replies);
-    let (_, argument) = requested(parent.run(&mut second, SLICE, false).expect("run"));
+    let (_, argument) = requested(
+        parent.run(&mut second, SLICE, false).expect("run"),
+        &document,
+    );
     assert_eq!(argument, large, "the large outcome was delivered");
     assert_eq!(
         (sent() - before.0) - (parent.replies - before.1),
@@ -866,8 +889,10 @@ fn a_worker_runs_code_in_a_dialect_its_host_did_not_name_and_refuses_to_save_it(
     worker
         .start(new_run(), &identity, ExecutionClass::Cell)
         .expect("start");
-    let (_, _, admission, root) =
-        admitted(parent.run(&mut worker, SLICE, false).expect("a Python run"));
+    let (_, _, admission, root) = admitted(
+        parent.run(&mut worker, SLICE, false).expect("a Python run"),
+        &document,
+    );
     let root = parent.granted(root);
     worker.release().expect("release at the park");
     drop(pool);
@@ -980,7 +1005,10 @@ fn a_parked_run_is_refused_under_another_document() {
             ExecutionClass::Cell,
         )
         .expect("start");
-    let (_, _, admission, root) = admitted(parent.run(&mut worker, SLICE, false).expect("run"));
+    let (_, _, admission, root) = admitted(
+        parent.run(&mut worker, SLICE, false).expect("run"),
+        &document_a,
+    );
     let root = parent.granted(root);
     worker.release().expect("release at the park");
 
@@ -1022,7 +1050,10 @@ fn an_observed_run_names_its_last_entered_site_on_its_next_frame() {
         .start(start, &identity, ExecutionClass::Process)
         .expect("start");
     let mut parent = Parent::new(&[&document]);
-    let (wait, argument) = requested(parent.run(&mut worker, SLICE, false).expect("run"));
+    let (wait, argument) = requested(
+        parent.run(&mut worker, SLICE, false).expect("run"),
+        &document,
+    );
     let entered: Vec<Vec<EffectId>> = worker
         .take_sites()
         .iter()
@@ -1376,7 +1407,7 @@ main {
         let step = parent.run(&mut first, SLICE, false).expect("run");
         let step = limited(&mut parent, &mut first, step, &mut answers, &mut asked);
         let parked = metered(&step);
-        let (wait, argument, admission, root) = admitted(step);
+        let (wait, argument, admission, root) = admitted(step, &document);
         let root = parent.granted(root);
         drop(first);
         let before = asked.len();
@@ -1426,7 +1457,10 @@ fn worker_crash_mid_run_leaves_the_parent_running() {
             ExecutionClass::Cell,
         )
         .expect("start");
-    let (wait, argument) = requested(parent.run(&mut worker, SLICE, false).expect("run"));
+    let (wait, argument) = requested(
+        parent.run(&mut worker, SLICE, false).expect("run"),
+        &document,
+    );
     worker
         .deliver(wait, completed(argument))
         .expect("the outcome waits for the next slice");
@@ -1989,7 +2023,7 @@ fn a_host_read_past_its_deadline_ends_the_run_with_its_typed_limit() {
     config.deadlines.host_read = Duration::from_millis(200);
     let service = service::Service::new(config);
     let (_, bytes) = entry_document(
-        "function go() -> Any\nkernel 1\nmetering statements\nbody { let got = read(handle(\"table\", \"t1\"), \"row\") return got }",
+        "function go(h: Handle(\"table\")) -> Any\nkernel 1\nmetering statements\nbody { let got = read(h, \"row\") return got }",
     );
     let document = lash_kernel_doc::IdentifiedDocument::decode_standard(&bytes.0)
         .expect("the linked worker fixture is valid");
@@ -2017,7 +2051,10 @@ fn a_host_read_past_its_deadline_ends_the_run_with_its_typed_limit() {
                 })
                 .collect(),
             target: Target::Entry(Name::new("go")),
-            args: Vec::new(),
+            args: vec![Datum::Handle(Handle {
+                kind: "table".into(),
+                id: "t1".into(),
+            })],
             session: None,
             modes: Default::default(),
             host: Vec::new(),
