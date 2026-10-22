@@ -699,3 +699,57 @@ fn leaf_payload<'s>(
     reader.finish().map_err(refuse)?;
     Ok(payload)
 }
+
+#[cfg(test)]
+mod preparation_tests {
+    use super::super::node::write_envelope;
+    use super::*;
+
+    /// A physical body's pure expansion is shared across cold readers;
+    /// acquiring it never memoizes the receiving reader's admission.
+    #[test]
+    fn physical_expansion_is_shared_without_memoizing_read_admission() {
+        let child = NodeId([0x37; 32]);
+        let bytes = write_envelope(NodeKind::TEXT_INDEX, &[child.0], &[0x0b, 0]);
+        let id = NodeId::of_envelope(&bytes);
+        let nodes = BTreeMap::from([(
+            id,
+            EncodedNode {
+                id,
+                bytes: bytes.into(),
+            },
+        )]);
+        let limits = DecodeLimits::within_total(1 << 20);
+        let mut first = GraphDecoder::new(&nodes, limits);
+        let first_envelope = first.envelope(id).unwrap();
+        let first_body = to_logical(&first_envelope, first_envelope.body, id).unwrap();
+        let mut second = GraphDecoder::new(&nodes, limits);
+        let second_envelope = second.envelope(id).unwrap();
+        let second_body = to_logical(&second_envelope, second_envelope.body, id).unwrap();
+        assert_eq!(&*first_body, &*second_body);
+        assert_eq!(first.read(), second.read());
+        assert!(matches!(
+            GraphDecoder::new(&nodes, DecodeLimits { nodes: 0, ..limits }).envelope(id),
+            Err(GraphRefusal::DecodeLimit {
+                dimension: DecodeDimension::Nodes,
+                ..
+            })
+        ));
+        assert_eq!(
+            GraphDecoder::new(&BTreeMap::<NodeId, EncodedNode>::new(), limits).envelope(id),
+            Err(GraphRefusal::MissingNode(id))
+        );
+        let mut changed = nodes.clone();
+        changed.get_mut(&id).unwrap().bytes =
+            write_envelope(NodeKind::TEXT_INDEX, &[[0x38; 32]], &[0x0b, 0]).into();
+        assert_eq!(
+            GraphDecoder::new(&changed, limits).envelope(id),
+            Err(GraphRefusal::HashMismatch(id))
+        );
+        assert_eq!(
+            first_body.as_ptr(),
+            second_body.as_ptr(),
+            "the same physical body was expanded twice"
+        );
+    }
+}
