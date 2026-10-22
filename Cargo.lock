@@ -2793,6 +2793,7 @@ dependencies = [
  "lash-internal-tool-presenter-standard",
  "lash-internal-tool-presenter-typescript",
  "lash-internal-tool-shape",
+ "lash-internal-tool-support",
  "lash-internal-trace",
  "lash-internal-vm-broker",
  "lash-internal-vm-client",
