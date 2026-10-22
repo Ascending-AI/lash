@@ -371,6 +371,8 @@ pub use lash_core::{
     facade_support::ModelCallAddress, facade_support::PluginLifecycleEvent,
     facade_support::SessionConfigChangedContext, facade_support::SessionConfigField,
 };
+/// The committed wait identity and deadline of a pending operation.
+pub use lash_core_store::tool_run::run_event::CompletionTimer;
 pub use lash_core_store::tool_run::{Material, NamesMaterial, SettledOutput, SettledOutputRefusal};
 pub use lash_execution_contracts::config_error::ConfigRegistrationError;
 pub use lash_execution_contracts::declaration_error::PluginDeclarationError;
@@ -448,5 +450,5 @@ pub use lash_vocabulary::claims::RegistryKind;
 pub use lash_core::facade_support::{ResolutionError, ResolutionValidator};
 pub use lash_core::{EndedCell, LinkedExecution};
 pub use lash_execution_contracts::process::{
-    InlineRequest, MigrationError, SuccessionContext, UseCorrespondence,
+    InlineCode, InlineRequest, MigrationError, SuccessionContext, UseCorrespondence,
 };

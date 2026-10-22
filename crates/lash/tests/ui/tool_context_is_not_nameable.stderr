@@ -4,7 +4,7 @@ error[E0425]: cannot find type `ToolContext` in module `lash::tools`
 4 |     let _: Option<lash::tools::ToolContext<'static>> = None;
   |                                ^^^^^^^^^^^
   |
- ::: $WORKSPACE/crates/lash-protocol-types/src/tool_contract.rs
+ ::: $WORKSPACE/crates/lash-vocabulary/src/tool_contract.rs
   |
   | pub struct ToolContract {
   | ----------------------- similarly named struct `ToolContract` defined here
