@@ -225,7 +225,15 @@ impl KernelMachine {
                             super::ops::Answer::Done => Flow::Done,
                             super::ops::Answer::Body(code) => {
                                 self.capture(task, entry, act, PhaseRecord::Called)?;
-                                self.enter_body(task, exe, lib, code, at, Some(stmt), None)?
+                                self.enter_body(
+                                    task,
+                                    exe,
+                                    lib,
+                                    code,
+                                    super::exec::Invocation::new(at, exe.lib(lib).arity)
+                                        .awaited_by(Some(stmt))
+                                        .with_boundary(None),
+                                )?
                             }
                             super::ops::Answer::Yielded => {
                                 self.capture(task, entry, act, PhaseRecord::Called)?;
@@ -531,7 +539,15 @@ impl KernelMachine {
             super::ops::Answer::Done => Ok(Flow::Done),
             super::ops::Answer::Body(code) => {
                 self.capture(task, entry, act, PhaseRecord::Called)?;
-                self.enter_body(task, exe, lib, code, args, Some(stmt), None)
+                self.enter_body(
+                    task,
+                    exe,
+                    lib,
+                    code,
+                    super::exec::Invocation::new(args, exe.lib(lib).arity)
+                        .awaited_by(Some(stmt))
+                        .with_boundary(None),
+                )
             }
             super::ops::Answer::Yielded => {
                 self.capture(task, entry, act, PhaseRecord::Called)?;
@@ -617,9 +633,13 @@ impl KernelMachine {
         count: usize,
     ) -> Status {
         match target {
-            Target::Export(callable, descriptor) => {
-                self.call_export(task, exe, callable, &descriptor, args, count, Some(stmt))
-            }
+            Target::Export(callable, descriptor) => self.call_export(
+                task,
+                exe,
+                callable,
+                &descriptor,
+                super::exec::Invocation::new(args, count).awaited_by(Some(stmt)),
+            ),
             Target::Code(code, captures, link) => {
                 let call = Call::new(code, args, count)
                     .in_link(link)
@@ -630,9 +650,14 @@ impl KernelMachine {
                 pushed?;
                 Ok(Flow::Step)
             }
-            Target::Library(lib, link) => {
-                self.call_lib_linked(task, exe, (lib, link), args, count, Some(stmt), None)
-            }
+            Target::Library(lib, link) => self.call_lib_linked(
+                task,
+                exe,
+                (lib, link),
+                super::exec::Invocation::new(args, count)
+                    .awaited_by(Some(stmt))
+                    .with_boundary(None),
+            ),
         }
     }
 
@@ -653,12 +678,21 @@ impl KernelMachine {
             crate::compile::LinkedHook::Import(slot) => self.import_target(exe, slot)?,
         };
         match target {
-            Target::Export(callable, descriptor) => {
-                self.call_export(task, exe, callable, &descriptor, args, count, awaiting)
-            }
-            Target::Library(lib, link) => {
-                self.call_lib_linked(task, exe, (lib, link), args, count, awaiting, None)
-            }
+            Target::Export(callable, descriptor) => self.call_export(
+                task,
+                exe,
+                callable,
+                &descriptor,
+                super::exec::Invocation::new(args, count).awaited_by(awaiting),
+            ),
+            Target::Library(lib, link) => self.call_lib_linked(
+                task,
+                exe,
+                (lib, link),
+                super::exec::Invocation::new(args, count)
+                    .awaited_by(awaiting)
+                    .with_boundary(None),
+            ),
             Target::Code(code, captures, link) => {
                 let result = self.push_frame(
                     task,
@@ -1127,10 +1161,9 @@ impl KernelMachine {
                 child,
                 exe,
                 (lib, link),
-                args,
-                count,
-                None,
-                export.as_deref().map(Into::into),
+                super::exec::Invocation::new(args, count)
+                    .awaited_by(None)
+                    .with_boundary(export.as_deref().map(Into::into)),
             ),
             Target::Export(..) => Err(fault("an export resolved to another export").into()),
         };

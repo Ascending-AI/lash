@@ -1,7 +1,7 @@
 {
   "cargo_only_target_count": 6,
   "cargo_package_count": 92,
-  "cargo_target_count": 366,
+  "cargo_target_count": 367,
   "facade_production_check_targets": [
     "//crates/lash-checkpoint-encoder:lash-checkpoint-encoder__fv_0200a96e__metadata[check]",
     "//crates/lash-core-effect:lash-core-effect__fv_72f14956__metadata[check]",
@@ -83657,7 +83657,7 @@
       "//third-party/vendored/lash-rmcp:lash-rmcp__fv_e2e7b48c"
     ]
   },
-  "generated_label_count": 468,
+  "generated_label_count": 469,
   "main_test_exclusions": {
     "//crates/lash-s3-store:lash-s3-store__unit_test": "requires an external service or credentials"
   },
@@ -85065,7 +85065,7 @@
     "//third-party/vendored/lash-rmcp:test_tool_routers__test",
     "//third-party/vendored/lash-rmcp:test_trace_context__test"
   ],
-  "metadata_target_count": 1544,
+  "metadata_target_count": 1545,
   "packages": [
     {
       "declared_features": [

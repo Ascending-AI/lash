@@ -556,14 +556,11 @@ impl KernelMachine {
         task: TaskId,
         exe: &Executable,
         (lib, link): (LibId, lash_vocabulary::content_ids::LinkId),
-        args: Reg,
-        count: usize,
-        awaiting: Option<StmtId>,
-        export: Option<super::exec::ExportBoundary<'_>>,
+        invocation: super::exec::Invocation<'_>,
     ) -> Status {
         let caller = self.active_link;
         self.active_link = link;
-        let result = self.call_lib(task, exe, lib, args, count, awaiting, export);
+        let result = self.call_lib(task, exe, lib, invocation);
         self.active_link = caller;
         result
     }
@@ -573,11 +570,14 @@ impl KernelMachine {
         task: TaskId,
         exe: &Executable,
         lib: LibId,
-        args: Reg,
-        count: usize,
-        awaiting: Option<StmtId>,
-        export: Option<super::exec::ExportBoundary<'_>>,
+        invocation: super::exec::Invocation<'_>,
     ) -> Status {
+        let super::exec::Invocation {
+            args,
+            count,
+            awaiting,
+            export,
+        } = invocation;
         let code = match self
             .answer(task, exe, lib, args, count, args)
             .map_err(|interrupt| interrupt.answering(exe.lib(lib)))?
@@ -586,7 +586,7 @@ impl KernelMachine {
             Answer::Body(code) => code,
             Answer::Yielded => return self.stand_segments(task, exe, awaiting, export),
         };
-        self.enter_body(task, exe, lib, code, args, awaiting, export)
+        self.enter_body(task, exe, lib, code, invocation)
     }
 
     /// Pushes the frame of library function `lib`'s kernel body `code`,
@@ -598,10 +598,14 @@ impl KernelMachine {
         exe: &Executable,
         lib: LibId,
         admitted: AdmittedBody,
-        args: Reg,
-        awaiting: Option<StmtId>,
-        export: Option<super::exec::ExportBoundary<'_>>,
+        invocation: super::exec::Invocation<'_>,
     ) -> Status {
+        let super::exec::Invocation {
+            args,
+            awaiting,
+            export,
+            ..
+        } = invocation;
         let function = exe.lib(lib);
         let AdmittedBody { code, entry } = admitted;
         // An argument the call leaves out is absent: the body binds every

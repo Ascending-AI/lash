@@ -352,10 +352,9 @@ pub(crate) fn start(
             TaskId::MAIN,
             &exe,
             (lib, machine.program.link),
-            0,
-            count,
-            None,
-            Some(descriptor.into()),
+            super::exec::Invocation::new(0, count)
+                .awaited_by(None)
+                .with_boundary(Some(descriptor.into())),
         ) {
             Ok(super::ops::Flow::Done) => {
                 let value = machine.take(0);
