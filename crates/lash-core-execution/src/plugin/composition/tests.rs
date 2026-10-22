@@ -92,7 +92,7 @@ impl crate::plugin::packages::PackageProvider for InventoryPackages {
     async fn hold(
         &self,
         _: &lash_core_store::artifact_referrer::ReferrerClaim,
-        _: &lash_vocabulary::package::PackageAdvertisement,
+        _: &[&lash_vocabulary::package::PackageAdvertisement],
     ) -> Result<(), lash_execution_contracts::process::linking::EnginePortError> {
         Ok(())
     }

@@ -352,3 +352,194 @@ async fn a_public_alias_retains_internal_fills_without_lending_their_authority()
         EnginePortError::Refused(AdmissionRefusal::NotVisible { .. })
     ));
 }
+
+struct CountedDocuments {
+    inner: Arc<dyn lash_execution_contracts::module_artifacts::ModuleArtifactStore>,
+    holds: Arc<std::sync::Mutex<BTreeMap<String, usize>>>,
+}
+#[async_trait::async_trait]
+impl lash_execution_contracts::module_artifacts::ModuleArtifactStore for CountedDocuments {
+    async fn publish_module_artifact(
+        &self,
+        claim: &ReferrerClaim,
+        module_ref: &str,
+        bytes: &[u8],
+    ) -> Result<(), lash_execution_contracts::module_artifacts::ArtifactStoreError> {
+        self.inner
+            .publish_module_artifact(claim, module_ref, bytes)
+            .await
+    }
+    async fn acquire_module_artifact(
+        &self,
+        claim: &ReferrerClaim,
+        module_ref: &str,
+    ) -> Result<(), lash_execution_contracts::module_artifacts::ArtifactStoreError> {
+        self.inner.acquire_module_artifact(claim, module_ref).await
+    }
+    async fn hold_module_artifacts(
+        &self,
+        claim: &ReferrerClaim,
+        artifacts: &[lash_execution_contracts::module_artifacts::ModuleArtifactHold<'_>],
+    ) -> Result<(), lash_execution_contracts::module_artifacts::ArtifactStoreError> {
+        {
+            let mut holds = self.holds.lock().unwrap();
+            for artifact in artifacts {
+                *holds.entry(artifact.module_ref().to_owned()).or_default() += 1;
+            }
+        }
+        self.inner.hold_module_artifacts(claim, artifacts).await
+    }
+    async fn end_module_referrer(
+        &self,
+        cleanup: &ResolvedArtifactCleanup,
+    ) -> Result<(), lash_execution_contracts::module_artifacts::ArtifactStoreError> {
+        self.inner.end_module_referrer(cleanup).await
+    }
+    async fn get_module_artifact(
+        &self,
+        module_ref: &str,
+    ) -> Result<Option<Vec<u8>>, lash_execution_contracts::module_artifacts::ArtifactStoreError>
+    {
+        self.inner.get_module_artifact(module_ref).await
+    }
+}
+
+/// FIG-7135: namespace retention walks the full helper graph once, regardless
+/// of the number of advertised packages, under each receiving claim.
+#[tokio::test]
+async fn a_full_helper_namespace_holds_each_document_once() {
+    use crate::tests::host::{
+        explicit_ephemeral_facets, runtime_lease_owner, sqlite_memory_store_backend,
+    };
+    let backend = sqlite_memory_store_backend().await;
+    let holds = Arc::new(std::sync::Mutex::new(BTreeMap::new()));
+    let counted = holds.clone();
+    let backend = crate::testing::LayeredBackend::over(backend)
+        .map_module_artifacts(move |inner| {
+            Arc::new(CountedDocuments {
+                inner,
+                holds: counted,
+            })
+        })
+        .into_backend();
+    let core = explicit_ephemeral_facets(crate::LashCore::standard_builder(backend.clone()))
+        .build(runtime_lease_owner())
+        .unwrap();
+    let env = lash_core::ProcessEnv::builder(crate::MaxToolCalls::new(16))
+        .component(lash_vm_runtime::KERNEL_SERVICES_CONFIG, &())
+        .build()
+        .unwrap();
+    let context = PublicationContext {
+        domain: PublicationDomain(backend.binding_identity().to_string()),
+        scope: PublicationScope::Host,
+        publisher: PublisherInstance("fixture".into()),
+        root: Segment::new("fixture").unwrap(),
+    };
+    let release = lash_vm_releases::helper_release().unwrap();
+    assert!(release.content.packages.len() > 1);
+    let pin = HostArtifactPin::mint();
+    let before = std::time::Instant::now();
+    let packages = core
+        .host_artifacts()
+        .process_namespace(&pin, &env, context)
+        .await
+        .unwrap();
+    eprintln!(
+        "full helper namespace setup: {:?}; packages={}; documents={}",
+        before.elapsed(),
+        release.content.packages.len(),
+        release.content.documents.len()
+    );
+    let expected: BTreeMap<_, _> = release
+        .content
+        .documents
+        .keys()
+        .map(|id| (id.to_string(), 1))
+        .collect();
+    assert_eq!(
+        *holds.lock().unwrap(),
+        expected,
+        "each helper Document must be held once per namespace"
+    );
+    let store = backend.package_store();
+    for accepted in &packages.snapshot.advertisements {
+        assert_eq!(
+            store
+                .publication(&accepted.publication.key())
+                .await
+                .unwrap(),
+            Some(accepted.publication.clone())
+        );
+    }
+    // Keep one helper publication on a second claim while ending the namespace
+    // owner: shared code survives exactly as long as a publication needs it.
+    let retained = packages
+        .snapshot
+        .advertisements
+        .iter()
+        .find(|accepted| !accepted.publication.code_links.is_empty())
+        .unwrap();
+    let reader =
+        ReferrerClaim::unguarded(ArtifactReferrer::HostPin(HostArtifactPin::mint())).unwrap();
+    store
+        .acquire_publication(&reader, &retained.publication.key())
+        .await
+        .unwrap();
+    let installer = ReferrerClaim::unguarded(ArtifactReferrer::HostPin(pin)).unwrap();
+    store
+        .end_package_referrer(&ResolvedArtifactCleanup {
+            referrer: installer.referrer().clone(),
+            carries: Vec::new(),
+        })
+        .await
+        .unwrap();
+    for accepted in &packages.snapshot.advertisements {
+        assert_eq!(
+            store
+                .publication(&accepted.publication.key())
+                .await
+                .unwrap()
+                .is_some(),
+            accepted.publication.key() == retained.publication.key()
+        );
+    }
+    for id in release.content.documents.keys() {
+        assert!(
+            backend
+                .module_artifacts()
+                .get_module_artifact(&id.to_string())
+                .await
+                .unwrap()
+                .is_some()
+        );
+    }
+    assert!(
+        store
+            .acquire_publication(&installer, &retained.publication.key())
+            .await
+            .is_err()
+    );
+    store
+        .end_package_referrer(&ResolvedArtifactCleanup {
+            referrer: reader.referrer().clone(),
+            carries: Vec::new(),
+        })
+        .await
+        .unwrap();
+    for id in release.content.documents.keys() {
+        assert!(
+            backend
+                .module_artifacts()
+                .get_module_artifact(&id.to_string())
+                .await
+                .unwrap()
+                .is_none()
+        );
+    }
+    for id in release.content.links.keys() {
+        assert!(store.link(id).await.unwrap().is_none());
+    }
+    for id in release.content.packages.keys() {
+        assert!(store.package(id).await.unwrap().is_none());
+    }
+}

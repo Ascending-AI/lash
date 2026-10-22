@@ -278,6 +278,7 @@ impl HostArtifacts {
         packages.consumer = Some(consumer);
         let claim = claim(pin)?;
         let store = self.core.backend().package_store();
+        let mut held = std::collections::BTreeSet::new();
         for accepted in &packages.snapshot.advertisements {
             if configured.snapshot.advertisements.contains(accepted) {
                 store
@@ -285,13 +286,25 @@ impl HostArtifacts {
                     .await
                     .map_err(lash_execution_contracts::plugin_error::registry_error)?;
             } else {
-                composition
-                    .composition
-                    .hold_package(&claim, accepted)
-                    .await
-                    .map_err(|error| {
-                        lash_execution_contracts::PluginError::Package(Box::new(error))
-                    })?;
+                if held.insert(accepted.publication.context.publisher.clone()) {
+                    let advertisements: Vec<_> = packages
+                        .snapshot
+                        .advertisements
+                        .iter()
+                        .filter(|candidate| {
+                            candidate.publication.context.publisher
+                                == accepted.publication.context.publisher
+                                && !configured.snapshot.advertisements.contains(candidate)
+                        })
+                        .collect();
+                    composition
+                        .composition
+                        .hold_packages(&claim, &advertisements)
+                        .await
+                        .map_err(|error| {
+                            lash_execution_contracts::PluginError::Package(Box::new(error))
+                        })?;
+                }
                 if let PackageAdvertisement::Enumerated(package) = &accepted.advertisement {
                     store
                         .put_package(

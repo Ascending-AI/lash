@@ -39,12 +39,13 @@ pub trait PackageProvider: Send + Sync {
         config: &OwnerConfigView,
         context: &PublicationContext,
     ) -> Result<Vec<PackageContribution>, PluginError>;
-    /// Retain the exact advertisement under the caller's existing cleanup
-    /// owner before a round exposes it. Return authenticated provenance intact.
+    /// Retain this provider's ordered namespace advertisements under the caller's
+    /// existing cleanup owner before exposing them. Shared code is held once
+    /// for the whole slice; every advertisement must pass ownership validation.
     async fn hold(
         &self,
         claim: &ReferrerClaim,
-        advertisement: &PackageAdvertisement,
+        advertisements: &[&PackageAdvertisement],
     ) -> Result<(), EnginePortError>;
 }
 /// A publication for an operation-only or deferred advertisement. Code
@@ -370,6 +371,7 @@ impl super::ExecutionComposition {
         store: &dyn lash_durable::packages::PackageStore,
         recorded: bool,
     ) -> Result<(), EnginePortError> {
+        let mut held = BTreeSet::new();
         for accepted in &packages.snapshot.advertisements {
             if recorded || matches!(accepted.publication.context.scope, PublicationScope::Host) {
                 store
@@ -378,7 +380,22 @@ impl super::ExecutionComposition {
                     .map_err(package_store_error)?;
                 continue;
             }
-            self.hold_package(claim, accepted).await?;
+            if held.insert(accepted.publication.context.publisher.clone()) {
+                let advertisements: Vec<_> = packages
+                    .snapshot
+                    .advertisements
+                    .iter()
+                    .filter(|candidate| {
+                        candidate.publication.context.publisher
+                            == accepted.publication.context.publisher
+                            && !matches!(
+                                candidate.publication.context.scope,
+                                PublicationScope::Host
+                            )
+                    })
+                    .collect();
+                self.hold_packages(claim, &advertisements).await?;
+            }
             if let PackageAdvertisement::Enumerated(package) = &accepted.advertisement {
                 store
                     .put_package(
@@ -399,18 +416,22 @@ impl super::ExecutionComposition {
         Ok(())
     }
 
-    /// Hold using the same registered publisher that supplied the accepted
-    /// advertisement. A recorded publication bypasses live advertisement.
-    pub async fn hold_package(
+    /// Hold one publisher's ordered namespace slice using its registered hook.
+    /// A recorded publication bypasses live advertisement.
+    pub async fn hold_packages(
         &self,
         claim: &ReferrerClaim,
-        accepted: &AcceptedAdvertisement,
+        accepted: &[&AcceptedAdvertisement],
     ) -> Result<(), EnginePortError> {
+        let Some(first) = accepted.first() else {
+            return Ok(());
+        };
+        let publisher = &first.publication.context.publisher;
         let registered = self
             .package_providers
             .iter()
             .find(|registered| {
-                accepted.publication.context.publisher.0
+                publisher.0
                     == format!(
                         "{}/{}",
                         registered.identity.owner(),
@@ -419,10 +440,21 @@ impl super::ExecutionComposition {
             })
             .ok_or_else(|| {
                 EnginePortError::Refused(AdmissionRefusal::NotOwner {
-                    path: advertisement_path(&accepted.advertisement).clone(),
+                    path: advertisement_path(&first.advertisement).clone(),
                 })
             })?;
-        registered.hook.hold(claim, &accepted.advertisement).await
+        for candidate in accepted {
+            if candidate.publication.context.publisher != *publisher {
+                return Err(EnginePortError::Refused(AdmissionRefusal::NotOwner {
+                    path: advertisement_path(&candidate.advertisement).clone(),
+                }));
+            }
+        }
+        let advertisements: Vec<_> = accepted
+            .iter()
+            .map(|candidate| &candidate.advertisement)
+            .collect();
+        registered.hook.hold(claim, &advertisements).await
     }
 
     /// Accept one coherent advertisement from committed config. No content

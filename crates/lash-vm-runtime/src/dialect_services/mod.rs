@@ -159,7 +159,7 @@ impl PackageProvider for Services {
     async fn hold(
         &self,
         _claim: &lash_core_store::artifact_referrer::ReferrerClaim,
-        _advertisement: &PackageAdvertisement,
+        _advertisements: &[&PackageAdvertisement],
     ) -> Result<(), EnginePortError> {
         Ok(())
     }

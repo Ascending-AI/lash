@@ -7,7 +7,7 @@ impl PackageProvider for ServicePackage {
     async fn hold(
         &self,
         _: &ReferrerClaim,
-        _: &PackageAdvertisement,
+        _: &[&PackageAdvertisement],
     ) -> Result<(), EnginePortError> {
         Ok(())
     }
@@ -121,7 +121,7 @@ impl PackageProvider for ControlledPackages {
     async fn hold(
         &self,
         _: &ReferrerClaim,
-        _: &PackageAdvertisement,
+        _: &[&PackageAdvertisement],
     ) -> Result<(), EnginePortError> {
         self.holding.notify_one();
         self.release.notified().await;
