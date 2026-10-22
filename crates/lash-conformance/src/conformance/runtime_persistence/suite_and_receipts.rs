@@ -155,10 +155,10 @@ pub async fn session_plugin_config_round_trips_through_the_committed_head(
                 "termination": {"kind": "conformance-termination"},
             }),
         )
-        .unwrap();
+        .expect("cold fixture config has no owner cap");
     expected
         .insert("conformance-plugin", serde_json::json!({"turn_cap": 12}))
-        .unwrap();
+        .expect("cold fixture config has no owner cap");
     let mut state = RuntimeSessionState {
         session_id: SessionId::from("session-plugin-config"),
         ..RuntimeSessionState::fixture(crate::SessionPolicy::new(
