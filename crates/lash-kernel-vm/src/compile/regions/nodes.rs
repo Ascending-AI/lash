@@ -633,6 +633,11 @@ pub(super) fn import_result(libs: &Libs<'_>, callee: &super::super::Callee, node
 fn checked_result(libs: &Libs<'_>, lib: LibId, node: Node) -> Node {
     let ty = libs.exe.lib(lib).header.signature.result.clone();
     Box::new(move |slots, cx| {
+        // The public Text check warms its payload. Decline before a helper
+        // allocates when that boundary could read cold data.
+        if ty == lash_vocabulary::Type::Text && cx.arena.any_cold() {
+            return None;
+        }
         node(slots, cx).filter(|value| super::super::import_result_fits(&ty, *value))
     })
 }
