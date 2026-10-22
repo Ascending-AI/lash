@@ -22,7 +22,15 @@ pub(super) struct Documents(
     /// depth they were validated under: a later admission of one skips
     /// validation (FIG-6931).
     BTreeSet<(DocumentId, usize)>,
+    BTreeMap<usize, Arc<ImmutableIdentity>>,
 );
+
+/// Weak ownership reserves the allocation address without retaining source
+/// bytes. Arc copy-on-write gives modified content a distinct allocation.
+struct ImmutableIdentity {
+    document: Weak<Document>,
+    identity: OnceLock<DocumentId>,
+}
 
 /// The most validated identities a library remembers; past it, it starts
 /// again.
@@ -69,7 +77,45 @@ impl From<Refused> for OpenError {
     }
 }
 
+#[cfg(test)]
+thread_local! {
+    static DOCUMENT_ENCODINGS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+fn identify_document(document: &Document) -> DocumentId {
+    #[cfg(test)]
+    DOCUMENT_ENCODINGS.with(|count| count.set(count.get() + 1));
+    document.identity()
+}
+
 impl PreparedLibrary {
+    pub(crate) fn document_identity(&self, document: &Arc<Document>) -> DocumentId {
+        let key = Arc::as_ptr(document) as usize;
+        let known = {
+            let mut documents = self
+                .0
+                .documents
+                .lock()
+                .unwrap_or_else(|error| error.into_inner());
+            if let Some(known) = documents.2.get(&key) {
+                Arc::clone(known)
+            } else {
+                documents
+                    .2
+                    .retain(|_, known| known.document.strong_count() != 0);
+                let known = Arc::new(ImmutableIdentity {
+                    document: Arc::downgrade(document),
+                    identity: OnceLock::new(),
+                });
+                documents.2.insert(key, Arc::clone(&known));
+                known
+            }
+        };
+        // Canonical encoding runs once for this live immutable allocation,
+        // outside the library cache lock. Its result never crosses a mutation.
+        *known.identity.get_or_init(|| identify_document(document))
+    }
+
     /// Admission precedes compilation, preserving import's refusal order:
     /// document identity and pins are checked before missing body callees.
     pub(crate) fn admit(
@@ -279,6 +325,57 @@ mod tests {
         QualifiedName, Signature, Type,
         package::{Fill, Link},
     };
+
+    /// Immutable identity validation does no repeated token encoding, and
+    /// changing either the root or a retained Document must still refuse.
+    #[test]
+    fn linked_validation_identifies_immutable_documents_once_and_rejects_mutation() {
+        let document = Arc::new(Document::new(doc::NumberPolicy::BySpelling, vec![]));
+        let identity = document.identity();
+        let link = Link {
+            document: identity,
+            fills: BTreeMap::new(),
+        };
+        let root = link.identity();
+        let library = PreparedLibrary::new(Arc::new(doc::FunctionRegistry::default()));
+        let program = crate::Program::prepare(
+            root,
+            BTreeMap::from([(identity, document)]),
+            &BTreeMap::from([(root, link)]),
+            doc::heap::PageId([3; 32]),
+            library,
+        )
+        .expect("valid immutable program");
+        DOCUMENT_ENCODINGS.with(|count| count.set(0));
+        program.validate_links().expect("same first start");
+        program.validate_links().expect("same next start");
+        assert_eq!(
+            DOCUMENT_ENCODINGS.with(|count| count.replace(0)),
+            0,
+            "validating unchanged linked content encoded its Documents again"
+        );
+        let mut changed = program.clone();
+        Arc::make_mut(&mut changed.document)
+            .private_bindings
+            .insert(lash_vocabulary::Name::new("changed"));
+        assert!(
+            changed.validate_links().is_err(),
+            "root mutation reused an old identity"
+        );
+        let mut changed = program.clone();
+        Arc::make_mut(
+            changed
+                .documents
+                .get_mut(&identity)
+                .expect("retained document"),
+        )
+        .private_bindings
+        .insert(lash_vocabulary::Name::new("changed"));
+        assert!(
+            changed.validate_links().is_err(),
+            "retained mutation reused an old identity"
+        );
+    }
 
     /// FIG-6931's compile-once rule survives linked preparation: equal code
     /// content shares immutable tables, while each execution keeps its own

@@ -4,6 +4,11 @@ use lash_helper_labels::{LabelError, Labels};
 use lash_kernel_doc::Export;
 use std::collections::BTreeSet;
 
+#[cfg(test)]
+std::thread_local! {
+    pub(super) static DEFINITION_VISITS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 /// Read strict labels without changing executable content or identity.
 /// Member keys are `member` or `type.member`; definition keys name private
 /// definitions in documents directly exported by this Package.
@@ -15,6 +20,7 @@ pub fn read_labels(
     let labels = lash_helper_labels::read_json(json)?;
     let mut definitions = BTreeSet::new();
     let mut public = BTreeSet::new();
+    let mut indexed = BTreeSet::new();
     for member in package.members.values() {
         if let MemberKind::Export { link, export } = &member.kind {
             let link = content
@@ -23,12 +29,13 @@ pub fn read_labels(
             let document = content
                 .document(link.document)
                 .map_err(|e| LabelError::at("/definitions", "", e.to_string()))?;
-            definitions.extend(
-                document
-                    .functions
-                    .values()
-                    .map(|f| f.name.as_str().to_owned()),
-            );
+            if indexed.insert(link.document) {
+                definitions.extend(document.functions.values().map(|f| {
+                    #[cfg(test)]
+                    DEFINITION_VISITS.with(|count| count.set(count.get() + 1));
+                    f.name.as_str()
+                }));
+            }
             if let Some(Export::Function(f)) = document.exports.get(&export.name) {
                 public.insert(f.function);
             }
@@ -59,7 +66,7 @@ pub fn read_labels(
         }
     }
     for key in labels.definitions.keys() {
-        if !definitions.contains(key) {
+        if !definitions.contains(key.as_str()) {
             return Err(LabelError::at(
                 "/definitions",
                 key,

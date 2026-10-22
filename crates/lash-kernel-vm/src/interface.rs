@@ -216,7 +216,7 @@ impl Program {
             .instances
             .get(&self.link)
             .ok_or_else(|| invalid("root Link is not loaded"))?;
-        if root.document != self.document.identity() {
+        if root.document != self.library.document_identity(&self.document) {
             return Err(invalid("root Link names another document"));
         }
         for (link, instance) in &self.instances {
@@ -227,7 +227,7 @@ impl Program {
                 .documents
                 .get(&instance.document)
                 .ok_or_else(|| invalid("instance document is not loaded"))?;
-            if document.identity() != instance.document {
+            if self.library.document_identity(document) != instance.document {
                 return Err(invalid("document bytes differ from their identity"));
             }
             if !document.imports.keys().eq(instance.slots.keys()) {
