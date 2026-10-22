@@ -57,7 +57,7 @@ impl Lowerer<'_> {
         self.nested(statement.range(), |this| {
             this.statement_inner(statement, span)
         })?;
-        self.own_caption(statement, first);
+        self.own_caption(statement, first)?;
         Ok(())
     }
 

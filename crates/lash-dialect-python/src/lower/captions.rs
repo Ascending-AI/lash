@@ -12,7 +12,7 @@ use lash_vocabulary::sites::{Site, Unit};
 use ruff_python_ast::{self as ast, Stmt as PyStmt};
 use ruff_text_size::{Ranged, TextSize};
 
-use super::Lowerer;
+use super::{Lowerer, Lowering};
 
 /// The arm of the statement just emitted that a clause caption names.
 #[derive(Clone, Copy)]
@@ -140,9 +140,9 @@ impl Lowerer<'_> {
     /// holds its first action, else its last. An entry's caption is its
     /// function's. A construct that emits nothing, such as a docstring or
     /// `pass`, leaves its caption a comment.
-    pub(super) fn own_caption(&mut self, statement: &PyStmt, first: usize) {
+    pub(super) fn own_caption(&mut self, statement: &PyStmt, first: usize) -> Lowering<()> {
         let Some(caption) = self.caption_at(statement.start()) else {
-            return;
+            return Ok(());
         };
         let emitted = first..self.buf.stmts.len();
         let last = |matches: fn(&Stmt) -> bool| {
@@ -153,11 +153,21 @@ impl Lowerer<'_> {
         };
         let owner = match statement {
             PyStmt::FunctionDef(def) if self.entry_defs.contains(&def.range) => {
+                let function = self
+                    .module
+                    .as_ref()
+                    .and_then(|module| module.function(&Name::new(def.name.id.as_str())))
+                    .ok_or_else(|| {
+                        crate::diagnostics::unplaced(
+                            crate::diagnostics::Code::InvalidDocument,
+                            "a captioned module Export has no lowered body",
+                        )
+                    })?;
                 self.declared_captions.push(CaptionEntry::site(
-                    Site::new(Unit::Function(Name::new(def.name.id.as_str())), Vec::new()),
+                    Site::new(Unit::Library(function), Vec::new()),
                     caption,
                 ));
-                return;
+                return Ok(());
             }
             PyStmt::If(_) => last(|stmt| matches!(stmt, Stmt::If { .. })),
             PyStmt::For(_) | PyStmt::While(_) => {
@@ -173,6 +183,7 @@ impl Lowerer<'_> {
         if let Some(owner) = owner {
             self.buf.notes[owner].caption = Some(caption);
         }
+        Ok(())
     }
 }
 

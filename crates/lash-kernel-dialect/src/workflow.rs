@@ -155,6 +155,14 @@ impl Module {
         self.entries.contains_key(name)
     }
 
+    /// The exact body identity of the Export already lowered under `name`.
+    #[must_use]
+    pub fn function(&self, name: &Name) -> Option<FunctionId> {
+        self.entries
+            .get(name)
+            .map(|entry| entry.function.identity())
+    }
+
     /// Adds `entry`.
     ///
     /// # Errors
