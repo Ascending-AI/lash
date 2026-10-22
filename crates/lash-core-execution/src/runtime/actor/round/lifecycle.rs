@@ -733,8 +733,16 @@ impl Lifecycle {
             // passed, settles its member now: a resumed owner never leaves
             // a resolution unread.
             if !parked.is_empty() {
+                let acknowledged = self.cx.acknowledged_commits();
                 let racing = self.check_terminals(&parked).await?;
-                if let Some(won) = waits::poll(&self.cx, &racing).await? {
+                let winner = waits::poll(&self.cx, &racing).await?;
+                if attempt.is_some() && self.cx.acknowledged_commits() != acknowledged {
+                    // Polling a due wait committed its winner. The process
+                    // pass's transaction and fold precede that write: reload
+                    // them before classifying or settling the member.
+                    return Ok(Act::Refused);
+                }
+                if let Some(won) = winner {
                     self.parked_ended(won, &parked).await;
                     parked.clear();
                 }

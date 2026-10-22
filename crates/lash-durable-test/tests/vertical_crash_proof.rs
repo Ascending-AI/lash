@@ -401,6 +401,13 @@ fn core(
         Protocol::Noted | Protocol::NotedTwice => lash::LashCore::builder(backend.clone())
             .protocol_plugin(Arc::new(noted::NotedProtocolFactory)),
     };
+    let tools = ext_write(Arc::clone(world));
+    let packages = lash::package::ToolPackageProvider::new(
+        "tools",
+        lash::tool_provider_key!("tools"),
+        [lash_vocabulary::Segment::new("tools").unwrap()].into(),
+        Arc::clone(&tools),
+    );
     builder
         .serve_sessions(false)
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
@@ -418,10 +425,12 @@ fn core(
         .execution_budgets(lash::ExecutionBudgets::recommended())
         .delta_coalescing(lash::DeltaCoalescing::recommended())
         .serve_test_llm_profile(model(protocol, Arc::clone(seen)), metadata())
-        .tools(
-            lash::tool_provider_key!("tools"),
-            ext_write(Arc::clone(world)),
-        )
+        .plugin(Arc::new(lash::plugins::StaticPluginFactory::new(
+            lash::plugins::PluginDeclaration::initial("tools"),
+            lash::plugins::PluginSpec::new()
+                .with_tool_provider(lash::tool_provider_key!("tools"), tools)
+                .with_package_provider(lash::tool_provider_key!("operations"), Arc::new(packages)),
+        )))
         .build(lash::persistence::LeaseOwnerIdentity::opaque(
             lash::persistence::LeaseOwnerId::new("v0-deployment"),
             lash::persistence::LeaseIncarnationId::new("v0-boot"),
