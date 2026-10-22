@@ -96,6 +96,7 @@ fn island_run(
     let mut scratch = Scratch::default();
     let tape = ChargeTape::new();
     let mut island = Island {
+        link: machine.current_link(),
         exe: &exe,
         stream: exe.document_stream(),
         arena: &mut arena,

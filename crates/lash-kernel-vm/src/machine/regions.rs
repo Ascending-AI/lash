@@ -313,6 +313,7 @@ impl KernelMachine {
         let slice_end = self.slice_end;
         let mut guests = RegionGuests {
             ground: super::islands::Ground {
+                link: self.active_link,
                 exe,
                 tape,
                 recorder,

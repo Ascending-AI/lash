@@ -36,10 +36,12 @@ struct ImmutableIdentity {
 /// again.
 const VALIDATED: usize = 4096;
 
+type CodeCell = Arc<OnceLock<Result<PreparedCode, Missing>>>;
+
 pub(crate) struct Admission {
     document: Weak<Document>,
     identity: OnceLock<DocumentId>,
-    code: Mutex<BTreeMap<CodeContent, Arc<OnceLock<Result<PreparedCode, Missing>>>>>,
+    code: Mutex<BTreeMap<CodeContent, CodeCell>>,
 }
 
 /// Operation fills stay per execution. Immutable compilation also keys the
