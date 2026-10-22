@@ -148,7 +148,22 @@ impl NodeTimestamp {
 
 impl std::fmt::Display for NodeTimestamp {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str(&self.0.to_rfc3339_opts(chrono::SecondsFormat::Nanos, true))
+        use chrono::{Datelike as _, Timelike as _};
+        // Chrono represents a leap second as second 59 plus at least one
+        // billion nanoseconds. Preserve its canonical RFC 3339 spelling
+        // while writing directly into the caller's prepared destination.
+        let nanos = self.0.nanosecond();
+        write!(
+            formatter,
+            "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}.{:09}Z",
+            self.0.year(),
+            self.0.month(),
+            self.0.day(),
+            self.0.hour(),
+            self.0.minute(),
+            self.0.second() + nanos / 1_000_000_000,
+            nanos % 1_000_000_000,
+        )
     }
 }
 

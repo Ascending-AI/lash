@@ -1514,6 +1514,7 @@ fn node_timestamp_round_trips_fixed_width_utc_instants() {
     for text in [
         "0000-01-01T00:00:00.000000000Z",
         "1970-01-01T00:00:00.000000001Z",
+        "2016-12-31T23:59:60.123456789Z",
         "2026-10-02T00:00:00.123456789Z",
         "9999-12-31T23:59:59.999999999Z",
     ] {
@@ -2224,6 +2225,43 @@ fn source_edit_refusal_leaves_graph_and_readers_unchanged() {
     drop(retiring);
     drop(retired);
     drop(old_reader);
+    // The receipt arrives after commit: all timestamp correction storage
+    // must already exist and held readers must retain their original view.
+    let original_timestamp = graph.nodes[0].timestamp;
+    let correction = RealizedNodeTimestamp {
+        node_id: graph.nodes[0].node_id.clone(),
+        timestamp: "2026-10-23T00:00:00.000000000Z".parse().unwrap(),
+    };
+    let held_graph = graph.clone();
+    let prepared = graph
+        .clone()
+        .prepare_receipt_adoption(&[correction.node_id.clone()])
+        .unwrap();
+    ledger.refuse.store(true, Ordering::SeqCst);
+    let realized = [correction];
+    let mut formatted = String::with_capacity(NodeTimestamp::WIDTH);
+    let measurement = crate::history_growth_law::allocation_counter::Measurement::start();
+    let acknowledged = prepared.acknowledge(&realized);
+    let counts = measurement.finish();
+    let acknowledged = acknowledged.expect("receipt adoption uses only prepared source capacity");
+    assert_eq!(
+        counts.allocated, 0,
+        "valid receipt correction allocates nothing after acknowledgement"
+    );
+    assert_eq!(acknowledged.nodes[0].timestamp, realized[0].timestamp);
+    let measurement = crate::history_growth_law::allocation_counter::Measurement::start();
+    use std::fmt::Write as _;
+    write!(&mut formatted, "{}", realized[0].timestamp).unwrap();
+    let counts = measurement.finish();
+    assert_eq!(
+        counts.allocated, 0,
+        "receipt timestamp formatting allocates nothing after acknowledgement"
+    );
+    assert_eq!(formatted, "2026-10-23T00:00:00.000000000Z");
+    assert_eq!(held_graph.nodes[0].timestamp, original_timestamp);
+    ledger.refuse.store(false, Ordering::SeqCst);
+    drop(acknowledged);
+    drop(held_graph);
     drop(graph);
     assert!(
         ledger.used.load(Ordering::SeqCst) > 0,

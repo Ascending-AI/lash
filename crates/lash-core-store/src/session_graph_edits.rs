@@ -3,7 +3,128 @@
 use super::*;
 use lash_protocol_types::allocation::SourceCapacity;
 
+/// A private graph proposal whose receipt corrections are prepared before
+/// the durable write. It cannot be cloned into another preparation.
+#[derive(Debug)]
+pub struct PreparedGraphReceipt {
+    graph: SessionGraph,
+    positions: std::collections::BTreeMap<NodeId, Option<usize>>,
+    _allocation: AllocationHold,
+}
+impl PreparedGraphReceipt {
+    /// Borrow only for precommit projection. Do not retain graph clones across
+    /// acknowledgement: the prepared correction slots are exclusively owned.
+    pub fn graph(&self) -> &SessionGraph {
+        &self.graph
+    }
+
+    pub fn acknowledge(
+        mut self,
+        realized: &[RealizedNodeTimestamp],
+    ) -> Result<SessionGraph, crate::StoreError> {
+        let corrupt = |message: &str| crate::StoreError::StoredDataCorrupt {
+            record_kind: "PreparedGraphReceipt",
+            message: message.into(),
+        };
+        // Validate the complete receipt before touching a correction slot.
+        // Retired expected IDs remain valid and deliberately have no slot.
+        if realized.len() != self.positions.len()
+            || self
+                .positions
+                .keys()
+                .any(|id| realized.iter().filter(|node| node.node_id == *id).count() != 1)
+        {
+            return Err(corrupt(
+                "receipt timestamps differ from the prepared node identities",
+            ));
+        }
+        if self.positions.values().any(Option::is_some) {
+            let storage = Arc::get_mut(&mut self.graph.inner)
+                .ok_or_else(|| corrupt("prepared graph storage was shared after preparation"))?;
+            // Preparation made this exact buffer private. No mutable source
+            // escaped the carrier, so this cannot grow or request admission.
+            let nodes = storage.data.nodes.make_mut()?;
+            if self
+                .positions
+                .values()
+                .flatten()
+                .any(|index| Arc::get_mut(&mut nodes[*index]).is_none())
+            {
+                return Err(corrupt(
+                    "prepared timestamp record was shared after preparation",
+                ));
+            }
+            for realized in realized {
+                if let Some(Some(index)) = self.positions.get(&realized.node_id) {
+                    Arc::get_mut(&mut nodes[*index])
+                        .unwrap_or_else(|| unreachable!("exclusive prepared correction slot"))
+                        .timestamp = realized.timestamp;
+                }
+            }
+        }
+        Ok(self.graph)
+    }
+}
+
 impl SessionGraph {
+    /// Prepare the complete source replacement before the durable write. The
+    /// returned carrier spends no new capacity when it accepts its receipt.
+    pub fn prepare_receipt_adoption(
+        mut self,
+        timestamp_node_ids: &[NodeId],
+    ) -> Result<PreparedGraphReceipt, crate::StoreError> {
+        let budget = self.nodes.allocation_budget().clone();
+        let bytes = timestamp_node_ids.iter().fold(
+            std::mem::size_of::<PreparedGraphReceipt>() as u64 + 128,
+            |bytes, id| bytes.saturating_add(2048).saturating_add(id.len() as u64),
+        );
+        let allocation = budget.reserve(bytes)?;
+        let cache = self.try_cache()?;
+        let mut positions = std::collections::BTreeMap::new();
+        for id in timestamp_node_ids {
+            if cache.by_id.get(id.as_str()).is_none()
+                || positions.insert(id.clone(), None).is_some()
+            {
+                return Err(crate::StoreError::StoredDataCorrupt {
+                    record_kind: "PreparedGraphReceipt",
+                    message: "prepared timestamp identity is absent or duplicated".into(),
+                });
+            }
+        }
+        self.mark_all_durable();
+        if self.anchor().is_none()
+            && let Some(base) = self.nodes.first()
+            && base.parent_node_id.is_none()
+            && base.frame_open().is_some()
+        {
+            let frame_node_id = crate::FrameNodeId::from(&base.node_id);
+            self.set_anchor(WindowAnchor {
+                frame_node_id,
+                generation: 0,
+                external_parent: None,
+                previous_frame_node_id: None,
+            })?;
+        }
+        self.retire_below_current_frame()?;
+        let cache = self.try_cache()?;
+        for (id, position) in &mut positions {
+            *position = cache.by_id.get(id.as_str());
+        }
+        if positions.values().any(Option::is_some) {
+            let nodes = self.storage_mut()?.data.nodes.make_mut()?;
+            for index in positions.values().flatten() {
+                // Clone metadata and detach each correction record while the
+                // owner still may refuse; held source readers stay immutable.
+                nodes[*index] = Arc::new(nodes[*index].clone_in(&budget)?);
+            }
+        }
+        Ok(PreparedGraphReceipt {
+            graph: self,
+            positions,
+            _allocation: allocation,
+        })
+    }
+
     /// Resident positions for `node_ids`, in input order.
     ///
     /// Resolution reads the initialized cache's `by_id` when it exists and
