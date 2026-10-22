@@ -290,3 +290,108 @@ fn imports_and_function_exports_round_trip_without_main() {
         document
     );
 }
+
+/// FIG-7143 / K-EFF-005: value paths name fields and array positions; limits
+/// never manufacture a type mismatch, even within a union.
+#[test]
+fn decode_mismatch_retains_value_path_and_depth_is_a_limit() {
+    use lash_vocabulary::{RecordType, RecordTypeField, Type, TypeMismatch};
+    let expected = Type::Record(RecordType {
+        fields: vec![RecordTypeField {
+            name: "x/y~z".into(),
+            ty: Type::List(Box::new(Type::Text)),
+            optional: false,
+        }],
+        rest: None,
+    });
+    let value = crate::Datum::Record(vec![(
+        "x/y~z".into(),
+        crate::Datum::List(vec![crate::Datum::Bool(true)]),
+    )]);
+    let decoder = crate::Decoder {
+        max_depth: 64,
+        policy: crate::NumberPolicy::Float,
+        declared: &|_| false,
+    };
+    assert_eq!(
+        decoder.decode(&value, &expected),
+        Err(crate::DecodeRefusal::Type {
+            mismatch: TypeMismatch::new(Type::Text, Type::Bool)
+                .within("0")
+                .within("x/y~z")
+        })
+    );
+    let map = Type::Map(Box::new(lash_vocabulary::MapType {
+        key: Type::Text,
+        value: Type::List(Box::new(Type::Text)),
+    }));
+    assert_eq!(
+        decoder.decode(&value, &map),
+        Err(crate::DecodeRefusal::Type {
+            mismatch: TypeMismatch::new(Type::Text, Type::Bool)
+                .within("0")
+                .within("x/y~z")
+        })
+    );
+    let limited = crate::Decoder {
+        max_depth: 1,
+        ..decoder
+    };
+    assert_eq!(
+        limited.decode(&value, &Type::Union(vec![expected, Type::Json])),
+        Err(crate::DecodeRefusal::DepthLimit { limit: 1 })
+    );
+}
+
+/// FIG-7143 / K-EFF-005: unconstrained data still names the offending
+/// map member or error payload, rather than reporting its enclosing value.
+#[test]
+fn unconstrained_decode_mismatches_keep_map_and_error_value_paths() {
+    use crate::{Datum, DecodeRefusal, Decoder, ErrorDatum, NumberPolicy, NumberToken};
+    use lash_vocabulary::{Type, TypeMismatch};
+    let decoder = Decoder {
+        max_depth: 64,
+        policy: NumberPolicy::Float,
+        declared: &|_| false,
+    };
+    let invalid = Datum::Number(NumberToken::new("1e999").unwrap());
+    let error = |data| {
+        Datum::Error(Box::new(ErrorDatum {
+            kind: "example".into(),
+            message: String::new(),
+            data,
+        }))
+    };
+    for ty in [Type::Any, Type::Json] {
+        for (value, path) in [
+            (
+                Datum::Map(vec![(Datum::Text("x/y~z".into()), invalid.clone())]),
+                "/x~1y~0z",
+            ),
+            (
+                Datum::Map(vec![(Datum::Bool(true), invalid.clone())]),
+                "/0/1",
+            ),
+            (Datum::Map(vec![(invalid.clone(), Datum::Null)]), "/0/0"),
+            (error(invalid.clone()), "/data"),
+        ] {
+            assert_eq!(
+                decoder.decode(&value, &ty),
+                Err(DecodeRefusal::Type {
+                    mismatch: TypeMismatch {
+                        path: path.into(),
+                        expected: Type::Float,
+                        actual: Type::Number,
+                    },
+                }),
+                "{ty:?} at {path}"
+            );
+        }
+    }
+    assert_eq!(
+        decoder.decode(&error(invalid), &Type::Error),
+        Err(DecodeRefusal::Type {
+            mismatch: TypeMismatch::new(Type::Float, Type::Number).within("data"),
+        })
+    );
+}

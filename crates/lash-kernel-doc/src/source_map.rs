@@ -10,31 +10,7 @@ use lash_vocabulary::names::DocumentId;
 use lash_vocabulary::names::SourceMapId;
 use lash_vocabulary::sites::Site;
 
-/// UTF-8 byte offsets in authored or printed source.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct Span {
-    pub start: usize,
-    pub end: usize,
-}
-impl Span {
-    /// An ordered half-open byte range. Source boundaries are checked by the map.
-    pub fn new(start: usize, end: usize) -> Option<Self> {
-        (start <= end).then_some(Self { start, end })
-    }
-}
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct SpanWire {
-    start: usize,
-    end: usize,
-}
-impl TryFrom<SpanWire> for Span {
-    type Error = &'static str;
-    fn try_from(value: SpanWire) -> Result<Self, Self::Error> {
-        Self::new(value.start, value.end).ok_or("source range ends before it starts")
-    }
-}
+pub use lash_vocabulary::sites::Span;
 
 /// The language of source, independent of a generated-source format version.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -277,14 +253,6 @@ impl TryFrom<SourceMapWire> for SourceMap {
         };
         map.check_order()?;
         Ok(map)
-    }
-}
-
-impl<'de> Deserialize<'de> for Span {
-    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        SpanWire::deserialize(deserializer)?
-            .try_into()
-            .map_err(serde::de::Error::custom)
     }
 }
 

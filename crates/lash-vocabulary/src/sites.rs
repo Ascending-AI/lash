@@ -535,3 +535,57 @@ impl EffectLocation {
         Self { at, origin }
     }
 }
+
+/// UTF-8 byte offsets in authored or printed source.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct Span {
+    pub start: usize,
+    pub end: usize,
+}
+impl Span {
+    /// An ordered half-open byte range. Source boundaries are checked by the map.
+    pub fn new(start: usize, end: usize) -> Option<Self> {
+        (start <= end).then_some(Self { start, end })
+    }
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SpanWire {
+    start: usize,
+    end: usize,
+}
+impl TryFrom<SpanWire> for Span {
+    type Error = &'static str;
+    fn try_from(value: SpanWire) -> Result<Self, Self::Error> {
+        Self::new(value.start, value.end).ok_or("source range ends before it starts")
+    }
+}
+
+impl<'de> Deserialize<'de> for Span {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        SpanWire::deserialize(deserializer)?
+            .try_into()
+            .map_err(serde::de::Error::custom)
+    }
+}
+
+impl crate::tokens::TokenCodec for Span {
+    fn encode(&self, out: &mut crate::tokens::TokenWriter) {
+        out.seq(2);
+        out.unsigned(self.start as u64);
+        out.unsigned(self.end as u64);
+    }
+    fn decode(
+        input: &mut crate::tokens::TokenReader<'_>,
+    ) -> Result<Self, crate::tokens::TokenError> {
+        input.expect_struct(2)?;
+        Self::new(
+            crate::tokens::checked_usize(input.unsigned()?)?,
+            crate::tokens::checked_usize(input.unsigned()?)?,
+        )
+        .ok_or_else(|| {
+            crate::tokens::TokenError::Invalid("source range ends before it starts".into())
+        })
+    }
+}

@@ -41,3 +41,140 @@ fn anonymous_definition_keeps_lexical_capture_and_its_own_unit() {
             .any(|binding| binding.name == Name::new("value") && binding.captured)
     );
 }
+
+/// FIG-7143: entry admission requires annotations; ordinary functions stay free.
+#[test]
+fn incomplete_entry_requires_signature_without_restricting_ordinary_functions() {
+    let (definition, _) = parse_definition_with_locals("function app.free(value: Any) -> Any\nkernel 1\nmetering statements\nbody { return value }").unwrap();
+    let mut document = Document::new(NumberPolicy::Float, vec![]);
+    let function = definition.identity();
+    let signature = definition.signature.clone();
+    document.functions.insert(function, definition);
+    crate::derive(&document, &document.functions)
+        .expect("ordinary unannotated functions remain valid");
+    document.exports.insert(
+        Name::new("entry"),
+        Export::Function(FunctionExport {
+            function,
+            signature,
+            convention: StartConvention::Direct,
+            asynchronous: false,
+            rest: false,
+        }),
+    );
+    document.main = Some(vec![lash_kernel_doc::Stmt::Return {
+        value: lash_kernel_doc::Expr::Closure(Box::new(lash_kernel_doc::Closure {
+            function,
+            presentation: None,
+        })),
+    }]);
+    let captured = lash_kernel_doc::FunctionValue {
+        callable: lash_vocabulary::CallableId {
+            link: lash_vocabulary::LinkId::from_bytes([1; 32]),
+            function,
+        },
+        captures: Default::default(),
+        signature: document.functions[&function].signature.clone(),
+        convention: StartConvention::Direct,
+        captions: lash_kernel_doc::Captions::empty(document.identity()),
+        representation: lash_kernel_doc::FunctionRepresentation::Bare,
+        creation: Some(lash_vocabulary::sites::Site::new(Unit::Main, [0, 0])),
+        token: None,
+    };
+    captured
+        .check_definition(&document)
+        .expect("an ordinary captured kernel closure needs no dialect presentation");
+    assert!(matches!(
+        captured.entry_export(&document),
+        Err(lash_kernel_doc::FunctionValueRefusal::SignatureRequired { .. })
+    ));
+    let refusal = crate::startable_export(&document, &Name::new("entry")).unwrap_err();
+    let crate::StartRefusal::SignatureRequired(required) = refusal else {
+        panic!("expected typed signature requirement: {refusal}")
+    };
+    assert_eq!(
+        required.position,
+        lash_kernel_doc::SignaturePosition::Parameter {
+            index: 0,
+            name: Name::new("value")
+        }
+    );
+    assert_eq!(
+        serde_json::to_value(&required).unwrap()["code"],
+        "SIGNATURE_REQUIRED"
+    );
+    let presentation = lash_kernel_doc::CallablePresentation {
+        signature: lash_vocabulary::Signature {
+            params: vec![lash_vocabulary::Param {
+                name: Name::new("value"),
+                ty: lash_vocabulary::Type::Json,
+                optional: false,
+            }],
+            result: lash_vocabulary::Type::Any,
+        },
+        representation: lash_kernel_doc::FunctionRepresentation::Bare,
+        convention: StartConvention::Direct,
+    };
+    let location = lash_kernel_doc::FunctionLocation {
+        name: Some("entry".into()),
+        site: None,
+    };
+    assert_eq!(
+        presentation
+            .promote_entry(function, location.clone(), false, false)
+            .unwrap_err()
+            .position,
+        lash_kernel_doc::SignaturePosition::Result
+    );
+    let complete = lash_kernel_doc::CallablePresentation {
+        signature: lash_vocabulary::Signature {
+            result: lash_vocabulary::Type::Json,
+            ..presentation.signature
+        },
+        ..presentation
+    };
+    assert_eq!(
+        complete
+            .promote_entry(function, location, false, false)
+            .unwrap()
+            .signature,
+        complete.signature
+    );
+}
+
+/// FIG-7143: transported metadata cannot replace the defining public signature.
+#[test]
+fn entry_promotion_verifies_the_defining_callable_contract() {
+    let definition = lash_kernel_doc::parse_definition(
+        "function app.entry() -> Bool\nkernel 1\nmetering statements\nbody { return true }",
+    )
+    .unwrap();
+    let id = definition.identity();
+    let mut document = Document::new(NumberPolicy::Float, vec![]);
+    document.functions.insert(id, definition);
+    let mut value = lash_kernel_doc::FunctionValue {
+        callable: lash_vocabulary::CallableId {
+            link: lash_vocabulary::LinkId::from_bytes([1; 32]),
+            function: id,
+        },
+        captures: Default::default(),
+        signature: lash_vocabulary::Signature {
+            params: vec![],
+            result: lash_vocabulary::Type::Bool,
+        },
+        convention: StartConvention::Direct,
+        captions: lash_kernel_doc::Captions::empty(document.identity()),
+        representation: lash_kernel_doc::FunctionRepresentation::Bare,
+        creation: None,
+        token: None,
+    };
+    assert_eq!(
+        value.entry_export(&document).unwrap().signature,
+        value.signature
+    );
+    value.signature.result = lash_vocabulary::Type::Text;
+    assert_eq!(
+        value.entry_export(&document).unwrap_err(),
+        lash_kernel_doc::FunctionValueRefusal::Identity
+    );
+}

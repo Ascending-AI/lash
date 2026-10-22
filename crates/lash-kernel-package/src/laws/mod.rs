@@ -250,8 +250,8 @@ fn l_start_sync_data_export_needs_no_main() {
     );
     let selector = StartSelector::Export(Name::new("run"));
     let args = BTreeMap::from([(Name::new("value"), Datum::Null)]);
-    assert!(lash_kernel_check::validate_start_input(&doc, &selector, &args).is_err());
-    assert!(lash_kernel_check::validate_start_result(&doc, &selector, &Datum::Null).is_err());
+    assert!(lash_kernel_check::validate_start_input(&doc, &selector, root, &args).is_err());
+    assert!(lash_kernel_check::validate_start_result(&doc, &selector, root, &Datum::Null).is_err());
 }
 #[test]
 fn a4_matching_brand_with_stale_shape_is_catchable() {

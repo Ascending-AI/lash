@@ -320,11 +320,20 @@ async fn kernel_run(
     };
     let args = match entry_args(&document, &process_input) {
         Ok(args) => args,
-        Err(message) => {
-            return ended(failure(
+        Err(error) => {
+            let cause = match &error {
+                EntryArgumentsError::Boundary(
+                    lash_kernel_check::StartBoundaryRefusal::TypeMismatch(source),
+                ) => Some(lash_core::ToolFailureCause::EntryTypeMismatch {
+                    source: (**source).clone(),
+                }),
+                _ => None,
+            };
+            return ended(caused_failure(
                 KernelProcessFailureCode::ArgumentsInvalid,
-                message,
+                error.to_string(),
                 None,
+                cause,
             ));
         }
     };
@@ -802,10 +811,31 @@ fn capacity_cause(outcome: &InfrastructureOutcome) -> Option<CapacityCause> {
 
 /// Start arguments follow the selected function Export's signature. Main
 /// takes no arguments and is never run before an Export start.
+#[derive(Debug, thiserror::Error)]
+pub(super) enum EntryArgumentsError {
+    #[error("{0}")]
+    Message(String),
+    #[error(transparent)]
+    Boundary(#[from] lash_kernel_check::StartBoundaryRefusal),
+    #[error(transparent)]
+    Callable(#[from] lash_kernel_doc::FunctionValueRefusal),
+    #[error(transparent)]
+    Decode(#[from] lash_kernel_doc::DecodeRefusal),
+}
+impl From<&str> for EntryArgumentsError {
+    fn from(message: &str) -> Self {
+        Self::Message(message.into())
+    }
+}
+impl From<String> for EntryArgumentsError {
+    fn from(message: String) -> Self {
+        Self::Message(message)
+    }
+}
 pub(super) fn entry_args(
     document: &Document,
     input: &KernelProcessInput,
-) -> Result<Vec<Datum>, String> {
+) -> Result<Vec<Datum>, EntryArgumentsError> {
     use lash_vocabulary::names::StartSelector;
     let mut supplied = std::collections::BTreeMap::new();
     let signature = match &input.code {
@@ -818,11 +848,30 @@ pub(super) fn entry_args(
             }
             StartSelector::Export(name) => match document.exports.get(name) {
                 Some(lash_kernel_doc::Export::Function(export)) => &export.signature,
-                _ => return Err(format!("{name} is not a function Export")),
+                _ => return Err(format!("{name} is not a function Export").into()),
             },
         },
         super::InlineRequest::Callable { function, .. } => &function.signature,
         super::InlineRequest::Unlinked { .. } => return Err("unrealized process input".into()),
+    };
+    let callable = match &input.code {
+        super::InlineRequest::Linked { start } => {
+            let lash_vocabulary::StartSelector::Export(name) = &start.selector else {
+                unreachable!("Main returned above")
+            };
+            let Some(lash_kernel_doc::Export::Function(export)) = document.exports.get(name) else {
+                unreachable!("checked above")
+            };
+            lash_vocabulary::CallableId {
+                link: start.link,
+                function: export.function,
+            }
+        }
+        super::InlineRequest::Callable { function, .. } => {
+            function.entry_export(document)?;
+            function.callable
+        }
+        _ => unreachable!("unlinked input returned above"),
     };
     for (name, value) in &input.args {
         let param = signature
@@ -830,12 +879,23 @@ pub(super) fn entry_args(
             .iter()
             .find(|param| param.name.as_str() == name)
             .ok_or_else(|| format!("unknown argument {name}"))?;
-        let value = lash_vm_broker::kernel::value::datum_from_tool_json(value, &param.ty)?;
+        let value = lash_vm_broker::kernel::value::datum_from_tool_json(value, &param.ty).map_err(
+            |error| match error {
+                lash_kernel_doc::DecodeRefusal::Type { mismatch } => EntryArgumentsError::Boundary(
+                    lash_kernel_check::StartBoundaryRefusal::TypeMismatch(Box::new(
+                        lash_vocabulary::EntryTypeMismatch {
+                            callable,
+                            mismatch: mismatch.within(param.name.as_str()).within("input"),
+                        },
+                    )),
+                ),
+                other => EntryArgumentsError::Decode(other),
+            },
+        )?;
         supplied.insert(lash_vocabulary::names::Name::new(name), value);
     }
     if let super::InlineRequest::Linked { start } = &input.code {
-        lash_kernel_check::validate_start_input(document, &start.selector, &supplied)
-            .map_err(|error| error.to_string())?;
+        lash_kernel_check::validate_start_input(document, &start.selector, start.link, &supplied)?;
     } else {
         let decoder = lash_kernel_doc::Decoder {
             max_depth: lash_vocabulary::data_limits::KernelDataLimits::standard().document_depth(),
@@ -843,12 +903,33 @@ pub(super) fn entry_args(
             declared: &|id| document.functions.contains_key(&id.function),
         };
         for param in &signature.params {
+            let Some(value) = supplied.get(&param.name) else {
+                if param.optional {
+                    continue;
+                }
+                return Err(lash_kernel_check::StartBoundaryRefusal::MissingArgument {
+                    name: param.name.clone(),
+                }
+                .into());
+            };
+            if param.optional && matches!(value, Datum::Absent) {
+                continue;
+            }
             decoder
-                .decode(
-                    supplied.get(&param.name).unwrap_or(&Datum::Absent),
-                    &param.ty,
-                )
-                .map_err(|error| error.to_string())?;
+                .decode(value, &param.ty)
+                .map_err(|error| match error {
+                    lash_kernel_doc::DecodeRefusal::Type { mismatch } => {
+                        EntryArgumentsError::Boundary(
+                            lash_kernel_check::StartBoundaryRefusal::TypeMismatch(Box::new(
+                                lash_vocabulary::EntryTypeMismatch {
+                                    callable,
+                                    mismatch: mismatch.within(param.name.as_str()).within("input"),
+                                },
+                            )),
+                        )
+                    }
+                    other => EntryArgumentsError::Decode(other),
+                })?;
         }
     }
     Ok(signature
@@ -921,7 +1002,7 @@ fn issue(
 
 /// How a run's end becomes the output its awaiter reads.
 pub(super) fn outcome_of_end(end: End) -> lash_execution_contracts::process::ProcessOutcome {
-    let json = |value: &Datum| {
+    let json = |value: &Datum| -> Option<serde_json::Value> {
         datum_to_json(value)
             .ok()
             .and_then(|text| serde_json::from_str(&text).ok())
@@ -981,7 +1062,7 @@ fn uncaught(
     error: Datum,
     site: Option<lash_vocabulary::sites::Site>,
 ) -> lash_execution_contracts::process::ProcessOutcome {
-    let json = |value: &Datum| {
+    let json = |value: &Datum| -> Option<serde_json::Value> {
         datum_to_json(value)
             .ok()
             .and_then(|text| serde_json::from_str(&text).ok())
@@ -1000,11 +1081,23 @@ fn uncaught(
             json(&value),
         ),
     };
+    let cause = match (error_kind.as_deref(), raw.as_ref()) {
+        (Some("entry_type_mismatch" | "function_argument"), Some(raw)) => {
+            serde_json::from_value(raw.clone())
+                .ok()
+                .map(|source| lash_core::ToolFailureCause::EntryTypeMismatch { source })
+        }
+        (Some("effect_result"), Some(raw)) => serde_json::from_value(raw.clone())
+            .ok()
+            .map(|source| lash_core::ToolFailureCause::TypeMismatch { source }),
+        _ => None,
+    }
+    .unwrap_or(lash_core::ToolFailureCause::UncaughtError { error_kind, site });
     caused_failure(
         KernelProcessFailureCode::RuntimeError,
         message,
         raw,
-        Some(lash_core::ToolFailureCause::UncaughtError { error_kind, site }),
+        Some(cause),
     )
 }
 
@@ -1026,6 +1119,42 @@ impl KernelRecordedSettings {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// FIG-7143: the plugin/host boundary keeps the kernel's typed mismatch.
+    #[test]
+    fn entry_mismatch_stays_typed_in_process_failure() {
+        let source = lash_vocabulary::EntryTypeMismatch {
+            callable: lash_vocabulary::CallableId {
+                link: lash_vocabulary::LinkId::from_bytes([1; 32]),
+                function: lash_vocabulary::FunctionId::from_bytes([2; 32]),
+            },
+            mismatch: lash_vocabulary::TypeMismatch::new(
+                lash_vocabulary::Type::Text,
+                lash_vocabulary::Type::Bool,
+            )
+            .within("actor")
+            .within("output"),
+        };
+        let outcome = uncaught(
+            Datum::Error(Box::new(ErrorDatum {
+                kind: "entry_type_mismatch".into(),
+                message: "entry_type_mismatch".into(),
+                data: lash_kernel_doc::diagnostic_datum(&source).expect("diagnostic data"),
+            })),
+            None,
+        );
+        let lash_execution_contracts::process::ProcessAwaitOutput::Settled { output } = outcome
+        else {
+            panic!("expected settled failure")
+        };
+        let lash_core::ToolCallOutcome::Failure(failure) = output.outcome else {
+            panic!("expected failure")
+        };
+        assert_eq!(
+            failure.cause.as_deref(),
+            Some(&lash_core::ToolFailureCause::EntryTypeMismatch { source })
+        );
+    }
 
     /// FIG-6786: a worker that died running the run is a fault of the
     /// attempt, which spends one of the step's attempts, so a run that keeps

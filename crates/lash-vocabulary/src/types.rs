@@ -162,3 +162,126 @@ fn describe_type(ty: &Type) -> String {
     }
 }
 pub use crate::type_relations::{data_only, serves as signature_serves};
+
+/// The first incompatible value at a public boundary. `path` is an RFC 6901
+/// pointer into the value, never a path through the type grammar.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct TypeMismatch {
+    pub path: String,
+    pub expected: Type,
+    /// A bounded kind witness; no user value is included.
+    pub actual: Type,
+}
+impl TypeMismatch {
+    pub fn new(expected: Type, actual: Type) -> Self {
+        Self {
+            path: String::new(),
+            expected,
+            actual,
+        }
+    }
+    pub fn within(mut self, segment: &str) -> Self {
+        self.path = format!(
+            "/{}{}",
+            segment.replace('~', "~0").replace('/', "~1"),
+            self.path
+        );
+        self
+    }
+}
+impl fmt::Display for TypeMismatch {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "type mismatch at {}: expected {:?}, actual {:?}",
+            self.path, self.expected, self.actual
+        )
+    }
+}
+impl std::error::Error for TypeMismatch {}
+
+/// A public entry's input or settled result violated its declared contract.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct EntryTypeMismatch {
+    pub callable: crate::names::CallableId,
+    pub mismatch: TypeMismatch,
+}
+impl fmt::Display for EntryTypeMismatch {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{:?}: {}", self.callable, self.mismatch)
+    }
+}
+impl std::error::Error for EntryTypeMismatch {}
+
+/// Source identity before a callable has been linked.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct FunctionLocation {
+    pub name: Option<String>,
+    pub site: Option<crate::sites::Site>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum SignaturePosition {
+    Parameter { index: u32, name: Name },
+    Result,
+}
+
+/// Only entry promotion requires a written parameter and settled-result type.
+/// Producers resolve explicit any/unknown to Json before calling this seam.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema, thiserror::Error)]
+#[serde(tag = "code", rename = "SIGNATURE_REQUIRED", deny_unknown_fields)]
+#[error("SIGNATURE_REQUIRED: {function:?} {position:?}")]
+pub struct SignatureRequired {
+    pub function: FunctionLocation,
+    pub position: SignaturePosition,
+    pub span: Option<crate::sites::Span>,
+}
+
+/// Check a resolved entry signature. Any denotes missing annotation evidence;
+/// explicit unconstrained annotations must already have resolved to Json.
+/// Dialects can attach the parameter/result insertion span to the returned fact.
+pub fn require_entry_signature(
+    signature: &Signature,
+    function: FunctionLocation,
+) -> Result<(), Box<SignatureRequired>> {
+    fn incomplete(ty: &Type) -> bool {
+        match ty {
+            Type::Any => true,
+            Type::Tuple(items) | Type::Union(items) => items.iter().any(incomplete),
+            Type::List(item) | Type::Set(item) | Type::Task(item) => incomplete(item),
+            Type::Map(map) => incomplete(&map.key) || incomplete(&map.value),
+            Type::Record(record) => {
+                record.fields.iter().any(|f| incomplete(&f.ty))
+                    || record.rest.as_deref().is_some_and(incomplete)
+            }
+            Type::Function(signature) => {
+                signature.params.iter().any(|p| incomplete(&p.ty)) || incomplete(&signature.result)
+            }
+            _ => false,
+        }
+    }
+    for (index, param) in signature.params.iter().enumerate() {
+        if incomplete(&param.ty) {
+            return Err(Box::new(SignatureRequired {
+                function,
+                position: SignaturePosition::Parameter {
+                    index: index as u32,
+                    name: param.name.clone(),
+                },
+                span: None,
+            }));
+        }
+    }
+    if incomplete(&signature.result) {
+        return Err(Box::new(SignatureRequired {
+            function,
+            position: SignaturePosition::Result,
+            span: None,
+        }));
+    }
+    Ok(())
+}

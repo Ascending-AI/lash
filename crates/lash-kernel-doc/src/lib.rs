@@ -34,7 +34,8 @@ pub use source_map::{SourceLanguage, SourceMap, SourceMapRefusal, SourceSite, Sp
 mod codec_variants;
 mod continuation;
 mod decode;
-pub use decode::{DecodeMismatch, Decoder};
+pub use decode::{DecodeRefusal, Decoder, datum_type, diagnostic_datum};
+pub use lash_vocabulary::{EntryTypeMismatch, TypeMismatch};
 pub mod document;
 
 /// The arena: what a run's objects are while it executes (seams C, D).
@@ -97,9 +98,10 @@ pub use function::{
     FunctionHeader, Guard, Implementation, ImplementationKind, Measure, Metering, Operand,
 };
 pub use function_value::{
-    CallablePresentation, FUNCTION_VALUE_ENTRY, FUNCTION_VALUE_TAG, FunctionRepresentation,
-    FunctionTarget, FunctionValue, FunctionValueLimits, FunctionValueRefusal, StartConvention,
-    escape_function_key,
+    CallablePresentation, FUNCTION_VALUE_ENTRY, FUNCTION_VALUE_TAG, FunctionLocation,
+    FunctionRepresentation, FunctionTarget, FunctionValue, FunctionValueLimits,
+    FunctionValueRefusal, SignaturePosition, SignatureRequired, StartConvention,
+    escape_function_key, require_entry_signature,
 };
 pub use graph_codec::FrozenDatum;
 pub use heap::{EntityId, FamilyId, Identity};

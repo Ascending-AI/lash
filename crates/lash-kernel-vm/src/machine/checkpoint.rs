@@ -127,13 +127,13 @@ impl Machine for KernelMachine {
             policy: self.program.document.numbers,
             declared: &declared,
         };
-        let rejected = |what: &str, mismatch: lash_kernel_doc::DecodeMismatch| {
-            Datum::Error(Box::new(lash_kernel_doc::ErrorDatum {
-                kind: "effect_result".into(),
-                message: format!("{what} does not fit the stated type: {mismatch}"),
-                data: Datum::Null,
-            }))
-        };
+        let rejected =
+            |_what: &str, refusal: lash_kernel_doc::DecodeRefusal| -> Result<Datum, DeliverError> {
+                refusal
+                    .error_datum()
+                    .map(|error| Datum::Error(Box::new(error)))
+                    .map_err(|e| DeliverError::Heap(HeapFault::Malformed(e.to_string())))
+            };
         let frozen = match outcome {
             // A failure's data is decoded under the document's number
             // policy, as a result is, before the heap freezes it.
@@ -147,7 +147,7 @@ impl Machine for KernelMachine {
                     ),
                     Err(mismatch) => CommittedOutcomeRecord::Rejected(
                         self.heap
-                            .freeze_datum(&rejected("the result", mismatch))
+                            .freeze_datum(&rejected("the result", mismatch)?)
                             .map_err(delivery_error)?,
                     ),
                 }
@@ -171,7 +171,7 @@ impl Machine for KernelMachine {
                             .freeze_datum(&rejected(
                                 &format!("the result of `{effect:?}`"),
                                 mismatch,
-                            ))
+                            )?)
                             .map_err(delivery_error)?,
                     ),
                 }

@@ -243,29 +243,31 @@ fn type_text(ty: &Type, spelling: Spelling) -> String {
     }
 }
 
-/// Render the pinned SIGNATURE_REQUIRED facts. The diagnostic owner supplies
-/// the function and position; source coordinates remain available separately.
-pub fn render_signature_required(function: Option<&str>, parameter: Option<(&str, u32)>) -> String {
-    let function = function.unwrap_or("<anonymous>");
-    match parameter {
-        Some((name, index)) => format!(
+/// Render the entry annotation refusal; source coordinates remain available
+/// on the owning diagnostic for hosts to present alongside this text.
+pub fn render_signature_required(required: &lash_vocabulary::SignatureRequired) -> String {
+    let function = required.function.name.as_deref().unwrap_or("<anonymous>");
+    match &required.position {
+        lash_vocabulary::SignaturePosition::Parameter { name, index } => format!(
             "SIGNATURE_REQUIRED: {function} parameter {index} ({name}) needs a written type annotation"
         ),
-        None => {
+        lash_vocabulary::SignaturePosition::Result => {
             format!("SIGNATURE_REQUIRED: {function} needs a written settled-result type annotation")
         }
     }
 }
 
-/// Render the pinned EntryTypeMismatch components without erasing typed facts
-/// in the runtime. Wiring to its owning struct follows the contract lane.
+/// Render the owning entry mismatch using this dialect's type spelling.
 pub fn render_entry_type_mismatch(
-    callable: &lash_vocabulary::CallableId,
-    path: &str,
-    expected: &Type,
-    actual: &Type,
+    source: &lash_vocabulary::EntryTypeMismatch,
     spelling: Spelling,
 ) -> String {
+    let callable = &source.callable;
+    let lash_vocabulary::TypeMismatch {
+        path,
+        expected,
+        actual,
+    } = &source.mismatch;
     format!(
         "ENTRY_TYPE_MISMATCH: {callable:?} at {path}: expected {}, actual {}",
         type_text(expected, spelling),
@@ -306,7 +308,7 @@ mod laws {
     /// ENTRY-PRESENTATION: signature optionality and diagnostic facts retain
     /// their meanings in both source languages.
     #[test]
-    fn entry_signatures_and_diagnostics_use_the_dialect_spelling() {
+    fn entry_contract_facts_use_the_dialect_spelling() {
         let signature = Signature {
             params: vec![Param {
                 name: Name::new("event"),
@@ -328,11 +330,28 @@ mod laws {
             "tuple[()]"
         );
         assert_eq!(
-            render_signature_required(Some("entry"), Some(("event", 0))),
+            render_signature_required(&lash_vocabulary::SignatureRequired {
+                function: lash_vocabulary::FunctionLocation {
+                    name: Some("entry".into()),
+                    site: None
+                },
+                position: lash_vocabulary::SignaturePosition::Parameter {
+                    name: Name::new("event"),
+                    index: 0
+                },
+                span: None,
+            }),
             "SIGNATURE_REQUIRED: entry parameter 0 (event) needs a written type annotation"
         );
         assert_eq!(
-            render_signature_required(None, None),
+            render_signature_required(&lash_vocabulary::SignatureRequired {
+                function: lash_vocabulary::FunctionLocation {
+                    name: None,
+                    site: None
+                },
+                position: lash_vocabulary::SignaturePosition::Result,
+                span: None,
+            }),
             "SIGNATURE_REQUIRED: <anonymous> needs a written settled-result type annotation"
         );
         let callable = lash_vocabulary::CallableId {
@@ -344,10 +363,14 @@ mod laws {
             (Spelling::Python, "str", "float"),
         ] {
             let text = render_entry_type_mismatch(
-                &callable,
-                "/output/id",
-                &Type::Text,
-                &Type::Number,
+                &lash_vocabulary::EntryTypeMismatch {
+                    callable,
+                    mismatch: lash_vocabulary::TypeMismatch {
+                        path: "/output/id".into(),
+                        expected: Type::Text,
+                        actual: Type::Number,
+                    },
+                },
                 spelling,
             );
             assert!(

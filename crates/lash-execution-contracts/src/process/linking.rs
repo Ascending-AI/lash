@@ -117,6 +117,12 @@ pub struct LoadedContent {
 )]
 /// Typed deterministic admission refusal retained across the plugin/host boundary.
 pub enum AdmissionRefusal {
+    CallableIdentity {
+        callable: lash_vocabulary::CallableId,
+    },
+    SignatureRequired {
+        source: Box<lash_vocabulary::SignatureRequired>,
+    },
     CallableTooLarge {
         bytes: u64,
         limit: u64,

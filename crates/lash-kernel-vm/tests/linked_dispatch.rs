@@ -682,98 +682,10 @@ fn imported_args_list_is_settled_under_its_defining_link_after_cold_restore() {
     }
 }
 
-/// Public callable signatures constrain the settled value, independently
-/// of the private function header and across a parked frame.
-#[test]
-fn callable_settled_result_must_fit_its_public_signature() {
-    for public_type in [
-        Type::Bool,
-        Type::Function(Box::new(Signature {
-            params: vec![],
-            result: Type::Bool,
-        })),
-    ] {
-        let definition = function(
-            "test.result",
-            Signature {
-                params: vec![],
-                result: Type::Any,
-            },
-            BTreeMap::new(),
-            vec![Stmt::Return { value: null() }],
-        );
-        let function = definition.identity();
-        let document = document(
-            BTreeMap::new(),
-            BTreeMap::from([(function, definition)]),
-            None,
-        );
-        let document_id = document.identity();
-        let link = Link {
-            document: document_id,
-            fills: BTreeMap::new(),
-        };
-        let link_id = link.identity();
-        let program = Program::prepare(
-            link_id,
-            BTreeMap::from([(document_id, Arc::new(document))]),
-            &BTreeMap::from([(link_id, link)]),
-            PageId([9; 32]),
-            PreparedLibrary::new(Arc::new(FunctionRegistry::new())),
-        )
-        .unwrap_or_else(|error| panic!("linked law fixture: {error:?}"));
-        let mut machine = KernelMachine::start(
-            program,
-            bounds(),
-            CellStart {
-                owner: PageId([8; 32]),
-                target: Target::Callable(Box::new(lash_kernel_doc::FunctionValue {
-                    callable: lash_vocabulary::CallableId {
-                        link: link_id,
-                        function,
-                    },
-                    representation: lash_kernel_doc::FunctionRepresentation::Bare,
-                    creation: None,
-                    token: None,
-                    captures: BTreeMap::new(),
-                    signature: Signature {
-                        params: vec![],
-                        result: public_type,
-                    },
-                    convention: StartConvention::Direct,
-                    captions: lash_kernel_doc::Captions::empty(document_id),
-                })),
-                args: vec![],
-                session: None,
-                modes: BTreeMap::new(),
-                host: vec![],
-            },
-            Box::new(Pages::default()),
-        )
-        .unwrap_or_else(|error| panic!("linked law fixture: {error:?}"));
-        loop {
-            match machine
-                .run(&mut Passive, 100_000)
-                .unwrap_or_else(|error| panic!("linked law fixture: {error:?}"))
-            {
-                Step::Slice => {}
-                Step::Ended(End::Error(lash_kernel_vm::RunError::Uncaught {
-                    error: Datum::Error(error),
-                    ..
-                })) => {
-                    assert_eq!(error.kind, "function_result");
-                    break;
-                }
-                other => panic!("public signature mismatch was accepted: {other:?}"),
-            }
-        }
-    }
-}
-
 /// An immediate library export's public result failure belongs to the spawned
 /// child. The spawner receives its handle and observes that error at join.
 #[test]
-fn spawned_immediate_export_result_failure_ends_the_child() {
+fn spawned_immediate_export_mismatch_keeps_child_identity() {
     struct Null;
     impl lash_kernel_doc::NativeFunction for Null {
         fn call(
@@ -925,7 +837,19 @@ fn spawned_immediate_export_result_failure_ends_the_child() {
                     let Datum::Error(error) = done.result else {
                         panic!("join did not observe child error: {done:?}")
                     };
-                    assert_eq!(error.kind, "function_result");
+                    assert_eq!(error.kind, "entry_type_mismatch");
+                    assert_eq!(
+                        error.data,
+                        lash_kernel_doc::diagnostic_datum(&lash_vocabulary::EntryTypeMismatch {
+                            callable: lash_vocabulary::CallableId {
+                                link: child_link_id,
+                                function
+                            },
+                            mismatch: lash_vocabulary::TypeMismatch::new(Type::Bool, Type::Null)
+                                .within("output"),
+                        })
+                        .expect("typed child mismatch")
+                    );
                     break;
                 }
                 other => {
@@ -1695,4 +1619,213 @@ fn unused_native_declarations_do_not_enlarge_selected_reach() {
             other => panic!("selected body: {other:?}"),
         }
     }
+}
+
+/// FIG-7143: nested result mismatches retain callable identity and RFC 6901 paths.
+#[test]
+fn entry_nested_result_mismatch_retains_typed_boundary_facts() {
+    use lash_vocabulary::types::{RecordType, RecordTypeField};
+    for suspended in [false, true] {
+        let signature = Signature {
+            params: vec![],
+            result: Type::Record(RecordType {
+                fields: vec![RecordTypeField {
+                    name: "a/b~c".into(),
+                    ty: Type::List(Box::new(Type::Text)),
+                    optional: false,
+                }],
+                rest: None,
+            }),
+        };
+        let imports = if suspended {
+            BTreeMap::from([(
+                ImportSlot(0),
+                Import {
+                    name: QualifiedName {
+                        package: lash_vocabulary::PackagePath::parse("service").expect("package"),
+                        member: lash_vocabulary::Segment::new("read").expect("member"),
+                        type_member: None,
+                    },
+                    kind: ImportKind::Operation {
+                        signature: self::signature(vec![]),
+                    },
+                },
+            )])
+        } else {
+            BTreeMap::new()
+        };
+        let mut block = if suspended { vec![perform()] } else { vec![] };
+        block.push(Stmt::Return {
+            value: Expr::Record(vec![lash_kernel_doc::RecordEntry {
+                field: "a/b~c".into(),
+                value: Expr::List(vec![Expr::Literal(Literal::Bool(true))]),
+            }]),
+        });
+        let definition = function("test.wrong", signature.clone(), imports.clone(), block);
+        let function = definition.identity();
+        let mut document = document(imports, BTreeMap::from([(function, definition)]), None);
+        document.exports.insert(
+            Name::new("entry"),
+            lash_kernel_doc::Export::Function(FunctionExport {
+                function,
+                signature,
+                convention: StartConvention::Direct,
+                asynchronous: false,
+                rest: false,
+            }),
+        );
+        let id = document.identity();
+        let fills = if suspended {
+            BTreeMap::from([(
+                ImportSlot(0),
+                Fill::Operation(OperationRequirement::new(
+                    self::signature(vec![]),
+                    ContractId::new("read.v1"),
+                )),
+            )])
+        } else {
+            BTreeMap::new()
+        };
+        let link = Link {
+            document: id,
+            fills,
+        };
+        let link_id = link.identity();
+        let program = Program::prepare(
+            link_id,
+            BTreeMap::from([(id, Arc::new(document))]),
+            &BTreeMap::from([(link_id, link)]),
+            PageId([9; 32]),
+            PreparedLibrary::new(Arc::new(FunctionRegistry::new())),
+        )
+        .expect("entry program");
+        let pages = Pages::default();
+        let mut machine = KernelMachine::start(
+            program.clone(),
+            bounds(),
+            CellStart {
+                owner: PageId([8; 32]),
+                target: Target::Entry(Name::new("entry")),
+                args: vec![],
+                session: None,
+                modes: BTreeMap::new(),
+                host: vec![],
+            },
+            Box::new(pages.clone()),
+        )
+        .expect("start entry");
+        if suspended {
+            let asked = request(&mut machine);
+            let saved = machine.checkpoint().expect("parked boundary");
+            machine = KernelMachine::open(program, bounds(), &saved.checkpoint(), Box::new(pages))
+                .expect("cold restore");
+            machine
+                .deliver(asked.wait, Outcome::Completed(Datum::Null))
+                .expect("answer");
+        }
+        loop {
+            match machine.run(&mut Passive, 100_000).expect("run entry") {
+                Step::Slice => {}
+                Step::Ended(End::Error(lash_kernel_vm::RunError::Uncaught {
+                    error: Datum::Error(error),
+                    ..
+                })) => {
+                    assert_eq!(error.kind, "entry_type_mismatch");
+                    assert_eq!(
+                        error.data,
+                        lash_kernel_doc::diagnostic_datum(&lash_vocabulary::EntryTypeMismatch {
+                            callable: lash_vocabulary::CallableId {
+                                link: link_id,
+                                function
+                            },
+                            mismatch: lash_vocabulary::TypeMismatch::new(Type::Text, Type::Bool)
+                                .within("0")
+                                .within("a/b~c")
+                                .within("output"),
+                        })
+                        .expect("typed nested mismatch")
+                    );
+                    break;
+                }
+                other => panic!("wrong result was accepted: {other:?}"),
+            }
+        }
+    }
+}
+
+/// FIG-7143: a wrong input refuses before any guest statement or effect runs.
+#[test]
+fn entry_wrong_input_is_refused_before_body_execution() {
+    let signature = signature(vec![Param {
+        name: Name::new("event"),
+        ty: Type::List(Box::new(Type::Text)),
+        optional: false,
+    }]);
+    let definition = function(
+        "test.input",
+        signature.clone(),
+        BTreeMap::new(),
+        vec![Stmt::Throw {
+            value: Expr::Literal(Literal::Text("body ran".into())),
+        }],
+    );
+    let function = definition.identity();
+    let mut document = document(
+        BTreeMap::new(),
+        BTreeMap::from([(function, definition)]),
+        None,
+    );
+    document.exports.insert(
+        Name::new("entry"),
+        lash_kernel_doc::Export::Function(FunctionExport {
+            function,
+            signature,
+            convention: StartConvention::Direct,
+            asynchronous: false,
+            rest: false,
+        }),
+    );
+    let id = document.identity();
+    let link = Link {
+        document: id,
+        fills: BTreeMap::new(),
+    };
+    let link_id = link.identity();
+    let program = Program::prepare(
+        link_id,
+        BTreeMap::from([(id, Arc::new(document))]),
+        &BTreeMap::from([(link_id, link)]),
+        PageId([9; 32]),
+        PreparedLibrary::new(Arc::new(FunctionRegistry::new())),
+    )
+    .expect("entry program");
+    let started = KernelMachine::start(
+        program,
+        bounds(),
+        CellStart {
+            owner: PageId([8; 32]),
+            target: Target::Entry(Name::new("entry")),
+            args: vec![Datum::List(vec![Datum::Bool(true)])],
+            session: None,
+            modes: BTreeMap::new(),
+            host: vec![],
+        },
+        Box::new(Pages::default()),
+    );
+    let Err(error) = started else {
+        panic!("refuse before returning a runnable machine")
+    };
+    assert_eq!(
+        error,
+        lash_kernel_vm::StartError::TypeMismatch(Box::new(lash_vocabulary::EntryTypeMismatch {
+            callable: lash_vocabulary::CallableId {
+                link: link_id,
+                function
+            },
+            mismatch: lash_vocabulary::TypeMismatch::new(Type::Text, Type::Bool)
+                .within("0")
+                .within("event")
+                .within("input"),
+        }))
+    );
 }

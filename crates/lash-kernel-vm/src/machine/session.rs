@@ -208,10 +208,15 @@ pub(crate) fn start(
                     limits,
                 )
                 .map_err(|error| arguments(error.to_string()))?;
+            // Starting an ordinary exported callable is not workflow promotion.
+            // Workflow hosts apply entry_export before reaching the machine.
+            let defining = function
+                .check_definition(&machine.program.document)
+                .map_err(StartError::FunctionValue)?;
             Some(lash_kernel_doc::FunctionExport {
                 function: function.callable.function,
-                signature: function.signature.clone(),
-                convention: function.convention.clone(),
+                signature: defining.signature,
+                convention: defining.convention,
                 asynchronous: false,
                 rest: false,
             })
@@ -269,13 +274,45 @@ pub(crate) fn start(
                 return Err(arguments("start function is not loaded".into()));
             }
             let signature = &definition.signature;
+            let callable = lash_vocabulary::CallableId {
+                link: machine.program.link,
+                function: definition.function,
+            };
+            let decoder = lash_kernel_doc::Decoder {
+                max_depth: limits.value_depth(),
+                policy: machine.program.document.numbers,
+                declared: &|id| {
+                    exe.instances
+                        .get(&id.link)
+                        .is_some_and(|doc| doc.functions.contains_key(&id.function))
+                },
+            };
+            for (index, param) in signature.params.iter().enumerate() {
+                let Some(datum) = start.args.get(index) else {
+                    if param.optional {
+                        continue;
+                    }
+                    return Err(StartError::MissingArgument {
+                        name: param.name.clone(),
+                    });
+                };
+                if param.optional && matches!(datum, Datum::Absent) {
+                    continue;
+                }
+                decoder
+                    .decode(datum, &param.ty)
+                    .map_err(|error| match error {
+                        lash_kernel_doc::DecodeRefusal::Type { mismatch } => {
+                            StartError::TypeMismatch(Box::new(lash_vocabulary::EntryTypeMismatch {
+                                callable,
+                                mismatch: mismatch.within(param.name.as_str()).within("input"),
+                            }))
+                        }
+                        other => StartError::Decode(other),
+                    })?;
+            }
             let given = start.args.len();
-            if matches!(
-                definition.convention,
-                lash_kernel_doc::StartConvention::Direct
-                    | lash_kernel_doc::StartConvention::PyDirect { .. }
-            ) && !(signature.required()..=signature.params.len()).contains(&given)
-            {
+            if !(signature.required()..=signature.params.len()).contains(&given) {
                 return Err(arguments(format!(
                     "`{entry}` takes {} to {} argument(s); {given} given",
                     signature.required(),
@@ -358,13 +395,20 @@ pub(crate) fn start(
         ) {
             Ok(super::ops::Flow::Done) => {
                 let value = machine.take(0);
-                let result =
-                    match machine.check_public_result(&exe, &value, &descriptor.signature.result) {
-                        Ok(()) => Ok(value),
-                        Err(error) => Err(*machine
-                            .thrown_by(TaskId::MAIN, error)
-                            .map_err(|e| start_interrupt("start result", e.into()))?),
-                    };
+                let result = match machine.check_public_result(
+                    &exe,
+                    &value,
+                    &descriptor.signature.result,
+                    lash_vocabulary::CallableId {
+                        link: machine.program.link,
+                        function: descriptor.function,
+                    },
+                ) {
+                    Ok(()) => Ok(value),
+                    Err(error) => Err(*machine
+                        .thrown_by(TaskId::MAIN, error)
+                        .map_err(|e| start_interrupt("start result", e.into()))?),
+                };
                 machine
                     .end_task(TaskId::MAIN, result)
                     .map_err(|e| start_interrupt("start result", e.into()))?;

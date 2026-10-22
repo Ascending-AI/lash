@@ -541,18 +541,10 @@ pub fn render_entry_signature(signature: &lash_vocabulary::Signature) -> String 
 /// Render missing-annotation facts from the entry contract owner.
 pub use lash_tool_presenter_api::entry::render_signature_required;
 
-/// Render the entry mismatch's typed components in this dialect.
-pub fn render_entry_type_mismatch(
-    callable: &lash_vocabulary::CallableId,
-    path: &str,
-    expected: &lash_vocabulary::Type,
-    actual: &lash_vocabulary::Type,
-) -> String {
+/// Render the owning entry mismatch in this dialect.
+pub fn render_entry_type_mismatch(source: &lash_vocabulary::EntryTypeMismatch) -> String {
     lash_tool_presenter_api::entry::render_entry_type_mismatch(
-        callable,
-        path,
-        expected,
-        actual,
+        source,
         lash_tool_presenter_api::entry::PYTHON_SPELLING,
     )
 }

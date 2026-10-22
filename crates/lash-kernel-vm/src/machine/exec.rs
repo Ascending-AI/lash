@@ -607,7 +607,19 @@ impl KernelMachine {
         result: Result<Value, Value>,
     ) -> Result<Option<Completion>, Halt> {
         let result = if let (Ok(value), Some(ty)) = (&result, &frame.public_result) {
-            match self.check_public_result(exe, value, ty) {
+            let lash_vocabulary::sites::Unit::Library(function) = exe.code(frame.code).site.unit
+            else {
+                return Err(fault("public result frame has no defining callable"));
+            };
+            match self.check_public_result(
+                exe,
+                value,
+                ty,
+                lash_vocabulary::CallableId {
+                    link: frame.link,
+                    function,
+                },
+            ) {
                 Ok(()) => result,
                 Err(error) => Err(*self.thrown_by(task, error)?),
             }
@@ -1104,15 +1116,47 @@ impl KernelMachine {
         exe: &Executable,
         value: &Value,
         ty: &lash_vocabulary::types::Type,
+        callable: lash_vocabulary::CallableId,
     ) -> Eval<()> {
-        if self.public_value_fits(exe, *value, ty, self.limits.value_depth())? {
-            Ok(())
+        if let Some(mismatch) =
+            self.public_value_fits(exe, *value, ty, self.limits.value_depth())?
+        {
+            self.raise_typed(
+                "entry_type_mismatch",
+                &lash_vocabulary::EntryTypeMismatch {
+                    callable,
+                    mismatch: mismatch.within("output"),
+                },
+            )
         } else {
-            Err(Interrupt::refused(
-                "function_result",
-                "settled result does not fit the public signature",
-            ))
+            Ok(())
         }
+    }
+
+    pub(super) fn raise_typed<T>(
+        &mut self,
+        kind: &str,
+        payload: &impl serde::Serialize,
+    ) -> Eval<T> {
+        let data = lash_kernel_doc::diagnostic_datum(payload).map_err(|e| fault(&e.to_string()))?;
+        let datum = lash_kernel_doc::Datum::Error(Box::new(lash_kernel_doc::ErrorDatum {
+            kind: kind.into(),
+            message: kind.into(),
+            data,
+        }));
+        self.raise_datum(datum)
+    }
+
+    fn raise_datum<T>(&mut self, datum: lash_kernel_doc::Datum) -> Eval<T> {
+        let frozen = self.heap.freeze_datum(&datum)?;
+        let page = self.heap.instantiate(&frozen)?;
+        let value = self.admit_page(&page)?;
+        Err(Interrupt::raised(value))
+    }
+
+    pub(super) fn decode_refusal<T>(&mut self, refusal: lash_kernel_doc::DecodeRefusal) -> Eval<T> {
+        let error = refusal.error_datum().map_err(|e| fault(&e.to_string()))?;
+        self.raise_datum(lash_kernel_doc::Datum::Error(Box::new(error)))
     }
 
     /// Copies a value out of the run, charging its deep size
@@ -1401,7 +1445,7 @@ impl KernelMachine {
         exe: &Executable,
         datum: &lash_kernel_doc::Datum,
         ty: &lash_vocabulary::types::Type,
-        what: &str,
+        _what: &str,
         charged: bool,
     ) -> Eval<Value> {
         let decoder = lash_kernel_doc::Decoder {
@@ -1418,12 +1462,7 @@ impl KernelMachine {
         };
         let decoded = match decoder.decode(datum, ty) {
             Ok(decoded) => decoded,
-            Err(mismatch) => {
-                return raise(
-                    "effect_result",
-                    format!("{what} does not fit the stated type: {mismatch}"),
-                );
-            }
+            Err(refusal) => return self.decode_refusal(refusal),
         };
         let frozen = self.heap.freeze_datum(&decoded).map_err(Interrupt::from)?;
         let charge = if charged {

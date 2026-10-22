@@ -1129,7 +1129,7 @@ impl KernelMachine {
     ) -> Status {
         let (target, count, export) = match target {
             Target::Export(callable, descriptor) => {
-                let count = self.export_arguments(exe, &descriptor, args, count)?;
+                let count = self.export_arguments(exe, callable, &descriptor, args, count)?;
                 (
                     self.callable_target(exe, callable)?,
                     count,
@@ -1180,6 +1180,13 @@ impl KernelMachine {
         // A task root is outside its spawner's synchronous library call.
         // A native answer bills the same root formula as a body frame.
         self.refresh_charging(child)?;
+        let exported_callable = export.as_ref().map(|export| lash_vocabulary::CallableId {
+            function: export.function,
+            link: match &target {
+                Target::Library(_, link) | Target::Code(_, _, link) => *link,
+                Target::Export(callable, _) => callable.link,
+            },
+        });
         let started = match target {
             Target::Code(code, captures, link) => {
                 let pushed = self.push_frame(
@@ -1208,7 +1215,12 @@ impl KernelMachine {
                 && let Some(export) = &export
             {
                 let value = self.regs[args];
-                self.check_public_result(exe, &value, &export.signature.result)?;
+                self.check_public_result(
+                    exe,
+                    &value,
+                    &export.signature.result,
+                    exported_callable.ok_or_else(|| fault("exported spawn has no callable"))?,
+                )?;
             }
             Ok(flow)
         });

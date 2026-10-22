@@ -21,7 +21,7 @@ impl KernelMachine {
             awaiting,
             ..
         } = invocation;
-        let count = self.export_arguments(exe, descriptor, args, count)?;
+        let count = self.export_arguments(exe, callable, descriptor, args, count)?;
         let flow = match self.callable_target(exe, callable)? {
             Target::Library(lib, link) => self.call_lib_linked(
                 task,
@@ -50,7 +50,7 @@ impl KernelMachine {
         match flow {
             Flow::Done => {
                 let value = self.regs[args];
-                self.check_public_result(exe, &value, &descriptor.signature.result)?;
+                self.check_public_result(exe, &value, &descriptor.signature.result, callable)?;
             }
             Flow::Step => {}
         }
@@ -60,6 +60,7 @@ impl KernelMachine {
     pub(super) fn export_arguments(
         &mut self,
         exe: &Executable,
+        callable: lash_vocabulary::CallableId,
         descriptor: &lash_kernel_doc::FunctionExport,
         args: Reg,
         count: usize,
@@ -79,14 +80,15 @@ impl KernelMachine {
         for (index, param) in descriptor.signature.params.iter().enumerate().take(count) {
             let value = self.regs[args + index];
             if !(param.optional && matches!(value, Value::Absent))
-                && !self.public_value_fits(exe, value, &param.ty, self.limits.value_depth())?
+                && let Some(mismatch) =
+                    self.public_value_fits(exe, value, &param.ty, self.limits.value_depth())?
             {
-                return raise(
+                return self.raise_typed(
                     "function_argument",
-                    format!(
-                        "argument `{}` does not fit the imported function signature",
-                        param.name
-                    ),
+                    &lash_vocabulary::EntryTypeMismatch {
+                        callable,
+                        mismatch: mismatch.within(param.name.as_str()).within("input"),
+                    },
                 );
             }
         }
