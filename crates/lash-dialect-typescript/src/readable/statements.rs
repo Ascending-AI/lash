@@ -470,7 +470,7 @@ impl Lifter<'_> {
         let helper = [atom_of(target), atom_of(index)];
         let computed = |value: Option<&k::Rhs>| {
             value
-                .and_then(|value| self.helper_read(value, "ts.get_computed"))
+                .and_then(|value| self.helper_read(value, "ts.get_numeric"))
                 .is_some_and(|args| helper.iter().map(Option::as_ref).eq(args.iter().map(Some)))
         };
         if !computed(Self::sets(out_of_bounds, name))

@@ -398,6 +398,11 @@ impl Lifter<'_> {
                 let target = self.expr(target)?;
                 Ok(Expr::Field(Box::new(target), property.to_owned()))
             }
+            ("ts.get_numeric", [target, key]) => {
+                let target = self.expr(target)?;
+                let key = self.expr(key)?;
+                Ok(Expr::Index(Box::new(target), Box::new(key)))
+            }
             ("ts.read", [target, k::Expr::Literal(k::Literal::Text(field))]) => {
                 let target = self.expr(target)?;
                 Ok(Expr::Field(Box::new(target), field.clone()))

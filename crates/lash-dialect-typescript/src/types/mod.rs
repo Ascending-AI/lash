@@ -37,7 +37,7 @@ mod plain;
 pub(crate) use facts::Facts;
 pub(crate) use narrow::{Narrowing, narrow};
 pub(crate) use packages::{Gives, Packages};
-pub(crate) use plain::PlainRecord;
+pub(crate) use plain::{PlainRecord, numeric_name};
 
 /// The array methods whose result is a new kernel list whatever array they
 /// are called on: each returns a list it builds, from `[]` or by

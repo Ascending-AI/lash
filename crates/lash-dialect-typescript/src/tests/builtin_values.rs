@@ -215,3 +215,30 @@ fn builtin_indexes_project_the_owning_rows() {
     assert!(!builtins::is_global("UserDefined"));
     assert!(table.builtin("UserDefined").is_none());
 }
+
+/// FIG-7136: narrowing computed keys keeps numeric spellings, holes,
+/// exotic indices and nullish failure order identical to the generic reader.
+#[test]
+fn numeric_computed_members_preserve_generic_reads() {
+    let source = r#"
+function read(value: any, key: number) { return value[key]; }
+const record = {'0': 'zero', '-1': 'minus', '1.5': 'fraction', NaN: 'nan', Infinity: 'inf'};
+const values = [record, [7, , 9], 'abc', Number, Math, new Date(0), null, undefined];
+const keys = [0, -0, -1, 1.5, 999, NaN, Infinity, -Infinity];
+let out = [];
+for (const value of values) {
+  for (const key of keys) {
+    try { const result = read(value, key); out.push(Number.isNaN(result) ? 'nan' : result); }
+    catch (error) { out.push(error.name); }
+  }
+}
+await control.finish(out);
+"#;
+    let generic = source.replace("key: number", "key: any");
+    let numeric = machine::end(source);
+    assert_eq!(numeric, machine::end(&generic));
+    let Ended::Finished(lash_kernel_doc::Datum::List(results)) = numeric else {
+        panic!("the witness must finish every read");
+    };
+    assert_eq!(results.len(), 64);
+}

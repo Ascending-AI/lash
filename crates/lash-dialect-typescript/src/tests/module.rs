@@ -327,3 +327,97 @@ fn an_async_return_adopts_a_promise_as_an_entry_and_as_a_nested_call() {
     assert_eq!(recorded.end, "ok");
     assert_eq!(recorded.lines(), ["7"]);
 }
+
+fn selected_operations(source: &str, entry: &str) -> Vec<String> {
+    let lowered = module(source).expect("reach witness lowers");
+    let (content, root) = super::linked::content(&lowered.document);
+    let reach = content
+        .inspect(
+            root,
+            &lash_kernel_package::ReachSelection::Function(lash_vocabulary::ExportName {
+                name: Name::new(entry),
+                member: None,
+            }),
+        )
+        .expect("selected Link reach");
+    reach
+        .operations
+        .values()
+        .map(|need| match need {
+            lash_kernel_package::OperationNeed::Fixed { name, .. }
+            | lash_kernel_package::OperationNeed::Deferred { name, .. } => {
+                format!("{}.{}", name.package, name.member)
+            }
+        })
+        .collect()
+}
+
+/// FIG-7136: numeric indexing cannot manufacture built-in callable members.
+/// The retained Link DAG may hold services that this Export does not reach.
+#[test]
+fn a_pure_indexed_factorial_reaches_no_read_imports() {
+    for source in [
+        r#"
+export function factorial(n: number): number {
+  const values = [1];
+  for (let i = 1; i <= n; i++) { values[i] = values[i - 1] * i; }
+  return values[n];
+}
+"#,
+        r#"
+export function factorial(n: number): number {
+  const values = {0: 1};
+  for (let i = 1; i <= n; i++) { values[i] = values[i - 1] * i; }
+  return values[n];
+}
+"#,
+    ] {
+        let operations = selected_operations(source, "factorial");
+        assert!(
+            operations.is_empty(),
+            "pure factorial reaches {operations:?}"
+        );
+        let cell = format!(
+            "{} await control.finish(factorial(6));",
+            source.replace("export ", "")
+        );
+        assert_eq!(
+            super::machine::end(&cell),
+            super::machine::Ended::Finished(lash_kernel_doc::Datum::Float(
+                lash_kernel_doc::Float::new(720.0)
+            )),
+        );
+    }
+}
+
+/// FIG-7136: a key that may name a service member must keep its operation
+/// in the selected reach, even before the function is called.
+#[test]
+fn computed_service_members_keep_their_read_imports() {
+    // The receiver comes from the caller. Spelling Date or Math here would
+    // introduce their callable tokens and could conceal a missing member edge.
+    let operations = selected_operations(
+        "export function read(receiver: any, key: string): any { return receiver[key](); }",
+        "read",
+    );
+    for operation in ["typescript.clock", "typescript.random"] {
+        assert!(
+            operations.iter().any(|name| name == operation),
+            "computed member lost {operation}: {operations:?}"
+        );
+    }
+}
+
+/// FIG-7136 and readable-first source: a numeric record read keeps an ordinary
+/// TypeScript spelling that re-lowers to the same cell document.
+#[test]
+fn numeric_indexing_exports_as_ordinary_typescript() {
+    let lowered = super::lower("const values = {0: 7}; const key = 0; values[key];").unwrap();
+    crate::print(
+        &lowered.document,
+        None,
+        super::library(),
+        Default::default(),
+    )
+    .expect("numeric indexing has a verified authored-source representation");
+}

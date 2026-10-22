@@ -100,7 +100,7 @@ impl Names {
 /// Whether `name` may be the text of a number, as a property key spells it:
 /// `NaN`, `Infinity`, `-Infinity`, or a digit, after an optional minus
 /// sign. This admits more than the canonical spellings, never fewer.
-fn numeric_name(name: &str) -> bool {
+pub(crate) fn numeric_name(name: &str) -> bool {
     let digits = name.strip_prefix('-').unwrap_or(name);
     matches!(name, "NaN" | "Infinity" | "-Infinity")
         || digits.as_bytes().first().is_some_and(u8::is_ascii_digit)
