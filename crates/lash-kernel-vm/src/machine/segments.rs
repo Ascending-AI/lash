@@ -226,10 +226,8 @@ impl<const SHARED: bool> PlanRun<'_, SHARED> {
                 Ok(())
             }
             Target::Code(code, captures, link) => {
-                let ran = if link != self.machine.current_link() {
-                    Ok(None)
-                } else {
-                    self.machine.callback_island(
+                let ran = self.machine.in_link(link, |machine| {
+                    machine.callback_island(
                         &mut self.gate,
                         self.task,
                         self.exe,
@@ -237,7 +235,7 @@ impl<const SHARED: bool> PlanRun<'_, SHARED> {
                         at + 1,
                         count,
                     )
-                };
+                });
                 match self.check(ran)? {
                     Some(Ran::Returned(value)) => {
                         self.machine.spent_captures(captures);
@@ -352,13 +350,13 @@ impl<const SHARED: bool> PlanRun<'_, SHARED> {
                 Some(Steady {
                     island: Some(island),
                     cells,
+                    link,
                     ..
                 }),
                 Some(gate),
-            ) if values.len() <= island.arity => {
-                self.machine
-                    .steady_entry(gate, self.task, self.exe, (island, cells), values)
-            }
+            ) if values.len() <= island.arity => self.machine.in_link(*link, |machine| {
+                machine.steady_entry(gate, self.task, self.exe, (island, cells), values)
+            }),
             _ => Ok(None),
         }
     }
@@ -405,12 +403,9 @@ impl<const SHARED: bool> PlanRun<'_, SHARED> {
         let Target::Code(code, cells, link) = self.check(target)? else {
             return Err(self.lost("a closure resolved to no code"));
         };
-        let island = if link == self.machine.current_link() {
-            self.machine
-                .callback_plan(&mut self.gate, self.task, self.exe, code)
-        } else {
-            Ok(None)
-        };
+        let island = self.machine.in_link(link, |machine| {
+            machine.callback_plan(&mut self.gate, self.task, self.exe, code)
+        });
         let island = self.check(island)?.and_then(|plan| {
             let gate = self.gate.as_ref()?;
             SteadyIsland::of(gate, self.exe, plan, cells.len())

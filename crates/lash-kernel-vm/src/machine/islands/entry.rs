@@ -303,6 +303,7 @@ impl KernelMachine {
             .get_mut(task.0 as usize)?
             .ok_or_else(|| fault("no task"))?;
         let ground = Ground {
+            link: self.active_link,
             exe,
             tape: recorder.filter(|_| gate.charging),
             recorder,
@@ -495,6 +496,7 @@ impl KernelMachine {
             .get_mut(task.0 as usize)?
             .ok_or_else(|| fault("no task"))?;
         let ground = Ground {
+            link: self.active_link,
             exe,
             tape: recorder.filter(|_| gate.charging),
             recorder,
@@ -647,6 +649,7 @@ impl KernelMachine {
         exe: &Executable,
         (stmt, pc, regs): RunsOn,
     ) -> Result<(), Halt> {
+        self.active_link = self.frame(task)?.link;
         for (reg, value) in regs {
             self.put(reg as usize, value);
         }
@@ -670,6 +673,7 @@ impl KernelMachine {
         level: Level,
     ) -> Eval<Option<RunsOn>> {
         let mut frame = self.fresh_frame(exe, level.code)?;
+        frame.link = level.link;
         frame.slots.fresh(level.slots.len());
         frame.control = level.control;
         for (at, slot) in level.slots.into_iter().enumerate() {
@@ -708,6 +712,7 @@ impl KernelMachine {
 /// Fields no call changes while a region batch or a callback walk runs.
 /// The bound stays at the entry: a callback's limiter can grow it.
 pub(in crate::machine) struct Ground<'a> {
+    pub(in crate::machine) link: lash_vocabulary::LinkId,
     pub(in crate::machine) exe: &'a Executable,
     pub(in crate::machine) tape: Option<&'a ChargeTape>,
     pub(in crate::machine) recorder: Option<&'a ChargeTape>,
@@ -792,6 +797,7 @@ fn open<'a>(
     scratch.sessions.clear();
     let ground = entry.ground;
     Island {
+        link: ground.link,
         exe: ground.exe,
         stream: ground.exe.document_stream(),
         arena: entry.arena,
