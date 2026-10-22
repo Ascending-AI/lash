@@ -13,6 +13,7 @@ pub(super) fn compile_document(
     document: &Document,
     observed: &Document,
     library: &PreparedLibrary,
+    authored: &BTreeSet<FunctionId>,
     imports: &BTreeMap<
         (Unit, lash_vocabulary::ImportSlot),
         (lash_vocabulary::DocumentId, FunctionId),
@@ -38,14 +39,14 @@ pub(super) fn compile_document(
         document
             .functions
             .iter()
-            .filter(|(_, f)| {
+            .filter(|(id, f)| {
                 matches!(
                     &f.implementation,
                     doc::Implementation::Guest {
                         metering: doc::Metering::Statements,
                         ..
                     }
-                )
+                ) && authored.contains(id)
             })
             .map(|(id, _)| UnitSource::Function(id)),
     );
