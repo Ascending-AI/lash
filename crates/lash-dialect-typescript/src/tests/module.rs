@@ -440,3 +440,49 @@ fn numeric_indexing_exports_as_ordinary_typescript() {
     )
     .expect("numeric indexing has a verified authored-source representation");
 }
+
+/// FIG-7109: the sleep duration conversion belongs to lowering, not source.
+#[test]
+fn sleep_prints_its_authored_duration_and_preserves_the_document() {
+    for source in [
+        "export async function demo(): Promise<string> { await sleep(5); return 'awake'; }",
+        "export async function demo(delay: number): Promise<string> { await sleep(delay); return 'awake'; }",
+    ] {
+        let lowered = module(source).unwrap();
+        let printed = crate::print(
+            &lowered.document,
+            Some(&lowered.captions),
+            super::library(),
+            Default::default(),
+        )
+        .expect("sleep has an exact authored inverse");
+        let (read, captions) = crate::read(
+            &printed.source,
+            &lowered.document,
+            super::library(),
+            Default::default(),
+        )
+        .unwrap();
+        assert_eq!(read.canonical_bytes(), lowered.document.canonical_bytes());
+        assert_eq!(captions.entries(), lowered.captions.entries());
+    }
+}
+
+/// FIG-7109: a failed callable lift is a fact about its exact code region.
+#[test]
+fn an_unprintable_export_refuses_with_its_callable_site() {
+    use lash_kernel_doc::{Export, StartConvention};
+    use lash_vocabulary::sites::{Site, Unit};
+    let lowered = module("export function hidden(): number { return 1; }").unwrap();
+    let mut document = lowered.document.document().clone();
+    let Export::Function(export) = document.exports.get_mut(&Name::new("hidden")).unwrap() else {
+        panic!("function export");
+    };
+    export.convention = StartConvention::Direct;
+    let site = Site::new(Unit::Library(export.function), Vec::new());
+    assert_eq!(
+        crate::print(&document, None, super::library(), Default::default()),
+        Err(lash_kernel_dialect::PrintError::Unprintable { site }),
+        "the failed lift must survive instead of printing an empty module",
+    );
+}

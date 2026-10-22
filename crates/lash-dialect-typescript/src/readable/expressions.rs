@@ -149,7 +149,19 @@ impl Lifter<'_> {
             && let [duration] = act.args.as_slice()
             && matches!(body, k::Expr::Literal(k::Literal::Absent))
         {
-            let duration = self.expr(duration)?;
+            let k::Expr::Act(conversion) = duration else {
+                return refuse("a sleep duration conversion");
+            };
+            let k::ActKind::Call(k::Callee::Import(slot)) = &conversion.kind else {
+                return refuse("a sleep duration helper import");
+            };
+            if !self.helper_import(slot, "ts.sleep_duration") {
+                return refuse("the selected sleep duration helper");
+            }
+            let [authored] = conversion.args.as_slice() else {
+                return refuse("one authored sleep duration");
+            };
+            let duration = self.expr(authored)?;
             return Ok(Expr::Unary(
                 "await ",
                 Box::new(Expr::Call(

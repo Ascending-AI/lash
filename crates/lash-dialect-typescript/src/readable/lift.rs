@@ -23,7 +23,7 @@ pub(super) fn refuse<T>(why: impl Into<String>) -> Lift<T> {
 /// What a document lifts to: each declared function on its own, and
 /// `main` as the order of the module's entries or as a cell's statements.
 pub(super) struct Lifted {
-    pub(super) functions: BTreeMap<Name, Lift<Item>>,
+    pub(super) functions: BTreeMap<Name, (lash_vocabulary::FunctionId, Lift<Item>)>,
     pub(super) main: Lift<Main>,
 }
 
@@ -45,14 +45,17 @@ pub(super) fn document(
         .filter_map(|(name, export)| match export {
             k::Export::Function(export) => Some((
                 name.clone(),
-                document
-                    .functions
-                    .get(&export.function)
-                    .ok_or_else(|| "missing exported function".to_owned())
-                    .and_then(|function| {
-                        Lifter::new(document, captions, Unit::Library(export.function), library)
-                            .item(name, function, export)
-                    }),
+                (
+                    export.function,
+                    document
+                        .functions
+                        .get(&export.function)
+                        .ok_or_else(|| "missing exported function".to_owned())
+                        .and_then(|function| {
+                            Lifter::new(document, captions, Unit::Library(export.function), library)
+                                .item(name, function, export)
+                        }),
+                ),
             )),
             _ => None,
         })
@@ -134,6 +137,25 @@ impl<'a> Lifter<'a> {
         let qualified = lash_kernel_dialect::authoring::helper_name(&name);
         self.library(id)
             .is_some_and(|found| found == name.as_str() || found == qualified.to_string())
+    }
+
+    /// Match the import contract authored for the library's selected helper.
+    /// Display labels do not establish a helper's identity or convention.
+    pub(super) fn helper_import(&self, slot: &lash_vocabulary::ImportSlot, name: &str) -> bool {
+        let Some(identity) = self.library.resolve(name) else {
+            return false;
+        };
+        let Some(header) = self.library.header(&identity) else {
+            return false;
+        };
+        !header.has_native()
+            && self.document.imports.get(slot).is_some_and(|import| {
+                import.name == lash_kernel_dialect::authoring::helper_name(&header.name)
+                    && matches!(&import.kind,
+                        lash_vocabulary::ImportKind::Code { signature, convention }
+                            if *signature == header.signature
+                                && *convention == lash_vocabulary::Convention::Direct)
+            })
     }
 
     fn caption(&self, target: impl Into<CaptionTarget>) -> Option<Caption> {

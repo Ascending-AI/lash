@@ -46,9 +46,19 @@ pub fn print(
         items: lifted
             .functions
             .into_iter()
-            .filter_map(|(name, item)| item.ok().map(|item| (name, item)))
-            .collect(),
-        main: lifted.main.ok(),
+            .map(|(name, (function, item))| {
+                item.map(|item| (name, item))
+                    .map_err(|_| PrintError::Unprintable {
+                        site: lash_vocabulary::sites::Site::new(
+                            lash_vocabulary::sites::Unit::Library(function),
+                            Vec::new(),
+                        ),
+                    })
+            })
+            .collect::<Result<_, _>>()?,
+        main: Some(lifted.main.map_err(|_| PrintError::Unprintable {
+            site: lash_vocabulary::sites::Site::new(lash_vocabulary::sites::Unit::Main, Vec::new()),
+        })?),
     };
     let verified = printing.items.keys().cloned().collect();
     regions::print_verified(document, captions, options, verified, &printing)
@@ -77,11 +87,10 @@ impl regions::Regions for Printing<'_> {
                     if index > 0 {
                         writer.out.push('\n');
                     }
-                    if let Some(item) = self.items.get(name).filter(|_| functions.contains(name)) {
-                        let start = writer.out.len();
-                        writer.item(item);
-                        written.insert(name.clone(), start..writer.out.len());
-                    }
+                    let item = self.items.get(name).filter(|_| functions.contains(name))?;
+                    let start = writer.out.len();
+                    writer.item(item);
+                    written.insert(name.clone(), start..writer.out.len());
                 }
             }
             lift::Main::Cell(statements) => writer.top_level(statements),

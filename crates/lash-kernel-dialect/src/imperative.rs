@@ -72,6 +72,9 @@ pub enum PrintError {
     Depth { limit: usize },
     #[error("cannot encode generated source: {0}")]
     Encode(#[from] lash_kernel_doc::EncodeError),
+    /// Authored syntax cannot represent this callable or main region.
+    #[error("no authored source representation at {site}")]
+    Unprintable { site: Site },
     #[error("invalid generated source: {0}")]
     Invalid(String),
 }
@@ -81,6 +84,7 @@ impl From<PrintError> for crate::Diagnostic {
             code: match &error {
                 PrintError::Bytes { .. } => "GENERATED_SOURCE_BYTES",
                 PrintError::Depth { .. } => "GENERATED_SOURCE_DEPTH",
+                PrintError::Unprintable { .. } => "GENERATED_SOURCE_UNPRINTABLE",
                 PrintError::Encode(_) | PrintError::Invalid(_) => "GENERATED_SOURCE_INVALID",
             }
             .into(),
