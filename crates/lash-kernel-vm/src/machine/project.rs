@@ -362,9 +362,9 @@ pub(crate) fn closure_code(
     exe: &Executable,
     function: &lash_vocabulary::FunctionId,
     site: &Site,
+    captures: &[lash_vocabulary::Name],
 ) -> Result<CodeId, HeapFault> {
-    exe.closure_at(function, site)
-        .or_else(|| exe.declared.get(function).copied())
+    exe.closure_at(function, site, captures)
         .ok_or_else(|| malformed("a closure names no admitted code"))
 }
 
@@ -511,7 +511,17 @@ fn open(
             captures,
         }) => {
             let site = site.resolve(pages)?;
-            let code = exe.code(closure_code(exe, &callable.function, &site)?);
+            let mut capture_names = captures
+                .iter()
+                .map(|(name, _)| name.resolve(pages))
+                .collect::<Result<Vec<_>, _>>()?;
+            capture_names.sort();
+            let code = exe.code(closure_code(
+                exe,
+                &callable.function,
+                &site,
+                &capture_names,
+            )?);
             let mut named = Vec::with_capacity(captures.len());
             for (name, cell) in captures {
                 named.push((name.resolve(pages)?, cell));
@@ -533,6 +543,7 @@ fn open(
             (
                 Body::Closure {
                     identity: Arc::new(lash_kernel_doc::arena::ClosureIdentity {
+                        capture_names,
                         callable,
                         site: lash_kernel_doc::linked_site::LinkedSite {
                             link: callable.link,
@@ -862,6 +873,7 @@ fn stored(
                 exe,
                 &identity.callable.function,
                 &identity.site.site,
+                &identity.capture_names,
             )?);
             let mut held = Vec::with_capacity(captures.len());
             for (name, cell) in code

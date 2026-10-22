@@ -164,9 +164,9 @@ struct Tables {
     edges: Vec<StepEdge>,
     /// Each function body by its site, and each block by its own: how a
     /// parked run's coordinates find their place in this layout.
-    code_at: BTreeMap<Site, CodeId>,
+    code_at: BTreeMap<(Site, Vec<Name>), CodeId>,
     /// Lexical closure bodies by function and creation site.
-    closure_at: BTreeMap<(FunctionId, Site), CodeId>,
+    closure_at: BTreeMap<(FunctionId, Site, Vec<Name>), CodeId>,
     /// Canonical action-site order, independent of the executable layout.
     occurrence_at: BTreeMap<Site, usize>,
     occurrence_keys: Box<[Vec<u8>]>,
@@ -703,15 +703,23 @@ impl Executable {
     }
 
     /// The function body or closure body whose site is `site`.
-    pub(crate) fn code_at(&self, site: &Site) -> Option<CodeId> {
-        self.tables_of(&site.unit)?.code_at.get(site).copied()
+    pub(crate) fn code_at(&self, site: &Site, captures: &[Name]) -> Option<CodeId> {
+        self.tables_of(&site.unit)?
+            .code_at
+            .get(&(site.clone(), captures.to_vec()))
+            .copied()
     }
 
     /// A closure's lexical body under its defining executable tables.
-    pub(crate) fn closure_at(&self, function: &FunctionId, site: &Site) -> Option<CodeId> {
+    pub(crate) fn closure_at(
+        &self,
+        function: &FunctionId,
+        site: &Site,
+        captures: &[Name],
+    ) -> Option<CodeId> {
         self.tables_of(&site.unit)?
             .closure_at
-            .get(&(*function, site.clone()))
+            .get(&(*function, site.clone(), captures.to_vec()))
             .copied()
     }
 
@@ -757,6 +765,8 @@ impl Executable {
 /// One function body: `main`, a declared function, a library body or a
 /// closure.
 pub(crate) struct Code {
+    /// Sorted lexical capture names distinguish compilations of one lifted body.
+    pub(crate) capture_names: Vec<Name>,
     pub(crate) created: Option<Site>,
     /// The site of the body: a unit's, or a closure expression's child.
     pub(crate) site: Site,
@@ -1435,7 +1445,12 @@ impl<'a> Compiler<'a> {
         let code_at = codes
             .iter()
             .enumerate()
-            .map(|(index, code)| (code.site.clone(), CodeId(base.codes + index as u32)))
+            .map(|(index, code)| {
+                (
+                    (code.site.clone(), code.capture_names.clone()),
+                    CodeId(base.codes + index as u32),
+                )
+            })
             .collect();
         let closure_at = codes
             .iter()
@@ -1445,7 +1460,11 @@ impl<'a> Compiler<'a> {
                     return None;
                 };
                 Some((
-                    (function, code.created.clone()?),
+                    (
+                        function,
+                        code.created.clone().unwrap_or_else(|| code.site.clone()),
+                        code.capture_names.clone(),
+                    ),
                     CodeId(base.codes + index as u32),
                 ))
             })

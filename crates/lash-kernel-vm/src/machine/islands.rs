@@ -1163,10 +1163,13 @@ fn found_code(arena: &mut Arena, exe: &Executable, handle: ArenaHandle) -> Optio
     let executable = exe.local();
     let found = match arena.closure(handle).ok()? {
         (_, _, Some(code)) if code.executable == executable => return Some(CodeId(code.code)),
-        (identity, ..) => {
-            super::project::closure_code(exe, &identity.callable.function, &identity.site.site)
-                .ok()?
-        }
+        (identity, ..) => super::project::closure_code(
+            exe,
+            &identity.callable.function,
+            &identity.site.site,
+            &identity.capture_names,
+        )
+        .ok()?,
     };
     arena
         .found_closure_code(

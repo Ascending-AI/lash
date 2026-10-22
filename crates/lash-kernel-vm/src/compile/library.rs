@@ -233,7 +233,7 @@ impl PreparedPlan {
                 tables
                     .closure_at
                     .iter()
-                    .find_map(|((_, site), code)| (site == &created).then_some(*code))
+                    .find_map(|((_, site, _), code)| (site == &created).then_some(*code))
                     .ok_or_else(|| format!("a plan closure at {created} has no compiled body"))
             })
             .collect::<Result<_, _>>()?;

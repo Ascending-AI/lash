@@ -437,6 +437,7 @@ pub mod execution {
     }
     #[derive(Clone)]
     pub struct FrameRecord {
+        pub capture_names: Vec<lash_vocabulary::names::Name>,
         pub convention: Option<lash_kernel_doc::StartConvention>,
         pub public_result: Option<lash_vocabulary::types::Type>,
         pub link: lash_vocabulary::content_ids::LinkId,
@@ -469,6 +470,7 @@ pub mod execution {
     impl FrameRecord {
         pub fn fresh(link: lash_vocabulary::content_ids::LinkId, statement: SiteRef) -> Self {
             Self {
+                capture_names: Vec::new(),
                 link,
                 convention: None,
                 public_result: None,
@@ -641,7 +643,8 @@ pub mod execution {
     }
     impl Cell for FrameRecord {
         fn same_version(&self, other: &Self) -> bool {
-            self.link == other.link
+            self.capture_names == other.capture_names
+                && self.link == other.link
                 && self.convention == other.convention
                 && self.public_result == other.public_result
                 && self.statement.same_version(&other.statement)
@@ -812,7 +815,8 @@ pub mod execution {
     }
     impl TokenCodec for FrameRecord {
         fn encode(&self, out: &mut TokenWriter) {
-            out.seq(11);
+            out.seq(12);
+            self.capture_names.encode(out);
             self.link.encode(out);
             self.convention.encode(out);
             self.public_result.encode(out);
@@ -826,8 +830,9 @@ pub mod execution {
             self.pending.encode(out);
         }
         fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
-            input.expect_struct(11)?;
+            input.expect_struct(12)?;
             Ok(Self {
+                capture_names: Vec::<lash_vocabulary::names::Name>::decode(input)?,
                 link: lash_vocabulary::content_ids::LinkId::decode(input)?,
                 convention: Option::<lash_kernel_doc::StartConvention>::decode(input)?,
                 public_result: Option::<lash_vocabulary::types::Type>::decode(input)?,

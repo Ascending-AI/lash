@@ -199,6 +199,7 @@ pub fn checkpoint(
             );
             frame_index += 1;
             r.put(&frame.link);
+            r.put(&frame.capture_names);
             r.put(&frame.convention);
             r.put(&frame.public_result);
             r.put(site.as_ref());

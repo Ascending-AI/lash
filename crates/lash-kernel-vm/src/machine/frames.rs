@@ -426,6 +426,10 @@ impl Frame {
     ) -> Result<bool, HeapFault> {
         let code = exe.code(self.code);
         let mut changed = !self.owned;
+        if stored.capture_names != code.capture_names {
+            stored.capture_names = code.capture_names.clone();
+            changed = true;
+        }
         if stored.convention != self.convention {
             stored.convention = self.convention.clone();
             changed = true;
@@ -983,14 +987,15 @@ impl Frames {
             let code = match resident {
                 Some((_, frame)) => frame.code,
                 None => {
-                    let site = row(&self.rows, index, &self.access)?
-                        .statement
-                        .resolve(&self.access)?;
+                    let record = row(&self.rows, index, &self.access)?;
+                    let site = record.statement.resolve(&self.access)?;
                     (0..site.path.len())
                         .rev()
                         .find_map(|length| {
-                            self.exe
-                                .code_at(&Site::new(site.unit.clone(), &site.path[..length]))
+                            self.exe.code_at(
+                                &Site::new(site.unit.clone(), &site.path[..length]),
+                                &record.capture_names,
+                            )
                         })
                         .ok_or_else(|| malformed("a frame has no admitted code body"))?
                 }

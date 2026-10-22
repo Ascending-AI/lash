@@ -257,10 +257,13 @@ pub(crate) fn start(
                 .or_else(|| exe.declared.get(&definition.function))
                 .copied()
                 .or_else(|| {
-                    exe.code_at(&lash_vocabulary::sites::Site::new(
-                        lash_vocabulary::sites::Unit::Library(definition.function),
-                        [],
-                    ))
+                    exe.code_at(
+                        &lash_vocabulary::sites::Site::new(
+                            lash_vocabulary::sites::Unit::Library(definition.function),
+                            [],
+                        ),
+                        &[],
+                    )
                 });
             if code.is_none() && exe.lib_of(&definition.function).is_none() {
                 return Err(arguments("start function is not loaded".into()));

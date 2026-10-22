@@ -812,6 +812,7 @@ impl KernelMachine {
                             exe,
                             &identity.callable.function,
                             &identity.site.site,
+                            &identity.capture_names,
                         )?;
                         let found = LocalCode {
                             executable,

@@ -71,7 +71,7 @@ impl Compiler<'_> {
             .into_iter()
             .map(|slot| placer.placed(Local::unplaced(slot)))
             .collect();
-        let free = scopes
+        let free: Vec<_> = scopes
             .free
             .iter()
             .flatten()
@@ -103,7 +103,14 @@ impl Compiler<'_> {
                 .then(a.cmp(b))
         });
         let ats_by_name = by_name.into_iter().map(|slot| positions[slot]).collect();
+        let mut capture_names: Vec<_> = captures
+            .iter()
+            .map(|capture| scopes.slots[capture.inner as usize].name.clone())
+            .chain(free.iter().map(|(name, _)| name.clone()))
+            .collect();
+        capture_names.sort();
         Code {
+            capture_names,
             created: None,
             site,
             params,

@@ -794,6 +794,7 @@ impl KernelMachine {
         };
         let link = self.current_link();
         let identity = Arc::new(lash_kernel_doc::arena::ClosureIdentity {
+            capture_names: exe.code(code).capture_names.clone(),
             callable: lash_vocabulary::names::CallableId { link, function },
             site: lash_kernel_doc::linked_site::LinkedSite {
                 link,

@@ -23,6 +23,7 @@ impl KernelMachine {
                     exe,
                     &function.callable.function,
                     creation,
+                    &function.captures.keys().cloned().collect::<Vec<_>>(),
                 )?),
                 None => exe.declared.get(&function.callable.function).copied(),
             };
@@ -48,6 +49,7 @@ impl KernelMachine {
                     cells.push((name, self.new_cell(Value::Null)));
                 }
                 let identity = Arc::new(ClosureIdentity {
+                    capture_names: compiled.capture_names.clone(),
                     callable: function.callable,
                     site: lash_kernel_doc::linked_site::LinkedSite {
                         link: function.callable.link,
