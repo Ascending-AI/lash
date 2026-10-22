@@ -50,7 +50,9 @@ pub(super) async fn validate_config_tool_catalog(
         ),
         None => crate::plugin::PluginSessionRequest::creation(state.session_id.clone(), authority),
     };
-    host.validate_session_tool_catalog(request)
+    host.validate_session_tool_catalog(
+        request.with_allocation_budget(state.session_graph.nodes.allocation_budget().clone()),
+    )
 }
 
 /// Return a candidate catalog's config refusal (a surface its providers

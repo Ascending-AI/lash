@@ -6,7 +6,7 @@ use super::{
 
 impl RuntimeSessionState {
     /// The recorded native plugin view published with the current checkpoint.
-    pub fn plugin_admission_snapshot(&self) -> Option<std::sync::Arc<[u8]>> {
+    pub fn plugin_admission_snapshot(&self) -> Option<lash_kernel_doc::allocation::SharedBytes> {
         self.checkpoint_components
             .component(crate::store::PLUGIN_ADMISSION_CHECKPOINT_COMPONENT)
             .and_then(ResidentCheckpointComponent::opaque_body)
@@ -19,7 +19,10 @@ impl RuntimeSessionState {
             .remove(crate::store::PLUGIN_ADMISSION_CHECKPOINT_COMPONENT);
     }
 
-    pub fn set_plugin_admission_snapshot(&mut self, bytes: std::sync::Arc<[u8]>) {
+    pub fn set_plugin_admission_snapshot(
+        &mut self,
+        bytes: lash_kernel_doc::allocation::SharedBytes,
+    ) {
         let key = crate::store::PLUGIN_ADMISSION_CHECKPOINT_COMPONENT.to_owned();
         let previous = self.checkpoint_components.entries.get(&key);
         if previous
@@ -65,7 +68,10 @@ impl RuntimeSessionState {
         let config = crate::store::persisted_session_config_from_state(self).plugin_config;
         let admission = plugins.capture_plugin_admission(&config, fleet)?;
         let captured = plugins.capture_plugin_state()?;
-        let state_matches = self.checkpoint_components.records_plugin_state(&captured);
+        let state_matches = self
+            .checkpoint_components
+            .records_plugin_state(&captured)
+            .map_err(crate::RuntimeError::allocation)?;
         let entries = &mut self.checkpoint_components.entries;
         let admission_matches = match (
             entries.get(crate::store::PLUGIN_ADMISSION_CHECKPOINT_COMPONENT),

@@ -365,7 +365,7 @@ impl GraphStaging {
         let id = NodeId::of_envelope(&bytes);
         self.stage_prepared(EncodedNode {
             id,
-            bytes: Arc::from(bytes),
+            bytes: bytes.into(),
         })?;
         Ok(id)
     }

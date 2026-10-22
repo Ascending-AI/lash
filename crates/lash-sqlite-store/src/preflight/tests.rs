@@ -563,7 +563,7 @@ mod walk {
             DurablePayload::GraphNode(bytes) => {
                 let node = lash_core_store::checkpoint_graph::EncodedNode {
                     id: lash_core_store::checkpoint_graph::NodeId::of_envelope(bytes),
-                    bytes: std::sync::Arc::from(bytes.as_slice()),
+                    bytes: bytes.as_slice().into(),
                 };
                 assert_eq!(node.id.to_hex(), stored.checkpoint_ref.as_str());
                 let named = lash_core_store::store::SessionCheckpoint::named(&node)

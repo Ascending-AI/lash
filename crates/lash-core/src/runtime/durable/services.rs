@@ -384,7 +384,11 @@ impl RuntimeTurnServices {
         let (observer, publisher) = live_observer(&runtime, &live, &row.run);
         // The run starts from the head the runtime opened at: what it
         // changes from here is what its phases record (FIG-5301).
-        runtime.services.plugins.begin_run();
+        runtime
+            .services
+            .plugins
+            .begin_run()
+            .map_err(crate::RuntimeError::allocation)?;
         let start = match recorded {
             Some(recorded) => TurnStart::Resumed(recorded),
             None => TurnStart::Fresh(row.admission.trace().cloned()),

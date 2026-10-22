@@ -376,7 +376,7 @@ fn build_runtime_state(
     base.head_revision = 0;
     base.checkpoint_components.complete_for_new_session()?;
     // The child captures its own live namespaces at its first boundary.
-    base.set_plugin_state(None);
+    base.set_plugin_state(None)?;
     base.clear_plugin_admission_snapshot();
     base.policy = policy.clone();
     base.session_graph = crate::SessionGraph::default();
@@ -400,13 +400,16 @@ async fn materialize_session_init(
     current: &CurrentOwnerCapability,
     plan: &SessionInitPlan,
 ) -> Result<MaterializedSession, lash_execution_contracts::plugin_error::PluginError> {
-    let plugins = current
-        .plugins
-        .plugin_host()
-        .defer_session(PluginSessionRequest::creation(
-            &plan.session_id,
-            plan.plugin_config.clone(),
-        ))?;
+    let plugins = current.plugins.plugin_host().defer_session(
+        PluginSessionRequest::creation(&plan.session_id, plan.plugin_config.clone())
+            .with_allocation_budget(
+                plan.initial_runtime_state
+                    .session_graph
+                    .nodes
+                    .allocation_budget()
+                    .clone(),
+            ),
+    )?;
     let initial_state = plan.initial_runtime_state.clone();
     let store_binding = bind_session_store(current, plan).await?;
     // Session creation routes through the same assembler as live open and
@@ -846,15 +849,14 @@ async fn reopen_committed_session(
     };
     let plugin_host = current.plugins.plugin_host();
     let plugins = match state.plugin_state() {
-        Some(snapshot) => plugin_host.defer_session(PluginSessionRequest::rematerialization(
-            state.session_id.clone(),
-            snapshot,
-            authority,
-        )),
-        None => plugin_host.defer_session(PluginSessionRequest::creation(
-            state.session_id.clone(),
-            authority,
-        )),
+        Some(snapshot) => plugin_host.defer_session(
+            PluginSessionRequest::rematerialization(state.session_id.clone(), snapshot, authority)
+                .with_allocation_budget(state.session_graph.nodes.allocation_budget().clone()),
+        ),
+        None => plugin_host.defer_session(
+            PluginSessionRequest::creation(state.session_id.clone(), authority)
+                .with_allocation_budget(state.session_graph.nodes.allocation_budget().clone()),
+        ),
     }?;
     let policy = state.effective_policy().clone();
     let runtime = LashRuntime::assemble_runtime(

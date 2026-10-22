@@ -196,10 +196,10 @@ pub use session_obj::PluginSession;
 
 pub use lash_core_store::plugin_state::KeyRejection;
 pub use lash_core_store::plugin_state::NamespaceEntry;
-pub use lash_core_store::plugin_state::NamespaceValues;
 pub use lash_core_store::plugin_state::PluginNamespaceState;
 pub use lash_core_store::plugin_state::PluginState;
 pub use lash_core_store::plugin_state::PluginStateError;
+pub use lash_core_store::plugin_state::{NamespaceValues, NamespaceValuesWeak};
 pub use lash_core_store::tool_run::FrontierRefusal;
 pub use lash_core_store::tool_run::FrontierStep;
 pub use lash_core_store::tool_run::HookCause;

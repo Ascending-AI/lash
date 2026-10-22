@@ -18,6 +18,8 @@ use crate::store_failure::StoreFailure;
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 #[non_exhaustive]
 pub enum GraphRefusal {
+    #[error(transparent)]
+    Allocation(#[from] lash_protocol_types::allocation::AllocationError),
     #[error("the envelope does not start with LASH")]
     BadMagic,
     #[error("node kind {0} is not supported here")]

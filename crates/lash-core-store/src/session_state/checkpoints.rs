@@ -22,8 +22,11 @@ impl RuntimeSessionState {
 
     /// Record `snapshot` as the head's plugin state, or delete it. Only a
     /// namespace whose values changed writes its body at the next commit.
-    pub fn set_plugin_state(&mut self, snapshot: Option<crate::PluginState>) {
-        self.checkpoint_components.set_plugin_state(snapshot);
+    pub fn set_plugin_state(
+        &mut self,
+        snapshot: Option<crate::PluginState>,
+    ) -> Result<(), lash_protocol_types::allocation::AllocationError> {
+        self.checkpoint_components.set_plugin_state(snapshot)
     }
 
     pub fn plugin_state_is_dirty(&self) -> bool {
@@ -56,14 +59,17 @@ impl RuntimeSessionState {
             result.head_revision > self.head_revision,
             "adopted head revision must advance"
         );
+        let committed_components_match = self
+            .checkpoint_components
+            .manifest_matches_resident_commit_intent(
+                &result.manifest,
+                self.session_graph.nodes.allocation_budget(),
+            )?;
         self.head_revision = result.head_revision;
         self.checkpoint_ref = Some(result.checkpoint_ref);
         self.session_graph
             .apply_realized_node_timestamps(&result.realized_node_timestamps)?;
         self.agent_frames = self.session_graph.agent_frame_records(&self.session_id);
-        let committed_components_match = self
-            .checkpoint_components
-            .manifest_matches_resident_commit_intent(&result.manifest);
         self.checkpoint_components.adopt_manifest(&result.manifest);
         self.checkpoint_components.discard_known_bodies(
             committed_components_match,
@@ -92,7 +98,10 @@ impl RuntimeSessionState {
         }
         if !self
             .checkpoint_components
-            .manifest_matches_resident_commit_intent(&result.manifest)
+            .manifest_matches_resident_commit_intent(
+                &result.manifest,
+                self.session_graph.nodes.allocation_budget(),
+            )?
         {
             return Err(corrupt(
                 "acknowledged checkpoint differs from its prepared postimage",
@@ -288,7 +297,8 @@ impl RuntimeSessionState {
         // descriptor; ownership and receipt evidence change only the map.
         let snapshot = capture(plugins)?;
         if !snapshot.plugins.is_empty() {
-            self.set_plugin_state(Some(snapshot));
+            self.set_plugin_state(Some(snapshot))
+                .map_err(crate::RuntimeError::allocation)?;
         }
         // The config a commit writes is the recorded one too (FIG-4747): the
         // sticky config under a run view and the view the state runs under

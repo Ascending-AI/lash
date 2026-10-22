@@ -105,13 +105,15 @@ pub(super) fn write_run_changes(
     tx: &mut lash_durable::ActorTx,
     session: &SessionId,
     run: &TurnId,
-) -> Vec<lash_durable::domain::TurnNamespaceWrite> {
+) -> Result<Vec<lash_durable::domain::TurnNamespaceWrite>, TurnError> {
     #[expect(
         clippy::expect_used,
         reason = "a reference-free sealed call always encodes with an unbounded staging budget"
     )]
     drive.stage_model_calls(tx).expect("sealed calls stage");
-    let changes = drive.run_changes();
+    let changes = drive
+        .run_changes()
+        .map_err(crate::RuntimeError::allocation)?;
     if !changes.is_empty() {
         #[expect(
             clippy::expect_used,
@@ -121,7 +123,7 @@ pub(super) fn write_run_changes(
         tx.write_namespaces(session, run, &changes)
             .expect("a run's namespace changes stage");
     }
-    changes
+    Ok(changes)
 }
 
 /// The bind of the steering input `drive`'s checkpoints delivered to its
@@ -683,7 +685,7 @@ async fn phase_loop(
                     if let Some(bind) = bind_delivered(drive.as_ref(), &session, &run) {
                         tx.write(bind);
                     }
-                    let written = write_run_changes(drive.as_mut(), &mut tx, &session, &run);
+                    let written = write_run_changes(drive.as_mut(), &mut tx, &session, &run)?;
                     let (checkpoint, stored) =
                         encode_phase(drive.as_mut(), delta)?.staged_in(&mut tx);
                     tx.write(DomainWrite::Turn(TurnWrite::Advance {
@@ -810,7 +812,7 @@ async fn phase_loop(
                     if let Some(bind) = bind_delivered(drive.as_ref(), &session, &run) {
                         tx.write(bind);
                     }
-                    let written = write_run_changes(drive.as_mut(), &mut tx, &session, &run);
+                    let written = write_run_changes(drive.as_mut(), &mut tx, &session, &run)?;
                     let (checkpoint, stored) =
                         encode_checkpoint(drive.as_mut())?.staged_in(&mut tx);
                     tx.write(DomainWrite::Turn(TurnWrite::Advance {
@@ -1000,7 +1002,7 @@ async fn phase_loop(
                 if let Some(bind) = bind_delivered(drive.as_ref(), &session, &run) {
                     tx.write(bind);
                 }
-                let written = write_run_changes(drive.as_mut(), &mut tx, &session, &run);
+                let written = write_run_changes(drive.as_mut(), &mut tx, &session, &run)?;
                 let (checkpoint, stored) = encode_checkpoint(drive.as_mut())?.staged_in(&mut tx);
                 tx.write(DomainWrite::Turn(TurnWrite::Advance {
                     session: session.clone(),

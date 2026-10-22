@@ -230,9 +230,10 @@ pub use lash_core::store::{
     HydratedCheckpointComponent, HydratedSessionCheckpoint, NamedManifest, OperationId, ParkReason,
     ParkReasonCode, ParkReport, PhysicalTurn, RuntimeCommit, RuntimeCommitReceipt,
     RuntimeStoreDecorator, RuntimeTurnCommitStamp, SemanticBoundaryOperation, SessionCheckpoint,
-    SessionHeadMeta, SessionHeadPayload, TurnChange, TurnChangeCursor, TurnChangeKind,
-    TurnChangePage, TurnCommitFailureCause, TurnCommitOutcome, TurnProjectionWatermark,
-    UnsettledTurnCounts, commit_runtime_state_verified, validate_turn_commit_outcome_code,
+    SessionHeadMeta, SessionHeadPayload, SharedCheckpointAddress, TurnChange, TurnChangeCursor,
+    TurnChangeKind, TurnChangePage, TurnCommitFailureCause, TurnCommitOutcome,
+    TurnProjectionWatermark, UnsettledTurnCounts, commit_runtime_state_verified,
+    validate_turn_commit_outcome_code,
 };
 /// A logical run's durable terminal evidence, the store segment that
 /// answers and binds runs (FIG-3600 S7, FIG-3607 item 8) with the one

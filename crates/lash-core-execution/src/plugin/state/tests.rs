@@ -222,16 +222,14 @@ fn plugin_view_cannot_capture_foreign_namespace() {
     );
     staged.discard();
 
-    session.begin_run();
+    session.begin_run().unwrap();
     let mut changed = state.clone();
-    let foreign = changed.plugins.get_mut("plugin-b").unwrap();
+    let mut foreign = changed.plugins.get("plugin-b").unwrap().clone();
     foreign.generation += 1;
-    foreign.values = Arc::new(BTreeMap::from([(
-        "secret".into(),
-        Value::from("changed-b"),
-    )]));
+    foreign.values = BTreeMap::from([("secret".into(), Value::from("changed-b"))]).into();
+    changed.plugins.insert("plugin-b".into(), foreign).unwrap();
     session.hydrate_state(&changed).unwrap();
-    let full_changes = session.run_changes();
+    let full_changes = session.run_changes().unwrap();
     let foreign_change = full_changes
         .iter()
         .find(|change| change.plugin == "plugin-b")
@@ -241,7 +239,7 @@ fn plugin_view_cannot_capture_foreign_namespace() {
         "the runtime captures the changed values"
     );
     for (route, changes) in [
-        ("run-changes", view.run_changes()),
+        ("run-changes", view.run_changes().unwrap()),
         (
             "execution-run-changes",
             ExecutionState::run_changes(view.as_ref()),
@@ -909,7 +907,8 @@ fn fork_preserves_absent_namespaces_and_canonical_order() {
                 values: values.into(),
                 encoding: Default::default(),
             },
-        )]),
+        )])
+        .into(),
     };
     let host = crate::PluginHost::empty(
         crate::ExecutionBudgets::recommended(),

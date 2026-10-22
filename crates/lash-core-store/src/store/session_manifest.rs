@@ -235,7 +235,7 @@ impl SessionCheckpoint {
             components.insert(
                 name,
                 CheckpointComponentDescriptor {
-                    blob_ref: BlobRef(blob.to_hex()),
+                    blob_ref: BlobRef(blob.to_hex()).into(),
                     encoding_version,
                 },
             );

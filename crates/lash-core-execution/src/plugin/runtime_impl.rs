@@ -39,14 +39,24 @@ pub struct PluginHost {
 /// a process runtime, which is never a session.
 #[derive(Clone, Debug)]
 pub struct PluginSessionRequest<'a> {
+    pub allocation_budget: lash_protocol_types::allocation::AllocationBudget,
     pub owner: RuntimeOwner,
     pub materialization: PluginSessionMaterializationRequest<'a>,
     pub tool_catalog_overlay: ToolCatalogContribution,
 }
 
 impl<'a> PluginSessionRequest<'a> {
+    pub fn with_allocation_budget(
+        mut self,
+        budget: lash_protocol_types::allocation::AllocationBudget,
+    ) -> Self {
+        self.allocation_budget = budget;
+        self
+    }
+
     pub fn creation(session_id: impl Into<SessionId>, config: SessionAuthorityContext) -> Self {
         Self {
+            allocation_budget: lash_protocol_types::allocation::AllocationBudget::unowned(),
             owner: RuntimeOwner::Session(session_id.into()),
             materialization: PluginSessionMaterializationRequest::Creation {
                 config,
@@ -62,6 +72,7 @@ impl<'a> PluginSessionRequest<'a> {
         config: SessionAuthorityContext,
     ) -> Self {
         Self {
+            allocation_budget: lash_protocol_types::allocation::AllocationBudget::unowned(),
             owner: RuntimeOwner::Session(session_id.into()),
             materialization: PluginSessionMaterializationRequest::Rematerialization {
                 snapshot,
@@ -462,6 +473,7 @@ impl PluginHost {
         request: PluginSessionRequest<'_>,
     ) -> Result<Arc<PluginSession>, PluginError> {
         let PluginSessionRequest {
+            allocation_budget,
             owner,
             materialization,
             tool_catalog_overlay,
@@ -490,9 +502,9 @@ impl PluginHost {
             transcript_decoders: self.transcript_decoders()?,
             state: Arc::new(StdMutex::new({
                 let mut registry = if forked {
-                    PluginStateRegistry::from_fork(snapshot)
+                    PluginStateRegistry::from_fork(snapshot, &allocation_budget)?
                 } else {
-                    PluginStateRegistry::from_snapshot(snapshot)
+                    PluginStateRegistry::from_snapshot(snapshot, &allocation_budget)?
                 };
                 registry.diagnostics = self.trace_runtime.diagnostic_limits();
                 registry.limits = self.data_limits.plugin_state;
@@ -788,15 +800,16 @@ impl PluginHost {
         let inventory = self.inventory(ContributionReadiness::Ready)?;
         let mut registry = state.lock_recover();
         for factory in self.factories() {
-            registry
-                .data
-                .plugins
-                .entry(factory.id().into())
-                .or_insert_with(|| super::PluginNamespaceState {
-                    format_version: factory.plugin_declaration().format_version,
-                    ..Default::default()
-                });
-            registry.declare_fork(factory.id(), factory.plugin_declaration().state_fork);
+            if !registry.data.plugins.contains_key(factory.id()) {
+                let mut namespace =
+                    super::PluginNamespaceState::empty_in(registry.data.allocation_budget())?;
+                namespace.format_version = factory.plugin_declaration().format_version;
+                registry
+                    .data
+                    .plugins
+                    .insert(factory.id().into(), namespace)?;
+            }
+            registry.declare_fork(factory.id(), factory.plugin_declaration().state_fork)?;
         }
         drop(registry);
         let mut plugins = Vec::new();

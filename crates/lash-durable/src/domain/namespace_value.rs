@@ -51,7 +51,7 @@ impl NamespaceValue {
     ///
     /// Any refusal of the staging area.
     pub fn stage(&self, staging: &mut GraphStaging) -> Result<NodeId, GraphRefusal> {
-        for node in self.body.published.values() {
+        for node in self.body.published().values() {
             staging.adopt(node.clone())?;
         }
         Ok(staging.encode_value(

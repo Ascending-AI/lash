@@ -115,7 +115,9 @@ fn storeless_body_release_keeps_the_accepted_execution_for_restore() {
     let mut state = ambient();
     let (first_root, first) = execution("first");
     state.set_execution_graph(first);
-    state.set_plugin_state(Some(crate::PluginState::default()));
+    state
+        .set_plugin_state(Some(crate::PluginState::default()))
+        .unwrap();
     state.discard_runtime_snapshots_retaining_accepted_execution();
     assert!(
         state.plugin_state().is_none(),
@@ -175,6 +177,7 @@ fn incomplete_checkpoint_component_projection_is_a_typed_error() {
         .build_checkpoint(
             crate::PersistedTurnState::default(),
             crate::store::FleetFormat::current(),
+            &lash_protocol_types::allocation::AllocationBudget::unowned(),
         )
         .expect_err("snapshot projection cannot prove the complete keyed set");
 
@@ -757,8 +760,8 @@ fn a_checkpoint_naming_the_retired_tool_state_component_is_refused() {
             crate::store::RETIRED_TOOL_STATE_CHECKPOINT_COMPONENT.to_owned(),
             crate::store::HydratedCheckpointComponent::Changed {
                 encoding_version: crate::store::CHECKPOINT_COMPONENT_ENCODING_VERSION,
-                body_ref: crate::BlobRef::for_content(body),
-                body: std::sync::Arc::from(&body[..]),
+                body_ref: crate::BlobRef::for_content(body).into(),
+                body: (&body[..]).into(),
             },
         )]
         .into_iter()
@@ -796,10 +799,12 @@ fn released_plugin_bodies_drop_their_cache_and_keep_only_held_addresses() {
     };
     let mut state = ambient();
     let initial = namespace("0", 0);
-    let values = std::sync::Arc::downgrade(&initial.values);
-    state.set_plugin_state(Some(crate::PluginState {
-        plugins: std::collections::BTreeMap::from([("keyed".into(), initial)]),
-    }));
+    let values = initial.values.downgrade().unwrap();
+    state
+        .set_plugin_state(Some(crate::PluginState {
+            plugins: std::collections::BTreeMap::from([("keyed".into(), initial)]).into(),
+        }))
+        .unwrap();
     state
         .apply_persisted_commit_result(commit_result_for(&state))
         .unwrap();
@@ -809,9 +814,11 @@ fn released_plugin_bodies_drop_their_cache_and_keep_only_held_addresses() {
         "a discarded namespace's encoding cache retained its values"
     );
 
-    state.set_plugin_state(Some(crate::PluginState {
-        plugins: std::collections::BTreeMap::from([("keyed".into(), namespace("1", 1))]),
-    }));
+    state
+        .set_plugin_state(Some(crate::PluginState {
+            plugins: std::collections::BTreeMap::from([("keyed".into(), namespace("1", 1))]).into(),
+        }))
+        .unwrap();
     let next = crate::RuntimeCommit::persisted_state_for_test(&state);
     assert!(next.checkpoint.namespace_nodes.len() <= 3);
     assert!(

@@ -53,7 +53,7 @@ impl StageSpool for SharedSpool {
         self.lock().seal(page, protected)
     }
 
-    fn read(&self, page: &NodeId) -> Result<Arc<[u8]>, StageFault> {
+    fn read(&self, page: &NodeId) -> Result<lash_kernel_doc::allocation::SharedBytes, StageFault> {
         self.lock().read(page)
     }
 

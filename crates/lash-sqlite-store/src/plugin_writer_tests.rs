@@ -137,7 +137,8 @@ fn plugin_state(format: u32, value: u64) -> PluginState {
                 values: BTreeMap::from([("count".to_owned(), serde_json::json!(value))]).into(),
                 encoding: Default::default(),
             },
-        )]),
+        )])
+        .into(),
     }
 }
 
@@ -281,7 +282,7 @@ async fn an_out_of_range_plugin_write_is_refused_with_zero_publication_on_every_
         .await
         .expect("admit the session");
     let mut state = state("writer");
-    state.set_plugin_state(Some(plugin_state(1, 1)));
+    state.set_plugin_state(Some(plugin_state(1, 1))).unwrap();
     state
         .authority
         .plugin_config
@@ -322,7 +323,7 @@ async fn an_out_of_range_plugin_write_is_refused_with_zero_publication_on_every_
 
     // A commit's plugin state.
     let mut next = state.clone();
-    next.set_plugin_state(Some(plugin_state(2, 2)));
+    next.set_plugin_state(Some(plugin_state(2, 2))).unwrap();
     let error = commit(&store, &mut next)
         .await
         .expect_err("a commit refuses plugin state outside the range");
@@ -361,7 +362,7 @@ async fn an_out_of_range_plugin_write_is_refused_with_zero_publication_on_every_
 
     assert_eq!(recorded_range(&location), Some((1, 1)));
     // The permitted format still commits after every refusal.
-    state.set_plugin_state(Some(plugin_state(1, 3)));
+    state.set_plugin_state(Some(plugin_state(1, 3))).unwrap();
     commit(&store, &mut state)
         .await
         .expect("the permitted format still commits");
@@ -519,7 +520,7 @@ async fn a_deleted_writer_entry_refuses_writes_and_publishes_nothing() {
         .expect("admit a session without plugin stamps");
     let admitted = published(&location);
     let mut state = state("deleted-commit");
-    state.set_plugin_state(Some(plugin_state(2, 2)));
+    state.set_plugin_state(Some(plugin_state(2, 2))).unwrap();
     let error = commit(&store, &mut state)
         .await
         .expect_err("plugin state at the deleted range's stamp must refuse");
@@ -546,7 +547,7 @@ async fn a_deleted_writer_entry_refuses_writes_and_publishes_nothing() {
     // A first-format write after the deletion provisions [1, 1] — the
     // bootstrap any unprovisioned plugin gets — and never the deleted
     // range's headroom.
-    state.set_plugin_state(Some(plugin_state(1, 3)));
+    state.set_plugin_state(Some(plugin_state(1, 3))).unwrap();
     commit(&store, &mut state)
         .await
         .expect("the first format still bootstraps");

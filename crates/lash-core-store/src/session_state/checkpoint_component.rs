@@ -6,7 +6,7 @@
 //! whose body was released holds `ResidentCheckpointComponentBody`'s payload
 //! `None`.
 
-use std::sync::Arc;
+use lash_kernel_doc::allocation::SharedBytes;
 
 #[derive(Clone, Debug, serde::Serialize)]
 pub(super) enum ResidentCheckpointComponentBody {
@@ -14,66 +14,144 @@ pub(super) enum ResidentCheckpointComponentBody {
         snapshot: Option<crate::PluginState>,
         map: PluginStateRecord,
     },
-    Opaque(Option<Arc<[u8]>>),
+    Opaque(Option<SharedBytes>),
 }
 
 /// The head's namespace map as resident state keeps it, with which values
 /// each entry's body was encoded from: a capture holding the same shared
 /// values is unchanged without encoding them again.
+type HeldAddresses = crate::source_map::SharedSourceMap<crate::checkpoint_graph::NodeId, ()>;
+
 #[derive(Clone, Debug, Default, serde::Serialize)]
 pub(super) struct PluginStateRecord {
     pub(super) map: crate::plugin_state::PluginStateMap,
     #[serde(skip)]
-    pub(super) bodies: std::collections::BTreeMap<String, crate::plugin_state::NamespaceBody>,
-    /// Addresses reachable from the committed roots, without payloads. They
-    /// remain useful after body release when the next capture changes a key.
+    pub(super) bodies:
+        Option<crate::source_map::SharedSourceMap<String, crate::plugin_state::NamespaceBody>>,
     #[serde(skip)]
-    pub(super) held_nodes: std::collections::BTreeMap<
-        String,
-        std::collections::BTreeSet<crate::checkpoint_graph::NodeId>,
+    pub(super) held_nodes: crate::source_map::SharedSourceMap<String, HeldAddresses>,
+    #[serde(skip)]
+    prepared_held_nodes: crate::source_map::SharedSourceMap<String, HeldAddresses>,
+    #[serde(skip)]
+    pub(super) encoded_from: Option<
+        crate::source_map::SharedSourceMap<String, crate::plugin_state::NamespaceValuesWeak>,
     >,
     #[serde(skip)]
-    pub(super) encoded_from: std::collections::BTreeMap<
-        String,
-        std::sync::Weak<std::collections::BTreeMap<String, serde_json::Value>>,
-    >,
+    generations: crate::source_map::SharedSourceMap<String, u64>,
 }
 
 impl PluginStateRecord {
-    fn adopt_bodies(&mut self) {
-        for (plugin, body) in &self.bodies {
-            self.held_nodes
-                .insert(plugin.clone(), body.graph.keys().copied().collect());
+    pub(super) fn empty_in(
+        budget: &lash_protocol_types::allocation::AllocationBudget,
+    ) -> Result<Self, lash_protocol_types::allocation::AllocationError> {
+        use crate::source_map::SharedSourceMap;
+        Ok(Self {
+            map: crate::plugin_state::PluginStateMap::empty_in(budget)?,
+            bodies: Some(SharedSourceMap::empty_in(budget)?),
+            held_nodes: SharedSourceMap::empty_in(budget)?,
+            prepared_held_nodes: SharedSourceMap::empty_in(budget)?,
+            encoded_from: Some(SharedSourceMap::empty_in(budget)?),
+            generations: SharedSourceMap::empty_in(budget)?,
+        })
+    }
+    pub(super) fn clone_in(
+        &self,
+        budget: &lash_protocol_types::allocation::AllocationBudget,
+    ) -> Result<Self, lash_protocol_types::allocation::AllocationError> {
+        Ok(Self {
+            map: self.map.clone_in(budget)?,
+            bodies: self
+                .bodies
+                .as_ref()
+                .map(|map| map.clone_in(budget))
+                .transpose()?,
+            held_nodes: self.held_nodes.clone_in(budget)?,
+            prepared_held_nodes: self.prepared_held_nodes.clone_in(budget)?,
+            encoded_from: self
+                .encoded_from
+                .as_ref()
+                .map(|map| map.clone_in(budget))
+                .transpose()?,
+            generations: self.generations.clone_in(budget)?,
+        })
+    }
+    pub(super) fn body(&self, plugin: &str) -> Option<&crate::plugin_state::NamespaceBody> {
+        self.bodies.as_ref()?.get(plugin)
+    }
+    pub(super) fn body_iter(
+        &self,
+    ) -> impl Iterator<Item = (&String, &crate::plugin_state::NamespaceBody)> {
+        self.bodies.as_ref().into_iter().flat_map(|map| map.iter())
+    }
+    pub(super) fn insert_body(
+        &mut self,
+        plugin: String,
+        body: crate::plugin_state::NamespaceBody,
+    ) -> Result<(), lash_protocol_types::allocation::AllocationError> {
+        if let Some(bodies) = &mut self.bodies {
+            bodies.insert(plugin, body)?;
         }
-        self.held_nodes
-            .retain(|plugin, _| self.map.plugins.contains_key(plugin));
+        Ok(())
     }
-
+    pub(super) fn record_source(
+        &mut self,
+        plugin: String,
+        values: &crate::plugin_state::NamespaceValues,
+    ) -> Result<(), lash_protocol_types::allocation::AllocationError> {
+        if let Some(encoded) = &mut self.encoded_from {
+            encoded.insert(plugin, values.downgrade()?)?;
+        }
+        Ok(())
+    }
+    pub(super) fn prepare_adoption(
+        &mut self,
+    ) -> Result<(), lash_protocol_types::allocation::AllocationError> {
+        let budget = self.map.plugins.allocation_budget();
+        let mut held = self.held_nodes.clone();
+        let mut generations = crate::source_map::SharedSourceMap::empty_in(budget)?;
+        for (plugin, entry) in &self.map.plugins {
+            generations.insert(plugin.clone(), entry.generation)?;
+        }
+        for (plugin, body) in self.body_iter() {
+            // One sparse B-tree node per fixed-size address, plus source metadata.
+            let allocation = budget.reserve(
+                (body.graph().len() as u64)
+                    .saturating_mul(1024)
+                    .saturating_add(256),
+            )?;
+            let addresses = HeldAddresses::from_admitted(
+                body.graph().keys().map(|id| (*id, ())).collect(),
+                allocation,
+                budget.clone(),
+            );
+            held.insert(plugin.clone(), addresses)?;
+        }
+        held.retain(|plugin, _| self.map.plugins.contains_key(plugin))?;
+        self.prepared_held_nodes = held;
+        self.generations = generations;
+        Ok(())
+    }
+    fn adopt_bodies(&mut self) {
+        self.held_nodes = self.prepared_held_nodes.clone();
+    }
     fn release_bodies(&mut self) {
-        self.bodies.clear();
-        self.encoded_from.clear();
+        self.bodies = None;
+        self.encoded_from = None;
     }
-
-    pub(super) fn generations(&self) -> std::collections::BTreeMap<String, u64> {
-        self.map
-            .plugins
-            .iter()
-            .map(|(plugin, entry)| (plugin.clone(), entry.generation))
-            .collect()
+    pub(super) fn generations(&self) -> crate::source_map::SharedSourceMap<String, u64> {
+        self.generations.clone()
     }
-
-    /// The content address of `plugin`'s values when they are the very
-    /// values its recorded body was encoded from.
     pub(super) fn known_values(
         &self,
         plugin: &str,
         values: &crate::plugin_state::NamespaceValues,
     ) -> Option<&crate::store::BlobRef> {
         self.encoded_from
+            .as_ref()?
             .get(plugin)
-            .filter(|encoded| std::ptr::eq(encoded.as_ptr(), Arc::as_ptr(values)))
+            .filter(|encoded| encoded.matches(values))
             .and(self.map.plugins.get(plugin))
-            .map(|entry| &entry.values)
+            .map(|entry| entry.values.as_ref())
     }
 }
 
@@ -85,7 +163,7 @@ pub(super) enum PendingCheckpointComponentBody {
         snapshot: crate::PluginState,
         map: PluginStateRecord,
     },
-    Opaque(Arc<[u8]>),
+    Opaque(SharedBytes),
 }
 
 impl PendingCheckpointComponentBody {
@@ -161,7 +239,7 @@ impl ResidentCheckpointComponent {
     }
 
     /// The resident bytes of an opaque component.
-    pub(super) fn opaque_body(&self) -> Option<Arc<[u8]>> {
+    pub(super) fn opaque_body(&self) -> Option<SharedBytes> {
         match self {
             Self::Unchanged {
                 body: ResidentCheckpointComponentBody::Opaque(body),
@@ -170,7 +248,7 @@ impl ResidentCheckpointComponent {
             Self::Changed {
                 body: PendingCheckpointComponentBody::Opaque(body),
                 ..
-            } => Some(Arc::clone(body)),
+            } => Some(body.clone()),
             _ => None,
         }
     }
@@ -182,10 +260,11 @@ impl ResidentCheckpointComponent {
             Self::Unchanged { body, .. } => {
                 std::mem::replace(body, ResidentCheckpointComponentBody::Opaque(None))
             }
-            Self::Changed { body, .. } => {
-                std::mem::replace(body, PendingCheckpointComponentBody::Opaque(Arc::default()))
-                    .into_resident()
-            }
+            Self::Changed { body, .. } => std::mem::replace(
+                body,
+                PendingCheckpointComponentBody::Opaque(SharedBytes::default()),
+            )
+            .into_resident(),
         };
         if let ResidentCheckpointComponentBody::PluginState { map, .. } = &mut body {
             map.adopt_bodies();
@@ -289,8 +368,9 @@ pub(super) fn assemble_plugin_state(
         crate::checkpoint_graph::EncodedNode,
     >,
 ) -> Result<(crate::PluginState, PluginStateRecord), crate::StoreError> {
-    let mut state = crate::PluginState::default();
-    let mut record = PluginStateRecord::default();
+    let budget = map.plugins.allocation_budget().clone();
+    let mut state = crate::PluginState::empty_in(&budget)?;
+    let mut record = PluginStateRecord::empty_in(&budget)?;
     for (plugin, entry) in &map.plugins {
         let key = crate::plugin_state::namespace_component_key(plugin);
         let component = entries
@@ -301,8 +381,8 @@ pub(super) fn assemble_plugin_state(
             })?;
         if component
             .descriptor()
-            .map(|descriptor| &descriptor.blob_ref)
-            != Some(&entry.values)
+            .map(|descriptor| descriptor.blob_ref.as_ref())
+            != Some(entry.values.as_ref())
         {
             return Err(crate::StoreError::StoredDataCorrupt {
                 record_kind: "HydratedSessionCheckpoint",
@@ -332,23 +412,18 @@ pub(super) fn assemble_plugin_state(
             record_kind: "plugin namespace",
             message: error.to_string(),
         })?;
-        if body.bytes != bytes {
+        if body.bytes() != &bytes {
             return Err(crate::StoreError::StoredDataCorrupt {
                 record_kind: "plugin namespace",
                 message: "map root body differs".into(),
             });
         }
         let values = body.snapshot();
-        record
-            .held_nodes
-            .insert(plugin.clone(), body.graph.keys().copied().collect());
-        record.bodies.insert(plugin.clone(), body.clone());
-        record
-            .encoded_from
-            .insert(plugin.clone(), std::sync::Arc::downgrade(&values));
-        let mut namespace = entry.namespace(values);
-        namespace.encoding = crate::plugin_state::NamespaceEncoding::recorded(body);
-        state.plugins.insert(plugin.clone(), namespace);
+        record.insert_body(plugin.clone(), body.clone())?;
+        record.record_source(plugin.clone(), &values)?;
+        let mut namespace = entry.namespace(values)?;
+        namespace.encoding = crate::plugin_state::NamespaceEncoding::recorded(body)?;
+        state.plugins.insert(plugin.clone(), namespace)?;
     }
     if let Some(stray) = entries.keys().find_map(|key| {
         crate::plugin_state::namespace_component_plugin(key)
@@ -360,5 +435,11 @@ pub(super) fn assemble_plugin_state(
         });
     }
     record.map = map;
+    record.prepare_adoption()?;
+    record.adopt_bodies();
     Ok((state, record))
 }
+
+#[cfg(test)]
+#[path = "checkpoint_component_tests.rs"]
+mod retention_tests;

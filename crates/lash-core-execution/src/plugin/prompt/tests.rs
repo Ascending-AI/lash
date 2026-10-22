@@ -390,8 +390,11 @@ fn a_renderer_reads_one_namespace_generation() {
             let namespace = registry.data.plugins.entry(plugin.into()).or_default();
             namespace.generation = 1;
             namespace
-                .values_mut()
-                .insert(key.into(), serde_json::json!(value));
+                .apply_changes(&[lash_core_store::tool_run::ResolvedStateChange::Put {
+                    key: key.into(),
+                    value: serde_json::json!(value),
+                }])
+                .unwrap();
         }
     }
     let owner = crate::RuntimeOwner::Session(crate::SessionId::from("prompt-laws"));
@@ -413,8 +416,11 @@ fn a_renderer_reads_one_namespace_generation() {
                 let namespace = registry.data.plugins.get_mut("mem").expect("namespace");
                 namespace.generation = 2;
                 namespace
-                    .values_mut()
-                    .insert("t".into(), serde_json::json!(2));
+                    .apply_changes(&[lash_core_store::tool_run::ResolvedStateChange::Put {
+                        key: "t".into(),
+                        value: serde_json::json!(2),
+                    }])
+                    .unwrap();
             }
             let after = (input.state().generation(), input.state().get("t").cloned());
             observed.lock_recover().push((before, after));

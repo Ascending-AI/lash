@@ -160,7 +160,7 @@ pub enum RootChange {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct HydratedNode {
     pub encoding: BlobEncoding,
-    pub bytes: Arc<[u8]>,
+    pub bytes: lash_kernel_doc::allocation::SharedBytes,
 }
 
 /// An owner's complete root graph, read under one protection: every node
@@ -348,7 +348,7 @@ impl RunFacts {
                         *id,
                         HydratedNode {
                             encoding: BlobEncoding::Graph,
-                            bytes: Arc::clone(&node.bytes),
+                            bytes: node.bytes.clone(),
                         },
                     )
                 })
@@ -370,7 +370,7 @@ impl RunFacts {
             node.id,
             HydratedNode {
                 encoding: BlobEncoding::Graph,
-                bytes: Arc::clone(&node.bytes),
+                bytes: node.bytes.clone(),
             },
         );
         self

@@ -60,6 +60,13 @@ impl PluginTransitionRecord {
             .iter()
             .map(|(id, result)| result.clone().map(|namespace| (id.clone(), namespace)))
             .collect::<Result<BTreeMap<_, _>, _>>()?;
+        let budget = plugins
+            .values()
+            .next()
+            .map(|namespace| namespace.values.allocation_budget())
+            .cloned()
+            .unwrap_or_default();
+        let plugins = lash_core_store::source_map::SharedSourceMap::from_map_in(&plugins, &budget)?;
         Ok((PluginState { plugins }, config))
     }
 }
@@ -137,7 +144,7 @@ impl PluginHost {
                                     generation: 0,
                                     publication: Default::default(),
                                     fork: declaration.state_fork,
-                                    values: Arc::new(values),
+                                    values: values.into(),
                                     encoding: Default::default(),
                                 })
                             })
@@ -190,6 +197,7 @@ impl PluginSession {
             .host
             .isolated_registry()
             .defer_session(PluginSessionRequest {
+                allocation_budget: self.state.lock_recover().data.allocation_budget().clone(),
                 owner: self.owner.clone(),
                 materialization,
                 tool_catalog_overlay: self.tool_catalog_overlay.clone(),
@@ -258,24 +266,28 @@ pub const PLUGIN_ADMISSION_CHECKPOINT_VERSION: u32 = 1;
 
 #[derive(serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
-struct PluginAdmissionCheckpoint {
+struct PluginAdmissionCheckpoint<V> {
     format: u32,
-    view: PluginNativeView,
+    view: V,
 }
 
 impl PluginNativeView {
-    pub fn encode(&self, fleet: crate::FleetFormat) -> Result<Arc<[u8]>, PluginError> {
-        rmp_serde::to_vec_named(&PluginAdmissionCheckpoint {
+    pub fn encode(
+        &self,
+        fleet: crate::FleetFormat,
+    ) -> Result<lash_kernel_doc::allocation::SharedBytes, PluginError> {
+        let body = PluginAdmissionCheckpoint {
             format: fleet.writer_version(lash_core_store::surface_format!(
                 PLUGIN_ADMISSION_CHECKPOINT_VERSION
             )),
-            view: self.clone(),
-        })
-        .map(Arc::from)
-        .map_err(|error| PluginError::StoredDataCorrupt {
-            record_kind: crate::store::PLUGIN_ADMISSION_CHECKPOINT_COMPONENT.into(),
-            message: error.to_string(),
-        })
+            view: self,
+        };
+        lash_core_store::store::encode_checkpoint_component(
+            crate::store::PLUGIN_ADMISSION_CHECKPOINT_COMPONENT,
+            &body,
+            self.config.allocation_budget(),
+        )
+        .map_err(PluginError::from)
     }
     pub fn decode(bytes: &[u8], fleet: crate::FleetFormat) -> Result<Self, PluginError> {
         #[derive(serde::Deserialize)]
@@ -301,7 +313,8 @@ impl PluginNativeView {
             }
             .into());
         }
-        let record: PluginAdmissionCheckpoint = rmp_serde::from_slice(bytes).map_err(corrupt)?;
+        let record: PluginAdmissionCheckpoint<PluginNativeView> =
+            rmp_serde::from_slice(bytes).map_err(corrupt)?;
         Ok(record.view)
     }
 }
@@ -378,6 +391,7 @@ impl PluginSession {
             .host
             .isolated_registry()
             .defer_session(PluginSessionRequest {
+                allocation_budget: self.state.lock_recover().data.allocation_budget().clone(),
                 owner: self.owner.clone(),
                 materialization: PluginSessionMaterializationRequest::Rematerialization {
                     snapshot: state,
@@ -389,7 +403,10 @@ impl PluginSession {
         Ok(built)
     }
 
-    pub fn native_view(&self, fleet: crate::FleetFormat) -> Result<Option<Arc<[u8]>>, PluginError> {
+    pub fn native_view(
+        &self,
+        fleet: crate::FleetFormat,
+    ) -> Result<Option<lash_kernel_doc::allocation::SharedBytes>, PluginError> {
         if !self.host.export_plugin_namespaces {
             return Ok(None);
         }
@@ -400,7 +417,7 @@ impl PluginSession {
         &self,
         config: Option<&PluginConfig>,
         fleet: crate::FleetFormat,
-    ) -> Result<Option<Arc<[u8]>>, PluginError> {
+    ) -> Result<Option<lash_kernel_doc::allocation::SharedBytes>, PluginError> {
         self.require_runtime_owner()?;
         let Some(mut view) = self.native_view.lock_recover().clone() else {
             return Ok(None);

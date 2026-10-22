@@ -195,6 +195,8 @@ impl DurableSnapshotStore {
 /// Why a store refused a save.
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 pub enum QuietPointRefusal {
+    #[error(transparent)]
+    Allocation(#[from] lash_protocol_types::allocation::AllocationError),
     /// An owner read or commit refused the save, retaining its fence cause.
     #[error(transparent)]
     Durable(#[from] lash_durable::DurableError),

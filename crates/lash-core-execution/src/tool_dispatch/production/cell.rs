@@ -573,7 +573,12 @@ impl MemberBodies for CellMembers {
             .publish_committed_state(state)
     }
 
-    fn run_changes(&self) -> Vec<lash_durable::domain::TurnNamespaceWrite> {
+    fn run_changes(
+        &self,
+    ) -> Result<
+        Vec<lash_durable::domain::TurnNamespaceWrite>,
+        lash_protocol_types::allocation::AllocationError,
+    > {
         self.tools.context.dispatch().state.run_changes()
     }
 

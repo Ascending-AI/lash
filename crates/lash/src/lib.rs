@@ -1168,7 +1168,8 @@ pub mod http_transport {
 pub mod allocation {
     pub use lash_protocol_types::allocation::{
         AllocationBudget, AllocationError, AllocationHold, AllocationLedger, AllocationReservation,
-        ProjectionError, ReserveError, SourceCapacity, json_decode_capacity, payload_capacity,
+        ProjectionError, ReserveError, SharedBytes, SourceCapacity, json_decode_capacity,
+        payload_capacity,
     };
 }
 
