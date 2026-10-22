@@ -1,5 +1,6 @@
 #[path = "session_graph_edits.rs"]
 mod edits;
+pub use edits::PreparedGraphReceipt;
 /// version_surface = "coexist"
 /// version_guard(items(DRAFT_NODE_PREFIX_VERSION, draft_node_id))
 const DRAFT_NODE_PREFIX_VERSION: &str = "draft-node/v3/";
@@ -1522,6 +1523,21 @@ impl SessionGraph {
         Ok(true)
     }
 
+    /// Borrow the authoritative active-path frame payloads in chronological
+    /// order. Preparation can size its projection before copying any fields.
+    pub fn active_frame_nodes(
+        &self,
+    ) -> Result<
+        impl ExactSizeIterator<Item = &SessionNodeRecord> + DoubleEndedIterator,
+        crate::StoreError,
+    > {
+        Ok(self
+            .try_cache()?
+            .active_frame_indices
+            .iter()
+            .map(|index| self.nodes[*index].as_ref()))
+    }
+
     pub(crate) fn try_agent_frame_records(
         &self,
         session_id: &SessionId,
@@ -1531,8 +1547,7 @@ impl SessionGraph {
             .anchor()
             .and_then(|anchor| anchor.previous_frame_node_id.clone());
         let mut frames = Vec::new();
-        for index in self.try_cache()?.active_frame_indices.iter() {
-            let node = &self.nodes[*index];
+        for node in self.active_frame_nodes()? {
             let Some((reason, assignment)) = node.frame_open() else {
                 continue;
             };

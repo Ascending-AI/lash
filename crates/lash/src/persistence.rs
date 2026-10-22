@@ -62,8 +62,8 @@ pub use lash_core_store::attachments::{AttachmentExecutionBinding, AttachmentHol
 pub use lash_core_store::compat::{CompatRefusal, CompatStamp};
 pub use lash_core_store::runtime_error::ExecutableGenerationRefusal;
 pub use lash_core_store::session_graph::{
-    NodeTimestamp, NodeTimestampError, SessionGraphAppendBuilder, SessionGraphData,
-    SessionNodeDraft, SessionReadModel,
+    NodeTimestamp, NodeTimestampError, PreparedGraphReceipt, SessionGraphAppendBuilder,
+    SessionGraphData, SessionNodeDraft, SessionReadModel,
 };
 pub use lash_core_store::session_identity::{
     SessionLineage, SessionObservedProcessOutcome, SessionObservedProcessReceipt,
