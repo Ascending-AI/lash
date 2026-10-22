@@ -492,18 +492,14 @@ pub trait SessionHistoryStore: Send + Sync {
         selector: WindowSelector,
     ) -> Result<Option<SessionWindowRead>, StoreError>;
 
-    /// Load a serving owner's source under its claim ledger. External cold
-    /// implementations may delegate to their independently owned read; both
-    /// production stores admit before decoding and preserve the typed refusal.
+    /// Load a serving owner's source under its claim ledger. Implementations
+    /// must admit before decoding and preserve the typed refusal.
     async fn load_session_window_in(
         &self,
         session_id: &SessionId,
         selector: WindowSelector,
         budget: &lash_protocol_types::allocation::AllocationBudget,
-    ) -> Result<Option<SessionWindowRead>, StoreError> {
-        let _ = budget;
-        self.load_session_window(session_id, selector).await
-    }
+    ) -> Result<Option<SessionWindowRead>, StoreError>;
 
     /// One page of the pinned leaf's ancestry, descending by generation,
     /// across frame and fork boundaries (ADR 0112 §6).

@@ -19,19 +19,59 @@ async fn effect_executor_allocations_are_independent_of_history_depth() {
     .build()
     .await;
     let run = crate::TurnId::from("sequence-sharing");
-    let controller = crate::ActorContext::detached(backend)
-        .scoped(crate::AdmittedScope::turn(
-            runtime.state.session_id.clone(),
-            run.clone(),
-        ))
-        .expect("admit the fixture's turn scope");
+    // A serving turn belongs to a claim with one coherent acknowledged
+    // projection. Construct that owner before entering the measured interval.
+    let actor = lash_durable::ActorKey::session(runtime.state.session_id.as_str()).unwrap();
+    let mut wake = lash_durable::MailTx::new();
+    wake.wake(actor.clone());
+    backend
+        .durable()
+        .commit_mail(
+            wake,
+            lash_durable::CommitLabel::new("sequence-sharing.wake"),
+        )
+        .await
+        .unwrap();
+    let lease = backend
+        .durable()
+        .register_node(&lash_durable::NodeSpec {
+            node: lash_durable::NodeId::new("sequence-sharing-owner"),
+            decodes: backend.formats().decodes(),
+            serves: Vec::new(),
+            capabilities: Default::default(),
+            ttl_millis: 600_000,
+        })
+        .await
+        .unwrap();
+    let claimed = backend
+        .durable()
+        .claim(&lease, 16)
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|claim| claim.actor == actor)
+        .expect("claim the fixture session");
+    let controller = crate::ActorContext::new(
+        backend.clone(),
+        actor,
+        claimed.epoch,
+        crate::AdmittedScope::turn(runtime.state.session_id.clone(), run.clone()),
+        tokio_util::sync::CancellationToken::new(),
+        Arc::new(lash_durable::NoProbe),
+    );
+    let mut owner = crate::runtime::durable::head::SessionOwner::default();
+    let held = owner
+        .head(&controller, &runtime.state.session_id)
+        .await
+        .expect("coherent owner projection")
+        .clone();
     let (observer, _observations) = TurnObserver::unread();
     let turn = Box::pin(runtime.prepare_durable_turn(
         &controller,
         &run,
         crate::runtime::logical_turn::LogicalTurnAdmissions::new(Vec::new()),
         crate::runtime::turn_loop::TurnStart::Fresh(None),
-        None,
+        Some(&held),
         &observer,
     ))
     .await

@@ -263,7 +263,7 @@ pub async fn checkpoint_profile_change_preserves_refs_budget_and_atomic_root_lea
             crate::HydratedCheckpointComponent::changed(b"must roll back".to_vec()),
         );
         let mut missing = descriptor.clone();
-        missing.blob_ref = crate::BlobRef::for_content(b"never written");
+        missing.blob_ref = crate::BlobRef::for_content(b"never written").into();
         invalid.checkpoint.components.insert(
             "profile/missing".into(),
             crate::HydratedCheckpointComponent::Unchanged {

@@ -234,6 +234,14 @@ impl SessionHistoryStore for Integrator {
     ) -> Result<Option<SessionWindowRead>, StoreError> {
         unreachable!("external signature witness")
     }
+    async fn load_session_window_in(
+        &self,
+        session_id: &SessionId,
+        selector: WindowSelector,
+        budget: &lash::allocation::AllocationBudget,
+    ) -> Result<Option<SessionWindowRead>, StoreError> {
+        unreachable!("external signature witness")
+    }
     async fn load_ancestors(
         &self,
         session_id: &SessionId,
