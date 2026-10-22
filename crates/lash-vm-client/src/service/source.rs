@@ -161,11 +161,34 @@ impl Service {
 
 fn refused(response: Response) -> SourceServiceError {
     match response {
+        Response::Unprintable { site } => {
+            SourceServiceError::Print(lash_kernel_dialect::PrintError::Unprintable { site })
+        }
         Response::DialectRefused(refusal) => SourceServiceError::Dialect(refusal),
         Response::UndeclaredMembers { members } => {
             SourceServiceError::UndeclaredMembers { members }
         }
         Response::UnknownDialect { dialect } => SourceServiceError::UnknownDialect { dialect },
         _ => PoolError::breach(SequenceFault::UnexpectedServiceResponse).into(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// FIG-7109: source-service errors retain the worker's typed code site.
+    #[test]
+    fn unprintable_worker_sites_reach_the_source_service_error() {
+        let site = lash_vocabulary::sites::Site::new(lash_vocabulary::sites::Unit::Main, vec![2]);
+        let wire = rmp_serde::to_vec_named(&Response::Unprintable { site: site.clone() }).unwrap();
+        let response = rmp_serde::from_slice(&wire).unwrap();
+        let error = refused(response);
+        assert!(
+            matches!(error,
+            SourceServiceError::Print(lash_kernel_dialect::PrintError::Unprintable { site: actual })
+                if actual == site),
+            "host must retain the typed site"
+        );
     }
 }

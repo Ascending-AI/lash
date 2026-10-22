@@ -119,6 +119,9 @@ pub(crate) fn perform(
                     match printer.print(&document, captions.as_ref(), embedding.library(), options)
                     {
                         Ok(printed) => Response::Printed(printed),
+                        Err(lash_kernel_dialect::PrintError::Unprintable { site }) => {
+                            Response::Unprintable { site }
+                        }
                         Err(error) => Response::DialectRefused(refusal(error.into())),
                     }
                 }
@@ -336,6 +339,48 @@ mod tests {
             panic!("a lowering request");
         };
         assert_eq!(functions[&name].document.id(), identified.id());
+    }
+
+    /// FIG-7109: the worker preserves an unprintable callable as a typed site.
+    #[test]
+    fn unprintable_callable_sites_cross_the_worker_wire() {
+        use lash_vocabulary::{
+            Name,
+            sites::{Site, Unit},
+        };
+        let embedding =
+            crate::embedding::tests::every_dialect(&Default::default()).expect("embedding");
+        let namespaces = Default::default();
+        let environment = lash_kernel_dialect::Environment::new(embedding.library(), &namespaces);
+        let lowered = lash_dialect_typescript::lower(
+            "export function hidden(): number { return 1; }",
+            &environment,
+            Mode::Module,
+        )
+        .expect("authored module");
+        let mut document = lowered.document.document().clone();
+        let lash_kernel_doc::Export::Function(export) = document
+            .exports
+            .get_mut(&Name::new("hidden"))
+            .expect("export")
+        else {
+            panic!("function export");
+        };
+        export.convention = lash_kernel_doc::StartConvention::Direct;
+        let expected = Site::new(Unit::Library(export.function), Vec::new());
+        let request = Request::Print {
+            format: SourceFormat::TypeScriptV1,
+            document: document.canonical_bytes(),
+            captions: None,
+            options: Default::default(),
+        };
+        let encoded = EncodedPayload(rmp_serde::to_vec_named(&request).expect("request"));
+        let response = perform(&embedding, &encoded).expect("print response");
+        let response: Response = rmp_serde::from_slice(&response.0).expect("response");
+        assert!(
+            matches!(response, Response::Unprintable { site } if site == expected),
+            "the callable site must survive IPC without parsing diagnostic prose"
+        );
     }
 
     std::thread_local! {

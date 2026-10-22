@@ -258,6 +258,10 @@ pub enum Response {
         function_values: Option<lash_kernel_doc::FunctionRepresentation>,
     },
     Printed(lash_kernel_dialect::PrintedSource),
+    /// The exact callable or main region has no authored source spelling.
+    Unprintable {
+        site: Site,
+    },
     Read {
         /// The document's token body.
         #[serde(with = "serde_bytes")]
