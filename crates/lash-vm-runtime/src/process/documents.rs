@@ -54,7 +54,7 @@ pub enum StoredSourceMap {
 pub struct KernelDocuments {
     store: Arc<dyn ModuleArtifactStore>,
     packages: Arc<dyn PackageStore>,
-    /// Unpublished, deterministic fulfilments only; never a replacement for an existing stored read.
+    /// Pure deterministic preparations only; never a replacement for an existing stored read.
     prepared: Arc<Mutex<DocumentPreparations>>,
 }
 // Pure preparations belong to the same document owner as unpublished Links.
