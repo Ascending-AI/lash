@@ -181,3 +181,23 @@ fn helper_numeric_suffix_words_are_canonical() {
         "h_n4_math_n8_sqrt1_n2"
     );
 }
+
+/// FIG-7135: adding helpers projects each newly admitted name once rather
+/// than projecting every earlier name again for its collision check.
+#[test]
+fn helper_collision_admission_projects_each_name_once() {
+    let mut library = NamedLibrary::new();
+    crate::authoring::HELPER_PROJECTIONS.with(|count| count.set(0));
+    for index in 0..64 {
+        let definition = parse_definition(&format!(
+            "function law.helper_{index}() -> Null\nkernel 1\ncharge 1\nbody {{ return null }}"
+        ))
+        .unwrap();
+        library.insert(definition).unwrap();
+    }
+    assert!(
+        crate::authoring::HELPER_PROJECTIONS.with(|count| count.get()) <= 64,
+        "helper admission repeated canonical projection: {}",
+        crate::authoring::HELPER_PROJECTIONS.with(|count| count.get())
+    );
+}

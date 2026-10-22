@@ -5,10 +5,32 @@ pub(crate) fn authored(
     text: &str,
     registry: &lash_kernel_doc::FunctionRegistry,
 ) -> lash_kernel_doc::Document {
-    let mut definitions: BTreeMap<_, _> = registry
-        .iter()
-        .filter(|(id, f)| text.contains(f.name()) || text.contains(&id.to_string()))
-        .map(|(id, f)| (*id, (**f.definition()).clone()))
+    // Names come from the registry's index; explicit identities come from
+    // the source. Never format every registry identity for each input case.
+    let mut selected = std::collections::BTreeSet::new();
+    selected.extend(
+        registry
+            .names()
+            .filter_map(|(name, id)| text.contains(name).then_some(id)),
+    );
+    for digits in text.split(|ch: char| !matches!(ch, '0'..='9' | 'a'..='f')) {
+        for start in 0..=digits.len().saturating_sub(64) {
+            if let Some(spelling) = digits.get(start..start + 64)
+                && let Ok(id) = lash_vocabulary::FunctionId::parse(spelling)
+                && registry.get(&id).is_some()
+            {
+                selected.insert(id);
+            }
+        }
+    }
+    let mut definitions: BTreeMap<_, _> = selected
+        .into_iter()
+        .map(|id| {
+            let registered = registry
+                .get(&id)
+                .unwrap_or_else(|| unreachable!("selected registration"));
+            (id, (**registered.definition()).clone())
+        })
         .collect();
     let mut required: Vec<_> = definitions.keys().copied().collect();
     while let Some(id) = required.pop() {
@@ -94,17 +116,43 @@ pub(crate) fn authored(
             None => true,
         })
         .collect();
-    let mut header = lash_kernel_doc::print_document(&missing);
-    for f in definitions.values() {
-        header.push_str(&format!(
-            "definition {}\n",
-            serde_json::to_string(&lash_kernel_doc::print_definition(f))
-                .unwrap_or_else(|error| panic!("linked law fixture: {error:?}"))
-        ));
-        if f.has_native() {
-            header.push_str(&format!("native @{}\n", f.identity()));
-        }
-    }
-    lash_kernel_doc::parse_document(&format!("{header}{main}"))
-        .unwrap_or_else(|error| panic!("linked law fixture: {error:?}"))
+    missing.requires.natives.extend(
+        definitions
+            .iter()
+            .filter_map(|(id, definition)| definition.has_native().then_some(*id)),
+    );
+    missing.functions = definitions;
+    lash_kernel_doc::core_support::parse_document_over(
+        &main,
+        missing,
+        lash_vocabulary::data_limits::KernelDataLimits::standard(),
+    )
+    .unwrap_or_else(|error| panic!("linked law fixture: {error:?}"))
+}
+
+/// FIG-7135: a final law fixture already owns typed definitions. Installing
+/// them beside a parsed body must not print and parse those bodies again.
+#[test]
+fn authored_fixtures_preserve_definitions_without_text_round_trips() {
+    use lash_kernel_doc::{FunctionRegistry, NumberPolicy, parse_definition};
+    let definition = parse_definition(
+        "function law.helper(x: Any) -> Any\nkernel 1\ncharge 1\nbody { return x }",
+    )
+    .expect("helper");
+    let mut registry = FunctionRegistry::default();
+    let function = registry
+        .register(definition.clone(), None)
+        .expect("register");
+    let text = format!("kernel 1\nnumbers by_spelling\nmain {{ return invoke @{function}(1) }}");
+    let _ = lash_kernel_doc::document_work::take_definition_parses();
+    let actual = authored(&text, &registry);
+    let mut expected = lash_kernel_doc::parse_document(&text).expect("explicit-id body");
+    expected.functions.insert(function, definition);
+    assert_eq!(actual, expected);
+    assert_eq!(actual.numbers, NumberPolicy::BySpelling);
+    assert_eq!(
+        lash_kernel_doc::document_work::take_definition_parses(),
+        0,
+        "fixture assembly serialized definitions already held as typed facts"
+    );
 }

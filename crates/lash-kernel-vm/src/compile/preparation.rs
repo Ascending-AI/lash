@@ -50,7 +50,16 @@ pub(crate) struct Admission {
 struct CodeContent {
     documents: Vec<DocumentId>,
     functions: Vec<FunctionId>,
-    imports: Vec<(Unit, lash_vocabulary::ImportSlot, DocumentId, FunctionId)>,
+    imports: BTreeSet<ImportResolution>,
+}
+
+/// Code identity depends on resolved targets and export descriptors, never on
+/// execution Links or operation routes. Certification is derived only on a miss.
+#[derive(PartialEq, Eq, PartialOrd, Ord)]
+struct ImportResolution {
+    source: DocumentId,
+    slot: lash_vocabulary::ImportSlot,
+    target: Option<(DocumentId, FunctionId, lash_vocabulary::ExportName)>,
 }
 
 /// Only a resolution shared by every loaded instance of a source unit is
@@ -70,6 +79,8 @@ fn code_imports(
             .functions
             .iter()
             .filter_map(|(id, definition)| {
+                #[cfg(test)]
+                IMPORT_SOURCE_VISITS.with(|count| count.set(count.get() + 1));
                 functions
                     .contains(id)
                     .then_some((Unit::Library(*id), &definition.body()?.imports))
@@ -171,6 +182,8 @@ impl From<Refused> for OpenError {
 
 #[cfg(test)]
 thread_local! {
+    static IMPORT_SOURCE_VISITS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    static DEFINITION_COPIES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
     static DOCUMENT_ENCODINGS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
@@ -309,14 +322,27 @@ impl Admission {
             crate::interface::PreparedInstance,
         >,
     ) -> Result<Arc<Executable>, Missing> {
-        let imports = code_imports(self.identity(document), documents, functions, instances);
         let content = CodeContent {
             documents: documents.keys().copied().collect(),
             functions: functions.iter().copied().collect(),
-            imports: imports
-                .iter()
-                .map(|((unit, slot), (document, function))| {
-                    (unit.clone(), *slot, *document, *function)
+            imports: instances
+                .values()
+                .flat_map(|instance| {
+                    instance.slots.iter().map(|(slot, prepared)| {
+                        let target = match prepared {
+                            crate::interface::PreparedSlot::Function { callable, export } => {
+                                instances.get(&callable.link).map(|target| {
+                                    (target.document, callable.function, export.clone())
+                                })
+                            }
+                            _ => None,
+                        };
+                        ImportResolution {
+                            source: instance.document,
+                            slot: *slot,
+                            target,
+                        }
+                    })
                 })
                 .collect(),
         };
@@ -327,7 +353,11 @@ impl Admission {
         // One producer compiles this content; no admission map lock is held
         // while registry preparation or compilation runs.
         let code = code
-            .get_or_init(|| Self::prepare_code(document, library, documents, functions, &imports))
+            .get_or_init(|| {
+                let imports =
+                    code_imports(self.identity(document), documents, functions, instances);
+                Self::prepare_code(document, library, documents, functions, &imports)
+            })
             .as_ref()
             .map_err(|missing| *missing)?;
         let library = code.library.as_ref().unwrap_or(library);
@@ -359,13 +389,14 @@ impl Admission {
     ) -> Result<PreparedCode, Missing> {
         // Link tables are instance-specific; compile the reached documents together,
         // deduplicating identical FunctionIds while keeping frame Links separate.
-        let mut reached = document.clone();
-        for loaded in documents.values() {
-            reached.functions.extend(loaded.functions.clone());
+        let mut reached = BTreeMap::new();
+        for source in std::iter::once(document).chain(documents.values().map(Arc::as_ref)) {
+            for (id, definition) in &source.functions {
+                if functions.contains(id) {
+                    reached.insert(*id, definition);
+                }
+            }
         }
-        reached
-            .functions
-            .retain(|function, _| functions.contains(function));
         // Authored frames follow executable guest roots. A native or formula
         // helper's retained fallback definitions remain owned by the library;
         // compiling them again would create dormant charged regions.
@@ -376,7 +407,6 @@ impl Admission {
         // callable environments, even when its main does not name them.
         pending.extend(
             reached
-                .functions
                 .keys()
                 .filter(|id| library.registry().get(id).is_none())
                 .copied(),
@@ -402,7 +432,7 @@ impl Admission {
         }
         let mut authored = BTreeSet::new();
         while let Some(id) = pending.pop_first() {
-            let Some(definition) = reached.functions.get(&id) else {
+            let Some(definition) = reached.get(&id) else {
                 continue;
             };
             let doc::Implementation::Guest {
@@ -417,13 +447,11 @@ impl Admission {
             }
         }
         let loaded = if reached
-            .functions
             .keys()
             .any(|id| library.registry().get(id).is_none())
         {
             let mut registry = library.registry().as_ref().clone();
             let mut pending: BTreeSet<_> = reached
-                .functions
                 .keys()
                 .filter(|id| registry.get(id).is_none())
                 .copied()
@@ -431,15 +459,17 @@ impl Admission {
             while let Some(blocked) = pending.first().copied() {
                 let ready =
                     pending.iter().copied().find(|id| {
-                        reached.functions[id].body().is_none_or(|body| {
+                        reached[id].body().is_none_or(|body| {
                             doc::Node::Block(&body.block).functions_within().iter().all(
                                 |dependency| dependency == id || registry.get(dependency).is_some(),
                             )
                         })
                     });
                 let id = ready.ok_or(Missing(blocked))?;
+                #[cfg(test)]
+                DEFINITION_COPIES.with(|count| count.set(count.get() + 1));
                 registry
-                    .register(reached.functions[&id].clone(), None)
+                    .register(reached[&id].clone(), None)
                     .map_err(|_| Missing(id))?;
                 pending.remove(&id);
             }
@@ -453,7 +483,7 @@ impl Admission {
         };
         let library = loaded.as_ref().unwrap_or(library);
         let own = Arc::new(compile_document(
-            &reached, document, library, &authored, imports,
+            document, &reached, library, &authored, imports,
         )?);
         Ok(PreparedCode {
             own,
@@ -477,6 +507,60 @@ mod tests {
         QualifiedName, Signature, Type,
         package::{Fill, Link},
     };
+
+    /// FIG-7135: starts share immutable import-source facts, and selecting one
+    /// function never copies the unrelated retained library definitions.
+    #[test]
+    fn linked_preparation_work_is_bounded_by_selected_content() {
+        let mut root = Document::new(doc::NumberPolicy::BySpelling, vec![]);
+        for index in 0..64 {
+            let definition = doc::parse_definition(&format!(
+                "function retained_{index}() -> Null\nkernel 1\ncharge 1\nbody {{ return null }}"
+            ))
+            .expect("definition");
+            root.functions.insert(definition.identity(), definition);
+        }
+        let function = *root.functions.keys().next().expect("nonempty fixture");
+        let root = Arc::new(root);
+        let identity = root.identity();
+        let documents = BTreeMap::from([(identity, Arc::clone(&root))]);
+        let link = Link {
+            document: identity,
+            fills: BTreeMap::new(),
+        }
+        .identity();
+        let instances = BTreeMap::from([(
+            link,
+            PreparedInstance {
+                link,
+                document: identity,
+                slots: BTreeMap::new(),
+            },
+        )]);
+        let library = PreparedLibrary::new(Arc::new(doc::FunctionRegistry::default()));
+        let admission = library
+            .admit(&root, KernelDataLimits::standard())
+            .unwrap_or_else(|_| panic!("valid root"));
+        IMPORT_SOURCE_VISITS.with(|count| count.set(0));
+        DEFINITION_COPIES.with(|count| count.set(0));
+        for _ in 0..32 {
+            admission
+                .executable(
+                    &root,
+                    &library,
+                    &documents,
+                    &BTreeSet::from([function]),
+                    &instances,
+                )
+                .unwrap_or_else(|missing| panic!("selected executable: {}", missing.0));
+        }
+        let visits = IMPORT_SOURCE_VISITS.with(|count| count.get());
+        let copies = DEFINITION_COPIES.with(|count| count.get());
+        assert!(
+            visits <= 64 && copies <= 1,
+            "selected preparation repeated source work: {visits} import-source visits, {copies} definition copies"
+        );
+    }
 
     /// FIG-7109: imported pure helpers form a region, and repointing the
     /// same retained documents and function selection cannot reuse its target.
