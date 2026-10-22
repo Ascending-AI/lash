@@ -11,7 +11,7 @@ pub(super) fn target(callee: &k::Callee) -> Option<k::FunctionTarget> {
 
 impl super::Renderer<'_> {
     /// Resolve an ordered lexical capture without evaluating or renaming it.
-    fn resolved<'a>(&'a self, mut value: &'a k::Expr) -> Option<&'a k::Expr> {
+    pub(super) fn resolved<'a>(&'a self, mut value: &'a k::Expr) -> Option<&'a k::Expr> {
         let mut seen = std::collections::BTreeSet::new();
         while let k::Expr::Variable(name) = value {
             let Some(bound) = self.substitutions.get(name) else {

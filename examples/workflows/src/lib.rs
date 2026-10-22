@@ -372,7 +372,10 @@ pub(crate) fn render_with(root: &Path) -> Result<(BTreeMap<String, String>, Vec<
             let prefix = format!("{}/", case.name);
             if let Some(expected) = &case.refusal {
                 let Err(diagnostic) = lowered else {
-                    anyhow::bail!("MODULE-CONTRACT: refused case must refuse");
+                    anyhow::bail!(
+                        "MODULE-CONTRACT: {} {extension}: refused case must refuse ({expected})",
+                        case.name
+                    );
                 };
                 ensure!(
                     &diagnostic.code == expected,

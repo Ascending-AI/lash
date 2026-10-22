@@ -42,6 +42,28 @@ impl Renderer<'_> {
                 self.out.write("\n");
                 true
             }
+            // Indexed assignment lowers to a discarded call of the selected
+            // mutation helper. Python evaluates the value before the place;
+            // lowering retains any required operand pins in the document.
+            k::Stmt::Do {
+                value: k::Expr::Act(action),
+            } if matches!(&action.kind, k::ActKind::Call(callee)
+                if super::task::target(callee)
+                    .is_some_and(|target| self.operators.is(&target, "py.setitem"))) =>
+            {
+                let [target, index, value] = action.args.as_slice() else {
+                    return false;
+                };
+                self.out.begin_node(None); // discarded action
+                self.inline_expr(target);
+                self.out.write("[");
+                self.inline_expr(index);
+                self.out.write("] = ");
+                self.inline_expr(value);
+                self.out.end_node();
+                self.out.write("\n");
+                true
+            }
             k::Stmt::Assign {
                 place:
                     k::Place::Member(k::Member::Index {
