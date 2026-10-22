@@ -597,6 +597,228 @@ mod tests {
     use lash_core_store::store::Target;
     use lash_durable::{ActorKey, CommitLabel, DomainWrite, DurableReads, DurableStore};
 
+    /// PROMPT-RETIRE-WORK: publishing and settling one more turn must not
+    /// rewrite or retire paths proportional to the history already retained.
+    #[tokio::test]
+    async fn prompt_retirement_work_is_independent_of_session_history() {
+        use lash_core_ids::operational_metrics::sql::collect;
+        use lash_core_store::prompt_sections::ChunkedRequestTemplate;
+        use lash_protocol_types::llm::types::{
+            ProviderRouteIdentity, RecordedRequestTemplate, RequestSegment,
+        };
+
+        let set = crate::SqliteStoreSet::memory().await.unwrap();
+        let identity = lash_core_execution::testing::sql_work::owner_commit(&set).await;
+        let store = set.durable_store();
+        let session = SessionId::from("sql-work-owner");
+        let actor = ActorKey::session(session.as_str()).unwrap();
+        let route = ProviderRouteIdentity {
+            provider: "fixture".into(),
+            endpoint: "https://fixture.test".into(),
+            model: "model".into(),
+        };
+        let mut items = Vec::new();
+        let mut early = [Vec::new(), Vec::new(), Vec::new()];
+        let mut late = early.clone();
+        for turn in 1..=1000 {
+            for role in ["user", "assistant"] {
+                items.push(
+                    RequestSegment::item_json(&serde_json::json!({
+                        "role": role, "content": format!("history turn {turn}")
+                    }))
+                    .unwrap(),
+                );
+            }
+            let mut builder = RecordedRequestTemplate::builder(route.clone(), true, None);
+            builder.literal("{\"messages\":[");
+            for item in &items {
+                builder.segment(item);
+            }
+            builder.literal("]}");
+            let template = builder.finish().unwrap();
+            let (chunked, texts) = ChunkedRequestTemplate::chunk(&template);
+            let run = TurnId::parse(format!("history-{turn}")).unwrap();
+            let mut tx = store.begin(&actor, Epoch(identity.epoch)).await.unwrap();
+            tx.write(DomainWrite::Prompt(PromptWrite::Record {
+                call: PromptCallKey {
+                    session: session.clone(),
+                    call: ModelCallId::Turn {
+                        run: run.clone(),
+                        ordinal: 1,
+                    },
+                },
+                snapshot: None,
+                request: serde_json::to_string(&chunked).unwrap(),
+                snapshot_texts: Vec::new(),
+                request_texts: texts,
+                prefix: chunked.prefix.map(|root| root.blob.0),
+            }));
+            tx.write(DomainWrite::Prompt(PromptWrite::Settle {
+                session: session.clone(),
+                run,
+                open: None,
+            }));
+            let (result, receipt) = collect(
+                "prompt-history",
+                "sqlite",
+                store.commit(tx, CommitLabel::new("model.done")),
+            )
+            .await;
+            result.unwrap();
+            let mut work = [0; 3];
+            for (sql, shape) in &receipt.shapes {
+                let family = if sql.starts_with("delete from main.prompt_texts ") {
+                    Some(0)
+                } else if sql.starts_with("delete from main.prompt_text_edges ") {
+                    Some(1)
+                } else if sql.starts_with("insert into main.prompt_text_edges ") {
+                    Some(2)
+                } else {
+                    None
+                };
+                if let Some(family) = family {
+                    work[family] += shape.sqlite_work.unwrap().vm_steps;
+                }
+            }
+            let cohort = if (10..=30).contains(&turn) {
+                Some(&mut early)
+            } else if turn >= 980 {
+                Some(&mut late)
+            } else {
+                None
+            };
+            if let Some(cohort) = cohort {
+                for (samples, steps) in cohort.iter_mut().zip(work) {
+                    samples.push(steps);
+                }
+            }
+        }
+        let mut bounded = true;
+        for ((family, mut early), mut late) in ["prompt delete", "edge delete", "edge insert"]
+            .into_iter()
+            .zip(early)
+            .zip(late)
+        {
+            early.sort_unstable();
+            late.sort_unstable();
+            let (early, late) = (early[10], late[10]);
+            eprintln!("{family}: early={early} late={late} VM steps per turn");
+            assert!(early > 0, "{family} was not measured");
+            bounded &= late * 100 <= early * 105;
+        }
+        assert!(
+            bounded,
+            "prompt publication and retirement grow with session history"
+        );
+    }
+
+    /// PREFIX-READER: a carried forest's obsolete links live exactly as long as
+    /// an admitted reader, even across carry, prefix reset and last-reader release.
+    #[tokio::test]
+    async fn held_prompt_links_survive_carries_until_the_last_reader_settles() {
+        use lash_core_store::prompt_sections::ChunkedRequestTemplate;
+        use lash_durable::domain::{ModelCallId, PromptCallKey, PromptWrite};
+        use lash_protocol_types::llm::types::{
+            ProviderRouteIdentity, RecordedRequestTemplate, RequestSegment,
+        };
+        let set = crate::SqliteStoreSet::memory().await.unwrap();
+        let identity = lash_core_execution::testing::sql_work::owner_commit(&set).await;
+        let store = set.durable_store();
+        let actor = ActorKey::session("sql-work-owner").unwrap();
+        let session = SessionId::from("sql-work-owner");
+        let route = ProviderRouteIdentity {
+            provider: "fixture".into(),
+            endpoint: "https://fixture.test".into(),
+            model: "model".into(),
+        };
+        let mut items = Vec::new();
+        let mut held = None;
+        let mut all = std::collections::BTreeSet::new();
+        for turn in 1..=64 {
+            items.push(
+                RequestSegment::item_json(&serde_json::json!({"content":format!("turn {turn}")}))
+                    .unwrap(),
+            );
+            let mut builder = RecordedRequestTemplate::builder(route.clone(), true, None);
+            builder.literal("{\"messages\":[");
+            for item in &items {
+                builder.segment(item);
+            }
+            builder.literal("]}");
+            let template = builder.finish().unwrap();
+            let (chunked, texts) = ChunkedRequestTemplate::chunk(&template);
+            all.extend(texts.iter().map(|text| text.hash.clone()));
+            let run = TurnId::parse(format!("history-{turn}")).unwrap();
+            if turn == 14 {
+                held = Some((chunked.clone(), texts.clone(), template, run.clone()));
+            }
+            let mut tx = store.begin(&actor, Epoch(identity.epoch)).await.unwrap();
+            tx.write(DomainWrite::Prompt(PromptWrite::Record {
+                call: PromptCallKey {
+                    session: session.clone(),
+                    call: ModelCallId::Turn {
+                        run: run.clone(),
+                        ordinal: 1,
+                    },
+                },
+                snapshot: None,
+                request: serde_json::to_string(&chunked).unwrap(),
+                snapshot_texts: Vec::new(),
+                request_texts: texts,
+                prefix: chunked.prefix.map(|root| root.blob.0),
+            }));
+            if turn != 14 {
+                tx.write(DomainWrite::Prompt(PromptWrite::Settle {
+                    session: session.clone(),
+                    run,
+                    open: None,
+                }));
+            }
+            store.commit(tx, CommitLabel::MODEL_START).await.unwrap();
+        }
+        let (chunked, texts, exact, run) = held.unwrap();
+        let mut tx = store.begin(&actor, Epoch(identity.epoch)).await.unwrap();
+        tx.write(DomainWrite::Prompt(PromptWrite::ResetPrefix {
+            session: session.clone(),
+        }));
+        store.commit(tx, CommitLabel::MODEL_DONE).await.unwrap();
+        let hashes: Vec<_> = all.into_iter().collect();
+        let found = store.prompt_texts(&hashes).await.unwrap();
+        assert_eq!(
+            found,
+            texts
+                .iter()
+                .cloned()
+                .map(|mut text| {
+                    text.children.sort();
+                    text.children.dedup();
+                    text
+                })
+                .collect::<Vec<_>>(),
+            "only the old reader's exact closure survives"
+        );
+        assert_eq!(
+            chunked
+                .assemble(|hash| found
+                    .iter()
+                    .find(|text| text.hash == hash.as_str())
+                    .map(|text| &*text.text))
+                .unwrap(),
+            exact
+        );
+        let mut tx = store.begin(&actor, Epoch(identity.epoch)).await.unwrap();
+        tx.write(DomainWrite::Prompt(PromptWrite::Settle {
+            session,
+            run,
+            open: None,
+        }));
+        store.commit(tx, CommitLabel::MODEL_DONE).await.unwrap();
+        assert!(
+            store.prompt_texts(&hashes).await.unwrap().is_empty(),
+            "last reader releases every old link"
+        );
+    }
+
     /// PROMPT-AUDIT-RETENTION: revision expiry releases settled audit plans
     /// and last-reference texts, retaining pending requests and the prefix.
     #[tokio::test]

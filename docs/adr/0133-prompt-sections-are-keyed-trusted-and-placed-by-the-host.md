@@ -264,9 +264,13 @@ and the closing envelope together. Long rendered history strings also split
 at groups of eight escaped line boundaries within each string, once both
 that string and its current fragment reach 4 KiB. A large segment splits on
 UTF-8 boundaries at 32 KiB from its own start. JSON fields
-and punctuation within a message are not separate index nodes. Index branches name two children. The canonical tree
-keeps each completed power-of-two prefix subtree unchanged on append, so a
-new call installs only new fragments and logarithmic index paths. Stores
+and punctuation within a message are not separate index nodes. Index branches
+name two children. Complete binary subtrees form a forest, with one mountain
+per occupied bit of the leaf count. Persistent two-child links publish the
+mountains in chronological order: an older forest and its newest mountain.
+An append shares the older tail and consumes only equal-sized newest mountains
+by binary carry, so publication and retirement do constant amortized work
+rather than replacing a path or relisting every mountain (FIG-7134). Stores
 probe from roots and stop at a held immutable node, publishing its new edges
 only once. A separate content domain keeps arbitrary audit text from standing
 for an installed index. For a reusable history, the full-body root and closing-envelope fragments

@@ -836,3 +836,109 @@ async fn a_growing_prompt_forest_binds_only_its_new_frontier() {
         assert_eq!(stored, [text]);
     }
 }
+
+/// PREFIX-READER: a carried forest's obsolete links live exactly as long as
+/// an admitted reader, even across carry, prefix reset and last-reader release.
+#[tokio::test]
+async fn held_prompt_links_survive_carries_until_the_last_reader_settles() {
+    use lash_core_store::prompt_sections::ChunkedRequestTemplate;
+    use lash_durable::domain::{ModelCallId, PromptCallKey, PromptWrite};
+    use lash_protocol_types::llm::types::{
+        ProviderRouteIdentity, RecordedRequestTemplate, RequestSegment,
+    };
+    let Some(owned) = owned("held-prompt-links").await else {
+        return;
+    };
+    let store = owned.storage.durable_store();
+    let route = ProviderRouteIdentity {
+        provider: "fixture".into(),
+        endpoint: "https://fixture.test".into(),
+        model: "model".into(),
+    };
+    let mut items = Vec::new();
+    let mut held = None;
+    let mut all = std::collections::BTreeSet::new();
+    for turn in 1..=64 {
+        items.push(
+            RequestSegment::item_json(&serde_json::json!({"content":format!("turn {turn}")}))
+                .unwrap(),
+        );
+        let mut builder = RecordedRequestTemplate::builder(route.clone(), true, None);
+        builder.literal("{\"messages\":[");
+        for item in &items {
+            builder.segment(item);
+        }
+        builder.literal("]}");
+        let template = builder.finish().unwrap();
+        let (chunked, texts) = ChunkedRequestTemplate::chunk(&template);
+        all.extend(texts.iter().map(|text| text.hash.clone()));
+        let run = TurnId::parse(format!("history-{turn}")).unwrap();
+        if turn == 14 {
+            held = Some((chunked.clone(), texts.clone(), template, run.clone()));
+        }
+        let mut tx = store.begin(&owned.actor, owned.epoch).await.unwrap();
+        tx.write(DomainWrite::Prompt(PromptWrite::Record {
+            call: PromptCallKey {
+                session: owned.session.clone(),
+                call: ModelCallId::Turn {
+                    run: run.clone(),
+                    ordinal: 1,
+                },
+            },
+            snapshot: None,
+            request: serde_json::to_string(&chunked).unwrap(),
+            snapshot_texts: Vec::new(),
+            request_texts: texts,
+            prefix: chunked.prefix.map(|root| root.blob.0),
+        }));
+        if turn != 14 {
+            tx.write(DomainWrite::Prompt(PromptWrite::Settle {
+                session: owned.session.clone(),
+                run,
+                open: None,
+            }));
+        }
+        store.commit(tx, CommitLabel::MODEL_START).await.unwrap();
+    }
+    let (chunked, texts, exact, run) = held.unwrap();
+    let mut tx = store.begin(&owned.actor, owned.epoch).await.unwrap();
+    tx.write(DomainWrite::Prompt(PromptWrite::ResetPrefix {
+        session: owned.session.clone(),
+    }));
+    store.commit(tx, CommitLabel::MODEL_DONE).await.unwrap();
+    let hashes: Vec<_> = all.into_iter().collect();
+    let found = store.prompt_texts(&hashes).await.unwrap();
+    assert_eq!(
+        found,
+        texts
+            .iter()
+            .cloned()
+            .map(|mut text| {
+                text.children.sort();
+                text.children.dedup();
+                text
+            })
+            .collect::<Vec<_>>(),
+        "only the old reader's exact closure survives"
+    );
+    assert_eq!(
+        chunked
+            .assemble(|hash| found
+                .iter()
+                .find(|text| text.hash == hash.as_str())
+                .map(|text| &*text.text))
+            .unwrap(),
+        exact
+    );
+    let mut tx = store.begin(&owned.actor, owned.epoch).await.unwrap();
+    tx.write(DomainWrite::Prompt(PromptWrite::Settle {
+        session: owned.session,
+        run,
+        open: None,
+    }));
+    store.commit(tx, CommitLabel::MODEL_DONE).await.unwrap();
+    assert!(
+        store.prompt_texts(&hashes).await.unwrap().is_empty(),
+        "last reader releases every old link"
+    );
+}

@@ -940,9 +940,9 @@ fn item_leaves(
     leaves
 }
 
-/// A canonical append tree: the left subtree is the largest complete
-/// power-of-two prefix smaller than the sequence. Every completed subtree
-/// keeps its address when the sequence grows.
+/// Complete binary mountains, linked newest first: a link's left child is
+/// the older forest and its right child is the newest mountain. Appending
+/// shares that older tail instead of rebuilding a path through every mountain.
 fn fragment_tree(
     fragments: &[PromptTextRef],
     texts: &mut Vec<(BlobRef, std::sync::Arc<PromptText>)>,
@@ -950,18 +950,24 @@ fn fragment_tree(
     if fragments.len() == 1 {
         return fragments[0].clone();
     }
-    let split = 1usize << (fragments.len() - 1).ilog2();
+    let split = if fragments.len().is_power_of_two() {
+        fragments.len() / 2
+    } else {
+        fragments.len() - (1usize << fragments.len().trailing_zeros())
+    };
     let left = fragment_tree(&fragments[..split], texts);
     let right = fragment_tree(&fragments[split..], texts);
     keep_fragment(&RequestFragment::Branch { left, right }, texts)
 }
 
-/// The active canonical tree and its distinct bodies. Reference counts keep
-/// duplicate leaves/subtrees alive when an append replaces the right path.
+/// The active forest and its distinct bodies. A binary carry consumes only
+/// the newest equal-sized mountains and their links. Reference counts keep
+/// duplicate leaves/subtrees alive when a consumed link is removed.
 #[derive(Default)]
 struct PreparedPrefix {
     leaves: Vec<PromptTextRef>,
     tree: Option<PreparedTree>,
+    mountains: Vec<PreparedMountain>,
     uses: std::collections::BTreeMap<BlobRef, usize>,
     texts: RequestTexts,
 }
@@ -969,27 +975,54 @@ struct PreparedPrefix {
 struct PreparedTree {
     reference: PromptTextRef,
     leaves: usize,
-    children: Option<Box<[Self; 2]>>,
+}
+
+struct PreparedMountain {
+    tree: PreparedTree,
+    /// The forest through this mountain; older tails are shared on append.
+    root: PromptTextRef,
 }
 
 impl PreparedTree {
-    /// A cold prefix is built once in postorder, without creating intermediate
-    /// append paths that would immediately be replaced.
-    fn build(leaves: &[&Leaf], prefix: &mut PreparedPrefix) -> Self {
-        if leaves.len() == 1 {
-            let (reference, encoded) = leaves[0];
-            prefix.keep(reference, encoded.clone());
-            prefix.leaves.push(reference.clone());
-            return Self {
-                reference: reference.clone(),
-                leaves: 1,
-                children: None,
-            };
+    /// Build each complete mountain once, then link only the final forest.
+    /// Cold preparation never encodes publication links it would discard.
+    fn build(mut leaves: &[&Leaf], prefix: &mut PreparedPrefix) -> Self {
+        fn mountain(leaves: &[&Leaf], prefix: &mut PreparedPrefix) -> PreparedTree {
+            if leaves.len() == 1 {
+                let (reference, encoded) = leaves[0];
+                prefix.keep(reference, encoded.clone());
+                prefix.leaves.push(reference.clone());
+                return PreparedTree {
+                    reference: reference.clone(),
+                    leaves: 1,
+                };
+            }
+            let (left, right) = leaves.split_at(leaves.len() / 2);
+            let left = mountain(left, prefix);
+            let right = mountain(right, prefix);
+            PreparedTree::branch(left, right, prefix)
         }
-        let split = 1usize << (leaves.len() - 1).ilog2();
-        let left = Self::build(&leaves[..split], prefix);
-        let right = Self::build(&leaves[split..], prefix);
-        Self::branch(left, right, prefix)
+        let mut tree: Option<Self> = None;
+        while !leaves.is_empty() {
+            let size = 1usize << leaves.len().ilog2();
+            let (complete, rest) = leaves.split_at(size);
+            let newest = mountain(complete, prefix);
+            tree = Some(match tree {
+                Some(tree) => tree.append(newest, prefix),
+                None => {
+                    prefix.mountains.push(PreparedMountain {
+                        tree: Self {
+                            reference: newest.reference.clone(),
+                            leaves: newest.leaves,
+                        },
+                        root: newest.reference.clone(),
+                    });
+                    newest
+                }
+            });
+            leaves = rest;
+        }
+        tree.expect("a template has fragments")
     }
 
     fn branch(left: Self, right: Self, prefix: &mut PreparedPrefix) -> Self {
@@ -1001,17 +1034,39 @@ impl PreparedTree {
         Self {
             reference,
             leaves: left.leaves + right.leaves,
-            children: Some(Box::new([left, right])),
         }
     }
 
-    fn append(self, leaf: Self, prefix: &mut PreparedPrefix) -> Self {
-        if self.leaves.is_power_of_two() {
-            return Self::branch(self, leaf, prefix);
+    fn append(self, mut newest: Self, prefix: &mut PreparedPrefix) -> Self {
+        let leaves = self.leaves + newest.leaves;
+        while prefix
+            .mountains
+            .last()
+            .is_some_and(|older| older.tree.leaves == newest.leaves)
+        {
+            let older = prefix.mountains.pop().expect("equal-sized mountain");
+            if !prefix.mountains.is_empty() {
+                // This was a list link, not the mountain's own branch. The
+                // mountain becomes a child of the carry and stays reachable.
+                prefix.remove(&older.root.blob);
+            }
+            newest = Self::branch(older.tree, newest, prefix);
         }
-        prefix.remove(&self.reference.blob);
-        let [left, right] = *self.children.expect("an incomplete tree is a branch");
-        Self::branch(left, right.append(leaf, prefix), prefix)
+        let reference = if let Some(older) = prefix.mountains.last() {
+            let (reference, encoded) = encode_fragment(&RequestFragment::Branch {
+                left: older.root.clone(),
+                right: newest.reference.clone(),
+            });
+            prefix.keep(&reference, encoded);
+            reference
+        } else {
+            newest.reference.clone()
+        };
+        prefix.mountains.push(PreparedMountain {
+            tree: newest,
+            root: reference.clone(),
+        });
+        Self { reference, leaves }
     }
 }
 
@@ -1068,10 +1123,18 @@ impl PreparedPrefix {
             let leaf = PreparedTree {
                 reference: reference.clone(),
                 leaves: 1,
-                children: None,
             };
             self.tree = Some(match self.tree.take() {
-                None => leaf,
+                None => {
+                    self.mountains.push(PreparedMountain {
+                        tree: PreparedTree {
+                            reference: leaf.reference.clone(),
+                            leaves: 1,
+                        },
+                        root: leaf.reference.clone(),
+                    });
+                    leaf
+                }
                 Some(tree) => tree.append(leaf, self),
             });
         }

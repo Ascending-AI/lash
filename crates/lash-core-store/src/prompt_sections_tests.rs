@@ -128,53 +128,52 @@ fn chunked_response_mode_is_recorded_only_outside_the_body() {
     }
 }
 
-/// PREFIX-DELTA (FIG-5956): a growing wire history relists neither its
-/// fragment bytes nor its index prefix. Count newly addressed bodies and
-/// the admission's encoded index, independently of backend deduplication.
+/// PREFIX-READER: a carried forest may replace links on a binary carry or
+/// compaction while an admitted reader still owns the exact older closure.
 #[test]
-fn growing_requests_submit_new_fragments_and_logarithmic_index_paths() {
-    use lash_protocol_types::{
-        llm::types::ProviderRouteIdentity, llm::types::RecordedRequestTemplate,
+fn held_requests_survive_forest_carries_and_compaction() {
+    use lash_protocol_types::llm::types::{
+        ProviderRouteIdentity, RecordedRequestTemplate, RequestSegment,
     };
     let route = ProviderRouteIdentity {
         provider: "fixture".into(),
         endpoint: "https://fixture.test".into(),
         model: "model".into(),
     };
-    for rendered in [false, true] {
-        let mut held = std::collections::BTreeSet::new();
-        let mut messages = Vec::new();
-        for ordinal in 0..256 {
-            messages.push(format!(
-                "{{\"role\":\"user\",\"content\":\"{ordinal}:{}\"}}",
-                "x".repeat(2048)
-            ));
-            let wire = if rendered {
-                serde_json::json!({"messages": [{"role": "user", "content": messages.join("\n")}], "stream": true}).to_string()
-            } else {
-                format!("{{\"messages\":[{}],\"stream\":true}}", messages.join(","))
-            };
-            let template =
-                RecordedRequestTemplate::literal(route.clone(), true, None, wire.as_str()).unwrap();
-            let (index, texts) = ChunkedRequestTemplate::chunk(&template);
-            let fresh: Vec<_> = texts
-                .iter()
-                .filter(|text| !held.contains(&text.hash))
-                .collect();
-            let logarithm = (ordinal + 1usize).ilog2() as usize + 1;
-            let submitted = fresh.iter().map(|text| text.text.len()).sum::<usize>();
-            assert!(
-                submitted <= 8192 + 4096 * logarithm,
-                "call {ordinal} submitted {submitted} bytes for one new message"
+    let mut items = Vec::new();
+    let mut held = Vec::new();
+    for turn in 1..=128 {
+        if turn == 65 {
+            // Preserve the memo owner, but invalidate the old prefix.
+            items.drain(1..32);
+        }
+        items.push(RequestSegment::item_json(&serde_json::json!({
+            "content": if turn % 3 == 0 { "duplicate".to_owned() } else { format!("turn {turn}") }
+        })).unwrap());
+        let mut builder = RecordedRequestTemplate::builder(route.clone(), true, None);
+        builder.literal("{\"messages\":[");
+        for item in &items {
+            builder.segment(item);
+        }
+        builder.literal("]}");
+        let template = builder.finish().unwrap();
+        let (chunked, texts) = ChunkedRequestTemplate::chunk(&template);
+        assert_eq!(
+            chunked
+                .assemble(|hash| texts.get(hash.as_str()).map(|t| &*t.text))
+                .unwrap(),
+            template
+        );
+        if [7, 31, 63, 64, 127].contains(&turn) {
+            held.push((chunked, texts, template));
+        }
+        for (chunked, texts, exact) in &held {
+            assert_eq!(
+                &chunked
+                    .assemble(|hash| texts.get(hash.as_str()).map(|t| &*t.text))
+                    .unwrap(),
+                exact
             );
-            let metadata = serde_json::to_string(&index).unwrap().len();
-            assert!(
-                metadata <= 1024,
-                "call {ordinal} relisted {metadata} bytes of fragment index"
-            );
-            let read = |reference: &BlobRef| texts.get(reference.as_str()).map(|text| &*text.text);
-            assert_eq!(index.assemble(read).unwrap(), template);
-            held.extend(texts.iter().map(|text| text.hash.clone()));
         }
     }
 }
