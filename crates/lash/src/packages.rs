@@ -12,7 +12,7 @@ use lash_core::plugin::packages::{
 use lash_core_store::packages::PackageRecord;
 use lash_execution_contracts::process::ProcessDocumentProvider;
 use lash_execution_contracts::process::linking::{AdmissionRefusal, ContentRef, EnginePortError};
-use lash_vocabulary::{names::*, package::*};
+use lash_vocabulary::package::*;
 
 /// A publisher bound by the host to its owned roots and immutable accepted
 /// namespace. Guest input cannot choose a publication domain or publisher.
@@ -249,11 +249,25 @@ impl PackagePublisher for ScopedPackagePublisher {
         }
         // An alias has no code Import of its own. Retain the exact publication
         // that already admitted its defining Link, never provenance by hash alone.
-        for id in code_links.iter().filter(|id| !prepared.contains_key(id)) {
-            let mut sources = publications
-                .iter()
-                .copied()
-                .filter(|record| record.code_links.contains(id));
+        for member in package.members.values() {
+            let MemberKind::Export { link, .. } = &member.kind else {
+                continue;
+            };
+            if prepared.contains_key(link) {
+                continue;
+            }
+            let mut sources = self.snapshot.advertisements.iter().filter_map(|accepted| {
+                let PackageAdvertisement::Enumerated(source) = &accepted.advertisement else {
+                    return None;
+                };
+                source
+                    .members
+                    .values()
+                    .any(|original| {
+                        original.visibility == Visibility::Public && original.kind == member.kind
+                    })
+                    .then_some(&accepted.publication)
+            });
             let source = sources.next().ok_or_else(|| {
                 EnginePortError::Refused(AdmissionRefusal::NotOwner {
                     path: package.path.clone(),

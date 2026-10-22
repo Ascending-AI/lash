@@ -61,8 +61,7 @@ async fn df_library_and_workflow_keep_their_defining_links() {
     assert!(linked.link.fills.values().any(
         |fill| matches!(fill, lash::package::Fill::Export { link, .. } if links.contains(link))
     ));
-    let receipt = creator
-        .start(start, "s3://sales.csv", "nightly-law", &pin)
+    let receipt = Box::pin(creator.start(start, "s3://sales.csv", "nightly-law", &pin))
         .await
         .unwrap();
     let output = tokio::time::timeout(

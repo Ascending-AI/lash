@@ -222,10 +222,10 @@ impl Scan<'_> {
                                 .task_root()
                                 .get(&task.0.to_be_bytes(), self.heap.pages())?
                                 .ok_or_else(|| invalid("live code references a missing task"))?;
-                            if let TaskStateRecord::Ended(ended) = row.state {
-                                if let Some(value) = ended.retained() {
-                                    pending.push(Work::Value(value.clone()));
-                                }
+                            if let TaskStateRecord::Ended(ended) = row.state
+                                && let Some(value) = ended.retained()
+                            {
+                                pending.push(Work::Value(value.clone()));
                             }
                         }
                     }

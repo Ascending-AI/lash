@@ -39,7 +39,7 @@ use crate::RuntimeEffectControllerError;
 /// namespace (an incorporation record, a nested process's own journal) are
 /// the host's to judge and pass.
 ///
-/// A command that calls a host tool binding which drifted since the pass that
+/// A command that calls a host operation binding which drifted since the pass that
 /// wrote the journal (FIG-3587) is also **served only**: every effect it
 /// issues that would dispatch — a tool attempt, a retry sleep, anything but a
 /// pure wait — carries the drift refusal to its engine on the local executor

@@ -137,7 +137,7 @@ pub enum ProcessStartTarget {
     /// (FIG-6993).
     Inline {
         engine_kind: String,
-        request: crate::process::engine::InlineRequest,
+        request: Box<crate::process::engine::InlineRequest>,
         #[serde(default)]
         args: serde_json::Map<String, serde_json::Value>,
         launch: EngineLaunch,

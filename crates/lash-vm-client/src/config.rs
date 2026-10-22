@@ -369,7 +369,7 @@ impl PoolConfig {
                 let release = lash_vm_releases::helper_release()?;
                 crate::packages::WorkerLibrary::new(&release.functions, release.resolver_roots())
                     .map(std::sync::Arc::new)
-                    .map_err(|error| lash_vm_releases::LibraryError::new(error))
+                    .map_err(lash_vm_releases::LibraryError::new)
             }
         }
     }

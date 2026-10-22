@@ -9,7 +9,7 @@ explicit shape and leaf-unwrapping rule.
 
 ## Decision
 
-The internal `ResourceOperationBatch` and `ResourceOperationListBatch` paths
+The aggregate operation paths
 carry compiled aggregate shapes and per-leaf unwrap choices. Literal and
 list-batch compilation evaluate operands and collect their leaf arguments before
 handing the batch to the host. These are IR operations, not an additional

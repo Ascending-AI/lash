@@ -203,8 +203,8 @@ pub enum ProcessWorkflowFoldError {
 
 struct Site {
     value: ProcessWorkflowSite,
-    /// A committed outcome wins over late provisional facts of that occurrence.
-    durable_terminal: bool,
+    /// A committed park or outcome wins over late provisional facts of that occurrence.
+    durable_state: bool,
     /// Origin metadata does not establish transition ordering.
     timestamp: Option<u64>,
 }
@@ -330,6 +330,8 @@ impl ProcessWorkflowOverlayAccumulator {
             task: at.task(),
             site: origin.position(),
         };
+        let durable_state = durable_terminal
+            || (sequence.is_some() && matches!(state, ProcessWorkflowSiteState::Waiting { .. }));
         let held = self.sites.entry(key).or_insert_with(|| Site {
             value: ProcessWorkflowSite {
                 origin: origin.clone(),
@@ -340,13 +342,13 @@ impl ProcessWorkflowOverlayAccumulator {
                 first_entered: None,
                 last_settled: None,
             },
-            durable_terminal,
+            durable_state,
             timestamp: Some(timestamp),
         });
         if (at.position() == held.value.at.position() && at.visit() > held.value.at.visit())
             || ((at.position() != held.value.at.position() || at.visit() == held.value.at.visit())
-                && (durable_terminal
-                    || (!held.durable_terminal
+                && (sequence.is_some()
+                    || (!held.durable_state
                         && held.timestamp.is_none_or(|held| timestamp >= held))))
         {
             held.value.origin = origin.clone();
@@ -354,7 +356,7 @@ impl ProcessWorkflowOverlayAccumulator {
             held.value.label = at.to_string();
             held.value.occurrences = lash_vocabulary::sites::ObservationReader::counts(at).starts;
             held.value.state = state;
-            held.durable_terminal = durable_terminal;
+            held.durable_state = durable_state;
             held.timestamp = Some(timestamp);
         }
         // Committed history belongs to the site across all its occurrences,
@@ -1164,6 +1166,19 @@ mod tests {
                 },
             },
         };
+        let mut origin = observation.clone();
+        if let TraceLanguageExecutionPayload::Node { at, fact, .. } = &mut origin.execution.payload
+        {
+            *fact = TraceNodeFact::Origin {
+                origin: at.position().site().clone(),
+            };
+        }
+        overlay
+            .observe(
+                &document,
+                &ProcessObservationEventPayload::LanguageExecution(origin),
+            )
+            .expect("the parent entry carries its authored origin");
         overlay
             .observe(
                 &document,
@@ -1171,6 +1186,7 @@ mod tests {
             )
             .expect("the process's own entry");
         let before = overlay.snapshot();
+        assert_eq!(before.sites.len(), 1);
         let mut nested = observation;
         nested.execution.event_key = "nested".into();
         let nested_subject = TraceRuntimeSubject::Effect {
@@ -1325,6 +1341,30 @@ mod tests {
         assert_eq!(
             metadata_first.snapshot().sites[0].state,
             ProcessWorkflowSiteState::Completed
+        );
+        let mut parked = ProcessWorkflowOverlayAccumulator::new(process.clone());
+        let wait = lash_execution_contracts::process::WaitState {
+            kind: WaitKind::Sleep { until_ms: 300 },
+            since_ms: 100,
+            site: Some(lash_vocabulary::sites::EffectLocation {
+                at: at.clone(),
+                origin,
+            }),
+        };
+        parked.committed(&ObservedProcessEvent {
+            sequence: 1,
+            occurred_at_ms: 100,
+            fact: ProcessLifecycleFact::Waiting { wait },
+        });
+        clock.set(200);
+        observe(&mut parked, &at, TraceNodeFact::Started { call_id: None });
+        assert_eq!(
+            parked.snapshot().sites[0].state,
+            ProcessWorkflowSiteState::Waiting {
+                kind: ProcessWorkflowWaitKind::Sleep,
+                resume_at_ms: Some(300),
+            },
+            "a delayed live start cannot reopen the committed park"
         );
     }
 }

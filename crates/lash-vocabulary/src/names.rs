@@ -597,7 +597,6 @@ impl From<FunctionName> for String {
 }
 
 /// The name of a library function.
-
 /// The name of an effect a host supplies.
 pub type EffectName = FunctionName;
 

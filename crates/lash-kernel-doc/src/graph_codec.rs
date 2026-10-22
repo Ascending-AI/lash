@@ -41,7 +41,7 @@ use crate::NumberPolicy;
 use crate::NumberToken;
 use crate::TaskId;
 use crate::Timestamp;
-use lash_vocabulary::names::Name;
+
 #[cfg(test)]
 use lash_vocabulary::sites::TaskIdentity;
 use lash_vocabulary::tokens::CodecVariant;
@@ -50,14 +50,8 @@ use lash_vocabulary::tokens::TokenError;
 use lash_vocabulary::tokens::TokenReader;
 use lash_vocabulary::tokens::TokenWriter;
 
-/// The deepest a decoded value, form or type may nest, in recursive
-/// decodes. Deeper input is refused as a [`DecodeDimension::Depth`] limit.
-use lash_vocabulary::tokens::MAX_DECODE_DEPTH;
-
 /// FrozenValue (node kind 8) variant numbers: what a frozen tree is.
 use lash_vocabulary::tokens::FROZEN_DATUM;
-use lash_vocabulary::tokens::FROZEN_JSON;
-use lash_vocabulary::tokens::FROZEN_TOOL_VALUE;
 
 /// A datum as the body of a FrozenValue node: `sum(0, 1, <Datum>)`. A
 /// committed effect outcome and a run's result are staged through it, so

@@ -10,7 +10,6 @@ use lash_kernel_doc::{
 };
 
 use lash_vocabulary::data_limits::KernelDataLimits;
-use lash_vocabulary::names::Name;
 
 use super::Arena;
 

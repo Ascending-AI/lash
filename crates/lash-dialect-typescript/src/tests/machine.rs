@@ -82,7 +82,7 @@ impl Host for Console {
         } else {
             0
         };
-        crate::tests::linked::read(use_, bits)
+        crate::tests::linked_reads::read(use_, bits)
     }
 
     fn read(&mut self, _handle: &Handle, _request: &Datum) -> Result<Datum, ErrorDatum> {
@@ -716,7 +716,7 @@ fn a_function_crossing_to_a_tool_uses_its_source_entry_convention() {
         .expect("the same body imports as an entry")
         .document
         .into_document();
-        let convention = super::linked::exported(&entry, &Name::new("run"))
+        let convention = super::linked_inspection::exported(&entry, &Name::new("run"))
             .convention
             .clone();
         let (_, result) = end_of_entry(entry, "run", args.clone());

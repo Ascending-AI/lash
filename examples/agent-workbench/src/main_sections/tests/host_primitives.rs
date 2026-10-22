@@ -447,7 +447,7 @@ async fn a_delivery_that_cannot_start_is_recorded_failed_and_not_retried() {
         .expect("fire the mail source");
     let mut retrying = true;
     for _ in 0..16 {
-        retrying = state.host_triggers.deliver_unbound().await;
+        retrying = Box::pin(state.host_triggers.deliver_unbound()).await;
         if !retrying {
             break;
         }

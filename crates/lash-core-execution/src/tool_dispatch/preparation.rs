@@ -137,7 +137,7 @@ pub async fn prepare_granted_tool_call_with_context(
     .await
 }
 
-/// Prepares a call a replayed code cell makes on a host tool binding that
+/// Prepares a call a replayed code cell makes on a host operation binding that
 /// drifted since the pass that wrote its journal (FIG-3587): against the
 /// binding's recorded manifest and contract, with identity preparation, so
 /// the call's envelope is the one the journal recorded and it is served from

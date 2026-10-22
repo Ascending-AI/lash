@@ -4,7 +4,7 @@ use lash_vocabulary::identity::TurnId;
 mod process_lifecycle;
 mod process_replay;
 mod process_workflow;
-pub use lash_vocabulary::observation::RunObservation;
+
 pub use process_workflow::ProcessWorkflowFoldError;
 pub use process_workflow::ProcessWorkflowLiveCoverage;
 pub use process_workflow::ProcessWorkflowOverlay;

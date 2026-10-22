@@ -1124,16 +1124,6 @@ struct ScriptEngine {
     advance: Advance,
 }
 
-/// An engine that performs no tool's effect.
-fn no_tools() -> Vec<lash_vocabulary::tool_contract::ToolDefinition> {
-    Vec::new()
-}
-
-/// An engine that performs the write tool's effect.
-fn writes() -> Vec<lash_vocabulary::tool_contract::ToolDefinition> {
-    vec![write_definition()]
-}
-
 fn infra(error: impl std::fmt::Display) -> lash_execution_contracts::process::ProcessInfraError {
     lash_execution_contracts::process::ProcessInfraError::new(
         lash_execution_contracts::plugin_error::PluginError::Session(error.to_string()),

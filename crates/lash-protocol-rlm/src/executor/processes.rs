@@ -1,12 +1,11 @@
 //! Load retained linked reach without fulfilling against current advertisements.
 use lash_core::RuntimeExecutionContext;
-use lash_kernel_doc::{FunctionRegistry, IdentifiedDocument};
+use lash_kernel_doc::FunctionRegistry;
 
 use lash_vocabulary::names::LinkedStart;
 use std::sync::Arc;
 
 pub(super) struct PreparedExecution {
-    pub document: IdentifiedDocument,
     pub content: lash_kernel_package::LinkedContent,
     pub loaded: lash_vm_broker::kernel::loader::Assembled,
 }
@@ -50,9 +49,5 @@ pub(super) async fn prepare(
         held,
     )
     .map_err(|error| error.to_string())?;
-    Ok(PreparedExecution {
-        document: IdentifiedDocument::new(root.clone()),
-        content,
-        loaded,
-    })
+    Ok(PreparedExecution { content, loaded })
 }

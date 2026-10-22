@@ -14,7 +14,7 @@ use crate::worker::{Fences, cpu_nanos};
 use lash_kernel_doc::heap::{
     HeapFault, HostResource, PAGE_GRANT_BYTES, PageGrant, PageId, PageRef,
 };
-use lash_kernel_doc::{Datum, ErrorDatum, Handle, Timestamp};
+use lash_kernel_doc::{Datum, ErrorDatum, Handle};
 
 use lash_kernel_state::paged::PagePortLimits;
 use lash_kernel_state::paged::{PageAnswer, PageBody, PageSource};
@@ -31,7 +31,7 @@ use lash_vm_protocol::page::{
     PageAuthority, PageCapability, PageEnvelope, PageExchangeId, PageReply, PageRequest, ReadPage,
 };
 use lash_vm_protocol::*;
-use lash_vocabulary::names::EffectName;
+
 use lash_vocabulary::sites::TaskLabel;
 use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap, HashSet};

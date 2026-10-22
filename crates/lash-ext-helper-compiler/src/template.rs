@@ -446,14 +446,12 @@ struct Evaluator<'a> {
 
 /// Every name a closure in `block` uses that it does not declare itself,
 /// as a parameter or a variable: the names it may capture.
-fn captured(block: &[Stmt], library: &Library) -> std::collections::BTreeSet<Name> {
+fn captured(block: &[Stmt], library: &Library) -> Option<std::collections::BTreeSet<Name>> {
     let mut captured = std::collections::BTreeSet::new();
     let mut pending = vec![Node::Block(block)];
     while let Some(node) = pending.pop() {
         if let Node::Expr(Expr::Closure(closure)) = node {
-            let definition = library
-                .definition(&closure.function)
-                .expect("validated local closure definition");
+            let definition = library.definition(&closure.function)?;
             if let Some(body) = definition.body() {
                 let params = definition
                     .signature
@@ -473,7 +471,7 @@ fn captured(block: &[Stmt], library: &Library) -> std::collections::BTreeSet<Nam
         }
         pending.extend(node.children());
     }
-    captured
+    Some(captured)
 }
 
 /// The arena read that collection native `name`'s call on `args` makes,
@@ -1455,7 +1453,7 @@ pub(crate) fn emit(
         heap_callees: Vec::new(),
         used: 0,
         heap: false,
-        captured: captured(&definition.body()?.block, library),
+        captured: captured(&definition.body()?.block, library)?,
     };
     let scalar = evaluator.pass(definition, &IMMEDIATE)?;
     // A helper whose native an embedder installs answers through it where

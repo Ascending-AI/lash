@@ -124,9 +124,9 @@ impl NamedLibrary {
         }
         if !definition.has_native() {
             let projected = crate::authoring::helper_name(&definition.name);
-            for (name, id) in self.iter() {
-                if self.header(&id).is_some_and(|header| !header.has_native()) {
-                    let name = FunctionName::new(name).expect("registered qualified name");
+            for (_, id) in self.iter() {
+                if let Some(header) = self.header(&id).filter(|header| !header.has_native()) {
+                    let name = header.name.clone();
                     if crate::authoring::helper_name(&name) == projected {
                         return Err(LibraryError::ImportCollision {
                             first: name,

@@ -465,31 +465,31 @@ async fn an_engine_step_retries_as_its_kind_declares_unless_its_host_overrides(t
         0,
     );
     assert_eq!(
-        flaky_runs(
+        Box::pin(flaky_runs(
             tier,
             lash_vocabulary::tool_contract::ExecutionPolicy::Once,
             None
-        )
+        ))
         .await,
         1,
         "a step kind declared `Once` is not retried after its failure"
     );
     assert_eq!(
-        flaky_runs(
+        Box::pin(flaky_runs(
             tier,
             lash_vocabulary::tool_contract::ExecutionPolicy::Once,
             Some(three)
-        )
+        ))
         .await,
         3,
         "the host's `Repeatable` override retries it"
     );
     assert_eq!(
-        flaky_runs(
+        Box::pin(flaky_runs(
             tier,
             three,
             Some(lash_vocabulary::tool_contract::ExecutionPolicy::Once)
-        )
+        ))
         .await,
         1,
         "the host's `Once` override stops the engine's declared retries"

@@ -1,6 +1,6 @@
 //! Ordinary authored source read through the front end.
 
-use lash_kernel_dialect::regions::{self, RegionRead};
+use lash_kernel_dialect::regions::RegionRead;
 use lash_kernel_dialect::{CellEnvironment, Environment, GeneratedSourceLimits, Lowered, Mode};
 use lash_kernel_doc as k;
 

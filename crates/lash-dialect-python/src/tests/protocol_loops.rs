@@ -11,7 +11,6 @@ use std::sync::Arc;
 use lash_kernel_vm::Bounds;
 
 use super::machine::{BOUNDS, ending, execution_observation, installed, lower};
-use super::pages;
 
 /// How `source` ends and what it prints, the same uninterrupted and
 /// reopened at every safe point.

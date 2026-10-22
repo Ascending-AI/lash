@@ -31,12 +31,11 @@ pub(super) struct Function {
 }
 impl Function {
     fn charge(&mut self, make: impl FnOnce(Formula) -> Formula) {
-        if let Some(definition) = &mut self.definition {
-            if let Implementation::Native { charge } | Implementation::Both { charge, .. } =
+        if let Some(definition) = &mut self.definition
+            && let Implementation::Native { charge } | Implementation::Both { charge, .. } =
                 &mut definition.implementation
-            {
-                *charge = make(std::mem::replace(charge, Formula::Constant(0)));
-            }
+        {
+            *charge = make(std::mem::replace(charge, Formula::Constant(0)));
         }
     }
 }

@@ -6,15 +6,12 @@
 
 use std::sync::Arc;
 
-use lash_kernel_doc::{
-    Datum, ErrorDatum, FunctionRegistry, Handle, Integer, Timestamp, parse_document,
-};
+use lash_kernel_doc::{Datum, ErrorDatum, FunctionRegistry, Handle};
 
 use lash_kernel_vm::kernel_internals::{Layout, prepare_with_layout};
 use lash_kernel_vm::{
-    Bounds, End, Host, Machine, Meters, PreparedLibrary, Program, Step, register_machine_functions,
+    Bounds, End, Host, Machine, Meters, PreparedLibrary, Step, register_machine_functions,
 };
-use lash_vocabulary::FunctionId;
 
 use crate::{register_collections, register_numbers, register_text_json};
 
@@ -62,14 +59,6 @@ impl Libraries {
             general: prepare_with_layout(Arc::clone(&registry), Layout(1)),
             registry,
         }
-    }
-
-    fn id(&self, name: &str) -> FunctionId {
-        self.registry
-            .iter()
-            .find(|(_, function)| function.definition().name.as_str() == name)
-            .map(|(id, _)| *id)
-            .unwrap_or_else(|| panic!("no function `{name}`"))
     }
 
     /// Runs `main`, which binds `args` and returns `name` called on them,
@@ -229,10 +218,10 @@ fn short_integer_digits_are_the_integers_own_spelling() {
 fn prepared_and_general_layouts_attribute_the_same_work() {
     let libraries = Libraries::new();
     let document = Arc::new(
-        crate::testsupport::document(&format!(
+        crate::testsupport::document(
             "kernel 1\nnumbers by_spelling\n
-definition \"function helper(x: Any) -> Any\\nkernel 1\\nmetering statements\\nbody {{ return add(x, 1) }}\"
-main {{
+definition \"function helper(x: Any) -> Any\\nkernel 1\\nmetering statements\\nbody { return add(x, 1) }\"
+main {
     let a = call helper(0)
     let b = num.add(-0.0, 2.5)
     let c = int.mul(3, 7)
@@ -240,10 +229,9 @@ main {{
     let ordered = lt(a, c)
     let structural = eq([1, 2], [1, 2])
     let negated = bool.not(ordered)
-    try {{ let bad = num.add(\"text\", a) }} catch e {{ print e.kind }}
+    try { let bad = num.add(\"text\", a) } catch e { print e.kind }
     return (a, b, c, d, ordered, structural, negated)
-}}"
-        ), &libraries.registry),
+}", &libraries.registry),
     );
     let mut ends = Vec::new();
     let mut charges = Vec::new();

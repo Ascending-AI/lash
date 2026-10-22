@@ -1,10 +1,10 @@
 //! Linked documents and ordinary operation scripts for authored dialect laws.
 use lash_kernel_dialect::{
-    EffectControl, Library as _, NamespaceKind, NamespaceMember, Namespaces, OperationSignature,
+    EffectControl, NamespaceKind, NamespaceMember, Namespaces, OperationSignature,
 };
 use lash_vocabulary::package::{Fill, Link, MemberKind, Visibility};
 use lash_vocabulary::{
-    EffectName, ImportKind, Name, OperationMode, OperationUse, QualifiedName, QualifiedOperation,
+    EffectName, ImportKind, OperationMode, OperationUse, QualifiedName, QualifiedOperation,
     Signature, TurnControls,
 };
 use std::{
@@ -19,7 +19,8 @@ pub(super) fn namespaces(
 ) -> Result<Namespaces, lash_kernel_dialect::NamespaceRefusal> {
     let mut packages = BTreeMap::new();
     for (name, signature) in effects {
-        let operation = QualifiedOperation::from_effect(name).expect("fixture operation");
+        let operation = QualifiedOperation::from_effect(name)
+            .unwrap_or_else(|error| panic!("fixture operation {name}: {error}"));
         let flags = controls.get(name);
         let mut accepted = TurnControls::none();
         if flags.is_some_and(|flags| flags.contains(&EffectControl::Finish)) {
@@ -55,7 +56,7 @@ pub(super) fn operation(use_: &OperationUse) -> EffectName {
         let operations = operations.borrow();
         let name = operations
             .get(use_)
-            .expect("scripted operation belongs to a prepared Link");
+            .unwrap_or_else(|| panic!("scripted operation {use_:?} belongs to no prepared Link"));
         QualifiedOperation {
             package: name.package.clone(),
             name: name.member.clone(),
@@ -67,7 +68,8 @@ pub(super) fn operation(use_: &OperationUse) -> EffectName {
 pub(super) fn content(
     document: &lash_kernel_doc::Document,
 ) -> (lash_kernel_package::LinkedContent, lash_vocabulary::LinkId) {
-    let release = lash_vm_releases::helper_release().expect("helper release");
+    let release = lash_vm_releases::helper_release()
+        .unwrap_or_else(|error| panic!("fixture helper release: {error}"));
     let mut content = release.content.clone();
     let mut fills = BTreeMap::new();
     for (slot, import) in &document.imports {
@@ -86,7 +88,7 @@ pub(super) fn content(
                     .values()
                     .find(|package| package.path == import.name.package)
                     .and_then(|package| package.members.get(&import.name.member))
-                    .expect("helper package export");
+                    .unwrap_or_else(|| panic!("fixture helper export {} is absent", import.name));
                 let MemberKind::Export { link, export } = &member.kind else {
                     panic!("code export")
                 };
@@ -126,7 +128,7 @@ pub(super) fn program(
         super::pages::CLOSURE,
         library,
     )
-    .expect("linked fixture");
+    .unwrap_or_else(|error| panic!("linked fixture admission: {error:?}"));
     OPERATIONS.with(|operations| {
         let mut operations = operations.borrow_mut();
         for (link, instance) in &program.instances {
@@ -144,160 +146,4 @@ pub(super) fn program(
         }
     });
     program
-}
-pub(super) fn modes(program: &lash_kernel_vm::Program) -> lash_kernel_vm::EffectModes {
-    program
-        .instances
-        .iter()
-        .flat_map(|(link, instance)| {
-            program.documents[&instance.document]
-                .imports
-                .iter()
-                .filter_map(move |(slot, import)| {
-                    matches!(import.kind, ImportKind::Operation { .. }).then(|| {
-                        let read = matches!(
-                            import.name.package.to_string().as_str(),
-                            "typescript" | "python"
-                        ) && matches!(import.name.member.as_str(), "clock" | "random");
-                        (
-                            OperationUse {
-                                link: *link,
-                                slot: *slot,
-                            },
-                            if read {
-                                OperationMode::Read
-                            } else {
-                                OperationMode::Waited
-                            },
-                        )
-                    })
-                })
-        })
-        .collect()
-}
-pub(super) fn read(
-    use_: &OperationUse,
-    bits: u64,
-) -> Result<Result<lash_kernel_doc::Datum, lash_kernel_doc::ErrorDatum>, lash_kernel_vm::HostFault>
-{
-    use lash_kernel_doc::{Datum, Integer, Timestamp};
-
-    let name = operation(use_);
-    Ok(Ok(if name.as_str().ends_with(".clock") {
-        Datum::Timestamp(Timestamp {
-            nanoseconds: Integer::from(0),
-        })
-    } else if name.as_str().ends_with(".random") {
-        Datum::Bytes(lash_kernel_doc::Bytes::new(bits.to_be_bytes().as_slice()))
-    } else {
-        return Err(lash_kernel_vm::HostFault::new(format!(
-            "unexpected read {name}"
-        )));
-    }))
-}
-
-pub(super) fn exported<'a>(
-    document: &'a lash_kernel_doc::Document,
-    name: &Name,
-) -> &'a lash_kernel_doc::FunctionExport {
-    let lash_kernel_doc::Export::Function(function) = &document.exports[name] else {
-        panic!("function export")
-    };
-    function
-}
-
-/// Linked semantic oracles are authored as definitions; only the stated roots
-/// are callable by an embedding host.
-pub(super) fn definitions(
-    source: &str,
-    roots: &[&str],
-    library: &lash_kernel_dialect::NamedLibrary,
-) -> lash_kernel_doc::Document {
-    let mut names = library.clone();
-    let definitions = lash_kernel_dialect::define_functions(source, &mut names).unwrap();
-    let mut document =
-        lash_kernel_doc::Document::new(lash_kernel_doc::NumberPolicy::BySpelling, vec![]);
-    document.main = None;
-    for definition in definitions {
-        if let Some(body) = definition.body() {
-            document.imports.extend(body.imports.clone());
-        }
-        document.functions.insert(definition.identity(), definition);
-    }
-    for root in roots {
-        let id = names.resolve(root).expect("fixture root");
-        let definition = &document.functions[&id];
-        document.exports.insert(
-            Name::new(*root),
-            lash_kernel_doc::Export::Function(lash_kernel_doc::FunctionExport {
-                function: id,
-                signature: definition.signature.clone(),
-                convention: lash_kernel_doc::StartConvention::Direct,
-                asynchronous: false,
-                rest: false,
-            }),
-        );
-    }
-    let used: BTreeSet<_> = document
-        .functions
-        .values()
-        .flat_map(|definition| {
-            definition
-                .body()
-                .into_iter()
-                .flat_map(|body| lash_kernel_doc::Node::Block(&body.block).functions_within())
-        })
-        .collect();
-    lash_kernel_dialect::authoring::include_native_definitions(&mut document, used, &names);
-    document
-}
-
-pub(super) fn main(
-    source: &str,
-    library: &lash_kernel_dialect::NamedLibrary,
-) -> lash_kernel_doc::Document {
-    let mut document = definitions(source, &["law.main"], library);
-    let lash_kernel_doc::Export::Function(root) =
-        document.exports.remove(&Name::new("law.main")).unwrap()
-    else {
-        panic!("fixture root")
-    };
-    document.main = Some(
-        document.functions[&root.function]
-            .body()
-            .unwrap()
-            .block
-            .clone(),
-    );
-    document.functions.remove(&root.function);
-    document
-}
-
-/// The document-local slot of exactly this code helper, when it is imported.
-pub(super) fn helper_slot(
-    document: &lash_kernel_doc::Document,
-    helper: &str,
-) -> Option<lash_vocabulary::ImportSlot> {
-    let name = lash_kernel_dialect::authoring::helper_name(
-        &lash_vocabulary::FunctionName::new(helper).expect("helper name"),
-    );
-    document.imports.iter().find_map(|(slot, import)| {
-        (import.name == name && matches!(import.kind, ImportKind::Code { .. })).then_some(*slot)
-    })
-}
-
-/// An operation's diagnostic name identifies its declaration, never its call syntax.
-pub(super) fn operation_slot(
-    document: &lash_kernel_doc::Document,
-    operation: &str,
-) -> Option<lash_vocabulary::ImportSlot> {
-    let name = QualifiedOperation::from_effect(&EffectName::new(operation).unwrap())
-        .expect("operation name");
-    document.imports.iter().find_map(|(slot, import)| {
-        (import.name.package == name.package
-            && import.name.member == name.name
-            && import.name.type_member.is_none()
-            && matches!(import.kind, ImportKind::Operation { .. }))
-        .then_some(*slot)
-    })
 }

@@ -193,3 +193,5 @@ fn a_host_source_policy_allows_a_larger_typescript_cell() {
 }
 
 mod linked;
+mod linked_inspection;
+mod linked_reads;

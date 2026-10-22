@@ -6,7 +6,6 @@ use lash_kernel_doc::{Datum, ErrorDatum, Handle};
 
 use lash_vm_broker::{DurableSnapshotStore, ParentFault};
 use lash_vm_client::RunHost;
-use lash_vocabulary::names::EffectName;
 
 use crate::ProjectionCatalog;
 

@@ -213,7 +213,13 @@ fn main() -> Outcome<()> {
             (
                 function,
                 lash_vocabulary::tokens::encode_body(
-                    writer.get(&function).unwrap().definition().as_ref(),
+                    writer
+                        .get(&function)
+                        .unwrap_or_else(|| {
+                            panic!("the cold-load writer lacks definition {function}")
+                        })
+                        .definition()
+                        .as_ref(),
                 ),
             )
         })

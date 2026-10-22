@@ -253,16 +253,6 @@ impl HostArtifacts {
             .map(|resolved| resolved.definition))
     }
 
-    pub(crate) async fn resolved_definition(
-        &self,
-        id: &ProcessDefinitionId,
-    ) -> Result<Option<lash_execution_contracts::process::ResolvedProcessDefinition>> {
-        Ok(self
-            .definition_ports
-            .read_definition(&self.engines, id)
-            .await?)
-    }
-
     /// Advertise the chosen process components under this host's trusted
     /// domain, retaining their publications under the caller's existing pin.
     /// This is explicit authoring configuration; it does not expose model tools.
@@ -443,7 +433,7 @@ impl HostArtifacts {
     ) -> Result<ProcessDefinition> {
         let request = lash_vm_runtime::process::InlineRequest::Callable {
             link: function.callable.link,
-            function: function.clone(),
+            function: Box::new(function.clone()),
             origin: origin.clone(),
         }
         .into_request(
@@ -476,7 +466,7 @@ impl HostArtifacts {
     ) -> Result<ProcessDefinition> {
         let request = lash_vm_runtime::process::InlineRequest::Callable {
             link: function.callable.link,
-            function: function.clone(),
+            function: Box::new(function.clone()),
             origin: origin.clone(),
         }
         .into_request(

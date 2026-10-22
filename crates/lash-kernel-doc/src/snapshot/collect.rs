@@ -9,20 +9,16 @@ use std::ops::ControlFlow;
 
 use serde::{Deserialize, Serialize};
 
-use crate::AssignOrder;
 use crate::Closure;
 use crate::Document;
 use crate::Expr;
-use crate::Literal;
+
 use crate::Node;
-use crate::Place;
-use crate::Rhs;
+
 use crate::Stmt;
 use crate::ValueKind;
 use crate::heap::{Chunk, Element, EntityId, HeapFault, Identity, PageReader, PageValue, TupleRef};
 
-use lash_vocabulary::names::EffectName;
-use lash_vocabulary::names::FunctionId;
 use lash_vocabulary::names::Name;
 use lash_vocabulary::sites::Site;
 use lash_vocabulary::sites::Unit;

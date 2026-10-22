@@ -30,7 +30,7 @@ fn a_float_key_lowers_to_its_spelling_and_one_concatenation() {
             "{key}:\n{text}"
         );
         assert!(
-            super::linked::helper_slot(
+            super::linked_inspection::helper_slot(
                 &super::lower(&format!(
                     "function f(n: number) {{ const key = {key}; return key; }}"
                 ))
@@ -62,7 +62,7 @@ fn an_unproven_operand_keeps_the_general_form() {
     let unknown = main_text("function f(x) { return String(x) + `k${x}`; }");
     assert!(unknown.contains("ts.to_string(x)"), "{unknown}");
     assert!(
-        super::linked::helper_slot(
+        super::linked_inspection::helper_slot(
             &super::lower("function f(x) { return String(x) + `k${x}`; }")
                 .unwrap()
                 .document,

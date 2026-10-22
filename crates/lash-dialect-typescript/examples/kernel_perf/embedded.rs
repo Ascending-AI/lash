@@ -121,7 +121,7 @@ pub(super) fn main() -> Result<(), String> {
             target: Target::Main,
             args: Vec::new(),
             session: None,
-            modes: crate::linked::modes(&program),
+            modes: crate::pages::modes(&program),
             host: Vec::new(),
         },
         layout,

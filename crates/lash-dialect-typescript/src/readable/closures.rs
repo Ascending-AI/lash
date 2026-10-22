@@ -17,7 +17,7 @@ const TOKEN: &str = "ts.function";
 
 impl Lifter<'_> {
     /// The function `value`, at `site`, is the token of, when it is one.
-    pub(super) fn closure(&mut self, value: &k::Expr, site: &Site) -> Lift<Option<Function>> {
+    pub(super) fn closure(&mut self, value: &k::Expr, _site: &Site) -> Lift<Option<Function>> {
         let k::Expr::Tuple(parts) = value else {
             return Ok(None);
         };

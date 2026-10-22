@@ -30,7 +30,7 @@ impl KernelProcessPluginFactory {
             workers,
             dialect: dialect.into(),
             bounds,
-            preparations: crate::process::ProcessPreparations::default(),
+            preparations: crate::process::ProcessPreparations,
             #[cfg(feature = "synthetic-next")]
             writes: None,
         }
@@ -248,7 +248,7 @@ where
         >,
 {
     use crate::dialect_services::{Dialect, Services};
-    use lash_core::plugin::{ToolProviderHandle, registries::Registry};
+    use lash_core::plugin::ToolProviderHandle;
     let owner = reg
         .declared_owner()
         .ok_or_else(|| PluginError::Registration("dialect services require an owner".into()))?

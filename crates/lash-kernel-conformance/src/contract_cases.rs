@@ -4,9 +4,7 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use lash_kernel_check::{
-    Environment, RefusalReason, admit, derive, derive_definition, requirements,
-};
+use lash_kernel_check::{Environment, RefusalReason, admit, derive, derive_definition};
 use lash_kernel_doc::Document;
 use lash_kernel_doc::FunctionDefinition;
 use lash_kernel_doc::FunctionRegistry;
@@ -293,7 +291,7 @@ fn typed_refusals(shard: &Shard, registry: &FunctionRegistry) {
             continue;
         }
         let document = doc(&case.document);
-        let mut env = Environment::new(registry);
+        let env = Environment::new(registry);
         let errors = admit(&document, &env).unwrap_err().errors;
         assert!(errors.iter().any(|error| match shard.rule.as_str() {
             "K-ADM-005" => matches!(error.reason, RefusalReason::ArgumentType { .. }),
@@ -568,9 +566,7 @@ fn delivery_errors(shard: &Shard, registry: &FunctionRegistry) {
     let Step::Parked(park) = machine.run(&mut host, u64::MAX).unwrap() else {
         panic!("effect parks")
     };
-    let Request::Effect(request) = &park.requests[0] else {
-        panic!("effect request")
-    };
+    let Request::Effect(request) = &park.requests[0];
     let before = lash_vocabulary::tokens::encode_body(
         &machine
             .seal(crate::pages::BUDGET)

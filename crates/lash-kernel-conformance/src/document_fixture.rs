@@ -13,7 +13,10 @@ pub(crate) fn authored(
     let mut main = String::new();
     for line in text.lines() {
         if let Some(source) = line.trim().strip_prefix("definition ") {
-            pending.push(serde_json::from_str::<String>(source).unwrap());
+            pending.push(
+                serde_json::from_str::<String>(source)
+                    .unwrap_or_else(|error| panic!("linked law fixture: {error:?}")),
+            );
         } else {
             main.push_str(line);
             main.push('\n');
@@ -46,7 +49,7 @@ pub(crate) fn authored(
         .collect::<Vec<_>>()
         .join("\n");
     let declared = lash_kernel_doc::parse_document(&imports_text)
-        .unwrap()
+        .unwrap_or_else(|error| panic!("linked law fixture: {error:?}"))
         .imports;
     let mut body_imports = BTreeMap::new();
     for definition in definitions.values() {
@@ -75,11 +78,13 @@ pub(crate) fn authored(
     for f in definitions.values() {
         header.push_str(&format!(
             "definition {}\n",
-            serde_json::to_string(&lash_kernel_doc::print_definition(f)).unwrap()
+            serde_json::to_string(&lash_kernel_doc::print_definition(f))
+                .unwrap_or_else(|error| panic!("linked law fixture: {error:?}"))
         ));
         if f.has_native() {
             header.push_str(&format!("native @{}\n", f.identity()));
         }
     }
-    lash_kernel_doc::parse_document(&format!("{header}{main}")).unwrap()
+    lash_kernel_doc::parse_document(&format!("{header}{main}"))
+        .unwrap_or_else(|error| panic!("linked law fixture: {error:?}"))
 }

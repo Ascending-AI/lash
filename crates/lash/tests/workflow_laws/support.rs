@@ -135,12 +135,6 @@ pub(super) fn operation_import(
         },
     )
 }
-pub(super) fn echo_signature() -> lash::workflow::document::Signature {
-    lash_vocabulary::json_schema::tool_signature(
-        &echo_definitions()[0].contract.input_schema.canonical,
-        &echo_definitions()[0].contract.output_schema.canonical,
-    )
-}
 pub(super) fn echo_import_header(slot: u32) -> String {
     let mut document = Document::new(lash::workflow::document::NumberPolicy::Float, Vec::new());
     document.imports.insert(

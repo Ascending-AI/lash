@@ -189,7 +189,7 @@ pub(super) fn load_cell(
         };
         ledgers.calls.push(LedgerCall {
             control: state.control_attempt == Some(summary.ordinal),
-            operation: summary.operation.clone(),
+            operation: summary.operation,
             effect: summary.effect.clone(),
             state: call_state,
         });

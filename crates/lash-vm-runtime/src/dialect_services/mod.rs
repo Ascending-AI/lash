@@ -37,19 +37,25 @@ impl Dialect {
 pub static DIALECT_SERVICE_PACKAGES: std::sync::LazyLock<[Package; 2]> =
     std::sync::LazyLock::new(|| {
         [Dialect::TypeScript, Dialect::Python].map(|dialect| Package {
-            path: PackagePath::new(Segment::new(dialect.package()).expect("canonical")),
+            path: PackagePath::new(
+                Segment::new(dialect.package())
+                    .unwrap_or_else(|error| panic!("declared dialect package: {error}")),
+            ),
             members: ["clock", "random", "sleep"]
                 .into_iter()
                 .map(|member| {
                     (
-                        Segment::new(member).expect("canonical"),
+                        Segment::new(member)
+                            .unwrap_or_else(|error| panic!("declared dialect service: {error}")),
                         Member {
                             visibility: Visibility::Public,
                             kind: MemberKind::Operation(OperationOffer {
                                 requirement: lash_kernel_dialect::authoring::service_requirement(
                                     &lash_kernel_dialect::service_name(dialect.package(), member),
                                 )
-                                .expect("service requirement"),
+                                .unwrap_or_else(|| {
+                                    panic!("declared dialect service requirement is absent")
+                                }),
                                 intents: BTreeSet::new(),
                                 controls: TurnControls::none(),
                                 mode: if member == "sleep" {
@@ -70,7 +76,8 @@ pub static TIMER_OPERATIONS: std::sync::LazyLock<[(PackageId, Segment); 2]> =
         DIALECT_SERVICE_PACKAGES.each_ref().map(|package| {
             (
                 package.identity(),
-                Segment::new("sleep").expect("canonical"),
+                Segment::new("sleep")
+                    .unwrap_or_else(|error| panic!("declared sleep member: {error}")),
             )
         })
     });
@@ -117,7 +124,7 @@ impl Services {
                         lash_kernel_dialect::authoring::service_requirement(
                             &lash_kernel_dialect::service_name(dialect.package(), member),
                         )
-                        .expect("service requirement")
+                        .unwrap_or_else(|| panic!("declared dialect service requirement is absent"))
                         .contract,
                     )
                     .with_execution(execution)
@@ -125,7 +132,7 @@ impl Services {
                         // Timer admission only records a deadline from the original
                         // admitted instant. Retrying an uncommitted admission is safe.
                         ExecutionPolicy::repeatable(
-                            std::num::NonZeroU32::new(3).expect("nonzero timer attempts"),
+                            std::num::NonZeroU32::MIN.saturating_add(2),
                             0,
                             0,
                         )
@@ -153,7 +160,13 @@ impl Services {
 #[async_trait::async_trait]
 impl PackageProvider for Services {
     fn roots(&self) -> BTreeSet<Segment> {
-        BTreeSet::from([Segment::new(self.dialect.package()).expect("canonical")])
+        self.dialect
+            .declaration()
+            .path
+            .first()
+            .cloned()
+            .into_iter()
+            .collect()
     }
     fn advertise(
         &self,
@@ -169,7 +182,7 @@ impl PackageProvider for Services {
                 route: OperationRoute {
                     tool: definition.manifest.id.clone(),
                     provider: self.provider.clone(),
-                    policy: definition.manifest.execution_policy.clone(),
+                    policy: definition.manifest.execution_policy,
                     projection: definition.manifest.argument_projection.clone(),
                     payload: None,
                     source: RouteSource::Advertised,

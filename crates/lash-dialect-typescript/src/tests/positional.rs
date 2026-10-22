@@ -1,11 +1,6 @@
 //! TS-CALL-SLOTS: a stable direct call and its exported packed entry share
 //! one body, preserving argument/default evaluation and parked state.
 use super::machine;
-use lash_kernel_doc::{Datum, Handle, Rhs, Stmt};
-
-use lash_kernel_vm::{Bounds, CellStart, End, Host, KernelMachine, Machine, Request, Step, Target};
-use lash_vocabulary::{Name, Type};
-use std::sync::Arc;
 
 #[test]
 fn positional_and_packed_entries_agree_on_missing_extra_and_default_arguments() {
@@ -80,7 +75,7 @@ fn array_callback_slots_agree_with_packed_calls() {
         );
         let text = super::main_text(&direct);
         let lowered = super::lower(&direct).unwrap();
-        let padded = super::linked::helper_slot(&lowered.document, "ts.pad")
+        let padded = super::linked_inspection::helper_slot(&lowered.document, "ts.pad")
             .is_some_and(|slot| text.contains(&format!("invoke import {}(", slot.0)));
         assert_eq!(padded, packed, "{callback}\n{text}");
         let direct = machine::run(&direct, &[]);
@@ -116,7 +111,7 @@ fn array_callback_slots_agree_with_packed_calls() {
             );
             let text = super::main_text(&direct);
             let lowered = super::lower(&direct).unwrap();
-            let padded = super::linked::helper_slot(&lowered.document, "ts.pad")
+            let padded = super::linked_inspection::helper_slot(&lowered.document, "ts.pad")
                 .is_some_and(|slot| text.contains(&format!("invoke import {}(", slot.0)));
             assert_eq!(padded, packed, "{callback}\n{text}");
             let direct = machine::run(&direct, &[]);

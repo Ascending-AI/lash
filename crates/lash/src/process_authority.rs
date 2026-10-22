@@ -42,7 +42,7 @@ pub fn tools_excess(env: &ProcessEnv, offered: &ToolCatalog) -> BTreeSet<ExcessL
                 .any(|entry| entry.manifest.id == link.tool)
         })
         .map(|(effect, link)| ExcessLink {
-            operation: effect.clone(),
+            operation: *effect,
             tool: link.tool.clone(),
         })
         .collect()

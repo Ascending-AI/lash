@@ -1,7 +1,7 @@
 //! Mocked multi-account inbox world for the workbench demo.
 //!
 //! The host owns a small in-memory set of named inboxes. Each is projected into
-//! the RLM Lash VM host environment as a typed module authority of type `Inbox` at
+//! the RLM namespace as an explicitly advertised Package at
 //! module path `inbox.<slug>`, exposing three operations:
 //!
 //! - `send({ title, text })` — add a message to that inbox

@@ -10,9 +10,15 @@ The Tool Catalog is a flat set of callable tools. Membership is the availability
 
 Standard protocol presents all catalog members when discovery is absent. With discovery configured it presents inline members and, when enabled, batch dispatch. RLM presents tools according to its pinned cell or native channel under ADR 0083. Membership does not require every schema to appear inline in every request.
 
-RLM's host-provided `DeferredToolResolver` resolves missing call paths during linking, in the context of the execution that links: its owner, its logical Run, and the capability refs that Run's spec recorded. The runtime gathers unresolved paths, excludes recorded outcomes, resolves one batch, folds grants into the link environment, and links. Missing answers become `NotAvailable`. Outcomes, including negative answers and Tool Execution Bindings, are frozen under the cell's admitted execution and commit with its VM snapshot ([ADR 0132](0132-durability-is-state-first-over-the-lash-store.md) §8). Resume reinstalls recorded routing through the host hook and reuses the outcomes; a different cell starts a fresh record. Resolution does not mutate the session catalog.
-
-A deferred grant names the provider that executes it by its declared identity, owner plus key (FIG-6073). A provider registered with `LashCoreBuilder::tools(key, provider)` is installed as plugin `key` with its one provider declared under `key`; a plugin's own providers carry the keys it registers them under. Grant execution and restore resolve that exact provider, without searching other providers for a matching tool.
+A host advertises a Deferred Package under a scoped provider identity. Its
+members are resolved on first use at runtime, independently for each Operation
+Use. The runtime validates the arguments and atomically records the positive
+or negative resolution before dispatch. Later calls, parks, replay and carry
+reuse that immutable answer; a new execution resolves afresh. Resolution never
+changes the session Tool Catalog. An unresolved grant records the provider's
+owner, key and configuration, and claim requirements include its discovery
+debt until the answer is committed. A resolved target records its own route
+and requirements, so a cold continuation does not need the retired resolver.
 
 ## Why and alternatives
 
@@ -20,6 +26,9 @@ An availability ladder mixes callability, prompt presentation and discovery into
 
 ## Consequences
 
-Hosts own discovery and grant storage. `examples/agent-workbench` supplies a host implementation. Standard discovery reaches catalog members through its admitted dispatch paths; link-time deferred resolution belongs to RLM.
+Hosts own discovery and Deferred Package providers. `examples/agent-workbench` supplies a host implementation. Standard discovery reaches catalog members through its admitted dispatch paths; first-use deferred resolution belongs to the execution.
 
-[Standard presentation](../../crates/lash-protocol-standard/src/lib.rs), [link records](../../crates/lash-vm-runtime/src/deferred.rs) and [recorded resolution](../../crates/lash-vm-runtime/src/deferred/journal.rs) implement the decision.
+[Standard presentation](../../crates/lash-protocol-standard/src/lib.rs),
+[scoped providers](../../crates/lash-vm-runtime/src/deferred.rs) and
+[recorded resolution](../../crates/lash-durable/src/resolutions.rs) implement
+the decision.

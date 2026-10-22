@@ -36,10 +36,10 @@ use std::sync::Arc;
 use lash_execution_contracts::process::EngineStepAnswer;
 use lash_execution_contracts::process::EngineStepKind;
 use lash_execution_contracts::process::EngineStepRun;
-use lash_kernel_doc::{Document, IdentifiedDocument};
+use lash_kernel_doc::IdentifiedDocument;
 
 use lash_vocabulary::names::DocumentId;
-use lash_vocabulary::names::Name;
+
 use lash_vocabulary::types::Signature;
 use tokio_util::sync::CancellationToken;
 
@@ -57,7 +57,7 @@ pub enum InlineRequest {
     },
     Callable {
         link: lash_vocabulary::package::LinkId,
-        function: lash_kernel_doc::FunctionValue,
+        function: Box<lash_kernel_doc::FunctionValue>,
         origin: lash_vocabulary::package::CallableOrigin,
     },
     Unlinked {
@@ -690,11 +690,9 @@ impl lash_execution_contracts::process::ProcessEngine for KernelProcessEngine {
         &self,
         payload: &serde_json::Value,
     ) -> Option<lash_core::ExecutableGeneration> {
-        Some(
-            KernelProcessDefinition::from_payload(payload)
-                .ok()?
-                .executable_generation(),
-        )
+        KernelProcessDefinition::from_payload(payload)
+            .ok()?
+            .executable_generation()
     }
 
     /// A kernel start states its settings: they decode strictly, and name

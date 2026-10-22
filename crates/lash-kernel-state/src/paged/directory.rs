@@ -185,7 +185,7 @@ impl Cell for ObjectHead {
                 rows.children(out);
             }
             Body::Closure {
-                callable,
+                callable: _,
                 site,
                 captures,
             } => {
@@ -203,7 +203,7 @@ impl Cell for ObjectHead {
                 rows.grants(children)?;
             }
             Body::Closure {
-                callable,
+                callable: _,
                 site,
                 captures,
             } => {

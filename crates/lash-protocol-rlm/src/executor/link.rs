@@ -318,11 +318,7 @@ pub(super) fn execution_id(
 ) -> lash_core_store::resolutions::ExecutionId {
     match exec {
         lash_vm_broker::ExecKey::Cell(session, turn, cell) => {
-            lash_core_store::resolutions::ExecutionId::cell(
-                session,
-                &turn.to_string(),
-                cell.as_str(),
-            )
+            lash_core_store::resolutions::ExecutionId::cell(session, turn, cell.as_str())
         }
         lash_vm_broker::ExecKey::Process(process) => {
             lash_core_store::resolutions::ExecutionId::process(process)

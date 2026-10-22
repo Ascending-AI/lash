@@ -494,7 +494,7 @@ fn is_perform(node: lash::workflow::document::Node<'_>, slot: u32) -> bool {
 #[tokio::test]
 async fn stored_sleep_waits_name_the_sleep_site_and_each_loop_occurrence() {
     let core = core().await;
-    let artifacts = core.host_artifacts();
+
     let pin = lash::process::HostArtifactPin::mint();
     let environment = environment(true);
     let source = GUARDED.replace("do perform 0(5) as Null",
@@ -676,7 +676,7 @@ async fn a_process_feed_names_pure_compute_calls_and_counts_their_entries() {
     use lash::workflow::{ProcessWorkflowOverlayAccumulator, ProcessWorkflowSiteState};
 
     let core = core().await;
-    let artifacts = core.host_artifacts();
+
     let pin = lash::process::HostArtifactPin::mint();
     let environment = environment(true);
     let identity = lash_kernel_doc::parse_definition("function identity(value: Text) -> Text\nkernel 1\nmetering statements\nbody { return value }").unwrap();
@@ -775,7 +775,7 @@ async fn a_fan_out_overlay_holds_one_row_for_each_elements_effect() {
     use lash::workflow::{WorkflowExecutionOverlayAccumulator, WorkflowOverlayOccurrence};
 
     let core = core().await;
-    let artifacts = core.host_artifacts();
+
     let pin = lash::process::HostArtifactPin::mint();
     let environment = environment(true);
     let text = echo_import_header(0);
@@ -1116,7 +1116,7 @@ async fn a_process_parked_in_its_inner_loop_resumes_on_another_node_and_finishes
         )
     };
     let first = core_over(open().await, "first").await;
-    let artifacts = first.host_artifacts();
+
     let pin = lash::process::HostArtifactPin::mint();
     let environment = environment(true);
     let document = guarded(GUARDED);

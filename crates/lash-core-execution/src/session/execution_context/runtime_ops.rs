@@ -49,7 +49,6 @@ pub trait RuntimeExecutionContextRuntimeOps<'run>: Sized {
     /// runs in (its id, originator, and for an engine process `env`, its
     /// recorded environment) and what the children it starts inherit come
     /// from the process's recorded facts.
-    #[must_use]
     fn with_process_execution(
         self,
         process: &lash_execution_contracts::process::ProcessRecord,

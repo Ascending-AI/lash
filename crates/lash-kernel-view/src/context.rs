@@ -124,23 +124,23 @@ impl ViewContext {
         }
         for (name, display) in labels.definitions {
             for member in package.members.values() {
-                if let MemberKind::Export { link, .. } = &member.kind {
-                    if let Some(document) = self.document(*link) {
-                        let ids = document
-                            .functions
-                            .iter()
-                            .filter(|(_, definition)| definition.name.as_str() == name)
-                            .map(|(id, _)| *id)
-                            .collect::<Vec<_>>();
-                        for function in ids {
-                            self.labels.insert(
-                                CallableId {
-                                    link: *link,
-                                    function,
-                                },
-                                display.clone(),
-                            );
-                        }
+                if let MemberKind::Export { link, .. } = &member.kind
+                    && let Some(document) = self.document(*link)
+                {
+                    let ids = document
+                        .functions
+                        .iter()
+                        .filter(|(_, definition)| definition.name.as_str() == name)
+                        .map(|(id, _)| *id)
+                        .collect::<Vec<_>>();
+                    for function in ids {
+                        self.labels.insert(
+                            CallableId {
+                                link: *link,
+                                function,
+                            },
+                            display.clone(),
+                        );
                     }
                 }
             }

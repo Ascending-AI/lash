@@ -13,7 +13,7 @@ pub(crate) mod slots;
 pub(crate) mod sorts;
 
 use crate::projection::{Plan, Projector};
-use lash_kernel_doc::{Datum, ErrorDatum, Handle, Integer, Timestamp};
+use lash_kernel_doc::{Datum, ErrorDatum, Handle};
 
 use lash_kernel_vm::kernel_internals::{Layout, prepare_with_layout};
 use lash_kernel_vm::{Bounds, CellStart, Host, Machine, Outcome, Program, Request, Step, Target};
@@ -77,9 +77,6 @@ fn generated_plan_indexes_are_in_function_identity_order() {
 pub(crate) mod runner;
 
 pub(crate) struct World {
-    pub(crate) bits: u64,
-    pub(crate) stride: u64,
-    pub(crate) nanoseconds: i64,
     pub(crate) prints: Vec<Datum>,
 }
 impl Host for World {
@@ -172,7 +169,7 @@ fn run_with_options<const L: u64>(
 
 /// [`run_with_options`], and the work its regions and islands ran.
 fn run_with_work<const L: u64>(
-    case: &runner::Case,
+    _case: &runner::Case,
     program: &Program,
     projector: &mut Projector<'_>,
     charge: u64,
@@ -210,12 +207,7 @@ fn run_with_work<const L: u64>(
     .unwrap();
     let tape = lash_kernel_vm::ChargeTape::new();
     machine.record_charges(tape.clone());
-    let mut world = World {
-        bits: case.bits,
-        stride: case.stride,
-        nanoseconds: case.nanoseconds,
-        prints: Vec::new(),
-    };
+    let mut world = World { prints: Vec::new() };
     let mut requests = Vec::new();
     let end = loop {
         match machine.run(&mut world, u64::MAX).unwrap() {
@@ -542,7 +534,7 @@ fn control_program(source: &str) -> Program {
         control::PLANS.len(),
         "the compiled control fixture matches its admitted bodies"
     );
-    let mut source = format!("kernel 1\nnumbers by_spelling\n{source}\n");
+    let source = format!("kernel 1\nnumbers by_spelling\n{source}\n");
     let document = crate::document_fixture::authored(&source, &registry);
     crate::machine::prepare_document(
         &lash_kernel_vm::PreparedLibrary::new(Arc::new(registry)),
@@ -757,12 +749,7 @@ fn uri_decode_completion_price_bounds_delegated_work_on_return_and_raise() {
                     },
                 )
                 .unwrap();
-                let mut world = World {
-                    bits: 0,
-                    stride: 0,
-                    nanoseconds: 0,
-                    prints: Vec::new(),
-                };
+                let mut world = World { prints: Vec::new() };
                 machine.count_work();
                 let step = machine.run(&mut world, u64::MAX).unwrap();
                 let Step::Ended(end) = step else {

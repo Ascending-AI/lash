@@ -55,8 +55,7 @@ use lash_durable_test::{Matrix, Scenario, SimClock, SimNodes, SimNodesConfig};
 use lash_execution_contracts::backend::Backend;
 use lash_kernel_doc::heap::PageId;
 use lash_kernel_doc::{
-    Datum, ErrorDatum, FunctionRegistry, Handle, Integer, NumberPolicy, NumberToken, Timestamp,
-    parse_document,
+    Datum, ErrorDatum, FunctionRegistry, Handle, Integer, NumberPolicy, NumberToken, parse_document,
 };
 use lash_kernel_state::paged::{PageBody, PageKind, PageSource as _, SessionRoot};
 use lash_kernel_vm::{Bounds, EffectRequest, End, Host, Outcome, Program, Request, Target};
@@ -77,7 +76,7 @@ use lash_vm_client::RunStart;
 use lash_vocabulary::ToolId;
 use lash_vocabulary::identity::SessionId;
 use lash_vocabulary::identity::TurnId;
-use lash_vocabulary::names::Name;
+
 use lash_vocabulary::sites::EffectId;
 use lash_vocabulary::sites::Site;
 use lash_vocabulary::sites::Unit;
@@ -129,7 +128,7 @@ body {
 }
 "#,
     )
-    .unwrap()
+    .expect("the linked park fixture is valid")
 }
 fn program(numbers: NumberPolicy) -> Program {
     let worker = worker_definition();
@@ -158,9 +157,10 @@ main {{
   return [results[0], results[1], results[2], sum]
 }}
 "#,
-        serde_json::to_string(&lash_kernel_doc::print_definition(&worker)).unwrap()
+        serde_json::to_string(&lash_kernel_doc::print_definition(&worker))
+            .expect("the linked park fixture is valid")
     );
-    let document = Arc::new(parse_document(&text).unwrap());
+    let document = Arc::new(parse_document(&text).expect("the linked park fixture is valid"));
     let fills = document
         .imports
         .iter()
@@ -189,7 +189,7 @@ main {{
         PageId([0; 32]),
         lash_kernel_vm::PreparedLibrary::new(Arc::new(FunctionRegistry::new())),
     )
-    .unwrap()
+    .expect("the linked park fixture is valid")
 }
 
 fn bounds() -> Bounds {
@@ -917,9 +917,7 @@ async fn admissions(
     let identities = identities();
     let mut admit = Vec::new();
     for (index, request) in requests.into_iter().enumerate() {
-        let Request::Effect(request) = request else {
-            return Err("the run sleeps nowhere".into());
-        };
+        let Request::Effect(request) = request;
         let call = identities.child_call_id(park, index as u64);
         let draft = host
             .admit(&request, call, 0, 0)

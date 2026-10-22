@@ -1,7 +1,7 @@
 //! Host integration of the independent exact-source operations (FIG-6205).
-use lash::dialect::{GeneratedSourceLimits, PrintOptions, PrintedSource, SourceFormat};
+use lash::dialect::{PrintOptions, PrintedSource, SourceFormat};
 use lash::workflow::WorkflowDocument;
-use lash::workflow::document::{self as k, Document, Node, Site, Unit};
+use lash::workflow::document::{self as k, Document, Node, Site};
 
 fn local(
     document: &WorkflowDocument,

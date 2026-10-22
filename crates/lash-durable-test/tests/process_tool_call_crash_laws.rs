@@ -773,7 +773,7 @@ async fn an_aggregate_sleep_past_every_step_bound_wakes_at_its_deadline_across_a
     deployment.process_only = true;
     let clock = SimClock::new();
     let database = deployment.database(Arc::clone(&clock)).await;
-    start_sleeping_process(&deployment).await;
+    Box::pin(start_sleeping_process(&deployment)).await;
     let nodes = SimNodes::new(
         Arc::clone(&database),
         Arc::clone(&clock),
@@ -1735,7 +1735,7 @@ impl Scenario for DynamicCalls {
     async fn start(&self, nodes: &Arc<SimNodes>) -> Result<(), String> {
         *self.seen.nodes.lock_recover() = Some(Arc::downgrade(nodes));
         // The host is outside the deployment under test: its start is uncut.
-        let process = self.start_process().await?;
+        let process = Box::pin(self.start_process()).await?;
         *self.process.lock_recover() = Some(process);
         nodes.start("a");
         nodes.quiesce().await;
@@ -1931,7 +1931,7 @@ async fn a_dynamic_match_owes_its_codec_from_resolution_commit_through_target_se
         calls.activation(),
     ));
     *calls.seen.nodes.lock_recover() = Some(Arc::downgrade(&nodes));
-    let process = calls.start_process().await.unwrap();
+    let process = Box::pin(calls.start_process()).await.unwrap();
     *calls.process.lock_recover() = Some(process.clone());
     let actor = ActorKey::process(process.as_str()).unwrap();
     nodes.start("a");

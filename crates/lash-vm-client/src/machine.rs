@@ -15,7 +15,7 @@ use std::sync::Arc;
 
 use lash_core_store::checkpoint_graph::NodeId;
 use lash_kernel_doc::heap::PageGrant;
-use lash_kernel_doc::{Datum, ErrorDatum, Handle, IdentifiedDocument, Timestamp};
+use lash_kernel_doc::{Datum, ErrorDatum, Handle, IdentifiedDocument};
 
 use lash_kernel_state::paged::SessionRoot;
 use lash_kernel_vm::{Bounds, EffectModes, End, Outcome, Target, WaitId};
@@ -31,7 +31,6 @@ use lash_vm_protocol::{
     RunBounds, StartFrom, VmOwner,
 };
 use lash_vocabulary::names::DocumentId;
-use lash_vocabulary::names::EffectName;
 
 use crate::service::{CallHeld, Service};
 use crate::wire::{
@@ -140,9 +139,7 @@ pub trait RunHost: Send + Sync {
     fn enter_site(&self, _at: &lash_vocabulary::sites::EffectLocation) {}
 
     /// The time, read once for each `clock` call the run makes.
-
     /// Sixty-four random bits.
-
     /// A read through a projection handle. `Err` is raised in the guest,
     /// which may catch it.
     async fn read(

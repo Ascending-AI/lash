@@ -30,7 +30,7 @@ async fn fold(args: &Args, meter: &Meter) -> Result<Receipt> {
     let result = Box::pin(async {
         let node = &fleet.nodes[0];
         let published = publish(&node.core, &loop_document(args.operations, args.callers)).await?;
-        let process = start(&node.core, &published, "overlay").await?;
+        let process = Box::pin(start(&node.core, &published, "overlay")).await?;
         let observed = node.core.processes().observe(&process);
         let snapshot = within("process snapshot", observed.snapshot()).await??;
         let ProcessReadView::Retained(view) = &snapshot.read_view else {

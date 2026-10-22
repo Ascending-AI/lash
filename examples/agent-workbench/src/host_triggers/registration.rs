@@ -28,7 +28,8 @@ fn environment(core: &LashCore) -> lash::vm::WorkflowEnvironmentRequest {
             domain: PublicationDomain(core.backend().binding_identity().to_string()),
             scope: PublicationScope::Host,
             publisher: PublisherInstance("workbench-triggers".into()),
-            root: Segment::new("workbench").expect("declared package root"),
+            root: Segment::new("workbench")
+                .unwrap_or_else(|error| panic!("declared workbench package root: {error}")),
         },
         attachment: lash::package::Attachment {
             members: Default::default(),

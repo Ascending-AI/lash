@@ -23,7 +23,7 @@ pub(super) fn entries_once(program: &Program) -> Result<(), Diagnostic> {
             other => (None, other),
         };
         let names: Vec<&str> = match inner {
-            Stmt::Function { name, function } => vec![name.as_str()],
+            Stmt::Function { name, function: _ } => vec![name.as_str()],
             Stmt::Var {
                 kind: VarKind::Const,
                 declarations,
@@ -31,7 +31,7 @@ pub(super) fn entries_once(program: &Program) -> Result<(), Diagnostic> {
                 .iter()
                 .filter_map(
                     |declaration| match (&declaration.pattern, &declaration.init) {
-                        (Pattern::Ident(name, _), Some(Expr::Function(function))) => {
+                        (Pattern::Ident(name, _), Some(Expr::Function(_function))) => {
                             Some(name.as_str())
                         }
                         _ => None,

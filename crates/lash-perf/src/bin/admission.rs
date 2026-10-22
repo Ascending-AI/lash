@@ -123,7 +123,7 @@ fn main() -> Result<()> {
             at = end.max(start);
         }
     }
-    let controls = BTreeMap::from([(
+    let _controls = BTreeMap::from([(
         EffectName::new("control.finish")?,
         BTreeSet::from([lash_kernel_dialect::EffectControl::Finish]),
     )]);

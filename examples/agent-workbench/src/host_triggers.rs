@@ -1243,7 +1243,7 @@ impl TriggerPasses {
             }
             loop {
                 triggers.finish_removals().await;
-                let retry = triggers.deliver_unbound().await;
+                let retry = Box::pin(triggers.deliver_unbound()).await;
                 if let Err(error) = triggers.prune_settled() {
                     eprintln!("agent-workbench triggers: the occurrences were not pruned: {error}");
                 }

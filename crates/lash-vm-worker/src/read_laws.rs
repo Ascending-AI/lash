@@ -151,9 +151,7 @@ fn run(
             Step::Parked(park) => {
                 parks += 1;
                 for request in park.requests {
-                    let Request::Effect(request) = request else {
-                        panic!("the cell sleeps nowhere");
-                    };
+                    let Request::Effect(request) = request;
                     assert_eq!(request.use_, use_, "the cell performs only its tool");
                     let outcome = match answer {
                         Ok(value) => Outcome::Completed(value.clone()),

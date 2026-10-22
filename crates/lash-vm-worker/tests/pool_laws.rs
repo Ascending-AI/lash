@@ -16,7 +16,7 @@ use lash_core_store::checkpoint_graph::stage::{StageLeaseId, StageSpool as _};
 use lash_durable::DurableError;
 use lash_durable::domain::pages::{RootLease, StoredPage};
 use lash_kernel_doc::heap::{PageGrant, PageRef};
-use lash_kernel_doc::{Datum, Float, Handle, Integer, Timestamp, parse_document};
+use lash_kernel_doc::{Datum, Float, Handle, Integer, parse_document};
 use lash_kernel_state::paged::{PageAnswer, PageBody, PageSource};
 use lash_kernel_vm::{Bound, End, Outcome, Request, RunError, Target};
 use lash_vm_broker::kernel::MachinePark;
@@ -134,7 +134,7 @@ fn document(body: &str) -> (String, EncodedPayload) {
 
 /// `body` as a document against the registry every worker assembles.
 fn parsed(body: &str) -> lash_kernel_doc::Document {
-    let release = lash_vm_releases::helper_release().unwrap();
+    let release = lash_vm_releases::helper_release().expect("the linked worker fixture is valid");
     let mut text = String::from(
         "numbers by_spelling\nkernel 1\nimport 0 operation host.echo(x?: Any) -> Any\n",
     );
@@ -143,7 +143,7 @@ fn parsed(body: &str) -> lash_kernel_doc::Document {
             text.push_str(&format!(
                 "definition {}\n",
                 serde_json::to_string(&lash_kernel_doc::print_definition(function.definition()))
-                    .unwrap()
+                    .expect("the linked worker fixture is valid")
             ));
             if function.definition().has_native() {
                 text.push_str(&format!("native @{}\n", function.definition().identity()));
@@ -157,7 +157,7 @@ fn parsed(body: &str) -> lash_kernel_doc::Document {
 /// Pin a fixture's final Imports against one immutable helper release.
 fn linked(document: lash_kernel_doc::Document) -> lash_kernel_vm::Program {
     use lash_vocabulary::{Fill, ImportKind, Link, MemberKind, OperationRequirement};
-    let release = lash_vm_releases::helper_release().unwrap();
+    let release = lash_vm_releases::helper_release().expect("the linked worker fixture is valid");
     let fills = document
         .imports
         .iter()
@@ -204,15 +204,19 @@ fn linked(document: lash_kernel_doc::Document) -> lash_kernel_vm::Program {
         .map(|(id, document)| (*id, Arc::new(document.clone())))
         .collect();
     documents.insert(document.identity(), Arc::new(document));
-    let embedding = lash_vm_worker::built_embedding(&WorkerTuning::standard()).unwrap();
+    let embedding = lash_vm_worker::built_embedding(&WorkerTuning::standard())
+        .expect("the linked worker fixture is valid");
     lash_kernel_vm::Program::prepare(
         id,
         documents,
         &links,
         lash_kernel_doc::heap::PageId([0; 32]),
-        embedding.prepared_library().unwrap().clone(),
+        embedding
+            .prepared_library()
+            .expect("the linked worker fixture is valid")
+            .clone(),
     )
-    .unwrap()
+    .expect("the linked worker fixture is valid")
 }
 fn echo_namespace(signature: lash_vocabulary::Signature) -> lash_kernel_dialect::Namespaces {
     let offer = lash_vocabulary::OperationOffer {
@@ -226,9 +230,10 @@ fn echo_namespace(signature: lash_vocabulary::Signature) -> lash_kernel_dialect:
     };
     lash_kernel_dialect::Namespaces::new(
         [(
-            lash_vocabulary::PackagePath::parse("host").unwrap(),
+            lash_vocabulary::PackagePath::parse("host")
+                .expect("the linked worker fixture is valid"),
             [(
-                lash_vocabulary::Segment::new("echo").unwrap(),
+                lash_vocabulary::Segment::new("echo").expect("the linked worker fixture is valid"),
                 lash_kernel_dialect::NamespaceMember {
                     visibility: lash_vocabulary::Visibility::Public,
                     kind: lash_kernel_dialect::NamespaceKind::Operation(offer.into()),
@@ -240,11 +245,12 @@ fn echo_namespace(signature: lash_vocabulary::Signature) -> lash_kernel_dialect:
         Default::default(),
         &|_| false,
     )
-    .unwrap()
+    .expect("the linked worker fixture is valid")
 }
 
 fn entry_document(source: &str) -> (String, EncodedPayload) {
-    let (definition, locals) = lash_kernel_doc::parse_definition_with_locals(source).unwrap();
+    let (definition, locals) = lash_kernel_doc::parse_definition_with_locals(source)
+        .expect("the linked worker fixture is valid");
     let mut document =
         lash_kernel_doc::Document::new(lash_kernel_doc::NumberPolicy::BySpelling, vec![]);
     document.main = None;
@@ -280,7 +286,7 @@ fn bounds() -> RunBounds {
 fn fresh(document: &EncodedPayload, target: Target, args: Vec<Datum>) -> Start {
     let program = linked(
         lash_kernel_doc::IdentifiedDocument::decode_standard(&document.0)
-            .unwrap()
+            .expect("the linked worker fixture is valid")
             .into_document(),
     );
     Start {
@@ -289,7 +295,7 @@ fn fresh(document: &EncodedPayload, target: Target, args: Vec<Datum>) -> Start {
             PayloadKind::Start,
             &program.instances.values().collect::<Vec<_>>(),
         )
-        .unwrap(),
+        .expect("the linked worker fixture is valid"),
         documents: program
             .documents
             .iter()
@@ -332,7 +338,7 @@ fn resumed(
 ) -> Start {
     let program = linked(
         lash_kernel_doc::IdentifiedDocument::decode_standard(&document.0)
-            .unwrap()
+            .expect("the linked worker fixture is valid")
             .into_document(),
     );
     Start {
@@ -341,7 +347,7 @@ fn resumed(
             PayloadKind::Start,
             &program.instances.values().collect::<Vec<_>>(),
         )
-        .unwrap(),
+        .expect("the linked worker fixture is valid"),
         documents: program
             .documents
             .iter()
@@ -1985,7 +1991,8 @@ fn a_host_read_past_its_deadline_ends_the_run_with_its_typed_limit() {
     let (_, bytes) = entry_document(
         "function go() -> Any\nkernel 1\nmetering statements\nbody { let got = read(handle(\"table\", \"t1\"), \"row\") return got }",
     );
-    let document = lash_kernel_doc::IdentifiedDocument::decode_standard(&bytes.0).unwrap();
+    let document = lash_kernel_doc::IdentifiedDocument::decode_standard(&bytes.0)
+        .expect("the linked worker fixture is valid");
     let program = linked(document.shared().as_ref().clone());
     let run = bounds();
     let machines = RemoteMachines::new(
@@ -2166,25 +2173,28 @@ mod pool_package;
 
 /// The parent's code-only package; the shipped worker is given no package list.
 fn pool_library(source: &str) -> Arc<lash_vm_client::packages::WorkerLibrary> {
-    let release = lash_vm_releases::helper_release().unwrap();
+    let release = lash_vm_releases::helper_release().expect("the linked worker fixture is valid");
     let mut registry = release.functions.clone();
-    let definition = lash_kernel_doc::parse_definition(source).unwrap();
-    let id = registry.register(definition, None).unwrap();
+    let definition =
+        lash_kernel_doc::parse_definition(source).expect("the linked worker fixture is valid");
+    let id = registry
+        .register(definition, None)
+        .expect("the linked worker fixture is valid");
     Arc::new(
         lash_vm_client::packages::WorkerLibrary::new(
             &registry,
             release.resolver_roots().into_iter().chain([id]),
         )
-        .unwrap(),
+        .expect("the linked worker fixture is valid"),
     )
 }
 
 fn pool_call(worker: &mut Checkout, definition: &str) -> (EndWire, Option<u64>) {
     let definition = lash_kernel_doc::parse_definition(definition).expect("definition");
-    let function = definition.identity();
+    let _function = definition.identity();
     let name = definition.name.clone();
     let document = parse_document(&format!(
-        "kernel 1\nnumbers by_spelling\ndefinition {}\nmain {{ let x = invoke {name}(7) return x }}", serde_json::to_string(&lash_kernel_doc::print_definition(&definition)).unwrap()
+        "kernel 1\nnumbers by_spelling\ndefinition {}\nmain {{ let x = invoke {name}(7) return x }}", serde_json::to_string(&lash_kernel_doc::print_definition(&definition)).expect("the linked worker fixture is valid")
     )).expect("fixture document");
     let bytes = EncodedPayload(document.canonical_bytes());
     worker
@@ -2239,8 +2249,7 @@ fn a_shipped_packages_native_is_pure_across_warm_and_cold_workers() {
         .next()
         .expect("a shipped native");
     let definition = lash_kernel_doc::print_definition(
-        &held
-            .functions
+        held.functions
             .get(&function)
             .expect("the native")
             .definition(),
@@ -2250,7 +2259,7 @@ fn a_shipped_packages_native_is_pure_across_warm_and_cold_workers() {
     config.max_workers = 1;
     config.library = Some(Arc::new(
         lash_vm_client::packages::WorkerLibrary::new(&held.functions, held.resolver_roots())
-            .unwrap(),
+            .expect("the linked worker fixture is valid"),
     ));
     let pool = WorkerPool::new(config.clone()).expect("warm pool");
     let mut worker = checkout(&pool);

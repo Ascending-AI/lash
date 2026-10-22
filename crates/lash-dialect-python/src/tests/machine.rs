@@ -14,13 +14,12 @@ use lash_kernel_doc::{Datum, ErrorDatum, Handle};
 use lash_kernel_vm::kernel_internals::conformance::{self, Checkpoint};
 use lash_kernel_vm::{
     Bounds, End, Host, KernelMachine, Machine, Outcome, Park, PreparedLibrary, Program, Request,
-    RunError, Step, WaitId, register_machine_functions,
+    RunError, Step, WaitId,
 };
 use lash_vocabulary::{EffectName, Name, Param, Signature, Type};
 use serde::Deserialize;
 
 use super::pages::{self, Session};
-use crate::define_helpers;
 
 pub(super) struct Installed {
     pub(super) prepared: PreparedLibrary,

@@ -187,7 +187,7 @@ impl KernelMachine {
                     return Ok(true);
                 }
                 (Type::Map(types), Value::Map(_)) => {
-                    for pair in members.chunks_exact(2) {
+                    for pair in members.as_chunks::<2>().0 {
                         if !self.public_value_fits(exe, pair[0], &types.key, depth - 1)?
                             || !self.public_value_fits(exe, pair[1], &types.value, depth - 1)?
                         {
@@ -198,7 +198,7 @@ impl KernelMachine {
                 }
                 (Type::Record(record), Value::Record(_)) => {
                     let mut seen = std::collections::BTreeSet::new();
-                    for pair in members.chunks_exact(2) {
+                    for pair in members.as_chunks::<2>().0 {
                         let Datum::Text(name) = self.copy_datum(&pair[0])? else {
                             return Ok(false);
                         };

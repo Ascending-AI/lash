@@ -4,7 +4,6 @@
 
 use std::collections::BTreeMap;
 
-use lash_kernel_doc::print_document;
 use lash_vocabulary::{EffectName, Signature, Type};
 
 use super::{lower_against, main_text};

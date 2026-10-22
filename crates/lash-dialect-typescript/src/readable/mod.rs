@@ -41,7 +41,6 @@ pub fn print(
     let lifted = lift::document(document, captions, library);
     let printing = Printing {
         document,
-        captions,
         options,
         environment: Environment::new(library, &namespaces),
         items: lifted
@@ -58,7 +57,6 @@ pub fn print(
 /// One document's lifts, printed and read for [`regions::print_verified`].
 struct Printing<'a> {
     document: &'a k::Document,
-    captions: Option<&'a k::Captions>,
     options: PrintOptions,
     environment: Environment<'a>,
     items: BTreeMap<Name, source::Item>,

@@ -473,8 +473,8 @@ fn write(
             use_: operations::use_for(&write_definition()),
             input: serde_json::json!({ "x": x }),
             site: site.map(|(node_id, occurrence)| {
-                Box::new(lash_protocol_types::effect_identity_fixture(
-                    node_id, occurrence,
+                Box::new(lash_vocabulary::sites::EffectLocation::authored(
+                    lash_protocol_types::effect_identity_fixture(node_id, occurrence),
                 ))
             }),
         }],
@@ -629,7 +629,9 @@ fn effects_advance_to(
             && let Some(lash_execution_contracts::process::StepRequest::Tool { site, .. }) =
                 steps.first_mut()
         {
-            *site = Some(Box::new(node_site(n)));
+            *site = Some(Box::new(lash_vocabulary::sites::EffectLocation::authored(
+                node_site(n),
+            )));
         }
         action
     };

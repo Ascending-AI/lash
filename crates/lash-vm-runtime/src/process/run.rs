@@ -18,14 +18,12 @@ use lash_execution_contracts::process::CapacityCause;
 use lash_execution_contracts::process::CapacityVerdict;
 use lash_execution_contracts::process::EngineStepAnswer;
 use lash_execution_contracts::process::EngineStepRun;
-use lash_kernel_doc::{Datum, Document, ErrorDatum, Handle, Integer, Timestamp};
+use lash_kernel_doc::{Datum, Document, ErrorDatum, Handle};
 
-use lash_kernel_vm::{Bounds, End, Request, RunError, Target};
+use lash_kernel_vm::{Bounds, End, Request, RunError};
 use lash_protocol_types::engine_fault::{PoolFault, ProtocolBreach};
 use lash_vm_broker::ParentFault;
-use lash_vm_broker::kernel::{
-    DrivenMachine, KernelFailure, MachineStep, Machines, datum_from_json, datum_to_json,
-};
+use lash_vm_broker::kernel::{DrivenMachine, KernelFailure, MachineStep, Machines, datum_to_json};
 use lash_vm_client::{FrameEpoch, InfrastructureOutcome, OwnerEpoch, RunHost, VmOwner};
 use lash_vocabulary::identity::ProcessId;
 use tokio_util::sync::CancellationToken;
@@ -540,7 +538,7 @@ async fn kernel_run(
                     caught,
                     reads,
                     start,
-                    requirements,
+                    requirements: Box::new(requirements),
                 },
                 Some(candidate),
             ))
@@ -718,23 +716,6 @@ pub(super) async fn run_machine(
     }
 }
 
-/// Why a run's pinned code is not admitted.
-pub(super) enum Unpinned {
-    /// The store does not keep a definition the run reaches.
-    Unretained(super::documents::Unretained),
-    /// A stored definition is refused (R5).
-    Refused(lash_vm_broker::kernel::loader::LoadRefusal),
-}
-
-/// The execution closure of `document` over the definitions it was
-/// written against (FIG-6985): each the engine holds as it holds it, and
-/// each other as the store keeps it, admitted under the engine's
-/// internal-operation authority.
-///
-/// # Errors
-///
-/// [`RunFault`] when the store does not answer or a closure node does not
-/// encode.
 /// What a failure to drive the machine is to the process: its terminal
 /// when every attempt would meet it the same way, the host's capacity
 /// verdict, which records nothing and runs again uncounted, or a fault of

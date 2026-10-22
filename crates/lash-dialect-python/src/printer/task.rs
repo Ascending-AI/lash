@@ -61,10 +61,10 @@ pub(super) fn operation(
     }
     let mut operation = performed.as_ref().clone();
     for argument in &mut operation.args {
-        if let k::Expr::Variable(name) = argument {
-            if let Some(value) = bindings.get(name) {
-                *argument = (*value).clone();
-            }
+        if let k::Expr::Variable(name) = argument
+            && let Some(value) = bindings.get(name)
+        {
+            *argument = (*value).clone();
         }
     }
     Some(operation)

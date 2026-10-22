@@ -406,7 +406,7 @@ pub(super) async fn start(
     published: &Published,
     key: &str,
 ) -> Result<lash::ProcessId> {
-    Ok(within(
+    Ok(Box::pin(within(
         "process start",
         core.host_artifacts().start_linked(
             &published.pin,
@@ -420,7 +420,7 @@ pub(super) async fn start(
             unique(key),
             &published.environment,
         ),
-    )
+    ))
     .await??
     .process_id)
 }
@@ -439,9 +439,10 @@ pub(super) fn loop_document(iterations: usize, steps: usize) -> String {
         source.push_str("do perform 0(input) as Any\n");
     }
     source.push_str("} return 0 }\n");
-    let mut document =
-        lash::workflow::document::parse_document(&source).expect("workload document");
-    let definition = mark_definition().expect("mark definition");
+    let mut document = lash::workflow::document::parse_document(&source)
+        .unwrap_or_else(|error| panic!("generated workload document: {error}"));
+    let definition =
+        mark_definition().unwrap_or_else(|error| panic!("generated mark definition: {error}"));
     let signature = lash_vocabulary::json_schema::tool_signature(
         &definition.contract.input_schema.canonical,
         &definition.contract.output_schema.canonical,
@@ -449,7 +450,7 @@ pub(super) fn loop_document(iterations: usize, steps: usize) -> String {
     document
         .imports
         .get_mut(&lash_vocabulary::ImportSlot(0))
-        .expect("mark import")
+        .unwrap_or_else(|| panic!("generated workload has no mark import"))
         .kind = lash_vocabulary::ImportKind::Operation { signature };
     lash::workflow::document::print_document(&document)
 }

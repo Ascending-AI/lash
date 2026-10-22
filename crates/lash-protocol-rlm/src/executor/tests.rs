@@ -10,7 +10,6 @@ mod graph;
 mod python;
 mod tool_input;
 
-use std::collections::BTreeSet;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 

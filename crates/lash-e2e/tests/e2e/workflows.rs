@@ -17,7 +17,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use anyhow::{Context as _, Result, bail, ensure};
 use lash::workflow::authoring::{DataRecordEntry, DataValue, Operation, ValueTarget};
 use lash::workflow::document::{
-    Action, Atom, Document, Expr, Literal, Name, Node, Rhs, Site, Stmt, Type, Unit, parse_document,
+    Action, Atom, Document, Expr, Literal, Name, Node, Rhs, Site, Stmt, Type, Unit,
 };
 use lash::workflow::edit::Position;
 use lash_e2e::{Case, Host, NodeOptions};

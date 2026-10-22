@@ -636,7 +636,7 @@ async fn counts(
 #[tokio::test]
 async fn coarse_counts() {
     let core = core().await;
-    let (process, document, context) = launch(
+    let (process, document, context) = Box::pin(launch(
         &core,
         &format!(
             "{HEADER}
@@ -651,7 +651,7 @@ async fn coarse_counts() {
       }}"
         ),
         "coarse-counts",
-    )
+    ))
     .await;
     assert_eq!(finished(&core, &process).await, serde_json::json!(7));
     let view = view::derive(&document, &context).unwrap();
@@ -764,7 +764,7 @@ async fn coarse_counts() {
 async fn coarse_resume() {
     let files = Files::new();
     let first = core_over(files.open().await, "coarse-first").await;
-    let (process, document, context) = launch(
+    let (process, document, context) = Box::pin(launch(
         &first,
         &format!(
             "{HEADER}
@@ -776,7 +776,7 @@ async fn coarse_resume() {
       }}"
         ),
         "coarse-resume",
-    )
+    ))
     .await;
     let due = timer_park_after(&first, &process, 0).await;
     let view = view::derive(&document, &context).unwrap();

@@ -231,7 +231,7 @@ fn tool_keywords_name_the_declared_input_fields() {
                 .unwrap(),
             signature
         );
-        let mut admission = lash_kernel_check::Environment::new(machine::library());
+        let admission = lash_kernel_check::Environment::new(machine::library());
         lash_kernel_check::admit(&lowered.document, &admission).expect("valid tool input");
         let mut calls = 0;
         // Cells and modules both call it by its dotted path.

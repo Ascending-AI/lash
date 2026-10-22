@@ -163,7 +163,9 @@ impl Incoming {
             ),
             TraceEvent::StepBodyStarted { step } => (
                 ExecutionRef::of_step(step),
-                WorkflowOverlayFact::StepBodyStarted { step: step.clone() },
+                WorkflowOverlayFact::StepBodyStarted {
+                    step: Box::new(step.clone()),
+                },
             ),
             _ => return None,
         };

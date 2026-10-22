@@ -351,7 +351,11 @@ fn run_main() -> anyhow::Result<()> {
             let runtime = runtime.build()?;
             let result = runtime.block_on(async {
                 if *pg_statements {
-                    lash_perf::boundary::run_pg_statements(options, *pg_statements_top).await
+                    Box::pin(lash_perf::boundary::run_pg_statements(
+                        options,
+                        *pg_statements_top,
+                    ))
+                    .await
                 } else {
                     lash_perf::boundary::run(options).await
                 }

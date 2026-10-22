@@ -216,7 +216,6 @@ fn nested_actions_keep_the_authors_statement_shape() {
 /// FIG-6657, SHAPE: a `while` test keeps its awaited call in the loop's own
 /// condition, evaluated afresh at each pass; the loop prints and reads back,
 /// and its `else` runs on exhaustion.
-
 /// FIG-6402 rev2 §11: capture needs a slot even when its first binding comes later.
 #[test]
 fn a_closure_captures_a_slot_first_bound_later() {

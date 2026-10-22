@@ -1,6 +1,6 @@
 //! Linked carry requires a complete runtime correspondence before any write.
 use super::envelope::CellEnvelope;
-use lash_core_store::checkpoint_graph::{GraphDecoder, NodeKind};
+use lash_core_store::checkpoint_graph::GraphDecoder;
 
 pub(super) async fn carry(
     snapshots: &lash_vm_broker::DurableSnapshotStore,
@@ -37,8 +37,6 @@ pub(super) async fn carry(
 #[derive(Debug, thiserror::Error)]
 pub(super) enum Error {
     #[error(transparent)]
-    Carry(lash_kernel_migrate::CarryFault),
-    #[error(transparent)]
     Migration(lash_vm_runtime::KernelMigrationRefusal),
     #[error("{0}")]
     Host(String),
@@ -60,34 +58,11 @@ impl Error {
         let code = lash_core::RuntimeErrorCode::ExecutionStateCaptureFailed;
         let message = self.to_string();
         let typed = match &self {
-            Self::Carry(lash_kernel_migrate::CarryFault::Refused(refusal)) => Some((
-                "lash.kernel.parked_carry",
-                serde_json::to_value(refusal),
-                PluginFailureClass::Parked,
-            )),
             Self::Migration(refusal) => Some((
                 "lash.kernel.migration",
                 serde_json::to_value(refusal),
                 PluginFailureClass::Parked,
             )),
-            Self::Carry(lash_kernel_migrate::CarryFault::Heap(fault)) => {
-                use lash_kernel_doc::heap::HeapFault;
-                let reason = match fault {
-                    HeapFault::Missing { .. } => "missing",
-                    HeapFault::Corrupt { .. } => "corrupt",
-                    HeapFault::Unauthorized { .. } => "unauthorized",
-                    HeapFault::LeaseLost => "lease_lost",
-                    HeapFault::Exhausted { .. } => "exhausted",
-                    HeapFault::Transport(_) => "transport",
-                    HeapFault::Malformed(_) => "malformed",
-                    _ => "unknown",
-                };
-                Some((
-                    "lash.kernel.heap",
-                    Ok(serde_json::json!({"reason": reason, "detail": fault.to_string()})),
-                    PluginFailureClass::Redrivable,
-                ))
-            }
             _ => None,
         };
         let mut error = lash_core::RuntimeError::new(code.clone(), message.clone());
@@ -123,11 +98,12 @@ mod tests {
     /// A semantic refusal keeps its discriminant and detail through the
     /// plugin payload; it parks the turn instead of becoming a cell result.
     #[test]
-    fn a_cell_carry_refusal_keeps_its_typed_cause_at_the_plugin_boundary() {
-        let refusal = lash_kernel_migrate::ParkedRefusal::StateNotCarried {
-            detail: "pinned snapshot R1 lacks function f".into(),
+    fn a_linked_migration_refusal_keeps_its_typed_cause_at_the_plugin_boundary() {
+        let refusal = lash_vm_runtime::KernelMigrationRefusal::NotAdmitted {
+            document: lash_vocabulary::DocumentId::from_bytes([1; 32]),
+            reason: "linked carry has no successor Link correspondence".into(),
         };
-        let error = super::Error::Carry(refusal.clone().into()).into_runtime();
+        let error = super::Error::Migration(refusal.clone()).into_runtime();
         let Some(lash_core::RuntimeErrorCause::PluginOperation { failure }) = error.cause else {
             panic!("{error:?}");
         };
@@ -136,7 +112,8 @@ mod tests {
             lash_protocol_types::PluginFailureClass::Parked
         );
         assert_eq!(
-            serde_json::from_value::<lash_kernel_migrate::ParkedRefusal>(failure.payload).unwrap(),
+            serde_json::from_value::<lash_vm_runtime::KernelMigrationRefusal>(failure.payload)
+                .unwrap(),
             refusal
         );
     }

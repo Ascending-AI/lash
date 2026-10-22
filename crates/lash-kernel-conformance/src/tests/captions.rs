@@ -438,9 +438,9 @@ fn signature_targets() {
     // Inserting a statement moves no parameter or field: their captions
     // stay, and none is touched.
     let base = document.identity();
-    let send = EffectName::new("send").expect("a tool's name");
+    let _send = EffectName::new("send").expect("a tool's name");
     let registry = lash_kernel_doc::FunctionRegistry::new();
-    let mut environment = lash_kernel_check::Environment::new(&registry);
+    let environment = lash_kernel_check::Environment::new(&registry);
     let mut draft = Draft::open(document.clone()).expect("a draft");
     let insert = Operation::InsertStep {
         base,
@@ -633,7 +633,7 @@ fn admitted() -> Vec<(String, Option<String>)> {
 /// exactly the survivors at their successors' sites, and `touched` names
 /// those beneath which the edit wrote.
 fn rekey() {
-    let mut document = parse_document(concat!(
+    let document = parse_document(concat!(
         "kernel 1\nnumbers float\neffect send(value: Any) -> Any contract \"1\"\n",
         "entry helper(item: Record{title: Text}) -> Any\n",
         "fn helper(item) { return null }\n",
@@ -649,7 +649,7 @@ fn rekey() {
     ))
     .expect("document");
     let registry = lash_kernel_doc::FunctionRegistry::new();
-    let mut environment = lash_kernel_check::Environment::new(&registry);
+    let environment = lash_kernel_check::Environment::new(&registry);
     let captionable = CaptionKind::captionable(&document);
     let kinds: BTreeSet<CaptionKind> = captionable.iter().map(|(_, kind)| *kind).collect();
     assert_eq!(kinds, CaptionKind::ALL.into_iter().collect(), "every kind");

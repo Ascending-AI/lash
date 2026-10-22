@@ -71,7 +71,7 @@ pub(crate) struct ImportedTwin {
 impl ImportedTwin {
     pub(crate) fn origin(&self) -> crate::Origin {
         crate::Origin::Imported {
-            packages: self.packages.clone(),
+            packages: Box::new(self.packages.clone()),
             dialect: self.dialect,
             text: self.source.into(),
             map: self.map.clone(),
@@ -145,10 +145,10 @@ impl Catalog {
                     let entries: Vec<_> = document
                         .exports
                         .iter()
-                        .filter_map(|(name, export)| {
+                        .filter(|(_, export)| {
                             matches!(export, lash::workflow::document::Export::Function(_))
-                                .then(|| name.to_string())
                         })
+                        .map(|(name, _)| name.to_string())
                         .collect();
                     if entries != case.entries {
                         return Err(RunError::Invalid(format!(

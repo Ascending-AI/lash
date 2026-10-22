@@ -87,8 +87,8 @@ impl NamePlan {
             .collect();
         let helpers = document
             .functions
-            .iter()
-            .map(|(id, _)| (*id, format!("function_{id}")))
+            .keys()
+            .map(|id| (*id, format!("function_{id}")))
             .collect();
         Self { names, helpers }
     }

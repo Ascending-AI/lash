@@ -1,7 +1,7 @@
 //! Saved values retain their defining callable and immutable capture pages.
 //! Saving and fresh fulfilment never reconstruct or rename executable code.
 use crate::Written;
-use lash_kernel_doc::Expr;
+
 use lash_kernel_doc::heap::*;
 use lash_kernel_doc::snapshot::{FrozenToken, SnapshotError, SnapshotHeap, SnapshotRefusal};
 use lash_kernel_doc::{Document, FunctionCatalog, FunctionDefinition, FunctionRepresentation};

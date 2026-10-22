@@ -41,12 +41,12 @@ fn plan_append(
 fn effect_summary_request() -> crate::ProcessEventAppendRequest {
     ProcessEffectOccurrence::new(
         lash_vocabulary::sites::EffectLocation::authored(
-            lash_protocol_types::effect_identity_fixture("resource_operation:node", 1),
+            lash_protocol_types::effect_identity_fixture("operation:node", 1),
         ),
         "fixture.operation",
         ProcessEffectOutcomeClass::Failure,
         Some(crate::FailureCode::from_foreign_wire("fixture:failed")),
-        "lash_vm:scope:resource:17:fixture.operation:23:resource_operation:node:1",
+        "lash_vm:scope:resource:17:fixture.operation:23:operation:node:1",
         crate::FleetFormat::current(),
     )
     .append_request()

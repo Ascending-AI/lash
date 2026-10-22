@@ -3,7 +3,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use lash_kernel_dialect::{CellEnvironment, Environment, Lowered, Mode, Namespaces};
+use lash_kernel_dialect::{CellEnvironment, Environment, Lowered, Mode};
 use lash_kernel_doc::{self as k};
 
 use lash_vocabulary::{EffectName, Name, Param, Signature, Type};

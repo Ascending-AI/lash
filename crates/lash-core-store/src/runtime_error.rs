@@ -534,7 +534,7 @@ runtime_error_codes! {
         /// turn parks for a build of its own generation.
         RetiredGeneration = "retired_generation" => Parked,
         // a binding the cell's journal names moved; only its recorded results serve it.
-        /// A redriven code cell needed a host tool binding its journaled binding
+        /// A redriven code cell needed a host operation binding its journaled binding
         /// set names, and the live tool for it is now missing or changed
         /// (FIG-3587). The binding is served only from recorded results: a call
         /// that would reach the live tool refuses, before anything is claimed.

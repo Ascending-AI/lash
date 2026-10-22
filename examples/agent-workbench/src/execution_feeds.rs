@@ -186,12 +186,10 @@ impl Cache {
         graph.identity = Some(observation.execution.identity.clone());
         if let TraceLanguageExecutionPayload::ExecutionStarted { .. } =
             &observation.execution.payload
-        {
-            if let lash::tracing::TraceExecutionCode::Start(start) =
+            && let lash::tracing::TraceExecutionCode::Start(start) =
                 &observation.execution.identity.document
-            {
-                graph.wants = Some(start.clone());
-            }
+        {
+            graph.wants = Some(start.clone());
         }
         if let Err(error) = graph.accumulator.observe(observation) {
             eprintln!("warning: workbench execution graph refused an observation: {error}");

@@ -264,7 +264,7 @@ body {
 fn program() -> &'static Program {
     static PROGRAM: std::sync::OnceLock<Program> = std::sync::OnceLock::new();
     PROGRAM.get_or_init(|| {
-        let registry = machine::registry();
+        let _registry = machine::registry();
         let mut text = USES
             .iter()
             .map(|name| format!("use {name}\n"))
@@ -284,7 +284,7 @@ fn program() -> &'static Program {
         text.push_str(FORMER_BOUNDARY);
         text.push_str(FORMER_NUMBER_TO_STRING);
         text.push_str(ENTRIES);
-        let document = super::linked::definitions(
+        let document = super::linked_inspection::definitions(
             &text,
             &[
                 "boundary",
@@ -314,7 +314,7 @@ impl Host for Console {
         _: &lash_vocabulary::sites::PositionLabel,
         _: &lash_vocabulary::sites::Site,
     ) -> Result<Result<Datum, lash_kernel_doc::ErrorDatum>, lash_kernel_vm::HostFault> {
-        crate::tests::linked::read(use_, 0)
+        crate::tests::linked_reads::read(use_, 0)
     }
 
     fn read(&mut self, _handle: &Handle, _request: &Datum) -> Result<Datum, ErrorDatum> {

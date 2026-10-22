@@ -275,11 +275,10 @@ impl Expected {
     pub fn check(&self, actual: &Observations) -> Result<(), HarnessError> {
         let mut trace = actual.trace.clone();
         for (expected, seen) in self.trace.iter().zip(&mut trace) {
-            match (expected, seen) {
-                (Trace::Effect { identity: None, .. }, Trace::Effect { identity, .. }) => {
-                    *identity = None;
-                }
-                _ => {}
+            if let (Trace::Effect { identity: None, .. }, Trace::Effect { identity, .. }) =
+                (expected, seen)
+            {
+                *identity = None;
             }
         }
         if self.prints != actual.prints

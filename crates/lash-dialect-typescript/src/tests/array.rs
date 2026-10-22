@@ -542,7 +542,7 @@ fn json_encoding_of_boundary_arrays_uses_null_for_sparse_slots() {
     let text = format!(
         "{uses}function law.main() -> Any\nkernel 1\nmetering statements\nbody {{\nlet guest = [(), absent]\nlet copied = invoke ts.boundary(guest)\nlet encoded = json.stringify(copied)\nif same(guest[0], ()) {{}} else {{ throw \"guest was changed\" }}\nfinish encoded\n}}\n"
     );
-    let document = super::linked::main(&text, &kernel.library);
+    let document = super::linked_inspection::main(&text, &kernel.library);
     let end = drive_document(document, &[], &text);
     assert!(
         matches!(end, End::Finished(finished) if finished.result == Datum::Text("[null,null]".into()))
@@ -582,7 +582,7 @@ body {{
 }}
 "#
     );
-    let document = super::linked::main(&text, &kernel.library);
+    let document = super::linked_inspection::main(&text, &kernel.library);
     let end = drive_document(document, &[], &text);
     assert!(
         matches!(&end, End::Finished(finished) if finished.result == Datum::List(vec![
@@ -830,7 +830,7 @@ fn observe_array_path(method: &str, setup: &str, generic: bool) -> (String, Vec<
     source.push_str(&format!(
         "function law.main() -> Any\nkernel 1\nmetering statements\nimport 0 operation host.echo(x: Any) -> Any\nbody {{ {setup} let answer = invoke ts.array.{prefix}{method}(xs, args) return answer }}"
     ));
-    let document = super::linked::main(&source, &kernel().library);
+    let document = super::linked_inspection::main(&source, &kernel().library);
     let mut machine = super::pages::start(
         crate::tests::linked::program(Arc::new(document), kernel().prepared.clone()),
         Bounds {

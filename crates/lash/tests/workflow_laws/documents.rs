@@ -218,7 +218,7 @@ async fn a_running_process_draws_its_view_after_its_pin_and_helper_release_are_g
 async fn a_host_runs_opaque_document_bytes_without_json() {
     use lash::workflow::document::{DocumentBytes, document_work};
     let core = super::core().await;
-    let artifacts = core.host_artifacts();
+
     let pin = lash::process::HostArtifactPin::mint();
     let env = environment(false);
     let typed = lash::workflow::document::parse_document(&complete_answer("answer", 42))
@@ -306,7 +306,7 @@ async fn a_publication_acknowledges_admission_and_reads_its_pinned_document() {
 async fn host_document_bytes_refuse_tampering_and_wrong_grammar_typed() {
     use lash::workflow::document::{DOCUMENT_GRAMMAR_VERSION, DocumentBytes, DocumentBytesRefusal};
     let core = super::core().await;
-    let artifacts = core.host_artifacts();
+
     let pin = lash::process::HostArtifactPin::mint();
     let env = environment(false);
     let bytes = DocumentBytes::from(Document::new(

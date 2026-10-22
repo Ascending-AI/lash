@@ -28,9 +28,8 @@ use lash_core_execution::runtime::process::steps::{
 use lash_core_store::tool_run::SettledOutput;
 use lash_durable::domain::pages::PageStore;
 use lash_durable::domain::{ExecKey, OwnerKey, RootOwner};
-use lash_kernel_doc::{Datum, ErrorDatum, Handle, Integer, Timestamp};
+use lash_kernel_doc::{Datum, ErrorDatum, Handle};
 
-use lash_kernel_vm::Target;
 use lash_protocol_types::engine_fault::{CheckpointRefusal, KernelRestoreRefusal, RunRefusal};
 use lash_vm_broker::ParentFault;
 use lash_vm_broker::kernel::{KernelFailure, MachineStep, Machines as _};

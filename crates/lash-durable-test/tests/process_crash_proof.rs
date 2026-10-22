@@ -84,7 +84,7 @@ use lash_execution_contracts::process::LifetimeDecision;
 use lash_execution_contracts::process::ProcessEngine;
 use lash_execution_contracts::process::ProcessInfraError;
 use lash_execution_contracts::process::ProcessInput;
-use lash_execution_contracts::process::ProcessLifecycleFact;
+
 use lash_execution_contracts::process::ProcessOutcome;
 use lash_execution_contracts::process::ProcessProvenance;
 use lash_execution_contracts::process::ProcessRecord;
@@ -402,7 +402,7 @@ impl ProcessSteps for ProofSteps {
     async fn admit(
         &self,
         _runtime: &Arc<lash_core_execution::runtime::process::StepRuntime>,
-        process: &ProcessRecord,
+        _process: &ProcessRecord,
         step: &StepRequest,
         _target: Option<&lash_core_execution::runtime::process::steps::InvocationTarget>,
         now_ms: u64,

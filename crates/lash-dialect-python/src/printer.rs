@@ -11,7 +11,7 @@ use lash_kernel_dialect::{
     check_document_depth,
 };
 use lash_kernel_doc as k;
-use lash_vocabulary::{FunctionId, Name};
+use lash_vocabulary::Name;
 pub(crate) use names::{attribute_identifier, identifier, legal_identifier};
 use std::collections::{BTreeMap, BTreeSet};
 use std::ops::Range;
@@ -178,9 +178,6 @@ impl Renderer<'_> {
         self.indent -= 1;
         self.out.end_node();
     }
-    fn metadata(&mut self, value: &impl serde::Serialize) {
-        self.out.metadata(value, SourceFormat::PythonV1);
-    }
     fn name(&mut self, n: &Name) {
         // Authored source spells the document's names; only the kernel
         // surface reserves some for its own syntax.
@@ -197,16 +194,6 @@ impl Renderer<'_> {
             return;
         };
         self.out.write(&name);
-    }
-    fn names(&mut self, names: &[Name]) {
-        self.out.write("[");
-        for (i, n) in names.iter().enumerate() {
-            if i > 0 {
-                self.out.write(", ");
-            }
-            self.name(n);
-        }
-        self.out.write("]");
     }
     fn padding(&mut self) {
         for _ in 0..self.indent {
@@ -248,38 +235,7 @@ impl Renderer<'_> {
         }
         self.out.end_node();
     }
-    fn expr(&mut self, expr: &k::Expr) {
-        self.node(k::Node::Expr(expr), None);
-    }
-    fn block(&mut self, block: &k::Block) {
-        self.node(k::Node::Block(block), None);
-    }
-    fn rhs(&mut self, rhs: &k::Rhs) {
-        match rhs {
-            k::Rhs::Expr(e) => self.expr(e),
-            k::Rhs::Action(a) => self.node(k::Node::Action(a), None),
-        }
-    }
     // Members have no Site of their own. Their expression children stay in kernel order.
-    fn member_header(&mut self, prefix: &str, member: &k::Member) {
-        self.out.write("with k.");
-        self.out.write(prefix);
-        match member {
-            k::Member::Field { field, .. } => {
-                self.out.write("field(");
-                self.out.json(field);
-            }
-            k::Member::Index { .. } => self.out.write("index("),
-        }
-        self.suite();
-        match member {
-            k::Member::Field { target, .. } => self.expr(target),
-            k::Member::Index { target, index } => {
-                self.expr(target);
-                self.expr(index);
-            }
-        }
-    }
     fn statement(&mut self, stmt: &k::Stmt) {
         self.render_statement(stmt);
         self.scope.types.statement(stmt, self.operators.functions());
@@ -322,16 +278,6 @@ impl Renderer<'_> {
             k::Atom::Literal(l) => self.literal(l),
             k::Atom::Variable(n) => self.name(n),
         }
-    }
-    fn atoms(&mut self, atoms: &[k::Atom]) {
-        self.out.write("[");
-        for (i, atom) in atoms.iter().enumerate() {
-            if i > 0 {
-                self.out.write(", ");
-            }
-            self.atom(atom);
-        }
-        self.out.write("]");
     }
     fn callee(&mut self, callee: &k::Callee) {
         match callee {
@@ -428,14 +374,6 @@ impl Renderer<'_> {
         };
         self.nested_action(&act, false);
     }
-    fn call_atoms(&mut self, atoms: &[k::Atom]) {
-        for (i, atom) in atoms.iter().enumerate() {
-            if i > 0 {
-                self.out.write(", ");
-            }
-            self.atom(atom);
-        }
-    }
 }
 
 /// Memoize the applicability predicate in one postorder pass. This is naming/
@@ -502,36 +440,4 @@ impl InlinePlan {
             }
         }
     }
-}
-
-/// Only native calls emit await. A bound closure has its own function context.
-fn awaits(body: &k::Block) -> bool {
-    fn node(node: k::Node<'_>) -> bool {
-        match node {
-            k::Node::Expr(k::Expr::Act(act)) if !matches!(act.kind, k::ActKind::Spawn(_)) => true,
-            k::Node::Action(
-                k::Action::Call { .. }
-                | k::Action::Perform { .. }
-                | k::Action::Await { .. }
-                | k::Action::Join { .. }
-                | k::Action::JoinMany { .. },
-            ) => true,
-            k::Node::Stmt(
-                k::Stmt::Let {
-                    value: k::Rhs::Expr(k::Expr::Closure(_)),
-                    ..
-                }
-                | k::Stmt::Assign {
-                    place: k::Place::Variable(_),
-                    value: k::Rhs::Expr(k::Expr::Closure(_)),
-                    ..
-                },
-            ) => false,
-            _ => node.children().into_iter().any(node_awaits),
-        }
-    }
-    fn node_awaits(value: k::Node<'_>) -> bool {
-        node(value)
-    }
-    body.iter().any(|stmt| node(k::Node::Stmt(stmt)))
 }

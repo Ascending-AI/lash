@@ -3,6 +3,7 @@
 use super::*;
 use lash_core::{ArtifactReferrer, HostArtifactPin};
 use lash_core_store::artifact_referrer::ResolvedArtifactCleanup;
+use lash_vocabulary::names::*;
 
 #[tokio::test]
 async fn a_publication_retains_its_link_after_the_installer_ends() {
@@ -215,7 +216,7 @@ async fn a_public_alias_retains_internal_fills_without_lending_their_authority()
             },
         },
     };
-    let document = lash_kernel_doc::Document {
+    let mut document = lash_kernel_doc::Document {
         imports: function.body().unwrap().imports.clone(),
         exports: [(
             Name::new("run"),
@@ -237,6 +238,10 @@ async fn a_public_alias_retains_internal_fills_without_lending_their_authority()
         numbers: lash_kernel_doc::NumberPolicy::BySpelling,
         private_bindings: Default::default(),
     };
+    document.exports.insert(
+        Name::new("other"),
+        document.exports[&Name::new("run")].clone(),
+    );
     let documents = Arc::new(lash_vm_runtime::KernelDocuments::new(
         store.clone(),
         store.clone(),
@@ -270,11 +275,22 @@ async fn a_public_alias_retains_internal_fills_without_lending_their_authority()
             },
         },
     };
+    let other = Member {
+        visibility: Visibility::Public,
+        kind: MemberKind::Export {
+            link: fulfilled.content.identity(),
+            export: ExportName {
+                name: Name::new("other"),
+                member: None,
+            },
+        },
+    };
     let package = Package {
         path,
         members: [
             (Segment::new("private").unwrap(), private),
             (Segment::new("run").unwrap(), public.clone()),
+            (Segment::new("other").unwrap(), other.clone()),
         ]
         .into(),
     };
@@ -318,12 +334,83 @@ async fn a_public_alias_retains_internal_fills_without_lending_their_authority()
         )
         .await
         .unwrap();
-    let snapshot = NamespaceSnapshot {
-        advertisements: vec![AcceptedAdvertisement {
-            publication: publication.clone(),
-            advertisement: PackageAdvertisement::Enumerated(package),
-        }],
+    // L-ALIAS: another valid publication of this Link offers a different
+    // Export. Only the publication offering `run` supplies this alias's source.
+    let other_alias = Package {
+        path: PackagePath::parse("fixture.shadow").unwrap(),
+        members: [(Segment::new("other").unwrap(), other)].into(),
     };
+    let other_publication = ScopedPackagePublisher::new(
+        context.clone(),
+        NamespaceSnapshot {
+            advertisements: vec![AcceptedAdvertisement {
+                publication: publication.clone(),
+                advertisement: PackageAdvertisement::Enumerated(package.clone()),
+            }],
+        },
+        provider.clone(),
+        store.clone(),
+    )
+    .publish(
+        &claim,
+        &context,
+        PublishPackage {
+            package: other_alias.clone(),
+            code: Vec::new(),
+        },
+    )
+    .await
+    .unwrap();
+    // L-ALIAS: a second package may keep the same public Export internally.
+    // Its local visibility cannot revoke the original package's public offer.
+    let internal_alias = Package {
+        path: PackagePath::parse("fixture.hidden").unwrap(),
+        members: [(
+            Segment::new("run").unwrap(),
+            Member {
+                visibility: Visibility::Internal,
+                kind: public.kind.clone(),
+            },
+        )]
+        .into(),
+    };
+    let internal_publication = ScopedPackagePublisher::new(
+        context.clone(),
+        NamespaceSnapshot {
+            advertisements: vec![AcceptedAdvertisement {
+                publication: publication.clone(),
+                advertisement: PackageAdvertisement::Enumerated(package.clone()),
+            }],
+        },
+        provider.clone(),
+        store.clone(),
+    )
+    .publish(
+        &claim,
+        &context,
+        PublishPackage {
+            package: internal_alias.clone(),
+            code: Vec::new(),
+        },
+    )
+    .await
+    .unwrap();
+    let mut snapshot = NamespaceSnapshot {
+        advertisements: vec![
+            AcceptedAdvertisement {
+                publication: publication.clone(),
+                advertisement: PackageAdvertisement::Enumerated(package),
+            },
+            AcceptedAdvertisement {
+                publication: other_publication,
+                advertisement: PackageAdvertisement::Enumerated(other_alias),
+            },
+        ],
+    };
+    snapshot.advertisements.push(AcceptedAdvertisement {
+        publication: internal_publication,
+        advertisement: PackageAdvertisement::Enumerated(internal_alias),
+    });
     let publisher = ScopedPackagePublisher::new(context.clone(), snapshot, provider, store.clone());
     let alias = Package {
         path: PackagePath::parse("fixture.alias").unwrap(),

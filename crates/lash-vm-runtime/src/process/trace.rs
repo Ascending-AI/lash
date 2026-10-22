@@ -11,8 +11,7 @@ use lash_core::plugin::PluginExecutionTrace;
 use lash_trace::{
     TraceContext, TraceEvent, TraceLanguageExecution, TraceLanguageExecutionFailure,
     TraceLanguageExecutionIdentity, TraceLanguageExecutionPayload, TraceLanguageExecutionStatus,
-    TraceNodeAwaited, TraceNodeFact, TraceNodeWaitResolution, TraceRuntimeScope,
-    TraceRuntimeSubject,
+    TraceNodeFact, TraceRuntimeScope, TraceRuntimeSubject,
 };
 use lash_vm_client::wire::OutcomeWire;
 use lash_vocabulary::sites::EffectId;

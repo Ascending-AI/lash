@@ -3,7 +3,7 @@ use super::super::directory::ordinal_key;
 use super::super::tree::{SealWork, Tree};
 use super::super::*;
 use super::heap::{fresh, seal};
-use lash_kernel_doc::Datum;
+
 use lash_kernel_doc::heap::*;
 use lash_vocabulary::names::Name;
 use lash_vocabulary::sites::Site;

@@ -14,7 +14,7 @@
 //! lowers to the same generated slot), root rebinding, member assignment, a
 //! saved function with a frozen capture of a shadowed block binding called
 //! after its block ends and after a restart, a process handle,
-//! a projected host binding, a deferred tool binding's result, and a
+//! a projected host binding, a deferred operation binding's result, and a
 //! loop-carried global.
 //!
 //! Multi-turn reads preserve all prior nested records, on one worker and

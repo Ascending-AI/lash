@@ -36,7 +36,7 @@ mod continuation;
 mod decode;
 pub use decode::{DecodeMismatch, Decoder};
 pub mod document;
-use lash_vocabulary::data_limits::KernelDataLimits;
+
 /// The arena: what a run's objects are while it executes (seams C, D).
 /// Its value and native ABI are the crate root's.
 pub mod arena;
@@ -49,21 +49,17 @@ mod graph_codec;
 /// The canonical binary token grammar of checkpoint graph node bodies: a
 /// cross-crate seam for the kernel's and the store's binary codecs, not part
 /// of the document vocabulary.
-#[doc(hidden)]
-use lash_vocabulary::tokens as graph_tokens;
 /// The persistent semantic heap's page vocabulary: what pages, saved rows
 /// and projection hold (FIG-6195, FIG-6708).
 pub mod heap;
 mod identified;
 pub use document_bytes::{DOCUMENT_GRAMMAR_VERSION, DocumentBytes, DocumentBytesRefusal};
 pub use identified::{IdentifiedDocument, document_work};
-use lash_vocabulary::observation;
-use lash_vocabulary::sites as identity;
 /// One root-based snapshot of live code: what a saved function and a
 /// crossing function share (`K-CLO-004`).
 pub mod snapshot;
 use lash_vocabulary::names as name;
-use observation::ExecutionPath;
+
 mod native;
 mod number;
 /// Generated execution plans for library bodies (FIG-6678): what a build's
@@ -74,7 +70,6 @@ pub mod scalar;
 /// One root-based snapshot of live code: what a saved function and a
 /// crossing function share (`K-CLO-004`).
 mod text;
-use lash_vocabulary::types;
 mod validate;
 mod value;
 mod version;
@@ -108,9 +103,8 @@ pub use function_value::{
 };
 pub use graph_codec::FrozenDatum;
 pub use heap::{EntityId, FamilyId, Identity};
-use identity::{EffectId, PositionLabel, TaskLabel, VisitId, WaitId};
-pub(crate) use identity::{EffectIdentity, LoopIteration, SpawnIdentity, TaskIdentity};
-use name::{DocumentId, FunctionId, FunctionName, Name, QualifiedName, SourceMapId};
+
+use name::{DocumentId, FunctionId};
 pub use native::{
     FunctionCatalog, FunctionRegistry, GuardExceeded, RegisteredFunction, RegistryError,
     ValidatedFunctions, WorkCounter,
@@ -126,7 +120,7 @@ pub use text::{
     parse_document_with_limits, parse_signature, print_definition, print_document,
     print_document_with_ranges,
 };
-use types::{Signature, Type};
+
 pub use validate::{
     Invalid, InvalidReason, StatementForm, StatementRuleViolation, check_statement,
     validate_callable_signature, validate_definition, validate_definition_with_limits,

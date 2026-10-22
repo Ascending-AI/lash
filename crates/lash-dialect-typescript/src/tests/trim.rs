@@ -98,7 +98,7 @@ fn native_trim_agrees_with_generic_utf16_scan() {
         let source = format!(
             "{header}function trim(text: Text, leading: Bool, trailing: Bool) -> Text\nkernel 1\nmetering statements\nbody {{ let output = invoke {helper}(text, leading, trailing) print output return output }}"
         );
-        let document = super::linked::definitions(&source, &["trim"], &named);
+        let document = super::linked_inspection::definitions(&source, &["trim"], &named);
         crate::tests::linked::program(Arc::new(document), prepared.clone())
     };
     let fast = make_program("ts.string.trim_value");

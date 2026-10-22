@@ -3,7 +3,6 @@
 use crate::{Datum, FunctionRepresentation, FunctionValue, FunctionValueRefusal};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
 
 /// Data within a frozen environment, including recursive callable references.
 /// References have meaning only within the enclosing FunctionValue graph.
@@ -161,11 +160,10 @@ fn check_data(datum: &Datum, depth: usize) -> Result<(), FunctionValueRefusal> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{
-        Captions, Document, FunctionRegistry, FunctionValueLimits, NumberPolicy, Signature, Type,
-    };
+    use crate::{Captions, Document, FunctionRegistry, FunctionValueLimits, NumberPolicy};
     use lash_vocabulary::data_limits::KernelDataLimits;
-    use lash_vocabulary::{CallableId, names::Name};
+    use lash_vocabulary::{CallableId, Signature, Type, names::Name};
+    use std::collections::BTreeMap;
 
     fn function() -> FunctionValue {
         FunctionValue {

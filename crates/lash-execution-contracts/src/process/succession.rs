@@ -117,7 +117,7 @@ pub fn successor_is_current(request: &ProcessSuccessorRequest, record: &ProcessR
 
 use lash_core_store::artifact_referrer::ArtifactName;
 use lash_core_store::tool_surface::ExecutionEnvironment;
-use lash_vocabulary::package::*;
+
 use lash_vocabulary::{claims::*, names::*};
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

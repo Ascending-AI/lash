@@ -1,14 +1,4 @@
 //! Source spelling shared by ordinary lowering and readable export.
-use lash_kernel_doc as k;
-pub(crate) fn operation_path(effect: &lash_vocabulary::EffectName) -> String {
-    match lash_vocabulary::names::QualifiedOperation::from_effect(effect) {
-        Ok(operation) => lash_kernel_dialect::spell_operation(
-            lash_kernel_dialect::Spelling::TypeScript,
-            &operation,
-        ),
-        Err(_) => effect.as_str().to_owned(),
-    }
-}
 
 pub(crate) fn legal_identifier(name: &str) -> bool {
     property_identifier(name)

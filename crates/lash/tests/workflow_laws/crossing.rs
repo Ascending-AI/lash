@@ -233,7 +233,7 @@ async fn a_function_a_process_ships_runs_from_its_own_document_as_it_was() {
             .unwrap();
         let request = lash::vm::KernelInlineRequest::Callable {
             link: value.callable.link,
-            function: value.clone(),
+            function: Box::new(value.clone()),
             origin,
         }
         .into_request(namespace.snapshot, namespace.context, namespace.attachment)

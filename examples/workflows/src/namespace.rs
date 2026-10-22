@@ -60,7 +60,8 @@ impl FixtureNamespace {
             domain: PublicationDomain("workflow-corpus".into()),
             scope: PublicationScope::Host,
             publisher: PublisherInstance("workflow-corpus".into()),
-            root: Segment::new("corpus").expect("literal root"),
+            root: Segment::new("corpus")
+                .unwrap_or_else(|error| panic!("declared corpus root: {error}")),
         }
     }
     pub(crate) fn namespaces(&self) -> Result<lash_kernel_dialect::Namespaces> {

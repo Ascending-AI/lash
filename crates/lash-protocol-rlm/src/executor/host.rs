@@ -25,11 +25,11 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex};
 
+use lash_core::RuntimeExecutionContext;
 use lash_core::facade_support::ToolInvocation;
 use lash_core::tool_dispatch::{CellCall, CellMember, CellMembers};
-use lash_core::{RuntimeExecutionContext, ToolExecutionGrant};
 use lash_core_store::checkpoint_graph::{GraphStaging, NodeId};
-use lash_core_store::tool_surface::{ExecutionEnvironment, UseBinding};
+use lash_core_store::tool_surface::UseBinding;
 use lash_kernel_doc::{Datum, ErrorDatum};
 
 use lash_kernel_vm::{EffectRequest, Outcome};
@@ -524,7 +524,7 @@ impl KernelEffects for CellHost<'_> {
             }
             ledgers.calls.push(LedgerCall {
                 control,
-                operation: request.use_.clone(),
+                operation: request.use_,
                 effect: request.identity.clone(),
                 state: LedgerCallState::Pending {
                     call_id: invocation.id.clone(),
@@ -677,7 +677,7 @@ impl KernelEffects for CellHost<'_> {
             let control = call.control();
             graph.state.admit(
                 call.effect.clone(),
-                call.operation.clone(),
+                call.operation,
                 call.call_id().clone(),
                 admission,
                 control,

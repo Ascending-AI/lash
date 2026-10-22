@@ -12,7 +12,6 @@ use lash_vocabulary::ImportSlot;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::document::Document;
 use lash_vocabulary::names::FunctionId;
 use lash_vocabulary::names::Name;
 use lash_vocabulary::types::Signature;

@@ -88,7 +88,7 @@ fn brand_one_package_constructors_use_canonical_brands_and_their_own_identities(
              let brand = invoke brand.of(value)\n\
              return (brand, value.__lash_built)\n}}\n"
         );
-        let document = super::linked::definitions(&source, &["run"], super::library());
+        let document = super::linked_inspection::definitions(&source, &["run"], super::library());
         let (_, result) = machine::end_of_entry(document, "run", vec![]);
         let Datum::Tuple(parts) = result else {
             panic!("constructor returns its brand and stamp: {package}.{ty}");

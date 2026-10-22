@@ -4,9 +4,7 @@
 use super::{OwnerConfigView, PluginRegistrar};
 use crate::deferred_provider::DeferredResolveContext;
 use lash_core_store::artifact_referrer::ReferrerClaim;
-use lash_core_store::{
-    process_env::ProcessEnv, resolutions::ResolutionSeed, tool_surface::OperationRoute,
-};
+use lash_core_store::{process_env::ProcessEnv, tool_surface::OperationRoute};
 use lash_execution_contracts::{
     PluginError,
     process::{EngineSettings, linking::*},

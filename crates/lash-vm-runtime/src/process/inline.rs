@@ -15,9 +15,7 @@ impl super::InlineRequest {
                 StartSelector::Main => lash_kernel_vm::Target::Main,
                 StartSelector::Export(name) => lash_kernel_vm::Target::Entry(name.clone()),
             },
-            Self::Callable { function, .. } => {
-                lash_kernel_vm::Target::Callable(Box::new(function.clone()))
-            }
+            Self::Callable { function, .. } => lash_kernel_vm::Target::Callable(function.clone()),
             Self::Unlinked { .. } => return Err("unrealized process input".into()),
         })
     }

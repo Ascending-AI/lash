@@ -17,9 +17,7 @@ use lash_execution_contracts::process::StepName;
 use lash_kernel_doc::Datum;
 use lash_kernel_state::AdmittedWait;
 use lash_vm_client::wire::OutcomeWire;
-use lash_vocabulary::names::DocumentId;
-use lash_vocabulary::names::FunctionId;
-use lash_vocabulary::names::Name;
+
 use lash_vocabulary::sites::EffectId;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
@@ -85,9 +83,9 @@ impl KernelProcessDefinition {
         definition.validate()?;
         Ok(definition)
     }
-    pub fn executable_generation(&self) -> lash_core::ExecutableGeneration {
-        let draft = super::definition_draft(self).expect("validated realized process definition");
-        lash_core::ExecutableGeneration::new(draft.id().to_string())
+    pub fn executable_generation(&self) -> Option<lash_core::ExecutableGeneration> {
+        let draft = super::definition_draft(self).ok()?;
+        Some(lash_core::ExecutableGeneration::new(draft.id().to_string()))
     }
     pub fn artifacts(&self) -> Vec<lash_core::ArtifactName> {
         self.code.artifacts()
@@ -436,7 +434,7 @@ pub(crate) enum KernelRunOutput {
             default,
             skip_serializing_if = "lash_vocabulary::claims::ClaimRequirements::is_empty"
         )]
-        requirements: lash_vocabulary::claims::ClaimRequirements,
+        requirements: Box<lash_vocabulary::claims::ClaimRequirements>,
     },
     /// The run ended.
     Ended {

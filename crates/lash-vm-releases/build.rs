@@ -22,7 +22,7 @@ use lash_kernel_doc::{Document, Export, FunctionExport, StartConvention};
 
 use lash_kernel_doc::{FunctionDefinition, FunctionRegistry};
 
-use lash_vocabulary::{claims::NodeRequirements, names::*, package::*};
+use lash_vocabulary::{claims::NodeRequirements, names::*};
 use std::collections::BTreeMap;
 
 struct ReleaseUnit {

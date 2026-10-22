@@ -1,9 +1,6 @@
 //! Host authoring projects accepted advertisements through the runtime; Core carries neutral inputs only.
-use super::documents::{inspection, refused};
-use super::{
-    KernelDocuments, KernelProcessDefinition, KernelProcessEngine, definition_draft,
-    entry_signature,
-};
+use super::documents::refused;
+use super::{KernelDocuments, KernelProcessEngine, definition_draft, entry_signature};
 use lash_execution_contracts::process::linking::*;
 use lash_execution_contracts::process::*;
 use lash_kernel_dialect::{FunctionMember, NamespaceKind, NamespaceMember, Namespaces, ValueType};

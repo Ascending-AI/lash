@@ -308,29 +308,28 @@ pub(crate) fn draw(
             .or_default()
             .push(site);
     }
-    let (nodes, edges) = match document.map(WorkflowDocument::graph) {
-        Some(graph) => (
-            graph
-                .execution_sites()
-                .iter()
-                .map(|site| {
-                    node(
-                        site.site.to_string(),
-                        site.kind.into(),
-                        site_label(
-                            graph,
-                            document.expect("loaded graph has its document").document(),
-                            site,
-                        ),
-                        site.loops.len(),
-                        observed
-                            .get(&site.site.position())
-                            .map_or(&[], Vec::as_slice),
-                    )
-                })
-                .collect(),
-            site_edges(graph),
-        ),
+    let (nodes, edges) = match document {
+        Some(document) => {
+            let graph = document.graph();
+            (
+                graph
+                    .execution_sites()
+                    .iter()
+                    .map(|site| {
+                        node(
+                            site.site.to_string(),
+                            site.kind.into(),
+                            site_label(graph, document.document(), site),
+                            site.loops.len(),
+                            observed
+                                .get(&site.site.position())
+                                .map_or(&[], Vec::as_slice),
+                        )
+                    })
+                    .collect(),
+                site_edges(graph),
+            )
+        }
         None => (
             observed
                 .iter()

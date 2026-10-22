@@ -14,7 +14,6 @@ use serde::{Deserialize, Serialize};
 
 use crate::number::{Float, Integer, NumberToken};
 
-use lash_vocabulary::names::Name;
 use lash_vocabulary::names::parse_hex;
 use lash_vocabulary::names::string_schema;
 use lash_vocabulary::names::write_hex;

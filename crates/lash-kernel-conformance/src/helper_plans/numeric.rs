@@ -6,7 +6,7 @@ use super::*;
 /// bodies, including the completion tape, raises and depth refusals.
 #[test]
 fn generated_scalar_templates_agree_with_their_bodies() {
-    use lash_kernel_doc::{Float, PreparedNative, Value, parse_document};
+    use lash_kernel_doc::{Float, PreparedNative, Value};
 
     use std::sync::Arc;
     let samples = [
@@ -208,7 +208,7 @@ fn generated_scalar_templates_agree_with_their_bodies() {
 /// the template, including negative zero and mixed numeric kinds.
 #[test]
 fn python_floor_forwards_agree_with_their_bodies_on_edge_pairs() {
-    use lash_kernel_doc::{parse_document, scalar::ScalarOp};
+    use lash_kernel_doc::scalar::ScalarOp;
 
     use std::sync::Arc;
     let runner = runner::Runner::new("python").unwrap();

@@ -153,7 +153,10 @@ impl Parent {
             crate::embedding::tests::every_dialect(&Default::default()).expect("embedding");
         let program = crate::embedding::tests::linked(
             document.into_document(),
-            embedding.prepared_library().unwrap().clone(),
+            embedding
+                .prepared_library()
+                .expect("the linked turn fixture is valid")
+                .clone(),
         );
         let pages = self.pages.take().expect("a lease's pages");
         self.pages = Some(pages.with_references([NodeId(program.closure.0), NodeId(BINDING)]));
@@ -273,10 +276,14 @@ fn turn(parent: &mut Parent, bounds: RunBounds) {
     };
     parent.name_hosts(&document);
     let embedding = crate::embedding::tests::every_dialect(&Default::default()).expect("embedding");
-    let loaded = lash_kernel_doc::IdentifiedDocument::decode_standard(&document).unwrap();
+    let loaded = lash_kernel_doc::IdentifiedDocument::decode_standard(&document)
+        .expect("the linked turn fixture is valid");
     let program = crate::embedding::tests::linked(
         loaded.into_document(),
-        embedding.prepared_library().unwrap().clone(),
+        embedding
+            .prepared_library()
+            .expect("the linked turn fixture is valid")
+            .clone(),
     );
     let start = Start {
         owner: VmOwner::new("codemode:session"),
@@ -286,7 +293,7 @@ fn turn(parent: &mut Parent, bounds: RunBounds) {
             PayloadKind::Start,
             &program.instances.values().cloned().collect::<Vec<_>>(),
         )
-        .unwrap(),
+        .expect("the linked turn fixture is valid"),
         documents: program
             .documents
             .iter()
@@ -344,9 +351,7 @@ fn turn(parent: &mut Parent, bounds: RunBounds) {
                 let park: ParkWire = wire::decode(PayloadKind::Park, &park).expect("park");
                 let park = MachinePark::try_from(park).expect("canonical park");
                 for request in park.requests {
-                    let RunRequest::Effect(effect) = request else {
-                        panic!("the cell performs effects")
-                    };
+                    let RunRequest::Effect(effect) = request;
                     deliveries.push(Delivery {
                         wait: effect.wait,
                         outcome: wire::encode(

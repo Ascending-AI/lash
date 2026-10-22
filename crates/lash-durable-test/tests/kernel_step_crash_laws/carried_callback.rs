@@ -221,7 +221,7 @@ fn core(
 }
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_preexisting_callback_authorizes_after_carry_and_a_cold_reopen_on_sqlite() {
-    run_callback(SOURCE, Discovery::None).await;
+    Box::pin(run_callback(SOURCE, Discovery::None)).await;
 }
 
 /// L-DEFERRED-PIN: committed negatives are never rediscovered by carries or a cold callback.
@@ -240,7 +240,7 @@ async fn a_negative_resolution_stays_pinned_across_carry_and_a_cold_reopen_on_sq
             "  do perform 0(5000)",
             "  let before = apply callback()\n  do perform 0(5000)",
         );
-    run_callback(&source, Discovery::Negative).await;
+    Box::pin(run_callback(&source, Discovery::Negative)).await;
 }
 
 /// L-DEFERRED-PIN: a resolved callback keeps its captured argument and exact
@@ -252,7 +252,7 @@ async fn a_resolved_callback_keeps_its_capture_and_target_across_carry_and_a_col
         .replace("  let callback = fn() { do perform 0(1) as Null return \"creation-code\" }",
             "  let captured = {value: \"creation-code\"}\n  let callback = fn() { do perform 0(1) as Null let answer = perform 1(captured) as Json return answer }")
         .replace("  do perform 0(5000)", "  let before = apply callback()\n  do perform 0(5000)");
-    run_callback(&source, Discovery::Resolved).await;
+    Box::pin(run_callback(&source, Discovery::Resolved)).await;
 }
 
 async fn run_callback(source: &str, discovery: Discovery) {
@@ -564,16 +564,14 @@ async fn publish(
     for import in document.imports.values_mut() {
         if let lash_vocabulary::ImportKind::Operation { signature } = &mut import.kind {
             for accepted in &packages.snapshot.advertisements {
-                if let PackageAdvertisement::Enumerated(package) = &accepted.advertisement {
-                    if package.path == import.name.package {
-                        if let Some(Member {
-                            kind: MemberKind::Operation(offer),
-                            ..
-                        }) = package.members.get(&import.name.member)
-                        {
-                            *signature = offer.requirement.signature.clone();
-                        }
-                    }
+                if let PackageAdvertisement::Enumerated(package) = &accepted.advertisement
+                    && package.path == import.name.package
+                    && let Some(Member {
+                        kind: MemberKind::Operation(offer),
+                        ..
+                    }) = package.members.get(&import.name.member)
+                {
+                    *signature = offer.requirement.signature.clone();
                 }
             }
         }

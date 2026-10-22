@@ -4,8 +4,7 @@
 //! Printing verifies the complete lowering identity and captions. A document
 //! with no faithful authored representation is refused.
 
-use std::collections::{BTreeMap, BTreeSet};
-use std::ops::Range;
+use std::collections::BTreeSet;
 
 use lash_kernel_dialect::regions::{self, RegionRead};
 use lash_kernel_dialect::{

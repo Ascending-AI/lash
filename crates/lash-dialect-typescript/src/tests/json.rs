@@ -120,7 +120,7 @@ fn program() -> &'static Program {
         text.push_str("use idle\n");
         text.push_str("use quick\n");
         text.push_str(ENTRIES);
-        let document = super::linked::definitions(
+        let document = super::linked_inspection::definitions(
             &text,
             &["fast", "walk", "admits", "draw", "idle"],
             super::library(),
@@ -146,7 +146,7 @@ impl Host for Console {
         _: &lash_vocabulary::sites::PositionLabel,
         _: &lash_vocabulary::sites::Site,
     ) -> Result<Result<Datum, lash_kernel_doc::ErrorDatum>, lash_kernel_vm::HostFault> {
-        crate::tests::linked::read(use_, 0)
+        crate::tests::linked_reads::read(use_, 0)
     }
 
     fn read(&mut self, _handle: &Handle, _request: &Datum) -> Result<Datum, ErrorDatum> {

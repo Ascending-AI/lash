@@ -19,7 +19,7 @@ use lash_kernel_doc::{
     NumberPolicy, Place, Rhs, Stmt, TryStmt,
 };
 
-use lash_vocabulary::{EffectName, FunctionId, FunctionName, Name};
+use lash_vocabulary::{FunctionId, FunctionName, Name};
 
 use crate::adapter as ast;
 use crate::builtins::{self, Table};
@@ -180,10 +180,6 @@ impl Buf {
 
     fn last_stmt(&self) -> Option<&Stmt> {
         self.emitted.last().map(|emitted| &emitted.stmt)
-    }
-
-    fn last_stmt_mut(&mut self) -> Option<&mut Stmt> {
-        self.emitted.last_mut().map(|emitted| &mut emitted.stmt)
     }
 
     fn last_note_mut(&mut self) -> Option<&mut Note> {
@@ -530,7 +526,7 @@ pub(crate) fn lower_beside(
     // require.
     lowerer.declared_notes.extend(lowerer.local_notes);
     let document = lash_kernel_doc::IdentifiedDocument::new(document);
-    let mut layers = lash_kernel_dialect::site_layers(
+    let layers = lash_kernel_dialect::site_layers(
         &document,
         source,
         lash_kernel_doc::SourceLanguage::TypeScript,
@@ -1067,10 +1063,13 @@ impl Lowerer<'_> {
                 self.span,
             )
         })?;
-        let header = self
-            .library
-            .header(&function)
-            .expect("resolved helper has a header");
+        let header = self.library.header(&function).ok_or_else(|| {
+            Diagnostic::new(
+                DiagnosticCode::LinkError,
+                format!("the helper `{name}` has no header"),
+                self.span,
+            )
+        })?;
         if header.has_native() {
             self.used.insert(function, header.name.clone());
             return Ok(lash_kernel_doc::FunctionTarget::Local(function));
@@ -1092,7 +1091,7 @@ impl Lowerer<'_> {
 
     /// Native and body helpers both nest, using their admitted call form.
     pub(crate) fn invoke(&mut self, function: &str, args: &[Operand], ty: Ty) -> Lowering<Operand> {
-        let identity = self.library.resolve(function).expect("helper is installed");
+        let identity = self.function(function)?;
         let target = self.helper_callee(function)?;
         // Its header alone: a first use decodes no body (FIG-6931).
         let header = self.library.header(&identity);

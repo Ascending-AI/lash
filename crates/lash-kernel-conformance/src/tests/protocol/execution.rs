@@ -235,13 +235,11 @@ fn sites(rule: &str, case: &Case) {
         let effect = || {
             at.requests
                 .iter()
-                .find_map(|r| {
-                    if let lash_kernel_vm::Request::Effect(r) = r {
-                        Some(r)
-                    } else {
-                        None
-                    }
+                .map(|r| {
+                    let lash_kernel_vm::Request::Effect(r) = r;
+                    r
                 })
+                .next()
                 .unwrap()
         };
         match rule {
@@ -407,9 +405,7 @@ fn committed(case: &Case) {
         panic!("effect park")
     };
     assert_eq!(park.requests.len(), 1);
-    let lash_kernel_vm::Request::Effect(request) = &park.requests[0] else {
-        panic!("effect request")
-    };
+    let lash_kernel_vm::Request::Effect(request) = &park.requests[0];
     let admitted = machine.seal(crate::pages::BUDGET).unwrap().unwrap();
     let outcome = lash_kernel_vm::Outcome::Completed(int(7));
     machine.deliver(request.wait, outcome.clone()).unwrap();

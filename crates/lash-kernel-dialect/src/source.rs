@@ -77,9 +77,10 @@ pub fn define_functions_with(
             .to_string();
         let mut text = chunk;
         for operation in &header.operations {
-            let at = operation
-                .find('(')
-                .expect("operation declaration has signature");
+            let at = operation.find('(').ok_or_else(|| SourceError::Complete {
+                function: label.clone(),
+                reason: format!("operation `{operation}` has no signature"),
+            })?;
             let path = &operation[..at];
             let operation_name = lash_vocabulary::operation_text::parse(path).map_err(|error| {
                 SourceError::Complete {

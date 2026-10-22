@@ -26,16 +26,16 @@ fn code_sites(document: &Document) -> Vec<(Site, String)> {
     }
     let mut out = Vec::new();
     for (unit, block) in document.units() {
-        if let Unit::Library(id) = unit {
-            if !matches!(
+        if let Unit::Library(id) = unit
+            && !matches!(
                 document.functions[&id].implementation,
                 lash_kernel_doc::Implementation::Guest {
                     metering: lash_kernel_doc::Metering::Statements,
                     ..
                 }
-            ) {
-                continue;
-            }
+            )
+        {
+            continue;
         }
         walk(Node::Block(block), Site::new(unit, Vec::new()), &mut out);
     }

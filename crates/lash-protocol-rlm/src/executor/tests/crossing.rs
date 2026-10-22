@@ -500,7 +500,6 @@ async fn a_function_in_a_json_schema_data_slot_raises_not_data_naming_its_path()
 /// the dialect knew of a capture's type shapes the code it wrote, so both
 /// are part of the code; the functions here read their capture alike in
 /// either cell.
-
 /// FN-TAG: a record a guest writes under the reserved key reaches the tool
 /// as escaped plain data, never as a function value, beside a function
 /// value the typed encoder wrote once in its canonical form.

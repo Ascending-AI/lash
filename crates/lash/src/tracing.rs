@@ -58,7 +58,6 @@ pub use lash_core::{
     facade_support::TraceRecord, facade_support::TraceRuntimeScope,
     facade_support::TraceRuntimeSubject, facade_support::TraceSinkError,
 };
-pub use lash_protocol_types::ExecutionNodeKind;
 #[cfg(feature = "otel-trace")]
 pub use lash_trace::otel::api as otel;
 

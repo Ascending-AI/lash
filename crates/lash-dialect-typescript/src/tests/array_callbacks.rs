@@ -459,7 +459,7 @@ fn a_callback_that_parks_inside_a_method_resumes_identically() {
                  return (out, log, xs)\n\
                  }}\n"
             );
-            let document = super::linked::main(&text, &kernel.library);
+            let document = super::linked_inspection::main(&text, &kernel.library);
             crate::tests::linked::program(Arc::new(document), kernel.prepared.clone())
         };
         let straight = observe(program(after()), false);

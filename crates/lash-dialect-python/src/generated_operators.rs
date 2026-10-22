@@ -202,14 +202,6 @@ impl Operators {
     }
 }
 
-/// The helper a builtin's authored call stands for.
-pub(crate) fn builtin_label(name: &str) -> Option<&'static str> {
-    BUILTINS
-        .iter()
-        .find(|(builtin, _)| *builtin == name)
-        .map(|(_, helper)| *helper)
-}
-
 pub(crate) trait Reference {
     fn label(&self, operators: &Operators) -> Option<String>;
 }
@@ -241,10 +233,10 @@ impl Operators {
         reference.label(self)
     }
     pub(crate) fn is(&self, reference: &impl Reference, label: &str) -> bool {
-        let expected = lash_kernel_dialect::authoring::helper_name(
-            &FunctionName::new(label).expect("helper name"),
-        )
-        .to_string();
+        let Ok(name) = FunctionName::new(label) else {
+            return false;
+        };
+        let expected = lash_kernel_dialect::authoring::helper_name(&name).to_string();
         reference
             .label(self)
             .is_some_and(|name| name == label || name == expected)

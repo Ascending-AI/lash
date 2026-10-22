@@ -30,7 +30,6 @@
 
 use std::collections::BTreeMap;
 
-use lash_kernel_check::library_performs;
 use lash_kernel_package::{ExportName, ImportSlot};
 mod activity;
 mod applies;
@@ -1132,9 +1131,7 @@ impl<'a> Walk<'a> {
                 ActionRole::Task
             }
         };
-        let applies = self
-            .links
-            .applies(self.graph, self.functions, derived, self.context);
+        let applies = self.links.applies(self.graph, derived, self.context);
         let mut performs = match &callee {
             Some(CalleeView::Effect(effect)) => std::collections::BTreeSet::from([*effect]),
             Some(CalleeView::Library { id, link, .. }) => {
@@ -1153,7 +1150,6 @@ impl<'a> Walk<'a> {
         };
         performs.extend(applied_performs(
             self.graph,
-            self.functions,
             &mut self.links,
             &applies,
             self.context,
@@ -1181,7 +1177,6 @@ impl<'a> Walk<'a> {
 /// derivation; the view only follows the callable sites `applies` has resolved.
 fn applied_performs(
     graph: &Graph,
-    functions: &FunctionDeclarations,
     links: &mut applies::Links,
     callables: &[Site],
     context: &ViewContext,
@@ -1256,7 +1251,7 @@ fn applied_performs(
                 _ => {}
             }
             if let Some(action) = action {
-                callables.extend(links.applies(graph, functions, action, context));
+                callables.extend(links.applies(graph, action, context));
             }
             match &node.kind {
                 NodeKind::Expr(ExprNode::Call { function, .. })
@@ -1483,5 +1478,5 @@ fn context_callee(
     &lash_kernel_doc::FunctionDefinition,
 )> {
     let id = context.resolve(context.reference.link, slot)?;
-    Some((id.clone(), context.function(&id)?))
+    Some((id, context.function(&id)?))
 }

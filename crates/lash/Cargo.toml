@@ -98,7 +98,7 @@ codemode = [
 rlm = ["codemode", "dep:lash-protocol-rlm", "dep:lash-rlm-types", "dep:lash-render"]
 
 # The canvas read of a checked document (`lash::workflow::view`), drawn with
-# display facts from the selected `lash::package::PackageView`. It
+# display facts from the retained `lash::workflow::view::ViewContext`. It
 # links the kernel's document, checker and view and no dialect, editor or
 # runtime: a viewer draws TypeScript and Python workflows alike without
 # either parser.

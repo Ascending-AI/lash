@@ -259,7 +259,6 @@ fn the_promise_constructor_is_refused() {
 
 /// `instanceof Promise` calls its unary predicate with the tested value,
 /// including after the kernel document has been printed as TypeScript.
-
 /// FIG-5905: the source computes the recorded Node result.
 #[test]
 fn promise_aggregates_follow_reaction_order() {

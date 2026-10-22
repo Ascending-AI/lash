@@ -10,7 +10,7 @@ use lash_kernel_dialect::{EffectControl, Left, NotSaved};
 use lash_kernel_doc::heap::HeapFault;
 use lash_kernel_vm::{CellSave, CellSaveContext, SaveCell, SavedCell};
 use lash_vm_client::service::LowerFunction;
-use lash_vocabulary::names::EffectName;
+
 use lash_vocabulary::sites::Site;
 
 /// How a cell of one dialect saves its functions.

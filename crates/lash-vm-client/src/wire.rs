@@ -23,7 +23,7 @@ use lash_kernel_vm::{
 use lash_vm_broker::kernel::MachinePark;
 use lash_vm_protocol::EncodedPayload;
 use lash_vm_protocol::page::PageCapability;
-use lash_vocabulary::names::EffectName;
+
 use lash_vocabulary::names::FunctionId;
 use lash_vocabulary::names::FunctionName;
 use lash_vocabulary::names::Name;

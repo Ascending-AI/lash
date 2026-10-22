@@ -157,7 +157,7 @@ impl Host for Console {
         _: &lash_vocabulary::sites::PositionLabel,
         _: &lash_vocabulary::sites::Site,
     ) -> Result<Result<Datum, ErrorDatum>, lash_kernel_vm::HostFault> {
-        crate::linked::read(use_, 0)
+        crate::linked_reads::read(use_, 0)
     }
 
     fn read(&mut self, _handle: &Handle, _request: &Datum) -> Result<Datum, ErrorDatum> {
@@ -209,7 +209,7 @@ fn start_on(program: &Program, source: &pages::Source) -> KernelMachine {
         target: Target::Main,
         args: Vec::new(),
         session: None,
-        modes: crate::linked::modes(program),
+        modes: crate::pages::modes(program),
         host: Vec::new(),
     };
     KernelMachine::start(
@@ -232,7 +232,7 @@ fn to_end(machine: &mut KernelMachine, name: &str) -> (u64, Datum) {
     )
 }
 
-fn try_to_end(machine: &mut KernelMachine, name: &str) -> Result<(Option<u64>, Datum), End> {
+fn try_to_end(machine: &mut KernelMachine, name: &str) -> Result<(Option<u64>, Datum), Box<End>> {
     let mut console = Console::default();
     let mut finished = Datum::Null;
     loop {
@@ -246,7 +246,7 @@ fn try_to_end(machine: &mut KernelMachine, name: &str) -> Result<(Option<u64>, D
                 }
             }
             Step::Ended(End::Finished(_)) => return Ok((machine.meters().charged, finished)),
-            Step::Ended(other) => return Err(other),
+            Step::Ended(other) => return Err(Box::new(other)),
             Step::Slice => unreachable!("the slice is unbounded"),
         }
     }
@@ -481,13 +481,9 @@ fn main() -> Result<(), String> {
     // Prepared once, as in a worker: helper bodies compile only on use;
     // each live document's preparation is reused at start.
     let prepared = PreparedLibrary::new(Arc::clone(&registry));
-    let library = NamedLibrary::resolving(&registry, |id| {
-        lash_vm_releases::helper_release()
-            .expect("helper release")
-            .resolver_roots()
-            .contains(id)
-    })
-    .expect("unique library names");
+    let release = lash_vm_releases::helper_release().map_err(|error| error.to_string())?;
+    let library = NamedLibrary::resolving(&registry, |id| release.resolver_roots().contains(id))
+        .expect("unique library names");
     let effects = effects();
     let controls = BTreeMap::from([(
         EffectName::new("perf.finish").expect("a tool's name"),
@@ -1123,13 +1119,9 @@ fn host_json_probe() -> Result<(), String> {
         }
     }
     let registry = registry();
-    let library = NamedLibrary::resolving(&registry, |id| {
-        lash_vm_releases::helper_release()
-            .expect("helper release")
-            .resolver_roots()
-            .contains(id)
-    })
-    .unwrap();
+    let release = lash_vm_releases::helper_release().map_err(|error| error.to_string())?;
+    let library =
+        NamedLibrary::resolving(&registry, |id| release.resolver_roots().contains(id)).unwrap();
     let prepared = PreparedLibrary::new(Arc::clone(&registry));
     let effects = effects();
     let env_namespaces = crate::linked::namespaces(&effects, &Default::default()).unwrap();
@@ -1174,7 +1166,7 @@ fn host_json_probe() -> Result<(), String> {
                     target: Target::Main,
                     args: Vec::new(),
                     session: None,
-                    modes: crate::linked::modes(&program),
+                    modes: crate::pages::modes(&program),
                     host: Vec::new(),
                 },
                 Box::new(source),
@@ -1228,3 +1220,5 @@ fn host_json_probe() -> Result<(), String> {
 
 #[path = "../src/tests/linked.rs"]
 mod linked;
+#[path = "../src/tests/linked_reads.rs"]
+mod linked_reads;

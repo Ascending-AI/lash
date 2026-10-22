@@ -495,15 +495,7 @@ impl<'embedding> Server<'embedding> {
             })
         };
         let fresh = matches!(start.from, StartFrom::Fresh(_));
-        let program = self.program(
-            &start.document,
-            &start.definitions,
-            &start.functions,
-            start.link,
-            &start.instances,
-            &start.documents,
-            fresh,
-        )?;
+        let program = self.program(&start, fresh)?;
         let path = start.observe_path.then(|| program.document.site_ordinals());
         let bounds = Bounds {
             memory_meter: match start.bounds.memory_meter {
@@ -666,14 +658,15 @@ impl<'embedding> Server<'embedding> {
     /// function.
     fn program(
         &mut self,
-        encoded: &EncodedPayload,
-        definitions: &[StoredDefinition],
-        functions: &std::collections::BTreeSet<lash_vocabulary::names::FunctionId>,
-        link: lash_vocabulary::content_ids::LinkId,
-        encoded_instances: &EncodedPayload,
-        supplied_documents: &[lash_vm_protocol::message::StoredDocument],
+        start: &lash_vm_protocol::message::Start,
         fresh: bool,
     ) -> Result<Program, PoolError> {
+        let encoded = &start.document;
+        let definitions = &start.definitions;
+        let functions = &start.functions;
+        let link = start.link;
+        let encoded_instances = &start.instances;
+        let supplied_documents = &start.documents;
         let document = IdentifiedDocument::decode(&encoded.0, self.bootstrap.tuning.kernel_data)
             .map_err(|error| {
                 PoolError::refused(RunRefusal::Undecodable {

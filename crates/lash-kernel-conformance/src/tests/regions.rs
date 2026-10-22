@@ -17,7 +17,6 @@ use lash_kernel_vm::kernel_internals::{
     Layout, RegionWork, call_islands, in_charge, loop_regions, prepare_with_layout, transient_hold,
 };
 use lash_kernel_vm::{Charge, Machine, PreparedLibrary, Program};
-use lash_vocabulary::names::Name;
 
 use crate::machine::{Run, case_program, run_program_in};
 use crate::projection::{Image, Plan, Projector, corpus_agrees, taped_work};
@@ -872,7 +871,7 @@ fn program_case(name: &str, text: &str, call_depth: u32) -> Case {
     source.push_str(text);
     let document = crate::document_fixture::authored(&source, &registry);
     // A refused program runs in no plan, and the law would compare nothing.
-    let mut admission = lash_kernel_check::Environment::new(&registry);
+    let admission = lash_kernel_check::Environment::new(&registry);
     lash_kernel_check::admit(&document, &admission)
         .unwrap_or_else(|refusal| panic!("{name} must be admitted: {refusal:?}"));
     let mut environment = Environment::default();
@@ -1251,12 +1250,7 @@ fn finished<const L: u64>(
         Box::new(crate::pages::Source::default()),
     )
     .unwrap_or_else(|error| panic!("{}: {error}", case.name));
-    let mut world = crate::helper_plans::World {
-        bits: 0,
-        stride: 1,
-        nanoseconds: 0,
-        prints: Vec::new(),
-    };
+    let mut world = crate::helper_plans::World { prints: Vec::new() };
     let mut returns = Vec::new();
     loop {
         match machine.run(&mut world, slice) {
@@ -1628,12 +1622,7 @@ fn limited<const L: u64>(
             }),
             ..Default::default()
         });
-        let mut world = crate::helper_plans::World {
-            bits: 0,
-            stride: 1,
-            nanoseconds: 0,
-            prints: Vec::new(),
-        };
+        let mut world = crate::helper_plans::World { prints: Vec::new() };
         loop {
             match machine.run(&mut world, u64::MAX) {
                 Ok(lash_kernel_vm::Step::Ended(end)) => {

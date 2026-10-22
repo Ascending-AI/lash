@@ -102,7 +102,7 @@ pub(crate) async fn namespace(
         domain: PublicationDomain(core.backend().binding_identity().to_string()),
         scope: PublicationScope::Host,
         publisher: PublisherInstance("workflow-graph".into()),
-        root: Segment::new("workflow").unwrap(),
+        root: Segment::new("workflow").map_err(|error| RunError::Invalid(error.to_string()))?,
     };
     let packages = core
         .host_artifacts()
@@ -814,12 +814,14 @@ impl Overlay {
 
     fn waiting(&mut self, wait: &WaitState) -> RunEvent {
         let mut event = self.event(
-            wait.site.as_ref().map(|at| at.position()),
+            wait.site
+                .as_ref()
+                .map(|location| location.origin.position()),
             RunStatus::Waiting,
             DisplayDelta::default(),
             None,
         );
-        event.occurrence = wait.site.clone();
+        event.occurrence = wait.site.as_ref().map(|location| location.at.clone());
         if let WaitKind::Call { call_id, .. } = &wait.kind {
             event.approval_key = self.host.approval_key(&self.process, call_id.as_str());
         }
@@ -1309,6 +1311,7 @@ mod tests {
             );
             let durable = ProcessEffectOccurrence {
                 vocabulary_version: 1,
+                origin: Site::new(Unit::Main, [0, 0]),
                 at: lash::workflow::document::testkit::effect(
                     lash::workflow::document::testkit::root_task(),
                     Site::new(Unit::Main, [0, 0]),

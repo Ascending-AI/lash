@@ -19,7 +19,7 @@ pub enum WorkflowImport {
     /// the document to keep them. `captions` are those the source spelled:
     /// they replace whatever the host held for this workflow.
     Imported {
-        environment: lash_vm_runtime::WorkflowEnvironmentRequest,
+        environment: Box<lash_vm_runtime::WorkflowEnvironmentRequest>,
         document: DocumentBytes,
         source_map: SourceMap,
         source: String,
@@ -66,7 +66,7 @@ pub(crate) async fn import(
         Err(error) => return source_refusal(error),
     };
     Ok(WorkflowImport::Imported {
-        environment,
+        environment: Box::new(environment),
         document: DocumentBytes::from(document),
         source_map,
         source: source.to_owned(),

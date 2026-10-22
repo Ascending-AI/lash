@@ -140,7 +140,7 @@ impl ExecutionResolutions for SqliteDurableStore {
                         ))
                     })
                     .optional()?;
-                let Some((epoch, state, revision, requires)) = row else {
+                let Some((epoch, state, revision, _requires)) = row else {
                     return refuse(super::fenced(
                         tx,
                         &owner.actor,

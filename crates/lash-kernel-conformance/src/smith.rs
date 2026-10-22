@@ -10,7 +10,7 @@ use std::sync::{Arc, OnceLock};
 use arbitrary::{Arbitrary, Unstructured};
 use lash_kernel_doc::Document;
 use lash_kernel_doc::FunctionRegistry;
-use lash_kernel_doc::parse_document;
+
 use lash_kernel_vm::{Bounds, PreparedLibrary};
 use lash_vocabulary::names::Name;
 
@@ -62,7 +62,7 @@ fn library() -> &'static Library {
             .unwrap_or_else(|error| panic!("text definitions: {error}"));
         lash_kernel_lib::register_collections(&mut registry)
             .unwrap_or_else(|error| panic!("collection bodies: {error}"));
-        let mut header = String::from(
+        let header = String::from(
             "kernel 1\nnumbers by_spelling\nimport 0 operation host.echo(x: Any) -> Any\nimport 1 operation typescript.sleep(milliseconds: Int) -> Null\n",
         );
         let registry = Arc::new(registry);

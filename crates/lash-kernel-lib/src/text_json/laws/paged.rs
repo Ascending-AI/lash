@@ -5,7 +5,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use lash_kernel_doc::heap::{HeapFault, PageId, PageRef};
-use lash_kernel_doc::{Datum, FunctionRegistry, parse_document};
+use lash_kernel_doc::{Datum, FunctionRegistry};
 
 use lash_kernel_state::paged::{PageAnswer, PageBody, PageSource, SealBudget};
 use lash_kernel_vm::kernel_internals::{Layout, start_with_layout};
@@ -91,9 +91,7 @@ fn park(machine: &mut KernelMachine, world: &mut World) -> Request {
 }
 
 fn deliver(machine: &mut KernelMachine, request: &Request) {
-    let Request::Effect(effect) = request else {
-        panic!("{request:?}")
-    };
+    let Request::Effect(effect) = request;
     machine
         .deliver(effect.wait, Outcome::Completed(effect.args[0].clone()))
         .unwrap();

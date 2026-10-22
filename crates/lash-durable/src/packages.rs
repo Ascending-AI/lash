@@ -4,7 +4,7 @@ use crate::formats::FormatSet;
 use crate::{DurableError, StoreFailure, StoreFailureKind};
 pub use lash_vocabulary::claims::{ClaimRequirements, NodeCapabilities};
 
-/// One live node, as the fleet gates read it (P1: one entry per node).
+/// One live node, as capability admission reads it (P1: one entry per node).
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct NodeCapability {
     /// The format sets the node decodes.
@@ -84,9 +84,7 @@ pub fn strand(requires: &[String], live: &[NodeCapability]) -> Option<ClaimRequi
     let record = lash_vocabulary::claims::ObligationToken::requirements_of(
         requires.iter().map(String::as_str),
     );
-    if record.tokens().next().is_none() {
-        return None;
-    }
+    record.tokens().next()?;
     let size = |unmet: &ClaimRequirements| unmet.tokens().count();
     let closest = live
         .iter()

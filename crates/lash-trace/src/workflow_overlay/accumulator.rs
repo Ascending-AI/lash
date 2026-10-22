@@ -257,7 +257,7 @@ impl WorkflowExecutionOverlayAccumulator {
             observation.observed_at_ms,
             ExecutionRef::of_step(&observation.step),
             WorkflowOverlayFact::StepBodyStarted {
-                step: observation.step.clone(),
+                step: Box::new(observation.step.clone()),
             },
         )
     }

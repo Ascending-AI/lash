@@ -1,5 +1,5 @@
 //! One binding rule for every generated-source rendering and reading path.
-use lash_kernel_doc as k;
+
 use std::collections::BTreeSet;
 
 #[derive(Default)]

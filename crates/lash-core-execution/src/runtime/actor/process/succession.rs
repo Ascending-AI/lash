@@ -243,7 +243,7 @@ impl ProcessActivation {
                         entry: record.entry.clone(),
                     })
                     .collect();
-                let mut known = match self.steps.check_successor_links(
+                let known = match self.steps.check_successor_links(
                     &std::sync::Arc::new(successor_env.clone()),
                     &inspection,
                     &seeds,
@@ -389,7 +389,7 @@ impl ProcessActivation {
             .await
             .map_err(unavailable)?;
         request.env = reference;
-        let mut registration = crate::runtime::actor::resolutions::registration(
+        let registration = crate::runtime::actor::resolutions::registration(
             context.execution.clone(),
             &inspection,
             lash_core_store::artifact_referrer::ArtifactReferrer::ProcessRecord(

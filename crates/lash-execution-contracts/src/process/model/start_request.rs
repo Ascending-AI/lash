@@ -145,7 +145,7 @@ impl ProcessStartDeclaration {
         Self::of_target(
             ProcessStartTarget::Inline {
                 engine_kind,
-                request,
+                request: Box::new(request),
                 args,
                 launch,
             },
@@ -335,7 +335,7 @@ impl ProcessStartRequest {
         Self::of_target(
             ProcessStartTarget::Inline {
                 engine_kind: engine_kind.into(),
-                request,
+                request: Box::new(request),
                 args,
                 launch,
             },

@@ -6,7 +6,7 @@ use super::tree::{Access, Cell, SealWork, Tree};
 use super::*;
 use lash_kernel_doc::heap::*;
 use lash_kernel_doc::heap_values::{decode_value_with_family, encode_relative};
-use lash_vocabulary::names::Name;
+
 use lash_vocabulary::tokens::{TokenCodec, TokenError, TokenReader, TokenWriter, encode_body};
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::ops::ControlFlow;

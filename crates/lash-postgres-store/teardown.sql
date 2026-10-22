@@ -100,6 +100,8 @@ DROP TABLE IF EXISTS lash_tool_intent_retired_owners CASCADE;
 
 DROP TABLE IF EXISTS lash_lash_vm_artifacts CASCADE;
 
+DROP TABLE IF EXISTS lash_package_labels CASCADE;
+
 DROP TABLE IF EXISTS lash_artifact_referrer_edges CASCADE;
 
 DROP TABLE IF EXISTS lash_referrer_fences CASCADE;
@@ -112,19 +114,11 @@ DROP TABLE IF EXISTS lash_catalog_identity CASCADE;
 
 DROP TABLE IF EXISTS lash_nodes CASCADE;
 
-DROP TABLE IF EXISTS lash_package_artifacts CASCADE;
-
-DROP TABLE IF EXISTS lash_package_sets CASCADE;
-
-DROP TABLE IF EXISTS lash_package_set_members CASCADE;
-
-DROP TABLE IF EXISTS lash_package_definitions CASCADE;
-
-DROP TABLE IF EXISTS lash_package_labels CASCADE;
-
-DROP TABLE IF EXISTS lash_package_internal_operations CASCADE;
-
 DROP TABLE IF EXISTS lash_actors CASCADE;
+
+DROP TABLE IF EXISTS lash_package_executions CASCADE;
+
+DROP TABLE IF EXISTS lash_execution_resolutions CASCADE;
 
 DROP TABLE IF EXISTS lash_actor_mail CASCADE;
 

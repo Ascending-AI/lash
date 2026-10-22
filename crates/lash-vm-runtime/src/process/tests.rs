@@ -14,12 +14,10 @@ use lash_vocabulary::sites::Unit;
 
 use super::advance::{advance, decode, state_format};
 use super::state::{
-    Admission, Issued, KERNEL_RUN_STEP, KernelRunInput, KernelRunOutput, ParkedPage, ParkedRun,
-    Phase, refused,
+    Admission, Issued, KERNEL_RUN_STEP, KernelRunInput, KernelRunOutput, ParkedPage, Phase,
 };
 use lash_kernel_doc::KernelVersion;
 use lash_kernel_state::{AdmittedRequest, AdmittedWait};
-use std::collections::BTreeMap;
 
 fn process() -> lash_vocabulary::identity::ProcessId {
     lash_core::ProcessIdMint::sequential_id_for_testing(1)
@@ -48,7 +46,6 @@ fn sealed() -> ParkedPage {
 /// its bytes, so the process's root owns it, and an ended run stands on
 /// none. A state whose bytes name another page than the root holds is
 /// refused.
-
 /// The admission of a `perform` of `fetch` at `identity`.
 fn operation_use() -> lash_vocabulary::OperationUse {
     lash_vocabulary::OperationUse {
@@ -333,12 +330,9 @@ fn a_fan_out_waits_on_every_element_and_delivers_each_outcome_once_in_any_order(
 /// the refusal is raised at its `perform` by the next run, a `sleep` is a
 /// timer the process wakes for, and the step of a wait the machine
 /// withdrew settles into nothing.
-
 /// Workflow admission's local names preserve the wrapper and every checker
 /// error; hosts never need to parse a payload or display message for the code.
-
 /// P2: admitting an entry does not require the effects of main or siblings.
-
 /// FIG-6431 / S1: HTTP engine settings round-trip strictly to the recorded
 /// settings; an unknown key or invalid typed value is never ignored.
 #[test]

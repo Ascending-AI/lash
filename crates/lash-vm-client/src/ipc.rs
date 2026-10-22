@@ -1,7 +1,4 @@
-use lash_protocol_types::engine_fault::{
-    ExecutionLease, FrameEpoch, InfrastructureOutcome, OwnerEpoch, PayloadKind, SequenceFault,
-    SupervisorEvidence,
-};
+use lash_protocol_types::engine_fault::{InfrastructureOutcome, PayloadKind, SequenceFault};
 #[cfg(not(target_os = "linux"))]
 compile_error!("Lash VM workers require Linux");
 
@@ -743,6 +740,7 @@ fn decode_pool_measured(
 mod traffic_tests {
     use super::*;
     use crate::measurements::{IpcTraffic, Measurements};
+    use lash_protocol_types::engine_fault::{ExecutionLease, FrameEpoch, OwnerEpoch};
     use lash_vm_protocol::{
         DecodeLimits, EncodedPayload, MessageFence, ParentMessage, WorkerMessage,
     };
@@ -901,6 +899,9 @@ mod traffic_tests {
 #[cfg(test)]
 mod loss_tests {
     use super::*;
+    use lash_protocol_types::engine_fault::{
+        ExecutionLease, FrameEpoch, OwnerEpoch, SupervisorEvidence,
+    };
     use lash_vm_protocol::{MessageFence, ParentMessage};
 
     /// FIG-6823: a worker killed from outside is named by its signal when

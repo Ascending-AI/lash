@@ -23,7 +23,6 @@ use lash_execution_contracts::process::ProcessInfraError;
 use lash_execution_contracts::process::StepName;
 use lash_execution_contracts::process::StepRequest;
 use lash_kernel_doc::KernelVersion;
-use lash_vm_client::wire::OutcomeWire;
 
 use super::state::{
     Delivery, DeliverySource, HeldAdmission, Issued, KERNEL_RUN_STEP, KernelEngineState,
@@ -334,7 +333,7 @@ fn run_settled(
                 page: parked,
                 by: settling,
             });
-            state.requirements = requirements;
+            state.requirements = *requirements;
             state.phase = Phase::Parked;
             for wait in withdrawn {
                 state.waits.remove(&wait);

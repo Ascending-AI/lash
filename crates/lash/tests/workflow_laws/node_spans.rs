@@ -102,7 +102,6 @@ async fn publish_nodes(
     lash_core::ProcessEnvRef,
     lash_execution_contracts::process::ProcessDefinition,
 ) {
-    let artifacts = core.host_artifacts();
     let pin = lash::process::HostArtifactPin::mint();
     let environment = environment(false);
     let document = nodes_document();

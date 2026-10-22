@@ -433,12 +433,15 @@ async fn a_no_op_cell_writes_the_same_pages_and_bytes_whatever_the_binding_count
         key: &'static str,
         code: &str,
     ) -> lash_core::operational_metrics::sql::Receipt {
-        let ((), receipt) =
-            lash_core::operational_metrics::sql::collect("fig6418-l2", "sqlite", async {
+        let ((), receipt) = Box::pin(lash_core::operational_metrics::sql::collect(
+            "fig6418-l2",
+            "sqlite",
+            async {
                 cell(state, host, key, code).await;
                 commit_working(state, host).await;
-            })
-            .await;
+            },
+        ))
+        .await;
         receipt
     }
 
@@ -447,12 +450,12 @@ async fn a_no_op_cell_writes_the_same_pages_and_bytes_whatever_the_binding_count
 
     // The measurement is live: a cell that binds a value installs its
     // pages, and the window sees them.
-    let bound = measured(
+    let bound = Box::pin(measured(
         &mut small,
         &small_host,
         "exec-code:live",
         "const bound = 7;",
-    )
+    ))
     .await;
     assert!(
         bound.newly_installed_graph_bytes > 0,
@@ -462,19 +465,19 @@ async fn a_no_op_cell_writes_the_same_pages_and_bytes_whatever_the_binding_count
     let large_host = open_host().await;
     let mut large = session_with_bindings(&large_host, 50_000).await;
 
-    let small_noop = measured(
+    let small_noop = Box::pin(measured(
         &mut small,
         &small_host,
         "exec-code:noop",
         "await control.finish(1);",
-    )
+    ))
     .await;
-    let large_noop = measured(
+    let large_noop = Box::pin(measured(
         &mut large,
         &large_host,
         "exec-code:noop",
         "await control.finish(1);",
-    )
+    ))
     .await;
 
     // A no-op cell commits its descriptor and the pages it changed; neither

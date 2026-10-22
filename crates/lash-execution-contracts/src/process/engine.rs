@@ -276,7 +276,7 @@ use crate::process::{
 use lash_core_store::artifact_referrer::{ArtifactName, ReferrerClaim, ResolvedArtifactCleanup};
 use lash_core_store::executable_generation::ExecutableGeneration;
 use lash_core_store::tool_run::SettledOutput;
-use lash_vocabulary::types::*;
+
 use lash_vocabulary::{claims::*, names::*, package::*};
 use serde::{Deserialize, Serialize};
 #[async_trait::async_trait]

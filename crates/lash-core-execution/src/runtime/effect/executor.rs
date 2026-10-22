@@ -762,7 +762,7 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
     /// Exposes structured replay-comparison evidence to effect-host and conformance implementors,
     /// returning `None` when the runtime has no configured trace sink.
     /// Marks this executor's effect as served only from the journal: it
-    /// belongs to a replayed command whose tool binding drifted, and running
+    /// belongs to a replayed command whose operation binding drifted, and running
     /// it live would reach the drifted tool (FIG-3587, FIG-3719).
     pub(crate) fn serving_only_from_journal(
         mut self,

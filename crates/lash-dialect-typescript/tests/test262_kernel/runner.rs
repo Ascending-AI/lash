@@ -28,6 +28,8 @@ use lash_vocabulary::names::Name;
 
 #[path = "../../src/tests/linked.rs"]
 mod linked;
+#[path = "../../src/tests/linked_reads.rs"]
+mod linked_reads;
 #[expect(
     dead_code,
     reason = "shared test page fixture includes session and reopen helpers"
@@ -162,7 +164,7 @@ impl Host for TestHost {
         _: &lash_vocabulary::sites::PositionLabel,
         _: &lash_vocabulary::sites::Site,
     ) -> Result<Result<Datum, ErrorDatum>, lash_kernel_vm::HostFault> {
-        linked::read(use_, 0)
+        linked_reads::read(use_, 0)
     }
 
     fn read(&mut self, _handle: &Handle, _request: &Datum) -> Result<Datum, ErrorDatum> {
@@ -185,7 +187,7 @@ impl Host for TestHost {
 impl<M: Machine> Executor for OnMachine<M> {
     fn run(&self, lowered: &Lowered) -> Result<Execution, String> {
         let program = linked::program(Arc::clone(lowered.document.shared()), self.library.clone());
-        let modes = linked::modes(&program);
+        let modes = pages::modes(&program);
         let session = pages::Session::default();
         let start = CellStart {
             owner: pages::OWNER,

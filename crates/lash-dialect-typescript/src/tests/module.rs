@@ -265,7 +265,8 @@ fn entry_conventions_bind_source_arguments_and_normalize_absent() {
         ),
     ] {
         let document = module(source).unwrap().document.into_document();
-        let entry = super::linked::exported(&document, &lash_vocabulary::Name::new("run"));
+        let entry =
+            super::linked_inspection::exported(&document, &lash_vocabulary::Name::new("run"));
         assert_eq!(
             matches!(
                 entry.convention,

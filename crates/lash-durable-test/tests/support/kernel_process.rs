@@ -16,16 +16,14 @@ pub async fn publish(
     for import in document.imports.values_mut() {
         if let lash_vocabulary::ImportKind::Operation { signature } = &mut import.kind {
             for accepted in &packages.snapshot.advertisements {
-                if let PackageAdvertisement::Enumerated(package) = &accepted.advertisement {
-                    if package.path == import.name.package {
-                        if let Some(Member {
-                            kind: MemberKind::Operation(offer),
-                            ..
-                        }) = package.members.get(&import.name.member)
-                        {
-                            *signature = offer.requirement.signature.clone();
-                        }
-                    }
+                if let PackageAdvertisement::Enumerated(package) = &accepted.advertisement
+                    && package.path == import.name.package
+                    && let Some(Member {
+                        kind: MemberKind::Operation(offer),
+                        ..
+                    }) = package.members.get(&import.name.member)
+                {
+                    *signature = offer.requirement.signature.clone();
                 }
             }
         }
@@ -52,42 +50,6 @@ pub async fn publish(
     (payload, env)
 }
 
-/// One explicitly installed component namespace and the host's all-package attachment.
-pub async fn namespace(
-    core: &lash::LashCore,
-    pin: &lash_core::HostArtifactPin,
-    env: &lash::process::ProcessEnv,
-) -> (
-    RecordedPackages,
-    lash_vm_runtime::WorkflowEnvironmentRequest,
-) {
-    let context = PublicationContext {
-        domain: PublicationDomain(core.backend().binding_identity().to_string()),
-        scope: PublicationScope::Host,
-        publisher: PublisherInstance("kernel-process-law".into()),
-        root: Segment::new("law").unwrap(),
-    };
-    let packages = core
-        .host_artifacts()
-        .process_namespace(pin, env, context.clone())
-        .await
-        .unwrap();
-    let request = lash_vm_runtime::WorkflowEnvironmentRequest {
-        snapshot: packages.snapshot.clone(),
-        context,
-        attachment: Attachment {
-            packages: packages
-                .snapshot
-                .advertisements
-                .iter()
-                .filter_map(|accepted| match &accepted.advertisement {
-                    PackageAdvertisement::Enumerated(package) => Some(package.path.clone()),
-                    _ => None,
-                })
-                .collect(),
-            members: Default::default(),
-            deferred: Default::default(),
-        },
-    };
-    (packages, request)
-}
+#[path = "kernel_namespace.rs"]
+mod namespace;
+pub use namespace::namespace;

@@ -93,7 +93,7 @@ pub(crate) enum Origin {
     Document,
     /// Imported from this source, with the captions it spells.
     Imported {
-        packages: runtime::Namespace,
+        packages: Box<runtime::Namespace>,
         dialect: Dialect,
         text: String,
         map: Option<lash::workflow::document::SourceMap>,
@@ -374,7 +374,7 @@ impl AppState {
             _ => None,
         };
         let existing_packages = match &origin {
-            Origin::Imported { packages, .. } => Some(packages.clone()),
+            Origin::Imported { packages, .. } => Some((**packages).clone()),
             Origin::Edited { .. } | Origin::Read { .. } => self.current().namespace,
             Origin::Document => None,
         };

@@ -5,8 +5,7 @@ use std::sync::Arc;
 use lash_kernel_doc::Datum;
 use lash_kernel_doc::ErrorDatum;
 use lash_kernel_doc::Handle;
-use lash_kernel_doc::Integer;
-use lash_kernel_doc::Timestamp;
+
 use lash_kernel_vm::{
     CellStart, Delivered, Host, KernelMachine, Machine, Meters, Outcome, Program, Request,
     StartError, Step, Target,
@@ -39,21 +38,8 @@ pub enum HostCall {
 }
 
 struct World {
-    state: u64,
     calls: Vec<HostCall>,
     fail: bool,
-}
-
-impl World {
-    fn bits(&mut self) -> u64 {
-        // A specified PRNG, independent of interpreter slice boundaries and
-        // cancellation probes; only guest host reads advance it.
-        self.state = self.state.wrapping_add(0x9e37_79b9_7f4a_7c15);
-        let mut n = self.state;
-        n = (n ^ (n >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
-        n = (n ^ (n >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
-        n ^ (n >> 31)
-    }
 }
 
 impl Host for World {
@@ -94,7 +80,7 @@ fn fault(error: impl std::fmt::Display) -> HarnessError {
 
 fn program(smith: &Smith) -> Program {
     crate::machine::prepare_document(&library().prepared, Arc::new(smith.document.clone()), None)
-        .expect("smith document prepares")
+        .unwrap_or_else(|| panic!("smith document has no prepared linked fixture"))
 }
 
 fn session() -> crate::pages::Session {
@@ -153,7 +139,6 @@ fn observe_in<M: Machine>(
         Err(refusal) => return Ok(Execution::Refused(refusal)),
     };
     let mut host = World {
-        state: smith.schedule.host_seed,
         calls: Vec::new(),
         fail: smith.schedule.fail_effects,
     };

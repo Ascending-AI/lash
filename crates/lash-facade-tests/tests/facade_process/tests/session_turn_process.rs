@@ -4,12 +4,12 @@ use lash_facade_tests::session_process::*;
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn observation_names_the_child_session_of_an_unnamed_start() -> Result<()> {
-    observed_child_session_matches_execution(false).await
+    Box::pin(observed_child_session_matches_execution(false)).await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn observation_names_the_child_session_of_a_named_start() -> Result<()> {
-    observed_child_session_matches_execution(true).await
+    Box::pin(observed_child_session_matches_execution(true)).await
 }
 
 /// A child turn that panics ends its process with a typed failure, never a

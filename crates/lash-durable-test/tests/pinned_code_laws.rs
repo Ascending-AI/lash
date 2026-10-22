@@ -25,9 +25,9 @@ mod sim;
 use std::sync::Arc;
 
 use lash::package::*;
-use lash_core::plugin::packages::{PackagePublisher as _, PublishPackage};
-#[path = "support/kernel_process.rs"]
-mod kernel_process;
+use lash_core::plugin::packages::PublishPackage;
+#[path = "support/kernel_namespace.rs"]
+mod kernel_namespace;
 use lash_durable::{ActorKey, ActorState, DurableStore};
 use lash_durable_test::{Matrix, Script, SimClock, SimNodes, SimNodesConfig, Tripwire};
 use lash_execution_contracts::backend::StoreSet;
@@ -120,7 +120,7 @@ async fn publication(
         .component(SERVICES, &())
         .build()
         .unwrap();
-    let (mut packages, mut environment) = kernel_process::namespace(core, &pin, &env).await;
+    let (mut packages, mut environment) = kernel_namespace::namespace(core, &pin, &env).await;
     let helper_start = artifacts
         .publish_workflow(
             &pin,

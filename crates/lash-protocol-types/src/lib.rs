@@ -116,9 +116,6 @@ pub use value_shape::{FieldShape, ValueShape, ValueShapeLimits};
 #[cfg(any(test, feature = "testing"))]
 pub use workflow_site::effect_identity_fixture;
 
-mod execution_node_kind;
-pub use execution_node_kind::ExecutionNodeKind;
-
 pub mod trace_carrier;
 
 pub use llm::types::{

@@ -206,7 +206,7 @@ pub enum WorkflowOverlayFact {
         payload: Box<TraceLanguageExecutionPayload>,
     },
     /// The admitted body of a process step started.
-    StepBodyStarted { step: StepBodyStarted },
+    StepBodyStarted { step: Box<StepBodyStarted> },
 }
 
 impl WorkflowOverlayFact {

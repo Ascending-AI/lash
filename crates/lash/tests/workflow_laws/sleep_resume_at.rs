@@ -84,7 +84,7 @@ async fn a_sleep_with_a_computed_duration_reports_when_it_resumes() {
     let files = Files::new();
     files.clock.set(PARKED_AT);
     let core = core_over(files.open().await, "resume-at").await;
-    for (language, process) in parked_naps(&core).await {
+    for (language, process) in Box::pin(parked_naps(&core)).await {
         assert_eq!(
             sleep_state(&core, &process).await,
             waiting_until(RESUME_AT),
@@ -101,7 +101,7 @@ async fn a_sleeps_resume_instant_survives_a_reload_from_the_store() {
     let files = Files::new();
     files.clock.set(PARKED_AT);
     let core = core_over(files.open().await, "resume-at-first").await;
-    let parked = parked_naps(&core).await;
+    let parked = Box::pin(parked_naps(&core)).await;
     core.shutdown().await.expect("shutdown");
     let core = core_over(files.open().await, "resume-at-second").await;
     for (language, process) in parked {

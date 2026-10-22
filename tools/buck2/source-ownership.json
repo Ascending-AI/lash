@@ -384,6 +384,7 @@
         "tests/core_node_processes/process_endstates.rs",
         "tests/core_node_processes/read_tools.rs",
         "tests/core_node_processes/session_and_isolated_envs.rs",
+        "tests/support/kernel_namespace.rs",
         "tests/support/kernel_process.rs",
         "tests/support/operations.rs"
       ],
@@ -438,6 +439,7 @@
         "tests/kernel_step_crash_laws.rs",
         "tests/kernel_step_crash_laws/carried_callback.rs",
         "tests/kernel_step_crash_laws/paged_carry.rs",
+        "tests/support/kernel_namespace.rs",
         "tests/support/kernel_process.rs",
         "tests/support/matrix.rs",
         "tests/support/served.rs",
@@ -478,7 +480,7 @@
       ],
       "pinned_code_laws": [
         "tests/pinned_code_laws.rs",
-        "tests/support/kernel_process.rs",
+        "tests/support/kernel_namespace.rs",
         "tests/support/served.rs",
         "tests/support/sim.rs"
       ],
@@ -515,6 +517,7 @@
       "process_ran_laws": [
         "tests/process_ran_laws.rs",
         "tests/support/dialect.rs",
+        "tests/support/kernel_namespace.rs",
         "tests/support/kernel_process.rs",
         "tests/support/matrix.rs",
         "tests/support/served.rs",
@@ -529,6 +532,7 @@
       "process_tool_call_crash_laws": [
         "tests/process_tool_call_crash_laws.rs",
         "tests/support/dialect.rs",
+        "tests/support/kernel_namespace.rs",
         "tests/support/kernel_process.rs",
         "tests/support/matrix.rs",
         "tests/support/operations.rs",
@@ -542,6 +546,7 @@
       ],
       "recorded_behaviour_laws": [
         "tests/recorded_behaviour_laws.rs",
+        "tests/support/kernel_namespace.rs",
         "tests/support/kernel_process.rs",
         "tests/support/served.rs",
         "tests/support/sim.rs"
@@ -1035,7 +1040,6 @@
       "src/engine_fault.rs",
       "src/execution_budgets.rs",
       "src/execution_budgets/tests.rs",
-      "src/execution_node_kind.rs",
       "src/frame_key.rs",
       "src/future.rs",
       "src/handle.rs",

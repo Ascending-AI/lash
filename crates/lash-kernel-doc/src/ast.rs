@@ -910,5 +910,3 @@ impl From<Action> for Expr {
 fn is_zero(units: &u64) -> bool {
     *units == 0
 }
-
-use lash_vocabulary::sites::{Site, Unit};

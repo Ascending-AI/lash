@@ -222,11 +222,19 @@ async fn a_sleeping_kernel_process_ends_cancelled(tier: Tier, state: SleepState)
 }
 
 async fn a_lash_vm_process_cancelled_while_its_sleep_is_hot_ends_cancelled(tier: Tier) {
-    a_sleeping_kernel_process_ends_cancelled(tier, SleepState::Hot).await;
+    Box::pin(a_sleeping_kernel_process_ends_cancelled(
+        tier,
+        SleepState::Hot,
+    ))
+    .await;
 }
 
 async fn a_lash_vm_process_cancelled_after_idle_eviction_of_its_sleep_ends_cancelled(tier: Tier) {
-    a_sleeping_kernel_process_ends_cancelled(tier, SleepState::Suspended).await;
+    Box::pin(a_sleeping_kernel_process_ends_cancelled(
+        tier,
+        SleepState::Suspended,
+    ))
+    .await;
 }
 
 on_every_tier!(a_lash_vm_process_cancelled_while_its_sleep_is_hot_ends_cancelled);

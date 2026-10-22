@@ -1,9 +1,7 @@
 //! Laws of K-COL and K-ITER, using the public VM as an in-process embedder.
 use std::sync::Arc;
 
-use lash_kernel_doc::{
-    Datum, ErrorDatum, FunctionRegistry, Handle, Integer, Timestamp, parse_document,
-};
+use lash_kernel_doc::{Datum, ErrorDatum, FunctionRegistry, Handle, Integer, parse_document};
 
 use lash_kernel_vm::{
     Bounds, End, Host, KernelMachine, Machine, Outcome, Program, Request, RunError, Step,
@@ -811,9 +809,7 @@ fn callback_law(source: &str, expected: Datum, expected_effects: usize) {
             Step::Slice => {}
             Step::Parked(park) => {
                 for request in park.requests {
-                    let Request::Effect(effect) = request else {
-                        panic!("callback requested a sleep")
-                    };
+                    let Request::Effect(effect) = request;
                     effects += 1;
                     machine
                         .deliver(effect.wait, Outcome::Completed(effect.args[0].clone()))

@@ -245,10 +245,6 @@ fn step_body(process: &ProcessId, occurrence: u64, call: &str, attempt: u32) -> 
             .position()
             .site()
             .clone(),
-        origin: (occurrence_at(&site("then"), occurrence))
-            .position()
-            .site()
-            .clone(),
         at: occurrence_at(&site("then"), occurrence),
         call_id: lash_protocol_types::ToolCallId::fixture(call),
         attempt,

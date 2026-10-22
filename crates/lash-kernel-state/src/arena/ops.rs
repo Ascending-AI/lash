@@ -9,8 +9,6 @@
 use lash_kernel_doc::arena::{ArenaHandle, Body, Chunk, Chunks, LocalCode, Sequence, ShortText};
 use lash_kernel_doc::{NativeError, Retry, Value};
 
-use lash_vocabulary::sites::Site;
-
 use super::{Arena, CARD, Facts, Key, Place, Summary, malformed, value_summary};
 
 /// The refusal a value that is no legal key raises (`K-KEY-002`).

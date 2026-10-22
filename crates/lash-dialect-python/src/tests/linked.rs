@@ -146,24 +146,23 @@ pub(super) fn modes(program: &lash_kernel_vm::Program) -> lash_kernel_vm::Effect
             program.documents[&instance.document]
                 .imports
                 .iter()
-                .filter_map(move |(slot, import)| {
-                    matches!(import.kind, ImportKind::Operation { .. }).then(|| {
-                        let read = matches!(
-                            import.name.package.to_string().as_str(),
-                            "typescript" | "python"
-                        ) && matches!(import.name.member.as_str(), "clock" | "random");
-                        (
-                            OperationUse {
-                                link: *link,
-                                slot: *slot,
-                            },
-                            if read {
-                                OperationMode::Read
-                            } else {
-                                OperationMode::Waited
-                            },
-                        )
-                    })
+                .filter(|(_, import)| matches!(import.kind, ImportKind::Operation { .. }))
+                .map(move |(slot, import)| {
+                    let read = matches!(
+                        import.name.package.to_string().as_str(),
+                        "typescript" | "python"
+                    ) && matches!(import.name.member.as_str(), "clock" | "random");
+                    (
+                        OperationUse {
+                            link: *link,
+                            slot: *slot,
+                        },
+                        if read {
+                            OperationMode::Read
+                        } else {
+                            OperationMode::Waited
+                        },
+                    )
                 })
         })
         .collect()

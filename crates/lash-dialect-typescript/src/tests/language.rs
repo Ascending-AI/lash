@@ -76,7 +76,6 @@ fn top_level_bindings_are_the_sessions() {
 
 /// `K-DOC-002`: the manifest lists every function the document reaches,
 /// through the bodies of the helpers it calls.
-
 /// A statement's source span is mapped at the site of the statement that
 /// does the work. A former `@label` doc comment is a JSDoc of tags alone:
 /// ordinary trivia that locates nothing and, in a cell or a workflow module,

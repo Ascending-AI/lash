@@ -79,8 +79,8 @@ impl WorkflowCreator {
             .link_process_env(&self.environment, &start, &self.namespace, &BTreeMap::new())
             .await
             .map_err(|error| error.to_string())?;
-        self.artifacts
-            .start_linked(
+        Box::pin(
+            self.artifacts.start_linked(
                 pin,
                 StartLinked {
                     start,
@@ -93,9 +93,10 @@ impl WorkflowCreator {
                 },
                 key,
                 &environment_request(&self.namespace, self.context.clone()),
-            )
-            .await
-            .map_err(|error| error.to_string())
+            ),
+        )
+        .await
+        .map_err(|error| error.to_string())
     }
 }
 
@@ -138,7 +139,7 @@ pub async fn build(
     let package_provider = Arc::new(ToolPackageProvider::new(
         IO.component(),
         lash::tool_provider_key!("io"),
-        [Segment::new("io").unwrap()].into(),
+        [Segment::new("io").map_err(|error| error.to_string())?].into(),
         provider.clone(),
     ));
     let spec = lash::plugins::PluginSpec::new()
@@ -182,7 +183,7 @@ pub async fn build(
         domain: PublicationDomain(backend.binding_identity().to_string()),
         scope: PublicationScope::Host,
         publisher: PublisherInstance("dataframe-library".into()),
-        root: Segment::new("df").unwrap(),
+        root: Segment::new("df").map_err(|error| error.to_string())?,
     };
     let mut namespace = bootstrap
         .host_artifacts()

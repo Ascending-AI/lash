@@ -1386,9 +1386,9 @@ DECLARE
     v_answer JSONB;
     v_frame TEXT;
 BEGIN
-    -- Generated from this build's statements (registry e9fc4b157d9178ca); a call
+    -- Generated from this build's statements (registry 3f7d59736fd33635); a call
     -- built from others is refused, as is any isolation but read committed.
-    IF p_registry IS DISTINCT FROM 'e9fc4b157d9178ca'
+    IF p_registry IS DISTINCT FROM '3f7d59736fd33635'
         OR current_setting('transaction_isolation') <> 'read committed' THEN
         RAISE EXCEPTION 'lash_owner_commit: registry or isolation refused' USING ERRCODE = 'LX000';
     END IF;
@@ -2734,7 +2734,7 @@ BEGIN
         UPDATE lash_actors SET formats = (p_formats) WHERE actor_key = (p_actor);
     END IF;
     IF p_requires IS NOT NULL THEN
-        UPDATE lash_actors SET requires = (p_requires) WHERE actor_key = (p_actor);
+        UPDATE lash_actors SET base_requires = (p_requires), requires = (p_requires) WHERE actor_key = (p_actor);
     END IF;
     IF p_ack IS NOT NULL THEN
         WITH acked AS (

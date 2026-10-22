@@ -39,12 +39,7 @@ fn observe<const L: u64>(program: &Program, charge_limit: u64) -> Observed {
     .unwrap();
     let tape = lash_kernel_vm::ChargeTape::new();
     machine.record_charges(tape.clone());
-    let mut world = World {
-        bits: 0,
-        stride: 0,
-        nanoseconds: 0,
-        prints: Vec::new(),
-    };
+    let mut world = World { prints: Vec::new() };
     let end = loop {
         match machine.run(&mut world, u64::MAX).unwrap() {
             Step::Ended(end) => break end,

@@ -12,7 +12,7 @@ use lash_kernel_package::{LinkRefusal, LinkedContent, Namespace, ReachSelection,
 use lash_vocabulary::data_limits::KernelDataLimits;
 use lash_vocabulary::names::DocumentId;
 use lash_vocabulary::names::SourceMapId;
-use lash_vocabulary::{claims::NodeRequirements, names::*, package::*};
+use lash_vocabulary::{names::*, package::*};
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex};
 
@@ -20,12 +20,6 @@ pub(crate) fn document_artifact(document: &DocumentId) -> ArtifactName {
     ArtifactName {
         store: ArtifactStoreId::KernelDocument,
         artifact_ref: document.to_string(),
-    }
-}
-pub(crate) fn function_artifact(function: &FunctionId) -> ArtifactName {
-    ArtifactName {
-        store: ArtifactStoreId::KernelDocument,
-        artifact_ref: format!("function:{function}"),
     }
 }
 pub(crate) fn link_artifact(link: LinkId) -> ArtifactName {
@@ -406,12 +400,12 @@ impl KernelDocuments {
         for ad in &snapshot.advertisements {
             if let PackageAdvertisement::Enumerated(package) = &ad.advertisement {
                 for member in package.members.values() {
-                    if let MemberKind::Export { link, .. } = member.kind {
-                        if !content.links.contains_key(&link) {
-                            let loaded = self.load_linked(link).await?;
-                            content.documents.extend(loaded.documents);
-                            content.links.extend(loaded.links);
-                        }
+                    if let MemberKind::Export { link, .. } = member.kind
+                        && !content.links.contains_key(&link)
+                    {
+                        let loaded = self.load_linked(link).await?;
+                        content.documents.extend(loaded.documents);
+                        content.links.extend(loaded.links);
                     }
                 }
             }
@@ -544,10 +538,10 @@ impl KernelDocuments {
                         PackageAdvertisement::Enumerated(package.package),
                     ));
                 }
-            } else if let PublishedContent::Deferred(package) = record.content {
-                if origin.publications.contains(&key) {
-                    advertisements.push((record.context, PackageAdvertisement::Deferred(package)));
-                }
+            } else if let PublishedContent::Deferred(package) = record.content
+                && origin.publications.contains(&key)
+            {
+                advertisements.push((record.context, PackageAdvertisement::Deferred(package)));
             }
         }
         let namespace = Namespace {

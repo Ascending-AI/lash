@@ -32,52 +32,6 @@ use lash_vocabulary::sites::TaskLabel;
 
 use crate::dialect::DialectPrompts;
 
-/// Offer typed dialect facts to the session's pure feedback contributors.
-/// The original diagnosis remains intact; no contributor means no new text.
-pub(crate) fn contribute_repairs(
-    refusal: &mut DialectRefusal,
-    source: &str,
-    grant_calls: &BTreeMap<String, String>,
-    ctx: &lash_core::RuntimeExecutionContext<'_>,
-) -> Vec<lash_core::CellFailureRepair> {
-    // An unavailable provider contributes no names. Diagnostic discovery does
-    // not change whether this cell resolves, parks or receives a grant.
-    let deferred = ctx
-        .deferred_provider()
-        .ok()
-        .flatten()
-        .map(|(provider, resolver)| {
-            resolver.searchable_names(&lash_core::DeferredResolveContext::new(
-                provider,
-                ctx.owner(),
-                ctx.logical_run(),
-                ctx.run_capabilities(),
-                ctx.owner_config(),
-            ))
-        })
-        .unwrap_or_default();
-    let unknown_name = matches!(
-        refusal.code.as_str(),
-        "TS_UNKNOWN_BINDING" | "PY_UNKNOWN_NAME"
-    )
-    .then(|| refusal.span.and_then(|(start, end)| source.get(start..end)))
-    .flatten();
-    let diagnostic = lash_core::plugin::CellFailureDiagnostic {
-        code: &refusal.code,
-        span: refusal.span,
-        unknown_name,
-        grants: grant_calls,
-        deferred: &deferred,
-    };
-    let feedback = ctx.cell_failure_repairs(&diagnostic);
-    refusal.repairs.extend(
-        feedback
-            .iter()
-            .flat_map(|reply| reply.repairs.iter().cloned()),
-    );
-    feedback
-}
-
 /// The stable code of the refusal a model reads when a cell uses a binding
 /// an earlier cell left that was not carried (`K-SES-003`).
 pub const SESSION_BINDING_NOT_CARRIED: &str = "SESSION_BINDING_NOT_CARRIED";
@@ -597,8 +551,8 @@ mod tests {
 
     use lash_kernel_doc::heap::{HeapFault, PageGrant, PageId, PageRef};
     use lash_kernel_doc::{
-        ErrorDatum, FunctionRegistry, Handle, NativeCall, NativeError, NativeFunction, Timestamp,
-        Value, parse_definition, parse_document,
+        ErrorDatum, FunctionRegistry, Handle, NativeCall, NativeError, NativeFunction, Value,
+        parse_definition, parse_document,
     };
 
     use lash_kernel_state::paged::{PageAnswer, PageBody, PageSource};

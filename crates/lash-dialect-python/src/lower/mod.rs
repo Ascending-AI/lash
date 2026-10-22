@@ -31,7 +31,7 @@ use lash_kernel_doc::{
     Place, Rhs, Stmt, TryStmt, validate_document,
 };
 
-use lash_vocabulary::{EffectName, FunctionId, FunctionName, Name};
+use lash_vocabulary::{FunctionId, FunctionName, Name};
 use ruff_python_ast::{self as ast};
 use ruff_text_size::{Ranged, TextRange};
 
@@ -451,7 +451,7 @@ pub(crate) fn lower_with_calls(
     let document = lash_kernel_doc::IdentifiedDocument::new(document);
     let lash_kernel_dialect::SiteLayers {
         source_map,
-        mut written,
+        written,
         captions,
     } = lash_kernel_dialect::site_layers(
         &document,
@@ -1107,10 +1107,12 @@ impl Lowerer<'_> {
                 format!("the helper `{name}` is not installed"),
             )
         })?;
-        let header = self
-            .library
-            .header(&function)
-            .expect("resolved helper has a header");
+        let header = self.library.header(&function).ok_or_else(|| {
+            diagnostics::unplaced(
+                Code::LibraryMissing,
+                format!("the helper `{name}` has no header"),
+            )
+        })?;
         if header.has_native() {
             self.used.insert(function, header.name.clone());
             return Ok(lash_kernel_doc::FunctionTarget::Local(function));

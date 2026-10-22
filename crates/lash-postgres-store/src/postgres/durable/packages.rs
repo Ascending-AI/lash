@@ -165,7 +165,7 @@ async fn commit_resolution(
             .fetch_optional(crate::observed_sql::executor(&mut *tx))
             .await
             .map_err(sqlx_failure)?;
-    let Some((epoch, state, revision, requires)) = row else {
+    let Some((epoch, state, revision, _requires)) = row else {
         return Err(DurableError::OwnershipLost(lash_durable::Fenced {
             actor: owner.actor.clone(),
             held: owner.epoch,

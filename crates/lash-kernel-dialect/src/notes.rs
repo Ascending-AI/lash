@@ -120,7 +120,12 @@ pub fn site_layers(
     for (name, function) in &document.functions {
         if let Some(notes) = functions.get(name) {
             layers.block(
-                &function.body().expect("authored body").block,
+                &function
+                    .body()
+                    .ok_or_else(|| SourceMapRefusal::Site {
+                        site: Site::new(Unit::Library(*name), Vec::new()),
+                    })?
+                    .block,
                 notes,
                 &Site::new(Unit::Library(*name), Vec::new()),
             );

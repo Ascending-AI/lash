@@ -14,7 +14,7 @@ use lash_kernel_vm::{
 use lash_vocabulary::package::{Fill, Link};
 use lash_vocabulary::{
     ContractId, Convention, ExportName, FunctionId, FunctionName, Import, ImportKind, ImportSlot,
-    LinkId, Name, OperationRequirement, OperationUse, Param, QualifiedName, Signature, Type,
+    Name, OperationRequirement, OperationUse, Param, QualifiedName, Signature, Type,
 };
 use std::{
     cell::RefCell,
@@ -95,7 +95,8 @@ fn function(
 ) -> FunctionDefinition {
     FunctionDefinition {
         kernel: lash_kernel_doc::KERNEL_VERSION,
-        name: FunctionName::new(name).unwrap(),
+        name: FunctionName::new(name)
+            .unwrap_or_else(|error| panic!("linked law fixture: {error:?}")),
         signature,
         errors: BTreeSet::new(),
         guard: None,
@@ -142,7 +143,10 @@ fn bounds() -> Bounds {
 }
 fn request(machine: &mut KernelMachine) -> lash_kernel_vm::EffectRequest {
     loop {
-        match machine.run(&mut Passive, 100_000).unwrap() {
+        match machine
+            .run(&mut Passive, 100_000)
+            .unwrap_or_else(|error| panic!("linked law fixture: {error:?}"))
+        {
             Step::Slice => {}
             Step::Parked(park) => {
                 let [Request::Effect(request)] = park.requests.as_slice() else {
@@ -159,8 +163,12 @@ fn request(machine: &mut KernelMachine) -> lash_kernel_vm::EffectRequest {
 fn imported_body_and_callback_keep_their_links_after_cold_restore() {
     let operation = Import {
         name: QualifiedName {
-            package: lash_vocabulary::Vec1::new(lash_vocabulary::Segment::new("service").unwrap()),
-            member: lash_vocabulary::Segment::new("read").unwrap(),
+            package: lash_vocabulary::Vec1::new(
+                lash_vocabulary::Segment::new("service")
+                    .unwrap_or_else(|error| panic!("linked law fixture: {error:?}")),
+            ),
+            member: lash_vocabulary::Segment::new("read")
+                .unwrap_or_else(|error| panic!("linked law fixture: {error:?}")),
             type_member: None,
         },
         kind: ImportKind::Operation {
@@ -218,9 +226,11 @@ fn imported_body_and_callback_keep_their_links_after_cold_restore() {
         Import {
             name: QualifiedName {
                 package: lash_vocabulary::Vec1::new(
-                    lash_vocabulary::Segment::new("library").unwrap(),
+                    lash_vocabulary::Segment::new("library")
+                        .unwrap_or_else(|error| panic!("linked law fixture: {error:?}")),
                 ),
-                member: lash_vocabulary::Segment::new("run").unwrap(),
+                member: lash_vocabulary::Segment::new("run")
+                    .unwrap_or_else(|error| panic!("linked law fixture: {error:?}")),
                 type_member: None,
             },
             kind: ImportKind::Code {
@@ -290,7 +300,7 @@ fn imported_body_and_callback_keep_their_links_after_cold_restore() {
         PageId([9; 32]),
         prepared,
     )
-    .unwrap();
+    .unwrap_or_else(|error| panic!("linked law fixture: {error:?}"));
     let pages = Pages::default();
     let start = CellStart {
         owner: PageId([8; 32]),
@@ -301,7 +311,8 @@ fn imported_body_and_callback_keep_their_links_after_cold_restore() {
         host: vec![],
     };
     let mut machine =
-        KernelMachine::start(program.clone(), bounds(), start, Box::new(pages.clone())).unwrap();
+        KernelMachine::start(program.clone(), bounds(), start, Box::new(pages.clone()))
+            .unwrap_or_else(|error| panic!("linked law fixture: {error:?}"));
     let first = request(&mut machine);
     assert_eq!(
         first.use_,
@@ -310,12 +321,16 @@ fn imported_body_and_callback_keep_their_links_after_cold_restore() {
             slot: ImportSlot(0)
         }
     );
-    let checkpoint = machine.checkpoint().unwrap().checkpoint();
+    let checkpoint = machine
+        .checkpoint()
+        .unwrap_or_else(|error| panic!("linked law fixture: {error:?}"))
+        .checkpoint();
     drop(machine);
-    let mut machine = KernelMachine::open(program, bounds(), &checkpoint, Box::new(pages)).unwrap();
+    let mut machine = KernelMachine::open(program, bounds(), &checkpoint, Box::new(pages))
+        .unwrap_or_else(|error| panic!("linked law fixture: {error:?}"));
     machine
         .deliver(first.wait, Outcome::Completed(Datum::Null))
-        .unwrap();
+        .unwrap_or_else(|error| panic!("linked law fixture: {error:?}"));
     let second = request(&mut machine);
     assert_eq!(
         second.use_,
@@ -326,9 +341,12 @@ fn imported_body_and_callback_keep_their_links_after_cold_restore() {
     );
     machine
         .deliver(second.wait, Outcome::Completed(Datum::Null))
-        .unwrap();
+        .unwrap_or_else(|error| panic!("linked law fixture: {error:?}"));
     loop {
-        match machine.run(&mut Passive, 100_000).unwrap() {
+        match machine
+            .run(&mut Passive, 100_000)
+            .unwrap_or_else(|error| panic!("linked law fixture: {error:?}"))
+        {
             Step::Slice => {}
             Step::Ended(End::Finished(done)) => {
                 assert_eq!(done.result, Datum::Null);
@@ -346,8 +364,10 @@ fn callable_start_installs_the_captured_environment() {
         ImportSlot(0),
         Import {
             name: QualifiedName {
-                package: lash_vocabulary::PackagePath::parse("service").unwrap(),
-                member: lash_vocabulary::Segment::new("read").unwrap(),
+                package: lash_vocabulary::PackagePath::parse("service")
+                    .unwrap_or_else(|error| panic!("linked law fixture: {error:?}")),
+                member: lash_vocabulary::Segment::new("read")
+                    .unwrap_or_else(|error| panic!("linked law fixture: {error:?}")),
                 type_member: None,
             },
             kind: ImportKind::Operation {
@@ -395,7 +415,7 @@ fn callable_start_installs_the_captured_environment() {
         PageId([9; 32]),
         PreparedLibrary::new(Arc::new(registry)),
     )
-    .unwrap();
+    .unwrap_or_else(|error| panic!("linked law fixture: {error:?}"));
     let target = Target::Callable(Box::new(lash_kernel_doc::FunctionValue {
         callable: lash_vocabulary::CallableId {
             link: link_id,
@@ -426,15 +446,22 @@ fn callable_start_installs_the_captured_environment() {
         },
         Box::new(pages.clone()),
     )
-    .unwrap();
+    .unwrap_or_else(|error| panic!("linked law fixture: {error:?}"));
     let asked = request(&mut machine);
-    let checkpoint = machine.checkpoint().unwrap().checkpoint();
+    let checkpoint = machine
+        .checkpoint()
+        .unwrap_or_else(|error| panic!("linked law fixture: {error:?}"))
+        .checkpoint();
     drop(machine);
-    let mut cold = KernelMachine::open(program, bounds(), &checkpoint, Box::new(pages)).unwrap();
+    let mut cold = KernelMachine::open(program, bounds(), &checkpoint, Box::new(pages))
+        .unwrap_or_else(|error| panic!("linked law fixture: {error:?}"));
     cold.deliver(asked.wait, Outcome::Completed(Datum::Null))
-        .unwrap();
+        .unwrap_or_else(|error| panic!("linked law fixture: {error:?}"));
     loop {
-        match cold.run(&mut Passive, 100_000).unwrap() {
+        match cold
+            .run(&mut Passive, 100_000)
+            .unwrap_or_else(|error| panic!("linked law fixture: {error:?}"))
+        {
             Step::Slice => {}
             Step::Ended(End::Finished(done)) => {
                 assert_eq!(done.result, Datum::Bool(true));
@@ -451,8 +478,10 @@ fn callable_start_installs_the_captured_environment() {
 fn imported_args_list_is_settled_under_its_defining_link_after_cold_restore() {
     let operation = Import {
         name: QualifiedName {
-            package: lash_vocabulary::PackagePath::parse("service").unwrap(),
-            member: lash_vocabulary::Segment::new("read").unwrap(),
+            package: lash_vocabulary::PackagePath::parse("service")
+                .unwrap_or_else(|error| panic!("linked law fixture: {error:?}")),
+            member: lash_vocabulary::Segment::new("read")
+                .unwrap_or_else(|error| panic!("linked law fixture: {error:?}")),
             type_member: None,
         },
         kind: ImportKind::Operation {
@@ -540,8 +569,10 @@ fn imported_args_list_is_settled_under_its_defining_link_after_cold_restore() {
             ImportSlot(0),
             Import {
                 name: QualifiedName {
-                    package: lash_vocabulary::PackagePath::parse("library").unwrap(),
-                    member: lash_vocabulary::Segment::new("packed").unwrap(),
+                    package: lash_vocabulary::PackagePath::parse("library")
+                        .unwrap_or_else(|error| panic!("linked law fixture: {error:?}")),
+                    member: lash_vocabulary::Segment::new("packed")
+                        .unwrap_or_else(|error| panic!("linked law fixture: {error:?}")),
                     type_member: None,
                 },
                 kind: ImportKind::Code {
@@ -595,7 +626,7 @@ fn imported_args_list_is_settled_under_its_defining_link_after_cold_restore() {
         PageId([9; 32]),
         PreparedLibrary::new(Arc::new(FunctionRegistry::new())),
     )
-    .unwrap();
+    .unwrap_or_else(|error| panic!("linked law fixture: {error:?}"));
     let pages = Pages::default();
     let mut machine = KernelMachine::start(
         program.clone(),
@@ -610,7 +641,7 @@ fn imported_args_list_is_settled_under_its_defining_link_after_cold_restore() {
         },
         Box::new(pages.clone()),
     )
-    .unwrap();
+    .unwrap_or_else(|error| panic!("linked law fixture: {error:?}"));
     for _ in 0..4 {
         let asked = request(&mut machine);
         assert_eq!(
@@ -620,7 +651,10 @@ fn imported_args_list_is_settled_under_its_defining_link_after_cold_restore() {
                 slot: ImportSlot(0)
             }
         );
-        let checkpoint = machine.checkpoint().unwrap().checkpoint();
+        let checkpoint = machine
+            .checkpoint()
+            .unwrap_or_else(|error| panic!("linked law fixture: {error:?}"))
+            .checkpoint();
         drop(machine);
         machine = KernelMachine::open(
             program.clone(),
@@ -628,13 +662,16 @@ fn imported_args_list_is_settled_under_its_defining_link_after_cold_restore() {
             &checkpoint,
             Box::new(pages.clone()),
         )
-        .unwrap();
+        .unwrap_or_else(|error| panic!("linked law fixture: {error:?}"));
         machine
             .deliver(asked.wait, Outcome::Completed(Datum::Null))
-            .unwrap();
+            .unwrap_or_else(|error| panic!("linked law fixture: {error:?}"));
     }
     loop {
-        match machine.run(&mut Passive, 100_000).unwrap() {
+        match machine
+            .run(&mut Passive, 100_000)
+            .unwrap_or_else(|error| panic!("linked law fixture: {error:?}"))
+        {
             Step::Slice => {}
             Step::Ended(End::Finished(done)) => {
                 assert_eq!(done.result, Datum::Bool(true));
@@ -684,7 +721,7 @@ fn callable_settled_result_must_fit_its_public_signature() {
             PageId([9; 32]),
             PreparedLibrary::new(Arc::new(FunctionRegistry::new())),
         )
-        .unwrap();
+        .unwrap_or_else(|error| panic!("linked law fixture: {error:?}"));
         let mut machine = KernelMachine::start(
             program,
             bounds(),
@@ -713,9 +750,12 @@ fn callable_settled_result_must_fit_its_public_signature() {
             },
             Box::new(Pages::default()),
         )
-        .unwrap();
+        .unwrap_or_else(|error| panic!("linked law fixture: {error:?}"));
         loop {
-            match machine.run(&mut Passive, 100_000).unwrap() {
+            match machine
+                .run(&mut Passive, 100_000)
+                .unwrap_or_else(|error| panic!("linked law fixture: {error:?}"))
+            {
                 Step::Slice => {}
                 Step::Ended(End::Error(lash_kernel_vm::RunError::Uncaught {
                     error: Datum::Error(error),
@@ -762,7 +802,8 @@ fn native_export_starts_without_main_and_pays_its_formula() {
         };
         let definition = FunctionDefinition {
             kernel: lash_kernel_doc::KERNEL_VERSION,
-            name: FunctionName::new("test.native").unwrap(),
+            name: FunctionName::new("test.native")
+                .unwrap_or_else(|error| panic!("linked law fixture: {error:?}")),
             signature: Signature {
                 params: vec![],
                 result: Type::Bool,
@@ -804,7 +845,7 @@ fn native_export_starts_without_main_and_pays_its_formula() {
                     Arc::new(Answer(kind == 0)) as Arc<dyn lash_kernel_doc::NativeFunction>
                 }),
             )
-            .unwrap();
+            .unwrap_or_else(|error| panic!("linked law fixture: {error:?}"));
         let program = Program::prepare(
             link_id,
             BTreeMap::from([(document.identity(), Arc::new(document))]),
@@ -812,7 +853,7 @@ fn native_export_starts_without_main_and_pays_its_formula() {
             PageId([9; 32]),
             PreparedLibrary::new(Arc::new(registry)),
         )
-        .unwrap();
+        .unwrap_or_else(|error| panic!("linked law fixture: {error:?}"));
         let mut machine = KernelMachine::start(
             program,
             bounds(),
@@ -826,9 +867,12 @@ fn native_export_starts_without_main_and_pays_its_formula() {
             },
             Box::new(Pages::default()),
         )
-        .unwrap();
+        .unwrap_or_else(|error| panic!("linked law fixture: {error:?}"));
         loop {
-            match machine.run(&mut Passive, 100_000).unwrap() {
+            match machine
+                .run(&mut Passive, 100_000)
+                .unwrap_or_else(|error| panic!("linked law fixture: {error:?}"))
+            {
                 Step::Slice => {}
                 Step::Ended(End::Finished(done)) => {
                     assert_eq!(done.result, Datum::Bool(true));
@@ -859,9 +903,11 @@ fn native_export_settlement_runs_the_defining_hook_after_cold_restore() {
             Import {
                 name: QualifiedName {
                     package: lash_vocabulary::Vec1::new(
-                        lash_vocabulary::Segment::new("service").unwrap(),
+                        lash_vocabulary::Segment::new("service")
+                            .unwrap_or_else(|error| panic!("linked law fixture: {error:?}")),
                     ),
-                    member: lash_vocabulary::Segment::new("settle").unwrap(),
+                    member: lash_vocabulary::Segment::new("settle")
+                        .unwrap_or_else(|error| panic!("linked law fixture: {error:?}")),
                     type_member: None,
                 },
                 kind: ImportKind::Operation {
@@ -906,7 +952,8 @@ fn native_export_settlement_runs_the_defining_hook_after_cold_restore() {
         };
         let definition = FunctionDefinition {
             kernel: lash_kernel_doc::KERNEL_VERSION,
-            name: FunctionName::new("test.answer").unwrap(),
+            name: FunctionName::new("test.answer")
+                .unwrap_or_else(|error| panic!("linked law fixture: {error:?}")),
             signature: Signature {
                 params: if kind == 1 {
                     vec![
@@ -966,7 +1013,7 @@ fn native_export_settlement_runs_the_defining_hook_after_cold_restore() {
         let mut registry = FunctionRegistry::new();
         registry
             .register(definition, Some(Arc::new(Answer)))
-            .unwrap();
+            .unwrap_or_else(|error| panic!("linked law fixture: {error:?}"));
         let program = Program::prepare(
             link.identity(),
             BTreeMap::from([(document.identity(), Arc::new(document))]),
@@ -974,7 +1021,7 @@ fn native_export_settlement_runs_the_defining_hook_after_cold_restore() {
             PageId([9; 32]),
             PreparedLibrary::new(Arc::new(registry)),
         )
-        .unwrap();
+        .unwrap_or_else(|error| panic!("linked law fixture: {error:?}"));
         let pages = Pages::default();
         let mut machine = KernelMachine::start(
             program.clone(),
@@ -989,16 +1036,21 @@ fn native_export_settlement_runs_the_defining_hook_after_cold_restore() {
             },
             Box::new(pages.clone()),
         )
-        .unwrap();
+        .unwrap_or_else(|error| panic!("linked law fixture: {error:?}"));
         let requested = request(&mut machine);
-        let saved = machine.checkpoint().unwrap();
-        machine =
-            KernelMachine::open(program, bounds(), &saved.checkpoint(), Box::new(pages)).unwrap();
+        let saved = machine
+            .checkpoint()
+            .unwrap_or_else(|error| panic!("linked law fixture: {error:?}"));
+        machine = KernelMachine::open(program, bounds(), &saved.checkpoint(), Box::new(pages))
+            .unwrap_or_else(|error| panic!("linked law fixture: {error:?}"));
         machine
             .deliver(requested.wait, Outcome::Completed(Datum::Null))
-            .unwrap();
+            .unwrap_or_else(|error| panic!("linked law fixture: {error:?}"));
         loop {
-            match machine.run(&mut Passive, 100_000).unwrap() {
+            match machine
+                .run(&mut Passive, 100_000)
+                .unwrap_or_else(|error| panic!("linked law fixture: {error:?}"))
+            {
                 Step::Slice => {}
                 Step::Ended(End::Finished(done)) => {
                     assert_eq!(done.result, Datum::Bool(kind != 2));
@@ -1195,8 +1247,10 @@ fn imported_arguments_fit_before_private_abi_adaptation() {
                     ImportSlot(0),
                     Import {
                         name: QualifiedName {
-                            package: lash_vocabulary::PackagePath::parse("library").unwrap(),
-                            member: lash_vocabulary::Segment::new("public").unwrap(),
+                            package: lash_vocabulary::PackagePath::parse("library")
+                                .unwrap_or_else(|error| panic!("linked law fixture: {error:?}")),
+                            member: lash_vocabulary::Segment::new("public")
+                                .unwrap_or_else(|error| panic!("linked law fixture: {error:?}")),
                             type_member: None,
                         },
                         kind: ImportKind::Code {
@@ -1251,7 +1305,7 @@ fn imported_arguments_fit_before_private_abi_adaptation() {
                 PageId([8; 32]),
                 PreparedLibrary::new(Arc::new(FunctionRegistry::new())),
             )
-            .unwrap();
+            .unwrap_or_else(|error| panic!("linked law fixture: {error:?}"));
             let mut machine = KernelMachine::start(
                 program,
                 bounds(),
@@ -1265,9 +1319,12 @@ fn imported_arguments_fit_before_private_abi_adaptation() {
                 },
                 Box::new(Pages::default()),
             )
-            .unwrap();
+            .unwrap_or_else(|error| panic!("linked law fixture: {error:?}"));
             loop {
-                match machine.run(&mut Passive, u64::MAX).unwrap() {
+                match machine
+                    .run(&mut Passive, u64::MAX)
+                    .unwrap_or_else(|error| panic!("linked law fixture: {error:?}"))
+                {
                     Step::Slice => {}
                     Step::Ended(End::Finished(done)) if accepted => {
                         assert_eq!(done.result, Datum::Bool(true));
@@ -1297,7 +1354,8 @@ fn imported_arguments_fit_before_private_abi_adaptation() {
 fn unused_native_declarations_do_not_enlarge_selected_reach() {
     let unused = FunctionDefinition {
         kernel: lash_kernel_doc::KERNEL_VERSION,
-        name: FunctionName::new("unused.native").unwrap(),
+        name: FunctionName::new("unused.native")
+            .unwrap_or_else(|error| panic!("linked law fixture: {error:?}")),
         signature: Signature {
             params: vec![],
             result: Type::Null,
@@ -1323,7 +1381,7 @@ fn unused_native_declarations_do_not_enlarge_selected_reach() {
     );
     selected
         .body_mut()
-        .unwrap()
+        .unwrap_or_else(|| panic!("selected law fixture has no body"))
         .functions
         .insert(unused_id, unused.name.clone());
     let selected_id = selected.identity();
@@ -1356,7 +1414,7 @@ fn unused_native_declarations_do_not_enlarge_selected_reach() {
         PageId([8; 32]),
         PreparedLibrary::new(Arc::new(FunctionRegistry::new())),
     )
-    .unwrap();
+    .unwrap_or_else(|error| panic!("linked law fixture: {error:?}"));
     program.functions = BTreeSet::from([selected_id]);
     let mut machine = KernelMachine::start(
         program,
@@ -1373,7 +1431,10 @@ fn unused_native_declarations_do_not_enlarge_selected_reach() {
     )
     .expect("unused declaration adds no runtime requirement");
     loop {
-        match machine.run(&mut Passive, u64::MAX).unwrap() {
+        match machine
+            .run(&mut Passive, u64::MAX)
+            .unwrap_or_else(|error| panic!("linked law fixture: {error:?}"))
+        {
             Step::Slice => {}
             Step::Ended(End::Finished(done)) => {
                 assert_eq!(done.result, Datum::Bool(true));

@@ -908,7 +908,6 @@ async fn read_observer(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::Write as _;
 
     fn bodies(path: &std::path::Path) -> Vec<Value> {
         std::fs::read_to_string(path)

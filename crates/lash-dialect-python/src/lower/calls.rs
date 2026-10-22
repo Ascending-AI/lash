@@ -1,8 +1,6 @@
 //! Calls: functions, tools, built-ins, methods and asyncio.
 
-use lash_kernel_doc::{
-    ActExpr, ActKind, Action, Atom, Callee, Expr, Literal, RecordEntry, Rhs, Stmt,
-};
+use lash_kernel_doc::{ActExpr, ActKind, Callee, Expr, Literal, RecordEntry, Rhs, Stmt};
 
 use lash_vocabulary::{EffectName, Name, RecordType, Signature, Type};
 use ruff_python_ast::{self as ast, Expr as PyExpr};
@@ -690,7 +688,17 @@ impl Lowerer<'_> {
             if !call.arguments.keywords.is_empty() {
                 let mut fields = Vec::new();
                 for keyword in &call.arguments.keywords {
-                    let name = keyword.arg.as_ref().expect("no stars").id.to_string();
+                    let name = keyword
+                        .arg
+                        .as_ref()
+                        .ok_or_else(|| {
+                            diagnostics::unplaced(
+                                Code::StarUnsupported,
+                                "keyword expansion is not supported",
+                            )
+                        })?
+                        .id
+                        .to_string();
                     let value = self.expr(&keyword.value)?;
                     fields.push(RecordEntry {
                         field: name,
@@ -716,7 +724,7 @@ impl Lowerer<'_> {
             self.tool_arguments(effect, signature, call)?
         };
         let operation = lash_vocabulary::names::QualifiedOperation::from_effect(effect)
-            .expect("canonical operation");
+            .map_err(|error| diagnostics::unplaced(Code::LibraryMissing, error.to_string()))?;
         let deferred = self.namespaces.operation(effect).is_none();
         let slot = self.imports.operation(
             lash_vocabulary::names::QualifiedName {

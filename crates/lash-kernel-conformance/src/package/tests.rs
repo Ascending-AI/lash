@@ -1,10 +1,8 @@
 //! CONF-NATIVE, CONF-SHAPE and CONF-METER over installed packages.
 #![allow(clippy::unwrap_used, reason = "a malformed law fixture fails its law")]
 
-use std::collections::BTreeSet;
 use std::sync::Arc;
 
-use lash_ext_helper_compiler::library::{Dialect, Library};
 use lash_kernel_doc::Datum;
 use lash_kernel_doc::FunctionRegistry;
 use lash_kernel_doc::Implementation;

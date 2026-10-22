@@ -7,7 +7,7 @@ use lash_kernel_doc::Datum;
 use lash_kernel_doc::heap::*;
 use lash_kernel_state::paged::*;
 use lash_kernel_vm::SessionEditor;
-use lash_vocabulary::Name;
+use lash_vocabulary::{ImportKind, Name, OperationMode, OperationUse};
 use std::{
     cell::RefCell,
     collections::{BTreeMap, BTreeSet},
@@ -91,7 +91,7 @@ pub(crate) fn with_source(
     source: &Source,
 ) -> Result<lash_kernel_vm::KernelMachine, lash_kernel_vm::StartError> {
     use lash_kernel_vm::Machine;
-    for (use_, mode) in super::linked::modes(&program) {
+    for (use_, mode) in modes(&program) {
         start.modes.entry(use_).or_insert(mode);
     }
     lash_kernel_vm::KernelMachine::start(program, bounds, start, Box::new(source.clone()))
@@ -113,4 +113,34 @@ pub(crate) fn reopen(
         Box::new(source.clone()),
     )
     .unwrap();
+}
+
+pub(crate) fn modes(program: &lash_kernel_vm::Program) -> lash_kernel_vm::EffectModes {
+    program
+        .instances
+        .iter()
+        .flat_map(|(link, instance)| {
+            program.documents[&instance.document]
+                .imports
+                .iter()
+                .filter(|(_, import)| matches!(import.kind, ImportKind::Operation { .. }))
+                .map(move |(slot, import)| {
+                    let read = matches!(
+                        import.name.package.to_string().as_str(),
+                        "typescript" | "python"
+                    ) && matches!(import.name.member.as_str(), "clock" | "random");
+                    (
+                        OperationUse {
+                            link: *link,
+                            slot: *slot,
+                        },
+                        if read {
+                            OperationMode::Read
+                        } else {
+                            OperationMode::Waited
+                        },
+                    )
+                })
+        })
+        .collect()
 }

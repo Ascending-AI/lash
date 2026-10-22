@@ -15,7 +15,7 @@ use lash_trace::{
     TraceLanguageExecutionIdentity, TraceLanguageExecutionPayload, TraceLanguageExecutionStatus,
     TraceNodeFact, TraceRuntimeScope, TraceRuntimeSubject,
 };
-use lash_vocabulary::names::DocumentId;
+
 use lash_vocabulary::sites::EffectId;
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};

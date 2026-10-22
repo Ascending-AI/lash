@@ -592,7 +592,7 @@ impl Scenario for Spawn {
     }
 
     async fn start(&self, nodes: &Arc<SimNodes>) -> Result<(), String> {
-        self.send().await?;
+        Box::pin(self.send()).await?;
         // A starts and claims first, B once A is settled, so the matrix
         // cuts the uncut run's writes by node.
         nodes.start("a");
@@ -783,8 +783,7 @@ async fn run_cut<T>(
         spawn.config(),
         spawn.activation(),
     ));
-    spawn
-        .send()
+    Box::pin(spawn.send())
         .await
         .expect("the host sends the parent's input");
     nodes.start("a");

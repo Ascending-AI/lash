@@ -186,9 +186,7 @@ impl Runner {
                 Step::Slice => return Err("unbounded slice yielded".into()),
                 Step::Parked(park) => {
                     for request in park.requests {
-                        let effect = match request {
-                            Request::Effect(effect) => effect,
-                        };
+                        let Request::Effect(effect) = request;
                         if crate::linked::operation(&effect.use_).as_str() != "host.observe" {
                             return Err("unexpected effect".into());
                         }

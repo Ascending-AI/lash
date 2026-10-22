@@ -22,7 +22,7 @@ use lash_kernel_check::{
     ActNode, ActionNode, AtomNode, BindingId, CalleeNode, ExprNode, Graph, MemberNode, NodeId,
     NodeKind, PlaceNode, Reference, StmtNode,
 };
-use lash_kernel_doc::{FunctionDeclarations, Literal};
+use lash_kernel_doc::Literal;
 
 use crate::ViewContext;
 use lash_vocabulary::names::Name;
@@ -150,13 +150,11 @@ impl Links {
     pub(crate) fn applies(
         &mut self,
         graph: &Graph,
-        functions: &FunctionDeclarations,
         action: Derived<'_>,
         context: &ViewContext,
     ) -> Vec<Site> {
         let mut analysis = Analysis::new(
             graph,
-            functions,
             &mut self.library,
             context,
             context.reference.link,
@@ -189,7 +187,6 @@ struct Analysis<'a> {
     link: LinkId,
     summarizing: bool,
     graph: &'a Graph,
-    functions: &'a FunctionDeclarations,
     library: &'a mut BTreeMap<CallableId, Summary>,
     inputs: BTreeMap<BindingId, usize>,
 }
@@ -197,7 +194,6 @@ struct Analysis<'a> {
 impl<'a> Analysis<'a> {
     fn new(
         graph: &'a Graph,
-        functions: &'a FunctionDeclarations,
         library: &'a mut BTreeMap<CallableId, Summary>,
         context: &'a ViewContext,
         link: LinkId,
@@ -205,7 +201,6 @@ impl<'a> Analysis<'a> {
     ) -> Self {
         Self {
             graph,
-            functions,
             library,
             context,
             link,
@@ -219,7 +214,7 @@ impl<'a> Analysis<'a> {
             return summary.clone();
         }
         // Insert before traversing so a recursive import edge terminates.
-        self.library.insert(function.clone(), Summary::default());
+        self.library.insert(*function, Summary::default());
         let summary = self
             .context
             .document(function.link)
@@ -229,14 +224,8 @@ impl<'a> Analysis<'a> {
                 let graph =
                     lash_kernel_check::derive_definition(definition, &document.functions).ok()?;
                 let unit = graph.units().first()?;
-                let mut analysis = Analysis::new(
-                    &graph,
-                    &document.functions,
-                    self.library,
-                    self.context,
-                    function.link,
-                    true,
-                );
+                let mut analysis =
+                    Analysis::new(&graph, self.library, self.context, function.link, true);
                 analysis.inputs.extend(
                     unit.params
                         .iter()
@@ -252,7 +241,7 @@ impl<'a> Analysis<'a> {
                 })
             })
             .unwrap_or_default();
-        self.library.insert(function.clone(), summary.clone());
+        self.library.insert(*function, summary.clone());
         summary
     }
     fn target(&self, callee: &CalleeNode) -> Option<CallableId> {

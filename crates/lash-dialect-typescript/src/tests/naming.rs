@@ -3,13 +3,9 @@
 
 use std::collections::BTreeMap;
 
-use lash_kernel_dialect::readability::SurfacePrinter as _;
-use lash_kernel_doc::{self as k};
-
 use lash_vocabulary::{EffectName, Name, Param, Signature, Type};
 
 use super::{lower_against, print_document};
-use crate::TypeScript;
 
 /// Each of `names` as an operation taking one `input` and giving anything.
 fn effects(names: &[&str]) -> BTreeMap<EffectName, Signature> {
@@ -46,7 +42,7 @@ fn a_multiword_operation_is_written_in_camel_case_and_performed_canonically() {
     assert!(
         text.contains(&format!(
             "perform {}(",
-            super::linked::operation_slot(&lowered.document, "inbox.send_item")
+            super::linked_inspection::operation_slot(&lowered.document, "inbox.send_item")
                 .expect("operation import")
                 .0
         )),
@@ -117,7 +113,7 @@ fn a_keyword_operation_is_callable_through_the_qualified_escape() {
     assert!(
         text.contains(&format!(
             "perform {}(",
-            super::linked::operation_slot(&lowered.document, "records.delete")
+            super::linked_inspection::operation_slot(&lowered.document, "records.delete")
                 .expect("operation import")
                 .0
         )),

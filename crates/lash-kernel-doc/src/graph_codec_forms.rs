@@ -12,7 +12,7 @@ use crate::{
     RecordEntry, Rhs, Stmt, TryStmt,
 };
 use lash_vocabulary::names::Name;
-use lash_vocabulary::names::QualifiedName;
+
 use lash_vocabulary::tokens::{CodecVariant, TokenCodec, TokenError, TokenReader, TokenWriter};
 use lash_vocabulary::types::Signature;
 use lash_vocabulary::types::Type;

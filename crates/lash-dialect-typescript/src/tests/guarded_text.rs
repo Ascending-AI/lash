@@ -29,7 +29,7 @@ fn program() -> &'static Program {
     static PROGRAM: OnceLock<Program> = OnceLock::new();
     PROGRAM.get_or_init(|| {
         let methods = METHODS;
-        let registry = machine::registry();
+        let _registry = machine::registry();
         let mut source = ["eq", "num.lt", "list.len", "error.new"].into_iter().map(|name| format!("use {name}\n")).collect::<String>();
         for name in methods.iter().flat_map(|name| [name.to_string(), format!("{name}_generic")]) { source.push_str(&format!("use {name}\n")); }
         for entry in ["fast", "walk"] {
@@ -52,7 +52,7 @@ fn program() -> &'static Program {
             }
             source.push_str("return null\n}\n");
         }
-        let document = super::linked::definitions(&source, &["fast", "walk"], super::library());
+        let document = super::linked_inspection::definitions(&source, &["fast", "walk"], super::library());
         crate::tests::linked::program(Arc::new(document),machine::prepared().clone())
     })
 }

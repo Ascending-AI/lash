@@ -41,7 +41,7 @@ fn awaiting_a_value_waits_for_the_process_a_handle_names() {
     assert!(
         text.contains(&format!(
             "perform {}(",
-            super::linked::operation_slot(&document, "processes.await")
+            super::linked_inspection::operation_slot(&document, "processes.await")
                 .expect("operation import")
                 .0
         )),
@@ -51,7 +51,7 @@ fn awaiting_a_value_waits_for_the_process_a_handle_names() {
     let plain = super::lower_with_effects("const got = await Promise.resolve(3);")
         .expect("the cell lowers")
         .document;
-    assert!(super::linked::operation_slot(&plain, "processes.await").is_none());
+    assert!(super::linked_inspection::operation_slot(&plain, "processes.await").is_none());
 }
 
 /// FIG-6361: split returns List(Any). Every method sharing the guarded

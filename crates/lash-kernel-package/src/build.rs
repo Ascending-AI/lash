@@ -508,7 +508,8 @@ impl LinkedContent {
                     continue;
                 };
                 for original in p.members.values() {
-                    if original.kind == member.kind
+                    if !accepted
+                        && original.kind == member.kind
                         && original.visibility == Visibility::Internal
                         && (p.path != package.path
                             || **owner != *context

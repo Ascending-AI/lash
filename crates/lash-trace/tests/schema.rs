@@ -1089,10 +1089,6 @@ fn step_body_started() -> lash_trace::StepBodyStarted {
             .position()
             .site()
             .clone(),
-        origin: (lash_protocol_types::effect_identity_fixture("then", 2))
-            .position()
-            .site()
-            .clone(),
         at: lash_protocol_types::effect_identity_fixture("then", 2),
         call_id: lash_protocol_types::ToolCallId::fixture("call-2"),
         attempt: 1,

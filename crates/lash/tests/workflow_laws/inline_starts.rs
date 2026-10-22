@@ -56,10 +56,6 @@ fn empty_environment() -> lash::process::ProcessEnv {
         .unwrap()
 }
 
-fn transport(value: &FunctionValue) -> serde_json::Value {
-    value.transport_json().expect("the function value encodes")
-}
-
 /// A write a cut stops a start at.
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum Cut {
@@ -552,7 +548,7 @@ fn inline_request(
         lash::process::LASH_VM_ENGINE_KIND,
         lash::vm::KernelInlineRequest::Callable {
             link: value.callable.link,
-            function: value.clone(),
+            function: Box::new(value.clone()),
             origin: lash::package::CallableOrigin {
                 authored: [value.callable.link].into(),
                 publications: Default::default(),
@@ -670,7 +666,7 @@ async fn holds_its_closure(
     let record = every_process(stores)
         .await
         .into_iter()
-        .find(|record| &record.id == process)
+        .find(|record| record.id == process)
         .unwrap();
     assert!(
         core.host_artifacts()
@@ -939,7 +935,6 @@ async fn a_declared_inline_start_realizes_once_across_a_crash_at_each_realizatio
         let stores = sqlite().await;
         let cuts = Arc::new(Cuts::default());
         let (core, _) = cut_core(&stores, &cuts, &format!("tool-{cut}")).await;
-        let artifacts = core.host_artifacts();
         let pin = lash::process::HostArtifactPin::mint();
         let environment = launching("launch");
         let publication = publish(
@@ -1158,7 +1153,6 @@ async fn an_inline_start_past_the_value_or_batch_bound_publishes_and_starts_noth
     assert!(!cuts.published(&format!("link:v1:{}", large.callable.link)));
     assert!(every_process(&stores).await.is_empty(), "nothing started");
 
-    let artifacts = core.host_artifacts();
     let pin = lash::process::HostArtifactPin::mint();
     let environment = launching("launch");
     let publication = publish(

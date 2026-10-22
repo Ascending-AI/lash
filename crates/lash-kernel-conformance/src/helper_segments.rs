@@ -123,12 +123,7 @@ struct Cut {
 }
 
 fn world() -> World {
-    World {
-        bits: 0,
-        stride: 0,
-        nanoseconds: 0,
-        prints: Vec::new(),
-    }
+    World { prints: Vec::new() }
 }
 
 /// Runs `machine` to its end statement by statement, answering each park

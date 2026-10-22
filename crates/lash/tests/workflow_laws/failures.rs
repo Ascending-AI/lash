@@ -543,7 +543,7 @@ async fn a_caught_failure_reports_recovered() {
         let module = Module::import(&core, language, source).await;
         for entry in ["guarded", "nested"] {
             assert_eq!(
-                echo_states(&core, &module, entry).await,
+                Box::pin(echo_states(&core, &module, entry)).await,
                 (
                     true,
                     vec![ProcessWorkflowSiteState::Recovered],
@@ -567,7 +567,7 @@ async fn an_uncaught_failure_stays_failed() {
     ] {
         let module = Module::import(&core, language, source).await;
         assert_eq!(
-            echo_states(&core, &module, "unguarded").await,
+            Box::pin(echo_states(&core, &module, "unguarded")).await,
             (
                 false,
                 vec![ProcessWorkflowSiteState::Failed],
@@ -593,12 +593,12 @@ async fn a_failure_a_catch_raises_again_is_not_recovered() {
     ] {
         let module = Module::import(&core, language, source).await;
         assert_eq!(
-            echo_states(&core, &module, "rethrown").await,
+            Box::pin(echo_states(&core, &module, "rethrown")).await,
             (false, vec![Failed], vec![Some(view::ActionState::Failed)]),
             "{language:?}"
         );
         assert_eq!(
-            echo_states(&core, &module, "fallback").await,
+            Box::pin(echo_states(&core, &module, "fallback")).await,
             (
                 false,
                 vec![Recovered, Failed],

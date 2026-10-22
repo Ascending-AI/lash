@@ -413,8 +413,10 @@ pub fn deferred_signature() -> lash_vocabulary::types::Signature {
 }
 pub fn service_name(dialect: &str, member: &str) -> lash_vocabulary::names::QualifiedName {
     lash_vocabulary::names::QualifiedName {
-        package: PackagePath::new(Segment::new(dialect).expect("dialect package")),
-        member: Segment::new(member).expect("service member"),
+        package: PackagePath::new(
+            Segment::new(dialect).unwrap_or_else(|error| panic!("dialect package: {error}")),
+        ),
+        member: Segment::new(member).unwrap_or_else(|error| panic!("service member: {error}")),
         type_member: None,
     }
 }

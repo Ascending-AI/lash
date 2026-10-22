@@ -17,8 +17,10 @@ impl Imports {
         if let Some((slot, _)) = entries.iter().find(|(_, found)| **found == import) {
             return *slot;
         }
-        let slot =
-            ImportSlot(u32::try_from(entries.len()).expect("source admission bounds import count"));
+        let slot = ImportSlot(
+            u32::try_from(entries.len())
+                .unwrap_or_else(|error| panic!("source admission bounds import count: {error}")),
+        );
         entries.insert(slot, import);
         slot
     }
@@ -64,7 +66,7 @@ pub fn helper_name(name: &FunctionName) -> QualifiedName {
     let root = if parts.len() > 1 {
         parts.remove(0)
     } else {
-        Segment::new("kernel").expect("canonical")
+        Segment::new("kernel").unwrap_or_else(|error| panic!("canonical: {error}"))
     };
     let mut member = String::from("h");
     for part in parts {
@@ -72,7 +74,8 @@ pub fn helper_name(name: &FunctionName) -> QualifiedName {
     }
     QualifiedName {
         package: PackagePath::new(root),
-        member: Segment::new(member).expect("length-delimited canonical helper words"),
+        member: Segment::new(member)
+            .unwrap_or_else(|error| panic!("length-delimited canonical helper words: {error}")),
         type_member: None,
     }
 }
@@ -111,7 +114,8 @@ fn canonical_segment(text: &str) -> Segment {
         })
         .collect::<Vec<_>>()
         .join("_");
-    Segment::new(&result).expect("helper names have canonical word segments")
+    Segment::new(&result)
+        .unwrap_or_else(|error| panic!("helper names have canonical word segments: {error}"))
 }
 
 /// Defines one authored body by content identity. Captures remain free
@@ -137,7 +141,8 @@ pub fn local_function(
     let used = used_imports(&block);
     FunctionDefinition {
         kernel: lash_kernel_doc::KERNEL_VERSION,
-        name: FunctionName::new("local.function").expect("qualified"),
+        name: FunctionName::new("local.function")
+            .unwrap_or_else(|error| panic!("qualified: {error}")),
         signature: Signature {
             params: params
                 .into_iter()

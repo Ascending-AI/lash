@@ -100,7 +100,7 @@ pub(crate) async fn import_source(
                 }
             } else {
                 Origin::Imported {
-                    packages,
+                    packages: Box::new(packages),
                     dialect: request.dialect,
                     text: request.source,
                     map,

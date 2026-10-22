@@ -438,7 +438,7 @@ pub async fn a_resolution_winner_and_its_claim_debt_commit_atomically(
             "target",
             ToolProviderKey::new("tools").map_err(|error| LawBroken(format!("{error:?}")))?,
         ),
-        policy: definition.manifest.execution_policy.clone(),
+        policy: definition.manifest.execution_policy,
         projection: definition.manifest.argument_projection.clone(),
         payload: None,
         source: RouteSource::Resolved {

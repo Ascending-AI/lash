@@ -33,9 +33,9 @@ use lash_kernel_dialect::{Resolution, Spelling};
 use lash_kernel_doc::{ActKind, Expr, Literal, Rhs, Stmt};
 
 use lash_vocabulary::{
-    EffectName, Name,
-    names::{Import, ImportKind, QualifiedName},
-    types::{Param, Signature, Type},
+    EffectName,
+    names::QualifiedName,
+    types::{Signature, Type},
 };
 
 use super::{Lowerer, Lowering, Operand, Ty};
@@ -356,7 +356,9 @@ impl Lowerer<'_> {
                 let signature = self.signature_of(&effect);
                 let deferred = self.namespaces.operation(&effect).is_none();
                 let operation = lash_vocabulary::names::QualifiedOperation::from_effect(&effect)
-                    .expect("canonical operation");
+                    .map_err(|error| {
+                        Diagnostic::new(DiagnosticCode::LinkError, error.to_string(), self.span)
+                    })?;
                 let slot = self.imports.operation(
                     QualifiedName {
                         package: operation.package,

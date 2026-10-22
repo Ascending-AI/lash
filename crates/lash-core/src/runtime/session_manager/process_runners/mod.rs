@@ -276,8 +276,8 @@ impl lash_core_execution::runtime::process::steps::ProcessStepContext for Runtim
         }
         .resolve(use_, name.clone())
         .await
-        .map(|committed| {
-            let record = match &committed {
+        .inspect(|committed| {
+            let record = match committed {
                 lash_core_execution::runtime::actor::resolutions::CommittedUse::Ready(record)
                 | lash_core_execution::runtime::actor::resolutions::CommittedUse::Parked {
                     record,
@@ -288,7 +288,6 @@ impl lash_core_execution::runtime::process::steps::ProcessStepContext for Runtim
                 .resolutions
                 .lock_recover()
                 .insert(use_, record.entry.clone());
-            committed
         })
     }
 
