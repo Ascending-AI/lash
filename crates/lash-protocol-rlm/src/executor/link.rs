@@ -88,7 +88,7 @@ pub(super) async fn link_cell(
     let documents = state
         .documents
         .as_ref()
-        .expect("cell document owner")
+        .ok_or_else(|| host_failure("the cell has no document owner"))?
         .clone();
     let boundary = HostBoundary {
         snapshot: packages.snapshot.clone(),
