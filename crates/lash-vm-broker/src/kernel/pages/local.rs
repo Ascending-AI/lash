@@ -17,7 +17,7 @@ use super::{answer_page, frame_page, staging};
 /// fixture, a test's map.
 pub trait CommittedPages {
     /// The envelope of `page`, if it is committed.
-    fn page(&self, page: &NodeId) -> Option<Arc<[u8]>>;
+    fn page(&self, page: &NodeId) -> Option<lash_kernel_doc::allocation::SharedBytes>;
 }
 
 /// An in-process [`PageSource`]: committed pages from `committed`, sealed

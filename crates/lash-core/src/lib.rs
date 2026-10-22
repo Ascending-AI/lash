@@ -1046,8 +1046,8 @@ pub use store::{
     RuntimeTurnCommitStamp, ScanCoverage, SemanticBoundaryOperation, SessionAdmission,
     SessionBlobReclaimReport, SessionCatalogStore, SessionCommitStore, SessionHistoryStore,
     SessionLookup, SessionMeta, SessionReferrerState, SessionStateAdmission, SessionStore,
-    StoreBackend, StoreComponentVersion, StoreError, StoreMaintenance, StorePreflight,
-    StoreReleaseStamp, StoreReleaseState, StoreSchemaDatabase, StoreSchemaOutcome,
+    SharedCheckpointAddress, StoreBackend, StoreComponentVersion, StoreError, StoreMaintenance,
+    StorePreflight, StoreReleaseStamp, StoreReleaseState, StoreSchemaDatabase, StoreSchemaOutcome,
     StoreSchemaStatus, StoreSchemaVerdict, SurfaceFormat, TurnInputAdmission, TurnInputForsaking,
     TurnInputStore, VacuumReport, WriterPin, compare_releases, release_stamp_advances,
 };

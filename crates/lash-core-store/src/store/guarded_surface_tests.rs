@@ -96,7 +96,7 @@ fn restamp_checkpoint(bytes: &[u8], version: u32) -> Vec<u8> {
 
 fn write_component(fleet: FleetFormat) -> Vec<u8> {
     serde_json::to_vec(&CheckpointComponentDescriptor {
-        blob_ref: BlobRef::for_content(b"component"),
+        blob_ref: BlobRef::for_content(b"component").into(),
         encoding_version: fleet.writer_version(crate::surface_format!(
             CHECKPOINT_COMPONENT_ENCODING_VERSION
         )),

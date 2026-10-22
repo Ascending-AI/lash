@@ -1,13 +1,14 @@
 use super::*;
+use lash_kernel_doc::allocation::SharedBytes;
 use std::sync::Arc;
 
-/// `serde_bytes` wire shape for an `Arc<[u8]>` body: identical bytes encoding
+/// `serde_bytes` wire shape for an `SharedBytes` body: identical bytes encoding
 /// on serialize, one copy into the shared buffer on deserialize.
 mod arc_serde_bytes {
-    use std::sync::Arc;
+    use lash_kernel_doc::allocation::SharedBytes;
 
     pub(super) fn serialize<S: serde::Serializer>(
-        body: &Arc<[u8]>,
+        body: &SharedBytes,
         serializer: S,
     ) -> Result<S::Ok, S::Error> {
         serializer.serialize_bytes(body)
@@ -15,9 +16,9 @@ mod arc_serde_bytes {
 
     pub(super) fn deserialize<'de, D: serde::Deserializer<'de>>(
         deserializer: D,
-    ) -> Result<Arc<[u8]>, D::Error> {
+    ) -> Result<SharedBytes, D::Error> {
         let bytes: Vec<u8> = serde_bytes::deserialize(deserializer)?;
-        Ok(Arc::from(bytes))
+        Ok(bytes.into())
     }
 }
 
@@ -113,7 +114,7 @@ impl SessionCheckpoint {
     pub fn component_ref(&self, key: &str) -> Option<&BlobRef> {
         self.components
             .get(key)
-            .map(|component| &component.blob_ref)
+            .map(|component| component.blob_ref.as_ref())
     }
 
     /// A manifest outside any store validates component encodings against
@@ -151,13 +152,128 @@ impl SessionCheckpoint {
     }
 }
 
+/// An immutable checkpoint address, with admission on the allocation that
+/// descriptor and component clones retain. Its serialized form is BlobRef.
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
+#[serde(transparent)]
+pub struct SharedCheckpointAddress(Arc<CheckpointAddressStorage>);
+#[derive(Debug, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
+#[serde(transparent)]
+struct CheckpointAddressStorage {
+    value: BlobRef,
+    #[serde(skip)]
+    _allocation: lash_protocol_types::allocation::AllocationHold,
+    #[serde(skip)]
+    budget: lash_protocol_types::allocation::AllocationBudget,
+}
+impl SharedCheckpointAddress {
+    /// Reserve address and storage capacity before copying a borrowed reference.
+    pub fn copy_from_ref_in(
+        value: &BlobRef,
+        budget: &lash_protocol_types::allocation::AllocationBudget,
+    ) -> Result<Self, lash_protocol_types::allocation::AllocationError> {
+        let allocation = budget.reserve(
+            value.0.capacity() as u64 + std::mem::size_of::<CheckpointAddressStorage>() as u64 + 64,
+        )?;
+        Ok(Self(Arc::new(CheckpointAddressStorage {
+            value: value.clone(),
+            _allocation: allocation,
+            budget: budget.clone(),
+        })))
+    }
+    /// Share this ledger's admitted address; reserve before copying a foreign one.
+    pub fn clone_in(
+        &self,
+        budget: &lash_protocol_types::allocation::AllocationBudget,
+    ) -> Result<Self, lash_protocol_types::allocation::AllocationError> {
+        if self.0.budget.identity() == budget.identity() {
+            return Ok(self.clone());
+        }
+        Self::copy_from_ref_in(self, budget)
+    }
+    /// Transfer fresh whole-source decode admission before exposing readers.
+    pub fn decoded_in(
+        &mut self,
+        allocation: lash_protocol_types::allocation::AllocationHold,
+        budget: lash_protocol_types::allocation::AllocationBudget,
+    ) -> bool {
+        let Some(storage) = Arc::get_mut(&mut self.0) else {
+            return false;
+        };
+        storage._allocation = allocation;
+        storage.budget = budget;
+        true
+    }
+}
+impl std::fmt::Display for SharedCheckpointAddress {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.value.fmt(f)
+    }
+}
+impl From<BlobRef> for SharedCheckpointAddress {
+    fn from(value: BlobRef) -> Self {
+        Self(Arc::new(CheckpointAddressStorage {
+            value,
+            _allocation: Default::default(),
+            budget: Default::default(),
+        }))
+    }
+}
+impl std::ops::Deref for SharedCheckpointAddress {
+    type Target = BlobRef;
+    fn deref(&self) -> &Self::Target {
+        &self.0.value
+    }
+}
+impl AsRef<BlobRef> for SharedCheckpointAddress {
+    fn as_ref(&self) -> &BlobRef {
+        &self.0.value
+    }
+}
+impl PartialEq for SharedCheckpointAddress {
+    fn eq(&self, other: &Self) -> bool {
+        self.0.value == other.0.value
+    }
+}
+impl Eq for SharedCheckpointAddress {}
+impl PartialEq<BlobRef> for SharedCheckpointAddress {
+    fn eq(&self, other: &BlobRef) -> bool {
+        self.as_ref() == other
+    }
+}
+impl PartialEq<SharedCheckpointAddress> for BlobRef {
+    fn eq(&self, other: &SharedCheckpointAddress) -> bool {
+        self == other.as_ref()
+    }
+}
+
 /// Durable address and codec identity for one checkpoint component.
 #[derive(
     Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
 )]
 pub struct CheckpointComponentDescriptor {
-    pub blob_ref: BlobRef,
+    pub blob_ref: SharedCheckpointAddress,
     pub encoding_version: u32,
+}
+
+impl CheckpointComponentDescriptor {
+    pub fn clone_in(
+        &self,
+        budget: &lash_protocol_types::allocation::AllocationBudget,
+    ) -> Result<Self, lash_protocol_types::allocation::AllocationError> {
+        Ok(Self {
+            blob_ref: self.blob_ref.clone_in(budget)?,
+            encoding_version: self.encoding_version,
+        })
+    }
+    /// Transfer a preadmitted fresh decode before sharing its address.
+    pub fn decoded_in(
+        &mut self,
+        allocation: lash_protocol_types::allocation::AllocationHold,
+        budget: lash_protocol_types::allocation::AllocationBudget,
+    ) -> bool {
+        self.blob_ref.decoded_in(allocation, budget)
+    }
 }
 
 /// One entry in a complete keyed checkpoint component set.
@@ -177,9 +293,9 @@ pub enum HydratedCheckpointComponent {
         encoding_version: u32,
         /// Content address derived when the changed body entered the commit plan.
         #[serde(skip_serializing)]
-        body_ref: BlobRef,
+        body_ref: SharedCheckpointAddress,
         #[serde(with = "arc_serde_bytes")]
-        body: Arc<[u8]>,
+        body: SharedBytes,
     },
     Unchanged {
         descriptor: CheckpointComponentDescriptor,
@@ -187,7 +303,7 @@ pub enum HydratedCheckpointComponent {
     Hydrated {
         descriptor: CheckpointComponentDescriptor,
         #[serde(with = "arc_serde_bytes")]
-        body: Arc<[u8]>,
+        body: SharedBytes,
     },
 }
 
@@ -201,7 +317,7 @@ impl<'de> serde::Deserialize<'de> for HydratedCheckpointComponent {
             Changed {
                 encoding_version: u32,
                 #[serde(with = "arc_serde_bytes")]
-                body: Arc<[u8]>,
+                body: SharedBytes,
             },
             Unchanged {
                 descriptor: CheckpointComponentDescriptor,
@@ -209,7 +325,7 @@ impl<'de> serde::Deserialize<'de> for HydratedCheckpointComponent {
             Hydrated {
                 descriptor: CheckpointComponentDescriptor,
                 #[serde(with = "arc_serde_bytes")]
-                body: Arc<[u8]>,
+                body: SharedBytes,
             },
         }
 
@@ -231,6 +347,75 @@ impl<'de> serde::Deserialize<'de> for HydratedCheckpointComponent {
 }
 
 impl HydratedCheckpointComponent {
+    pub fn clone_in(
+        &self,
+        budget: &lash_protocol_types::allocation::AllocationBudget,
+    ) -> Result<Self, lash_protocol_types::allocation::AllocationError> {
+        Ok(match self {
+            Self::Changed {
+                encoding_version,
+                body_ref,
+                body,
+            } => Self::Changed {
+                encoding_version: *encoding_version,
+                body_ref: body_ref.clone_in(budget)?,
+                body: body.clone_in(budget)?,
+            },
+            Self::Unchanged { descriptor } => Self::Unchanged {
+                descriptor: descriptor.clone_in(budget)?,
+            },
+            Self::Hydrated { descriptor, body } => Self::Hydrated {
+                descriptor: descriptor.clone_in(budget)?,
+                body: body.clone_in(budget)?,
+            },
+        })
+    }
+
+    /// Transfer whole-source admission to every immutable escaping source.
+    /// Call only on a fresh decode, before publishing any component readers.
+    pub fn decoded_in(
+        &mut self,
+        allocation: lash_protocol_types::allocation::AllocationHold,
+        budget: lash_protocol_types::allocation::AllocationBudget,
+    ) -> bool {
+        match self {
+            Self::Changed { body_ref, body, .. } => {
+                body_ref.decoded_in(allocation.clone(), budget.clone())
+                    && body.decoded_in(allocation, budget)
+            }
+            Self::Unchanged { descriptor } => descriptor.decoded_in(allocation, budget),
+            Self::Hydrated { descriptor, body } => {
+                descriptor.decoded_in(allocation.clone(), budget.clone())
+                    && body.decoded_in(allocation, budget)
+            }
+        }
+    }
+
+    /// Admit a serving component's body and address before copying or hashing.
+    pub fn changed_for_fleet_in(
+        body: &SharedBytes,
+        fleet_format: crate::store::FleetFormat,
+        budget: &lash_protocol_types::allocation::AllocationBudget,
+    ) -> Result<Self, lash_protocol_types::allocation::AllocationError> {
+        let allocation =
+            budget.reserve(64 + std::mem::size_of::<CheckpointAddressStorage>() as u64 + 64)?;
+        let body = body.clone_in(budget)?;
+        let body_ref = SharedCheckpointAddress(Arc::new(CheckpointAddressStorage {
+            value: BlobRef::for_content(&body),
+            _allocation: allocation,
+            budget: budget.clone(),
+        }));
+        #[cfg(feature = "perf-witness")]
+        crate::perf_witness::record_hash_pass(body.len());
+        Ok(Self::Changed {
+            encoding_version: fleet_format.writer_version(crate::surface_format!(
+                CHECKPOINT_COMPONENT_ENCODING_VERSION
+            )),
+            body_ref,
+            body,
+        })
+    }
+
     /// Marks logical component bytes as changed and in need of durable storage.
     ///
     /// Integrator class (ADR 0051): **store and durable-substrate implementors**
@@ -243,14 +428,14 @@ impl HydratedCheckpointComponent {
     ///
     /// Non-durable and test callers mint at the build's current format; a
     /// durable writer calls [`Self::changed_for_fleet`] with its store's `F`.
-    pub fn changed(body: impl Into<Arc<[u8]>>) -> Self {
+    pub fn changed(body: impl Into<SharedBytes>) -> Self {
         Self::changed_for_fleet(body, crate::store::FleetFormat::current())
     }
 
     /// The fleet-stamped variant: `encoding_version` is the fleet's writer
     /// version for the component-encoding surface (FIG-3796).
     pub fn changed_for_fleet(
-        body: impl Into<Arc<[u8]>>,
+        body: impl Into<SharedBytes>,
         fleet_format: crate::store::FleetFormat,
     ) -> Self {
         Self::changed_with_encoding_version(
@@ -261,8 +446,8 @@ impl HydratedCheckpointComponent {
         )
     }
 
-    fn changed_with_encoding_version(body: Arc<[u8]>, encoding_version: u32) -> Self {
-        let body_ref = BlobRef::for_content(&body);
+    fn changed_with_encoding_version(body: SharedBytes, encoding_version: u32) -> Self {
+        let body_ref = BlobRef::for_content(&body).into();
         #[cfg(feature = "perf-witness")]
         crate::perf_witness::record_hash_pass(body.len());
         Self::Changed {
@@ -291,7 +476,10 @@ impl HydratedCheckpointComponent {
     /// loaded checkpoint manifest. The caller must supply the bytes named by
     /// `descriptor`; [`HydratedSessionCheckpoint::manifest`] verifies their
     /// content address before the value may be projected back to a root.
-    pub fn hydrated(descriptor: CheckpointComponentDescriptor, body: impl Into<Arc<[u8]>>) -> Self {
+    pub fn hydrated(
+        descriptor: CheckpointComponentDescriptor,
+        body: impl Into<SharedBytes>,
+    ) -> Self {
         Self::Hydrated {
             descriptor,
             body: body.into(),
@@ -345,9 +533,9 @@ impl HydratedCheckpointComponent {
     /// Integrator class (ADR 0051): same contract as [`Self::body`], but the
     /// clone is a refcount bump instead of a `to_vec` copy — callers that keep
     /// or forward the bytes should prefer it.
-    pub fn body_arc(&self) -> Option<Arc<[u8]>> {
+    pub fn body_arc(&self) -> Option<SharedBytes> {
         match self {
-            Self::Changed { body, .. } | Self::Hydrated { body, .. } => Some(Arc::clone(body)),
+            Self::Changed { body, .. } | Self::Hydrated { body, .. } => Some(body.clone()),
             Self::Unchanged { .. } => None,
         }
     }
@@ -478,7 +666,7 @@ pub struct HydratedSessionCheckpoint {
 pub struct CheckpointExecution {
     /// A SessionExecution node.
     pub root: crate::checkpoint_graph::NodeId,
-    pub descriptor: Option<std::sync::Arc<[u8]>>,
+    pub descriptor: Option<lash_kernel_doc::allocation::SharedBytes>,
 }
 
 impl CheckpointExecution {
@@ -495,7 +683,7 @@ impl CheckpointExecution {
             .as_ref()
             .map(|bytes| crate::checkpoint_graph::EncodedNode {
                 id: self.root,
-                bytes: std::sync::Arc::clone(bytes),
+                bytes: bytes.clone(),
             })
     }
 }
@@ -544,7 +732,7 @@ impl HydratedSessionCheckpoint {
         &self,
         key: &str,
         fleet_format: crate::store::FleetFormat,
-    ) -> Result<Option<Arc<[u8]>>, StoreError> {
+    ) -> Result<Option<SharedBytes>, StoreError> {
         let Some(component) = self.component(key) else {
             return Ok(None);
         };
@@ -693,6 +881,176 @@ impl crate::store::DurableRecord for HydratedCheckpointComponent {
 mod checkpoint_tests {
     use super::*;
 
+    fn budget(
+        limit: u64,
+    ) -> (
+        lash_protocol_types::allocation::AllocationBudget,
+        Arc<std::sync::atomic::AtomicU64>,
+    ) {
+        let used = Arc::new(std::sync::atomic::AtomicU64::new(0));
+        (
+            lash_protocol_types::allocation::AllocationBudget::new(
+                crate::execution_state::retention_tests::Ledger {
+                    used: used.clone(),
+                    limit,
+                },
+            ),
+            used,
+        )
+    }
+
+    /// LO-EVICT-ENCODED-OUTPUT: serialization output is admitted before
+    /// allocation and its readers retain that admission.
+    #[test]
+    fn encoded_component_output_is_admitted_before_writing() {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        struct Payload<'a> {
+            text: &'a str,
+            used: &'a AtomicU64,
+            calls: std::cell::Cell<usize>,
+        }
+        impl serde::Serialize for Payload<'_> {
+            fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+                let call = self.calls.get() + 1;
+                self.calls.set(call);
+                if call > 1 {
+                    assert!(self.used.load(Ordering::SeqCst) >= self.text.len() as u64);
+                }
+                serializer.serialize_str(self.text)
+            }
+        }
+        let text = "checkpoint".repeat(8192);
+        let (tiny, used) = budget(1);
+        let payload = Payload {
+            text: &text,
+            used: &used,
+            calls: std::cell::Cell::new(0),
+        };
+        assert!(matches!(
+            crate::store::encode_checkpoint_component("output-law", &payload, &tiny),
+            Err(StoreError::Allocation(_))
+        ));
+        assert_eq!(
+            payload.calls.get(),
+            1,
+            "refusal precedes the output-writing pass"
+        );
+        let (budget, used) = budget(1 << 20);
+        let payload = Payload {
+            text: &text,
+            used: &used,
+            calls: std::cell::Cell::new(0),
+        };
+        let bytes =
+            crate::store::encode_checkpoint_component("output-law", &payload, &budget).unwrap();
+        assert_eq!(payload.calls.get(), 2);
+        assert!(used.load(Ordering::SeqCst) >= bytes.len() as u64);
+        assert_eq!(rmp_serde::from_slice::<String>(&bytes).unwrap(), text);
+        let reader = bytes.clone();
+        drop(bytes);
+        assert!(used.load(Ordering::SeqCst) >= reader.len() as u64);
+        drop(reader);
+        assert_eq!(used.load(Ordering::SeqCst), 0);
+    }
+
+    /// LO-EVICT-COMPONENT: admission precedes an encoded body copy, and
+    /// escaped component bytes retain the charge independently of the component.
+    #[test]
+    fn component_admission_follows_escaped_encoded_bytes() {
+        use std::sync::atomic::Ordering;
+        let component = HydratedCheckpointComponent::changed(vec![7; 8192]);
+        let (tiny, used) = budget(1);
+        assert!(
+            component.clone_in(&tiny).is_err(),
+            "component bytes must be admitted before copying"
+        );
+        assert_eq!(used.load(Ordering::SeqCst), 0);
+        let (budget, used) = budget(1 << 20);
+        let admitted = component.clone_in(&budget).unwrap();
+        let charged = used.load(Ordering::SeqCst);
+        assert!(charged >= 8192);
+        let bytes = admitted.body_arc().unwrap();
+        let clone = admitted.clone();
+        drop(admitted);
+        drop(clone);
+        assert!(used.load(Ordering::SeqCst) >= 8192);
+        assert_eq!(bytes.as_ref(), &[7; 8192]);
+        drop(bytes);
+        assert_eq!(used.load(Ordering::SeqCst), 0);
+    }
+
+    /// LO-EVICT-ENCODED-NODE: envelope clones retain their actual source
+    /// admission, and a foreign owner must admit its independent copy.
+    #[test]
+    fn encoded_node_admission_follows_escaped_envelope_bytes() {
+        use std::sync::atomic::Ordering;
+        let bytes = vec![9; 8192];
+        let node = crate::checkpoint_graph::EncodedNode {
+            id: crate::checkpoint_graph::NodeId::of_envelope(&bytes),
+            bytes: bytes.into(),
+        };
+        let (tiny, _) = budget(1);
+        assert!(
+            node.clone_in(&tiny).is_err(),
+            "envelopes must be admitted before copying"
+        );
+        let (budget, used) = budget(1 << 20);
+        let admitted = node.clone_in(&budget).unwrap();
+        let charged = used.load(Ordering::SeqCst);
+        assert!(charged >= 8192);
+        let bytes = admitted.bytes.clone();
+        let clone = admitted.clone_in(&budget).unwrap();
+        assert_eq!(used.load(Ordering::SeqCst), charged);
+        drop(admitted);
+        drop(clone);
+        assert_eq!(used.load(Ordering::SeqCst), charged);
+        assert_eq!(bytes.len(), 8192);
+        drop(bytes);
+        assert_eq!(used.load(Ordering::SeqCst), 0);
+        let mut decoded: SharedBytes =
+            rmp_serde::from_slice(&rmp_serde::to_vec(&vec![4_u8; 1024]).unwrap()).unwrap();
+        let hold = budget.reserve(4096).unwrap();
+        assert!(decoded.decoded_in(hold, budget.clone()));
+        let reader = decoded.clone();
+        assert!(
+            !decoded.decoded_in(Default::default(), Default::default()),
+            "a shared decode cannot change ledgers"
+        );
+        drop(decoded);
+        assert_eq!(used.load(Ordering::SeqCst), 4096);
+        assert_eq!(reader.len(), 1024);
+        drop(reader);
+        assert_eq!(used.load(Ordering::SeqCst), 0);
+    }
+
+    /// LO-EVICT-DESCRIPTOR: copied durable addresses are charged before
+    /// retention and descriptor clones share the admitted source allocation.
+    #[test]
+    fn descriptor_admission_retains_shared_address_storage() {
+        use std::sync::atomic::Ordering;
+        let descriptor = CheckpointComponentDescriptor {
+            blob_ref: BlobRef::for_content(b"body").into(),
+            encoding_version: CHECKPOINT_COMPONENT_ENCODING_VERSION,
+        };
+        let (tiny, _) = budget(1);
+        assert!(
+            descriptor.clone_in(&tiny).is_err(),
+            "descriptor strings must be admitted before copying"
+        );
+        let (budget, used) = budget(1 << 20);
+        let admitted = descriptor.clone_in(&budget).unwrap();
+        let charged = used.load(Ordering::SeqCst);
+        assert!(charged >= 64);
+        let measurement = crate::history_growth_law::allocation_counter::Measurement::start();
+        let clone = admitted.clone();
+        assert_eq!(measurement.finish().allocated, 0);
+        drop(admitted);
+        assert_eq!(used.load(Ordering::SeqCst), charged);
+        assert_eq!(clone.blob_ref, descriptor.blob_ref);
+        drop(clone);
+        assert_eq!(used.load(Ordering::SeqCst), 0);
+    }
+
     #[test]
     fn checked_component_body_validates_the_opaque_component_envelope() {
         let key = "opaque/owner";
@@ -701,8 +1059,8 @@ mod checkpoint_tests {
                 key.to_string(),
                 HydratedCheckpointComponent::Changed {
                     encoding_version: CHECKPOINT_COMPONENT_ENCODING_VERSION + 1,
-                    body_ref: BlobRef::for_content(b"owner-defined"),
-                    body: Arc::from(&b"owner-defined"[..]),
+                    body_ref: BlobRef::for_content(b"owner-defined").into(),
+                    body: (&b"owner-defined"[..]).into(),
                 },
             )]
             .into_iter()

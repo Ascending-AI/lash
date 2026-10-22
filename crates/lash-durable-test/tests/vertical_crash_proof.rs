@@ -1484,7 +1484,12 @@ async fn a_turn_resumed_at_any_checkpoint_commits_messages_and_protocol_records_
 /// The heap pages candidates published, by identity: where a law reads
 /// back a text the heap paged out of its root.
 #[derive(Clone, Debug, Default)]
-struct Published(BTreeMap<lash_core_store::checkpoint_graph::NodeId, Arc<[u8]>>);
+struct Published(
+    BTreeMap<
+        lash_core_store::checkpoint_graph::NodeId,
+        lash_core_store::checkpoint_graph::SharedBytes,
+    >,
+);
 
 impl lash_core_store::checkpoint_graph::NodeSource for Published {
     fn fetch(
@@ -1503,7 +1508,7 @@ impl lash_core_store::checkpoint_graph::NodeSource for Published {
 impl Published {
     fn insert(&mut self, nodes: &[lash_core_store::checkpoint_graph::EncodedNode]) {
         for node in nodes {
-            self.0.insert(node.id, Arc::clone(&node.bytes));
+            self.0.insert(node.id, node.bytes.clone());
         }
     }
 
@@ -1515,7 +1520,7 @@ impl Published {
             lash_core_store::checkpoint_graph::NodeId,
             lash_core_store::checkpoint_graph::EncodedNode,
         >,
-    ) -> Vec<Arc<[u8]>> {
+    ) -> Vec<lash_core_store::checkpoint_graph::SharedBytes> {
         use lash_core_store::checkpoint_graph::parse_envelope;
         let mut seen = std::collections::BTreeSet::new();
         let mut next: Vec<_> = nodes
@@ -1533,7 +1538,7 @@ impl Published {
                 if let Ok(envelope) = parse_envelope(bytes, Some(id)) {
                     next.extend(envelope.children.iter());
                 }
-                reached.push(Arc::clone(bytes));
+                reached.push(bytes.clone());
             }
         }
         reached

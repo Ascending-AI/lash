@@ -127,7 +127,7 @@ async fn committed_checkpoint(
         .manifest
         .components
         .values()
-        .map(|component| component.blob_ref.clone())
+        .map(|component| component.blob_ref.as_ref().clone())
         .collect();
     CommittedCheckpoint {
         request,

@@ -966,8 +966,6 @@ fn a_deployment_graph_read_policy_refuses_its_configured_byte_budget() {
 /// keep their allocation, including an unchanged placed subtree of a new root.
 #[test]
 fn repeated_captures_share_unchanged_graph_materialization() {
-    use std::sync::Arc;
-
     let body = |suffix: &str| {
         let mut out = TokenWriter::new();
         out.seq(2);
@@ -989,7 +987,7 @@ fn repeated_captures_share_unchanged_graph_materialization() {
     );
     for (id, node) in first.nodes() {
         assert!(
-            Arc::ptr_eq(&node.bytes, &repeated.get(id).unwrap().bytes),
+            node.bytes.ptr_eq(&repeated.get(id).unwrap().bytes),
             "unchanged node {id} was materialized again"
         );
     }
@@ -1002,7 +1000,7 @@ fn repeated_captures_share_unchanged_graph_materialization() {
     let mut newly_materialized = 0;
     for (id, node) in changed.nodes() {
         match first.get(id) {
-            Some(previous) => assert!(Arc::ptr_eq(&previous.bytes, &node.bytes)),
+            Some(previous) => assert!(previous.bytes.ptr_eq(&node.bytes)),
             None => newly_materialized += 1,
         }
     }
@@ -1037,7 +1035,7 @@ fn repeated_captures_share_unchanged_graph_materialization() {
     for (id, node) in after.nodes() {
         match before.get(id) {
             Some(previous) => {
-                assert!(Arc::ptr_eq(&previous.bytes, &node.bytes));
+                assert!(previous.bytes.ptr_eq(&node.bytes));
                 shared_nodes += 1;
             }
             None => changed_nodes += 1,

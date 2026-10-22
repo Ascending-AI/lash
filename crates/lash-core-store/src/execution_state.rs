@@ -66,7 +66,7 @@ pub enum ExecutionGraphCapture {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct HydratedExecutionGraph {
     pub root: crate::checkpoint_graph::NodeId,
-    pub descriptor: Arc<[u8]>,
+    pub descriptor: lash_kernel_doc::allocation::SharedBytes,
 }
 
 impl HydratedExecutionGraph {
@@ -75,7 +75,7 @@ impl HydratedExecutionGraph {
     pub fn node(&self) -> crate::checkpoint_graph::EncodedNode {
         crate::checkpoint_graph::EncodedNode {
             id: self.root,
-            bytes: Arc::clone(&self.descriptor),
+            bytes: self.descriptor.clone(),
         }
     }
 }
@@ -139,6 +139,11 @@ impl PluginConfig {
     /// The protocol owner and the namespaces, for a transport to encode.
     pub fn recorded_parts(&self) -> (Option<&str>, &BTreeMap<String, PluginConfigNamespace>) {
         (self.protocol_plugin_id(), self.namespaces())
+    }
+
+    /// The ledger that admitted this immutable configuration.
+    pub fn allocation_budget(&self) -> &AllocationBudget {
+        &self.0.budget
     }
 
     /// Share an admitted source on this ledger, or reserve before copying

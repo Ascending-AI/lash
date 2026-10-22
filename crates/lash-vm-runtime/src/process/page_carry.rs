@@ -48,7 +48,7 @@ impl PageSource for Pages {
             .iter()
             .map(|page| {
                 let id = NodeId(page.id.0);
-                let bytes = self.nodes().get(&id).map(|node| Arc::clone(&node.bytes));
+                let bytes = self.nodes().get(&id).map(|node| node.bytes.clone());
                 let bytes = match bytes {
                     Some(bytes) => bytes,
                     None => {

@@ -56,14 +56,17 @@ impl RuntimeSessionState {
             result.head_revision > self.head_revision,
             "adopted head revision must advance"
         );
+        let committed_components_match = self
+            .checkpoint_components
+            .manifest_matches_resident_commit_intent(
+                &result.manifest,
+                self.session_graph.nodes.allocation_budget(),
+            )?;
         self.head_revision = result.head_revision;
         self.checkpoint_ref = Some(result.checkpoint_ref);
         self.session_graph
             .apply_realized_node_timestamps(&result.realized_node_timestamps)?;
         self.agent_frames = self.session_graph.agent_frame_records(&self.session_id);
-        let committed_components_match = self
-            .checkpoint_components
-            .manifest_matches_resident_commit_intent(&result.manifest);
         self.checkpoint_components.adopt_manifest(&result.manifest);
         self.checkpoint_components.discard_known_bodies(
             committed_components_match,
@@ -92,7 +95,10 @@ impl RuntimeSessionState {
         }
         if !self
             .checkpoint_components
-            .manifest_matches_resident_commit_intent(&result.manifest)
+            .manifest_matches_resident_commit_intent(
+                &result.manifest,
+                self.session_graph.nodes.allocation_budget(),
+            )?
         {
             return Err(corrupt(
                 "acknowledged checkpoint differs from its prepared postimage",

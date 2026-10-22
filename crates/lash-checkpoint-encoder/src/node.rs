@@ -2,7 +2,6 @@
 //! (FIG-5887 §2).
 
 use std::fmt;
-use std::sync::Arc;
 
 use lash_kernel_doc::graph_tokens::{
     CanonicalFault, ChildRef, RefForm, TokenCodec, TokenError, TokenEvent, TokenReader,
@@ -129,7 +128,7 @@ impl fmt::Display for NodeId {
 #[derive(Clone, PartialEq, Eq)]
 pub struct EncodedNode {
     pub id: NodeId,
-    pub bytes: Arc<[u8]>,
+    pub bytes: crate::allocation::SharedBytes,
 }
 
 impl fmt::Debug for EncodedNode {
@@ -142,6 +141,17 @@ impl fmt::Debug for EncodedNode {
 }
 
 impl EncodedNode {
+    /// Adopt the actual immutable envelope under the owner's allocation cap.
+    pub fn clone_in(
+        &self,
+        budget: &crate::allocation::AllocationBudget,
+    ) -> Result<Self, crate::allocation::AllocationError> {
+        Ok(Self {
+            id: self.id,
+            bytes: self.bytes.clone_in(budget)?,
+        })
+    }
+
     /// The envelope, already known to be well formed: staged nodes are only
     /// ever built by this module.
     ///

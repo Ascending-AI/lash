@@ -495,14 +495,11 @@ impl SqliteStore {
                     })?;
                 // The descriptor alone: its heap pages are read on demand
                 // under a root lease (ADR 0145 §10).
-                let descriptor =
-                    lash_core_store::checkpoint_graph::NodeSource::fetch(closure, &root)
-                        .map(|node| std::sync::Arc::from(node.bytes))
-                        .ok_or_else(|| {
-                            graph_store_error(
-                                lash_core_store::checkpoint_graph::GraphRefusal::MissingNode(root),
-                            )
-                        })?;
+                let descriptor = closure.shared_bytes(&root).ok_or_else(|| {
+                    graph_store_error(
+                        lash_core_store::checkpoint_graph::GraphRefusal::MissingNode(root),
+                    )
+                })?;
                 Ok::<_, StoreError>(lash_core_store::store::CheckpointExecution {
                     root,
                     descriptor: Some(descriptor),
@@ -515,25 +512,25 @@ impl SqliteStore {
         for (key, descriptor) in &record.components {
             let graph_body =
                 lash_core_store::checkpoint_graph::NodeId::from_hex(descriptor.blob_ref.as_str())
-                    .and_then(|id| {
-                        lash_core_store::checkpoint_graph::NodeSource::fetch(closure, &id)
-                    })
-                    .map(|node| std::sync::Arc::<[u8]>::from(node.bytes));
+                    .and_then(|id| closure.shared_bytes(&id));
             let body =
                 if lash_core_store::plugin_state::namespace_component_plugin(key).is_some() {
-                    graph_body.as_ref()
+                    graph_body
                 } else {
-                    bodies.get(descriptor.blob_ref.as_str())
+                    bodies
+                        .get(descriptor.blob_ref.as_str())
+                        .cloned()
+                        .map(lash_core_store::checkpoint_graph::SharedBytes::from)
                 }
                 .ok_or_else(|| StoreError::CheckpointComponentMissing {
                     key: key.clone(),
-                    blob_ref: descriptor.blob_ref.clone(),
+                    blob_ref: descriptor.blob_ref.as_ref().clone(),
                 })?;
             components.insert(
                 key.clone(),
                 lash_core_store::store::HydratedCheckpointComponent::hydrated(
                     descriptor.clone(),
-                    std::sync::Arc::clone(body),
+                    body,
                 ),
             );
         }

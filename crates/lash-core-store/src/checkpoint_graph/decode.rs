@@ -84,7 +84,7 @@ pub fn closure(
             id,
             EncodedNode {
                 id,
-                bytes: std::sync::Arc::from(stored.bytes),
+                bytes: stored.bytes.into(),
             },
         );
     }

@@ -293,7 +293,7 @@ async fn scan_session_execution_state(
 fn execution_state_ref(manifest: &[u8]) -> Option<String> {
     let node = lash_core_store::checkpoint_graph::EncodedNode {
         id: lash_core_store::checkpoint_graph::NodeId::of_envelope(manifest),
-        bytes: std::sync::Arc::from(manifest),
+        bytes: manifest.into(),
     };
     lash_core_store::store::SessionCheckpoint::named(&node)?
         .execution

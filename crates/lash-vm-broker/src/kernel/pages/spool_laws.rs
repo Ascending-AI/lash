@@ -55,7 +55,7 @@ fn page(label: &str, children: &[NodeId]) -> VerifiedNode {
 /// The committed pages behind a root lease.
 #[derive(Default)]
 struct Committed {
-    pages: std::sync::Mutex<BTreeMap<NodeId, Arc<[u8]>>>,
+    pages: std::sync::Mutex<BTreeMap<NodeId, lash_kernel_doc::allocation::SharedBytes>>,
     lost: AtomicBool,
 }
 
@@ -96,7 +96,7 @@ impl LeasedReads for Committed {
 }
 
 impl CommittedPages for Arc<Committed> {
-    fn page(&self, page: &NodeId) -> Option<Arc<[u8]>> {
+    fn page(&self, page: &NodeId) -> Option<lash_kernel_doc::allocation::SharedBytes> {
         self.pages.lock().expect("pages").get(page).cloned()
     }
 }
@@ -483,13 +483,14 @@ fn a_cell_within_the_resident_bound_opens_no_file_per_page() {
         assert_eq!(spool.read(&orphan.id), Err(StageFault::Missing(orphan.id)));
         let commit = CommitId([4; 32]);
         let mut manifest = spool.candidate(top.id, None, commit).expect("candidate");
-        let entries: Vec<(NodeId, Option<Arc<[u8]>>)> = drain(manifest.as_mut(), None, 64)
-            .into_iter()
-            .map(|entry| match entry {
-                ManifestEntry::Fresh(node) => (node.id, Some(node.into_node().bytes)),
-                ManifestEntry::External(id) => (id, None),
-            })
-            .collect();
+        let entries: Vec<(NodeId, Option<lash_kernel_doc::allocation::SharedBytes>)> =
+            drain(manifest.as_mut(), None, 64)
+                .into_iter()
+                .map(|entry| match entry {
+                    ManifestEntry::Fresh(node) => (node.id, Some(node.into_node().bytes)),
+                    ManifestEntry::External(id) => (id, None),
+                })
+                .collect();
         let candidate = files(dir) - idle;
         spool.settle(commit).expect("settled");
         assert_eq!(spool.usage().pages, 0);
