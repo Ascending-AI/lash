@@ -6,9 +6,10 @@ use lash_kernel_doc::{Expr, Node, Stmt};
 
 use lash_vocabulary::Name;
 
-use super::Lowerer;
+use super::{Lowerer, Lowering};
 use crate::adapter::{self as ast, VarKind};
 use crate::captions::Arm;
+use crate::{Diagnostic, DiagnosticCode};
 
 /// Whether a kernel statement is the one a control construct lowers to:
 /// the last of its kind the construct emits.
@@ -83,28 +84,39 @@ impl Lowerer<'_> {
         statement: &ast::Stmt,
         before: usize,
         entry: Option<Name>,
-    ) {
+    ) -> Lowering<()> {
         let spelled = self.spelled;
         let caption = spelled.statements.get(&start);
         if let Some(entry) = entry {
+            let function = self
+                .module
+                .as_ref()
+                .and_then(|module| module.function(&entry))
+                .ok_or_else(|| {
+                    Diagnostic::new(
+                        DiagnosticCode::InvalidAst,
+                        "a captioned module Export has no lowered body",
+                        self.span,
+                    )
+                })?;
             if let Some(caption) = caption {
                 self.declared_captions
                     .push(lash_kernel_doc::CaptionEntry::site(
                         lash_vocabulary::sites::Site::new(
-                            lash_vocabulary::sites::Unit::Function(entry),
+                            lash_vocabulary::sites::Unit::Library(function),
                             Vec::new(),
                         ),
                         caption.clone(),
                     ));
             }
-            return;
+            return Ok(());
         }
         let arms: Vec<_> = [Arm::Else, Arm::Catch, Arm::Finally]
             .into_iter()
             .filter_map(|arm| Some((arm, spelled.arms.get(&(start, arm))?)))
             .collect();
         if caption.is_none() && arms.is_empty() {
-            return;
+            return Ok(());
         }
         let owner = {
             let mut emitted = self.buf.stmts().skip(before);
@@ -116,7 +128,7 @@ impl Lowerer<'_> {
             }
         };
         let Some((owned, note)) = owner.and_then(|index| self.buf.get_mut(before + index)) else {
-            return;
+            return Ok(());
         };
         let indices: Vec<_> = arms
             .into_iter()
@@ -128,5 +140,6 @@ impl Lowerer<'_> {
         for (index, caption) in indices {
             note.arm_captions.entry(index).or_insert(caption);
         }
+        Ok(())
     }
 }

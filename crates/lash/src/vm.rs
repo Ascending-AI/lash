@@ -151,4 +151,4 @@ pub use lash_vm_runtime::{DIALECT_SERVICE_PACKAGES, TIMER_OPERATIONS};
 
 /// Errors and retained source maps named by the runtime host interfaces.
 pub use lash_vm_releases::LibraryError;
-pub use lash_vm_runtime::{AdoptionRefusal, StoredSourceMap};
+pub use lash_vm_runtime::{AdoptionRefusal, StoredSourceMap, Unretained};

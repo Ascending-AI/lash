@@ -127,7 +127,7 @@ impl Lowerer<'_> {
                 // A declaration's caption names the statement that binds
                 // it, where its hoisting put it.
                 if let ast::Stmt::Spanned(span, inner) = statement {
-                    self.own_captions(span.start, inner, before, None);
+                    self.own_captions(span.start, inner, before, None)?;
                 }
             }
         }
@@ -183,7 +183,7 @@ impl Lowerer<'_> {
                 let before = self.buf.len();
                 let result = self.lower_statement(inner);
                 if result.is_ok() {
-                    self.own_captions(span.start, inner, before, entry);
+                    self.own_captions(span.start, inner, before, entry)?;
                 }
                 self.span = outer;
                 result

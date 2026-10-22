@@ -87,6 +87,7 @@ pub use parked_calls::a_parked_call_is_reopened_from_its_completion_wait_after_a
 pub use passes::{
     a_once_process_body_survives_one_revision_conflict,
     a_paged_step_chain_folds_each_published_outcome_from_what_its_owner_kept,
+    a_process_terminal_retires_its_optional_execution_debt,
     a_step_chain_restores_its_state_once_and_reloads_after_a_lost_acknowledgement,
     ready_step_completions_commit_together_up_to_the_member_bound,
 };

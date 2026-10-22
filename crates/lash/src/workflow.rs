@@ -193,6 +193,7 @@ pub mod view {
         ArmCaption, BindingCaption, CallableCaption, CaptionView, CaptionViewRefusal, FieldCaption,
         NodeCaption, ParamCaption,
     };
+    pub use lash_kernel_view::{Comparison, LabelError, MemberDisplay};
     pub use lash_vocabulary::observation::RanCounts;
     pub use lash_vocabulary::observation::ReplayPath;
     pub use lash_vocabulary::observation::RunObservation;

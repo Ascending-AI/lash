@@ -9,11 +9,23 @@ fn checks(source: &str, name: &str) -> usize {
     let target = lash_kernel_dialect::authoring::helper_name(
         &lash_vocabulary::FunctionName::new("py.arg_missing").unwrap(),
     );
-    document.ordinal_nodes().into_iter().filter(|(site, _)| match site.unit {
-        lash_vocabulary::sites::Unit::Library(id) => matches!(document.functions[&id].implementation, lash_kernel_doc::Implementation::Guest { metering: lash_kernel_doc::Metering::Statements, .. }),
-        lash_vocabulary::sites::Unit::Main => true,
-        _ => false,
-    }).filter(|(_, node)| match node {
+    let mut pending = document
+        .units()
+        .filter(|(unit, _)| match unit {
+            lash_vocabulary::sites::Unit::Library(id) => {
+                lash_kernel_doc::FunctionCatalog::header(super::machine::library(), id).is_none()
+            }
+            lash_vocabulary::sites::Unit::Main => true,
+            _ => false,
+        })
+        .map(|(_, block)| lash_kernel_doc::Node::Block(block))
+        .collect::<Vec<_>>();
+    let mut nodes = Vec::new();
+    while let Some(node) = pending.pop() {
+        pending.extend(node.children());
+        nodes.push(node);
+    }
+    nodes.into_iter().filter(|node| match node {
         lash_kernel_doc::Node::Expr(lash_kernel_doc::Expr::Act(action)) => matches!(action.kind, lash_kernel_doc::ActKind::Call(lash_kernel_doc::Callee::Import(slot)) if document.imports[&slot].name == target) && matches!(action.args.first(), Some(lash_kernel_doc::Expr::Literal(lash_kernel_doc::Literal::Text(value))) if value == name),
         lash_kernel_doc::Node::Action(lash_kernel_doc::Action::Call { callee: lash_kernel_doc::Callee::Import(slot), args }) => document.imports[slot].name == target && matches!(args.first(), Some(lash_kernel_doc::Atom::Literal(lash_kernel_doc::Literal::Text(value))) if value == name),
         _ => false,

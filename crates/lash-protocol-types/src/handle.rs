@@ -219,7 +219,8 @@ mod tests {
     /// A minted id carrying `n`'s bits under the UUIDv7 version and variant.
     fn process(n: u128) -> ProcessId {
         let version_and_variant = (0xf_u128 << 76) | (0b11_u128 << 62);
-        ProcessId::from_minted((n & !version_and_variant) | (0x7_u128 << 76) | (0b10_u128 << 62))
+        let bits = (n & !version_and_variant) | (0x7_u128 << 76) | (0b10_u128 << 62);
+        ProcessId::parse(&format!("p_{bits:032x}")).unwrap()
     }
 
     #[test]

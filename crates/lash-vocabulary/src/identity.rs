@@ -378,7 +378,7 @@ impl ProcessId {
 
     #[cfg(any(test, feature = "testing"))]
     #[doc(hidden)]
-    pub fn from_minted(uuid_v7: u128) -> Self {
+    pub(crate) fn from_minted(uuid_v7: u128) -> Self {
         Self(format!("{PROCESS_ID_PREFIX}{uuid_v7:032x}"))
     }
 
