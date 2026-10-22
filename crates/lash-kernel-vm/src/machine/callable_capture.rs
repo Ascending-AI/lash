@@ -21,7 +21,7 @@ impl KernelMachine {
             let code = match &function.creation {
                 Some(creation) => Some(super::project::closure_code(
                     exe,
-                    &function.callable.function,
+                    &function.callable,
                     creation,
                     &function.captures.keys().cloned().collect::<Vec<_>>(),
                 )?),

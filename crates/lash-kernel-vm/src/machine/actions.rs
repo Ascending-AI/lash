@@ -844,7 +844,7 @@ impl KernelMachine {
                     Err(identity) => {
                         let code = super::project::closure_code(
                             exe,
-                            &identity.callable.function,
+                            &identity.callable,
                             &identity.site.site,
                             &identity.capture_names,
                         )?;

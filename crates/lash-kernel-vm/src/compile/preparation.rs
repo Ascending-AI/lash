@@ -403,6 +403,11 @@ impl Admission {
         let mut pending = document.main.as_ref().map_or_else(BTreeSet::new, |body| {
             doc::Node::Block(body).functions_within()
         });
+        // Saved cell values enter through the heap, not the current main.
+        // Their defining cells still own the authored function layouts.
+        for main in documents.values().filter_map(|source| source.main.as_ref()) {
+            pending.extend(doc::Node::Block(main).functions_within());
+        }
         // Definitions first admitted by this execution include retained
         // callable environments, even when its main does not name them.
         pending.extend(

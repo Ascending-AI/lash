@@ -630,7 +630,15 @@ async fn run_linked_cell(
         selector: lash_vocabulary::names::StartSelector::Main,
     };
     let prepared = match services.kernel.library() {
-        Ok(functions) => processes::prepare(&ctx, &start, &functions).await,
+        Ok(functions) => {
+            processes::prepare(
+                &ctx,
+                &start,
+                &functions,
+                &host.envelope.environment.authored,
+            )
+            .await
+        }
         Err(error) => Err(error.to_string()),
     };
     let prepared = match prepared {

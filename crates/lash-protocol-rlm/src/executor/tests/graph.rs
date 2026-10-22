@@ -149,9 +149,11 @@ async fn a_working_state_is_adopted_whole_and_a_cancelled_cell_never_promotes_it
     );
     state.acknowledge_execution_state_capture().await;
 
+    let context = cell_context(&host, SESSION, TURN, "exec-code:1", Arc::new(NoTools));
+    state.shows_packages(crate::testing::packages::record(&context).await);
     let speculative = Box::pin(super::super::execute_cell(
         &mut state,
-        cell_context(&host, SESSION, TURN, "exec-code:1", Arc::new(NoTools)),
+        context,
         lash_core::ExecRequest {
             code: "kept.push(3);\nconst extra = twice(21);".to_owned(),
         },
