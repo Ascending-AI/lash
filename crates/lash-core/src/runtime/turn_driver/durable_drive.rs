@@ -967,7 +967,12 @@ impl TurnDrive for RuntimeDrive {
         self.driver.run_config.stored(stored);
     }
 
-    fn run_changes(&self) -> Vec<lash_durable::domain::TurnNamespaceWrite> {
+    fn run_changes(
+        &self,
+    ) -> Result<
+        Vec<lash_durable::domain::TurnNamespaceWrite>,
+        lash_protocol_types::allocation::AllocationError,
+    > {
         self.driver.session.plugins().run_changes()
     }
 

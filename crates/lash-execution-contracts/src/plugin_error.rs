@@ -231,9 +231,12 @@ define_plugin_errors! {
         => PluginError::ProcessEnvRefused { refusal }
         => { refusal: lash_core_store::process_env::ProcessEnvRefusal }
         => Self::ProcessEnvRefused { refusal: refusal.clone() }
-        => Self::ProcessEnvRefused { .. }
+        => Self::ProcessEnvRefused { refusal }
         => "process_env_refused"
-        => crate::ToolFailureClass::InvalidRequest;
+        => match refusal {
+            lash_core_store::process_env::ProcessEnvRefusal::Allocation { refusal } => allocation_tool_class(refusal),
+            _ => crate::ToolFailureClass::InvalidRequest,
+        };
 /// A host's successor request for a process was refused (FIG-6121, D2):
     /// nothing was recorded, and the process goes on as written.
     #[error("process `{process}` is not carried onto its successor: {refusal}")]
@@ -481,6 +484,7 @@ define_plugin_errors! {
         => match source {
             lash_core_store::plugin_state::PluginStateError::InvalidKey { .. } | lash_core_store::plugin_state::PluginStateError::ValueTooLarge { .. } | lash_core_store::plugin_state::PluginStateError::StoreTooLarge { .. } => crate::ToolFailureClass::InvalidRequest,
             lash_core_store::plugin_state::PluginStateError::Unrecorded { .. } | lash_core_store::plugin_state::PluginStateError::EffectOwnerMismatch | lash_core_store::plugin_state::PluginStateError::Frontier { .. } | lash_core_store::plugin_state::PluginStateError::Encode { .. } | lash_core_store::plugin_state::PluginStateError::Decode { .. } => crate::ToolFailureClass::Internal,
+            lash_core_store::plugin_state::PluginStateError::Allocation(error) => allocation_tool_class(error),
             lash_core_store::plugin_state::PluginStateError::PublicationFenced { .. } => crate::ToolFailureClass::Unavailable,
         };
 /// A factory's [`super::PluginDeclaration`] failed the composition's owner
@@ -1014,6 +1018,13 @@ impl PluginError {
                     Redrivable
                 }
             }
+            Self::State(crate::PluginStateError::Allocation(error))
+            | Self::ProcessEnvRefused {
+                refusal: crate::ProcessEnvRefusal::Allocation { refusal: error },
+            } => match error.kind {
+                lash_protocol_types::allocation::ReserveError::Pressure => Retryable,
+                lash_protocol_types::allocation::ReserveError::TooLarge => Terminal,
+            },
             Self::StoreRefusal(refusal) => {
                 if refusal.is_terminal() {
                     Terminal
@@ -1234,6 +1245,7 @@ fn keeps_its_code(error: &crate::RuntimeError) -> bool {
             error.cause.as_ref(),
             Some(
                 crate::RuntimeErrorCause::ControlPhaseExpired { .. }
+                    | crate::RuntimeErrorCause::OwnerAllocation { .. }
                     | crate::RuntimeErrorCause::ProviderFailure { .. }
                     | crate::RuntimeErrorCause::ModuleArtifactRefused { .. }
                     | crate::RuntimeErrorCause::PluginFormat { .. }
@@ -1312,6 +1324,19 @@ impl From<PluginError> for lash_protocol_types::PluginOperationFailure {
 impl From<crate::config_error::ConfigRegistrationError> for PluginError {
     fn from(error: crate::config_error::ConfigRegistrationError) -> Self {
         Self::ConfigRegistration(error)
+    }
+}
+
+fn allocation_tool_class(
+    error: &lash_protocol_types::allocation::AllocationError,
+) -> crate::ToolFailureClass {
+    match error.kind {
+        lash_protocol_types::allocation::ReserveError::Pressure => {
+            crate::ToolFailureClass::Unavailable
+        }
+        lash_protocol_types::allocation::ReserveError::TooLarge => {
+            crate::ToolFailureClass::ResourceLimit
+        }
     }
 }
 
@@ -1581,5 +1606,11 @@ impl From<lash_core_store::plugin_state::ConfigAdmissionError> for PluginError {
                 Self::Runtime(crate::RuntimeError::allocation(error))
             }
         }
+    }
+}
+
+impl From<lash_protocol_types::allocation::AllocationError> for PluginError {
+    fn from(error: lash_protocol_types::allocation::AllocationError) -> Self {
+        Self::Runtime(crate::RuntimeError::allocation(error))
     }
 }

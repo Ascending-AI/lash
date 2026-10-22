@@ -473,7 +473,9 @@ impl From<QuietPointRefusal> for KernelFailure {
     fn from(refusal: QuietPointRefusal) -> Self {
         match refusal {
             QuietPointRefusal::Durable(error) => Self::Durable(error),
-            QuietPointRefusal::Refused(_) => Self::Checkpoint(refusal),
+            QuietPointRefusal::Refused(_) | QuietPointRefusal::Allocation(_) => {
+                Self::Checkpoint(refusal)
+            }
         }
     }
 }

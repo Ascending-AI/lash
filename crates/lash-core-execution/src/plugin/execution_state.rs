@@ -17,7 +17,9 @@ pub trait ExecutionState: Send + Sync {
         &self,
         state: &[StateResolution],
     ) -> Result<(), crate::RuntimeEffectControllerError>;
-    fn run_changes(&self) -> Vec<TurnNamespaceWrite>;
+    fn run_changes(
+        &self,
+    ) -> Result<Vec<TurnNamespaceWrite>, lash_protocol_types::allocation::AllocationError>;
     fn run_changes_committed(&self, written: &[TurnNamespaceWrite]);
     fn owner_state(&self, owner: &str) -> PluginNamespaceState;
 
@@ -67,7 +69,9 @@ impl ExecutionState for PluginSession {
     ) -> Result<(), crate::RuntimeEffectControllerError> {
         PluginSession::publish_committed_state(self, state)
     }
-    fn run_changes(&self) -> Vec<TurnNamespaceWrite> {
+    fn run_changes(
+        &self,
+    ) -> Result<Vec<TurnNamespaceWrite>, lash_protocol_types::allocation::AllocationError> {
         PluginSession::run_changes(self)
     }
     fn run_changes_committed(&self, written: &[TurnNamespaceWrite]) {

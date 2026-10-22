@@ -466,8 +466,8 @@ impl crate::PluginSession {
 
     /// The segment that owns publication from now on: a recorded resolution
     /// of an earlier segment no longer applies (K6, Q5 §6).
-    pub fn adopt_state_segment(&self, segment: SegmentOrdinal) {
-        self.state_desk().adopt_state_segment(segment);
+    pub fn adopt_state_segment(&self, segment: SegmentOrdinal) -> Result<(), PluginStateError> {
+        self.state_desk().adopt_state_segment(segment)
     }
 }
 
@@ -539,7 +539,12 @@ impl StateDesk<'_> {
                     for namespace in &namespaces {
                         registry.reserved.insert(namespace.clone(), address.clone());
                     }
-                    return Ok(self.resolve(&mut registry, address, segment, proposals));
+                    let result = self.resolve(&mut registry, address, segment, proposals);
+                    if result.is_err() {
+                        registry.reserved.retain(|_, holder| holder != address);
+                        registry.settled.notify_waiters();
+                    }
+                    return result;
                 }
             }
             notified.await;
@@ -554,20 +559,18 @@ impl StateDesk<'_> {
         address: &crate::EffectAddress,
         segment: SegmentOrdinal,
         proposals: Vec<Proposal>,
-    ) -> Vec<StateResolution> {
+    ) -> Result<Vec<StateResolution>, PluginStateError> {
         let mut candidates: BTreeMap<String, PluginNamespaceState> = BTreeMap::new();
         proposals
             .into_iter()
             .map(|Proposal { batch, proposer }| {
                 let plugin = batch.plugin.clone();
-                let namespace = candidates.entry(plugin.clone()).or_insert_with(|| {
-                    registry
-                        .data
-                        .plugins
-                        .get(&plugin)
-                        .cloned()
-                        .unwrap_or_default()
-                });
+                let namespace = match candidates.entry(plugin.clone()) {
+                    std::collections::btree_map::Entry::Occupied(entry) => entry.into_mut(),
+                    std::collections::btree_map::Entry::Vacant(entry) => {
+                        entry.insert(namespace_for(&registry.data, &plugin)?)
+                    }
+                };
                 namespace.publication.owner_segment = registry.segment;
                 let mut outcome = match self.admit_batch(&batch, proposer.as_ref(), namespace) {
                     Err(refusal) => StateResolutionOutcome::Refused { refusal },
@@ -589,11 +592,7 @@ impl StateDesk<'_> {
                 };
                 let reduced = match &outcome {
                     StateResolutionOutcome::Applied { changes } => {
-                        let mut values = (*namespace.values).clone();
-                        for change in changes {
-                            change.apply_to(&mut values);
-                        }
-                        Some(values)
+                        Some(namespace.values.changed(changes)?)
                     }
                     StateResolutionOutcome::Refused { .. } => None,
                 };
@@ -608,7 +607,7 @@ impl StateDesk<'_> {
                 });
                 let namespace = candidates.entry(plugin.clone()).or_default();
                 if let Some(values) = reduced {
-                    namespace.replace_values(Arc::new(values));
+                    namespace.replace_values(values)?;
                 }
                 let resolution = StateResolution {
                     publisher: address.clone(),
@@ -621,8 +620,8 @@ impl StateDesk<'_> {
                     outcome,
                 };
                 namespace.generation = namespace.generation.saturating_add(1);
-                namespace.publication.record(&resolution);
-                resolution
+                namespace.publication.record(&resolution)?;
+                Ok(resolution)
             })
             .collect()
     }
@@ -754,11 +753,12 @@ impl StateDesk<'_> {
         let published = resolutions
             .iter()
             .try_for_each(|resolution| {
-                let namespace = candidate
+                let mut namespace = namespace_for(&candidate, &resolution.plugin)?;
+                let result = publish_one(&mut namespace, segment, resolution)?;
+                candidate
                     .plugins
-                    .entry(resolution.plugin.clone())
-                    .or_default();
-                match publish_one(namespace, segment, resolution)? {
+                    .insert_ref(&resolution.plugin, namespace)?;
+                match result {
                     Published::Applied | Published::AlreadyApplied => Ok(()),
                     Published::Ahead => {
                         let queue = owed.entry(resolution.plugin.clone()).or_default();
@@ -809,8 +809,10 @@ impl StateDesk<'_> {
         let registry = self.state.lock_recover();
         let mut data = registry.data.clone();
         for resolution in staged {
-            let namespace = data.plugins.entry(resolution.plugin.clone()).or_default();
-            match publish_one(namespace, registry.segment, resolution)? {
+            let mut namespace = namespace_for(&data, &resolution.plugin)?;
+            let result = publish_one(&mut namespace, registry.segment, resolution)?;
+            data.plugins.insert_ref(&resolution.plugin, namespace)?;
+            match result {
                 Published::Applied | Published::AlreadyApplied => {}
                 // A staged resolution was reduced against the published
                 // namespace, so it follows it at once.
@@ -862,14 +864,19 @@ impl StateDesk<'_> {
 
     /// The segment that owns publication from now on: a recorded resolution
     /// of an earlier segment no longer applies (K6, Q5 §6).
-    pub fn adopt_state_segment(&self, segment: SegmentOrdinal) {
+    pub fn adopt_state_segment(&self, segment: SegmentOrdinal) -> Result<(), PluginStateError> {
         let mut registry = self.state.lock_recover();
-        registry.segment = registry.segment.max(segment);
-        let segment = registry.segment;
-        for namespace in registry.data.plugins.values_mut() {
+        let segment = registry.segment.max(segment);
+        let mut data = registry.data.clone();
+        for (id, current) in &registry.data.plugins {
+            let mut namespace = current.clone();
             namespace.publication.owner_segment = segment;
+            data.plugins.insert_ref(id, namespace)?;
         }
+        registry.data = data;
+        registry.segment = segment;
         registry.source = None;
+        Ok(())
     }
 }
 
@@ -904,9 +911,7 @@ fn publish_one(
             }
             match &resolution.outcome {
                 StateResolutionOutcome::Applied { changes } => {
-                    for change in changes {
-                        change.apply_to(namespace.values_mut());
-                    }
+                    namespace.apply_changes(changes)?;
                 }
                 StateResolutionOutcome::Refused { refusal } => {
                     tracing::warn!(
@@ -919,7 +924,7 @@ fn publish_one(
                 }
             }
             namespace.generation = namespace.generation.saturating_add(1);
-            namespace.publication.record(resolution);
+            namespace.publication.record(resolution)?;
             Ok(Published::Applied)
         }
         Err(lash_core_store::tool_run::FrontierRefusal::OutOfOrder { .. })
@@ -941,15 +946,16 @@ fn settle_owed(
     segment: SegmentOrdinal,
 ) -> Result<(), PluginStateError> {
     for (plugin, queue) in owed.iter_mut() {
-        let namespace = candidate.plugins.entry(plugin.clone()).or_default();
+        let mut namespace = namespace_for(candidate, plugin)?;
         while let Some(entry) = queue.first_entry() {
-            match publish_one(namespace, segment, entry.get())? {
+            match publish_one(&mut namespace, segment, entry.get())? {
                 Published::Ahead => break,
                 Published::Applied | Published::AlreadyApplied => {
                     entry.remove();
                 }
             }
         }
+        candidate.plugins.insert_ref(plugin, namespace)?;
     }
     owed.retain(|_, queue| !queue.is_empty());
     Ok(())
@@ -984,7 +990,7 @@ fn session_budget(
         .chain(candidates.iter())
         .map(|(id, namespace)| {
             let current = candidates.get(id).unwrap_or(namespace);
-            (id.clone(), (Arc::clone(&current.values), frontier(current)))
+            (id.clone(), (current.values.clone(), frontier(current)))
         })
         .collect::<BTreeMap<_, _>>();
     for (id, (values, frontier)) in namespaces {
@@ -993,12 +999,12 @@ fn session_budget(
             continue;
         }
         let measured = match registry.sizes.get(&id) {
-            Some((from, size)) if std::ptr::eq(from.as_ptr(), Arc::as_ptr(&values)) => *size,
+            Some((from, size)) if from.matches(&values) => *size,
             _ => {
                 let size = encoded(&values);
-                registry
-                    .sizes
-                    .insert(id.clone(), (Arc::downgrade(&values), size));
+                if let Ok(identity) = values.downgrade() {
+                    registry.sizes.insert(id.clone(), (identity, size));
+                }
                 size
             }
         };
@@ -1038,8 +1044,10 @@ pub(in crate::plugin) fn replay_state(
 ) -> Result<PluginState, PluginStateError> {
     let mut owed = BTreeMap::<String, BTreeMap<u64, StateResolution>>::new();
     for resolution in resolutions {
-        let namespace = state.plugins.entry(resolution.plugin.clone()).or_default();
-        match publish_one(namespace, resolution.segment, resolution)? {
+        let mut namespace = namespace_for(&state, &resolution.plugin)?;
+        let result = publish_one(&mut namespace, resolution.segment, resolution)?;
+        state.plugins.insert_ref(&resolution.plugin, namespace)?;
+        match result {
             Published::Ahead => {
                 if let Some(previous) = owed
                     .entry(resolution.plugin.clone())
@@ -1071,4 +1079,14 @@ pub(in crate::plugin) fn replay_state(
         });
     }
     Ok(state)
+}
+
+fn namespace_for(
+    state: &PluginState,
+    plugin: &str,
+) -> Result<PluginNamespaceState, lash_protocol_types::allocation::AllocationError> {
+    match state.plugins.get(plugin) {
+        Some(namespace) => Ok(namespace.clone()),
+        None => PluginNamespaceState::empty_in(state.allocation_budget()),
+    }
 }

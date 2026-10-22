@@ -227,6 +227,8 @@ impl EmbeddedRuntimeBuilder {
                     ),
                     None => PluginSessionRequest::creation(state.session_id.clone(), authority),
                 };
+                let request = request
+                    .with_allocation_budget(state.session_graph.nodes.allocation_budget().clone());
                 host.clone()
                     .with_trace_runtime(self.core.tracing.clone())
                     .with_execution_budgets(self.core.control.execution_budgets.clone())

@@ -430,7 +430,7 @@ impl RunValuesWrite {
     #[must_use]
     pub fn body(&self) -> Option<&[u8]> {
         match self {
-            Self::Body(body) => Some(&body.bytes),
+            Self::Body(body) => Some(body.bytes()),
             Self::Base | Self::Held => None,
         }
     }

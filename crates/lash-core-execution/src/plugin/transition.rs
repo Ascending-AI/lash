@@ -133,6 +133,13 @@ impl PluginTransitionRecord {
             .iter()
             .map(|(id, result)| result.clone().map(|namespace| (id.clone(), namespace)))
             .collect::<Result<BTreeMap<_, _>, _>>()?;
+        let budget = plugins
+            .values()
+            .next()
+            .map(|namespace| namespace.values.allocation_budget())
+            .cloned()
+            .unwrap_or_default();
+        let plugins = lash_core_store::source_map::SharedSourceMap::from_map_in(&plugins, &budget)?;
         Ok((PluginState { plugins }, config))
     }
 }
@@ -210,7 +217,7 @@ impl PluginHost {
                                     generation: 0,
                                     publication: Default::default(),
                                     fork: declaration.state_fork,
-                                    values: Arc::new(values),
+                                    values: values.into(),
                                     encoding: Default::default(),
                                 })
                             })
@@ -263,6 +270,7 @@ impl PluginSession {
             .host
             .isolated_registry()
             .defer_session(PluginSessionRequest {
+                allocation_budget: self.state.lock_recover().data.allocation_budget().clone(),
                 owner: self.owner.clone(),
                 materialization,
                 tool_catalog_overlay: self.tool_catalog_overlay.clone(),
@@ -315,7 +323,7 @@ impl PluginSession {
             .clone_in(config.allocation_budget())
             .map_err(|error| PluginError::from(crate::StoreError::Allocation(error)))?;
         let mut live = self.state.lock_recover();
-        live.hydrate_live(&candidate);
+        live.hydrate_live(&candidate)?;
         live.source = Some(record.source.clone());
         drop(live);
         *self.admission.lock_recover() = Some(admission);
@@ -503,7 +511,7 @@ impl PluginSession {
         let retained = RetainedPluginNativeView::capture_in(&view, &budget)
             .map_err(|error| PluginError::from(crate::StoreError::Allocation(error)))?;
         let view = retained.view();
-        self.state.lock_recover().hydrate_live(&view.state);
+        self.state.lock_recover().hydrate_live(&view.state)?;
         *self.admission.lock_recover() = Some(view.request.target.clone());
         self.authority.write_recover().plugin_config.config = Arc::new(view.config.clone());
         *self.native_view.lock_recover() = Some(retained);
@@ -552,6 +560,7 @@ impl PluginSession {
             .host
             .isolated_registry()
             .defer_session(PluginSessionRequest {
+                allocation_budget: self.state.lock_recover().data.allocation_budget().clone(),
                 owner: self.owner.clone(),
                 materialization: PluginSessionMaterializationRequest::Rematerialization {
                     snapshot: state,

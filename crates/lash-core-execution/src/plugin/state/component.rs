@@ -101,8 +101,10 @@ impl crate::plugin::ExecutionState for ComponentState {
         self.desk().publish_committed_state(state)
     }
     /// A process runs no durable run: its state is its step outcomes'.
-    fn run_changes(&self) -> Vec<TurnNamespaceWrite> {
-        Vec::new()
+    fn run_changes(
+        &self,
+    ) -> Result<Vec<TurnNamespaceWrite>, lash_protocol_types::allocation::AllocationError> {
+        Ok(Vec::new())
     }
     fn run_changes_committed(&self, _written: &[TurnNamespaceWrite]) {}
     fn owner_state(&self, owner: &str) -> PluginNamespaceState {

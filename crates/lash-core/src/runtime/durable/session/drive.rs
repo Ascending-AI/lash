@@ -176,8 +176,13 @@ pub trait TurnDrive: Send {
     /// reinstalls the run's rows over the head before the machine restores.
     /// An unchanged namespace is never written. Empty for a drive that holds
     /// no plugins.
-    fn run_changes(&self) -> Vec<lash_durable::domain::TurnNamespaceWrite> {
-        Vec::new()
+    fn run_changes(
+        &self,
+    ) -> Result<
+        Vec<lash_durable::domain::TurnNamespaceWrite>,
+        lash_protocol_types::allocation::AllocationError,
+    > {
+        Ok(Vec::new())
     }
 
     /// Record that a phase committed `written`, what

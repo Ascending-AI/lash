@@ -133,6 +133,26 @@ impl<K, V> SharedSourceMap<K, V> {
     pub fn allocation_budget(&self) -> &AllocationBudget {
         &self.0.budget
     }
+    /// Attach a pre-admitted fresh decode and transfer that same source
+    /// obligation into every escaping value before exposing a reader.
+    pub fn decoded_in_with(
+        &mut self,
+        allocation: AllocationHold,
+        budget: AllocationBudget,
+        mut adopt: impl FnMut(&mut V, AllocationHold, AllocationBudget) -> bool,
+    ) -> bool {
+        let Some(storage) = Arc::get_mut(&mut self.0) else {
+            return false;
+        };
+        for value in storage.entries.values_mut() {
+            if !adopt(value, allocation.clone(), budget.clone()) {
+                return false;
+            }
+        }
+        storage.allocation = allocation;
+        storage.budget = budget;
+        true
+    }
     /// Fresh decoders attach their already acquired source obligation before
     /// sharing the map. An unexpectedly shared decode cannot be adopted.
     pub fn decoded_in(&mut self, allocation: AllocationHold, budget: AllocationBudget) -> bool {
@@ -399,5 +419,11 @@ mod tests {
         assert!(used.load(Ordering::SeqCst) > 0);
         drop(reader);
         assert_eq!(used.load(Ordering::SeqCst), 0);
+    }
+}
+
+impl MapValue for () {
+    fn clone_in(&self, _: &AllocationBudget) -> Result<Self, AllocationError> {
+        Ok(())
     }
 }

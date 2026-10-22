@@ -431,7 +431,7 @@ pub struct SessionSnapshot {
     pub plugin_state_ref: Option<crate::store::BlobRef>,
     /// Host-owned mediated generations from the resident plugin-state component.
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
-    pub plugin_state_generations: std::collections::BTreeMap<String, u64>,
+    pub plugin_state_generations: crate::source_map::SharedSourceMap<String, u64>,
     /// Read-only projection of the hydrated execution-state reference. Applying
     /// a snapshot does not write this field; the resident component set wins.
     #[serde(default, skip_serializing_if = "Option::is_none")]

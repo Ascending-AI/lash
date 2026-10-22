@@ -442,7 +442,7 @@ async fn a_run_keeps_only_its_own_receipts_and_still_deduplicates_its_base() {
     let host = host(&Arc::default());
     let total = |total: u64| StateCommands::new().set("total", serde_json::json!(total));
     let first = session(&host, None);
-    first.begin_run();
+    first.begin_run().unwrap();
     let earlier = record(
         &first,
         "earlier",
@@ -455,7 +455,7 @@ async fn a_run_keeps_only_its_own_receipts_and_still_deduplicates_its_base() {
 
     // The next run begins from that head on a node of its own.
     let second = session(&host, Some(&head));
-    second.begin_run();
+    second.begin_run().unwrap();
     let base = second.export_state();
     let frontier = &base.plugins[LEDGER].publication;
     assert_eq!(frontier.applied(), Some(PublicationOrdinal(1)));
@@ -666,9 +666,12 @@ async fn one_refused_command_publishes_none_of_its_batch() {
         .lock_recover()
         .data
         .plugins
-        .get_mut(LEDGER)
-        .unwrap()
-        .format_version = crate::FormatVersion::new(2).unwrap();
+        .update(LEDGER, |namespace, _| {
+            let mut namespace = namespace.clone();
+            namespace.format_version = crate::FormatVersion::new(2).unwrap();
+            Ok(namespace)
+        })
+        .unwrap();
     let outcome = record(
         &live,
         "incompatible-writer",
@@ -895,7 +898,9 @@ async fn a_predecessor_segment_never_publishes_after_transfer() {
     assert_ne!(base, checkpoint);
 
     let successor = session(&host, Some(&checkpoint));
-    successor.adopt_state_segment(lash_core_store::tool_run::SegmentOrdinal(1));
+    successor
+        .adopt_state_segment(lash_core_store::tool_run::SegmentOrdinal(1))
+        .unwrap();
     let transferred = successor.export_state();
     let successor = session(&host, Some(&transferred));
     publish(&successor, "applied", journaled(&applied)).unwrap();
@@ -1032,7 +1037,7 @@ async fn a_callback_keeps_its_publisher_segment_across_handover() {
         result = &mut body => panic!("held callback finished: {result:?}"),
         _ = reached => {}
     }
-    live.adopt_state_segment(SegmentOrdinal(1));
+    live.adopt_state_segment(SegmentOrdinal(1)).unwrap();
     let checkpoint = live.export_state();
     finish.send(()).unwrap();
     let outcome = journaled(&body.await.unwrap());

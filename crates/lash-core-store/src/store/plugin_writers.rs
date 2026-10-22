@@ -721,15 +721,26 @@ mod tests {
     #[test]
     fn a_runtime_commit_publication_reads_its_stamps_off_the_payload() {
         let mut state = PluginStateMap::default();
-        state.plugins.insert(
-            "probe".into(),
-            crate::plugin_state::PluginNamespaceState {
-                format_version: version(2),
-                generation: 1,
-                ..Default::default()
-            }
-            .entry(crate::plugin_state::NamespaceBody::encode(&BTreeMap::new()).values),
-        );
+        state
+            .plugins
+            .insert(
+                "probe".into(),
+                crate::plugin_state::PluginNamespaceState {
+                    format_version: version(2),
+                    generation: 1,
+                    ..Default::default()
+                }
+                .entry(
+                    crate::plugin_state::NamespaceBody::encode(
+                        &BTreeMap::new(),
+                        &lash_protocol_types::allocation::AllocationBudget::unowned(),
+                    )
+                    .unwrap()
+                    .values(),
+                )
+                .unwrap(),
+            )
+            .unwrap();
         let mut checkpoint = super::super::HydratedSessionCheckpoint::default();
         checkpoint
             .components

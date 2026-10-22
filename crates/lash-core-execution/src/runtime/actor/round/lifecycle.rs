@@ -252,8 +252,13 @@ pub trait MemberBodies: Send + Sync {
     /// record yet (FIG-5301): a commit that prunes members' records writes
     /// them, so a pruned outcome is never the only copy of a value or of its
     /// dedup receipt. Empty for bodies that reduce no session plugin state.
-    fn run_changes(&self) -> Vec<lash_durable::domain::TurnNamespaceWrite> {
-        Vec::new()
+    fn run_changes(
+        &self,
+    ) -> Result<
+        Vec<lash_durable::domain::TurnNamespaceWrite>,
+        lash_protocol_types::allocation::AllocationError,
+    > {
+        Ok(Vec::new())
     }
 
     /// Record that a commit wrote `written`, what

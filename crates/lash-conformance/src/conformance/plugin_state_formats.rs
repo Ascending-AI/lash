@@ -170,21 +170,22 @@ pub(super) async fn plugin_format_boundary(
         ))
         .unwrap();
     let mut snapshot = seed.export_state();
-    snapshot.plugins.insert(
-        "format-state".into(),
-        lash_core::PluginNamespaceState {
-            format_version: lash_core::FormatVersion::new(version).unwrap(),
-            generation: 7,
-            publication: Default::default(),
-            fork: Default::default(),
-            values: std::sync::Arc::new(std::collections::BTreeMap::from([(
-                "count".into(),
-                serde_json::json!(17),
-            )])),
-            encoding: Default::default(),
-        },
-    );
-    state.set_plugin_state(Some(snapshot));
+    snapshot
+        .plugins
+        .insert(
+            "format-state".into(),
+            lash_core::PluginNamespaceState {
+                format_version: lash_core::FormatVersion::new(version).unwrap(),
+                generation: 7,
+                publication: Default::default(),
+                fork: Default::default(),
+                values: std::collections::BTreeMap::from([("count".into(), serde_json::json!(17))])
+                    .into(),
+                encoding: Default::default(),
+            },
+        )
+        .unwrap();
+    state.set_plugin_state(Some(snapshot)).unwrap();
     state
         .authority
         .plugin_config

@@ -532,10 +532,117 @@ pub struct StateFrontier {
     settled: Option<PublicationOrdinal>,
     /// Digests of the resolutions applied after `settled`, in order: origin
     /// and resolved content.
-    recent: Vec<crate::BlobRef>,
+    recent: StateReceipts,
+}
+
+#[derive(Clone, Debug, Default)]
+struct StateReceipts {
+    source: std::sync::Arc<ReceiptSource>,
+    len: usize,
+}
+#[derive(Debug, Default)]
+struct ReceiptSource {
+    values: Vec<crate::BlobRef>,
+    _allocation: lash_protocol_types::allocation::AllocationHold,
+    budget: lash_protocol_types::allocation::AllocationBudget,
+}
+impl StateReceipts {
+    fn from_admitted(
+        values: Vec<crate::BlobRef>,
+        allocation: lash_protocol_types::allocation::AllocationHold,
+        budget: lash_protocol_types::allocation::AllocationBudget,
+    ) -> Self {
+        Self {
+            len: values.len(),
+            source: std::sync::Arc::new(ReceiptSource {
+                values,
+                _allocation: allocation,
+                budget,
+            }),
+        }
+    }
+    fn capacity(&self) -> u64 {
+        self.source.values[..self.len].iter().fold(
+            256 + (self.len as u64).saturating_mul(64),
+            |bytes, value| bytes.saturating_add(value.as_str().len() as u64 + 32),
+        )
+    }
+    fn len(&self) -> usize {
+        self.len
+    }
+    fn clone_in(
+        &self,
+        budget: &lash_protocol_types::allocation::AllocationBudget,
+    ) -> Result<Self, lash_protocol_types::allocation::AllocationError> {
+        if self.source.budget.identity() == budget.identity() {
+            return Ok(self.clone());
+        }
+        let allocation = budget.reserve(self.capacity())?;
+        Ok(Self::from_admitted(
+            self.source.values[..self.len].to_vec(),
+            allocation,
+            budget.clone(),
+        ))
+    }
+}
+impl PartialEq for StateReceipts {
+    fn eq(&self, other: &Self) -> bool {
+        self.source.values[..self.len] == other.source.values[..other.len]
+    }
+}
+impl Eq for StateReceipts {}
+impl serde::Serialize for StateReceipts {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        self.source.values[..self.len].serialize(serializer)
+    }
+}
+impl<'de> serde::Deserialize<'de> for StateReceipts {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let values = Vec::<crate::BlobRef>::deserialize(deserializer)?;
+        Ok(Self::from_admitted(
+            values,
+            Default::default(),
+            lash_protocol_types::allocation::AllocationBudget::unowned(),
+        ))
+    }
 }
 
 impl StateFrontier {
+    pub fn empty_in(
+        budget: &lash_protocol_types::allocation::AllocationBudget,
+    ) -> Result<Self, lash_protocol_types::allocation::AllocationError> {
+        let allocation = budget.reserve(256)?;
+        Ok(Self {
+            owner_segment: Default::default(),
+            settled: None,
+            recent: StateReceipts::from_admitted(Vec::new(), allocation, budget.clone()),
+        })
+    }
+
+    pub fn clone_in(
+        &self,
+        budget: &lash_protocol_types::allocation::AllocationBudget,
+    ) -> Result<Self, lash_protocol_types::allocation::AllocationError> {
+        Ok(Self {
+            owner_segment: self.owner_segment,
+            settled: self.settled,
+            recent: self.recent.clone_in(budget)?,
+        })
+    }
+    /// Transfer a fresh decoder's whole-source reservation to its receipt storage.
+    pub(crate) fn decoded_in(
+        &mut self,
+        allocation: lash_protocol_types::allocation::AllocationHold,
+        budget: lash_protocol_types::allocation::AllocationBudget,
+    ) -> bool {
+        let Some(source) = std::sync::Arc::get_mut(&mut self.recent.source) else {
+            return false;
+        };
+        source._allocation = allocation;
+        source.budget = budget;
+        true
+    }
+
     /// The last publication applied.
     #[must_use]
     pub fn applied(&self) -> Option<PublicationOrdinal> {
@@ -558,20 +665,32 @@ impl StateFrontier {
     /// The receipts of the publications applied since the frontier settled.
     #[must_use]
     pub fn recent(&self) -> &[crate::BlobRef] {
-        &self.recent
+        &self.recent.source.values[..self.recent.len]
     }
 
     /// Advance after the resolved changes have been accepted and installed.
-    pub fn record(&mut self, resolution: &StateResolution) {
+    pub fn record(
+        &mut self,
+        resolution: &StateResolution,
+    ) -> Result<(), lash_protocol_types::allocation::AllocationError> {
         debug_assert_eq!(resolution.ordinal, self.next());
-        self.recent.push(resolution.receipt());
+        use lash_protocol_types::allocation::payload_capacity;
+        let budget = &self.recent.source.budget;
+        let bytes = self.recent.capacity().saturating_add(512);
+        let allocation = budget.reserve(bytes)?;
+        let _encoding = budget.reserve(payload_capacity(resolution, 0).saturating_mul(4))?;
+        let mut values = Vec::with_capacity(self.recent.len + 1);
+        values.extend(self.recent().iter().cloned());
+        values.push(resolution.receipt());
+        self.recent = StateReceipts::from_admitted(values, allocation, budget.clone());
+        Ok(())
     }
 
     /// Settle every publication applied so far: a run begins from here, and
     /// keeps only the receipts it applies itself.
     pub fn settle(&mut self) {
         self.settled = self.applied();
-        self.recent.clear();
+        self.recent.len = 0;
     }
 }
 
@@ -641,7 +760,7 @@ impl StateFrontier {
             }
             let receipt = usize::try_from(resolution.ordinal.0 - settled - 1)
                 .ok()
-                .and_then(|index| self.recent.get(index));
+                .and_then(|index| self.recent().get(index));
             return if receipt == Some(&resolution.receipt()) {
                 Ok(FrontierStep::AlreadyApplied)
             } else {

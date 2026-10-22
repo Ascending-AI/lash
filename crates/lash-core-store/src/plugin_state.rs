@@ -1,7 +1,9 @@
 //! Durable plugin-namespace state carried in a session checkpoint.
 use serde_json::Value;
 
+use crate::source_map::{MapValue, SharedSourceMap};
 pub use lash_core_ids::FormatVersion;
+use lash_protocol_types::allocation::{AllocationBudget, AllocationError, AllocationHold};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
@@ -83,6 +85,8 @@ pub enum KeyRejection {
 )]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum PluginStateError {
+    #[error(transparent)]
+    Allocation(#[from] lash_protocol_types::allocation::AllocationError),
     #[error("recorded plugin state belongs to another runtime owner")]
     EffectOwnerMismatch,
     /// A recorded resolution does not follow its namespace's applied
@@ -119,11 +123,16 @@ pub enum PluginStateError {
 }
 
 impl PluginStateError {
-    /// Every state failure is permanent for the same input: a codec or limit
-    /// refusal does not change, and a fenced or out-of-order publication is
-    /// resolved only by rebuilding from durable state.
+    /// Pressure can clear when readers release their allocations. Other state
+    /// failures require changed input, configuration or durable state.
     pub fn is_terminal(&self) -> bool {
-        true
+        !matches!(
+            self,
+            Self::Allocation(AllocationError {
+                kind: lash_protocol_types::allocation::ReserveError::Pressure,
+                ..
+            })
+        )
     }
 }
 
@@ -323,7 +332,7 @@ pub enum StateFork {
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct PluginState {
-    pub plugins: BTreeMap<String, PluginNamespaceState>,
+    pub plugins: SharedSourceMap<String, PluginNamespaceState>,
 }
 
 /// One namespace's format, mediated generation, fork policy and JSON values.
@@ -345,7 +354,260 @@ pub struct PluginNamespaceState {
 }
 
 /// A namespace's values, shared immutably.
-pub type NamespaceValues = std::sync::Arc<BTreeMap<String, Value>>;
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct NamespaceValues(std::sync::Arc<NamespaceMap>);
+
+#[derive(Debug, Default, Serialize, Deserialize)]
+#[serde(transparent)]
+struct NamespaceMap {
+    values: BTreeMap<String, Value>,
+    #[serde(skip)]
+    allocation: lash_protocol_types::allocation::AllocationHold,
+    #[serde(skip)]
+    budget: lash_protocol_types::allocation::AllocationBudget,
+}
+
+/// A non-owning identity of the immutable namespace source.
+#[derive(Clone, Debug)]
+pub struct NamespaceValuesWeak {
+    source: std::sync::Weak<NamespaceMap>,
+    admission: std::sync::Arc<WeakAdmission>,
+}
+#[derive(Debug)]
+struct WeakAdmission {
+    _allocation: AllocationHold,
+    budget: AllocationBudget,
+}
+impl NamespaceValuesWeak {
+    pub fn matches(&self, values: &NamespaceValues) -> bool {
+        std::ptr::eq(self.source.as_ptr(), std::sync::Arc::as_ptr(&values.0))
+    }
+    pub fn upgrade(&self) -> Option<NamespaceValues> {
+        self.source.upgrade().map(NamespaceValues)
+    }
+}
+
+impl NamespaceValues {
+    pub fn empty_in(budget: &AllocationBudget) -> Result<Self, AllocationError> {
+        let allocation = budget.reserve(256)?;
+        Ok(Self(std::sync::Arc::new(NamespaceMap {
+            values: BTreeMap::new(),
+            allocation,
+            budget: budget.clone(),
+        })))
+    }
+    pub(crate) fn from_admitted(
+        values: BTreeMap<String, Value>,
+        allocation: AllocationHold,
+        budget: AllocationBudget,
+    ) -> Self {
+        Self(std::sync::Arc::new(NamespaceMap {
+            values,
+            allocation,
+            budget,
+        }))
+    }
+
+    pub fn allocation_budget(&self) -> &lash_protocol_types::allocation::AllocationBudget {
+        &self.0.budget
+    }
+    pub fn downgrade(&self) -> Result<NamespaceValuesWeak, AllocationError> {
+        let allocation = self.0.budget.reserve(256)?;
+        Ok(NamespaceValuesWeak {
+            source: std::sync::Arc::downgrade(&self.0),
+            admission: std::sync::Arc::new(WeakAdmission {
+                _allocation: allocation,
+                budget: self.0.budget.clone(),
+            }),
+        })
+    }
+    pub(crate) fn decoded_in(
+        &mut self,
+        allocation: AllocationHold,
+        budget: AllocationBudget,
+    ) -> bool {
+        let Some(storage) = std::sync::Arc::get_mut(&mut self.0) else {
+            return false;
+        };
+        storage.allocation = allocation;
+        storage.budget = budget;
+        true
+    }
+    pub fn ptr_eq(&self, other: &Self) -> bool {
+        std::sync::Arc::ptr_eq(&self.0, &other.0)
+    }
+    pub fn clone_in(
+        &self,
+        budget: &lash_protocol_types::allocation::AllocationBudget,
+    ) -> Result<Self, lash_protocol_types::allocation::AllocationError> {
+        if self.0.budget.identity() == budget.identity() {
+            return Ok(self.clone());
+        }
+        let allocation = budget.reserve(self.capacity())?;
+        Ok(Self(std::sync::Arc::new(NamespaceMap {
+            values: self.0.values.clone(),
+            allocation,
+            budget: budget.clone(),
+        })))
+    }
+    pub fn copy_from_map_in(
+        values: &BTreeMap<String, Value>,
+        budget: &lash_protocol_types::allocation::AllocationBudget,
+    ) -> Result<Self, lash_protocol_types::allocation::AllocationError> {
+        let allocation = budget.reserve(Self::map_capacity(values))?;
+        Ok(Self(std::sync::Arc::new(NamespaceMap {
+            values: values.clone(),
+            allocation,
+            budget: budget.clone(),
+        })))
+    }
+    fn capacity(&self) -> u64 {
+        Self::map_capacity(&self.0.values)
+    }
+    fn map_capacity(values: &BTreeMap<String, Value>) -> u64 {
+        use lash_protocol_types::allocation::SourceCapacity;
+        values.iter().fold(256u64, |bytes, (key, value)| {
+            bytes
+                .saturating_add(2048)
+                .saturating_add(key.owned_capacity())
+                .saturating_add(value.owned_capacity())
+        })
+    }
+    pub fn changed(
+        &self,
+        changes: &[crate::tool_run::ResolvedStateChange],
+    ) -> Result<Self, lash_protocol_types::allocation::AllocationError> {
+        use lash_protocol_types::allocation::SourceCapacity;
+        let bytes = changes
+            .iter()
+            .fold(self.capacity(), |bytes, change| match change {
+                crate::tool_run::ResolvedStateChange::Put { key, value } => bytes
+                    .saturating_add(2048)
+                    .saturating_add(key.owned_capacity())
+                    .saturating_add(value.owned_capacity()),
+                crate::tool_run::ResolvedStateChange::Delete { .. } => bytes,
+            });
+        let allocation = self.0.budget.reserve(bytes)?;
+        let mut values = self.0.values.clone();
+        for change in changes {
+            change.apply_to(&mut values);
+        }
+        Ok(Self(std::sync::Arc::new(NamespaceMap {
+            values,
+            allocation,
+            budget: self.0.budget.clone(),
+        })))
+    }
+}
+impl From<BTreeMap<String, Value>> for NamespaceValues {
+    fn from(values: BTreeMap<String, Value>) -> Self {
+        Self(std::sync::Arc::new(NamespaceMap {
+            values,
+            ..Default::default()
+        }))
+    }
+}
+impl std::ops::Deref for NamespaceValues {
+    type Target = BTreeMap<String, Value>;
+    fn deref(&self) -> &Self::Target {
+        &self.0.values
+    }
+}
+impl PartialEq for NamespaceValues {
+    fn eq(&self, other: &Self) -> bool {
+        self.ptr_eq(other) || self.0.values == other.0.values
+    }
+}
+impl Eq for NamespaceValues {}
+
+impl PluginState {
+    pub fn empty_in(budget: &AllocationBudget) -> Result<Self, AllocationError> {
+        Ok(Self {
+            plugins: SharedSourceMap::empty_in(budget)?,
+        })
+    }
+    pub fn clone_in(&self, budget: &AllocationBudget) -> Result<Self, AllocationError> {
+        Ok(Self {
+            plugins: self.plugins.clone_in(budget)?,
+        })
+    }
+    pub fn allocation_budget(&self) -> &AllocationBudget {
+        self.plugins.allocation_budget()
+    }
+    pub fn insert_namespace(
+        &mut self,
+        plugin: &str,
+        namespace: PluginNamespaceState,
+    ) -> Result<(), AllocationError> {
+        let _key = self.allocation_budget().reserve(plugin.len() as u64 + 64)?;
+        self.plugins.insert(plugin.to_owned(), namespace)?;
+        Ok(())
+    }
+    pub fn decoded_in(&mut self, allocation: AllocationHold, budget: AllocationBudget) -> bool {
+        self.plugins
+            .decoded_in_with(allocation, budget, PluginNamespaceState::decoded_in)
+    }
+}
+impl PluginStateMap {
+    pub fn decoded_in(&mut self, allocation: AllocationHold, budget: AllocationBudget) -> bool {
+        self.plugins
+            .decoded_in_with(allocation, budget, NamespaceEntry::decoded_in)
+    }
+    pub fn empty_in(budget: &AllocationBudget) -> Result<Self, AllocationError> {
+        Ok(Self {
+            plugins: SharedSourceMap::empty_in(budget)?,
+        })
+    }
+    pub fn clone_in(&self, budget: &AllocationBudget) -> Result<Self, AllocationError> {
+        Ok(Self {
+            plugins: self.plugins.clone_in(budget)?,
+        })
+    }
+}
+impl MapValue for PluginNamespaceState {
+    fn clone_in(&self, budget: &AllocationBudget) -> Result<Self, AllocationError> {
+        Ok(Self {
+            format_version: self.format_version,
+            generation: self.generation,
+            publication: self.publication.clone_in(budget)?,
+            fork: self.fork,
+            values: self.values.clone_in(budget)?,
+            encoding: self.encoding.clone_in(budget)?,
+        })
+    }
+}
+impl MapValue for NamespaceEntry {
+    fn clone_in(&self, budget: &AllocationBudget) -> Result<Self, AllocationError> {
+        Ok(Self {
+            format_version: self.format_version,
+            generation: self.generation,
+            publication: self.publication.clone_in(budget)?,
+            fork: self.fork,
+            values: self.values.clone_in(budget)?,
+        })
+    }
+}
+impl MapValue for NamespaceBody {
+    fn clone_in(&self, budget: &AllocationBudget) -> Result<Self, AllocationError> {
+        Self::clone_in(self, budget)
+    }
+}
+impl MapValue for NamespaceValuesWeak {
+    fn clone_in(&self, budget: &AllocationBudget) -> Result<Self, AllocationError> {
+        if self.admission.budget.identity() == budget.identity() {
+            return Ok(self.clone());
+        }
+        let allocation = budget.reserve(256)?;
+        Ok(Self {
+            source: self.source.clone(),
+            admission: std::sync::Arc::new(WeakAdmission {
+                _allocation: allocation,
+                budget: budget.clone(),
+            }),
+        })
+    }
+}
 
 impl Default for PluginNamespaceState {
     fn default() -> Self {
@@ -361,35 +623,69 @@ impl Default for PluginNamespaceState {
 }
 
 impl PluginNamespaceState {
+    pub(crate) fn decoded_in(
+        &mut self,
+        allocation: AllocationHold,
+        budget: AllocationBudget,
+    ) -> bool {
+        self.values.decoded_in(allocation.clone(), budget.clone())
+            && self
+                .publication
+                .decoded_in(allocation.clone(), budget.clone())
+            && self.encoding.decoded_in(allocation, budget)
+    }
+    pub fn empty_in(budget: &AllocationBudget) -> Result<Self, AllocationError> {
+        Ok(Self {
+            format_version: FormatVersion::ONE,
+            generation: 0,
+            publication: crate::tool_run::StateFrontier::empty_in(budget)?,
+            fork: StateFork::Copy,
+            values: NamespaceValues::empty_in(budget)?,
+            encoding: NamespaceEncoding::empty_in(budget)?,
+        })
+    }
+    pub fn clone_in(&self, budget: &AllocationBudget) -> Result<Self, AllocationError> {
+        MapValue::clone_in(self, budget)
+    }
+
     /// The persistent keyed graph of these values. Unchanged values reuse
     /// their encoded nodes; an edit encodes only its value and trie path.
-    #[must_use]
-    pub fn body(&self) -> NamespaceBody {
+    pub fn body(&self) -> Result<NamespaceBody, lash_protocol_types::allocation::AllocationError> {
         self.encoding.body(&self.values)
     }
 
-    /// The values to change in place: shared values are copied first.
-    pub fn values_mut(&mut self) -> &mut BTreeMap<String, Value> {
-        self.encoding = self.encoding.detached();
-        std::sync::Arc::make_mut(&mut self.values)
+    /// Replace the immutable source only after its complete growth is admitted.
+    pub fn apply_changes(
+        &mut self,
+        changes: &[crate::tool_run::ResolvedStateChange],
+    ) -> Result<(), lash_protocol_types::allocation::AllocationError> {
+        let values = self.values.changed(changes)?;
+        self.replace_values(values)
     }
 
-    /// Replace a map while keeping the preceding keyed encoding available.
-    pub fn replace_values(&mut self, values: NamespaceValues) {
-        self.encoding = self.encoding.detached();
+    /// Retain a foreign source only after reserving its copy on this ledger.
+    pub fn replace_values(
+        &mut self,
+        values: NamespaceValues,
+    ) -> Result<(), lash_protocol_types::allocation::AllocationError> {
+        let values = values.clone_in(self.values.allocation_budget())?;
+        self.encoding = self.encoding.detached(self.values.allocation_budget())?;
         self.values = values;
+        Ok(())
     }
 
     /// The namespace's entry with its values stored at `values`.
-    #[must_use]
-    pub fn entry(&self, values: crate::store::BlobRef) -> NamespaceEntry {
-        NamespaceEntry {
-            values,
+    pub fn entry(&self, values: &crate::store::BlobRef) -> Result<NamespaceEntry, AllocationError> {
+        Ok(NamespaceEntry {
+            values: crate::store::SharedCheckpointAddress::copy_from_ref_in(
+                values,
+                self.values.allocation_budget(),
+            )?,
             format_version: self.format_version,
             generation: self.generation,
             publication: self.publication.clone(),
             fork: self.fork,
-        }
+        })
     }
 
     /// Whether `entry` records this namespace's metadata. Equal generations
@@ -411,7 +707,7 @@ impl PluginNamespaceState {
 #[serde(deny_unknown_fields)]
 pub struct NamespaceEntry {
     /// The content address of the namespace's values body.
-    pub values: crate::store::BlobRef,
+    pub values: crate::store::SharedCheckpointAddress,
     pub format_version: FormatVersion,
     pub generation: u64,
     pub publication: crate::tool_run::StateFrontier,
@@ -419,17 +715,23 @@ pub struct NamespaceEntry {
 }
 
 impl NamespaceEntry {
+    fn decoded_in(&mut self, allocation: AllocationHold, budget: AllocationBudget) -> bool {
+        self.values.decoded_in(allocation.clone(), budget.clone())
+            && self.publication.decoded_in(allocation, budget)
+    }
     /// The namespace this entry records, with `values` its body decoded.
-    #[must_use]
-    pub fn namespace(&self, values: NamespaceValues) -> PluginNamespaceState {
-        PluginNamespaceState {
+    pub fn namespace(
+        &self,
+        values: NamespaceValues,
+    ) -> Result<PluginNamespaceState, AllocationError> {
+        Ok(PluginNamespaceState {
             format_version: self.format_version,
             generation: self.generation,
-            publication: self.publication.clone(),
+            publication: self.publication.clone_in(values.allocation_budget())?,
             fork: self.fork,
+            encoding: NamespaceEncoding::default().clone_in(values.allocation_budget())?,
             values,
-            encoding: NamespaceEncoding::default(),
-        }
+        })
     }
 }
 
@@ -439,7 +741,7 @@ impl NamespaceEntry {
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct PluginStateMap {
-    pub plugins: BTreeMap<String, NamespaceEntry>,
+    pub plugins: SharedSourceMap<String, NamespaceEntry>,
 }
 
 const NAMESPACE_COMPONENT_PREFIX: &str = "plugin_state/";
@@ -479,11 +781,12 @@ pub fn fork_checkpoint_plugin_state(
         return Ok(false);
     };
     let mut forked = PluginStateMap::default();
-    for (plugin, mut entry) in map.plugins.clone() {
+    for (plugin, entry) in &map.plugins {
+        let mut entry = entry.clone();
         match entry.fork {
             StateFork::Copy => {
                 entry.publication.owner_segment = Default::default();
-                forked.plugins.insert(plugin, entry);
+                forked.plugins.insert(plugin.clone(), entry)?;
             }
             StateFork::Reset => {
                 checkpoint
@@ -558,16 +861,17 @@ mod keyed_publication_tests {
                 ("z".to_owned(), Value::String("x".repeat(size))),
             ]);
             let mut namespace = PluginNamespaceState {
-                values: std::sync::Arc::new(values),
+                values: values.into(),
                 ..PluginNamespaceState::default()
             };
-            let before = namespace.body();
-            namespace
-                .values_mut()
-                .insert("a".into(), Value::String("1".into()));
+            let before = namespace.body()?;
+            namespace.apply_changes(&[crate::tool_run::ResolvedStateChange::Put {
+                key: "a".into(),
+                value: Value::String("1".into()),
+            }])?;
             work::reset();
             work::COLLECTOR_STATE.store(2, Ordering::Relaxed);
-            let after = namespace.body();
+            let after = namespace.body()?;
             work::COLLECTOR_STATE.store(0, Ordering::Relaxed);
             let counts = (
                 work::GRAPH_SERIALIZED_BODY_BYTES.load(Ordering::Relaxed),
@@ -575,46 +879,55 @@ mod keyed_publication_tests {
             );
             assert!(before.value_address("z").is_some());
             assert_eq!(before.value_address("z"), after.value_address("z"));
-            let publication = after.publication_after(Some(&before), true);
+            let publication = after.publication_after(Some(&before), true)?;
             let publication_bytes = publication
-                .published
+                .published()
                 .values()
                 .map(|node| node.bytes.len())
                 .sum::<usize>();
-            let mut installed = before.graph.clone();
-            installed.extend(publication.published.clone());
+            let mut installed = before.graph().clone();
+            installed.extend(publication.published().clone());
             let reopened = NamespaceBody::load(
                 &installed,
                 after.root(),
                 crate::checkpoint_graph::DecodeLimits::within_total(1 << 28),
             )?;
             assert_eq!(reopened.snapshot(), namespace.values);
-            assert!(publication.published.len() <= 3);
+            assert!(publication.published().len() <= 3);
             let key = namespace_component_key("counted");
             let checkpoint = crate::store::HydratedSessionCheckpoint {
                 components: BTreeMap::from([(
                     key.clone(),
-                    crate::store::HydratedCheckpointComponent::changed(after.bytes.clone()),
+                    crate::store::HydratedCheckpointComponent::changed(after.bytes().clone()),
                 )])
                 .into(),
-                namespace_nodes: after.graph.clone().into(),
+                namespace_nodes: after.graph().clone(),
                 ..Default::default()
             };
             assert_eq!(
                 checkpoint.decode_component::<BTreeMap<String, Value>>(&key)?,
                 Some((*namespace.values).clone())
             );
-            namespace
-                .values_mut()
-                .insert("a".into(), Value::String("0".into()));
-            assert_eq!(namespace.body().values, before.values);
-            namespace.values_mut().clear();
-            let empty = namespace.body();
-            assert_eq!(empty.values, NamespaceBody::encode(&BTreeMap::new()).values);
+            namespace.apply_changes(&[crate::tool_run::ResolvedStateChange::Put {
+                key: "a".into(),
+                value: Value::String("0".into()),
+            }])?;
+            assert_eq!(namespace.body()?.values(), before.values());
+            namespace.replace_values(BTreeMap::new().into())?;
+            let empty = namespace.body()?;
+            assert_eq!(
+                empty.values(),
+                NamespaceBody::encode(
+                    &BTreeMap::new(),
+                    &lash_protocol_types::allocation::AllocationBudget::unowned()
+                )
+                .unwrap()
+                .values()
+            );
             Ok((
                 counts.0,
                 counts.1,
-                publication.published.len(),
+                publication.published().len(),
                 publication_bytes,
             ))
         };
@@ -627,3 +940,6 @@ mod keyed_publication_tests {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod namespace_retention_tests;

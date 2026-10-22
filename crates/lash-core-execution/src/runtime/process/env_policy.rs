@@ -229,7 +229,7 @@ impl<'a> ProcessEnvCx<'a> {
                                 .to_owned(),
                         }
                     })?;
-                    Ok(crate::ExecutionBinding { codec, ..payload })
+                    Ok::<_, crate::ProcessEnvRefusal>(crate::ExecutionBinding { codec, ..payload })
                 })
                 .transpose()?;
             let link = crate::OperationLink {

@@ -84,7 +84,7 @@ async fn gc_unreachable_keeps_rooted_checkpoint_blobs() {
             lash_core::NoProgressBudget::bounded(12),
         ))
     };
-    state.set_plugin_state(Some(plugin_state));
+    state.set_plugin_state(Some(plugin_state)).unwrap();
     store
         .admit_session(&SessionStoreCreateRequest {
             owning_process_id: None,
