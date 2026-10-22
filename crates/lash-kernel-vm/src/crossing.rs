@@ -35,6 +35,7 @@ pub(crate) struct CrossingHeap<'m> {
 }
 
 pub(crate) struct CrossingRun<'a> {
+    pub signature_origins: &'a crate::interface::FunctionOrigins,
     pub captions: &'a [lash_kernel_doc::CaptionEntry],
     pub documents: &'a BTreeMap<DocumentId, Arc<lash_kernel_doc::Document>>,
     pub instances: &'a BTreeMap<LinkId, crate::interface::PreparedInstance>,

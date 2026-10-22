@@ -120,6 +120,9 @@ pub enum AdmissionRefusal {
     CallableIdentity {
         callable: lash_vocabulary::CallableId,
     },
+    EntryAnnotation {
+        source: Box<lash_vocabulary::EntryAnnotationRefusal>,
+    },
     SignatureRequired {
         source: Box<lash_vocabulary::SignatureRequired>,
     },

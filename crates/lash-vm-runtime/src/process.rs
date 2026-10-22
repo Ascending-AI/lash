@@ -618,6 +618,9 @@ impl KernelProcessEngine {
                         AdmissionRefusal, EnginePortError,
                     };
                     EnginePortError::Refused(match error {
+                        lash_kernel_doc::FunctionValueRefusal::EntryAnnotation { source } => {
+                            AdmissionRefusal::EntryAnnotation { source }
+                        }
                         lash_kernel_doc::FunctionValueRefusal::SignatureRequired { source } => {
                             AdmissionRefusal::SignatureRequired { source }
                         }

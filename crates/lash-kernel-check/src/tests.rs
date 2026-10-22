@@ -69,6 +69,7 @@ fn incomplete_entry_requires_signature_without_restricting_ordinary_functions() 
         })),
     }]);
     let captured = lash_kernel_doc::FunctionValue {
+        signature_origin: None,
         callable: lash_vocabulary::CallableId {
             link: lash_vocabulary::LinkId::from_bytes([1; 32]),
             function,
@@ -121,10 +122,15 @@ fn incomplete_entry_requires_signature_without_restricting_ordinary_functions() 
     };
     assert_eq!(
         presentation
-            .promote_entry(function, location.clone(), false, false)
-            .unwrap_err()
-            .position,
-        lash_kernel_doc::SignaturePosition::Result
+            .promote_entry(function, location.clone(), false, false, None)
+            .unwrap_err(),
+        lash_vocabulary::EntrySignatureRefusal::Required(Box::new(
+            lash_vocabulary::SignatureRequired {
+                function: location.clone(),
+                position: lash_kernel_doc::SignaturePosition::Result,
+                span: None
+            }
+        ))
     );
     let complete = lash_kernel_doc::CallablePresentation {
         signature: lash_vocabulary::Signature {
@@ -135,7 +141,7 @@ fn incomplete_entry_requires_signature_without_restricting_ordinary_functions() 
     };
     assert_eq!(
         complete
-            .promote_entry(function, location, false, false)
+            .promote_entry(function, location, false, false, None)
             .unwrap()
             .signature,
         complete.signature
@@ -153,6 +159,7 @@ fn entry_promotion_verifies_the_defining_callable_contract() {
     let mut document = Document::new(NumberPolicy::Float, vec![]);
     document.functions.insert(id, definition);
     let mut value = lash_kernel_doc::FunctionValue {
+        signature_origin: None,
         callable: lash_vocabulary::CallableId {
             link: lash_vocabulary::LinkId::from_bytes([1; 32]),
             function: id,

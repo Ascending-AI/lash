@@ -66,10 +66,10 @@ pub mod kernel_internals;
 
 pub use interface::{
     Bound, BoundExceeded, Bounds, CellSave, CellStart, Charge, ChargeLimiter, DeliverError,
-    Delivered, EffectModes, EffectRequest, End, Finished, Host, HostFault, LimitDecision, Machine,
-    MachineError, MachineOptions, MemoryLimiter, MemoryMeter, Meters, OpenError, Outcome, Park,
-    PreparedInstance, PreparedSlot, Program, Request, RunError, RunObserver, SaveCell, SavedCell,
-    SealError, StartError, Step, Target, WaitId,
+    Delivered, EffectModes, EffectRequest, End, Finished, FunctionOrigins, Host, HostFault,
+    LimitDecision, Machine, MachineError, MachineOptions, MemoryLimiter, MemoryMeter, Meters,
+    OpenError, Outcome, Park, PreparedInstance, PreparedSlot, Program, Request, RunError,
+    RunObserver, SaveCell, SavedCell, SealError, StartError, Step, Target, WaitId,
 };
 
 pub use functions::machine_native;
