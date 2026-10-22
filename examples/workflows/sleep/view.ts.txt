@@ -1,8 +1,9 @@
-unit Function(Name("demo"))
-statement fn demo/0 ordinal=3 depth=0 block=fn demo Do { value: Let { name: Name("t1"), value: Act(ActExpr { kind: Sleep { then_yield: true }, args: [Literal(Float(Float(5.0)))] }), body: Literal(Absent) } }
-statement fn demo/1 ordinal=4 depth=0 block=fn demo ReturnVia { value: Literal(Text("awake")), policy: FunctionId(ec07dd4e314068cde58b9c1223c9fc11094029f4f5fe6f8d325a12e10b32a475) }
-scope fn demo ordinal=2 depth=0 Entry
-action fn demo/0/0/0 None
-caption callable 0 block=fn demo "Wait a moment, then report"
-caption node 0 site=fn demo/0 "Pause briefly"
-caption node 1 site=fn demo/1 "Say it is awake"
+unit Library(FunctionId(20f5d52debaf67ff53653f1b9def3c8d80f9025de3e1ca22b06a609ba5eac5c6))
+statement function 20f5d52debaf67ff53653f1b9def3c8d80f9025de3e1ca22b06a609ba5eac5c6/0 ordinal=3 depth=0 block=function 20f5d52debaf67ff53653f1b9def3c8d80f9025de3e1ca22b06a609ba5eac5c6 Do { value: Let { name: Name("t1"), value: Act(ActExpr { kind: Perform { slot: ImportSlot(1), result: Null, then_yield: true }, args: [Act(ActExpr { kind: Call(Import(ImportSlot(0))), args: [Literal(Float(Float(5.0)))] })] }), body: Literal(Absent) } }
+statement function 20f5d52debaf67ff53653f1b9def3c8d80f9025de3e1ca22b06a609ba5eac5c6/1 ordinal=4 depth=0 block=function 20f5d52debaf67ff53653f1b9def3c8d80f9025de3e1ca22b06a609ba5eac5c6 ReturnVia { value: Literal(Text("awake")), policy: Import(ImportSlot(2)) }
+scope function 20f5d52debaf67ff53653f1b9def3c8d80f9025de3e1ca22b06a609ba5eac5c6 ordinal=2 depth=0 Entry
+action function 20f5d52debaf67ff53653f1b9def3c8d80f9025de3e1ca22b06a609ba5eac5c6/0/0/0 Some(Timer { use_: OperationUse { link: LinkId(2dbad80ab761), slot: ImportSlot(1) } })
+action function 20f5d52debaf67ff53653f1b9def3c8d80f9025de3e1ca22b06a609ba5eac5c6/0/0/0/0 library id=2db5fa3cccdca8da03f351f1e50779a58d7eea10a589e1b42a635b37d4082754 name=ts.sleep_duration exports=[]
+caption callable 0 block=function 20f5d52debaf67ff53653f1b9def3c8d80f9025de3e1ca22b06a609ba5eac5c6 "Wait a moment, then report"
+caption node 1 site=function 20f5d52debaf67ff53653f1b9def3c8d80f9025de3e1ca22b06a609ba5eac5c6/0 "Pause briefly"
+caption node 2 site=function 20f5d52debaf67ff53653f1b9def3c8d80f9025de3e1ca22b06a609ba5eac5c6/1 "Say it is awake"

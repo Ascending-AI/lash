@@ -1,137 +1,15 @@
 {
-  "context": {
-    "control.finish": {
-      "signature": {
-        "params": [
-          {
-            "name": "input",
-            "ty": "any"
-          }
-        ],
-        "result": "any"
-      },
-      "contract": "1"
-    },
-    "corpus.capture": {
-      "signature": {
-        "params": [
-          {
-            "name": "input",
-            "ty": {
-              "record": {
-                "fields": [
-                  {
-                    "name": "list",
-                    "ty": {
-                      "list": "any"
-                    }
-                  }
-                ]
-              }
-            }
-          }
-        ],
-        "result": "json"
-      },
-      "contract": "8be2f3c2bb16abe57355aa08cb729511defddba2c4adeb4b1744edd4e7d329e1"
-    },
-    "corpus.echo": {
-      "signature": {
-        "params": [
-          {
-            "name": "input",
-            "ty": "json",
-            "optional": true
-          }
-        ],
-        "result": "json"
-      },
-      "contract": "52910906e3f939a5ce2e34bd105cd37184ead8ac272080fcbff759b3b6db6560"
-    },
-    "display.add_item": {
-      "signature": {
-        "params": [
-          {
-            "name": "input",
-            "ty": "any"
-          }
-        ],
-        "result": "any"
-      },
-      "contract": "1"
-    },
-    "display.set_status": {
-      "signature": {
-        "params": [
-          {
-            "name": "input",
-            "ty": "any"
-          }
-        ],
-        "result": "any"
-      },
-      "contract": "1"
-    },
-    "display.show_message": {
-      "signature": {
-        "params": [
-          {
-            "name": "input",
-            "ty": "any"
-          }
-        ],
-        "result": "any"
-      },
-      "contract": "1"
-    },
-    "gmail.list_recent": {
-      "signature": {
-        "params": [
-          {
-            "name": "input",
-            "ty": "any"
-          }
-        ],
-        "result": "any"
-      },
-      "contract": "1"
-    },
-    "llm.query": {
-      "signature": {
-        "params": [
-          {
-            "name": "input",
-            "ty": "any"
-          }
-        ],
-        "result": "any"
-      },
-      "contract": "1"
-    },
-    "web.search": {
-      "signature": {
-        "params": [
-          {
-            "name": "input",
-            "ty": "any"
-          }
-        ],
-        "result": "any"
-      },
-      "contract": "1"
-    }
-  },
   "transaction": {
-    "base": "c2dc2261174815326673d067b946a1ef798102a220d3bfc3afd5f2676fa8675a",
+    "base": "4eb7006a5c9a73e0a8cf093cc0b164a01723fd35888e02a6a84653443f29679d",
     "edits": [
       {
         "set_value": {
-          "base": "c2dc2261174815326673d067b946a1ef798102a220d3bfc3afd5f2676fa8675a",
+          "base": "4eb7006a5c9a73e0a8cf093cc0b164a01723fd35888e02a6a84653443f29679d",
           "target": {
             "tool_argument": {
               "action": {
                 "unit": {
-                  "function": "demo"
+                  "library": "94a7ec890d63e7e6b7d1706b69d0e7dd80fa408bd1eb08ff9f65d06fc35d2f39"
                 },
                 "path": [
                   0,

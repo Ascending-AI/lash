@@ -1,8 +1,8 @@
 language: Python
 exceptions: absent-binding initialization, task finalizer
-main/0 [20..209] "async def demo(flag: bool):\n    #: Check whether the answer is yes\n    if flag:\n        #: Send back a yes\n        return await corpus.echo(\"yes\")\n    #: Otherwise answer no\n    return \"no\""
-fn demo/0 [91..166] "if flag:\n        #: Send back a yes\n        return await corpus.echo(\"yes\")"
-fn demo/0/1/0 [135..166] "return await corpus.echo(\"yes\")"
-fn demo/0/1/0/0 [135..166] "return await corpus.echo(\"yes\")"
-fn demo/0/1/0/0/0 [135..166] "return await corpus.echo(\"yes\")"
-fn demo/1 [198..209] "return \"no\""
+main/0 [20..216] "async def demo(flag: bool) -> str:\n    #: Check whether the answer is yes\n    if flag:\n        #: Send back a yes\n        return await corpus.echo(\"yes\")\n    #: Otherwise answer no\n    return \"no\""
+function e51dacf99e63baa935abe524e3e3c394f3749dcd550587d9f0688f1a190bcf0b/0 [98..173] "if flag:\n        #: Send back a yes\n        return await corpus.echo(\"yes\")"
+function e51dacf99e63baa935abe524e3e3c394f3749dcd550587d9f0688f1a190bcf0b/0/1/0 [142..173] "return await corpus.echo(\"yes\")"
+function e51dacf99e63baa935abe524e3e3c394f3749dcd550587d9f0688f1a190bcf0b/0/1/0/0 [142..173] "return await corpus.echo(\"yes\")"
+function e51dacf99e63baa935abe524e3e3c394f3749dcd550587d9f0688f1a190bcf0b/0/1/0/0/0 [142..173] "return await corpus.echo(\"yes\")"
+function e51dacf99e63baa935abe524e3e3c394f3749dcd550587d9f0688f1a190bcf0b/1 [205..216] "return \"no\""

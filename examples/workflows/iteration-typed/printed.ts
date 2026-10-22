@@ -2,7 +2,7 @@
 export async function demo(
   /** The numbers to add */
   items: number[],
-) {
+): Promise<number> {
   /** Start the total at zero */
   let total = 0;
   /** Go through each number */

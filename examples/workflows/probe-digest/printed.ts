@@ -1,5 +1,5 @@
 /** Pace a digest of topics */
-export async function digest(topics) {
+export async function digest(topics: { urgent: boolean; }[]): Promise<{ seen: number; }> {
   /** Start counting at zero */
   let seen = 0;
   /** Go through each topic */

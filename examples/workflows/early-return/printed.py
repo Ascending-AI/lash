@@ -1,5 +1,5 @@
 #: Echo a value unless it is negative
-async def demo(value: int):
+async def demo(value: int) -> str:
     #: Check for a negative value
     if value < 0:
         #: Stop and report that it is negative

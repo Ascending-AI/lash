@@ -1,8 +1,8 @@
-unit Function(Name("demo"))
-statement fn demo/0 ordinal=3 depth=0 block=fn demo Do { value: Act(ActExpr { kind: Sleep { then_yield: false }, args: [Literal(Float(Float(5.0)))] }) }
-statement fn demo/1 ordinal=4 depth=0 block=fn demo Return { value: Literal(Text("awake")) }
-scope fn demo ordinal=2 depth=0 Entry
-action fn demo/0/0 None
-caption callable 0 block=fn demo "Wait a moment, then report"
-caption node 0 site=fn demo/0 "Pause briefly"
-caption node 1 site=fn demo/1 "Say it is awake"
+unit Library(FunctionId(d977a9ebd923fc515aef4734a03fcda74d819dbbf8cdae9cf22b5f98a09f27f9))
+statement function d977a9ebd923fc515aef4734a03fcda74d819dbbf8cdae9cf22b5f98a09f27f9/0 ordinal=3 depth=0 block=function d977a9ebd923fc515aef4734a03fcda74d819dbbf8cdae9cf22b5f98a09f27f9 Do { value: Act(ActExpr { kind: Call(Import(ImportSlot(0))), args: [Literal(Float(Float(0.005)))] }) }
+statement function d977a9ebd923fc515aef4734a03fcda74d819dbbf8cdae9cf22b5f98a09f27f9/1 ordinal=4 depth=0 block=function d977a9ebd923fc515aef4734a03fcda74d819dbbf8cdae9cf22b5f98a09f27f9 Return { value: Literal(Text("awake")) }
+scope function d977a9ebd923fc515aef4734a03fcda74d819dbbf8cdae9cf22b5f98a09f27f9 ordinal=2 depth=0 Entry
+action function d977a9ebd923fc515aef4734a03fcda74d819dbbf8cdae9cf22b5f98a09f27f9/0/0 Some(Timer { use_: OperationUse { link: LinkId(0bdb677164ce), slot: ImportSlot(4294901778) } })
+caption callable 0 block=function d977a9ebd923fc515aef4734a03fcda74d819dbbf8cdae9cf22b5f98a09f27f9 "Wait a moment, then report"
+caption node 0 site=function d977a9ebd923fc515aef4734a03fcda74d819dbbf8cdae9cf22b5f98a09f27f9/0 "Pause briefly"
+caption node 1 site=function d977a9ebd923fc515aef4734a03fcda74d819dbbf8cdae9cf22b5f98a09f27f9/1 "Say it is awake"

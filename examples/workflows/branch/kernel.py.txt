@@ -1,23 +1,11 @@
 kernel 1
 numbers by_spelling
-effect corpus.echo(input?: Json) -> Json contract "52910906e3f939a5ce2e34bd105cd37184ead8ac272080fcbff759b3b6db6560"
-use kind = @3e2a9836b16b3ade4f7fcc2d56d1fb203dffed4bd5d7f4bf800df213c8c8c5f7
-use list.len = @70d92c79f9c69cfe8cda0752cf30f5f0db0499a1bbffeeed9e2abddad9cf302b
-use py.reply = @9069f1a97a82e155fe11114065351d42262bd0be81a4a8c41f522dfbb431d5d5
-use record.contains = @c5ee063554dd9a59526868c163b1a3282db896327967a522d00fcde29c91c25c
-use record.keys = @3048431a57b64b680843cd96770d99536bab12b83c3c7788856614e555b4985c
-use same = @1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578
-entry demo(flag: Bool) -> Any
-
-fn demo(flag) {
-  if flag {
-    return invoke py.reply(perform corpus.echo("yes") as Json)
-  }
-  return "no"
-}
-
+import 0 operation corpus.echo(input?: Json) -> Json
+import 1 code py.h_n5_reply(value: Any) -> Any direct
+export demo "{\"kind\":\"function\",\"value\":{\"function\":\"e51dacf99e63baa935abe524e3e3c394f3749dcd550587d9f0688f1a190bcf0b\",\"signature\":{\"params\":[{\"name\":\"flag\",\"ty\":\"bool\"}],\"result\":\"text\"},\"convention\":{\"kind\":\"direct\"},\"asynchronous\":true,\"rest\":false}}"
+definition "function local.function(flag: Any) -> Any\nkernel 1\nmetering statements\nimport 0 operation corpus.echo(input?: Json) -> Json\nimport 1 code py.h_n5_reply(value: Any) -> Any direct\nbody {\n  if flag {\n    return invoke import 1(perform 0(\"yes\") as Json)\n  }\n  return \"no\"\n}\n"
 main {
-  let demo = &demo
+  let demo = &local.function
 }
 
-unit Function(Name("demo")): statements=3 scopes=3 sites=6
+unit Library(FunctionId(e51dacf99e63baa935abe524e3e3c394f3749dcd550587d9f0688f1a190bcf0b)): statements=3 scopes=3 sites=6

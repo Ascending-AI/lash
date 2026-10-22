@@ -1,6 +1,6 @@
 language: Python
 exceptions: absent-binding initialization, task finalizer
-main/0 [46..157] "async def demo():\n    #: Pause briefly\n    await asyncio.sleep(0.005)\n    #: Say it is awake\n    return \"awake\""
-fn demo/0 [89..115] "await asyncio.sleep(0.005)"
-fn demo/0/0 [89..115] "await asyncio.sleep(0.005)"
-fn demo/1 [143..157] "return \"awake\""
+main/0 [46..164] "async def demo() -> str:\n    #: Pause briefly\n    await asyncio.sleep(0.005)\n    #: Say it is awake\n    return \"awake\""
+function d977a9ebd923fc515aef4734a03fcda74d819dbbf8cdae9cf22b5f98a09f27f9/0 [96..122] "await asyncio.sleep(0.005)"
+function d977a9ebd923fc515aef4734a03fcda74d819dbbf8cdae9cf22b5f98a09f27f9/0/0 [96..122] "await asyncio.sleep(0.005)"
+function d977a9ebd923fc515aef4734a03fcda74d819dbbf8cdae9cf22b5f98a09f27f9/1 [150..164] "return \"awake\""

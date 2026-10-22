@@ -1,13 +1,13 @@
-unit Function(Name("demo"))
-statement fn demo/0 ordinal=3 depth=0 block=fn demo If { condition: Variable(Name("flag")), then_block: [Return { value: Act(ActExpr { kind: Call(Library(FunctionId(9069f1a97a82e155fe11114065351d42262bd0be81a4a8c41f522dfbb431d5d5))), args: [Act(ActExpr { kind: Perform { effect: QualifiedName("corpus.echo"), result: Json, then_yield: false }, args: [Literal(Text("yes"))] })] }) }], else_block: [] }
-statement fn demo/0/1/0 ordinal=5 depth=1 block=fn demo/0/1 Return { value: Act(ActExpr { kind: Call(Library(FunctionId(9069f1a97a82e155fe11114065351d42262bd0be81a4a8c41f522dfbb431d5d5))), args: [Act(ActExpr { kind: Perform { effect: QualifiedName("corpus.echo"), result: Json, then_yield: false }, args: [Literal(Text("yes"))] })] }) }
-statement fn demo/1 ordinal=7 depth=0 block=fn demo Return { value: Literal(Text("no")) }
-scope fn demo ordinal=2 depth=0 Entry
-scope fn demo/0/1 ordinal=4 depth=1 Then
-scope fn demo/0/2 ordinal=6 depth=1 Else
-action fn demo/0/1/0/0 library id=9069f1a97a82e155fe11114065351d42262bd0be81a4a8c41f522dfbb431d5d5 name=py.reply label="Python reply"
-action fn demo/0/1/0/0/0 Some(Effect(QualifiedName("corpus.echo")))
-caption callable 0 block=fn demo "Answer yes or no"
-caption node 0 site=fn demo/0 "Check whether the answer is yes"
-caption node 2 site=fn demo/0/1/0 "Send back a yes"
-caption node 3 site=fn demo/1 "Otherwise answer no"
+unit Library(FunctionId(e51dacf99e63baa935abe524e3e3c394f3749dcd550587d9f0688f1a190bcf0b))
+statement function e51dacf99e63baa935abe524e3e3c394f3749dcd550587d9f0688f1a190bcf0b/0 ordinal=3 depth=0 block=function e51dacf99e63baa935abe524e3e3c394f3749dcd550587d9f0688f1a190bcf0b If { condition: Variable(Name("flag")), then_block: [Return { value: Act(ActExpr { kind: Call(Import(ImportSlot(1))), args: [Act(ActExpr { kind: Perform { slot: ImportSlot(0), result: Json, then_yield: false }, args: [Literal(Text("yes"))] })] }) }], else_block: [] }
+statement function e51dacf99e63baa935abe524e3e3c394f3749dcd550587d9f0688f1a190bcf0b/0/1/0 ordinal=5 depth=1 block=function e51dacf99e63baa935abe524e3e3c394f3749dcd550587d9f0688f1a190bcf0b/0/1 Return { value: Act(ActExpr { kind: Call(Import(ImportSlot(1))), args: [Act(ActExpr { kind: Perform { slot: ImportSlot(0), result: Json, then_yield: false }, args: [Literal(Text("yes"))] })] }) }
+statement function e51dacf99e63baa935abe524e3e3c394f3749dcd550587d9f0688f1a190bcf0b/1 ordinal=7 depth=0 block=function e51dacf99e63baa935abe524e3e3c394f3749dcd550587d9f0688f1a190bcf0b Return { value: Literal(Text("no")) }
+scope function e51dacf99e63baa935abe524e3e3c394f3749dcd550587d9f0688f1a190bcf0b ordinal=2 depth=0 Entry
+scope function e51dacf99e63baa935abe524e3e3c394f3749dcd550587d9f0688f1a190bcf0b/0/1 ordinal=4 depth=1 Then
+scope function e51dacf99e63baa935abe524e3e3c394f3749dcd550587d9f0688f1a190bcf0b/0/2 ordinal=6 depth=1 Else
+action function e51dacf99e63baa935abe524e3e3c394f3749dcd550587d9f0688f1a190bcf0b/0/1/0/0 library id=373444e2d103ee313318775419afb68a65184593e7bdcae900957bfd4ec811aa name=py.reply exports=[]
+action function e51dacf99e63baa935abe524e3e3c394f3749dcd550587d9f0688f1a190bcf0b/0/1/0/0/0 Some(Effect(OperationUse { link: LinkId(c87a29cc148b), slot: ImportSlot(0) }))
+caption callable 0 block=function e51dacf99e63baa935abe524e3e3c394f3749dcd550587d9f0688f1a190bcf0b "Answer yes or no"
+caption node 0 site=function e51dacf99e63baa935abe524e3e3c394f3749dcd550587d9f0688f1a190bcf0b/0 "Check whether the answer is yes"
+caption node 2 site=function e51dacf99e63baa935abe524e3e3c394f3749dcd550587d9f0688f1a190bcf0b/0/1/0 "Send back a yes"
+caption node 3 site=function e51dacf99e63baa935abe524e3e3c394f3749dcd550587d9f0688f1a190bcf0b/1 "Otherwise answer no"

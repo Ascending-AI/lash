@@ -618,7 +618,6 @@ impl<'a> Printer<'a> {
             Expr::Closure(closure) => {
                 self.out.push_str("fn ");
                 self.function(&closure.function);
-                self.out.push(' ');
                 self.start(closure.presentation.as_ref());
             }
             Expr::Call { function, args } => {
@@ -713,7 +712,7 @@ impl<'a> Printer<'a> {
         let Some(start) = start else {
             return;
         };
-        self.out.push_str("presentation");
+        self.out.push_str(" presentation");
         self.signature(&start.signature);
         match &start.representation {
             FunctionRepresentation::Bare => self.out.push_str(" bare"),
@@ -728,23 +727,23 @@ impl<'a> Printer<'a> {
 
     fn convention(&mut self, convention: &StartConvention) {
         match convention {
-            StartConvention::Direct => self.out.push_str(" direct "),
+            StartConvention::Direct => self.out.push_str(" direct"),
             StartConvention::TsDirect { await_fn } => {
                 self.out.push_str(" ts_direct(");
                 self.target(await_fn);
-                self.out.push_str(") ");
+                self.out.push(')');
             }
             StartConvention::TsArgsList { await_fn, same_fn } => {
                 self.out.push_str(" ts_args(");
                 self.target(await_fn);
                 self.out.push_str(", ");
                 self.target(same_fn);
-                self.out.push_str(") ");
+                self.out.push(')');
             }
             StartConvention::PyDirect { cleanup } => {
                 self.out.push_str(" py_direct(");
                 self.target(cleanup);
-                self.out.push_str(") ");
+                self.out.push(')');
             }
         }
     }

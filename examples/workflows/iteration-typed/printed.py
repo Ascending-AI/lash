@@ -2,7 +2,7 @@
 async def demo(
     #: The numbers to add
     items: list[int],
-):
+) -> int:
     #: Start the total at zero
     total = 0
     #: Go through each number

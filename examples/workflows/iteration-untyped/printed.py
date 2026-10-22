@@ -1,5 +1,5 @@
 #: Echo every item
-async def demo(items):
+async def demo(items: list[str]) -> list[str]:
     #: Start an empty list of replies
     out = []
     #: Go through each item

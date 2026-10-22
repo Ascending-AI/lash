@@ -1,22 +1,13 @@
 kernel 1
 numbers by_spelling
-effect corpus.echo(input?: Json) -> Json contract "52910906e3f939a5ce2e34bd105cd37184ead8ac272080fcbff759b3b6db6560"
-use kind = @3e2a9836b16b3ade4f7fcc2d56d1fb203dffed4bd5d7f4bf800df213c8c8c5f7
-use list.len = @70d92c79f9c69cfe8cda0752cf30f5f0db0499a1bbffeeed9e2abddad9cf302b
-use py.reply = @9069f1a97a82e155fe11114065351d42262bd0be81a4a8c41f522dfbb431d5d5
-use record.contains = @c5ee063554dd9a59526868c163b1a3282db896327967a522d00fcde29c91c25c
-use record.keys = @3048431a57b64b680843cd96770d99536bab12b83c3c7788856614e555b4985c
-use same = @1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578
-use text.concat = @ba1c1b7fe1ae760637dddbee3751c5dfbe05ed7b4f3e7792af355dc80d5ff6bb
-entry demo(name: Text) -> Any
-
-fn demo(name) {
-  let `größe` = "日本 🦀"
-  return invoke py.reply(perform corpus.echo(text.concat(`größe`, name)) as Json)
-}
-
+import 0 operation corpus.echo(input?: Json) -> Json
+import 1 code py.h_n5_reply(value: Any) -> Any direct
+native @df2a1a04d84d1a924b3a01004431802561579881c84b726b743db234aca50d7e
+export demo "{\"kind\":\"function\",\"value\":{\"function\":\"01a71e446f63283b5b9abd896bbbdcd54cf1c041d5936f7d1a4d4b57273cd4d3\",\"signature\":{\"params\":[{\"name\":\"name\",\"ty\":\"text\"}],\"result\":\"text\"},\"convention\":{\"kind\":\"direct\"},\"asynchronous\":true,\"rest\":false}}"
+definition "function local.function(name: Any) -> Any\nkernel 1\nmetering statements\nimport 0 operation corpus.echo(input?: Json) -> Json\nimport 1 code py.h_n5_reply(value: Any) -> Any direct\nuse text.concat = @df2a1a04d84d1a924b3a01004431802561579881c84b726b743db234aca50d7e\nbody {\n  let `größe` = \"日本 🦀\"\n  return invoke import 1(perform 0(text.concat(`größe`, name)) as Json)\n}\n"
+definition "function text.concat(text: Text, other: Text) -> Text\nkernel 1\ncharge sum(1, deep(text), deep(other), deep(result))\nnative\n"
 main {
-  let demo = &demo
+  let demo = &local.function
 }
 
-unit Function(Name("demo")): statements=2 scopes=1 sites=5
+unit Library(FunctionId(01a71e446f63283b5b9abd896bbbdcd54cf1c041d5936f7d1a4d4b57273cd4d3)): statements=2 scopes=1 sites=5

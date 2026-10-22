@@ -1,5 +1,5 @@
 #: Try a step, and always finish up
-async def demo():
+async def demo() -> str:
     #: Start with a placeholder result
     result = "start"
     #: Try the echo

@@ -1,34 +1,44 @@
 kernel 1
 numbers float
-effect corpus.echo(input?: Json) -> Json contract "52910906e3f939a5ce2e34bd105cd37184ead8ac272080fcbff759b3b6db6560"
-use collection.holds_none = @a58e0ba0d11b84096fd0264a5a281ef308aa5fe9a7bf26dd7b662b283fa491fe
-use error.new = @94cb9716bc8ce4815dfcc5451d7f6d00901c7ed7aeba0d131da241a5f750d064
-use kind = @3e2a9836b16b3ade4f7fcc2d56d1fb203dffed4bd5d7f4bf800df213c8c8c5f7
-use list.copy_deep = @dc940e0118f81f9684c5d9d0111b22d535f6b48369eb7d6373009da276a17c4b
-use list.len = @70d92c79f9c69cfe8cda0752cf30f5f0db0499a1bbffeeed9e2abddad9cf302b
-use map.copy_deep = @0b8756185acbba5254579b4e28b3609cbd353673a46350444efe5bac54d03e97
-use map.values = @52849f963c318359e81934c83cd35ce4364ec742a159a8e99be42dff2351d980
-use num.add = @9cda7fce431cb6f247f593c290eba8aa75171a9f1fbcc628f4603c6fe7ab6343
-use num.lt = @34ca055d8b47010f1540ce16c398577f9b6a83e19896e062035424e4f5c8624e
-use num.sub = @f2398fa57623b70bf53b29519dc1a967051e687bff7c01036fbeb0b9c3f96d28
-use record.copy_deep = @a6d4171fd163b1a7519a83d38916149be44c801ebe223d1d7a7db311e9bf2008
-use record.values = @5d1db382f1280cf8e9ce7f0356c7117b1fe0f0d7f6f3acf2874fec1807f5facf
-use same = @1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578
-use set.copy_deep = @3bca75c884c39293ac043da1ab4ca91be4d9585702aa3304f394b9812215c6d7
-use text.concat = @ba1c1b7fe1ae760637dddbee3751c5dfbe05ed7b4f3e7792af355dc80d5ff6bb
-use ts.await = @18a30299db399e09c5772b4431f1c4baf6e139a164f476b6fe173b1447d54a6f
-use ts.boundary = @ac89e50257ae69e06fe10e8faa4c6567d50315aca6fcecee2a967bdc8b4af23b
-use ts.promise.adopt = @ec07dd4e314068cde58b9c1223c9fc11094029f4f5fe6f8d325a12e10b32a475
-use ts.promise.is = @0f99cae1fc6ad1ff6812fb50d4070182ec247c6fe07f1a7b049a4fa7aa9c82a5
-entry demo(name: Text) -> Any ts_direct(ts.await)
-
-fn demo(name) {
-  let `größe` = "日本 🦀"
-  return perform corpus.echo(invoke ts.boundary(text.concat(`größe`, name))) as Json then yield via ts.promise.adopt
-}
-
+import 0 operation corpus.echo(input?: Json) -> Json
+import 1 code ts.h_n8_boundary(value: Any) -> Any direct
+import 2 code ts.h_n7_promise_n5_adopt(value: Any) -> Any direct
+import 3 code ts.h_n5_await(value: Any) -> Any direct
+native @048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544
+native @083cc8b48fd7026c3019d5792294dc77917d2c70360c2b6e9de8769d0624ac93
+native @1c50cd669ab12c8c1448a422ad8da57414f9cecb204e2761bf3ed6de239dc2f0
+native @36557788c4b00e5de73b2b4f95b1852ebdc4e90e000230dd9c7c1dbd4531dc75
+native @40590fcc56fe886746ecbc896b0342e86e0f5b80b06165b243b68224d4fea6d8
+native @42b3d4f5682011d4830d4dcd01965cee6d7cc5e492157bf194d43aa20d224340
+native @6db20342e1a7beb5c27af579a4103c3252b25e36cd077856823b6062ea804ef5
+native @94621ce821ee886636f7d33907340b7290c9e71c2137bd762b6c70bb464566f9
+native @ab53e73663e92f177818d6e7bd7e24812d9c55eb893fddf040b7d0a01e357940
+native @b1e053ff016534b957987f8e6450beb3132c4ae820c1319af2d455dffea2d0a1
+native @c8742b017a2d5b515564fed15204c6447609613f3d9ab128d62d139e6c8ea87e
+native @ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5
+native @df2a1a04d84d1a924b3a01004431802561579881c84b726b743db234aca50d7e
+native @e5f5e7081794f244d696377835fa16cadf6f6c49d53e947fc928b49494989ca3
+native @e626bd24fec9dcb7ef17316818ccc470756e89815aa30f08e8b43d27c0516cfd
+export demo "{\"kind\":\"function\",\"value\":{\"function\":\"6987c82f40309fc65c33cd9ba4c590793716a876da5f6671deb81a8696352f3d\",\"signature\":{\"params\":[{\"name\":\"name\",\"ty\":\"text\"}],\"result\":\"text\"},\"convention\":{\"kind\":\"ts_direct\",\"value\":{\"await_fn\":{\"kind\":\"import\",\"value\":3}}},\"asynchronous\":true,\"rest\":false}}"
+definition "function same(arg0: Any, arg1: Any) -> Bool\nkernel 1\nerrors \"arity\"\ncharge sum(1, sum(min(size(arg0), size(arg1)), nested(arg0), nested(arg1)), deep(result))\nnative\n"
+definition "function set.copy_deep(xs: Set(Any)) -> Set(Any)\nkernel 1\nerrors \"cyclic_value\", \"index_out_of_range\", \"invalid_key\", \"key_missing\", \"too_deep\", \"type_error\"\ncharge sum(1, deep(xs), deep(result))\nnative\n"
+definition "function num.lt(arg0: Number, arg1: Number) -> Bool\nkernel 1\nerrors \"arity\", \"type_error\"\ncharge sum(1, product(sum(deep(arg0), deep(arg1)), sum(deep(arg0), deep(arg1))), deep(result))\nnative\n"
+definition "function list.copy_deep(xs: List(Any)) -> List(Any)\nkernel 1\nerrors \"cyclic_value\", \"index_out_of_range\", \"invalid_key\", \"key_missing\", \"too_deep\", \"type_error\"\ncharge sum(1, deep(xs), deep(result))\nnative\n"
+definition "function list.len(xs: List(Any)) -> Int\nkernel 1\nerrors \"cyclic_value\", \"index_out_of_range\", \"invalid_key\", \"key_missing\", \"too_deep\", \"type_error\"\ncharge 1\nnative\n"
+definition "function ts.boundary(value: Any) -> Any\nkernel 1\nerrors \"cyclic_value\", \"not_data\", \"too_deep\", \"type_error\"\ncharge sum(4, deep(value))\nuse collection.holds_none = @c8742b017a2d5b515564fed15204c6447609613f3d9ab128d62d139e6c8ea87e\nuse error.new = @e5f5e7081794f244d696377835fa16cadf6f6c49d53e947fc928b49494989ca3\nuse kind = @ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5\nuse list.copy_deep = @36557788c4b00e5de73b2b4f95b1852ebdc4e90e000230dd9c7c1dbd4531dc75\nuse list.len = @40590fcc56fe886746ecbc896b0342e86e0f5b80b06165b243b68224d4fea6d8\nuse map.copy_deep = @42b3d4f5682011d4830d4dcd01965cee6d7cc5e492157bf194d43aa20d224340\nuse map.values = @ab53e73663e92f177818d6e7bd7e24812d9c55eb893fddf040b7d0a01e357940\nuse num.add = @94621ce821ee886636f7d33907340b7290c9e71c2137bd762b6c70bb464566f9\nuse num.lt = @1c50cd669ab12c8c1448a422ad8da57414f9cecb204e2761bf3ed6de239dc2f0\nuse num.sub = @6db20342e1a7beb5c27af579a4103c3252b25e36cd077856823b6062ea804ef5\nuse record.copy_deep = @e626bd24fec9dcb7ef17316818ccc470756e89815aa30f08e8b43d27c0516cfd\nuse record.values = @b1e053ff016534b957987f8e6450beb3132c4ae820c1319af2d455dffea2d0a1\nuse same = @048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544\nuse set.copy_deep = @083cc8b48fd7026c3019d5792294dc77917d2c70360c2b6e9de8769d0624ac93\nbody {\n  let k = kind(value)\n  if same(k, \"text\") {\n    return value\n  }\n  if same(k, \"float\") {\n    return value\n  }\n  if same(k, \"tuple\") {\n    if same(value, ()) {\n      return value\n    }\n    if same(value[0], \"ts.function\") {\n      if same(value[1], \"\") {\n        return value\n      }\n      throw error.new(\"not_data\", \"A built-in function or object is not data\", null)\n    }\n    if same(value[0], \"ts.object\") {\n      throw error.new(\"not_data\", \"A built-in function or object is not data\", null)\n    }\n    return value\n  }\n  if same(k, \"set\") {\n    return set.copy_deep(value)\n  }\n  if collection.holds_none(value, set{\"absent\", \"tuple\"}) {\n    return value\n  }\n  let copied = value\n  if same(k, \"list\") {\n    set copied = list.copy_deep(value)\n  } else {\n    if same(k, \"record\") {\n      set copied = record.copy_deep(value)\n    } else {\n      if same(k, \"map\") {\n        set copied = map.copy_deep(value)\n      } else {\n        return value\n      }\n    }\n  }\n  let pending = [copied]\n  while num.lt(0, list.len(pending)) metered 2 {\n    let last = num.sub(list.len(pending), 1)\n    let item = pending[last]\n    remove pending[last]\n    let children = item\n    if same(kind(item), \"list\") {\n      let index = 0\n      while num.lt(index, list.len(item)) {\n        let child = item[index]\n        if same(child, ()) {\n          set item[index] = null\n        }\n        if same(child, absent) {\n          set item[index] = null\n        }\n        set index = num.add(index, 1)\n      }\n    } else {\n      if same(kind(item), \"record\") {\n        set children = record.values(item)\n      } else {\n        set children = map.values(item)\n      }\n    }\n    for child in children {\n      let ck = kind(child)\n      if same(ck, \"float\") {} else {\n        if same(ck, \"text\") {} else {\n          if same(ck, \"tuple\") {\n            if same(child, ()) {} else {\n              if same(child[0], \"ts.function\") {\n                if same(child[1], \"\") {} else {\n                  throw error.new(\"not_data\", \"A built-in function or object is not data\", null)\n                }\n              }\n              if same(child[0], \"ts.object\") {\n                throw error.new(\"not_data\", \"A built-in function or object is not data\", null)\n              }\n            }\n          } else {\n            if same(ck, \"list\") {\n              set pending[list.len(pending)] = child\n            }\n            if same(ck, \"record\") {\n              set pending[list.len(pending)] = child\n            }\n            if same(ck, \"map\") {\n              set pending[list.len(pending)] = child\n            }\n          }\n        }\n      }\n    }\n  }\n  return copied\n}\n"
+definition "function map.copy_deep(xs: Map(Any, Any)) -> Map(Any, Any)\nkernel 1\nerrors \"cyclic_value\", \"index_out_of_range\", \"invalid_key\", \"key_missing\", \"too_deep\", \"type_error\"\ncharge sum(1, deep(xs), deep(result))\nnative\n"
+definition "function local.function(name: Any) -> Any\nkernel 1\nmetering statements\nimport 0 operation corpus.echo(input?: Json) -> Json\nimport 1 code ts.h_n8_boundary(value: Any) -> Any direct\nimport 2 code ts.h_n7_promise_n5_adopt(value: Any) -> Any direct\nuse text.concat = @df2a1a04d84d1a924b3a01004431802561579881c84b726b743db234aca50d7e\nbody {\n  let `größe` = \"日本 🦀\"\n  return perform 0(invoke import 1(text.concat(`größe`, name))) as Json then yield via import 2\n}\n"
+definition "function num.sub(arg0: Number, arg1: Number) -> Number\nkernel 1\nerrors \"arity\", \"number_range\", \"type_error\"\ncharge sum(1, sum(deep(arg0), deep(arg1)), deep(result))\nnative\n"
+definition "function num.add(arg0: Number, arg1: Number) -> Number\nkernel 1\nerrors \"arity\", \"number_range\", \"type_error\"\ncharge sum(1, sum(deep(arg0), deep(arg1)), deep(result))\nnative\n"
+definition "function map.values(xs: Map(Any, Any)) -> List(Any)\nkernel 1\nerrors \"cyclic_value\", \"index_out_of_range\", \"invalid_key\", \"key_missing\", \"too_deep\", \"type_error\"\ncharge sum(1, size(xs), size(result))\nnative\n"
+definition "function record.values(xs: Record{..Any}) -> List(Any)\nkernel 1\nerrors \"cyclic_value\", \"index_out_of_range\", \"invalid_key\", \"key_missing\", \"too_deep\", \"type_error\"\ncharge sum(1, size(xs), size(result))\nnative\n"
+definition "function collection.holds_none(value: Any, kinds: Set(Text)) -> Bool\nkernel 1\nerrors \"type_error\"\ncharge sum(1, size(kinds), deep(value))\nnative\n"
+definition "function kind(arg0: Any) -> Text\nkernel 1\nerrors \"arity\"\ncharge sum(1, 0, deep(result))\nnative\n"
+definition "function text.concat(text: Text, other: Text) -> Text\nkernel 1\ncharge sum(1, deep(text), deep(other), deep(result))\nnative\n"
+definition "function error.new(kind: Text, message: Text, data?: Any) -> Error\nkernel 1\nerrors \"type_error\"\ncharge sum(1, size(kind), size(message), size(result))\nnative\n"
+definition "function record.copy_deep(xs: Record{..Any}) -> Record{..Any}\nkernel 1\nerrors \"cyclic_value\", \"index_out_of_range\", \"invalid_key\", \"key_missing\", \"too_deep\", \"type_error\"\ncharge sum(1, deep(xs), deep(result))\nnative\n"
 main {
-  let demo = &demo
+  let demo = &local.function
 }
 
-unit Function(Name("demo")): statements=2 scopes=1 sites=5
+unit Library(FunctionId(6987c82f40309fc65c33cd9ba4c590793716a876da5f6671deb81a8696352f3d)): statements=2 scopes=1 sites=5

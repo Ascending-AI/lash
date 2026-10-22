@@ -1,44 +1,30 @@
 --- before
 -kernel 1
 -numbers float
--effect corpus.echo(input?: Json) -> Json contract "52910906e3f939a5ce2e34bd105cd37184ead8ac272080fcbff759b3b6db6560"
--use kind = @3e2a9836b16b3ade4f7fcc2d56d1fb203dffed4bd5d7f4bf800df213c8c8c5f7
--use same = @1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578
--use ts.await = @18a30299db399e09c5772b4431f1c4baf6e139a164f476b6fe173b1447d54a6f
--use ts.promise.adopt = @ec07dd4e314068cde58b9c1223c9fc11094029f4f5fe6f8d325a12e10b32a475
--use ts.promise.is = @0f99cae1fc6ad1ff6812fb50d4070182ec247c6fe07f1a7b049a4fa7aa9c82a5
--entry demo() -> Any ts_direct(ts.await)
--
--fn demo() {
--  return perform corpus.echo("hello") as Json then yield via ts.promise.adopt
--}
--
+-import 0 operation corpus.echo(input?: Json) -> Json
+-import 1 code ts.h_n7_promise_n5_adopt(value: Any) -> Any direct
+-import 2 code ts.h_n5_await(value: Any) -> Any direct
+-export demo "{\"kind\":\"function\",\"value\":{\"function\":\"7584922fbea9a256f618616bb8ab0ba520a7123f20e35660e745738f58b5129f\",\"signature\":{\"result\":\"text\"},\"convention\":{\"kind\":\"ts_direct\",\"value\":{\"await_fn\":{\"kind\":\"import\",\"value\":2}}},\"asynchronous\":true,\"rest\":false}}"
+-definition "function local.function() -> Any\nkernel 1\nmetering statements\nimport 0 operation corpus.echo(input?: Json) -> Json\nimport 1 code ts.h_n7_promise_n5_adopt(value: Any) -> Any direct\nbody {\n  return perform 0(\"hello\") as Json then yield via import 1\n}\n"
 -main {
--  let demo = &demo
+-  let demo = &local.function
 -}
 +++ after
 +kernel 1
 +numbers float
-+effect corpus.echo(input?: Json) -> Json contract "52910906e3f939a5ce2e34bd105cd37184ead8ac272080fcbff759b3b6db6560"
-+use kind = @3e2a9836b16b3ade4f7fcc2d56d1fb203dffed4bd5d7f4bf800df213c8c8c5f7
-+use same = @1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578
-+use ts.await = @18a30299db399e09c5772b4431f1c4baf6e139a164f476b6fe173b1447d54a6f
-+use ts.promise.adopt = @ec07dd4e314068cde58b9c1223c9fc11094029f4f5fe6f8d325a12e10b32a475
-+use ts.promise.is = @0f99cae1fc6ad1ff6812fb50d4070182ec247c6fe07f1a7b049a4fa7aa9c82a5
-+entry demo() -> Any ts_direct(ts.await)
-+
-+fn demo() {
-+  return perform corpus.echo("edited λ") as Json then yield via ts.promise.adopt
-+}
-+
++import 0 operation corpus.echo(input?: Json) -> Json
++import 1 code ts.h_n7_promise_n5_adopt(value: Any) -> Any direct
++import 2 code ts.h_n5_await(value: Any) -> Any direct
++export demo "{\"kind\":\"function\",\"value\":{\"function\":\"48b0a8c941cf2ede20cb85dd062f8e24eaa2f09bb4dc4c5f4aa7acda0a3424a9\",\"signature\":{\"result\":\"text\"},\"convention\":{\"kind\":\"ts_direct\",\"value\":{\"await_fn\":{\"kind\":\"import\",\"value\":2}}},\"asynchronous\":true,\"rest\":false}}"
++definition "function local.function() -> Any\nkernel 1\nmetering statements\nimport 0 operation corpus.echo(input?: Json) -> Json\nimport 1 code ts.h_n7_promise_n5_adopt(value: Any) -> Any direct\nbody {\n  return perform 0(\"edited λ\") as Json then yield via import 1\n}\n"
 +main {
-+  let demo = &demo
++  let demo = &local.function
 +}
 
 Correspondence:
 {
-  "base": "1ec60b75e754b02a62486afd1c2672688a55117000da9b9eb69f1841dc93e219",
-  "result": "6425c867924ed80ba4fddf4795a53d7df3353c501ddafe7ca0c3940f603b27e5",
+  "base": "d9db2e009c6d6480037fa676f63c30f4658b39e2c25a0c7bb46f7641c753812b",
+  "result": "8522f1888e231107808f1e3c3429fe6cfa7ac0d621963d83596e66ecdaefc9b0",
   "entries": [
     {
       "from": {
@@ -81,19 +67,19 @@ Correspondence:
     {
       "from": {
         "unit": {
-          "function": "demo"
+          "library": "7584922fbea9a256f618616bb8ab0ba520a7123f20e35660e745738f58b5129f"
         }
       },
       "to": {
         "unit": {
-          "function": "demo"
+          "library": "48b0a8c941cf2ede20cb85dd062f8e24eaa2f09bb4dc4c5f4aa7acda0a3424a9"
         }
       }
     },
     {
       "from": {
         "unit": {
-          "function": "demo"
+          "library": "7584922fbea9a256f618616bb8ab0ba520a7123f20e35660e745738f58b5129f"
         },
         "path": [
           0
@@ -101,7 +87,7 @@ Correspondence:
       },
       "to": {
         "unit": {
-          "function": "demo"
+          "library": "48b0a8c941cf2ede20cb85dd062f8e24eaa2f09bb4dc4c5f4aa7acda0a3424a9"
         },
         "path": [
           0
@@ -111,7 +97,7 @@ Correspondence:
     {
       "from": {
         "unit": {
-          "function": "demo"
+          "library": "7584922fbea9a256f618616bb8ab0ba520a7123f20e35660e745738f58b5129f"
         },
         "path": [
           0,
@@ -120,7 +106,7 @@ Correspondence:
       },
       "to": {
         "unit": {
-          "function": "demo"
+          "library": "48b0a8c941cf2ede20cb85dd062f8e24eaa2f09bb4dc4c5f4aa7acda0a3424a9"
         },
         "path": [
           0,
@@ -133,12 +119,12 @@ Correspondence:
 }
 
 Captions to review:
-fn demo "Say hello"
-fn demo/0 "Send a greeting and give back the reply"
+function 48b0a8c941cf2ede20cb85dd062f8e24eaa2f09bb4dc4c5f4aa7acda0a3424a9 "Say hello"
+function 48b0a8c941cf2ede20cb85dd062f8e24eaa2f09bb4dc4c5f4aa7acda0a3424a9/0 "Send a greeting and give back the reply"
 
 Reprinted source:
 /** Say hello */
-export async function demo() {
+export async function demo(): Promise<string> {
   /** Send a greeting and give back the reply */
   return await corpus.echo("edited λ");
 }

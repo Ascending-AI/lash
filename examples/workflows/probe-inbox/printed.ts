@@ -1,5 +1,5 @@
 /** Send a paced inbox digest */
-export async function digest(items) {
+export async function digest(items: { title: string; }[]): Promise<{ sent: number; }> {
   /** Start counting at zero */
   let sent = 0;
   /** Go through each item */

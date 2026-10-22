@@ -1,14 +1,14 @@
-unit Function(Name("demo"))
-statement fn demo/0 ordinal=3 depth=0 block=fn demo Let { name: Name("out"), value: Expr(List([])) }
-statement fn demo/1 ordinal=4 depth=0 block=fn demo For { metered: 0, binding: Name("item"), iterable: Variable(Name("items")), via: Some(Protocol { open: FunctionId(5d45efd4573df199d3d3f08071187055400a96528227c3b616bc77cb02b041ed), next: Some(FunctionId(b01e9bc78562470d442df6a60d4cdbf11011107ae94c38fa3a3aefcc5d4e7667)), item: Some(FunctionId(9ca984cf92050630538b9cce7f1d1e121c03a9f071916630311c72ba43304ed4)), check: None }), body: [Assign { place: Member(Index { target: Variable(Name("out")), index: Call { function: FunctionId(70d92c79f9c69cfe8cda0752cf30f5f0db0499a1bbffeeed9e2abddad9cf302b), args: [Variable(Name("out"))] } }), value: Expr(Act(ActExpr { kind: Perform { effect: QualifiedName("corpus.echo"), result: Json, then_yield: true }, args: [Act(ActExpr { kind: Call(Library(FunctionId(ac89e50257ae69e06fe10e8faa4c6567d50315aca6fcecee2a967bdc8b4af23b))), args: [Variable(Name("item"))] })] })), order: ValueFirst }], else_block: [] }
-statement fn demo/1/1/0 ordinal=6 depth=1 block=fn demo/1/1 Assign { place: Member(Index { target: Variable(Name("out")), index: Call { function: FunctionId(70d92c79f9c69cfe8cda0752cf30f5f0db0499a1bbffeeed9e2abddad9cf302b), args: [Variable(Name("out"))] } }), value: Expr(Act(ActExpr { kind: Perform { effect: QualifiedName("corpus.echo"), result: Json, then_yield: true }, args: [Act(ActExpr { kind: Call(Library(FunctionId(ac89e50257ae69e06fe10e8faa4c6567d50315aca6fcecee2a967bdc8b4af23b))), args: [Variable(Name("item"))] })] })), order: ValueFirst }
-statement fn demo/2 ordinal=7 depth=0 block=fn demo ReturnVia { value: Variable(Name("out")), policy: FunctionId(ec07dd4e314068cde58b9c1223c9fc11094029f4f5fe6f8d325a12e10b32a475) }
-scope fn demo ordinal=2 depth=0 Entry
-scope fn demo/1/1 ordinal=5 depth=1 For
-action fn demo/1/1/0/2 Some(Effect(QualifiedName("corpus.echo")))
-action fn demo/1/1/0/2/0 library id=ac89e50257ae69e06fe10e8faa4c6567d50315aca6fcecee2a967bdc8b4af23b name=ts.boundary label="TypeScript boundary"
-caption callable 0 block=fn demo "Echo every item"
-caption node 0 site=fn demo/0 "Start an empty list of replies"
-caption node 1 site=fn demo/1 "Go through each item"
-caption node 3 site=fn demo/1/1/0 "Echo the item and keep the reply"
-caption node 4 site=fn demo/2 "Give back the replies"
+unit Library(FunctionId(862ac77b4c9c5b850220289817de1bb752346055a3d73de026ccb48b3d0bdaa2))
+statement function 862ac77b4c9c5b850220289817de1bb752346055a3d73de026ccb48b3d0bdaa2/0 ordinal=153 depth=0 block=function 862ac77b4c9c5b850220289817de1bb752346055a3d73de026ccb48b3d0bdaa2 Let { name: Name("out"), value: Expr(List([])) }
+statement function 862ac77b4c9c5b850220289817de1bb752346055a3d73de026ccb48b3d0bdaa2/1 ordinal=154 depth=0 block=function 862ac77b4c9c5b850220289817de1bb752346055a3d73de026ccb48b3d0bdaa2 For { metered: 0, binding: Name("item"), iterable: Variable(Name("items")), via: Some(Protocol { open: Import(ImportSlot(0)), next: Some(Import(ImportSlot(1))), item: Some(Local(FunctionId(9ce8cba7eff42b54485f7191e2ec84aa79c59d091f42d17f1ee6d44677f4dc79))), check: None }), body: [Assign { place: Member(Index { target: Variable(Name("out")), index: Call { function: FunctionId(40590fcc56fe886746ecbc896b0342e86e0f5b80b06165b243b68224d4fea6d8), args: [Variable(Name("out"))] } }), value: Expr(Act(ActExpr { kind: Perform { slot: ImportSlot(2), result: Json, then_yield: true }, args: [Act(ActExpr { kind: Call(Import(ImportSlot(3))), args: [Variable(Name("item"))] })] })), order: ValueFirst }], else_block: [] }
+statement function 862ac77b4c9c5b850220289817de1bb752346055a3d73de026ccb48b3d0bdaa2/1/1/0 ordinal=156 depth=1 block=function 862ac77b4c9c5b850220289817de1bb752346055a3d73de026ccb48b3d0bdaa2/1/1 Assign { place: Member(Index { target: Variable(Name("out")), index: Call { function: FunctionId(40590fcc56fe886746ecbc896b0342e86e0f5b80b06165b243b68224d4fea6d8), args: [Variable(Name("out"))] } }), value: Expr(Act(ActExpr { kind: Perform { slot: ImportSlot(2), result: Json, then_yield: true }, args: [Act(ActExpr { kind: Call(Import(ImportSlot(3))), args: [Variable(Name("item"))] })] })), order: ValueFirst }
+statement function 862ac77b4c9c5b850220289817de1bb752346055a3d73de026ccb48b3d0bdaa2/2 ordinal=157 depth=0 block=function 862ac77b4c9c5b850220289817de1bb752346055a3d73de026ccb48b3d0bdaa2 ReturnVia { value: Variable(Name("out")), policy: Import(ImportSlot(4)) }
+scope function 862ac77b4c9c5b850220289817de1bb752346055a3d73de026ccb48b3d0bdaa2 ordinal=152 depth=0 Entry
+scope function 862ac77b4c9c5b850220289817de1bb752346055a3d73de026ccb48b3d0bdaa2/1/1 ordinal=155 depth=1 For
+action function 862ac77b4c9c5b850220289817de1bb752346055a3d73de026ccb48b3d0bdaa2/1/1/0/2 Some(Effect(OperationUse { link: LinkId(114329458f59), slot: ImportSlot(2) }))
+action function 862ac77b4c9c5b850220289817de1bb752346055a3d73de026ccb48b3d0bdaa2/1/1/0/2/0 library id=411d0271271abca69b93d661ad438465fe469441a6c6b9202a85d9b4c9bf03b0 name=ts.boundary exports=[]
+caption callable 0 block=function 862ac77b4c9c5b850220289817de1bb752346055a3d73de026ccb48b3d0bdaa2 "Echo every item"
+caption node 0 site=function 862ac77b4c9c5b850220289817de1bb752346055a3d73de026ccb48b3d0bdaa2/0 "Start an empty list of replies"
+caption node 1 site=function 862ac77b4c9c5b850220289817de1bb752346055a3d73de026ccb48b3d0bdaa2/1 "Go through each item"
+caption node 3 site=function 862ac77b4c9c5b850220289817de1bb752346055a3d73de026ccb48b3d0bdaa2/1/1/0 "Echo the item and keep the reply"
+caption node 4 site=function 862ac77b4c9c5b850220289817de1bb752346055a3d73de026ccb48b3d0bdaa2/2 "Give back the replies"

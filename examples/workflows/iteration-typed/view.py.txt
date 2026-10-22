@@ -1,14 +1,14 @@
-unit Function(Name("demo"))
-statement fn demo/0 ordinal=3 depth=0 block=fn demo Let { name: Name("total"), value: Expr(Literal(Int(Integer(0)))) }
-statement fn demo/1 ordinal=4 depth=0 block=fn demo For { metered: 0, binding: Name("item"), iterable: Variable(Name("items")), via: Some(Protocol { open: FunctionId(6493a17d666515acdb0be8f73eef0f455873f1508f8bd296c11773152a7b7e3f), next: None, item: None, check: Some(FunctionId(9c19a00e95592dd7c0bb299ea5df5908af7176c5e66457c782dd81d954b58830)) }), body: [Assign { place: Variable(Name("total")), value: Action(Call { callee: Library(FunctionId(db032522a59b5ed49f7f09ed109e2de89b7f2899360c89623aa5e9334f178976)), args: [Variable(Name("total")), Variable(Name("item"))] }), order: ValueFirst }], else_block: [] }
-statement fn demo/1/1/0 ordinal=6 depth=1 block=fn demo/1/1 Assign { place: Variable(Name("total")), value: Action(Call { callee: Library(FunctionId(db032522a59b5ed49f7f09ed109e2de89b7f2899360c89623aa5e9334f178976)), args: [Variable(Name("total")), Variable(Name("item"))] }), order: ValueFirst }
-statement fn demo/2 ordinal=7 depth=0 block=fn demo Return { value: Variable(Name("total")) }
-scope fn demo ordinal=2 depth=0 Entry
-scope fn demo/1/1 ordinal=5 depth=1 For
-action fn demo/1/1/0/0 library id=db032522a59b5ed49f7f09ed109e2de89b7f2899360c89623aa5e9334f178976 name=py.iadd label="Python iadd"
-caption callable 0 block=fn demo "Add up the numbers"
-caption node 0 site=fn demo/0 "Start the total at zero"
-caption node 1 site=fn demo/1 "Go through each number"
-caption node 2 site=fn demo/1/1/0 "Add it to the total"
-caption node 3 site=fn demo/2 "Give back the total"
+unit Library(FunctionId(67b6f6265e5f90f0a6becd314d3bd83ca7b2f75dac0ceb809228b6525c682c19))
+statement function 67b6f6265e5f90f0a6becd314d3bd83ca7b2f75dac0ceb809228b6525c682c19/0 ordinal=3 depth=0 block=function 67b6f6265e5f90f0a6becd314d3bd83ca7b2f75dac0ceb809228b6525c682c19 Let { name: Name("total"), value: Expr(Literal(Int(Integer(0)))) }
+statement function 67b6f6265e5f90f0a6becd314d3bd83ca7b2f75dac0ceb809228b6525c682c19/1 ordinal=4 depth=0 block=function 67b6f6265e5f90f0a6becd314d3bd83ca7b2f75dac0ceb809228b6525c682c19 For { metered: 0, binding: Name("item"), iterable: Variable(Name("items")), via: Some(Protocol { open: Import(ImportSlot(0)), next: None, item: None, check: Some(Import(ImportSlot(1))) }), body: [Assign { place: Variable(Name("total")), value: Action(Call { callee: Import(ImportSlot(2)), args: [Variable(Name("total")), Variable(Name("item"))] }), order: ValueFirst }], else_block: [] }
+statement function 67b6f6265e5f90f0a6becd314d3bd83ca7b2f75dac0ceb809228b6525c682c19/1/1/0 ordinal=6 depth=1 block=function 67b6f6265e5f90f0a6becd314d3bd83ca7b2f75dac0ceb809228b6525c682c19/1/1 Assign { place: Variable(Name("total")), value: Action(Call { callee: Import(ImportSlot(2)), args: [Variable(Name("total")), Variable(Name("item"))] }), order: ValueFirst }
+statement function 67b6f6265e5f90f0a6becd314d3bd83ca7b2f75dac0ceb809228b6525c682c19/2 ordinal=7 depth=0 block=function 67b6f6265e5f90f0a6becd314d3bd83ca7b2f75dac0ceb809228b6525c682c19 Return { value: Variable(Name("total")) }
+scope function 67b6f6265e5f90f0a6becd314d3bd83ca7b2f75dac0ceb809228b6525c682c19 ordinal=2 depth=0 Entry
+scope function 67b6f6265e5f90f0a6becd314d3bd83ca7b2f75dac0ceb809228b6525c682c19/1/1 ordinal=5 depth=1 For
+action function 67b6f6265e5f90f0a6becd314d3bd83ca7b2f75dac0ceb809228b6525c682c19/1/1/0/0 library id=c08be354562f4bc403a856b111f3bf8732e1df28788d99d1e1b502a361fb2d8e name=py.iadd exports=[]
+caption callable 0 block=function 67b6f6265e5f90f0a6becd314d3bd83ca7b2f75dac0ceb809228b6525c682c19 "Add up the numbers"
+caption node 0 site=function 67b6f6265e5f90f0a6becd314d3bd83ca7b2f75dac0ceb809228b6525c682c19/0 "Start the total at zero"
+caption node 1 site=function 67b6f6265e5f90f0a6becd314d3bd83ca7b2f75dac0ceb809228b6525c682c19/1 "Go through each number"
+caption node 2 site=function 67b6f6265e5f90f0a6becd314d3bd83ca7b2f75dac0ceb809228b6525c682c19/1/1/0 "Add it to the total"
+caption node 3 site=function 67b6f6265e5f90f0a6becd314d3bd83ca7b2f75dac0ceb809228b6525c682c19/2 "Give back the total"
 caption param 0 items "The numbers to add"

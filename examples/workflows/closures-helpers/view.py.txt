@@ -1,15 +1,15 @@
-unit Function(Name("demo"))
-statement fn demo/0 ordinal=3 depth=0 block=fn demo Let { name: Name("size"), value: Expr(Closure(Closure { params: [Name("item")], body: [Return { value: Act(ActExpr { kind: Call(Library(FunctionId(cc9ac110bb1e7b522181d159845638b0b2879d7d1b388383be932cbadd59f366))), args: [Variable(Name("item"))] }) }], start: Some(StartAdapter { signature: Signature { params: [Param { name: Name("item"), ty: Any, optional: false }], result: Any }, representation: Bare, convention: Direct }) })) }
-statement fn demo/0/0/0/0 ordinal=5 depth=1 block=fn demo/0/0/0 Return { value: Act(ActExpr { kind: Call(Library(FunctionId(cc9ac110bb1e7b522181d159845638b0b2879d7d1b388383be932cbadd59f366))), args: [Variable(Name("item"))] }) }
-statement fn demo/1 ordinal=6 depth=0 block=fn demo Let { name: Name("t1"), value: Expr(List([])) }
-statement fn demo/2 ordinal=7 depth=0 block=fn demo For { metered: 0, binding: Name("item_1"), iterable: Variable(Name("items")), via: Some(Protocol { open: FunctionId(6493a17d666515acdb0be8f73eef0f455873f1508f8bd296c11773152a7b7e3f), next: None, item: None, check: Some(FunctionId(9c19a00e95592dd7c0bb299ea5df5908af7176c5e66457c782dd81d954b58830)) }), body: [Assign { place: Member(Index { target: Variable(Name("t1")), index: Call { function: FunctionId(70d92c79f9c69cfe8cda0752cf30f5f0db0499a1bbffeeed9e2abddad9cf302b), args: [Variable(Name("t1"))] } }), value: Action(Call { callee: Value(Name("size")), args: [Variable(Name("item_1"))] }), order: ValueFirst }], else_block: [] }
-statement fn demo/2/1/0 ordinal=9 depth=1 block=fn demo/2/1 Assign { place: Member(Index { target: Variable(Name("t1")), index: Call { function: FunctionId(70d92c79f9c69cfe8cda0752cf30f5f0db0499a1bbffeeed9e2abddad9cf302b), args: [Variable(Name("t1"))] } }), value: Action(Call { callee: Value(Name("size")), args: [Variable(Name("item_1"))] }), order: ValueFirst }
-statement fn demo/3 ordinal=10 depth=0 block=fn demo Return { value: Variable(Name("t1")) }
-scope fn demo ordinal=2 depth=0 Entry
-scope fn demo/0/0/0 ordinal=4 depth=1 Closure
-scope fn demo/2/1 ordinal=8 depth=1 For
-action fn demo/0/0/0/0/0 library id=cc9ac110bb1e7b522181d159845638b0b2879d7d1b388383be932cbadd59f366 name=py.length label="Python length"
-action fn demo/2/1/0/2 applies=fn demo/0/0 None
-caption callable 0 block=fn demo "Measure each word"
-caption node 0 site=fn demo/0 "Describe how to measure one word"
-caption node 3 site=fn demo/3 "Measure every word in the list"
+unit Library(FunctionId(ed6113d8927c231078fb6e3e3e78514d5916db98cd95f86b3deb208064e94122))
+statement function ed6113d8927c231078fb6e3e3e78514d5916db98cd95f86b3deb208064e94122/0 ordinal=5 depth=0 block=function ed6113d8927c231078fb6e3e3e78514d5916db98cd95f86b3deb208064e94122 Let { name: Name("size"), value: Expr(Closure(Closure { function: FunctionId(ea78c194e0fe24d3001dc8a72229e5ac0ce8b7a797f5931d9dba7b0113d4c3cc), presentation: Some(CallablePresentation { signature: Signature { params: [Param { name: Name("item"), ty: Any, optional: false }], result: Any }, representation: Bare, convention: Direct }) })) }
+statement function ea78c194e0fe24d3001dc8a72229e5ac0ce8b7a797f5931d9dba7b0113d4c3cc/0 ordinal=3 depth=1 block=function ea78c194e0fe24d3001dc8a72229e5ac0ce8b7a797f5931d9dba7b0113d4c3cc Return { value: Act(ActExpr { kind: Call(Import(ImportSlot(0))), args: [Variable(Name("item"))] }) }
+statement function ed6113d8927c231078fb6e3e3e78514d5916db98cd95f86b3deb208064e94122/1 ordinal=6 depth=0 block=function ed6113d8927c231078fb6e3e3e78514d5916db98cd95f86b3deb208064e94122 Let { name: Name("t2"), value: Expr(List([])) }
+statement function ed6113d8927c231078fb6e3e3e78514d5916db98cd95f86b3deb208064e94122/2 ordinal=7 depth=0 block=function ed6113d8927c231078fb6e3e3e78514d5916db98cd95f86b3deb208064e94122 For { metered: 0, binding: Name("item_1"), iterable: Variable(Name("items")), via: Some(Protocol { open: Import(ImportSlot(1)), next: None, item: None, check: Some(Import(ImportSlot(2))) }), body: [Assign { place: Member(Index { target: Variable(Name("t2")), index: Call { function: FunctionId(40590fcc56fe886746ecbc896b0342e86e0f5b80b06165b243b68224d4fea6d8), args: [Variable(Name("t2"))] } }), value: Action(Call { callee: Value(Name("size")), args: [Variable(Name("item_1"))] }), order: ValueFirst }], else_block: [] }
+statement function ed6113d8927c231078fb6e3e3e78514d5916db98cd95f86b3deb208064e94122/2/1/0 ordinal=9 depth=1 block=function ed6113d8927c231078fb6e3e3e78514d5916db98cd95f86b3deb208064e94122/2/1 Assign { place: Member(Index { target: Variable(Name("t2")), index: Call { function: FunctionId(40590fcc56fe886746ecbc896b0342e86e0f5b80b06165b243b68224d4fea6d8), args: [Variable(Name("t2"))] } }), value: Action(Call { callee: Value(Name("size")), args: [Variable(Name("item_1"))] }), order: ValueFirst }
+statement function ed6113d8927c231078fb6e3e3e78514d5916db98cd95f86b3deb208064e94122/3 ordinal=10 depth=0 block=function ed6113d8927c231078fb6e3e3e78514d5916db98cd95f86b3deb208064e94122 Return { value: Variable(Name("t2")) }
+scope function ed6113d8927c231078fb6e3e3e78514d5916db98cd95f86b3deb208064e94122 ordinal=4 depth=0 Entry
+scope function ea78c194e0fe24d3001dc8a72229e5ac0ce8b7a797f5931d9dba7b0113d4c3cc ordinal=2 depth=1 Closure
+scope function ed6113d8927c231078fb6e3e3e78514d5916db98cd95f86b3deb208064e94122/2/1 ordinal=8 depth=1 For
+action function ea78c194e0fe24d3001dc8a72229e5ac0ce8b7a797f5931d9dba7b0113d4c3cc/0/0 library id=3155e92ba166d4c8b0974183333c42ff3c9384c8a2daf8d757c35721262d3167 name=py.length exports=[]
+action function ed6113d8927c231078fb6e3e3e78514d5916db98cd95f86b3deb208064e94122/2/1/0/2 applies=function ed6113d8927c231078fb6e3e3e78514d5916db98cd95f86b3deb208064e94122/0/0 None
+caption callable 0 block=function ed6113d8927c231078fb6e3e3e78514d5916db98cd95f86b3deb208064e94122 "Measure each word"
+caption node 0 site=function ed6113d8927c231078fb6e3e3e78514d5916db98cd95f86b3deb208064e94122/0 "Describe how to measure one word"
+caption node 3 site=function ed6113d8927c231078fb6e3e3e78514d5916db98cd95f86b3deb208064e94122/3 "Measure every word in the list"

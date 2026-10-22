@@ -1,5 +1,5 @@
 /** Try a step, and always finish up */
-export async function demo() {
+export async function demo(): Promise<string> {
   /** Start with a placeholder result */
   let result = "start";
   /** Try the echo */
