@@ -166,10 +166,14 @@ pub async fn checkpoint_identity_is_independent_of_compression_profile(
             .ensure_agent_frame_initialized()
             .expect("source fixture edit is admitted");
         let mut commit = RuntimeCommit::persisted_state_for_test(&state);
-        commit.checkpoint.components.insert(
-            "profile/leaf".into(),
-            crate::HydratedCheckpointComponent::changed(bytes.clone()),
-        );
+        commit
+            .checkpoint
+            .components
+            .insert(
+                "profile/leaf".into(),
+                crate::HydratedCheckpointComponent::changed(bytes.clone()),
+            )
+            .expect("fixture allocation admitted");
         let result =
             commit_runtime_state_for_test(store, commit, &format!("profile-identity-{index}"))
                 .await
@@ -213,10 +217,14 @@ pub async fn checkpoint_profile_change_preserves_refs_budget_and_atomic_root_lea
     };
     let bytes = vec![b'a'; 12_288];
     let mut commit = RuntimeCommit::persisted_state_for_test(&state);
-    commit.checkpoint.components.insert(
-        "profile/leaf".into(),
-        crate::HydratedCheckpointComponent::changed(bytes.clone()),
-    );
+    commit
+        .checkpoint
+        .components
+        .insert(
+            "profile/leaf".into(),
+            crate::HydratedCheckpointComponent::changed(bytes.clone()),
+        )
+        .expect("fixture allocation admitted");
     let first = commit_runtime_state_for_test(first_store, commit, "profile-root-first")
         .await
         .expect("first profile commits leaf");
@@ -224,18 +232,26 @@ pub async fn checkpoint_profile_change_preserves_refs_budget_and_atomic_root_lea
     for (index, store) in stores.iter().enumerate().skip(1) {
         let state = loaded_conformance_state(store, &session).await;
         let mut unchanged = RuntimeCommit::persisted_state_for_test(&state);
-        unchanged.checkpoint.components.insert(
-            "profile/leaf".into(),
-            crate::HydratedCheckpointComponent::Unchanged {
-                descriptor: descriptor.clone(),
-            },
-        );
+        unchanged
+            .checkpoint
+            .components
+            .insert(
+                "profile/leaf".into(),
+                crate::HydratedCheckpointComponent::Unchanged {
+                    descriptor: descriptor.clone(),
+                },
+            )
+            .expect("fixture allocation admitted");
         let reference_budget = unchanged.measure_budget().expect("measure unchanged leaf");
         let mut changed = unchanged.clone();
-        changed.checkpoint.components.insert(
-            "profile/leaf".into(),
-            crate::HydratedCheckpointComponent::changed(bytes.clone()),
-        );
+        changed
+            .checkpoint
+            .components
+            .insert(
+                "profile/leaf".into(),
+                crate::HydratedCheckpointComponent::changed(bytes.clone()),
+            )
+            .expect("fixture allocation admitted");
         assert_eq!(
             changed
                 .measure_budget()
@@ -258,18 +274,26 @@ pub async fn checkpoint_profile_change_preserves_refs_budget_and_atomic_root_lea
         );
         let state = loaded_conformance_state(store, &session).await;
         let mut invalid = RuntimeCommit::persisted_state_for_test(&state);
-        invalid.checkpoint.components.insert(
-            "profile/new-leaf".into(),
-            crate::HydratedCheckpointComponent::changed(b"must roll back".to_vec()),
-        );
+        invalid
+            .checkpoint
+            .components
+            .insert(
+                "profile/new-leaf".into(),
+                crate::HydratedCheckpointComponent::changed(b"must roll back".to_vec()),
+            )
+            .expect("fixture allocation admitted");
         let mut missing = descriptor.clone();
         missing.blob_ref = crate::BlobRef::for_content(b"never written").into();
-        invalid.checkpoint.components.insert(
-            "profile/missing".into(),
-            crate::HydratedCheckpointComponent::Unchanged {
-                descriptor: missing,
-            },
-        );
+        invalid
+            .checkpoint
+            .components
+            .insert(
+                "profile/missing".into(),
+                crate::HydratedCheckpointComponent::Unchanged {
+                    descriptor: missing,
+                },
+            )
+            .expect("fixture allocation admitted");
         let error =
             commit_runtime_state_for_test(store, invalid, &format!("profile-invalid-{index}"))
                 .await

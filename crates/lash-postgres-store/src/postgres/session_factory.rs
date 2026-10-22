@@ -535,7 +535,7 @@ impl lash_core_store::store::SessionCatalogStore for PostgresStore {
             // The child's drive records its transition before construction.
             let inherited_admission = checkpoint
                 .components
-                .remove(lash_core_store::store::PLUGIN_ADMISSION_CHECKPOINT_COMPONENT)
+                .remove(lash_core_store::store::PLUGIN_ADMISSION_CHECKPOINT_COMPONENT)?
                 .is_some();
             if source_frame_ended {
                 // An ended frame's globals end with it (ADR 0113 §3.1).

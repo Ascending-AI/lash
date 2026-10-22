@@ -45,7 +45,8 @@ async fn published_by(core: &LashCore, session: &str) -> Result<Published> {
     .map(|mut checkpoint| {
         checkpoint
             .components
-            .remove(lash_core::store::PLUGIN_ADMISSION_CHECKPOINT_COMPONENT);
+            .remove(lash_core::store::PLUGIN_ADMISSION_CHECKPOINT_COMPONENT)
+            .expect("fixture allocation admitted");
         lash_core::store::fork_checkpoint_plugin_state(
             &mut checkpoint,
             lash_core::store::FleetFormat::current(),

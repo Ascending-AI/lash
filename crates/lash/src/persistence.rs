@@ -72,6 +72,7 @@ pub use lash_core_store::session_identity::{
 pub use lash_core_store::session_state::{
     InstalledRunView, RuntimeSessionAuthority, SessionPluginStateSource,
 };
+pub use lash_core_store::source_map::{MapKey, MapValue, SharedSourceMap};
 /// Retained tool material: a store's dependency leases on bundles.
 pub use lash_core_store::store::ToolMaterialStore;
 pub use lash_core_store::store::commit_budget::RuntimeCommitBudgetMeasurement;

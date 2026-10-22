@@ -522,19 +522,27 @@ mod tests {
             nodes: vec![node.clone()],
         };
         let changed_body = vec![0; 129];
-        commit.checkpoint.components.insert(
-            "arbitrary/changed".to_string(),
-            crate::HydratedCheckpointComponent::changed(changed_body.clone()),
-        );
-        commit.checkpoint.components.insert(
-            "arbitrary/unchanged".to_string(),
-            crate::HydratedCheckpointComponent::Unchanged {
-                descriptor: crate::CheckpointComponentDescriptor {
-                    blob_ref: crate::BlobRef("existing-content-ref".to_string()).into(),
-                    encoding_version: crate::store::CHECKPOINT_COMPONENT_ENCODING_VERSION,
+        commit
+            .checkpoint
+            .components
+            .insert(
+                "arbitrary/changed".to_string(),
+                crate::HydratedCheckpointComponent::changed(changed_body.clone()),
+            )
+            .expect("fixture allocation admitted");
+        commit
+            .checkpoint
+            .components
+            .insert(
+                "arbitrary/unchanged".to_string(),
+                crate::HydratedCheckpointComponent::Unchanged {
+                    descriptor: crate::CheckpointComponentDescriptor {
+                        blob_ref: crate::BlobRef("existing-content-ref".to_string()).into(),
+                        encoding_version: crate::store::CHECKPOINT_COMPONENT_ENCODING_VERSION,
+                    },
                 },
-            },
-        );
+            )
+            .expect("fixture allocation admitted");
         commit.committed_attachment_ids =
             vec![crate::AttachmentId::parse("a1".repeat(32)).expect("valid attachment id")];
 

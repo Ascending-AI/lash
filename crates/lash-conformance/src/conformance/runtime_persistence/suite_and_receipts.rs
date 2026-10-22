@@ -337,10 +337,14 @@ pub async fn commit_rejects_carried_nondefault_byte_budget(store: Arc<dyn Runtim
         crate::CommitBudgetLimit::Unbounded,
     );
     let mut commit = RuntimeCommit::persisted_state_for_test_with_budget(&state, budget);
-    commit.checkpoint.components.insert(
-        "arbitrary/oversized".to_string(),
-        crate::HydratedCheckpointComponent::changed(vec![0; CONFIGURED_BYTE_LIMIT * 2]),
-    );
+    commit
+        .checkpoint
+        .components
+        .insert(
+            "arbitrary/oversized".to_string(),
+            crate::HydratedCheckpointComponent::changed(vec![0; CONFIGURED_BYTE_LIMIT * 2]),
+        )
+        .expect("fixture allocation admitted");
 
     let error = store
         .commit_runtime_state(commit)
