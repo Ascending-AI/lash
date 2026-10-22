@@ -335,6 +335,8 @@ pub(super) async fn apply(
             )
             .await
             .map_err(super::store_failure)?;
+            // Package registration is optional; every terminal retires any live executions.
+            super::packages::end_actor_executions(tx, commit.actor).await?;
             if ended {
                 set_cursor(tx, process, Some(""), commit.epoch).await?;
             }

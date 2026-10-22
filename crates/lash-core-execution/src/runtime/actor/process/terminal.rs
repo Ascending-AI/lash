@@ -49,7 +49,6 @@ pub fn record_terminal(
         process: process.clone(),
         outcome_json,
     }));
-    tx.end_execution(lash_core_store::resolutions::ExecutionId::process(process));
     waits::resolve_process_terminal_waits(tx, process, outcome)?;
     waits::revoke_scope(tx, &ScopeKey::Process(process.clone()));
     tx.write(DomainWrite::ExecRoot(ExecRootWrite::Clear {

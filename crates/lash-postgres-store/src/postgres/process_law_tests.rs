@@ -50,6 +50,7 @@ macro_rules! law {
 }
 
 law!(
+    a_process_terminal_retires_its_optional_execution_debt,
     c1_a_parked_child_ends_engine_free_and_its_child_receives_parent_ended,
     a_cascade_wider_than_its_batch_ends_a_tree_three_levels_deep,
     a_repeatable_step_that_fails_retryably_once_succeeds_on_its_second_ordinal,
