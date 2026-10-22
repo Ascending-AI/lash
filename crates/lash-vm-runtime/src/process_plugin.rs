@@ -147,6 +147,14 @@ impl KernelServicesPluginFactory {
     }
 }
 pub const KERNEL_SERVICES_OWNER: &str = "lash-kernel-services";
+const HELPERS_PROVIDER: lash_core::plugin::ToolProviderKey =
+    lash_core::tool_provider_key!("helpers");
+
+/// Whether trusted publication provenance belongs to the compiler helpers.
+/// Projects the registration owner/key without a second package inventory.
+pub fn is_helper_publication(context: &lash_vocabulary::package::PublicationContext) -> bool {
+    context.publisher.0 == format!("{}/{}", KERNEL_SERVICES_OWNER, HELPERS_PROVIDER)
+}
 pub const KERNEL_SERVICES_CONFIG: lash_core::ProcessConfigKey<()> =
     lash_core::ProcessConfigKey::new(KERNEL_SERVICES_OWNER, lash_core::FormatVersion::ONE);
 pub const DIALECT_SERVICE_EXECUTION: std::time::Duration = std::time::Duration::from_secs(30);
@@ -276,7 +284,7 @@ where
     let release = lash_vm_releases::helper_release()
         .map_err(|error| PluginError::Registration(error.to_string()))?;
     reg.package_provider(
-        lash_core::tool_provider_key!("helpers"),
+        HELPERS_PROVIDER,
         Arc::new(HelperPackages { release, documents }),
     )?;
     Ok(())

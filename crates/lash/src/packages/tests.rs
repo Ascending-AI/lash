@@ -636,3 +636,113 @@ async fn a_full_helper_namespace_holds_each_document_once() {
         assert!(store.package(id).await.unwrap().is_none());
     }
 }
+
+/// FIG-7135: accepting snapshots under distinct claims on one node prepares
+/// each release content once; keeping a prepared release grants no retention.
+#[tokio::test]
+async fn helper_release_preparation_is_independent_of_snapshot_count() {
+    let stores = lash_sqlite_store::SqliteStoreSet::memory().await.unwrap();
+    let store = stores.open_store().await.unwrap();
+    let documents = lash_vm_runtime::KernelDocuments::new(store.clone(), store.clone());
+    let release = lash_vm_releases::helper_release().unwrap();
+    let claims: Vec<_> = (0..3)
+        .map(|_| {
+            ReferrerClaim::unguarded(ArtifactReferrer::HostPin(HostArtifactPin::mint())).unwrap()
+        })
+        .collect();
+    let _ = lash_kernel_doc::document_work::take();
+    for claim in &claims {
+        // The helper provider's snapshot-acceptance path, across shared owners.
+        documents
+            .clone()
+            .hold_helper_release(claim, &release.content, &release.labels)
+            .await
+            .unwrap();
+    }
+    let work = lash_kernel_doc::document_work::take();
+    assert_eq!(
+        work.token_decodes,
+        release.content.documents.len() as u64,
+        "snapshot acceptance must decode/derive/validate each helper release only once"
+    );
+    // Same advertised ids with different actual bytes must never hit the slot.
+    let mut corrupt = release.content.clone();
+    corrupt.documents.values_mut().next().unwrap().main = Some(Vec::new());
+    assert!(matches!(
+        documents
+            .hold_helper_release(&claims[0], &corrupt, &release.labels)
+            .await,
+        Err(lash_execution_contracts::process::linking::EnginePortError::Refused(_))
+    ));
+    let mut labels = release.labels.clone();
+    labels.insert(
+        *release.content.packages.keys().next().unwrap(),
+        "not JSON".into(),
+    );
+    assert!(matches!(
+        documents
+            .hold_helper_release(&claims[0], &release.content, &labels)
+            .await,
+        Err(lash_execution_contracts::process::linking::EnginePortError::Refused(_))
+    ));
+    // A distinct valid release earns exactly one preparation of its own.
+    let document =
+        lash_kernel_doc::parse_document("kernel 1\nnumbers float\nmain { print 1 }").unwrap();
+    let other = lash_kernel_package::LinkedContent {
+        documents: [(document.identity(), document)].into(),
+        ..Default::default()
+    };
+    let _ = lash_kernel_doc::document_work::take();
+    for claim in &claims {
+        documents
+            .hold_helper_release(claim, &other, &BTreeMap::new())
+            .await
+            .unwrap();
+    }
+    assert_eq!(
+        lash_kernel_doc::document_work::take().token_decodes,
+        1,
+        "distinct release content must be prepared separately, once"
+    );
+    for claim in &claims {
+        store
+            .end_package_referrer(&ResolvedArtifactCleanup {
+                referrer: claim.referrer().clone(),
+                carries: Vec::new(),
+            })
+            .await
+            .unwrap();
+    }
+    // The preparation remains available, but the last exact hold has ended.
+    for id in release.content.documents.keys() {
+        assert!(backend_document_missing(&*store, id).await);
+    }
+    // Reaccept after physical reclamation: preparation must republish, not lend
+    // an old claim's retention or assume that cached bytes are still stored.
+    let _ = lash_kernel_doc::document_work::take();
+    documents
+        .hold_helper_release(&claims[0], &release.content, &release.labels)
+        .await
+        .unwrap_err();
+    let fresh =
+        ReferrerClaim::unguarded(ArtifactReferrer::HostPin(HostArtifactPin::mint())).unwrap();
+    documents
+        .hold_helper_release(&fresh, &release.content, &release.labels)
+        .await
+        .unwrap();
+    assert_eq!(lash_kernel_doc::document_work::take().token_decodes, 0);
+    for id in release.content.documents.keys() {
+        assert!(!backend_document_missing(&*store, id).await);
+    }
+}
+
+async fn backend_document_missing(
+    store: &impl lash_execution_contracts::module_artifacts::ModuleArtifactStore,
+    id: &DocumentId,
+) -> bool {
+    store
+        .get_module_artifact(&id.to_string())
+        .await
+        .unwrap()
+        .is_none()
+}
