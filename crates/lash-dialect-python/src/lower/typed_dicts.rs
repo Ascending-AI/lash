@@ -6,7 +6,7 @@
 use std::collections::BTreeMap;
 
 use lash_kernel_doc::Caption;
-use lash_vocabulary::{RecordType, RecordTypeField, Type};
+use lash_vocabulary::{AnnotationResolutionReason as Reason, RecordType, RecordTypeField, Type};
 use ruff_python_ast::{self as ast, Expr as PyExpr, Stmt as PyStmt};
 use ruff_text_size::{Ranged, TextSize};
 
@@ -14,6 +14,7 @@ use ruff_text_size::{Ranged, TextSize};
 #[derive(Clone, Debug)]
 pub(crate) struct TypedDict {
     fields: Vec<TypedField>,
+    rest: Option<PyExpr>,
 }
 
 #[derive(Clone, Debug)]
@@ -26,11 +27,11 @@ struct TypedField {
     start: TextSize,
 }
 
-/// The module's `TypedDict`s, by name.
+/// The source's top-level `TypedDict`s, by name.
 pub(crate) type TypedDicts = BTreeMap<String, TypedDict>;
 
 /// The `TypedDict` `class` declares, when it is one: a single `TypedDict`
-/// base, no keyword, decorator or type parameter, and a body of annotated
+/// base, an optional `extra_items` annotation, no decorator or type parameter, and a body of annotated
 /// field names, `pass` and docstrings. A field declared twice keeps its
 /// first place and its last annotation, as Python's does.
 pub(crate) fn declared(class: &ast::StmtClassDef) -> Option<TypedDict> {
@@ -39,12 +40,23 @@ pub(crate) fn declared(class: &ast::StmtClassDef) -> Option<TypedDict> {
         return None;
     };
     if base.id.as_str() != "TypedDict"
-        || !arguments.keywords.is_empty()
         || !class.decorator_list.is_empty()
         || class.type_params.is_some()
     {
         return None;
     }
+    let rest = match arguments.keywords.as_slice() {
+        [] => None,
+        [keyword]
+            if keyword
+                .arg
+                .as_ref()
+                .is_some_and(|name| name.id.as_str() == "extra_items") =>
+        {
+            Some(keyword.value.clone())
+        }
+        _ => return None,
+    };
     let mut fields: Vec<TypedField> = Vec::new();
     for statement in &class.body {
         match statement {
@@ -87,84 +99,119 @@ pub(crate) fn declared(class: &ast::StmtClassDef) -> Option<TypedDict> {
             _ => return None,
         }
     }
-    Some(TypedDict { fields })
+    Some(TypedDict { fields, rest })
 }
 
-/// What a Python annotation means as a kernel type: `int`, `float`, `bool`,
-/// `str`, `bytes` and `None`; `list`, `set` and `dict`, bare or with their
-/// item types; `tuple` with its member types; `Any` and `object`; a
-/// `TypedDict` the module declares, as a closed record; and unions written
-/// with `|`, `Optional` or `Union`. `None` when it is none of these, or a
-/// `TypedDict` that holds itself.
-pub(crate) fn annotation_type(annotation: &PyExpr, typed: &TypedDicts) -> Option<Type> {
-    kernel_type(annotation, typed, &mut Vec::new())
+/// Resolve the written data contract, retaining why an annotation cannot
+/// describe an entry. The caller decides whether to enforce that contract.
+pub(crate) fn annotation_type(
+    annotation: &PyExpr,
+    typed: &TypedDicts,
+    max_depth: usize,
+    mut max_nodes: usize,
+) -> Result<Type, Reason> {
+    kernel_type(
+        annotation,
+        typed,
+        &mut Vec::new(),
+        max_depth,
+        &mut max_nodes,
+    )
 }
 
 fn kernel_type<'t>(
     annotation: &'t PyExpr,
     typed: &'t TypedDicts,
     open: &mut Vec<&'t str>,
-) -> Option<Type> {
+    depth: usize,
+    nodes: &mut usize,
+) -> Result<Type, Reason> {
+    if depth == 0 || *nodes == 0 {
+        return Err(Reason::Limit);
+    }
+    *nodes -= 1;
+    let unsupported = || Reason::Unsupported {
+        construct: "annotation".into(),
+    };
     match annotation {
-        PyExpr::NoneLiteral(_) => Some(Type::Null),
+        PyExpr::NoneLiteral(_) => Ok(Type::Null),
         PyExpr::Name(name) => match name.id.as_str() {
-            "int" => Some(Type::Int),
-            "float" => Some(Type::Float),
-            "bool" => Some(Type::Bool),
-            "str" => Some(Type::Text),
-            "bytes" => Some(Type::Bytes),
-            "None" => Some(Type::Null),
-            "Any" | "object" => Some(Type::Any),
-            "list" => Some(Type::List(Box::new(Type::Any))),
-            "set" => Some(Type::Set(Box::new(Type::Any))),
-            "dict" => Some(map(Type::Any, Type::Any)),
+            "int" => Ok(Type::Int),
+            "float" => Ok(Type::Float),
+            "bool" => Ok(Type::Bool),
+            "str" => Ok(Type::Text),
+            "bytes" => Ok(Type::Bytes),
+            "None" => Ok(Type::Null),
+            "Any" | "object" | "JsonValue" => Ok(Type::Json),
+            "list" => Ok(Type::List(Box::new(Type::Json))),
+            "set" => Ok(Type::Set(Box::new(Type::Json))),
+            "dict" => Ok(map(Type::Json, Type::Json)),
             other => {
-                let (name, record) = typed.get_key_value(other)?;
+                let (name, record) = typed
+                    .get_key_value(other)
+                    .ok_or_else(|| Reason::Unresolved { name: other.into() })?;
                 if open.contains(&name.as_str()) {
-                    return None;
+                    return Err(Reason::Cycle { name: name.clone() });
                 }
                 open.push(name);
-                let fields = record
-                    .fields
-                    .iter()
-                    .map(|field| {
-                        Some(RecordTypeField {
-                            name: field.name.clone(),
-                            ty: kernel_type(&field.annotation, typed, open)?,
-                            optional: field.optional,
+                let resolved = (|| {
+                    let fields = record
+                        .fields
+                        .iter()
+                        .map(|field| {
+                            Ok(RecordTypeField {
+                                name: field.name.clone(),
+                                ty: kernel_type(&field.annotation, typed, open, depth - 1, nodes)?,
+                                optional: field.optional,
+                            })
                         })
-                    })
-                    .collect::<Option<Vec<_>>>();
+                        .collect::<Result<Vec<_>, Reason>>()?;
+                    let rest = record
+                        .rest
+                        .as_ref()
+                        .map(|rest| kernel_type(rest, typed, open, depth - 1, nodes).map(Box::new))
+                        .transpose()?;
+                    Ok(Type::Record(RecordType { fields, rest }))
+                })();
                 open.pop();
-                Some(Type::Record(RecordType {
-                    fields: fields?,
-                    rest: None,
-                }))
+                resolved
             }
         },
         PyExpr::Subscript(subscript) => {
             let PyExpr::Name(name) = subscript.value.as_ref() else {
-                return None;
+                return Err(unsupported());
             };
-            let types = members(subscript)
+            let members = members(subscript);
+            let supported = match name.id.as_str() {
+                "list" | "set" | "Optional" => members.len() == 1,
+                "dict" => members.len() == 2,
+                "tuple" | "Union" => !members.is_empty(),
+                _ => false,
+            };
+            if !supported {
+                return Err(Reason::Unsupported {
+                    construct: name.id.to_string(),
+                });
+            }
+            let types = members
                 .into_iter()
-                .map(|member| kernel_type(member, typed, open))
-                .collect::<Option<Vec<_>>>()?;
+                .map(|member| kernel_type(member, typed, open, depth - 1, nodes))
+                .collect::<Result<Vec<_>, _>>()?;
             match (name.id.as_str(), types.as_slice()) {
-                ("list", [item]) => Some(Type::List(Box::new(item.clone()))),
-                ("set", [item]) => Some(Type::Set(Box::new(item.clone()))),
-                ("dict", [key, value]) => Some(map(key.clone(), value.clone())),
-                ("tuple", members) if !members.is_empty() => Some(Type::Tuple(members.to_vec())),
-                ("Optional", [item]) => Some(union(vec![item.clone(), Type::Null])),
-                ("Union", members) if !members.is_empty() => Some(union(members.to_vec())),
-                _ => None,
+                ("list", [item]) => Ok(Type::List(Box::new(item.clone()))),
+                ("set", [item]) => Ok(Type::Set(Box::new(item.clone()))),
+                ("dict", [key, value]) => Ok(map(key.clone(), value.clone())),
+                ("tuple", members) => Ok(Type::Tuple(members.to_vec())),
+                ("Optional", [item]) => Ok(union(vec![item.clone(), Type::Null])),
+                ("Union", members) => Ok(union(members.to_vec())),
+                _ => unreachable!("validated constructor arity"),
             }
         }
-        PyExpr::BinOp(operation) if operation.op == ast::Operator::BitOr => Some(union(vec![
-            kernel_type(&operation.left, typed, open)?,
-            kernel_type(&operation.right, typed, open)?,
+        PyExpr::BinOp(operation) if operation.op == ast::Operator::BitOr => Ok(union(vec![
+            kernel_type(&operation.left, typed, open, depth - 1, nodes)?,
+            kernel_type(&operation.right, typed, open, depth - 1, nodes)?,
         ])),
-        _ => None,
+        _ => Err(unsupported()),
     }
 }
 
@@ -179,13 +226,11 @@ fn map(key: Type, value: Type) -> Type {
     Type::Map(Box::new(lash_vocabulary::MapType { key, value }))
 }
 
-/// One type of `members`: none nested, none twice, and any value if one
-/// member is.
+/// One type of `members`: no nested unions or duplicate members.
 fn union(members: Vec<Type>) -> Type {
     let mut types: Vec<Type> = Vec::new();
     for member in members {
         let flat = match member {
-            Type::Any => return Type::Any,
             Type::Union(inner) => inner,
             other => vec![other],
         };

@@ -106,12 +106,10 @@ impl Lowerer<'_> {
                     Some("<lambda>"),
                     None,
                 )?;
-                let written = self.function_written(lambda.parameters.as_deref(), false, None);
-                let start = super::saved::callable_presentation(
-                    lambda.parameters.as_deref(),
-                    None,
-                    params.len(),
-                );
+                let written =
+                    self.function_written(lambda.parameters.as_deref(), false, None, None);
+                let start =
+                    self.callable_presentation(lambda.parameters.as_deref(), None, params.len());
                 let closure = self.emit_closure(params, body, start);
                 if let Some(note) = self.buf.notes.last_mut() {
                     note.span = Some(diagnostics::span(lambda.range));

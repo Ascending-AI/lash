@@ -5,12 +5,11 @@ use lash_kernel_doc::{
     CallablePresentation, FunctionRepresentation, SourceLanguage, StartConvention,
 };
 
-use lash_vocabulary::{Name, Param, Signature, Type};
+use lash_vocabulary::{AnnotationOrigin, Name, Param, Signature, SignatureOrigin, Type};
 use ruff_python_ast::{self as ast, Expr as PyExpr};
 use ruff_text_size::Ranged;
 
 use super::Lowerer;
-use crate::scope::Ty;
 
 /// A later call needs the parameter names, default slots and coroutine
 /// rule: the call shape Python wrote of the function, which the kernel never
@@ -29,6 +28,7 @@ impl Lowerer<'_> {
         parameters: Option<&ast::Parameters>,
         is_async: bool,
         returns: Option<&PyExpr>,
+        name: Option<&str>,
     ) -> Written {
         let params = parameters
             .map(|parameters| parameters.args.as_slice())
@@ -54,11 +54,11 @@ impl Lowerer<'_> {
             text.push_str(self.text(returns.range()));
         }
         Written {
-            signature_origin: None,
             captions: Vec::new(),
             language: SourceLanguage::Python,
             signature: text,
             call: Some(call),
+            signature_origin: Some(self.signature_origin(parameters, returns, name)),
         }
     }
 }
@@ -66,41 +66,95 @@ impl Lowerer<'_> {
 /// How a source function is started when it crosses to a tool: called
 /// directly with the start's arguments (`K-CLO-004`). None for a closure
 /// that takes more parameters than its source signature names.
-pub(super) fn callable_presentation(
-    parameters: Option<&ast::Parameters>,
-    returns: Option<&PyExpr>,
-    callable_params: usize,
-) -> Option<CallablePresentation> {
-    let params = parameters
-        .map(|parameters| parameters.args.as_slice())
-        .unwrap_or_default();
-    let signature = Signature {
-        params: params
-            .iter()
-            .map(|param| Param {
-                name: Name::new(param.parameter.name.id.as_str()),
-                ty: parameter_type(param.parameter.annotation.as_deref()),
-                optional: param.default.is_some(),
-            })
-            .collect(),
-        result: parameter_type(returns),
-    };
-    (signature.params.len() == callable_params).then_some(CallablePresentation {
-        signature,
-        representation: FunctionRepresentation::Bare,
-        convention: StartConvention::Direct,
-    })
-}
+impl Lowerer<'_> {
+    pub(super) fn callable_presentation(
+        &self,
+        parameters: Option<&ast::Parameters>,
+        returns: Option<&PyExpr>,
+        callable_params: usize,
+    ) -> Option<CallablePresentation> {
+        let signature = self.declared_signature(parameters, returns);
+        (signature.params.len() == callable_params).then_some(CallablePresentation {
+            signature,
+            representation: FunctionRepresentation::Bare,
+            convention: StartConvention::Direct,
+        })
+    }
 
-/// Python's trusted scalar/container annotations as the durable entry types.
-fn parameter_type(annotation: Option<&PyExpr>) -> Type {
-    match annotation.map(Ty::of_annotation).unwrap_or(Ty::Unknown) {
-        Ty::None => Type::Null,
-        Ty::Bool => Type::Bool,
-        Ty::Int => Type::Int,
-        Ty::Float => Type::Float,
-        Ty::Str => Type::Text,
-        // Python's remaining annotations carry no item shape in this lowerer.
-        _ => Type::Any,
+    pub(super) fn declared_signature(
+        &self,
+        parameters: Option<&ast::Parameters>,
+        returns: Option<&PyExpr>,
+    ) -> Signature {
+        let params = parameters
+            .map(|parameters| parameters.args.as_slice())
+            .unwrap_or_default();
+        Signature {
+            params: params
+                .iter()
+                .map(|param| Param {
+                    name: Name::new(param.parameter.name.id.as_str()),
+                    ty: self.annotation_type(param.parameter.annotation.as_deref()),
+                    optional: param.default.is_some(),
+                })
+                .collect(),
+            result: self.annotation_type(returns),
+        }
+    }
+
+    pub(super) fn resolve_annotation(
+        &self,
+        annotation: &PyExpr,
+    ) -> Result<Type, lash_vocabulary::AnnotationResolutionReason> {
+        super::typed_dicts::annotation_type(
+            annotation,
+            &self.typed_dicts,
+            self.max_nesting,
+            self.max_annotation_nodes,
+        )
+    }
+
+    pub(super) fn signature_origin(
+        &self,
+        parameters: Option<&ast::Parameters>,
+        returns: Option<&PyExpr>,
+        name: Option<&str>,
+    ) -> SignatureOrigin {
+        let origin = |annotation: Option<&PyExpr>, missing| AnnotationOrigin {
+            span: annotation
+                .map(|annotation| crate::diagnostics::span(annotation.range()))
+                .or(missing),
+            refusal: annotation.and_then(|annotation| self.resolve_annotation(annotation).err()),
+        };
+        SignatureOrigin {
+            name: name.map(str::to_owned),
+            params: parameters
+                .map(|parameters| {
+                    parameters
+                        .args
+                        .iter()
+                        .map(|param| {
+                            origin(
+                                param.parameter.annotation.as_deref(),
+                                Some(crate::diagnostics::span(param.parameter.name.range)),
+                            )
+                        })
+                        .collect()
+                })
+                .unwrap_or_default(),
+            result: origin(
+                returns,
+                parameters.map(|parameters| {
+                    crate::diagnostics::span(ruff_text_size::TextRange::empty(parameters.end()))
+                }),
+            ),
+        }
+    }
+
+    // Ordinary calls stay free; promotion consults the retained origin.
+    fn annotation_type(&self, annotation: Option<&PyExpr>) -> Type {
+        annotation
+            .and_then(|annotation| self.resolve_annotation(annotation).ok())
+            .unwrap_or(Type::Any)
     }
 }

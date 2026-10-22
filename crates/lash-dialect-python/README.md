@@ -312,11 +312,27 @@ parameter or result is annotated with it captions that field
 `CAPTIONS` declares every kind and its `guide` says this for a model's
 prompt.
 
-A workflow module may declare `TypedDict` classes at its top level: one
-`TypedDict` base, no keyword, decorator or type parameter, and a body of
-annotated field names (a field may be `NotRequired[...]`), docstrings and
-`pass`. Such a class declares a closed record type for entry annotations and
-nothing else: it emits no statement, and its name is no value.
+Modules and cells may declare `TypedDict` classes at their top level: one
+`TypedDict` base, an optional `extra_items` annotation, no decorator or type
+parameter, and a body of annotated field names (a field may be
+`NotRequired[...]`), docstrings and `pass`. Such a class declares a closed
+record type unless it writes an explicit rest, such as
+`extra_items=JsonValue`. It emits no statement, and its name is no value.
+
+A workflow entry must write annotations for every parameter and its settled
+result. Module entries and saved functions promoted to entries use the same
+structural resolver: scalars, containers, fixed tuples, unions and local
+`TypedDict` records. Explicit `Any`, `object` and `JsonValue`, including inside
+containers or records, mean kernel `Json` at the entry boundary. Missing
+annotations produce `SIGNATURE_REQUIRED`; unresolvable, cyclic or unsupported
+annotations produce typed `ENTRY_ANNOTATION_REFUSED` facts. Ordinary functions
+and lambdas remain free to omit annotations or use unresolved ones.
+
+`SourceLimits::with_annotation_nodes` bounds each annotation's expanded
+structural nodes (default 4096); zero refuses all written annotations at
+promotion. Resolution depth follows `SourceLimits::new`'s nesting policy
+(default 96, configurable from 1 through 96). Exceeding either bound retains a
+typed resolution-limit fact for entry promotion.
 
 The front end decides the owner as it lowers each construct: a control's own
 statement, a `def`'s binding, else the statement holding the construct's

@@ -1375,7 +1375,7 @@ async fn typescript_and_python_modules_share_one_entry_contract() {
     };
 
     let typescript = "export async function first(inbox: string) { return inbox; }\nconst second = async (n: number) => n * 2;\nif (second) {\n  async function inBlock() { return 1; }\n}\n";
-    let python = "async def first(inbox: str):\n    return inbox\n\n\nasync def second(n: int):\n    return n * 2\n\n\nif True:\n    async def in_block():\n        return 1\n";
+    let python = "async def first(inbox: str) -> str:\n    return inbox\n\n\nasync def second(n: int) -> int:\n    return n * 2\n\n\nif True:\n    async def in_block():\n        return 1\n";
     assert_eq!(
         entries(
             import(SourceLanguage::TypeScript, typescript).await,
@@ -1391,7 +1391,7 @@ async fn typescript_and_python_modules_share_one_entry_contract() {
     for (typescript, python, refusal) in [
         (
             "export async function a() { return 1; }\nexport async function a() { return 2; }",
-            "async def a():\n    return 1\n\n\nasync def a():\n    return 2\n",
+            "async def a() -> int:\n    return 1\n\n\nasync def a() -> int:\n    return 2\n",
             ModuleRefusal::DuplicateEntry,
         ),
         (
@@ -1401,27 +1401,22 @@ async fn typescript_and_python_modules_share_one_entry_contract() {
         ),
         (
             "const limit = 3;\nexport async function a() { return limit; }",
-            "limit = 3\n\n\nasync def a():\n    return limit\n",
+            "limit = 3\n\n\nasync def a() -> int:\n    return limit\n",
             ModuleRefusal::CapturedModuleBinding,
         ),
         (
             "function helper() { return 1; }\nexport async function a() { return helper(); }",
-            "def helper():\n    return 1\n\n\nasync def a():\n    return helper()\n",
+            "def helper() -> int:\n    return 1\n\n\nasync def a() -> int:\n    return helper()\n",
             ModuleRefusal::CapturedModuleBinding,
         ),
         (
             "export async function b() { return 1; }\nexport async function a() { return await b(); }",
-            "async def b():\n    return 1\n\n\nasync def a():\n    return await b()\n",
+            "async def b() -> int:\n    return 1\n\n\nasync def a() -> int:\n    return await b()\n",
             ModuleRefusal::CapturedModuleBinding,
         ),
         (
-            "export async function a(f: () => number) { return 1; }",
-            "async def a(f: Callable[[], int]):\n    return 1\n",
-            ModuleRefusal::UnmappableEntryAnnotation,
-        ),
-        (
             "export async function a(limit: number = 3) { return limit; }",
-            "async def a(limit: int = 3):\n    return limit\n",
+            "async def a(limit: int = 3) -> int:\n    return limit\n",
             ModuleRefusal::EntryDefault,
         ),
     ] {
@@ -1447,7 +1442,7 @@ async fn typescript_and_python_modules_share_one_entry_contract() {
         ),
         (
             SourceLanguage::Python,
-            "async def entry():\n    return 0\n\nif True:\n    async def a():\n        return 1\n",
+            "async def entry() -> int:\n    return 0\n\nif True:\n    async def a() -> int:\n        return 1\n",
         ),
     ] {
         assert!(

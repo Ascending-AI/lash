@@ -1002,8 +1002,7 @@ impl Lowerer<'_> {
                 continue;
             };
             let name = class.name.id.as_str();
-            if self.module.is_some()
-                && self.variable(name).is_none()
+            if self.variable(name).is_none()
                 && let Some(typed) = super::typed_dicts::declared(class)
             {
                 self.typed_dicts.insert(name.to_owned(), typed);
@@ -1075,13 +1074,14 @@ impl Lowerer<'_> {
             checked.then_some(name),
             active,
         )?;
-        let written =
-            self.function_written(Some(&def.parameters), def.is_async, def.returns.as_deref());
-        let start = super::saved::callable_presentation(
+        let written = self.function_written(
             Some(&def.parameters),
+            def.is_async,
             def.returns.as_deref(),
-            params.len(),
+            Some(name),
         );
+        let start =
+            self.callable_presentation(Some(&def.parameters), def.returns.as_deref(), params.len());
         let variable = self.written(name, def.name.range)?;
         self.span_of(def);
         let closure = self.emit_closure(params, body, start);

@@ -20,7 +20,7 @@ const TYPESCRIPT: &str = r#"export async function route(priority: string) {
   return [later, urgent];
 }"#;
 
-const PYTHON: &str = "async def route(priority: str):
+const PYTHON: &str = "async def route(priority: str) -> list[Any]:
     #: The filed request
     reply = await inbox.send_item({\"title\": priority})
     pending = asyncio.create_task(inbox.send_item({\"title\": \"later\"}))

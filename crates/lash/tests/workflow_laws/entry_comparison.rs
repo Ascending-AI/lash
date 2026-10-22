@@ -184,7 +184,7 @@ fn the_triage_entry_states_its_declared_parameters_and_the_union_of_its_returns(
 fn an_entry_that_may_fall_through_has_null_in_its_result_facet() {
     let view = view(
         Dialect::Python,
-        "async def check(flag: bool):\n    if flag:\n        return \"yes\"\n",
+        "async def check(flag: bool) -> str | None:\n    if flag:\n        return \"yes\"\n",
         "check",
     );
     assert_eq!(
@@ -200,7 +200,7 @@ fn an_entry_that_may_fall_through_has_null_in_its_result_facet() {
 /// library declares.
 #[test]
 fn a_typescript_and_a_python_equality_read_as_eq_of_the_parameter_and_the_literal() {
-    let python = "async def triage(title: str, priority: str):\n    if priority == \"high\":\n        await inbox.send_item({\"title\": \"Urgent request\"})\n        return {\"routed\": \"urgent\"}\n    else:\n        await inbox.send_item({\"title\": \"Request filed\"})\n        return {\"routed\": \"later\"}\n";
+    let python = "async def triage(title: str, priority: str) -> Any:\n    if priority == \"high\":\n        await inbox.send_item({\"title\": \"Urgent request\"})\n        return {\"routed\": \"urgent\"}\n    else:\n        await inbox.send_item({\"title\": \"Request filed\"})\n        return {\"routed\": \"later\"}\n";
     for view in [
         view(Dialect::TypeScript, TRIAGE, "triage"),
         view(Dialect::Python, python, "triage"),
@@ -281,7 +281,7 @@ fn a_condition_reads_through_once_bound_variables_and_never_through_a_reassigned
 fn a_condition_on_a_reassigned_parameter_or_a_non_comparison_call_has_no_comparison() {
     let view = view(
         Dialect::Python,
-        "async def route(priority: str, tags: list):\n    if len(tags):\n        await inbox.send_item({\"title\": \"1\"})\n    priority = \"low\"\n    if priority == \"high\":\n        await inbox.send_item({\"title\": \"2\"})\n",
+        "async def route(priority: str, tags: list) -> None:\n    if len(tags):\n        await inbox.send_item({\"title\": \"1\"})\n    priority = \"low\"\n    if priority == \"high\":\n        await inbox.send_item({\"title\": \"2\"})\n",
         "route",
     );
     assert_eq!(

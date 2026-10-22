@@ -95,63 +95,12 @@ fn map(key: Type, value: Type) -> Type {
     Type::Map(Box::new(MapType { key, value }))
 }
 
-/// Each annotation's kernel meaning in Python, mapped structurally rather
-/// than read as a scalar or any value: containers carry their item types,
-/// a dict is a map, and `|` and `Optional` are unions.
-#[test]
-fn an_entry_signature_is_the_kernel_meaning_of_its_python_annotations() {
-    let source = "\
-import asyncio
-
-
-async def digest(
-    inbox: str,
-    count: int,
-    ratio: float,
-    flags: list[bool],
-    topics: list[dict],
-    scores: dict[str, int],
-    tags: set[str],
-    pair: tuple[str, int],
-    note: str | None,
-    limit: Optional[int],
-    anything: Any,
-    untyped,
-) -> dict:
-    await asyncio.sleep(0)
-    return {\"inbox\": inbox}
-";
-    assert_eq!(
-        entries(source),
-        BTreeMap::from([(
-            Name::new("digest"),
-            Signature {
-                params: vec![
-                    param("inbox", Type::Text),
-                    param("count", Type::Int),
-                    param("ratio", Type::Float),
-                    param("flags", Type::List(Box::new(Type::Bool))),
-                    param("topics", Type::List(Box::new(map(Type::Any, Type::Any)))),
-                    param("scores", map(Type::Text, Type::Int)),
-                    param("tags", Type::Set(Box::new(Type::Text))),
-                    param("pair", Type::Tuple(vec![Type::Text, Type::Int])),
-                    param("note", Type::Union(vec![Type::Text, Type::Null])),
-                    param("limit", Type::Union(vec![Type::Int, Type::Null])),
-                    param("anything", Type::Any),
-                    param("untyped", Type::Any),
-                ],
-                result: map(Type::Any, Type::Any),
-            },
-        )])
-    );
-}
-
 /// Top-level sync and async defs are Exports; block and nested definitions
 /// remain ordinary code. Each Export preserves its source async flag.
 #[test]
 fn top_level_function_exports_keep_async_flags_and_exclude_block_locals() {
     let source = "\
-async def first():
+async def first() -> int:
     async def nested():
         return 0
     return await nested()
@@ -161,7 +110,7 @@ async def second(n: int) -> int:
     return n * 2
 
 
-def helper():
+def helper() -> int:
     return 7
 
 
@@ -208,7 +157,7 @@ fn a_module_calls_a_namespaced_tool_by_its_dotted_path() {
         .expect("the test's effects are operations");
     let environment = Environment::new(machine::library(), &environment_namespaces);
     let lowered = crate::lower(
-        "async def demo():\n    return await display.show_message(text=\"hi\")\n",
+        "async def demo() -> Any:\n    return await display.show_message(text=\"hi\")\n",
         &environment,
         Mode::Module,
     )
@@ -267,7 +216,7 @@ fn tool_keywords_name_the_declared_input_fields() {
             ],
         ),
     ] {
-        let source = format!("async def demo():\n    return await {call}\n");
+        let source = format!("async def demo() -> Any:\n    return await {call}\n");
         let lowered = crate::lower(&source, &environment, Mode::Module)
             .unwrap_or_else(|diagnostic| panic!("{diagnostic}\n{source}"));
         assert_eq!(
@@ -314,7 +263,7 @@ fn tool_keywords_name_the_declared_input_fields() {
         "display.show_message(style='bold')",
         "display.show_message({'text': 'hi'}, text='again')",
     ] {
-        let source = format!("async def demo():\n    return await {call}\n");
+        let source = format!("async def demo() -> Any:\n    return await {call}\n");
         let refused = crate::lower(&source, &environment, Mode::Module).expect_err(call);
         assert_eq!(refused.code, "PY_ARGUMENTS", "{call}: {refused}");
     }
@@ -335,31 +284,23 @@ fn the_contract_refuses_under_the_shared_codes() {
     }
     for (source, expected) in [
         (
-            "async def a():\n    return 1\n\n\nasync def a():\n    return 2\n",
+            "async def a() -> int:\n    return 1\n\n\nasync def a() -> int:\n    return 2\n",
             ModuleRefusal::DuplicateEntry,
         ),
         (
-            "limit = 3\n\n\nasync def a():\n    return limit\n",
+            "limit = 3\n\n\nasync def a() -> int:\n    return limit\n",
             ModuleRefusal::CapturedModuleBinding,
         ),
         (
-            "def helper():\n    return 1\n\n\nasync def a():\n    return helper()\n",
+            "def helper() -> int:\n    return 1\n\n\nasync def a() -> int:\n    return helper()\n",
             ModuleRefusal::CapturedModuleBinding,
         ),
         (
-            "async def b():\n    return 1\n\n\nasync def a():\n    return await b()\n",
+            "async def b() -> int:\n    return 1\n\n\nasync def a() -> int:\n    return await b()\n",
             ModuleRefusal::CapturedModuleBinding,
         ),
         (
-            "async def a(f: Callable[[], int]):\n    return 1\n",
-            ModuleRefusal::UnmappableEntryAnnotation,
-        ),
-        (
-            "async def a() -> \"Later\":\n    return 1\n",
-            ModuleRefusal::UnmappableEntryAnnotation,
-        ),
-        (
-            "async def a(limit: int = 3):\n    return limit\n",
+            "async def a(limit: int = 3) -> int:\n    return limit\n",
             ModuleRefusal::EntryDefault,
         ),
     ] {
@@ -373,7 +314,7 @@ fn the_contract_refuses_under_the_shared_codes() {
 fn entry_convention_keeps_python_positional_and_keyword_arguments() {
     use lash_kernel_doc::{Datum, Integer, StartConvention};
 
-    let lowered = module("async def run(a: int, b: int):\n    async def pair(x, y):\n        return [x, y]\n    return [await pair(a, b), await pair(y=a, x=b)]\n").unwrap();
+    let lowered = module("async def run(a: int, b: int) -> list[list[int]]:\n    async def pair(x, y):\n        return [x, y]\n    return [await pair(a, b), await pair(y=a, x=b)]\n").unwrap();
     let entry = super::linked::exported(&lowered.document, &Name::new("run"));
     assert_eq!(entry.convention, StartConvention::Direct);
     assert_eq!(
@@ -401,7 +342,7 @@ fn entry_convention_keeps_python_positional_and_keyword_arguments() {
 /// it, and a cell's root wraps it. Mere spelling and shadowed names do not.
 #[test]
 fn task_cleanup_follows_resolved_calls_and_belongs_to_the_entry_root() {
-    let plain = module("# create_task gather\nasync def run():\n    def gather():\n        return 'create_task'\n    return gather()\n").unwrap();
+    let plain = module("# create_task gather\nasync def run() -> str:\n    def gather():\n        return 'create_task'\n    return gather()\n").unwrap();
     assert!(
         !plain
             .document
@@ -413,7 +354,7 @@ fn task_cleanup_follows_resolved_calls_and_belongs_to_the_entry_root() {
                         &lash_vocabulary::FunctionName::new("tasks.cancel_all").unwrap()
                     ))
     );
-    let tasks = module("import asyncio\nasync def run():\n    async def child():\n        try:\n            await asyncio.sleep(1)\n        finally:\n            print('cleanup')\n    def launch():\n        return asyncio.ensure_future(child())\n    launch()\n    await asyncio.sleep(0)\n    print('done')\n    return 7\n").unwrap();
+    let tasks = module("import asyncio\nasync def run() -> int:\n    async def child():\n        try:\n            await asyncio.sleep(1)\n        finally:\n            print('cleanup')\n    def launch():\n        return asyncio.ensure_future(child())\n    launch()\n    await asyncio.sleep(0)\n    print('done')\n    return 7\n").unwrap();
     let document = &tasks.document;
     let lash_kernel_doc::StartConvention::PyDirect { cleanup } =
         &super::linked::exported(document, &Name::new("run")).convention
@@ -456,4 +397,257 @@ fn task_cleanup_follows_resolved_calls_and_belongs_to_the_entry_root() {
     );
     assert_eq!(end, "ok");
     assert_eq!(lines, ["done", "cleanup"]);
+}
+
+fn saved_handle(
+    source: &str,
+) -> (
+    lash_kernel_doc::IdentifiedDocument,
+    lash_kernel_doc::FunctionValue,
+) {
+    let lowered = machine::lower(source).expect("ordinary annotated function");
+    let (site, closure) = lowered
+        .written
+        .keys()
+        .find_map(|site| {
+            let closure = lash_kernel_doc::snapshot::closure_at(&lowered.document, site)?;
+            (lowered.written[site]
+                .signature_origin
+                .as_ref()?
+                .name
+                .as_deref()
+                == Some("handle"))
+            .then_some((site, closure))
+        })
+        .expect("the saved defining closure");
+    let presentation = closure.presentation.as_ref().unwrap();
+    let value = lash_kernel_doc::FunctionValue {
+        callable: lash_vocabulary::CallableId {
+            link: lash_vocabulary::LinkId::from_bytes([1; 32]),
+            function: closure.function,
+        },
+        captures: BTreeMap::new(),
+        signature: presentation.signature.clone(),
+        convention: presentation.convention.clone(),
+        representation: presentation.representation.clone(),
+        captions: lash_kernel_doc::Captions::empty(lowered.document.id()),
+        creation: Some(site.clone()),
+        token: None,
+        signature_origin: lowered.written[site].signature_origin.clone(),
+    };
+    let wire = serde_json::to_string(&value).unwrap();
+    let value: lash_kernel_doc::FunctionValue = serde_json::from_str(&wire).unwrap();
+    (lowered.document, value)
+}
+
+/// FIG-7145: only entry promotion requires written parameter/result types;
+/// ordinary definitions and lambdas remain valid with missing annotations.
+#[test]
+fn entry_promotion_requires_written_annotations_at_the_missing_position() {
+    for (source, missing) in [
+        (
+            "async def handle(event) -> str:\n    return 'ok'\n",
+            "event",
+        ),
+        ("def handle(event: Any):\n    return event\n", ")"),
+    ] {
+        machine::lower(source).expect("an ordinary function remains free");
+        let error = module(source).expect_err("an entry needs a written signature");
+        assert_eq!(error.code, "SIGNATURE_REQUIRED");
+        let Some(lash_kernel_dialect::DiagnosticFact::SignatureRequired(required)) =
+            error.fact.as_deref()
+        else {
+            panic!("a typed missing annotation: {error:?}");
+        };
+        assert_eq!(required.function.name.as_deref(), Some("handle"));
+        assert_eq!(required.span, error.span);
+        assert_eq!(
+            required.position,
+            if missing == "event" {
+                lash_kernel_doc::SignaturePosition::Parameter {
+                    index: 0,
+                    name: Name::new("event"),
+                }
+            } else {
+                lash_kernel_doc::SignaturePosition::Result
+            }
+        );
+        let (document, value) = saved_handle(source);
+        let lash_kernel_doc::FunctionValueRefusal::SignatureRequired { source: saved } = value
+            .entry_export(&document)
+            .expect_err("saved promotion needs annotations")
+        else {
+            panic!("typed saved refusal")
+        };
+        assert_eq!(saved.position, required.position);
+        assert_eq!(saved.span, required.span);
+        assert_eq!(saved.function.name, required.function.name);
+        let span = error
+            .span
+            .expect("the missing annotation has a source position");
+        let offset = source.find(missing).unwrap();
+        if missing == "event" {
+            assert_eq!(span.start, offset);
+            assert_eq!(span.end, offset + missing.len());
+        } else {
+            assert_eq!(span.start, offset + 1);
+            assert_eq!(span.end, offset + 1);
+        }
+    }
+    machine::lower("identity = lambda value: value\n").expect("ordinary lambda");
+}
+
+/// FIG-7145: a saved defining closure and a module entry use the same
+/// structural annotation contract, including explicitly open JSON data.
+#[test]
+fn typed_dict_entry_contract_survives_saved_function_promotion() {
+    use lash_vocabulary::{RecordType, RecordTypeField};
+    let source = "\
+class Event(TypedDict, extra_items=JsonValue):
+    actor: Actor
+    values: list[tuple[int, str | None]]
+    anything: NotRequired[object]
+class Actor(TypedDict):
+    name: str
+    labels: list[Any]
+async def handle(event: Event, metadata: dict[str, Any]) -> Event:
+    return event
+";
+    let actor = Type::Record(RecordType {
+        fields: vec![
+            RecordTypeField {
+                name: "name".into(),
+                ty: Type::Text,
+                optional: false,
+            },
+            RecordTypeField {
+                name: "labels".into(),
+                ty: Type::List(Box::new(Type::Json)),
+                optional: false,
+            },
+        ],
+        rest: None,
+    });
+    let event = Type::Record(RecordType {
+        fields: vec![
+            RecordTypeField {
+                name: "actor".into(),
+                ty: actor,
+                optional: false,
+            },
+            RecordTypeField {
+                name: "values".into(),
+                ty: Type::List(Box::new(Type::Tuple(vec![
+                    Type::Int,
+                    Type::Union(vec![Type::Text, Type::Null]),
+                ]))),
+                optional: false,
+            },
+            RecordTypeField {
+                name: "anything".into(),
+                ty: Type::Json,
+                optional: true,
+            },
+        ],
+        rest: Some(Box::new(Type::Json)),
+    });
+    let expected = Signature {
+        params: vec![
+            param("event", event.clone()),
+            param("metadata", map(Type::Text, Type::Json)),
+        ],
+        result: event,
+    };
+    let (document, value) = saved_handle(source);
+    assert_eq!(value.entry_export(&document).unwrap().signature, expected);
+    assert_eq!(entries(source)[&Name::new("handle")], expected);
+    assert_eq!(
+        entries("def handle(value: Any) -> object:\n    return value\n")[&Name::new("handle")],
+        Signature {
+            params: vec![param("value", Type::Json)],
+            result: Type::Json
+        }
+    );
+    use lash_vocabulary::AnnotationResolutionReason as Reason;
+    for (source, reason, annotation) in [
+        (
+            "class Loop(TypedDict):\n    next: Loop\ndef handle(value: Loop) -> None:\n    pass\n",
+            Reason::Cycle {
+                name: "Loop".into(),
+            },
+            "Loop)",
+        ),
+        (
+            "def handle(value: Callable[[], int]) -> int:\n    return 1\n",
+            Reason::Unsupported {
+                construct: "Callable".into(),
+            },
+            "Callable[[], int]",
+        ),
+        (
+            "def handle(value: Missing) -> int:\n    return 1\n",
+            Reason::Unresolved {
+                name: "Missing".into(),
+            },
+            "Missing",
+        ),
+        (
+            "def handle(value: int) -> \"Later\":\n    return 1\n",
+            Reason::Unsupported {
+                construct: "annotation".into(),
+            },
+            "\"Later\"",
+        ),
+    ] {
+        let error = module(source).expect_err("unrepresentable entry annotation");
+        assert_eq!(error.code, "ENTRY_ANNOTATION_REFUSED");
+        assert!(error.message.is_empty());
+        let Some(lash_kernel_dialect::DiagnosticFact::EntryAnnotationRefused(refused)) =
+            error.fact.as_deref()
+        else {
+            panic!("typed resolution fact")
+        };
+        assert_eq!(refused.reason, reason);
+        assert_eq!(refused.function.name.as_deref(), Some("handle"));
+        let start = source.find(annotation).unwrap();
+        let width = if annotation == "Loop)" {
+            4
+        } else {
+            annotation.len()
+        };
+        assert_eq!(
+            refused.span,
+            Some(lash_vocabulary::sites::Span {
+                start,
+                end: start + width
+            })
+        );
+        let (document, value) = saved_handle(source);
+        let lash_kernel_doc::FunctionValueRefusal::EntryAnnotation { source: saved } = value
+            .entry_export(&document)
+            .expect_err("same saved refusal")
+        else {
+            panic!("typed saved resolution fact")
+        };
+        assert_eq!(saved.reason, refused.reason);
+        assert_eq!(saved.position, refused.position);
+        assert_eq!(saved.span, refused.span);
+    }
+    // Expansion has a host-configurable budget, independently of source size.
+    let effects = machine::effects();
+    let namespaces = crate::tests::linked::namespaces(&effects, machine::controls()).unwrap();
+    let environment = Environment::new(machine::library(), &namespaces);
+    let error = crate::lower_with_limits(
+        source,
+        &environment,
+        Mode::Module,
+        crate::SourceLimits::standard().with_annotation_nodes(1),
+    )
+    .expect_err("bounded expansion");
+    let Some(lash_kernel_dialect::DiagnosticFact::EntryAnnotationRefused(refused)) =
+        error.fact.as_deref()
+    else {
+        panic!("typed expansion limit")
+    };
+    assert_eq!(refused.reason, Reason::Limit);
 }

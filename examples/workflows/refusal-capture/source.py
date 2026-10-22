@@ -1,4 +1,4 @@
 limit = 3
 
-async def a():
+async def a() -> int:
     return limit

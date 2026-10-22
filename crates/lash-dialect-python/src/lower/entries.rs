@@ -14,8 +14,8 @@ use std::collections::HashSet;
 use lash_kernel_dialect::workflow::{Entry, ModuleError, ModuleRefusal};
 use lash_kernel_doc::{AssignOrder, Expr, Literal, Place, Rhs, Stmt};
 
-use lash_vocabulary::{Name, Param, Signature, Type};
-use ruff_python_ast::{self as ast, Expr as PyExpr, Stmt as PyStmt};
+use lash_vocabulary::{Name, Signature};
+use ruff_python_ast::{self as ast, Stmt as PyStmt};
 use ruff_text_size::{Ranged, TextRange};
 
 use super::statements::Body;
@@ -40,7 +40,7 @@ impl Lowerer<'_> {
         let name = def.name.id.as_str();
         self.span_of(def);
         let span = self.span;
-        let signature = self.entry_signature(&def.parameters, def.returns.as_deref())?;
+        let signature = self.entry_signature(def)?;
         let names: Vec<Name> = signature
             .params
             .iter()
@@ -131,11 +131,8 @@ impl Lowerer<'_> {
 
     /// The signature a host starts an entry under: each parameter a plain
     /// name with no default, of the type its annotation means.
-    fn entry_signature(
-        &self,
-        parameters: &ast::Parameters,
-        returns: Option<&PyExpr>,
-    ) -> Lowering<Signature> {
+    fn entry_signature(&self, def: &ast::StmtFunctionDef) -> Lowering<Signature> {
+        let parameters = &def.parameters;
         let unsupported = parameters
             .posonlyargs
             .first()
@@ -151,7 +148,6 @@ impl Lowerer<'_> {
                 "name each parameter; pass a list or a dict for a variable number of values",
             ));
         }
-        let mut params = Vec::with_capacity(parameters.args.len());
         for param in &parameters.args {
             if let Some(default) = &param.default {
                 return Err(ModuleRefusal::EntryDefault
@@ -164,33 +160,35 @@ impl Lowerer<'_> {
                     )
                     .into_diagnostic());
             }
-            params.push(Param {
-                name: Name::new(param.parameter.name.id.as_str()),
-                ty: self.entry_type(param.parameter.annotation.as_deref())?,
-                optional: false,
-            });
         }
-        Ok(Signature {
-            params,
-            result: self.entry_type(returns)?,
-        })
-    }
-
-    /// The kernel type an entry annotation means; none is any value.
-    fn entry_type(&self, annotation: Option<&PyExpr>) -> Lowering<Type> {
-        let Some(annotation) = annotation else {
-            return Ok(Type::Any);
-        };
-        super::typed_dicts::annotation_type(annotation, &self.typed_dicts).ok_or_else(|| {
-            ModuleRefusal::UnmappableEntryAnnotation
-                .at(
-                    format!(
-                        "the annotation `{}` has no kernel type an entry is started or ended with",
-                        self.text(annotation.range())
-                    ),
-                    Some(diagnostics::span(annotation.range())),
-                )
-                .into_diagnostic()
-        })
+        let signature = self.declared_signature(Some(parameters), def.returns.as_deref());
+        self.signature_origin(
+            Some(parameters),
+            def.returns.as_deref(),
+            Some(def.name.id.as_str()),
+        )
+        .require(
+            &signature,
+            lash_vocabulary::FunctionLocation {
+                name: Some(def.name.id.to_string()),
+                site: None,
+            },
+        )
+        .map_err(|refusal| match refusal {
+            lash_vocabulary::EntrySignatureRefusal::Required(required) => {
+                lash_kernel_dialect::Diagnostic::from(*required)
+            }
+            lash_vocabulary::EntrySignatureRefusal::Annotation(refused) => {
+                lash_kernel_dialect::Diagnostic {
+                    code: "ENTRY_ANNOTATION_REFUSED".into(),
+                    span: refused.span,
+                    fact: Some(Box::new(
+                        lash_kernel_dialect::DiagnosticFact::EntryAnnotationRefused(*refused),
+                    )),
+                    ..Default::default()
+                }
+            }
+        })?;
+        Ok(signature)
     }
 }

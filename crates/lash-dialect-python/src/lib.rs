@@ -56,12 +56,21 @@ pub const MAX_SOURCE_BYTES: usize = 1 << 20;
 pub struct SourceLimits {
     pub max_bytes: usize,
     max_nesting: usize,
+    max_annotation_nodes: usize,
 }
 impl SourceLimits {
+    /// Bound each annotation's expanded structural nodes (default 4096).
+    /// Structural depth uses `max_nesting` (default 96).
+    pub fn with_annotation_nodes(mut self, max_nodes: usize) -> Self {
+        self.max_annotation_nodes = max_nodes;
+        self
+    }
+
     pub const fn standard() -> Self {
         Self {
             max_bytes: MAX_SOURCE_BYTES,
             max_nesting: 96,
+            max_annotation_nodes: 4096,
         }
     }
     pub fn new(max_bytes: usize, max_nesting: usize) -> Result<Self, Diagnostic> {
@@ -74,6 +83,7 @@ impl SourceLimits {
         Ok(Self {
             max_bytes,
             max_nesting,
+            max_annotation_nodes: 4096,
         })
     }
 }
@@ -158,7 +168,7 @@ fn lower_with_calls(
         source,
         environment,
         mode,
-        limits.max_nesting,
+        limits,
         calls,
         spelled,
         beside,
