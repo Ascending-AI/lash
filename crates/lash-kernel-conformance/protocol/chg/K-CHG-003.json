@@ -1,29 +1,29 @@
 {
-  "rule": "K-CHG-003",
   "cases": [
     {
-      "name": "return charges result size 2",
-      "document": "kernel 1\nnumbers by_spelling\nnative @484d66ceed6752bb16858cd93e6da6ed3f7bd4a1596832f943bb81d219e43df1\nmain {\n  try {\n    do invoke @484d66ceed6752bb16858cd93e6da6ed3f7bd4a1596832f943bb81d219e43df1()\n  } catch e {}\n  finish null\n}\n",
+      "document": "kernel 1\nnumbers by_spelling\nnative @9027a4ca904773cc2c54b2ba87f223a657acd608f09f69248274c280586ba499\ndefinition \"function probe.result() -> Any\\nkernel 1\\ncharge sum(9, size(result))\\nnative\\nbody {\\n  return 7\\n}\\n\"\nmain {\n  try {\n    do invoke probe.result()\n  } catch e {}\n  finish null\n}\n",
       "expected": {
-        "prints": [],
-        "trace": [],
+        "charged": 17,
         "end": {
           "finished": "null"
         },
-        "charged": 17
-      }
+        "prints": [],
+        "trace": []
+      },
+      "name": "return charges result size 2"
     },
     {
-      "name": "throw charges result size 0",
-      "document": "kernel 1\nnumbers by_spelling\nnative @f2d9e700f7a4e7718a4f9a168df9d580e2e822fcc9489402dd29fd70a0fb4cfe\nmain {\n  try {\n    do invoke @f2d9e700f7a4e7718a4f9a168df9d580e2e822fcc9489402dd29fd70a0fb4cfe()\n  } catch e {}\n  finish null\n}\n",
+      "document": "kernel 1\nnumbers by_spelling\nnative @2d93c8ed6915b9295d027da6b707591143a79652b8eaa7b002915878f4c22aeb\ndefinition \"function probe.result() -> Any\\nkernel 1\\ncharge sum(9, size(result))\\nnative\\nbody {\\n  throw 7\\n}\\n\"\nmain {\n  try {\n    do invoke probe.result()\n  } catch e {}\n  finish null\n}\n",
       "expected": {
-        "prints": [],
-        "trace": [],
+        "charged": 15,
         "end": {
           "finished": "null"
         },
-        "charged": 15
-      }
+        "prints": [],
+        "trace": []
+      },
+      "name": "throw charges result size 0"
     }
-  ]
+  ],
+  "rule": "K-CHG-003"
 }

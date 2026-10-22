@@ -773,12 +773,14 @@ suppressed even at zero (`flight_recorder.minimum_interval_ms`:
 
 ### Callback slot scopes
 
-Generated from `callback_slots!` in `lash-core-store/src/tool_run/state_command.rs`.
+Generated from `CallbackSlot::ALL` and `CallbackSlot::trace_scope` in `lash-vocabulary/src/providers.rs`.
 
 | Slot | Scope |
 |---|---|
 | `ToolProvider` | `Attempt` |
 | `ToolReads` | `Untraced` |
+| `PackageProvider` | `Untraced` |
+| `DeferredPackageProvider` | `Untraced` |
 | `ToolCatalog` | `Untraced` |
 | `BeforeTurn` | `Turn` |
 | `ToolArgsTransform` | `Call` |

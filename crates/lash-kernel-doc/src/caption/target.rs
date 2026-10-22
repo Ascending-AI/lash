@@ -14,7 +14,6 @@ use super::{Caption, CaptionKind};
 use crate::Document;
 use lash_vocabulary::names::Name;
 use lash_vocabulary::sites::Site;
-use lash_vocabulary::sites::Unit;
 use lash_vocabulary::types::Signature;
 use lash_vocabulary::types::Type;
 
@@ -175,28 +174,6 @@ impl CaptionTarget {
             Self::Param(param) => Some(&param.function),
             Self::Field(field) => Some(&field.function),
         }
-    }
-
-    /// This target in the document `site`, the successor of its function's
-    /// body, belongs to: the same parameter or field of that function.
-    pub(super) fn of_function(&self, site: &Site) -> Option<Self> {
-        let Unit::Function(function) = &site.unit else {
-            return None;
-        };
-        if !site.path.is_empty() {
-            return None;
-        }
-        Some(match self {
-            Self::Site(_) => return None,
-            Self::Param(param) => Self::Param(ParamTarget {
-                function: function.clone(),
-                param: param.param.clone(),
-            }),
-            Self::Field(field) => Self::Field(FieldTarget {
-                function: function.clone(),
-                path: field.path.clone(),
-            }),
-        })
     }
 }
 

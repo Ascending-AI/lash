@@ -1,449 +1,441 @@
 {
   "authored": [
     {
-      "name": "every kind, nearest wins, tags and trivia",
-      "source": "/**\n * Weekly report — 週報\n *\n * Gathers the numbers   \n * and sends them.\n *\n *\n * Twice if needed.\n * @param flag whether to send\n * @returns the result\n */\nexport async function demo(flag: boolean, items: string[]) {\n  /** Fetch the start for t1 */\n  let result = await corpus.echo(\"start\");\n  // An ordinary comment.\n  /* A block comment. */\n  /** Decide */\n  if (flag) {\n    /** Say yes */\n    result = await corpus.echo(\"yes\");\n  }\n  /** Otherwise say no */\n  else {\n    /** Plain no */\n    result = \"no\";\n  }\n  /** Check a */\n  if (result === \"a\") {\n    result = \"b\";\n  } /** Check c instead */ else if (result === \"c\") {\n    result = \"d\";\n  }\n  /** Nothing else */\n  else {}\n  /** Echo twice */\n  const both = await corpus.echo(await corpus.echo(\"inner\"));\n  /** Try it */\n  try {\n    result = await corpus.echo(\"try\");\n  }\n  /** Recover */\n  catch (error) {\n    result = \"caught\";\n  }\n  /** Always */\n  finally {\n    await corpus.echo(\"finally\");\n  }\n  /** @label Legacy label */\n  for (const item of items) {\n    /** Echo each */ await corpus.echo(item);\n  }\n  /** Not a caption: a blank line follows */\n\n  /** Not a caption: too long xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx */\n  while (flag) {\n    flag = false;\n  }\n  /** Far */\n  /** Near wins */\n  return [result, both];\n}\n",
-      "stripped": "export async function demo(flag: boolean, items: string[]) {\n  let result = await corpus.echo(\"start\");\n  // An ordinary comment.\n  /* A block comment. */\n  if (flag) {\n    result = await corpus.echo(\"yes\");\n  }\n  else {\n    result = \"no\";\n  }\n  if (result === \"a\") {\n    result = \"b\";\n  } else if (result === \"c\") {\n    result = \"d\";\n  }\n  else {}\n  const both = await corpus.echo(await corpus.echo(\"inner\"));\n  try {\n    result = await corpus.echo(\"try\");\n  }\n  catch (error) {\n    result = \"caught\";\n  }\n  finally {\n    await corpus.echo(\"finally\");\n  }\n  /** @label Legacy label */\n  for (const item of items) {\n    await corpus.echo(item);\n  }\n  /** Not a caption: a blank line follows */\n\n  /** Not a caption: too long xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx */\n  while (flag) {\n    flag = false;\n  }\n  return [result, both];\n}\n",
       "captions": [
         {
+          "caption": {
+            "description": "Gathers the numbers\nand sends them.\n\nTwice if needed.",
+            "title": "Weekly report — 週報"
+          },
           "site": {
             "unit": {
-              "function": "demo"
+              "library": "a16942d6fdc27c2eb341e2a6537862ad3d415be47a28456e1df4e43ee61982e1"
             }
-          },
-          "caption": {
-            "title": "Weekly report — 週報",
-            "description": "Gathers the numbers\nand sends them.\n\nTwice if needed."
           }
         },
         {
-          "site": {
-            "unit": {
-              "function": "demo"
-            },
-            "path": [
-              0
-            ]
-          },
           "caption": {
             "title": "Fetch the start for t1"
+          },
+          "site": {
+            "path": [
+              0
+            ],
+            "unit": {
+              "library": "a16942d6fdc27c2eb341e2a6537862ad3d415be47a28456e1df4e43ee61982e1"
+            }
           }
         },
         {
-          "site": {
-            "unit": {
-              "function": "demo"
-            },
-            "path": [
-              1
-            ]
-          },
           "caption": {
             "title": "Decide"
+          },
+          "site": {
+            "path": [
+              1
+            ],
+            "unit": {
+              "library": "a16942d6fdc27c2eb341e2a6537862ad3d415be47a28456e1df4e43ee61982e1"
+            }
           }
         },
         {
-          "site": {
-            "unit": {
-              "function": "demo"
-            },
-            "path": [
-              1,
-              1,
-              0
-            ]
-          },
           "caption": {
             "title": "Say yes"
+          },
+          "site": {
+            "path": [
+              1,
+              1,
+              0
+            ],
+            "unit": {
+              "library": "a16942d6fdc27c2eb341e2a6537862ad3d415be47a28456e1df4e43ee61982e1"
+            }
           }
         },
         {
-          "site": {
-            "unit": {
-              "function": "demo"
-            },
-            "path": [
-              1,
-              2
-            ]
-          },
           "caption": {
             "title": "Otherwise say no"
+          },
+          "site": {
+            "path": [
+              1,
+              2
+            ],
+            "unit": {
+              "library": "a16942d6fdc27c2eb341e2a6537862ad3d415be47a28456e1df4e43ee61982e1"
+            }
           }
         },
         {
+          "caption": {
+            "title": "Plain no"
+          },
           "site": {
-            "unit": {
-              "function": "demo"
-            },
             "path": [
               1,
               2,
               0
-            ]
-          },
-          "caption": {
-            "title": "Plain no"
+            ],
+            "unit": {
+              "library": "a16942d6fdc27c2eb341e2a6537862ad3d415be47a28456e1df4e43ee61982e1"
+            }
           }
         },
         {
-          "site": {
-            "unit": {
-              "function": "demo"
-            },
-            "path": [
-              2
-            ]
-          },
           "caption": {
             "title": "Check a"
+          },
+          "site": {
+            "path": [
+              2
+            ],
+            "unit": {
+              "library": "a16942d6fdc27c2eb341e2a6537862ad3d415be47a28456e1df4e43ee61982e1"
+            }
           }
         },
         {
+          "caption": {
+            "title": "Check c instead"
+          },
           "site": {
-            "unit": {
-              "function": "demo"
-            },
             "path": [
               2,
               2,
               0
-            ]
-          },
-          "caption": {
-            "title": "Check c instead"
+            ],
+            "unit": {
+              "library": "a16942d6fdc27c2eb341e2a6537862ad3d415be47a28456e1df4e43ee61982e1"
+            }
           }
         },
         {
+          "caption": {
+            "title": "Nothing else"
+          },
           "site": {
-            "unit": {
-              "function": "demo"
-            },
             "path": [
               2,
               2,
               0,
               2
-            ]
-          },
-          "caption": {
-            "title": "Nothing else"
+            ],
+            "unit": {
+              "library": "a16942d6fdc27c2eb341e2a6537862ad3d415be47a28456e1df4e43ee61982e1"
+            }
           }
         },
         {
-          "site": {
-            "unit": {
-              "function": "demo"
-            },
-            "path": [
-              3
-            ]
-          },
           "caption": {
             "title": "Echo twice"
+          },
+          "site": {
+            "path": [
+              3
+            ],
+            "unit": {
+              "library": "a16942d6fdc27c2eb341e2a6537862ad3d415be47a28456e1df4e43ee61982e1"
+            }
           }
         },
         {
-          "site": {
-            "unit": {
-              "function": "demo"
-            },
-            "path": [
-              4
-            ]
-          },
           "caption": {
             "title": "Try it"
+          },
+          "site": {
+            "path": [
+              4
+            ],
+            "unit": {
+              "library": "a16942d6fdc27c2eb341e2a6537862ad3d415be47a28456e1df4e43ee61982e1"
+            }
           }
         },
         {
+          "caption": {
+            "title": "Recover"
+          },
           "site": {
-            "unit": {
-              "function": "demo"
-            },
             "path": [
               4,
               1
-            ]
-          },
-          "caption": {
-            "title": "Recover"
+            ],
+            "unit": {
+              "library": "a16942d6fdc27c2eb341e2a6537862ad3d415be47a28456e1df4e43ee61982e1"
+            }
           }
         },
         {
+          "caption": {
+            "title": "Always"
+          },
           "site": {
-            "unit": {
-              "function": "demo"
-            },
             "path": [
               4,
               2
-            ]
-          },
-          "caption": {
-            "title": "Always"
+            ],
+            "unit": {
+              "library": "a16942d6fdc27c2eb341e2a6537862ad3d415be47a28456e1df4e43ee61982e1"
+            }
           }
         },
         {
+          "caption": {
+            "title": "Echo each"
+          },
           "site": {
-            "unit": {
-              "function": "demo"
-            },
             "path": [
               5,
               1,
               0
-            ]
-          },
-          "caption": {
-            "title": "Echo each"
+            ],
+            "unit": {
+              "library": "a16942d6fdc27c2eb341e2a6537862ad3d415be47a28456e1df4e43ee61982e1"
+            }
           }
         },
         {
-          "site": {
-            "unit": {
-              "function": "demo"
-            },
-            "path": [
-              7
-            ]
-          },
           "caption": {
             "title": "Near wins"
+          },
+          "site": {
+            "path": [
+              7
+            ],
+            "unit": {
+              "library": "a16942d6fdc27c2eb341e2a6537862ad3d415be47a28456e1df4e43ee61982e1"
+            }
           }
         }
-      ]
+      ],
+      "name": "every kind, nearest wins, tags and trivia",
+      "source": "/**\n * Weekly report — 週報\n *\n * Gathers the numbers   \n * and sends them.\n *\n *\n * Twice if needed.\n * @param flag whether to send\n * @returns the result\n */\nexport async function demo(flag: boolean, items: string[]) {\n  /** Fetch the start for t1 */\n  let result = await corpus.echo(\"start\");\n  // An ordinary comment.\n  /* A block comment. */\n  /** Decide */\n  if (flag) {\n    /** Say yes */\n    result = await corpus.echo(\"yes\");\n  }\n  /** Otherwise say no */\n  else {\n    /** Plain no */\n    result = \"no\";\n  }\n  /** Check a */\n  if (result === \"a\") {\n    result = \"b\";\n  } /** Check c instead */ else if (result === \"c\") {\n    result = \"d\";\n  }\n  /** Nothing else */\n  else {}\n  /** Echo twice */\n  const both = await corpus.echo(await corpus.echo(\"inner\"));\n  /** Try it */\n  try {\n    result = await corpus.echo(\"try\");\n  }\n  /** Recover */\n  catch (error) {\n    result = \"caught\";\n  }\n  /** Always */\n  finally {\n    await corpus.echo(\"finally\");\n  }\n  /** @label Legacy label */\n  for (const item of items) {\n    /** Echo each */ await corpus.echo(item);\n  }\n  /** Not a caption: a blank line follows */\n\n  /** Not a caption: too long xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx */\n  while (flag) {\n    flag = false;\n  }\n  /** Far */\n  /** Near wins */\n  return [result, both];\n}\n",
+      "stripped": "export async function demo(flag: boolean, items: string[]) {\n  let result = await corpus.echo(\"start\");\n  // An ordinary comment.\n  /* A block comment. */\n  if (flag) {\n    result = await corpus.echo(\"yes\");\n  }\n  else {\n    result = \"no\";\n  }\n  if (result === \"a\") {\n    result = \"b\";\n  } else if (result === \"c\") {\n    result = \"d\";\n  }\n  else {}\n  const both = await corpus.echo(await corpus.echo(\"inner\"));\n  try {\n    result = await corpus.echo(\"try\");\n  }\n  catch (error) {\n    result = \"caught\";\n  }\n  finally {\n    await corpus.echo(\"finally\");\n  }\n  /** @label Legacy label */\n  for (const item of items) {\n    await corpus.echo(item);\n  }\n  /** Not a caption: a blank line follows */\n\n  /** Not a caption: too long xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx */\n  while (flag) {\n    flag = false;\n  }\n  return [result, both];\n}\n"
     },
     {
-      "name": "hoisted work and predeclarations",
-      "source": "/** Hoisted work */\nexport async function hoisted(flag: boolean) {\n  /** Read the value later via t1 */\n  const read = () => value;\n  /** Greet first */\n  await greet(\"a\");\n  /** Set the value */\n  let value = await corpus.echo(\"v\");\n  /** Pick one */\n  const picked = flag ? await corpus.echo(\"x\") : \"y\";\n  /** Greet someone */\n  async function greet(name: string) {\n    /** Echo the name */\n    return await corpus.echo(name);\n  }\n  return [read(), picked];\n}\n",
-      "stripped": "export async function hoisted(flag: boolean) {\n  const read = () => value;\n  await greet(\"a\");\n  let value = await corpus.echo(\"v\");\n  const picked = flag ? await corpus.echo(\"x\") : \"y\";\n  async function greet(name: string) {\n    return await corpus.echo(name);\n  }\n  return [read(), picked];\n}\n",
       "captions": [
         {
-          "site": {
-            "unit": {
-              "function": "hoisted"
-            }
-          },
           "caption": {
             "title": "Hoisted work"
+          },
+          "site": {
+            "unit": {
+              "library": "0ac89047c26730008cfe97da34d607c77e18a0a40a245291c6a21bc33e1a1717"
+            }
           }
         },
         {
-          "site": {
-            "unit": {
-              "function": "hoisted"
-            },
-            "path": [
-              1
-            ]
-          },
           "caption": {
             "title": "Read the value later via t1"
+          },
+          "site": {
+            "path": [
+              1
+            ],
+            "unit": {
+              "library": "0ac89047c26730008cfe97da34d607c77e18a0a40a245291c6a21bc33e1a1717"
+            }
           }
         },
         {
-          "site": {
-            "unit": {
-              "function": "hoisted"
-            },
-            "path": [
-              2
-            ]
-          },
           "caption": {
             "title": "Greet someone"
+          },
+          "site": {
+            "path": [
+              2
+            ],
+            "unit": {
+              "library": "0ac89047c26730008cfe97da34d607c77e18a0a40a245291c6a21bc33e1a1717"
+            }
           }
         },
         {
-          "site": {
-            "unit": {
-              "function": "hoisted"
-            },
-            "path": [
-              2,
-              0,
-              4,
-              0,
-              0,
-              0,
-              0,
-              0,
-              2
-            ]
-          },
           "caption": {
             "title": "Echo the name"
+          },
+          "site": {
+            "path": [
+              2
+            ],
+            "unit": {
+              "library": "d21ff9bba0ecc660ddb143367ed84a240e2357e2be92b8a84daf0c9393f8cf2c"
+            }
           }
         },
         {
-          "site": {
-            "unit": {
-              "function": "hoisted"
-            },
-            "path": [
-              3
-            ]
-          },
           "caption": {
             "title": "Greet first"
+          },
+          "site": {
+            "path": [
+              3
+            ],
+            "unit": {
+              "library": "0ac89047c26730008cfe97da34d607c77e18a0a40a245291c6a21bc33e1a1717"
+            }
           }
         },
         {
-          "site": {
-            "unit": {
-              "function": "hoisted"
-            },
-            "path": [
-              4
-            ]
-          },
           "caption": {
             "title": "Set the value"
+          },
+          "site": {
+            "path": [
+              4
+            ],
+            "unit": {
+              "library": "0ac89047c26730008cfe97da34d607c77e18a0a40a245291c6a21bc33e1a1717"
+            }
           }
         },
         {
-          "site": {
-            "unit": {
-              "function": "hoisted"
-            },
-            "path": [
-              5
-            ]
-          },
           "caption": {
             "title": "Pick one"
+          },
+          "site": {
+            "path": [
+              5
+            ],
+            "unit": {
+              "library": "0ac89047c26730008cfe97da34d607c77e18a0a40a245291c6a21bc33e1a1717"
+            }
           }
         }
-      ]
+      ],
+      "name": "hoisted work and predeclarations",
+      "source": "/** Hoisted work */\nexport async function hoisted(flag: boolean) {\n  /** Read the value later via t1 */\n  const read = () => value;\n  /** Greet first */\n  await greet(\"a\");\n  /** Set the value */\n  let value = await corpus.echo(\"v\");\n  /** Pick one */\n  const picked = flag ? await corpus.echo(\"x\") : \"y\";\n  /** Greet someone */\n  async function greet(name: string) {\n    /** Echo the name */\n    return await corpus.echo(name);\n  }\n  return [read(), picked];\n}\n",
+      "stripped": "export async function hoisted(flag: boolean) {\n  const read = () => value;\n  await greet(\"a\");\n  let value = await corpus.echo(\"v\");\n  const picked = flag ? await corpus.echo(\"x\") : \"y\";\n  async function greet(name: string) {\n    return await corpus.echo(name);\n  }\n  return [read(), picked];\n}\n"
     },
     {
-      "name": "parameters and the fields of their and the result's types",
-      "source": "type Topic = {\n  /** Not a caption: a named type's fields are not the entry's */\n  title: string;\n};\n/** Triage a card */\nexport async function triage(\n  /**\n   * The card that was answered\n   *\n   * Sent by the review queue.\n   */\n  event: {\n    /** What the reviewer picked */\n    choice: string;\n    /** Notes, when written */\n    notes?: string;\n    reviewer: {\n      /** Who reviewed it */\n      name: string;\n    };\n  },\n  /** Items to echo */\n  items: Array<{\n    /** The item's title */\n    title: string;\n  }>,\n  /** @param flag tags alone are no caption */\n  flag: boolean | null,\n  topic: Topic,\n): Promise<{\n  /** Whether the card was escalated */\n  escalated: boolean;\n}> {\n  /** Start counting */\n  let count = 0;\n  await corpus.echo(event);\n  return { escalated: flag === true };\n}\n",
-      "stripped": "type Topic = {\n  title: string;\n};\nexport async function triage(\n  event: {\n    choice: string;\n    notes?: string;\n    reviewer: {\n      name: string;\n    };\n  },\n  items: Array<{\n    title: string;\n  }>,\n  flag: boolean | null,\n  topic: Topic,\n): Promise<{\n  escalated: boolean;\n}> {\n  let count = 0;\n  await corpus.echo(event);\n  return { escalated: flag === true };\n}\n",
       "captions": [
         {
-          "site": {
-            "unit": {
-              "function": "triage"
-            }
-          },
           "caption": {
             "title": "Triage a card"
-          }
-        },
-        {
+          },
           "site": {
             "unit": {
-              "function": "triage"
-            },
-            "path": [
-              0
-            ]
-          },
-          "caption": {
-            "title": "Start counting"
+              "library": "6d5f293a3348fa6530321d8ddd5edafcb5a22b15ee4ff64ebd1f9e23c120186a"
+            }
           }
         },
         {
+          "caption": {
+            "title": "Start counting"
+          },
+          "site": {
+            "path": [
+              0
+            ],
+            "unit": {
+              "library": "6d5f293a3348fa6530321d8ddd5edafcb5a22b15ee4ff64ebd1f9e23c120186a"
+            }
+          }
+        },
+        {
+          "caption": {
+            "description": "Sent by the review queue.",
+            "title": "The card that was answered"
+          },
           "param": {
             "function": "triage",
             "param": "event"
-          },
-          "caption": {
-            "title": "The card that was answered",
-            "description": "Sent by the review queue."
           }
         },
         {
+          "caption": {
+            "title": "Items to echo"
+          },
           "param": {
             "function": "triage",
             "param": "items"
-          },
-          "caption": {
-            "title": "Items to echo"
           }
         },
         {
-          "field": {
-            "function": "triage",
-            "path": {
-              "root": {
-                "param": "event"
-              },
-              "fields": [
-                "choice"
-              ]
-            }
-          },
           "caption": {
             "title": "What the reviewer picked"
-          }
-        },
-        {
+          },
           "field": {
             "function": "triage",
             "path": {
+              "fields": [
+                "choice"
+              ],
               "root": {
                 "param": "event"
-              },
-              "fields": [
-                "notes"
-              ]
+              }
             }
-          },
+          }
+        },
+        {
           "caption": {
             "title": "Notes, when written"
-          }
-        },
-        {
+          },
           "field": {
             "function": "triage",
             "path": {
+              "fields": [
+                "notes"
+              ],
               "root": {
                 "param": "event"
-              },
+              }
+            }
+          }
+        },
+        {
+          "caption": {
+            "title": "Who reviewed it"
+          },
+          "field": {
+            "function": "triage",
+            "path": {
               "fields": [
                 "reviewer",
                 "name"
-              ]
+              ],
+              "root": {
+                "param": "event"
+              }
             }
-          },
-          "caption": {
-            "title": "Who reviewed it"
           }
         },
         {
-          "field": {
-            "function": "triage",
-            "path": {
-              "root": {
-                "param": "items"
-              },
-              "fields": [
-                "title"
-              ]
-            }
-          },
           "caption": {
             "title": "The item's title"
-          }
-        },
-        {
+          },
           "field": {
             "function": "triage",
             "path": {
-              "root": "result",
               "fields": [
-                "escalated"
-              ]
+                "title"
+              ],
+              "root": {
+                "param": "items"
+              }
             }
-          },
+          }
+        },
+        {
           "caption": {
             "title": "Whether the card was escalated"
+          },
+          "field": {
+            "function": "triage",
+            "path": {
+              "fields": [
+                "escalated"
+              ],
+              "root": "result"
+            }
           }
         }
-      ]
+      ],
+      "name": "parameters and the fields of their and the result's types",
+      "source": "type Topic = {\n  /** Not a caption: a named type's fields are not the entry's */\n  title: string;\n};\n/** Triage a card */\nexport async function triage(\n  /**\n   * The card that was answered\n   *\n   * Sent by the review queue.\n   */\n  event: {\n    /** What the reviewer picked */\n    choice: string;\n    /** Notes, when written */\n    notes?: string;\n    reviewer: {\n      /** Who reviewed it */\n      name: string;\n    };\n  },\n  /** Items to echo */\n  items: Array<{\n    /** The item's title */\n    title: string;\n  }>,\n  /** @param flag tags alone are no caption */\n  flag: boolean | null,\n  topic: Topic,\n): Promise<{\n  /** Whether the card was escalated */\n  escalated: boolean;\n}> {\n  /** Start counting */\n  let count = 0;\n  await corpus.echo(event);\n  return { escalated: flag === true };\n}\n",
+      "stripped": "type Topic = {\n  title: string;\n};\nexport async function triage(\n  event: {\n    choice: string;\n    notes?: string;\n    reviewer: {\n      name: string;\n    };\n  },\n  items: Array<{\n    title: string;\n  }>,\n  flag: boolean | null,\n  topic: Topic,\n): Promise<{\n  escalated: boolean;\n}> {\n  let count = 0;\n  await corpus.echo(event);\n  return { escalated: flag === true };\n}\n"
     }
   ],
   "readback": [

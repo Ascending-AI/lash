@@ -186,10 +186,17 @@ impl CaptionDialect<'_> {
     /// The first case that does not read back.
     pub fn readback(&self) -> Result<(), HarnessError> {
         const RULE: &str = "K-CAP-002";
+        let mut witnessed = BTreeSet::new();
         for case in &self.corpus.readback {
             let lowered = self.module(RULE, &case.name, &case.source)?;
             let document = lowered.document.document();
-            let captions = everywhere(document)?;
+            let captions = authored_surface(&lowered, &case.source)?;
+            witnessed.extend(
+                captions
+                    .entries()
+                    .iter()
+                    .filter_map(|entry| entry.target.kind(document)),
+            );
             let printed = self
                 .print(document, &captions, false)
                 .map_err(|error| fail(RULE, &case.name, error))?;
@@ -221,11 +228,21 @@ impl CaptionDialect<'_> {
                 ));
             }
         }
+        for kind in self.package.captions.kinds {
+            if !witnessed.contains(kind) {
+                return Err(fail(
+                    RULE,
+                    "corpus",
+                    format!("no authored witness for {kind:?}"),
+                ));
+            }
+        }
         Ok(())
     }
 
     /// `K-CAP-006`: a printer lists in `dropped` exactly the captions of
-    /// the kinds its dialect does not spell, with or without a map.
+    /// the kinds its dialect does not spell or its syntax cannot represent,
+    /// with or without a map.
     ///
     /// # Errors
     ///
@@ -236,11 +253,37 @@ impl CaptionDialect<'_> {
         for case in &self.corpus.readback {
             let lowered = self.module(RULE, &case.name, &case.source)?;
             let document = lowered.document.document();
-            let captions = everywhere(document)?;
+            let authored = authored_surface(&lowered, &case.source)?;
+            // Exercise the authored surface alongside retained support bodies
+            // and synthetic module bindings. Closure adapters are lowering
+            // scaffolding, not a second authored statement inventory.
+            let authored_units: BTreeSet<_> = lowered
+                .source_map
+                .iter()
+                .flat_map(|map| &map.sites)
+                .map(|located| located.site.unit.clone())
+                .collect();
+            let entries = everywhere(document)?
+                .entries()
+                .iter()
+                .filter(|entry| {
+                    authored.get(&entry.target).is_some()
+                        || entry.target.site().is_some_and(|site| {
+                            (site.unit == lash_vocabulary::sites::Unit::Main
+                                && !document.exports.is_empty())
+                                || !authored_units.contains(&site.unit)
+                        })
+                })
+                .cloned()
+                .collect();
+            let captions = Captions::new(document, entries)
+                .map_err(|refusal| fail(RULE, &case.name, refusal))?;
             let expected: Vec<CaptionTarget> = captions
                 .entries()
                 .iter()
-                .filter(|entry| !self.supports(document, &entry.target))
+                .filter(|entry| {
+                    !self.supports(document, &entry.target) || authored.get(&entry.target).is_none()
+                })
                 .map(|entry| entry.target.clone())
                 .collect();
             for source_map in [false, true] {
@@ -396,6 +439,137 @@ pub fn everywhere(document: &Document) -> Result<Captions, HarnessError> {
             target,
             caption: caption.clone(),
         })
+        .collect();
+    Captions::new(document, entries).map_err(|refusal| HarnessError(refusal.to_string()))
+}
+
+/// Source locations own authored statements; their clause arms share that
+/// ownership. Export declarations own their body and signature targets.
+/// Retained helper bodies and module export-binding scaffolding have no
+/// authored caption surface. A lifted closure's body has statements, but
+/// no separate declaration caption (`K-CAP-003`).
+fn authored_surface(lowered: &Lowered, source: &str) -> Result<Captions, HarnessError> {
+    use lash_kernel_doc::{CaptionKind, Node};
+    use lash_vocabulary::sites::Unit;
+    let document = lowered.document.document();
+    let exports: BTreeSet<_> = document
+        .exports
+        .values()
+        .filter_map(|export| match export {
+            lash_kernel_doc::Export::Function(export) => Some(export.function),
+            _ => None,
+        })
+        .collect();
+    // A closure's synthetic return or argument adapter can share the source
+    // range of the statement that creates it. Ownership belongs to that
+    // outer construct, not to every implementation statement with a span.
+    let mut depths = std::collections::BTreeMap::new();
+    let mut pending: std::collections::VecDeque<_> = exports
+        .iter()
+        .map(|id| (Unit::Library(*id), 0usize))
+        .collect();
+    if document.exports.is_empty() {
+        pending.push_back((Unit::Main, 0));
+    }
+    while let Some((unit, depth)) = pending.pop_front() {
+        if depths.contains_key(&unit) {
+            continue;
+        }
+        depths.insert(unit.clone(), depth);
+        let Some(body) = document.node(&Site::new(unit, [])) else {
+            continue;
+        };
+        let mut nodes = vec![body];
+        while let Some(node) = nodes.pop() {
+            if let Node::Expr(lash_kernel_doc::Expr::Closure(closure)) = node {
+                pending.push_back((Unit::Library(closure.function), depth + 1));
+            }
+            nodes.extend(node.children());
+        }
+    }
+    let mut constructs = std::collections::BTreeMap::<_, Vec<Site>>::new();
+    for located in lowered.source_map.iter().flat_map(|map| &map.sites) {
+        if !depths.contains_key(&located.site.unit)
+            || !matches!(document.node(&located.site), Some(Node::Stmt(_)))
+        {
+            continue;
+        }
+        for span in &located.ranges {
+            // Python except dispatch is an implementation control tree,
+            // not an authored if/else. Its suite statements have their own
+            // source ranges; the enclosing try owns the clause caption.
+            if source[span.start..span.end]
+                .trim_start()
+                .starts_with("except")
+            {
+                continue;
+            }
+            constructs
+                .entry((span.start, span.end))
+                .or_default()
+                .push(located.site.clone());
+        }
+    }
+    let mut mapped = BTreeSet::new();
+    for sites in constructs.values_mut() {
+        let depth = sites
+            .iter()
+            .map(|site| depths[&site.unit])
+            .min()
+            .expect("a construct");
+        sites.retain(|site| depths[&site.unit] == depth);
+        let path_depth = sites
+            .iter()
+            .map(|site| site.path.len())
+            .min()
+            .expect("a construct");
+        sites.retain(|site| site.path.len() == path_depth);
+        sites.sort();
+        // K-CAP-003: the first action, otherwise the final binding.
+        let owner = sites
+            .iter()
+            .find(|site| {
+                let mut nodes = vec![document.node(site).expect("mapped statement")];
+                while let Some(node) = nodes.pop() {
+                    if matches!(
+                        node,
+                        Node::Action(_) | Node::Expr(lash_kernel_doc::Expr::Act(_))
+                    ) {
+                        return true;
+                    }
+                    nodes.extend(
+                        node.children()
+                            .into_iter()
+                            .filter(|node| !matches!(node, Node::Block(_))),
+                    );
+                }
+                false
+            })
+            .or_else(|| sites.last())
+            .expect("a construct owner");
+        mapped.insert(owner.clone());
+    }
+    let entries = everywhere(document)?
+        .entries()
+        .iter()
+        .filter(|entry| {
+            let Some(site) = entry.target.site() else {
+                return true;
+            };
+            if site.path.is_empty() {
+                return matches!(site.unit, Unit::Library(id) if exports.contains(&id));
+            }
+            match document.node(site) {
+                Some(Node::Stmt(_)) => mapped.contains(site),
+                Some(Node::Block(_)) if CaptionKind::of(document, site).is_some() => {
+                    let mut parent = site.clone();
+                    parent.path.pop();
+                    mapped.contains(&parent)
+                }
+                _ => false,
+            }
+        })
+        .cloned()
         .collect();
     Captions::new(document, entries).map_err(|refusal| HarnessError(refusal.to_string()))
 }
