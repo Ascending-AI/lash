@@ -15,6 +15,8 @@ use crate::{Diagnostic, DiagnosticKind, Note};
 pub enum ModuleRefusal {
     /// Two entries have one name.
     DuplicateEntry,
+    /// The module declares no entry.
+    EmptyModule,
     /// An entry reads a binding of the module: another entry, a top-level
     /// helper or a top-level value.
     CapturedModuleBinding,
@@ -26,8 +28,9 @@ pub enum ModuleRefusal {
 
 impl ModuleRefusal {
     /// Every rule, for a caller that lists them.
-    pub const ALL: [Self; 4] = [
+    pub const ALL: [Self; 5] = [
         Self::DuplicateEntry,
+        Self::EmptyModule,
         Self::CapturedModuleBinding,
         Self::UnmappableEntryAnnotation,
         Self::EntryDefault,
@@ -38,6 +41,7 @@ impl ModuleRefusal {
     pub const fn code(self) -> &'static str {
         match self {
             Self::DuplicateEntry => "WORKFLOW_DUPLICATE_ENTRY",
+            Self::EmptyModule => "WORKFLOW_EMPTY_MODULE",
             Self::CapturedModuleBinding => "WORKFLOW_CAPTURED_MODULE_BINDING",
             Self::UnmappableEntryAnnotation => "WORKFLOW_UNMAPPABLE_ENTRY_ANNOTATION",
             Self::EntryDefault => "WORKFLOW_ENTRY_DEFAULT",
@@ -50,9 +54,10 @@ impl ModuleRefusal {
     pub const fn kind(self) -> DiagnosticKind {
         match self {
             Self::DuplicateEntry => DiagnosticKind::ProgramDefect,
-            Self::CapturedModuleBinding | Self::UnmappableEntryAnnotation | Self::EntryDefault => {
-                DiagnosticKind::Refusal
-            }
+            Self::EmptyModule
+            | Self::CapturedModuleBinding
+            | Self::UnmappableEntryAnnotation
+            | Self::EntryDefault => DiagnosticKind::Refusal,
         }
     }
 
@@ -61,6 +66,7 @@ impl ModuleRefusal {
     pub const fn repair(self) -> &'static str {
         match self {
             Self::DuplicateEntry => "rename one of the entries",
+            Self::EmptyModule => "declare the workflow as a top-level function",
             Self::CapturedModuleBinding => {
                 "pass the value as a parameter of the entry, or define the helper inside its body"
             }
@@ -191,6 +197,10 @@ impl Module {
         document: &mut Document,
         notes: &mut BTreeMap<FunctionId, Vec<Note>>,
     ) -> Result<(), ModuleError> {
+        if self.entries.is_empty() {
+            return Err(ModuleRefusal::EmptyModule
+                .at("the module declares no entry: no top-level function", None));
+        }
         for (name, entry) in self.entries {
             if document.exports.contains_key(&name) {
                 return Err(duplicate(&name, entry.span));

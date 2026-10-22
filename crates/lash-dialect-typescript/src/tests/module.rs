@@ -203,6 +203,16 @@ fn process_wrapping_is_not_an_entry_form() {
 /// The contract's refusals, under the codes every dialect shares.
 #[test]
 fn the_contract_refuses_under_the_shared_codes() {
+    // FIG-7135: a code-only module still has no host-startable entry.
+    for source in ["const value = 3;", ""] {
+        let diagnostic = module(source).expect_err("a module must declare an entry");
+        assert_eq!(diagnostic.code.as_str(), "WORKFLOW_EMPTY_MODULE");
+        assert_eq!(diagnostic.span, None);
+        assert_eq!(
+            diagnostic.kind,
+            lash_kernel_dialect::DiagnosticKind::Refusal
+        );
+    }
     for (source, expected) in [
         (
             "export async function a() { return 1; }\nexport async function a() { return 2; }",

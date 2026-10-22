@@ -321,6 +321,16 @@ fn tool_keywords_name_the_declared_input_fields() {
 /// The contract's refusals, under the codes every dialect shares.
 #[test]
 fn the_contract_refuses_under_the_shared_codes() {
+    // FIG-7135: a code-only module still has no host-startable entry.
+    for source in ["value = 3\n", ""] {
+        let diagnostic = module(source).expect_err("a module must declare an entry");
+        assert_eq!(diagnostic.code, "WORKFLOW_EMPTY_MODULE");
+        assert_eq!(diagnostic.span, None);
+        assert_eq!(
+            diagnostic.kind,
+            lash_kernel_dialect::DiagnosticKind::Refusal
+        );
+    }
     for (source, expected) in [
         (
             "async def a():\n    return 1\n\n\nasync def a():\n    return 2\n",

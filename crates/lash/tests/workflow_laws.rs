@@ -1393,6 +1393,11 @@ async fn typescript_and_python_modules_share_one_entry_contract() {
             ModuleRefusal::DuplicateEntry,
         ),
         (
+            "const value = 3;",
+            "value = 3\n",
+            ModuleRefusal::EmptyModule,
+        ),
+        (
             "const limit = 3;\nexport async function a() { return limit; }",
             "limit = 3\n\n\nasync def a():\n    return limit\n",
             ModuleRefusal::CapturedModuleBinding,
@@ -1436,16 +1441,16 @@ async fn typescript_and_python_modules_share_one_entry_contract() {
     for (language, source) in [
         (
             SourceLanguage::TypeScript,
-            "if (true) { const a = async () => 1; }",
+            "export async function entry() { return 0; }\nif (true) { const a = async () => 1; }",
         ),
         (
             SourceLanguage::Python,
-            "if True:\n    async def a():\n        return 1\n",
+            "async def entry():\n    return 0\n\nif True:\n    async def a():\n        return 1\n",
         ),
     ] {
         assert!(
-            entries(import(language, source).await, source).is_empty(),
-            "nested functions create no public Export"
+            entries(import(language, source).await, source) == ["entry"],
+            "only the top-level function creates a public Export"
         );
     }
     let wrapped = "export const digest = process(async (inbox: string) => inbox);";
