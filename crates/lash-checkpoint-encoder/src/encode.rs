@@ -97,6 +97,7 @@ enum EncodingKind {
     Bytes,
     Envelope,
     Logical(usize),
+    References(NodeKind),
 }
 
 type EncodingKey = (EncodingKind, [u8; 32]);
@@ -112,15 +113,27 @@ struct PreparedEncoding {
 
 enum PreparedGraph {
     Encoding(Arc<PreparedEncoding>),
-    Envelope { input: Box<[u8]>, framing: Framing },
-    Logical { input: Box<[u8]>, tokens: Arc<[u8]> },
+    Envelope {
+        input: Box<[u8]>,
+        framing: Framing,
+    },
+    Logical {
+        input: Box<[u8]>,
+        tokens: Arc<[u8]>,
+    },
+    References {
+        input: Box<[u8]>,
+        references: Arc<References>,
+    },
 }
 
 impl PreparedGraph {
     fn input(&self) -> &[u8] {
         match self {
             Self::Encoding(prepared) => &prepared.input,
-            Self::Envelope { input, .. } | Self::Logical { input, .. } => input,
+            Self::Envelope { input, .. }
+            | Self::Logical { input, .. }
+            | Self::References { input, .. } => input,
         }
     }
 
@@ -129,6 +142,12 @@ impl PreparedGraph {
             Self::Encoding(prepared) => prepared.bytes,
             Self::Envelope { input, .. } => input.len() + std::mem::size_of::<Framing>(),
             Self::Logical { input, tokens } => input.len() + tokens.len(),
+            Self::References { input, references } => {
+                input.len()
+                    + references.at.capacity() * std::mem::size_of::<(usize, [u8; 32])>()
+                    + references.children.capacity() * std::mem::size_of::<[u8; 32]>()
+                    + std::mem::size_of::<References>()
+            }
         }
     }
 }
@@ -163,21 +182,34 @@ impl EncodingCache {
     fn get(&mut self, key: &EncodingKey, input: &[u8]) -> Option<Arc<PreparedEncoding>> {
         match self.get_prepared(key, input)? {
             PreparedGraph::Encoding(prepared) => Some(Arc::clone(prepared)),
-            PreparedGraph::Envelope { .. } | PreparedGraph::Logical { .. } => None,
+            PreparedGraph::Envelope { .. }
+            | PreparedGraph::Logical { .. }
+            | PreparedGraph::References { .. } => None,
         }
     }
 
     fn envelope(&mut self, key: &EncodingKey, input: &[u8]) -> Option<Framing> {
         match self.get_prepared(key, input)? {
             PreparedGraph::Envelope { framing, .. } => Some(*framing),
-            PreparedGraph::Encoding(_) | PreparedGraph::Logical { .. } => None,
+            PreparedGraph::Encoding(_)
+            | PreparedGraph::Logical { .. }
+            | PreparedGraph::References { .. } => None,
         }
     }
 
     fn logical(&mut self, key: &EncodingKey, input: &[u8]) -> Option<Arc<[u8]>> {
         match self.get_prepared(key, input)? {
             PreparedGraph::Logical { tokens, .. } => Some(Arc::clone(tokens)),
-            PreparedGraph::Encoding(_) | PreparedGraph::Envelope { .. } => None,
+            PreparedGraph::Encoding(_)
+            | PreparedGraph::Envelope { .. }
+            | PreparedGraph::References { .. } => None,
+        }
+    }
+
+    fn references(&mut self, key: &EncodingKey, input: &[u8]) -> Option<Arc<References>> {
+        match self.get_prepared(key, input)? {
+            PreparedGraph::References { references, .. } => Some(Arc::clone(references)),
+            _ => None,
         }
     }
 
@@ -755,7 +787,7 @@ pub fn to_physical(
     let references = References::scan(logical, kind)?;
     let mut body = Vec::with_capacity(references.physical_len(logical.len()));
     references.write_physical(logical, &mut body);
-    Ok((references.children, body))
+    Ok((references.children.clone(), body))
 }
 
 /// A logical reference's length: its tag and its child's digest.
@@ -768,9 +800,55 @@ pub(crate) struct References {
     pub(crate) children: Vec<[u8; 32]>,
 }
 
+#[cfg(test)]
+thread_local! {
+    static REFERENCE_SCANS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+
+fn prepare_references(
+    key: EncodingKey,
+    logical: &[u8],
+    scan: impl FnOnce() -> Result<References, GraphRefusal>,
+) -> Result<Arc<References>, GraphRefusal> {
+    let cache = encoding_cache();
+    if let Some(references) = cache
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .references(&key, logical)
+    {
+        return Ok(references);
+    }
+    let references = Arc::new(scan()?);
+    let prepared = PreparedGraph::References {
+        input: logical.into(),
+        references: Arc::clone(&references),
+    };
+    let mut cache = cache
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    if let Some(references) = cache.references(&key, logical) {
+        return Ok(references);
+    }
+    cache.insert_prepared(key, prepared);
+    Ok(references)
+}
+
 impl References {
     /// Reads every token of `logical`, each of which must be canonical.
-    pub(crate) fn scan(logical: &[u8], kind: NodeKind) -> Result<Self, GraphRefusal> {
+    pub(crate) fn scan(logical: &[u8], kind: NodeKind) -> Result<Arc<Self>, GraphRefusal> {
+        if logical.len() > CACHE_BYTES {
+            return Self::scan_uncached(logical, kind).map(Arc::new);
+        }
+        let key = (
+            EncodingKind::References(kind),
+            TypedBody::logical(logical).digest(),
+        );
+        prepare_references(key, logical, || Self::scan_uncached(logical, kind))
+    }
+
+    fn scan_uncached(logical: &[u8], kind: NodeKind) -> Result<Self, GraphRefusal> {
+        #[cfg(test)]
+        REFERENCE_SCANS.with(|count| count.set(count.get() + 1));
         let mut at = Vec::new();
         let mut reader = TokenReader::new(logical);
         while !reader.is_empty() {
@@ -894,6 +972,68 @@ fn longest_block(events: &[Event], start: usize) -> usize {
 #[cfg(test)]
 mod cache_tests {
     use super::*;
+
+    /// FIG-7135: repeated physical framing scans each logical content once,
+    /// independently of fresh allocations and the number of cold readers.
+    #[test]
+    fn reference_scans_are_bounded_by_content_not_reads() {
+        let mut tokens = TokenWriter::new();
+        tokens.seq(4);
+        tokens.text("FIG-7135 repeated reference scan");
+        tokens.child(ChildRef([0x61; 32]));
+        tokens.child(ChildRef([0x62; 32]));
+        tokens.child(ChildRef([0x61; 32]));
+        let logical = tokens.into_bytes();
+        REFERENCE_SCANS.with(|count| count.set(0));
+        for _ in 0..12 {
+            let (children, physical) =
+                to_physical(&logical.clone(), NodeKind::FROZEN_VALUE).unwrap();
+            assert_eq!(children, [[0x61; 32], [0x62; 32]]);
+            assert!(!physical.is_empty());
+        }
+        assert_eq!(
+            REFERENCE_SCANS.with(std::cell::Cell::get),
+            1,
+            "reference scanning grows with reader count"
+        );
+    }
+
+    /// FIG-7135: racing reference scans reclassify under the same owner
+    /// and compare complete inputs, even when their lookup keys coincide.
+    #[test]
+    fn racing_reference_preparations_keep_each_inputs_children() {
+        let barrier = std::sync::Barrier::new(2);
+        let key = (EncodingKind::References(NodeKind(1_002)), [0x94; 32]);
+        let bodies: Vec<_> = [0x81, 0x82]
+            .into_iter()
+            .map(|byte| {
+                let mut body = TokenWriter::new();
+                body.child(ChildRef([byte; 32]));
+                body.into_bytes()
+            })
+            .collect();
+        std::thread::scope(|scope| {
+            for body in &bodies {
+                let barrier = &barrier;
+                scope.spawn(move || {
+                    let refs = prepare_references(key, body, || {
+                        let refs = References::scan_uncached(body, NodeKind(1_002))?;
+                        barrier.wait();
+                        Ok(refs)
+                    })
+                    .unwrap();
+                    assert_eq!(refs.children, [<[u8; 32]>::try_from(&body[1..]).unwrap()]);
+                });
+            }
+        });
+        for body in &bodies {
+            let refs = prepare_references(key, body, || {
+                References::scan_uncached(body, NodeKind(1_002))
+            })
+            .unwrap();
+            assert_eq!(refs.children, [<[u8; 32]>::try_from(&body[1..]).unwrap()]);
+        }
+    }
 
     /// Preparation residency is bounded by both retained bytes and entries;
     /// eviction cannot change an encoding and an oversized input runs uncached.

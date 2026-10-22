@@ -620,6 +620,7 @@ impl<'s> GraphDecoder<'s> {
         let refuse = |error| GraphRefusal::from_token(error, Some(id), None);
         let mut reader = TokenReader::new(placed);
         let mut out: Option<TokenWriter> = None;
+        let mut copied = 0;
         while !reader.is_empty() {
             let start = reader.position();
             match reader.next_event().map_err(refuse)? {
@@ -648,10 +649,9 @@ impl<'s> GraphDecoder<'s> {
                             let writer = out.get_or_insert_with(|| {
                                 let capacity = placed.len() - (reader.position() - start)
                                     + token_len(value.len()) as usize;
-                                let mut writer = TokenWriter::with_capacity(capacity);
-                                writer.raw(&placed[..start]);
-                                writer
+                                TokenWriter::with_capacity(capacity)
                             });
+                            writer.raw(&placed[copied..start]);
                             match family {
                                 Family::Text => writer.text(
                                     std::str::from_utf8(&value)
@@ -659,27 +659,23 @@ impl<'s> GraphDecoder<'s> {
                                 ),
                                 Family::Bytes => writer.bytes(&value),
                             }
+                            copied = reader.position();
                         }
-                        None => {
-                            if let Some(writer) = &mut out {
-                                writer.raw(&placed[start..reader.position()]);
-                            }
-                        }
+                        None => {}
                     }
                 }
-                _ => {
-                    if let Some(writer) = &mut out {
-                        writer.raw(&placed[start..reader.position()]);
-                    }
-                }
+                _ => {}
             }
             self.limit(
                 DecodeDimension::LogicalBytes,
-                out.as_ref().map_or(reader.position(), TokenWriter::len) as u64,
+                out.as_ref().map_or(reader.position(), |writer| {
+                    writer.len() + reader.position() - copied
+                }) as u64,
                 self.limits.logical_bytes,
             )?;
         }
-        Ok(out.map_or(Cow::Borrowed(placed), |writer| {
+        Ok(out.map_or(Cow::Borrowed(placed), |mut writer| {
+            writer.raw(&placed[copied..]);
             Cow::Owned(writer.into_bytes())
         }))
     }
