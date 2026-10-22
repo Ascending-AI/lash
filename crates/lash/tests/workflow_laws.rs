@@ -1309,6 +1309,7 @@ fn workflow_import_future_is_send() {
                 Some(lash::dialect::workflow::WorkflowSourceLimits {
                     max_bytes: 1024,
                     max_nesting: 16,
+                    implicit_text_conversion: Default::default(),
                 }),
             ));
         };
@@ -1540,3 +1541,86 @@ mod cancelled_sleep;
 #[cfg(all(feature = "typescript", feature = "python", feature = "workflow-view"))]
 #[path = "workflow_laws/sleep_resume_at.rs"]
 mod sleep_resume_at;
+
+/// FIG-7139: saved-workflow import preserves typed implicit-text refusals and host policy.
+#[tokio::test]
+async fn implicit_text_admission_preserves_operand_facts_for_hosts() {
+    use lash::dialect::{
+        SourceOperandType as Static,
+        workflow::{ImplicitTextConversionPolicy as Policy, WorkflowSourceLimits},
+    };
+    use lash::workflow::{
+        WorkflowImport,
+        document::{SourceLanguage, Span},
+    };
+    let stores = Arc::new(lash_sqlite_store::SqliteStoreSet::memory().await.unwrap());
+    let core =
+        core_with_process_tools(stores, "implicit-text", false, EchoComponent::Installed).await;
+    let pin = lash::process::HostArtifactPin::mint();
+    let (_, request) = namespace(&core, &pin, &source_environment(false)).await;
+    for (parameters, typed) in [
+        ("event", false),
+        (
+            "event: { answered_by: { identity_id: string; kind: string } }",
+            true,
+        ),
+    ] {
+        for expression in [
+            "`answered by ${event.answered_by}`",
+            "'answered by ' + event.answered_by",
+        ] {
+            let source = format!("export function answer({parameters}) {{ return {expression}; }}");
+            for policy in [
+                None,
+                Some(Policy::Refuse),
+                Some(Policy::Allow),
+                Some(Policy::Strict),
+            ] {
+                let limits = policy.map(|implicit_text_conversion| WorkflowSourceLimits {
+                    max_bytes: 65536,
+                    max_nesting: 28,
+                    implicit_text_conversion,
+                });
+                let imported = core
+                    .host_artifacts()
+                    .import_workflow(SourceLanguage::TypeScript, &source, &request, limits)
+                    .await
+                    .unwrap();
+                if policy != Some(Policy::Allow) && (typed || policy == Some(Policy::Strict)) {
+                    let WorkflowImport::Refused(diagnostics) = imported else {
+                        panic!("must refuse {source}");
+                    };
+                    assert_eq!(diagnostics.len(), 1);
+                    let diagnostic = &diagnostics[0];
+                    assert_eq!(diagnostic.code, "TS_IMPLICIT_TEXT_CONVERSION");
+                    let start = source.rfind("event.answered_by").unwrap();
+                    assert_eq!(
+                        diagnostic.span,
+                        Some(Span {
+                            start,
+                            end: start + "event.answered_by".len()
+                        })
+                    );
+                    let expected = if typed {
+                        Static::Record(
+                            [
+                                ("identity_id".to_owned(), Static::Text),
+                                ("kind".to_owned(), Static::Text),
+                            ]
+                            .into(),
+                        )
+                    } else {
+                        Static::Any
+                    };
+                    assert_eq!(diagnostic.operand_type, Some(Box::new(expected)));
+                    assert!(diagnostic.repairs.is_empty());
+                } else {
+                    assert!(
+                        matches!(imported, WorkflowImport::Imported { .. }),
+                        "{imported:?}"
+                    );
+                }
+            }
+        }
+    }
+}

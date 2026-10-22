@@ -135,6 +135,7 @@ impl Service {
                 span: None,
                 unsupported: true,
                 repairs: diagnostic.repairs,
+                operand_type: diagnostic.operand_type,
             }));
         }
         let response = self

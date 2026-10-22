@@ -414,7 +414,7 @@ impl Lowerer<'_> {
         let mut tests = Vec::new();
         match object.ty {
             Ty::Object => {}
-            Ty::Unknown | Ty::Record(_) | Ty::Union(_) => {
+            Ty::Unknown | Ty::Callable(_) | Ty::Map | Ty::Set | Ty::Record(_) | Ty::Union(_) => {
                 let kind = self.native("kind", vec![object.expr()])?;
                 tests.push(self.same(kind, Operand::text("record").expr())?);
             }
@@ -453,7 +453,7 @@ impl Lowerer<'_> {
     fn list_tests(&mut self, object: &Operand) -> Lowering<Option<Vec<Expr>>> {
         match object.ty {
             Ty::Array => Ok(Some(Vec::new())),
-            Ty::Unknown | Ty::Union(_) => {
+            Ty::Unknown | Ty::Callable(_) | Ty::Map | Ty::Set | Ty::Union(_) => {
                 let kind = self.native("kind", vec![object.expr()])?;
                 Ok(Some(vec![self.same(kind, Operand::text("list").expr())?]))
             }
@@ -847,7 +847,10 @@ impl Lowerer<'_> {
                 let brand = brand.clone();
                 return self.read_typed_member(&object, &brand, name);
             }
-            if matches!(object.ty, Ty::Unknown | Ty::Union(_)) {
+            if matches!(
+                object.ty,
+                Ty::Unknown | Ty::Callable(_) | Ty::Map | Ty::Set | Ty::Union(_)
+            ) {
                 let targets = self.selectable(name, false);
                 if !targets.is_empty() || self.seals() {
                     let object = self.pin(object);
@@ -1030,7 +1033,12 @@ impl Lowerer<'_> {
                 } else {
                     Operand::undefined()
                 };
-                return self.invoke(function, &[receiver, args], Ty::Unknown);
+                let ty = match path.as_str() {
+                    "String" => Ty::Text,
+                    "JSON.stringify" => Ty::Union(vec![Ty::Text, Ty::Undefined]),
+                    _ => Ty::Unknown,
+                };
+                return self.invoke(function, &[receiver, args], ty);
             }
             // A method every function or object inherits is called on the
             // built-in's token; any other name a built-in lacks is refused.
@@ -1104,7 +1112,10 @@ impl Lowerer<'_> {
                     return self.call_typed_member(&object, &brand, name, args, awaited);
                 }
                 if let Key::Static(name) = &key
-                    && matches!(object.ty, Ty::Unknown | Ty::Union(_))
+                    && matches!(
+                        object.ty,
+                        Ty::Unknown | Ty::Callable(_) | Ty::Map | Ty::Set | Ty::Union(_)
+                    )
                 {
                     let targets = self.selectable(name, true);
                     if !targets.is_empty() || self.seals() {
@@ -1209,7 +1220,10 @@ impl Lowerer<'_> {
         name: &str,
         args: &[ast::CallArg],
     ) -> Lowering<Option<Operand>> {
-        if !matches!(object.ty, Ty::Unknown | Ty::Union(_)) {
+        if !matches!(
+            object.ty,
+            Ty::Unknown | Ty::Callable(_) | Ty::Map | Ty::Set | Ty::Union(_)
+        ) {
             return Ok(None);
         }
         let function = match name {
@@ -1408,44 +1422,6 @@ impl Lowerer<'_> {
             }
             _ => None,
         }
-    }
-
-    pub(super) fn lower_new(
-        &mut self,
-        constructor: &str,
-        args: &[ast::CallArg],
-    ) -> Lowering<Operand> {
-        if let Some((root, _)) = constructor.split_once('.')
-            && !self.is_bound(root)
-            && self.namespaces.is_root(root)
-        {
-            return Err(Diagnostic::with_repair(
-                DiagnosticCode::NewUnsupported,
-                format!(
-                    "`new {constructor}` is not in the TypeScript dialect: a package value is built by its type's static"
-                ),
-                format!(
-                    "call the static the prompt lists under `{constructor}`, such as `await {constructor}.create()`"
-                ),
-                self.span,
-            ));
-        }
-        let function = (!self.is_bound(constructor))
-            .then(|| self.table.constructors.get(constructor).copied())
-            .flatten();
-        let Some(function) = function else {
-            let Some(idiom) = DiagnosticCode::NewUnsupported.accepted_idiom() else {
-                unreachable!("constructors name their accepted forms");
-            };
-            return Err(Diagnostic::with_repair(
-                DiagnosticCode::NewUnsupported,
-                format!("`new {constructor}` is not in the TypeScript dialect"),
-                format!("use a plain-object factory for `{constructor}`; {}", idiom),
-                self.span,
-            ));
-        };
-        let args = self.arguments(args)?;
-        self.invoke(function, &[Operand::undefined(), args], Ty::Unknown)
     }
 
     /// `base?.a.b?.(x)`: each `?.` ends the whole chain with `undefined`

@@ -254,6 +254,7 @@ pub struct DialectRefusal {
     /// to the source being malformed.
     pub unsupported: bool,
     pub repairs: Vec<String>,
+    pub operand_type: Option<Box<lash_kernel_dialect::SourceOperandType>>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]

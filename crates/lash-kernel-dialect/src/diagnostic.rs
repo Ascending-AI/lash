@@ -7,7 +7,7 @@ use lash_kernel_doc::Span;
 /// Whose fault a rejection is.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DiagnosticKind {
-    /// The dialect does not support this construct, however it is written.
+    /// The dialect or the host's source admission policy refuses this construct.
     Refusal,
     /// The construct is supported; this instance of it is wrong.
     ProgramDefect,
@@ -25,6 +25,8 @@ pub struct Diagnostic {
     pub span: Option<Span>,
     pub kind: DiagnosticKind,
     pub repairs: Vec<String>,
+    /// Static operand facts for an implicit text conversion; no repair prose.
+    pub operand_type: Option<Box<SourceOperandType>>,
 }
 
 impl fmt::Display for Diagnostic {
@@ -38,3 +40,27 @@ impl fmt::Display for Diagnostic {
 }
 
 impl std::error::Error for Diagnostic {}
+
+/// What source analysis knows about an operand, independently of runtime values.
+/// Functions retain only their known result; objects and arrays distinguish proven
+/// representation from annotated fields or elements.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum SourceOperandType {
+    Any,
+    Undefined,
+    Null,
+    Boolean,
+    Number,
+    Text,
+    List(Box<Self>),
+    Record(std::collections::BTreeMap<String, Self>),
+    Object,
+    Array,
+    Map,
+    Set,
+    Function { result: Box<Self> },
+    Union(Vec<Self>),
+    Package { package: String, name: String },
+}

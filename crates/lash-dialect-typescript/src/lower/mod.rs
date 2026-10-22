@@ -30,9 +30,11 @@ use lash_kernel_dialect::Spelling;
 mod async_fn;
 mod calls;
 mod captions;
+mod constructors;
 pub(crate) use calls::tool_calls;
 mod expressions;
 mod functions;
+mod implicit_text;
 mod lazy;
 mod packages;
 mod patterns;
@@ -304,6 +306,7 @@ struct FunctionFrame {
 
 pub(crate) struct Lowerer<'a> {
     source: &'a str,
+    implicit_text_conversion: workflow::ImplicitTextConversionPolicy,
     imported: &'a BTreeMap<String, Vec<String>>,
     /// The entries of a workflow module, as they are lowered; `None` for a
     /// cell.
@@ -386,26 +389,31 @@ pub(crate) fn check_binding_names<'a>(names: impl IntoIterator<Item = &'a str>) 
     Ok(())
 }
 
-/// Lowers a parsed program against `environment`.
+/// Lowers a parsed program under the host's module admission policy.
 pub(crate) fn lower(
     program: &ast::Program,
     source: &str,
     environment: &Environment<'_>,
     mode: Mode<'_>,
+    policy: workflow::ImplicitTextConversionPolicy,
 ) -> Lowering<Lowered> {
-    lower_beside(program, source, environment, mode, &[])
+    lower_beside(program, source, environment, mode, &[], policy)
 }
 
-/// [`lower`], where `beside` are the words of code written beside the
-/// source, in its module but read by another reader: no generated name
-/// takes one (`crate::readable`).
+/// Lower with the words of adjacent generated source reserved from fresh names.
+/// A generated-source reader selects `Allow`; authored modules carry host policy.
 pub(crate) fn lower_beside(
     program: &ast::Program,
     source: &str,
     environment: &Environment<'_>,
     mode: Mode<'_>,
     beside: &[String],
+    policy: workflow::ImplicitTextConversionPolicy,
 ) -> Lowering<Lowered> {
+    let implicit_text_conversion = match mode {
+        Mode::Module => policy,
+        Mode::Cell(_) => workflow::ImplicitTextConversionPolicy::Allow,
+    };
     let (cell, module) = match mode {
         Mode::Cell(cell) => (cell, None),
         Mode::Module => (CellEnvironment::first(), Some(workflow::Module::new())),
@@ -429,6 +437,7 @@ pub(crate) fn lower_beside(
     taken.extend(beside.iter().cloned());
     let mut lowerer = Lowerer {
         source,
+        implicit_text_conversion,
         imported: &program.imported,
         module,
         library: environment.library,

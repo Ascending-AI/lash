@@ -20,8 +20,8 @@ pub(crate) struct TypeAnnotation {
     pub(crate) shape: TypeShape,
 }
 
-/// The durable-representable subset of TypeScript's type syntax, plus one leaf
-/// for everything outside it.
+/// The modeled TypeScript type syntax, including function annotations that
+/// cannot cross a durable entry boundary, plus one leaf for everything outside it.
 #[derive(Clone, Debug)]
 pub(crate) enum TypeShape {
     /// `any` and `unknown`: the gradual type an unannotated parameter already
@@ -40,6 +40,7 @@ pub(crate) enum TypeShape {
     Array(Box<TypeAnnotation>),
     Object(Vec<TypeAnnotationField>),
     Union(Vec<TypeAnnotation>),
+    Function(Box<TypeAnnotation>),
     /// A named type: a local `type` alias or a host named-data type such as
     /// `timer.Tick`. It is resolved against the artifact's alias table and the
     /// host catalog at registration, not here.
@@ -88,7 +89,14 @@ pub(crate) fn convert_type(ty: &swc::TsType) -> TypeAnnotation {
             }
         },
         swc::TsType::TsTypeRef(reference) => reference_shape(reference),
-        swc::TsType::TsFnOrConstructorType(_) => TypeShape::Unsupported("a function type"),
+        swc::TsType::TsFnOrConstructorType(function) => match function {
+            swc::TsFnOrConstructorType::TsFnType(function) => {
+                TypeShape::Function(Box::new(convert_type(&function.type_ann.type_ann)))
+            }
+            swc::TsFnOrConstructorType::TsConstructorType(_) => {
+                TypeShape::Unsupported("a constructor type")
+            }
+        },
         swc::TsType::TsTupleType(_) => TypeShape::Unsupported("a tuple type"),
         swc::TsType::TsMappedType(_) => TypeShape::Unsupported("a mapped type"),
         swc::TsType::TsConditionalType(_) => TypeShape::Unsupported("a conditional type"),

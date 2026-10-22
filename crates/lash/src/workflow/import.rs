@@ -91,6 +91,7 @@ pub(crate) fn source_refusal(
                     WorkflowSourceDiagnosticKind::ProgramDefect
                 },
                 repairs: refusal.repairs,
+                operand_type: refusal.operand_type,
             }]))
         }
         lash_vm_client::service::SourceServiceError::UnknownDialect { dialect } => Ok(

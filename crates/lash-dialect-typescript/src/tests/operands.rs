@@ -63,6 +63,7 @@ fn native_expression_depth_respects_the_document_limit() {
         "",
         &environment,
         lash_kernel_dialect::Mode::Cell(lash_kernel_dialect::CellEnvironment::first()),
+        lash_kernel_dialect::workflow::ImplicitTextConversionPolicy::Allow,
     )
     .unwrap();
     lash_kernel_doc::validate_document(&lowered.document, super::library()).unwrap();

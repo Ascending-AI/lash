@@ -101,11 +101,23 @@ pub fn lower_with_limits(
         Mode::Cell(cell) => {
             lower::check_binding_names(cell.bindings.iter().map(lash_vocabulary::Name::as_str))?;
             let program = adapter::parse_with_limits(source, limits)?;
-            lower::lower(&program, source, environment, mode)
+            lower::lower(
+                &program,
+                source,
+                environment,
+                mode,
+                limits.implicit_text_conversion(),
+            )
         }
         Mode::Module => {
             let program = adapter::parse_workflow(source, limits)?;
-            lower::lower(&program, source, environment, mode)
+            lower::lower(
+                &program,
+                source,
+                environment,
+                mode,
+                limits.implicit_text_conversion(),
+            )
         }
     }
 }
@@ -174,7 +186,13 @@ impl Parser {
         };
         lower::check_binding_names(cell.bindings.iter().map(lash_vocabulary::Name::as_str))?;
         let program = self.parser.parse(source)?;
-        lower::lower(&program, source, environment, mode)
+        lower::lower(
+            &program,
+            source,
+            environment,
+            mode,
+            self.parser.limits().implicit_text_conversion(),
+        )
     }
 }
 

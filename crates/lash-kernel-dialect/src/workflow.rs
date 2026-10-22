@@ -111,6 +111,7 @@ impl ModuleError {
             span: self.span,
             kind: self.refusal.kind(),
             repairs: vec![self.refusal.repair().to_owned()],
+            operand_type: None,
         }
     }
 }
@@ -125,6 +126,22 @@ impl ModuleError {
 pub struct WorkflowSourceLimits {
     pub max_bytes: usize,
     pub max_nesting: usize,
+    /// TypeScript implicit text conversion admission. The default is `refuse`.
+    pub implicit_text_conversion: ImplicitTextConversionPolicy,
+}
+
+/// Admission of implicit text conversions in saved TypeScript workflows.
+/// Cell execution and explicit conversions keep JavaScript semantics.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ImplicitTextConversionPolicy {
+    /// Refuse records, collections and functions; accept unconstrained operands.
+    #[default]
+    Refuse,
+    /// Accept all implicit conversions.
+    Allow,
+    /// Also refuse unconstrained (`Any`) operands.
+    Strict,
 }
 
 /// One entry a front end lowered: the declared function a start calls, the

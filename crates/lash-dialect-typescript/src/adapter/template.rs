@@ -7,6 +7,7 @@
 //! is the early SyntaxError ECMA writes down, and a cooked lone surrogate is
 //! as unrepresentable as the string-literal form.
 
+use swc_common::Spanned;
 use swc_ecma_ast as swc;
 
 use super::{Adapter, Expr, early_errors, source_span};
@@ -36,7 +37,10 @@ impl Adapter<'_> {
             expressions: template
                 .exprs
                 .iter()
-                .map(|expr| self.convert_expr(expr))
+                .map(|expr| {
+                    self.convert_expr(expr)
+                        .map(|converted| (source_span(expr.span()), converted))
+                })
                 .collect::<Result<_, _>>()?,
         })
     }

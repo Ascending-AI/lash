@@ -344,7 +344,7 @@ fn durable_type(annotation: Option<&TypeAnnotation>, refusal: DiagnosticCode) ->
                 _ => Type::Union(types),
             }
         }
-        TypeShape::Unsupported(_) => {
+        TypeShape::Function(_) | TypeShape::Unsupported(_) => {
             return Err(Diagnostic::new(
                 refusal,
                 "this type is not one a process is started or ended with",

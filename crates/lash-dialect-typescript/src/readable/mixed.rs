@@ -42,9 +42,17 @@ fn lower(
             environment,
             Mode::Cell(CellEnvironment::first()),
             beside,
+            lash_kernel_dialect::workflow::ImplicitTextConversionPolicy::Allow,
         )
     } else {
         let program = crate::adapter::parse_workflow(source, limits)?;
-        crate::lower::lower_beside(&program, source, environment, Mode::Module, beside)
+        crate::lower::lower_beside(
+            &program,
+            source,
+            environment,
+            Mode::Module,
+            beside,
+            lash_kernel_dialect::workflow::ImplicitTextConversionPolicy::Allow,
+        )
     }
 }

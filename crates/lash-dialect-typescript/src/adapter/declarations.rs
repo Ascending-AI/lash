@@ -409,7 +409,7 @@ impl Checker {
                 self.expr(alternate)
             }
             Expr::Template { expressions, .. } => {
-                expressions.iter().try_for_each(|expr| self.expr(expr))
+                expressions.iter().try_for_each(|(_, expr)| self.expr(expr))
             }
             Expr::Function(function) => self.function(function, None),
             Expr::Call { callee, args, .. } => {

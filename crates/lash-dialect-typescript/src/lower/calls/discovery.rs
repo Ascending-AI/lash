@@ -350,7 +350,7 @@ impl Discovery<'_> {
                 self.expr(alternate);
             }
             ast::Expr::Template { expressions, .. } => {
-                for expr in expressions {
+                for (_, expr) in expressions {
                     self.expr(expr);
                 }
             }

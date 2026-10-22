@@ -194,6 +194,7 @@ fn typescript_module(
         None => Ok(lash_dialect_typescript::SourceLimits::standard()),
         Some(limits) => {
             lash_dialect_typescript::SourceLimits::new(limits.max_bytes, limits.max_nesting)
+                .map(|source| source.with_implicit_text_conversion(limits.implicit_text_conversion))
         }
     };
     Some(
@@ -261,6 +262,7 @@ fn refusal(diagnostic: Diagnostic) -> DialectRefusal {
         span: diagnostic.span.map(|span| (span.start, span.end)),
         unsupported: matches!(diagnostic.kind, DiagnosticKind::Refusal),
         repairs: diagnostic.repairs,
+        operand_type: diagnostic.operand_type,
     }
 }
 

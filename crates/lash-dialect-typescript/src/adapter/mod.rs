@@ -275,7 +275,7 @@ pub(crate) enum Expr {
     },
     Template {
         quasis: Vec<String>,
-        expressions: Vec<Expr>,
+        expressions: Vec<(SourceSpan, Expr)>,
     },
     Function(Function),
     Call {

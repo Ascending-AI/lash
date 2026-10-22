@@ -496,3 +496,153 @@ fn an_unprintable_export_refuses_with_its_callable_site() {
         "the failed lift must survive instead of printing an empty module",
     );
 }
+
+/// FIG-7139: admission sees the typed operand before implicit conversion erases it.
+#[test]
+fn implicit_record_text_is_refused_at_its_operand() {
+    for expression in [
+        "`answered by ${event.answered_by}`",
+        "'answered by ' + event.answered_by",
+    ] {
+        let source = format!(
+            "export function answer(event: {{ answered_by: {{ identity_id: string; kind: string }} }}) {{ return {expression}; }}"
+        );
+        let Err(diagnostic) = module(&source) else {
+            panic!("implicit record text must be refused");
+        };
+        assert_eq!(diagnostic.code.as_str(), "TS_IMPLICIT_TEXT_CONVERSION");
+        let start = source.rfind("event.answered_by").unwrap();
+        assert_eq!(
+            diagnostic.span,
+            Some(lash_kernel_doc::Span {
+                start,
+                end: start + "event.answered_by".len(),
+            })
+        );
+        assert!(diagnostic.suggestions.is_empty());
+    }
+}
+
+/// FIG-7139: admission policy distinguishes known structures from Any and permits explicit text.
+#[test]
+fn implicit_text_policy_admits_only_the_selected_static_operands() {
+    use lash_kernel_dialect::SourceOperandType as Static;
+    use lash_kernel_dialect::workflow::ImplicitTextConversionPolicy as Policy;
+    let namespaces = Default::default();
+    let environment = Environment::new(super::library(), &namespaces);
+    let lower = |source: &str, policy| {
+        crate::lower_with_limits(
+            source,
+            &environment,
+            Mode::Module,
+            crate::SourceLimits::standard().with_implicit_text_conversion(policy),
+        )
+    };
+    for (parameters, expression, expected) in [
+        ("event", "event.answered_by", Static::Any),
+        (
+            "event: { answered_by: { identity_id: string; kind: string } }",
+            "event.answered_by",
+            Static::Record(
+                [
+                    ("identity_id".to_owned(), Static::Text),
+                    ("kind".to_owned(), Static::Text),
+                ]
+                .into(),
+            ),
+        ),
+        (
+            "values: string[]",
+            "values",
+            Static::List(Box::new(Static::Text)),
+        ),
+        ("", "[1, 2]", Static::Array),
+        ("", "({ id: 1 })", Static::Object),
+        (
+            "",
+            "(() => 1)",
+            Static::Function {
+                result: Box::new(Static::Any),
+            },
+        ),
+        (
+            "",
+            "((() => 1) as (() => number))",
+            Static::Function {
+                result: Box::new(Static::Number),
+            },
+        ),
+        ("", "new Map()", Static::Map),
+        ("", "new Set()", Static::Set),
+        ("", "new Array(2)", Static::Array),
+        (
+            "value: string | { id: string }",
+            "value",
+            Static::Union(vec![
+                Static::Text,
+                Static::Record([("id".to_owned(), Static::Text)].into()),
+            ]),
+        ),
+    ] {
+        for expression in [
+            format!("`value ${{{expression}}}`"),
+            format!("'value ' + {expression}"),
+            format!("{expression} + ' value'"),
+        ] {
+            let source = format!("export function answer({parameters}) {{ return {expression}; }}");
+            assert!(lower(&source, Policy::Allow).is_ok(), "allow: {source}");
+            for policy in [Policy::Refuse, Policy::Strict] {
+                let result = lower(&source, policy);
+                if policy == Policy::Refuse && expected == Static::Any {
+                    assert!(result.is_ok(), "unconstrained: {source}");
+                } else {
+                    let diagnostic = result
+                        .err()
+                        .unwrap_or_else(|| panic!("must refuse {source}"));
+                    assert_eq!(diagnostic.code, DiagnosticCode::ImplicitTextConversion);
+                    assert_eq!(
+                        diagnostic.operand_type,
+                        Some(Box::new(expected.clone())),
+                        "{source}"
+                    );
+                    assert!(diagnostic.suggestions.is_empty());
+                }
+            }
+        }
+    }
+    for expression in [
+        "event.answered_by.identity_id",
+        "42",
+        "true",
+        "null",
+        "undefined",
+        "String(event)",
+        "JSON.stringify(event)",
+        "JSON.stringify(undefined)",
+    ] {
+        for expression in [
+            format!("`value ${{{expression}}}`"),
+            format!("'value ' + {expression}"),
+            format!("{expression} + ' value'"),
+        ] {
+            let source = format!(
+                "export function answer(event: {{ answered_by: {{ identity_id: string }} }}) {{ return {expression}; }}"
+            );
+            lower(&source, Policy::Strict)
+                .unwrap_or_else(|error| panic!("strict must admit {source}: {error}"));
+        }
+    }
+    // Explicit conversion facts survive binding, and cell conversion semantics stay available.
+    lower(
+        "export function answer(event) { const text = JSON.stringify(event); return `${text}`; }",
+        Policy::Strict,
+    )
+    .expect("explicit result binding");
+    let cell = crate::lower_with_limits(
+        "const value = {}; `${value}`;",
+        &environment,
+        Mode::Cell(lash_kernel_dialect::CellEnvironment::first()),
+        crate::SourceLimits::standard().with_implicit_text_conversion(Policy::Strict),
+    );
+    assert!(cell.is_ok());
+}

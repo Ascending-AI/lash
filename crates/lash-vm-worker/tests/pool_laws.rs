@@ -2181,6 +2181,7 @@ fn authored_workflow_import_is_worker_owned_and_preserves_source_policy() {
         Some(lash_kernel_dialect::workflow::WorkflowSourceLimits {
             max_bytes,
             max_nesting: 28,
+            implicit_text_conversion: Default::default(),
         })
     };
     runtime.block_on(async {

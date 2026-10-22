@@ -907,6 +907,20 @@ publishes nothing and links no parser into your process. `limits`
 (`lash::dialect::workflow::WorkflowSourceLimits`) narrows the dialect's source
 policy; `None` keeps its standard one.
 
+TypeScript workflow modules default to `ImplicitTextConversionPolicy::Refuse`:
+implicit conversion of a statically known record, collection or function in a
+template substitution or string `+` returns `TS_IMPLICIT_TEXT_CONVERSION`.
+`WorkflowSourceLimits::implicit_text_conversion` selects `Refuse`, `Allow`
+(accept all conversions), or `Strict` (also refuse unconstrained `Any`). This is
+an authoring admission policy; cells and JavaScript runtime conversion semantics
+are unchanged. `WorkflowSourceDiagnostic::operand_type` retains the static type,
+and `span` identifies the exact operand bytes. Hosts render guidance from these
+facts; this diagnostic supplies no repair text. Text, numbers, booleans, nullish
+values, selected primitive fields, `String(x)` and `JSON.stringify(x)` pass even
+under `Strict`. Direct dialect callers choose the same policy with
+`SourceLimits::with_implicit_text_conversion` before `lower_with_limits`.
+
+
 A host's `workflows.create` tool can accept only `{code}`. Its handler lowers
 for inspection over the offered surface, derives typed
 `graph::requirements(&document, offered.catalog().as_ref())`, then attaches exactly

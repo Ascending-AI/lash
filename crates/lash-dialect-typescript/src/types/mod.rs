@@ -71,8 +71,12 @@ pub(crate) enum Ty {
     /// An array the source built, or one a built-in array method made: a
     /// kernel list, of any elements, holes among them.
     Array,
+    Map,
+    Set,
     /// A function, with what a call of it gives.
     Function(Box<Ty>),
+    /// A function annotation, without proof that the value is a function token.
+    Callable(Box<Ty>),
     /// One of several types, none of them unknown and none a union.
     Union(Vec<Ty>),
     /// A package value of this brand, as a package member's declared
@@ -123,7 +127,7 @@ impl Ty {
     /// What a call of this function gives.
     pub(crate) fn returned(&self) -> Self {
         match self {
-            Self::Function(result) => (**result).clone(),
+            Self::Function(result) | Self::Callable(result) => (**result).clone(),
             Self::Never => Self::Never,
             _ => Self::Unknown,
         }
@@ -222,6 +226,7 @@ impl Ty {
 /// source's own `type` and `interface` declarations.
 pub(crate) fn believed(annotation: &TypeAnnotation, aliases: &BTreeMap<String, Ty>) -> Ty {
     match &annotation.shape {
+        TypeShape::Function(result) => Ty::Callable(Box::new(believed(result, aliases))),
         TypeShape::Unknown | TypeShape::Unsupported(_) => Ty::Unknown,
         TypeShape::String | TypeShape::StringLiteral => Ty::Text,
         TypeShape::Number => Ty::Number,

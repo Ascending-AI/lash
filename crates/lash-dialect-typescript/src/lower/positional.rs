@@ -213,7 +213,9 @@ fn reads_arguments(expr: &Expr) -> bool {
             consequent,
             alternate,
         } => reads_arguments(test) || reads_arguments(consequent) || reads_arguments(alternate),
-        Expr::Template { expressions, .. } => expressions.iter().any(reads_arguments),
+        Expr::Template { expressions, .. } => {
+            expressions.iter().any(|(_, expr)| reads_arguments(expr))
+        }
         Expr::Call { callee, args, .. } => reads_arguments(callee) || args_read_arguments(args),
         Expr::New { args, .. } => args_read_arguments(args),
         Expr::OptionalChain { base, operations } => {

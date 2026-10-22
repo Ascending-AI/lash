@@ -90,6 +90,8 @@ pub enum DiagnosticCode {
     UnsupportedExpression,
     InvalidAst,
     LinkError,
+    /// Host policy refused an implicit conversion to text.
+    ImplicitTextConversion,
     /// A rule of the workflow contract every dialect shares, under the
     /// shared code ([`lash_kernel_dialect::workflow`]).
     Module(ModuleRefusal),
@@ -179,6 +181,7 @@ impl DiagnosticCode {
         Self::UnsupportedExpression,
         Self::InvalidAst,
         Self::LinkError,
+        Self::ImplicitTextConversion,
     ];
 
     /// The accepted in-dialect idiom for a construct this code refuses.
@@ -407,6 +410,8 @@ impl DiagnosticCode {
             | Self::OperationValue
  => CodeClassification::AlwaysRefusal,
 
+            Self::ImplicitTextConversion => CodeClassification::PolicyRefusal,
+
             // Both families, decided per site.
             Self::MethodUnsupported
             | Self::UnsupportedExpression
@@ -516,6 +521,7 @@ impl DiagnosticCode {
             Self::UnsupportedExpression => "TS_EXPRESSION_UNSUPPORTED",
             Self::InvalidAst => "TS_INVALID_SHARED_AST",
             Self::LinkError => "TS_LINK_ERROR",
+            Self::ImplicitTextConversion => "TS_IMPLICIT_TEXT_CONVERSION",
         }
     }
 }
@@ -527,6 +533,8 @@ pub enum CodeClassification {
     AlwaysRefusal,
     /// Always the program being wrong.
     AlwaysDefect,
+    /// A host-selected admission rule; hosts render guidance from typed facts.
+    PolicyRefusal,
     /// Both, depending on which site emitted it. The site must say.
     PerSite,
 }
@@ -549,6 +557,7 @@ pub struct Diagnostic {
     /// content on a channel a consumer can find: the message holds the refusal,
     /// these hold the rewrite, and no text appears in both.
     pub suggestions: Vec<String>,
+    pub operand_type: Option<Box<lash_kernel_dialect::SourceOperandType>>,
 }
 
 impl Diagnostic {
@@ -591,7 +600,10 @@ impl Diagnostic {
         span: Option<SourceSpan>,
     ) -> Self {
         debug_assert!(
-            code.classification() != CodeClassification::AlwaysRefusal,
+            !matches!(
+                code.classification(),
+                CodeClassification::AlwaysRefusal | CodeClassification::PolicyRefusal
+            ),
             "{} always refuses a construct",
             code.as_str()
         );
@@ -631,6 +643,7 @@ impl Diagnostic {
             span,
             kind,
             suggestions,
+            operand_type: None,
         }
     }
 
@@ -652,6 +665,7 @@ impl Diagnostic {
             span,
             kind: kind_from_code(code),
             suggestions: vec![repair.into()],
+            operand_type: None,
         }
     }
 }
@@ -664,7 +678,9 @@ impl Diagnostic {
 /// silent default that would quietly file one family under the other.
 fn kind_from_code(code: DiagnosticCode) -> DiagnosticKind {
     match code.classification() {
-        CodeClassification::AlwaysRefusal => DiagnosticKind::Refusal,
+        CodeClassification::AlwaysRefusal | CodeClassification::PolicyRefusal => {
+            DiagnosticKind::Refusal
+        }
         CodeClassification::AlwaysDefect | CodeClassification::PerSite => {
             DiagnosticKind::ProgramDefect
         }
@@ -718,6 +734,7 @@ impl From<Diagnostic> for lash_kernel_dialect::Diagnostic {
             span: diagnostic.span,
             kind: diagnostic.kind,
             repairs: diagnostic.suggestions,
+            operand_type: diagnostic.operand_type,
         }
     }
 }

@@ -364,7 +364,9 @@ fn makes_function(expr: &Expr) -> bool {
             consequent,
             alternate,
         } => makes_function(test) || makes_function(consequent) || makes_function(alternate),
-        Expr::Template { expressions, .. } => expressions.iter().any(makes_function),
+        Expr::Template { expressions, .. } => {
+            expressions.iter().any(|(_, expr)| makes_function(expr))
+        }
         Expr::Call { callee, args, .. } => makes_function(callee) || args_make_function(args),
         Expr::New { args, .. } => args_make_function(args),
         Expr::OptionalChain { base, operations } => {

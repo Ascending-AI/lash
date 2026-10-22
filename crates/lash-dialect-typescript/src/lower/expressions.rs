@@ -620,7 +620,7 @@ impl Lowerer<'_> {
         let (Some(left), Some(right)) = (operands.next(), operands.next()) else {
             unreachable!("two operands were lowered");
         };
-        self.binary(op, left, right)
+        self.binary_with_admission(op, left, right, operand_spans)
     }
 
     /// A binary operator over operands already evaluated.
@@ -755,7 +755,7 @@ impl Lowerer<'_> {
     fn lower_template(
         &mut self,
         quasis: &[String],
-        expressions: &[ast::Expr],
+        expressions: &[(SourceSpan, ast::Expr)],
     ) -> Lowering<Operand> {
         if expressions.is_empty() {
             return Ok(Operand::text(quasis.concat()));
@@ -765,11 +765,12 @@ impl Lowerer<'_> {
             if !quasi.is_empty() {
                 parts.push((Buf::default(), Operand::text(quasi.clone())));
             }
-            let Some(expression) = expressions.get(index) else {
+            let Some((span, expression)) = expressions.get(index) else {
                 continue;
             };
             let part = self.aside(|this| {
                 let value = this.lower_expr(expression)?;
+                this.check_implicit_text(&value.ty, Some(*span))?;
                 // Each value is converted where the source evaluates it: a
                 // conversion may run the value's own `toString`.
                 match value.ty {

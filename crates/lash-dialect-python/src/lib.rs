@@ -143,6 +143,7 @@ fn lower_with_calls(
         }),
         kind: Code::Syntax.kind(),
         repairs: Vec::new(),
+        operand_type: None,
     })?;
     let spelled = captions::spelled(
         source,

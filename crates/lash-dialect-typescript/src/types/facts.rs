@@ -417,6 +417,14 @@ impl Facts {
                 }
                 _ => Ty::Unknown,
             },
+            Expr::New { constructor, .. } if self.binding(constructor).is_none() => {
+                match constructor.as_str() {
+                    "Array" => Ty::Array,
+                    "Map" => Ty::Map,
+                    "Set" => Ty::Set,
+                    _ => Ty::Unknown,
+                }
+            }
             Expr::Update { .. } => Ty::Float,
             Expr::Delete { .. } => Ty::Bool,
             // A cell's `const` of an `async` arrow may name a process, which
@@ -427,6 +435,18 @@ impl Facts {
                 .package_call(callee)
                 .map_or(Ty::Unknown, |gives| gives.called(false)),
             Expr::Call { callee, .. } => match callee.as_ref() {
+                Expr::Ident(name, _) if name == "String" && self.binding(name).is_none() => {
+                    Ty::Text
+                }
+                Expr::Member {
+                    object,
+                    property: MemberProperty::Field(name),
+                    ..
+                } if matches!(object.as_ref(), Expr::Ident(root, _) if root == "JSON" && self.binding(root).is_none())
+                    && name == "stringify" =>
+                {
+                    Ty::Union(vec![Ty::Text, Ty::Undefined])
+                }
                 Expr::Member {
                     object,
                     property: MemberProperty::Field(name),
@@ -1069,7 +1089,7 @@ impl<'a> Collector<'a> {
                 self.expr(alternate);
             }
             Expr::Template { expressions, .. } => {
-                for expression in expressions {
+                for (_, expression) in expressions {
                     self.plain.escape(expression);
                     self.expr(expression);
                 }

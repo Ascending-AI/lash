@@ -8,6 +8,7 @@ use super::{Diagnostic, DiagnosticCode, MAX_SOURCE_BYTES, MAX_SOURCE_NESTING_DEP
 pub struct SourceLimits {
     max_bytes: usize,
     max_nesting: usize,
+    implicit_text_conversion: lash_kernel_dialect::workflow::ImplicitTextConversionPolicy,
 }
 impl SourceLimits {
     pub const HARD_MAX_BYTES: usize = 128 * 1024;
@@ -15,6 +16,8 @@ impl SourceLimits {
         Self {
             max_bytes: MAX_SOURCE_BYTES,
             max_nesting: MAX_SOURCE_NESTING_DEPTH,
+            implicit_text_conversion:
+                lash_kernel_dialect::workflow::ImplicitTextConversionPolicy::Refuse,
         }
     }
     pub fn new(max_bytes: usize, max_nesting: usize) -> Result<Self, Diagnostic> {
@@ -35,7 +38,23 @@ impl SourceLimits {
         Ok(Self {
             max_bytes,
             max_nesting,
+            implicit_text_conversion:
+                lash_kernel_dialect::workflow::ImplicitTextConversionPolicy::Refuse,
         })
+    }
+    /// Select implicit text admission for workflow modules. Omission is `refuse`.
+    /// Cells keep their ordinary JavaScript conversion behavior.
+    pub const fn with_implicit_text_conversion(
+        mut self,
+        policy: lash_kernel_dialect::workflow::ImplicitTextConversionPolicy,
+    ) -> Self {
+        self.implicit_text_conversion = policy;
+        self
+    }
+    pub(crate) const fn implicit_text_conversion(
+        self,
+    ) -> lash_kernel_dialect::workflow::ImplicitTextConversionPolicy {
+        self.implicit_text_conversion
     }
     pub const fn max_bytes(self) -> usize {
         self.max_bytes
