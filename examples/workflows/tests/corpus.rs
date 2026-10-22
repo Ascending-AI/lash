@@ -365,6 +365,42 @@ fn python_terminal_operations_read_back_by_import_identity() -> anyhow::Result<(
     terminal_operation_roundtrip(lash_kernel_doc::SourceLanguage::Python)
 }
 
+/// FIG-7135: an escaped closure keeps its captured list's read and later mutation.
+#[test]
+fn typescript_capturing_cell_prints_and_reads_identically() -> anyhow::Result<()> {
+    let embedding = lash_vm_worker::built_embedding(&Default::default())?;
+    let signatures = corpus_tool_signatures()?;
+    let namespaces = workflow_corpus::corpus_namespaces(&signatures, &Default::default())?;
+    let environment = lash_kernel_dialect::Environment::new(embedding.library(), &namespaces);
+    let lowered = lash_dialect_typescript::lower(
+        include_str!("../capturing-cell/source.ts"),
+        &environment,
+        lash_kernel_dialect::Mode::Cell(lash_kernel_dialect::CellEnvironment::first()),
+    )?;
+    let printed = lash_dialect_typescript::print(
+        &lowered.document,
+        Some(&lowered.captions),
+        embedding.library(),
+        lash_kernel_dialect::PrintOptions {
+            source_map: true,
+            ..Default::default()
+        },
+    )?;
+    let (read, captions) = lash_dialect_typescript::read(
+        &printed.source,
+        &lowered.document,
+        embedding.library(),
+        Default::default(),
+    )?;
+    assert_eq!(read.canonical_bytes(), lowered.document.canonical_bytes());
+    assert_eq!(captions, lowered.captions);
+    printed
+        .source_map
+        .expect("requested map")
+        .validate(&read, &printed.source)?;
+    Ok(())
+}
+
 /// FIG-6953 READABLE-STYLE: a workflow edited through the canvas API prints
 /// as the source the authoring guide teaches, with none of the kernel
 /// surface's scaffolding.

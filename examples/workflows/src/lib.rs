@@ -503,7 +503,8 @@ pub(crate) fn render_with(root: &Path) -> Result<(BTreeMap<String, String>, Vec<
                 outputs.insert(format!("{prefix}edits/1.{extension}.txt"), text);
             }
             if case.mode == CaseMode::Cell {
-                let text = cell::crossing(&lowered, registry.clone(), &namespace)?;
+                let text = cell::crossing(&lowered, registry.clone(), &namespace)
+                    .with_context(|| format!("{} {extension}: cell crossing", case.name))?;
                 outputs.insert(format!("{prefix}cell-1.{extension}.txt"), text);
             }
         }
