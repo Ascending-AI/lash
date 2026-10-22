@@ -37,20 +37,7 @@ pub(crate) fn register_native_plugin(
             dialect: Arc::clone(&dialect),
         }))
     })?;
-    reg.tools()
-        .provider(lash_core::tool_provider_key!("control"), move |owner, _| {
-            let dialect = Arc::clone(&owner.dialect);
-            Ok(Arc::new(crate::control_tools::RlmControlToolsProvider {
-                vocabulary: dialect.prompt_vocabulary(),
-            }))
-        })?;
-    reg.tools()
-        .provider(lash_core::tool_provider_key!("finish"), move |owner, _| {
-            let dialect = Arc::clone(&owner.dialect);
-            Ok(Arc::new(crate::control_tools::RlmFinishProvider {
-                vocabulary: dialect.prompt_vocabulary(),
-            }))
-        })?;
+    crate::control_tools::register(reg)?;
     reg.tool_catalog()
         .contribute(lash_core::hook_key!("rlm-catalog"), move |owner, _| {
             let catalog_dialect = Arc::clone(&owner.dialect);

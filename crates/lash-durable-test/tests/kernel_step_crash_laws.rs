@@ -146,6 +146,32 @@ async def worker() -> str:
 /// ends with.
 static UNCUT: Mutex<Vec<(&'static str, String)>> = Mutex::new(Vec::new());
 
+// Kernel-text cases need only the ordinary timer component. Dialect source
+// cases also need the compiler's helper publication.
+const SERVICES: lash::process::ProcessConfigKey<()> =
+    lash::process::ProcessConfigKey::new("kernel-step-services", lash::plugins::FormatVersion::ONE);
+
+fn services() -> lash::process::StaticProcessComponent {
+    let provider = lash_vm_runtime::dialect_services::Services::new(
+        lash_vm_runtime::dialect_services::Dialect::TypeScript,
+        SERVICES.tool_provider(lash::tool_provider_key!("timer")),
+        Duration::from_secs(30),
+        Arc::new(|| 0),
+    )
+    .unwrap();
+    lash::plugins::StaticPluginFactory::new(
+        lash::plugins::PluginDeclaration::initial(SERVICES.component()),
+        lash::plugins::PluginSpec::new()
+            .with_tool_provider_registration(
+                lash::tool_provider_key!("timer"),
+                provider.registration(),
+            )
+            .with_package_provider(lash::tool_provider_key!("timer"), provider),
+    )
+    .as_component(SERVICES.format())
+    .unwrap()
+}
+
 struct KernelSteps {
     source: &'static str,
     /// The dialect `source` is imported from, or kernel text.
@@ -163,7 +189,9 @@ struct KernelSteps {
 
 impl KernelSteps {
     fn new(source: &'static str) -> Self {
-        Self::imported(source, None, 5)
+        // OPERATION-BOUNDARIES: three VM segments and two ordinary
+        // timers, each with an admitted park and a deferred completion.
+        Self::imported(source, None, 3 + 2 * 2)
     }
 
     fn imported(
@@ -216,6 +244,7 @@ impl KernelSteps {
                     served::rlm(&backend, self.workers(&clock)),
                 )
                 .serve_sessions(false)
+                .process_component(Arc::new(services()), SERVICES)
                 .commit_budget(lash::CommitBudget::bounded(16 * 1024 * 1024, 4096))
                 .data_retention(lash::DataRetention::standard())
                 .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
@@ -237,7 +266,14 @@ impl KernelSteps {
     async fn start_process(&self) -> Result<lash_vocabulary::identity::ProcessId, String> {
         let core = self.core();
         let env = lash::process::ProcessEnv::builder(lash::MaxToolCalls::new(16))
-            .component(lash::vm::KERNEL_SERVICES_CONFIG, &())
+            .component(
+                if self.language.is_some() {
+                    lash::vm::KERNEL_SERVICES_CONFIG
+                } else {
+                    SERVICES
+                },
+                &(),
+            )
             .build()
             .unwrap();
         let (payload, env) = match self.language {
@@ -405,7 +441,7 @@ impl Scenario for KernelSteps {
         let committed = outcomes.iter().filter(|write| write.committed()).count();
         if committed != self.outcomes {
             violations.push(format!(
-                "the process committed {committed} step outcomes, not {}",
+                "OPERATION-BOUNDARIES: the process committed {committed} step outcomes, not {} (VM segments plus timer parks and completions)",
                 self.outcomes
             ));
         }
@@ -614,7 +650,8 @@ async fn a_typescript_run_parked_in_each_loop_cursor_resumes_exactly_across_a_cu
     imported_steps_resume_exactly(
         TS_CURSORS,
         lash::workflow::document::SourceLanguage::TypeScript,
-        11,
+        // Six VM segments, five timer parks and five completions.
+        6 + 2 * 5,
         "1,2,3,4,5,6,x,y,7,8",
     )
     .await;
@@ -629,7 +666,9 @@ async fn a_python_run_parked_in_a_tuple_loop_and_its_root_cleanup_resumes_exactl
     imported_steps_resume_exactly(
         PY_TUPLE_AND_CLEANUP,
         lash::workflow::document::SourceLanguage::Python,
-        8,
+        // Four VM segments; the three timers each park and settle.
+        // Root cleanup cancels the long timer and waits for finally's.
+        4 + 2 * 3,
         "b2",
     )
     .await;

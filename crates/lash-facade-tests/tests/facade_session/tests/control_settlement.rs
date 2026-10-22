@@ -42,6 +42,44 @@ fn scripted_cells(
         .into_handle()
 }
 
+/// FIG-7109: the RLM plugin advertises its own control package, so a
+/// minimal host needs no tool or package fixture to finish a code cell.
+#[cfg(feature = "rlm")]
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_minimal_rlm_host_imports_control_finish() -> Result<()> {
+    let requests = Arc::new(StdMutex::new(Vec::new()));
+    let provider = scripted_cells(
+        "minimal-rlm-control",
+        vec![typescript_block("await control.finish(\"done\");")],
+        Arc::clone(&requests),
+    );
+    let core =
+        explicit_ephemeral_facets(rlm_core_builder_over(sqlite_memory_store_backend().await))
+            .serve_test_llm_profile(provider, mock_llm_profile_spec())
+            .build(lash_facade_tests::runtime_lease_owner())?;
+    let session = created_session(
+        &core,
+        SessionId::parse("minimal-rlm-control").expect("nonblank host identity"),
+    )
+    .await
+    .open()
+    .await?;
+    let output = session.send(TurnInput::text("finish")).output().await?;
+
+    assert_eq!(
+        output.outcome,
+        TurnOutcome::Finished(TurnFinish::Finished {
+            tool_name: "control.finish".to_string(),
+            value: serde_json::json!("done"),
+        }),
+        "model messages: {:?}",
+        requests.lock_recover()
+    );
+    drop(session);
+    core.shutdown().await?;
+    Ok(())
+}
+
 /// FIG-5823 law 4: a host that offers its own finish tool replaces Lash's
 /// `control.finish`, and the value has the type the host declared: text is
 /// refused as the integer, and an integer finishes.

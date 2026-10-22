@@ -541,7 +541,15 @@ impl KernelMachine {
             } => {
                 let caller = self.active_link;
                 self.active_link = link;
-                let result = self.enter_body(task, exe, lib, admitted, args, awaiting, None);
+                let result = self.enter_body(
+                    task,
+                    exe,
+                    lib,
+                    admitted,
+                    super::exec::Invocation::new(args, exe.lib(lib).arity)
+                        .awaited_by(awaiting)
+                        .with_boundary(None),
+                );
                 self.active_link = caller;
                 result
             }

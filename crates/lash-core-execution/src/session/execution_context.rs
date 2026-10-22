@@ -1244,6 +1244,13 @@ impl<'run> RuntimeExecutionContext<'run> {
             .read_route(tool, pinned, &self.dispatch.config)
     }
 
+    /// The accepted packages and routes from this execution's recorded round
+    /// surface. A surface-less context has no trusted consumer context; the
+    /// code runtime must refuse it rather than advertise a live replacement.
+    pub fn recorded_packages(&self) -> &lash_core_store::tool_surface::RecordedPackages {
+        self.dispatch.routes.packages()
+    }
+
     /// The registered package callbacks, independent of model tool exposure.
     pub fn package_composition(&self) -> &Arc<crate::plugin::ExecutionComposition> {
         &self.dispatch.composition

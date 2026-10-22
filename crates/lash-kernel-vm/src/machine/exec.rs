@@ -37,6 +37,34 @@ impl<'a> From<&'a lash_kernel_doc::FunctionExport> for ExportBoundary<'a> {
     }
 }
 
+/// Arguments and the continuation owned by one call activation.
+#[derive(Clone, Copy)]
+pub(super) struct Invocation<'a> {
+    pub(super) args: Reg,
+    pub(super) count: usize,
+    pub(super) awaiting: Option<StmtId>,
+    pub(super) export: Option<ExportBoundary<'a>>,
+}
+
+impl<'a> Invocation<'a> {
+    pub(super) fn new(args: Reg, count: usize) -> Self {
+        Self {
+            args,
+            count,
+            awaiting: None,
+            export: None,
+        }
+    }
+    pub(super) fn awaited_by(mut self, awaiting: Option<StmtId>) -> Self {
+        self.awaiting = awaiting;
+        self
+    }
+    pub(super) fn with_boundary(mut self, export: Option<ExportBoundary<'a>>) -> Self {
+        self.export = export;
+        self
+    }
+}
+
 /// A function about to run in a new frame.
 pub(super) struct Call<'a> {
     pub(super) code: CodeId,

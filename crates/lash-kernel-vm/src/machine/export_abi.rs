@@ -13,20 +13,23 @@ impl KernelMachine {
         exe: &Executable,
         callable: lash_vocabulary::CallableId,
         descriptor: &lash_kernel_doc::FunctionExport,
-        args: Reg,
-        count: usize,
-        awaiting: Option<crate::compile::StmtId>,
+        invocation: super::exec::Invocation<'_>,
     ) -> Status {
+        let super::exec::Invocation {
+            args,
+            count,
+            awaiting,
+            ..
+        } = invocation;
         let count = self.export_arguments(exe, descriptor, args, count)?;
         let flow = match self.callable_target(exe, callable)? {
             Target::Library(lib, link) => self.call_lib_linked(
                 task,
                 exe,
                 (lib, link),
-                args,
-                count,
-                awaiting,
-                Some(descriptor.into()),
+                super::exec::Invocation::new(args, count)
+                    .awaited_by(awaiting)
+                    .with_boundary(Some(descriptor.into())),
             )?,
             Target::Code(code, captures, link) => {
                 let pushed = self.push_frame(

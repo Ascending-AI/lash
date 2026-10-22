@@ -41,7 +41,7 @@ use lash_vocabulary::tokens::put_varint;
 use lash_vocabulary::tokens::varint_len;
 
 use super::node::{
-    EncodedNode, INDEX_FANOUT, INLINE_TOKEN_MAX, LEAF_PAYLOAD_MAX, MAX_NODE_BYTES, NodeId,
+    EncodedNode, Framing, INDEX_FANOUT, INLINE_TOKEN_MAX, LEAF_PAYLOAD_MAX, MAX_NODE_BYTES, NodeId,
     envelope_len, parse_envelope, write_envelope,
 };
 use super::refusal::GraphRefusal;
@@ -84,8 +84,9 @@ pub struct GraphStaging {
 
 // Canonical encoding depends only on the operation and its complete input,
 // never on a store, owner, release catalog or decoder. Keep its immutable
-// envelopes across captures and canonical read checks. Runtime reads still
-// fetch and check every supplied envelope before deriving their logical body.
+// envelopes and framing across captures and canonical read checks. Runtime
+// reads still fetch, bound, hash and compare every supplied envelope before
+// reusing its framing or deriving its logical body.
 const CACHE_BYTES: usize = 32 << 20;
 const CACHE_ENTRIES: usize = 256;
 
@@ -94,6 +95,7 @@ enum EncodingKind {
     Node(NodeKind),
     Text,
     Bytes,
+    Envelope,
 }
 
 type EncodingKey = (EncodingKind, [u8; 32]);
@@ -107,9 +109,30 @@ struct PreparedEncoding {
     bytes: usize,
 }
 
+enum PreparedGraph {
+    Encoding(Arc<PreparedEncoding>),
+    Envelope { input: Box<[u8]>, framing: Framing },
+}
+
+impl PreparedGraph {
+    fn input(&self) -> &[u8] {
+        match self {
+            Self::Encoding(prepared) => &prepared.input,
+            Self::Envelope { input, .. } => input,
+        }
+    }
+
+    fn bytes(&self) -> usize {
+        match self {
+            Self::Encoding(prepared) => prepared.bytes,
+            Self::Envelope { input, .. } => input.len() + std::mem::size_of::<Framing>(),
+        }
+    }
+}
+
 #[derive(Default)]
 struct EncodingCache {
-    entries: BTreeMap<EncodingKey, (Arc<PreparedEncoding>, u64)>,
+    entries: BTreeMap<EncodingKey, (PreparedGraph, u64)>,
     bytes: usize,
     clock: u64,
 }
@@ -124,14 +147,28 @@ impl std::fmt::Debug for EncodingCache {
 }
 
 impl EncodingCache {
-    fn get(&mut self, key: &EncodingKey, input: &[u8]) -> Option<Arc<PreparedEncoding>> {
+    fn get_prepared(&mut self, key: &EncodingKey, input: &[u8]) -> Option<&PreparedGraph> {
         let (prepared, used) = self.entries.get_mut(key)?;
-        if prepared.input.as_ref() != input {
+        if prepared.input() != input {
             return None;
         }
         self.clock = self.clock.wrapping_add(1);
         *used = self.clock;
-        Some(Arc::clone(prepared))
+        Some(prepared)
+    }
+
+    fn get(&mut self, key: &EncodingKey, input: &[u8]) -> Option<Arc<PreparedEncoding>> {
+        match self.get_prepared(key, input)? {
+            PreparedGraph::Encoding(prepared) => Some(Arc::clone(prepared)),
+            PreparedGraph::Envelope { .. } => None,
+        }
+    }
+
+    fn envelope(&mut self, key: &EncodingKey, input: &[u8]) -> Option<Framing> {
+        match self.get_prepared(key, input)? {
+            PreparedGraph::Envelope { framing, .. } => Some(*framing),
+            PreparedGraph::Encoding(_) => None,
+        }
     }
 
     fn insert(&mut self, key: EncodingKey, input: &[u8], root: NodeId, nodes: Vec<EncodedNode>) {
@@ -144,8 +181,24 @@ impl EncodingCache {
         if bytes > CACHE_BYTES {
             return;
         }
+        self.insert_prepared(
+            key,
+            PreparedGraph::Encoding(Arc::new(PreparedEncoding {
+                input: input.into(),
+                root,
+                nodes,
+                bytes,
+            })),
+        );
+    }
+
+    fn insert_prepared(&mut self, key: EncodingKey, prepared: PreparedGraph) {
+        let bytes = prepared.bytes();
+        if bytes > CACHE_BYTES {
+            return;
+        }
         if let Some((previous, _)) = self.entries.remove(&key) {
-            self.bytes -= previous.bytes;
+            self.bytes -= previous.bytes();
         }
         while self.entries.len() >= CACHE_ENTRIES || self.bytes + bytes > CACHE_BYTES {
             let Some(oldest) = self
@@ -157,22 +210,11 @@ impl EncodingCache {
                 break;
             };
             if let Some((removed, _)) = self.entries.remove(&oldest) {
-                self.bytes -= removed.bytes;
+                self.bytes -= removed.bytes();
             }
         }
         self.clock = self.clock.wrapping_add(1);
-        self.entries.insert(
-            key,
-            (
-                Arc::new(PreparedEncoding {
-                    input: input.into(),
-                    root,
-                    nodes,
-                    bytes,
-                }),
-                self.clock,
-            ),
-        );
+        self.entries.insert(key, (prepared, self.clock));
         self.bytes += bytes;
     }
 }
@@ -180,6 +222,40 @@ impl EncodingCache {
 fn encoding_cache() -> Arc<Mutex<EncodingCache>> {
     static CACHE: OnceLock<Arc<Mutex<EncodingCache>>> = OnceLock::new();
     Arc::clone(CACHE.get_or_init(|| Arc::new(Mutex::new(EncodingCache::default()))))
+}
+
+/// Canonical framing belongs to the same bounded pure-preparation inventory
+/// as encoding. Every lookup compares the current bytes in full; no stored
+/// presence, referrer or receiving limit is memoized.
+pub(crate) fn prepare_envelope(
+    digest: NodeId,
+    bytes: &[u8],
+    parse: impl FnOnce() -> Result<Framing, GraphRefusal>,
+) -> Result<Framing, GraphRefusal> {
+    let cache = encoding_cache();
+    let key = (EncodingKind::Envelope, digest.0);
+    if let Some(framing) = cache
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .envelope(&key, bytes)
+    {
+        return Ok(framing);
+    }
+    let framing = parse()?;
+    let mut cache = cache
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    if let Some(framing) = cache.envelope(&key, bytes) {
+        return Ok(framing);
+    }
+    cache.insert_prepared(
+        key,
+        PreparedGraph::Envelope {
+            input: bytes.into(),
+            framing,
+        },
+    );
+    Ok(framing)
 }
 
 /// Encodes one node of `kind` into `staging` and returns it. Placed leaves,
