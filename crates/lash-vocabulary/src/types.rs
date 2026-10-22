@@ -312,3 +312,186 @@ pub fn require_entry_signature(
     }
     Ok(())
 }
+
+/// Why a written entry annotation cannot describe boundary data.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum AnnotationResolutionReason {
+    Unresolved { name: String },
+    Cycle { name: String },
+    Unsupported { construct: String },
+    Limit,
+}
+
+/// Source coordinates and resolution evidence, never executable type authority.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct AnnotationOrigin {
+    pub span: Option<crate::sites::Span>,
+    pub refusal: Option<AnnotationResolutionReason>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SignatureOrigin {
+    pub name: Option<String>,
+    pub params: Vec<AnnotationOrigin>,
+    pub result: AnnotationOrigin,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, JsonSchema, thiserror::Error)]
+#[serde(tag = "code", rename = "ENTRY_ANNOTATION_REFUSED", deny_unknown_fields)]
+#[error("ENTRY_ANNOTATION_REFUSED: {function:?} {position:?} {reason:?}")]
+pub struct EntryAnnotationRefusal {
+    pub function: FunctionLocation,
+    pub position: SignaturePosition,
+    pub span: Option<crate::sites::Span>,
+    pub reason: AnnotationResolutionReason,
+}
+
+// An internally tagged struct needs an enum wire on read, so the required
+// code is consumed before deny_unknown_fields checks the payload.
+impl<'de> Deserialize<'de> for EntryAnnotationRefusal {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(tag = "code", deny_unknown_fields)]
+        enum Wire {
+            #[serde(rename = "ENTRY_ANNOTATION_REFUSED")]
+            Refused {
+                function: FunctionLocation,
+                position: SignaturePosition,
+                span: Option<crate::sites::Span>,
+                reason: AnnotationResolutionReason,
+            },
+        }
+        let Wire::Refused {
+            function,
+            position,
+            span,
+            reason,
+        } = Wire::deserialize(deserializer)?;
+        Ok(Self {
+            function,
+            position,
+            span,
+            reason,
+        })
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
+pub enum EntrySignatureRefusal {
+    #[error(transparent)]
+    Required(Box<SignatureRequired>),
+    #[error(transparent)]
+    Annotation(Box<EntryAnnotationRefusal>),
+}
+
+impl SignatureOrigin {
+    /// The resolved signature alone decides eligibility. Authored metadata
+    /// explains its first incomplete position and supplies source coordinates.
+    pub fn require(
+        &self,
+        signature: &Signature,
+        mut function: FunctionLocation,
+    ) -> Result<(), EntrySignatureRefusal> {
+        if function.name.is_none() {
+            function.name.clone_from(&self.name);
+        }
+        let Err(mut required) = require_entry_signature(signature, function) else {
+            return Ok(());
+        };
+        let origin = match &required.position {
+            SignaturePosition::Parameter { index, .. } => self.params.get(*index as usize),
+            SignaturePosition::Result => Some(&self.result),
+        };
+        required.span = origin.and_then(|origin| origin.span);
+        if let Some(reason) = origin.and_then(|origin| origin.refusal.clone()) {
+            Err(EntrySignatureRefusal::Annotation(Box::new(
+                EntryAnnotationRefusal {
+                    function: required.function,
+                    position: required.position,
+                    span: required.span,
+                    reason,
+                },
+            )))
+        } else {
+            Err(EntrySignatureRefusal::Required(required))
+        }
+    }
+}
+
+impl crate::tokens::TokenCodec for AnnotationResolutionReason {
+    fn encode(&self, out: &mut crate::tokens::TokenWriter) {
+        match self {
+            Self::Unresolved { name } => {
+                out.sum(0, 1);
+                name.encode(out);
+            }
+            Self::Cycle { name } => {
+                out.sum(1, 1);
+                name.encode(out);
+            }
+            Self::Unsupported { construct } => {
+                out.sum(2, 1);
+                construct.encode(out);
+            }
+            Self::Limit => out.sum(3, 0),
+        }
+    }
+    fn decode(
+        input: &mut crate::tokens::TokenReader<'_>,
+    ) -> Result<Self, crate::tokens::TokenError> {
+        Ok(match input.sum()? {
+            (0, 1) => Self::Unresolved {
+                name: String::decode(input)?,
+            },
+            (1, 1) => Self::Cycle {
+                name: String::decode(input)?,
+            },
+            (2, 1) => Self::Unsupported {
+                construct: String::decode(input)?,
+            },
+            (3, 0) => Self::Limit,
+            _ => {
+                return Err(crate::tokens::TokenError::Invalid(
+                    "annotation resolution reason".into(),
+                ));
+            }
+        })
+    }
+}
+impl crate::tokens::TokenCodec for AnnotationOrigin {
+    fn encode(&self, out: &mut crate::tokens::TokenWriter) {
+        out.seq(2);
+        self.span.encode(out);
+        self.refusal.encode(out);
+    }
+    fn decode(
+        input: &mut crate::tokens::TokenReader<'_>,
+    ) -> Result<Self, crate::tokens::TokenError> {
+        input.expect_struct(2)?;
+        Ok(Self {
+            span: Option::decode(input)?,
+            refusal: Option::decode(input)?,
+        })
+    }
+}
+impl crate::tokens::TokenCodec for SignatureOrigin {
+    fn encode(&self, out: &mut crate::tokens::TokenWriter) {
+        out.seq(3);
+        self.name.encode(out);
+        self.params.encode(out);
+        self.result.encode(out);
+    }
+    fn decode(
+        input: &mut crate::tokens::TokenReader<'_>,
+    ) -> Result<Self, crate::tokens::TokenError> {
+        input.expect_struct(3)?;
+        Ok(Self {
+            name: Option::decode(input)?,
+            params: Vec::decode(input)?,
+            result: AnnotationOrigin::decode(input)?,
+        })
+    }
+}

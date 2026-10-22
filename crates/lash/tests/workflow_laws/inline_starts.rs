@@ -37,6 +37,7 @@ async fn function(
     .await
     .unwrap();
     FunctionValue {
+        signature_origin: None,
         callable: lash::package::CallableId {
             link: publication.start.link,
             function: definition.identity(),

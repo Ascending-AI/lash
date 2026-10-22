@@ -506,6 +506,8 @@ pub trait RunObserver {
 /// Per-segment embedding policy. These options are derived, never checkpointed.
 #[derive(Default)]
 pub struct MachineOptions {
+    /// Annotation diagnostics, keyed by creation identity or saved environment.
+    pub signature_origins: FunctionOrigins,
     pub observation: crate::ObservationMode,
     pub trace_path: bool,
     pub cell_save: Option<Box<dyn CellSave>>,
@@ -779,4 +781,11 @@ pub struct PreparedInstance {
     pub link: LinkId,
     pub document: DocumentId,
     pub slots: BTreeMap<ImportSlot, PreparedSlot>,
+}
+
+/// Source-owned coordinates used only when callables cross a boundary.
+#[derive(Clone, Debug, Default)]
+pub struct FunctionOrigins {
+    pub sites: BTreeMap<(LinkId, lash_vocabulary::sites::Site), lash_vocabulary::SignatureOrigin>,
+    pub environments: BTreeMap<lash_kernel_doc::heap::EntityId, lash_vocabulary::SignatureOrigin>,
 }

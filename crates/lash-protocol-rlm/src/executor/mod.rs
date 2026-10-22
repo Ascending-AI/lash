@@ -617,6 +617,7 @@ async fn run_linked_cell(
     });
     let bounds = cell_bounds(services);
     let save = lash_vm_client::wire::SaveWire {
+        saved_origins: host.envelope.saved_origins.clone(),
         controls: host
             .envelope
             .environment

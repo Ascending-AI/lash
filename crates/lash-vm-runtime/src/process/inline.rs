@@ -192,6 +192,9 @@ impl KernelProcessEngine {
             function
                 .entry_export(document)
                 .map_err(|error| match error {
+                    lash_kernel_doc::FunctionValueRefusal::EntryAnnotation { source } => {
+                        EnginePortError::Refused(AdmissionRefusal::EntryAnnotation { source })
+                    }
                     lash_kernel_doc::FunctionValueRefusal::SignatureRequired { source } => {
                         EnginePortError::Refused(AdmissionRefusal::SignatureRequired { source })
                     }

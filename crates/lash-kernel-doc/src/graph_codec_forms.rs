@@ -471,7 +471,7 @@ impl TokenCodec for StartConvention {
 /// A function value: its document and its entry's name.
 impl TokenCodec for FunctionValue {
     fn encode(&self, out: &mut TokenWriter) {
-        out.seq(8);
+        out.seq(9);
         self.callable.encode(out);
         self.captures.encode(out);
         self.signature.encode(out);
@@ -480,9 +480,10 @@ impl TokenCodec for FunctionValue {
         self.representation.encode(out);
         self.creation.encode(out);
         self.token.encode(out);
+        self.signature_origin.encode(out);
     }
     fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
-        input.expect_struct(8)?;
+        input.expect_struct(9)?;
         Ok(Self {
             callable: lash_vocabulary::CallableId::decode(input)?,
             captures: BTreeMap::decode(input)?,
@@ -492,6 +493,7 @@ impl TokenCodec for FunctionValue {
             representation: FunctionRepresentation::decode(input)?,
             creation: Option::decode(input)?,
             token: Option::decode(input)?,
+            signature_origin: Option::decode(input)?,
         })
     }
 }

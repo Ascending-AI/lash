@@ -300,6 +300,17 @@ pub(super) async fn link_cell(
         }
     }
     let envelope = CellEnvelope {
+        saved_origins: state
+            .lowering_functions()
+            .values()
+            .filter_map(|function| {
+                function
+                    .written
+                    .as_ref()
+                    .and_then(|written| written.signature_origin.clone())
+                    .map(|origin| (function.environment, origin))
+            })
+            .collect(),
         code: CellEnvelope::code_digest(code),
         dialect: state.dialect().to_owned(),
         link: fulfilled.inspection.link,

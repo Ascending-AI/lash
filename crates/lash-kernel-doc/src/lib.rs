@@ -35,7 +35,10 @@ mod codec_variants;
 mod continuation;
 mod decode;
 pub use decode::{DecodeRefusal, Decoder, datum_type, diagnostic_datum};
-pub use lash_vocabulary::{EntryTypeMismatch, TypeMismatch};
+pub use lash_vocabulary::{
+    AnnotationOrigin, AnnotationResolutionReason, EntryAnnotationRefusal, EntrySignatureRefusal,
+    EntryTypeMismatch, SignatureOrigin, TypeMismatch,
+};
 pub mod document;
 
 /// The arena: what a run's objects are while it executes (seams C, D).

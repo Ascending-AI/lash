@@ -50,6 +50,9 @@ pub const FUNCTION_VALUE_ENTRY: &str = "run";
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct FunctionValue {
+    /// Source coordinates for diagnostics, independent of executable identity.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub signature_origin: Option<lash_vocabulary::SignatureOrigin>,
     pub callable: lash_vocabulary::names::CallableId,
     pub captures: std::collections::BTreeMap<Name, crate::CaptureValue>,
     pub signature: Signature,
@@ -180,6 +183,10 @@ impl Default for FunctionValueLimits {
 pub enum FunctionValueRefusal {
     #[error(transparent)]
     SignatureRequired { source: Box<SignatureRequired> },
+    #[error(transparent)]
+    EntryAnnotation {
+        source: Box<lash_vocabulary::EntryAnnotationRefusal>,
+    },
     #[error("function value metadata differs from its defining callable")]
     Identity,
     /// The JSON is not the one-key `$lash_function` wrapper.
@@ -316,8 +323,14 @@ impl CallablePresentation {
         location: FunctionLocation,
         asynchronous: bool,
         rest: bool,
-    ) -> Result<crate::FunctionExport, Box<SignatureRequired>> {
-        require_entry_signature(&self.signature, location)?;
+        origin: Option<&lash_vocabulary::SignatureOrigin>,
+    ) -> Result<crate::FunctionExport, lash_vocabulary::EntrySignatureRefusal> {
+        if let Some(origin) = origin {
+            origin.require(&self.signature, location)?;
+        } else {
+            require_entry_signature(&self.signature, location)
+                .map_err(lash_vocabulary::EntrySignatureRefusal::Required)?;
+        }
         Ok(crate::FunctionExport {
             function,
             signature: self.signature.clone(),
@@ -397,7 +410,15 @@ impl FunctionValue {
                 },
                 false,
                 false,
+                self.signature_origin.as_ref(),
             )
-            .map_err(|source| FunctionValueRefusal::SignatureRequired { source })
+            .map_err(|refusal| match refusal {
+                lash_vocabulary::EntrySignatureRefusal::Required(source) => {
+                    FunctionValueRefusal::SignatureRequired { source }
+                }
+                lash_vocabulary::EntrySignatureRefusal::Annotation(source) => {
+                    FunctionValueRefusal::EntryAnnotation { source }
+                }
+            })
     }
 }

@@ -30,6 +30,7 @@ impl Lowerer<'_> {
             signature.push_str(text(annotation.span));
         }
         Written {
+            signature_origin: None,
             captions: Vec::new(),
             language: SourceLanguage::TypeScript,
             signature,

@@ -1241,6 +1241,7 @@ impl KernelMachine {
         };
         let mut run = crate::crossing::CrossingRun {
             captions: &self.captions,
+            signature_origins: &self.signature_origins,
             documents: &self.program.documents,
             instances: &self.program.instances,
             catalog: library.registry().as_ref(),

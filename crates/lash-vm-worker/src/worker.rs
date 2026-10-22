@@ -526,6 +526,7 @@ impl<'embedding> Server<'embedding> {
                 let save: wire::SaveWire = wire::decode(PayloadKind::Start, payload)
                     .map_err(|error| undecodable(RunInput::Start, &error))?;
                 Ok::<_, PoolError>(crate::save::DialectSave {
+                    saved_origins: save.saved_origins,
                     values: self
                         .embedding
                         .dialects
@@ -536,6 +537,22 @@ impl<'embedding> Server<'embedding> {
                 })
             })
             .transpose()?;
+        let signature_origins = save
+            .as_ref()
+            .map(|save| lash_kernel_vm::interface::FunctionOrigins {
+                sites: save
+                    .written
+                    .iter()
+                    .filter_map(|(site, written)| {
+                        written
+                            .signature_origin
+                            .clone()
+                            .map(|origin| ((program.link, site.clone()), origin))
+                    })
+                    .collect(),
+                environments: save.saved_origins.clone(),
+            })
+            .unwrap_or_default();
         let captions = save
             .as_ref()
             .map(|save| {
@@ -627,6 +644,7 @@ impl<'embedding> Server<'embedding> {
             },
             trace_path: path.is_some(),
             captions,
+            signature_origins,
             cell_save: save.map(|save| Box::new(save) as Box<dyn lash_kernel_vm::CellSave>),
             memory_limiter: match start.memory_limiter {
                 true => Some(Box::new(WireLimiter {

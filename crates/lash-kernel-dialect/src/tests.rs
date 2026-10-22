@@ -25,11 +25,12 @@ fn written_refuses_a_second_start_signature() {
     assert!(refused.to_string().contains("unknown field `start`"));
 
     let mut out = TokenWriter::new();
-    out.seq(4);
+    out.seq(5);
     SourceLanguage::Python.encode(&mut out);
     out.text("() -> str");
     Some(signature).encode(&mut out);
     None::<crate::CallShape>.encode(&mut out);
+    None::<lash_vocabulary::SignatureOrigin>.encode(&mut out);
     assert!(decode_body::<crate::Written>(&out.into_bytes()).is_err());
 }
 

@@ -15,6 +15,8 @@ use lash_vocabulary::sites::Site;
 
 /// How a cell of one dialect saves its functions.
 pub(crate) struct DialectSave {
+    pub(crate) saved_origins:
+        BTreeMap<lash_kernel_doc::heap::EntityId, lash_vocabulary::SignatureOrigin>,
     /// The dialect's function values; none keeps no function.
     pub(crate) values: Option<lash_kernel_doc::FunctionRepresentation>,
     pub(crate) controls: BTreeMap<lash_vocabulary::names::OperationUse, BTreeSet<EffectControl>>,

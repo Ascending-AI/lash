@@ -95,6 +95,7 @@ pub enum SourceOperandType {
 #[non_exhaustive]
 pub enum DiagnosticFact {
     SignatureRequired(lash_kernel_doc::SignatureRequired),
+    EntryAnnotationRefused(lash_vocabulary::EntryAnnotationRefusal),
     NamespaceShadowing(lash_vocabulary::NamespaceShadowing),
 }
 

@@ -1,5 +1,101 @@
 {
   "$defs": {
+    "AnnotationOrigin": {
+      "additionalProperties": false,
+      "description": "Source coordinates and resolution evidence, never executable type authority.",
+      "properties": {
+        "refusal": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AnnotationResolutionReason"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "span": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Span"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "AnnotationResolutionReason": {
+      "description": "Why a written entry annotation cannot describe boundary data.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "unresolved",
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "name"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "cycle",
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "name"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "construct": {
+              "type": "string"
+            },
+            "kind": {
+              "const": "unsupported",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "construct"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "limit",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        }
+      ]
+    },
     "Bytes": {
       "pattern": "^([0-9a-f]{2})*$",
       "type": "string"
@@ -734,6 +830,17 @@
         "signature": {
           "$ref": "#/$defs/Signature"
         },
+        "signature_origin": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SignatureOrigin"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Source coordinates for diagnostics, independent of executable identity."
+        },
         "token": {
           "description": "Token members other than its callable slot, which is Null.",
           "items": {
@@ -1065,6 +1172,31 @@
       ],
       "type": "object"
     },
+    "SignatureOrigin": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "params": {
+          "items": {
+            "$ref": "#/$defs/AnnotationOrigin"
+          },
+          "type": "array"
+        },
+        "result": {
+          "$ref": "#/$defs/AnnotationOrigin"
+        }
+      },
+      "required": [
+        "params",
+        "result"
+      ],
+      "type": "object"
+    },
     "Site": {
       "additionalProperties": false,
       "description": "A node's address: the code it belongs to and the chain of\n[`Node::children`] indexes that reaches it from that code's body.\n\nA site is derived from the document and is never written by a host\n(`K-ID-004`). An empty chain addresses the body itself.",
@@ -1100,6 +1232,27 @@
       "required": [
         "site",
         "caption"
+      ],
+      "type": "object"
+    },
+    "Span": {
+      "additionalProperties": false,
+      "description": "UTF-8 byte offsets in authored or printed source.",
+      "properties": {
+        "end": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "start": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "start",
+        "end"
       ],
       "type": "object"
     },
