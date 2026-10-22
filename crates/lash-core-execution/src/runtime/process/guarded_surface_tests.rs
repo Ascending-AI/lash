@@ -73,25 +73,27 @@ fn restamp_scope(bytes: &[u8], version: u32) -> Vec<u8> {
 fn write_admission(fleet: FleetFormat) -> Vec<u8> {
     let session = crate::SessionId::fixture("admission");
     let view = crate::plugin::PluginNativeView {
-        request: crate::plugin::PluginTransitionRequest {
-            id: crate::plugin::PluginTransitionId(
-                crate::EffectAddress::new(
-                    crate::ExecutionScope::turn(&session, "run"),
-                    "plugin-transition",
-                )
-                .expect("address"),
-            ),
-            owner: crate::RuntimeOwner::Session(session),
-            base: crate::plugin::PluginTransitionBase::Session {
-                head: crate::store::SessionHeadRef {
-                    generation: 0,
-                    revision: 0,
-                    leaf: None,
-                    checkpoint: None,
+        request: crate::plugin::PluginTransitionRequest::new(
+            crate::plugin::PluginTransitionRequestData {
+                id: crate::plugin::PluginTransitionId(
+                    crate::EffectAddress::new(
+                        crate::ExecutionScope::turn(&session, "run"),
+                        "plugin-transition",
+                    )
+                    .expect("address"),
+                ),
+                owner: crate::RuntimeOwner::Session(session),
+                base: crate::plugin::PluginTransitionBase::Session {
+                    head: crate::store::SessionHeadRef {
+                        generation: 0,
+                        revision: 0,
+                        leaf: None,
+                        checkpoint: None,
+                    },
                 },
+                target: Default::default(),
             },
-            target: Default::default(),
-        },
+        ),
         source: crate::BlobRef::for_content(b"native"),
         generation: None,
         state: Default::default(),

@@ -68,7 +68,7 @@ async fn duplicate_plugin_id_refused() -> Result<()> {
     )), Err(lash_execution_contracts::plugin_error::PluginError::Declaration(error)) if error == duplicate)
     );
     let record = host.transition_plugins(
-        lash::plugins::PluginTransitionRequest {
+        lash::plugins::PluginTransitionRequest::new(lash::plugins::PluginTransitionRequestData {
             id: lash::plugins::PluginTransitionId(
                 lash_core::EffectAddress::new(
                     lash_core::ExecutionScope::turn("duplicate-owner", "run"),
@@ -86,7 +86,7 @@ async fn duplicate_plugin_id_refused() -> Result<()> {
                 },
             },
             target: Default::default(),
-        },
+        }),
         &Default::default(),
         &Default::default(),
     );

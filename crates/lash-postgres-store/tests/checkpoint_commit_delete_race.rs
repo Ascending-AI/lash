@@ -127,7 +127,9 @@ async fn commit_waits_for_delete(branch: ReuseBranch) {
     }
 
     let held_ref = match branch {
-        ReuseBranch::UnchangedComponent | ReuseBranch::ChangedComponent => shared.blob_ref.clone(),
+        ReuseBranch::UnchangedComponent | ReuseBranch::ChangedComponent => {
+            shared.blob_ref.as_ref().clone()
+        }
         ReuseBranch::ExistingRoot => victim_receipt.checkpoint_ref.clone(),
     };
 

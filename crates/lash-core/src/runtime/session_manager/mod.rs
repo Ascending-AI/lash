@@ -124,10 +124,22 @@ impl OwnerPlugins {
         }
     }
 
-    fn adopt_plugin_admission(&self, adopted: crate::store::plugin_writers::PluginAdmission) {
+    fn adopt_plugin_admission(
+        &self,
+        adopted: crate::store::plugin_writers::PluginAdmission,
+        budget: &lash_protocol_types::allocation::AllocationBudget,
+    ) -> Result<(), lash_execution_contracts::plugin_error::PluginError> {
         match self {
             Self::Session(plugins) => plugins.adopt_plugin_admission(adopted),
-            Self::Process { admission, .. } => *admission.lock_recover() = Some(adopted),
+            Self::Process { admission, .. } => {
+                let adopted = adopted.clone_in(budget).map_err(|error| {
+                    lash_execution_contracts::plugin_error::PluginError::from(
+                        crate::StoreError::Allocation(error),
+                    )
+                })?;
+                *admission.lock_recover() = Some(adopted);
+                Ok(())
+            }
         }
     }
 }
@@ -474,8 +486,11 @@ impl RuntimeSessionServices {
     pub(in crate::runtime) fn adopt_plugin_admission(
         &self,
         admission: crate::store::plugin_writers::PluginAdmission,
-    ) {
-        self.current.plugins.adopt_plugin_admission(admission);
+        budget: &lash_protocol_types::allocation::AllocationBudget,
+    ) -> Result<(), lash_execution_contracts::plugin_error::PluginError> {
+        self.current
+            .plugins
+            .adopt_plugin_admission(admission, budget)
     }
 
     pub(in crate::runtime) fn state_service(
@@ -662,6 +677,55 @@ mod process_visibility_tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     const SESSION_ID: &str = "process-visibility-table-session";
+
+    /// LO-EVICT-PROCESS-ADMISSION: a process cannot retain a foreign
+    /// plugin composition when its claimed-owner ledger refuses admission.
+    #[test]
+    fn process_plugin_admission_refuses_before_installation() {
+        use lash_protocol_types::allocation::*;
+        struct Refuse;
+        impl AllocationLedger for Refuse {
+            fn reserve(&self, requested: u64) -> Result<AllocationHold, AllocationError> {
+                Err(AllocationError {
+                    kind: ReserveError::TooLarge,
+                    actor: "process".into(),
+                    requested,
+                    capacity: 1,
+                })
+            }
+            fn reserve_shared(
+                &self,
+                _: usize,
+                requested: u64,
+            ) -> Result<AllocationHold, AllocationError> {
+                self.reserve(requested)
+            }
+        }
+        let plugins = super::OwnerPlugins::Process {
+            host: Arc::new(crate::PluginHost::new(
+                Vec::new(),
+                crate::ExecutionBudgets::recommended(),
+                crate::trace::TraceRuntime::new(Arc::new(crate::SystemClock)),
+            )),
+            admission: Arc::default(),
+        };
+        let foreign = crate::store::plugin_writers::PluginAdmission::from_plugins(vec![
+            crate::store::plugin_writers::AdmittedPlugin {
+                plugin: "process-plugin".repeat(1024),
+                writer: crate::FormatVersion::ONE,
+            },
+        ]);
+        assert!(
+            plugins
+                .adopt_plugin_admission(foreign, &AllocationBudget::new(Refuse))
+                .is_err(),
+            "the owner must refuse before installing plugin metadata"
+        );
+        assert!(
+            plugins.plugin_admission().is_none(),
+            "a refused adoption changes no live admission"
+        );
+    }
 
     #[derive(Clone, Copy, Debug)]
     enum Operation {

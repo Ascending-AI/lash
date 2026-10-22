@@ -479,35 +479,37 @@ async fn restore_notifications_identify_reopened_and_revision_zero_heads() -> Re
     // A restored runtime has accepted plugin state even when no checkpoint
     // has committed. Fresh assembly without this snapshot stays lazy.
     let transition = plugins.host().transition_plugins(
-        lash_core::plugin::PluginTransitionRequest {
-            id: lash_core::plugin::PluginTransitionId(
-                lash_core::EffectAddress::new(
-                    lash_core::ExecutionScope::turn(unpersisted.clone(), "restore-fixture"),
-                    "plugin-transition",
-                )
-                .expect("fixture transition address"),
-            ),
-            owner: lash_core::RuntimeOwner::Session(unpersisted.clone()),
-            base: lash_core::plugin::PluginTransitionBase::Session {
-                head: lash_core::store::SessionHeadRef {
-                    generation: 0,
-                    revision: 0,
-                    leaf: None,
-                    checkpoint: None,
+        lash_core::plugin::PluginTransitionRequest::new(
+            lash_core::plugin::PluginTransitionRequestData {
+                id: lash_core::plugin::PluginTransitionId(
+                    lash_core::EffectAddress::new(
+                        lash_core::ExecutionScope::turn(unpersisted.clone(), "restore-fixture"),
+                        "plugin-transition",
+                    )
+                    .expect("fixture transition address"),
+                ),
+                owner: lash_core::RuntimeOwner::Session(unpersisted.clone()),
+                base: lash_core::plugin::PluginTransitionBase::Session {
+                    head: lash_core::store::SessionHeadRef {
+                        generation: 0,
+                        revision: 0,
+                        leaf: None,
+                        checkpoint: None,
+                    },
                 },
+                target: lash_core::store::plugin_writers::PluginAdmission::from_plugins(
+                    plugins
+                        .host()
+                        .factories()
+                        .iter()
+                        .map(|factory| lash_core::store::plugin_writers::AdmittedPlugin {
+                            plugin: factory.id().into(),
+                            writer: factory.plugin_declaration().format_version,
+                        })
+                        .collect(),
+                ),
             },
-            target: lash_core::store::plugin_writers::PluginAdmission::from_plugins(
-                plugins
-                    .host()
-                    .factories()
-                    .iter()
-                    .map(|factory| lash_core::store::plugin_writers::AdmittedPlugin {
-                        plugin: factory.id().into(),
-                        writer: factory.plugin_declaration().format_version,
-                    })
-                    .collect(),
-            ),
-        },
+        ),
         &plugins.export_state(),
         &Default::default(),
     );

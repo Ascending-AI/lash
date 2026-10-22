@@ -253,7 +253,8 @@ pub(super) struct LiveSessionAuthority {
 pub struct PluginSession {
     pub(super) bindings: Arc<std::sync::RwLock<std::sync::Weak<ServiceBindings>>>,
     pub(super) state: Arc<std::sync::Mutex<PluginStateRegistry>>,
-    pub(super) native_view: Arc<std::sync::Mutex<Option<PluginNativeView>>>,
+    pub(super) native_view:
+        Arc<std::sync::Mutex<Option<super::transition::RetainedPluginNativeView>>>,
     pub(super) host: PluginHost,
     pub(super) declared_inventory: Arc<InstalledInventory>,
     pub(super) transcript_decoders: lash_core_store::transcript::TranscriptDecoders,
@@ -502,8 +503,22 @@ impl PluginSession {
     /// record of the Run or process segment that runs now. A retry or replay
     /// adopts the same record, so it writes the same formats whatever the
     /// fleet record permits by then.
-    pub fn adopt_plugin_admission(&self, admission: crate::store::plugin_writers::PluginAdmission) {
+    pub fn adopt_plugin_admission(
+        &self,
+        admission: crate::store::plugin_writers::PluginAdmission,
+    ) -> Result<(), PluginError> {
+        let budget = self
+            .authority
+            .read_recover()
+            .plugin_config
+            .config
+            .allocation_budget()
+            .clone();
+        let admission = admission
+            .clone_in(&budget)
+            .map_err(|error| PluginError::from(crate::StoreError::Allocation(error)))?;
         *self.admission.lock_recover() = Some(admission);
+        Ok(())
     }
 
     /// The plugin admission this session writes under, if it adopted one.
@@ -516,20 +531,42 @@ impl PluginSession {
     /// admission is adopted, or it chose the native format throughout. A
     /// plugin the admission does not name keeps its native format: the
     /// fleet record's check at the commit decides it.
-    fn recorded_writers(&self) -> Option<BTreeMap<String, FormatVersion>> {
-        let mut writers = self.plugin_admission()?.writers();
-        let mut native = true;
-        for factory in self.host.factories() {
-            let declared = factory.plugin_declaration().format_version;
-            native &= *writers.entry(factory.id().to_owned()).or_insert(declared) == declared;
-        }
-        (!native).then_some(writers)
+    fn recorded_writers(
+        &self,
+    ) -> Result<
+        Option<crate::store::plugin_writers::PluginWriterSelection>,
+        lash_protocol_types::allocation::AllocationError,
+    > {
+        let Some(admission) = self.plugin_admission() else {
+            return Ok(None);
+        };
+        let budget = self
+            .authority
+            .read_recover()
+            .plugin_config
+            .config
+            .allocation_budget()
+            .clone();
+        let admission = admission.clone_in(&budget)?;
+        let writers = admission.writers_with_defaults(
+            self.host
+                .factories()
+                .iter()
+                .map(|factory| (factory.id(), factory.plugin_declaration().format_version)),
+        )?;
+        let native = self.host.factories().iter().all(|factory| {
+            writers.get(factory.id()) == Some(&factory.plugin_declaration().format_version)
+        });
+        Ok((!native).then_some(writers))
     }
 
     /// `state`, a native capture, in the formats the adopted admission
     /// recorded.
     fn in_recorded_formats(&self, state: PluginState) -> Result<PluginState, PluginError> {
-        match self.recorded_writers() {
+        match self
+            .recorded_writers()
+            .map_err(|error| PluginError::from(crate::StoreError::Allocation(error)))?
+        {
             Some(writers) => self.host.encode_state(&state, &writers),
             None => Ok(state),
         }
@@ -541,7 +578,7 @@ impl PluginSession {
         &self,
         config: &PluginConfig,
     ) -> Result<Option<PluginConfig>, lash_core_store::plugin_state::ConfigAdmissionError> {
-        let Some(writers) = self.recorded_writers() else {
+        let Some(writers) = self.recorded_writers()? else {
             return Ok(None);
         };
         if config.namespaces().iter().all(|(id, namespace)| {
@@ -560,15 +597,18 @@ impl PluginSession {
     /// format than the plugin's native one decodes to another generation
     /// than the live state it was captured from, so identity is judged on
     /// the written form.
-    fn is_committed_form(&self, snapshot: &PluginState) -> bool {
-        // Written natively, the committed form is the live state itself,
-        // which the hydration check already compares.
-        self.is_materialized()
-            && self.recorded_writers().is_some_and(|writers| {
-                self.host
-                    .encode_state(&self.capture_state(), &writers)
-                    .is_ok_and(|committed| committed == *snapshot)
-            })
+    fn is_committed_form(
+        &self,
+        snapshot: &PluginState,
+    ) -> Result<bool, lash_protocol_types::allocation::AllocationError> {
+        if !self.is_materialized() {
+            return Ok(false);
+        }
+        Ok(self.recorded_writers()?.is_some_and(|writers| {
+            self.host
+                .encode_state(&self.capture_state(), &writers)
+                .is_ok_and(|committed| committed == *snapshot)
+        }))
     }
     /// Who this plugin session was built for.
     pub fn owner(&self) -> &crate::RuntimeOwner {
@@ -927,7 +967,10 @@ impl PluginSession {
     }
 
     pub fn require_hydrated_state(&self, snapshot: &PluginState) -> Result<(), PluginError> {
-        if self.is_committed_form(snapshot) {
+        if self
+            .is_committed_form(snapshot)
+            .map_err(|error| PluginError::from(crate::StoreError::Allocation(error)))?
+        {
             return Ok(());
         }
         let snapshot = snapshot.clone();
@@ -944,7 +987,10 @@ impl PluginSession {
     /// from its pinned head and its rows instead (`restore_run`).
     #[cfg(test)]
     pub(crate) fn hydrate_state(&self, snapshot: &PluginState) -> Result<(), PluginError> {
-        if self.is_committed_form(snapshot) {
+        if self
+            .is_committed_form(snapshot)
+            .map_err(|error| PluginError::from(crate::StoreError::Allocation(error)))?
+        {
             return Ok(());
         }
         self.host

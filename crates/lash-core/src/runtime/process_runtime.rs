@@ -174,8 +174,12 @@ impl SessionTurnRuntime {
     /// Adopt `admission`, the plugin admission the running segment's start
     /// recorded (FIG-4747): every session the process creates records plugin
     /// namespaces in those formats.
-    pub fn adopt_plugin_admission(&self, admission: crate::store::plugin_writers::PluginAdmission) {
-        self.services.adopt_plugin_admission(admission);
+    pub fn adopt_plugin_admission(
+        &self,
+        admission: crate::store::plugin_writers::PluginAdmission,
+        budget: &lash_protocol_types::allocation::AllocationBudget,
+    ) -> Result<(), lash_execution_contracts::plugin_error::PluginError> {
+        self.services.adopt_plugin_admission(admission, budget)
     }
 
     /// The `SessionTurn` input of this runtime's process, or why it is not one.

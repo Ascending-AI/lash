@@ -219,36 +219,38 @@ async fn plugin_context_host_exports_cannot_escape_namespaces() {
         .unwrap();
     let transition = |id: &str, state: &crate::PluginState| {
         host.transition_plugins(
-            crate::plugin::PluginTransitionRequest {
-                id: crate::plugin::PluginTransitionId(
-                    crate::EffectAddress::new(
-                        crate::ExecutionScope::turn(crate::SessionId::fixture(id), "run"),
-                        "plugin-transition",
-                    )
-                    .unwrap(),
-                ),
-                owner: crate::RuntimeOwner::Session(crate::SessionId::fixture(id)),
-                base: crate::plugin::PluginTransitionBase::Session {
-                    head: crate::store::SessionHeadRef {
-                        generation: 0,
-                        revision: 0,
-                        leaf: None,
-                        checkpoint: None,
+            crate::plugin::PluginTransitionRequest::new(
+                crate::plugin::PluginTransitionRequestData {
+                    id: crate::plugin::PluginTransitionId(
+                        crate::EffectAddress::new(
+                            crate::ExecutionScope::turn(crate::SessionId::fixture(id), "run"),
+                            "plugin-transition",
+                        )
+                        .unwrap(),
+                    ),
+                    owner: crate::RuntimeOwner::Session(crate::SessionId::fixture(id)),
+                    base: crate::plugin::PluginTransitionBase::Session {
+                        head: crate::store::SessionHeadRef {
+                            generation: 0,
+                            revision: 0,
+                            leaf: None,
+                            checkpoint: None,
+                        },
                     },
+                    target: crate::store::plugin_writers::PluginAdmission::from_plugins(
+                        host.factories()
+                            .iter()
+                            .map(|factory| {
+                                let declaration = factory.plugin_declaration();
+                                crate::store::plugin_writers::AdmittedPlugin {
+                                    plugin: factory.id().into(),
+                                    writer: declaration.format_version,
+                                }
+                            })
+                            .collect(),
+                    ),
                 },
-                target: crate::store::plugin_writers::PluginAdmission::from_plugins(
-                    host.factories()
-                        .iter()
-                        .map(|factory| {
-                            let declaration = factory.plugin_declaration();
-                            crate::store::plugin_writers::AdmittedPlugin {
-                                plugin: factory.id().into(),
-                                writer: declaration.format_version,
-                            }
-                        })
-                        .collect(),
-                ),
-            },
+            ),
             state,
             &Default::default(),
         )
