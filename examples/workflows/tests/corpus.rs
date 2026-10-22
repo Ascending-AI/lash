@@ -305,7 +305,11 @@ fn terminal_operation_roundtrip(language: lash_kernel_doc::SourceLanguage) -> an
                 )
             }
         };
-        let main = lowered.document.main.as_ref().expect("cell main");
+        let main = lowered
+            .document
+            .main
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("cell main is absent"))?;
         assert!(matches!(main[1], lash_kernel_doc::Stmt::Finish { .. }));
         assert!(!matches!(main[0], lash_kernel_doc::Stmt::Finish { .. }));
         let options = lash_kernel_dialect::PrintOptions {
@@ -349,7 +353,7 @@ fn terminal_operation_roundtrip(language: lash_kernel_doc::SourceLanguage) -> an
         assert_eq!(captions, lowered.captions);
         printed
             .source_map
-            .expect("requested map")
+            .ok_or_else(|| anyhow::anyhow!("requested map is absent"))?
             .validate(&read, &printed.source)?;
     }
     Ok(())
@@ -396,7 +400,7 @@ fn typescript_capturing_cell_prints_and_reads_identically() -> anyhow::Result<()
     assert_eq!(captions, lowered.captions);
     printed
         .source_map
-        .expect("requested map")
+        .ok_or_else(|| anyhow::anyhow!("requested map is absent"))?
         .validate(&read, &printed.source)?;
     Ok(())
 }
