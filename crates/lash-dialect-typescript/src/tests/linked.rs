@@ -131,8 +131,16 @@ pub(super) fn program(
         let link = link(&document, &release.content);
         let root = link.identity();
         let mut scope = RootContent {
-            previous_document: None,
-            previous_link: None,
+            previous_document: if retained.is_none() {
+                release.content.documents.get(&document_id).cloned()
+            } else {
+                None
+            },
+            previous_link: if retained.is_none() {
+                release.content.links.get(&root).cloned()
+            } else {
+                None
+            },
             document: document_id,
             link: root,
             content: &mut retained,
