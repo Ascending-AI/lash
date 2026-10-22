@@ -193,7 +193,7 @@ pub(super) async fn link_cell(
         .admit_document(&claim, &bytes)
         .await
         .map_err(package_error)?;
-    let fulfilled = documents
+    let mut fulfilled = documents
         .fulfil(&lash_execution_contracts::process::linking::FulfilRequest {
             document: id,
             selector: lash_execution_contracts::process::linking::ReachSelector::Start(
@@ -205,6 +205,27 @@ pub(super) async fn link_cell(
         })
         .await
         .map_err(package_error)?;
+    for link in &authored {
+        let saved = documents
+            .inspect_link(
+                *link,
+                &lash_execution_contracts::process::linking::ReachSelector::AllExports,
+            )
+            .await
+            .map_err(package_error)?;
+        fulfilled.inspection.operations.extend(saved.operations);
+        fulfilled
+            .inspection
+            .machine
+            .kernels
+            .extend(saved.machine.kernels);
+        fulfilled
+            .inspection
+            .machine
+            .natives
+            .extend(saved.machine.natives);
+        fulfilled.inspection.artifacts.extend(saved.artifacts);
+    }
     let mut environment = lash_core::facade_support::select_routes(
         &fulfilled.inspection,
         lash_vocabulary::claims::RegistryKind::Session,
