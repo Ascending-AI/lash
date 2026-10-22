@@ -41,7 +41,7 @@ use super::node::{
 use super::refusal::GraphRefusal;
 use super::registry::{BodyShape, NodeKind};
 use crate::EncodeBudget;
-use crate::allocation::{AllocationBudget, AllocationHold};
+use crate::allocation::{AllocationBudget, AllocationHold, SharedBytes};
 
 /// A logical body: one typed value's canonical tokens, references as
 /// digests, values unplaced.
@@ -333,8 +333,12 @@ impl GraphStaging {
         }
         parse_envelope(&node.bytes, Some(node.id))?;
         if !self.nodes.contains_key(&node.id) {
-            self.budget.charge(node.len())?;
-            self.nodes.insert(node.id, node);
+            let mut budget = self.budget;
+            budget.charge(node.len())?;
+            let bytes = node.bytes.clone_in(&self.allocation_budget)?;
+            self.nodes
+                .insert(node.id, EncodedNode { id: node.id, bytes });
+            self.budget = budget;
         }
         Ok(())
     }
@@ -388,19 +392,29 @@ impl GraphStaging {
                 }
             });
         }
+        // The vector and final shared slice coexist during conversion. Keep
+        // this pre-write obligation on the actual envelope readers retain.
+        let allocation = self
+            .allocation_budget
+            .reserve(len.saturating_mul(2).saturating_add(256))?;
         let bytes = write_envelope(kind, children, &body);
         let id = NodeId::of_envelope(&bytes);
         self.stage_prepared(EncodedNode {
             id,
-            bytes: bytes.into(),
+            bytes: SharedBytes::from_admitted(bytes, allocation, self.allocation_budget.clone()),
         })?;
         Ok(id)
     }
 
-    fn stage_prepared(&mut self, node: EncodedNode) -> Result<(), GraphRefusal> {
-        if !self.nodes.contains_key(&node.id) {
-            self.budget.charge(node.len())?;
+    fn stage_prepared(&mut self, mut node: EncodedNode) -> Result<(), GraphRefusal> {
+        if let Some(existing) = self.nodes.get(&node.id) {
+            node = existing.clone();
+        } else {
+            let mut budget = self.budget;
+            budget.charge(node.len())?;
+            node.bytes = node.bytes.clone_in(&self.allocation_budget)?;
             self.nodes.insert(node.id, node.clone());
+            self.budget = budget;
         }
         if let Some(recorded) = &mut self.recorded {
             recorded.push(node);
@@ -866,6 +880,29 @@ mod cache_tests {
         drop(staging);
         assert!(ledger.used.load(Ordering::SeqCst) > 0);
         drop(shared);
+        assert_eq!(ledger.used.load(Ordering::SeqCst), 0);
+        let mut staging = GraphStaging::new_in(encoding(), &budget).unwrap();
+        let root = staging.place_bytes(b"retained encoded source").unwrap();
+        let escaped = staging.get(&root).unwrap().bytes.clone();
+        drop(staging);
+        assert!(
+            ledger.used.load(Ordering::SeqCst) > 0,
+            "escaped envelope retains its admission"
+        );
+        drop(escaped);
+        assert_eq!(ledger.used.load(Ordering::SeqCst), 0);
+
+        let mut staging = GraphStaging::new_in(encoding(), &budget).unwrap();
+        ledger.refused.store(true, Ordering::SeqCst);
+        assert!(matches!(
+            staging.place_bytes(b"refused source"),
+            Err(GraphRefusal::Allocation(_))
+        ));
+        assert!(
+            staging.nodes().is_empty(),
+            "no envelope publishes after admission refusal"
+        );
+        drop(staging);
         assert_eq!(ledger.used.load(Ordering::SeqCst), 0);
     }
 
