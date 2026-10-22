@@ -100,10 +100,26 @@ pub fn namespaces(document: &k::Document) -> Result<Namespaces, NamespaceRefusal
 }
 
 /// The exact terminal-call shape authored lowering emits, keyed by the
-/// retained import slot. A display name never supplies a control fact.
+/// owning unit's import contract and projected onto matching root imports.
+/// A local slot or display name alone never supplies a control fact.
 fn terminal_operations(document: &k::Document) -> BTreeSet<lash_vocabulary::ImportSlot> {
     let mut terminal = BTreeSet::new();
-    for (_, block) in document.units() {
+    let mut roots = BTreeMap::<_, Vec<_>>::new();
+    for (slot, import) in &document.imports {
+        roots.entry(&import.name).or_default().push((*slot, import));
+    }
+    for (unit, block) in document.units() {
+        let imports = match unit {
+            lash_vocabulary::sites::Unit::Main | lash_vocabulary::sites::Unit::Function(_) => {
+                &document.imports
+            }
+            lash_vocabulary::sites::Unit::Library(function) => {
+                &document.functions[&function]
+                    .body()
+                    .expect("units only yields guest bodies")
+                    .imports
+            }
+        };
         let mut pending = vec![k::Node::Block(block)];
         while let Some(node) = pending.pop() {
             if let k::Node::Stmt(k::Stmt::Finish {
@@ -112,8 +128,15 @@ fn terminal_operations(document: &k::Document) -> BTreeSet<lash_vocabulary::Impo
                 && matches!(&**body, k::Expr::Literal(k::Literal::Null))
                 && let k::Expr::Act(action) = &**value
                 && let k::ActKind::Perform { slot, .. } = action.kind
+                && let Some(import) = imports.get(&slot)
             {
-                terminal.insert(slot);
+                terminal.extend(
+                    roots
+                        .get(&import.name)
+                        .into_iter()
+                        .flatten()
+                        .filter_map(|(root, candidate)| (*candidate == import).then_some(*root)),
+                );
             }
             pending.extend(node.children());
         }

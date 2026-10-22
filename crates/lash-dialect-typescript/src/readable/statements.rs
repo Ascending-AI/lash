@@ -36,6 +36,19 @@ impl Lifter<'_> {
                 value,
                 order: k::AssignOrder::ValueFirst,
             } => self.assign(place, value)?,
+            // A discarded dynamic member write is the exact ts.set import
+            // call; retain the source's place-before-value evaluation order.
+            k::Stmt::Do {
+                value: k::Expr::Act(action),
+            } if matches!(&action.kind, k::ActKind::Call(k::Callee::Import(slot))
+                    if self.helper_import(slot, "ts.set"))
+                && action.args.len() == 3 =>
+            {
+                let target = self.expr(&action.args[0])?;
+                let index = self.expr(&action.args[1])?;
+                let value = self.expr(&action.args[2])?;
+                StmtKind::Assign(Expr::Index(Box::new(target), Box::new(index)), "=", value)
+            }
             k::Stmt::Do { value } => StmtKind::Expr(self.expr(value)?),
             k::Stmt::If {
                 condition,

@@ -201,3 +201,100 @@ fn helper_collision_admission_projects_each_name_once() {
         crate::authoring::HELPER_PROJECTIONS.with(|count| count.get())
     );
 }
+
+/// FIG-7135: a helper's local import slot never selects a root operation.
+#[test]
+fn terminal_readback_projects_each_units_exact_import_contract() {
+    use lash_kernel_doc::{
+        ActExpr, ActKind, Document, Expr, FunctionBody, Literal, Metering, NumberPolicy, Stmt,
+    };
+    use lash_vocabulary::{
+        EffectName, Import, ImportKind, ImportSlot, Name, PackagePath, QualifiedName, Segment,
+        Signature, Type,
+    };
+    use std::collections::BTreeMap;
+
+    let import = |member: &str| Import {
+        name: QualifiedName {
+            package: PackagePath::parse("corpus").unwrap(),
+            member: Segment::new(member).unwrap(),
+            type_member: None,
+        },
+        kind: ImportKind::Operation {
+            signature: Signature {
+                params: vec![],
+                result: Type::Any,
+            },
+        },
+    };
+    let ordinary = import("echo");
+    let terminal = import("stop");
+    let mut document = Document::new(NumberPolicy::Float, vec![]);
+    document.imports = BTreeMap::from([
+        (ImportSlot(0), ordinary.clone()),
+        (ImportSlot(7), terminal.clone()),
+    ]);
+    let mut function =
+        parse_definition("function helper.stop() -> Any\nkernel 1\ncharge 1\nnative\n").unwrap();
+    function.implementation = Implementation::Guest {
+        metering: Metering::Statements,
+        body: FunctionBody {
+            functions: BTreeMap::new(),
+            imports: BTreeMap::from([(ImportSlot(0), terminal)]),
+            block: vec![Stmt::Finish {
+                value: Expr::Let {
+                    name: Name::new("t1"),
+                    value: Box::new(Expr::Act(Box::new(ActExpr {
+                        kind: ActKind::Perform {
+                            slot: ImportSlot(0),
+                            result: Type::Any,
+                            then_yield: true,
+                        },
+                        args: vec![],
+                    }))),
+                    body: Box::new(Expr::Literal(Literal::Null)),
+                },
+            }],
+        },
+    };
+    document
+        .functions
+        .insert(function.identity(), function.clone());
+    let namespaces = crate::regions::namespaces(&document).unwrap();
+    assert!(
+        namespaces
+            .controls(&EffectName::new("corpus.echo").unwrap())
+            .is_none()
+    );
+    assert!(
+        namespaces
+            .controls(&EffectName::new("corpus.stop").unwrap())
+            .is_some()
+    );
+
+    // Equal names with a different signature are not the same import contract.
+    let Implementation::Guest { body, .. } = &mut function.implementation else {
+        unreachable!()
+    };
+    let mut mismatched = ordinary;
+    mismatched.kind = ImportKind::Operation {
+        signature: Signature {
+            params: vec![],
+            result: Type::Text,
+        },
+    };
+    body.imports.insert(ImportSlot(0), mismatched);
+    document.functions.clear();
+    document.functions.insert(function.identity(), function);
+    let namespaces = crate::regions::namespaces(&document).unwrap();
+    assert!(
+        namespaces
+            .controls(&EffectName::new("corpus.echo").unwrap())
+            .is_none()
+    );
+    assert!(
+        namespaces
+            .controls(&EffectName::new("corpus.stop").unwrap())
+            .is_none()
+    );
+}
