@@ -324,6 +324,56 @@ impl Admission {
         reached
             .functions
             .retain(|function, _| functions.contains(function));
+        // Authored frames follow executable guest roots. A native or formula
+        // helper's retained fallback definitions remain owned by the library;
+        // compiling them again would create dormant charged regions.
+        let mut pending = document.main.as_ref().map_or_else(BTreeSet::new, |body| {
+            doc::Node::Block(body).functions_within()
+        });
+        // Definitions first admitted by this execution include retained
+        // callable environments, even when its main does not name them.
+        pending.extend(
+            reached
+                .functions
+                .keys()
+                .filter(|id| library.registry().get(id).is_none())
+                .copied(),
+        );
+        for loaded in documents.values() {
+            for export in loaded.exports.values() {
+                match export {
+                    doc::Export::Function(function) => {
+                        pending.insert(function.function);
+                    }
+                    doc::Export::Type(ty) => {
+                        pending.insert(ty.checker);
+                        for member in ty.members.values() {
+                            let (doc::TypeMember::Static(function)
+                            | doc::TypeMember::Method(function)
+                            | doc::TypeMember::Property(function)) = member;
+                            pending.insert(function.function);
+                        }
+                    }
+                    doc::Export::Error { .. } => {}
+                }
+            }
+        }
+        let mut authored = BTreeSet::new();
+        while let Some(id) = pending.pop_first() {
+            let Some(definition) = reached.functions.get(&id) else {
+                continue;
+            };
+            let doc::Implementation::Guest {
+                body,
+                metering: doc::Metering::Statements,
+            } = &definition.implementation
+            else {
+                continue;
+            };
+            if authored.insert(id) {
+                pending.extend(doc::Node::Block(&body.block).functions_within());
+            }
+        }
         let loaded = if reached
             .functions
             .keys()
@@ -360,7 +410,9 @@ impl Admission {
             None
         };
         let library = loaded.as_ref().unwrap_or(library);
-        let own = Arc::new(compile_document(&reached, document, library, imports)?);
+        let own = Arc::new(compile_document(
+            &reached, document, library, &authored, imports,
+        )?);
         Ok(PreparedCode {
             own,
             library: loaded,
