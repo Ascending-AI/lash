@@ -170,6 +170,7 @@ struct Tables {
     /// Canonical action-site order, independent of the executable layout.
     occurrence_at: BTreeMap<Site, usize>,
     occurrence_keys: Box<[Vec<u8>]>,
+    occurrence_units: Box<[Unit]>,
 }
 
 impl Tables {
@@ -1472,7 +1473,7 @@ impl<'a> Compiler<'a> {
                 }
             }
         }
-        let (occurrence_at, occurrence_keys) = self.index_occurrences();
+        let (occurrence_at, occurrence_keys, occurrence_units) = self.index_occurrences();
         let base = self.base;
         let codes: Vec<Code> = self.codes.into_iter().flatten().collect();
         let code_at = codes
@@ -1513,6 +1514,7 @@ impl<'a> Compiler<'a> {
             closure_at,
             occurrence_at,
             occurrence_keys,
+            occurrence_units,
         }
     }
 }

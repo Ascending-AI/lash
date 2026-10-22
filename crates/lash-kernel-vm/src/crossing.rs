@@ -12,7 +12,7 @@
 //! not in it. Anywhere else, a concretely typed slot such as a record field
 //! or JSON data, it raises `not_data` naming its path
 //! (`input.plan.steps[2].map`). A task, a ref, a cycle, a function no
-//! adapter says how to start, one a library body made, and a value past its
+//! adapter says how to start, one whose exact library origin is unavailable, and a value past its
 //! bound still raise. Every refusal comes before anything is requested.
 
 use std::collections::BTreeMap;

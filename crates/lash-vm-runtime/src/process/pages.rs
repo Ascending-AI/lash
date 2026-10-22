@@ -273,3 +273,136 @@ impl lash_execution_contracts::process::StepPublication for RunCandidate {
     /// The staging goes with the activation's last holder.
     async fn abandoned(&self) {}
 }
+
+/// Check the immutable root before constructing any execution registry. The
+/// reader lease owns the blocking traversal and releases on cancellation or
+/// refusal; no carry pages or guest instructions can precede this proof.
+#[doc(hidden)]
+pub async fn check_parked_helpers(
+    store: Arc<dyn PageStore>,
+    request: RootLeaseRequest,
+    parked: NodeId,
+    binding: NodeId,
+    content: &lash_kernel_package::LinkedContent,
+    helpers: Arc<lash_kernel_doc::BuildHelpers>,
+) -> Result<lash_kernel_doc::Selection, KernelFailure> {
+    use lash_kernel_doc::heap::{HeapFault, PageGrant, PageId, PageRef};
+    use lash_kernel_state::paged::{Checkpoint, HelperCompatibilityError, PageSource as _};
+    let source = super::page_carry::leased_pages(store, request)
+        .await
+        .map_err(|error| match error {
+            lash_kernel_migrate::CarryFault::Heap(fault) => {
+                KernelFailure::Open(lash_kernel_vm::OpenError::Heap(fault))
+            }
+            other => fault(&other.to_string()),
+        })?;
+    let (checkpoint, source) = tokio::task::spawn_blocking(move || {
+        let mut source = source;
+        let answer = source
+            .read(&[PageRef {
+                id: PageId(parked.0),
+                grant: PageGrant::NONE,
+            }])?
+            .into_iter()
+            .next()
+            .ok_or_else(|| HeapFault::Malformed("root read returned no page".into()))??;
+        let checkpoint = Checkpoint::of_answer(&answer)?;
+        if checkpoint.header().owner != PageId(binding.0) {
+            return Err(HelperCompatibilityError::Heap(HeapFault::Malformed(
+                "checkpoint belongs to another execution owner".into(),
+            )));
+        }
+        Ok((checkpoint, source))
+    })
+    .await
+    .map_err(|error| fault(&error.to_string()))?
+    .map_err(helper_refusal)?;
+    if checkpoint.header().helper_library == helpers.identity() {
+        return lash_kernel_state::paged::check_helper_compatibility(
+            checkpoint.header().helper_library,
+            || unreachable!("equal image never walks"),
+            &helpers,
+        )
+        .map(|()| lash_kernel_doc::Selection::Fresh)
+        .map_err(helper_refusal);
+    }
+    let content = content.clone();
+    tokio::task::spawn_blocking(move || {
+        let (documents, imports) = helper_code(&content)?;
+        let (_, selection) = checkpoint.check_helper_compatibility(
+            Box::new(source),
+            &documents,
+            &imports,
+            &helpers,
+        )?;
+        Ok(selection)
+    })
+    .await
+    .map_err(|error| fault(&error.to_string()))?
+    .map_err(helper_refusal)
+}
+
+/// Project validated operation contexts intact. A code Import's exact Link
+/// and export determines its function; operation contracts remain untouched.
+pub(super) fn helper_code(
+    content: &lash_kernel_package::LinkedContent,
+) -> Result<
+    (
+        std::collections::BTreeMap<lash_vocabulary::LinkId, lash_kernel_doc::Document>,
+        std::collections::BTreeMap<
+            (lash_vocabulary::LinkId, lash_vocabulary::ImportSlot),
+            lash_vocabulary::CallableId,
+        >,
+    ),
+    lash_kernel_state::paged::HelperCompatibilityError,
+> {
+    use lash_kernel_doc::heap::HeapFault;
+    use lash_vocabulary::package::Fill;
+    let mut documents = std::collections::BTreeMap::new();
+    let mut imports = std::collections::BTreeMap::new();
+    for (link, instance) in &content.links {
+        let document = content
+            .documents
+            .get(&instance.document)
+            .ok_or_else(|| HeapFault::Malformed("helper code Link document is absent".into()))?;
+        documents.insert(*link, document.clone());
+        for (slot, fill) in &instance.fills {
+            if let Fill::Export {
+                link: target,
+                export,
+            } = fill
+                && let lash_kernel_doc::Export::Function(function) = content
+                    .export(*target, export)
+                    .map_err(|error| HeapFault::Malformed(error.to_string()))?
+            {
+                imports.insert(
+                    (*link, *slot),
+                    lash_vocabulary::CallableId {
+                        link: *target,
+                        function: function.function,
+                    },
+                );
+            }
+        }
+    }
+    Ok((documents, imports))
+}
+
+pub(super) fn helper_refusal(
+    error: lash_kernel_state::paged::HelperCompatibilityError,
+) -> KernelFailure {
+    use lash_kernel_state::paged::HelperCompatibilityError;
+    match error {
+        HelperCompatibilityError::Heap(fault) => {
+            KernelFailure::Open(lash_kernel_vm::OpenError::Heap(fault))
+        }
+        HelperCompatibilityError::MissingHelper { function } => KernelFailure::Worker {
+            outcome: lash_protocol_types::engine_fault::RunRefusal::Restore {
+                refusal: lash_protocol_types::engine_fault::KernelRestoreRefusal::MissingHelper {
+                    function,
+                },
+            }
+            .into(),
+        },
+    }
+}

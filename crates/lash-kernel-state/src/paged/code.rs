@@ -14,6 +14,10 @@ use std::{collections::BTreeSet, sync::Arc};
 pub struct RetainedCode {
     pub callables: BTreeSet<CallableId>,
     pub frames: BTreeSet<(LinkId, Unit)>,
+    /// Exact transient continuation coordinates, including every caller frame.
+    pub sites: BTreeSet<(LinkId, lash_vocabulary::sites::Site)>,
+    /// Convention imports retained outside executable body syntax.
+    pub imports: BTreeSet<(LinkId, lash_vocabulary::ImportSlot)>,
 }
 /// Read code identities from the existing root walk; never scan unreferenced
 /// directory rows or infer identity from function names or positions.
@@ -62,10 +66,24 @@ pub fn checkpoint_code(
         |task| {
             super::census_graph::state_values(&task.state, &mut |value| scan.value(value.clone()))?;
             visit(&task.frames, heap.pages(), |frame| {
-                scan.code.frames.insert((
-                    frame.link,
-                    frame.statement.resolve(heap.pages())?.unit.clone(),
-                ));
+                let site = frame.statement.resolve(heap.pages())?;
+                scan.code.frames.insert((frame.link, site.unit.clone()));
+                scan.code.sites.insert((frame.link, site.as_ref().clone()));
+                if let Some(convention) = &frame.convention {
+                    for target in convention.targets() {
+                        match target {
+                            lash_kernel_doc::FunctionTarget::Local(function) => {
+                                scan.code.callables.insert(CallableId {
+                                    link: frame.link,
+                                    function: *function,
+                                });
+                            }
+                            lash_kernel_doc::FunctionTarget::Import(slot) => {
+                                scan.code.imports.insert((frame.link, *slot));
+                            }
+                        }
+                    }
+                }
                 super::census_graph::frame_values(frame, heap.pages(), &mut |value| {
                     scan.value(value.clone())
                 })
@@ -235,4 +253,201 @@ impl Scan<'_> {
         }
         Ok(())
     }
+}
+
+/// Follow only retained code. Documents supply local function bytes and exact
+/// code-import bindings; helper edges come from the build's validated index.
+/// Dead directory objects, unrelated exports and the rest of the library do
+/// not enter this work list.
+pub(super) fn restore_selection(
+    live: RetainedCode,
+    documents: &std::collections::BTreeMap<LinkId, lash_kernel_doc::Document>,
+    code_imports: &std::collections::BTreeMap<(LinkId, lash_vocabulary::ImportSlot), CallableId>,
+    build: &lash_kernel_doc::BuildHelpers,
+) -> Result<lash_kernel_doc::RestoreSelection, HeapFault> {
+    use lash_kernel_doc::Node;
+    let mut pending: Vec<_> = live
+        .frames
+        .into_iter()
+        .filter(|(_, unit)| !matches!(unit, Unit::Main))
+        .collect();
+    for (link, site) in live.sites {
+        if !matches!(site.unit, Unit::Main) {
+            continue;
+        }
+        let document = documents
+            .get(&link)
+            .ok_or_else(|| invalid("live code Link is not loaded"))?;
+        let body = document
+            .main
+            .as_ref()
+            .ok_or_else(|| invalid("live Main has no body"))?;
+        for node in continuation(body, &site.path)? {
+            enqueue(node, link, document, code_imports, &mut pending)?;
+        }
+    }
+    pending.extend(
+        live.callables
+            .into_iter()
+            .map(|callable| (callable.link, Unit::Library(callable.function))),
+    );
+    for key in live.imports {
+        let callable = code_imports
+            .get(&key)
+            .ok_or_else(|| invalid("retained convention Import is not linked code"))?;
+        pending.push((callable.link, Unit::Library(callable.function)));
+    }
+    let mut seen = BTreeSet::new();
+    let mut pins = BTreeSet::new();
+    let mut helper_contexts = BTreeSet::new();
+    let mut reached = BTreeSet::new();
+    while let Some((link, unit)) = pending.pop() {
+        if !seen.insert((link, unit.clone())) {
+            continue;
+        }
+        let document = documents
+            .get(&link)
+            .ok_or_else(|| invalid("live code Link is not loaded"))?;
+        let body = match &unit {
+            Unit::Main => document
+                .main
+                .as_ref()
+                .ok_or_else(|| invalid("live Main has no body"))?,
+            Unit::Function(name) => {
+                let (_, body) = document
+                    .units()
+                    .find(|(unit, _)| unit == &Unit::Function(name.clone()))
+                    .ok_or_else(|| invalid("live named function has no body"))?;
+                body
+            }
+            Unit::Library(function) => {
+                reached.insert(CallableId {
+                    link,
+                    function: *function,
+                });
+                if let Some(definition) = document.functions.get(function) {
+                    reached.insert(CallableId {
+                        link,
+                        function: *function,
+                    });
+                    let Some(body) = definition.body() else {
+                        continue;
+                    };
+                    &body.block
+                } else {
+                    // The continuation was admitted under this operation Link.
+                    // An exact helper ID is either in its explicit manifest or
+                    // in that helper image's transitive static reach.
+                    if !document.library.contains(function) && !build.contains(function) {
+                        // A helper removed by this build has no metadata to walk.
+                        // Keep its identity for the typed membership refusal.
+                        pins.insert(*function);
+                        continue;
+                    }
+                    let mut helpers = vec![*function];
+                    while let Some(helper) = helpers.pop() {
+                        reached.insert(CallableId {
+                            link,
+                            function: helper,
+                        });
+                        if !helper_contexts.insert((link, helper)) {
+                            continue;
+                        }
+                        pins.insert(helper);
+                        #[cfg(any(test, feature = "perf-witness"))]
+                        super::helper_compatibility_work::update(|work| work.dependency_steps += 1);
+                        if let Some(callees) = build.callees(&helper) {
+                            helpers.extend(callees.iter().copied());
+                        }
+                    }
+                    continue;
+                }
+            }
+        };
+        enqueue(
+            Node::Block(body),
+            link,
+            document,
+            code_imports,
+            &mut pending,
+        )?;
+    }
+    Ok(lash_kernel_doc::RestoreSelection {
+        pins,
+        live: reached,
+    })
+}
+
+/// Main has no content-addressed function identity: select its remaining
+/// lexical suffixes. Loops can revisit their whole bodies; active try handlers
+/// can still run on departure. Every frame supplies its own saved coordinate.
+fn continuation<'a>(
+    body: &'a lash_kernel_doc::Block,
+    path: &[u32],
+) -> Result<Vec<lash_kernel_doc::Node<'a>>, HeapFault> {
+    use lash_kernel_doc::{Node, Stmt};
+    let mut retained = Vec::new();
+    let mut node = Node::Block(body);
+    for (depth, index) in path.iter().copied().enumerate() {
+        let index = index as usize;
+        match node {
+            Node::Block(block) => {
+                let start = if depth + 1 == path.len() {
+                    index
+                } else {
+                    index + 1
+                };
+                let suffix = block
+                    .get(start..)
+                    .ok_or_else(|| invalid("live Main coordinate is not a block suffix"))?;
+                retained.push(Node::Block(suffix));
+                if depth + 1 == path.len() {
+                    return Ok(retained);
+                }
+            }
+            Node::Stmt(Stmt::For { .. } | Stmt::While { .. }) => {
+                retained.push(node);
+                return Ok(retained);
+            }
+            Node::Stmt(Stmt::Try(scope)) => {
+                if let Some(catch) = &scope.catch {
+                    retained.push(Node::Block(&catch.body));
+                }
+                if let Some(finally) = &scope.finally {
+                    retained.push(Node::Block(finally));
+                }
+            }
+            _ => {}
+        }
+        node = node
+            .children()
+            .get(index)
+            .copied()
+            .ok_or_else(|| invalid("live Main coordinate is not in its document"))?;
+    }
+    retained.push(node);
+    Ok(retained)
+}
+
+fn enqueue(
+    node: lash_kernel_doc::Node<'_>,
+    link: LinkId,
+    document: &lash_kernel_doc::Document,
+    code_imports: &std::collections::BTreeMap<(LinkId, lash_vocabulary::ImportSlot), CallableId>,
+    pending: &mut Vec<(LinkId, Unit)>,
+) -> Result<(), HeapFault> {
+    for function in node.functions_within() {
+        if !document.functions.contains_key(&function) && !document.library.contains(&function) {
+            return Err(invalid(
+                "live local reference is not admitted by its Document",
+            ));
+        }
+        pending.push((link, Unit::Library(function)));
+    }
+    for slot in node.imports_within() {
+        if let Some(callable) = code_imports.get(&(link, slot)) {
+            pending.push((callable.link, Unit::Library(callable.function)));
+        }
+    }
+    Ok(())
 }

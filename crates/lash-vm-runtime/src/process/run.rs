@@ -279,9 +279,53 @@ async fn kernel_run(
         }
     };
     let loaded_execution = engine
-        .load_execution(&process_input.code, &run.environment.retained_code)
+        .load_execution_content(&process_input.code, &run.environment.retained_code)
         .await
         .map_err(|error| RunFault(error.to_string()))?;
+    let content = &loaded_execution.content;
+    let restore_selection = if let Some(parked) = &input.parked {
+        let step = run
+            .pages
+            .as_ref()
+            .ok_or_else(|| RunFault("the store holds no heap pages for the run".into()))?;
+        let exec = lash_durable::domain::ExecKey::Process(run.process.clone());
+        let row = step
+            .store
+            .exec_root(&exec)
+            .await
+            .map_err(|error| RunFault(error.to_string()))?
+            .ok_or_else(|| RunFault("the process has no execution root".into()))?;
+        let binding = lash_vm_broker::kernel::graph::owner_binding_node(&exec)
+            .map_err(|error| RunFault(error.to_string()))?;
+        let checked = super::pages::check_parked_helpers(
+            Arc::clone(&step.store),
+            lash_durable::domain::pages::RootLeaseRequest {
+                owner: lash_durable::domain::RootOwner::Exec(exec),
+                expected: row.root,
+                fence: lash_durable::domain::pages::LeaseFence::Actor {
+                    actor: step.actor.clone(),
+                    epoch: step.epoch,
+                },
+                ttl_millis: 60_000,
+            },
+            parked.page.root,
+            binding,
+            &content,
+            Arc::clone(&engine.helpers),
+        )
+        .await;
+        match checked {
+            Ok(selection) => selection,
+            Err(failure) => return worker_failure(failure),
+        }
+    } else {
+        lash_kernel_doc::Selection::Fresh
+    };
+
+    let loaded_execution = engine
+        .admit_execution(loaded_execution, &restore_selection)
+        .map_err(|error| RunFault(error.to_string()))?;
+    let ordinary = loaded_execution.ordinary;
     let content = loaded_execution.content;
     let reach = loaded_execution.reach;
     let (root_link, _) = process_input
@@ -318,7 +362,12 @@ async fn kernel_run(
             ));
         }
     };
-    let args = match entry_args(&document, &process_input) {
+    let args = match entry_args(
+        &document,
+        &process_input,
+        &engine.helpers,
+        &restore_selection,
+    ) {
         Ok(args) => args,
         Err(error) => {
             let cause = match &error {
@@ -358,9 +407,11 @@ async fn kernel_run(
             .iter()
             .map(|(id, document)| (*id, Arc::new(document.clone())))
             .collect(),
-        &reach.functions,
+        &ordinary,
         &reach.machine,
         &engine.functions,
+        &engine.helpers,
+        &restore_selection,
     )
     .map_err(|error| RunFault(error.to_string()))?;
     let closure = loaded.closure;
@@ -377,7 +428,9 @@ async fn kernel_run(
             .collect(),
         &content.links,
         lash_kernel_doc::heap::PageId(closure.reference().0),
-        lash_kernel_vm::PreparedLibrary::with_charge(loaded.registry, settings.charge),
+        lash_kernel_vm::PreparedLibrary::with_charge(loaded.registry, settings.charge)
+            .with_helper_handle(Arc::clone(&engine.helpers)),
+        restore_selection.clone(),
     )
     .map_err(|error| RunFault(error.to_string()))?;
     program.functions = closure.body().identities().collect();
@@ -466,6 +519,12 @@ async fn kernel_run(
         closure,
     )
     .map_err(|error| RunFault(error.to_string()))?;
+    let machines = match restore_selection {
+        lash_kernel_doc::Selection::Fresh => machines,
+        lash_kernel_doc::Selection::Restored(selection) => {
+            machines.with_restore_selection(selection)
+        }
+    };
     let Some(step_pages) = run.pages.as_ref() else {
         return Err(RunFault("the store holds no heap pages for the run".to_owned()).into());
     };
@@ -835,6 +894,8 @@ impl From<String> for EntryArgumentsError {
 pub(super) fn entry_args(
     document: &Document,
     input: &KernelProcessInput,
+    helpers: &lash_kernel_doc::BuildHelpers,
+    selection: &lash_kernel_doc::Selection,
 ) -> Result<Vec<Datum>, EntryArgumentsError> {
     use lash_vocabulary::names::StartSelector;
     let mut supplied = std::collections::BTreeMap::new();
@@ -868,7 +929,7 @@ pub(super) fn entry_args(
             }
         }
         super::InlineRequest::Callable { function, .. } => {
-            function.entry_export(document)?;
+            function.entry_export(document, helpers, selection)?;
             function.callable
         }
         _ => unreachable!("unlinked input returned above"),

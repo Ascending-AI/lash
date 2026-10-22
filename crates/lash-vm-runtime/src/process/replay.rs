@@ -338,7 +338,8 @@ fn failed(host: &ReplayHost, failure: KernelFailure) -> Result<SegmentAnswer, Re
         } => match refusal {
             RunRefusal::Restore {
                 refusal:
-                    KernelRestoreRefusal::MissingNative { .. }
+                    KernelRestoreRefusal::MissingHelper { .. }
+                    | KernelRestoreRefusal::MissingNative { .. }
                     | KernelRestoreRefusal::DefinitionRefused { .. },
             } => unreplayable(Unreplayable::FunctionMissing),
             RunRefusal::Restore {
@@ -470,9 +471,46 @@ impl KernelProcessEngine {
         };
         input.code = recorded_start.code.clone();
         let loaded_execution = self
-            .load_execution(&input.code, &recorded_start.retained_code)
+            .load_execution_content(&input.code, &recorded_start.retained_code)
             .await
             .map_err(|error| ReplayFault(error.to_string()))?;
+        let content = &loaded_execution.content;
+        let restore_selection = if let Some((page, fact)) = &start.parked {
+            let binding = lash_vm_broker::kernel::graph::owner_binding_node(&ExecKey::Process(
+                request.process.clone(),
+            ))
+            .map_err(|error| ReplayFault(error.to_string()))?;
+            let checked = super::pages::check_parked_helpers(
+                Arc::clone(&request.pages),
+                lash_durable::domain::pages::RootLeaseRequest {
+                    owner: RootOwner::RunFact {
+                        owner: OwnerKey::Process(request.process.clone()),
+                        run: fact.run,
+                        ordinal: fact.ordinal,
+                    },
+                    expected: fact.record,
+                    fence: lash_durable::domain::pages::LeaseFence::Reader,
+                    ttl_millis: i64::try_from(self.policy.replay_lease.as_millis())
+                        .unwrap_or(i64::MAX),
+                },
+                page.root,
+                binding,
+                &content,
+                Arc::clone(&self.helpers),
+            )
+            .await;
+            match checked {
+                Ok(selection) => selection,
+                Err(failure) => return failed(&ReplayHost::of(reads), failure),
+            }
+        } else {
+            lash_kernel_doc::Selection::Fresh
+        };
+
+        let loaded_execution = self
+            .admit_execution(loaded_execution, &restore_selection)
+            .map_err(|error| ReplayFault(error.to_string()))?;
+        let ordinary = loaded_execution.ordinary;
         let content = loaded_execution.content;
         let reach = loaded_execution.reach;
         let (root_link, _) = input
@@ -488,7 +526,7 @@ impl KernelProcessEngine {
             .get(&root.document)
             .ok_or_else(|| ReplayFault("root Document is absent".into()))?
             .clone();
-        let Ok(args) = entry_args(&document, &input) else {
+        let Ok(args) = entry_args(&document, &input, &self.helpers, &restore_selection) else {
             return unreplayable(Unreplayable::NoTape);
         };
         let loaded = lash_vm_broker::kernel::loader::declare_reach(
@@ -498,9 +536,11 @@ impl KernelProcessEngine {
                 .iter()
                 .map(|(id, document)| (*id, Arc::new(document.clone())))
                 .collect(),
-            &reach.functions,
+            &ordinary,
             &reach.machine,
             &self.functions,
+            &self.helpers,
+            &restore_selection,
         )
         .map_err(|error| ReplayFault(error.to_string()))?;
         let closure = loaded.closure;
@@ -513,7 +553,9 @@ impl KernelProcessEngine {
                 .collect(),
             &content.links,
             lash_kernel_doc::heap::PageId(closure.reference().0),
-            lash_kernel_vm::PreparedLibrary::with_charge(loaded.registry, settings.charge),
+            lash_kernel_vm::PreparedLibrary::with_charge(loaded.registry, settings.charge)
+                .with_helper_handle(Arc::clone(&self.helpers)),
+            restore_selection.clone(),
         )
         .map_err(|error| ReplayFault(error.to_string()))?;
         let host = Arc::new(ReplayHost::of(reads));
@@ -554,6 +596,12 @@ impl KernelProcessEngine {
             closure,
         )
         .map_err(|error| ReplayFault(error.to_string()))?;
+        let machines = match restore_selection {
+            lash_kernel_doc::Selection::Fresh => machines,
+            lash_kernel_doc::Selection::Restored(selection) => {
+                machines.with_restore_selection(selection)
+            }
+        };
         let lease = self.policy.replay_lease;
         if lease.is_zero() || lease > super::KernelRunPolicy::MAX_REPLAY_LEASE {
             return Err(ReplayFault(format!(

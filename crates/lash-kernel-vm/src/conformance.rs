@@ -67,6 +67,7 @@ pub fn checkpoint(
     reader.put(&root.document);
     reader.put(&root.link);
     reader.put(&root.closure);
+    reader.put(&root.helper_library);
     reader.put(&root.owner);
     reader.put(&root.target);
     match &root.status {

@@ -166,6 +166,7 @@ fn program(
         &content.links,
         closure,
         lash_kernel_vm::PreparedLibrary::new(functions),
+        lash_kernel_doc::Selection::Fresh,
     )
     .unwrap()
 }
@@ -449,6 +450,8 @@ async fn atomic_carry(tier: super::served::Tier) {
         document_a.functions.keys().copied(),
         &a_registry,
         &BTreeMap::new(),
+        &lash_kernel_doc::BuildHelpers::empty(),
+        &document_a.library,
     )
     .unwrap();
     let closure_b = lash_vm_broker::kernel::closure::derive(
@@ -458,6 +461,8 @@ async fn atomic_carry(tier: super::served::Tier) {
             .flat_map(|d| d.functions.keys().copied()),
         &b_registry,
         &BTreeMap::new(),
+        &lash_kernel_doc::BuildHelpers::empty(),
+        &document_b.library,
     )
     .unwrap();
     let pages = Pages::default();
@@ -537,7 +542,12 @@ async fn atomic_carry(tier: super::served::Tier) {
             PageId(closure_b.reference().0),
         ),
         bounds(),
-        (1, PageId(closure_a.reference().0)),
+        lash_kernel_migrate::CarryContext {
+            kernel: 1,
+            closure: PageId(closure_a.reference().0),
+            links: content.links.clone(),
+            selection: lash_kernel_doc::Selection::Fresh,
+        },
     )
     .await
     .unwrap();

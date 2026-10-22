@@ -16,7 +16,12 @@
 
 pub(crate) mod checkpoint;
 mod code;
-pub use checkpoint::{Checkpoint, CheckpointHeader, inspect_checkpoint};
+#[cfg(any(test, feature = "perf-witness"))]
+pub use checkpoint::helper_compatibility_work;
+pub use checkpoint::{
+    Checkpoint, CheckpointHeader, HelperCompatibilityError, HelperPins, check_helper_compatibility,
+    inspect_checkpoint,
+};
 pub use code::{RetainedCode, checkpoint_code};
 pub mod census;
 pub(crate) mod census_impl;
@@ -71,8 +76,8 @@ pub(crate) use heap_impl::PagedHeap;
 pub use heap_impl::heap_accounting;
 
 pub use directory::execution::{
-    FrameRecord, IteratedRecord, PendingRecord, PhaseRecord, ROLE_CHUNK, ROLE_FLAT, RoleChunk,
-    RoleRecord, RolesRecord, TaskRecord,
+    FrameRecord, IteratedRecord, OccurrenceOwner, OccurrenceRecord, PendingRecord, PhaseRecord,
+    ROLE_CHUNK, ROLE_FLAT, RoleChunk, RoleRecord, RolesRecord, TaskRecord,
 };
 
 #[cfg(test)]

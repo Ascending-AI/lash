@@ -405,7 +405,8 @@ pub struct OperationUse {
     schemars::JsonSchema,
 )]
 #[serde(deny_unknown_fields)]
-/// A stored function under its defining Link. Calls and escaped captures retain this Link.
+/// A function and its operation context. Authored callbacks retain their defining
+/// Link; build helpers carry the caller's real Link and an exact library ID.
 pub struct CallableId {
     pub link: LinkId,
     pub function: FunctionId,

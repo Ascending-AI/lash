@@ -258,11 +258,11 @@ pub struct CheckpointRoot {
     pub kernel: u32,
     pub document: DocumentId,
     pub link: lash_vocabulary::content_ids::LinkId,
-    /// The ExecutionClosure node the run pins: every library function its
-    /// document reaches, by identity. Derived from the document, so a
-    /// resume checks it names the run's own; the parent stages it and the
-    /// definitions it names beside the root.
+    /// Ordinary stored definitions selected by the document. Build helpers
+    /// are carried by the binary and never staged in this closure.
     pub closure: PageId,
+    /// The immutable build helper image this root executed with.
+    pub helper_library: lash_vocabulary::HelperLibraryId,
     /// The OwnerBinding node of the execution.
     pub owner: PageId,
     pub target: CellTargetKind,
@@ -296,8 +296,8 @@ pub struct CheckpointRoot {
 impl CheckpointRoot {
     /// The encoded host-name list's byte budget (S1, FIG-6499).
     ///
-    /// The 4096-byte root reserves 831 token bytes for its fixed fields:
-    /// struct header (2), kernel (6), link (34), document (34), closure/owner (66),
+    /// The 4096-byte root reserves 865 token bytes for its fixed fields:
+    /// struct header (2), kernel (6), link (34), document (34), closure/owner (66), helper library (34),
     /// limits (24), target (3), nine full tree roots (9 * 58), heap (33), largest ended
     /// status (66), and meters (41). All integers use their maximum widths.
     /// Another 256 bytes cover the envelope: each of at most 13 distinct
@@ -308,7 +308,7 @@ impl CheckpointRoot {
     /// Even empty names cost two bytes, so this bounds their count as well
     /// as each name. No guest allocation or park can grow the list.
     pub const HOST_METADATA_LIMIT: usize =
-        4096 - (2 + 6 + 34 + 34 + 66 + 24 + 3 + 9 * 58 + 33 + 66 + 41) - 256;
+        4096 - (2 + 6 + 34 + 34 + 66 + 34 + 24 + 3 + 9 * 58 + 33 + 66 + 41) - 256;
 
     /// The canonical host-name list's size, without allocating its encoding.
     /// Overflow saturates so admission refuses it.

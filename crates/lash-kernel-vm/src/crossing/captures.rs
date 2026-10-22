@@ -5,7 +5,9 @@ use lash_kernel_doc::{CaptureValue, FunctionRepresentation, FunctionValue};
 /// Capture discovery follows authored adapter bodies as well as the library.
 struct LinkedCatalog<'a> {
     document: &'a lash_kernel_doc::Document,
-    base: &'a dyn FunctionCatalog,
+    helpers: &'a lash_kernel_doc::BuildHelpers,
+    selection: &'a lash_kernel_doc::Selection,
+    link: LinkId,
 }
 
 impl FunctionCatalog for LinkedCatalog<'_> {
@@ -13,10 +15,19 @@ impl FunctionCatalog for LinkedCatalog<'_> {
         &self,
         function: &lash_vocabulary::FunctionId,
     ) -> Option<&lash_kernel_doc::FunctionDefinition> {
-        self.document
-            .functions
-            .get(function)
-            .or_else(|| self.base.definition(function))
+        self.document.functions.get(function).or_else(|| {
+            self.selection
+                .admits_helper(
+                    &CallableId {
+                        link: self.link,
+                        function: *function,
+                    },
+                    &self.document.library,
+                    self.helpers,
+                )
+                .then(|| self.helpers.definition(function))
+                .flatten()
+        })
     }
 }
 
@@ -86,7 +97,9 @@ impl Graph {
         let document = defining_document(run, callable)?;
         let catalog = LinkedCatalog {
             document,
-            base: run.catalog,
+            helpers: run.helpers,
+            selection: run.selection,
+            link: callable.link,
         };
         let definition = catalog
             .definition(&callable.function)

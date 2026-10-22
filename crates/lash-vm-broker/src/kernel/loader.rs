@@ -250,15 +250,24 @@ pub fn assemble(
     document: &Document,
     held: &Arc<FunctionRegistry>,
     stored: &BTreeMap<FunctionId, Arc<FunctionDefinition>>,
+    helpers: &lash_kernel_doc::BuildHelpers,
+    selection: &lash_kernel_doc::Selection,
 ) -> Result<Assembled, LoadRefusal> {
     let admitted = admit(
         document.functions.keys().copied().collect(),
         document.kernel(),
         held,
         stored,
+        helpers,
+        &document.library,
     )?;
     let closure = admitted.closure;
-    for member in closure.body().functions() {
+    for member in closure
+        .body()
+        .functions()
+        .iter()
+        .filter(|member| selected(member.function, selection))
+    {
         if member.native_only
             && held
                 .get(&member.function)
@@ -276,26 +285,23 @@ pub fn assemble(
             held: true,
         });
     }
-    let mut registry = FunctionRegistry::new();
-    let mut plans = Vec::new();
-    for function in dependency_order(&closure, held, &admitted.stored)? {
-        let (definition, native) = match held.get(&function) {
-            Some(registered) => {
-                plans.extend(registered.plan());
-                (
-                    registered.definition().as_ref().clone(),
-                    registered.native().cloned(),
-                )
-            }
-            None => (stored_definition(&admitted.stored, function)?, None),
-        };
-        register(&mut registry, function, definition, native)?;
+    let mut registry = held.as_ref().clone();
+    for function in dependency_order(
+        &closure,
+        held,
+        &admitted.stored,
+        &document.library,
+        selection,
+    )? {
+        if registry.get(&function).is_none() {
+            register(
+                &mut registry,
+                function,
+                stored_definition(&admitted.stored, function)?,
+                None,
+            )?;
+        }
     }
-    registry
-        .install_answered_plans(&plans)
-        .map_err(|error| LoadRefusal::Graph {
-            problem: error.to_string(),
-        })?;
     Ok(Assembled {
         registry: Arc::new(registry),
         closure,
@@ -321,14 +327,30 @@ pub fn declare(
     kernel: u32,
     held: &FunctionRegistry,
     stored: &BTreeMap<FunctionId, Arc<FunctionDefinition>>,
+    helpers: &lash_kernel_doc::BuildHelpers,
+    library: &lash_kernel_doc::LibraryDependencies,
+    selection: &lash_kernel_doc::Selection,
 ) -> Result<FunctionRegistry, LoadRefusal> {
-    let admitted = admit(listed.into_iter().collect(), kernel, held, stored)?;
-    let mut registry = FunctionRegistry::declarations();
-    for function in dependency_order(&admitted.closure, held, &admitted.stored)? {
-        let definition = match held.get(&function) {
-            Some(registered) => registered.definition().as_ref().clone(),
-            None => stored_definition(&admitted.stored, function)?,
-        };
+    let admitted = admit(
+        listed.into_iter().collect(),
+        kernel,
+        held,
+        stored,
+        helpers,
+        library,
+    )?;
+    let mut registry = held.as_declarations();
+    for function in dependency_order(
+        &admitted.closure,
+        held,
+        &admitted.stored,
+        library,
+        selection,
+    )? {
+        if registry.get(&function).is_some() {
+            continue;
+        }
+        let definition = stored_definition(&admitted.stored, function)?;
         register(&mut registry, function, definition, None)?;
     }
     Ok(registry)
@@ -347,6 +369,8 @@ fn admit(
     kernel: u32,
     held: &FunctionRegistry,
     stored: &BTreeMap<FunctionId, Arc<FunctionDefinition>>,
+    helpers: &lash_kernel_doc::BuildHelpers,
+    library: &lash_kernel_doc::LibraryDependencies,
 ) -> Result<Admitted, LoadRefusal> {
     if let Some(function) = stored.keys().find(|function| !listed.contains(function)) {
         return Err(LoadRefusal::Unlisted {
@@ -369,7 +393,7 @@ fn admit(
         .filter(|(function, _)| held.get(function).is_none())
         .map(|(function, definition)| (*function, Arc::clone(definition)))
         .collect();
-    let closure = super::closure::derive(listed, held, &stored)?;
+    let closure = super::closure::derive(listed, held, &stored, helpers, library)?;
     Ok(Admitted { closure, stored })
 }
 
@@ -447,6 +471,8 @@ fn dependency_order(
     closure: &Closure,
     held: &FunctionRegistry,
     stored: &BTreeMap<FunctionId, Arc<FunctionDefinition>>,
+    library: &lash_kernel_doc::LibraryDependencies,
+    selection: &lash_kernel_doc::Selection,
 ) -> Result<Vec<FunctionId>, LoadRefusal> {
     let callees = |function: &FunctionId| -> BTreeSet<FunctionId> {
         let mut callees: BTreeSet<FunctionId> = match held.get(function) {
@@ -462,12 +488,13 @@ fn dependency_order(
                 })
                 .unwrap_or_default(),
         };
-        callees.remove(function);
+        callees.retain(|callee| callee != function && !library.contains(callee));
         callees
     };
     let mut waiting: BTreeMap<FunctionId, BTreeSet<FunctionId>> = closure
         .body()
         .identities()
+        .filter(|function| selected(*function, selection))
         .map(|function| (function, callees(&function)))
         .collect();
     let mut order = Vec::with_capacity(waiting.len());
@@ -560,8 +587,26 @@ pub fn declare_reach(
     functions: &BTreeMap<lash_vocabulary::package::LinkId, std::collections::BTreeSet<FunctionId>>,
     machine: &lash_vocabulary::claims::NodeRequirements,
     held: &Arc<FunctionRegistry>,
+    helpers: &lash_kernel_doc::BuildHelpers,
+    selection: &lash_kernel_doc::Selection,
 ) -> Result<Assembled, LoadRefusal> {
+    for document in std::iter::once(root).chain(documents.values().map(Arc::as_ref)) {
+        lash_kernel_doc::validate_document_structure(document).map_err(|error| {
+            LoadRefusal::Graph {
+                problem: error.to_string(),
+            }
+        })?;
+    }
+    // This union decides graph retention only; each original Document above
+    // authenticates origin independently, and Program retains that boundary.
+    let library = lash_kernel_doc::LibraryDependencies(
+        std::iter::once(root)
+            .chain(documents.values().map(Arc::as_ref))
+            .flat_map(|document| document.library.iter().copied())
+            .collect(),
+    );
     let mut selected = root.clone();
+    selected.library = library.clone();
     selected.functions.clear();
     selected.requires = machine.clone();
     for function in functions.values().flatten() {
@@ -570,7 +615,7 @@ pub fn declare_reach(
             .find_map(|document| document.functions.get(function))
         {
             selected.functions.insert(*function, definition.clone());
-        } else if !machine.natives.contains(function) {
+        } else if !machine.natives.contains(function) && !helpers.contains(function) {
             return Err(LoadRefusal::Missing {
                 function: *function,
             });
@@ -586,16 +631,83 @@ pub fn declare_reach(
         selected.kernel(),
         held,
         &stored,
+        helpers,
+        &library,
     )?;
     let registry = declare(
         selected.functions.keys().copied(),
         selected.kernel(),
         held,
         &stored,
+        helpers,
+        &library,
+        selection,
     )?;
     Ok(Assembled {
         registry: Arc::new(registry),
         closure: admitted.closure,
         held: false,
     })
+}
+
+/// A restored selection narrows executable admission only. The durable
+/// closure retains the original ordinary definitions and its identity, so
+/// root.closure still authenticates the original code independently of which
+/// authored functions remain live after a helper-library upgrade.
+fn selected(function: FunctionId, selection: &lash_kernel_doc::Selection) -> bool {
+    match selection {
+        lash_kernel_doc::Selection::Fresh => true,
+        lash_kernel_doc::Selection::Restored(selection) => selection
+            .live
+            .iter()
+            .any(|callable| callable.function == function),
+    }
+}
+
+#[cfg(test)]
+mod laws {
+    use super::*;
+
+    /// FIG-7169: the immutable helper handle may share a registry with
+    /// ordinary installed code; declaration must preserve and reuse it.
+    #[test]
+    fn declaring_stored_code_reuses_installed_ordinary_definitions() {
+        let mut registry = FunctionRegistry::new();
+        let ordinary = registry
+            .register(
+                lash_kernel_doc::parse_definition(
+                    "function ordinary.value() -> Any\nkernel 1\ncharge 1\nbody { return 7 }",
+                )
+                .unwrap(),
+                None,
+            )
+            .unwrap();
+        let helper = registry
+            .register(
+                lash_kernel_doc::parse_definition(
+                    "function helper.value() -> Any\nkernel 1\ncharge 1\nbody { return 9 }",
+                )
+                .unwrap(),
+                None,
+            )
+            .unwrap();
+        let helpers = lash_kernel_doc::BuildHelpers::new(registry.clone(), [helper]).unwrap();
+        let stored = lash_kernel_doc::parse_definition(&format!(
+            "function stored.value() -> Any\nkernel 1\ncharge 1\nuse ordinary.value = @{ordinary}\nbody {{ let value = invoke ordinary.value() return value }}")).unwrap();
+        let stored_id = stored.identity();
+        let declared = declare(
+            [ordinary, stored_id],
+            1,
+            &registry,
+            &BTreeMap::from([(stored_id, Arc::new(stored))]),
+            &helpers,
+            &lash_kernel_doc::LibraryDependencies::default(),
+            &lash_kernel_doc::Selection::Fresh,
+        )
+        .unwrap();
+        assert!(declared.get(&ordinary).is_some());
+        assert!(declared.get(&helper).is_some());
+        assert!(declared.get(&stored_id).is_some());
+        assert!(registry.get(&stored_id).is_none());
+    }
 }

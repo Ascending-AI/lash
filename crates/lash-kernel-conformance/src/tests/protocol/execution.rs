@@ -321,7 +321,8 @@ fn sites(rule: &str, case: &Case) {
                             ),
                             heap.pages()
                         )
-                        .unwrap(),
+                        .unwrap()
+                        .map(|row| row.count),
                     Some(1)
                 );
                 assert!(matches!(
@@ -339,7 +340,8 @@ fn sites(rule: &str, case: &Case) {
                             ),
                             heap.pages()
                         )
-                        .unwrap(),
+                        .unwrap()
+                        .map(|row| row.count),
                     Some(1)
                 );
                 let mut statement = identity.site.clone();

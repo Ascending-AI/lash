@@ -186,13 +186,13 @@ impl KernelMachine {
                     )
                 })
                 .and_then(|closure| closure.presentation.as_ref())
-                .map(|presentation| &presentation.signature)
+                .map(|presentation| presentation.signature.clone())
                 .or_else(|| {
                     document.exports.values().find_map(|export| match export {
                         lash_kernel_doc::Export::Function(export)
                             if export.function == callable.function =>
                         {
-                            Some(&export.signature)
+                            Some(export.signature.clone())
                         }
                         _ => None,
                     })
@@ -201,10 +201,19 @@ impl KernelMachine {
                     document
                         .functions
                         .get(&callable.function)
-                        .map(|definition| &definition.signature)
+                        .map(|definition| definition.signature.clone())
                 });
+            let signature = signature.or_else(|| {
+                exe.admits_callable(&callable)
+                    .then(|| {
+                        exe.helpers()
+                            .registered(&callable.function)
+                            .map(|registered| registered.header().signature.clone())
+                    })
+                    .flatten()
+            });
             return Ok(if let Some(provided) = signature {
-                lash_vocabulary::type_relations::serves(provided, expected).map(|_| {
+                lash_vocabulary::type_relations::serves(&provided, expected).map(|_| {
                     TypeMismatch::new(ty.clone(), Type::Function(Box::new(provided.clone())))
                 })
             } else {

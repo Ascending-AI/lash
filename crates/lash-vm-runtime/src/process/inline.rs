@@ -61,14 +61,31 @@ pub(super) struct LoadedExecution {
     pub content: LinkedContent,
     pub reach: LinkedReach,
     pub inspection: LinkInspection,
+    /// Original ordinary reach authenticates the durable closure independently
+    /// of the live executable selection after a helper-image change.
+    pub ordinary: std::collections::BTreeMap<LinkId, BTreeSet<FunctionId>>,
+}
+pub(super) struct ExecutionContent {
+    pub content: LinkedContent,
+    roots: Vec<(LinkId, ReachSelection)>,
+    code: super::InlineRequest,
 }
 impl KernelProcessEngine {
-    /// Load every captured defining instance, then derive the exact code and helper reach.
     pub(super) async fn load_execution(
         &self,
         code: &super::InlineRequest,
         retained: &BTreeSet<CallableId>,
     ) -> Result<LoadedExecution, EnginePortError> {
+        let content = self.load_execution_content(code, retained).await?;
+        self.admit_execution(content, &lash_kernel_doc::Selection::Fresh)
+    }
+
+    /// Load every captured defining instance, then derive the exact code and helper reach.
+    pub(super) async fn load_execution_content(
+        &self,
+        code: &super::InlineRequest,
+        retained: &BTreeSet<CallableId>,
+    ) -> Result<ExecutionContent, EnginePortError> {
         let (root, selector) = code
             .linked()
             .ok_or_else(|| invalid("unlinked code was not realized"))?;
@@ -122,6 +139,32 @@ impl KernelProcessEngine {
                 content.packages.extend(loaded.packages);
             }
         }
+        Ok(ExecutionContent {
+            content,
+            roots,
+            code: code.clone(),
+        })
+    }
+
+    /// Contextual admission follows helper compatibility, while ordinary
+    /// closure membership is re-derived from the immutable authored facts.
+    pub(super) fn admit_execution(
+        &self,
+        loaded: ExecutionContent,
+        selection: &lash_kernel_doc::Selection,
+    ) -> Result<LoadedExecution, EnginePortError> {
+        let ExecutionContent {
+            content,
+            mut roots,
+            code,
+        } = loaded;
+        let (root, selector) = code
+            .linked()
+            .ok_or_else(|| invalid("unlinked code was not realized"))?;
+        let callables = match &code {
+            super::InlineRequest::Callable { function, .. } => function.nodes(),
+            _ => Vec::new(),
+        };
         for callable in &callables {
             let document = content
                 .document(
@@ -131,19 +174,32 @@ impl KernelProcessEngine {
                         .document,
                 )
                 .map_err(super::map_link_refusal)?;
-            callable.check_definition(document).map_err(|_| {
-                EnginePortError::Refused(AdmissionRefusal::CallableIdentity {
-                    callable: callable.callable,
-                })
-            })?;
-            let definition = document
+            callable
+                .check_definition(document, &self.helpers, selection)
+                .map_err(|_| {
+                    EnginePortError::Refused(AdmissionRefusal::CallableIdentity {
+                        callable: callable.callable,
+                    })
+                })?;
+            let signature = document
                 .functions
                 .get(&callable.callable.function)
+                .map(|definition| definition.signature.clone())
+                .or_else(|| {
+                    selection
+                        .admits_helper(&callable.callable, &document.library, &self.helpers)
+                        .then(|| {
+                            self.helpers
+                                .registered(&callable.callable.function)
+                                .map(|registered| registered.header().signature.clone())
+                        })
+                        .flatten()
+                })
                 .ok_or_else(|| invalid("captured callable definition is absent"))?;
             lash_kernel_doc::validate_callable_signature(
                 &callable.signature,
                 &callable.convention,
-                &definition.signature,
+                &signature,
             )
             .map_err(|error| invalid(error.to_string()))?;
             for target in callable.convention.targets() {
@@ -168,10 +224,28 @@ impl KernelProcessEngine {
             }
         }
         let mut reach = LinkedReach::default();
-        for (link, selection) in roots {
-            let selected = content
-                .inspect(link, &selection)
-                .map_err(super::map_link_refusal)?;
+        let mut ordinary = std::collections::BTreeMap::<LinkId, BTreeSet<FunctionId>>::new();
+        for (link, selected_start) in roots {
+            for (link, functions) in content
+                .inspect_ordinary(link, &selected_start)
+                .map_err(super::map_link_refusal)?
+                .functions
+            {
+                ordinary.entry(link).or_default().extend(functions);
+            }
+            let selected = match selection {
+                lash_kernel_doc::Selection::Fresh => {
+                    content.inspect(link, &selected_start, self.helpers.as_ref())
+                }
+                lash_kernel_doc::Selection::Restored(restored) => {
+                    content.inspect_restored(link, restored, self.helpers.as_ref())
+                }
+            }
+            .map_err(super::map_link_refusal)?;
+            if reach.signature.is_none() {
+                reach.signature = selected.signature.clone();
+            }
+
             reach.operations.extend(selected.operations);
             reach.machine.extend(&selected.machine);
             reach.artifacts.extend(selected.artifacts);
@@ -179,8 +253,19 @@ impl KernelProcessEngine {
                 reach.functions.entry(link).or_default().extend(functions);
             }
         }
-        let mut inspection = super::documents::inspection(&content, root, &selector)?;
-        if let super::InlineRequest::Callable { function, .. } = code {
+        let mut inspection = LinkInspection {
+            link: root,
+            document: content
+                .link(root)
+                .map_err(super::map_link_refusal)?
+                .document,
+            selector,
+            operations: Default::default(),
+            machine: Default::default(),
+            artifacts: Default::default(),
+            signature: reach.signature.clone(),
+        };
+        if let super::InlineRequest::Callable { function, .. } = &code {
             let document = content
                 .document(
                     content
@@ -190,7 +275,7 @@ impl KernelProcessEngine {
                 )
                 .map_err(super::map_link_refusal)?;
             function
-                .entry_export(document)
+                .entry_export(document, &self.helpers, selection)
                 .map_err(|error| match error {
                     lash_kernel_doc::FunctionValueRefusal::EntryAnnotation { source } => {
                         EnginePortError::Refused(AdmissionRefusal::EntryAnnotation { source })
@@ -250,6 +335,7 @@ impl KernelProcessEngine {
             content,
             reach,
             inspection,
+            ordinary,
         })
     }
 }
