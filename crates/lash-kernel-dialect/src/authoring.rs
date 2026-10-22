@@ -52,12 +52,19 @@ impl Imports {
     }
 }
 
+#[cfg(test)]
+thread_local! {
+    pub(crate) static HELPER_PROJECTIONS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 /// Canonical package name of a helper. All helpers under one source root
 /// share one package, so a helper and helpers beneath its name cannot make
 /// a member/namespace collision. Length-delimited canonical words preserve
 /// the original segment boundaries; canonical-name collisions are refused
 /// by the library at definition time.
 pub fn helper_name(name: &FunctionName) -> QualifiedName {
+    #[cfg(test)]
+    HELPER_PROJECTIONS.with(|count| count.set(count.get() + 1));
     let mut parts = name
         .as_str()
         .split('.')

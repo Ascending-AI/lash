@@ -55,9 +55,20 @@ pub fn parse_document_with_limits(
     text: &str,
     limits: lash_vocabulary::data_limits::KernelDataLimits,
 ) -> Result<Document, ParseError> {
-    let mut parser = Parser::new(text, limits)?;
     let mut document = Document::new(NumberPolicy::Float, Vec::new());
     document.main = None;
+    parse_document_over(text, document, limits)
+}
+
+/// Reads text beside an already typed prelude. Internal document assembly
+/// retains definitions and Imports as facts instead of printing their bodies
+/// only to parse them back. Text items keep the ordinary duplicate checks.
+pub fn parse_document_over(
+    text: &str,
+    mut document: Document,
+    limits: lash_vocabulary::data_limits::KernelDataLimits,
+) -> Result<Document, ParseError> {
+    let mut parser = Parser::new(text, limits)?;
     while parser.peek() != &Token::End {
         match parser.keyword("a document item")?.as_str() {
             "kernel" => {

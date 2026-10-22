@@ -1,7 +1,7 @@
 //! Library functions by name.
 
 use std::collections::BTreeMap;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 use lash_kernel_doc::{FunctionCatalog, FunctionDefinition, FunctionRegistry, RegisteredFunction};
 
@@ -48,6 +48,13 @@ pub struct NamedLibrary {
     /// The functions inserted by name beyond the registry's.
     inserted: BTreeMap<FunctionName, FunctionId>,
     definitions: BTreeMap<FunctionId, Arc<FunctionDefinition>>,
+    projected: OnceLock<BTreeMap<lash_vocabulary::QualifiedName, Projected>>,
+}
+
+#[derive(Clone, Debug)]
+struct Projected {
+    first: FunctionName,
+    guest: Option<FunctionName>,
 }
 
 /// The registry functions a library resolves names against.
@@ -122,19 +129,29 @@ impl NamedLibrary {
                 function: taken,
             });
         }
+        let projected = crate::authoring::helper_name(&definition.name);
+        let index = self.projected();
+        if !definition.has_native()
+            && let Some(first) = index.get(&projected).and_then(|entry| entry.guest.as_ref())
+        {
+            return Err(LibraryError::ImportCollision {
+                first: first.clone(),
+                second: definition.name.clone(),
+            });
+        }
+        let index = self
+            .projected
+            .get_mut()
+            .unwrap_or_else(|| unreachable!("initialized index"));
+        let entry = index.entry(projected).or_insert_with(|| Projected {
+            first: definition.name.clone(),
+            guest: None,
+        });
+        if definition.name < entry.first {
+            entry.first = definition.name.clone();
+        }
         if !definition.has_native() {
-            let projected = crate::authoring::helper_name(&definition.name);
-            for (_, id) in self.iter() {
-                if let Some(header) = self.header(&id).filter(|header| !header.has_native()) {
-                    let name = header.name.clone();
-                    if crate::authoring::helper_name(&name) == projected {
-                        return Err(LibraryError::ImportCollision {
-                            first: name,
-                            second: definition.name.clone(),
-                        });
-                    }
-                }
-            }
+            entry.guest = Some(definition.name.clone());
         }
         self.inserted.insert(definition.name.clone(), function);
         self.definitions.insert(function, definition);
@@ -167,6 +184,30 @@ impl NamedLibrary {
         );
         names.sort_unstable();
         names.into_iter()
+    }
+
+    fn projected(&self) -> &BTreeMap<lash_vocabulary::QualifiedName, Projected> {
+        self.projected.get_or_init(|| {
+            let mut projected = BTreeMap::<_, Projected>::new();
+            for (source, function) in self.iter() {
+                let name = FunctionName::new(source)
+                    .unwrap_or_else(|_| unreachable!("named functions have valid names"));
+                let entry = projected
+                    .entry(crate::authoring::helper_name(&name))
+                    .or_insert_with(|| Projected {
+                        first: name.clone(),
+                        guest: None,
+                    });
+                if entry.guest.is_none()
+                    && self
+                        .header(&function)
+                        .is_some_and(|header| !header.has_native())
+                {
+                    entry.guest = Some(name);
+                }
+            }
+            projected
+        })
     }
 
     /// The registry function `name` resolves to.
@@ -231,10 +272,7 @@ impl FunctionCatalog for NamedLibrary {
 
 impl Library for NamedLibrary {
     fn imported(&self, name: &lash_vocabulary::QualifiedName) -> Option<FunctionName> {
-        self.iter().find_map(|(source, _)| {
-            let source = FunctionName::new(source).ok()?;
-            (crate::authoring::helper_name(&source) == *name).then_some(source)
-        })
+        self.projected().get(name).map(|entry| entry.first.clone())
     }
 
     fn resolve(&self, name: &str) -> Option<FunctionId> {

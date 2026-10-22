@@ -11,7 +11,7 @@ enum UnitSource<'a> {
 /// library body it reaches.
 pub(super) fn compile_document(
     document: &Document,
-    observed: &Document,
+    functions: &BTreeMap<FunctionId, &FunctionDefinition>,
     library: &PreparedLibrary,
     authored: &BTreeSet<FunctionId>,
     imports: &BTreeMap<
@@ -21,7 +21,7 @@ pub(super) fn compile_document(
 ) -> Result<DocumentCode, Missing> {
     let prepared = &library.0;
     if !prepared.missing.is_empty() {
-        for function in document.functions.keys() {
+        for function in functions.keys() {
             if let Some(absent) = prepared.missing.get(function) {
                 return Err(Missing(*absent));
             }
@@ -36,8 +36,7 @@ pub(super) fn compile_document(
         .into_iter()
         .collect();
     units.extend(
-        document
-            .functions
+        functions
             .iter()
             .filter(|(id, f)| {
                 matches!(
@@ -51,8 +50,7 @@ pub(super) fn compile_document(
             .map(|(id, _)| UnitSource::Function(id)),
     );
     units.extend(
-        document
-            .functions
+        functions
             .iter()
             .filter(|(_, definition)| {
                 matches!(
@@ -115,7 +113,7 @@ pub(super) fn compile_document(
                 true,
             ),
             UnitSource::NativeStart(function) => {
-                let params: Vec<_> = document.functions[*function]
+                let params: Vec<_> = functions[*function]
                     .signature
                     .params
                     .iter()
@@ -131,7 +129,7 @@ pub(super) fn compile_document(
                 compiler.unit_code(code, Unit::Library(**function), &params, &block, false);
             }
             UnitSource::Function(name) => {
-                if let Some(function) = document.functions.get(*name) {
+                if let Some(function) = functions.get(*name) {
                     let unit = Unit::Library(**name);
                     let params: Vec<_> = function
                         .signature
@@ -152,7 +150,7 @@ pub(super) fn compile_document(
         sites: ordinals,
         actions: action_ordinals,
         conditions: condition_sites,
-    } = observed.ordinals();
+    } = document.ordinals();
     let block_ordinals = tables
         .blocks
         .iter()

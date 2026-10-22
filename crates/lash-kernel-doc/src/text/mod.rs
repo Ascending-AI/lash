@@ -6,7 +6,7 @@
 //! same holds for definitions.
 
 mod lexer;
-mod parser;
+pub(crate) mod parser;
 mod printer;
 
 use crate::validate::StatementForm;
