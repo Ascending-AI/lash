@@ -441,7 +441,7 @@ impl Compiler<'_> {
     /// document cannot reach.
     fn hook(&self, function: &doc::FunctionTarget) -> Result<super::LinkedHook, FunctionId> {
         match function {
-            doc::FunctionTarget::Import(slot) => Ok(super::LinkedHook::Import(*slot)),
+            doc::FunctionTarget::Import(slot) => Ok(super::LinkedHook::Import(*slot, None)),
             doc::FunctionTarget::Local(id) => self
                 .declared
                 .get(id)
@@ -452,11 +452,40 @@ impl Compiler<'_> {
         }
     }
     fn via(&self, via: &doc::Protocol) -> Result<Via, FunctionId> {
+        use lash_vocabulary::Type;
+        // The cursor supplies these kinds before the public call boundary.
+        let hinted =
+            |target: &doc::FunctionTarget, kinds: &[Type], result: Type| {
+                let mut hook = self.hook(target)?;
+                if let super::LinkedHook::Import(slot, hint) = &mut hook {
+                    *hint =
+                        self.imports
+                            .get(&(self.unit.clone(), *slot))
+                            .copied()
+                            .filter(|id| {
+                                let signature = &self.resolve.library.lib(*id).header.signature;
+                                signature.params.len() == kinds.len()
+                                    && signature.params.iter().zip(kinds).all(|(param, kind)| {
+                                        param.ty == Type::Any || &param.ty == kind
+                                    })
+                                    && (signature.result == Type::Any || signature.result == result)
+                            });
+                }
+                Ok(hook)
+            };
         Ok(Via {
             open: self.hook(&via.open)?,
             next: via.next.as_ref().map(|f| self.hook(f)).transpose()?,
-            item: via.item.as_ref().map(|f| self.hook(f)).transpose()?,
-            check: via.check.as_ref().map(|f| self.hook(f)).transpose()?,
+            item: via
+                .item
+                .as_ref()
+                .map(|f| hinted(f, &[Type::Any, Type::Any], Type::Any))
+                .transpose()?,
+            check: via
+                .check
+                .as_ref()
+                .map(|f| hinted(f, &[Type::Any, Type::Int, Type::Int, Type::Bool], Type::Int))
+                .transpose()?,
         })
     }
 
@@ -573,7 +602,19 @@ impl Compiler<'_> {
             },
             doc::Callee::Import(slot) => Callee::Import(
                 *slot,
-                self.imports.get(&(self.unit.clone(), *slot)).copied(),
+                self.imports
+                    .get(&(self.unit.clone(), *slot))
+                    .copied()
+                    .filter(|id| {
+                        self.resolve
+                            .library
+                            .lib(*id)
+                            .header
+                            .signature
+                            .params
+                            .iter()
+                            .all(|param| param.ty == lash_vocabulary::Type::Any)
+                    }),
             ),
             doc::Callee::Value(name) => Callee::Value(self.resolve(name)),
         }
