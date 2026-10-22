@@ -402,3 +402,66 @@ fn authored_origin_requires_public_imports_and_the_accepted_contract_pin() {
         .is_err()
     );
 }
+
+/// FIG-7135: aliases of one retained Document do not multiply the work of
+/// indexing its private definition labels, even across distinct Links.
+#[test]
+fn label_definition_index_visits_each_document_once() {
+    let mut doc = source();
+    let hidden = parse_definition(
+        "function app.hidden(value: Text) -> Text\nkernel 1\ncharge 1\nbody { return value }",
+    )
+    .unwrap();
+    doc.functions.insert(hidden.identity(), hidden);
+    let expected = doc.functions.len();
+    assert!(expected > 0);
+    let mut content = LinkedContent::default();
+    let document = content.insert_document(doc.clone()).unwrap();
+    let mut members = BTreeMap::new();
+    for contract in ["c1", "c2"] {
+        let link = Link {
+            document,
+            fills: [(
+                ImportSlot(0),
+                Fill::Operation(OperationRequirement {
+                    signature: match &doc.imports[&ImportSlot(0)].kind {
+                        ImportKind::Operation { signature } => signature.clone(),
+                        _ => unreachable!(),
+                    },
+                    contract: ContractId::new(contract),
+                }),
+            )]
+            .into(),
+        };
+        let link = content.insert_link(link).unwrap();
+        members.insert(
+            segment(contract),
+            Member {
+                visibility: Visibility::Public,
+                kind: MemberKind::Export {
+                    link,
+                    export: ExportName {
+                        name: Name::new("run"),
+                        member: None,
+                    },
+                },
+            },
+        );
+    }
+    let package = Package {
+        path: path("app"),
+        members,
+    };
+    crate::labels::DEFINITION_VISITS.with(|count| count.set(0));
+    crate::read_labels(
+        &content,
+        &package,
+        r#"{"definitions":{"app.hidden":"Hidden"}}"#,
+    )
+    .unwrap();
+    let visits = crate::labels::DEFINITION_VISITS.with(std::cell::Cell::get);
+    assert!(
+        visits <= expected,
+        "label work must follow distinct Documents, not advertised aliases: visited {visits}, bound {expected}"
+    );
+}
