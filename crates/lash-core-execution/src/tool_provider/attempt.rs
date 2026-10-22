@@ -21,8 +21,15 @@ impl<'run> AttemptContext<'run> {
         })
     }
 
-    /// One engine request, bound to the authenticated package facts of this attempt.
-    pub fn engine_inline_request(
+    /// Request already-linked engine code under its retained defining origin.
+    ///
+    /// The payload carries the defining Link and authenticated origin identities;
+    /// the receiving engine validates and retains them from current store bytes.
+    /// The attempt's consumer context accompanies those facts, without copying
+    /// unrelated namespace advertisements into the durable start declaration.
+    /// Unlinked source instead uses an explicit `InlineCode::Unlinked` request
+    /// with the namespace snapshot needed to fulfil its Imports.
+    pub fn retained_inline_request(
         &self,
         payload: serde_json::Value,
     ) -> Result<lash_execution_contracts::process::InlineRequest, ResolveTargetError> {
@@ -38,7 +45,7 @@ impl<'run> AttemptContext<'run> {
         })?;
         Ok(lash_execution_contracts::process::InlineRequest {
             code: lash_execution_contracts::process::InlineCode::Engine { payload },
-            snapshot: packages.snapshot.clone(),
+            snapshot: Default::default(),
             context,
             attachment: lash_vocabulary::package::Attachment {
                 members: Default::default(),
@@ -640,5 +647,117 @@ impl<'run> AttemptContext<'run> {
             intent_index,
             self.parent_invocation.as_deref(),
         )
+    }
+}
+
+#[cfg(test)]
+mod work_laws {
+    use lash_vocabulary::names::{ExportName, Name, PackagePath, Segment};
+    use lash_vocabulary::package::*;
+
+    /// FIG-7135/C10: a linked callable already carries retained provenance
+    /// by identity. Its declaration never copies unrelated package members.
+    #[test]
+    fn linked_start_declaration_bytes_do_not_grow_with_advertised_members() {
+        let context = PublicationContext {
+            domain: PublicationDomain("store".into()),
+            scope: PublicationScope::Host,
+            publisher: PublisherInstance("library".into()),
+            root: Segment::new("library").unwrap(),
+        };
+        let payload = serde_json::json!({
+            "kind": "callable",
+            "value": {"link": "retained-link", "function": "captured-callable", "origin": {"authored": ["retained-link"]}}
+        });
+        let declaration = |members: usize| {
+            let package = Package {
+                path: PackagePath::parse("library").unwrap(),
+                members: (0..members)
+                    .map(|n| {
+                        (
+                            Segment::new(format!("member{n}")).unwrap(),
+                            Member {
+                                visibility: Visibility::Public,
+                                kind: MemberKind::Export {
+                                    link: LinkId::from_bytes([7; 32]),
+                                    export: ExportName {
+                                        name: Name::new("run"),
+                                        member: None,
+                                    },
+                                },
+                            },
+                        )
+                    })
+                    .collect(),
+            };
+            let record = PublicationRecord {
+                context: context.clone(),
+                path: package.path.clone(),
+                content: PublishedContent::Package(package.identity()),
+                code_links: Default::default(),
+                imported_publications: Vec::new(),
+            };
+            let mut attempt = crate::testing::ToolCallFixture::mock().attempt("linked-start-size");
+            attempt.routes = Some(crate::SurfaceTools::default().with_packages(
+                lash_core_store::tool_surface::RecordedPackages {
+                    consumer: Some(context.clone()),
+                    snapshot: NamespaceSnapshot {
+                        advertisements: vec![AcceptedAdvertisement {
+                            publication: record,
+                            advertisement: PackageAdvertisement::Enumerated(package),
+                        }],
+                    },
+                    routes: Vec::new(),
+                },
+            ));
+            let request = attempt.retained_inline_request(payload.clone()).unwrap();
+            assert_eq!(request.context, context);
+            assert_eq!(
+                request.code,
+                lash_execution_contracts::process::InlineCode::Engine {
+                    payload: payload.clone()
+                }
+            );
+            let launch = lash_execution_contracts::process::model::launch::held_inline_launch(
+                lash_protocol_types::LASH_VM_ENGINE_KIND.into(),
+                request,
+                lash_execution_contracts::process::model::launch::held_launch(
+                    lash_execution_contracts::process::EngineLaunch::new(
+                        crate::ProcessEnvRef::new("linked-env"),
+                        None,
+                    ),
+                ),
+            );
+            let start = lash_execution_contracts::process::ProcessStartDeclaration::inline(
+                Default::default(),
+                launch,
+                lash_execution_contracts::process::ProcessOriginator::Session {
+                    session_id: "test-session".into(),
+                    agent_frame_id: None,
+                },
+                lash_execution_contracts::process::Lifetime::Detached,
+            );
+            let intents = lash_execution_contracts::tool_intent::ToolIntents::v3(vec![
+                lash_execution_contracts::tool_intent::ToolIntent::StartProcess(Box::new(
+                    lash_execution_contracts::tool_intent::StartProcessIntent {
+                        owner: attempt.owner().runtime_owner(),
+                        declaration: start,
+                    },
+                )),
+            ]);
+            let value = serde_json::to_value(&intents).unwrap();
+            eprintln!(
+                "members={members} declaration_bytes={}",
+                serde_json::to_vec(&value).unwrap().len()
+            );
+            intents.declared_canonical_bytes().unwrap()
+        };
+        let small = declaration(1);
+        let large = declaration(2_048);
+        assert_eq!(
+            small, large,
+            "linked start declarations carry code and provenance identities, not namespace contents"
+        );
+        assert!(large <= lash_execution_contracts::tool_intent::TOOL_INTENT_MAX_CANONICAL_BYTES);
     }
 }

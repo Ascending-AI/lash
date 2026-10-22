@@ -277,7 +277,7 @@ impl lash::tools::StaticToolExecute for Launch {
         let resolved = match context
             .resolve_inline_start(
                 lash::process::LASH_VM_ENGINE_KIND,
-                match context.engine_inline_request(serde_json::json!({"kind":"callable","value":{
+                match context.retained_inline_request(serde_json::json!({"kind":"callable","value":{
                     "link":shipped(&call.args["function"]).callable.link,
                     "function":shipped(&call.args["function"]),
                     "origin":match context.callable_origin() { Ok(origin)=>origin,Err(error)=>return refuse(format!("{error:?}")) }

@@ -1108,5 +1108,5 @@ fn inline_callable_request(
         .and_then(|callable| callable.get("link"))
         .ok_or_else(|| refused("function value has no defining Link"))?;
     let origin = context.callable_origin()?;
-    context.engine_inline_request(serde_json::json!({"kind": "callable", "value": {"link": link, "function": function, "origin": origin}}))
+    context.retained_inline_request(serde_json::json!({"kind": "callable", "value": {"link": link, "function": function, "origin": origin}}))
 }
