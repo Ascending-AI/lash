@@ -9,7 +9,9 @@ use lash::package::*;
 use lash::workflow::document as k;
 use std::collections::BTreeMap;
 
-fn namespaces(effects: BTreeMap<k::EffectName, k::Signature>) -> lash::dialect::Namespaces {
+fn namespaces(
+    effects: BTreeMap<k::EffectName, lash::schema::Signature>,
+) -> lash::dialect::Namespaces {
     let mut packages: BTreeMap<PackagePath, BTreeMap<Segment, lash::dialect::NamespaceMember>> =
         BTreeMap::new();
     for (name, signature) in effects {
@@ -145,7 +147,7 @@ fn holder(
     )
 }
 fn export_unit(document: &k::Document, name: &str) -> k::Unit {
-    let k::Export::Function(export) = &document.exports[&k::Name::new(name)] else {
+    let k::Export::Function(export) = &document.exports[&lash::schema::Name::new(name)] else {
         panic!("function export")
     };
     k::Unit::Library(export.function)

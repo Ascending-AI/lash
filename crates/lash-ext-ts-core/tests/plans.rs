@@ -26,7 +26,7 @@ fn closed_helpers_have_generated_plans() {
     let generated =
         lash_ext_helper_compiler::generate(Dialect::TypeScript).expect("the helpers compile");
     for name in [
-        "ts.number.parse_int",
+        "ts.number.parse_integer",
         "ts.number.parse_decimal",
         "ts.number.parse",
         "ts.primitive_to_number",

@@ -170,7 +170,7 @@ pub(super) fn export_closure(
     document: &mut Document,
     name: &str,
     params: &[&str],
-    result: lash::workflow::document::Type,
+    result: lash::schema::Type,
 ) {
     let Stmt::Let {
         value: Rhs::Expr(Expr::Closure(closure)),
@@ -183,12 +183,12 @@ pub(super) fn export_closure(
         Name::new(name),
         lash::workflow::document::Export::Function(lash::workflow::document::FunctionExport {
             function: closure.function,
-            signature: lash::workflow::document::Signature {
+            signature: lash::schema::Signature {
                 params: params
                     .iter()
-                    .map(|name| lash::workflow::document::Param {
+                    .map(|name| lash::schema::Param {
                         name: Name::new(*name),
-                        ty: lash::workflow::document::Type::Json,
+                        ty: lash::schema::Type::Json,
                         optional: false,
                     })
                     .collect(),

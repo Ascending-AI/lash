@@ -153,14 +153,6 @@ pub use lash_vm_runtime::{DIALECT_SERVICE_PACKAGES, TIMER_OPERATIONS};
 pub use lash_vm_releases::LibraryError;
 pub use lash_vm_runtime::{AdoptionRefusal, StoredSourceMap, Unretained};
 
-/// Entry JSON contracts and containment (event type is the subtype).
-#[cfg(feature = "codemode")]
-pub use lash_vocabulary::entry_schema::{
-    EntrySchemaPolicy, EntrySchemas, TypeSchemaRefusal, TypeSchemaRefusalReason, entry_schemas,
-    json_schema_of_type,
-};
-#[cfg(feature = "codemode")]
-pub use lash_vocabulary::schema::{Widening, WideningReason};
 #[cfg(feature = "codemode")]
 pub use lash_vocabulary::type_relations::type_mismatch;
 

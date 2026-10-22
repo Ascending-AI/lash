@@ -244,8 +244,7 @@ pub mod package {
     pub use lash_core_store::packages::{LinkRecord, PackageRecord};
     pub use lash_core_store::resolutions::ResolutionSeed;
     pub use lash_core_store::tool_surface::{
-        AdvertisedRoute, ExecutionEnvironment, OperationRoute, RecordedPackages, RouteSource,
-        RoutedOperation, UseBinding,
+        AdvertisedRoute, ExecutionEnvironment, RecordedPackages, RoutedOperation, UseBinding,
     };
     pub use lash_execution_contracts::process::linking::{
         AdmissionRefusal, ContentRef, EnginePortError, FulfilRequest, Fulfilled, LinkInspection,

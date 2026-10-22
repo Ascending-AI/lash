@@ -180,7 +180,7 @@ fn coarse_eval() {
                     .unwrap()
                     .0
                     .to_owned(),
-                result: lash::workflow::document::Type::Any,
+                result: lash::schema::Type::Any,
                 then_yield: false,
             },
             args: Vec::new(),
@@ -199,7 +199,7 @@ fn coarse_eval() {
     let value = || lash::workflow::document::Action::Perform {
         slot: lash::package::ImportSlot(7),
         args: Vec::new(),
-        result: lash::workflow::document::Type::Any,
+        result: lash::schema::Type::Any,
         then_yield: false,
     };
     let issued = |assignment: Stmt| {
@@ -725,7 +725,7 @@ async fn coarse_counts() {
     }) {
         assert_eq!(runs(&action.site), Some(1), "{:?}", action.kind);
     }
-    for observation in [None, Some(view::RunObservation::Off)] {
+    for observation in [None, Some(lash::process::RunObservation::Off)] {
         assert!(
             view.coverage(&view::RanCounts {
                 observation,

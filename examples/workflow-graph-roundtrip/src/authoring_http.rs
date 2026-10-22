@@ -4,9 +4,10 @@
 use axum::Json;
 use axum::extract::State;
 use axum::http::StatusCode;
+use lash::schema::Name;
 use lash::workflow::WorkflowImport;
 use lash::workflow::authoring::Operation;
-use lash::workflow::document::{Captions, Correspondence, Document, Name, SourceMap};
+use lash::workflow::document::{Captions, Correspondence, Document, SourceMap};
 use lash::workflow::edit::{Draft, EditDiagnosticKind, Transaction};
 use serde::{Deserialize, Serialize};
 

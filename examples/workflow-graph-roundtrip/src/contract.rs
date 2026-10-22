@@ -7,10 +7,9 @@ use lash::workflow::document::Correspondence;
 use std::collections::BTreeMap;
 
 use axum::http::StatusCode;
+use lash::schema::Name;
 use lash::workflow::authoring::Operation;
-use lash::workflow::document::{
-    CaptionEntry, CaptionTarget, Captions, Document, Name, Site, SourceMap,
-};
+use lash::workflow::document::{CaptionEntry, CaptionTarget, Captions, Document, Site, SourceMap};
 use lash::workflow::view::{CaptionView, PathStep, WorkflowCoverage};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;

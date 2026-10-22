@@ -2,8 +2,9 @@
 //! includes, so the example and its tests ship exactly the committed corpus.
 use crate::{Dialect, runtime::RunError};
 use lash::LashCore;
+use lash::schema::Name;
 use lash::workflow::WorkflowEnvironment;
-use lash::workflow::document::{Captions, Document, Name, SourceMap};
+use lash::workflow::document::{Captions, Document, SourceMap};
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -262,7 +263,7 @@ pub(crate) async fn entry_view(
     pin: &lash::process::HostArtifactPin,
     document: &Document,
     entry: &Name,
-    environment: &lash::workflow::WorkflowEnvironmentRequest,
+    environment: &lash::vm::WorkflowEnvironmentRequest,
 ) -> Result<lash::workflow::view::WorkflowView, String> {
     let start = core
         .host_artifacts()
@@ -306,10 +307,11 @@ mod tests {
     use std::collections::BTreeMap;
     use std::sync::Arc;
 
+    use lash::process::RunObservation;
     use lash::workflow::document::{Site, Unit};
     use lash::workflow::view::{
-        PathSite, PathStep, RanCounts, ReplayPath, RunObservation, ScopeCoverage,
-        StatementCoverage, TaskPath, WorkflowCoverage, WorkflowView,
+        PathSite, PathStep, RanCounts, ReplayPath, ScopeCoverage, StatementCoverage, TaskPath,
+        WorkflowCoverage, WorkflowView,
     };
 
     use super::{Catalog, SOURCES, entry_view};

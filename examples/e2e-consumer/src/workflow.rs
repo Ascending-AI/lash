@@ -24,9 +24,10 @@ use lash::process::{
     ProcessConfigKey, ProcessDefinition, ProcessDefinitionId, ProcessEnv, ProcessLifecycleFact,
     ProcessObservationStreamItem, ProcessOriginator, ProcessStartRequest, ProcessStatus,
 };
+use lash::schema::Name;
 use lash::sync::MutexExt as _;
 use lash::workflow::authoring::Operation;
-use lash::workflow::document::{Document, Name};
+use lash::workflow::document::Document;
 use lash::workflow::edit::{Draft, Location, Transaction};
 use lash::workflow::{
     WorkflowDocument, WorkflowDocumentRead, WorkflowExecutionOverlayAccumulator,
@@ -324,7 +325,7 @@ async fn namespace(
     host: &Host,
 ) -> Result<(
     lash::package::RecordedPackages,
-    lash::workflow::WorkflowEnvironmentRequest,
+    lash::vm::WorkflowEnvironmentRequest,
 )> {
     use lash::package::*;
     let context = PublicationContext {
@@ -351,7 +352,7 @@ async fn namespace(
             })
             .collect(),
     };
-    let request = lash::workflow::WorkflowEnvironmentRequest {
+    let request = lash::vm::WorkflowEnvironmentRequest {
         snapshot: packages.snapshot.clone(),
         context,
         attachment,

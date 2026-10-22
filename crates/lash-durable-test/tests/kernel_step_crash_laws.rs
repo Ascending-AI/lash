@@ -294,9 +294,7 @@ impl KernelSteps {
                     .publish_workflow(
                         &pin,
                         &document,
-                        &lash::package::StartSelector::Export(lash::workflow::document::Name::new(
-                            "worker",
-                        )),
+                        &lash::package::StartSelector::Export(lash::schema::Name::new("worker")),
                         &request,
                         None,
                     )

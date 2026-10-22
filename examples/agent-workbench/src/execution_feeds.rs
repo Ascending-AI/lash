@@ -691,7 +691,7 @@ mod tests {
                 subject: TraceRuntimeSubject::Process {
                     process_id: process_id.clone(),
                 },
-                observation: lash::workflow::view::RunObservation::Off,
+                observation: lash::process::RunObservation::Off,
             },
         )
     }

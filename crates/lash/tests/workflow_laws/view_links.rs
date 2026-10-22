@@ -7,16 +7,16 @@ use lash::workflow::view::{
 };
 use std::collections::BTreeMap;
 
-fn echo() -> BTreeMap<k::EffectName, k::Signature> {
+fn echo() -> BTreeMap<k::EffectName, lash::schema::Signature> {
     BTreeMap::from([(
         k::EffectName::new("tools.echo").expect("a tool's name"),
-        k::Signature {
-            params: vec![k::Param {
-                name: k::Name::new("x"),
-                ty: k::Type::Any,
+        lash::schema::Signature {
+            params: vec![lash::schema::Param {
+                name: lash::schema::Name::new("x"),
+                ty: lash::schema::Type::Any,
                 optional: false,
             }],
-            result: k::Type::Any,
+            result: lash::schema::Type::Any,
         },
     )])
 }

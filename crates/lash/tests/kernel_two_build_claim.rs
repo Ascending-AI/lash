@@ -265,7 +265,7 @@ async fn payload(backend: &lash::Backend, text: &str) -> serde_json::Value {
         lash_vm_runtime::KernelProcessDefinition::of(
             &document,
             identity,
-            lash::workflow::document::Name::new("worker"),
+            lash::schema::Name::new("worker"),
             lash::package::lash_packages()
                 .expect("the shipped library assembles")
                 .digest(),
@@ -977,7 +977,7 @@ async fn payload_under(
         packages,
         document: identity,
         functions: document.manifest.functions.keys().copied().collect(),
-        entry: lash::workflow::document::Name::new("worker"),
+        entry: lash::schema::Name::new("worker"),
         args: serde_json::Map::new(),
     })
     .expect("the input encodes")

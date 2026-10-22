@@ -852,7 +852,7 @@ async fn an_inline_start_retry_is_exact_and_a_conflicting_or_refused_one_starts_
     );
 
     let mut unstartable = value.clone();
-    unstartable.signature.result = lash::workflow::document::Type::Any;
+    unstartable.signature.result = lash::schema::Type::Any;
     let refused = host_start(&core, inline_request(&unstartable, 3, &launch, "refused"))
         .await
         .expect_err("a function with no such entry is refused");

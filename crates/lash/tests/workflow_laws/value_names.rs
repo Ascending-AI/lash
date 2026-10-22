@@ -39,13 +39,13 @@ fn lower(format: SourceFormat, source: &str) -> (Document, Captions) {
     let embedding = lash_vm_worker::built_embedding(&Default::default()).expect("embedding");
     let effects = BTreeMap::from([(
         k::EffectName::new("inbox.send_item").expect("a tool's name"),
-        k::Signature {
-            params: vec![k::Param {
-                name: k::Name::new("input"),
-                ty: k::Type::Any,
+        lash::schema::Signature {
+            params: vec![lash::schema::Param {
+                name: lash::schema::Name::new("input"),
+                ty: lash::schema::Type::Any,
                 optional: false,
             }],
-            result: k::Type::Any,
+            result: lash::schema::Type::Any,
         },
     )]);
     let environment_namespaces = super::namespaces(effects);

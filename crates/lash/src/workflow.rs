@@ -1,6 +1,6 @@
 //! Author, inspect and run linked kernel Documents.
 //!
-//! A host supplies a trusted `WorkflowEnvironmentRequest`: accepted publications,
+//! A host supplies a trusted [`WorkflowEnvironmentRequest`](crate::vm::WorkflowEnvironmentRequest): accepted publications,
 //! its consumer context and explicit attachments. Import lowers source against
 //! that namespace. Publication fulfils the Document once, validates the selected
 //! Main or function Export and retains its Link under a host artifact pin.
@@ -74,7 +74,7 @@ pub mod document {
         validate_definition, validate_definition_with_limits, validate_document,
         validate_document_with_limits,
     };
-    pub use lash_vocabulary::names::{DocumentId, FunctionId, FunctionName, Name, QualifiedName};
+    pub use lash_vocabulary::names::{DocumentId, FunctionId, FunctionName, QualifiedName};
     pub use lash_vocabulary::names::{
         EffectName, InvalidIdentity, InvalidQualifiedName, SourceMapId,
     };
@@ -82,9 +82,6 @@ pub mod document {
     pub use lash_vocabulary::sites::{
         EffectId, LoopCounts, ObservationReader, PositionCounts, PositionLabel, Site, TaskLabel,
         Unit, VisitId, WaitId,
-    };
-    pub use lash_vocabulary::types::{
-        MapType, Param, RecordType, RecordTypeField, Signature, Type,
     };
 
     pub use lash_kernel_doc::linked_site::LinkedSite;
@@ -199,7 +196,6 @@ pub mod view {
     pub use lash_kernel_view::{Comparison, LabelError, MemberDisplay};
     pub use lash_vocabulary::observation::RanCounts;
     pub use lash_vocabulary::observation::ReplayPath;
-    pub use lash_vocabulary::observation::RunObservation;
     pub use lash_vocabulary::observation::TaskPath;
 }
 
@@ -223,7 +219,6 @@ pub use lash_vm_runtime::trace_adapter::workflow_overlay_document;
 #[cfg(feature = "codemode")]
 pub use lash_vm_runtime::{
     ReplaySegments, SegmentAnswer, SegmentReplay, Unreplayable, WorkflowEnvironment,
-    WorkflowEnvironmentRequest, WorkflowPublishRequest,
 };
 /// Which document an execution runs, as a process's observation snapshot
 /// ([`ProcessDocumentIdentity`](crate::process::ProcessDocumentIdentity))
@@ -374,13 +369,12 @@ pub use lash_core::ProcessWorkflowRan;
 pub use lash_core::ProcessWorkflowSite;
 pub use lash_core::ProcessWorkflowSiteState;
 pub use lash_core::ProcessWorkflowWaitKind;
-pub use lash_vocabulary::observation::RunObservation;
 
 /// Immutable linked content and validation used by document hosts and editors.
 #[cfg(any(feature = "codemode", feature = "workflow-view"))]
 pub mod link {
     pub use lash_kernel_package::{
-        LinkRefusal, LinkedContent, LinkedReach, Namespace, OperationNeed as LinkedOperationNeed,
-        ReachSelection, RetainedContent,
+        LinkRefusal, LinkedContent, LinkedReach, Namespace as LinkNamespace,
+        OperationNeed as LinkedOperationNeed, ReachSelection, RetainedContent,
     };
 }

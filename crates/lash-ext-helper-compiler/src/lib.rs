@@ -26,6 +26,8 @@ mod template;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
 
+use lash_kernel_dialect::Library as _;
+
 use analysis::Analysis;
 use library::{Dialect, Library};
 
@@ -142,6 +144,13 @@ pub fn generate_library(library: &Library, dialect: Dialect) -> Result<Generated
     let mut functions = Vec::new();
     let mut seen = BTreeSet::new();
     for function in &library.helpers {
+        // Lifted closure bodies stay in the catalog for their factories,
+        // but are not independently callable helper-package members.
+        if !library.definition(function).is_some_and(|definition| {
+            library.names.resolve(definition.name.as_str()) == Some(*function)
+        }) {
+            continue;
+        }
         order(*function, library, &analysis, &mut seen, &mut functions);
     }
     for function in &functions {

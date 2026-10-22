@@ -31,13 +31,13 @@ fn view(dialect: Dialect, source: &str, entry: &str) -> WorkflowView {
     let embedding = lash_vm_worker::built_embedding(&Default::default()).expect("embedding");
     let effects = BTreeMap::from([(
         k::EffectName::new("inbox.send_item").expect("a tool's name"),
-        k::Signature {
-            params: vec![k::Param {
-                name: k::Name::new("input"),
-                ty: k::Type::Any,
+        lash::schema::Signature {
+            params: vec![lash::schema::Param {
+                name: lash::schema::Name::new("input"),
+                ty: lash::schema::Type::Any,
                 optional: false,
             }],
-            result: k::Type::Any,
+            result: lash::schema::Type::Any,
         },
     )]);
     let environment_namespaces = super::namespaces(effects);
@@ -103,7 +103,11 @@ fn the_triage_entry_states_its_declared_parameters_and_the_union_of_its_returns(
     let view = view(Dialect::TypeScript, TRIAGE, "triage");
     let source = &view.canonical_source;
     let entry = &view.entry;
-    assert_eq!(entry.name, Some(k::Name::new("triage")), "{source}");
+    assert_eq!(
+        entry.name,
+        Some(lash::schema::Name::new("triage")),
+        "{source}"
+    );
     let params: Vec<_> = entry
         .params
         .iter()
@@ -116,14 +120,23 @@ fn the_triage_entry_states_its_declared_parameters_and_the_union_of_its_returns(
             )
         })
         .collect();
-    let optional_text = k::Type::Union(vec![k::Type::Text, k::Type::Null, k::Type::Absent]);
+    let optional_text = lash::schema::Type::Union(vec![
+        lash::schema::Type::Text,
+        lash::schema::Type::Null,
+        lash::schema::Type::Absent,
+    ]);
     assert_eq!(
         params,
         [
-            ("title", &k::Type::Text, false, binding(&view, "title")),
+            (
+                "title",
+                &lash::schema::Type::Text,
+                false,
+                binding(&view, "title")
+            ),
             (
                 "priority",
-                &k::Type::Text,
+                &lash::schema::Type::Text,
                 false,
                 binding(&view, "priority")
             ),
@@ -139,14 +152,18 @@ fn the_triage_entry_states_its_declared_parameters_and_the_union_of_its_returns(
         .expect("title's binding");
     assert_eq!(
         (title.kind, &title.ty),
-        (BindingKind::Param, &k::Type::Any),
+        (BindingKind::Param, &lash::schema::Type::Any),
         "the binding's facet says less than the signature"
     );
-    assert_eq!(entry.result, k::Type::Any, "the entry declares no result");
-    let routed = k::Type::Record(k::RecordType {
-        fields: vec![k::RecordTypeField {
+    assert_eq!(
+        entry.result,
+        lash::schema::Type::Any,
+        "the entry declares no result"
+    );
+    let routed = lash::schema::Type::Record(lash::schema::RecordType {
+        fields: vec![lash::schema::RecordTypeField {
             name: "routed".into(),
-            ty: k::Type::Text,
+            ty: lash::schema::Type::Text,
             optional: false,
         }],
         rest: None,
@@ -155,7 +172,7 @@ fn the_triage_entry_states_its_declared_parameters_and_the_union_of_its_returns(
         view.dataflow
             .returns
             .iter()
-            .any(|ending| ending.ty == k::Type::Absent),
+            .any(|ending| ending.ty == lash::schema::Type::Absent),
         "the lowering closes the body with `return absent`:\n{source}"
     );
     assert_eq!(entry.result_facet, routed, "{source}");
@@ -172,7 +189,7 @@ fn an_entry_that_may_fall_through_has_null_in_its_result_facet() {
     );
     assert_eq!(
         view.entry.result_facet,
-        k::Type::Union(vec![k::Type::Text, k::Type::Null]),
+        lash::schema::Type::Union(vec![lash::schema::Type::Text, lash::schema::Type::Null]),
         "{}",
         view.canonical_source
     );

@@ -87,12 +87,13 @@ async fn both_dialects_and_transports_preserve_exact_documents_and_optional_maps
     .document
     .into_document();
     let mut host = k::parse_document("kernel 1\nnumbers float\nmain { let out = \"start\" try { set out = \"operator\" } catch e { set out = \"caught\" } return out }").expect("host tree");
-    host.private_bindings.insert(k::Name::new("日本語"));
+    host.private_bindings
+        .insert(lash::schema::Name::new("日本語"));
     // Exceed the ordinary cell cap. This is a whole-workflow operation.
     host.main.as_mut().unwrap().insert(
         0,
         k::Stmt::Let {
-            name: k::Name::new("日本語"),
+            name: lash::schema::Name::new("日本語"),
             value: k::Rhs::Expr(k::Expr::Literal(k::Literal::Text("λ".repeat(40_000)))),
         },
     );

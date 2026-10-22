@@ -35,7 +35,7 @@ fn fixture(width: usize, depth: usize) -> Result<Document> {
     let mut body = Vec::new();
     for index in 0..width {
         body.push(Stmt::Let {
-            name: k::Name::new(format!("item_{index}")),
+            name: lash::schema::Name::new(format!("item_{index}")),
             value: Rhs::Expr(Expr::List(vec![
                 Expr::Literal(Literal::Int(k::Integer::from(i64::try_from(index)?))),
                 Expr::Literal(Literal::Text("readable λ".into())),

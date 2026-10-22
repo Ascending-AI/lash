@@ -12,9 +12,10 @@ use std::sync::Arc;
 
 use futures_util::StreamExt as _;
 
+use lash::schema::Name;
 use lash::workflow::WorkflowRead;
 use lash::workflow::authoring::{DataValue, Operation, ValueTarget};
-use lash::workflow::document::{Document, Expr, Literal, Name, Place, Rhs, Stmt, Unit};
+use lash::workflow::document::{Document, Expr, Literal, Place, Rhs, Stmt, Unit};
 use lash::workflow::edit::{Draft, Transaction};
 #[path = "workflow_laws/support.rs"]
 mod support;
@@ -784,7 +785,7 @@ async fn a_fan_out_overlay_holds_one_row_for_each_elements_effect() {
         &mut document,
         "fan",
         &["a", "b", "c"],
-        lash::workflow::document::Type::Json,
+        lash::schema::Type::Json,
     );
     let publication = publish(
         &core,

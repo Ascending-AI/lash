@@ -4,7 +4,9 @@
 
 use std::sync::Arc;
 
-use lash::workflow::document::{Document, Name};
+use lash::schema::Name;
+
+use lash::workflow::document::Document;
 use lash::workflow::{WorkflowDocumentRead, WorkflowRead};
 
 use super::*;
@@ -47,7 +49,7 @@ fn holding() -> Document {
         &mut document,
         "held",
         &[],
-        lash::workflow::document::Type::List(Box::new(lash::workflow::document::Type::Text)),
+        lash::schema::Type::List(Box::new(lash::schema::Type::Text)),
     );
     document
 }

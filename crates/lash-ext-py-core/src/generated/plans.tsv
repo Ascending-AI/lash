@@ -9,7 +9,6 @@ py.float_text	32a395e177a55c7963929beeb617158366bb9cb9a63cbeafd9a5ae88fc26340a	c
 py.text_repr	7992616556ec00f79db8045548b1c94715c2225268f731343bc301fbb56d6ad0	closed	-	true	0	false	sum(4, size(value), size(result))	generated
 brand.of	de7ce6931fd93dde5062927fd4d24e0786ce2957bfb00542b5ddbcb7353ccdf3	closed	-	false	0	false	8	generated
 py.type	f9b078af7519f6d1ad25157de49683a8f9d98ce8671f7b8dd50adf1308135372	closed	-	true	0	true	sum(8, size(result))	generated
-kernel.anonymous	308597285daa6b50d7fdd3cc95e1584ffa1c35783cfaf06e4311c34fa80bfb65	callback	apply go; apply go; apply go; apply go; apply go; apply go	true	0	false	statements	reads `go`, which no scope binds
 py.repr	7bbe89039d9ba6922f93dba33b546209a0268992072f958d4535fa72da32906e	callback	apply go	false	1	false	sum(8, deep_size(value), size(result))	segment of 1 sites
 py.str	5dd20d3a3123c4ae1cd9bd973832a9ae1ad11b8819854e5beaa521f236d98593	callback	invoke py.repr	false	0	false	sum(8, deep_size(value), size(result))	segment of 1 sites
 py.fail	1b715c6aff4658af53a1c93402fef826a1da902ab3ad5e88eaa3d129c408d198	closed	-	false	0	false	4	generated
@@ -50,10 +49,10 @@ py.for_in.check	66d29710b29958b3fa96c199658114c5da6212a81d8a3a1cac7eabccd85b2b62
 py.to_tuple	98d35ddd886a4cedf0d38666c6a64360d06533cc9d5310aafa678885d1b66199	closed	-	true	0	false	sum(4, product(size(value), size(value)))	generated
 py.to_set	fed27f8b9ae402ae4d229c949b356fb2158ece82eb272106e2d308cd46ac0647	closed	-	true	0	false	sum(4, size(value), size(result))	generated
 py.to_dict	f1ea7241425c1c586a184ad07e38c4ee0e18f78547aae98266be14ec48aebd14	closed	-	true	0	false	sum(4, size(value), size(result))	generated
-kernel.anonymous	07ad8d4e25b343a6bb2222e6f291ac5dd328634021f4d76a810aece2cd3f894d	callback	apply go; apply go	true	0	false	statements	reads `go`, which no scope binds
 py.reply	373444e2d103ee313318775419afb68a65184593e7bdcae900957bfd4ec811aa	callback	apply go	false	1	false	sum(4, deep_size(value))	segment of 1 sites
 py.unpack	1708247fe5c75da1ef961e30d1dcc911a9fbca368365d8f9d96d9054b4e2f2ff	closed	-	true	0	false	sum(4, size(value))	generated
 py.time	33b71e9adc8a5b41d94f449a100a54a8b5eb4882b04d6c9d059e8eb88c647954	host	perform import 4294901776	false	0	false	6	segment of 1 sites
+py.operation_input	4f965b8219f615155a1afecbae1365e55ec89dec17f499586b411f6b443bb22a	closed	-	true	0	false	statements	generated
 py.show	23cab5f378a387340af6080e6dd2ae8d0df25ec5acb1e23c76a840cbb70b833f	callback	invoke py.str	true	0	false	sum(4, deep_size(args), size(result))	segment of 1 sites
 py.number_text	27c44618e23c97373508a27c672bf3e2a3b43505fceaaa6917748d6fbcea6da3	closed	-	true	0	false	sum(8, size(value), size(result))	generated
 py.number_underscores	20856de356032c43d8aed870f857962a404869a00812bdac561b90f482ca96df	closed	-	true	0	false	sum(8, product(size(digits), size(digits)))	generated
@@ -62,7 +61,6 @@ py.float	c4f32c0fc4eec1e65bc2bb2e6b26986660d5e5571aee6cf6623900811ec381db	callba
 py.abs	d02221430c09954fe9dc9e89048346e405964084bf5f9a752360d2b8343bd6a8	closed	-	true	0	false	sum(4, size(value))	generated
 py.extreme	cc2d64b07b1d4caadb0a1875906526a876b70d4f28a6bb2ee97bf0ad8a5cacf2	closed	-	true	0	false	sum(4, deep_size(args))	generated
 py.sum	9536a2433e64a866ae04d2b3c9012326b82c63545e9807ca4338124d49def355	closed	-	true	0	false	sum(4, deep_size(values))	generated
-kernel.anonymous	2ad810df19417f8ffabf4b3b73875b756d4a1ba93c7da500490f954c24563905	closed	-	false	0	false	statements	generated
 py.sorted	0be6ee396d2e7273e2901eaac2dda2cd85e9b5828bf0e819c583412154b54afd	callback	apply sort; apply key	true	1	true	sum(8, product(2, size(values)), size(result))	segment of 2 sites
 collection.range	ec05146cb19e74ede7b8bfdab35c584b5b1fac544046a1a104daf0a9548014ad	closed	-	true	0	false	sum(1, size(start), size(end), size(step), size(result))	generated
 py.range	de7c298f65da6b19ea79585b436fe5b1e546e75171f477be3e80bfb69f50c116	closed	-	true	0	false	sum(4, size(result))	generated

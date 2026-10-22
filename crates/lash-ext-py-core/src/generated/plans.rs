@@ -43,7 +43,6 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &PY_SHOW_PLAN,
     &PY_SLICE_PLAN,
     &PY_NUMBER_TEXT_PLAN,
-    &KERNEL_ANONYMOUS_3_PLAN,
     &PY_LENGTH_PLAN,
     &PY_EXC_IS_EXCEPTION_PLAN,
     &PY_FLOAT_TEXT_PLAN,
@@ -60,6 +59,7 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &PY_ZIP_PLAN,
     &PY_CHR_PLAN,
     &PY_TEXT_PRINTABLE_PLAN,
+    &PY_OPERATION_INPUT_PLAN,
     &PY_EXC_THROW_PLAN,
     &PY_CONTAINS_PLAN,
     &PY_SUB_PLAN,
@@ -11441,6 +11441,109 @@ fn py_time(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::PlanExi
     Ok(Value::Null)
 }
 
+const PY_OPERATION_INPUT_PLAN: p::HelperPlan = p::HelperPlan {
+    name: "py.operation_input",
+    function: p::function("4f965b8219f615155a1afecbae1365e55ec89dec17f499586b411f6b443bb22a"),
+    callees: &[
+        p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"),
+        p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
+    ],
+    literals: &[
+        p::PlanLiteral::Text("map"),
+        p::PlanLiteral::Text("text"),
+    ],
+    fields: &[],
+    records: &[&[], ],
+    registers: 3,
+    slots: &[
+        p::PlanLocal { name: "value", path: &[] },
+        p::PlanLocal { name: "out", path: &[0, 1, 0] },
+        p::PlanLocal { name: "", path: &[] },
+        p::PlanLocal { name: "key", path: &[0, 1, 1, 1] },
+    ],
+    closures: &[
+    ],
+    sites: &[],
+    run: py_operation_input,
+    template: Some(p::HelperTemplate { entry: Some(py_operation_input_template), depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: py_operation_input_heap, depth: 1, writes: false, element_write: false, callees: &[] }), forwards: p::Forwards { floats: None, ints: None } }),
+};
+
+/// `py.operation_input`.
+fn py_operation_input(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
+    ctx.begin()?;
+    ctx.local(0, 0)?;
+    ctx.call(0, 0, 1)?;
+    ctx.literal(0, 1)?;
+    ctx.call(1, 0, 2)?;
+    if ctx.test(0, p::Test::If)? {
+        ctx.begin()?;
+        ctx.record(0, 0)?;
+        ctx.bind(1, 0)?;
+        ctx.begin()?;
+        ctx.local(0, 0)?;
+        let c0 = ctx.open(0, 2)?;
+        'l0: loop {
+            if !ctx.next(c0, 0)? {
+                break 'l0;
+            }
+            ctx.bind(3, 0)?;
+            ctx.begin()?;
+            ctx.local(3, 0)?;
+            ctx.call(0, 0, 1)?;
+            ctx.literal(1, 1)?;
+            ctx.call(1, 0, 2)?;
+            if ctx.test(0, p::Test::If)? {
+            } else {
+                ctx.begin()?;
+                ctx.local(0, 0)?;
+                return Ok(ctx.take(0));
+            }
+            ctx.begin()?;
+            ctx.local(0, 0)?;
+            ctx.local(3, 1)?;
+            ctx.index(0)?;
+            ctx.pin(0)?;
+            ctx.local(1, 1)?;
+            ctx.local(3, 2)?;
+            ctx.set_index(1, 0)?;
+            ctx.unbind(3);
+            ctx.begin()?;
+        }
+        ctx.close(c0);
+        ctx.begin()?;
+        ctx.local(1, 0)?;
+        return Ok(ctx.take(0));
+    }
+    ctx.begin()?;
+    ctx.local(0, 0)?;
+    Ok(ctx.take(0))
+}
+fn py_operation_input_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
+    let _ = natives;
+    match args {
+        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_)] => {
+            if let Some(value) = (|| {
+                Some(args[0])
+            })() { return Some(value); }
+            None
+        },
+        _ => None,
+    }
+}
+fn py_operation_input_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
+    let _ = (&heap, natives);
+    match args {
+        [Value::LongText(_) | Value::List(_) | Value::Record(_)] => {
+            if let Some(value) = (|| {
+                Some(args[0])
+            })() { return Some(value); }
+            None
+        },
+        _ => None,
+    }
+}
+
 const PY_SHOW_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.show",
     function: p::function("23cab5f378a387340af6080e6dd2ae8d0df25ec5acb1e23c76a840cbb70b833f"),
@@ -13391,54 +13494,6 @@ fn py_sum(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::PlanExi
     ctx.begin()?;
     ctx.local(2, 0)?;
     Ok(ctx.take(0))
-}
-
-const KERNEL_ANONYMOUS_3_PLAN: p::HelperPlan = p::HelperPlan {
-    name: "kernel.anonymous",
-    function: p::function("2ad810df19417f8ffabf4b3b73875b756d4a1ba93c7da500490f954c24563905"),
-    callees: &[
-        p::function("c247f67b2dd2b9a128e506e2c11070be90ebcc8f06a989a59fc03242df1d9181"),
-    ],
-    literals: &[],
-    fields: &[],
-    records: &[],
-    registers: 3,
-    slots: &[
-        p::PlanLocal { name: "items", path: &[] },
-        p::PlanLocal { name: "ranks", path: &[] },
-        p::PlanLocal { name: "descending", path: &[] },
-    ],
-    closures: &[
-    ],
-    sites: &[],
-    run: kernel_anonymous_3,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: kernel_anonymous_3_heap, depth: 1, writes: false, element_write: false, callees: &[p::function("c247f67b2dd2b9a128e506e2c11070be90ebcc8f06a989a59fc03242df1d9181"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
-};
-
-/// `kernel.anonymous`.
-fn kernel_anonymous_3(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::PlanExit> {
-    ctx.adopt(0, 0)?;
-    ctx.adopt(1, 1)?;
-    ctx.adopt(2, 2)?;
-    ctx.begin()?;
-    ctx.local(0, 0)?;
-    ctx.local(1, 1)?;
-    ctx.local(2, 2)?;
-    ctx.call(0, 0, 3)?;
-    Ok(ctx.take(0))
-}
-fn kernel_anonymous_3_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_)] => {
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[0], args[1], args[2]])?; let _ = v0;
-                Some(v0)
-            })() { return Some(value); }
-            None
-        },
-        _ => None,
-    }
 }
 
 const PY_SORTED_PLAN: p::HelperPlan = p::HelperPlan {

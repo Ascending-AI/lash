@@ -15,9 +15,10 @@ use lash::workflow::document::Correspondence;
 use std::collections::{BTreeMap, BTreeSet};
 
 use anyhow::{Context as _, Result, bail, ensure};
+use lash::schema::{Name, Type};
 use lash::workflow::authoring::{DataRecordEntry, DataValue, Operation, ValueTarget};
 use lash::workflow::document::{
-    Action, Atom, Document, Expr, Literal, Name, Node, Rhs, Site, Stmt, Type, Unit,
+    Action, Atom, Document, Expr, Literal, Node, Rhs, Site, Stmt, Unit,
 };
 use lash::workflow::edit::Position;
 use lash_e2e::{Case, Host, NodeOptions};

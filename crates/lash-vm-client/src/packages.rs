@@ -147,15 +147,22 @@ impl WorkerLibrary {
         Ok(())
     }
 }
-/// Runtime transport operations used by the worker implementation.
-/// The host supplies image content through `WorkerLibrary::new`.
-pub trait WorkerLibraryRuntimeOps {
+mod runtime_ops {
+    pub trait Sealed {}
+    impl Sealed for super::WorkerLibrary {}
+}
+
+/// Sealed transport support for the worker implementation, outside the host API.
+/// Hosts supply image content through `WorkerLibrary::new`.
+pub trait WorkerLibraryRuntimeOps: runtime_ops::Sealed {
     fn resolve_document(
         &self,
         document: &lash_vm_protocol::message::StoredDocument,
         limits: lash_vocabulary::data_limits::KernelDataLimits,
     ) -> Result<IdentifiedDocument, PoolError>;
 }
+// Cross-crate runtime support, as with WorkerPoolRuntimeOps (ADR 0051).
+#[doc(hidden)]
 impl WorkerLibraryRuntimeOps for WorkerLibrary {
     /// Resolve exact content from this image, or decode the bytes supplied by
     /// this execution. A narrower receiving decoder still enforces its limits.

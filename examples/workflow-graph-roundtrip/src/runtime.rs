@@ -4,8 +4,9 @@ use std::sync::Arc;
 use lash::LashCore;
 use lash::persistence::ProcessStartReceipt;
 use lash::process::*;
+use lash::schema::Name;
 use lash::tracing::{TraceLanguageExecutionPayload, TraceNodeFact};
-use lash::workflow::document::{Document, EffectId, Name, Site, TaskLabel};
+use lash::workflow::document::{Document, EffectId, Site, TaskLabel};
 use lash::workflow::edit::Draft;
 use lash::workflow::view::{ActionObservation, ActionState, WorkflowCoverage, WorkflowView};
 use lash::workflow::{
@@ -91,7 +92,7 @@ pub(crate) struct Publication {
 #[derive(Clone)]
 pub(crate) struct Namespace {
     pub(crate) packages: lash::package::RecordedPackages,
-    pub(crate) request: lash::workflow::WorkflowEnvironmentRequest,
+    pub(crate) request: lash::vm::WorkflowEnvironmentRequest,
 }
 pub(crate) async fn namespace(
     core: &LashCore,
@@ -122,7 +123,7 @@ pub(crate) async fn namespace(
             .collect(),
     };
     Ok(Namespace {
-        request: lash::workflow::WorkflowEnvironmentRequest {
+        request: lash::vm::WorkflowEnvironmentRequest {
             snapshot: packages.snapshot.clone(),
             context,
             attachment,

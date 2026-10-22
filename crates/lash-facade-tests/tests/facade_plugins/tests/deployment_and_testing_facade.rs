@@ -108,7 +108,7 @@ async fn definition_args_checks_partial_and_complete_inputs_without_starting() {
     );
     document.main = None;
     document.exports.insert(
-        lash::workflow::document::Name::new("handler"),
+        lash::schema::Name::new("handler"),
         lash::workflow::document::Export::Function(lash::workflow::document::FunctionExport {
             function: function.identity(),
             signature: function.signature.clone(),
@@ -119,7 +119,7 @@ async fn definition_args_checks_partial_and_complete_inputs_without_starting() {
     );
     document.functions.insert(function.identity(), function);
     let pin = lash::process::HostArtifactPin::mint();
-    let environment = lash::workflow::WorkflowEnvironmentRequest {
+    let environment = lash::vm::WorkflowEnvironmentRequest {
         snapshot: Default::default(),
         attachment: lash::package::Attachment {
             packages: Default::default(),
@@ -138,7 +138,7 @@ async fn definition_args_checks_partial_and_complete_inputs_without_starting() {
         .publish_workflow(
             &pin,
             &lash::workflow::document::DocumentBytes::from(document),
-            &lash::package::StartSelector::Export(lash::workflow::document::Name::new("handler")),
+            &lash::package::StartSelector::Export(lash::schema::Name::new("handler")),
             &environment,
             None,
         )
@@ -330,7 +330,7 @@ async fn a_saved_definition_start_read_fault_is_an_outer_store_error() {
     );
     document.main = None;
     document.exports.insert(
-        lash::workflow::document::Name::new("handler"),
+        lash::schema::Name::new("handler"),
         lash::workflow::document::Export::Function(lash::workflow::document::FunctionExport {
             function: function.identity(),
             signature: function.signature.clone(),
@@ -341,7 +341,7 @@ async fn a_saved_definition_start_read_fault_is_an_outer_store_error() {
     );
     document.functions.insert(function.identity(), function);
     let pin = lash::process::HostArtifactPin::mint();
-    let environment = lash::workflow::WorkflowEnvironmentRequest {
+    let environment = lash::vm::WorkflowEnvironmentRequest {
         snapshot: Default::default(),
         attachment: lash::package::Attachment {
             packages: Default::default(),
@@ -360,7 +360,7 @@ async fn a_saved_definition_start_read_fault_is_an_outer_store_error() {
         .publish_workflow(
             &pin,
             &lash::workflow::document::DocumentBytes::from(document),
-            &lash::package::StartSelector::Export(lash::workflow::document::Name::new("handler")),
+            &lash::package::StartSelector::Export(lash::schema::Name::new("handler")),
             &environment,
             None,
         )
