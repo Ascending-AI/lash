@@ -2428,33 +2428,10 @@ async fn a_cells_call_trace_admission_is_exported_once_across_a_crash(tier: Tier
 /// A tool's plugin-state change cut at its `round.outcome`, before or after
 /// the commit, its acknowledgement or its owner lost: once the turn
 /// resumes, the session's committed state is the value the call's committed
-/// outcome carries (FIG-5266).
+/// outcome carries (FIG-5266). A zombie's outcome is refused and commits
+/// nothing; only the new owner's state survives.
 async fn a_tool_state_change_cut_at_its_outcome_is_the_committed_value_after_resume(tier: Tier) {
-    prove_under(
-        Turn::State,
-        tier,
-        &[CommitLabel::ROUND_OUTCOME],
-        &[
-            Fault::FailBefore,
-            Fault::AckHidden,
-            Fault::Abort,
-            Fault::CommitThenAbort,
-        ],
-    )
-    .await;
-}
-
-/// A zombie member's state change commits nothing: its `round.outcome` is
-/// refused, and the session's committed state is the value of the outcome
-/// the new owner committed, never the zombie's (FIG-5266).
-async fn a_zombie_members_state_change_commits_nothing(tier: Tier) {
-    prove_under(
-        Turn::State,
-        tier,
-        &[CommitLabel::ROUND_OUTCOME],
-        &[Fault::Zombie],
-    )
-    .await;
+    prove_at(Turn::State, tier, &[CommitLabel::ROUND_OUTCOME]).await;
 }
 
 /// In a round of two members, one never observes the other's state before
@@ -2552,7 +2529,6 @@ tiered_laws!(
     a_cell_members_state_change_survives_a_cut_after_its_outcome,
     a_cell_member_never_observes_another_members_uncommitted_state,
     a_tool_state_change_cut_at_its_outcome_is_the_committed_value_after_resume,
-    a_zombie_members_state_change_commits_nothing,
     a_member_never_observes_another_members_uncommitted_state,
     a_native_call_cut_at_its_outcome_streams_its_activity_and_commits_one_outcome,
     a_native_call_cut_at_its_receipt_streams_its_activity_and_commits_one_outcome,

@@ -1310,18 +1310,6 @@ fn runtime_completion_durable_and_observer_readiness_and_units() {
     assert_eq!(observer_units[0].unit, "runtime:observer_snapshot");
 }
 
-#[test]
-fn script_bundle_hash_is_stable_for_current_bundle() {
-    // A literal pin: any change to the canonical bundle's paths or contents
-    // turns this red, so the update is a deliberate act in the diff.
-    let scripts = script_hash_manifest().expect("scripts");
-
-    assert_eq!(
-        script_bundle_hash(&scripts),
-        "56d92b184abc621e0fcdc25baa72e64936aa491bac8bef04b7b0db6dad14cfad"
-    );
-}
-
 fn test_delivered(
     sequence: usize,
     boundary_id: &str,

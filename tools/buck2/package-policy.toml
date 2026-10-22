@@ -160,13 +160,10 @@ kinds = ["test"]
 targets = ["plugin_state_storage_laws"]
 shards = 6
 
-# All nine pressure/frame laws passed in 295 s, but the action including
-# its fixture work exhausted the unchanged 300 s bound (FIG-5427). On a
-# loaded pool the RLM continue_as matrix alone ran 221-245 s on PostgreSQL
-# and 162-170 s on SQLite, against 25-40 s quiet, and its shards timed out
-# on main (FIG-6040). Each tier's matrix is now two laws, node kills and
-# lost writes; seven shards put at most an estimated 166 s of loaded law
-# time on one action. The bound is unchanged.
+# Pressure/frame laws retain seven shards and the 300 s action bound.
+# Each tier's ContinueAs law shares one baseline across the union of kill
+# and lost-write faults (FIG-7168); Overflow also owns the summary-resend
+# oracle. The former partition timings do not predict merged-law cost.
 [[rule]]
 packages = ["lash-internal-durable-test"]
 kinds = ["test"]

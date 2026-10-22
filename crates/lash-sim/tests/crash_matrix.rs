@@ -43,6 +43,7 @@ macro_rules! crash_matrix {
             #[tokio::test]
             async fn $name() {
                 let cells = assert_case(Case::$case).await;
+                remaining_reproducer_cells(Case::$case).await;
                 eprintln!("{}: cells per seed {cells:?}", Case::$case.name());
             }
         )*
@@ -65,6 +66,38 @@ crash_matrix! {
     a_pressure_frame_cut_at_every_label_opens_once_and_its_turn_runs_in_it => Pressure;
 }
 
+/// A reduced catalog sweep can omit a hard-coded reproducer seed. Its
+/// owning law then runs just that reproducer's cuts, preserving the cell
+/// union without adding a full matrix for the omitted seed.
+async fn remaining_reproducer_cells(case: Case) {
+    let (required, faults, label) = match case {
+        Case::Effects => (
+            0..2,
+            &[Fault::StaleEpoch, Fault::Zombie][..],
+            CommitLabel::ROUND_OUTCOME,
+        ),
+        Case::Cell => (
+            0..1,
+            &[Fault::CommitThenAbort][..],
+            CommitLabel::MODEL_DONE_CELL_SNAPSHOT_ADMIT,
+        ),
+        _ => return,
+    };
+    let covered = lash_sim::crash_matrix::seeds();
+    for seed in required.filter(|seed| !covered.contains(seed)) {
+        let report = Matrix::new()
+            .faults(faults)
+            .labels(&[label])
+            .run_test(|| Deployment::new(case, seed, Dialect::SqliteMemory))
+            .await;
+        assert!(
+            !report.cells.is_empty(),
+            "{case:?} seed {seed}: no {label} was cut"
+        );
+        report.assert_held();
+    }
+}
+
 /// A stale-epoch cut at the cell's first save, which commits the model
 /// response that asked for it with the call's admission
 /// (`model.done+cell.snapshot+admit`, FIG-6000), runs no body on the old
@@ -74,7 +107,8 @@ crash_matrix! {
 /// self-stop deadline, so the body never starts there, nor anywhere.
 #[tokio::test]
 async fn a_stale_epoch_cut_at_a_cell_admission_runs_no_body_on_the_old_owner() {
-    for seed in 0..8 {
+    // The full Cell matrix owns the focused cuts for its seeds.
+    for seed in (0..8).filter(|seed| !lash_sim::crash_matrix::seeds().contains(seed)) {
         let worlds = RefCell::new(Vec::new());
         let report = Matrix::new()
             .faults(&[Fault::StaleEpoch])
@@ -105,28 +139,6 @@ async fn a_stale_epoch_cut_at_a_cell_admission_runs_no_body_on_the_old_owner() {
     }
 }
 
-/// A cell resumed on another owner after its first save, whose `Once`
-/// call that owner settles `Interrupted`, ends Answered (FIG-6315). The
-/// injected interruption ends the cell with an error and no carry, and
-/// its end, recorded over the cell's root with the session as the cell
-/// left it, publishes that session's pages out of the turn's spool. The
-/// turn's next prompt reads them under a lease on the cell's ended root,
-/// which stays the session's until the commit that consumes the cell's
-/// answer.
-#[tokio::test]
-async fn a_cell_resumed_after_its_first_save_and_settled_interrupted_ends_its_turn_answered() {
-    let report = Matrix::new()
-        .faults(&[Fault::CommitThenAbort])
-        .labels(&[CommitLabel::MODEL_DONE_CELL_SNAPSHOT_ADMIT])
-        .run_test(|| Deployment::new(Case::Cell, 0, Dialect::SqliteMemory))
-        .await;
-    assert!(
-        !report.cells.is_empty(),
-        "the cell's first save was not cut"
-    );
-    report.assert_held();
-}
-
 /// A stale-epoch session command commits nothing (FIG-5230): the session
 /// actor writes each command's head commit on its fenced transaction under
 /// `session.command`, so a zombie owner whose write reaches the store only
@@ -135,7 +147,8 @@ async fn a_cell_resumed_after_its_first_save_and_settled_interrupted_ends_its_tu
 /// command exactly once.
 #[tokio::test]
 async fn a_stale_epoch_session_command_commits_nothing() {
-    for seed in 0..4 {
+    // The full Command matrix owns the focused cuts for its seeds.
+    for seed in (0..4).filter(|seed| !lash_sim::crash_matrix::seeds().contains(seed)) {
         let report = Matrix::new()
             .faults(&[Fault::StaleEpoch, Fault::Zombie])
             .labels(&[CommitLabel::SESSION_COMMAND])
@@ -144,26 +157,6 @@ async fn a_stale_epoch_session_command_commits_nothing() {
         assert!(
             report.cells.iter().any(|cell| cell.fault == Fault::Zombie),
             "seed {seed}: no session command was cut under a zombie owner"
-        );
-        report.assert_held();
-    }
-}
-
-/// A stale owner's or a zombie's `round.outcome` commit, carrying a tool's
-/// process start, commits nothing: the new owner settles the
-/// `Once` call `Interrupted`, and the process cannot exist without its
-/// outcome (the case's laws).
-#[tokio::test]
-async fn a_stale_owner_s_tool_outcome_with_a_process_start_commits_nothing() {
-    for seed in 0..2 {
-        let report = Matrix::new()
-            .faults(&[Fault::StaleEpoch, Fault::Zombie])
-            .labels(&[CommitLabel::ROUND_OUTCOME])
-            .run_test(|| Deployment::new(Case::Effects, seed, Dialect::SqliteMemory))
-            .await;
-        assert!(
-            !report.cells.is_empty(),
-            "seed {seed}: no round.outcome was cut"
         );
         report.assert_held();
     }

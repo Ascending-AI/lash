@@ -101,10 +101,9 @@ const PROGRAMS: &[(&str, &str, u32)] = &[
     ),
 ];
 
-/// Every shard exercises these R1/R2 mutation witnesses: nested arm exits
+/// Core shard zero owns these R1/R2 mutation witnesses: nested arm exits
 /// and ended declarations, a for cursor with continue, and a declaration
-/// followed by break. Their full sweeps keep each shard red-capable even
-/// when its assigned corpus cases and smith seeds form no such regions.
+/// followed by break. The other core shards own distinct smith seeds.
 const EXIT_PROGRAMS: &[(&str, &str, u32)] = &[
     (
         "nested arms and a let in an arm",
@@ -275,9 +274,9 @@ const ACCUMULATORS: &[(&str, &str)] = &[
 /// Top-level programs (`docs/design/kernel-regions.md` §6): their
 /// variables are session bindings, which a region holds as slots between
 /// boundaries. Each names what it reaches, and whether it parks on a
-/// `sleep` the run delivers. The first two run on every shard: the cold
+/// `sleep` the run delivers. Core shard zero owns the first two: the cold
 /// sum shape's binding grows past its holding, and the park stands
-/// between two regions over the same bindings, so each shard catches a
+/// between two regions over the same bindings. Together they catch a
 /// region that skips a session admission, publishes nothing, or holds its
 /// writes past a boundary.
 const SESSIONS: &[(&str, &str, bool)] = &[
@@ -313,15 +312,15 @@ const SESSIONS: &[(&str, &str, bool)] = &[
     ),
 ];
 
-/// How many [`SESSIONS`] programs every shard runs.
+/// How many [`SESSIONS`] programs core shard zero owns.
 const SESSION_WITNESSES: usize = 2;
 
 /// The memory bound an allocating program runs under besides the
 /// default: past a region's nursery, short of what the longest run holds.
 const TIGHT: u64 = 96 * 1024;
 
-/// Core witness groups; their repeated witnesses and smith schedules remain
-/// fixed while the other program matrices are balanced across all laws.
+/// Core groups partition distinct smith seeds. Core shard zero also owns
+/// the common exit/session witnesses; other programs are dealt across laws.
 const SHARDS: usize = 16;
 
 mod deal;
@@ -1004,7 +1003,7 @@ fn regions_on_and_off_agree(group: Option<usize>, core: Option<(usize, Sweep)>) 
     for ((name, text, call_depth), witness) in programs {
         let case = program_case(name, text, *call_depth);
         if witness {
-            let Some((_, sweep)) = core else { continue };
+            let Some((0, sweep)) = core else { continue };
             counts.sweep = sweep;
         } else if !deal.mine(&case, 1, &mut counts) {
             continue;
@@ -1046,7 +1045,7 @@ fn regions_on_and_off_agree(group: Option<usize>, core: Option<(usize, Sweep)>) 
             }]];
         }
         if index < SESSION_WITNESSES {
-            let Some((_, sweep)) = core else { continue };
+            let Some((0, sweep)) = core else { continue };
             counts.sweep = sweep;
         } else if !deal.mine(&case, 1, &mut counts) {
             continue;

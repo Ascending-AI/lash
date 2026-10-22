@@ -39,7 +39,8 @@ macro_rules! program_shards {
 }
 
 // Each original group also projects a separate core law, preserving its
-// repeated exit/session witnesses and smith schedules without stacking them
+// distinct smith schedules, with common exit/session witnesses only in core
+// shard zero, without stacking them
 // on a program matrix. Program matrices are dealt by cost across all listed
 // program laws, with large matrices split into disjoint sweeps. Membership is
 // authored here once; Deal derives its capacity from this same inventory.

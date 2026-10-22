@@ -29,7 +29,7 @@ use std::time::Duration;
 use lash_core::sync::MutexExt as _;
 use lash_core_store::store::RunTerminalKind;
 use lash_durable::CommitLabel;
-use lash_durable_test::{Cut, SimNodes};
+use lash_durable_test::{Cut, Fault, SimNodes};
 use lash_vocabulary::identity::SessionId;
 
 use super::{admit_turn, turn_end, turn_settled};
@@ -128,6 +128,19 @@ impl Workload for CellCase {
             if entered > bound {
                 violations.push(format!(
                     "no program re-entry: {exec:?} was entered fresh {entered} times"
+                ));
+            }
+        }
+        // FIG-6000: a stale admission returns only after its owner's
+        // self-stop deadline. Its body must never start on either owner.
+        if cut.is_some_and(|cut| {
+            cut.fault == Fault::StaleEpoch
+                && cut.point.label == CommitLabel::MODEL_DONE_CELL_SNAPSHOT_ADMIT
+        }) {
+            let bodies = world.ledger().of_tool(EXT_WRITE);
+            if !bodies.is_empty() {
+                violations.push(format!(
+                    "{EXT_WRITE}'s body ran after a stale admission: {bodies:?}"
                 ));
             }
         }

@@ -712,8 +712,6 @@ mod sweep {
         Kind::Corrupt,
         Kind::LostReply,
     ];
-    /// The faults a retry recovers from.
-    const RECOVERED: &[Kind] = &[Kind::Transient, Kind::LostReply];
 
     #[derive(Clone, Copy, Debug)]
     enum Kind {
@@ -1634,14 +1632,6 @@ mod sweep {
         ($module:ident, $storage:expr $(, $ignore:meta)?) => {
             mod $module {
                 use super::*;
-                #[tokio::test(flavor = "multi_thread", worker_threads = 4)] $(#[$ignore])?
-                async fn open_and_send_transient_fault_cells() { sweep($storage, Scenario::Open, RECOVERED).await; }
-                #[tokio::test(flavor = "multi_thread", worker_threads = 4)] $(#[$ignore])?
-                async fn runtime_assembly_transient_fault_cells() { sweep($storage, Scenario::Assembly, RECOVERED).await; }
-                #[tokio::test(flavor = "multi_thread", worker_threads = 4)] $(#[$ignore])?
-                async fn single_and_batch_admission_transient_fault_cells() { sweep($storage, Scenario::Admission, RECOVERED).await; }
-                #[tokio::test(flavor = "multi_thread", worker_threads = 4)] $(#[$ignore])?
-                async fn committed_child_reopen_transient_fault_cells() { sweep($storage, Scenario::Child, RECOVERED).await; }
                 #[tokio::test(flavor = "multi_thread", worker_threads = 4)] $(#[$ignore])?
                 async fn open_and_send_fault_cells() { sweep($storage, Scenario::Open, EVERY).await; }
                 #[tokio::test(flavor = "multi_thread", worker_threads = 4)] $(#[$ignore])?

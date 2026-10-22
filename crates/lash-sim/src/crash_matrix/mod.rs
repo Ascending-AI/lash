@@ -277,6 +277,9 @@ pub async fn assert_case_on(case: Case, dialect: &Dialect) -> Vec<(u64, usize)> 
     let mut counts = Vec::new();
     for seed in seeds() {
         let run = run_case_on(case, seed, &MODES, dialect).await;
+        if *dialect == Dialect::SqliteMemory {
+            assert_focused_cuts(case, &run.report);
+        }
         let labels = run.report.labels();
         eprintln!(
             "crash matrix {} seed {seed}: {} cells over {} labels ({})",
@@ -324,4 +327,48 @@ pub async fn assert_case_on(case: Case, dialect: &Dialect) -> Vec<(u64, usize)> 
         counts.push((seed, run.report.cells.len()));
     }
     counts
+}
+
+/// Admission regressions share the catalog's cells and domain laws. Keep
+/// their non-vacuity assertions beside the owning full matrices.
+fn assert_focused_cuts(case: Case, report: &MatrixReport) {
+    let cut = |label, fault| {
+        report
+            .cells
+            .iter()
+            .any(|cell| cell.point.label == label && cell.fault == fault)
+    };
+    match case {
+        Case::Cell => {
+            assert!(
+                cut(
+                    CommitLabel::MODEL_DONE_CELL_SNAPSHOT_ADMIT,
+                    Fault::StaleEpoch
+                ),
+                "no admission was cut under a stale epoch"
+            );
+            // FIG-6315: CellCase requires Answered even when the first-save
+            // cut settles its operation Interrupted and carries no bindings.
+            assert!(
+                cut(
+                    CommitLabel::MODEL_DONE_CELL_SNAPSHOT_ADMIT,
+                    Fault::CommitThenAbort
+                ),
+                "the cell's first save was not cut"
+            );
+        }
+        Case::Command => assert!(
+            cut(CommitLabel::SESSION_COMMAND, Fault::Zombie),
+            "no session command was cut under a zombie owner"
+        ),
+        Case::Effects => {
+            for fault in [Fault::StaleEpoch, Fault::Zombie] {
+                assert!(
+                    cut(CommitLabel::ROUND_OUTCOME, fault),
+                    "no round.outcome was cut under {fault}"
+                );
+            }
+        }
+        _ => {}
+    }
 }
