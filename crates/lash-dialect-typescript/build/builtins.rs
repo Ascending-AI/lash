@@ -41,7 +41,7 @@ pub(crate) const POSITIONAL: &[(&str, Positional)] = &[
         Positional {
             helper: "ts.to_string",
             arity: 1,
-            float: Some("ts.number.to_string"),
+            float: Some("ts.number.format_value"),
             empty: Some(Empty::Text),
         },
     ),

@@ -39,42 +39,50 @@ fn calls_helper(document: &lash_kernel_doc::Document, helper: &str) -> bool {
     let name = lash_kernel_dialect::authoring::helper_name(
         &lash_vocabulary::FunctionName::new(helper).unwrap(),
     );
-    document
-        .ordinal_nodes()
-        .into_iter()
-        .filter(|(site, _)| match site.unit {
-            lash_vocabulary::sites::Unit::Library(id) => matches!(
-                document.functions[&id].implementation,
-                lash_kernel_doc::Implementation::Guest {
-                    metering: lash_kernel_doc::Metering::Statements,
-                    ..
-                }
-            ),
+    let mut nodes = document
+        .units()
+        .filter(|(unit, _)| match unit {
+            lash_vocabulary::sites::Unit::Library(id) => {
+                lash_kernel_doc::FunctionCatalog::header(super::library(), id).is_none()
+                    && matches!(
+                        document.functions[id].implementation,
+                        lash_kernel_doc::Implementation::Guest {
+                            metering: lash_kernel_doc::Metering::Statements,
+                            ..
+                        }
+                    )
+            }
             lash_vocabulary::sites::Unit::Main => true,
             _ => false,
         })
-        .any(|(_, node)| match node {
-            lash_kernel_doc::Node::Expr(lash_kernel_doc::Expr::Call {
-                function: called, ..
-            }) => *called == function,
-            lash_kernel_doc::Node::Expr(lash_kernel_doc::Expr::Act(action)) => match action.kind {
-                lash_kernel_doc::ActKind::Call(lash_kernel_doc::Callee::Local(called)) => {
-                    called == function
-                }
-                lash_kernel_doc::ActKind::Call(lash_kernel_doc::Callee::Import(slot)) => {
-                    document.imports[&slot].name == name
-                }
-                _ => false,
-            },
-            lash_kernel_doc::Node::Action(lash_kernel_doc::Action::Call { callee, .. }) => {
-                match callee {
-                    lash_kernel_doc::Callee::Local(called) => *called == function,
-                    lash_kernel_doc::Callee::Import(slot) => document.imports[slot].name == name,
-                    _ => false,
-                }
+        .map(|(_, block)| lash_kernel_doc::Node::Block(block))
+        .collect::<Vec<_>>();
+    let mut walked = Vec::new();
+    while let Some(node) = nodes.pop() {
+        nodes.extend(node.children());
+        walked.push(node);
+    }
+    walked.into_iter().any(|node| match node {
+        lash_kernel_doc::Node::Expr(lash_kernel_doc::Expr::Call {
+            function: called, ..
+        }) => *called == function,
+        lash_kernel_doc::Node::Expr(lash_kernel_doc::Expr::Act(action)) => match action.kind {
+            lash_kernel_doc::ActKind::Call(lash_kernel_doc::Callee::Local(called)) => {
+                called == function
+            }
+            lash_kernel_doc::ActKind::Call(lash_kernel_doc::Callee::Import(slot)) => {
+                document.imports[&slot].name == name
             }
             _ => false,
-        })
+        },
+        lash_kernel_doc::Node::Action(lash_kernel_doc::Action::Call { callee, .. }) => match callee
+        {
+            lash_kernel_doc::Callee::Local(called) => *called == function,
+            lash_kernel_doc::Callee::Import(slot) => document.imports[slot].name == name,
+            _ => false,
+        },
+        _ => false,
+    })
 }
 
 /// A tool's declared result type is stated at its `perform`, so an `Int`

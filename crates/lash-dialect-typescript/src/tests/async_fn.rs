@@ -224,15 +224,24 @@ fn tool_arguments_freeze_guest_functions_but_refuse_builtins() {
     let Ended::Finished(Datum::FunctionValue(function)) = direct else {
         panic!("a guest function crosses as a function value: {direct:?}");
     };
+    let nested = end("const value = () => 1; await control.finish([1, [2, value], value]);");
+    let Ended::Finished(Datum::List(mut values)) = nested else {
+        panic!("nested guest functions cross as frozen values: {nested:?}");
+    };
+    let Datum::FunctionValue(nested_function) = values.pop().expect("the direct function") else {
+        panic!("the last value is the same function passed inside the array");
+    };
+    assert_eq!(nested_function.signature, function.signature);
+    assert_eq!(nested_function.captures, function.captures);
     assert_eq!(
-        end("const value = [1, [2, () => 1]]; await control.finish(value);"),
-        Ended::Finished(Datum::List(vec![
+        values,
+        vec![
             Datum::Float(Float::new(1.0)),
             Datum::List(vec![
                 Datum::Float(Float::new(2.0)),
-                Datum::FunctionValue(function)
+                Datum::FunctionValue(nested_function)
             ]),
-        ]))
+        ]
     );
     for argument in [
         "Math",

@@ -19,7 +19,7 @@ const AWAIT_EFFECT: &str = "processes.await";
 const HANDLE_FIELD: &str = "__handle__";
 
 impl Lowerer<'_> {
-    /// The async function a module's top-level `const` binds, if `init` is
+    /// The function a module's top-level `const` binds, if `init` is
     /// one: an entry of the module. A declaration inside a block, a
     /// function or an entry is ordinary code.
     pub(super) fn module_entry<'e>(&self, init: &'e ast::Expr) -> Option<&'e ast::Function> {

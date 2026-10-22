@@ -122,6 +122,14 @@ fn drive_document(
                                 .deliver(effect.wait, Outcome::Completed(Datum::Null))
                                 .unwrap();
                         }
+                        Request::Effect(effect)
+                            if super::linked::operation(&effect.use_).as_str()
+                                == "typescript.sleep" =>
+                        {
+                            machine
+                                .deliver(effect.wait, Outcome::Completed(Datum::Null))
+                                .unwrap();
+                        }
                         Request::Effect(effect) => {
                             assert_eq!(effect.args, expected[asked], "{source}");
                             asked += 1;

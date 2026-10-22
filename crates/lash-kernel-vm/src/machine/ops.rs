@@ -559,10 +559,11 @@ impl KernelMachine {
         args: Reg,
         count: usize,
         awaiting: Option<StmtId>,
+        export: Option<super::exec::ExportBoundary<'_>>,
     ) -> Status {
         let caller = self.active_link;
         self.active_link = link;
-        let result = self.call_lib(task, exe, lib, args, count, awaiting);
+        let result = self.call_lib(task, exe, lib, args, count, awaiting, export);
         self.active_link = caller;
         result
     }
@@ -575,6 +576,7 @@ impl KernelMachine {
         args: Reg,
         count: usize,
         awaiting: Option<StmtId>,
+        export: Option<super::exec::ExportBoundary<'_>>,
     ) -> Status {
         let code = match self
             .answer(task, exe, lib, args, count, args)
@@ -582,9 +584,9 @@ impl KernelMachine {
         {
             Answer::Done => return Ok(Flow::Done),
             Answer::Body(code) => code,
-            Answer::Yielded => return self.stand_segments(task, exe, awaiting),
+            Answer::Yielded => return self.stand_segments(task, exe, awaiting, export),
         };
-        self.enter_body(task, exe, lib, code, args, awaiting)
+        self.enter_body(task, exe, lib, code, args, awaiting, export)
     }
 
     /// Pushes the frame of library function `lib`'s kernel body `code`,
@@ -598,6 +600,7 @@ impl KernelMachine {
         admitted: AdmittedBody,
         args: Reg,
         awaiting: Option<StmtId>,
+        export: Option<super::exec::ExportBoundary<'_>>,
     ) -> Status {
         let function = exe.lib(lib);
         let AdmittedBody { code, entry } = admitted;
@@ -605,7 +608,8 @@ impl KernelMachine {
         // parameter.
         let call = Call::new(code, args, function.arity)
             .in_link(self.current_link())
-            .of_library(lib);
+            .of_library(lib)
+            .with_boundary(export);
         self.push_operation_frame(task, exe, call.awaited_by(awaiting), entry)?;
         Ok(Flow::Step)
     }

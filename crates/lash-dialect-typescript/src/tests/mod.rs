@@ -38,12 +38,31 @@ mod typed;
 pub(crate) fn kernel_registry() -> lash_kernel_doc::FunctionRegistry {
     static BASE: OnceLock<lash_kernel_doc::FunctionRegistry> = OnceLock::new();
     BASE.get_or_init(|| {
-        lash_ext_helper_compiler::library::Library::of(
+        let mut base = lash_ext_helper_compiler::library::Library::of(
             lash_ext_helper_compiler::library::Dialect::TypeScript,
         )
         .expect("source packages")
         .base_registry()
-        .expect("package dependencies")
+        .expect("package dependencies");
+        let implementations = machine::registry();
+        let natives = base
+            .iter()
+            .filter_map(|(id, registered)| {
+                if registered.native().is_some() {
+                    return None;
+                }
+                implementations
+                    .get(id)?
+                    .native()
+                    .cloned()
+                    .map(|native| (*id, native))
+            })
+            .collect::<Vec<_>>();
+        for (id, native) in natives {
+            base.implement(id, native)
+                .expect("the dependency declares its native");
+        }
+        base
     })
     .clone()
 }
@@ -151,14 +170,16 @@ fn main_of(lowered: Result<Lowered, Diagnostic>) -> String {
         let text = print_document(&lowered.document);
         bodies.push(text[text.find("main {").expect("main")..].to_owned());
     }
-    for definition in lowered.document.functions.values() {
-        if matches!(
-            definition.implementation,
-            lash_kernel_doc::Implementation::Guest {
-                metering: lash_kernel_doc::Metering::Statements,
-                ..
-            }
-        ) {
+    for (id, definition) in &lowered.document.functions {
+        if lash_kernel_doc::FunctionCatalog::header(library(), id).is_none()
+            && matches!(
+                definition.implementation,
+                lash_kernel_doc::Implementation::Guest {
+                    metering: lash_kernel_doc::Metering::Statements,
+                    ..
+                }
+            )
+        {
             let text = lash_kernel_doc::print_definition(definition);
             bodies.push(text);
         }

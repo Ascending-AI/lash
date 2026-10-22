@@ -149,11 +149,11 @@ export async function digest(
     );
 }
 
-/// Every top-level async function is an entry, exported or not, by
-/// declaration or by `const`, arrow or function expression. One declared
-/// inside a block, or bound by `let`, is ordinary code of the module.
+/// Top-level function declarations and const functions are Exports, whether
+/// synchronous or async. Block locals and mutable bindings stay ordinary code;
+/// the Export retains the source's async flag for its settled public ABI.
 #[test]
-fn top_level_async_declarations_are_the_entries_and_block_local_ones_are_not() {
+fn top_level_function_exports_keep_async_flags_and_exclude_block_locals() {
     let source = r#"
 export async function declared() { return 1; }
 async function unexported() { return 2; }
@@ -166,9 +166,27 @@ if (reassignable) {
 }
 function helper() { return 7; }
 "#;
+    let lowered = module(source).unwrap();
+    let functions = lowered
+        .document
+        .exports
+        .iter()
+        .filter_map(|(name, export)| match export {
+            lash_kernel_doc::Export::Function(function) => {
+                Some((name.clone(), function.asynchronous))
+            }
+            _ => None,
+        })
+        .collect::<BTreeMap<_, _>>();
     assert_eq!(
-        entries(source).into_keys().collect::<Vec<_>>(),
-        ["arrow", "declared", "expression", "unexported"].map(Name::new)
+        functions,
+        BTreeMap::from([
+            (Name::new("arrow"), true),
+            (Name::new("declared"), true),
+            (Name::new("expression"), true),
+            (Name::new("helper"), false),
+            (Name::new("unexported"), true),
+        ])
     );
 }
 

@@ -186,6 +186,18 @@ impl<'a> Lowerer<'a> {
             SPELLING.spell(export_kind(&export.kind), segment)
         );
         if SPELLING.spell(export_kind(&export.kind), segment) != written {
+            if let Some(misspelled) = self.namespaces.misspelled(path, SPELLING) {
+                return Some(Diagnostic::with_repair(
+                    DiagnosticCode::OperationSpelling,
+                    format!(
+                        "`{}` names the operation `{}` in another dialect's spelling",
+                        path.join("."),
+                        misspelled.operation.effect_name()
+                    ),
+                    format!("write `{}`", misspelled.repair),
+                    self.span,
+                ));
+            }
             return Some(self.unknown_member(
                 format!("`{package}.{written}` is not how TypeScript spells a package member"),
                 format!("write `{owner}`"),
