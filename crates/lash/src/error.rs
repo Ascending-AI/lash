@@ -14,6 +14,8 @@ pub enum EmbedError {
     #[error(transparent)]
     WorkflowSourceMap(#[from] lash_kernel_doc::SourceMapRefusal),
 
+    #[error(transparent)]
+    IngressConfiguration(lash_core::durable_port::DurableConfigError),
     /// A workflow source operation failed in the registered worker service.
     #[cfg(feature = "codemode")]
     #[error(transparent)]
@@ -518,6 +520,7 @@ impl EmbedError {
     /// [`TurnIssue::retryable`](crate::turn::TurnIssue) instead.
     pub fn is_retryable(&self) -> bool {
         match self {
+            Self::IngressConfiguration(_) => false,
             #[cfg(feature = "codemode")]
             Self::WorkflowSource(lash_vm_client::service::SourceServiceError::Worker(error)) => {
                 error.clone().into_runtime_error().is_retryable()
@@ -611,6 +614,7 @@ impl EmbedError {
     ///   structured causes.
     pub fn is_terminal(&self) -> bool {
         match self {
+            Self::IngressConfiguration(_) => true,
             #[cfg(feature = "codemode")]
             Self::WorkflowSource(lash_vm_client::service::SourceServiceError::Worker(error)) => {
                 error.clone().into_runtime_error().is_terminal()
@@ -676,7 +680,7 @@ impl EmbedError {
 pub(crate) fn durable_error_is_retryable(error: &lash_core::durable_port::DurableError) -> bool {
     use lash_core::durable_port::{DurableError, StoreFailureKind};
     match error {
-        DurableError::AckLost { .. } => true,
+        DurableError::AckLost { .. } | DurableError::OwnerCapacityExceeded { .. } => true,
         DurableError::Store(failure) => matches!(
             failure.kind,
             StoreFailureKind::Contended | StoreFailureKind::Unavailable

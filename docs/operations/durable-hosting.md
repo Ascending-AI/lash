@@ -79,7 +79,11 @@ let stores: Arc<dyn lash::StoreSet> = Arc::new(lash::postgres::PostgresStoreSet:
     attachment_store,
 ));
 let backend = DurableBackendBuilder::new(stores)
-    .config(DurableSettings::standard())
+    .config(DurableSettings {
+        owner_retention: Some(owner_retention), // OwnerRetentionSettings chosen by the host
+        max_ingress_bytes: Some(max_ingress_bytes), // NonZeroU64 chosen by the host
+        ..DurableSettings::standard()
+    })
     .process_engine(Arc::new(CiEngine))
     .projection_provider(Arc::new(TicketProvider::new(client)))
     .build()?;
@@ -974,7 +978,8 @@ rule.
 | `lease` | see [§1](#heartbeat-self-stop-and-reap) | Node-lease timings (`LeaseSettings`). |
 | `claim_batch` | 16 | The most actors one claim takes. Must not exceed `max_active`. |
 | `max_active` | 256 | The most actors a node runs at once. |
-| `idle_evict` | 60 s | How long an owner keeps an idle actor hot before releasing it. |
+| `owner_retention` | Unconfigured (`None`) | Required `OwnerRetentionSettings`: idle time and nonzero resident session/process count. Backend assembly refuses omission with `MissingOwnerRetention`. |
+| `max_ingress_bytes` | Unconfigured (`None`) | Required nonzero serialized host-item limit, at most the runtime commit byte budget. |
 | `activation_loop_budget` | 8 | Claims in a row without progress before an actor parks with `ActivationLoop`. |
 | `group_commit` | 64 members, 5 ms | Finished round members commit in batches (`GroupCommit { max_members, window }`). The window must be shorter than `lease.claim_poll`. |
 | `snapshot_every_fuel` | 1 000 000 | VM fuel spent without an effect after which a quiet point snapshots anyway. |
@@ -985,10 +990,39 @@ rule.
 | `retirement.steps_per_sweep` | 16 (at most 256) | The most steps one sweep runs. |
 | `retirement.backlog_limit` | 10 000 holds and frontier nodes (at most 1 000 000) | Above it the node claims no new actors and sweeps without waiting, until the backlog falls back under. |
 
-Counts must be at least 1 (`Zero`), durations at least 1 ms
+Counts must be at least 1 (`Zero`), positive durations at least 1 ms
 (`BelowResolution`), retirement values at most their hard maxima
 (`AboveMaximum`), plus `ClaimBeyondCapacity`, `GroupWindowNotBeforePoll`
 and the lease rules (`Lease(LeaseConfigError)`).
+
+### Owner retention
+
+Hosts supply `owner_retention: Some(OwnerRetentionSettings { idle,
+max_resident_owners })` and a separate nonzero `max_ingress_bytes`. Neither
+`standard` nor `development` chooses these values. Serving refuses an
+omitted policy or ingress limit. The ingress limit must be at most the
+runtime commit byte budget; the aggregate commit budget still applies.
+
+The resident count includes session and process owners. A claim past the
+count requests the LRU idle owner's release and starts its replacement only
+after that activation drops every reference. With all owners busy, durable
+mail stays queued until a slot frees. A synchronous admission may return
+retryable `OwnerCapacityExceeded { actor, resident, capacity }`. No busy
+owner waits for admission. Zero idle time releases immediately; positive
+idle durations must fit signed 64-bit milliseconds.
+
+One serialized host message or queued command larger than `max_ingress_bytes`
+is refused before enqueue with typed `HostPayloadTooLarge`. Kernel function
+values, imperative state commands, snapshot crossings and VM heaps retain
+their existing limits. There is no per-allocation host byte ledger.
+
+Owner probes attribute reads by actor/epoch: `OwnHeadReload`,
+`OwnCommittedPhaseReload`, `ExternalFrontierReads`, `RecoveryLoads`,
+`HistoricalPinReads`, process record/driver/root reloads,
+`CompletedRunRowsReplayed`, `ContextBytes`, `ActiveRunRows`, and `VmPages`.
+Hydration, requested context and active facts are separate from warm own-state
+reloads. The crash harness records acknowledged/adopted cut occurrences and
+fails when a selected hook never fires.
 
 ### Page retirement
 
@@ -1663,7 +1697,9 @@ cap; the workbench's upload preset is 1 MiB.
 | H | Catalogue preview modules / call names | 100 / 50 | `CataloguePreviewOptions` | Addressable counts |
 | H/S | Charge-safety retry count | Host-declared policy | `ChargeSafetyPolicy`, session/core config | 5 unsafe retries; bounded provider billing exposure |
 | H | Durable lease TTL / heartbeat / self-stop / reap / poll / backoff / startup / shutdown | 15 s / 3 s / 10 s / 2 s / 250 ms / 25 ms / 2 s / 2 s | `DurableSettings.lease: LeaseSettings` | Representable durations with lease ordering validation |
-| H | Durable claim / active / idle eviction / activation loop / group commit / snapshot / cascade | 16 / 256 / 60 s / 8 / 64 members and 5 ms / 1M fuel / 256 | `DurableSettings` | Typed representable counts/durations |
+| H | Durable claim / active / activation loop / group commit / snapshot / cascade | 16 / 256 / 8 / 64 members and 5 ms / 1M fuel / 256 | `DurableSettings` | Typed representable counts/durations |
+| H | Owner idle retention and resident count | No default | `DurableSettings.owner_retention` | Nonzero session/process count; zero idle releases immediately |
+| H | Host item ingress bytes | No default | `DurableSettings.max_ingress_bytes` | Nonzero and at most the runtime commit byte budget; checked before durable enqueue |
 | H | SQLite busy / connection and WAL working policies | Busy 15 s; role-specific presets | `SqliteConnectionPolicy`, store/node working config | Platform/typed ranges, timeout checked |
 | H/S | PostgreSQL connection prefix / replay schema names | 32 / 48 bytes | `PostgresHostConfig.name_limits: PostgresNameLimits` | 32 / 48 reserve suffix space within PostgreSQL's 63-byte identifiers |
 | H/S | PostgreSQL roles / SQL deadlines / retries / replay / maintenance | Role presets in `docs/operations/postgres.md`; live replay 2048/120 s/8 MiB; process replay 2048/120 s/8 MiB/4096/256 MiB | `PostgresHostConfig.{roles,guards,retry,signals,live_replay,process_replay,maintenance,deployment}` | Server timeouts `i32::MAX` ms; replay events ≤1M, batch ≤65536, per-owner bytes ≤1 GiB, age ≤24 h, aggregate process replay ≤1 TiB; other validated role ranges documented there |

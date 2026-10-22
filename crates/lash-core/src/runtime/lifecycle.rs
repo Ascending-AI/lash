@@ -811,14 +811,17 @@ mod tests {
                 crate::plugin::SessionAuthorityContext::fixture(),
             ))
             .expect("plugin session");
-        let host = crate::EmbeddedRuntimeHost::new(crate::RuntimeHostConfig::new(
-            crate::testing::sqlite_memory_store_backend().await,
-            crate::CommitBudget::bounded(1024 * 1024, 512),
-            crate::QueuedWorkBatchingConfig::new(1),
-            crate::ExecutionBudgets::recommended(),
-            crate::runtime::DeltaCoalescing::recommended(),
-            crate::DataRetentionConfig::standard(),
-        ));
+        let host = crate::EmbeddedRuntimeHost::new(
+            crate::RuntimeHostConfig::new(
+                crate::testing::sqlite_memory_store_backend().await,
+                crate::CommitBudget::bounded(1024 * 1024, 512),
+                crate::QueuedWorkBatchingConfig::new(1),
+                crate::ExecutionBudgets::recommended(),
+                crate::runtime::DeltaCoalescing::recommended(),
+                crate::DataRetentionConfig::standard(),
+            )
+            .expect("the fixture ingress limit fits its commit budget"),
+        );
         let services = crate::RuntimeServices::new(
             plugins,
             std::sync::Arc::clone(&host.core.durability.attachment_store),

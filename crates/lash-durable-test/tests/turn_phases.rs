@@ -103,7 +103,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use lash_core::facade_support::{EffectId, Response};
-use lash_core::runtime::durable::head::{HeadCache, SessionHead};
+use lash_core::runtime::durable::head::{SessionHead, SessionOwner};
 use lash_core::runtime::durable::session::{
     AdmittedInputs, CellExit, CodeCell, ComposedCall, ModelAnswer, ModelCallAttempt, ModelPin,
     OpenTurn, ParkedTurnState, PhaseCheckpoint, PreparedCall, SessionActivation, SessionParkReason,
@@ -254,12 +254,12 @@ fn response_text(response: &LlmResponse) -> String {
 
 impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for ScriptedProtocol {
     fn prepare_protocol_iteration(&self, ctx: DriverContextView<'_>) -> Vec<DriverAction> {
-        match ctx.project_llm_request(false) {
+        match ctx.project_llm_request_retained(false) {
             Ok(request) => vec![DriverAction::Start(PendingWork::Llm {
                 request,
                 driver_state: None,
             })],
-            Err(error) => lash_sansio::sansio::stored_history_refusal_actions(error),
+            Err(error) => vec![lash_sansio::DriverAction::ProjectionRefused(error)],
         }
     }
 
@@ -653,7 +653,7 @@ impl TurnDrive for L3Drive {
         _cx: &ActorContext,
         _id: EffectId,
         call: u32,
-        request: Arc<LlmRequest>,
+        request: Arc<lash_protocol_types::llm::types::RetainedLlmRequest>,
     ) -> Result<PreparedCall, TurnError> {
         let composition = {
             let mut seen = self.services.seen.lock_recover();
@@ -664,7 +664,7 @@ impl TurnDrive for L3Drive {
             seen.compositions.push(composition);
             composition
         };
-        let mut request = LlmRequest::clone(&request);
+        let mut request = request.materialize();
         request.instructions = Some(Arc::from(composition.instructions()));
         let generation = {
             let mut seen = self.services.seen.lock_recover();
@@ -683,8 +683,12 @@ impl TurnDrive for L3Drive {
                 .expect("the literal is JSON"),
         };
         Ok(PreparedCall::Admit(Box::new(ComposedCall {
-            request: Arc::new(request),
+            request: Arc::new(
+                lash_protocol_types::llm::types::RetainedLlmRequest::from_request(request),
+            ),
             prompt: None,
+
+            prompt_state: Default::default(),
             template,
         })))
     }
@@ -693,7 +697,7 @@ impl TurnDrive for L3Drive {
         &mut self,
         cx: &ActorContext,
         _id: EffectId,
-        request: Arc<LlmRequest>,
+        request: Arc<lash_protocol_types::llm::types::RetainedLlmRequest>,
         send: &lash_protocol_types::llm::types::AdmittedSend,
         attempt: ModelCallAttempt,
     ) -> Result<(), TurnError> {
@@ -938,7 +942,13 @@ impl TurnDrive for L3Drive {
     fn stop_cell(&mut self) {}
 
     /// Nothing is held for the commit.
-    async fn committed(&mut self) {}
+    async fn committed(
+        &mut self,
+        _cx: &ActorContext,
+        _receipt: &lash_durable::ActorCommit,
+    ) -> Result<(), TurnError> {
+        Ok(())
+    }
 }
 
 /// The L3 scenario's catalog: its protocol never calls a tool.
@@ -1874,7 +1884,13 @@ async fn restore_after_the_head_moved(dialect: Dialect, postgres_url: Option<Str
     let keep = Mutex::default();
     let (stores, database) =
         dialect::open(dialect, postgres_url.as_deref(), SimClock::new(), &keep).await;
-    let backend = Backend::for_testing(stores);
+    let backend = Backend::for_testing(
+        stores,
+        lash_durable::OwnerRetentionSettings {
+            idle: std::time::Duration::from_secs(60),
+            max_resident_owners: const { std::num::NonZeroUsize::new(256).unwrap() },
+        },
+    );
     let catalog: Arc<dyn lash_core_store::store::RuntimeStore> = backend.session_store_factory();
     lash_core_store::testing::store_fixtures::admit_conformance_session(&catalog, &session()).await;
     let earlier = vec![
@@ -1977,7 +1993,7 @@ async fn restore_after_the_head_moved(dialect: Dialect, postgres_url: Option<Str
         .expect("the turn reads")
         .expect("the turn is open");
     let cx = ActorContext::detached(backend.clone());
-    let mut heads = HeadCache::default();
+    let mut heads = SessionOwner::default();
     let restored = TurnRestore::new(&cx, &row, &mut heads)
         .restore(machine_config(&session(), &run(), Mode::Plain))
         .await
@@ -2110,7 +2126,13 @@ async fn input_to_a_running_turn_is_admitted(dialect: Dialect, postgres_url: Opt
     let keep = Mutex::default();
     let (stores, database) =
         dialect::open(dialect, postgres_url.as_deref(), SimClock::new(), &keep).await;
-    let backend = Backend::for_testing(stores);
+    let backend = Backend::for_testing(
+        stores,
+        lash_durable::OwnerRetentionSettings {
+            idle: std::time::Duration::from_secs(60),
+            max_resident_owners: const { std::num::NonZeroUsize::new(256).unwrap() },
+        },
+    );
     admit_running_turn(&backend, database.as_ref(), &session(), &run()).await;
 
     let catalog: Arc<dyn lash_core_store::store::RuntimeStore> = backend.session_store_factory();
@@ -2159,7 +2181,13 @@ async fn each_turn_terminal_reads_back(dialect: Dialect, postgres_url: Option<St
     let keep = Mutex::default();
     let (stores, database) =
         dialect::open(dialect, postgres_url.as_deref(), SimClock::new(), &keep).await;
-    let backend = Backend::for_testing(stores);
+    let backend = Backend::for_testing(
+        stores,
+        lash_durable::OwnerRetentionSettings {
+            idle: std::time::Duration::from_secs(60),
+            max_resident_owners: const { std::num::NonZeroUsize::new(256).unwrap() },
+        },
+    );
     let evidence = cancel_evidence(&TurnCancelRequest {
         session: session(),
         run: run(),

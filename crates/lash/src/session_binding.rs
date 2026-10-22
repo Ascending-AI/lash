@@ -113,11 +113,17 @@ impl BoundSession {
     /// Apply only lifecycle-owner services to a destination core environment.
     /// Provider, plugin, prompt, tracing, and policy configuration continue to
     /// come from the core performing resume.
-    pub(crate) fn apply_owner(&self, mut env: RuntimeEnvironment) -> RuntimeEnvironment {
-        env.core = env.core.with_backend(self.backend.clone());
+    pub(crate) fn apply_owner(
+        &self,
+        mut env: RuntimeEnvironment,
+    ) -> crate::Result<RuntimeEnvironment> {
+        env.core = env
+            .core
+            .with_backend(self.backend.clone())
+            .map_err(crate::EmbedError::IngressConfiguration)?;
         env.core.control.effect_host = self.effect_host();
         env.core.durability.attachment_store = Arc::clone(&self.attachment_store);
         env.core.durability.process_env_store = Arc::clone(&self.process_env_store);
-        env.with_work_ports(self.process.clone())
+        Ok(env.with_work_ports(self.process.clone()))
     }
 }

@@ -483,10 +483,13 @@ impl SendBuilder {
                 .enqueue_turn_inputs(
                     &context.parts.store,
                     vec![(input, Some(id.to_string()))],
-                    ingress,
-                    run_spec,
-                    pin,
-                    parent,
+                    lash_core::facade_support::HostInputAdmission {
+                        ingress,
+                        run_spec,
+                        pin,
+                        parent,
+                        max_ingress_bytes: context.parts.effect_host.backend().max_ingress_bytes(),
+                    },
                 )
                 .await?
                 .pop()

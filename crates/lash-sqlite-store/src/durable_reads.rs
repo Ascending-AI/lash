@@ -29,6 +29,9 @@ impl DurableReads for SqliteDurableStore {
         &self,
         session: &lash_vocabulary::identity::SessionId,
     ) -> Result<Option<TurnRow>, DurableError> {
+        lash_core_ids::operational_metrics::sql::owner_state_read(
+            lash_core_ids::operational_metrics::sql::OwnerStateRead::Phase,
+        );
         let session = session.clone();
         self.read(move |tx| turns::turn(tx, &session)).await
     }

@@ -308,6 +308,24 @@ impl RuntimeControlConfig {
 }
 
 impl RuntimeHostConfig {
+    /// One admitted item fits the byte budget on its own. The aggregate
+    /// frame remains governed by the existing commit check and compaction.
+    fn validate_ingress(
+        backend: &lash_execution_contracts::backend::Backend,
+        budget: crate::CommitBudget,
+    ) -> Result<(), lash_durable::DurableConfigError> {
+        let ingress = backend.max_ingress_bytes().get();
+        if let lash_core_store::store::CommitBudgetLimit::Bounded(commit) = budget.bytes
+            && u128::from(ingress) > commit.get() as u128
+        {
+            return Err(lash_durable::DurableConfigError::IngressAboveCommitBudget {
+                ingress,
+                commit: commit.get() as u64,
+            });
+        }
+        Ok(())
+    }
+
     /// A config over `backend`: its effect host, attachment port,
     /// process-exec-env store and clock, with the commit budget, queued-work
     /// batching, execution budgets, delta coalescing and
@@ -318,6 +336,9 @@ impl RuntimeHostConfig {
     /// so hosts must choose them rather than silently inheriting policy; the
     /// local durable choice is the durable engine over one SQLite database
     /// file (ADR 0132 §1).
+    ///
+    /// # Errors
+    /// Refuses an ingress limit larger than the commit byte budget.
     pub fn new(
         backend: lash_execution_contracts::backend::Backend,
         commit_budget: crate::CommitBudget,
@@ -325,14 +346,15 @@ impl RuntimeHostConfig {
         execution_budgets: crate::ExecutionBudgets,
         delta_coalescing: DeltaCoalescing,
         data_retention: DataRetentionConfig,
-    ) -> Self {
+    ) -> Result<Self, lash_durable::DurableConfigError> {
+        Self::validate_ingress(&backend, commit_budget)?;
         let effect_host = crate::ActorContext::detached(backend.clone());
         let attachment_store = backend.attachment_store();
         let process_env_store = backend.process_env_store();
         let turn_prelude_store = backend.turn_prelude_store();
         let clock = backend.clock();
         let artifact_ports = ArtifactReferrerPorts::of_backend(&backend);
-        Self {
+        Ok(Self {
             data_limits: RuntimeDataLimits::standard(),
             backend: backend.clone(),
             durability: RuntimeDurabilityConfig {
@@ -383,7 +405,7 @@ impl RuntimeHostConfig {
             tool_live: Arc::new(crate::ToolLive::default()),
             observation_work_limits: lash_trace::ObservationWorkLimits::standard(),
             clock,
-        }
+        })
     }
 
     /// The backend this config's ports come from.
@@ -395,7 +417,15 @@ impl RuntimeHostConfig {
     /// process-exec-env store and clock become `backend`'s, with every other
     /// setting kept. Every backend-bound port moves together, so the config
     /// still names exactly one backend (ADR 0102, D2).
-    pub fn with_backend(mut self, backend: lash_execution_contracts::backend::Backend) -> Self {
+    ///
+    /// # Errors
+    /// Refuses the destination backend's ingress limit when it exceeds this
+    /// runtime's commit byte budget.
+    pub fn with_backend(
+        mut self,
+        backend: lash_execution_contracts::backend::Backend,
+    ) -> Result<Self, lash_durable::DurableConfigError> {
+        Self::validate_ingress(&backend, self.durability.commit_budget)?;
         self.durability.attachment_store = Arc::new(
             crate::RuntimeAttachmentStore::ephemeral(
                 self.delivery_backend(backend.attachment_store()),
@@ -412,7 +442,7 @@ impl RuntimeHostConfig {
             .process_engines
             .clone()
             .with_artifact_ports(ArtifactReferrerPorts::of_backend(&backend));
-        Self { backend, ..config }
+        Ok(Self { backend, ..config })
     }
 
     /// The backend's deployment store: the catalog every session this

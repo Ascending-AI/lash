@@ -98,6 +98,27 @@ impl DurableStore for ObservedStore {
         answer
     }
 
+    async fn begin_retained(
+        &self,
+        actor: &ActorKey,
+        epoch: crate::Epoch,
+        expected: crate::StateRevision,
+        max_mail_bytes: u64,
+    ) -> Result<ActorTx, DurableError> {
+        let answer = self
+            .inner
+            .begin_retained(actor, epoch, expected, max_mail_bytes)
+            .await;
+        let lost = match &answer {
+            Err(DurableError::OwnershipLost(fenced)) => Some((fenced.held, fenced.current)),
+            _ => None,
+        };
+        if lost.is_some() {
+            let _ = self.begins.send((epoch, lost));
+        }
+        answer
+    }
+
     async fn open_process(
         &self,
         actor: &ActorKey,

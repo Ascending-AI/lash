@@ -197,7 +197,13 @@ impl Scenario for SessionMail {
         .await
         .expect("an in-memory store set opens");
         let durable: Arc<dyn DurableStore> = Arc::new(stores.durable_store());
-        let backend = Backend::for_testing(Arc::new(stores));
+        let backend = Backend::for_testing(
+            Arc::new(stores),
+            lash_durable::OwnerRetentionSettings {
+                idle: std::time::Duration::from_secs(60),
+                max_resident_owners: const { std::num::NonZeroUsize::new(256).unwrap() },
+            },
+        );
         let _ = self.shared.set(Shared { backend, clock });
         durable
     }

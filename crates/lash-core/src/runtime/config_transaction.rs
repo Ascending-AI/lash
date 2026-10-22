@@ -101,6 +101,11 @@ impl LashRuntime {
         }
         let registry = self.config_registry()?;
         let entries = registry.entries(transaction)?;
+        crate::RuntimeError::validate_host_payload(
+            "session_command",
+            &entries,
+            self.host.core.backend().max_ingress_bytes(),
+        )?;
         Ok(registry.admit(id, expected_revision, entries)?)
     }
 
@@ -434,6 +439,7 @@ impl LashRuntime {
                 tx,
                 self.code_executor().as_ref(),
                 commit,
+                self.state.clone(),
                 lash_durable::CommitLabel::SESSION_COMMAND,
                 self.host.core.tracing.metrics(),
             )
@@ -441,7 +447,9 @@ impl LashRuntime {
             .map_err(super::durable::head_commit::HeadCommitError::into_runtime_error),
             Err(error) => Err(super::runtime_error_from_store_commit(error)),
         };
-        self.invalidate_resident_session_state();
+        if committed.is_err() {
+            self.invalidate_resident_session_state();
+        }
         if let Err(error) = committed {
             tracing::warn!(
                 session_id = %self.state.session_id,
@@ -451,7 +459,7 @@ impl LashRuntime {
             );
             return;
         }
-        if let Err(error) = self.reload_invalidated_resident_session_state().await {
+        if let Err(error) = self.adopt_owner_state(owner).await {
             tracing::warn!(
                 session_id = %self.state.session_id,
                 %error,

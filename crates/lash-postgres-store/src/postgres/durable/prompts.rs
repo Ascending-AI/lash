@@ -38,7 +38,6 @@ use sqlx::PgConnection;
 
 use super::steps::{Collect, Entry, Shape, Step, Ty, Value};
 use super::{Committing, HeldTexts, get, sqlx_failure};
-use crate::connection_sql::connection_sql;
 
 pub(super) static SQL: LazyLock<PromptStatements> =
     LazyLock::new(|| PromptStatements::render(Dialect::postgres()));
@@ -147,33 +146,69 @@ lash_store_sql::statements! {
              ) SELECT (SELECT COUNT(*) FROM expired) AS released_count, released.hash
                FROM (SELECT 1) AS singleton LEFT JOIN released ON TRUE";
 
-        /// Reclaim every text in `?1` no root references any more.
-        reclaim_texts = "DELETE FROM prompt_texts AS stored
-             WHERE stored.hash = ANY(?1::BYTEA[])
-               AND NOT EXISTS (
-                   SELECT 1 FROM prompt_snapshot_texts AS edge WHERE edge.hash = stored.hash
-               ) AND NOT EXISTS (
-                   SELECT 1 FROM prompt_prefixes AS prefix WHERE prefix.hash = stored.hash
-               ) AND NOT EXISTS (
-                   SELECT 1 FROM prompt_text_edges AS edge WHERE edge.child = stored.hash
-               ) RETURNING hash";
+        /// Persist released prompt roots as cleanup obligations.
+        retirement_put = "INSERT INTO prompt_retirement_frontier(hash) SELECT unnest(?1::BYTEA[]) ON CONFLICT DO NOTHING";
+
+        /// Bounded durable frontier, claimed in digest order.
+        retirement_seeds = "SELECT hash FROM prompt_retirement_frontier ORDER BY hash LIMIT ?1 FOR UPDATE SKIP LOCKED";
+
+        /// Shared or rooted boundaries stop discovery. The outer LIMIT
+        /// bounds the lazy recursive evaluation before any sort or join.
+        retirement_candidates = "WITH RECURSIVE candidates AS (
+             SELECT unnest(?1::BYTEA[]) AS hash
+             UNION
+             SELECT edge.child AS hash FROM candidates JOIN prompt_text_edges AS edge ON edge.parent = candidates.hash
+              WHERE NOT (candidates.hash = ANY(?2::BYTEA[]))
+                AND NOT EXISTS (SELECT 1 FROM prompt_snapshot_texts WHERE hash = candidates.hash)
+                AND NOT EXISTS (SELECT 1 FROM prompt_prefixes WHERE hash = candidates.hash)
+                AND (SELECT count(*) FROM (SELECT 1 FROM prompt_text_edges WHERE child = candidates.hash LIMIT 2) AS incoming) <= 1
+         ) SELECT hash FROM candidates LIMIT ?3";
+
+        /// Liveness is recomputed after candidate locks. A skipped external
+        /// parent protects all candidate descendants, including diamonds.
+        retirement_unprotected = "WITH RECURSIVE candidates AS (SELECT unnest(?1::BYTEA[]) AS hash), protected AS (
+             SELECT hash FROM candidates
+              WHERE hash = ANY(?2::BYTEA[])
+                 OR EXISTS (SELECT 1 FROM prompt_snapshot_texts WHERE hash = candidates.hash)
+                 OR EXISTS (SELECT 1 FROM prompt_prefixes WHERE hash = candidates.hash)
+                 OR EXISTS (SELECT 1 FROM prompt_text_edges AS edge WHERE edge.child = candidates.hash AND NOT (edge.parent = ANY(?1::BYTEA[])))
+             UNION
+             SELECT edge.child AS hash FROM protected JOIN prompt_text_edges AS edge ON edge.parent = protected.hash WHERE edge.child = ANY(?1::BYTEA[])
+         ) SELECT hash FROM candidates WHERE hash NOT IN (SELECT hash FROM protected)";
+
+        /// Retirement never waits behind a publisher; skipped candidates
+        /// keep their durable queue entries and protect their descendants.
+        retirement_try_lock = "WITH ordered AS MATERIALIZED (SELECT DISTINCT key FROM unnest(?1::BYTEA[]) AS target(key) ORDER BY key)
+             SELECT key FROM ordered WHERE pg_try_advisory_xact_lock(hashtextextended(encode(key, 'hex'), 2))";
+
+        retirement_take = "DELETE FROM prompt_retirement_frontier WHERE hash = ANY(?1::BYTEA[])";
+        retirement_edges = "DELETE FROM prompt_text_edges WHERE parent = ANY(?1::BYTEA[]) RETURNING child";
+        retirement_nodes = "DELETE FROM prompt_texts WHERE hash = ANY(?1::BYTEA[]) RETURNING octet_length(text) AS bytes";
+        reclaim_texts = "SELECT * FROM lash_prompt_retire(?1, ?2, ?3)";
+
     }
 }
 
 pub(super) static POSTGRES_SQL: LazyLock<PostgresPromptStatements> =
     LazyLock::new(|| PostgresPromptStatements::render(Dialect::postgres()));
 
-/// The advisory-lock seed of prompt-text retention (`connection_sql`).
+#[cfg(test)]
 pub(super) const TEXT_LOCK_SEED: i64 = 2;
 
-/// The reclaim's closure read and its children read, which the one-call
-/// commit runs as its own mechanics beside [`RECLAIM`]'s delete.
-pub(super) fn closure() -> &'static lash_store_sql::Rendered {
-    &POSTGRES_SQL.closure
-}
-
-pub(super) fn read_children() -> &'static lash_store_sql::Rendered {
-    &SQL.read_children
+/// Statements the generated retirement routine executes, in program order.
+pub(super) fn retirement_mechanics() -> Vec<&'static str> {
+    let pg = &*POSTGRES_SQL;
+    vec![
+        pg.retirement_put.sql(),
+        pg.retirement_seeds.sql(),
+        pg.retirement_candidates.sql(),
+        pg.retirement_try_lock.sql(),
+        pg.retirement_unprotected.sql(),
+        pg.retirement_take.sql(),
+        pg.retirement_edges.sql(),
+        pg.retirement_nodes.sql(),
+        pg.retirement_put.sql(),
+    ]
 }
 
 /// The server function that runs one level of a record's text frontier:
@@ -358,25 +393,44 @@ pub(super) fn steps(epoch: Epoch, write: &PromptWrite, held: &HeldTexts) -> Opti
         .iter()
         .map(|text| (text.hash.as_str(), text))
         .collect();
-    let mut frontier = roots.clone();
     let mut texts = BTreeMap::new();
-    while let Some(hash) = frontier.pop_first() {
-        if texts.contains_key(&hash) {
-            continue;
+    if let Some(delta) = request_texts.supplied_delta() {
+        // Omitted immutable bodies are references, even when this in-memory
+        // reader still has bytes. The server locks and validates the whole
+        // direct frontier before publishing any root or edge.
+        let supplied: BTreeMap<_, _> = delta
+            .map(|text| (text.hash.clone(), text))
+            .chain(snapshot_texts.iter().map(|text| (text.hash.clone(), text)))
+            .collect();
+        for hash in &roots {
+            texts.insert(hash.clone(), None);
         }
-        let text = (!held.contains(&hash))
-            .then(|| {
-                request_texts
-                    .get(&hash)
-                    .or_else(|| snapshots.get(hash.as_str()).copied())
-            })
-            .flatten();
-        if let Some(text) = text {
-            frontier.extend(text.children.iter().cloned());
+        for (hash, text) in &supplied {
+            for child in &text.children {
+                texts.entry(child.clone()).or_insert(None);
+            }
+            texts.insert(hash.clone(), (!held.contains(hash)).then_some(*text));
         }
-        // A hint prunes only what is sent. The server still locks and reads
-        // this root, and refuses an absent body before any text publication.
-        texts.insert(hash, text);
+    } else {
+        let mut frontier = roots.clone();
+        while let Some(hash) = frontier.pop_first() {
+            if texts.contains_key(&hash) {
+                continue;
+            }
+            let text = (!held.contains(&hash))
+                .then(|| {
+                    request_texts
+                        .get(&hash)
+                        .or_else(|| snapshots.get(hash.as_str()).copied())
+                })
+                .flatten();
+            if let Some(text) = text {
+                frontier.extend(text.children.iter().cloned());
+            }
+            // A hint prunes only what is sent. The server still locks and reads
+            // this root, and refuses an absent body before any text publication.
+            texts.insert(hash, text);
+        }
     }
     let (hashes, bodies): (Vec<_>, Vec<_>) = texts
         .iter()
@@ -536,53 +590,72 @@ pub(super) async fn reclaim_with_protection(
     released: Vec<String>,
     protected: &BTreeSet<String>,
 ) -> Result<(), sqlx::Error> {
-    let released: Vec<String> = released
-        .into_iter()
-        .collect::<BTreeSet<_>>()
-        .into_iter()
-        .collect();
     if released.is_empty() {
         return Ok(());
     }
-    // Gather before locking, then use fresh statements after the locks.
-    // Publication of an existing node locks that node and stops there;
-    // its closure therefore remains protected throughout publication.
-    let closure: Vec<String> = crate::keys::query_scalar(POSTGRES_SQL.closure.sql())
+    crate::observed_sql::query(POSTGRES_SQL.reclaim_texts.sql())
         .bind(crate::keys::keys(&released))
         .bind(crate::keys::keys(protected))
-        .fetch_all(crate::observed_sql::executor(&mut *tx))
+        .bind(4096_i64)
+        .execute(crate::observed_sql::executor(tx))
         .await?;
-    crate::observed_sql::query(connection_sql().lock_xact_by_keys_seeded.sql())
-        .bind(crate::keys::keys(&closure))
-        .bind(TEXT_LOCK_SEED)
-        .execute(crate::observed_sql::executor(&mut *tx))
-        .await?;
-    let mut frontier: Vec<_> = released
-        .into_iter()
-        .filter(|hash| !protected.contains(hash))
-        .collect();
-    while !frontier.is_empty() {
-        let mut children = BTreeMap::new();
-        for hash in &frontier {
-            let found: Vec<String> = crate::keys::query_scalar(SQL.read_children.sql())
-                .bind(crate::keys::key(hash))
-                .fetch_all(crate::observed_sql::executor(&mut *tx))
-                .await?;
-            children.insert(hash.clone(), found);
-        }
-        let removed: Vec<String> = crate::keys::query_scalar(POSTGRES_SQL.reclaim_texts.sql())
-            .bind(crate::keys::keys(&frontier))
-            .fetch_all(crate::observed_sql::executor(&mut *tx))
-            .await?;
-        frontier = removed
-            .iter()
-            .flat_map(|hash| children[hash].iter().cloned())
-            .filter(|hash| !protected.contains(hash))
-            .collect::<BTreeSet<_>>()
-            .into_iter()
-            .collect();
-    }
     Ok(())
+}
+
+pub(super) async fn drain_retired(
+    tx: &mut PgConnection,
+    limit: u64,
+) -> Result<(i64, i64, i64), sqlx::Error> {
+    crate::observed_sql::query_as(POSTGRES_SQL.reclaim_texts.sql())
+        .bind(Vec::<Vec<u8>>::new())
+        .bind(Vec::<Vec<u8>>::new())
+        .bind(i64::try_from(limit.max(1)).unwrap_or(i64::MAX))
+        .fetch_one(crate::observed_sql::executor(tx))
+        .await
+}
+
+/// The single set-based retirement program used by explicit and generated
+/// owner commits. Allocation hints do not authorize any delete.
+#[cfg(test)]
+pub(super) fn retirement_function_ddl() -> String {
+    let pg = &*POSTGRES_SQL;
+    let inline = |sql: &str, args: &[&str]| super::generator::inline_statement(sql, args);
+    let put = inline(pg.retirement_put.sql(), &["p_roots"]);
+    let seeds = inline(pg.retirement_seeds.sql(), &["p_limit"]);
+    let candidates = inline(
+        pg.retirement_candidates.sql(),
+        &["v_seeds", "p_protect", "p_limit"],
+    );
+    let lock = inline(pg.retirement_try_lock.sql(), &["v_candidates"]);
+    let unprotected = inline(
+        pg.retirement_unprotected.sql(),
+        &["v_candidates", "p_protect"],
+    );
+    let take = inline(pg.retirement_take.sql(), &["v_candidates"]);
+    let edges = inline(pg.retirement_edges.sql(), &["v_gone"]);
+    let nodes = inline(pg.retirement_nodes.sql(), &["v_gone"]);
+    let follow = inline(pg.retirement_put.sql(), &["v_next"]);
+    format!("CREATE OR REPLACE FUNCTION lash_prompt_retire(p_roots BYTEA[], p_protect BYTEA[], p_limit BIGINT)
+RETURNS TABLE(examined BIGINT, deleted BIGINT, bytes BIGINT)
+LANGUAGE plpgsql VOLATILE AS $lash_prompt_retire$
+DECLARE v_seeds BYTEA[]; v_candidates BYTEA[]; v_gone BYTEA[]; v_next BYTEA[];
+        v_count BIGINT := 0; v_bytes BIGINT := 0;
+BEGIN
+    {put};
+    v_seeds := ARRAY({seeds});
+    IF cardinality(v_seeds) = 0 THEN RETURN QUERY SELECT 0::BIGINT, 0::BIGINT, 0::BIGINT; RETURN; END IF;
+    v_candidates := ARRAY({candidates});
+    v_candidates := ARRAY({lock});
+    IF cardinality(v_candidates) = 0 THEN RETURN QUERY SELECT 0::BIGINT, 0::BIGINT, 0::BIGINT; RETURN; END IF;
+    v_gone := ARRAY({unprotected});
+    {take};
+    WITH removed AS ({edges}) SELECT COALESCE(array_agg(DISTINCT child), '{{}}') INTO v_next FROM removed WHERE NOT (child = ANY(v_candidates));
+    WITH removed AS ({nodes}) SELECT count(*), COALESCE(sum(removed.bytes),0) INTO v_count,v_bytes FROM removed;
+    {follow};
+    RETURN QUERY SELECT cardinality(v_candidates)::BIGINT,v_count,v_bytes;
+END
+$lash_prompt_retire$;
+")
 }
 
 pub(super) async fn snapshot(

@@ -136,9 +136,9 @@ fn drain_unsynced_effects(machine: &mut TurnMachine) -> Vec<Effect> {
     effects
 }
 
-fn find_llm_call(effects: &[Effect]) -> Option<(&EffectId, &LlmRequest)> {
+fn find_llm_call(effects: &[Effect]) -> Option<(&EffectId, LlmRequest)> {
     effects.iter().find_map(|effect| match effect {
-        Effect::LlmCall { id, request } => Some((id, request.as_ref())),
+        Effect::LlmCall { id, request } => Some((id, request.materialize())),
         _ => None,
     })
 }
@@ -367,7 +367,7 @@ impl ProtocolDriverHandle for ProseDriver {
     fn prepare_protocol_iteration(&self, ctx: DriverContextView<'_>) -> Vec<DriverAction> {
         vec![DriverAction::Start(PendingWork::Llm {
             request: ctx
-                .project_llm_request(false)
+                .project_llm_request_retained(false)
                 .expect("fixture history projects"),
             driver_state: None,
         })]
@@ -472,7 +472,7 @@ impl ProtocolDriverHandle for SyncThenAdvanceDriver {
     fn prepare_protocol_iteration(&self, ctx: DriverContextView<'_>) -> Vec<DriverAction> {
         vec![DriverAction::Start(PendingWork::Llm {
             request: ctx
-                .project_llm_request(true)
+                .project_llm_request_retained(true)
                 .expect("fixture history projects"),
             driver_state: None,
         })]
@@ -524,7 +524,7 @@ impl ProtocolDriverHandle for CellEveryIterationDriver {
     fn prepare_protocol_iteration(&self, ctx: DriverContextView<'_>) -> Vec<DriverAction> {
         vec![DriverAction::Start(PendingWork::Llm {
             request: ctx
-                .project_llm_request(false)
+                .project_llm_request_retained(false)
                 .expect("fixture history projects"),
             driver_state: None,
         })]
@@ -718,7 +718,7 @@ impl ProtocolDriverHandle for NoProgressFeedbackAtBudgetDriver {
         if ctx.protocol_iteration() == 0 {
             return vec![DriverAction::Start(PendingWork::Llm {
                 request: ctx
-                    .project_llm_request(false)
+                    .project_llm_request_retained(false)
                     .expect("fixture history projects"),
                 driver_state: None,
             })];
@@ -833,7 +833,7 @@ impl ProtocolDriverHandle for ToolBatchDriver {
     fn prepare_protocol_iteration(&self, ctx: DriverContextView<'_>) -> Vec<DriverAction> {
         vec![DriverAction::Start(PendingWork::Llm {
             request: ctx
-                .project_llm_request(true)
+                .project_llm_request_retained(true)
                 .expect("fixture history projects"),
             driver_state: None,
         })]

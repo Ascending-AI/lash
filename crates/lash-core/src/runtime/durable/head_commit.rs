@@ -119,10 +119,30 @@ pub(crate) async fn commit(
     tx: lash_durable::ActorTx,
     executor: Option<&Arc<dyn CodeExecutorPlugin>>,
     commit: RuntimeCommit,
+    postimage: crate::RuntimeSessionState,
     label: CommitLabel,
     metrics: &lash_trace::telemetry::metrics::TelemetryMetrics,
-) -> Result<(), HeadCommitError> {
-    commit_in(owner, tx, executor, commit, label, metrics, None, None).await
+) -> Result<crate::store::RuntimeCommitReceipt, HeadCommitError> {
+    commit_in(
+        owner,
+        tx,
+        executor,
+        PreparedHeadCommit {
+            commit,
+            state: postimage,
+        },
+        label,
+        metrics,
+        None,
+        None,
+    )
+    .await
+}
+
+/// A complete prepared head and the state whose checkpoint it carries.
+pub(crate) struct PreparedHeadCommit {
+    pub commit: RuntimeCommit,
+    pub state: crate::RuntimeSessionState,
 }
 
 /// [`commit`], recording in the same transaction that the session's state
@@ -144,15 +164,20 @@ pub(crate) async fn commit_in(
     owner: &ActorContext,
     tx: lash_durable::ActorTx,
     executor: Option<&Arc<dyn CodeExecutorPlugin>>,
-    commit: RuntimeCommit,
+    prepared: PreparedHeadCommit,
     label: CommitLabel,
     metrics: &lash_trace::telemetry::metrics::TelemetryMetrics,
     formats: Option<lash_durable::FormatSet>,
     ending: Option<&lash_durable::domain::ScopeKey>,
-) -> Result<(), HeadCommitError> {
+) -> Result<crate::store::RuntimeCommitReceipt, HeadCommitError> {
+    let PreparedHeadCommit {
+        commit,
+        state: postimage,
+    } = prepared;
     crate::store::admit_runtime_commit_budget(&commit, metrics).map_err(HeadCommitError::Store)?;
     let encoded = crate::store::encode_session_commit(&commit).map_err(HeadCommitError::Store)?;
     let mut tx = tx;
+    tx.session_postimage(postimage);
     if commit.frame_transition.is_some() || commit.applied_commands.is_some() || formats.is_some() {
         tx.write(DomainWrite::Prompt(
             lash_durable::domain::PromptWrite::ResetPrefix {
@@ -183,7 +208,18 @@ pub(crate) async fn commit_in(
         return Err(HeadCommitError::Refused(error));
     }
     match committed {
-        Ok(_) => Ok(()),
+        Ok(receipt) => {
+            let mut heads = receipt.session_heads.into_iter();
+            match (heads.next(), heads.next()) {
+                (Some(head), None) if head.session == commit.session_id => Ok(head.receipt),
+                _ => Err(HeadCommitError::Owner(DurableError::Store(
+                    lash_durable::StoreFailure {
+                        kind: lash_durable::StoreFailureKind::Corrupt,
+                        message: "head acknowledgement has no unique session result".into(),
+                    },
+                ))),
+            }
+        }
         Err(DurableError::Domain(DomainRefusal::HeadMoved {
             expected, found, ..
         })) => Err(HeadCommitError::Store(StoreError::HeadRevisionConflict {
@@ -218,8 +254,7 @@ impl crate::LashRuntime {
             .begin()
             .await
             .map_err(|error| HeadCommitError::Owner(error).into_runtime_error())?;
-        self.invalidate_resident_session_state();
-        self.reload_invalidated_resident_session_state().await?;
+        self.adopt_owner_state(owner).await?;
         let checked = owner
             .begin()
             .await

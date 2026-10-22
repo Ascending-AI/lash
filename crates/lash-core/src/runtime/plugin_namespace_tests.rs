@@ -324,14 +324,17 @@ async fn plugin_context_host_exports_cannot_escape_namespaces() {
         "restricted exports must not strip runtime checkpoint or fork state"
     );
     runtime_state.session_id = "private-child".into();
-    let runtime_host = crate::EmbeddedRuntimeHost::new(crate::RuntimeHostConfig::new(
-        crate::testing::sqlite_memory_store_backend().await,
-        crate::CommitBudget::bounded(1024 * 1024, 512),
-        crate::QueuedWorkBatchingConfig::new(1),
-        crate::ExecutionBudgets::recommended(),
-        crate::runtime::DeltaCoalescing::recommended(),
-        crate::DataRetentionConfig::standard(),
-    ));
+    let runtime_host = crate::EmbeddedRuntimeHost::new(
+        crate::RuntimeHostConfig::new(
+            crate::testing::sqlite_memory_store_backend().await,
+            crate::CommitBudget::bounded(1024 * 1024, 512),
+            crate::QueuedWorkBatchingConfig::new(1),
+            crate::ExecutionBudgets::recommended(),
+            crate::runtime::DeltaCoalescing::recommended(),
+            crate::DataRetentionConfig::standard(),
+        )
+        .expect("the fixture ingress limit fits its commit budget"),
+    );
     let runtime_services = crate::RuntimeServices::new(
         child.clone(),
         std::sync::Arc::clone(&runtime_host.core.durability.attachment_store),
@@ -351,14 +354,17 @@ async fn plugin_context_host_exports_cannot_escape_namespaces() {
             if message == "plugin-facing session handles cannot construct a host runtime"
     ));
     assert_eq!(restores.load(std::sync::atomic::Ordering::SeqCst), 0);
-    let runtime_host = crate::EmbeddedRuntimeHost::new(crate::RuntimeHostConfig::new(
-        crate::testing::sqlite_memory_store_backend().await,
-        crate::CommitBudget::bounded(1024 * 1024, 512),
-        crate::QueuedWorkBatchingConfig::new(1),
-        crate::ExecutionBudgets::recommended(),
-        crate::runtime::DeltaCoalescing::recommended(),
-        crate::DataRetentionConfig::standard(),
-    ));
+    let runtime_host = crate::EmbeddedRuntimeHost::new(
+        crate::RuntimeHostConfig::new(
+            crate::testing::sqlite_memory_store_backend().await,
+            crate::CommitBudget::bounded(1024 * 1024, 512),
+            crate::QueuedWorkBatchingConfig::new(1),
+            crate::ExecutionBudgets::recommended(),
+            crate::runtime::DeltaCoalescing::recommended(),
+            crate::DataRetentionConfig::standard(),
+        )
+        .expect("the fixture ingress limit fits its commit budget"),
+    );
     let runtime_services = crate::RuntimeServices::new(
         host.session(&SessionId::from("private-child")).unwrap(),
         std::sync::Arc::clone(&runtime_host.core.durability.attachment_store),

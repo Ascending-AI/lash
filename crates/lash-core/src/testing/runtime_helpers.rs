@@ -588,6 +588,7 @@ pub fn test_runtime_host_config(
         crate::runtime::DeltaCoalescing::recommended(),
         DataRetentionConfig::standard(),
     )
+    .expect("the fixture ingress limit fits its commit budget")
 }
 
 pub fn test_runtime_host_config_with_provider(

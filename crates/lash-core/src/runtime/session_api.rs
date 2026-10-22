@@ -68,6 +68,38 @@ impl LashRuntime {
         self.publish_resident_authority()
     }
 
+    /// Transfer the acknowledged owner state into the runtime without reading
+    /// back a head that this owner just committed.
+    pub(in crate::runtime) async fn adopt_owner_state(
+        &mut self,
+        owner: &ActorContext,
+    ) -> Result<(), RuntimeError> {
+        let projection = owner
+            .session_projection()
+            .await
+            .map_err(|error| {
+                RuntimeError::new(
+                    RuntimeErrorCode::ResidentSessionReloadFailed,
+                    error.to_string(),
+                )
+            })?
+            .ok_or_else(|| {
+                RuntimeError::new(
+                    RuntimeErrorCode::ResidentSessionReloadFailed,
+                    "owner has no acknowledged session state",
+                )
+            })?;
+        self.install_resident_state(projection.head.as_ref().clone())
+            .map_err(|error| {
+                RuntimeError::new(
+                    RuntimeErrorCode::ResidentSessionReloadFailed,
+                    error.to_string(),
+                )
+            })?;
+        self.resident_session.mark_adopted();
+        Ok(())
+    }
+
     /// Install a run's recorded [`ResolvedRun`](crate::ResolvedRun) as the
     /// resident execution view. The view's config carries its own authority,
     /// which can differ from the resident one (a replay after a config
@@ -475,13 +507,16 @@ impl LashRuntime {
             .clone()
             .ok_or_else(queued_turn_input_store_required)?;
         super::durable_queue::enqueue_turn_input_to_store(
-            self.state.session_id.clone(),
             store,
             input,
-            ingress,
             source_key,
-            crate::RunSpec::default(),
-            parent,
+            super::HostInputAdmission {
+                ingress,
+                run_spec: crate::RunSpec::default(),
+                pin: false,
+                parent,
+                max_ingress_bytes: self.host.core.backend().max_ingress_bytes(),
+            },
         )
         .await
     }
@@ -699,9 +734,15 @@ impl LashRuntime {
                 .await?;
             return Ok(AcceptedSessionCommand::Inline(receipt));
         };
-        let receipt =
-            enqueue_stored_session_command(&store, &session_id, command, &idempotency_key, parent)
-                .await?;
+        let receipt = enqueue_stored_session_command(
+            &store,
+            &session_id,
+            command,
+            &idempotency_key,
+            parent,
+            self.host.core.backend().max_ingress_bytes(),
+        )
+        .await?;
         Ok(AcceptedSessionCommand::Queued(
             crate::runtime::SessionCommandSettlementHandle { receipt },
         ))
@@ -1113,14 +1154,16 @@ impl LashRuntime {
             Some((_, owner)) => Some(self.open_head_attempt(owner).await?),
             None => None,
         };
-        self.refresh_session_graph_from_store()
-            .await
-            .map_err(|err| {
-                RuntimeError::new(
-                    crate::RuntimeErrorCode::SessionCommandRefresh,
-                    err.to_string(),
-                )
-            })?;
+        if applied.is_none() {
+            self.refresh_session_graph_from_store()
+                .await
+                .map_err(|err| {
+                    RuntimeError::new(
+                        crate::RuntimeErrorCode::SessionCommandRefresh,
+                        err.to_string(),
+                    )
+                })?;
+        }
         debug_assert_eq!(commands.len(), 1, "session commands apply alone");
         for command in commands {
             match command {
@@ -1202,15 +1245,18 @@ impl LashRuntime {
             tx,
             self.code_executor().as_ref(),
             commit,
+            self.state.clone(),
             lash_durable::CommitLabel::SESSION_COMMAND,
             self.host.core.tracing.metrics(),
         )
         .await;
-        // The resident session gives way to the durable head, which a landed
-        // commit moved.
-        self.invalidate_resident_session_state();
+        if committed.is_err() {
+            self.invalidate_resident_session_state();
+        }
         match committed {
-            Ok(()) => {}
+            Ok(_) => {
+                self.adopt_owner_state(owner).await?;
+            }
             // A host withdrew a command since the lane was read: the commit
             // applied nothing, and the lane is read again (FIG-3927 §2.7).
             Err(super::durable::head_commit::HeadCommitError::Store(
@@ -1218,7 +1264,6 @@ impl LashRuntime {
             )) => return Ok(false),
             Err(error) => return Err(error.into_runtime_error()),
         }
-        self.reload_invalidated_resident_session_state().await?;
         Ok(true)
     }
 }
@@ -1350,7 +1395,9 @@ pub(in crate::runtime) async fn enqueue_stored_session_command(
     command: crate::SessionCommand,
     idempotency_key: &str,
     parent: Option<lash_trace::TraceParent>,
+    max_ingress_bytes: std::num::NonZeroU64,
 ) -> Result<crate::SessionCommandReceipt, SessionCommandEnqueueError> {
+    crate::RuntimeError::validate_host_payload("session_command", &command, max_ingress_bytes)?;
     if store.session_id() != session_id {
         return Err(super::runtime_error_from_store_commit(
             crate::StoreError::ForeignSessionRequest {

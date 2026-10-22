@@ -99,6 +99,10 @@ impl DurableHost {
     ) -> Self {
         let backend = lash_execution_contracts::backend::Backend::for_testing(
             super::sqlite_memory_store_set_with_clock(clock).await,
+            lash_durable::OwnerRetentionSettings {
+                idle: std::time::Duration::from_secs(60),
+                max_resident_owners: const { std::num::NonZeroUsize::new(256).unwrap() },
+            },
         );
         let actor = match admitted.scope() {
             lash_core::ExecutionScope::Process { process_id } => {

@@ -138,6 +138,14 @@ fn core_builder(
     refuse_at: Option<u64>,
 ) -> (lash::Backend, lash::LashCoreBuilder) {
     let backend = lash::durable::DurableBackendBuilder::new(Arc::clone(stores))
+        .config(lash_durable::DurableSettings {
+            max_ingress_bytes: Some(const { std::num::NonZeroU64::new(64 * 1024).unwrap() }),
+            owner_retention: Some(lash_durable::OwnerRetentionSettings {
+                idle: std::time::Duration::from_secs(60),
+                max_resident_owners: const { std::num::NonZeroUsize::new(256).unwrap() },
+            }),
+            ..lash_durable::DurableSettings::standard()
+        })
         .process_engine(Arc::new(ScriptEngine {
             advance: engine,
             refuse_at,
@@ -828,6 +836,7 @@ async fn sequential_effect_occurrences_decode_constant_facts_per_occurrence() {
                 serves: lash::testing::node_serves(&core),
                 offers: Default::default(),
                 max_active: 1,
+                owner_retention: node_backend.config().settings().owner_retention,
                 claim_batch: 1,
                 retirement: lash_durable::RetirementSettings::standard(),
             },
@@ -1169,7 +1178,16 @@ impl Fleet {
         let backend = lash_execution_contracts::backend::Backend::assemble(
             lash_execution_contracts::backend::BackendParts {
                 stores: Arc::new(stores),
-                settings: lash_core_execution::DurableSettings::default(),
+                settings: lash_core_execution::DurableSettings {
+                    max_ingress_bytes: Some(
+                        const { std::num::NonZeroU64::new(64 * 1024).unwrap() },
+                    ),
+                    owner_retention: Some(lash_durable::OwnerRetentionSettings {
+                        idle: std::time::Duration::from_secs(60),
+                        max_resident_owners: const { std::num::NonZeroUsize::new(256).unwrap() },
+                    }),
+                    ..lash_core_execution::DurableSettings::default()
+                },
                 engines: vec![Arc::new(ScriptEngine {
                     advance,
                     refuse_at: None,

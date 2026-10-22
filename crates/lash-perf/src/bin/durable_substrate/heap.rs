@@ -368,7 +368,14 @@ async fn sample_with_stores(
     // No background sweep during a sample: the driver still sweeps once at
     // boot, then waits; each mark drains retirement itself, so an interval
     // counts the steps its own park left.
-    let mut settings = lash::durable::DurableSettings::standard();
+    let mut settings = lash::durable::DurableSettings {
+        max_ingress_bytes: Some(const { std::num::NonZeroU64::new(64 * 1024).unwrap() }),
+        owner_retention: Some(lash::durable::OwnerRetentionSettings {
+            idle: std::time::Duration::from_secs(60),
+            max_resident_owners: const { std::num::NonZeroUsize::new(256).unwrap() },
+        }),
+        ..lash::durable::DurableSettings::standard()
+    };
     settings.retirement.every = Duration::from_secs(3600);
     let backend = lash::durable::DurableBackendBuilder::new(Arc::clone(&stores))
         .config(settings)

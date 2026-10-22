@@ -136,6 +136,8 @@ async fn lowering_sends_the_recorded_bytes() {
 async fn a_reused_prefix_sends_the_bytes_a_cold_lowering_sends() {
     let token = || Arc::new(lash_core::provider::ProviderToken::new("access"));
     let cache = SegmentCache::new();
+    let retained_cache = SegmentCache::new();
+
     let mut providers = [
         GoogleOAuthProvider::new(token()).with_project_id(Some("wire-corpus-project".into())),
         GoogleOAuthProvider::new(token())
@@ -150,6 +152,19 @@ async fn a_reused_prefix_sends_the_bytes_a_cold_lowering_sends() {
                     let name = format!("{case} step {step} {variant}");
                     let warm = provider.lower(&request, &cache).await;
                     let cold = provider.lower(&request, &SegmentCache::disabled()).await;
+                    let retained =
+                        lash_protocol_types::llm::types::RetainedLlmRequest::from_request(
+                            request.clone(),
+                        );
+                    let persistent = provider.lower_retained(&retained, &retained_cache).await;
+                    assert_eq!(
+                        digest_line(
+                            &name,
+                            persistent.as_ref().map_err(|error| error.message.clone())
+                        ),
+                        digest_line(&name, cold.as_ref().map_err(|error| error.message.clone())),
+                        "retained {name}"
+                    );
                     assert_eq!(
                         digest_line(&name, warm.as_ref().map_err(|error| error.message.clone())),
                         digest_line(&name, cold.as_ref().map_err(|error| error.message.clone())),

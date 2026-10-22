@@ -130,6 +130,15 @@ impl SessionGraph {
     /// Every dropped node is durable and the kept nodes keep their order, so
     /// the kept durable nodes are still the rebuilt graph's prefix.
     pub(crate) fn retire_below_current_frame(&mut self) -> Option<Vec<NodeId>> {
+        // Ordinary acknowledgements keep the same frame. Its indexed opening
+        // already proves whether anything precedes it; do not materialize the
+        // growing path merely to discover that there is nothing to retire.
+        let cache = self
+            .try_cache()
+            .unwrap_or_else(|error| panic!("invalid resident session graph: {error}"));
+        if cache.active_frame_indices.last()? == cache.active_path_indices.first()? {
+            return None;
+        }
         let path = crate::facade_support::SessionGraphFacadeOps::active_path_nodes(self);
         let frame_offset = path.iter().rposition(|node| node.frame_open().is_some())?;
         if frame_offset == 0 {

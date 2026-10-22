@@ -123,7 +123,16 @@ impl WorkbenchLiveReplay {
                     live_replay: Some(serde_json::from_value(policy).with_context(|| {
                         format!("{LIVE_REPLAY_CONFIG_ENV} for the postgresql store")
                     })?),
-                    ..lash::postgres::PostgresHostConfig::default()
+                    ..{
+                        let mut config = lash::postgres::PostgresHostConfig::default();
+                        config.node.max_ingress_bytes =
+                            Some(const { std::num::NonZeroU64::new(64 * 1024).unwrap() });
+                        config.node.owner_retention = Some(lash::durable::OwnerRetentionSettings {
+                            idle: std::time::Duration::from_secs(60),
+                            max_resident_owners: const { std::num::NonZeroUsize::new(256).unwrap() },
+                        });
+                        config
+                    }
                 };
                 config.validate()?;
                 let database_url = database_url.ok_or_else(|| {
@@ -395,6 +404,14 @@ pub(crate) async fn build_workbench_core(
     owner: lash::persistence::LeaseOwnerIdentity,
 ) -> AnyhowResult<LashCore> {
     let host_backend = lash::durable::DurableBackendBuilder::new(Arc::clone(stores))
+        .config(lash::durable::DurableSettings {
+            max_ingress_bytes: Some(const { std::num::NonZeroU64::new(64 * 1024).unwrap() }),
+            owner_retention: Some(lash::durable::OwnerRetentionSettings {
+                idle: std::time::Duration::from_secs(60),
+                max_resident_owners: const { std::num::NonZeroUsize::new(256).unwrap() },
+            }),
+            ..lash::durable::DurableSettings::standard()
+        })
         .build()
         .context("build the durable backend")?;
     let mut builder =

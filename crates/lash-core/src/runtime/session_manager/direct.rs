@@ -574,14 +574,17 @@ mod tests {
     /// Real session services over a live runtime: the law asserts on the
     /// production rebind, not a fixture's idea of it.
     async fn session_services() -> (Arc<RuntimeSessionServices>, crate::SessionPolicy) {
-        let env = crate::RuntimeEnvironment::builder(crate::RuntimeHostConfig::new(
-            crate::testing::sqlite_memory_store_backend().await,
-            crate::CommitBudget::bounded(1024 * 1024, 512),
-            crate::QueuedWorkBatchingConfig::new(1),
-            crate::ExecutionBudgets::recommended(),
-            crate::runtime::DeltaCoalescing::recommended(),
-            crate::DataRetentionConfig::standard(),
-        ))
+        let env = crate::RuntimeEnvironment::builder(
+            crate::RuntimeHostConfig::new(
+                crate::testing::sqlite_memory_store_backend().await,
+                crate::CommitBudget::bounded(1024 * 1024, 512),
+                crate::QueuedWorkBatchingConfig::new(1),
+                crate::ExecutionBudgets::recommended(),
+                crate::runtime::DeltaCoalescing::recommended(),
+                crate::DataRetentionConfig::standard(),
+            )
+            .expect("the fixture ingress limit fits its commit budget"),
+        )
         .with_plugin_host(Arc::new(crate::PluginHost::new(
             crate::testing::test_standard_protocol_factories(),
             crate::ExecutionBudgets::recommended(),

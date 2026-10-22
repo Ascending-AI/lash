@@ -1715,3 +1715,51 @@ fn a_commits_added_transcript_equals_the_full_decode_less_the_base() {
     graph.append_message(input("branch-input", "turn-3"));
     check("a head branched away from the base's leaf", &base, &graph);
 }
+
+#[test]
+fn retained_graph_render_keeps_prefix_across_multiple_source_appends() {
+    use lash_protocol_types::session_model::message::HistoryPresentation;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    let calls = Arc::new(AtomicUsize::new(0));
+    let count = calls.clone();
+    let policy = HistoryPresentation::new(move |_, part| {
+        count.fetch_add(1, Ordering::SeqCst);
+        part.content().into_owned()
+    });
+    let mut graph = SessionGraph::default();
+    let mut held = Vec::<lash_protocol_types::llm::types::RequestMessages>::new();
+    for turn in 0..64 {
+        graph.append_message(text_message(
+            &format!("u{turn}"),
+            MessageRole::User,
+            &format!("question {turn}"),
+        ));
+        graph.append_message(text_message(
+            &format!("a{turn}"),
+            MessageRole::Assistant,
+            &format!("answer {turn}"),
+        ));
+        let read = graph.read_model();
+        calls.store(0, Ordering::SeqCst);
+        let rendered = read
+            .prompt_render_cache
+            .rendered_retained(read.messages.as_slice(), &policy);
+        assert_eq!(
+            calls.load(Ordering::SeqCst),
+            2,
+            "only the two new source parts render"
+        );
+        assert_eq!(
+            rendered.iter().cloned().collect::<Vec<_>>(),
+            lash_protocol_types::session_model::render_prompt(read.messages.as_slice()).messages
+        );
+        if let Some(previous) = held.last() {
+            assert_eq!(
+                previous.shared_prefix(&rendered),
+                previous.len(),
+                "every retained reader shares the complete prefix"
+            );
+        }
+        held.push(rendered);
+    }
+}

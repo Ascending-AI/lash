@@ -1192,3 +1192,5 @@ fn unpin(key: &str, expected: NodeId) -> lash_durable::DomainWrite {
 }
 
 page_law!(checkpoint_lease_handoffs_are_atomic);
+
+page_law!(lo_root_retained_delta_preserves_reachability);

@@ -281,7 +281,8 @@ mod tests {
                     crate::ExecutionBudgets::recommended(),
                     crate::runtime::DeltaCoalescing::recommended(),
                     crate::DataRetentionConfig::standard(),
-                ),
+                )
+                .expect("the fixture ingress limit fits its commit budget"),
                 crate::testing::runtime_lease_owner(),
             )
             .with_session_id(lash_vocabulary::identity::SessionId::fixture(

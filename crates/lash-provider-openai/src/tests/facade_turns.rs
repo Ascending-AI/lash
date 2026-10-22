@@ -35,6 +35,14 @@ pub(super) async fn durable_core(
         .await
         .expect("an in-memory store set opens");
     let backend = lash::durable::DurableBackendBuilder::new(Arc::new(stores))
+        .config(lash::durable::DurableSettings {
+            max_ingress_bytes: Some(const { std::num::NonZeroU64::new(64 * 1024).unwrap() }),
+            owner_retention: Some(lash::durable::OwnerRetentionSettings {
+                idle: std::time::Duration::from_secs(60),
+                max_resident_owners: const { std::num::NonZeroUsize::new(256).unwrap() },
+            }),
+            ..lash::durable::DurableSettings::standard()
+        })
         .build()
         .expect("the durable backend builds");
     let builder = LashCore::standard_builder(backend)
@@ -366,6 +374,14 @@ async fn mixed_model_stream_recovery_obeys_recorded_allowances() {
             .await
             .expect("SQLite memory stores");
         let backend = lash::durable::DurableBackendBuilder::new(Arc::new(stores))
+            .config(lash::durable::DurableSettings {
+                max_ingress_bytes: Some(const { std::num::NonZeroU64::new(64 * 1024).unwrap() }),
+                owner_retention: Some(lash::durable::OwnerRetentionSettings {
+                    idle: std::time::Duration::from_secs(60),
+                    max_resident_owners: const { std::num::NonZeroUsize::new(256).unwrap() },
+                }),
+                ..lash::durable::DurableSettings::standard()
+            })
             .build()
             .expect("durable backend");
         let core = LashCore::standard_builder(backend)

@@ -467,3 +467,45 @@ mod tests {
         assert_eq!(normalize("select $body$private$body$"), "<opaque SQL>");
     }
 }
+
+/// Session-state reads counted at the adapter/decoder boundary. The actor
+/// supplies attribution; independent host reads have no owner monitor.
+#[derive(Clone, Copy, Debug)]
+pub enum OwnerStateRead {
+    Head,
+    Phase,
+}
+/// Why an owner reads durable state.
+#[derive(Clone, Copy, Debug)]
+pub enum OwnerReadClass {
+    Warm,
+    Recovery,
+    Historical,
+}
+type OwnerReadObserver = Arc<dyn Fn(OwnerStateRead, OwnerReadClass) + Send + Sync>;
+tokio::task_local! {
+    static OWNER_READ_OBSERVER: OwnerReadObserver;
+    static OWNER_READ_CLASS: OwnerReadClass;
+}
+/// Attribute all underlying reads in an activation to its original claim.
+pub async fn observe_owner_reads<T>(
+    observer: OwnerReadObserver,
+    future: impl Future<Output = T>,
+) -> T {
+    OWNER_READ_OBSERVER.scope(observer, future).await
+}
+/// Mark a coherent hydration or a genuinely historical read explicitly.
+pub async fn classify_owner_reads<T>(class: OwnerReadClass, future: impl Future<Output = T>) -> T {
+    OWNER_READ_CLASS.scope(class, future).await
+}
+/// Count where a complete head or committed phase is actually requested.
+pub fn owner_state_read(source: OwnerStateRead) {
+    let _ = OWNER_READ_OBSERVER.try_with(|observer| {
+        observer(
+            source,
+            OWNER_READ_CLASS
+                .try_with(|class| *class)
+                .unwrap_or(OwnerReadClass::Warm),
+        )
+    });
+}

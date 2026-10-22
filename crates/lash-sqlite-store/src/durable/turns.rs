@@ -548,7 +548,7 @@ pub(super) fn apply_session_commit(
     write: &SessionCommitWrite,
     prepared: &Result<lash_core_store::store::RuntimeCommitPlanner, DurableError>,
     planned_under: lash_core_store::store::FleetFormat,
-) -> Answer<()> {
+) -> Answer<lash_core_store::store::RuntimeCommitReceipt> {
     commit.open_roots.forget();
     // A fleet move changes the versions a plan emits. Reclassify against
     // the fleet read by this transaction, just as the public store does.
@@ -577,7 +577,7 @@ pub(super) fn apply_session_commit(
         commit.blob_profile,
         now,
     ) {
-        Ok(_) => Ok(Ok(())),
+        Ok(receipt) => Ok(Ok(receipt)),
         Err(error) => refused(&error),
     }
 }
@@ -836,6 +836,40 @@ pub(super) fn turn_with_roots(
             Ok(cancel.map(|cancel| cancel.decode(session, run)).transpose())
         })?
         .map(|row| Some((row, roots))))
+}
+
+/// Read transaction guards without decoding acknowledged admission/phase state.
+pub(super) fn turn_frontier(
+    tx: &Connection,
+    session: &SessionId,
+) -> Answer<Option<(Option<TurnCancelRequest>, PhaseRoots)>> {
+    let stored = tx
+        .prepare_cached(super::SQL.sqlite.turn_frontier.sql())?
+        .query_row([session.as_str()], |row| {
+            Ok((
+                PhaseRoots {
+                    session: session.as_str().to_owned(),
+                    run: row.get(0)?,
+                    checkpoint: crate::codec::optional_hash_column(row, 1)?,
+                    answer: crate::codec::optional_hash_column(row, 2)?,
+                },
+                row.get::<_, Option<String>>(3)?
+                    .map(|_| StoredCancel::read(row, 3))
+                    .transpose()?,
+            ))
+        })
+        .optional()?;
+    let Some((roots, cancel)) = stored else {
+        return Ok(Ok(None));
+    };
+    let run = match TurnId::try_from(roots.run.clone()) {
+        Ok(run) => run,
+        Err(error) => return Ok(Err(corrupt("turn run", &error.to_string()))),
+    };
+    Ok(cancel
+        .map(|cancel| cancel.decode(session, &run))
+        .transpose()
+        .map(|cancel| Some((cancel, roots))))
 }
 
 /// An unfinished turn's phase root and receipt as stored.

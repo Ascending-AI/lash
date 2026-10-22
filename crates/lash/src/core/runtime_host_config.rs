@@ -32,6 +32,7 @@ impl LashCoreBuilder {
             delta_coalescing,
             data_retention,
         )
+        .map_err(EmbedError::IngressConfiguration)?
         .with_provider_file_cache(self.provider_file_cache);
         let core = self.apply_core_overrides(core)?;
         core.control.relay_policy().validate()?;

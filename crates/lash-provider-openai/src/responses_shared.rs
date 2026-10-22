@@ -52,7 +52,9 @@ use lash_vocabulary::schema_contract::SchemaContract;
 
 mod input;
 pub use input::build_responses_input;
-pub(crate) use input::{attachment_feedback, feedback_boundary, push_tool_output};
+pub(crate) use input::{
+    attachment_feedback, feedback_boundary, push_tool_output, retained_group_start,
+};
 mod tool_argument_decoder;
 pub use tool_argument_decoder::ToolArgumentDecoder;
 

@@ -264,6 +264,9 @@ impl SessionCommitStore for PostgresStore {
         &self,
         session_id: &SessionId,
     ) -> Result<Option<SessionHeadMeta>, StoreError> {
+        lash_core_ids::operational_metrics::sql::owner_state_read(
+            lash_core_ids::operational_metrics::sql::OwnerStateRead::Head,
+        );
         let mut tx = history::read_tx(self).await?;
         let row = history::admitted_head_row(&mut tx, session_id, None, self.fence.fleet(), false)
             .await?;

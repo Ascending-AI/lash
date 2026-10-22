@@ -438,7 +438,9 @@ impl AnthropicProvider {
         let mut messages = Vec::with_capacity(plan.units.len());
         for unit in &plan.units {
             let members = &plan.members[unit.members.clone()];
-            messages.extend(units.unit(
+            messages.extend(units.unit_at(
+                members.first().map_or(0, |member| member.0)
+                    ..members.last().map_or(0, |member| member.0 + 1),
                 |mut key| {
                     for &(index, native) in members {
                         let msg = &req.messages[index];
@@ -835,4 +837,30 @@ fn legal_tool_call_id(id: &str) -> bool {
         && id
             .bytes()
             .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_' || byte == b'-')
+}
+
+impl AnthropicProvider {
+    pub(crate) fn retained_group_start(
+        messages: &lash_protocol_types::llm::types::RequestMessages,
+    ) -> usize {
+        let mut role = None;
+        let mut groups = 0;
+        for index in (0..messages.len()).rev() {
+            let Some(message) = messages.get(index) else {
+                continue;
+            };
+            if !Self::message_has_content(message) {
+                continue;
+            }
+            let next = Self::role_name(&message.role);
+            if role != Some(next) {
+                groups += 1;
+                role = Some(next);
+                if groups == 3 {
+                    return index + 1;
+                }
+            }
+        }
+        0
+    }
 }

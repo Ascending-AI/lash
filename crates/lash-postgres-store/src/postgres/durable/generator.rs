@@ -123,36 +123,18 @@ fn gather(collect: Collect) -> String {
 /// then each level deletes what no root references any more, and the
 /// children of what it deleted are the next level.
 fn text_reclaim() -> String {
-    let closure = inline(prompts::closure().sql(), &["v_tfront", "v_protect"]);
-    let lock = perform(&inline(
-        connection_sql().lock_xact_by_keys_seeded.sql(),
-        &["v_closure", &prompts::TEXT_LOCK_SEED.to_string()],
-    ));
-    let children = inline(prompts::read_children().sql(), &["level.hash"]);
-    let reclaim = inline(prompts::RECLAIM.statement().sql(), &["v_tfront"]);
+    let reclaim = inline(
+        prompts::RECLAIM.statement().sql(),
+        &["v_texts", "v_protect", "4096"],
+    );
     format!(
-        "v_tfront := ARRAY(SELECT DISTINCT hash FROM unnest(v_texts) AS released(hash) ORDER BY hash);
-            IF cardinality(v_tfront) > 0 THEN
-                v_closure := ARRAY({closure});
-                {lock};
-                v_tfront := ARRAY(SELECT hash FROM unnest(v_tfront) AS released(hash)
-                    WHERE NOT (hash = ANY(v_protect)) ORDER BY hash);
-                WHILE cardinality(v_tfront) > 0 LOOP
-                    SELECT COALESCE(array_agg(level.hash), '{{}}'), COALESCE(array_agg(edge.child), '{{}}')
-                    INTO v_tparents, v_tchildren
-                    FROM unnest(v_tfront) AS level(hash), LATERAL ({children}) AS edge;
-                    WITH gone AS ({reclaim})
-                    SELECT COALESCE(array_agg(hash), '{{}}') INTO v_closure FROM gone;
-                    v_tfront := ARRAY(SELECT DISTINCT edge.child
-                        FROM unnest(v_tparents, v_tchildren) AS edge(parent, child)
-                        WHERE edge.parent = ANY(v_closure) AND NOT (edge.child = ANY(v_protect))
-                        ORDER BY edge.child);
-                END LOOP;
-            END IF;
-            v_texts := '{{}}';
-            v_protect := '{{}}';
-            v_rows := 0;"
+        "PERFORM * FROM ({reclaim}) AS retired; v_texts := '{{}}'; v_protect := '{{}}'; v_rows := 0;"
     )
+}
+
+/// Shared SQL inlining for domain-owned generated functions.
+pub(super) fn inline_statement(sql: &str, values: &[&str]) -> String {
+    inline(sql, values)
 }
 
 /// The artifact local end with the function's vouching for its answer
@@ -352,7 +334,8 @@ pub(crate) fn function_ddl() -> String {
             "v_clock",
             "jsonb_build_object('revision', v_rev, 'state', v_state, 'cancel', \
              jsonb_build_array(v_cancel_turn, v_cancel_request, v_cancel_origin, \
-             v_cancel_reason, v_cancel_disposition, v_cancel_mode))",
+             v_cancel_reason, v_cancel_disposition, v_cancel_mode), \
+             'session_heads', v_session_heads)",
         ],
     );
     let latch_sweep = inline(
@@ -361,6 +344,7 @@ pub(crate) fn function_ddl() -> String {
     );
     let branches: String = entries().iter().map(|entry| branch(entry)).collect();
     let registry = &*REGISTRY;
+    let receipt_statement = super::head_commit::RECORD_RECEIPT.name();
     let fleet_fence = perform(connection_sql().lock_xact_fleet_fence_shared.sql());
     format!(
         "CREATE OR REPLACE FUNCTION {FUNCTION}(
@@ -373,7 +357,7 @@ pub(crate) fn function_ddl() -> String {
     p_formats TEXT, p_ack BIGINT, p_release TEXT, p_due BIGINT, p_now BIGINT, p_requires TEXT)
 RETURNS TABLE (o_revision BIGINT, o_now BIGINT, o_fleet INTEGER, o_state TEXT,
     o_installed BIGINT, o_cancel_turn TEXT, o_cancel_request TEXT, o_cancel_origin TEXT,
-    o_cancel_reason TEXT, o_cancel_disposition TEXT, o_cancel_mode TEXT)
+    o_cancel_reason TEXT, o_cancel_disposition TEXT, o_cancel_mode TEXT, o_session_heads JSONB)
 LANGUAGE plpgsql
 AS $lash_owner_commit$
 #variable_conflict use_column
@@ -404,6 +388,7 @@ DECLARE
     v_row RECORD;
     v_first JSONB;
     v_slots JSONB := '{{}}';
+    v_session_heads JSONB := '[]';
     v_when JSONB;
     v_leaves TEXT[] := '{{}}';
     v_node TEXT;
@@ -505,6 +490,14 @@ BEGIN
 {branches}        ELSE
             RAISE EXCEPTION 'lash_owner_commit: no step %', v_step->>'s' USING ERRCODE = 'LX000';
         END CASE;
+        -- The result is assembled from the exact successful receipt write,
+        -- including the transaction's clock, without a post-commit read.
+        IF v_step->>'s' = '{receipt_statement}' THEN
+            v_session_heads := v_session_heads || jsonb_build_array(jsonb_build_object(
+                'session', v_p->>0,
+                'receipt', (v_p->>3)::JSONB || jsonb_build_object(
+                    'committed_at_ms', v_now, 'head_revision', (v_p->>10)::BIGINT)));
+        END IF;
         IF v_step ? 'c' THEN
             v_slots := v_slots || jsonb_build_object(v_step->>'c', COALESCE(v_first, 'null'::JSONB));
         END IF;
@@ -587,13 +580,15 @@ BEGIN
     {latch_record};
     {latch_sweep};
     RETURN QUERY SELECT v_rev, v_now, v_fleet, v_state, v_installed, v_cancel_turn,
-        v_cancel_request, v_cancel_origin, v_cancel_reason, v_cancel_disposition, v_cancel_mode;
+        v_cancel_request, v_cancel_origin, v_cancel_reason, v_cancel_disposition, v_cancel_mode,
+        v_session_heads;
 END
 $lash_owner_commit$;
 "
     ) + &crate::artifact_store::local_end_function_ddl()
         + &renewal_ddl()
         + &held_texts_ddl()
+        + &prompts::retirement_function_ddl()
         + &prompt_record_ddl()
 }
 

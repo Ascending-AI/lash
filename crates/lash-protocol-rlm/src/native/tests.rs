@@ -1338,7 +1338,7 @@ fn configured_prompt_is_instructions_on_both_channels() {
             );
             // The call's admission lowers its composed prompt onto the
             // projected request.
-            let mut request = (**projected).clone();
+            let mut request = projected.materialize();
             lash_core::sansio::place_prompt(
                 &mut request,
                 (!prompt.is_empty()).then(|| Arc::from(prompt)),

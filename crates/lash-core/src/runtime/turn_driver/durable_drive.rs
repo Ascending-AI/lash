@@ -3,6 +3,7 @@
 //! runner hands it. The phase runner owns every commit; the drive runs what
 //! a phase does in memory and builds the turn's head commit.
 
+use lash_protocol_types::llm::types::RetainedLlmRequest;
 use std::sync::Arc;
 
 use lash_core_execution::core_internal::RuntimeExecutionContextRuntimeOps as _;
@@ -737,7 +738,7 @@ impl TurnDrive for RuntimeDrive {
         &mut self,
         cx: &ActorContext,
         id: lash_sansio::EffectId,
-        request: Arc<LlmRequest>,
+        request: Arc<RetainedLlmRequest>,
         admitted: &lash_protocol_types::llm::types::AdmittedSend,
         attempt: ModelCallAttempt,
     ) -> Result<(), TurnError> {
@@ -747,7 +748,11 @@ impl TurnDrive for RuntimeDrive {
             cancel,
             stop_error,
         } = attempt;
-        if let Some(row) = cx.durable_reads()?.turn(&self.driver.session_id).await? {
+        if let Some(row) = cx
+            .session_projection()
+            .await?
+            .and_then(|projection| projection.turn)
+        {
             self.driver.model_call_ordinal =
                 row.phase.model().map_or(row.model_calls, |pin| pin.call);
         }
@@ -883,11 +888,14 @@ impl TurnDrive for RuntimeDrive {
 
     async fn prepare_call(
         &mut self,
-        _cx: &ActorContext,
+        cx: &ActorContext,
         id: lash_sansio::EffectId,
         call: u32,
-        request: Arc<LlmRequest>,
+        request: Arc<RetainedLlmRequest>,
     ) -> Result<PreparedCall, TurnError> {
+        if let Some(projection) = cx.session_projection().await? {
+            self.driver.prompt_state = projection.prompt.draft();
+        }
         self.driver.model_call_ordinal = call;
         // Tails that already drained commit with this call's admission; the
         // next call never waits for one that is still being read.
@@ -1048,10 +1056,13 @@ impl TurnDrive for RuntimeDrive {
             .is_some_and(|(cell, ended)| *cell == id && ended.held)
     }
 
-    async fn phase_committed(&mut self) {
+    async fn phase_committed(&mut self, cx: &ActorContext) -> Result<(), TurnError> {
+        if let Some(projection) = cx.session_projection().await? {
+            self.driver.prompt_state = projection.prompt.draft();
+        }
         self.driver.publish_committed_model_calls(&self.observer);
         let Some(staged) = self.staged_working.take() else {
-            return;
+            return Ok(());
         };
         self.working = Some(staged);
         self.driver.session_pages = working_pages(
@@ -1063,6 +1074,7 @@ impl TurnDrive for RuntimeDrive {
         if let Some(code_executor) = self.driver.session.plugins().code_executor() {
             code_executor.acknowledge_execution_state_capture().await;
         }
+        Ok(())
     }
 
     fn code_executor(&self) -> Option<std::sync::Arc<dyn crate::plugin::CodeExecutorPlugin>> {
@@ -1369,6 +1381,7 @@ impl TurnDrive for RuntimeDrive {
             .as_ref()
             .map(|commit| self.published.committing(commit));
         Ok(TurnCommit {
+            postimage: self.driver.turn_pipeline.state().clone(),
             expected_head: commit.expected_head_revision,
             commit: crate::store::encode_session_commit(&commit)
                 .map_err(|error| TurnError::Exec(error.to_string()))?,
@@ -1380,7 +1393,35 @@ impl TurnDrive for RuntimeDrive {
     /// and the publisher ends once that reached the live stream; then the
     /// commit itself, which settles the turn's provisional activity; then
     /// the lifecycle observers see the finalized turn.
-    async fn committed(&mut self) {
+    async fn committed(
+        &mut self,
+        cx: &ActorContext,
+        receipt: &lash_durable::ActorCommit,
+    ) -> Result<(), TurnError> {
+        let plugins = Arc::clone(self.driver.session.plugins());
+        if let Some(state) = self.after_commit.state.take()
+            && let Err(error) = plugins.publish_committed_state(state.resolutions())
+        {
+            cx.invalidate_session_projection().await;
+            return Err(TurnError::Exec(error.to_string()));
+        }
+        let head = match cx.session_projection().await? {
+            Some(projection) => projection.head,
+            None => {
+                // Release drops the projection immediately. Publication still
+                // owns this acknowledged postimage for the terminal handoff.
+                let mut state = self.driver.turn_pipeline.state().clone();
+                let [head] = receipt.session_heads.as_slice() else {
+                    return Err(TurnError::Exec(
+                        "terminal acknowledgement has no unique head".into(),
+                    ));
+                };
+                state
+                    .adopt_retained_commit_result(&head.receipt)
+                    .map_err(|error| TurnError::Exec(error.to_string()))?;
+                Arc::new(state)
+            }
+        };
         if let Some(follow) = self.after_commit.follow.take() {
             follow.publish();
         }
@@ -1395,19 +1436,10 @@ impl TurnDrive for RuntimeDrive {
         );
         let AfterCommit {
             follow: _,
-            state,
+            state: _,
             finalized,
             panic,
         } = std::mem::take(&mut self.after_commit);
-        let plugins = Arc::clone(self.driver.session.plugins());
-        if let Some(state) = state
-            && let Err(error) = plugins.publish_committed_state(state.resolutions())
-        {
-            tracing::warn!(
-                %error,
-                "a committed turn's after-turn state did not publish; its namespaces are fenced"
-            );
-        }
         self.observer.release_terminal();
         self.observer.close();
         if let Err(error) = (&mut self.publisher).await {
@@ -1415,10 +1447,11 @@ impl TurnDrive for RuntimeDrive {
         }
         if let Some(commit) = &self.commit {
             commit
-                .publish(
+                .publish_state(
                     self.live.as_ref(),
                     &self.published,
                     Some(&self.driver.turn_id),
+                    &head,
                 )
                 .await;
         }
@@ -1440,6 +1473,7 @@ impl TurnDrive for RuntimeDrive {
         {
             panic!("{code}: {message}");
         }
+        Ok(())
     }
 }
 

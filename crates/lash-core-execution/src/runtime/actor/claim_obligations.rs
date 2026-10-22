@@ -790,6 +790,30 @@ impl SessionObligations {
         }
     }
 
+    pub(super) async fn hydrated(
+        &self,
+        projection: &super::owner_state::SessionProjection,
+        reads: &dyn DurableReads,
+        limits: DecodeLimits,
+        phase_limits: DecodeLimits,
+    ) -> Result<(), DurableError> {
+        let mut work = RecordedWork::session();
+        work.apply_head(projection.head.undelivered_config_change.as_deref());
+        if projection.turn.is_some() {
+            work.read_turn_into(reads, &self.session, limits, phase_limits, None)
+                .await?;
+        }
+        self.state.lock().await.work = Some(work);
+        Ok(())
+    }
+
+    pub(super) fn invalidate_on_exit(&self) {
+        if let Ok(mut state) = self.state.try_lock() {
+            state.work = None;
+            state.written = None;
+        }
+    }
+
     pub(super) async fn invalidate(&self) {
         let mut state = self.state.lock().await;
         state.work = None;

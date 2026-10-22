@@ -19,7 +19,13 @@ impl LawBackend {
     }
 
     pub(crate) fn over_stores(stores: Arc<dyn crate::StoreSet>) -> Self {
-        Self::over(&crate::Backend::for_testing(stores))
+        Self::over(&crate::Backend::for_testing(
+            stores,
+            lash_core::durable_port::OwnerRetentionSettings {
+                idle: std::time::Duration::from_secs(60),
+                max_resident_owners: const { std::num::NonZeroUsize::new(256).unwrap() },
+            },
+        ))
     }
 
     pub(crate) fn into_backend(self) -> crate::Backend {
@@ -91,7 +97,13 @@ impl StoreLawBackend {
     }
 
     pub(crate) fn into_backend(self) -> crate::Backend {
-        crate::Backend::for_testing(self.stores)
+        crate::Backend::for_testing(
+            self.stores,
+            lash_core::durable_port::OwnerRetentionSettings {
+                idle: std::time::Duration::from_secs(60),
+                max_resident_owners: const { std::num::NonZeroUsize::new(256).unwrap() },
+            },
+        )
     }
 
     /// A store set whose every port panics: what a law reaches only for
@@ -101,6 +113,10 @@ impl StoreLawBackend {
         Self::new().stores
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "conformance fixture explicitly chooses its host limits"
+    )]
     pub(crate) fn host_config(
         self,
         commit_budget: crate::CommitBudget,
@@ -114,6 +130,7 @@ impl StoreLawBackend {
             lash_core::runtime::DeltaCoalescing::recommended(),
             crate::DataRetentionConfig::standard(),
         )
+        .expect("the fixture ingress limit fits its commit budget")
     }
 }
 

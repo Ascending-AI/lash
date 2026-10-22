@@ -141,7 +141,13 @@ enum Race {
 /// first input is bound to it, the second stays open, and every admission
 /// commit but one is refused for ownership or admits nothing.
 pub async fn two_claimers_racing_admission_admit_one_run(stores: Arc<dyn StoreSet>, prefix: &str) {
-    let backend = Backend::for_testing(Arc::clone(&stores));
+    let backend = Backend::for_testing(
+        Arc::clone(&stores),
+        lash_core::durable_port::OwnerRetentionSettings {
+            idle: std::time::Duration::from_secs(60),
+            max_resident_owners: const { std::num::NonZeroUsize::new(256).unwrap() },
+        },
+    );
     let durable = Arc::clone(backend.durable());
     for race in [
         Race::StaleCommitsLast,

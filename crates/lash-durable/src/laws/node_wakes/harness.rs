@@ -246,13 +246,27 @@ pub fn serve_node_on(
 pub(super) fn under(lease: LeaseSettings) -> DurableSettings {
     DurableSettings {
         lease,
-        ..DurableSettings::default()
+        ..DurableSettings {
+            max_ingress_bytes: Some(const { std::num::NonZeroU64::new(64 * 1024).unwrap() }),
+            owner_retention: Some(crate::OwnerRetentionSettings {
+                idle: std::time::Duration::from_secs(60),
+                max_resident_owners: const { std::num::NonZeroUsize::new(256).unwrap() },
+            }),
+            ..DurableSettings::default()
+        }
     }
 }
 
 /// Settings that run at most `max_active` actors under `lease`.
 pub(super) fn holding(lease: LeaseSettings, max_active: usize) -> DurableSettings {
-    let defaults = DurableSettings::default();
+    let defaults = DurableSettings {
+        max_ingress_bytes: Some(const { std::num::NonZeroU64::new(64 * 1024).unwrap() }),
+        owner_retention: Some(crate::OwnerRetentionSettings {
+            idle: std::time::Duration::from_secs(60),
+            max_resident_owners: const { std::num::NonZeroUsize::new(256).unwrap() },
+        }),
+        ..DurableSettings::default()
+    };
     DurableSettings {
         lease,
         max_active,
@@ -451,6 +465,18 @@ impl DurableStore for CountingStore {
 
     async fn begin(&self, actor: &ActorKey, epoch: Epoch) -> Result<ActorTx, DurableError> {
         self.inner.begin(actor, epoch).await
+    }
+
+    async fn begin_retained(
+        &self,
+        actor: &ActorKey,
+        epoch: crate::Epoch,
+        expected: crate::StateRevision,
+        max_mail_bytes: u64,
+    ) -> Result<ActorTx, DurableError> {
+        self.inner
+            .begin_retained(actor, epoch, expected, max_mail_bytes)
+            .await
     }
 
     async fn open_process(

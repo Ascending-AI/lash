@@ -639,11 +639,14 @@ impl Hints {
     }
 
     /// Ask owners to yield their slots until the node keeps at most
-    /// `max_active`: idle owners first, the longest idle first, then the
-    /// owners with work in claim order. A yielding owner finishes what it is
-    /// doing and releases its actor at its next idle pass.
+    /// `max_active`, choosing the longest idle owners first. A busy owner is
+    /// never selected; work that wins a yield race asks for another victim.
     pub(super) fn make_room(&self, max_active: usize) {
         let mut slots = self.slots();
+        // The claim already succeeded, but its activation still needs a slot.
+        // Preserve that debt if a selected victim becomes busy; its next idle
+        // transition must ring admission even with no further mail or poll.
+        slots.owed = true;
         let kept = slots.by_actor.values().filter(|slot| !slot.yielding);
         let excess = kept.count().saturating_sub(max_active);
         if excess == 0 {
@@ -652,7 +655,7 @@ impl Hints {
         let mut kept: Vec<&mut Slot> = slots
             .by_actor
             .values_mut()
-            .filter(|slot| !slot.yielding)
+            .filter(|slot| !slot.yielding && slot.idle.is_some())
             .collect();
         kept.sort_by_key(|slot| (slot.idle.is_none(), slot.idle, slot.order));
         for slot in kept.into_iter().take(excess) {
@@ -687,6 +690,18 @@ impl Hints {
             slot.idle = None;
             slot.yielding
         })
+    }
+
+    /// Work won a race with an idle yield request. Ask the runner to choose
+    /// the next idle victim; this busy owner never waits for admission.
+    pub(super) fn busy(&self, actor: &ActorKey) {
+        let mut slots = self.slots();
+        if let Some(slot) = slots.by_actor.get_mut(actor) {
+            slot.idle = None;
+            if std::mem::take(&mut slot.yielding) {
+                self.inner.claim.notify_one();
+            }
+        }
     }
 
     fn slots(&self) -> std::sync::MutexGuard<'_, Slots> {
@@ -1118,5 +1133,36 @@ impl std::fmt::Debug for KeyWatch {
             .field("generation", &self.generation())
             .field("every_process", &self.every_process)
             .finish()
+    }
+}
+
+#[cfg(test)]
+mod admission_laws {
+    use super::*;
+
+    /// A selected idle victim can receive work before releasing. Once it
+    /// returns idle, pending admission must wake even though the earlier
+    /// successful claim already consumed its normal claim-room debt.
+    #[tokio::test]
+    async fn a_busy_victim_that_returns_idle_wakes_pending_admission() {
+        let hints = Hints::default();
+        let a = ActorKey::session("victim").unwrap();
+        let b = ActorKey::session("busy").unwrap();
+        hints.start(a.clone());
+        hints.start(b);
+        assert!(hints.enter_idle(&a, Instant::now()));
+        assert_eq!(hints.claim_room(2), 1);
+        hints.make_room(1);
+        hints.busy(&a);
+        hints.inner.claim.notified().await;
+        // Every resident is now busy; the replacement still waits outside.
+        hints.make_room(1);
+        assert!(hints.enter_idle(&a, Instant::now()));
+        tokio::time::timeout(
+            std::time::Duration::from_secs(1),
+            hints.inner.claim.notified(),
+        )
+        .await
+        .expect("returning idle must ring pending admission without a poll");
     }
 }

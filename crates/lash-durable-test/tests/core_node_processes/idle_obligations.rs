@@ -144,7 +144,14 @@ async fn settling_one_of_two_writes_leaves_the_provider_required(tier: Tier) {
     let (stores, _keep) = stores(tier).await;
     let (backend, core) = node_over(
         stores,
-        lash_core_execution::DurableSettings::default(),
+        lash_core_execution::DurableSettings {
+            max_ingress_bytes: Some(const { std::num::NonZeroU64::new(64 * 1024).unwrap() }),
+            owner_retention: Some(lash_durable::OwnerRetentionSettings {
+                idle: std::time::Duration::from_secs(60),
+                max_resident_owners: const { std::num::NonZeroUsize::new(256).unwrap() },
+            }),
+            ..lash_core_execution::DurableSettings::default()
+        },
         vec![Arc::new(ScriptEngine {
             kind: TWO_WRITE_ENGINE,
             advance: two_write_engine_advance,
@@ -257,7 +264,14 @@ async fn a_typed_config_components_unsettled_step_is_served_after_release(tier: 
     let (stores, _keep) = stores(tier).await;
     let (backend, core) = node_over(
         stores,
-        lash_core_execution::DurableSettings::default(),
+        lash_core_execution::DurableSettings {
+            max_ingress_bytes: Some(const { std::num::NonZeroU64::new(64 * 1024).unwrap() }),
+            owner_retention: Some(lash_durable::OwnerRetentionSettings {
+                idle: std::time::Duration::from_secs(60),
+                max_resident_owners: const { std::num::NonZeroUsize::new(256).unwrap() },
+            }),
+            ..lash_core_execution::DurableSettings::default()
+        },
         vec![Arc::new(ScriptEngine {
             kind: TWO_WRITE_ENGINE,
             advance: two_write_engine_advance,
@@ -322,7 +336,14 @@ async fn component_state_format_fences_old_nodes_on_sqlite_memory() {
     let two = lash_vocabulary::providers::FormatVersion::new(2).unwrap();
     let (backend, core) = node_over(
         Arc::clone(&stores),
-        lash_core_execution::DurableSettings::default(),
+        lash_core_execution::DurableSettings {
+            max_ingress_bytes: Some(const { std::num::NonZeroU64::new(64 * 1024).unwrap() }),
+            owner_retention: Some(lash_durable::OwnerRetentionSettings {
+                idle: std::time::Duration::from_secs(60),
+                max_resident_owners: const { std::num::NonZeroUsize::new(256).unwrap() },
+            }),
+            ..lash_core_execution::DurableSettings::default()
+        },
         vec![Arc::new(ScriptEngine {
             kind: IDLE_ENGINE,
             advance: idle_engine_advance,
@@ -361,7 +382,14 @@ async fn component_state_format_fences_old_nodes_on_sqlite_memory() {
     let converted_view = Arc::new(Mutex::new(Vec::new()));
     let (_, newer) = node_over(
         stores,
-        lash_core_execution::DurableSettings::default(),
+        lash_core_execution::DurableSettings {
+            max_ingress_bytes: Some(const { std::num::NonZeroU64::new(64 * 1024).unwrap() }),
+            owner_retention: Some(lash_durable::OwnerRetentionSettings {
+                idle: std::time::Duration::from_secs(60),
+                max_resident_owners: const { std::num::NonZeroUsize::new(256).unwrap() },
+            }),
+            ..lash_core_execution::DurableSettings::default()
+        },
         vec![Arc::new(ScriptEngine {
             kind: IDLE_ENGINE,
             advance: idle_engine_advance,
@@ -574,7 +602,14 @@ async fn component_state_converts_at_a_cut_on_sqlite_memory() {
     };
     let (backend, first) = node_over(
         Arc::clone(&stores),
-        lash_core_execution::DurableSettings::default(),
+        lash_core_execution::DurableSettings {
+            max_ingress_bytes: Some(const { std::num::NonZeroU64::new(64 * 1024).unwrap() }),
+            owner_retention: Some(lash_durable::OwnerRetentionSettings {
+                idle: std::time::Duration::from_secs(60),
+                max_resident_owners: const { std::num::NonZeroUsize::new(256).unwrap() },
+            }),
+            ..lash_core_execution::DurableSettings::default()
+        },
         engine(),
         build(lash_vocabulary::providers::FormatVersion::ONE),
     );
@@ -613,7 +648,14 @@ async fn component_state_converts_at_a_cut_on_sqlite_memory() {
         seen.lock().unwrap().clear();
         let (_, next) = node_over(
             Arc::clone(&stores),
-            lash_core_execution::DurableSettings::default(),
+            lash_core_execution::DurableSettings {
+                max_ingress_bytes: Some(const { std::num::NonZeroU64::new(64 * 1024).unwrap() }),
+                owner_retention: Some(lash_durable::OwnerRetentionSettings {
+                    idle: std::time::Duration::from_secs(60),
+                    max_resident_owners: const { std::num::NonZeroUsize::new(256).unwrap() },
+                }),
+                ..lash_core_execution::DurableSettings::default()
+            },
             engine(),
             build(lash_vocabulary::providers::FormatVersion::new(2).unwrap()),
         );

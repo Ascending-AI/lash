@@ -212,9 +212,7 @@ impl RlmRuntimeState {
         // without rendering its prompt. The recorded round is the authority
         // for imports on every execution, including a cold restored cell.
         guard.shows_packages(ctx.recorded_packages().clone());
-        guard
-            .execute(ctx, request, session_projected_bindings)
-            .await
+        Box::pin(guard.execute(ctx, request, session_projected_bindings)).await
     }
 
     pub(crate) fn execution_state_dirty(&self) -> bool {

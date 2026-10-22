@@ -77,7 +77,14 @@ const TTL_MILLIS: i64 = 15_000;
 /// short claim poll.
 #[must_use]
 pub fn settings() -> DurableSettings {
-    let mut settings = DurableSettings::default();
+    let mut settings = DurableSettings {
+        max_ingress_bytes: Some(const { std::num::NonZeroU64::new(64 * 1024).unwrap() }),
+        owner_retention: Some(lash_durable::OwnerRetentionSettings {
+            idle: std::time::Duration::from_secs(60),
+            max_resident_owners: const { std::num::NonZeroUsize::new(256).unwrap() },
+        }),
+        ..DurableSettings::default()
+    };
     settings.lease.claim_poll = CLAIM_POLL;
     settings
 }
@@ -580,6 +587,7 @@ pub async fn a_waiting_actor_past_its_deadline_times_out_within_the_claim_poll(
             offers: Default::default(),
             lease: backend.config().lease(),
             max_active: 4,
+            owner_retention: backend.config().settings().owner_retention,
             claim_batch: 4,
             retirement: backend.config().settings().retirement,
         },

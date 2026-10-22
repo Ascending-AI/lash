@@ -141,7 +141,16 @@ impl Deployment {
                 None,
             ),
             Database::Postgres(url) => {
-                let mut config = PostgresHostConfig::default();
+                let mut config = {
+                    let mut config = PostgresHostConfig::default();
+                    config.node.max_ingress_bytes =
+                        Some(const { std::num::NonZeroU64::new(64 * 1024).unwrap() });
+                    config.node.owner_retention = Some(lash_durable::OwnerRetentionSettings {
+                        idle: std::time::Duration::from_secs(60),
+                        max_resident_owners: const { std::num::NonZeroUsize::new(256).unwrap() },
+                    });
+                    config
+                };
                 config.roles.work.max_connections = self.pool.max;
                 config.roles.work.min_connections = self.pool.min;
                 config.roles.max_store_operations = self.pool.max as usize;

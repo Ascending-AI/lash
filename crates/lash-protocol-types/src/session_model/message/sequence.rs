@@ -108,7 +108,7 @@ impl MessageSequence {
     }
 
     pub fn is_empty(&self) -> bool {
-        self.as_slice().is_empty()
+        self.len() == 0
     }
 
     pub fn len(&self) -> usize {
@@ -261,25 +261,36 @@ impl MessageSequence {
         self.materialized = Arc::default();
     }
 
-    pub fn render_prompt(&self, policy: &HistoryPresentation) -> RenderedPrompt {
+    pub fn render_retained(
+        &self,
+        policy: &HistoryPresentation,
+    ) -> crate::llm::types::RequestMessages {
         let SequenceMode::Layered { base, delta } = &self.mode else {
-            return policy.render(self.as_slice());
-        };
-        if base.is_empty() {
-            return policy.render(delta.as_slice());
-        }
-        let mut rendered = match &self.base_rendered {
-            Some(cache) => RenderedPrompt {
-                messages: cache.rendered(base.as_slice(), policy).to_vec(),
-            },
-            None => policy.render(base.as_slice()),
-        };
-        if !delta.is_empty() {
-            append_structured_prompt_tail(delta, base.as_slice(), policy, |message| {
-                rendered.messages.push(message);
+            let mut tail = Vec::new();
+            append_structured_prompt_tail(self.as_slice(), &[], policy, |message| {
+                tail.push(message)
             });
+            return crate::llm::types::RequestMessages::default().append(&tail);
+        };
+        let rendered = match &self.base_rendered {
+            Some(cache) => cache.rendered_retained(base.as_slice(), policy),
+            None => {
+                let mut tail = Vec::new();
+                append_structured_prompt_tail(base.as_slice(), &[], policy, |message| {
+                    tail.push(message)
+                });
+                crate::llm::types::RequestMessages::default().append(&tail)
+            }
+        };
+        let mut tail = Vec::new();
+        append_structured_prompt_tail(delta, base.as_slice(), policy, |message| tail.push(message));
+        rendered.append(&tail)
+    }
+
+    pub fn render_prompt(&self, policy: &HistoryPresentation) -> RenderedPrompt {
+        RenderedPrompt {
+            messages: self.render_retained(policy).iter().cloned().collect(),
         }
-        rendered
     }
 }
 

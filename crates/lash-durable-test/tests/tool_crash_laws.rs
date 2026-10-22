@@ -1586,7 +1586,11 @@ impl Scenario for Crash {
         *self.backend.lock_recover() = Some(served::configured_backend(
             stores,
             lash_core_execution::DurableSettings {
-                idle_evict: sim::IDLE_EVICT,
+                max_ingress_bytes: Some(const { std::num::NonZeroU64::new(64 * 1024).unwrap() }),
+                owner_retention: Some(lash_durable::OwnerRetentionSettings {
+                    idle: sim::IDLE_EVICT,
+                    max_resident_owners: const { std::num::NonZeroUsize::new(256).unwrap() },
+                }),
                 ..sim::settings()
             },
             Vec::new(),

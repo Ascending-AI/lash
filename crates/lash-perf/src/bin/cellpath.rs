@@ -82,6 +82,14 @@ async fn run(args: Args) -> Result<()> {
     )
     .await;
     let backend = lash::durable::DurableBackendBuilder::new(stores)
+        .config(lash::durable::DurableSettings {
+            max_ingress_bytes: Some(const { std::num::NonZeroU64::new(64 * 1024).unwrap() }),
+            owner_retention: Some(lash::durable::OwnerRetentionSettings {
+                idle: std::time::Duration::from_secs(60),
+                max_resident_owners: const { std::num::NonZeroUsize::new(256).unwrap() },
+            }),
+            ..lash::durable::DurableSettings::standard()
+        })
         .build()
         .map_err(|error| anyhow::anyhow!("the backend: {error}"))?;
     let mut workers = lash::vm::WorkerService::subprocess(&args.vm_worker)
