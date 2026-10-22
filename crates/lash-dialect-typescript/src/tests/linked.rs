@@ -124,23 +124,33 @@ pub(super) fn program(
     library: lash_kernel_vm::PreparedLibrary,
 ) -> lash_kernel_vm::Program {
     let document_id = document.identity();
-    FIXTURE_CONTENT.with(|content| {
-        let mut content = content.borrow_mut();
-        let link = link(&document, &content);
+    FIXTURE_CONTENT.with(|fixture| {
+        let mut retained = fixture.borrow_mut();
+        let release = lash_vm_releases::helper_release()
+            .unwrap_or_else(|error| panic!("fixture helpers: {error}"));
+        let link = link(&document, &release.content);
         let root = link.identity();
         let mut scope = RootContent {
             previous_document: None,
             previous_link: None,
             document: document_id,
             link: root,
-            content: &mut content,
+            content: &mut retained,
         };
-        scope.previous_document = scope
+        if let Some(content) = scope.content.as_mut() {
+            scope.previous_document = content
+                .documents
+                .insert(document_id, document.as_ref().clone());
+            scope.previous_link = content.links.insert(root, link);
+        } else {
+            // The first cell owns the graph's initial membership too. Later
+            // cells reuse the same published graph after its root is removed.
+            *scope.content = Some(content(&document).0);
+        }
+        let content = scope
             .content
-            .documents
-            .insert(document_id, document.as_ref().clone());
-        scope.previous_link = scope.content.links.insert(root, link);
-        let content = &scope.content;
+            .as_ref()
+            .unwrap_or_else(|| unreachable!("fixture graph initialized"));
 
         let reach = content
             .inspect(root, &lash_kernel_package::ReachSelection::AllExports)
@@ -208,16 +218,13 @@ pub(super) fn program(
 // A cell is a scoped addition, not a copy of that graph. Program documents
 // retain the shared immutable helper allocations after the scope ends.
 thread_local! {
-    static FIXTURE_CONTENT: RefCell<lash_kernel_package::LinkedContent> = RefCell::new({
-        HELPER_SNAPSHOTS.with(|copies| copies.set(copies.get() + 1));
-        lash_vm_releases::helper_release().expect("fixture helpers").content.clone()
-    });
-    static HELPER_SNAPSHOTS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    static FIXTURE_CONTENT: RefCell<Option<lash_kernel_package::LinkedContent>> = const { RefCell::new(None) };
+    pub(super) static HELPER_SNAPSHOTS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
 /// Own the temporary graph membership before inspection or admission can fail.
 struct RootContent<'a> {
-    content: &'a mut lash_kernel_package::LinkedContent,
+    content: &'a mut Option<lash_kernel_package::LinkedContent>,
     document: lash_vocabulary::DocumentId,
     link: lash_vocabulary::LinkId,
     previous_document: Option<lash_kernel_doc::Document>,
@@ -226,46 +233,16 @@ struct RootContent<'a> {
 
 impl Drop for RootContent<'_> {
     fn drop(&mut self) {
-        self.content.documents.remove(&self.document);
-        self.content.links.remove(&self.link);
+        let Some(content) = self.content.as_mut() else {
+            return;
+        };
+        content.documents.remove(&self.document);
+        content.links.remove(&self.link);
         if let Some(document) = self.previous_document.take() {
-            self.content.documents.insert(self.document, document);
+            content.documents.insert(self.document, document);
         }
         if let Some(link) = self.previous_link.take() {
-            self.content.links.insert(self.link, link);
+            content.links.insert(self.link, link);
         }
     }
-}
-
-/// FIG-7135: preparing independent cells shares immutable helper source;
-/// the number of release graph snapshots cannot grow with the cell count.
-#[test]
-fn cell_preparation_shares_the_helper_release_without_copying_its_graph() {
-    let library = super::machine::prepared().clone();
-    HELPER_SNAPSHOTS.with(|copies| copies.set(0));
-    let programs: Vec<_> = [
-        "'first'.trim()",
-        "'second'.slice(1)",
-        "'third'.includes('h')",
-    ]
-    .into_iter()
-    .map(|source| {
-        program(
-            Arc::clone(super::lower(source).unwrap().document.shared()),
-            library.clone(),
-        )
-    })
-    .collect();
-    for (id, document) in &programs[0].documents {
-        if *id != programs[0].document.identity() {
-            for program in &programs[1..] {
-                assert!(Arc::ptr_eq(document, &program.documents[id]));
-            }
-        }
-    }
-    assert!(programs.windows(2).all(|pair| pair[0].link != pair[1].link));
-    assert!(
-        HELPER_SNAPSHOTS.with(|copies| copies.get()) <= 1,
-        "cell preparation must share one published helper graph"
-    );
 }
