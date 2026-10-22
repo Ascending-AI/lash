@@ -26,12 +26,15 @@
 //! have succeeded, and every new staged byte is charged to the encoder's
 //! memory lease first.
 
+use std::borrow::Cow;
+use std::cell::OnceCell;
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex, OnceLock};
 
 use lash_vocabulary::tokens::CanonicalFault;
 use lash_vocabulary::tokens::ChildRef;
 use lash_vocabulary::tokens::TokenCodec;
+use lash_vocabulary::tokens::TokenError;
 use lash_vocabulary::tokens::TokenEvent;
 use lash_vocabulary::tokens::TokenReader;
 use lash_vocabulary::tokens::TokenWriter;
@@ -69,7 +72,88 @@ impl<'a> TypedBody<'a> {
     /// body this is (`K-ID-001`, `K-ID-002`).
     #[must_use]
     pub fn digest(&self) -> [u8; 32] {
+        #[cfg(any(test, feature = "testing"))]
+        record_analysis_work(0, self.0.len());
+        #[cfg(feature = "perf-witness")]
+        crate::perf_witness::record_hash_pass(self.0.len());
         logical_digest(self.0)
+    }
+}
+
+/// Borrowed facts for one immutable token representation within one read.
+/// This is an internal decoder/encoder seam: it grants no store admission.
+/// Transformed bytes require a separate analysis; the digest and scan cannot
+/// be supplied independently of the bytes they describe.
+pub struct AnalyzedBody<'a> {
+    bytes: &'a [u8],
+    digest: OnceCell<[u8; 32]>,
+    scan: OnceCell<Arc<LogicalScan>>,
+}
+
+impl<'a> AnalyzedBody<'a> {
+    #[must_use]
+    pub fn new(bytes: &'a [u8]) -> Self {
+        Self {
+            bytes,
+            digest: OnceCell::new(),
+            scan: OnceCell::new(),
+        }
+    }
+
+    #[must_use]
+    pub fn as_bytes(&self) -> &'a [u8] {
+        self.bytes
+    }
+
+    fn digest(&self) -> [u8; 32] {
+        *self
+            .digest
+            .get_or_init(|| TypedBody::logical(self.bytes).digest())
+    }
+
+    /// Canonical placement facts for exactly this borrowed representation.
+    pub fn scan(&self, kind: NodeKind) -> Result<&LogicalScan, GraphRefusal> {
+        if let Some(scan) = self.scan.get() {
+            return Ok(scan);
+        }
+        let scan = LogicalScan::scan_with_digest(self.bytes, kind, || self.digest())?;
+        Ok(self.scan.get_or_init(|| scan))
+    }
+
+    /// Inline framing size, without another scan or digest lookup.
+    pub fn inline_envelope_len(&self, kind: NodeKind) -> Result<u64, GraphRefusal> {
+        let scan = self.scan(kind)?;
+        Ok(envelope_len(
+            kind,
+            scan.children.len(),
+            scan.physical_len(self.bytes.len()) + 3,
+        ) as u64)
+    }
+
+    /// Requires exactly one token tree, consuming already prepared tree facts.
+    pub fn one_token(&self, kind: NodeKind) -> Result<(), GraphRefusal> {
+        let Some(scan) = self.scan.get() else {
+            return one_token(self.bytes, kind);
+        };
+        match scan.tree_end {
+            Some(end) if end == self.bytes.len() => Ok(()),
+            Some(_) => Err(GraphRefusal::NonCanonical {
+                node: None,
+                reason: CanonicalFault::NotOneToken,
+            }),
+            None => Err(GraphRefusal::from_token(
+                TokenError::Truncated,
+                None,
+                Some(kind.0),
+            )),
+        }
+    }
+
+    fn to_physical(&self, kind: NodeKind) -> Result<(Vec<[u8; 32]>, Vec<u8>), GraphRefusal> {
+        let scan = self.scan(kind)?;
+        let mut body = Vec::with_capacity(scan.physical_len(self.bytes.len()));
+        scan.write_physical(self.bytes, &mut body);
+        Ok((scan.children.clone(), body))
     }
 }
 
@@ -305,12 +389,13 @@ pub(crate) fn prepare_envelope(
 // Compare actual bytes on lookup and publication, under the same bounded
 // preparation owner as canonical encoding and envelope framing.
 pub(crate) fn prepare_logical(
+    digest: NodeId,
     bytes: &[u8],
     skip: usize,
     expand: impl FnOnce() -> Result<Vec<u8>, GraphRefusal>,
 ) -> Result<Arc<[u8]>, GraphRefusal> {
     let cache = encoding_cache();
-    let key = (EncodingKind::Logical(skip), NodeId::of_envelope(bytes).0);
+    let key = (EncodingKind::Logical(skip), digest.0);
     if let Some(tokens) = cache
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -398,31 +483,74 @@ impl GraphStaging {
     /// [`GraphRefusal::EncodeMemoryLimit`] past the lease.
     pub fn encode(&mut self, kind: NodeKind, body: TypedBody<'_>) -> Result<NodeId, GraphRefusal> {
         self.memoized(EncodingKind::Node(kind), body.as_bytes(), |staging| {
-            staging.encode_body(kind, body.as_bytes())
+            staging.encode_body(kind, &AnalyzedBody::new(body.as_bytes()), None)
         })
     }
 
-    fn encode_body(&mut self, kind: NodeKind, logical: &[u8]) -> Result<NodeId, GraphRefusal> {
+    /// Canonically re-encodes an unplaced body, reusing read-local facts only
+    /// after comparing its placement with the supplied immutable bytes.
+    pub fn reencode(
+        &mut self,
+        kind: NodeKind,
+        logical: &[u8],
+        placed: &AnalyzedBody<'_>,
+    ) -> Result<NodeId, GraphRefusal> {
+        if std::ptr::eq(logical, placed.as_bytes()) || logical == placed.as_bytes() {
+            self.encode_analyzed(kind, placed, Some(placed))
+        } else {
+            self.encode_analyzed(kind, &AnalyzedBody::new(logical), Some(placed))
+        }
+    }
+
+    fn encode_analyzed(
+        &mut self,
+        kind: NodeKind,
+        body: &AnalyzedBody<'_>,
+        placed: Option<&AnalyzedBody<'_>>,
+    ) -> Result<NodeId, GraphRefusal> {
+        self.memoized_analysis(EncodingKind::Node(kind), body, |staging| {
+            staging.encode_body(kind, body, placed)
+        })
+    }
+
+    fn encode_body(
+        &mut self,
+        kind: NodeKind,
+        body: &AnalyzedBody<'_>,
+        prepared_placement: Option<&AnalyzedBody<'_>>,
+    ) -> Result<NodeId, GraphRefusal> {
+        let logical = body.as_bytes();
         let spec = kind.spec().ok_or(GraphRefusal::UnsupportedKind(kind.0))?;
         match spec.shape {
             BodyShape::Direct => {
                 if kind != NodeKind::STRUCTURE_BLOCK {
-                    one_token(logical, kind)?;
+                    body.one_token(kind)?;
                 }
-                let (children, physical) = to_physical(logical, kind)?;
+                let (children, physical) = body.to_physical(kind)?;
                 self.insert(kind, &children, physical)
             }
             BodyShape::Enveloped => {
-                let placed = self.place(logical, kind)?;
-                one_token(&placed, kind)?;
-                let (children, physical) = to_physical(&placed, kind)?;
+                let placed = self.place(body, kind)?;
+                let analysis = AnalyzedBody::new(&placed);
+                let analysis =
+                    if std::ptr::eq(placed.as_ref(), logical) || placed.as_ref() == logical {
+                        body
+                    } else if let Some(prepared) =
+                        prepared_placement.filter(|prepared| prepared.as_bytes() == placed.as_ref())
+                    {
+                        prepared
+                    } else {
+                        &analysis
+                    };
+                analysis.one_token(kind)?;
+                let (children, physical) = analysis.to_physical(kind)?;
                 let mut inline = Vec::with_capacity(physical.len() + 3);
                 inline.extend_from_slice(&[0x0c, 0x00, 0x01]);
                 inline.extend_from_slice(&physical);
                 if envelope_len(kind, children.len(), inline.len()) as u64 <= spec.bound.bytes() {
                     return self.insert(kind, &children, inline);
                 }
-                let stream = self.stream(kind, &placed)?;
+                let stream = self.stream_analyzed(kind, analysis)?;
                 self.insert(kind, &[stream.0], vec![0x0c, 0x01, 0x01, 0x0b, 0x00])
             }
         }
@@ -550,12 +678,20 @@ impl GraphStaging {
         input: &[u8],
         encode: impl FnOnce(&mut Self) -> Result<NodeId, GraphRefusal>,
     ) -> Result<NodeId, GraphRefusal> {
+        self.memoized_analysis(kind, &AnalyzedBody::new(input), encode)
+    }
+
+    fn memoized_analysis(
+        &mut self,
+        kind: EncodingKind,
+        analysis: &AnalyzedBody<'_>,
+        encode: impl FnOnce(&mut Self) -> Result<NodeId, GraphRefusal>,
+    ) -> Result<NodeId, GraphRefusal> {
+        let input = analysis.as_bytes();
         if input.len() > CACHE_BYTES {
             return encode(self);
         }
-        #[cfg(feature = "perf-witness")]
-        crate::perf_witness::record_hash_pass(input.len());
-        let key = (kind, TypedBody::logical(input).digest());
+        let key = (kind, analysis.digest());
         let prepared = self
             .cache
             .lock()
@@ -589,7 +725,19 @@ impl GraphStaging {
 
     /// Replaces every text and bytes token over the inline bound with a
     /// reference to its placed value.
-    fn place(&mut self, logical: &[u8], kind: NodeKind) -> Result<Vec<u8>, GraphRefusal> {
+    fn place<'a>(
+        &mut self,
+        body: &AnalyzedBody<'a>,
+        kind: NodeKind,
+    ) -> Result<Cow<'a, [u8]>, GraphRefusal> {
+        let logical = body.as_bytes();
+        if body
+            .scan
+            .get()
+            .is_some_and(|scan| scan.oversized_inline.is_none())
+        {
+            return Ok(Cow::Borrowed(logical));
+        }
         let mut reader = TokenReader::new(logical);
         let mut out = TokenWriter::with_capacity(logical.len().min(MAX_NODE_BYTES as usize));
         while !reader.is_empty() {
@@ -609,7 +757,7 @@ impl GraphStaging {
                 _ => out.raw(&logical[start..reader.position()]),
             }
         }
-        Ok(out.into_bytes())
+        Ok(Cow::Owned(out.into_bytes()))
     }
 
     /// Stages `text`'s leaves and index and returns its root, whatever its
@@ -638,7 +786,8 @@ impl GraphStaging {
             let mut body = TokenWriter::with_capacity(token_len(chunk.len()) as usize);
             body.text(chunk);
             let logical = body.into_bytes();
-            let leaf = self.encode(NodeKind::TEXT_LEAF, TypedBody::logical(&logical))?;
+            let leaf =
+                self.encode_analyzed(NodeKind::TEXT_LEAF, &AnalyzedBody::new(&logical), None)?;
             leaves.push((leaf, chunk.len() as u64));
             rest = tail;
         }
@@ -658,7 +807,8 @@ impl GraphStaging {
             let mut body = TokenWriter::with_capacity(token_len(chunk.len()) as usize);
             body.bytes(chunk);
             let logical = body.into_bytes();
-            let leaf = self.encode(NodeKind::BYTES_LEAF, TypedBody::logical(&logical))?;
+            let leaf =
+                self.encode_analyzed(NodeKind::BYTES_LEAF, &AnalyzedBody::new(&logical), None)?;
             leaves.push((leaf, chunk.len() as u64));
         }
         self.value_index(NodeKind::BYTES_INDEX, leaves)
@@ -702,7 +852,16 @@ impl GraphStaging {
     /// Streams a placed logical body of `kind` through structure blocks and
     /// returns its WholeStream.
     pub fn stream(&mut self, kind: NodeKind, placed: &[u8]) -> Result<NodeId, GraphRefusal> {
-        let events = scan(placed, kind)?;
+        self.stream_analyzed(kind, &AnalyzedBody::new(placed))
+    }
+
+    fn stream_analyzed(
+        &mut self,
+        kind: NodeKind,
+        analysis: &AnalyzedBody<'_>,
+    ) -> Result<NodeId, GraphRefusal> {
+        let placed = analysis.as_bytes();
+        let events: Vec<_> = analysis.scan(kind)?.events().collect();
         let mut blocks = Vec::new();
         let mut start = 0;
         while start < events.len() {
@@ -715,7 +874,11 @@ impl GraphStaging {
             }
             let slice = &events[start..end];
             let logical = &placed[slice[0].start..slice[slice.len() - 1].end];
-            let (children, physical) = to_physical(logical, NodeKind::STRUCTURE_BLOCK)?;
+            let (children, physical) = if logical.len() == placed.len() {
+                analysis.to_physical(NodeKind::STRUCTURE_BLOCK)?
+            } else {
+                to_physical(logical, NodeKind::STRUCTURE_BLOCK)?
+            };
             blocks.push((
                 self.insert(NodeKind::STRUCTURE_BLOCK, &children, physical)?,
                 1_u64,
@@ -789,10 +952,7 @@ pub fn to_physical(
     logical: &[u8],
     kind: NodeKind,
 ) -> Result<(Vec<[u8; 32]>, Vec<u8>), GraphRefusal> {
-    let references = LogicalScan::scan(logical, kind)?;
-    let mut body = Vec::with_capacity(references.physical_len(logical.len()));
-    references.write_physical(logical, &mut body);
-    Ok((references.children.clone(), body))
+    AnalyzedBody::new(logical).to_physical(kind)
 }
 
 /// An enveloped kind's size if `placed` were inline, without writing the
@@ -801,12 +961,7 @@ pub fn to_physical(
 /// # Errors
 /// A token refusal if `placed` is not canonical logical tokens.
 pub fn inline_envelope_len(placed: &[u8], kind: NodeKind) -> Result<u64, GraphRefusal> {
-    let scan = LogicalScan::scan(placed, kind)?;
-    Ok(envelope_len(
-        kind,
-        scan.children.len(),
-        scan.physical_len(placed.len()) + 3,
-    ) as u64)
+    AnalyzedBody::new(placed).inline_envelope_len(kind)
 }
 
 /// A logical reference's length: its tag and its child's digest.
@@ -820,6 +975,7 @@ pub struct LogicalScan {
     pub(crate) children: Vec<[u8; 32]>,
     ends: Vec<usize>,
     oversized_inline: Option<(usize, usize)>,
+    tree_end: Option<usize>,
 }
 
 /// One validated logical token event, retained in its original order.
@@ -841,6 +997,51 @@ pub enum Placement {
 thread_local! {
     static LOGICAL_SCAN_EVENTS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
     static REFERENCE_SCANS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+
+// Read-local work is captured only while a focused testing scope owns it.
+#[cfg(any(test, feature = "testing"))]
+thread_local! {
+    static ANALYSIS_WORK: std::cell::RefCell<Option<AnalysisWork>> = const { std::cell::RefCell::new(None) };
+}
+
+#[cfg(any(test, feature = "testing"))]
+#[derive(Default, Debug)]
+pub struct AnalysisWork {
+    pub logical_hashes: Vec<usize>,
+    pub logical_scans: Vec<usize>,
+    pub envelope_hashes: Vec<usize>,
+}
+
+#[cfg(any(test, feature = "testing"))]
+pub(crate) fn record_analysis_work(operation: usize, bytes: usize) {
+    ANALYSIS_WORK.with(|work| {
+        if let Some(work) = work.borrow_mut().as_mut() {
+            match operation {
+                0 => work.logical_hashes.push(bytes),
+                1 => work.logical_scans.push(bytes),
+                _ => work.envelope_hashes.push(bytes),
+            }
+        }
+    });
+}
+
+/// Measures codec work on this testing thread, without retaining observations
+/// from unrelated reads. Dropping the scope also stops collection on panic.
+#[cfg(any(test, feature = "testing"))]
+pub fn with_analysis_work<T>(read: impl FnOnce() -> T) -> (T, AnalysisWork) {
+    struct Capture;
+    impl Drop for Capture {
+        fn drop(&mut self) {
+            ANALYSIS_WORK.with(|work| *work.borrow_mut() = None);
+        }
+    }
+    let capture = Capture;
+    ANALYSIS_WORK.with(|work| *work.borrow_mut() = Some(AnalysisWork::default()));
+    let result = read();
+    let work = ANALYSIS_WORK.with(|work| work.borrow_mut().take().unwrap_or_default());
+    drop(capture);
+    (result, work)
 }
 
 /// Token events parsed by logical preparation on this testing thread.
@@ -884,15 +1085,20 @@ impl LogicalScan {
     /// # Errors
     /// A token refusal if the supplied logical bytes are not canonical.
     pub fn scan(logical: &[u8], kind: NodeKind) -> Result<Arc<Self>, GraphRefusal> {
+        Self::scan_with_digest(logical, kind, || TypedBody::logical(logical).digest())
+    }
+
+    fn scan_with_digest(
+        logical: &[u8],
+        kind: NodeKind,
+        digest: impl FnOnce() -> [u8; 32],
+    ) -> Result<Arc<Self>, GraphRefusal> {
+        #[cfg(any(test, feature = "testing"))]
+        record_analysis_work(1, logical.len());
         if logical.len() > CACHE_BYTES {
             return Self::scan_uncached(logical, kind).map(Arc::new);
         }
-        #[cfg(feature = "perf-witness")]
-        crate::perf_witness::record_hash_pass(logical.len());
-        let key = (
-            EncodingKind::LogicalScan,
-            TypedBody::logical(logical).digest(),
-        );
+        let key = (EncodingKind::LogicalScan, digest());
         prepare_references(key, logical, || Self::scan_uncached(logical, kind))
     }
 
@@ -902,6 +1108,8 @@ impl LogicalScan {
         let mut at = Vec::new();
         let mut ends = Vec::new();
         let mut oversized_inline = None;
+        let mut pending = 1_u64;
+        let mut tree_end = None;
         let mut reader = TokenReader::new(logical);
         while !reader.is_empty() {
             let start = reader.position();
@@ -910,6 +1118,12 @@ impl LogicalScan {
                 .map_err(|error| GraphRefusal::from_token(error, None, Some(kind.0)))?;
             #[cfg(any(test, feature = "testing"))]
             LOGICAL_SCAN_EVENTS.with(|count| count.set(count.get() + 1));
+            if tree_end.is_none() {
+                pending = pending.saturating_sub(1).saturating_add(event.contents());
+                if pending == 0 {
+                    tree_end = Some(reader.position());
+                }
+            }
             match event {
                 TokenEvent::Child(child) => at.push((start, child.0)),
                 TokenEvent::Text(text) if token_len(text.len()) > INLINE_TOKEN_MAX => {
@@ -930,6 +1144,26 @@ impl LogicalScan {
             children,
             ends,
             oversized_inline,
+            tree_end,
+        })
+    }
+
+    fn events(&self) -> impl Iterator<Item = Event> + '_ {
+        let mut start = 0;
+        let mut children = self.at.iter().peekable();
+        self.ends.iter().map(move |end| {
+            let child = if children.peek().is_some_and(|(at, _)| *at == start) {
+                children.next().map(|(_, child)| *child)
+            } else {
+                None
+            };
+            let event = Event {
+                start,
+                end: *end,
+                child,
+            };
+            start = *end;
+            event
         })
     }
 
@@ -1004,26 +1238,6 @@ struct Event {
     start: usize,
     end: usize,
     child: Option<[u8; 32]>,
-}
-
-fn scan(logical: &[u8], kind: NodeKind) -> Result<Vec<Event>, GraphRefusal> {
-    let mut events = Vec::new();
-    let mut reader = TokenReader::new(logical);
-    while !reader.is_empty() {
-        let start = reader.position();
-        let event = reader
-            .next_event()
-            .map_err(|error| GraphRefusal::from_token(error, None, Some(kind.0)))?;
-        events.push(Event {
-            start,
-            end: reader.position(),
-            child: match event {
-                TokenEvent::Child(ChildRef(digest)) => Some(digest),
-                _ => None,
-            },
-        });
-    }
-    Ok(events)
 }
 
 /// The envelope length of one structure block holding `events`.

@@ -53,6 +53,8 @@ impl NodeId {
     /// The identity of an envelope's bytes.
     #[must_use]
     pub fn of_envelope(bytes: &[u8]) -> Self {
+        #[cfg(any(test, feature = "testing"))]
+        super::encode::record_analysis_work(2, bytes.len());
         #[cfg(feature = "perf-witness")]
         crate::perf_witness::record_hash_pass(bytes.len());
         Self(BlobRef::digest_for_content(bytes))
@@ -215,15 +217,29 @@ impl<'a> ChildTable<'a> {
 }
 
 /// A parsed envelope, borrowing the node's bytes.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug)]
 pub struct NodeEnvelope<'a> {
     bytes: &'a [u8],
+    digest: Option<NodeId>,
     framing: Framing,
     pub kind: NodeKind,
     pub children: ChildTable<'a>,
     /// The physical body: child references are slots.
     pub body: &'a [u8],
 }
+
+// Read-local digest preparation is not part of the envelope's value.
+impl PartialEq for NodeEnvelope<'_> {
+    fn eq(&self, other: &Self) -> bool {
+        self.bytes == other.bytes
+            && self.framing == other.framing
+            && self.kind == other.kind
+            && self.children == other.children
+            && self.body == other.body
+    }
+}
+
+impl Eq for NodeEnvelope<'_> {}
 
 impl<'a> NodeEnvelope<'a> {
     /// Expands the physical body's suffix after `skip` to logical tokens.
@@ -246,7 +262,10 @@ impl<'a> NodeEnvelope<'a> {
             });
         }
         let body = original.body.get(skip..).ok_or(GraphRefusal::Truncated)?;
-        super::encode::prepare_logical(self.bytes, skip, || {
+        let digest = self
+            .digest
+            .unwrap_or_else(|| NodeId::of_envelope(self.bytes));
+        super::encode::prepare_logical(digest, self.bytes, skip, || {
             #[cfg(test)]
             LOGICAL_EXPANSIONS.with(|count| count.set(count.get() + 1));
             let refuse = |error| GraphRefusal::from_token(error, Some(node), Some(self.kind.0));
@@ -612,6 +631,7 @@ impl Framing {
     fn envelope<'a>(&self, bytes: &'a [u8]) -> NodeEnvelope<'a> {
         NodeEnvelope {
             bytes,
+            digest: None,
             framing: *self,
             kind: self.kind,
             children: self.children(bytes),
@@ -655,7 +675,9 @@ fn parse_prepared(
     let framing = super::encode::prepare_envelope(digest, bytes, || {
         Ok(Framing::of(bytes, parse_uncached(bytes, node)?))
     })?;
-    Ok(framing.envelope(bytes))
+    let mut envelope = framing.envelope(bytes);
+    envelope.digest = Some(digest);
+    Ok(envelope)
 }
 
 fn parse_uncached(bytes: &[u8], node: Option<NodeId>) -> Result<NodeEnvelope<'_>, GraphRefusal> {
@@ -709,6 +731,7 @@ fn parse_uncached(bytes: &[u8], node: Option<NodeId>) -> Result<NodeEnvelope<'_>
     check_slots(body, children.len(), node)?;
     Ok(NodeEnvelope {
         bytes,
+        digest: None,
         framing: Framing {
             kind: NodeKind(kind),
             children_start: table_end - table_len,

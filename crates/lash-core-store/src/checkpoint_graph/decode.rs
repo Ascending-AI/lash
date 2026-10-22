@@ -23,9 +23,7 @@ use lash_vocabulary::tokens::TokenReader;
 use lash_vocabulary::tokens::TokenWriter;
 
 use super::commit::{EncodeBudget, ExplicitLimit};
-use super::encode::{
-    GraphStaging, LogicalScan, Placement, TypedBody, inline_envelope_len, token_len,
-};
+use super::encode::{AnalyzedBody, GraphStaging, LogicalScan, Placement, token_len};
 use super::node::{
     EncodedNode, INDEX_FANOUT, INLINE_TOKEN_MAX, NodeEnvelope, NodeId, check_envelope,
 };
@@ -337,13 +335,7 @@ impl<'s> GraphDecoder<'s> {
                 TokenReader::expect_fields(fields, 1).map_err(refuse)?;
                 let rest = &envelope.body[reader.position()..];
                 let placed = if variant == 0 {
-                    let placed = to_logical(&envelope, rest, id)?;
-                    let mut tree = TokenReader::new(&placed);
-                    tree.skip_tree().map_err(refuse)?;
-                    if !tree.is_empty() {
-                        return Err(non_canonical(id, CanonicalFault::NotOneToken));
-                    }
-                    placed
+                    to_logical(&envelope, rest, id)?
                 } else {
                     let mut reader = TokenReader::with_form(rest, RefForm::Physical);
                     let slot = match reader.next_event().map_err(refuse)? {
@@ -356,20 +348,32 @@ impl<'s> GraphDecoder<'s> {
                         .get(slot)
                         .ok_or(non_canonical(id, CanonicalFault::ChildSlotOutOfRange(slot)))?;
                     let placed = self.stream(id, stream, expected)?;
-                    if inline_envelope_len(&placed, expected)? <= spec.bound.bytes() {
-                        return Err(non_canonical(id, CanonicalFault::InvalidBodyForm));
-                    }
                     LogicalBody::Owned(placed)
                 };
-                let logical = match self.unplace(id, &placed)? {
-                    Cow::Borrowed(_) => placed,
-                    Cow::Owned(logical) => LogicalBody::Owned(logical),
-                };
-                let mut check = verifier();
-                if check.encode(expected, TypedBody::logical(&logical))? != id {
+                let analysis = AnalyzedBody::new(&placed);
+                if variant == 0 {
+                    analysis
+                        .scan(expected)
+                        .and_then(|_| analysis.one_token(expected))
+                        .map_err(|error| match error {
+                            lash_checkpoint_encoder::GraphRefusal::NonCanonical {
+                                reason, ..
+                            } => non_canonical(id, reason),
+                            other => GraphRefusal::from(other),
+                        })?;
+                }
+                if variant == 1 && analysis.inline_envelope_len(expected)? <= spec.bound.bytes() {
                     return Err(non_canonical(id, CanonicalFault::InvalidBodyForm));
                 }
-                Ok(logical)
+                let logical = self.unplace(id, &analysis)?;
+                let mut check = verifier();
+                if check.reencode(expected, &logical, &analysis)? != id {
+                    return Err(non_canonical(id, CanonicalFault::InvalidBodyForm));
+                }
+                Ok(match logical {
+                    Cow::Borrowed(_) => placed,
+                    Cow::Owned(logical) => LogicalBody::Owned(logical),
+                })
             }
         }
     }
@@ -642,8 +646,13 @@ impl<'s> GraphDecoder<'s> {
 
     /// Puts every placed value of `placed` back inline, refusing an inline
     /// value over the bound and a placed one under it.
-    fn unplace<'p>(&mut self, id: NodeId, placed: &'p [u8]) -> Result<Cow<'p, [u8]>, GraphRefusal> {
-        let scan = LogicalScan::scan(placed, NodeKind(0)).map_err(|error| match error {
+    fn unplace<'p>(
+        &mut self,
+        id: NodeId,
+        analysis: &AnalyzedBody<'p>,
+    ) -> Result<Cow<'p, [u8]>, GraphRefusal> {
+        let placed = analysis.as_bytes();
+        let scan = analysis.scan(NodeKind(0)).map_err(|error| match error {
             lash_checkpoint_encoder::GraphRefusal::NonCanonical { reason, .. } => {
                 non_canonical(id, reason)
             }
@@ -655,7 +664,7 @@ impl<'s> GraphDecoder<'s> {
             #[cfg(test)]
             UNPLACE_STEPS.with(|count| count.set(count.get() + 1));
             let start = step.start;
-            self.unplaced_prefix_limit(&scan, start, out.as_ref(), copied)?;
+            self.unplaced_prefix_limit(scan, start, out.as_ref(), copied)?;
             match step.placement {
                 Placement::Oversized => {
                     return Err(non_canonical(id, CanonicalFault::InvalidPlacement));
@@ -700,7 +709,7 @@ impl<'s> GraphDecoder<'s> {
                 self.limits.logical_bytes,
             )?;
         }
-        self.unplaced_prefix_limit(&scan, placed.len(), out.as_ref(), copied)?;
+        self.unplaced_prefix_limit(scan, placed.len(), out.as_ref(), copied)?;
         Ok(out.map_or(Cow::Borrowed(placed), |mut writer| {
             writer.raw(&placed[copied..]);
             Cow::Owned(writer.into_bytes())
@@ -745,6 +754,7 @@ thread_local! {
 
 #[cfg(test)]
 mod preparation_tests {
+    use super::super::encode::TypedBody;
     use super::super::node::write_envelope;
     use super::*;
 
@@ -782,7 +792,9 @@ mod preparation_tests {
         for _ in 0..12 {
             let mut decoder = GraphDecoder::new(&source, DecodeLimits::within_total(1 << 20));
             assert_eq!(
-                &*decoder.unplace(NodeId([0xb3; 32]), &placed).unwrap(),
+                &*decoder
+                    .unplace(NodeId([0xb3; 32]), &AnalyzedBody::new(&placed))
+                    .unwrap(),
                 placed
             );
         }
@@ -810,7 +822,12 @@ mod preparation_tests {
         let before = super::super::encode::logical_scan_events();
         for _ in 0..12 {
             let mut decoder = GraphDecoder::new(&nodes, limits);
-            assert_eq!(&*decoder.unplace(id, &placed.clone()).unwrap(), placed);
+            assert_eq!(
+                &*decoder
+                    .unplace(id, &AnalyzedBody::new(&placed.clone()))
+                    .unwrap(),
+                placed
+            );
         }
         let scanned = super::super::encode::logical_scan_events() - before;
         assert_eq!(
@@ -852,13 +869,13 @@ mod preparation_tests {
         // Warm the plan with the referenced opaque child present.
         assert_eq!(
             &*GraphDecoder::new(&OpaqueSource(opaque), limits)
-                .unplace(id, &placed)
+                .unplace(id, &AnalyzedBody::new(&placed))
                 .unwrap(),
             placed
         );
         let missing = BTreeMap::<NodeId, EncodedNode>::new();
         assert_eq!(
-            GraphDecoder::new(&missing, limits).unplace(id, &placed),
+            GraphDecoder::new(&missing, limits).unplace(id, &AnalyzedBody::new(&placed)),
             Err(GraphRefusal::MissingNode(child))
         );
         assert_eq!(
@@ -869,7 +886,7 @@ mod preparation_tests {
                     ..limits
                 }
             )
-            .unplace(id, &placed),
+            .unplace(id, &AnalyzedBody::new(&placed)),
             Err(GraphRefusal::DecodeLimit {
                 dimension: DecodeDimension::LogicalBytes,
                 actual: prefix_end,
@@ -884,7 +901,7 @@ mod preparation_tests {
                     ..limits
                 }
             )
-            .unplace(id, &placed),
+            .unplace(id, &AnalyzedBody::new(&placed)),
             Err(GraphRefusal::MissingNode(child))
         );
     }
@@ -904,12 +921,17 @@ mod preparation_tests {
             },
         )]);
         let limits = DecodeLimits::within_total(1 << 20);
+        use super::super::encode::with_analysis_work;
         let mut first = GraphDecoder::new(&nodes, limits);
-        let first_envelope = first.envelope(id).unwrap();
-        let first_body = to_logical(&first_envelope, first_envelope.body, id).unwrap();
+        let (first_body, first_work) = with_analysis_work(|| {
+            let envelope = first.envelope(id).unwrap();
+            to_logical(&envelope, envelope.body, id).unwrap()
+        });
         let mut second = GraphDecoder::new(&nodes, limits);
-        let second_envelope = second.envelope(id).unwrap();
-        let second_body = to_logical(&second_envelope, second_envelope.body, id).unwrap();
+        let (second_body, second_work) = with_analysis_work(|| {
+            let envelope = second.envelope(id).unwrap();
+            to_logical(&envelope, envelope.body, id).unwrap()
+        });
         assert_eq!(&*first_body, &*second_body);
         assert_eq!(first.read(), second.read());
         assert!(matches!(
@@ -934,6 +956,75 @@ mod preparation_tests {
             first_body.as_ptr(),
             second_body.as_ptr(),
             "the same physical body was expanded twice"
+        );
+        // Cover both inline and streamed placed bodies. Each uses its own
+        // immutable logical representation; equal bytes need one analysis
+        // even when sizing, unplacement and re-encoding all consume them.
+        let mut reads = Vec::new();
+        for (count, text) in [(4, ""), (5_000, ""), (4, "large"), (5_000, "large")] {
+            let mut body = TokenWriter::new();
+            body.seq(count + 1);
+            body.text(&text.repeat(103));
+            for value in 0..count {
+                body.unsigned(value);
+            }
+            let body = body.into_bytes();
+            // An isolated writer leaves the reader's canonical encoder cold.
+            let mut staged =
+                GraphStaging::isolated(EncodeBudget::new(ExplicitLimit::new(u64::MAX)));
+            let root = staged
+                .encode(NodeKind::HOST_ROOT, TypedBody::logical(&body))
+                .unwrap();
+            for _ in 0..2 {
+                let (logical, work) = with_analysis_work(|| {
+                    GraphDecoder::new(&staged, limits)
+                        .logical_body(root, NodeKind::HOST_ROOT)
+                        .unwrap()
+                });
+                assert_eq!(logical, body);
+                reads.push((body.len(), work));
+            }
+        }
+        eprintln!(
+            "FIG-7170 envelope hash work: {first_work:?}, {second_work:?}; body read work: {reads:?}"
+        );
+        for (len, work) in reads {
+            assert_eq!(
+                work.logical_hashes
+                    .iter()
+                    .filter(|size| **size == len)
+                    .count(),
+                1,
+                "one hash per logical representation per read"
+            );
+            // A warm canonical encoding can avoid analyzing the expanded
+            // body entirely. Every representation that is scanned is unique.
+            let mut scanned = std::collections::BTreeSet::new();
+            for size in &work.logical_scans {
+                assert!(
+                    scanned.insert(size),
+                    "a representation was scanned twice: {work:?}"
+                );
+                assert_eq!(
+                    work.logical_hashes
+                        .iter()
+                        .filter(|bytes| *bytes == size)
+                        .count(),
+                    1,
+                    "scanning and framing share the digest: {work:?}"
+                );
+            }
+            assert!(!scanned.is_empty(), "each placed body is admitted afresh");
+        }
+        assert_eq!(
+            first_work.envelope_hashes.len(),
+            1,
+            "one envelope hash per read"
+        );
+        assert_eq!(
+            second_work.envelope_hashes.len(),
+            1,
+            "one envelope hash per read"
         );
     }
 }
