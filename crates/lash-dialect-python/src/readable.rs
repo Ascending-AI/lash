@@ -89,11 +89,14 @@ impl regions::Regions for Printing<'_> {
         SourceFormat::PythonV1
     }
 
-    fn whole(&self, functions: &BTreeSet<Name>) -> Option<regions::Whole> {
-        let order = entries(self.document, self.captions)?;
+    fn whole(&self, functions: &BTreeSet<Name>) -> Result<regions::Whole, PrintError> {
+        let unprintable = || PrintError::Unprintable {
+            site: lash_vocabulary::sites::Site::new(lash_vocabulary::sites::Unit::Main, Vec::new()),
+        };
+        let parts = regions::module_parts(self.document).ok_or_else(unprintable)?;
         let regions = Regions {
             authored: functions.clone(),
-            whole: order,
+            whole: parts,
         };
         // The front end maps what it lowers; this print is only read.
         let options = PrintOptions {
@@ -107,8 +110,11 @@ impl regions::Regions for Printing<'_> {
             options,
             &regions,
         );
-        let (printed, written) = result.ok()?;
-        Some(regions::Whole {
+        let (printed, written) = result.map_err(|error| match error {
+            PrintError::Invalid(_) => unprintable(),
+            error => error,
+        })?;
+        Ok(regions::Whole {
             source: printed.source,
             functions: written,
         })
@@ -123,10 +129,6 @@ impl regions::Regions for Printing<'_> {
         )
         .map_err(|diagnostic| diagnostic.span.map(|span| span.start))
     }
-}
-
-fn entries(document: &k::Document, _captions: Option<&k::Captions>) -> Option<Vec<Name>> {
-    regions::export_order(document)
 }
 
 fn read_regions(

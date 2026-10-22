@@ -147,6 +147,111 @@ fn a_canvas_edited_non_ascii_python_document_reads_back_identically() -> anyhow:
     Ok(())
 }
 
+/// FIG-7135: module main preserves top-level order and excludes nested
+/// declarations from the public entries in both authored printers.
+fn module_main_roundtrip(
+    source: &str,
+    language: lash_kernel_doc::SourceLanguage,
+) -> anyhow::Result<()> {
+    use lash_kernel_doc::SourceLanguage;
+    let embedding = lash_vm_worker::built_embedding(&Default::default())?;
+    let namespaces = Default::default();
+    let environment = lash_kernel_dialect::Environment::new(embedding.library(), &namespaces);
+    let lowered = match language {
+        SourceLanguage::TypeScript => {
+            lash_dialect_typescript::lower(source, &environment, lash_kernel_dialect::Mode::Module)?
+        }
+        SourceLanguage::Python => {
+            lash_dialect_python::lower(source, &environment, lash_kernel_dialect::Mode::Module)?
+        }
+    };
+    assert_eq!(
+        lowered
+            .document
+            .exports
+            .keys()
+            .map(|name| name.as_str())
+            .collect::<Vec<_>>(),
+        ["arrow", "declared"]
+    );
+    let options = lash_kernel_dialect::PrintOptions {
+        source_map: true,
+        ..Default::default()
+    };
+    let printed = match language {
+        SourceLanguage::TypeScript => lash_dialect_typescript::print(
+            &lowered.document,
+            Some(&lowered.captions),
+            embedding.library(),
+            options,
+        )?,
+        SourceLanguage::Python => lash_dialect_python::print(
+            &lowered.document,
+            Some(&lowered.captions),
+            embedding.library(),
+            options,
+        )?,
+    };
+    let (read, captions) = match language {
+        SourceLanguage::TypeScript => lash_dialect_typescript::read(
+            &printed.source,
+            &lowered.document,
+            embedding.library(),
+            Default::default(),
+        )?,
+        SourceLanguage::Python => lash_dialect_python::read(
+            &printed.source,
+            &lowered.document,
+            embedding.library(),
+            Default::default(),
+        )?,
+    };
+    assert_eq!(read.canonical_bytes(), lowered.document.canonical_bytes());
+    assert_eq!(captions, lowered.captions);
+    printed
+        .source_map
+        .ok_or_else(|| anyhow::anyhow!("requested map is absent"))?
+        .validate(&read, &printed.source)?;
+    let mut unspellable = read;
+    unspellable
+        .main
+        .as_mut()
+        .ok_or_else(|| anyhow::anyhow!("module main is absent"))?
+        .push(lash_kernel_doc::Stmt::Try(lash_kernel_doc::TryStmt {
+            body: vec![],
+            catch: None,
+            finally: None,
+        }));
+    let refused = match language {
+        SourceLanguage::TypeScript => {
+            lash_dialect_typescript::print(&unspellable, None, embedding.library(), options)
+        }
+        SourceLanguage::Python => {
+            lash_dialect_python::print(&unspellable, None, embedding.library(), options)
+        }
+    };
+    assert!(
+        matches!(refused, Err(lash_kernel_dialect::PrintError::Unprintable { site }) if site.unit == lash_vocabulary::sites::Unit::Main)
+    );
+    Ok(())
+}
+
+#[test]
+fn typescript_module_main_preserves_block_local_functions() -> anyhow::Result<()> {
+    module_main_roundtrip(
+        include_str!("../entry-boundary/source.ts"),
+        lash_kernel_doc::SourceLanguage::TypeScript,
+    )
+}
+
+#[test]
+fn python_module_main_preserves_block_local_functions() -> anyhow::Result<()> {
+    module_main_roundtrip(
+        include_str!("../entry-boundary/source.py"),
+        lash_kernel_doc::SourceLanguage::Python,
+    )
+}
+
 /// FIG-6953 READABLE-STYLE: a workflow edited through the canvas API prints
 /// as the source the authoring guide teaches, with none of the kernel
 /// surface's scaffolding.
@@ -492,13 +597,13 @@ fn every_python_corpus_case_has_one_body_per_source_loop_and_no_statement_inflat
                     lash_kernel_doc::Stmt::For { .. } | lash_kernel_doc::Stmt::While { .. }
                 )
             ));
-            if let Node::Expr(lash_kernel_doc::Expr::Closure(closure)) = node {
-                if !deferred.contains(&closure.function) {
-                    pending.push((
-                        lash_vocabulary::sites::Unit::Library(closure.function),
-                        Node::Block(&document.functions[&closure.function].body().unwrap().block),
-                    ));
-                }
+            if let Node::Expr(lash_kernel_doc::Expr::Closure(closure)) = node
+                && !deferred.contains(&closure.function)
+            {
+                pending.push((
+                    lash_vocabulary::sites::Unit::Library(closure.function),
+                    Node::Block(&document.functions[&closure.function].body().unwrap().block),
+                ));
             }
             pending.extend(
                 node.children()

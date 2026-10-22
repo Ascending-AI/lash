@@ -167,7 +167,9 @@ impl Lifter<'_> {
     }
 
     pub(super) fn binding(&self, name: &Name) -> Lift<String> {
-        if source::identifier(name.as_str()) {
+        if let Some(original) = self.bindings.get(name) {
+            Ok(original.clone())
+        } else if source::identifier(name.as_str()) {
             Ok(name.as_str().to_owned())
         } else {
             refuse("a name TypeScript cannot spell")

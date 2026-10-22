@@ -120,8 +120,11 @@ pub trait Regions {
     /// The source language and format printed.
     fn format(&self) -> SourceFormat;
 
-    /// The module of `functions` and the lifted `main`, when `main` lifted.
-    fn whole(&self, functions: &BTreeSet<Name>) -> Option<Whole>;
+    /// The module of `functions` and the lifted `main`.
+    ///
+    /// # Errors
+    /// A typed refusal at an unspellable body, or a source limit.
+    fn whole(&self, functions: &BTreeSet<Name>) -> Result<Whole, PrintError>;
 
     /// `source` read back against the printed document. A refusal gives
     /// the offset it points at, if any.
@@ -148,17 +151,16 @@ pub fn print_verified(
     let empty = k::Captions::empty(document.identity());
     let captions = captions.unwrap_or(&empty);
     crate::imperative::check_captions(document, captions, options.limits)?;
-    let whole = regions.whole(&lifted).ok_or_else(|| {
-        PrintError::Invalid("the document cannot be expressed as authored source".to_owned())
-    })?;
+    let whole = regions.whole(&lifted)?;
     if whole.source.len() > options.limits.max_bytes {
         return Err(PrintError::Bytes {
             limit: options.limits.max_bytes,
         });
     }
-    let read = regions.read(&whole.source).map_err(|_| {
-        PrintError::Invalid("authored source does not read as this document".to_owned())
-    })?;
+    let unprintable = || PrintError::Unprintable {
+        site: lash_vocabulary::sites::Site::new(lash_vocabulary::sites::Unit::Main, Vec::new()),
+    };
+    let read = regions.read(&whole.source).map_err(|_| unprintable())?;
     if read.document.canonical_bytes() != document.canonical_bytes()
         || read
             .captions
@@ -166,9 +168,7 @@ pub fn print_verified(
             .iter()
             .any(|entry| captions.get(&entry.target) != Some(&entry.caption))
     {
-        return Err(PrintError::Invalid(
-            "authored source changes the document".to_owned(),
-        ));
+        return Err(unprintable());
     }
     // A retained library body or synthetic binding has no authored syntax.
     // Compare every caption that was spelled exactly, and report each input
@@ -209,36 +209,54 @@ fn whole_printed(
     })
 }
 
-/// Source declaration order, projected from the bindings authored lowering
-/// creates. Other executable top-level work must be lifted as cell code.
-pub fn export_order(document: &k::Document) -> Option<Vec<Name>> {
-    let mut order = Vec::new();
-    if document.exports.is_empty() {
-        return Some(order);
-    }
-    for statement in document.main.as_deref().unwrap_or_default() {
-        let (name, id) = match statement {
+/// Authored module parts in their Main statement order. Export bindings
+/// supply declarations; other runs retain their original statement indices.
+pub enum ModulePart {
+    Export(Name),
+    Statements(Range<usize>),
+    /// A scope predeclaration restored by lowering the later export binding.
+    Implicit,
+}
+
+/// Project module declarations and executable work from the same Main body.
+/// Every Export must have exactly one matching binding; nested declarations
+/// remain within their containing statement run.
+pub fn module_parts(document: &k::Document) -> Option<Vec<ModulePart>> {
+    let mut parts = Vec::new();
+    let mut seen = BTreeSet::new();
+    let main = document.main.as_deref().unwrap_or_default();
+    let mut first = 0;
+    for (index, statement) in main.iter().enumerate() {
+        let part = match statement {
             k::Stmt::Let {
                 name,
                 value: k::Rhs::Expr(k::Expr::Literal(k::Literal::Function(id))),
-            } => (name, id),
-            k::Stmt::Assign {
+            }
+            | k::Stmt::Assign {
                 place: k::Place::Variable(name),
                 value: k::Rhs::Expr(k::Expr::Literal(k::Literal::Function(id))),
                 ..
-            } => (name, id),
+            } if matches!(document.exports.get(name), Some(k::Export::Function(f)) if f.function == *id) =>
+            {
+                if !seen.insert(name.clone()) {
+                    return None;
+                }
+                ModulePart::Export(name.clone())
+            }
             k::Stmt::Let {
                 name,
                 value: k::Rhs::Expr(k::Expr::Literal(k::Literal::Absent)),
-            } if document.exports.contains_key(name) => continue,
-            _ => return None,
+            } if document.exports.contains_key(name) => ModulePart::Implicit,
+            _ => continue,
         };
-        if !matches!(document.exports.get(name),Some(k::Export::Function(f)) if f.function==*id)
-            || order.contains(name)
-        {
-            return None;
+        if first < index {
+            parts.push(ModulePart::Statements(first..index));
         }
-        order.push(name.clone());
+        parts.push(part);
+        first = index + 1;
     }
-    (order.len() == document.exports.len()).then_some(order)
+    if first < main.len() {
+        parts.push(ModulePart::Statements(first..main.len()));
+    }
+    (seen.len() == document.exports.len()).then_some(parts)
 }

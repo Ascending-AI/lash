@@ -78,24 +78,36 @@ impl regions::Regions for Printing<'_> {
         SourceFormat::TypeScriptV1
     }
 
-    fn whole(&self, functions: &BTreeSet<Name>) -> Option<regions::Whole> {
+    fn whole(&self, functions: &BTreeSet<Name>) -> Result<regions::Whole, PrintError> {
         let mut writer = source::Writer::default();
         let mut written = BTreeMap::new();
-        match self.main.as_ref()? {
-            lift::Main::Module(order) => {
-                for (index, name) in order.iter().enumerate() {
+        let unprintable = || PrintError::Unprintable {
+            site: lash_vocabulary::sites::Site::new(lash_vocabulary::sites::Unit::Main, Vec::new()),
+        };
+        match self.main.as_ref().ok_or_else(unprintable)? {
+            lift::Main::Module(parts) => {
+                for (index, part) in parts.iter().enumerate() {
                     if index > 0 {
                         writer.out.push('\n');
                     }
-                    let item = self.items.get(name).filter(|_| functions.contains(name))?;
-                    let start = writer.out.len();
-                    writer.item(item);
-                    written.insert(name.clone(), start..writer.out.len());
+                    match part {
+                        lift::ModulePart::Export(name) => {
+                            let item = self
+                                .items
+                                .get(name)
+                                .filter(|_| functions.contains(name))
+                                .ok_or_else(unprintable)?;
+                            let start = writer.out.len();
+                            writer.item(item);
+                            written.insert(name.clone(), start..writer.out.len());
+                        }
+                        lift::ModulePart::Statements(statements) => writer.top_level(statements),
+                    }
                 }
             }
             lift::Main::Cell(statements) => writer.top_level(statements),
         }
-        Some(regions::Whole {
+        Ok(regions::Whole {
             source: writer.out,
             functions: written,
         })
