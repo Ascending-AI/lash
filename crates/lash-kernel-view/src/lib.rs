@@ -44,6 +44,8 @@ mod comparison;
 mod context;
 pub use comparison::{ComparisonView, ValueRef, ValueSource};
 pub use context::ViewContext;
+/// Display facts and refusals accepted by a view's retained label sidecars.
+pub use lash_helper_labels::{Comparison, LabelError, MemberDisplay};
 mod entry;
 mod produced;
 pub use coarse::{
