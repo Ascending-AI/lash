@@ -119,23 +119,22 @@ impl Graph {
                     heap.heap.variable_get(cell)?,
                 );
             }
-            if site.unit == lash_vocabulary::sites::Unit::Main {
-                if let Some(body) = definition.body() {
-                    let params = definition
-                        .signature
-                        .params
-                        .iter()
-                        .map(|p| p.name.clone())
-                        .collect::<Vec<_>>();
-                    for name in
-                        lash_kernel_doc::snapshot::CodeReads::of(&params, &body.block, &catalog)
-                            .free
+            if site.unit == lash_vocabulary::sites::Unit::Main
+                && let Some(body) = definition.body()
+            {
+                let params = definition
+                    .signature
+                    .params
+                    .iter()
+                    .map(|p| p.name.clone())
+                    .collect::<Vec<_>>();
+                for name in
+                    lash_kernel_doc::snapshot::CodeReads::of(&params, &body.block, &catalog).free
+                {
+                    if let std::collections::btree_map::Entry::Vacant(entry) = captured.entry(name)
+                        && let Some(value) = heap.heap.session_binding(entry.key())?
                     {
-                        if !captured.contains_key(&name) {
-                            if let Some(value) = heap.heap.session_binding(&name)? {
-                                captured.insert(name, value);
-                            }
-                        }
+                        entry.insert(value);
                     }
                 }
             }
