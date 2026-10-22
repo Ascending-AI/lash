@@ -235,14 +235,6 @@ impl KernelMachine {
             .map_err(|error| OpenError::Malformed {
                 problem: error.to_string(),
             })?;
-        if root.link != program.link {
-            return Err(OpenError::Malformed {
-                problem: format!(
-                    "checkpoint Link {} differs from supplied {}",
-                    root.link, program.link
-                ),
-            });
-        }
         let census = match root.limits.memory {
             None => None,
             Some(_) => Some(session::restored_census(&mut *source, Some(root.heap))?),
@@ -303,6 +295,14 @@ impl KernelMachine {
             return Err(OpenError::DocumentMismatch {
                 parked: root.document,
                 given,
+            });
+        }
+        if root.link != program.link {
+            return Err(OpenError::Malformed {
+                problem: format!(
+                    "checkpoint Link {} differs from supplied {}",
+                    root.link, program.link
+                ),
             });
         }
         if root.kernel != program.document.kernel() {

@@ -91,6 +91,7 @@ const FORMATS: &str = "park-law-v1";
 const SESSION: &str = "park-law";
 const CREATE: CommitLabel = CommitLabel::new("law.create");
 const DONE: CommitLabel = CommitLabel::new("law.done");
+const REGISTER: CommitLabel = CommitLabel::new("execution.register");
 const WORKERS: u64 = 3;
 
 fn actor() -> ActorKey {
@@ -161,26 +162,18 @@ main {{
             .expect("the linked park fixture is valid")
     );
     let document = Arc::new(parse_document(&text).expect("the linked park fixture is valid"));
-    let fills = document
-        .imports
-        .iter()
-        .map(|(slot, import)| {
-            let lash_vocabulary::ImportKind::Operation { signature } = &import.kind else {
-                unreachable!()
-            };
-            (
-                *slot,
-                lash_vocabulary::Fill::Operation(lash_vocabulary::OperationRequirement::new(
-                    signature.clone(),
-                    lash_vocabulary::ContractId::new("1"),
-                )),
-            )
-        })
-        .collect();
-    let link = lash_vocabulary::Link {
-        document: document.identity(),
-        fills,
+    let package = operation_package(&document);
+    let advertisement = lash_vocabulary::PackageAdvertisement::Enumerated(package);
+    let context = publication_context();
+    let content = lash_kernel_package::LinkedContent {
+        documents: [(document.identity(), document.as_ref().clone())].into(),
+        ..Default::default()
     };
+    let link = lash_kernel_package::Namespace {
+        advertisements: vec![(&context, &advertisement)],
+    }
+    .fulfil(&content, document.identity(), &context, None, None)
+    .expect("the park fixture's published operations fulfil its imports");
     let id = link.identity();
     Program::prepare(
         id,
@@ -190,6 +183,46 @@ main {{
         lash_kernel_vm::PreparedLibrary::new(Arc::new(FunctionRegistry::new())),
     )
     .expect("the linked park fixture is valid")
+}
+
+fn publication_context() -> lash_vocabulary::PublicationContext {
+    lash_vocabulary::PublicationContext {
+        domain: lash_vocabulary::PublicationDomain("park-law".into()),
+        scope: lash_vocabulary::PublicationScope::Host,
+        publisher: lash_vocabulary::PublisherInstance("park-law-tools".into()),
+        root: lash_vocabulary::Segment::new("tools").expect("a valid root"),
+    }
+}
+
+fn operation_package(document: &lash_kernel_doc::Document) -> lash_vocabulary::Package {
+    let members = document
+        .imports
+        .values()
+        .map(|import| {
+            let lash_vocabulary::ImportKind::Operation { signature } = &import.kind else {
+                unreachable!()
+            };
+            (
+                import.name.member.clone(),
+                lash_vocabulary::Member {
+                    visibility: lash_vocabulary::Visibility::Public,
+                    kind: lash_vocabulary::MemberKind::Operation(lash_vocabulary::OperationOffer {
+                        requirement: lash_vocabulary::OperationRequirement::new(
+                            signature.clone(),
+                            lash_vocabulary::ContractId::new("1"),
+                        ),
+                        mode: lash_vocabulary::OperationMode::Waited,
+                        intents: Default::default(),
+                        controls: Default::default(),
+                    }),
+                },
+            )
+        })
+        .collect();
+    lash_vocabulary::Package {
+        path: lash_vocabulary::PackagePath::parse("tools").expect("a valid package path"),
+        members,
+    }
 }
 
 fn bounds() -> Bounds {
@@ -574,6 +607,55 @@ struct ParkActivation {
 }
 
 impl ParkActivation {
+    /// Publish the fixture's operations and register this exact cell under
+    /// its claiming actor before the broker can admit or end its work.
+    async fn register(&self, cx: &ActorContext) -> Result<(), DurableError> {
+        use lash_core_store::artifact_referrer::{ReferrerClaim, ReferrerGuard};
+        let claim = ReferrerClaim::guarded(ReferrerGuard::Journal(
+            cx.execution_scope()
+                .journal_identity()
+                .expect("a valid scope"),
+        ));
+        let package = operation_package(&self.program.document);
+        let packages = cx.backend().package_store();
+        packages
+            .put_package(
+                &claim,
+                &lash_core_store::packages::PackageRecord {
+                    id: package.identity(),
+                    package: package.clone(),
+                },
+            )
+            .await?;
+        packages
+            .publish(
+                &claim,
+                &lash_vocabulary::PublicationRecord {
+                    context: publication_context(),
+                    path: package.path.clone(),
+                    content: lash_vocabulary::PublishedContent::Package(package.identity()),
+                    code_links: Default::default(),
+                    imported_publications: Vec::new(),
+                },
+            )
+            .await?;
+        let ExecKey::Cell(session, turn, cell) = exec() else {
+            unreachable!("the law runs a cell")
+        };
+        let mut tx = cx.begin().await?;
+        tx.register_execution(lash_durable::resolutions::ExecutionRegistration {
+            execution: lash_durable::resolutions::ExecutionId::cell(&session, &turn, cell.as_str()),
+            uses: Default::default(),
+            referrer: claim.referrer(),
+            requirements: lash_vocabulary::claims::ClaimRequirements {
+                machine: self.program.document.requires.clone(),
+                ..Default::default()
+            },
+        });
+        cx.commit(tx, REGISTER).await?;
+        Ok(())
+    }
+
     fn stop(&self, why: &dyn std::fmt::Display) {
         self.shared
             .stops
@@ -646,6 +728,13 @@ impl Activation for ParkActivation {
             pages: &plan,
         };
         for _ in 0..8 {
+            if let Err(error) = self.register(&cx).await {
+                self.stop(&error);
+                if lost(&owned).await {
+                    return Exit::Released;
+                }
+                continue;
+            }
             if let Drive::TwoOrders = self.drive
                 && let Err(why) =
                     Box::pin(two_orders(&self.shared, &broker, &host, &self.program)).await
@@ -1194,6 +1283,7 @@ async fn a_kernel_run_of_three_tasks_resumes_from_its_parks_at_every_cut(tier: T
     // commits on its own, the second park saves the state that consumed
     // them and admits the sum, and the end commits last.
     report.assert_baseline_labels(&[
+        REGISTER,
         CommitLabel::CELL_SNAPSHOT_ADMIT,
         CommitLabel::ROUND_OUTCOME,
         CommitLabel::ROUND_OUTCOME,
