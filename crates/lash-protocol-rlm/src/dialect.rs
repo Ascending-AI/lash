@@ -1287,9 +1287,18 @@ mod tests {
             let mut session = DialectSession::new(extension_fixture(), services);
             let handler =
                 crate::testing::DurableHost::open(crate::testing::default_cell_scope()).await;
+            let ctx = crate::testing::recorded_cell_context(
+                &handler,
+                "test-session",
+                "test-turn",
+                "exec-code:0",
+                Arc::new(crate::testing::NoTools),
+            )
+            .await;
+            session.shows_packages(ctx.recorded_packages().clone());
             let response = session
                 .execute(
-                    lash_core::testing::code_execution_context(handler.ports()),
+                    ctx,
                     ExecRequest {
                         code: "const payload = `".to_string(),
                     },
@@ -1329,9 +1338,18 @@ mod tests {
                 DialectSession::new(crate::dialect::CellDialect::typescript(), services);
             let handler =
                 crate::testing::DurableHost::open(crate::testing::default_cell_scope()).await;
+            let ctx = crate::testing::recorded_cell_context(
+                &handler,
+                "test-session",
+                "test-turn",
+                "exec-code:0",
+                Arc::new(crate::testing::NoTools),
+            )
+            .await;
+            session.shows_packages(ctx.recorded_packages().clone());
             let response = session
                 .execute(
-                    lash_core::testing::code_execution_context(handler.ports()),
+                    ctx,
                     ExecRequest {
                         code: "const payload = `".to_string(),
                     },

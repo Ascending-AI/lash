@@ -360,11 +360,23 @@ pub(crate) fn project_cell(arena: &mut Arena, cell: ArenaHandle) -> Result<Entit
 /// Resolves a closure's lexical body by its function and creation site.
 pub(crate) fn closure_code(
     exe: &Executable,
-    function: &lash_vocabulary::FunctionId,
+    callable: &lash_vocabulary::CallableId,
     site: &Site,
     captures: &[lash_vocabulary::Name],
 ) -> Result<CodeId, HeapFault> {
-    exe.closure_at(function, site, captures)
+    exe.closure_at(&callable.function, site, captures)
+        .or_else(|| {
+            // Saving freezes free Main bindings into the closure. Its body
+            // then uses the declared function's free-variable layout, while
+            // its immutable lexical origin remains in the defining Link.
+            let document = exe.instances.get(&callable.link)?;
+            let origin = lash_kernel_doc::snapshot::closure_at(document, site)?;
+            if origin.function != callable.function {
+                return None;
+            }
+            let code = *exe.declared.get(&callable.function)?;
+            (exe.code(code).capture_names == captures).then_some(code)
+        })
         .ok_or_else(|| malformed("a closure names no admitted code"))
 }
 
@@ -516,12 +528,7 @@ fn open(
                 .map(|(name, _)| name.resolve(pages))
                 .collect::<Result<Vec<_>, _>>()?;
             capture_names.sort();
-            let code = exe.code(closure_code(
-                exe,
-                &callable.function,
-                &site,
-                &capture_names,
-            )?);
+            let code = exe.code(closure_code(exe, &callable, &site, &capture_names)?);
             let mut named = Vec::with_capacity(captures.len());
             for (name, cell) in captures {
                 named.push((name.resolve(pages)?, cell));
@@ -871,7 +878,7 @@ fn stored(
         Held::Closure(identity, captures) => {
             let code = exe.code(closure_code(
                 exe,
-                &identity.callable.function,
+                &identity.callable,
                 &identity.site.site,
                 &identity.capture_names,
             )?);

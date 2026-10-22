@@ -1182,7 +1182,7 @@ fn found_code(arena: &mut Arena, exe: &Executable, handle: ArenaHandle) -> Optio
         (_, _, Some(code)) if code.executable == executable => return Some(CodeId(code.code)),
         (identity, ..) => super::project::closure_code(
             exe,
-            &identity.callable.function,
+            &identity.callable,
             &identity.site.site,
             &identity.capture_names,
         )

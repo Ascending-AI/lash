@@ -107,6 +107,18 @@ impl DurableHost {
             .expect("create the law's session actor");
         let lease = register(&backend, 0).await;
         let context = claim(&backend, &lease, &actor, &admitted, &probe).await;
+        // Deployment setup precedes the cell's work/traffic measurement.
+        let release = lash_vm_releases::helper_release().expect("the fixture's helper release");
+        let content_claim = lash_core::ReferrerClaim::guarded(lash_core::ReferrerGuard::Journal(
+            admitted
+                .scope()
+                .journal_identity()
+                .expect("the fixture's execution journal"),
+        ));
+        lash_vm_runtime::KernelDocuments::new(backend.module_artifacts(), backend.package_store())
+            .hold_helper_release(&content_claim, &release.content, &release.labels)
+            .await
+            .expect("hold the fixture's deployment code");
         Self {
             backend,
             actor,
@@ -267,13 +279,32 @@ impl DurableHost {
 }
 
 async fn register(backend: &lash_execution_contracts::backend::Backend, index: usize) -> NodeLease {
+    let release = lash_vm_releases::helper_release().expect("the fixture's helper release");
+    let mut capabilities = lash_vocabulary::claims::NodeCapabilities::default();
+    for document in release.content.documents.values() {
+        capabilities
+            .machine
+            .kernels
+            .extend(&document.requires.kernels);
+        capabilities
+            .machine
+            .natives
+            .extend(&document.requires.natives);
+    }
+    let tools = lash_core::testing::test_tools_provider();
+    capabilities
+        .providers
+        .insert(lash_vocabulary::ProviderName {
+            owner: tools.owner().into(),
+            key: tools.key().into(),
+        });
     backend
         .durable()
         .register_node(&NodeSpec {
             node: NodeId::new(format!("rlm-cell-law-{index}")),
             decodes: vec![FormatSet::new(FORMATS)],
             serves: Vec::new(),
-            capabilities: Default::default(),
+            capabilities,
             ttl_millis: 600_000,
         })
         .await

@@ -93,7 +93,7 @@ pub(crate) fn cell_services(
 
 /// Run one cell through the production executor entry and settle it as
 /// its turn would: accepted.
-mod packages;
+pub(crate) mod packages;
 
 pub(crate) async fn run_cell(
     state: &mut crate::executor::CodeModeExecutionState,
@@ -101,7 +101,7 @@ pub(crate) async fn run_cell(
     services: &crate::executor::CellServices,
     code: &str,
 ) -> lash_core::ExecResponse {
-    packages::show(state, &ctx).await;
+    state.shows_packages(packages::record(&ctx).await);
     let response = Box::pin(crate::executor::execute_cell(
         state,
         ctx.with_recorded_render(recorded_test_render()),
@@ -219,6 +219,7 @@ impl lash_core::ToolProvider for NoTools {
 struct WithFinish {
     tools: Arc<dyn lash_core::ToolProvider>,
     finish: lash_vocabulary::tool_contract::ToolDefinition,
+    services: [Arc<lash_vm_runtime::dialect_services::Services>; 2],
 }
 
 #[async_trait::async_trait]
@@ -246,7 +247,11 @@ impl lash_core::ToolProvider for WithFinish {
         if &finish.id == id {
             return Some(finish);
         }
-        self.tools.resolve_manifest_by_id(id, config)
+        self.tools.resolve_manifest_by_id(id, config).or_else(|| {
+            self.services
+                .iter()
+                .find_map(|service| service.resolve_manifest_by_id(id, config))
+        })
     }
 
     fn resolve_contract(
@@ -258,12 +263,23 @@ impl lash_core::ToolProvider for WithFinish {
         if name == finish.tool() || name == finish.id.as_str() {
             return Some(Arc::new(self.finish.contract()));
         }
-        self.tools.resolve_contract(name, config)
+        self.tools.resolve_contract(name, config).or_else(|| {
+            self.services
+                .iter()
+                .find_map(|service| service.resolve_contract(name, config))
+        })
     }
 
     async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
         if call.name() == crate::FINISH_TOOL_NAME {
             return lash_core::ToolOutcome::finish(call.args.clone()).into();
+        }
+        if let Some(service) = self.services.iter().find(|service| {
+            service
+                .resolve_manifest(&call.name(), call.context.config())
+                .is_some()
+        }) {
+            return service.execute(call).await;
         }
         self.tools.execute(call).await
     }
@@ -277,6 +293,7 @@ pub(crate) fn with_finish(
     let provider: Arc<dyn lash_core::ToolProvider> = Arc::new(WithFinish {
         tools: provider,
         finish: crate::finish_tool_definition(&crate::dialect::TypescriptPrompts),
+        services: dialect_services(),
     });
     let catalog = lash_core::ToolCatalog::from_tool_definitions(
         provider
@@ -403,4 +420,61 @@ pub(crate) fn unmapped_workers() -> lash_vm_client::service::Service {
         UNMAPPED_WORKER_ENTRY.to_owned(),
     ];
     lash_vm_client::service::Service::new(lash_vm_client::PoolConfig::codemode(entry))
+}
+
+/// The same ordinary service declarations and runners used by dialect plugins.
+fn dialect_services() -> [Arc<lash_vm_runtime::dialect_services::Services>; 2] {
+    use lash_vm_runtime::dialect_services::{Dialect, Services};
+    [Dialect::TypeScript, Dialect::Python].map(|dialect| {
+        Services::new(
+            dialect,
+            lash_core::testing::test_tools_provider(),
+            std::time::Duration::from_secs(120),
+            Arc::new(|| 0),
+        )
+        .expect("the fixture's dialect services")
+    })
+}
+
+/// A round context with its accepted packages, as production records before code.
+pub(crate) async fn recorded_context(
+    builder: lash_core::testing::TestExecutionContextBuilder<'static>,
+) -> lash_core::RuntimeExecutionContext<'static> {
+    let mut built = builder.build();
+    let probe = lash_core::RuntimeExecutionContext::new(
+        Arc::clone(&built.dispatch),
+        Arc::clone(&built.process_env_store),
+        Arc::clone(&built.dispatch.attachment_store),
+        Arc::default(),
+        built.turn_context.clone(),
+    );
+    let recorded = packages::record(&probe).await;
+    let dispatch = Arc::make_mut(&mut built.dispatch);
+    dispatch.routes = dispatch.routes.clone().with_packages(recorded);
+    built.into_runtime()
+}
+
+pub(crate) async fn recorded_cell_context(
+    host: &DurableHost,
+    session: &'static str,
+    turn: &'static str,
+    replay_key: &'static str,
+    provider: Arc<dyn lash_core::ToolProvider>,
+) -> lash_core::RuntimeExecutionContext<'static> {
+    let (provider, catalog) = with_finish(provider);
+    recorded_context(
+        lash_core::testing::TestExecutionContextBuilder::new(host.ports())
+            .provider(provider)
+            .tool_catalog(catalog)
+            .runtime_parent_invocation(lash_core::testing::exec_code_invocation(
+                session,
+                turn,
+                0,
+                0,
+                "exec-code",
+                replay_key,
+            )),
+    )
+    .await
+    .with_session_pages(host.session_pages())
 }

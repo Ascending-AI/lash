@@ -697,16 +697,19 @@ mod tests {
         let key: &'static str = Box::leak(
             format!("exec-code:{}", CELLS.fetch_add(1, Ordering::SeqCst)).into_boxed_str(),
         );
-        Box::pin(state.execute_code(
-            crate::testing::cell_context(
-                host,
-                "test-session",
-                "test-turn",
-                key,
-                Arc::new(crate::testing::NoTools),
+        Box::pin(
+            state.execute_code(
+                crate::testing::recorded_cell_context(
+                    host,
+                    "test-session",
+                    "test-turn",
+                    key,
+                    Arc::new(crate::testing::NoTools),
+                )
+                .await,
+                request,
             ),
-            request,
-        ))
+        )
         .await
     }
 
