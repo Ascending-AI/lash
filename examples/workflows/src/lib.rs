@@ -181,7 +181,7 @@ fn written_captions(source: &str, lang: SourceLanguage) -> usize {
     }
 }
 
-pub(crate) fn code_sites(document: &Document) -> Vec<Site> {
+pub(crate) fn code_sites(document: &Document, library: &dyn k::FunctionCatalog) -> Vec<Site> {
     fn walk(node: Node<'_>, site: Site, out: &mut Vec<Site>) {
         if matches!(
             node,
@@ -195,6 +195,9 @@ pub(crate) fn code_sites(document: &Document) -> Vec<Site> {
     }
     let mut sites = Vec::new();
     for (unit, body) in document.units() {
+        if matches!(&unit, Unit::Library(id) if library.definition(id).is_some()) {
+            continue;
+        }
         walk(Node::Block(body), Site::new(unit, vec![]), &mut sites);
     }
     sites
@@ -414,6 +417,7 @@ pub(crate) fn render_with(root: &Path) -> Result<(BTreeMap<String, String>, Vec<
             );
             let map = readable::source_map(
                 &lowered,
+                env.library,
                 &source,
                 case.exceptions
                     .get(extension)
@@ -457,7 +461,7 @@ pub(crate) fn render_with(root: &Path) -> Result<(BTreeMap<String, String>, Vec<
                     checked.entry_unit(),
                     view.statements.len(),
                     view.scopes.len(),
-                    code_sites(document).len()
+                    code_sites(document, env.library).len()
                 )?;
                 views.push_str(&readable::view(&checked, &view)?);
                 views.push_str(&readable::captions(&checked, &view, &lowered.captions)?);
@@ -468,10 +472,11 @@ pub(crate) fn render_with(root: &Path) -> Result<(BTreeMap<String, String>, Vec<
                 environment: &env,
                 mode,
             };
-            let source = roundtrip(document, &lowered.captions, lang, &printing)?;
+            let source = roundtrip(document, &lowered.captions, lang, &printing)
+                .with_context(|| format!("{} {extension}: authored print/read", case.name))?;
             report.push(Lifted::of(&case.name, lang, false, document, &source));
             if case.mode == CaseMode::Module
-                && let Some(transaction) = canvas_edit(document)
+                && let Some(transaction) = canvas_edit(document, env.library)
             {
                 let mut draft = Draft::open(document.clone())?;
                 let applied = draft.apply(&transaction, &checker)?;
@@ -479,7 +484,10 @@ pub(crate) fn render_with(root: &Path) -> Result<(BTreeMap<String, String>, Vec<
                     .captions
                     .rekey(&applied.correspondence, document, draft.document())
                     .context("captions rekey through the canvas edit")?;
-                let edited = roundtrip(draft.document(), &rekeyed.captions, lang, &printing)?;
+                let edited = roundtrip(draft.document(), &rekeyed.captions, lang, &printing)
+                    .with_context(|| {
+                        format!("{} {extension}: edited authored print/read", case.name)
+                    })?;
                 report.push(Lifted::of(
                     &case.name,
                     lang,
@@ -506,12 +514,15 @@ pub(crate) fn render_with(root: &Path) -> Result<(BTreeMap<String, String>, Vec<
 /// The canvas edit the corpus records: the first tool argument of the first
 /// step that performs a tool, set to a text; or, in a workflow with no such
 /// argument, the first text a statement holds.
-pub(crate) fn canvas_edit(document: &Document) -> Option<Transaction> {
+pub(crate) fn canvas_edit(
+    document: &Document,
+    library: &dyn k::FunctionCatalog,
+) -> Option<Transaction> {
     use lash_kernel_edit::authoring::{DataValue, Operation, ValueTarget};
-    let sites = code_sites(document);
+    let sites = code_sites(document, library);
     let argument = sites.iter().find(|site| match document.node(site) {
         Some(Node::Expr(Expr::Act(action))) => {
-            matches!(&action.kind, k::ActKind::Call(k::Callee::Import(_)))
+            matches!(&action.kind, k::ActKind::Perform { .. })
                 && action
                     .args
                     .first()
@@ -574,7 +585,8 @@ fn edit(
     checker: &Checker<'_>,
     printing: &Printing<'_>,
 ) -> Result<(String, String)> {
-    let transaction = canvas_edit(document).context("edit fixture needs a perform")?;
+    let transaction =
+        canvas_edit(document, checker.functions).context("edit fixture needs a perform")?;
     #[derive(Serialize, Deserialize)]
     #[serde(deny_unknown_fields)]
     struct Replay {

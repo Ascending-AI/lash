@@ -132,7 +132,7 @@ async fn imported_parameterized_entries_can_run_with_named_inputs() {
             .post(format!("{base}/workflow/source"))
             .json(&json!({
                 "version": before["version"], "entry": "echo",
-                "source": "export async function echo(message: string) { return message; }"
+                "source": "export async function echo(message: string): Promise<string> { return message; }"
             }))
             .send()
             .await
@@ -206,12 +206,12 @@ async fn authored_source_is_read_from_its_published_map() {
     for (dialect, source, format) in [
         (
             "typescript",
-            "export async function demo() { return await corpus.echo(\"日本 🦀\"); }",
+            "export async function demo(): Promise<string> { return await corpus.echo(\"日本 🦀\"); }",
             "type_script_v1",
         ),
         (
             "python",
-            "async def demo():\n    return await corpus.echo(\"日本 🦀\")\n",
+            "async def demo() -> str:\n    return await corpus.echo(\"日本 🦀\")\n",
             "python_v1",
         ),
     ] {

@@ -1,6 +1,5 @@
-type Topic = { title: string; urgent: boolean };
 /** Pace a digest of topics */
-export async function digest(topics: Topic[]) {
+export async function digest(topics: { title: string; urgent: boolean }[]): Promise<{ seen: number }> {
   /** Start counting at zero */
   let seen = 0;
   /** Go through each topic */

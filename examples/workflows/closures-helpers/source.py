@@ -1,5 +1,5 @@
 #: Measure each word
-async def demo(items: list[str]):
+async def demo(items: list[str]) -> list[int]:
     #: Describe how to measure one word
     def size(item):
         return len(item)

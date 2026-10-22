@@ -1,5 +1,5 @@
 /** Echo every item */
-export async function demo(items) {
+export async function demo(items: string[]): Promise<string[]> {
   /** Start an empty list of replies */
   const out = [];
   /** Go through each item */

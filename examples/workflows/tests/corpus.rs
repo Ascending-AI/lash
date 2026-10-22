@@ -281,25 +281,92 @@ fn every_python_corpus_case_has_one_body_per_source_loop_and_no_statement_inflat
         let mut loops = 0;
         let mut entry_cleanup = 0;
         let mut deferred_calls = 0;
+        let mut bound = std::collections::BTreeMap::new();
+        for (unit, body) in document.units() {
+            let mut nodes = vec![lash_kernel_doc::Node::Block(body)];
+            while let Some(node) = nodes.pop() {
+                use lash_kernel_doc::{Expr, Node, Rhs, Stmt};
+                let binding = match node {
+                    Node::Stmt(Stmt::Let {
+                        name,
+                        value: Rhs::Expr(Expr::Closure(closure)),
+                    }) => Some((name, closure.function)),
+                    Node::Expr(Expr::Let { name, value, .. }) => match &**value {
+                        Expr::Closure(closure) => Some((name, closure.function)),
+                        _ => None,
+                    },
+                    _ => None,
+                };
+                if let Some((name, function)) = binding {
+                    assert!(
+                        bound
+                            .insert((unit.clone(), name.clone()), function)
+                            .is_none(),
+                        "one closure binding per local identity"
+                    );
+                }
+                nodes.extend(node.children());
+            }
+        }
+        let target =
+            |unit: &lash_vocabulary::sites::Unit, value: &lash_kernel_doc::Expr| match value {
+                lash_kernel_doc::Expr::Closure(closure) => Some(closure.function),
+                lash_kernel_doc::Expr::Variable(name) => {
+                    bound.get(&(unit.clone(), name.clone())).copied()
+                }
+                _ => None,
+            };
+        let is_run = |action: &lash_kernel_doc::ActExpr| {
+            matches!(&action.kind,
+            lash_kernel_doc::ActKind::Spawn(lash_kernel_doc::Callee::Import(slot))
+                if document.imports[slot].name == lash_kernel_dialect::authoring::helper_name(&lash_vocabulary::FunctionName::new("py.task.run").unwrap()))
+        };
+        let mut deferred = std::collections::BTreeSet::new();
+        for (unit, body) in document.units() {
+            let mut nodes = vec![lash_kernel_doc::Node::Block(body)];
+            while let Some(node) = nodes.pop() {
+                if let lash_kernel_doc::Node::Expr(lash_kernel_doc::Expr::Act(action)) = node
+                    && is_run(action)
+                    && let [work] = action.args.as_slice()
+                    && let Some(function) = target(&unit, work)
+                    && document.functions[&function].signature.params.is_empty()
+                    && matches!(
+                        document.functions[&function]
+                            .body()
+                            .unwrap()
+                            .block
+                            .as_slice(),
+                        [lash_kernel_doc::Stmt::Return {
+                            value: lash_kernel_doc::Expr::Act(_)
+                        }]
+                    )
+                {
+                    deferred.insert(function);
+                }
+                nodes.extend(node.children());
+            }
+        }
         let mut pending = if cell {
-            vec![lash_kernel_doc::Node::Block(
-                document.main.as_ref().unwrap(),
+            vec![(
+                lash_vocabulary::sites::Unit::Main,
+                lash_kernel_doc::Node::Block(document.main.as_ref().unwrap()),
             )]
         } else {
             document
                 .exports
                 .values()
                 .filter_map(|export| match export {
-                    lash_kernel_doc::Export::Function(function) => {
-                        Some(lash_kernel_doc::Node::Block(
+                    lash_kernel_doc::Export::Function(function) => Some((
+                        lash_vocabulary::sites::Unit::Library(function.function),
+                        lash_kernel_doc::Node::Block(
                             &document.functions[&function.function].body().unwrap().block,
-                        ))
-                    }
+                        ),
+                    )),
                     _ => None,
                 })
                 .collect()
         };
-        while let Some(node) = pending.pop() {
+        while let Some((unit, node)) = pending.pop() {
             use lash_kernel_doc::{ActKind, Callee, Expr, Node, Stmt};
 
             if let Node::Stmt(Stmt::Try(attempt)) = node
@@ -312,38 +379,39 @@ fn every_python_corpus_case_has_one_body_per_source_loop_and_no_statement_inflat
                     ],
                 ) = attempt.finally.as_deref()
                 && let ActKind::Call(Callee::Import(function)) = &action.kind
-                && document
-                    .imports
-                    .get(function)
-                    .is_some_and(|import| import.name.to_string() == "tasks.cancel_all")
+                && document.imports.get(function).is_some_and(|import| {
+                    import.name
+                        == lash_kernel_dialect::authoring::helper_name(
+                            &lash_vocabulary::FunctionName::new("tasks.cancel_all").unwrap(),
+                        )
+                })
             {
                 entry_cleanup += 2;
-                pending.push(Node::Block(&attempt.body));
+                pending.push((unit.clone(), Node::Block(&attempt.body)));
                 continue;
             }
             if let Node::Expr(Expr::Act(action)) = node
-                && let ActKind::Spawn(Callee::Import(function)) = &action.kind
-                && document
-                    .imports
-                    .get(function)
-                    .is_some_and(|import| import.name.to_string() == "py.task.run")
-                && let [Expr::Closure(closure)] = action.args.as_slice()
-                && document.functions[&closure.function]
-                    .signature
-                    .params
-                    .is_empty()
+                && is_run(action)
+                && let [work] = action.args.as_slice()
+                && let Some(function) = target(&unit, work)
+                && deferred.contains(&function)
                 && let [
                     Stmt::Return {
                         value: Expr::Act(call),
                     },
-                ] = document.functions[&closure.function]
+                ] = document.functions[&function]
                     .body()
                     .unwrap()
                     .block
                     .as_slice()
             {
                 deferred_calls += 1;
-                pending.extend(call.args.iter().map(Node::Expr));
+                pending.extend(call.args.iter().map(|expr| {
+                    (
+                        lash_vocabulary::sites::Unit::Library(function),
+                        Node::Expr(expr),
+                    )
+                }));
                 continue;
             }
             statements += usize::from(matches!(node, lash_kernel_doc::Node::Stmt(_)));
@@ -354,11 +422,18 @@ fn every_python_corpus_case_has_one_body_per_source_loop_and_no_statement_inflat
                 )
             ));
             if let Node::Expr(lash_kernel_doc::Expr::Closure(closure)) = node {
-                pending.push(Node::Block(
-                    &document.functions[&closure.function].body().unwrap().block,
-                ));
+                if !deferred.contains(&closure.function) {
+                    pending.push((
+                        lash_vocabulary::sites::Unit::Library(closure.function),
+                        Node::Block(&document.functions[&closure.function].body().unwrap().block),
+                    ));
+                }
             }
-            pending.extend(node.children());
+            pending.extend(
+                node.children()
+                    .into_iter()
+                    .map(|child| (unit.clone(), child)),
+            );
         }
         println!(
             "{name}: author={} lowered={statements} source_loops={} lowered_loops={loops} entry_cleanup={entry_cleanup} deferred_calls={deferred_calls}",
@@ -585,7 +660,12 @@ fn every_typescript_corpus_case_has_source_shaped_statements_and_one_body_per_lo
                     .document
                     .imports
                     .get(&function)
-                    .is_some_and(|import| import.name.to_string() == "ts.promise.start")
+                    .is_some_and(|import| {
+                        import.name
+                            == lash_kernel_dialect::authoring::helper_name(
+                                &lash_vocabulary::FunctionName::new("ts.promise.start").unwrap(),
+                            )
+                    })
                 && matches!(action.args.first(), Some(lash_kernel_doc::Expr::Closure(_)))
             {
                 adapters += 1;

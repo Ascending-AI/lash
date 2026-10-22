@@ -2,7 +2,12 @@
 //! carry both the content id and the display name/label a host joins.
 use super::*;
 
-pub(super) fn source_map(lowered: &Lowered, source: &str, allowed: &[String]) -> Result<String> {
+pub(super) fn source_map(
+    lowered: &Lowered,
+    library: &dyn lash_kernel_dialect::Library,
+    source: &str,
+    allowed: &[String],
+) -> Result<String> {
     let document = &lowered.document;
     let map = lowered
         .source_map
@@ -42,7 +47,7 @@ pub(super) fn source_map(lowered: &Lowered, source: &str, allowed: &[String]) ->
         }
         text.push('\n');
     }
-    for site in code_sites(document)
+    for site in code_sites(document, library)
         .into_iter()
         .filter(|site| !mapped.contains(site))
     {
@@ -55,7 +60,7 @@ pub(super) fn source_map(lowered: &Lowered, source: &str, allowed: &[String]) ->
             })) if site.unit == Unit::Main && site.path.len() == 1 => {
                 "absent-binding initialization"
             }
-            _ if task_finalizer(document, &site) => "task finalizer",
+            _ if task_finalizer(document, library, &site) => "task finalizer",
             _ => anyhow::bail!(
                 "SM-COVER: unexplained unmapped site {site}: {:?}",
                 document.node(&site)
@@ -70,7 +75,11 @@ pub(super) fn source_map(lowered: &Lowered, source: &str, allowed: &[String]) ->
     Ok(text)
 }
 
-fn task_finalizer(document: &Document, site: &Site) -> bool {
+fn task_finalizer(
+    document: &Document,
+    library: &dyn lash_kernel_dialect::Library,
+    site: &Site,
+) -> bool {
     // An entry declares its cleanup in its start convention; only a cell's
     // root wraps it.
     let body = match &site.unit {
@@ -110,10 +119,13 @@ fn task_finalizer(document: &Document, site: &Site) -> bool {
             .functions
             .get(id)
             .is_some_and(|function| function.name.as_str() == "tasks.cancel_all"),
-        k::ActKind::Call(k::Callee::Import(slot)) => document
-            .imports
-            .get(slot)
-            .is_some_and(|import| import.name.to_string() == "tasks.cancel_all"),
+        k::ActKind::Call(k::Callee::Import(slot)) => {
+            document.imports.get(slot).is_some_and(|import| {
+                library
+                    .imported(&import.name)
+                    .is_some_and(|name| name.as_str() == "tasks.cancel_all")
+            })
+        }
         _ => false,
     };
     action.args.is_empty()
