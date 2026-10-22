@@ -905,8 +905,11 @@ impl KernelDocuments {
                         message: "Package hash differs".into(),
                     });
                 }
+                let mut checked = BTreeSet::new();
                 for member in record.package.members.values() {
-                    if let MemberKind::Export { link, .. } = member.kind {
+                    if let MemberKind::Export { link, .. } = member.kind
+                        && checked.insert(link)
+                    {
                         self.load_linked(link).await?;
                     }
                 }

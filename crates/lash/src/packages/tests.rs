@@ -449,6 +449,7 @@ async fn a_public_alias_retains_internal_fills_without_lending_their_authority()
 struct CountedDocuments {
     inner: Arc<dyn lash_execution_contracts::module_artifacts::ModuleArtifactStore>,
     holds: Arc<std::sync::Mutex<BTreeMap<String, usize>>>,
+    reads: Arc<std::sync::Mutex<BTreeMap<String, usize>>>,
 }
 #[async_trait::async_trait]
 impl lash_execution_contracts::module_artifacts::ModuleArtifactStore for CountedDocuments {
@@ -493,6 +494,12 @@ impl lash_execution_contracts::module_artifacts::ModuleArtifactStore for Counted
         module_ref: &str,
     ) -> Result<Option<Vec<u8>>, lash_execution_contracts::module_artifacts::ArtifactStoreError>
     {
+        *self
+            .reads
+            .lock()
+            .unwrap()
+            .entry(module_ref.to_owned())
+            .or_default() += 1;
         self.inner.get_module_artifact(module_ref).await
     }
 }
@@ -512,6 +519,7 @@ async fn a_full_helper_namespace_holds_each_document_once() {
             Arc::new(CountedDocuments {
                 inner,
                 holds: counted,
+                reads: Default::default(),
             })
         })
         .into_backend();
@@ -749,4 +757,89 @@ async fn backend_document_missing(
         .await
         .unwrap()
         .is_none()
+}
+
+/// FIG-7135: many package names for one Link validate its current document
+/// once per hold, rather than hydrating the same retained code per member.
+#[tokio::test]
+async fn holding_package_aliases_loads_each_distinct_link_once() {
+    use crate::tests::host::sqlite_memory_store_backend;
+    let backend = sqlite_memory_store_backend().await;
+    let reads = Arc::new(std::sync::Mutex::new(BTreeMap::new()));
+    let documents = lash_vm_runtime::KernelDocuments::new(
+        Arc::new(CountedDocuments {
+            inner: backend.module_artifacts(),
+            holds: Default::default(),
+            reads: reads.clone(),
+        }),
+        backend.package_store(),
+    );
+    let function = lash_kernel_doc::parse_definition(
+        "function fixture.run() -> Null\nkernel 1\ncharge 1\nbody { return null }",
+    )
+    .unwrap();
+    let mut document =
+        lash_kernel_doc::parse_document("kernel 1\nnumbers float\nmain { return null }").unwrap();
+    document.main = None;
+    document.exports.insert(
+        Name::new("run"),
+        lash_kernel_doc::Export::Function(lash_kernel_doc::FunctionExport {
+            function: function.identity(),
+            signature: function.signature.clone(),
+            convention: lash_kernel_doc::StartConvention::Direct,
+            asynchronous: false,
+            rest: false,
+        }),
+    );
+    document.functions.insert(function.identity(), function);
+    let document_id = document.identity();
+    let link = Link {
+        document: document_id,
+        fills: Default::default(),
+    };
+    let link_id = link.identity();
+    let package = Package {
+        path: PackagePath::parse("fixture").unwrap(),
+        members: (0..8)
+            .map(|i| {
+                (
+                    Segment::new(format!("alias{i}")).unwrap(),
+                    Member {
+                        visibility: Visibility::Public,
+                        kind: MemberKind::Export {
+                            link: link_id,
+                            export: ExportName {
+                                name: Name::new("run"),
+                                member: None,
+                            },
+                        },
+                    },
+                )
+            })
+            .collect(),
+    };
+    let package_id = package.identity();
+    let content = lash_kernel_package::LinkedContent {
+        documents: [(document_id, document)].into(),
+        links: [(link_id, link)].into(),
+        packages: [(package_id, package)].into(),
+    };
+    let claim =
+        ReferrerClaim::unguarded(ArtifactReferrer::HostPin(HostArtifactPin::mint())).unwrap();
+    documents
+        .hold_helper_release(&claim, &content, &Default::default())
+        .await
+        .unwrap();
+    for _ in 0..2 {
+        reads.lock().unwrap().clear();
+        documents
+            .hold(&claim, &ContentRef::Package(package_id))
+            .await
+            .unwrap();
+        assert_eq!(
+            reads.lock().unwrap().get(&document_id.to_string()),
+            Some(&1),
+            "a package hold must read each distinct Link's current document once, including subsequent holds"
+        );
+    }
 }
