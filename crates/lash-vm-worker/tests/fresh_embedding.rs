@@ -34,6 +34,26 @@ fn a_fresh_embedding_parses_no_kernel_text_and_preserves_the_functions() {
         elapsed.as_nanos()
     );
 
+    // Owner churn and another embedding reuse the one installed immutable
+    // process image; neither performs helper identity work again.
+    let config =
+        lash_vm_client::PoolConfig::standard(lash_vm_client::WorkerEntry::helper("unused"));
+    let first = config.worker_library().expect("the installed image");
+    let _ = document_work::helper_work();
+    let second = config.worker_library().expect("the same installed image");
+    let resident =
+        lash_vm_worker::built_embedding(&WorkerTuning::standard()).expect("a resident embedding");
+    assert!(std::sync::Arc::ptr_eq(&first, &second));
+    assert_eq!(first.helpers().identity(), second.helpers().identity());
+    assert_eq!(
+        document_work::helper_work().identity_hashes,
+        0,
+        "a new owner does not reinstall or rehash immutable helpers"
+    );
+    assert_eq!(
+        resident.library_image().helpers().identity(),
+        first.helpers().identity()
+    );
     let registry = embedding.registry().expect("the worker registry");
     let expected = lash_vm_releases::helper_release()
         .expect("the helper declarations")
@@ -78,7 +98,7 @@ fn a_host_native_library_binds_exact_declarations_and_runs_complete_documents() 
             .resolver_roots()
             .into_iter()
             .chain([width_id, guest_id]),
-        &release.content.documents,
+        &Default::default(),
     )
     .unwrap();
     for id in [guest_id, lash_vocabulary::FunctionId::from_bytes([0; 32])] {
@@ -117,6 +137,7 @@ fn a_host_native_library_binds_exact_declarations_and_runs_complete_documents() 
         &BTreeMap::from([(id, link)]),
         lash_kernel_doc::heap::PageId([8; 32]),
         lash_kernel_vm::PreparedLibrary::new(worker),
+        lash_kernel_doc::Selection::Fresh,
     )
     .unwrap();
     let mut machine = lash_kernel_vm::KernelMachine::start(
@@ -360,7 +381,7 @@ fn a_run_from_stored_definitions_charges_exactly_as_the_writers_build() {
         WorkerLibrary::new(
             &registry,
             release.resolver_roots().into_iter().chain([id]),
-            &release.content.documents,
+            &Default::default(),
         )
         .unwrap()
     };
@@ -373,8 +394,14 @@ fn a_run_from_stored_definitions_charges_exactly_as_the_writers_build() {
             .unwrap()
     };
     let (writes, reads) = (embed(&writer), embed(&reader));
-    let closure =
-        lash_vm_broker::kernel::closure::derive([go], writer.registry(), &BTreeMap::new()).unwrap();
+    let closure = lash_vm_broker::kernel::closure::derive(
+        [go],
+        writer.registry(),
+        &BTreeMap::new(),
+        &lash_kernel_doc::BuildHelpers::empty(),
+        &Default::default(),
+    )
+    .unwrap();
     let mut text = String::from("kernel 1\nnumbers float\n");
     for function in closure.body().identities() {
         let definition = writer.registry().get(&function).unwrap();
@@ -415,9 +442,15 @@ fn a_run_from_stored_definitions_charges_exactly_as_the_writers_build() {
         .collect();
     let limits = lash_vocabulary::KernelDataLimits::standard();
     let library = |embedding: &lash_vm_worker::Embedding, definitions| {
-        lash_vm_worker::core_support::library_for(embedding, &document, definitions, limits)
-            .expect("a prepared frame")
-            .expect("the run's library assembles")
+        lash_vm_worker::core_support::library_for(
+            embedding,
+            &document,
+            definitions,
+            limits,
+            &lash_kernel_doc::Selection::Fresh,
+        )
+        .expect("a prepared frame")
+        .expect("the run's library assembles")
     };
 
     let run = |(library, closure): (
@@ -436,6 +469,7 @@ fn a_run_from_stored_definitions_charges_exactly_as_the_writers_build() {
             &BTreeMap::from([(id, link)]),
             lash_kernel_doc::heap::PageId(closure.reference().0),
             library,
+            lash_kernel_doc::Selection::Fresh,
         )
         .unwrap();
         let start = lash_kernel_vm::CellStart {

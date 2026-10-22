@@ -1,6 +1,6 @@
 //! The pool's immutable library and document image. Per-run content names this exact owner.
 use crate::PoolError;
-use lash_kernel_doc::FunctionRegistry;
+use lash_kernel_doc::{BuildHelpers, FunctionRegistry};
 use lash_kernel_doc::{Document, IdentifiedDocument};
 use lash_kernel_vm::PreparedLibrary;
 use lash_protocol_types::engine_fault::{PayloadKind, WorkerLibraryRefusal};
@@ -17,14 +17,67 @@ pub struct WorkerLibrary {
     registry: Arc<FunctionRegistry>,
     roots: std::collections::BTreeSet<lash_vocabulary::names::FunctionId>,
     documents: Arc<BTreeMap<DocumentId, IdentifiedDocument>>,
+    helpers: Arc<BuildHelpers>,
 }
 
 impl WorkerLibrary {
+    /// The process's one immutable build image, shared across owners and pools.
+    pub fn built() -> Result<Arc<Self>, lash_vm_releases::LibraryError> {
+        static BUILT: OnceLock<Result<Arc<WorkerLibrary>, lash_vm_releases::LibraryError>> =
+            OnceLock::new();
+        BUILT
+            .get_or_init(|| {
+                let release = lash_vm_releases::helper_release()?;
+                Self::with_helpers(
+                    &release.functions,
+                    release.resolver_roots(),
+                    &BTreeMap::new(),
+                    Arc::clone(&release.helpers),
+                )
+                .map(Arc::new)
+                .map_err(lash_vm_releases::LibraryError::new)
+            })
+            .clone()
+    }
+
     pub fn new(
         functions: &FunctionRegistry,
         roots: impl IntoIterator<Item = lash_vocabulary::names::FunctionId>,
         documents: &BTreeMap<DocumentId, Document>,
     ) -> Result<Self, WorkerLibraryRefusal> {
+        let release = lash_vm_releases::helper_release().map_err(malformed)?;
+        let members = release
+            .helpers
+            .members()
+            .filter(|id| functions.get(id).is_some())
+            .copied();
+        let helpers = Arc::new(BuildHelpers::new(functions.clone(), members).map_err(malformed)?);
+        Self::with_helpers(functions, roots, documents, helpers)
+    }
+
+    /// Install an exact closed helper image independently of host-authored Documents.
+    pub fn with_helpers(
+        functions: &FunctionRegistry,
+        roots: impl IntoIterator<Item = lash_vocabulary::names::FunctionId>,
+        documents: &BTreeMap<DocumentId, Document>,
+        helpers: Arc<BuildHelpers>,
+    ) -> Result<Self, WorkerLibraryRefusal> {
+        for id in helpers.members() {
+            if functions.get(id).is_none() {
+                return Err(malformed(format!(
+                    "helper {id} is absent from worker image"
+                )));
+            }
+        }
+        let mut metadata = TokenWriter::new();
+        metadata.seq(2);
+        metadata.bytes(helpers.identity().as_bytes());
+        helpers
+            .members()
+            .copied()
+            .collect::<std::collections::BTreeSet<_>>()
+            .encode(&mut metadata);
+        let metadata = metadata.into_bytes();
         let roots: std::collections::BTreeSet<_> = roots.into_iter().collect();
         let root_bytes = lash_vocabulary::tokens::encode_body(&roots);
         let documents: BTreeMap<_, _> = documents
@@ -52,7 +105,7 @@ impl WorkerLibrary {
             .frame_positions(&Default::default())
             .map_err(malformed)?;
         let mut frame = Vec::new();
-        for part in [&image, &index, &positions, &root_bytes, &content] {
+        for part in [&image, &index, &positions, &root_bytes, &content, &metadata] {
             let length: u32 = part.len().try_into().map_err(malformed)?;
             frame.extend_from_slice(&length.to_le_bytes());
             frame.extend_from_slice(part);
@@ -63,10 +116,14 @@ impl WorkerLibrary {
             registry: Arc::new(functions.clone()),
             roots,
             documents: Arc::new(documents),
+            helpers,
         })
     }
     pub fn roots(&self) -> &std::collections::BTreeSet<lash_vocabulary::names::FunctionId> {
         &self.roots
+    }
+    pub fn helpers(&self) -> &Arc<BuildHelpers> {
+        &self.helpers
     }
     pub fn registry(&self) -> &FunctionRegistry {
         &self.registry
@@ -77,23 +134,44 @@ impl WorkerLibrary {
     pub fn from_frame(frame: Arc<[u8]>) -> Result<Self, WorkerLibraryRefusal> {
         sections(&frame)?;
         let owner: &'static [u8] = Box::leak(frame.to_vec().into_boxed_slice());
-        let [image, _, _, roots, content] = sections(owner)?;
+        let [image, _, _, roots, content, metadata] = sections(owner)?;
         let documents = read_documents(content)?;
         let roots = lash_vocabulary::tokens::decode_body(roots).map_err(malformed)?;
         let registry = Arc::new(FunctionRegistry::over_frame(image).map_err(malformed)?);
+        let mut reader = TokenReader::new(metadata);
+        reader.expect_struct(2).map_err(malformed)?;
+        let identity = lash_vocabulary::HelperLibraryId::from_bytes(
+            reader
+                .bytes()
+                .map_err(malformed)?
+                .try_into()
+                .map_err(malformed)?,
+        );
+        let members =
+            std::collections::BTreeSet::<lash_vocabulary::FunctionId>::decode(&mut reader)
+                .map_err(malformed)?;
+        reader.finish().map_err(malformed)?;
+        let helpers =
+            Arc::new(BuildHelpers::new(registry.as_ref().clone(), members).map_err(malformed)?);
+        if helpers.identity() != identity {
+            return Err(malformed(
+                "helper library identity differs from image membership",
+            ));
+        }
         Ok(Self {
             frame,
             live: Arc::new(OnceLock::from(owner)),
             registry,
             roots,
             documents: Arc::new(documents),
+            helpers,
         })
     }
     pub fn indexes(&self) -> Result<[&'static [u8]; 4], WorkerLibraryRefusal> {
         let bytes = self
             .live
             .get_or_init(|| Box::leak(self.frame.to_vec().into_boxed_slice()));
-        let [image, index, positions, roots, _] = sections(bytes)?;
+        let [image, index, positions, roots, _, _] = sections(bytes)?;
         Ok([image, index, positions, roots])
     }
 
@@ -205,8 +283,8 @@ fn malformed(error: impl std::fmt::Display) -> WorkerLibraryRefusal {
         problem: error.to_string(),
     }
 }
-fn sections(bytes: &[u8]) -> Result<[&[u8]; 5], WorkerLibraryRefusal> {
-    let mut parts = [&[][..]; 5];
+fn sections(bytes: &[u8]) -> Result<[&[u8]; 6], WorkerLibraryRefusal> {
+    let mut parts = [&[][..]; 6];
     let mut at = 0usize;
     for part in &mut parts {
         let word: [u8; 4] = bytes
@@ -343,7 +421,130 @@ mod document_work_laws {
         }
         assert_eq!(
             sizes[0], sizes[1],
-            "per-run document bytes grew with image-owned helper content"
+            "per-run document bytes grew with image-owned host content"
         );
+    }
+}
+
+/// Scoped parent-side attribution of forbidden helper Document work. Only
+/// scalar counts are retained; the probe owns no Documents or execution cache.
+#[cfg(any(test, feature = "testing"))]
+pub mod helper_document_work {
+    use lash_kernel_doc::Document;
+    use lash_vocabulary::{DocumentId, FunctionId};
+    use std::collections::BTreeSet;
+    use std::sync::{Mutex, PoisonError};
+
+    #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+    pub struct Work {
+        pub publications: u64,
+        pub gets: u64,
+        pub stages: u64,
+        pub start_documents: u64,
+        pub start_bytes: u64,
+        pub start_instances: u64,
+        pub start_definitions: u64,
+    }
+    static WORK: Mutex<Option<Work>> = Mutex::new(None);
+
+    /// One exact-law window, spanning its async and delegated blocking work.
+    pub struct Window;
+    impl Window {
+        pub fn begin() -> Self {
+            let mut work = WORK.lock().unwrap_or_else(PoisonError::into_inner);
+            assert!(
+                work.is_none(),
+                "a helper Document work window is already active"
+            );
+            *work = Some(Work::default());
+            Self
+        }
+        pub fn snapshot(&self) -> Work {
+            WORK.lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .unwrap_or_default()
+        }
+    }
+    impl Drop for Window {
+        fn drop(&mut self) {
+            *WORK.lock().unwrap_or_else(PoisonError::into_inner) = None;
+        }
+    }
+    fn active() -> bool {
+        WORK.lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .is_some()
+    }
+    fn note(change: impl FnOnce(&mut Work)) {
+        if let Some(work) = WORK.lock().unwrap_or_else(PoisonError::into_inner).as_mut() {
+            change(work);
+        }
+    }
+    fn helper(function: &FunctionId) -> bool {
+        lash_vm_releases::helper_release().is_ok_and(|release| {
+            release
+                .functions
+                .get(function)
+                .is_some_and(|registered| registered.has_body())
+        })
+    }
+    pub fn contains_helper_body(document: &Document) -> bool {
+        active()
+            && document
+                .functions
+                .iter()
+                .any(|(id, definition)| definition.body().is_some() && helper(id))
+    }
+    pub fn published(document: &Document) {
+        if contains_helper_body(document) {
+            note(|work| work.publications += 1);
+        }
+    }
+    pub fn staged(document: &Document) {
+        if contains_helper_body(document) {
+            note(|work| work.stages += 1);
+        }
+    }
+    pub fn got(document: &Document) {
+        if contains_helper_body(document) {
+            note(|work| work.gets += 1);
+        }
+    }
+    pub(crate) fn start(
+        start: &lash_vm_protocol::Start,
+        documents: &BTreeSet<DocumentId>,
+    ) -> Result<(), crate::PoolError> {
+        if !active() {
+            return Ok(());
+        }
+        let mut found = Work::default();
+        for document in std::iter::once(&start.document).chain(&start.documents) {
+            if documents.contains(&document.identity()) {
+                found.start_documents += 1;
+                if let lash_vm_protocol::message::StoredDocument::Supplied { body, .. } = document {
+                    found.start_bytes += body.0.len() as u64;
+                }
+            }
+        }
+        let instances: Vec<lash_kernel_vm::interface::PreparedInstance> = crate::wire::decode(
+            lash_protocol_types::engine_fault::PayloadKind::Start,
+            &start.instances,
+        )?;
+        found.start_instances = instances
+            .iter()
+            .filter(|instance| documents.contains(&instance.document))
+            .count() as u64;
+        found.start_definitions = start
+            .definitions
+            .iter()
+            .filter(|definition| helper(&FunctionId::from_bytes(definition.function)))
+            .count() as u64;
+        note(|work| {
+            work.start_documents += found.start_documents;
+            work.start_bytes += found.start_bytes;
+            work.start_instances += found.start_instances;
+            work.start_definitions += found.start_definitions;
+        });
+        Ok(())
     }
 }

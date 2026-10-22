@@ -1027,6 +1027,7 @@ async fn a_process_starts_another_entry_of_its_document_by_function_reference_an
     let content = lash::vm::KernelDocuments::new(
         core.backend().module_artifacts(),
         core.backend().package_store(),
+        std::sync::Arc::clone(lash::vm::WorkerLibrary::built().unwrap().helpers()),
     )
     .load_linked(link)
     .await

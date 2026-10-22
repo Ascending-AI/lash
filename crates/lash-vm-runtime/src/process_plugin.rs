@@ -41,6 +41,7 @@ impl KernelProcessPluginFactory {
     #[must_use]
     pub fn with_library(mut self, packages: Arc<lash_vm_client::packages::WorkerLibrary>) -> Self {
         self.workers = self.workers.with_library(packages);
+        self.preparations = crate::process::ProcessPreparations::default();
         self
     }
 
@@ -99,10 +100,16 @@ impl KernelProcessPluginFactory {
         &self,
         store: Arc<dyn lash_execution_contracts::module_artifacts::ModuleArtifactStore>,
         packages: Arc<dyn lash_durable::packages::PackageStore>,
-    ) -> crate::KernelDocuments {
-        let mut documents = crate::KernelDocuments::new(store, packages);
+    ) -> Result<crate::KernelDocuments, PluginError> {
+        let library = self
+            .workers
+            .config()
+            .worker_library()
+            .map_err(|error| PluginError::Registration(error.to_string()))?;
+        let mut documents =
+            crate::KernelDocuments::new(store, packages, Arc::clone(library.helpers()));
         documents.prepared_from(&self.preparations);
-        documents
+        Ok(documents)
     }
 
     /// Constructs one runtime binding without retaining its backend authority.
@@ -112,7 +119,7 @@ impl KernelProcessPluginFactory {
         store: Arc<dyn lash_execution_contracts::module_artifacts::ModuleArtifactStore>,
         packages: Arc<dyn lash_durable::packages::PackageStore>,
     ) -> Result<crate::KernelProcessEngine, PluginError> {
-        let documents = self.documents(store, packages);
+        let documents = self.documents(store, packages)?;
         let bounds = lash_kernel_vm::Bounds {
             memory_meter: match self.bounds.memory_meter {
                 lash_vm_protocol::MemoryMeter::On => lash_kernel_vm::MemoryMeter::On,
@@ -150,112 +157,20 @@ impl lash_core::plugin::PluginMetadata for KernelProcessPluginFactory {
 
 /// Explicit session/process hosting for the ordinary dialect operations.
 /// The provider advertises packages and keeps its model manifest list empty.
-pub struct KernelServicesPluginFactory {
-    documents: crate::KernelDocuments,
-}
+#[derive(Default)]
+pub struct KernelServicesPluginFactory;
 impl KernelServicesPluginFactory {
-    pub fn new(documents: crate::KernelDocuments) -> Self {
-        Self { documents }
+    pub fn new() -> Self {
+        Self
     }
 }
 pub const KERNEL_SERVICES_OWNER: &str = "lash-kernel-services";
-const HELPERS_PROVIDER: lash_core::plugin::ToolProviderKey =
-    lash_core::tool_provider_key!("helpers");
-
-/// Whether trusted publication provenance belongs to the compiler helpers.
-/// Projects the registration owner/key without a second package inventory.
-pub fn is_helper_publication(context: &lash_vocabulary::package::PublicationContext) -> bool {
-    context.publisher.0 == format!("{}/{}", KERNEL_SERVICES_OWNER, HELPERS_PROVIDER)
-}
 pub const KERNEL_SERVICES_CONFIG: lash_core::ProcessConfigKey<()> =
     lash_core::ProcessConfigKey::new(KERNEL_SERVICES_OWNER, lash_core::FormatVersion::ONE);
 pub const DIALECT_SERVICE_EXECUTION: std::time::Duration = std::time::Duration::from_secs(30);
 
-struct HelperPackages {
-    release: Arc<lash_vm_releases::HelperRelease>,
-    documents: crate::KernelDocuments,
-}
-#[async_trait::async_trait]
-impl lash_core::plugin::packages::PackageProvider for HelperPackages {
-    async fn hold(
-        &self,
-        claim: &lash_core::ReferrerClaim,
-        advertisements: &[&lash_vocabulary::package::PackageAdvertisement],
-    ) -> Result<(), lash_execution_contracts::process::linking::EnginePortError> {
-        for advertisement in advertisements {
-            let lash_vocabulary::package::PackageAdvertisement::Enumerated(package) =
-                *advertisement
-            else {
-                return Err(
-                    lash_execution_contracts::process::linking::EnginePortError::Unsupported {
-                        operation: "helper release has no deferred packages".into(),
-                    },
-                );
-            };
-            if self.release.content.packages.get(&package.identity()) != Some(package) {
-                return Err(
-                    lash_execution_contracts::process::linking::EnginePortError::Refused(
-                        lash_execution_contracts::process::linking::AdmissionRefusal::NotOwner {
-                            path: package.path.clone(),
-                        },
-                    ),
-                );
-            }
-        }
-        self.documents
-            .hold_helper_release(claim, &self.release.content, &self.release.labels)
-            .await
-    }
-    fn roots(&self) -> std::collections::BTreeSet<lash_vocabulary::Segment> {
-        self.release
-            .content
-            .packages
-            .values()
-            .map(|package| package.path.as_slice()[0].clone())
-            .collect()
-    }
-    fn advertise(
-        &self,
-        _: &lash_core::OwnerConfigView,
-        context: &lash_vocabulary::package::PublicationContext,
-    ) -> Result<Vec<lash_core::plugin::packages::PackageContribution>, PluginError> {
-        Ok(self
-            .release
-            .content
-            .packages
-            .values()
-            .filter(|package| package.path.as_slice()[0] == context.root)
-            .cloned()
-            .map(|package| {
-                let code_links = package
-                    .members
-                    .values()
-                    .filter_map(|member| match &member.kind {
-                        lash_vocabulary::package::MemberKind::Export { link, .. } => Some(*link),
-                        _ => None,
-                    })
-                    .collect();
-                lash_core::plugin::packages::PackageContribution {
-                    publication: lash_vocabulary::package::PublicationRecord {
-                        context: context.clone(),
-                        path: package.path.clone(),
-                        content: lash_vocabulary::package::PublishedContent::Package(
-                            package.identity(),
-                        ),
-                        code_links,
-                        imported_publications: Vec::new(),
-                    },
-                    advertisement: lash_vocabulary::PackageAdvertisement::Enumerated(package),
-                    routes: Vec::new(),
-                }
-            })
-            .collect())
-    }
-}
-
 fn register_services<T: Send + Sync + 'static, R>(
     reg: &mut lash_core::plugin::PluginRegistrar<T, R>,
-    documents: crate::KernelDocuments,
 ) -> Result<(), PluginError>
 where
     R: lash_core::plugin::registries::Registry
@@ -293,12 +208,6 @@ where
         reg.tools()
             .provider_with_reads(*key, move |_, _| Ok(services.registration()))?;
     }
-    let release = lash_vm_releases::helper_release()
-        .map_err(|error| PluginError::Registration(error.to_string()))?;
-    reg.package_provider(
-        HELPERS_PROVIDER,
-        Arc::new(HelperPackages { release, documents }),
-    )?;
     Ok(())
 }
 
@@ -313,7 +222,7 @@ impl PluginFactory for KernelServicesPluginFactory {
     }
     fn recipe(self: Arc<Self>) -> Result<lash_core::plugin::PluginRecipe, PluginError> {
         let mut reg = lash_core::plugin::PluginRegistrar::new(KERNEL_SERVICES_OWNER);
-        register_services(&mut reg, self.documents.clone())?;
+        register_services(&mut reg)?;
         Ok(lash_core::plugin::PluginRecipe::from_registrar(
             KERNEL_SERVICES_OWNER,
             reg,
@@ -321,12 +230,11 @@ impl PluginFactory for KernelServicesPluginFactory {
     }
 }
 
-pub struct KernelServicesComponent {
-    documents: crate::KernelDocuments,
-}
+#[derive(Default)]
+pub struct KernelServicesComponent;
 impl KernelServicesComponent {
-    pub fn new(documents: crate::KernelDocuments) -> Self {
-        Self { documents }
+    pub fn new() -> Self {
+        Self
     }
 }
 impl lash_core::plugin::ProcessComponentFactory for KernelServicesComponent {
@@ -354,7 +262,7 @@ impl lash_core::plugin::ProcessComponentFactory for KernelServicesComponent {
     }
     fn recipe(self: Arc<Self>) -> Result<lash_core::plugin::ProcessRecipe, PluginError> {
         let mut reg = lash_core::plugin::PluginRegistrar::for_process(KERNEL_SERVICES_OWNER);
-        register_services(&mut reg, self.documents.clone())?;
+        register_services(&mut reg)?;
         Ok(lash_core::plugin::ProcessRecipe::new(
             KERNEL_SERVICES_OWNER,
             reg,

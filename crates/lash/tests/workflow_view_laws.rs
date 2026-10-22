@@ -220,6 +220,7 @@ async fn a_refused_source_map_publishes_no_document_or_link() {
     let documents = lash_vm_runtime::KernelDocuments::new(
         core.backend().module_artifacts(),
         core.backend().package_store(),
+        std::sync::Arc::clone(lash::vm::WorkerLibrary::built().unwrap().helpers()),
     );
     let other = k::parse_document("kernel 1\nnumbers float\nmain { return 7 }").unwrap();
     let missing = k::Site::new(k::Unit::Main, [999]);

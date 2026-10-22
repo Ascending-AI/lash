@@ -20,6 +20,8 @@ mod migrate;
 mod page_carry;
 mod pages;
 pub use page_carry::{carry_parked_checkpoint, carry_snapshot};
+#[doc(hidden)]
+pub use pages::check_parked_helpers;
 mod reads;
 mod replay;
 mod run;
@@ -434,6 +436,7 @@ pub struct KernelProcessEngine {
     /// The library functions the engine's workers hold, by identity: what a
     /// document is linked and admitted against in the parent.
     pub(crate) functions: Arc<lash_kernel_doc::FunctionRegistry>,
+    pub(crate) helpers: Arc<lash_kernel_doc::BuildHelpers>,
     pub(crate) workers: lash_vm_client::service::Service,
     /// The dialect the host's process documents are written in: a new
     /// process records it, and its runs name it to their worker.
@@ -512,10 +515,18 @@ impl KernelProcessEngine {
         workers: lash_vm_client::service::Service,
         bounds: lash_kernel_vm::Bounds,
     ) -> Result<Self, lash_vm_releases::LibraryError> {
-        let functions = Arc::new(workers.config().worker_library()?.registry().clone());
+        let library = workers.config().worker_library()?;
+        if !Arc::ptr_eq(documents.helpers(), library.helpers()) {
+            return Err(lash_vm_releases::LibraryError::new(
+                "the document owner must share the worker image helper handle",
+            ));
+        }
+        let functions = Arc::new(library.registry().clone());
+        let helpers = Arc::clone(library.helpers());
         Ok(Self {
             documents,
             functions,
+            helpers,
             workers,
             dialect: dialect.to_owned(),
             bounds,
@@ -580,7 +591,11 @@ impl KernelProcessEngine {
         })?;
         let content = self.documents.load_linked(link).await?;
         let reach = content
-            .inspect(link, &documents::selection(&selector))
+            .inspect(
+                link,
+                &documents::selection(&selector),
+                self.helpers.as_ref(),
+            )
             .map_err(documents::refused)?;
         let document = content
             .document(content.link(link).map_err(documents::refused)?.document)
@@ -595,9 +610,17 @@ impl KernelProcessEngine {
                         },
                     ));
                 }
-                let internal = document
+                let internal_signature = document
                     .functions
                     .get(&function.callable.function)
+                    .map(|definition| &definition.signature)
+                    .or_else(|| {
+                        self.helpers
+                            .admits(&document.library, &function.callable.function)
+                            .then(|| self.helpers.registered(&function.callable.function))
+                            .flatten()
+                            .map(|registered| &registered.header().signature)
+                    })
                     .ok_or_else(|| {
                         documents::refused(lash_kernel_package::LinkRefusal::InvalidDocument {
                             message: "missing callable definition".into(),
@@ -606,29 +629,35 @@ impl KernelProcessEngine {
                 lash_kernel_doc::validate_callable_signature(
                     &function.signature,
                     &function.convention,
-                    &internal.signature,
+                    internal_signature,
                 )
                 .map_err(|e| {
                     documents::refused(lash_kernel_package::LinkRefusal::InvalidDocument {
                         message: e.to_string(),
                     })
                 })?;
-                let exported = function.entry_export(&document).map_err(|error| {
-                    use lash_execution_contracts::process::linking::{
-                        AdmissionRefusal, EnginePortError,
-                    };
-                    EnginePortError::Refused(match error {
-                        lash_kernel_doc::FunctionValueRefusal::EntryAnnotation { source } => {
-                            AdmissionRefusal::EntryAnnotation { source }
-                        }
-                        lash_kernel_doc::FunctionValueRefusal::SignatureRequired { source } => {
-                            AdmissionRefusal::SignatureRequired { source }
-                        }
-                        _ => AdmissionRefusal::CallableIdentity {
-                            callable: function.callable,
-                        },
-                    })
-                })?;
+                let exported = function
+                    .entry_export(
+                        &document,
+                        self.helpers.as_ref(),
+                        &lash_kernel_doc::Selection::Fresh,
+                    )
+                    .map_err(|error| {
+                        use lash_execution_contracts::process::linking::{
+                            AdmissionRefusal, EnginePortError,
+                        };
+                        EnginePortError::Refused(match error {
+                            lash_kernel_doc::FunctionValueRefusal::EntryAnnotation { source } => {
+                                AdmissionRefusal::EntryAnnotation { source }
+                            }
+                            lash_kernel_doc::FunctionValueRefusal::SignatureRequired { source } => {
+                                AdmissionRefusal::SignatureRequired { source }
+                            }
+                            _ => AdmissionRefusal::CallableIdentity {
+                                callable: function.callable,
+                            },
+                        })
+                    })?;
                 Some(exported.signature)
             }
             _ => reach.signature,
@@ -640,7 +669,7 @@ impl KernelProcessEngine {
             natives: self
                 .functions
                 .iter()
-                .filter(|(_, f)| f.definition().has_native())
+                .filter(|(_, f)| f.states_native())
                 .map(|(id, _)| *id)
                 .collect(),
             kernels: [self.writes.number()].into(),

@@ -276,8 +276,15 @@ async fn publish(
         lash_core::HostArtifactPin::mint(),
     ))
     .unwrap();
-    let documents =
-        lash_vm_runtime::KernelDocuments::new(stores.module_artifacts(), stores.package_store());
+    let documents = lash_vm_runtime::KernelDocuments::new(
+        stores.module_artifacts(),
+        stores.package_store(),
+        std::sync::Arc::clone(
+            lash_vm_client::packages::WorkerLibrary::built()
+                .unwrap()
+                .helpers(),
+        ),
+    );
     documents
         .admit_document(
             &claim,

@@ -22,7 +22,7 @@ lash-vocabulary = { workspace = true }
 lash-execution-contracts = { workspace = true }
 async-trait = { workspace = true }
 chrono = { workspace = true }
-lash-core-ids = { workspace = true }
+lash-core-ids = { workspace = true, features = ["perf-witness"] }
 lash-durable = { workspace = true }
 lash-sansio = { workspace = true }
 lash-protocol-types = { workspace = true }
@@ -40,7 +40,7 @@ lash = { workspace = true, features = ["rlm", "testing", "dialect-typescript", "
 lash-core = { workspace = true }
 lash-core-execution = { workspace = true, features = ["testing"] }
 lash-core-store = { workspace = true, features = ["testing"] }
-lash-vm-runtime = { workspace = true }
+lash-vm-runtime = { workspace = true, features = ["testing"] }
 lash-kernel-doc = { workspace = true }
 lash-kernel-migrate = { workspace = true }
 lash-kernel-package = { workspace = true }
@@ -52,8 +52,8 @@ lash-llm-transport = { workspace = true }
 lash-provider-anthropic = { workspace = true }
 lash-plugin-standard-compaction = { workspace = true }
 lash-postgres-store = { workspace = true, features = ["testing"] }
-lash-sqlite-store = { workspace = true, features = ["testing"] }
-lash-vm-client = { workspace = true }
+lash-sqlite-store = { workspace = true, features = ["testing", "perf-witness"] }
+lash-vm-client = { workspace = true, features = ["testing"] }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 rusqlite = { version = "0.37", features = ["bundled"] }

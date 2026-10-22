@@ -132,6 +132,7 @@ pub fn library_for(
     document: &lash_kernel_doc::Document,
     definitions: &[(FunctionId, &[u8])],
     limits: lash_vocabulary::data_limits::KernelDataLimits,
+    selection: &lash_kernel_doc::Selection,
 ) -> Result<
     Result<
         (PreparedLibrary, lash_vm_broker::kernel::closure::Closure),
@@ -161,7 +162,13 @@ pub fn library_for(
                 .or_insert_with(|| Arc::new(definition.clone()));
         }
     }
-    let assembled = match loader::assemble(document, frame.registry(), &stored) {
+    let assembled = match loader::assemble(
+        document,
+        frame.registry(),
+        &stored,
+        embedding.library_image().helpers(),
+        selection,
+    ) {
         Ok(assembled) => assembled,
         Err(refusal) => return Ok(Err(refusal)),
     };
@@ -174,7 +181,8 @@ pub fn library_for(
             Ok(PreparedLibrary::with_charge(
                 Arc::clone(&assembled.registry),
                 lash_kernel_vm::Charge::Exact,
-            ))
+            )
+            .with_helper_handle(Arc::clone(embedding.library_image().helpers())))
         })
         .unwrap_or_else(|never| match never {});
     Ok(Ok((library, assembled.closure)))
@@ -276,7 +284,8 @@ impl Embedder {
             .map_err(|error| EmbedError::Registry(error.to_string()))?;
         let prepared =
             PreparedLibrary::over_frame(registry.clone(), lash_kernel_vm::Charge::Exact, index)
-                .map_err(|error| EmbedError::Registry(error.to_string()))?;
+                .map_err(|error| EmbedError::Registry(error.to_string()))?
+                .with_helper_handle(Arc::clone(library.helpers()));
         Ok(Embedding {
             library: names,
             written: registry,
@@ -441,10 +450,11 @@ pub(crate) mod tests {
     /// lash's own packages, as the parent holds them.
     pub(crate) fn lash() -> WorkerLibrary {
         let release = lash_vm_releases::helper_release().expect("helper release");
-        WorkerLibrary::new(
+        WorkerLibrary::with_helpers(
             &release.functions,
             release.resolver_roots(),
-            &release.content.documents,
+            &Default::default(),
+            std::sync::Arc::clone(&release.helpers),
         )
         .expect("native image")
     }
@@ -455,41 +465,21 @@ pub(crate) mod tests {
         document: lash_kernel_doc::Document,
         library: PreparedLibrary,
     ) -> lash_kernel_vm::Program {
-        use lash_vocabulary::{Fill, ImportKind, MemberKind, OperationRequirement};
-        let release = lash_vm_releases::helper_release().expect("helper release");
+        use lash_vocabulary::{Fill, ImportKind, OperationRequirement};
         let fills = document
             .imports
             .iter()
             .map(|(slot, import)| {
-                let fill = match &import.kind {
-                    ImportKind::Operation { signature } => {
-                        Fill::Operation(OperationRequirement::new(
-                            signature.clone(),
-                            lash_vocabulary::ContractId::new("1"),
-                        ))
-                    }
-                    _ => {
-                        let package = release
-                            .content
-                            .packages
-                            .values()
-                            .find(|package| package.path == import.name.package)
-                            .expect("helper namespace");
-                        let member = &package.members[&import.name.member];
-                        let MemberKind::Export { link, export } = &member.kind else {
-                            panic!("code member");
-                        };
-                        let mut export = export.clone();
-                        if import.name.type_member.is_some() {
-                            export.member = import.name.type_member.clone();
-                        }
-                        Fill::Export {
-                            link: *link,
-                            export,
-                        }
-                    }
+                let ImportKind::Operation { signature } = &import.kind else {
+                    panic!("fixture code imports require an ordinary package Link");
                 };
-                (*slot, fill)
+                (
+                    *slot,
+                    Fill::Operation(OperationRequirement::new(
+                        signature.clone(),
+                        lash_vocabulary::ContractId::new("1"),
+                    )),
+                )
             })
             .collect();
         let root = lash_vocabulary::Link {
@@ -497,14 +487,9 @@ pub(crate) mod tests {
             fills,
         };
         let link = root.identity();
-        let mut links = release.content.links.clone();
+        let mut links = std::collections::BTreeMap::new();
         links.insert(link, root);
-        let mut documents: BTreeMap<_, _> = release
-            .content
-            .documents
-            .iter()
-            .map(|(id, document)| (*id, Arc::new(document.clone())))
-            .collect();
+        let mut documents = std::collections::BTreeMap::new();
         documents.insert(document.identity(), Arc::new(document));
         let stored = documents
             .values()
@@ -517,6 +502,7 @@ pub(crate) mod tests {
             &links,
             lash_kernel_doc::heap::PageId([0; 32]),
             library,
+            lash_kernel_doc::Selection::Fresh,
         )
         .expect("linked law document");
         let closure = lash_vm_broker::kernel::closure::derive(
@@ -527,6 +513,8 @@ pub(crate) mod tests {
                 .copied(),
             program.library.registry(),
             &stored,
+            program.helpers(),
+            &program.document.library,
         )
         .expect("linked definitions");
         program.closure = lash_kernel_doc::heap::PageId(closure.reference().0);

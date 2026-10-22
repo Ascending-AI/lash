@@ -124,7 +124,6 @@ impl DurableHost {
         let lease = register(&backend, 0).await;
         let context = claim(&backend, &lease, &actor, &admitted, &probe).await;
         // Deployment setup precedes the cell's work/traffic measurement.
-        let release = lash_vm_releases::helper_release().expect("the fixture's helper release");
         let content_claim = lash_core::ReferrerClaim::guarded(lash_core::ReferrerGuard::Journal(
             admitted
                 .scope()
@@ -134,12 +133,12 @@ impl DurableHost {
         let documents = lash_vm_runtime::KernelDocuments::new(
             backend.module_artifacts(),
             backend.package_store(),
+            std::sync::Arc::clone(
+                lash_vm_client::packages::WorkerLibrary::built()
+                    .unwrap()
+                    .helpers(),
+            ),
         );
-        documents
-            .hold_helper_release(&content_claim, &release.content, &release.labels)
-            .await
-            .expect("hold the fixture's deployment code");
-        super::packages::deploy_helpers(&backend, &content_claim).await;
         super::packages::deploy_services(&backend, &content_claim).await;
         Self {
             documents,
@@ -304,16 +303,12 @@ impl DurableHost {
 async fn register(backend: &lash_execution_contracts::backend::Backend, index: usize) -> NodeLease {
     let release = lash_vm_releases::helper_release().expect("the fixture's helper release");
     let mut capabilities = lash_vocabulary::claims::NodeCapabilities::default();
-    for document in release.content.documents.values() {
-        capabilities
-            .machine
-            .kernels
-            .extend(&document.requires.kernels);
-        capabilities
-            .machine
-            .natives
-            .extend(&document.requires.natives);
-    }
+    capabilities.machine.kernels.extend(
+        release
+            .functions
+            .iter()
+            .map(|(_, function)| function.kernel()),
+    );
     capabilities.machine.natives.extend(
         release
             .functions

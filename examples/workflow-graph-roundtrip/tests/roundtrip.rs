@@ -580,6 +580,9 @@ async fn corpus_catalog_imports_both_dialects_and_draws_the_stored_read() {
                         let documents = lash::vm::KernelDocuments::new(
                             core.backend().module_artifacts(),
                             core.backend().package_store(),
+                            std::sync::Arc::clone(
+                                lash::vm::WorkerLibrary::built().unwrap().helpers(),
+                            ),
                         );
                         let mut content = documents.load_linked(reference.link).await.unwrap();
                         let store = core.backend().package_store();

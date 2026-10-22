@@ -62,7 +62,15 @@ async fn a_publication_retains_its_link_after_the_installer_ends() {
         library: Default::default(),
         private_bindings: Default::default(),
     };
-    let documents = lash_vm_runtime::KernelDocuments::new(store.clone(), store.clone());
+    let documents = lash_vm_runtime::KernelDocuments::new(
+        store.clone(),
+        store.clone(),
+        std::sync::Arc::clone(
+            lash_vm_client::packages::WorkerLibrary::built()
+                .unwrap()
+                .helpers(),
+        ),
+    );
     let request = lash_vm_runtime::WorkflowPublishRequest {
         document: lash_kernel_doc::DocumentBytes::from(document),
         selector: StartSelector::Export(export.clone()),
@@ -247,6 +255,11 @@ async fn a_public_alias_retains_internal_fills_without_lending_their_authority()
     let documents = Arc::new(lash_vm_runtime::KernelDocuments::new(
         store.clone(),
         store.clone(),
+        std::sync::Arc::clone(
+            lash_vm_client::packages::WorkerLibrary::built()
+                .unwrap()
+                .helpers(),
+        ),
     ));
     let id = documents
         .admit_document(&claim, &lash_kernel_doc::DocumentBytes::from(document))
@@ -653,7 +666,15 @@ async fn a_full_helper_namespace_holds_each_document_once() {
 async fn helper_release_preparation_is_independent_of_snapshot_count() {
     let stores = lash_sqlite_store::SqliteStoreSet::memory().await.unwrap();
     let store = stores.open_store().await.unwrap();
-    let documents = lash_vm_runtime::KernelDocuments::new(store.clone(), store.clone());
+    let documents = lash_vm_runtime::KernelDocuments::new(
+        store.clone(),
+        store.clone(),
+        std::sync::Arc::clone(
+            lash_vm_client::packages::WorkerLibrary::built()
+                .unwrap()
+                .helpers(),
+        ),
+    );
     let release = lash_vm_releases::helper_release().unwrap();
     let claims: Vec<_> = (0..3)
         .map(|_| {
@@ -775,6 +796,11 @@ async fn holding_package_aliases_loads_each_distinct_link_once() {
             reads: reads.clone(),
         }),
         backend.package_store(),
+        std::sync::Arc::clone(
+            lash_vm_client::packages::WorkerLibrary::built()
+                .unwrap()
+                .helpers(),
+        ),
     );
     let function = lash_kernel_doc::parse_definition(
         "function fixture.run() -> Null\nkernel 1\ncharge 1\nbody { return null }",

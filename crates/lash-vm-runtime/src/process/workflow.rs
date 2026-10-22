@@ -206,6 +206,9 @@ fn plugin(error: EnginePortError) -> lash_execution_contracts::PluginError {
 }
 #[async_trait::async_trait]
 impl ProcessDocumentProvider for KernelDocumentProvider {
+    fn runtime_documents(&self) -> ProcessDocument {
+        ProcessDocument::new(self.engine.documents.clone())
+    }
     async fn fulfil(&self, request: &FulfilRequest) -> Result<Fulfilled, EnginePortError> {
         self.engine.documents.fulfil(request).await
     }

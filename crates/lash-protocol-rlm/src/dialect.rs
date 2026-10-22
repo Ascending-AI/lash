@@ -364,17 +364,12 @@ impl SessionDialect {
         packages: &lash_core_store::tool_surface::RecordedPackages,
     ) -> Result<Option<String>, SessionError> {
         use lash_vocabulary::package::*;
-        // Compiler helpers remain executable Imports. Their accepted publisher
-        // provenance excludes them only from model-facing declarations.
         let attachment = Attachment {
             members: Default::default(),
             packages: packages
                 .snapshot
                 .advertisements
                 .iter()
-                .filter(|accepted| {
-                    !lash_vm_runtime::is_helper_publication(&accepted.publication.context)
-                })
                 .filter_map(|accepted| match &accepted.advertisement {
                     PackageAdvertisement::Enumerated(package) => Some(package.path.clone()),
                     _ => None,
@@ -1070,63 +1065,6 @@ impl DialectSession {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    /// FIG-7109: compiler helper exports are callable by lowering but never
-    /// model-facing package declarations. Provenance, not the path, selects them.
-    #[tokio::test]
-    async fn compiler_helper_publications_do_not_enter_the_model_package_surface() {
-        use lash_vocabulary::{names::*, package::*};
-        let root = Segment::new("implementation").unwrap();
-        let package = Package {
-            path: PackagePath::new(root.clone()),
-            members: [(
-                Segment::new("helper").unwrap(),
-                Member {
-                    visibility: Visibility::Public,
-                    kind: MemberKind::Export {
-                        link: LinkId::from_bytes([1; 32]),
-                        export: ExportName {
-                            name: Name::new("helper"),
-                            member: None,
-                        },
-                    },
-                },
-            )]
-            .into(),
-        };
-        let mut packages = lash_core_store::tool_surface::RecordedPackages::default();
-        let publication = PublicationRecord {
-            context: PublicationContext {
-                domain: PublicationDomain("prompt-law".into()),
-                scope: PublicationScope::Host,
-                publisher: PublisherInstance(format!(
-                    "{}/helpers",
-                    lash_vm_runtime::KERNEL_SERVICES_OWNER
-                )),
-                root,
-            },
-            path: package.path.clone(),
-            content: PublishedContent::Package(package.identity()),
-            code_links: [LinkId::from_bytes([1; 32])].into(),
-            imported_publications: vec![],
-        };
-        packages
-            .snapshot
-            .advertisements
-            .push(AcceptedAdvertisement {
-                publication,
-                advertisement: PackageAdvertisement::Enumerated(package),
-            });
-        // No document provider is needed to omit compiler implementation code.
-        let dialect = SessionDialect::prompt_only(CellDialect::typescript());
-        assert_eq!(dialect.package_surface(&packages).await.unwrap(), None);
-        // The same path published by a host still owes code documentation.
-        packages.snapshot.advertisements[0]
-            .publication
-            .context
-            .publisher = PublisherInstance("host/helpers".into());
-        assert!(dialect.package_surface(&packages).await.is_err());
-    }
 
     struct ExtensionFixture;
 

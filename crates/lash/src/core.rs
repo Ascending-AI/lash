@@ -1280,20 +1280,14 @@ impl LashCoreBuilder {
             .collect::<Vec<_>>();
         #[cfg(feature = "codemode")]
         {
-            let documents = lash_vm_runtime::KernelDocuments::new(
-                backend.module_artifacts(),
-                backend.package_store(),
-            );
-            plugin_factories.push(Arc::new(lash_vm_runtime::KernelServicesPluginFactory::new(
-                documents.clone(),
-            )));
+            plugin_factories.push(Arc::new(lash_vm_runtime::KernelServicesPluginFactory::new()));
             if self
                 .process_components
                 .declaration(lash_vm_runtime::KERNEL_SERVICES_OWNER)
                 .is_none()
             {
                 self.process_components.register(
-                    Arc::new(lash_vm_runtime::KernelServicesComponent::new(documents)),
+                    Arc::new(lash_vm_runtime::KernelServicesComponent::new()),
                     lash_vm_runtime::KERNEL_SERVICES_CONFIG,
                 )?;
             }

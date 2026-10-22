@@ -259,6 +259,10 @@ pub struct CheckpointStart {
     /// Each an admitted wait in the kernel's binary encoding
     /// (`lash_kernel_state::AdmittedWait`); the protocol does not read it.
     pub admissions: Vec<EncodedPayload>,
+    /// Parent-validated live helper selection on a library mismatch. This is
+    /// ephemeral admission data, never a stored checkpoint or helper body.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub selection: Option<EncodedPayload>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -272,7 +276,7 @@ pub struct Start {
     /// ([`lash_protocol_types::engine_fault::RunRefusal::DialectNotInstalled`], FIG-5990); it runs any
     /// other, which needs no dialect (FIG-6985).
     pub dialect: String,
-    /// The admitted root document, either owned by the exact pool image or
+    /// The admitted authored root document, either owned by the exact pool image or
     /// supplied as canonical tokens (`K-ID-003`). The worker resolves and
     /// validates it before compilation.
     pub document: StoredDocument,
@@ -280,7 +284,8 @@ pub struct Start {
     pub link: lash_vocabulary::content_ids::LinkId,
     /// PreparedInstance rows in the runtime's bounded encoding.
     pub instances: EncodedPayload,
-    /// Retained documents keyed by content identity; the primary document
+    /// Ordinary retained documents keyed by content identity. Build helpers
+    /// belong to the installed worker library and never appear here; the primary document
     /// may be omitted here because it already crosses in `document`.
     pub documents: Vec<StoredDocument>,
     /// The stored definition of each library function the document reaches
@@ -359,7 +364,7 @@ impl StoredDocument {
     }
 }
 
-/// A library function's definition as the store keeps it: the token body
+/// An ordinary foreign function's definition as the store keeps it: the token body
 /// of its HelperDefinition node, under the identity the document names it
 /// by, which the worker checks the body against.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

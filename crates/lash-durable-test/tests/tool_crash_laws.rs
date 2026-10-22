@@ -2465,7 +2465,28 @@ async fn a_cell_members_state_change_survives_a_cut_after_its_outcome(tier: Tier
 /// state before the other's outcome committed, however the cell is cut
 /// (FIG-5268).
 async fn a_cell_member_never_observes_another_members_uncommitted_state(tier: Tier) {
-    prove_at(Turn::StatePairCell, tier, &[CommitLabel::ROUND_OUTCOME]).await;
+    let helpers = lash_vm_client::packages::helper_document_work::Window::begin();
+    let sql = lash_core_ids::operational_metrics::sql::Window::new("helper-isolation", "sqlite");
+    let graph = lash_core_ids::perf_witness::Collector::install().expect("isolated work collector");
+    sql.within(prove_at(
+        Turn::StatePairCell,
+        tier,
+        &[CommitLabel::ROUND_OUTCOME],
+    ))
+    .await;
+    let work = helpers.snapshot();
+    let graph = graph.snapshot();
+    let sql = sql.snapshot();
+    eprintln!("caller SQL receipt (background task SQL excluded): {sql:?}");
+    eprintln!(
+        "helper isolation work: {work:?}; decoded_bytes={} hashed_bytes={} sql_statements={} sql_read_rows={}",
+        graph.graph_decoded_bytes, graph.hashed_bytes, graph.sql_statements, graph.sql_rows_read
+    );
+    assert_eq!(
+        work,
+        lash_vm_client::packages::helper_document_work::Work::default(),
+        "build helpers never publish, load, stage or cross Start as Documents, instances or stored definitions"
+    );
 }
 
 /// Cut `steps` on `tier` at every write of its uncut run labelled

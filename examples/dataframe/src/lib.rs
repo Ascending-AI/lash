@@ -22,6 +22,13 @@ pub async fn publish_library(
     let documents = Arc::new(lash::vm::KernelDocuments::new(
         backend.module_artifacts(),
         backend.package_store(),
+        Arc::clone(
+            workers
+                .config()
+                .worker_library()
+                .map_err(|error| error.to_string())?
+                .helpers(),
+        ),
     ));
     let environment = host::environment_request(namespace, context.clone());
     let names = documents

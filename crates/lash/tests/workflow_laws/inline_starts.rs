@@ -649,8 +649,11 @@ async fn holds_its_closure(
     value: &FunctionValue,
 ) {
     settle_cleanup(core).await;
-    let documents =
-        lash::vm::KernelDocuments::new(stores.module_artifacts(), stores.package_store());
+    let documents = lash::vm::KernelDocuments::new(
+        stores.module_artifacts(),
+        stores.package_store(),
+        std::sync::Arc::clone(lash::vm::WorkerLibrary::built().unwrap().helpers()),
+    );
     let content = documents
         .load_linked(value.callable.link)
         .await

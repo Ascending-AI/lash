@@ -340,6 +340,8 @@ pub trait ProcessEngine: Send + Sync {
 #[async_trait::async_trait]
 /// Trusted runtime linking, inspection, retention and opaque document ports; fulfil does no durable publication.
 pub trait ProcessDocumentProvider: Send + Sync {
+    /// The bound runtime document owner for runtime-aware hosts.
+    fn runtime_documents(&self) -> ProcessDocument;
     async fn fulfil(&self, request: &FulfilRequest) -> Result<Fulfilled, EnginePortError>;
     async fn inspect_link(
         &self,

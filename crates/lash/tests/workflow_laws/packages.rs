@@ -144,6 +144,7 @@ impl Packages {
         let documents = lash::vm::KernelDocuments::new(
             self.core.backend().module_artifacts(),
             self.core.backend().package_store(),
+            std::sync::Arc::clone(lash::vm::WorkerLibrary::built().unwrap().helpers()),
         );
         let claim = lash::persistence::ReferrerClaim::unguarded(
             lash::persistence::ArtifactReferrer::HostPin(self.pin.clone()),

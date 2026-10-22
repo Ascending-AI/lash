@@ -1,6 +1,6 @@
 //! Retain immutable Documents/Links before publishing references. Cold readers validate stored bytes afresh.
 use lash_core::{ArtifactName, ArtifactStoreId, ReferrerClaim};
-use lash_core_store::packages::{LinkRecord, PackageRecord};
+use lash_core_store::packages::LinkRecord;
 use lash_durable::packages::PackageStore;
 use lash_execution_contracts::module_artifacts::{
     ArtifactStoreError, ModuleArtifactBody, ModuleArtifactHold, ModuleArtifactStore,
@@ -12,7 +12,6 @@ use lash_kernel_package::{LinkRefusal, LinkedContent, Namespace, ReachSelection,
 use lash_vocabulary::data_limits::KernelDataLimits;
 use lash_vocabulary::names::DocumentId;
 use lash_vocabulary::names::SourceMapId;
-use lash_vocabulary::tokens::{TokenCodec as _, TokenWriter, logical_digest};
 use lash_vocabulary::{names::*, package::*};
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::sync::{Arc, Mutex, OnceLock};
@@ -54,17 +53,14 @@ pub enum StoredSourceMap {
 pub struct KernelDocuments {
     store: Arc<dyn ModuleArtifactStore>,
     packages: Arc<dyn PackageStore>,
+    helpers: Arc<lash_kernel_doc::BuildHelpers>,
     /// Pure deterministic preparations only; never a replacement for an existing stored read.
     prepared: Arc<Mutex<DocumentPreparations>>,
 }
 // Pure preparations belong to the same document owner as unpublished Links.
-// A per-content slot serializes first preparation without holding the inventory
-// mutex during decoding or checking. It contains no store or referrer authority.
-type HelperPreparation = OnceLock<Result<Arc<PreparedHelperRelease>, EnginePortError>>;
 #[derive(Default)]
 struct DocumentPreparations {
     linked: LinkedContent,
-    helpers: BTreeMap<[u8; 32], Arc<HelperPreparation>>,
     documents: VecDeque<Arc<PreparedDocument>>,
     document_bytes: usize,
     #[cfg(test)]
@@ -92,117 +88,6 @@ impl DocumentPreparations {
         let prepared = self.documents.remove(at)?;
         self.documents.push_back(Arc::clone(&prepared));
         Some(prepared)
-    }
-}
-
-struct PreparedHelperRelease {
-    documents: Vec<IdentifiedDocument>,
-    links: Vec<LinkRecord>,
-    packages: Vec<PackageRecord>,
-    labels: BTreeMap<PackageId, String>,
-}
-
-impl PreparedHelperRelease {
-    fn new(
-        content: &LinkedContent,
-        labels: &BTreeMap<PackageId, String>,
-    ) -> Result<Self, EnginePortError> {
-        for (id, document) in &content.documents {
-            if document.identity() != *id {
-                return Err(map_link_refusal(LinkRefusal::InvalidDocument {
-                    message: "helper Document hash differs".into(),
-                }));
-            }
-            lash_kernel_doc::validate_document(document, &document.functions).map_err(|e| {
-                map_link_refusal(LinkRefusal::InvalidDocument {
-                    message: e.to_string(),
-                })
-            })?;
-        }
-        for id in content.links.keys() {
-            content.retain_reach(*id).map_err(map_link_refusal)?;
-        }
-        for (id, package) in &content.packages {
-            if package.identity() != *id {
-                return Err(map_link_refusal(LinkRefusal::InvalidDocument {
-                    message: "helper Package hash differs".into(),
-                }));
-            }
-            for member in package.members.values() {
-                if let MemberKind::Export { link, export } = &member.kind {
-                    content.export(*link, export).map_err(map_link_refusal)?;
-                }
-            }
-        }
-        let documents = content
-            .documents
-            .values()
-            .map(|document| {
-                let document = DocumentBytes::from(document.clone())
-                    .decode(KernelDataLimits::standard())
-                    .map_err(|error| {
-                        map_link_refusal(LinkRefusal::InvalidDocument {
-                            message: error.to_string(),
-                        })
-                    })?;
-                lash_kernel_check::derive(&document, &document.functions).map_err(|error| {
-                    map_link_refusal(LinkRefusal::InvalidDocument {
-                        message: error.to_string(),
-                    })
-                })?;
-                Ok(document)
-            })
-            .collect::<Result<Vec<_>, EnginePortError>>()?;
-        let mut links = Vec::with_capacity(content.links.len());
-        let mut pending: BTreeSet<_> = content.links.keys().copied().collect();
-        let mut written = BTreeSet::new();
-        while !pending.is_empty() {
-            let ready = pending
-                .iter()
-                .copied()
-                .find(|id| {
-                    content.links[id].fills.values().all(|fill| match fill {
-                        Fill::Export { link, .. } => written.contains(link),
-                        _ => true,
-                    })
-                })
-                .ok_or_else(|| {
-                    map_link_refusal(LinkRefusal::InvalidDocument {
-                        message: "cyclic helper Link graph".into(),
-                    })
-                })?;
-            links.push(LinkRecord {
-                id: ready,
-                link: content.links[&ready].clone(),
-            });
-            pending.remove(&ready);
-            written.insert(ready);
-        }
-        for (id, json) in labels {
-            let package = content.packages.get(id).ok_or_else(|| {
-                map_link_refusal(LinkRefusal::InvalidDocument {
-                    message: "labels name an absent Package".into(),
-                })
-            })?;
-            lash_kernel_package::read_labels(content, package, json).map_err(|error| {
-                map_link_refusal(LinkRefusal::InvalidDocument {
-                    message: error.to_string(),
-                })
-            })?;
-        }
-        Ok(Self {
-            documents,
-            links,
-            packages: content
-                .packages
-                .iter()
-                .map(|(id, package)| PackageRecord {
-                    id: *id,
-                    package: package.clone(),
-                })
-                .collect(),
-            labels: labels.clone(),
-        })
     }
 }
 
@@ -316,13 +201,23 @@ fn namespace(snapshot: &NamespaceSnapshot) -> Namespace<'_> {
     }
 }
 impl KernelDocuments {
-    pub fn new(store: Arc<dyn ModuleArtifactStore>, packages: Arc<dyn PackageStore>) -> Self {
+    pub fn new(
+        store: Arc<dyn ModuleArtifactStore>,
+        packages: Arc<dyn PackageStore>,
+        helpers: Arc<lash_kernel_doc::BuildHelpers>,
+    ) -> Self {
         Self {
             store,
             packages,
+            helpers,
             prepared: Arc::new(Mutex::new(DocumentPreparations::default())),
         }
     }
+    /// The immutable helper image shared with this owner's workers.
+    pub fn helpers(&self) -> &Arc<lash_kernel_doc::BuildHelpers> {
+        &self.helpers
+    }
+
     pub(crate) fn prepared_from(&mut self, owner: &ProcessPreparations) {
         self.prepared = Arc::clone(&owner.prepared);
     }
@@ -337,77 +232,11 @@ impl KernelDocuments {
         Self {
             store,
             packages,
+            helpers: Arc::clone(&self.helpers),
             prepared: Arc::clone(&self.prepared),
         }
     }
 
-    /// Bootstrap build-owned helper content under the receiving owner's existing claim.
-    /// Advertisement acceptance follows this operation; cancellation leaves only that claim's debt.
-    pub async fn hold_helper_release(
-        &self,
-        claim: &ReferrerClaim,
-        content: &LinkedContent,
-        labels: &BTreeMap<PackageId, String>,
-    ) -> Result<(), EnginePortError> {
-        // Hash actual canonical content, including supplied ids and sidecars:
-        // a mismatched body or label cannot hit a previously validated release.
-        let mut out = TokenWriter::new();
-        out.seq(4);
-        content.documents.encode(&mut out);
-        content.links.encode(&mut out);
-        content.packages.encode(&mut out);
-        labels.encode(&mut out);
-        let identity = logical_digest(&out.into_bytes());
-        let slot = self
-            .prepared
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .helpers
-            .entry(identity)
-            .or_default()
-            .clone();
-        let release = slot
-            .get_or_init(|| PreparedHelperRelease::new(content, labels).map(Arc::new))
-            .clone()?;
-        for document in &release.documents {
-            // The release preparation derived and validated this immutable
-            // content. Keep those facts in this same owner's bounded residency.
-            let slot = Self::document_slot(&self.prepared, &document.id(), document.body());
-            slot.decoded.get_or_init(|| Ok(document.clone()));
-            slot.checked.get_or_init(|| Ok(document.clone()));
-            slot.derived.get_or_init(|| Ok(()));
-            let artifact = document_artifact(&document.id());
-            self.store
-                .hold_module_artifacts(
-                    claim,
-                    &[ModuleArtifactHold::Publish {
-                        module_ref: &artifact.artifact_ref,
-                        body: ModuleArtifactBody::Document(document.body()),
-                    }],
-                )
-                .await
-                .map_err(artifact_error)?;
-        }
-        for record in &release.links {
-            self.packages
-                .put_link(claim, record, &[document_artifact(&record.link.document)])
-                .await
-                .map_err(store_error)?;
-        }
-        for record in &release.packages {
-            self.packages
-                .put_package(claim, record)
-                .await
-                .map_err(store_error)?;
-        }
-        for (id, json) in &release.labels {
-            self.packages
-                .put_labels(claim, id, json)
-                .await
-                .map_err(store_error)?;
-        }
-        Ok(())
-    }
     pub async fn admit_document(
         &self,
         claim: &ReferrerClaim,
@@ -432,7 +261,7 @@ impl KernelDocuments {
         let slot = Self::document_slot(&self.prepared, &document.id(), document.body());
         slot.derived
             .get_or_init(|| {
-                lash_kernel_check::derive(document, &document.functions)
+                lash_kernel_check::derive(document, self.helpers.as_ref())
                     .map(|_| ())
                     .map_err(|e| {
                         EnginePortError::Refused(AdmissionRefusal::InvalidDocument {
@@ -446,6 +275,11 @@ impl KernelDocuments {
         slot.decoded.get_or_init(|| Ok(document.clone()));
         slot.checked.get_or_init(|| Ok(document.clone()));
         let artifact = document_artifact(&document.id());
+        #[cfg(feature = "testing")]
+        {
+            lash_vm_client::packages::helper_document_work::published(document);
+            lash_vm_client::packages::helper_document_work::staged(document);
+        }
         self.store
             .hold_module_artifacts(
                 claim,
@@ -471,7 +305,10 @@ impl KernelDocuments {
         else {
             return Ok(None);
         };
-        Self::check_current(&self.prepared, id, &bytes).map(Some)
+        let document = Self::check_current(&self.prepared, id, &bytes)?;
+        #[cfg(feature = "testing")]
+        lash_vm_client::packages::helper_document_work::got(&document);
+        Ok(Some(document))
     }
 
     fn check_current(
@@ -581,7 +418,7 @@ impl KernelDocuments {
         }
         #[cfg(not(test))]
         let _ = prepared;
-        lash_kernel_doc::validate_document(&document, &document.functions).map_err(|e| {
+        lash_kernel_doc::validate_document_structure(&document).map_err(|e| {
             EnginePortError::Corrupt {
                 artifact: document_artifact(id),
                 message: e.to_string(),
@@ -734,7 +571,7 @@ impl KernelDocuments {
             .map_err(map_link_refusal)?;
         let id = link.identity();
         content.links.insert(id, link.clone());
-        let inspection = inspection(&content, id, &request.selector)?;
+        let inspection = inspection(&content, id, &request.selector, &self.helpers)?;
         {
             let mut prepared = self
                 .prepared
@@ -897,7 +734,12 @@ impl KernelDocuments {
         link: LinkId,
         selector: &ReachSelector,
     ) -> Result<LinkInspection, EnginePortError> {
-        inspection(&self.load_linked(link).await?, link, selector)
+        inspection(
+            &self.load_linked(link).await?,
+            link,
+            selector,
+            &self.helpers,
+        )
     }
     /// Retain existing content by its stored pointer. Only a fresh, unpublished preparation may write a Link.
     pub async fn hold(
@@ -1005,17 +847,22 @@ impl KernelDocuments {
     ) -> Result<lash_kernel_check::WorkflowDocument, EnginePortError> {
         let content = self.load_linked(start.link).await?;
         content
-            .inspect(start.link, &ReachSelection::Start(start.selector.clone()))
+            .inspect(
+                start.link,
+                &ReachSelection::Start(start.selector.clone()),
+                self.helpers.as_ref(),
+            )
             .map_err(map_link_refusal)?;
         let document = content
             .document(content.link(start.link).map_err(map_link_refusal)?.document)
             .map_err(map_link_refusal)?
             .clone();
-        lash_kernel_check::WorkflowDocument::entered(document, start.clone()).map_err(|e| {
-            EnginePortError::Refused(AdmissionRefusal::InvalidDocument {
-                message: e.to_string(),
+        lash_kernel_check::WorkflowDocument::entered(document, start.clone(), self.helpers.as_ref())
+            .map_err(|e| {
+                EnginePortError::Refused(AdmissionRefusal::InvalidDocument {
+                    message: e.to_string(),
+                })
             })
-        })
     }
     pub async fn load(&self, reference: &ContentRef) -> Result<LoadedContent, EnginePortError> {
         let material = match reference {
@@ -1060,9 +907,10 @@ pub(super) fn inspection(
     content: &LinkedContent,
     root: LinkId,
     selector: &ReachSelector,
+    helpers: &lash_kernel_doc::BuildHelpers,
 ) -> Result<LinkInspection, EnginePortError> {
     let reach = content
-        .inspect(root, &selection(selector))
+        .inspect(root, &selection(selector), helpers)
         .map_err(map_link_refusal)?;
     Ok(LinkInspection {
         link: root,

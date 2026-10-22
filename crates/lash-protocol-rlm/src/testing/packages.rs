@@ -16,7 +16,6 @@ pub(crate) async fn record(ctx: &lash_core::RuntimeExecutionContext<'_>) -> Reco
         consumer: Some(consumer.clone()),
         ..Default::default()
     };
-    recorded.snapshot.advertisements = deploy_helpers(backend, &claim).await;
     use lash_core::plugin::packages::PackageProvider as _;
     for service in super::dialect_services() {
         let root = service.roots().into_iter().next().unwrap();
@@ -130,49 +129,6 @@ pub(crate) async fn record(ctx: &lash_core::RuntimeExecutionContext<'_>) -> Reco
     .validate()
     .expect("the fixture records a coherent namespace");
     recorded
-}
-
-/// Publication of the deployment's immutable helper namespace precedes cells.
-pub(crate) async fn deploy_helpers(
-    backend: &lash_execution_contracts::backend::Backend,
-    claim: &lash_core::ReferrerClaim,
-) -> Vec<AcceptedAdvertisement> {
-    let store = backend.package_store();
-    let release = lash_vm_releases::helper_release().unwrap();
-    let consumer = PublicationContext {
-        domain: PublicationDomain("cell-laws".into()),
-        scope: PublicationScope::Host,
-        publisher: PublisherInstance("cell-law-consumer".into()),
-        root: Segment::new("cell").unwrap(),
-    };
-    let mut accepted = Vec::new();
-    for package in release.content.packages.values() {
-        let context = PublicationContext {
-            root: package.path.as_slice()[0].clone(),
-            publisher: PublisherInstance("helper-release".into()),
-            ..consumer.clone()
-        };
-        let publication = PublicationRecord {
-            context,
-            path: package.path.clone(),
-            content: PublishedContent::Package(package.identity()),
-            code_links: package
-                .members
-                .values()
-                .filter_map(|member| match &member.kind {
-                    MemberKind::Export { link, .. } => Some(*link),
-                    _ => None,
-                })
-                .collect(),
-            imported_publications: vec![],
-        };
-        store.publish(claim, &publication).await.unwrap();
-        accepted.push(AcceptedAdvertisement {
-            publication,
-            advertisement: PackageAdvertisement::Enumerated(package.clone()),
-        });
-    }
-    accepted
 }
 
 /// Builtin dialect operation declarations are deployment facts too.

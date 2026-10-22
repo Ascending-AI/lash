@@ -702,6 +702,7 @@ mod tests {
                 &[(link_id, link)].into(),
                 PageId([8; 32]),
                 lash_kernel_vm::PreparedLibrary::new(Arc::new(registry)),
+                lash_kernel_doc::Selection::Fresh,
             )
             .unwrap();
             let bounds = Bounds {
