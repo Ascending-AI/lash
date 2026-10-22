@@ -18,7 +18,7 @@ use crate::driver::history::{
 
 pub(super) fn build_rlm_history_messages_from_turn(
     input: RlmHistoryRenderInput<'_>,
-) -> Result<Vec<LlmMessage>, lash_core::StoredDataCorruption> {
+) -> Result<Vec<LlmMessage>, lash_protocol_types::allocation::ProjectionError> {
     Ok(complete_history_messages(
         render_history_messages(&input)?,
         input.protocol_iteration,
@@ -33,7 +33,7 @@ pub(super) fn build_rlm_history_messages_from_turn(
 )]
 pub(super) fn render_history_messages(
     input: &RlmHistoryRenderInput<'_>,
-) -> Result<Vec<LlmMessage>, lash_core::StoredDataCorruption> {
+) -> Result<Vec<LlmMessage>, lash_protocol_types::allocation::ProjectionError> {
     let mut messages = Vec::new();
     let chronological = lash_core::facade_support::ChronologicalProjection::from_turn_view(
         input.events,
@@ -87,7 +87,8 @@ pub(super) fn render_history_messages(
                 else {
                     return;
                 };
-                let lash_rlm_types::RlmProtocolEvent::RlmTrajectoryEntry(step) = event.as_ref()
+                let lash_rlm_types::RlmProtocolEvent::RlmTrajectoryEntry(step) =
+                    event.as_ref().as_ref()
                 else {
                     return;
                 };

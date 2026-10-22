@@ -1528,3 +1528,19 @@ impl StoreError {
         }
     }
 }
+
+impl From<lash_protocol_types::allocation::ProjectionError> for StoreError {
+    fn from(error: lash_protocol_types::allocation::ProjectionError) -> Self {
+        match error {
+            lash_protocol_types::allocation::ProjectionError::Allocation(error) => {
+                Self::Allocation(error)
+            }
+            lash_protocol_types::allocation::ProjectionError::Stored(error) => {
+                Self::StoredDataCorrupt {
+                    record_kind: "protocol projection",
+                    message: error.to_string(),
+                }
+            }
+        }
+    }
+}

@@ -5,7 +5,7 @@ use lash_core::facade_support::{
     BorrowedChronologicalEntry, BorrowedChronologicalMessage, BorrowedChronologicalPayload,
     ChronologicalPayload, ChronologicalProjection, MessageSequence, visit_turn_view,
 };
-use lash_core::{MessageRole, PartKind, SessionHistoryRecord, StoredDataCorruption};
+use lash_core::{MessageRole, PartKind, SessionHistoryRecord};
 use lash_rlm_types::RlmProtocolEvent;
 
 use super::EventDecoder;
@@ -23,7 +23,7 @@ impl HistoryIndex {
         events: &[SessionHistoryRecord],
         messages: &MessageSequence,
         decoder: &EventDecoder,
-    ) -> Result<Self, StoredDataCorruption> {
+    ) -> Result<Self, lash_protocol_types::allocation::ProjectionError> {
         let mut entries = Vec::new();
         visit_turn_view(events, messages, |entry| entries.push(entry));
         Self::from_entries(&entries, decoder)
@@ -32,7 +32,7 @@ impl HistoryIndex {
     pub(crate) fn from_context(
         context: &lash_core::RuntimeExecutionContext<'_>,
         decoder: &EventDecoder,
-    ) -> Result<Self, StoredDataCorruption> {
+    ) -> Result<Self, lash_protocol_types::allocation::ProjectionError> {
         let mut entries = Vec::new();
         context.visit_chronological(|entry| entries.push(entry));
         Self::from_entries(&entries, decoder)
@@ -41,14 +41,14 @@ impl HistoryIndex {
     pub(crate) fn from_projection(
         projection: &ChronologicalProjection,
         decoder: &EventDecoder,
-    ) -> Result<Self, StoredDataCorruption> {
+    ) -> Result<Self, lash_protocol_types::allocation::ProjectionError> {
         Self::from_owned_entries(projection.entries(), decoder)
     }
 
     pub(crate) fn from_owned_entries(
         source: &[lash_core::facade_support::ChronologicalEntry],
         decoder: &EventDecoder,
-    ) -> Result<Self, StoredDataCorruption> {
+    ) -> Result<Self, lash_protocol_types::allocation::ProjectionError> {
         let entries = source
             .iter()
             .map(|entry| BorrowedChronologicalEntry {
@@ -75,7 +75,7 @@ impl HistoryIndex {
     fn from_entries(
         entries: &[BorrowedChronologicalEntry<'_>],
         decoder: &EventDecoder,
-    ) -> Result<Self, StoredDataCorruption> {
+    ) -> Result<Self, lash_protocol_types::allocation::ProjectionError> {
         let mut index = Self::default();
         let mut prose = Vec::new();
         let mut terminal = None;
@@ -124,7 +124,7 @@ impl HistoryIndex {
                 }
                 BorrowedChronologicalPayload::ProtocolEvent(event) => {
                     if let Some(RlmProtocolEvent::RlmTrajectoryEntry(step)) =
-                        decoder.decode(event)?.as_deref()
+                        decoder.decode(event)?.as_deref().map(AsRef::as_ref)
                     {
                         terminal = step
                             .result

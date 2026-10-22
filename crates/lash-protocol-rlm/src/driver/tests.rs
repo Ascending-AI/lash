@@ -22,22 +22,25 @@ fn user_event(id: &str, text: &str) -> SessionHistoryRecord {
 
 fn step_event(protocol_iteration: usize, code: &str, output: &str) -> SessionHistoryRecord {
     SessionHistoryRecord::Protocol(rlm_protocol_event(
-        RlmProtocolEvent::RlmTrajectoryEntry(std::sync::Arc::new(CellRecord {
-            language: "typescript".to_string(),
-            prints_retained: None,
-            id: format!("lash_vm_step_{protocol_iteration}"),
-            protocol_iteration,
-            code: code.to_string(),
-            prints: if output.is_empty() {
-                Vec::new()
-            } else {
-                vec![output.to_string().into()]
-            },
-            images: Vec::new(),
-            calls: Vec::new(),
-            bindings: Default::default(),
-            result: lash_core::CellOutcome::Completed,
-        })),
+        RlmProtocolEvent::RlmTrajectoryEntry(std::sync::Arc::new(
+            (CellRecord {
+                language: "typescript".to_string(),
+                prints_retained: None,
+                id: format!("lash_vm_step_{protocol_iteration}"),
+                protocol_iteration,
+                code: code.to_string(),
+                prints: if output.is_empty() {
+                    Vec::new()
+                } else {
+                    vec![output.to_string().into()]
+                },
+                images: Vec::new(),
+                calls: Vec::new(),
+                bindings: Default::default(),
+                result: lash_core::CellOutcome::Completed,
+            })
+            .into(),
+        )),
         lash_core::FleetFormat::current().writer_version(lash_core::surface_format!(
             crate::RLM_PROTOCOL_EVENT_VERSION
         )),
@@ -52,22 +55,25 @@ fn terminal_step_event(
     final_output: serde_json::Value,
 ) -> SessionHistoryRecord {
     SessionHistoryRecord::Protocol(rlm_protocol_event(
-        RlmProtocolEvent::RlmTrajectoryEntry(std::sync::Arc::new(CellRecord {
-            language: "typescript".to_string(),
-            prints_retained: None,
-            id: format!("lash_vm_step_{protocol_iteration}"),
-            protocol_iteration,
-            code: code.to_string(),
-            prints: output.into_iter().map(Into::into).collect(),
-            images,
-            calls: Vec::new(),
-            bindings: Default::default(),
-            result: lash_core::CellOutcome::finished_by(
-                crate::FINISH_TOOL_NAME,
-                lash_core::ToolCallId::fixture("finish-call"),
-                final_output,
-            ),
-        })),
+        RlmProtocolEvent::RlmTrajectoryEntry(std::sync::Arc::new(
+            (CellRecord {
+                language: "typescript".to_string(),
+                prints_retained: None,
+                id: format!("lash_vm_step_{protocol_iteration}"),
+                protocol_iteration,
+                code: code.to_string(),
+                prints: output.into_iter().map(Into::into).collect(),
+                images,
+                calls: Vec::new(),
+                bindings: Default::default(),
+                result: lash_core::CellOutcome::finished_by(
+                    crate::FINISH_TOOL_NAME,
+                    lash_core::ToolCallId::fixture("finish-call"),
+                    final_output,
+                ),
+            })
+            .into(),
+        )),
         lash_core::FleetFormat::current().writer_version(lash_core::surface_format!(
             crate::RLM_PROTOCOL_EVENT_VERSION
         )),
@@ -610,27 +616,30 @@ fn plugin_origin_is_not_rendered_in_history() {
 fn printed_images_render_as_llm_image_blocks() {
     let projector = projector(1000);
     let event = SessionHistoryRecord::Protocol(rlm_protocol_event(
-        RlmProtocolEvent::RlmTrajectoryEntry(std::sync::Arc::new(CellRecord {
-            language: "typescript".to_string(),
-            prints_retained: None,
-            id: "lash_vm_step_1".to_string(),
-            protocol_iteration: 1,
-            code: "print img".to_string(),
-            prints: vec![r#"{"type":"image","id":"img"}"#.to_string().into()],
-            images: vec![lash_core::AttachmentRef {
-                id: lash_core::AttachmentId::parse(
-                    "8f9e0cfb92cb165ce6277b3b26a453fd81ac949a6ab9afba49d348483e8f7c78",
-                )
-                .expect("valid attachment id"),
-                media_type: lash_core::MediaType::parse("image/png").unwrap(),
-                byte_len: 3,
-                type_metadata: Some(lash_core::AttachmentTypeMetadata::image(Some(1), Some(1))),
-                label: Some("img.png".to_string()),
-            }],
-            calls: Vec::new(),
-            bindings: Default::default(),
-            result: lash_core::CellOutcome::Completed,
-        })),
+        RlmProtocolEvent::RlmTrajectoryEntry(std::sync::Arc::new(
+            (CellRecord {
+                language: "typescript".to_string(),
+                prints_retained: None,
+                id: "lash_vm_step_1".to_string(),
+                protocol_iteration: 1,
+                code: "print img".to_string(),
+                prints: vec![r#"{"type":"image","id":"img"}"#.to_string().into()],
+                images: vec![lash_core::AttachmentRef {
+                    id: lash_core::AttachmentId::parse(
+                        "8f9e0cfb92cb165ce6277b3b26a453fd81ac949a6ab9afba49d348483e8f7c78",
+                    )
+                    .expect("valid attachment id"),
+                    media_type: lash_core::MediaType::parse("image/png").unwrap(),
+                    byte_len: 3,
+                    type_metadata: Some(lash_core::AttachmentTypeMetadata::image(Some(1), Some(1))),
+                    label: Some("img.png".to_string()),
+                }],
+                calls: Vec::new(),
+                bindings: Default::default(),
+                result: lash_core::CellOutcome::Completed,
+            })
+            .into(),
+        )),
         lash_core::FleetFormat::current().writer_version(lash_core::surface_format!(
             crate::RLM_PROTOCOL_EVENT_VERSION
         )),
@@ -754,7 +763,9 @@ fn growing_turn_decodes_only_new_history_events() {
     let SessionHistoryRecord::Protocol(first) = &mut events[0] else {
         unreachable!()
     };
-    first.payload.make_mut()["format"] = serde_json::json!(0);
+    let mut replacement = first.payload.value().clone();
+    replacement["format"] = serde_json::json!(0);
+    first.payload.replace(&replacement).unwrap();
     let config = projection_test_config("test-model", Default::default(), None);
     let error = projector
         .project(ProjectorContext {
@@ -766,5 +777,7 @@ fn growing_turn_decodes_only_new_history_events() {
             environment: &Default::default(),
         })
         .expect_err("rewritten corrupt content must validate again");
-    assert_eq!(error.record_kind, "RLM protocol event");
+    assert!(
+        matches!(error, lash_protocol_types::allocation::ProjectionError::Stored(error) if error.record_kind == "RLM protocol event")
+    );
 }

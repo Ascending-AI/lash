@@ -13,14 +13,17 @@ use crate::dialect::{DialectSession, test_dialect_services};
 
 fn cell(id: &str, bindings: BindingChanges) -> SessionHistoryRecord {
     SessionHistoryRecord::Protocol(crate::rlm_protocol_event(
-        RlmProtocolEvent::RlmTrajectoryEntry(std::sync::Arc::new(CellRecord {
-            id: id.to_string(),
-            language: "typescript".to_string(),
-            code: String::new(),
-            bindings,
-            result: lash_core::CellOutcome::Completed,
-            ..CellRecord::default()
-        })),
+        RlmProtocolEvent::RlmTrajectoryEntry(std::sync::Arc::new(
+            (CellRecord {
+                id: id.to_string(),
+                language: "typescript".to_string(),
+                code: String::new(),
+                bindings,
+                result: lash_core::CellOutcome::Completed,
+                ..CellRecord::default()
+            })
+            .into(),
+        )),
         lash_core::FleetFormat::current().writer_version(lash_core::surface_format!(
             crate::RLM_PROTOCOL_EVENT_VERSION
         )),

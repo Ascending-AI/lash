@@ -606,10 +606,31 @@ impl RlmGlobalsPatchPluginBody {
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize, PartialEq)]
 pub enum RlmProtocolEvent {
     /// One executed cell: the record the transcript returns, shared with it.
-    RlmTrajectoryEntry(std::sync::Arc<CellRecord>),
+    RlmTrajectoryEntry(std::sync::Arc<lash_protocol_types::allocation::Allocated<CellRecord>>),
     RlmGlobalsPatch(RlmGlobalsPatchPluginBody),
     RlmSeed(RlmSeedPluginBody),
     RlmDiagnostic(RlmDiagnosticEvent),
+}
+
+impl RlmProtocolEvent {
+    /// A decode's nested cell can escape through a transcript independently of
+    /// the event. Transfer the same preadmission before publishing either Arc.
+    pub fn decoded_in(
+        &mut self,
+        allocation: lash_protocol_types::allocation::AllocationHold,
+        budget: lash_protocol_types::allocation::AllocationBudget,
+    ) -> Result<(), lash_protocol_types::StoredDataCorruption> {
+        if let Self::RlmTrajectoryEntry(cell) = self {
+            let cell = std::sync::Arc::get_mut(cell).ok_or_else(|| {
+                lash_protocol_types::StoredDataCorruption {
+                    record_kind: "RLM cell".into(),
+                    message: "a fresh decode shares its cell before admission".into(),
+                }
+            })?;
+            cell.decoded_in(allocation, budget);
+        }
+        Ok(())
+    }
 }
 
 /// The protocol step an [`RlmDiagnosticEvent`] reports on.
@@ -855,6 +876,17 @@ mod projected_seed_tests {
 pub struct RlmTurnProtocol;
 
 impl lash_protocol_types::allocation::SourceCapacity for RlmProtocolEvent {
+    fn sources_admitted_in(
+        &self,
+        budget: &lash_protocol_types::allocation::AllocationBudget,
+    ) -> bool {
+        match self {
+            Self::RlmTrajectoryEntry(cell) => {
+                cell.allocation_budget().identity() == budget.identity()
+            }
+            Self::RlmDiagnostic(_) | Self::RlmGlobalsPatch(_) | Self::RlmSeed(_) => true,
+        }
+    }
     fn owned_capacity(&self) -> u64 {
         let map = |values: &serde_json::Map<String, serde_json::Value>| values.owned_capacity();
         match self {

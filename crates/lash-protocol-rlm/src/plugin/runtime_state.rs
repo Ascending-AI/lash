@@ -414,7 +414,9 @@ impl CodeExecutorPlugin for CodeModeCodeExecutor {
         record: &lash_core::ProtocolEvent,
     ) -> Result<Vec<lash_core::AttachmentId>, SessionError> {
         let decoded = decode_rlm_protocol_event(record).map_err(history_corruption)?;
-        let Some(RlmProtocolEvent::RlmTrajectoryEntry(cell)) = decoded.as_deref() else {
+        let Some(RlmProtocolEvent::RlmTrajectoryEntry(cell)) =
+            decoded.as_deref().map(AsRef::as_ref)
+        else {
             return Ok(Vec::new());
         };
         Ok(cell
@@ -509,6 +511,7 @@ fn frame_switch_carries(
         let values = match decode_rlm_protocol_event(event)
             .map_err(history_corruption)?
             .as_deref()
+            .map(AsRef::as_ref)
         {
             Some(RlmProtocolEvent::RlmSeed(seed)) => serde_json::to_value(seed),
             Some(RlmProtocolEvent::RlmGlobalsPatch(patch)) => serde_json::to_value(patch),
@@ -568,13 +571,8 @@ pub(crate) fn reject_reserved_projected_binding_names(
     Ok(())
 }
 
-fn history_corruption(error: lash_core::StoredDataCorruption) -> SessionError {
-    SessionError::Plugin(
-        lash_execution_contracts::plugin_error::PluginError::StoredDataCorrupt {
-            record_kind: error.record_kind,
-            message: error.message,
-        },
-    )
+fn history_corruption(error: lash_protocol_types::allocation::ProjectionError) -> SessionError {
+    SessionError::Plugin(error.into())
 }
 
 #[cfg(test)]

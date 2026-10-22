@@ -188,7 +188,7 @@ impl<M: TurnProtocol> TurnMachine<M> {
     /// The current cell's recorded trailing-discard count, for its trace.
     pub fn cell_trailing_discarded(
         &self,
-    ) -> Result<usize, lash_protocol_types::StoredDataCorruption> {
+    ) -> Result<usize, lash_protocol_types::allocation::ProjectionError> {
         if self.waiting_exec().is_none() {
             return Ok(0);
         }

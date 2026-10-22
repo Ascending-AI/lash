@@ -26,8 +26,6 @@ enum SequenceMode {
 pub struct MessageSequence {
     mode: SequenceMode,
     base_rendered: Option<Arc<BaseRenderCache>>,
-    // Raw mutable edits can introduce foreign parts or scalar allocations.
-    admitted: bool,
 }
 
 impl Default for MessageSequence {
@@ -74,7 +72,6 @@ impl MessageSequence {
         Self {
             mode: SequenceMode::Owned(AppendVec::from(messages)),
             base_rendered: None,
-            admitted: false,
         }
     }
 
@@ -86,7 +83,6 @@ impl MessageSequence {
                 joined: None,
             },
             base_rendered: None,
-            admitted: false,
         }
     }
 
@@ -108,10 +104,11 @@ impl MessageSequence {
         fn buffer(
             source: &AppendVec<Message>,
             budget: &crate::allocation::AllocationBudget,
-            admitted: bool,
         ) -> Result<AppendVec<Message>, crate::allocation::AllocationError> {
             use crate::allocation::SourceCapacity;
-            if admitted && source.allocation_budget().identity() == budget.identity() {
+            if source.allocation_budget().identity() == budget.identity()
+                && (budget.identity() == 0 || source.sources_admitted())
+            {
                 return Ok(source.clone());
             }
             let mut next = AppendVec::try_with_capacity(source.len(), budget)?;
@@ -130,28 +127,25 @@ impl MessageSequence {
         }
         match &self.mode {
             SequenceMode::Owned(owned) => Ok(Self {
-                mode: SequenceMode::Owned(buffer(owned, budget, self.admitted)?),
+                mode: SequenceMode::Owned(buffer(owned, budget)?),
                 base_rendered: self.base_rendered.clone(),
-                admitted: true,
             }),
             SequenceMode::Layered {
                 base,
                 delta,
                 joined,
             } => {
-                if self.admitted && base.allocation_budget().identity() == budget.identity() {
+                if base.allocation_budget().identity() == budget.identity()
+                    && (budget.identity() == 0
+                        || (base.sources_admitted()
+                            && delta.as_ref().is_none_or(AppendVec::sources_admitted)))
+                {
                     return Ok(self.clone());
                 }
-                let mut next = Self::from_base(buffer(base, budget, self.admitted)?);
-                next.admitted = true;
+                let mut next = Self::from_base(buffer(base, budget)?);
                 if let Some(delta) = delta {
                     // Admit its own parts before the join clones any scalar.
-                    next.extend(
-                        buffer(delta, budget, self.admitted)?
-                            .as_slice()
-                            .iter()
-                            .cloned(),
-                    )?;
+                    next.extend(buffer(delta, budget)?.as_slice().iter().cloned())?;
                 }
                 let _ = joined;
                 Ok(next)
@@ -279,7 +273,6 @@ impl MessageSequence {
             self.mode = SequenceMode::Owned(owned);
         }
         self.base_rendered = None;
-        self.admitted = false;
         match &mut self.mode {
             SequenceMode::Owned(owned) => owned.make_mut(),
             SequenceMode::Layered { .. } => {
@@ -382,7 +375,6 @@ impl MessageSequence {
             next.push(Self::adopt_message(message, budget)?)?;
         }
         self.mode = SequenceMode::Owned(next);
-        self.admitted = true;
         self.base_rendered = None;
         Ok(())
     }

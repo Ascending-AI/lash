@@ -236,13 +236,15 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
     fn cell_trailing_discarded(
         &self,
         events: &[SessionHistoryRecord],
-    ) -> Result<usize, lash_core::StoredDataCorruption> {
+    ) -> Result<usize, lash_protocol_types::allocation::ProjectionError> {
         for record in events.iter().rev() {
             let SessionHistoryRecord::Protocol(event) = record else {
                 continue;
             };
             if let Some(RlmProtocolEvent::RlmDiagnostic(diagnostic)) =
-                crate::projection::decode_rlm_protocol_event(event)?.as_deref()
+                crate::projection::decode_rlm_protocol_event(event)?
+                    .as_deref()
+                    .map(AsRef::as_ref)
                 && diagnostic.phase == LLM_EXTRACTION_PHASE
             {
                 let Some(note) = diagnostic.payload.get("discarded_after_cell") else {
@@ -738,7 +740,7 @@ fn conversation_event(message: Message) -> SessionHistoryRecord {
 
 fn trajectory_event(entry: CellRecord, schema_version: u32) -> SessionHistoryRecord {
     SessionHistoryRecord::Protocol(rlm_protocol_event(
-        RlmProtocolEvent::RlmTrajectoryEntry(std::sync::Arc::new(entry)),
+        RlmProtocolEvent::RlmTrajectoryEntry(std::sync::Arc::new((entry).into())),
         schema_version,
     ))
 }

@@ -89,7 +89,7 @@ fn last_cell_finish(view: &lash::persistence::SessionReadView) -> Option<serde_j
                 let decoded = lash_protocol_rlm::decode_rlm_protocol_event(event)
                     .expect("recorded RLM protocol event decodes");
                 let Some(lash_rlm_types::RlmProtocolEvent::RlmTrajectoryEntry(cell)) =
-                    decoded.as_deref()
+                    decoded.as_deref().map(AsRef::as_ref)
                 else {
                     return None;
                 };

@@ -363,14 +363,7 @@ impl DurableSession {
             records.iter(),
             &self.transcript_decoders,
         )
-        .map_err(|error| {
-            crate::EmbedError::Plugin(
-                lash_execution_contracts::plugin_error::PluginError::StoredDataCorrupt {
-                    record_kind: error.record_kind,
-                    message: error.message,
-                },
-            )
-        })
+        .map_err(crate::EmbedError::from)
     }
 
     #[allow(

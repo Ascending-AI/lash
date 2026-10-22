@@ -78,12 +78,15 @@ impl TranscriptDecoderPlugin for RlmTranscriptDecoder {
     fn decode_event(
         &self,
         event: &lash_core::ProtocolEvent,
-    ) -> Result<Option<TranscriptItem>, lash_core::StoredDataCorruption> {
+    ) -> Result<Option<TranscriptItem>, lash_core::StoreError> {
         if event.plugin_id != crate::plugin::RLM_PROTOCOL_PLUGIN_ID {
             return Ok(None);
         }
         Ok(Some(
-            match super::context::decode_rlm_protocol_event(event)?.as_deref() {
+            match super::context::decode_rlm_protocol_event(event)?
+                .as_deref()
+                .map(AsRef::as_ref)
+            {
                 Some(RlmProtocolEvent::RlmTrajectoryEntry(cell))
                     if !cell.code.trim().is_empty() =>
                 {

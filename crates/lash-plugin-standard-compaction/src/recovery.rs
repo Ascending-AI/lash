@@ -187,39 +187,20 @@ pub(crate) fn elide_oversized_parts(
 ) -> Result<usize, ContextError> {
     let mut elided = 0usize;
     for message in messages {
-        let growth = message.parts.iter().fold(0u64, |bytes, part| {
-            bytes.saturating_add(
-                (part.content().len() as u64 + OVERFLOW_ELIDED_PART_PLACEHOLDER.len() as u64 + 128)
-                    .saturating_mul(4),
-            )
-        });
-        elided += lash_protocol_types::MessageParts::edit(&mut message.parts, growth, 0, |parts| {
+        elided += lash_protocol_types::MessageParts::edit(&mut message.parts, |parts| {
             let mut count = 0;
-            for part in parts {
-                let mut text = part.content().into_owned();
-                if config.approx_token_count(&text) < config.overflow_elide_part_threshold_tokens {
-                    continue;
-                }
-                if let Some((index, _)) = text
-                    .char_indices()
-                    .nth(config.overflow_elided_retained_chars)
-                {
-                    text.truncate(index);
-                }
-                text.push_str(OVERFLOW_ELIDED_PART_PLACEHOLDER);
-                // A tool result's blocks collapse to the elided text; the
-                // summarization request carries no body of the result anyway.
-                match part.tool_result_content_mut() {
-                    Some(blocks) => *blocks = vec![ModelToolReturnPart::text(text)],
-                    None => {
-                        if let Some(content) = part.content_mut() {
-                            *content = text;
-                        }
-                    }
-                }
-                count += 1;
+            for index in 0..parts.len() {
+                count += usize::from(parts.elide_if(
+                    index,
+                    config.overflow_elided_retained_chars,
+                    OVERFLOW_ELIDED_PART_PLACEHOLDER,
+                    |text| {
+                        config.approx_token_count(text)
+                            >= config.overflow_elide_part_threshold_tokens
+                    },
+                )?);
             }
-            count
+            Ok(count)
         })
         .map_err(|error| {
             lash_execution_contracts::PluginError::Runtime(lash_core::RuntimeError::allocation(

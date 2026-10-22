@@ -835,7 +835,7 @@ impl<'a, M: TurnProtocol> DriverContextView<'a, M> {
     pub fn project_llm_request(
         &self,
         use_tools: bool,
-    ) -> Result<Arc<LlmRequest>, lash_protocol_types::StoredDataCorruption> {
+    ) -> Result<Arc<LlmRequest>, lash_protocol_types::allocation::ProjectionError> {
         let projected = self.config.projector.project(ProjectorContext {
             config: self.config,
             messages: self.prompt_messages,
@@ -986,9 +986,7 @@ pub trait ContextProjector<M: TurnProtocol = UnitTurnProtocol>: Send + Sync {
         ctx: ProjectorContext<'_, M>,
     ) -> Result<Arc<RetainedLlmRequest>, lash_protocol_types::allocation::ProjectionError> {
         let budget = ctx.config.allocation_budget.clone();
-        let request = self
-            .project(ctx)
-            .map_err(lash_protocol_types::allocation::ProjectionError::Stored)?;
+        let request = self.project(ctx)?;
         RetainedLlmRequest::try_from_flat(&request, &budget)
             .map(Arc::new)
             .map_err(Into::into)
@@ -997,7 +995,7 @@ pub trait ContextProjector<M: TurnProtocol = UnitTurnProtocol>: Send + Sync {
     fn project(
         &self,
         ctx: ProjectorContext<'_, M>,
-    ) -> Result<Arc<LlmRequest>, lash_protocol_types::StoredDataCorruption>;
+    ) -> Result<Arc<LlmRequest>, lash_protocol_types::allocation::ProjectionError>;
 }
 
 #[derive(Clone, Debug, Default)]
@@ -1015,13 +1013,9 @@ impl<M: TurnProtocol> ContextProjector<M> for ChatContextProjector {
     fn project(
         &self,
         ctx: ProjectorContext<'_, M>,
-    ) -> Result<Arc<LlmRequest>, lash_protocol_types::StoredDataCorruption> {
+    ) -> Result<Arc<LlmRequest>, lash_protocol_types::allocation::ProjectionError> {
         self.project_retained(ctx)
             .map(|request| Arc::new(request.materialize()))
-            .map_err(|error| lash_protocol_types::StoredDataCorruption {
-                record_kind: "request projection".into(),
-                message: error.to_string(),
-            })
     }
 
     fn project_retained(
@@ -1092,7 +1086,7 @@ pub trait ProtocolDriverHandle<M: TurnProtocol = UnitTurnProtocol>: Send + Sync 
     fn cell_trailing_discarded(
         &self,
         _events: &[SessionHistoryRecord<M::Event>],
-    ) -> Result<usize, lash_protocol_types::StoredDataCorruption> {
+    ) -> Result<usize, lash_protocol_types::allocation::ProjectionError> {
         Ok(0)
     }
 
@@ -1308,26 +1302,9 @@ pub struct TurnMachineConfig<M: TurnProtocol = UnitTurnProtocol> {
 
 /// Stop before a provider request when its durable history cannot be projected.
 pub fn stored_history_refusal_actions<M: TurnProtocol>(
-    error: lash_protocol_types::StoredDataCorruption,
+    error: lash_protocol_types::allocation::ProjectionError,
 ) -> Vec<DriverAction<M>> {
-    vec![
-        DriverAction::Emit(lash_protocol_types::session_model::make_error_event(
-            lash_protocol_types::TurnFailureKind::Runtime,
-            Some(lash_protocol_types::FailureCode::lash(
-                lash_protocol_types::TurnFailureCode::from_wire("stored_data_corrupt"),
-            )),
-            error.to_string(),
-            Some(error.to_string()),
-            lash_protocol_types::session_model::RuntimeOutputCuts::standard(),
-        )),
-        DriverAction::Finish(lash_protocol_types::TurnOutcome::Stopped(
-            lash_protocol_types::TurnStop::RuntimeError {
-                cause: lash_protocol_types::TurnErrorCause::new(
-                    lash_protocol_types::TurnErrorCode::StoredDataCorrupt,
-                ),
-            },
-        )),
-    ]
+    vec![DriverAction::ProjectionRefused(error)]
 }
 
 // ─── Internal state ───

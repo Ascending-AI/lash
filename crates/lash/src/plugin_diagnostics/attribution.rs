@@ -589,12 +589,7 @@ impl PluginDiagnostics {
         let decoders = self.core.transcript_decoders();
         let mut attributions = Vec::new();
         for event in &events {
-            let decoded = decoders.decode_event(event).map_err(|error| {
-                lash_core::StoreError::StoredDataCorrupt {
-                    record_kind: "cell failure feedback",
-                    message: error.to_string(),
-                }
-            })?;
+            let decoded = decoders.decode_event(event)?;
             let Some(crate::transcript::TranscriptItem::Cell(cell)) = decoded else {
                 continue;
             };

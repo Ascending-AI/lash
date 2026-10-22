@@ -43,7 +43,7 @@ impl ContextProjector<lash_core::HostTurnProtocol> for NativeContextProjector {
     fn project(
         &self,
         ctx: ProjectorContext<'_>,
-    ) -> Result<Arc<LlmRequest>, lash_core::StoredDataCorruption> {
+    ) -> Result<Arc<LlmRequest>, lash_protocol_types::allocation::ProjectionError> {
         let mut messages = Vec::new();
         messages.extend(build_rlm_history_messages_from_turn(
             RlmHistoryRenderInput {

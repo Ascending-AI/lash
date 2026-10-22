@@ -1,6 +1,6 @@
 #[path = "message/parts.rs"]
 mod parts;
-pub use parts::MessageParts;
+pub use parts::{MessageParts, MessagePartsEditor, omit_part_attachments};
 
 use crate::AttachmentRef;
 use crate::ToolCallId;
@@ -1591,20 +1591,18 @@ fn render_structured_message_owned(
     if blocks.is_empty() {
         return Ok(None);
     }
-    let mut projected = LlmMessage::new(llm_role_for_message(msg.role), blocks);
-    projected.starts_user_segment = matches!(
-        (msg.role, msg.origin.as_ref()),
-        (MessageRole::User, Some(MessageOrigin::TurnInput { .. }))
-    );
-    projected.blocks = Arc::new(crate::llm::types::LlmMessageBlocks::admitted(
-        // The vector was constructed under the reservations above.
-        match Arc::try_unwrap(projected.blocks) {
-            Ok(blocks) => blocks.into_blocks(),
-            Err(_) => unreachable!("fresh render blocks are private"),
-        },
-        holds,
-        budget.clone(),
-    ));
+    let projected = LlmMessage {
+        role: llm_role_for_message(msg.role),
+        starts_user_segment: matches!(
+            (msg.role, msg.origin.as_ref()),
+            (MessageRole::User, Some(MessageOrigin::TurnInput { .. }))
+        ),
+        blocks: Arc::new(crate::llm::types::LlmMessageBlocks::admitted(
+            blocks,
+            holds,
+            budget.clone(),
+        )),
+    };
     Ok(Some(crate::llm::types::AdmittedMessage {
         message: projected,
     }))

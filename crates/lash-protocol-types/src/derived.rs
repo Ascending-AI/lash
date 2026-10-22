@@ -17,11 +17,24 @@ impl DerivedMemo {
         &self,
         compute: impl FnOnce() -> T,
     ) -> Arc<T> {
+        match self.get_or_try_compute(|| Ok::<_, std::convert::Infallible>(Arc::new(compute()))) {
+            Ok(value) => value,
+            Err(never) => match never {},
+        }
+    }
+
+    /// Compute outside the lock, then reclassify and publish under the same
+    /// lock as the membership check. `compute` preadmits its value and the
+    /// amortized registry slots before making either allocation.
+    pub(crate) fn get_or_try_compute<T: Any + Send + Sync, E>(
+        &self,
+        compute: impl FnOnce() -> Result<Arc<T>, E>,
+    ) -> Result<Arc<T>, E> {
         let id = TypeId::of::<T>();
         if let Some(found) = self.find::<T>(id) {
-            return found;
+            return Ok(found);
         }
-        let value = Arc::new(compute());
+        let value = compute()?;
         let mut entries = self
             .0
             .lock()
@@ -29,10 +42,10 @@ impl DerivedMemo {
         if let Some((_, existing)) = entries.iter().find(|(key, _)| *key == id)
             && let Ok(existing) = Arc::clone(existing).downcast::<T>()
         {
-            return existing;
+            return Ok(existing);
         }
         entries.push((id, Arc::clone(&value) as Arc<dyn Any + Send + Sync>));
-        value
+        Ok(value)
     }
 
     fn find<T: Any + Send + Sync>(&self, id: TypeId) -> Option<Arc<T>> {

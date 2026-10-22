@@ -517,9 +517,6 @@ impl LlmMessageBlocks {
             budget.clone(),
         )))
     }
-    pub(crate) fn into_blocks(self) -> Vec<LlmContentBlock> {
-        self.blocks
-    }
     pub(crate) fn admitted(
         blocks: Vec<LlmContentBlock>,
         holds: Vec<crate::allocation::AllocationHold>,

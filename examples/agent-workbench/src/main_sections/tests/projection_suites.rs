@@ -155,7 +155,7 @@ async fn durable_transcript_projection_fixture() -> Vec<crate::ChatRow> {
                 lash::plugins::SessionAppendNode::message(committed),
                 lash::plugins::SessionAppendNode::protocol_event(lash::rlm::rlm_protocol_event(
                     lash::rlm::RlmProtocolEvent::RlmTrajectoryEntry(std::sync::Arc::new(
-                        trajectory,
+                        (trajectory).into(),
                     )),
                     lash::formats::RLM_PROTOCOL_EVENT_VERSION,
                 )),

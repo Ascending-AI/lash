@@ -496,8 +496,10 @@ impl SessionDialect {
     pub(crate) fn decode_history_event(
         &self,
         event: &lash_core::ProtocolEvent,
-    ) -> Result<Option<Arc<lash_rlm_types::RlmProtocolEvent>>, lash_core::StoredDataCorruption>
-    {
+    ) -> Result<
+        Option<Arc<lash_protocol_types::allocation::Allocated<lash_rlm_types::RlmProtocolEvent>>>,
+        lash_protocol_types::allocation::ProjectionError,
+    > {
         self.events.decode(event)
     }
 
@@ -505,14 +507,16 @@ impl SessionDialect {
         &self,
         events: &[lash_core::SessionHistoryRecord],
         messages: &lash_core::facade_support::MessageSequence,
-    ) -> Result<crate::projection::HistoryIndex, lash_core::StoredDataCorruption> {
+    ) -> Result<crate::projection::HistoryIndex, lash_protocol_types::allocation::ProjectionError>
+    {
         crate::projection::HistoryIndex::from_turn(events, messages, &self.events)
     }
 
     pub(crate) fn projection_index(
         &self,
         projection: &lash_core::facade_support::ChronologicalProjection,
-    ) -> Result<crate::projection::HistoryIndex, lash_core::StoredDataCorruption> {
+    ) -> Result<crate::projection::HistoryIndex, lash_protocol_types::allocation::ProjectionError>
+    {
         crate::projection::HistoryIndex::from_projection(projection, &self.events)
     }
 

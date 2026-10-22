@@ -8,7 +8,7 @@
 
 use std::sync::Arc;
 
-use lash_core::{ProtocolEvent, StoredDataCorruption};
+use lash_core::ProtocolEvent;
 use lash_rlm_types::RlmProtocolEvent;
 
 #[derive(Default)]
@@ -18,7 +18,10 @@ impl EventDecoder {
     pub(crate) fn decode(
         &self,
         event: &ProtocolEvent,
-    ) -> Result<Option<Arc<RlmProtocolEvent>>, StoredDataCorruption> {
+    ) -> Result<
+        Option<Arc<lash_protocol_types::allocation::Allocated<RlmProtocolEvent>>>,
+        lash_protocol_types::allocation::ProjectionError,
+    > {
         super::decode_rlm_protocol_event(event)
     }
 }

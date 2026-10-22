@@ -58,18 +58,32 @@ thread_local! {
 /// same decode, and a rewritten payload decodes afresh (FIG-6443).
 pub fn decode_rlm_protocol_event(
     event: &lash_core::ProtocolEvent,
-) -> Result<Option<std::sync::Arc<RlmProtocolEvent>>, lash_core::StoredDataCorruption> {
+) -> Result<
+    Option<std::sync::Arc<lash_protocol_types::allocation::Allocated<RlmProtocolEvent>>>,
+    lash_protocol_types::allocation::ProjectionError,
+> {
     if event.plugin_id != crate::plugin::RLM_PROTOCOL_PLUGIN_ID {
         return Ok(None);
     }
-    let decoded = event
-        .payload
-        .derived(|payload| DecodedRlmEvent(decode_rlm_payload(payload).map(std::sync::Arc::new)));
-    decoded.0.clone().map(Some)
+    let budget = event.payload.allocation_budget();
+    let decoded = event.payload.derived(0, |payload, allocation| {
+        DecodedRlmEvent(decode_rlm_payload(payload).and_then(|mut event| {
+            event.decoded_in(allocation.clone(), budget.clone())?;
+            Ok(std::sync::Arc::new(
+                lash_protocol_types::allocation::Allocated::new(event, allocation, budget.clone()),
+            ))
+        }))
+    })?;
+    decoded.0.clone().map(Some).map_err(Into::into)
 }
 
 /// What one retained RLM payload decodes to, kept with the payload.
-struct DecodedRlmEvent(Result<std::sync::Arc<RlmProtocolEvent>, lash_core::StoredDataCorruption>);
+struct DecodedRlmEvent(
+    Result<
+        std::sync::Arc<lash_protocol_types::allocation::Allocated<RlmProtocolEvent>>,
+        lash_core::StoredDataCorruption,
+    >,
+);
 
 fn decode_rlm_payload(
     payload: &serde_json::Value,
@@ -113,7 +127,7 @@ pub struct RlmHistoryProjection {
 impl RlmHistoryProjection {
     pub fn from_chronological(
         projection: &lash_core::facade_support::ChronologicalProjection,
-    ) -> Result<Self, lash_core::StoredDataCorruption> {
+    ) -> Result<Self, lash_protocol_types::allocation::ProjectionError> {
         Self::from_entries(projection.entries())
     }
 
@@ -121,7 +135,7 @@ impl RlmHistoryProjection {
     /// history the transcript had when it was that long.
     pub(crate) fn from_entries(
         entries: &[lash_core::facade_support::ChronologicalEntry],
-    ) -> Result<Self, lash_core::StoredDataCorruption> {
+    ) -> Result<Self, lash_protocol_types::allocation::ProjectionError> {
         let decoder = super::EventDecoder;
         let index = super::HistoryIndex::from_owned_entries(entries, &decoder)?;
         let mut history = Vec::with_capacity(entries.len());
@@ -134,7 +148,7 @@ impl RlmHistoryProjection {
             let item = match &entry.payload {
                 ChronologicalPayload::Message(message) => history_item_from_message(message),
                 ChronologicalPayload::ProtocolEvent(event) => {
-                    match decoder.decode(event)?.as_deref() {
+                    match decoder.decode(event)?.as_deref().map(AsRef::as_ref) {
                         Some(RlmProtocolEvent::RlmTrajectoryEntry(step)) => {
                             Some(history_item_from_lash_vm_step(step))
                         }
@@ -215,7 +229,7 @@ pub fn is_rlm_protocol_output(origin: Option<&lash_core::MessageOrigin>) -> bool
 
 pub fn rlm_history_projection(
     projection: &lash_core::facade_support::ChronologicalProjection,
-) -> Result<RlmHistoryProjection, lash_core::StoredDataCorruption> {
+) -> Result<RlmHistoryProjection, lash_protocol_types::allocation::ProjectionError> {
     RlmHistoryProjection::from_chronological(projection)
 }
 
@@ -351,7 +365,9 @@ mod tests {
                 payload: payload.into(),
             };
             let error = decode_rlm_protocol_event(&event).expect_err("our corrupt event refuses");
-            assert_eq!(error.record_kind, "RLM protocol event");
+            assert!(
+                matches!(error, lash_protocol_types::allocation::ProjectionError::Stored(ref error) if error.record_kind == "RLM protocol event")
+            );
             let events = [lash_core::SessionHistoryRecord::Protocol(event.clone())];
             let projection = lash_core::facade_support::ChronologicalProjection::from_turn_view(
                 &events,
@@ -364,6 +380,71 @@ mod tests {
                     .is_err()
             );
         }
+    }
+
+    /// LO-EVICT-RLM: a transcript cell can outlive both source and decoder memo.
+    #[test]
+    fn retained_rlm_cell_keeps_decoded_payload_admission() {
+        use lash_protocol_types::allocation::{
+            AllocationBudget, AllocationError, AllocationHold, AllocationLedger,
+            AllocationReservation,
+        };
+        use std::sync::{
+            Arc,
+            atomic::{AtomicU64, Ordering},
+        };
+        #[derive(Clone)]
+        struct Ledger(Arc<AtomicU64>);
+        struct Hold(Ledger, u64);
+        impl AllocationReservation for Hold {
+            fn retain(&self) {}
+        }
+        impl Drop for Hold {
+            fn drop(&mut self) {
+                self.0.0.fetch_sub(self.1, Ordering::SeqCst);
+            }
+        }
+        impl AllocationLedger for Ledger {
+            fn reserve(&self, bytes: u64) -> Result<AllocationHold, AllocationError> {
+                self.0.fetch_add(bytes, Ordering::SeqCst);
+                Ok(AllocationHold::new(Hold(self.clone(), bytes)))
+            }
+            fn reserve_shared(
+                &self,
+                _: usize,
+                bytes: u64,
+            ) -> Result<AllocationHold, AllocationError> {
+                self.reserve(bytes)
+            }
+        }
+        let ledger = Ledger(Arc::new(AtomicU64::new(0)));
+        let budget = AllocationBudget::new(ledger.clone());
+        let mut event = rlm_protocol_event(
+            RlmProtocolEvent::RlmTrajectoryEntry(Arc::new(
+                CellRecord {
+                    id: "retained-cell".into(),
+                    code: "source".repeat(4096),
+                    ..Default::default()
+                }
+                .into(),
+            )),
+            RLM_PROTOCOL_EVENT_VERSION,
+        );
+        event.payload = event.payload.adopt_in(&budget).unwrap();
+        let decoded = decode_rlm_protocol_event(&event).unwrap().unwrap();
+        let RlmProtocolEvent::RlmTrajectoryEntry(cell) = decoded.as_ref().as_ref() else {
+            panic!("cell");
+        };
+        let cell = Arc::clone(cell);
+        drop(decoded);
+        drop(event);
+        assert!(
+            ledger.0.load(Ordering::SeqCst) >= cell.code.len() as u64,
+            "escaped RLM cell released its decode admission"
+        );
+        assert_eq!(cell.id, "retained-cell");
+        drop(cell);
+        assert_eq!(ledger.0.load(Ordering::SeqCst), 0);
     }
 
     fn message(id: &str, role: MessageRole, text: &str) -> Message {
@@ -432,7 +513,7 @@ mod tests {
             ),
             cell_prose("terminal-content", "terminal prose"),
             lash_core::SessionHistoryRecord::Protocol(rlm_protocol_event(
-                RlmProtocolEvent::RlmTrajectoryEntry(std::sync::Arc::new(terminal)),
+                RlmProtocolEvent::RlmTrajectoryEntry(std::sync::Arc::new((terminal).into())),
                 lash_core::FleetFormat::current().writer_version(lash_core::surface_format!(
                     crate::RLM_PROTOCOL_EVENT_VERSION
                 )),
@@ -452,7 +533,7 @@ mod tests {
                 )),
             ),
             lash_core::SessionHistoryRecord::Protocol(rlm_protocol_event(
-                RlmProtocolEvent::RlmTrajectoryEntry(std::sync::Arc::new(retained)),
+                RlmProtocolEvent::RlmTrajectoryEntry(std::sync::Arc::new((retained).into())),
                 lash_core::FleetFormat::current().writer_version(lash_core::surface_format!(
                     crate::RLM_PROTOCOL_EVENT_VERSION
                 )),
@@ -522,13 +603,13 @@ mod tests {
             ),
             cell_prose("intermediate-content", "surviving prose"),
             lash_core::SessionHistoryRecord::Protocol(rlm_protocol_event(
-                RlmProtocolEvent::RlmTrajectoryEntry(std::sync::Arc::new(intermediate)),
+                RlmProtocolEvent::RlmTrajectoryEntry(std::sync::Arc::new((intermediate).into())),
                 lash_core::FleetFormat::current().writer_version(lash_core::surface_format!(
                     crate::RLM_PROTOCOL_EVENT_VERSION
                 )),
             )),
             lash_core::SessionHistoryRecord::Protocol(rlm_protocol_event(
-                RlmProtocolEvent::RlmTrajectoryEntry(std::sync::Arc::new(terminal)),
+                RlmProtocolEvent::RlmTrajectoryEntry(std::sync::Arc::new((terminal).into())),
                 lash_core::FleetFormat::current().writer_version(lash_core::surface_format!(
                     crate::RLM_PROTOCOL_EVENT_VERSION
                 )),

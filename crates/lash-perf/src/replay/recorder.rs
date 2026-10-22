@@ -598,18 +598,21 @@ mod tests {
     }
 
     fn cell(id: &str, code: &str, result: CellOutcome) -> TranscriptItem {
-        TranscriptItem::Cell(std::sync::Arc::new(CellRecord {
-            id: id.to_owned(),
-            protocol_iteration: 0,
-            language: "typescript".to_owned(),
-            code: code.to_owned(),
-            prints: Vec::new(),
-            prints_retained: None,
-            images: Vec::new(),
-            calls: Vec::new(),
-            bindings: Default::default(),
-            result,
-        }))
+        TranscriptItem::Cell(std::sync::Arc::new(
+            (CellRecord {
+                id: id.to_owned(),
+                protocol_iteration: 0,
+                language: "typescript".to_owned(),
+                code: code.to_owned(),
+                prints: Vec::new(),
+                prints_retained: None,
+                images: Vec::new(),
+                calls: Vec::new(),
+                bindings: Default::default(),
+                result,
+            })
+            .into(),
+        ))
     }
 
     /// REPLAY-RECORD typed capture: a code-mode turn's replies are its cells,

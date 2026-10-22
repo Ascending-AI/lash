@@ -847,7 +847,7 @@ await control.finish({ baton: baton });
                 .expect("recorded RLM protocol event decodes"),
             _ => None,
         })
-        .filter_map(|event| match &*event {
+        .filter_map(|event| match event.as_ref().as_ref() {
             lash_rlm_types::RlmProtocolEvent::RlmSeed(seed) => serde_json::to_value(seed).ok(),
             _ => None,
         })

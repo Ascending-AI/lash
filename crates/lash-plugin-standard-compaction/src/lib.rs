@@ -35,7 +35,6 @@ use std::{collections::BTreeMap, sync::Arc};
 
 use async_trait::async_trait;
 
-use lash_core::facade_support::ModelToolReturnPart;
 use lash_core::plugin::AttachmentOmissionContext;
 use lash_core::plugin::AttachmentOmissionPolicy;
 use lash_core::plugin::CompactionContext;
@@ -47,7 +46,6 @@ use lash_core::plugin::ContextPressureDecision;
 use lash_core::plugin::ContextPressureHook;
 use lash_core::plugin::HistoryPartId;
 use lash_core::plugin::PluginFactory;
-use lash_core::plugin::omit_part_attachments;
 use lash_core::{LlmUsage, Message, MessageOrigin, MessageRole, Part, PartKind, SessionSnapshot};
 use lash_execution_contracts::plugin_error::PluginError;
 
@@ -222,23 +220,18 @@ fn strip_all_attachments(
 ) -> Result<bool, ContextError> {
     let mut changed = false;
     for message in messages {
-        let growth = message.parts.iter().fold(0u64, |bytes, part| {
-            let copies = part.tool_result_content().map_or(1, <[_]>::len);
-            bytes.saturating_add((placeholder.len() as u64 + 32).saturating_mul(copies as u64))
-        });
-        changed |=
-            lash_protocol_types::MessageParts::edit(&mut message.parts, growth, 0, |parts| {
-                let mut changed = false;
-                for part in parts {
-                    changed |= omit_part_attachments(part, placeholder);
-                }
-                changed
-            })
-            .map_err(|error| {
-                lash_execution_contracts::PluginError::Runtime(lash_core::RuntimeError::allocation(
-                    error,
-                ))
-            })?;
+        changed |= lash_protocol_types::MessageParts::edit(&mut message.parts, |parts| {
+            let mut changed = false;
+            for index in 0..parts.len() {
+                changed |= parts.omit_attachments(index, placeholder)?;
+            }
+            Ok(changed)
+        })
+        .map_err(|error| {
+            lash_execution_contracts::PluginError::Runtime(lash_core::RuntimeError::allocation(
+                error,
+            ))
+        })?;
     }
     Ok(changed)
 }

@@ -15,10 +15,7 @@ impl SessionReadView {
         self.1 = options;
         self
     }
-    pub fn transcript(
-        &self,
-    ) -> Result<crate::transcript::SessionTranscript, crate::runtime_error::StoredDataCorruption>
-    {
+    pub fn transcript(&self) -> Result<crate::transcript::SessionTranscript, crate::StoreError> {
         crate::transcript::SessionTranscript::from_read_state(self, &self.1)
     }
     pub fn transcript_decoders(&self) -> &crate::transcript::TranscriptDecoders {

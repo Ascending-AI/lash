@@ -228,6 +228,12 @@ impl RequestMessages {
         tail: &[LlmMessage],
         budget: &crate::allocation::AllocationBudget,
     ) -> Result<Self, crate::allocation::AllocationError> {
+        if tail.is_empty() {
+            return Ok(self.clone());
+        }
+        let _scratch = budget.reserve(
+            (tail.len() as u64).saturating_mul(std::mem::size_of::<AdmittedMessage>() as u64 + 32),
+        )?;
         let totals = MessageTotals::of(tail.iter());
         let admitted = tail
             .iter()

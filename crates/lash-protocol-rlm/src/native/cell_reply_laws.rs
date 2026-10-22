@@ -122,6 +122,7 @@ fn last_decision(machine: &TurnMachine, native: bool) -> String {
             match crate::projection::decode_rlm_protocol_event(event)
                 .expect("valid history fixture")
                 .as_deref()
+                .map(AsRef::as_ref)
             {
                 Some(RlmProtocolEvent::RlmDiagnostic(diagnostic)) if diagnostic.phase == phase => {
                     diagnostic.payload["decision"].as_str().map(str::to_string)
@@ -289,6 +290,7 @@ fn discarded_continuations_are_recorded_and_excluded_from_history_in_both_dialec
                         match crate::projection::decode_rlm_protocol_event(event)
                             .unwrap()
                             .as_deref()
+                            .map(AsRef::as_ref)
                         {
                             Some(RlmProtocolEvent::RlmDiagnostic(d)) => Some(d.payload.clone()),
                             _ => None,

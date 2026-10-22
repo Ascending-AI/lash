@@ -8,9 +8,10 @@ pub use failure::{
 };
 pub use message::prompt_resume_safe_len;
 pub use message::{
-    BaseRenderCache, InternalPartKind, InvalidPartCombination, Message, MessageParts, MessageRole,
-    MessageSequence, Part, PartAttachment, PartKind, RenderedPrompt, append_rendered_prompt,
-    messages_are_prompt_resume_safe, render_prompt, shared_parts,
+    BaseRenderCache, InternalPartKind, InvalidPartCombination, Message, MessageParts,
+    MessagePartsEditor, MessageRole, MessageSequence, Part, PartAttachment, PartKind,
+    RenderedPrompt, append_rendered_prompt, messages_are_prompt_resume_safe, render_prompt,
+    shared_parts,
 };
 
 use std::sync::Arc;

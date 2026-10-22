@@ -735,14 +735,21 @@ impl RuntimeTurnDriver<'_> {
             let context = cell_trace.context.clone();
             self.emit_cell_trace(held.as_ref(), standing, true, move || (context, event));
         }
-        let discarded_bytes = machine.cell_trailing_discarded().map_err(|error| {
-            let mut failure =
-                RuntimeError::new(RuntimeErrorCode::RuntimeStoreCorrupt, error.to_string());
-            failure.cause = Some(crate::RuntimeErrorCause::StoredDataCorrupt {
-                corruption: Box::new(error),
-            });
-            failure
-        })?;
+        let discarded_bytes = machine
+            .cell_trailing_discarded()
+            .map_err(|error| match error {
+                lash_protocol_types::allocation::ProjectionError::Allocation(error) => {
+                    RuntimeError::allocation(error)
+                }
+                lash_protocol_types::allocation::ProjectionError::Stored(error) => {
+                    let mut failure =
+                        RuntimeError::new(RuntimeErrorCode::RuntimeStoreCorrupt, error.to_string());
+                    failure.cause = Some(crate::RuntimeErrorCause::StoredDataCorrupt {
+                        corruption: Box::new(error),
+                    });
+                    failure
+                }
+            })?;
         // The cell's own observation lane: every CodeBlock* event this driver
         // publishes for the cell sequences under the cell's replay key.
         let mut code_observations = crate::engine::ObservationCursor::new(

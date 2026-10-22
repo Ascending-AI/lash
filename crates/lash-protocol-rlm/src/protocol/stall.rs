@@ -52,7 +52,7 @@ pub(crate) fn stalled_attempts_in_phase(
     ctx: &DriverContextView<'_>,
     actions: &[DriverAction],
     extraction_phase: lash_rlm_types::RlmDiagnosticPhase,
-) -> Result<usize, lash_core::StoredDataCorruption> {
+) -> Result<usize, lash_protocol_types::allocation::ProjectionError> {
     let turn_id = ctx.turn_id();
     let trajectory_prefix = trajectory_entry_turn_prefix(turn_id);
     let mut attempts = 0;
@@ -60,7 +60,10 @@ pub(crate) fn stalled_attempts_in_phase(
         let SessionHistoryRecord::Protocol(event) = record else {
             continue;
         };
-        match crate::projection::decode_rlm_protocol_event(event)?.as_deref() {
+        match crate::projection::decode_rlm_protocol_event(event)?
+            .as_deref()
+            .map(AsRef::as_ref)
+        {
             Some(RlmProtocolEvent::RlmDiagnostic(diagnostic))
                 if diagnostic.phase == extraction_phase =>
             {
@@ -95,7 +98,7 @@ fn count_pending_attempts(
     trajectory_prefix: &str,
     attempts: &mut usize,
     extraction_phase: lash_rlm_types::RlmDiagnosticPhase,
-) -> Result<(), lash_core::StoredDataCorruption> {
+) -> Result<(), lash_protocol_types::allocation::ProjectionError> {
     for action in actions {
         let DriverAction::AppendEvents(records) = action else {
             continue;
@@ -104,7 +107,10 @@ fn count_pending_attempts(
             let SessionHistoryRecord::Protocol(event) = record else {
                 continue;
             };
-            match crate::projection::decode_rlm_protocol_event(event)?.as_deref() {
+            match crate::projection::decode_rlm_protocol_event(event)?
+                .as_deref()
+                .map(AsRef::as_ref)
+            {
                 Some(RlmProtocolEvent::RlmTrajectoryEntry(entry))
                     if !entry.result.is_failed() && entry.id.starts_with(trajectory_prefix) =>
                 {
