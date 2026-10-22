@@ -502,7 +502,7 @@ pub fn check_envelope<'a>(
     if NodeId::of_envelope(bytes) != expected {
         return Err(GraphRefusal::HashMismatch(expected));
     }
-    parse_envelope(bytes, Some(expected))
+    parse_prepared(bytes, Some(expected), expected)
 }
 
 /// [`check_envelope`] of `bytes` whose identity `expected` their receiver
@@ -520,7 +520,7 @@ pub fn check_decoded<'a>(
     limits: &DecodeLimits,
 ) -> Result<NodeEnvelope<'a>, GraphRefusal> {
     check_size(bytes.len() as u64, limits)?;
-    parse_envelope(bytes, Some(expected))
+    parse_prepared(bytes, Some(expected), expected)
 }
 
 /// The format's and the host's node-size bounds on an envelope of `len`
@@ -544,7 +544,7 @@ fn check_size(len: u64, limits: &DecodeLimits) -> Result<(), GraphRefusal> {
 
 /// Where a checked envelope's parts are.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-struct Framing {
+pub(crate) struct Framing {
     kind: NodeKind,
     children_start: usize,
     children_len: usize,
@@ -562,6 +562,14 @@ impl Framing {
         }
     }
 
+    fn envelope<'a>(&self, bytes: &'a [u8]) -> NodeEnvelope<'a> {
+        NodeEnvelope {
+            kind: self.kind,
+            children: self.children(bytes),
+            body: &bytes[self.body_start..],
+        }
+    }
+
     fn children<'a>(&self, bytes: &'a [u8]) -> ChildTable<'a> {
         ChildTable(
             bytes[self.children_start..self.children_start + self.children_len]
@@ -571,7 +579,7 @@ impl Framing {
     }
 }
 
-/// Parses an envelope without hashing it: magic, minimal varints, a
+/// Parses an envelope: magic, minimal varints, a
 /// strictly ascending child table, an exact body length, and a body of
 /// canonical tokens whose every slot is in range and every child referenced.
 ///
@@ -584,6 +592,24 @@ pub fn parse_envelope(
     bytes: &[u8],
     node: Option<NodeId>,
 ) -> Result<NodeEnvelope<'_>, GraphRefusal> {
+    if bytes.len() as u64 > MAX_NODE_BYTES {
+        return parse_uncached(bytes, node);
+    }
+    parse_prepared(bytes, node, NodeId::of_envelope(bytes))
+}
+
+fn parse_prepared(
+    bytes: &[u8],
+    node: Option<NodeId>,
+    digest: NodeId,
+) -> Result<NodeEnvelope<'_>, GraphRefusal> {
+    let framing = super::encode::prepare_envelope(digest, bytes, || {
+        Ok(Framing::of(bytes, parse_uncached(bytes, node)?))
+    })?;
+    Ok(framing.envelope(bytes))
+}
+
+fn parse_uncached(bytes: &[u8], node: Option<NodeId>) -> Result<NodeEnvelope<'_>, GraphRefusal> {
     let refuse = |error| GraphRefusal::from_token(error, node, None);
     if bytes.len() < MAGIC.len() {
         return Err(if MAGIC.starts_with(bytes) {
@@ -639,12 +665,19 @@ pub fn parse_envelope(
     })
 }
 
+#[cfg(test)]
+thread_local! {
+    static SLOT_SCAN_EVENTS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+
 /// Reads every token of a physical body: each must be canonical, each slot
 /// in range, and each child referenced at least once.
 fn check_slots(body: &[u8], children: usize, node: Option<NodeId>) -> Result<(), GraphRefusal> {
     let mut used = vec![false; children];
     let mut reader = TokenReader::with_form(body, RefForm::Physical);
     while !reader.is_empty() {
+        #[cfg(test)]
+        SLOT_SCAN_EVENTS.with(|events| events.set(events.get() + 1));
         if let TokenEvent::Slot(slot) = reader
             .next_event()
             .map_err(|error| GraphRefusal::from_token(error, node, None))?
@@ -682,6 +715,92 @@ impl TokenCodec for NodeId {
 mod frame_tests {
     use super::*;
     use std::collections::BTreeSet;
+
+    /// FIG-7135: cold cells and cuts check the current envelope's bytes, but
+    /// scan the canonical tokens once per resident immutable content.
+    #[test]
+    fn repeated_cold_envelopes_scan_tokens_once() {
+        let mut body = TokenWriter::new();
+        body.seq(4);
+        body.text("FIG-7135 cold immutable framing");
+        body.slot(0);
+        body.unsigned(42);
+        body.slot(0);
+        let bytes = write_envelope(NodeKind(1_002), &[[7; 32]], body.as_bytes());
+        let id = NodeId::of_envelope(&bytes);
+        let limits = DecodeLimits::within_total(u64::MAX);
+        SLOT_SCAN_EVENTS.with(|events| events.set(0));
+        for _cell in 0..4 {
+            for _cut in 0..3 {
+                let cold_bytes = bytes.clone();
+                let checked = check_envelope(&cold_bytes, id, &limits).unwrap();
+                assert_eq!(
+                    checked.children.iter().collect::<Vec<_>>(),
+                    [NodeId([7; 32])]
+                );
+                assert_eq!(checked.body, body.as_bytes());
+            }
+        }
+        assert_eq!(
+            SLOT_SCAN_EVENTS.with(std::cell::Cell::get),
+            5,
+            "one token scan per actual envelope, independent of cells and cuts"
+        );
+        // Neither the caller's old identity nor cached framing can hide a
+        // changed body, an invalid slot, or a tighter receiving limit.
+        let corrupt = write_envelope(NodeKind(1_002), &[[7; 32]], &[0x0b, 1]);
+        assert_eq!(
+            check_envelope(&corrupt, id, &limits),
+            Err(GraphRefusal::HashMismatch(id))
+        );
+        let corrupt_id = NodeId::of_envelope(&corrupt);
+        assert!(matches!(check_envelope(&corrupt, corrupt_id, &limits),
+            Err(GraphRefusal::NonCanonical { node: Some(found), reason: CanonicalFault::ChildSlotOutOfRange(1) }) if found == corrupt_id));
+        let mut smaller = limits;
+        smaller.node_bytes = bytes.len() as u64 - 1;
+        assert!(matches!(
+            check_envelope(&bytes, id, &smaller),
+            Err(GraphRefusal::DecodeLimit { .. })
+        ));
+    }
+
+    /// The preparation's check and publication have one synchronization
+    /// owner. Racing misses for different actual bytes cannot substitute
+    /// framing even if their lookup digests coincide (FIG-7135).
+    #[test]
+    fn racing_envelope_preparations_keep_each_inputs_framing() {
+        let rendezvous = std::sync::Barrier::new(2);
+        // Exercise the inventory's byte comparison independently of hashing.
+        let lookup = NodeId([0x71; 32]);
+        let bodies = [
+            write_envelope(NodeKind(1_002), &[], &[0x00]),
+            write_envelope(NodeKind(1_003), &[[0x35; 32]], &[0x0b, 0]),
+        ];
+        std::thread::scope(|scope| {
+            for bytes in &bodies {
+                let rendezvous = &rendezvous;
+                scope.spawn(move || {
+                    let framing = super::super::encode::prepare_envelope(lookup, bytes, || {
+                        let framing = Framing::of(bytes, parse_uncached(bytes, None)?);
+                        // Both misses prepare outside the inventory mutex,
+                        // before either can publish its result.
+                        rendezvous.wait();
+                        Ok(framing)
+                    })
+                    .unwrap();
+                    assert_eq!(
+                        framing.envelope(bytes),
+                        parse_uncached(bytes, None).unwrap()
+                    );
+                    // A later lookup must still check this caller's bytes.
+                    assert_eq!(
+                        parse_prepared(bytes, None, lookup).unwrap(),
+                        parse_uncached(bytes, None).unwrap()
+                    );
+                });
+            }
+        });
+    }
 
     /// The framing a logical body's envelope had before FIG-6932, built
     /// apart from [`frame_semantic`]: two passes over the body, a set of
