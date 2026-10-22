@@ -32,7 +32,6 @@ use lash_vm_protocol::page::{
 };
 use lash_vm_protocol::*;
 use lash_vocabulary::names::EffectName;
-use lash_vocabulary::sites::EffectId;
 use lash_vocabulary::sites::TaskLabel;
 use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -255,23 +254,23 @@ pub(crate) struct WireHost {
 /// a stretch of pure compute names the last site each task entered.
 #[derive(Default)]
 pub(crate) struct EnteredSites {
-    last: BTreeMap<TaskLabel, (u64, EffectId)>,
+    last: BTreeMap<TaskLabel, (u64, lash_vocabulary::sites::EffectLocation)>,
     entries: u64,
 }
 
 impl EnteredSites {
-    fn enter(&mut self, at: &EffectId) {
+    fn enter(&mut self, at: &lash_vocabulary::sites::EffectLocation) {
         self.entries += 1;
-        match self.last.get_mut(&at.task()) {
+        match self.last.get_mut(&at.at.task()) {
             Some(last) => *last = (self.entries, at.clone()),
             None => {
-                self.last.insert(at.task(), (self.entries, at.clone()));
+                self.last.insert(at.at.task(), (self.entries, at.clone()));
             }
         }
     }
 
     /// The entries the next frame carries, in the order they were entered.
-    fn take(&mut self) -> Vec<EffectId> {
+    fn take(&mut self) -> Vec<lash_vocabulary::sites::EffectLocation> {
         let mut entered: Vec<_> = std::mem::take(&mut self.last).into_values().collect();
         entered.sort_unstable_by_key(|(order, _)| *order);
         entered.into_iter().map(|(_, at)| at).collect()
@@ -328,7 +327,7 @@ impl lash_kernel_vm::Host for WireHost {
         self.sites.is_some()
     }
 
-    fn enter_site(&mut self, at: &EffectId) {
+    fn enter_site(&mut self, at: &lash_vocabulary::sites::EffectLocation) {
         if let Some(sites) = self.sites.as_mut() {
             sites.enter(at);
         }

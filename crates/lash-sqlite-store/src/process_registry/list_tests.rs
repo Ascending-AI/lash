@@ -266,6 +266,7 @@ fn process_lifecycle_write_size() {
         .expect("insert start");
         let wait = WaitState {
             kind: WaitKind::Call {
+                resume_at_ms: None,
                 call_id: lash_protocol_types::ToolCallId::fixture("write-size"),
                 tool_id: lash_vocabulary::tool_contract::ToolId::from("write-size"),
             },

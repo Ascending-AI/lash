@@ -145,7 +145,8 @@ pub mod facade_support {
     pub use crate::runtime::effect::scope_status;
     pub use crate::runtime::{DurableSessionOps, EMPTY_HEAD_REVISION, QueueWithdrawalObservation};
     pub use lash_core_execution::runtime::actor::resolutions::{
-        CommittedUse, FirstUse, ResolutionError, registration, start_requirements,
+        CommittedUse, FirstUse, ResolutionError, ResolutionValidator, registration,
+        start_requirements,
     };
     pub use lash_core_execution::runtime::actor::route_selection::select_routes;
 

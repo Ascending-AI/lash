@@ -59,7 +59,7 @@ fn the_view_schema_is_self_contained_with_resolving_defs_only_references() {
 fn closure_view_uses_retained_anonymous_body_and_unit() {
     use lash_kernel_doc::{Document, NumberPolicy, parse_definition_with_locals};
 
-    use lash_kernel_package::{LinkId, LinkedStart, StartSelector};
+    use lash_kernel_package::{LinkedStart, StartSelector};
     use lash_vocabulary::sites::Unit;
     let (root, locals) = parse_definition_with_locals("function app.make(value: Any) -> Any\nkernel 1\nmetering statements\nbody { let f = fn() { return value } return f }").unwrap();
     let anonymous = locals[0].identity();
@@ -69,15 +69,22 @@ fn closure_view_uses_retained_anonymous_body_and_unit() {
     document
         .functions
         .extend(locals.into_iter().map(|f| (f.identity(), f)));
-    let checked = lash_kernel_check::WorkflowDocument::entered(
-        document,
-        LinkedStart {
-            link: LinkId::from_bytes([1; 32]),
-            selector: StartSelector::Main,
-        },
-    )
-    .unwrap();
-    let view = crate::derive_callable(&checked, &Unit::Library(root_id)).unwrap();
+    let link = lash_vocabulary::Link {
+        document: document.identity(),
+        fills: Default::default(),
+    };
+    let mut content = lash_kernel_package::LinkedContent::default();
+    content
+        .documents
+        .insert(document.identity(), document.clone());
+    content.links.insert(link.identity(), link.clone());
+    let reference = LinkedStart {
+        link: link.identity(),
+        selector: StartSelector::Main,
+    };
+    let context = crate::ViewContext::new(reference.clone(), content, Default::default()).unwrap();
+    let checked = lash_kernel_check::WorkflowDocument::entered(document, reference).unwrap();
+    let view = crate::derive_callable(&checked, &Unit::Library(root_id), &context).unwrap();
     assert!(
         view.callables
             .iter()

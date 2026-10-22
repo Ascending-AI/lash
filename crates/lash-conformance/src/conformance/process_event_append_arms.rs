@@ -171,7 +171,9 @@ async fn durable_effect_outcome_event_crash_windows(
         .expect("register effect-summary process")
         .id;
     let recorded = lash_execution_contracts::process::ProcessEffectOccurrence::new(
-        lash_protocol_types::effect_identity_fixture("node:tool", 1),
+        lash_vocabulary::sites::EffectLocation::authored(
+            lash_protocol_types::effect_identity_fixture("node:tool", 1),
+        ),
         "tool:fixture",
         lash_execution_contracts::process::ProcessEffectOutcomeClass::Failure,
         Some(lash_protocol_types::FailureCode::from_foreign_wire(

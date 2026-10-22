@@ -471,7 +471,7 @@ impl KernelProcessEngine {
         };
         input.code = recorded_start.code.clone();
         let loaded_execution = self
-            .load_execution(&input.code)
+            .load_execution(&input.code, &recorded_start.retained_code)
             .await
             .map_err(|error| ReplayFault(error.to_string()))?;
         let content = loaded_execution.content;

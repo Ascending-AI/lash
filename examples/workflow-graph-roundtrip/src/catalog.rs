@@ -283,7 +283,18 @@ pub(crate) async fn entry_view(
     let lash::workflow::WorkflowDocumentRead::Read(checked) = read else {
         return Err(format!("{read:?}"));
     };
-    lash::workflow::view::derive(&checked).map_err(|error| error.to_string())
+    let publications = environment
+        .snapshot
+        .advertisements
+        .iter()
+        .map(|accepted| accepted.publication.clone())
+        .collect::<Vec<_>>();
+    let context = core
+        .host_artifacts()
+        .workflow_view_context(&start, &publications)
+        .await
+        .map_err(|error| error.to_string())?;
+    lash::workflow::view::derive(&checked, &context).map_err(|error| error.to_string())
 }
 
 #[cfg(test)]

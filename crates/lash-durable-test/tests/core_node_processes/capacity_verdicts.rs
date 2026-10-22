@@ -177,7 +177,6 @@ impl lash_core::plugin::PluginFactory for SaturatingPlugin {
                     lash_core::ProcessEngineRegistration::accepting(Arc::new(ScriptEngine {
                         kind: SATURATING_ENGINE,
                         advance: saturating_advance,
-                        performs: no_tools,
                     }))
                     .with_engine_steps(Arc::new(Saturating {
                         runs: Arc::clone(&factory.runs),
@@ -411,11 +410,17 @@ async fn a_kernel_run_waits_for_a_full_worker_pool(tier: Tier) {
         )
     })
     .await;
-    let payload = worker_payload(&deployment.backend).await;
-    let process = start(
+    let env = lash::process::ProcessEnv::builder(lash::MaxToolCalls::new(16))
+        .component(lash::vm::KERNEL_SERVICES_CONFIG, &())
+        .build()
+        .unwrap();
+    let (payload, env) = kernel_process::publish(&deployment.core, WORKER, &env).await;
+    let process = start_under(
         &deployment.core,
+        &env,
         lash_vm_runtime::LASH_VM_ENGINE_KIND,
         payload,
+        |request| request,
     )
     .await;
     let actor = lash_durable::ActorKey::process(process.as_str()).expect("a process actor key");

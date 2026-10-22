@@ -20,7 +20,9 @@ fn restamp(bytes: &[u8], field: &str, version: u32) -> Vec<u8> {
 
 fn write_occurrence(fleet: FleetFormat) -> Vec<u8> {
     serde_json::to_vec(&ProcessEffectOccurrence::new(
-        lash_protocol_types::effect_identity_fixture("resource_operation:node", 1),
+        lash_vocabulary::sites::EffectLocation::authored(
+            lash_protocol_types::effect_identity_fixture("resource_operation:node", 1),
+        ),
         "fixture.operation",
         ProcessEffectOutcomeClass::Success,
         None,

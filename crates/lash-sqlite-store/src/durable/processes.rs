@@ -90,7 +90,7 @@ pub(super) fn stamp_requires(
 ) -> rusqlite::Result<()> {
     cached_execute(
         tx,
-        SQL.actor.stamp_requires.sql(),
+        SQL.actor.stamp_effective_requires.sql(),
         rusqlite::params![actor, lash_durable::encode_requires(requires)],
     )
     .map(drop)

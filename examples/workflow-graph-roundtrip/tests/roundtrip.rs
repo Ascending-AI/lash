@@ -576,7 +576,41 @@ async fn corpus_catalog_imports_both_dialects_and_draws_the_stored_read() {
                         else {
                             panic!("stored definition");
                         };
-                        let mut expected = lash::workflow::view::derive(&stored.document).unwrap();
+                        let reference = stored.document.reference();
+                        let documents = lash::vm::KernelDocuments::new(
+                            core.backend().module_artifacts(),
+                            core.backend().package_store(),
+                        );
+                        let mut content = documents.load_linked(reference.link).await.unwrap();
+                        let store = core.backend().package_store();
+                        let mut labels = Vec::new();
+                        // This fixture's host installs this release. Fetch its pinned
+                        // Package bytes and independent sidecars through the store.
+                        for id in lash::vm::helper_release().unwrap().content.packages.keys() {
+                            if let Some(record) = store.package(id).await.unwrap() {
+                                content.packages.insert(*id, record.package);
+                                labels.extend(
+                                    store
+                                        .labels(id)
+                                        .await
+                                        .unwrap()
+                                        .into_iter()
+                                        .map(|json| (*id, json)),
+                                );
+                            }
+                        }
+                        let mut context = lash::workflow::view::ViewContext::new(
+                            reference.clone(),
+                            content,
+                            Default::default(),
+                        )
+                        .unwrap()
+                        .with_timer_operations(lash::vm::TIMER_OPERATIONS.iter().cloned());
+                        for (id, json) in labels {
+                            context.add_labels(id, &json).unwrap();
+                        }
+                        let mut expected =
+                            lash::workflow::view::derive(&stored.document, &context).unwrap();
                         let map = serde_json::from_value(opened["sourceMap"].clone()).unwrap();
                         expected
                             .readable_ranges(

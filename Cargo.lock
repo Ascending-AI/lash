@@ -2524,6 +2524,7 @@ dependencies = [
  "lash-internal-vocabulary",
  "lash-kernel-doc",
  "lash-kernel-migrate",
+ "lash-kernel-package",
  "lash-kernel-state",
  "lash-kernel-vm",
  "lash-runtime",
@@ -3480,6 +3481,7 @@ name = "lash-kernel-vm"
 version = "0.0.0-dev"
 dependencies = [
  "lash-internal-vocabulary",
+ "lash-kernel-check",
  "lash-kernel-dialect",
  "lash-kernel-doc",
  "lash-kernel-exec",
@@ -7058,6 +7060,7 @@ dependencies = [
  "anyhow",
  "axum",
  "chrono",
+ "lash-kernel-package",
  "lash-runtime",
  "reqwest",
  "serde",

@@ -403,15 +403,18 @@ pub(crate) fn start(
                 "callable captures differ from its lexical environment".into(),
             ));
         }
+        let cells = machine
+            .restore_callable_environment(&exe, function)
+            .map_err(|e| start_interrupt("callable captures", e))?;
         for (name, local) in &exe.code(code).free {
-            if let Some(datum) = function.captures.get(name) {
-                let value = machine
-                    .decode(&exe, datum, &lash_vocabulary::types::Type::Any)
-                    .map_err(|e| start_interrupt(name.as_str(), e))?;
-                machine
-                    .bind(TaskId::MAIN, local.at, true, value)
-                    .map_err(|e| start_interrupt(name.as_str(), e.into()))?;
-            }
+            let cell = cells
+                .iter()
+                .find_map(|(captured, cell)| (captured == name).then_some(*cell))
+                .ok_or_else(|| arguments("root capture is absent".into()))?;
+            machine
+                .frame(TaskId::MAIN)
+                .map_err(|e| start_interrupt("callable frame", e.into()))?
+                .set_slot(local.at, SlotState::Cell(cell));
         }
     }
     machine.regs.clear();

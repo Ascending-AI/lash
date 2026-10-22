@@ -145,3 +145,10 @@ pub use lash_vm_runtime::{
 
 /// Kernel input for an inline start, including a retained captured callable.
 pub use lash_vm_runtime::process::InlineRequest as KernelInlineRequest;
+
+#[cfg(feature = "codemode")]
+pub use lash_vm_runtime::{DIALECT_SERVICE_PACKAGES, TIMER_OPERATIONS};
+
+/// Errors and retained source maps named by the runtime host interfaces.
+pub use lash_vm_releases::LibraryError;
+pub use lash_vm_runtime::{AdoptionRefusal, StoredSourceMap};

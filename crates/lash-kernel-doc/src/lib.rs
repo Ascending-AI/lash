@@ -42,7 +42,9 @@ use lash_vocabulary::data_limits::KernelDataLimits;
 pub mod arena;
 mod document_bytes;
 pub mod function;
+mod function_capture;
 pub mod function_value;
+pub use function_capture::CaptureValue;
 mod graph_codec;
 /// The canonical binary token grammar of checkpoint graph node bodies: a
 /// cross-crate seam for the kernel's and the store's binary codecs, not part

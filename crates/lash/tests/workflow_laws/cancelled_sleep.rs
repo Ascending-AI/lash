@@ -9,8 +9,8 @@ use lash::workflow::ProcessWorkflowSiteState;
 use lash::workflow::document::SourceLanguage;
 
 /// `nap()` sleeps a minute; `naps()` sleeps a minute, then ten.
-const TYPESCRIPT: &str = "export async function nap() {\n  await sleep(60000);\n  return \"woke\";\n}\n\nexport async function naps() {\n  await sleep(60000);\n  await sleep(600000);\n  return \"woke\";\n}\n";
-const PYTHON: &str = "import asyncio\n\n\nasync def nap():\n    await asyncio.sleep(60)\n    return \"woke\"\n\n\nasync def naps():\n    await asyncio.sleep(60)\n    await asyncio.sleep(600)\n    return \"woke\"\n";
+const TYPESCRIPT: &str = "export async function nap(): Promise<string> {\n  await sleep(60000);\n  return \"woke\";\n}\n\nexport async function naps(): Promise<string> {\n  await sleep(60000);\n  await sleep(600000);\n  return \"woke\";\n}\n";
+const PYTHON: &str = "import asyncio\n\n\nasync def nap() -> str:\n    await asyncio.sleep(60)\n    return \"woke\"\n\n\nasync def naps() -> str:\n    await asyncio.sleep(60)\n    await asyncio.sleep(600)\n    return \"woke\"\n";
 
 const DIALECTS: [(SourceLanguage, &str); 2] = [
     (SourceLanguage::TypeScript, TYPESCRIPT),
@@ -73,9 +73,9 @@ async fn wait_ends(
 /// A sleep that elapses settles completed, and the run finishes.
 #[tokio::test]
 async fn a_sleep_that_elapses_reports_completed() {
-    let files = Files::new();
-    let core = core_over(files.open().await, "elapsed-sleep").await;
     for (language, source) in DIALECTS {
+        let files = Files::new();
+        let core = core_over(files.open().await, "elapsed-sleep").await;
         let module = Module::import(&core, language, source).await;
         let (_, process) = module.start(&core, "nap", &[], serde_json::json!({})).await;
         let due = timer_park_after(&core, &process, 0).await;
@@ -95,8 +95,8 @@ async fn a_sleep_that_elapses_reports_completed() {
             ["process.resumed"],
             "{language:?}"
         );
+        core.shutdown().await.expect("shutdown");
     }
-    core.shutdown().await.expect("shutdown");
 }
 
 /// A run cancelled while parked on its second sleep ends that wait as
@@ -105,15 +105,22 @@ async fn a_sleep_that_elapses_reports_completed() {
 /// as `process.resumed`, which reads completed.
 #[tokio::test]
 async fn a_cancel_during_a_sleep_reports_it_cancelled_and_leaves_an_elapsed_one_completed() {
-    let files = Files::new();
-    let core = core_over(files.open().await, "cancelled-sleep").await;
     for (language, source) in DIALECTS {
+        let files = Files::new();
+        let core = core_over(files.open().await, "cancelled-sleep").await;
         let module = Module::import(&core, language, source).await;
         let (_, process) = module
             .start(&core, "naps", &[], serde_json::json!({}))
             .await;
         let first = timer_park_after(&core, &process, 0).await;
+        // Move the injected epoch between node incarnations, so the one-minute
+        // jump does not expire the live node's own lease.
+        core.shutdown()
+            .await
+            .expect("stop before advancing the epoch");
+        drop(core);
         files.clock.set(first);
+        let core = core_over(files.open().await, "cancelled-sleep-resumed").await;
         timer_park_after(&core, &process, first).await;
         core.processes()
             .cancel(&process, core.effect_host())
@@ -146,6 +153,6 @@ async fn a_cancel_during_a_sleep_reports_it_cancelled_and_leaves_an_elapsed_one_
             ["process.resumed", "process.wait_cancelled"],
             "{language:?}"
         );
+        core.shutdown().await.expect("shutdown");
     }
-    core.shutdown().await.expect("shutdown");
 }

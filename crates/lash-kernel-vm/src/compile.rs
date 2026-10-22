@@ -407,7 +407,7 @@ pub(crate) struct DocumentCode {
     pub(crate) regions: Vec<LoopPlan>,
     /// The call islands lowering formed, by code.
     pub(crate) islands: islands::Islands,
-    pub(crate) block_ordinals: Vec<u32>,
+    pub(crate) block_ordinals: Vec<Option<u32>>,
     pub(crate) site_count: usize,
     pub(crate) action_ordinals: BTreeMap<Site, u32>,
     pub(crate) condition_ordinals: BTreeMap<u32, u32>,
@@ -438,7 +438,7 @@ impl Executable {
 
     pub(crate) fn block_ordinal(&self, id: BlockId) -> Option<u32> {
         let at = (id.0 as usize).checked_sub(self.block_base)?;
-        self.own.block_ordinals.get(at).copied()
+        self.own.block_ordinals.get(at).copied().flatten()
     }
 
     #[expect(

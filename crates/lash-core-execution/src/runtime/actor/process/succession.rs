@@ -164,7 +164,7 @@ impl ProcessActivation {
         mut tx: ActorTx,
         current: &Current<'_>,
         mut driver: Driver,
-        request: ProcessSuccessorRequest,
+        mut request: ProcessSuccessorRequest,
         state: Option<&EngineState>,
         fold: Option<&RunFold>,
     ) -> Result<Succession, DurableError> {
@@ -207,6 +207,7 @@ impl ProcessActivation {
                             state,
                             own_formats,
                             correspondence,
+                            predecessor_code,
                             resolutions,
                             requirements,
                             artifacts,
@@ -217,6 +218,7 @@ impl ProcessActivation {
                             resolutions,
                             requirements,
                             artifacts,
+                            predecessor_code,
                         )),
                         // A run in flight is carried at its next park.
                         Ok(SuccessorCarry::InFlight) => {
@@ -232,15 +234,10 @@ impl ProcessActivation {
         let carried = match carried {
             Err(refusal) => Err(refusal),
             Ok(carried) => (|| -> Result<_, DurableError> {
-                if let Err(message) = validate_pins(&context, &inspection, &carried.2, &carried.3) {
-                    return Ok(Err(ProcessSuccessorRefusal::Engine {
-                        refusal: serde_json::json!({"kind":"incompatible_succession", "message":message}),
-                        message,
-                    }));
-                }
                 let seeds: Vec<_> = carried
                     .3
                     .iter()
+                    .filter(|record| inspection.operations.contains_key(&record.key.use_))
                     .map(|record| lash_core_store::resolutions::ResolutionSeed {
                         use_: record.key.use_,
                         entry: record.entry.clone(),
@@ -260,14 +257,9 @@ impl ProcessActivation {
                     }
                     Err(error) => return Err(unavailable(error)),
                 };
-                for seed in &seeds {
-                    if let Some(debt) = seed.entry.requirements() {
-                        known.extend(debt);
-                    }
-                }
-                let mut supplied = known.clone();
-                supplied.extend(&carried.4);
-                if supplied != *carried.4 {
+                let mut supplied = carried.4.machine.clone();
+                supplied.extend(&known.machine);
+                if supplied != carried.4.machine {
                     return Ok(Err(ProcessSuccessorRefusal::Engine {
                         refusal: serde_json::json!({"kind":"missing_successor_requirements"}),
                         message: "carry omitted known successor claim debt".into(),
@@ -286,38 +278,125 @@ impl ProcessActivation {
                 Ok(Ok(carried))
             })()?,
         };
-        let (carried, own_formats, correspondence, resolutions, requirements, _artifacts) =
-            match carried {
-                Ok(carried) => carried,
-                Err(refusal) => {
-                    if current.row.state_rev > 0 {
-                        tx.write(DomainWrite::Process(ProcessWrite::Advance {
-                            process: current.process.clone(),
-                            expected_rev: current.row.state_rev,
-                            driver_json: driver.encode(),
-                        }));
+        let carried = match carried {
+            Ok(carried) => match super::succession_debt::merge(
+                current.engine,
+                self.backend.package_store().as_ref(),
+                &context,
+                &successor_env,
+                &inspection,
+                &carried.6,
+            )
+            .await
+            {
+                Ok((env, inspection)) => {
+                    let mut merged_context = context.clone();
+                    merged_context.environment = env.execution().clone();
+                    match validate_pins(&merged_context, &inspection, &carried.2, &carried.3) {
+                        Ok(()) => {
+                            let seeds: Vec<_> = carried
+                                .3
+                                .iter()
+                                .map(|record| lash_core_store::resolutions::ResolutionSeed {
+                                    use_: record.key.use_,
+                                    entry: record.entry.clone(),
+                                })
+                                .collect();
+                            match self.steps.check_successor_links(&std::sync::Arc::new(env.clone()),&inspection,&seeds) {
+                                Ok(known) => Ok((carried,env,inspection,known)),
+                                Err(crate::PluginError::Package(cause)) if cause.failure_class() == lash_protocol_types::ToolFailureClass::InvalidRequest =>
+                                    Err(ProcessSuccessorRefusal::Admission {cause}),
+                                Err(error) => return Err(unavailable(error)),
+                            }
+                        }
+                        Err(message) => Err(ProcessSuccessorRefusal::Engine {
+                            refusal: serde_json::json!({"kind":"incompatible_succession","message":message}),
+                            message,
+                        }),
                     }
-                    tracing::info!(process_id = %current.process, %refusal, "successor pair refused");
-                    append_event(
-                        &mut tx,
-                        current.process,
-                        ProcessEventAppendRequest::successor_refused(
-                            current.process,
-                            &request,
-                            &refusal,
-                        ),
-                    );
-                    owned.commit(tx, CommitLabel::PROCESS_ADVANCE).await?;
-                    return Ok(Succession::Ended(Pass::Again));
                 }
-            };
+                Err(cause)
+                    if cause.failure_class()
+                        == lash_protocol_types::ToolFailureClass::InvalidRequest =>
+                {
+                    Err(ProcessSuccessorRefusal::Admission {
+                        cause: Box::new(cause),
+                    })
+                }
+                Err(error) => return Err(unavailable(error)),
+            },
+            Err(refusal) => Err(refusal),
+        };
+        let (
+            (
+                carried,
+                own_formats,
+                correspondence,
+                resolutions,
+                mut requirements,
+                _artifacts,
+                _predecessor_code,
+            ),
+            merged_env,
+            inspection,
+            known,
+        ) = match carried {
+            Ok(carried) => carried,
+            Err(refusal) => {
+                if current.row.state_rev > 0 {
+                    tx.write(DomainWrite::Process(ProcessWrite::Advance {
+                        process: current.process.clone(),
+                        expected_rev: current.row.state_rev,
+                        driver_json: driver.encode(),
+                    }));
+                }
+                tracing::info!(process_id = %current.process, %refusal, "successor pair refused");
+                append_event(
+                    &mut tx,
+                    current.process,
+                    ProcessEventAppendRequest::successor_refused(
+                        current.process,
+                        &request,
+                        &refusal,
+                    ),
+                );
+                owned.commit(tx, CommitLabel::PROCESS_ADVANCE).await?;
+                return Ok(Succession::Ended(Pass::Again));
+            }
+        };
+        requirements.extend(&known);
+        let mut merged_execution = merged_env.execution().clone();
+        merged_execution.requirements.extend(&known);
+        let merged_env = merged_env.with_execution(merged_execution);
+        let claim = lash_core_store::artifact_referrer::ReferrerClaim::unguarded(
+            lash_core_store::artifact_referrer::ArtifactReferrer::ProcessRecord(
+                current.process.clone(),
+            ),
+        )
+        .map_err(unavailable)?;
+        for artifact in &inspection.artifacts {
+            self.backend
+                .module_artifacts()
+                .acquire_module_artifact(&claim, &artifact.artifact_ref)
+                .await
+                .map_err(unavailable)?;
+        }
+        let bytes = merged_env.to_store_bytes().map_err(unavailable)?;
+        let reference = lash_core_store::process_identity::process_env_ref_for_bytes(&bytes);
+        self.backend
+            .process_env_store()
+            .publish_process_env(&claim, &reference, &bytes)
+            .await
+            .map_err(unavailable)?;
+        request.env = reference;
         let mut registration = crate::runtime::actor::resolutions::registration(
             context.execution.clone(),
             &inspection,
             lash_core_store::artifact_referrer::ArtifactReferrer::ProcessRecord(
                 current.process.clone(),
             ),
-            *requirements,
+            known.clone(),
+            lash_vocabulary::claims::RegistryKind::Process,
         );
         for (use_, entry) in &context.resolutions {
             if let Some(target) = correspondence.uses.get(use_) {
@@ -326,7 +405,8 @@ impl ProcessActivation {
                     ..
                 }) = inspection.operations.get(target)
                 {
-                    registration.uses.insert(*target, name.clone());
+                    // The live inspection already authors every successor use once.
+                    let _ = name;
                 }
                 let _ = entry;
             }

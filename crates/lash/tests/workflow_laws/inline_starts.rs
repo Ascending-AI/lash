@@ -1,46 +1,59 @@
-//! START-ONCE (FIG-6382): a start of a function carried inline realizes it
-//! exactly once under its key, with a complete retained closure, whichever
-//! write of its realization a crash stops it after, on SQLite.
-//!
-//! Realization runs in a fixed order: its engine checks the function, the
-//! document and the declarations the store lacks are published under
-//! `Start(key)`, then the descriptor, then the row registers, then the row
-//! adopts what `Start(key)` held. A cut stops the start right at one of
-//! those writes, before it or once it committed, and never answers: the
-//! node died there. Recovery is the redrive: a host retries the same request
-//! under the same key, and a second node recovers a tool's call and realizes
-//! the start it declared again. The registration cut stops the start after its row
-//! committed, for good; the host's retry, and the retry after the key's
-//! staging was ended (its fence), answer that row.
-//!
-//! Each law checks: one process holds the key and runs the function once;
-//! nothing holds its closure but that process, which still reads its
-//! document, declarations and descriptor; and a refused or uncommitted start
-//! leaves no process and publishes nothing.
+//! START-ONCE: inline callable starts retain their defining Link and frozen
+//! captures exactly once. Cuts interrupt Link acquisition, descriptor publication,
+//! registration and staging cleanup on the host and declaring-tool routes.
 
 use std::sync::Mutex;
 
-use lash::workflow::document::{FunctionValue, parse_document};
+use lash::workflow::document::FunctionValue;
 use lash_core::ReferrerClaim;
+use lash_execution_contracts::backend::StoreSet as _;
 use lash_execution_contracts::module_artifacts::ArtifactStoreError;
 use lash_execution_contracts::module_artifacts::ModuleArtifactHold;
 use lash_execution_contracts::module_artifacts::ModuleArtifactStore;
 
 use super::*;
 
-/// `run(n)`: answers `[n, "inline"]`. The function a host holds as data.
-const RUN: &str = "kernel 1\nnumbers float\nentry run(n: Any) -> Any\n\nfn run(n) {\n  return [n, \"inline\"]\n}\n\nmain {\n  finish null\n}\n";
+/// Complete data-only callable definitions, published before they cross.
+const RUN: &str =
+    "function run(n: Json) -> Json\nkernel 1\nmetering statements\nbody {return [n, \"inline\"]}";
+const OTHER: &str =
+    "function run(n: Json) -> Json\nkernel 1\nmetering statements\nbody {return [n, \"other\"]}";
 
-/// The same function answering `[n, "other"]`: other bytes.
-const OTHER: &str = "kernel 1\nnumbers float\nentry run(n: Any) -> Any\n\nfn run(n) {\n  return [n, \"other\"]\n}\n\nmain {\n  finish null\n}\n";
-
-fn function(text: &str) -> FunctionValue {
-    let document = parse_document(text).expect("the function's document parses");
+async fn function(
+    core: &lash::LashCore,
+    pin: &lash::process::HostArtifactPin,
+    text: &str,
+) -> FunctionValue {
+    let definition = lash_kernel_doc::parse_definition(text).unwrap();
+    let document = function_document(definition.clone(), "run");
+    let publication = publish(
+        core,
+        pin,
+        &document.clone().into(),
+        &Name::new("run"),
+        &empty_environment(),
+        None,
+    )
+    .await
+    .unwrap();
     FunctionValue {
+        callable: lash::package::CallableId {
+            link: publication.start.link,
+            function: definition.identity(),
+        },
+        representation: lash::workflow::document::FunctionRepresentation::Bare,
+        creation: None,
+        token: None,
+        captures: Default::default(),
+        signature: definition.signature.clone(),
+        convention: lash::workflow::document::StartConvention::Direct,
         captions: lash::workflow::document::Captions::empty(document.identity()),
-        document,
-        entry: Name::new("run"),
     }
+}
+fn empty_environment() -> lash::process::ProcessEnv {
+    lash::process::ProcessEnv::builder(lash::MaxToolCalls::new(1024))
+        .build()
+        .unwrap()
 }
 
 fn transport(value: &FunctionValue) -> serde_json::Value {
@@ -50,10 +63,10 @@ fn transport(value: &FunctionValue) -> serde_json::Value {
 /// A write a cut stops a start at.
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum Cut {
-    /// The document's write is refused: the node died before it.
-    BeforeDocument(String),
-    /// The document's write committed; its caller gets no answer.
-    AfterDocument(String),
+    /// The Link acquisition is refused: the node died before it.
+    BeforeLink(String),
+    /// The Link acquisition committed; its caller gets no answer.
+    AfterLink(String),
     /// The descriptor's write committed; its caller gets no answer.
     AfterDescriptor,
 }
@@ -140,7 +153,26 @@ impl ModuleArtifactStore for CutModules {
         claim: &ReferrerClaim,
         module_ref: &str,
     ) -> Result<(), ArtifactStoreError> {
-        self.inner.acquire_module_artifact(claim, module_ref).await
+        let staged = matches!(claim.referrer(), lash_core::ArtifactReferrer::Start(_))
+            && module_ref.starts_with("link:v1:");
+        if staged && self.cuts.fires(&Cut::BeforeLink(module_ref.to_owned())) {
+            return died().await;
+        }
+        self.inner
+            .acquire_module_artifact(claim, module_ref)
+            .await?;
+        if staged {
+            self.cuts
+                .published
+                .lock()
+                .unwrap()
+                .push(module_ref.to_owned());
+            if self.cuts.fires(&Cut::AfterLink(module_ref.to_owned())) {
+                *self.cuts.staged_under.lock().unwrap() = Some(claim.referrer());
+                return died().await;
+            }
+        }
+        Ok(())
     }
 
     async fn hold_module_artifacts(
@@ -148,31 +180,7 @@ impl ModuleArtifactStore for CutModules {
         claim: &ReferrerClaim,
         artifacts: &[ModuleArtifactHold<'_>],
     ) -> Result<(), ArtifactStoreError> {
-        let documents: Vec<String> = artifacts
-            .iter()
-            .filter_map(|artifact| match artifact {
-                ModuleArtifactHold::Publish { module_ref, .. } => Some((*module_ref).to_owned()),
-                ModuleArtifactHold::Acquire { .. } | ModuleArtifactHold::Retain { .. } => None,
-            })
-            .collect();
-        for document in &documents {
-            if self.cuts.fires(&Cut::BeforeDocument(document.clone())) {
-                return died().await;
-            }
-        }
-        self.inner.hold_module_artifacts(claim, artifacts).await?;
-        self.cuts
-            .published
-            .lock()
-            .unwrap()
-            .extend(documents.iter().cloned());
-        for document in documents {
-            if self.cuts.fires(&Cut::AfterDocument(document)) {
-                *self.cuts.staged_under.lock().unwrap() = Some(claim.referrer());
-                return died().await;
-            }
-        }
-        Ok(())
+        self.inner.hold_module_artifacts(claim, artifacts).await
     }
 
     async fn end_module_referrer(
@@ -273,7 +281,11 @@ impl lash::tools::StaticToolExecute for Launch {
         let resolved = match context
             .resolve_inline_start(
                 lash::process::LASH_VM_ENGINE_KIND,
-                call.args["function"].clone(),
+                match context.engine_inline_request(serde_json::json!({"kind":"callable","value":{
+                    "link":shipped(&call.args["function"]).callable.link,
+                    "function":shipped(&call.args["function"]),
+                    "origin":match context.callable_origin() { Ok(origin)=>origin,Err(error)=>return refuse(format!("{error:?}")) }
+                }})) { Ok(request)=>request,Err(error)=>return refuse(format!("{error:?}")) },
                 args,
             )
             .await
@@ -287,7 +299,7 @@ impl lash::tools::StaticToolExecute for Launch {
             attempts.push(marker.clone());
             first
         };
-        let document = function_document(&call.args["function"]);
+        let document = callable_link(&call.args["function"]);
         if first {
             match call.args["cut"].as_str() {
                 Some("before-declaring") => {
@@ -300,7 +312,7 @@ impl lash::tools::StaticToolExecute for Launch {
                         .fired
                         .lock()
                         .unwrap()
-                        .push(Cut::BeforeDocument(String::new()));
+                        .push(Cut::BeforeLink(String::new()));
                     return lash::tools::ToolAttemptOutcome::host_failed(
                         lash_core::RuntimeEffectControllerError::from(
                             lash_execution_contracts::plugin_error::PluginError::attempt_fault(
@@ -310,8 +322,8 @@ impl lash::tools::StaticToolExecute for Launch {
                         .retryable_uncommitted_derivation(),
                     );
                 }
-                Some("before-document") => self.cuts.arm(Cut::BeforeDocument(document)),
-                Some("after-document") => self.cuts.arm(Cut::AfterDocument(document)),
+                Some("before-link") => self.cuts.arm(Cut::BeforeLink(document)),
+                Some("after-link") => self.cuts.arm(Cut::AfterLink(document)),
                 Some("after-descriptor") => self.cuts.arm(Cut::AfterDescriptor),
                 _ => {}
             }
@@ -327,7 +339,13 @@ impl lash::tools::StaticToolExecute for Launch {
             .expect("the tool runs inside a process")
             .originator
             .clone();
-        let choice = match context.start_policy_cx(&resolved.target, None).restrict() {
+        let policy = lash::process::env::policy::restrict_or(lash::process::env::policy::refuse(
+            "the child requires its retained parent",
+        ));
+        let choice = match policy
+            .choose(&context.start_policy_cx(&resolved.target, None))
+            .await
+        {
             Ok(choice) => choice,
             Err(error) => return refuse(format!("{error:?}")),
         };
@@ -381,8 +399,8 @@ fn shipped(transported: &serde_json::Value) -> FunctionValue {
 }
 
 /// The identity of the document a transported function value carries.
-fn function_document(transported: &serde_json::Value) -> String {
-    shipped(transported).document.identity().to_string()
+fn callable_link(transported: &serde_json::Value) -> String {
+    format!("link:v1:{}", shipped(transported).callable.link)
 }
 
 /// The component that contributes `tools.launch` to a workflow process.
@@ -469,7 +487,16 @@ async fn cut_core(
     let component = lash::plugins::StaticPluginFactory::new(
         lash::plugins::PluginDeclaration::initial(LAUNCH_TOOLS.component()),
         lash::plugins::PluginSpec::new()
-            .with_tool_provider(lash::tool_provider_key!("launch"), launch.clone()),
+            .with_tool_provider(lash::tool_provider_key!("launch"), launch.clone())
+            .with_package_provider(
+                lash::tool_provider_key!("launch"),
+                Arc::new(lash::package::ToolPackageProvider::new(
+                    LAUNCH_TOOLS.component(),
+                    lash::tool_provider_key!("launch"),
+                    [lash::package::Segment::new("tools").unwrap()].into(),
+                    launch.clone(),
+                )),
+            ),
     )
     .as_component(LAUNCH_TOOLS.format())
     .expect("the launch tool is a process component");
@@ -501,7 +528,7 @@ async fn empty_launch(core: &lash::LashCore) -> lash_execution_contracts::proces
         .host_artifacts()
         .publish_process_env(
             &lash::process::HostArtifactPin::mint(),
-            &linking(&environment(false), &[]),
+            &empty_environment(),
         )
         .await
         .expect("publish the empty environment");
@@ -523,16 +550,56 @@ fn inline_request(
     args.insert("n".to_owned(), serde_json::json!(n));
     lash_execution_contracts::process::ProcessStartRequest::inline(
         lash::process::LASH_VM_ENGINE_KIND,
-        transport(value),
-        lash::package::lash_packages()
-            .expect("the shipped library assembles")
-            .digest(),
+        lash::vm::KernelInlineRequest::Callable {
+            link: value.callable.link,
+            function: value.clone(),
+            origin: lash::package::CallableOrigin {
+                authored: [value.callable.link].into(),
+                publications: Default::default(),
+            },
+        }
+        .into_request(
+            Default::default(),
+            lash::package::PublicationContext {
+                domain: lash::package::PublicationDomain("inline-host".into()),
+                scope: lash::package::PublicationScope::Host,
+                publisher: lash::package::PublisherInstance("inline-laws".into()),
+                root: lash::package::Segment::new("inline").unwrap(),
+            },
+            lash::package::Attachment {
+                packages: Default::default(),
+                members: Default::default(),
+                deferred: Default::default(),
+            },
+        )
+        .unwrap(),
         args,
         launch.clone(),
         lash_execution_contracts::process::ProcessOriginator::host(),
         lash_execution_contracts::process::LifetimeDecision::Detached,
     )
     .with_host_start_key(key)
+}
+
+/// The structured package refusal survives the controller and host boundary.
+fn admission_refusal(
+    error: lash::EmbedError,
+) -> lash_execution_contracts::process::linking::AdmissionRefusal {
+    use lash_execution_contracts::PluginError;
+    let lash::EmbedError::Plugin(PluginError::RuntimeEffectController(error)) = error else {
+        panic!("an inline admission refusal")
+    };
+    let Some(lash_core::RuntimeErrorCause::PluginOperation { failure }) = error.cause else {
+        panic!("a typed plugin cause")
+    };
+    let PluginError::Package(error) = serde_json::from_value(failure.payload).unwrap() else {
+        panic!("a package cause")
+    };
+    let lash_execution_contracts::process::linking::EnginePortError::Refused(refusal) = *error
+    else {
+        panic!("an admission refusal")
+    };
+    refusal
 }
 
 async fn host_start(
@@ -585,46 +652,51 @@ async fn holds_its_closure(
     value: &FunctionValue,
 ) {
     settle_cleanup(core).await;
-    let reader = super::documents::retired_reader(Arc::clone(stores));
-    let WorkflowRead::Inspected(inspection) = reader
-        .processes()
-        .graph(process)
+    let documents =
+        lash::vm::KernelDocuments::new(stores.module_artifacts(), stores.package_store());
+    let content = documents
+        .load_linked(value.callable.link)
         .await
-        .expect("the reader reads the process")
-    else {
-        panic!("the process holds its document");
-    };
-    assert_eq!(inspection.document.document(), &value.document);
-    assert_eq!(
-        inspection
-            .document
-            .declarations()
-            .keys()
-            .collect::<Vec<_>>(),
-        value.document.manifest.functions.keys().collect::<Vec<_>>(),
-        "the process holds the declarations its document lists"
-    );
+        .expect("the child retains its Link");
+    let link = &content.links[&value.callable.link];
+    let document = &content.documents[&link.document];
+    let definition = &document.functions[&value.callable.function];
+    lash_kernel_doc::validate_callable_signature(
+        &value.signature,
+        &value.convention,
+        &definition.signature,
+    )
+    .expect("the retained code implements the callable signature");
+    let record = every_process(stores)
+        .await
+        .into_iter()
+        .find(|record| &record.id == process)
+        .unwrap();
     assert!(
         core.host_artifacts()
-            .get_definition(&inspection.definition.id)
+            .get_definition(record.identity.definition_id.as_ref().unwrap())
             .await
-            .expect("the descriptor reads")
+            .unwrap()
             .is_some(),
-        "the process holds its descriptor"
+        "the child holds its descriptor"
     );
-    reader.shutdown().await.expect("the reader stops");
 }
 
 /// START-ONCE on the host route: a start whose node died before the
-/// document's write, after it, or after the descriptor's is retried by its
+/// Link acquisition, after it, or after the descriptor's is retried by its
 /// host under the same key and realizes once.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_host_inline_start_realizes_once_across_a_crash_at_each_realization_write() {
-    let value = function(RUN);
-    let document = value.document.identity().to_string();
+    // The Link is deterministic, so every independent store tests the same cut.
+    let document = super::function_document(lash_kernel_doc::parse_definition(RUN).unwrap(), "run");
+    let link = lash::package::Link {
+        document: document.identity(),
+        fills: Default::default(),
+    };
+    let document = format!("link:v1:{}", link.identity());
     for (index, cut) in [
-        Cut::BeforeDocument(document.clone()),
-        Cut::AfterDocument(document.clone()),
+        Cut::BeforeLink(document.clone()),
+        Cut::AfterLink(document.clone()),
         Cut::AfterDescriptor,
     ]
     .into_iter()
@@ -633,6 +705,8 @@ async fn a_host_inline_start_realizes_once_across_a_crash_at_each_realization_wr
         let stores = sqlite().await;
         let cuts = Arc::new(Cuts::default());
         let (core, _) = cut_core(&stores, &cuts, &format!("host-cut-{index}")).await;
+        let pin = lash::process::HostArtifactPin::mint();
+        let value = function(&core, &pin, RUN).await;
         let launch = empty_launch(&core).await;
         let key = format!("host-inline-{index}");
         cuts.arm(cut.clone());
@@ -659,6 +733,7 @@ async fn a_host_inline_start_realizes_once_across_a_crash_at_each_realization_wr
             finished(&core, &process).await,
             serde_json::json!([3, "inline"])
         );
+        core.host_artifacts().release(pin).await.unwrap();
         holds_its_closure(&core, &stores, &process, &value).await;
         core.shutdown().await.expect("the node stops");
     }
@@ -672,10 +747,11 @@ async fn a_host_inline_start_realizes_once_across_a_crash_at_each_realization_wr
 #[tokio::test(flavor = "multi_thread")]
 async fn a_host_inline_start_cut_after_registration_is_answered_its_row_before_and_after_the_fence()
 {
-    let value = function(RUN);
     let stores = sqlite().await;
     let cuts = Arc::new(Cuts::default());
     let (core, registry) = cut_core(&stores, &cuts, "host-registered").await;
+    let pin = lash::process::HostArtifactPin::mint();
+    let value = function(&core, &pin, RUN).await;
     let launch = empty_launch(&core).await;
     let reached = Arc::new(tokio::sync::Notify::new());
     let notify = Arc::clone(&reached);
@@ -716,6 +792,7 @@ async fn a_host_inline_start_cut_after_registration_is_answered_its_row_before_a
         finished(&core, &process).await,
         serde_json::json!([3, "inline"])
     );
+    core.host_artifacts().release(pin).await.unwrap();
     holds_its_closure(&core, &stores, &process, &value).await;
     core.shutdown().await.expect("the node stops");
 }
@@ -726,11 +803,12 @@ async fn a_host_inline_start_cut_after_registration_is_answered_its_row_before_a
 /// refuses starts nothing and publishes nothing.
 #[tokio::test(flavor = "multi_thread")]
 async fn an_inline_start_retry_is_exact_and_a_conflicting_or_refused_one_starts_nothing() {
-    let value = function(RUN);
-    let other = function(OTHER);
     let stores = sqlite().await;
     let cuts = Arc::new(Cuts::default());
     let (core, _) = cut_core(&stores, &cuts, "host-conflict").await;
+    let pin = lash::process::HostArtifactPin::mint();
+    let value = function(&core, &pin, RUN).await;
+    let other = function(&core, &pin, OTHER).await;
     let launch = empty_launch(&core).await;
     let process = host_start(&core, inline_request(&value, 3, &launch, "exact"))
         .await
@@ -773,19 +851,17 @@ async fn an_inline_start_retry_is_exact_and_a_conflicting_or_refused_one_starts_
         );
     }
     assert!(
-        !cuts.published(&other.document.identity().to_string()),
+        !cuts.published(&format!("link:v1:{}", other.callable.link)),
         "a conflicting start publishes nothing"
     );
 
-    let mut unstartable = function(RUN);
-    unstartable.entry = Name::new("absent");
+    let mut unstartable = value.clone();
+    unstartable.signature.result = lash::workflow::document::Type::Any;
     let refused = host_start(&core, inline_request(&unstartable, 3, &launch, "refused"))
         .await
         .expect_err("a function with no such entry is refused");
-    assert_eq!(
-        refused.artifact_refusal(),
-        Some(lash::process::HostArtifactRefusal::DefinitionRefused),
-        "{refused:?}"
+    assert!(
+        matches!(admission_refusal(refused),lash_execution_contracts::process::linking::AdmissionRefusal::InvalidDocument {message} if message == "host callable signature must contain only data")
     );
     let ids: Vec<_> = every_process(&stores)
         .await
@@ -803,77 +879,50 @@ async fn an_inline_start_retry_is_exact_and_a_conflicting_or_refused_one_starts_
 /// `spawner(base, marker, cut)`: hands `tools.<launch>` a closure over
 /// `base`, which the tool starts inline; answers the tool's handle.
 fn spawner(launch: &str) -> lash::workflow::document::DocumentBytes {
-    let mut document = parse_document(&format!(
-        r#"kernel 1
-numbers float
-effect tools.{launch}(input: Any) -> Any contract "1"
-entry spawner(base: Any, marker: Any, cut: Any) -> Any
-
-fn spawner(base, marker, cut) {{
-  let add = fn(n) start(n: Any) -> Any bare direct {{
-    return [base, n]
-  }}
+    let tool = launch_definitions()
+        .into_iter()
+        .find(|tool| tool.manifest.tool() == format!("tools.{launch}"))
+        .unwrap();
+    let mut imports = Document::new(lash::workflow::document::NumberPolicy::Float, Vec::new());
+    let (slot, import) = operation_import(lash::package::ImportSlot(0), &tool);
+    imports.imports.insert(slot, import);
+    let header = lash_kernel_doc::print_document(&imports)
+        .lines()
+        .filter(|line| line.starts_with("import "))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let (definition, locals) = lash_kernel_doc::parse_definition_with_locals(&format!(
+        r#"function spawner(base: Json, marker: Text, cut: Text) -> Json
+kernel 1
+metering statements
+{header}
+body {{
+  let add = fn(n) presentation(n: Json) -> Json bare direct {{ return [base, n] }}
   let input = {{function: add, marker: marker, cut: cut}}
-  let handle = perform tools.{launch}(input) as Any
+  let handle = perform 0(input) as Any
   return handle
-}}
-
-main {{
-  finish null
-}}
-"#
+}}"#
     ))
-    .expect("the spawner parses");
-    let mut boundary = lash::vm::HostBoundary::new();
-    for tool in launch_definitions() {
-        boundary
-            .offer_operation(
-                tool.manifest.operation.clone(),
-                lash::vm::offered_tool(
-                    &tool.manifest,
-                    &tool.contract,
-                    lash::dialect::OfferedSource::Catalog {
-                        tool: tool.manifest.id.to_string(),
-                    },
-                ),
-            )
-            .expect("the launch contract");
-    }
-    let effect = lash::workflow::document::EffectName::new(format!("tools.{launch}"))
-        .expect("the launch effect");
-    document.manifest.effects.insert(
-        effect.clone(),
-        boundary
-            .effect(&effect)
-            .expect("the offered launch")
-            .1
-            .requirement
-            .clone(),
+    .unwrap();
+    let mut document = super::function_document(definition, "spawner");
+    document.functions.extend(
+        locals
+            .into_iter()
+            .map(|definition| (definition.identity(), definition)),
     );
-    lash::workflow::document::DocumentBytes::from(document)
+    document.into()
 }
-
-/// The environment a spawner of `tools.<launch>` runs under: that tool
-/// alone.
-fn launching(launch: &str) -> lash::process::ProcessEnv {
-    let mut builder = lash::process::ProcessEnv::builder(lash::MaxToolCalls::new(1024))
-        .component(LAUNCH_TOOLS, &());
-    for tool in launch_definitions()
-        .iter()
-        .filter(|tool| tool.manifest.tool() == format!("tools.{launch}"))
-    {
-        builder = builder.link_tool(
-            LAUNCH_TOOLS.tool_provider(lash::tool_provider_key!("launch")),
-            tool,
-        );
-    }
-    builder.build().expect("the environment builds")
+fn launching(_launch: &str) -> lash::process::ProcessEnv {
+    lash::process::ProcessEnv::builder(lash::MaxToolCalls::new(1024))
+        .component(LAUNCH_TOOLS, &())
+        .build()
+        .unwrap()
 }
 
 /// START-ONCE on the tool route: a process hands a capturing closure to a
 /// tool that declares its start inline. A crash after the crossing reached
 /// the tool and before it declared publishes nothing, and the call's retry
-/// starts the child; a node that died before or after the document's write
+/// starts the child; a node that died before or after the Link acquisition
 /// or after the descriptor's is recovered by a second node, which realizes
 /// the same start onto the one child. The child runs the closure as it
 /// crossed and holds its closure.
@@ -883,8 +932,8 @@ async fn a_declared_inline_start_realizes_once_across_a_crash_at_each_realizatio
     for cut in [
         "uncut",
         "before-declaring",
-        "before-document",
-        "after-document",
+        "before-link",
+        "after-link",
         "after-descriptor",
     ] {
         let stores = sqlite().await;
@@ -893,27 +942,17 @@ async fn a_declared_inline_start_realizes_once_across_a_crash_at_each_realizatio
         let artifacts = core.host_artifacts();
         let pin = lash::process::HostArtifactPin::mint();
         let environment = launching("launch");
-        let publication = published(
-            artifacts
-                .publish_workflow(
-                    &pin,
-                    &spawner,
-                    &Name::new("spawner"),
-                    &environment,
-                    artifacts
-                        .cell_packages()
-                        .await
-                        .expect("the package gate answers")
-                        .declare_all(),
-                    None,
-                )
-                .await
-                .expect("the spawner publishes"),
-        );
-        let env_ref = artifacts
-            .publish_process_env(&pin, &environment)
-            .await
-            .expect("publish the spawner's environment");
+        let publication = publish(
+            &core,
+            &pin,
+            &spawner,
+            &Name::new("spawner"),
+            &environment,
+            None,
+        )
+        .await
+        .expect("the spawner publishes");
+        let env_ref = publication.env_ref.clone();
         let marker = format!("tool-{cut}");
         let mut args = serde_json::Map::new();
         args.insert("base".to_owned(), serde_json::json!("b"));
@@ -921,10 +960,7 @@ async fn a_declared_inline_start_realizes_once_across_a_crash_at_each_realizatio
         args.insert("cut".to_owned(), serde_json::json!(cut));
         let parent = start_with(&core, &env_ref, &publication.definition, &marker, args).await;
         // A realization cut kills node A; node B recovers the call.
-        let core = if matches!(
-            cut,
-            "before-document" | "after-document" | "after-descriptor"
-        ) {
+        let core = if matches!(cut, "before-link" | "after-link" | "after-descriptor") {
             cuts.reached().await;
             tokio::time::timeout(std::time::Duration::from_secs(120), core.shutdown())
                 .await
@@ -973,29 +1009,22 @@ async fn a_declared_inline_start_realizes_once_across_a_crash_at_each_realizatio
         else {
             panic!("the child runs an engine input");
         };
-        let shipped_document = payload["document"]
-            .as_str()
-            .expect("the child names its document")
-            .to_owned();
-        assert!(
-            cuts.published(&shipped_document),
-            "the child runs the document realization published"
-        );
-        settle_cleanup(&core).await;
-        let reader = super::documents::retired_reader(Arc::clone(&stores));
-        let WorkflowRead::Inspected(inspection) = reader
-            .processes()
-            .graph(&child)
-            .await
-            .expect("the reader reads the child")
-        else {
-            panic!("{cut}: the child holds its document");
+        let code: lash::vm::KernelInlineRequest =
+            serde_json::from_value(payload["code"].clone()).unwrap();
+        let lash::vm::KernelInlineRequest::Callable { function, .. } = code else {
+            panic!("a callable start")
         };
         assert_eq!(
-            inspection.document.document().identity().to_string(),
-            shipped_document
+            function.captures.get(&Name::new("base")),
+            Some(&lash_kernel_doc::CaptureValue::Data(
+                lash::workflow::document::Datum::Text("b".into())
+            ))
         );
-        reader.shutdown().await.expect("the reader stops");
+        assert!(
+            cuts.published(&format!("link:v1:{}", function.callable.link)),
+            "realization acquired the defining Link"
+        );
+        holds_its_closure(&core, &stores, &child, &function).await;
         core.shutdown().await.expect("the node stops");
     }
 }
@@ -1014,34 +1043,24 @@ async fn an_uncommitted_declared_inline_start_leaves_no_process_and_holds_nothin
     let artifacts = core.host_artifacts();
     let pin = lash::process::HostArtifactPin::mint();
     let environment = launching("launch_once");
-    let publication = published(
-        artifacts
-            .publish_workflow(
-                &pin,
-                &spawner("launch_once"),
-                &Name::new("spawner"),
-                &environment,
-                artifacts
-                    .cell_packages()
-                    .await
-                    .expect("the package gate answers")
-                    .declare_all(),
-                None,
-            )
-            .await
-            .expect("the spawner publishes"),
-    );
-    let env_ref = artifacts
-        .publish_process_env(&pin, &environment)
-        .await
-        .expect("publish the spawner's environment");
+    let publication = publish(
+        &core,
+        &pin,
+        &spawner("launch_once"),
+        &Name::new("spawner"),
+        &environment,
+        None,
+    )
+    .await
+    .expect("the spawner publishes");
+    let env_ref = publication.env_ref.clone();
     let mut args = serde_json::Map::new();
     args.insert("base".to_owned(), serde_json::json!("b"));
     args.insert("marker".to_owned(), serde_json::json!("tool-once"));
-    args.insert("cut".to_owned(), serde_json::json!("after-document"));
+    args.insert("cut".to_owned(), serde_json::json!("after-link"));
     let parent = start_with(&core, &env_ref, &publication.definition, "tool-once", args).await;
     cuts.reached().await;
-    let Cut::AfterDocument(document) = cuts.fired().remove(0) else {
+    let Cut::AfterLink(document) = cuts.fired().remove(0) else {
         panic!("the document cut fired");
     };
     tokio::time::timeout(std::time::Duration::from_secs(120), core.shutdown())
@@ -1093,14 +1112,15 @@ async fn an_uncommitted_declared_inline_start_leaves_no_process_and_holds_nothin
         .await
         .expect("the staging's cleanup is due");
     settle_cleanup(&core).await;
+    let connection = rusqlite::Connection::open_with_flags(
+        stores.database_uri(),
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE | rusqlite::OpenFlags::SQLITE_OPEN_URI,
+    )
+    .unwrap();
+    let held:i64=connection.query_row("SELECT COUNT(*) FROM artifact_referrer_edges WHERE namespace = 'kernel_document' AND referrer_kind = 'start'",[],|row|row.get(0)).unwrap();
     assert_eq!(
-        stores
-            .module_artifacts()
-            .get_module_artifact(&document)
-            .await
-            .expect("the module store reads"),
-        None,
-        "nothing holds the uncommitted start's document"
+        held, 0,
+        "the uncommitted child retains no staging edges after cleanup: {document}"
     );
     core.shutdown().await.expect("the node stops");
 }
@@ -1120,60 +1140,49 @@ async fn an_inline_start_past_the_value_or_batch_bound_publishes_and_starts_noth
     let launch = empty_launch(&core).await;
     let ceiling = lash::workflow::document::FunctionValueLimits::CEILING;
 
-    let large = function(&RUN.replace(
-        "\"inline\"",
-        &format!("\"{}\"", "x".repeat(usize::try_from(ceiling).unwrap())),
-    ));
+    let function_pin = lash::process::HostArtifactPin::mint();
+    let mut large = function(&core, &function_pin, RUN).await;
+    large.captures.insert(
+        Name::new("base"),
+        lash_kernel_doc::CaptureValue::Data(lash::workflow::document::Datum::Text(
+            "x".repeat(usize::try_from(ceiling).unwrap()),
+        )),
+    );
     assert!(large.counted_bytes().unwrap() > ceiling);
     let refused = host_start(&core, inline_request(&large, 3, &launch, "too-large"))
         .await
         .expect_err("a function past the bound is refused");
-    assert_eq!(
-        refused.artifact_refusal(),
-        Some(lash::process::HostArtifactRefusal::DefinitionRefused),
-        "{refused:?}"
-    );
     assert!(
-        format!("{refused:?}").contains("above the bound"),
-        "{refused:?}"
+        matches!(admission_refusal(refused),lash_execution_contracts::process::linking::AdmissionRefusal::CallableTooLarge {bytes,limit} if bytes > limit && limit == ceiling)
     );
-    assert!(!cuts.published(&large.document.identity().to_string()));
+    assert!(!cuts.published(&format!("link:v1:{}", large.callable.link)));
     assert!(every_process(&stores).await.is_empty(), "nothing started");
 
     let artifacts = core.host_artifacts();
     let pin = lash::process::HostArtifactPin::mint();
     let environment = launching("launch");
-    let publication = published(
-        artifacts
-            .publish_workflow(
-                &pin,
-                &spawner("launch"),
-                &Name::new("spawner"),
-                &environment,
-                artifacts
-                    .cell_packages()
-                    .await
-                    .expect("the package gate answers")
-                    .declare_all(),
-                None,
-            )
-            .await
-            .expect("the spawner publishes"),
-    );
-    let env_ref = artifacts
-        .publish_process_env(&pin, &environment)
-        .await
-        .expect("publish the spawner's environment");
+    let publication = publish(
+        &core,
+        &pin,
+        &spawner("launch"),
+        &Name::new("spawner"),
+        &environment,
+        None,
+    )
+    .await
+    .expect("the spawner publishes");
+    let env_ref = publication.env_ref.clone();
     let mut args = serde_json::Map::new();
     // Keep this value below its own bound while its start declaration
     // exceeds the batch bound. The new caption sidecar consumes part of
     // the fixture's original margin, even when it has no entries.
     let captions_bytes =
-        serde_json::to_vec(&function(RUN).captions).unwrap().len() + "\"captions\":".len() + 1; // the member separator
+        serde_json::to_vec(&large.captions).unwrap().len() + "\"captions\":".len() + 1; // the member separator
     let base = "y".repeat(usize::try_from(ceiling).unwrap() - 700 - captions_bytes);
     args.insert("base".to_owned(), serde_json::json!(base));
     args.insert("marker".to_owned(), serde_json::json!("batch"));
     args.insert("cut".to_owned(), serde_json::json!("uncut"));
+    let published = cuts.published.lock().unwrap().len();
     let parent = start_with(&core, &env_ref, &publication.definition, "batch", args).await;
     let output = tokio::time::timeout(
         std::time::Duration::from_secs(120),
@@ -1218,8 +1227,8 @@ async fn an_inline_start_past_the_value_or_batch_bound_publishes_and_starts_noth
     assert_eq!(ids, vec![parent], "the refused start started nothing");
     assert_eq!(
         cuts.published.lock().unwrap().len(),
-        2,
-        "only the spawner's document and descriptor were published: {:?}",
+        published,
+        "the refused batch publishes no child descriptor or acquisition: {:?}",
         cuts.published.lock().unwrap()
     );
     core.shutdown().await.expect("the node stops");

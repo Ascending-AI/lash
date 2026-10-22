@@ -230,8 +230,21 @@ pub fn body_census(
     // depth.
     let mut path: Vec<u32> = Vec::new();
     let mut unit = Unit::Library(definition.identity());
-    let mut pending = vec![(doc::Node::Block(&body.block), 0usize, 0u32, unit.clone())];
-    while let Some((node, depth, index, owner)) = pending.pop() {
+    let charged = matches!(
+        definition.implementation,
+        doc::Implementation::Guest {
+            metering: doc::Metering::Statements,
+            ..
+        }
+    );
+    let mut pending = vec![(
+        doc::Node::Block(&body.block),
+        0usize,
+        0u32,
+        unit.clone(),
+        charged,
+    )];
+    while let Some((node, depth, index, owner, charged)) = pending.pop() {
         unit = owner;
         if depth == 0 {
             path.clear();
@@ -269,17 +282,27 @@ pub fn body_census(
                         0,
                         0,
                         Unit::Library(closure.function),
+                        true,
                     ));
                 }
             }
             _ => {}
         }
         let counted = match node {
-            doc::Node::Action(doc::Action::Perform { .. } | doc::Action::Spawn { .. }) => true,
-            doc::Node::Expr(doc::Expr::Act(act)) => matches!(
-                act.kind,
-                doc::ActKind::Perform { .. } | doc::ActKind::Spawn(_)
-            ),
+            doc::Node::Action(action) => {
+                charged
+                    || matches!(
+                        action,
+                        doc::Action::Perform { .. } | doc::Action::Spawn { .. }
+                    )
+            }
+            doc::Node::Expr(doc::Expr::Act(act)) => {
+                charged
+                    || matches!(
+                        act.kind,
+                        doc::ActKind::Perform { .. } | doc::ActKind::Spawn(_)
+                    )
+            }
             _ => false,
         };
         if counted {
@@ -288,7 +311,7 @@ pub fn body_census(
                 .push(Site::new(unit.clone(), path.clone()));
         }
         for (index, child) in node.children().into_iter().enumerate() {
-            pending.push((child, depth + 1, index as u32, unit.clone()));
+            pending.push((child, depth + 1, index as u32, unit.clone(), charged));
         }
     }
     Some(census)

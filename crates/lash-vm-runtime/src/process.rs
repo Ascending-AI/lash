@@ -87,9 +87,7 @@ impl InlineRequest {
         }
     }
     pub fn artifacts(&self) -> Vec<lash_core::ArtifactName> {
-        use lash_kernel_doc::Datum;
         let mut links = std::collections::BTreeSet::new();
-        let mut pending = Vec::new();
         match self {
             Self::Linked { start } => {
                 links.insert(start.link);
@@ -101,32 +99,9 @@ impl InlineRequest {
             } => {
                 links.extend(&origin.authored);
                 links.insert(*link);
-                links.insert(function.callable.link);
-                pending.extend(function.captures.values());
+                links.extend(function.nodes().iter().map(|node| node.callable.link));
             }
             Self::Unlinked { .. } => {}
-        }
-        while let Some(value) = pending.pop() {
-            match value {
-                Datum::Function(callable) => {
-                    links.insert(callable.link);
-                }
-                Datum::FunctionValue(function) => {
-                    links.insert(function.callable.link);
-                    pending.extend(function.captures.values());
-                }
-                Datum::Tuple(values) | Datum::List(values) | Datum::Set(values) => {
-                    pending.extend(values)
-                }
-                Datum::Map(values) => {
-                    for (key, value) in values {
-                        pending.extend([key, value]);
-                    }
-                }
-                Datum::Record(values) => pending.extend(values.iter().map(|(_, v)| v)),
-                Datum::Error(error) => pending.push(&error.data),
-                _ => {}
-            }
         }
         let mut artifacts: Vec<_> = links.into_iter().map(documents::link_artifact).collect();
         if let Self::Callable { origin, .. } = self {
@@ -642,7 +617,7 @@ impl KernelProcessEngine {
             natives: self
                 .functions
                 .iter()
-                .filter(|(_, f)| f.native().is_some())
+                .filter(|(_, f)| f.definition().has_native())
                 .map(|(id, _)| *id)
                 .collect(),
             kernels: [self.writes.number()].into(),
@@ -690,7 +665,10 @@ impl lash_execution_contracts::process::ProcessEngine for KernelProcessEngine {
                 message: error.to_string(),
             })
         })?;
-        Ok(self.load_execution(&definition.code).await?.inspection)
+        Ok(self
+            .load_execution(&definition.code, &Default::default())
+            .await?
+            .inspection)
     }
     async fn inspect_link(
         &self,

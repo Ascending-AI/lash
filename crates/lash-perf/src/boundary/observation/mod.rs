@@ -350,7 +350,7 @@ pub(super) async fn publish(core: &lash::LashCore, source: &str) -> Result<Publi
     let pin = HostArtifactPin::mint();
     let artifacts = core.host_artifacts();
     let context = PublicationContext {
-        domain: PublicationDomain(core.backend().binding_identity().into()),
+        domain: PublicationDomain(core.backend().binding_identity().to_string()),
         scope: PublicationScope::Host,
         publisher: PublisherInstance("observation-workload".into()),
         root: Segment::new("workload")?,

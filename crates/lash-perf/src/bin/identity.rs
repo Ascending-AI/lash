@@ -172,12 +172,32 @@ fn lower(
     )]);
     let bindings: BTreeSet<Name> = bindings.iter().map(|name| Name::new(*name)).collect();
     let functions = BTreeMap::new();
-    let environment_namespaces = lash_kernel_dialect::Namespaces::of_effects(
-        &effects,
-        &lash_vocabulary::operations::ContractId::new("1"),
-        &controls,
-    )
-    .ok()?;
+    let mut packages: BTreeMap<_, BTreeMap<_, _>> = BTreeMap::new();
+    for (name, signature) in &effects {
+        let operation = lash_vocabulary::operation_text::parse(name.as_str()).ok()?;
+        let mut allowed = lash_vocabulary::TurnControls::none();
+        if controls
+            .get(name)
+            .is_some_and(|flags| flags.contains(&lash_kernel_dialect::EffectControl::Finish))
+        {
+            allowed = allowed.with_finish(lash_vocabulary::JsonSchema::any());
+        }
+        packages.entry(operation.package).or_default().insert(
+            operation.name,
+            lash_kernel_dialect::NamespaceMember {
+                visibility: lash_vocabulary::Visibility::Public,
+                kind: lash_kernel_dialect::NamespaceKind::Operation(
+                    lash_kernel_dialect::OperationSignature {
+                        signature: signature.clone(),
+                        controls: allowed,
+                        mode: lash_vocabulary::OperationMode::Waited,
+                    },
+                ),
+            },
+        );
+    }
+    let environment_namespaces =
+        lash_kernel_dialect::Namespaces::new(packages, Default::default(), &|_| false).ok()?;
     let environment =
         lash_kernel_dialect::Environment::new(embedding.library(), &environment_namespaces);
     let cell = lash_kernel_dialect::CellEnvironment {

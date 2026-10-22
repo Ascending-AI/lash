@@ -5,7 +5,7 @@
 
 use lash::RetainedRevision;
 use lash::Retention;
-use lash_vocabulary::identity::SessionId;
+use lash::SessionId;
 use lash::SessionListFilter;
 use lash::SessionView;
 use lash::Target;

@@ -204,18 +204,42 @@ impl lash_core_execution::runtime::process::steps::ProcessStepContext for Runtim
             .process_engines
             .inspect_code(kind, payload)
             .await?;
-        let Some(OperationNeed::Deferred { name, .. }) = inspection.operations.get(&use_) else {
+        let mut need = inspection.operations.get(&use_).cloned();
+        if need.is_none() {
+            let runtime = self
+                .current
+                .host
+                .core
+                .process_engines
+                .require(kind)
+                .map_err(|error| ResolutionError::Corrupt(error.to_string()))?;
+            for callable in &environment.retained_code {
+                let retained = runtime
+                    .inspect_link(
+                        callable.link,
+                        &lash_execution_contracts::process::linking::ReachSelector::Callable {
+                            function: callable.function,
+                        },
+                    )
+                    .await?;
+                if let Some(found) = retained.operations.get(&use_) {
+                    need = Some(found.clone());
+                    break;
+                }
+            }
+        }
+        let Some(OperationNeed::Deferred {
+            name,
+            grant: retained,
+        }) = need
+        else {
             return Err(EnginePortError::Refused(AdmissionRefusal::MissingRoute { use_ }).into());
         };
+        if retained.as_ref() != grant {
+            return Err(EnginePortError::Refused(AdmissionRefusal::MissingRoute { use_ }).into());
+        }
         let composition = &engine.composition.composition;
-        let provider = composition
-            .deferred_package_provider(&grant.provider)
-            .ok_or_else(|| {
-                EnginePortError::Refused(AdmissionRefusal::ProviderNotHostable {
-                    provider: grant.provider.clone(),
-                    registry: environment.registry,
-                })
-            })?;
+        let provider = composition.deferred_package_provider(&grant.provider);
         let handle = lash_vocabulary::providers::ToolProviderHandle::from_name(
             environment.registry,
             &grant.provider,
@@ -238,7 +262,7 @@ impl lash_core_execution::runtime::process::steps::ProcessStepContext for Runtim
             execution: lash_core_store::resolutions::ExecutionId::process(&process.id),
             environment,
             capabilities: cx.capabilities(),
-            provider: provider.as_ref(),
+            provider: provider.map(|provider| provider.as_ref()),
             context: crate::DeferredResolveContext::new(
                 &handle,
                 &owner,

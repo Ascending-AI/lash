@@ -1085,6 +1085,14 @@ fn published_overlay_schema_accepts_a_folded_overlay_and_enforces_its_row() {
 fn step_body_started() -> lash_trace::StepBodyStarted {
     lash_trace::StepBodyStarted {
         process_id: lash_vocabulary::identity::ProcessId::fixture("p1"),
+        origin: (lash_protocol_types::effect_identity_fixture("then", 2))
+            .position()
+            .site()
+            .clone(),
+        origin: (lash_protocol_types::effect_identity_fixture("then", 2))
+            .position()
+            .site()
+            .clone(),
         at: lash_protocol_types::effect_identity_fixture("then", 2),
         call_id: lash_protocol_types::ToolCallId::fixture("call-2"),
         attempt: 1,

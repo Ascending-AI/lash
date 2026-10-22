@@ -15,7 +15,9 @@
 //! - [`family`] (S8): frozen values, lazy identity families and cell carry.
 
 pub(crate) mod checkpoint;
+mod code;
 pub use checkpoint::{Checkpoint, CheckpointHeader, inspect_checkpoint};
+pub use code::{RetainedCode, checkpoint_code};
 pub mod census;
 pub(crate) mod census_impl;
 pub mod family;

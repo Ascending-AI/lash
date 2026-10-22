@@ -293,6 +293,7 @@ mod tests {
             .id;
         let wait = lash_execution_contracts::process::WaitState {
             kind: lash_execution_contracts::process::WaitKind::Call {
+                resume_at_ms: None,
                 call_id: crate::ToolCallId::fixture("observation-law"),
                 tool_id: lash_vocabulary::tool_contract::ToolId::from("observation_law"),
             },

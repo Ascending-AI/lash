@@ -552,6 +552,7 @@ async fn process_feed_across_two_publication_windows() -> Result<(Vec<Shown>, us
     let wait = lash_execution_contracts::process::WaitState {
         since_ms: 0,
         kind: lash_execution_contracts::process::WaitKind::Call {
+            resume_at_ms: None,
             call_id: lash_core::ToolCallId::fixture("two-windows-call"),
             tool_id: lash_vocabulary::tool_contract::ToolId::from("two-windows-fixture"),
         },

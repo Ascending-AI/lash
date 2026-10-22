@@ -528,20 +528,22 @@ fn signature_view(dialect: &CaptionDialect<'_>) -> Result<(), crate::HarnessErro
             let lash_kernel_doc::Export::Function(entry) = export else {
                 continue;
             };
-            let link = lash_vocabulary::package::Link {
-                document: document.identity(),
-                fills: Default::default(),
+            let (content, link) = crate::linked::content(document);
+            let reference = lash_vocabulary::LinkedStart {
+                link,
+                selector: lash_vocabulary::StartSelector::Main,
             };
-            let holder = lash_kernel_check::WorkflowDocument::entered(
-                document.clone(),
-                lash_vocabulary::LinkedStart {
-                    link: link.identity(),
-                    selector: lash_vocabulary::StartSelector::Export(name.clone()),
-                },
+            let context =
+                lash_kernel_view::ViewContext::new(reference.clone(), content, Default::default())
+                    .map_err(|error| fail(&case.name, error.to_string()))?;
+            let holder = lash_kernel_check::WorkflowDocument::entered(document.clone(), reference)
+                .map_err(|error| fail(&case.name, error.to_string()))?;
+            let view = lash_kernel_view::derive_callable(
+                &holder,
+                &Unit::Library(entry.function),
+                &context,
             )
             .map_err(|error| fail(&case.name, error.to_string()))?;
-            let view = lash_kernel_view::derive(&holder)
-                .map_err(|error| fail(&case.name, error.to_string()))?;
             let joined = view
                 .captions(&holder, &lowered.captions)
                 .map_err(|error| fail(&case.name, error.to_string()))?;

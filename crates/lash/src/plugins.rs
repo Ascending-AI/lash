@@ -67,6 +67,7 @@ pub use lash_protocol_types::ToolContractResolver;
 pub use lash_sansio::CheckpointResumeAction;
 pub use lash_sansio::DriverAction;
 pub use lash_sansio::DriverContextView;
+pub use lash_sansio::EffectId as DriverEffectId;
 pub use lash_sansio::ExpandedRow;
 pub use lash_sansio::ExpandedWrapper;
 pub use lash_sansio::ModelToolCalls;
@@ -86,7 +87,6 @@ pub use lash_sansio::{
     TurnDriverConfig as GenericTurnDriverConfig, TurnDriverPreamble as GenericTurnDriverPreamble,
 };
 pub use lash_vocabulary::ToolCatalogBuildError;
-pub use lash_vocabulary::sites::EffectId as DriverEffectId;
 
 /// A session's recorded plugin configuration and the owner contract that
 /// creates and changes it (FIG-4379): each installed plugin registers the
@@ -443,3 +443,10 @@ pub use lash_sansio::ProtocolDriverHandle;
 /// node's installed registrations serve (S7).
 pub use lash_vocabulary::claims::ObligationToken;
 pub use lash_vocabulary::claims::RegistryKind;
+
+// Types named by the plugin extension contracts.
+pub use lash_core::facade_support::{ResolutionError, ResolutionValidator};
+pub use lash_core::{EndedCell, LinkedExecution};
+pub use lash_execution_contracts::process::{
+    InlineRequest, MigrationError, SuccessionContext, UseCorrespondence,
+};

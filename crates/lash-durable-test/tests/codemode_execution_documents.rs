@@ -21,9 +21,7 @@ use std::sync::{Arc, Mutex};
 
 use lash::tracing::{TraceLanguageExecution, TraceLanguageExecutionPayload};
 
-use lash::workflow::{
-    WorkflowDocument, WorkflowDocumentEntry, WorkflowDocumentRead, WorkflowDocumentRef,
-};
+use lash::workflow::{WorkflowDocument, WorkflowDocumentRead};
 use lash_core::facade_support::{TraceRecord, TraceSink, TraceSinkError};
 use lash_protocol_types::sync::MutexExt as _;
 
@@ -101,12 +99,15 @@ fn language_events(records: &[TraceRecord]) -> Vec<&TraceLanguageExecution> {
 /// Each execution's start, with the document it names.
 fn execution_starts<'r>(
     events: &[&'r TraceLanguageExecution],
-) -> Vec<(&'r TraceLanguageExecution, &'r WorkflowDocumentRef)> {
+) -> Vec<(&'r TraceLanguageExecution, &'r lash::package::LinkedStart)> {
     events
         .iter()
         .filter_map(|event| match &event.payload {
             TraceLanguageExecutionPayload::ExecutionStarted { .. } => {
-                Some((*event, &event.identity.document))
+                match &event.identity.document {
+                    lash::tracing::TraceExecutionCode::Start(start) => Some((*event, start)),
+                    lash::tracing::TraceExecutionCode::Callable(_) => None,
+                }
             }
             _ => None,
         })
@@ -145,10 +146,11 @@ fn finished(events: &[&TraceLanguageExecution], started: &TraceLanguageExecution
 struct ReadingFetch {
     sink: Arc<RecordingSink>,
     core: std::sync::OnceLock<std::sync::Weak<lash::LashCore>>,
-    read: Mutex<Vec<(WorkflowDocumentRef, Option<WorkflowDocument>)>>,
+    read: Mutex<Vec<(lash::package::LinkedStart, Option<WorkflowDocument>)>>,
     /// The same reference read from the store alone, with no engine and no
     /// registry: what a fresh reader of the retained document holds.
     retained: Mutex<Vec<Option<WorkflowDocument>>>,
+    contexts: Mutex<Vec<lash::workflow::view::ViewContext>>,
 }
 
 #[async_trait::async_trait]
@@ -193,18 +195,33 @@ impl lash_core::ToolProvider for ReadingFetch {
             .await
             .expect("the document read answers")
         {
-            WorkflowDocumentRead::Read(read) => Some(read.document),
+            WorkflowDocumentRead::Read(read) => Some(*read),
             _ => None,
         };
-        let retained =
-            match lash_vm_runtime::KernelDocuments::new(core.backend().module_artifacts())
-                .workflow(&reference)
-                .await
-                .expect("the store answers")
-            {
-                lash_vm_runtime::StoredWorkflow::Read(read) => Some(read.document),
-                lash_vm_runtime::StoredWorkflow::Unretained(_) => None,
-            };
+        let retained = match lash_vm_runtime::KernelDocuments::new(
+            core.backend().module_artifacts(),
+            core.backend().package_store(),
+        )
+        .execution_document(&reference)
+        .await
+        {
+            Ok(document) => Some(document),
+            Err(lash_execution_contracts::process::linking::EnginePortError::Missing {
+                ..
+            }) => None,
+            Err(error) => panic!("the stored cell reads: {error:?}"),
+        };
+        let execution = call
+            .context
+            .execution_environment()
+            .expect("the admitted cell's environment");
+        let publications = &execution.publications;
+        let context = core
+            .host_artifacts()
+            .workflow_view_context(&reference, publications)
+            .await
+            .expect("retained display context");
+        self.contexts.lock_recover().push(context);
         self.retained.lock_recover().push(retained);
         self.read.lock_recover().push((reference, document));
         lash_core::ToolProvider::execute(&Fetch, call).await
@@ -257,7 +274,7 @@ await control.finish(fetched.url);
     let [(reference, document)] = read.as_slice() else {
         panic!("the cell's one fetch read its document: {read:?}");
     };
-    assert_eq!(reference.entry, WorkflowDocumentEntry::Main);
+    assert_eq!(reference.selector, lash::package::StartSelector::Main);
     let document = document
         .as_ref()
         .expect("a running cell's document is readable by the reference its start named");
@@ -366,30 +383,23 @@ await control.finish(fetched.url);
     let [Some(retained)] = retained.as_slice() else {
         panic!("the store alone reads the retained cell's document: {retained:?}");
     };
-    assert_eq!(retained.reference().entry, WorkflowDocumentEntry::Main);
+    assert_eq!(
+        retained.reference().selector,
+        lash::package::StartSelector::Main
+    );
     assert!(
         !retained.declarations().is_empty(),
         "the cell's helpers are retained beside it"
     );
     assert_eq!(
         retained.declarations().keys().collect::<Vec<_>>(),
-        retained
-            .document()
-            .manifest
-            .functions
-            .keys()
-            .collect::<Vec<_>>()
+        retained.document().functions.keys().collect::<Vec<_>>()
     );
+    let context = tools.contexts.lock_recover()[0].clone();
     assert_eq!(
-        lash::workflow::view::derive(retained, &test_packages()).expect("the retained cell draws"),
-        lash::workflow::view::derive(drawn, &test_packages()).expect("the engine's read draws"),
+        lash::workflow::view::derive(retained, &context).expect("the retained cell draws"),
+        lash::workflow::view::derive(drawn, &context).expect("the engine's read draws"),
     );
     world.shutdown().await;
     drop(core);
-}
-
-fn test_packages() -> lash::package::PackageView<'static> {
-    static HELD: std::sync::LazyLock<std::sync::Arc<lash::package::HeldPackages>> =
-        std::sync::LazyLock::new(|| lash::package::lash_packages().unwrap());
-    HELD.view()
 }

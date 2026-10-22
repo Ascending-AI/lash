@@ -7,45 +7,47 @@ use std::sync::Arc;
 use lash::workflow::document::{Document, Name};
 use lash::workflow::{WorkflowDocumentRead, WorkflowRead};
 
-use super::{core_over, environment, linking, published, start_with, timer_park_after};
+use super::*;
 
 /// A document whose entry calls `collection.map`, whose body reaches other
 /// library functions, then sleeps for an hour: a process of it stands
 /// waiting with every helper it reached listed in its manifest.
 fn holding() -> Document {
-    let functions = lash::package::lash_packages()
-        .map(|packages| std::sync::Arc::clone(packages.functions()))
-        .expect("the shipped library assembles");
-    let map = functions
+    let release = lash::vm::helper_release().unwrap();
+    let root = *release
+        .functions
         .iter()
-        .find(|(_, function)| function.definition().name.to_string() == "collection.map")
-        .map(|(identity, _)| *identity)
-        .expect("the shipped library has collection.map");
-    let mut document = lash::workflow::document::parse_document(&format!(
-        r#"kernel 1
-numbers float
-use collection.map = @{map}
-entry held() -> Any
-
-fn held() {{
-  let same = fn(x) {{ return x }}
-  let items = ["first", "second"]
-  let out = invoke collection.map(items, same)
-  do sleep 3600000
-  return out
-}}
-
-main {{
-  finish null
-}}
-"#
-    ))
-    .expect("the document parses");
-    document.manifest.functions =
-        lash::workflow::graph::requirements(&document, functions.as_ref()).functions;
-    assert!(
-        document.manifest.functions.len() > 1,
-        "collection.map's body reaches other helpers"
+        .find(|(_, function)| function.definition().name.as_str() == "collection.map")
+        .unwrap()
+        .0;
+    let mut pending = vec![root];
+    let mut seen = std::collections::BTreeSet::new();
+    let mut definitions = String::new();
+    while let Some(id) = pending.pop() {
+        if !seen.insert(id) {
+            continue;
+        }
+        let function = release.functions.get(&id).unwrap().definition();
+        if let Some(body) = function.body() {
+            pending.extend(body.functions.keys().copied());
+        }
+        if function.body().is_none() {
+            definitions.push_str(&format!("native @{id}\n"));
+        }
+        definitions.push_str(&format!(
+            "definition {}\n",
+            serde_json::to_string(&lash_kernel_doc::print_definition(function)).unwrap()
+        ));
+    }
+    assert!(seen.len() > 1, "collection.map reaches other helpers");
+    let mut document = lash_kernel_doc::parse_document(&format!(
+        "kernel 1\nnumbers float\nimport 0 operation typescript.sleep(milliseconds: Int) -> Null\n{definitions}main {{ let held = fn() {{ let same = fn(x) {{ return x }} let items = [\"first\",\"second\"] let out = invoke collection.map(items,same) do perform 0(3600000) as Null return out }} }}"
+    )).unwrap();
+    export_closure(
+        &mut document,
+        "held",
+        &[],
+        lash::workflow::document::Type::List(Box::new(lash::workflow::document::Type::Text)),
     );
     document
 }
@@ -64,8 +66,12 @@ pub(super) fn retired_reader(stores: Arc<lash_sqlite_store::SqliteStoreSet>) -> 
                 lash::vm::TYPESCRIPT_DIALECT,
                 bounds,
             )
-            .with_packages(Arc::new(
-                lash::package::HeldPackages::install([]).expect("retired package set"),
+            .with_library(Arc::new(
+                lash::vm::WorkerLibrary::new(
+                    &lash::workflow::document::FunctionRegistry::default(),
+                    [],
+                )
+                .unwrap(),
             )),
         ))
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
@@ -100,30 +106,17 @@ async fn a_running_process_draws_its_view_after_its_pin_and_helper_release_are_g
     let document = holding();
     let entry = Name::new("held");
     let pin = lash::process::HostArtifactPin::mint();
-    let publication = published(
-        artifacts
-            .publish_workflow(
-                &pin,
-                &lash::workflow::document::DocumentBytes::from(document.clone()),
-                &entry,
-                &environment,
-                artifacts
-                    .cell_packages()
-                    .await
-                    .expect("the package gate answers")
-                    .declare_all(),
-                None,
-            )
-            .await
-            .expect("the publication answers"),
-    );
-    let env_ref = artifacts
-        .publish_process_env(
-            &lash::process::HostArtifactPin::mint(),
-            &linking(&environment, &[]),
-        )
-        .await
-        .expect("publish the process environment");
+    let publication = publish(
+        &core,
+        &pin,
+        &lash::workflow::document::DocumentBytes::from(document.clone()),
+        &entry,
+        &environment,
+        None,
+    )
+    .await
+    .expect("the publication answers");
+    let env_ref = publication.env_ref.clone();
     let process = start_with(
         &core,
         &env_ref,
@@ -136,32 +129,23 @@ async fn a_running_process_draws_its_view_after_its_pin_and_helper_release_are_g
 
     // A document only P holds tells when P's cleanup has run: one cleanup
     // severs every edge of its referrer at once.
-    let marker = lash::workflow::document::parse_document(
-        "kernel 1\nnumbers float\nentry marker() -> Any\nfn marker() { return 1 }\nmain { finish null }\n",
+    let marker = lash::workflow::document::parse_document(&complete_answer("marker", 1))
+        .expect("the marker parses");
+    let marker = publish(
+        &core,
+        &pin,
+        &lash::workflow::document::DocumentBytes::from(marker.clone()),
+        &Name::new("marker"),
+        &environment,
+        None,
     )
-    .expect("the marker parses");
-    let marker = published(
-        artifacts
-            .publish_workflow(
-                &pin,
-                &lash::workflow::document::DocumentBytes::from(marker.clone()),
-                &Name::new("marker"),
-                &environment,
-                artifacts
-                    .cell_packages()
-                    .await
-                    .expect("the package gate answers")
-                    .declare_all(),
-                None,
-            )
-            .await
-            .expect("the marker publishes"),
-    );
+    .await
+    .expect("the marker publishes");
     artifacts.release(pin).await.expect("P is released");
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(120);
     while matches!(
         artifacts
-            .execution_document(&marker.reference)
+            .execution_document(&marker.start)
             .await
             .expect("the marker reads"),
         WorkflowDocumentRead::Read(_)
@@ -190,11 +174,19 @@ async fn a_running_process_draws_its_view_after_its_pin_and_helper_release_are_g
             .declarations()
             .keys()
             .collect::<Vec<_>>(),
-        document.manifest.functions.keys().collect::<Vec<_>>(),
+        document.functions.keys().collect::<Vec<_>>(),
         "the reader draws with the declarations the document was admitted against"
     );
-    let view = lash::workflow::view::derive(&inspection.document, &super::test_packages())
-        .expect("the view derives");
+    let context = reader
+        .host_artifacts()
+        .workflow_view_context(
+            inspection.document.reference(),
+            &publication.environment.execution().publications,
+        )
+        .await
+        .unwrap();
+    let view =
+        lash::workflow::view::derive(&inspection.document, &context).expect("the view derives");
     assert!(
         view.dataflow.actions.iter().any(|action| matches!(
             &action.callee,
@@ -205,299 +197,19 @@ async fn a_running_process_draws_its_view_after_its_pin_and_helper_release_are_g
     );
     let WorkflowDocumentRead::Read(read) = reader
         .host_artifacts()
-        .execution_document(&publication.reference)
+        .execution_document(&publication.start)
         .await
         .expect("the execution document reads")
     else {
         panic!("the execution document is retained by its process");
     };
-    assert_eq!(read.document.document(), &document);
-    assert_eq!(read.rewritten_from, None, "nothing rewrote the document");
+    assert_eq!(read.document(), &document);
 
     core.processes()
         .cancel(&process, core.effect_host())
         .await
         .expect("the cancel is requested");
     reader.shutdown().await.expect("the reader shuts down");
-    core.shutdown().await.expect("shutdown");
-}
-
-/// DOC-IMPORT (FIG-6379): an import is drawable before anything is
-/// published, from the library declarations a runtime ships as data; a
-/// declaration that is not the function its identity names is refused
-/// before anything is derived from it.
-#[cfg(feature = "typescript")]
-#[tokio::test]
-async fn an_unpublished_import_draws_from_shipped_declarations_and_refuses_a_corrupt_one() {
-    use lash::workflow::document::{
-        DocumentDeclarationRefusal, Formula, FunctionDeclarations, required_declarations,
-    };
-    use lash::workflow::{WorkflowDocument, WorkflowDocumentError, WorkflowImport};
-    let stores = Arc::new(
-        lash_sqlite_store::SqliteStoreSet::memory()
-            .await
-            .expect("open a SQLite memory store set"),
-    );
-    let core = core_over(stores, "doc-import").await;
-    let artifacts = core.host_artifacts();
-    let environment = environment(false);
-    let checked = artifacts
-        .workflow_environment(&environment)
-        .await
-        .expect("the environment reads")
-        .expect("the kernel engine reads workflow documents");
-    let WorkflowImport::Imported {
-        document: imported, ..
-    } = artifacts
-        .import_workflow(
-            lash::workflow::document::SourceLanguage::TypeScript,
-            "export async function digest(items: string[]) { const out = items.map((item) => item); return out; }",
-            &environment, artifacts.cell_packages().await.expect("the package gate answers").declare_all(),
-            None,
-        )
-        .await
-        .expect("the import answers")
-    else {
-        panic!("the source imports");
-    };
-    let document = imported.to_document().expect("explicit typed import read");
-    let imported = lash::workflow::WorkflowDocument::derive(
-        document.clone(),
-        lash::workflow::WorkflowDocumentEntry::Main,
-        checked.functions(),
-    )
-    .expect("import view");
-    assert!(
-        !document.manifest.functions.is_empty(),
-        "the import uses helpers"
-    );
-    // A viewer receives the runtime's declarations as data, with no engine.
-    let shipped: FunctionDeclarations = serde_json::from_str(
-        &serde_json::to_string(&checked.functions().export_declarations())
-            .expect("the declarations encode"),
-    )
-    .expect("the declarations decode");
-    let used =
-        required_declarations(&document, &shipped).expect("the import's helpers are shipped");
-    let held = WorkflowDocument::new(document.clone(), used.clone())
-        .expect("the import is held with its shipped declarations");
-    assert_eq!(held.declarations(), &used);
-    assert_eq!(
-        lash::workflow::view::derive(&held, &super::test_packages())
-            .expect("the held import draws"),
-        lash::workflow::view::derive(&imported, &super::test_packages()).expect("the import draws")
-    );
-
-    let mut corrupt = used;
-    let (function, definition) = corrupt.iter_mut().next().expect("a used helper");
-    definition.charge = Formula::Constant(999_999);
-    let function = *function;
-    match WorkflowDocument::new(document.clone(), corrupt) {
-        Err(WorkflowDocumentError::Declarations(DocumentDeclarationRefusal::Identity {
-            function: refused,
-            ..
-        })) => assert_eq!(refused, function),
-        other => panic!("a corrupt declaration is refused before derivation: {other:?}"),
-    }
-    let mut short: FunctionDeclarations = held.declarations().clone();
-    short.remove(&function);
-    assert!(
-        matches!(
-            WorkflowDocument::new(document, short),
-            Err(WorkflowDocumentError::Declarations(
-                DocumentDeclarationRefusal::Missing { .. }
-            ))
-        ),
-        "a missing declaration is refused before derivation"
-    );
-    core.shutdown().await.expect("shutdown");
-}
-
-/// DOC-MAP (FIG-6379): one publication stores a host's source map beside
-/// the source it maps and answers the map's id; reading the id back
-/// answers the same pair, checked. A map of another source, another
-/// document or a site the document lacks is refused, and nothing of that
-/// publication is stored.
-#[cfg(feature = "typescript")]
-#[tokio::test]
-async fn a_publication_holds_its_checked_source_map_and_refuses_one_that_does_not_fit() {
-    use lash::workflow::document::{Site, SourceMapRefusal, SourceSite, Unit};
-    use lash::workflow::{
-        SourceMapRead, WorkflowDocumentEntry, WorkflowDocumentRef, WorkflowImport,
-        WorkflowUnavailable,
-    };
-    let stores = Arc::new(
-        lash_sqlite_store::SqliteStoreSet::memory()
-            .await
-            .expect("open a SQLite memory store set"),
-    );
-    let core = core_over(stores, "doc-map").await;
-    let artifacts = core.host_artifacts();
-    let environment = environment(false);
-    let import = |source: &'static str| {
-        let artifacts = artifacts.clone();
-        let environment = environment.clone();
-        async move {
-            let WorkflowImport::Imported { document, .. } = artifacts
-                .import_workflow(
-                    lash::workflow::document::SourceLanguage::TypeScript,
-                    source,
-                    &environment,
-                    artifacts
-                        .cell_packages()
-                        .await
-                        .expect("the package gate answers")
-                        .declare_all(),
-                    None,
-                )
-                .await
-                .expect("the import answers")
-            else {
-                panic!("the source imports: {source}");
-            };
-            document.to_document().expect("explicit typed import read")
-        }
-    };
-    let document =
-        import("export async function digest(items: string[]) { const out = items.map((item) => item); return out; }").await;
-    let other = import("export async function digest(items: string[]) { return items; }").await;
-    let entry = Name::new("digest");
-    let embedding = lash_vm_worker::built_embedding(&Default::default()).expect("embedding");
-    let printed = lash::typescript::print(
-        &document,
-        None,
-        embedding.library(),
-        lash::dialect::PrintOptions {
-            source_map: true,
-            ..Default::default()
-        },
-    )
-    .expect("the document prints");
-    let map = printed
-        .source_map
-        .clone()
-        .expect("the printer maps its source");
-
-    let pin = lash::process::HostArtifactPin::mint();
-    let refused = |publish| match publish {
-        lash::workflow::WorkflowPublish::SourceMapRefused(refusal) => refusal,
-        other => panic!("the map is refused: {other:?}"),
-    };
-    assert_eq!(
-        refused(
-            artifacts
-                .publish_workflow(
-                    &pin,
-                    &lash::workflow::document::DocumentBytes::from(document.clone()),
-                    &entry,
-                    &environment,
-                    artifacts
-                        .cell_packages()
-                        .await
-                        .expect("the package gate answers")
-                        .declare_all(),
-                    Some((&map, "other source"))
-                )
-                .await
-                .expect("the publication answers"),
-        ),
-        SourceMapRefusal::Digest
-    );
-    assert_eq!(
-        refused(
-            artifacts
-                .publish_workflow(
-                    &pin,
-                    &lash::workflow::document::DocumentBytes::from(other.clone()),
-                    &entry,
-                    &environment,
-                    artifacts
-                        .cell_packages()
-                        .await
-                        .expect("the package gate answers")
-                        .declare_all(),
-                    Some((&map, &printed.source))
-                )
-                .await
-                .expect("the publication answers"),
-        ),
-        SourceMapRefusal::Document
-    );
-    let mut stray = map.clone();
-    let missing = Site::new(Unit::Main, [999]);
-    stray.sites.push(SourceSite {
-        site: missing.clone(),
-        ranges: Vec::new(),
-        implicit: None,
-    });
-    assert_eq!(
-        refused(
-            artifacts
-                .publish_workflow(
-                    &pin,
-                    &lash::workflow::document::DocumentBytes::from(document.clone()),
-                    &entry,
-                    &environment,
-                    artifacts
-                        .cell_packages()
-                        .await
-                        .expect("the package gate answers")
-                        .declare_all(),
-                    Some((&stray, &printed.source))
-                )
-                .await
-                .expect("the publication answers"),
-        ),
-        SourceMapRefusal::Site { site: missing }
-    );
-    for refused_document in [&document, &other] {
-        let reference = WorkflowDocumentRef {
-            document: refused_document.identity(),
-            entry: WorkflowDocumentEntry::Main,
-        };
-        assert!(
-            matches!(
-                artifacts
-                    .execution_document(&reference)
-                    .await
-                    .expect("the read answers"),
-                lash::workflow::WorkflowDocumentRead::Unavailable(
-                    WorkflowUnavailable::Artifact { .. }
-                )
-            ),
-            "a refused publication stores nothing"
-        );
-    }
-
-    let publication = published(
-        artifacts
-            .publish_workflow(
-                &pin,
-                &lash::workflow::document::DocumentBytes::from(document.clone()),
-                &entry,
-                &environment,
-                artifacts
-                    .cell_packages()
-                    .await
-                    .expect("the package gate answers")
-                    .declare_all(),
-                Some((&map, &printed.source)),
-            )
-            .await
-            .expect("the publication answers"),
-    );
-    let id = publication
-        .source_map
-        .expect("the publication names its map");
-    assert_eq!(id, map.identity());
-    assert_eq!(
-        artifacts.read_source_map(&id).await.expect("the map reads"),
-        SourceMapRead::Read {
-            map: map.clone(),
-            source: printed.source.clone(),
-        }
-    );
-    artifacts.release(pin).await.expect("the pin is released");
     core.shutdown().await.expect("shutdown");
 }
 
@@ -509,9 +221,8 @@ async fn a_host_runs_opaque_document_bytes_without_json() {
     let artifacts = core.host_artifacts();
     let pin = lash::process::HostArtifactPin::mint();
     let env = environment(false);
-    let typed = lash::workflow::document::parse_document(
-        "kernel 1\nnumbers float\nentry answer() -> Any\nfn answer() { return 42 }\nmain { finish null }\n",
-    ).expect("typed document");
+    let typed = lash::workflow::document::parse_document(&complete_answer("answer", 42))
+        .expect("typed document");
     let bytes = DocumentBytes::from(typed);
     let received = DocumentBytes::from_parts(
         bytes.grammar_version(),
@@ -519,28 +230,11 @@ async fn a_host_runs_opaque_document_bytes_without_json() {
         bytes.as_bytes().to_vec(),
     );
     let _ = document_work::take();
-    let publication = published(
-        artifacts
-            .publish_workflow(
-                &pin,
-                &received,
-                &Name::new("answer"),
-                &env,
-                artifacts
-                    .cell_packages()
-                    .await
-                    .expect("the package gate answers")
-                    .declare_all(),
-                None,
-            )
-            .await
-            .expect("publish bytes"),
-    );
-    assert_eq!(publication.reference.document, bytes.id());
-    let env_ref = artifacts
-        .publish_process_env(&pin, &linking(&env, &[]))
+    let publication = publish(&core, &pin, &received, &Name::new("answer"), &env, None)
         .await
-        .expect("publish env");
+        .expect("publish bytes");
+    assert_eq!(publication.document, bytes.id());
+    let env_ref = publication.env_ref.clone();
     let process = start_with(
         &core,
         &env_ref,
@@ -565,31 +259,23 @@ async fn a_publication_acknowledges_admission_and_reads_its_pinned_document() {
     let core = super::core().await;
     let artifacts = core.host_artifacts();
     let pin = lash::process::HostArtifactPin::mint();
-    let document = lash::workflow::document::parse_document(
-        "kernel 1\nnumbers float\nentry answer() -> Any\nfn answer() { return 42 }\nmain { finish null }\n",
-    )
-    .expect("document");
-    let lash::workflow::WorkflowPublication {
+    let document =
+        lash::workflow::document::parse_document(&complete_answer("answer", 42)).expect("document");
+    let Publication {
         definition,
-        reference,
+        start: reference,
         source_map,
-    } = published(
-        artifacts
-            .publish_workflow(
-                &pin,
-                &lash::workflow::document::DocumentBytes::from(document.clone()),
-                &Name::new("answer"),
-                &environment(false),
-                artifacts
-                    .cell_packages()
-                    .await
-                    .expect("the package gate answers")
-                    .declare_all(),
-                None,
-            )
-            .await
-            .expect("publish"),
-    );
+        ..
+    } = publish(
+        &core,
+        &pin,
+        &lash::workflow::document::DocumentBytes::from(document.clone()),
+        &Name::new("answer"),
+        &environment(false),
+        None,
+    )
+    .await
+    .expect("publish");
     let WorkflowDocumentRead::Read(read) = artifacts
         .execution_document(&reference)
         .await
@@ -597,8 +283,8 @@ async fn a_publication_acknowledges_admission_and_reads_its_pinned_document() {
     else {
         panic!("the publication pin retains its document");
     };
-    assert_eq!(read.document.document(), &document);
-    assert_eq!(read.document.reference(), &reference);
+    assert_eq!(read.document(), &document);
+    assert_eq!(read.reference(), &reference);
     assert_eq!(
         artifacts
             .get_definition(&definition.id)
@@ -619,7 +305,6 @@ async fn a_publication_acknowledges_admission_and_reads_its_pinned_document() {
 #[tokio::test]
 async fn host_document_bytes_refuse_tampering_and_wrong_grammar_typed() {
     use lash::workflow::document::{DOCUMENT_GRAMMAR_VERSION, DocumentBytes, DocumentBytesRefusal};
-    use lash::workflow::{WorkflowAdmissionRefusal, WorkflowPublish};
     let core = super::core().await;
     let artifacts = core.host_artifacts();
     let pin = lash::process::HostArtifactPin::mint();
@@ -660,21 +345,10 @@ async fn host_document_bytes_refuse_tampering_and_wrong_grammar_typed() {
         ))
     ));
     for (bad, expected) in cases {
-        let WorkflowPublish::Refused(WorkflowAdmissionRefusal::Bytes(refusal)) = artifacts
-            .publish_workflow(
-                &pin,
-                &bad,
-                &Name::new("missing"),
-                &env,
-                artifacts
-                    .cell_packages()
-                    .await
-                    .expect("the package gate answers")
-                    .declare_all(),
-                None,
-            )
-            .await
-            .expect("typed answer")
+        let lash::EmbedError::WorkflowBytes(refusal) =
+            publish(&core, &pin, &bad, &Name::new("missing"), &env, None)
+                .await
+                .expect_err("typed refusal")
         else {
             panic!("bytes must be refused before entry admission")
         };
@@ -689,4 +363,12 @@ async fn host_document_bytes_refuse_tampering_and_wrong_grammar_typed() {
         }
     }
     core.shutdown().await.expect("shutdown");
+}
+
+fn complete_answer(name: &str, value: i64) -> String {
+    let definition = lash_kernel_doc::parse_definition(&format!(
+        "function {name}() -> Int\nkernel 1\nmetering statements\nbody {{return {value}}}"
+    ))
+    .unwrap();
+    lash_kernel_doc::print_document(&function_document(definition, name))
 }

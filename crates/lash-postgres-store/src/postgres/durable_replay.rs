@@ -402,7 +402,7 @@ pub(super) async fn apply_owner(
         })
     {
         let requires = packages::owner_requires(tx, write.actor(), write.requires()).await?;
-        crate::observed_sql::query(SQL.actor.stamp_requires.sql())
+        crate::observed_sql::query(SQL.actor.stamp_effective_requires.sql())
             .bind(actor)
             .bind(lash_durable::encode_requires(&requires))
             .execute(crate::observed_sql::executor(&mut ***tx))

@@ -69,6 +69,7 @@ fn replayed_waiting_non_tail_does_not_repair_terminal_projection() {
     );
     let wait = WaitState {
         kind: WaitKind::Call {
+            resume_at_ms: None,
             call_id: crate::ToolCallId::fixture("wait-call"),
             tool_id: lash_vocabulary::tool_contract::ToolId::from("wait-tool"),
         },

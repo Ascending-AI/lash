@@ -242,7 +242,7 @@ pub fn from_json<T: DeserializeOwned>(kind: PayloadKind, json: &[u8]) -> Result<
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Sites {
-    pub entered: Vec<EffectId>,
+    pub entered: Vec<lash_vocabulary::sites::EffectLocation>,
     pub ran: lash_kernel_vm::SiteCounts,
     /// The statement path since the previous frame, when the start asked
     /// for it: each task's consecutive starts, as document ordinals.

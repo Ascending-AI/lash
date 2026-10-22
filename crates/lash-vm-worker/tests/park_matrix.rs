@@ -1332,10 +1332,8 @@ mod postgres {
     }
 }
 
-fn operation_name(use_: lash_vocabulary::OperationUse) -> &'static str {
-    match use_.slot {
-        lash_vocabulary::ImportSlot(0) => "tools.work",
-        lash_vocabulary::ImportSlot(1) => "tools.sum",
-        _ => panic!("undeclared fixture operation {use_}"),
-    }
+fn operation_name(use_: lash_vocabulary::OperationUse) -> String {
+    program(NumberPolicy::BySpelling).document.imports[&use_.slot]
+        .name
+        .to_string()
 }

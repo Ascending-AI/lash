@@ -829,6 +829,7 @@ impl ProcessSteps for NoSteps {
         _runtime: &Arc<lash_core_execution::runtime::process::StepRuntime>,
         _process: &ProcessRecord,
         step: &StepRequest,
+        _target: Option<&lash_core_execution::runtime::process::steps::InvocationTarget>,
         _now_ms: u64,
     ) -> Result<StepAdmission, StepRefusal> {
         Err(StepRefusal::UnknownTool {
@@ -980,7 +981,7 @@ impl CellTurn {
                     .plugin(Arc::new(
                         lash::process_controls::SessionProcessAdminPluginFactory::new(
                             lash_execution_contracts::process::lifetime::session_or_starter,
-                            lash_core::runtime::env_policy::policy::from_run(|_| Ok(Vec::new())),
+                            lash::process::env::policy::from_run(|_| Ok(Vec::new())),
                         ),
                     ))
                     .build(lash::persistence::LeaseOwnerIdentity::opaque(
@@ -1415,6 +1416,18 @@ impl Scenario for CellTurn {
             Cell::CancelledBeforeSave => self.cancelled_before_save_laws(nodes).await,
             Cell::LongStretch => self.held_past_its_slice_laws(nodes).await,
         };
+        match self
+            .backend()
+            .stores()
+            .execution_resolutions()
+            .requirements(&actor())
+            .await
+        {
+            Ok(requirements) if requirements.is_empty() => {}
+            other => violations.push(format!(
+                "a terminal turn retains cell execution claim debt: {other:?}"
+            )),
+        }
         if self.ends_once {
             violations.extend(self.ends_once_laws(nodes).await);
         }

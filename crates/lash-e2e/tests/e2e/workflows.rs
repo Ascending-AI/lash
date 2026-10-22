@@ -17,8 +17,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use anyhow::{Context as _, Result, bail, ensure};
 use lash::workflow::authoring::{DataRecordEntry, DataValue, Operation, ValueTarget};
 use lash::workflow::document::{
-    Action, Atom, Document, EffectName, Expr, Literal, Name, Node, Rhs, Site, Stmt, Type, Unit,
-    parse_document,
+    Action, Atom, Document, Expr, Literal, Name, Node, Rhs, Site, Stmt, Type, Unit, parse_document,
 };
 use lash::workflow::edit::Position;
 use lash_e2e::{Case, Host, NodeOptions};
@@ -103,15 +102,19 @@ fn sites(document: &Document, wanted: impl Fn(Node<'_>) -> bool) -> Result<Vec<S
             walk(child, site.child(index), wanted, found);
         }
     }
-    let entry = Name::new(WORKFLOW);
+    let lash::workflow::document::Export::Function(export) =
+        &document.exports[&Name::new(WORKFLOW)]
+    else {
+        bail!("the workflow is a function Export")
+    };
     let function = document
         .functions
-        .get(&entry)
-        .context("the document declares the workflow")?;
+        .get(&export.function)
+        .context("the Document retains the workflow")?;
     let mut found = Vec::new();
     walk(
-        Node::Block(&function.body),
-        Site::new(Unit::Function(entry), Vec::new()),
+        Node::Block(&function.body().context("workflow body")?.block),
+        Site::new(Unit::Library(export.function), Vec::new()),
         &wanted,
         &mut found,
     );
@@ -130,9 +133,9 @@ fn is_text(node: Node<'_>, text: &str) -> bool {
     matches!(node, Node::Expr(Expr::Literal(Literal::Text(value))) if value == text)
 }
 
-fn performs(node: Node<'_>, effect: &str) -> bool {
-    matches!(node, Node::Action(Action::Perform { effect: performed, .. })
-        if performed.to_string() == effect)
+fn performs(document: &Document, node: Node<'_>, effect: &str) -> bool {
+    matches!(node, Node::Action(Action::Perform { slot, .. })
+        if document.imports.get(slot).is_some_and(|import| format!("{}.{}", import.name.package, import.name.member) == effect))
 }
 
 /// Whether `site` is `under` or a node beneath it.
@@ -187,21 +190,23 @@ fn shape(document: &Document, status: &str) -> Result<Shape> {
     let threshold = one(document, "threshold literal", |node| {
         matches!(node, Node::Expr(Expr::Literal(Literal::Int(_))))
     })?;
-    let review = one(document, "review", |node| performs(node, "review.request"))?;
+    let review = one(document, "review", |node| {
+        performs(document, node, "review.request")
+    })?;
     ensure!(
         within(&threshold, &inner_body) && within(&review, &inner_body),
         "the threshold and the review are in the inner loop"
     );
-    let records: Vec<Site> = sites(document, |node| performs(node, "ledger.record"))?
+    let records: Vec<Site> = sites(document, |node| performs(document, node, "ledger.record"))?
         .into_iter()
         .filter(|site| within(site, &inner_body))
         .collect();
     ensure!(!records.is_empty(), "the inner loop records");
-    let authored = sites(document, |node| performs(node, "ledger.record"))?
+    let authored = sites(document, |node| performs(document, node, "ledger.record"))?
         .into_iter()
         .find(|site| within(site, &try_body) && !within(site, &inner_body));
     ensure!(
-        sites(document, |node| performs(node, "ledger.record"))?
+        sites(document, |node| performs(document, node, "ledger.record"))?
             .iter()
             .any(|site| within(site, &catch_body)),
         "the catch body records"
@@ -228,8 +233,12 @@ fn shape(document: &Document, status: &str) -> Result<Shape> {
         records,
         authored,
         status,
-        start: one(document, "start", |node| performs(node, "processes.start"))?,
-        wait: one(document, "await", |node| performs(node, "processes.await"))?,
+        start: one(document, "start", |node| {
+            performs(document, node, "processes.start")
+        })?,
+        wait: one(document, "await", |node| {
+            performs(document, node, "processes.await")
+        })?,
     })
 }
 
@@ -559,32 +568,83 @@ case!(
     s38
 );
 
-/// The fixture as a document `host` admits: each `@{name}` is the identity
-/// the host's environment gives that library function, each effect carries
-/// the signature the host offers it under, and the manifest lists every
-/// function the host says the code reaches.
+/// Author complete definitions against this host's explicit namespace. Every
+/// operation's signature and every code import are retained in the Document;
+/// fulfilment later chooses immutable fills.
 async fn generated(host: &lash_e2e::Node, text: &str) -> Result<Document> {
+    use lash::dialect::NamespaceKind;
+    use lash::package::*;
+    use lash::workflow::document::{Export, FunctionExport, StartConvention};
     let environment = host.get("/workflow/environment").await?;
-    let mut text = text.to_owned();
-    for (name, id) in environment["functions"]
-        .as_object()
-        .context("the environment names its functions")?
-    {
-        text = text.replace(
-            &format!("@{{{name}}}"),
-            &format!("@{}", id.as_str().context("an identity")?),
+    let namespaces: lash::dialect::Namespaces =
+        serde_json::from_value(environment["namespaces"].clone())?;
+    let mut document = Document::new(lash::workflow::document::NumberPolicy::Float, Vec::new());
+    document.main = None;
+    for (slot, path, member) in [
+        (0, "review", "request"),
+        (1, "ledger", "record"),
+        (2, "processes", "start"),
+        (3, "processes", "await"),
+        (4, "num", "h_n2_gt"),
+        (5, "kernel", "h_n2_eq"),
+        (6, "text", "h_n6_concat"),
+        (7, "list", "h_n4_push"),
+    ] {
+        let package = PackagePath::parse(path)?;
+        let segment = Segment::new(member)?;
+        let offer = namespaces
+            .packages()
+            .get(&package)
+            .and_then(|members| members.get(&segment))
+            .with_context(|| format!("the host offers {path}.{member}"))?;
+        let kind = match &offer.kind {
+            NamespaceKind::Operation(operation) => ImportKind::Operation {
+                signature: operation.signature.clone(),
+            },
+            NamespaceKind::Function(function) => ImportKind::Code {
+                signature: function.signature.clone(),
+                convention: function.convention,
+            },
+            _ => bail!("the authored import is callable"),
+        };
+        document.imports.insert(
+            ImportSlot(slot),
+            Import {
+                name: QualifiedName {
+                    package,
+                    member: segment,
+                    type_member: None,
+                },
+                kind,
+            },
         );
     }
-    let mut document = parse_document(&text).context("the generated workflow parses")?;
-    for (effect, requirement) in &mut document.manifest.effects {
-        *requirement = serde_json::from_value(environment["effects"][effect.to_string()].clone())
-            .with_context(|| format!("the host offers `{effect}`"))?;
+    let imports = lash::workflow::document::print_document(&document)
+        .lines()
+        .skip(2)
+        .collect::<Vec<_>>()
+        .join("\n");
+    let audit = lash::workflow::document::parse_definition(&format!(
+        "function audit(summary: Json) -> Json\nkernel 1\nmetering statements\n{imports}\nbody {{ let note = {{entry: invoke import 6(\"audit:\", summary.status)}} do perform 1(note) as Text return summary }}"
+    ))?;
+    let source = text
+        .replace("@{imports}", &imports)
+        .replace("@{audit}", &format!("@{}", audit.identity()));
+    let workflow = lash::workflow::document::parse_definition(&source)
+        .context("the generated function parses")?;
+    for definition in [audit, workflow] {
+        document.exports.insert(
+            Name::new(definition.name.as_str()),
+            Export::Function(FunctionExport {
+                function: definition.identity(),
+                signature: definition.signature.clone(),
+                convention: StartConvention::Direct,
+                asynchronous: false,
+                rest: false,
+            }),
+        );
+        document.functions.insert(definition.identity(), definition);
     }
-    let required = host
-        .post("/workflow/requirements", &serde_json::to_value(&document)?)
-        .await?;
-    document.manifest.functions = serde_json::from_value(required["functions"].clone())
-        .context("the functions the document reaches")?;
     Ok(document)
 }
 
@@ -592,7 +652,7 @@ async fn s38(case: &mut Case) -> Result<()> {
     let repo = std::env::var("LASH_E2E_REPO").context("LASH_E2E_REPO is required")?;
     let text = std::fs::read_to_string(std::path::Path::new(&repo).join(FIXTURE))?;
     boot(case, "node-a").await?;
-    let entry = json!({"kind": "entry", "function": WORKFLOW});
+    let selector = serde_json::to_value(lash::package::StartSelector::Export(Name::new(WORKFLOW)))?;
 
     // (a) The generated workflow reaches the host as a kernel document. It
     // is written here, outside the host, against what the host offers.
@@ -607,7 +667,7 @@ async fn s38(case: &mut Case) -> Result<()> {
         .post("/workflow/draft/publish", &json!({"entry": WORKFLOW}))
         .await?;
     ensure!(
-        first["published"] == true && first["workflow"]["reference"]["entry"] == entry,
+        first["published"] == true && first["workflow"]["reference"]["selector"] == selector,
         "the generated workflow is admitted as a definition of its entry: {first}"
     );
     case.write("published-generated.json", &first)?;
@@ -634,14 +694,14 @@ async fn s38(case: &mut Case) -> Result<()> {
     // The audit process is an entry of the same document, and the start
     // names it by function reference.
     ensure!(
-        old_document.entries.contains_key(&Name::new(AUDIT))
-            && old_document.entries.contains_key(&Name::new(WORKFLOW)),
+        old_document.exports.contains_key(&Name::new(AUDIT))
+            && old_document.exports.contains_key(&Name::new(WORKFLOW)),
         "the document lists the workflow and its audit process as entries"
     );
     one(
         &old_document,
         "reference to the audit entry",
-        |node| matches!(node, Node::Expr(Expr::Literal(Literal::Function(name))) if name.as_str() == AUDIT),
+        |node| matches!(node, Node::Expr(Expr::Literal(Literal::Function(name))) if old_document.functions.get(name).is_some_and(|definition| definition.name.as_str() == AUDIT)),
     )?;
 
     // (f, first half) A run of the generated definition, parked inside the
@@ -663,10 +723,7 @@ async fn s38(case: &mut Case) -> Result<()> {
     let base_document = document(&opened["document"])?;
     let base = base_document.identity();
     let Node::Action(Action::Perform {
-        effect,
-        args,
-        result,
-        ..
+        slot, args, result, ..
     }) = base_document
         .node(&draft.records[0])
         .context("record action")?
@@ -681,10 +738,10 @@ async fn s38(case: &mut Case) -> Result<()> {
         })
         .collect();
     let edits = json!({"edits": [
-        Operation::InsertStep { base, at: Position::end(draft.try_body.clone()), effect: EffectName::new("ledger.record")?, args: vec![DataValue::Record(vec![DataRecordEntry { field: "entry".into(), value: DataValue::Literal(Literal::Text("signed-off".into())) }])], result: Type::Any, binding: Some(Name::new("signed")) },
+        Operation::InsertStep { base, at: Position::end(draft.try_body.clone()), slot: lash::package::ImportSlot(1), args: vec![DataValue::Record(vec![DataRecordEntry { field: "entry".into(), value: DataValue::Literal(Literal::Text("signed-off".into())) }])], result: Type::Any, binding: Some(Name::new("signed")) },
         Operation::SetValue { base, target: ValueTarget::Literal { expression: draft.status.clone() }, value: DataValue::Literal(Literal::Text("signed-off".into())) },
         Operation::SetValue { base, target: ValueTarget::Literal { expression: draft.threshold.clone() }, value: DataValue::Literal(Literal::Int(3.into())) },
-        Operation::InsertStep { base, at: Position::end(draft.inner_body.clone()), effect: effect.clone(), args: data_args, result: result.clone(), binding: None },
+        Operation::InsertStep { base, at: Position::end(draft.inner_body.clone()), slot: *slot, args: data_args, result: result.clone(), binding: None },
     ]});
     case.write("edits.json", &edits)?;
     let edited = host.post("/workflow/draft/edits", &edits).await?;
@@ -694,15 +751,14 @@ async fn s38(case: &mut Case) -> Result<()> {
         .await?;
     case.write("published-edited.json", &second)?;
     ensure!(
-        second["published"] == true && second["workflow"]["reference"]["entry"] == entry,
+        second["published"] == true && second["workflow"]["reference"]["selector"] == selector,
         "the edited workflow is admitted: {second}"
     );
     let new = second["definition"].clone();
     ensure!(
         new["id"] != old["id"]
-            && second["workflow"]["reference"]["document"].is_string()
-            && second["workflow"]["reference"]["document"]
-                != first["workflow"]["reference"]["document"],
+            && second["workflow"]["reference"]["link"].is_string()
+            && second["workflow"]["reference"]["link"] != first["workflow"]["reference"]["link"],
         "an edit publishes a new definition of a new document"
     );
     let new_document = document(&second["workflow"]["document"])?;

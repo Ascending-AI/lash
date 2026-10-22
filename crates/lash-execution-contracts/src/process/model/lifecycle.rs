@@ -32,7 +32,7 @@ pub struct WaitState {
     pub since_ms: i64,
     /// The node that blocked, and which occurrence of it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub site: Option<lash_vocabulary::sites::EffectId>,
+    pub site: Option<lash_vocabulary::sites::EffectLocation>,
 }
 
 /// Why a process wait has no workflow coordinate.
@@ -48,6 +48,7 @@ impl WaitState {
     pub fn execution_site(&self) -> Result<&lash_vocabulary::sites::EffectId, WaitSiteUnavailable> {
         self.site
             .as_ref()
+            .map(|site| &site.at)
             .ok_or(WaitSiteUnavailable::EngineDidNotNameSite)
     }
 }
@@ -59,6 +60,10 @@ pub enum WaitKind {
     Call {
         call_id: crate::ToolCallId,
         tool_id: lash_vocabulary::tool_contract::ToolId,
+        /// The absolute deadline of an ordinary timer resolving this call.
+        /// This is independent of its tool-completion timeout.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        resume_at_ms: Option<i64>,
     },
     /// A key the process's engine pinned and awaits, identified by the name
     /// the engine gave it, without its bearer key.
@@ -323,6 +328,7 @@ impl ProcessLifecycleState {
             ProcessStatus::Waiting => Self::Waiting {
                 waits: ProcessWaits::new(WaitState {
                     kind: WaitKind::Call {
+                        resume_at_ms: None,
                         call_id: crate::ToolCallId::fixture("fixture"),
                         tool_id: lash_vocabulary::tool_contract::ToolId::from("fixture"),
                     },

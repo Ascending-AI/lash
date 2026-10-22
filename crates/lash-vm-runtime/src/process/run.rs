@@ -174,9 +174,13 @@ impl RunHost for StepHost {
         self.trace.is_some()
     }
 
-    fn enter_site(&self, at: &lash_vocabulary::sites::EffectId) {
+    fn enter_site(&self, location: &lash_vocabulary::sites::EffectLocation) {
         if let Some(trace) = &self.trace {
-            trace.node(at, lash_trace::TraceNodeFact::Started { call_id: None });
+            trace.origin(&location.at, &location.origin);
+            trace.node(
+                &location.at,
+                lash_trace::TraceNodeFact::Started { call_id: None },
+            );
         }
     }
 
@@ -277,7 +281,7 @@ async fn kernel_run(
         }
     };
     let loaded_execution = engine
-        .load_execution(&process_input.code)
+        .load_execution(&process_input.code, &run.environment.retained_code)
         .await
         .map_err(|error| RunFault(error.to_string()))?;
     let content = loaded_execution.content;
@@ -353,8 +357,10 @@ async fn kernel_run(
     )
     .map_err(|error| RunFault(error.to_string()))?;
     let closure = loaded.closure;
-    let mut requirements = run.environment.requirements.clone();
-    requirements.machine.extend(&reach.machine);
+    let requirements = lash_vocabulary::claims::ClaimRequirements {
+        machine: reach.machine.clone(),
+        ..Default::default()
+    };
     let mut program = lash_kernel_vm::Program::prepare(
         root_link,
         content
@@ -369,7 +375,13 @@ async fn kernel_run(
     .map_err(|error| RunFault(error.to_string()))?;
     program.functions = closure.body().identities().collect();
     let counts = settings.observe == lash_kernel_vm::ObservationMode::Counts;
-    let start = counts.then(|| recorded_start(process_input.code.clone(), &input));
+    let start = counts.then(|| {
+        recorded_start(
+            process_input.code.clone(),
+            &input,
+            &run.environment.retained_code,
+        )
+    });
     // A recovered wait is reported by the occurrence it was delivered as.
     let delivered: Vec<(
         lash_vocabulary::sites::WaitId,
@@ -538,7 +550,11 @@ async fn kernel_run(
 
 /// Where `input` starts, as a segment records it for a replay: each part
 /// by reference to the retained record that holds it.
-fn recorded_start(code: super::InlineRequest, input: &KernelRunInput) -> RecordedStart {
+fn recorded_start(
+    code: super::InlineRequest,
+    input: &KernelRunInput,
+    retained: &std::collections::BTreeSet<lash_vocabulary::CallableId>,
+) -> RecordedStart {
     let from = match &input.parked {
         None => StartedFrom::Entry,
         Some(parked) => StartedFrom::Output {
@@ -564,6 +580,7 @@ fn recorded_start(code: super::InlineRequest, input: &KernelRunInput) -> Recorde
         })
         .collect();
     RecordedStart {
+        retained_code: retained.clone(),
         code,
         from,
         admissions,
@@ -900,6 +917,7 @@ fn issue(
             wait,
             admission,
             use_: request.use_,
+            origin: request.origin,
             input,
         },
         Err(message) => Issued::Refused {

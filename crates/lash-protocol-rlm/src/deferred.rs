@@ -29,14 +29,7 @@ pub(crate) async fn resolve_use(
         return Err(EnginePortError::Refused(AdmissionRefusal::MissingRoute { use_ }).into());
     };
     let composition = ctx.package_composition();
-    let provider = composition
-        .deferred_package_provider(&grant.provider)
-        .ok_or_else(|| {
-            EnginePortError::Refused(AdmissionRefusal::ProviderNotHostable {
-                provider: grant.provider.clone(),
-                registry: environment.registry,
-            })
-        })?;
+    let provider = composition.deferred_package_provider(&grant.provider);
     let handle = lash_vocabulary::providers::ToolProviderHandle::from_name(
         environment.registry,
         &grant.provider,
@@ -56,7 +49,7 @@ pub(crate) async fn resolve_use(
         execution: execution.clone(),
         environment,
         capabilities: cx.capabilities(),
-        provider: provider.as_ref(),
+        provider: provider.map(|provider| provider.as_ref()),
         context: lash_core::DeferredResolveContext::new(
             &handle,
             ctx.owner(),

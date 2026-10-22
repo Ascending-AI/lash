@@ -733,3 +733,43 @@ impl PagedHeap {
         })
     }
 }
+
+/// Visit code-bearing frozen values without materializing scalar payloads or a family.
+pub(super) fn frozen_values(
+    heap: &PagedHeap,
+    frozen: &FrozenRef,
+    visit: &mut dyn FnMut(&PageValue) -> Result<(), HeapFault>,
+) -> Result<(), HeapFault> {
+    let header = read_header(heap.pages(), frozen)?;
+    visit(&header.value.0)?;
+    // Frozen objects are a complete occurrence tree; they contain no garbage rows.
+    for rank in 0..header.objects.len() {
+        let (_, object) = header
+            .objects
+            .rank_get(rank, heap.pages())?
+            .ok_or_else(|| invalid("missing frozen code occurrence"))?;
+        match object.body {
+            Body::List { rows, .. } => {
+                let rows = rows.in_family(RELATIVE);
+                for rank in 0..rows.len() {
+                    let (_, value) = rows
+                        .rank_get(rank, heap.pages())?
+                        .ok_or_else(|| invalid("missing frozen list row"))?;
+                    visit(&value)?;
+                }
+            }
+            Body::Table { rows, .. } => {
+                let rows = rows.in_family(RELATIVE);
+                for rank in 0..rows.len() {
+                    let (_, entry) = rows
+                        .rank_get(rank, heap.pages())?
+                        .ok_or_else(|| invalid("missing frozen table row"))?;
+                    visit(&entry.key)?;
+                    visit(&entry.value)?;
+                }
+            }
+            _ => return Err(invalid("a frozen occurrence is not a container")),
+        }
+    }
+    Ok(())
+}

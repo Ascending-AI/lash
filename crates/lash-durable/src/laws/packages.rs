@@ -377,17 +377,42 @@ pub async fn a_resolution_winner_and_its_claim_debt_commit_atomically(
         type_member: None,
     };
     let execution = ExecutionId("process:resolution-owner".to_owned());
+    let shared = ClaimRequirements {
+        providers: [ProviderName {
+            owner: "shared".into(),
+            key: "tools".into(),
+        }]
+        .into(),
+        ..Default::default()
+    };
+    let mut discovery = shared.clone();
+    discovery.providers.insert(ProviderName {
+        owner: "discovery".into(),
+        key: "resolver".into(),
+    });
     let registration = ExecutionRegistration {
         execution: execution.clone(),
-        uses: [(use_, requested.clone())].into(),
+        uses: [(
+            use_,
+            crate::resolutions::DeferredUse {
+                requested: requested.clone(),
+                discovery: discovery.clone(),
+            },
+        )]
+        .into(),
         referrer: ArtifactReferrer::HostPin(HostArtifactPin::mint()),
         requirements: ClaimRequirements::default(),
     };
     let mut tx = store.begin(&actor, epoch).await?;
-    tx.register_execution(registration.clone());
+    tx.register_execution(registration.clone())
+        .set_requires(shared.tokens().collect());
     store
         .commit(tx, CommitLabel::new("law.resolution.register"))
         .await?;
+    super::ensure!(
+        resolutions.requirements(&actor).await? == discovery,
+        "unresolved use lost discovery debt"
+    );
     let revision = store.begin(&actor, epoch).await?.revision();
     let definition = ToolDefinition::raw(
         "tool:resolved",
@@ -483,14 +508,13 @@ pub async fn a_resolution_winner_and_its_claim_debt_commit_atomically(
     };
     super::ensure!(
         winner == loser && resolutions.load(&candidate.key).await? == Some(winner.clone()),
-        "callers did not share one winner"
+        "callers did not share one winner: winner={winner:?} loser={loser:?} stored={:?}",
+        resolutions.load(&candidate.key).await?
     );
     let debt = store.actor_requirements(None, 8).await?;
-    let expected: Vec<_> = if matches!(winner.entry, ResolutionEntry::Resolved { .. }) {
-        target.tokens().collect()
-    } else {
-        Vec::new()
-    };
+    let mut effective = shared.clone();
+    effective.extend(&target);
+    let expected: Vec<_> = effective.tokens().collect();
     let actual = debt
         .into_iter()
         .find(|(key, _)| key == &actor)
@@ -515,6 +539,7 @@ pub async fn a_resolution_winner_and_its_claim_debt_commit_atomically(
         resolutions.requirements(&actor).await? == target,
         "the live source debt differs"
     );
+    let expected: Vec<_> = target.tokens().collect();
     let stored = store.actor_requirements(None, 8).await?;
     super::ensure!(
         stored
@@ -523,13 +548,18 @@ pub async fn a_resolution_winner_and_its_claim_debt_commit_atomically(
         "an ordinary owner commit erased live target debt"
     );
     let mut successor = registration.clone();
+    successor.uses.clear();
     let successor_use = OperationUse {
         slot: ImportSlot(5),
         ..use_
     };
-    successor
-        .uses
-        .insert(successor_use, candidate.requested.clone());
+    successor.uses.insert(
+        successor_use,
+        crate::resolutions::DeferredUse {
+            requested: candidate.requested.clone(),
+            discovery: ClaimRequirements::default(),
+        },
+    );
     let mut carried = candidate.clone();
     carried.key.use_ = successor_use;
     let mut adoption = store.begin(&actor, epoch).await?;
@@ -572,6 +602,25 @@ pub async fn a_resolution_winner_and_its_claim_debt_commit_atomically(
             && resolutions.load(&carried.key).await? == Some(carried),
         "refused seed changed the actor or winner"
     );
+    let mut no_live_uses = registration.clone();
+    no_live_uses.uses.clear();
+    let mut prune = store.begin(&actor, epoch).await?;
+    prune.adopt_execution(no_live_uses);
+    store
+        .commit(prune, CommitLabel::new("law.resolution.dead_use"))
+        .await?;
+    super::ensure!(
+        resolutions.requirements(&actor).await? == ClaimRequirements::default(),
+        "dead use retained target debt"
+    );
+    super::ensure!(
+        store
+            .actor_requirements(None, 8)
+            .await?
+            .iter()
+            .all(|(key, debt)| key != &actor || debt.is_empty()),
+        "effective actor projection retained dead target debt"
+    );
     let mut ended = store.begin(&actor, epoch).await?;
     ended
         .end_execution(registration.execution.clone())
@@ -589,6 +638,7 @@ pub async fn a_resolution_winner_and_its_claim_debt_commit_atomically(
     );
     let mut fresh = registration.clone();
     fresh.execution = ExecutionId("process:resolution-owner:fresh".into());
+    fresh.uses.insert(successor_use, fresh.uses[&use_].clone());
     let mut admit = store.begin(&actor, epoch).await?;
     admit.register_execution(fresh.clone());
     store
@@ -600,7 +650,7 @@ pub async fn a_resolution_winner_and_its_claim_debt_commit_atomically(
         expected_revision: store.begin(&actor, epoch).await?.revision(),
     };
     let mut unavailable = candidate.clone();
-    unavailable.key.execution = fresh.execution;
+    unavailable.key.execution = fresh.execution.clone();
     unavailable.entry = ResolutionEntry::Unavailable {
         note: Some("missing".into()),
     };
@@ -620,6 +670,28 @@ pub async fn a_resolution_winner_and_its_claim_debt_commit_atomically(
     super::ensure!(
         matches!(resolutions.commit(&fresh_owner, changed).await?, CommitResolution::Existing(record) if record == unavailable),
         "a negative outcome was not pinned"
+    );
+    super::ensure!(
+        resolutions.requirements(&actor).await? == discovery,
+        "one negative winner erased another unresolved use's overlapping discovery debt"
+    );
+    fresh.uses.remove(&successor_use);
+    let mut prune = store.begin(&actor, epoch).await?;
+    prune.adopt_execution(fresh);
+    store
+        .commit(prune, CommitLabel::new("law.resolution.prune_discovery"))
+        .await?;
+    super::ensure!(
+        resolutions.requirements(&actor).await? == ClaimRequirements::default(),
+        "negative winner or dead use still owes discovery debt"
+    );
+    super::ensure!(
+        store
+            .actor_requirements(None, 8)
+            .await?
+            .iter()
+            .all(|(key, debt)| key != &actor || debt.is_empty()),
+        "last discovery debt remained in the materialized claim filter"
     );
     let mut release = store.begin(&actor, epoch).await?;
     release.give_up(Release::Ready);

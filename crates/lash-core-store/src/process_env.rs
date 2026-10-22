@@ -437,6 +437,12 @@ impl ProcessEnv {
         &self.execution
     }
 
+    /// Install owner-validated code debt while preserving authored configuration.
+    pub fn with_execution(mut self, execution: ExecutionEnvironment) -> Self {
+        self.execution = execution;
+        self
+    }
+
     pub fn model(&self) -> Option<&ProcessModel> {
         self.model.as_ref()
     }

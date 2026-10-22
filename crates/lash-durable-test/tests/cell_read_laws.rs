@@ -290,6 +290,7 @@ impl ProcessSteps for NoSteps {
         _runtime: &Arc<lash_core_execution::runtime::process::StepRuntime>,
         _process: &lash_execution_contracts::process::ProcessRecord,
         step: &lash_execution_contracts::process::StepRequest,
+        _target: Option<&lash_core_execution::runtime::process::steps::InvocationTarget>,
         _now_ms: u64,
     ) -> Result<StepAdmission, StepRefusal> {
         Err(StepRefusal::UnknownTool {
@@ -842,13 +843,7 @@ async fn a_cell_that_reads_is_claimed_only_where_its_reader_is_served_on_sqlite_
     };
     nodes.kill("a");
     nodes.quiesce().await;
-    let backend = turn.backend();
-    let capabilities = backend
-        .packages()
-        .expect("the executing nodes' installed packages")
-        .install(&backend)
-        .await
-        .expect("the probe installs the executing nodes' packages");
+    let capabilities = lash::testing::node_capabilities(&turn.core());
     let deadline = u64::try_from(due.0).unwrap() - SimClock::timestamp_ms_at(0);
     clock.advance_to(deadline + 1_000).await;
     let without: Vec<String> = serves

@@ -257,6 +257,7 @@ pub(super) async fn link_cell(
         &fulfilled.inspection,
         claim.referrer(),
         environment.requirements.clone(),
+        environment.registry,
     ));
     ctx.actor_context()
         .commit(tx, lash_durable::CommitLabel::new("execution.register"))

@@ -182,6 +182,9 @@ impl Lifter<'_> {
             let right = self.expr(then)?;
             return Ok(Expr::Binary("??", Box::new(left), Box::new(right)));
         }
+        if *body == bound {
+            return self.expr(value);
+        }
         if let Some(call) = self.call(name, value, body)? {
             return Ok(call);
         }
@@ -328,6 +331,64 @@ impl Lifter<'_> {
     /// implements.
     fn helper(&mut self, name: &str, args: &[k::Expr]) -> Lift<Expr> {
         match (name, args) {
+            (
+                "ts.promise.start",
+                [
+                    k::Expr::Closure(work),
+                    k::Expr::Literal(k::Literal::Absent),
+                    k::Expr::List(inputs),
+                ],
+            ) => {
+                let definition = self
+                    .document
+                    .functions
+                    .get(&work.function)
+                    .ok_or_else(|| "missing pending tool wrapper".to_owned())?;
+                let [_, params] = definition.signature.params.as_slice() else {
+                    return refuse("pending tool wrapper parameters");
+                };
+                let Some(body) = definition.body() else {
+                    return refuse("pending tool wrapper body");
+                };
+                let [
+                    k::Stmt::Return {
+                        value: k::Expr::Act(performed),
+                    },
+                ] = body.block.as_slice()
+                else {
+                    return refuse("pending tool wrapper return");
+                };
+                let k::ActKind::Perform {
+                    slot,
+                    then_yield: false,
+                    ..
+                } = performed.kind
+                else {
+                    return refuse("pending tool wrapper perform");
+                };
+                let [k::Expr::Act(boundary)] = performed.args.as_slice() else {
+                    return refuse("pending tool wrapper input");
+                };
+                if !matches!(&boundary.kind, k::ActKind::Call(k::Callee::Import(id)) if self.is(id, "ts.boundary"))
+                {
+                    return refuse("pending tool wrapper boundary");
+                }
+                let [k::Expr::Member(member)] = boundary.args.as_slice() else {
+                    return refuse("pending tool wrapper operand");
+                };
+                if !matches!(&**member, k::Member::Index { target: k::Expr::Variable(name), index: k::Expr::Literal(k::Literal::Float(index)) } if *name == params.name && index.get() == 0.0)
+                    || inputs.len() != 1
+                {
+                    return refuse("pending tool wrapper argument position");
+                }
+                let callee = self.operation(&slot)?;
+                let args = inputs
+                    .iter()
+                    .map(|input| self.expr(input))
+                    .collect::<Lift<_>>()?;
+                Ok(Expr::Call(Box::new(callee), args))
+            }
+
             ("ts.strict_equals", [left, right]) => self.binary("===", left, right),
             ("ts.strict_not_equals", [left, right]) => self.binary("!==", left, right),
             ("ts.not", [value]) => Ok(Expr::Unary("!", Box::new(self.expr(value)?))),

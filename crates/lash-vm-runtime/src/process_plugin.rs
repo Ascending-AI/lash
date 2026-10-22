@@ -160,27 +160,30 @@ impl lash_core::plugin::packages::PackageProvider for HelperPackages {
     async fn hold(
         &self,
         claim: &lash_core::ReferrerClaim,
-        advertisement: &lash_vocabulary::package::PackageAdvertisement,
+        advertisements: &[&lash_vocabulary::package::PackageAdvertisement],
     ) -> Result<(), lash_execution_contracts::process::linking::EnginePortError> {
-        let lash_vocabulary::package::PackageAdvertisement::Enumerated(package) = advertisement
-        else {
-            return Err(
-                lash_execution_contracts::process::linking::EnginePortError::Unsupported {
-                    operation: "helper release has no deferred packages".into(),
-                },
-            );
-        };
-        if self.release.content.packages.get(&package.identity()) != Some(package) {
-            return Err(
-                lash_execution_contracts::process::linking::EnginePortError::Refused(
-                    lash_execution_contracts::process::linking::AdmissionRefusal::NotOwner {
-                        path: package.path.clone(),
+        for advertisement in advertisements {
+            let lash_vocabulary::package::PackageAdvertisement::Enumerated(package) =
+                *advertisement
+            else {
+                return Err(
+                    lash_execution_contracts::process::linking::EnginePortError::Unsupported {
+                        operation: "helper release has no deferred packages".into(),
                     },
-                ),
-            );
+                );
+            };
+            if self.release.content.packages.get(&package.identity()) != Some(package) {
+                return Err(
+                    lash_execution_contracts::process::linking::EnginePortError::Refused(
+                        lash_execution_contracts::process::linking::AdmissionRefusal::NotOwner {
+                            path: package.path.clone(),
+                        },
+                    ),
+                );
+            }
         }
         self.documents
-            .hold_helper_release(claim, &self.release.content)
+            .hold_helper_release(claim, &self.release.content, &self.release.labels)
             .await
     }
     fn roots(&self) -> std::collections::BTreeSet<lash_vocabulary::Segment> {

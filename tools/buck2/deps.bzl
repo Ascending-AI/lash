@@ -569,6 +569,7 @@ PACKAGE_DEPS = {
             "lash_core_store": "//crates/lash-core-store:lash-core-store",
             "lash_kernel_doc": "//crates/lash-kernel-doc:lash-kernel-doc",
             "lash_kernel_migrate": "//crates/lash-kernel-migrate:lash-kernel-migrate",
+            "lash_kernel_package": "//crates/lash-kernel-package:lash-kernel-package",
             "lash_kernel_state": "//crates/lash-kernel-state:lash-kernel-state",
             "lash_kernel_vm": "//crates/lash-kernel-vm:lash-kernel-vm",
             "lash_llm_tools": "//crates/lash-llm-tools:lash-llm-tools",
@@ -1647,6 +1648,7 @@ PACKAGE_DEPS = {
     "lash-kernel-vm": {
         "build": {},
         "dev": {
+            "lash_kernel_check": "//crates/lash-kernel-check:lash-kernel-check",
             "lash_kernel_lib": "//crates/lash-kernel-lib:lash-kernel-lib",
             "lash_kernel_package": "//crates/lash-kernel-package:lash-kernel-package",
             "lash_kernel_state": "//crates/lash-kernel-state:lash-kernel-state"
@@ -2021,6 +2023,7 @@ PACKAGE_DEPS = {
         "build": {},
         "dev": {
             "lash": "//crates/lash:lash",
+            "lash_kernel_package": "//crates/lash-kernel-package:lash-kernel-package",
             "reqwest": "//third-party/rust:p0281"
         },
         "normal": {

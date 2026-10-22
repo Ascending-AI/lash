@@ -1011,6 +1011,21 @@ impl KernelMachine {
         }
     }
 
+    /// A TypeScript public return still belongs to its settlement hook. Only
+    /// the settled value crosses the run boundary; a promise may hold tasks.
+    pub(super) fn return_leaves_run(&mut self, task: TaskId) -> Result<bool, Halt> {
+        if task != TaskId::MAIN || self.task(task)?.frames.len() != 1 {
+            return Ok(false);
+        }
+        Ok(!matches!(
+            self.frame(task)?.convention,
+            Some(
+                lash_kernel_doc::StartConvention::TsDirect { .. }
+                    | lash_kernel_doc::StartConvention::TsArgsList { .. }
+            )
+        ))
+    }
+
     /// Host and data-only import results fit the public settled signature,
     /// whose types can differ from the function's private ABI.
     pub(super) fn check_public_result(
@@ -1379,7 +1394,7 @@ impl KernelMachine {
             && pending.is_none()
             && matches!(exe.stmt(id).form, Form::ReturnVia { .. })
         {
-            if task == TaskId::MAIN && self.task(task)?.frames.len() == 1 {
+            if self.return_leaves_run(task)? {
                 self.copy_out(&value)?;
             }
             return Ok((id, Ran::Depart(Completion::Return(Box::new(value)))));

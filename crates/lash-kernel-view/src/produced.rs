@@ -24,14 +24,20 @@ use crate::ActionView;
 /// What one derivation reads to name a value's producing `perform`.
 pub(crate) struct Producers<'a> {
     graph: &'a Graph,
+    context: &'a crate::ViewContext,
     /// The callables each action of the view applies, by site.
     applies: BTreeMap<&'a Site, &'a [Site]>,
 }
 
 impl<'a> Producers<'a> {
-    pub(crate) fn new(graph: &'a Graph, actions: &'a [ActionView]) -> Self {
+    pub(crate) fn new(
+        graph: &'a Graph,
+        actions: &'a [ActionView],
+        context: &'a crate::ViewContext,
+    ) -> Self {
         Self {
             graph,
+            context,
             applies: actions
                 .iter()
                 .map(|action| (&action.site, action.applies.as_slice()))
@@ -64,8 +70,39 @@ impl<'a> Producers<'a> {
                 kind: ActNode::Await(_),
                 args,
             }) if args.len() == 1 => self.settled(args[0], seen),
+            NodeKind::Expr(ExprNode::Call { function, args })
+                if self.receives(&lash_kernel_check::CalleeNode::Local(*function), args.len()) =>
+            {
+                self.reply(args[0], seen)
+            }
+            NodeKind::Expr(ExprNode::Act {
+                kind: ActNode::Call(callee),
+                args,
+            }) if self.receives(callee, args.len()) => self.reply(args[0], seen),
+            NodeKind::Action(ActionNode::Call { callee, args })
+                if self.receives(callee, args.len()) =>
+            {
+                let value = self.atom(&args[0], seen)?;
+                self.reply(value, seen)
+            }
             _ => None,
         }
+    }
+    fn receives(&self, callee: &lash_kernel_check::CalleeNode, count: usize) -> bool {
+        let function = match callee {
+            lash_kernel_check::CalleeNode::Local(function) => Some(lash_vocabulary::CallableId {
+                link: self.context.reference.link,
+                function: *function,
+            }),
+            lash_kernel_check::CalleeNode::Import(slot) => {
+                self.context.resolve(self.context.reference.link, *slot)
+            }
+            lash_kernel_check::CalleeNode::Value(_) => None,
+        };
+        count == 1
+            && function
+                .and_then(|id| self.context.display(&id))
+                .is_some_and(|label| label.reply)
     }
 
     /// The `perform` whose reply the task an `await` of `id` settles on

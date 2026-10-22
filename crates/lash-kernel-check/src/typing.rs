@@ -28,6 +28,7 @@ use crate::types::{common, disjoint, function_of, stable, union};
 
 pub(crate) struct Typer<'a> {
     pub(crate) graph: &'a mut Graph,
+    pub(crate) presentations: &'a BTreeMap<NodeId, lash_kernel_doc::CallablePresentation>,
     pub(crate) catalog: &'a dyn FunctionCatalog,
     /// The operations the code may perform: the document's manifest, or a
     /// library body's own `effects`.
@@ -210,7 +211,17 @@ impl Typer<'_> {
         match expr {
             ExprNode::Literal(literal) => self.literal(&literal),
             ExprNode::Variable(reference) => self.reference(&reference),
-            ExprNode::Tuple(items) => Type::Tuple(self.values(&items)),
+            ExprNode::Tuple(items) => {
+                let values = self.values(&items);
+                let token = items.iter().enumerate().find_map(|(index, item)| {
+                    let presentation = self.presentations.get(item)?;
+                    let lash_kernel_doc::FunctionRepresentation::Token { tag, callable } = &presentation.representation else { return None; };
+                    let first = self.graph.node(*items.first()?).kind.clone();
+                    (*callable as usize == index && matches!(first, NodeKind::Expr(ExprNode::Literal(Literal::Text(found))) if found == *tag))
+                        .then(|| Type::Function(Box::new(presentation.signature.clone())))
+                });
+                token.unwrap_or(Type::Tuple(values))
+            }
             ExprNode::List(items) => Type::List(Box::new(common(self.values(&items)))),
             ExprNode::Set(items) => Type::Set(Box::new(common(self.values(&items)))),
             ExprNode::Map(entries) => {

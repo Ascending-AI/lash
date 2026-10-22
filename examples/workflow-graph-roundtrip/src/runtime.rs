@@ -60,6 +60,7 @@ pub(crate) struct Published {
     pub(crate) pin: HostArtifactPin,
     pub(crate) reference: lash::package::LinkedStart,
     pub(crate) source_map: Option<lash::workflow::document::SourceMapId>,
+    pub(crate) context: lash::workflow::view::ViewContext,
 }
 
 impl Published {
@@ -185,8 +186,12 @@ pub(crate) async fn publish(
         })
         .map_err(|error| RunError::Invalid(error.to_string()))?;
         let definition = artifacts.publish_definition(&pin, &draft).await?;
+        let context = artifacts
+            .workflow_view_context(&start, &packages.packages.publications())
+            .await?;
         Ok(Publication {
             published: Published {
+                context,
                 definition,
                 reference: start,
                 source_map: source.map(|(map, _)| map.identity()),
@@ -216,7 +221,21 @@ pub(crate) async fn observe(
     // The feed retains everything published while the document is read.
     let mut feed = observed.subscribe_and_recover(snapshot.cursor);
     let document = execution_document(&core, &snapshot.read_view).await?;
-    let mut overlay = Overlay::new(&document, process, workflow_version, host)?;
+    let authority = core
+        .processes()
+        .environment(&process)
+        .await?
+        .ok_or_else(|| RunError::Invalid("the process environment is no longer retained".into()))?;
+    let lash::process::ProcessAuthority::Engine { env, .. } = authority.authority else {
+        return Err(RunError::Invalid(
+            "a workflow has no engine environment".into(),
+        ));
+    };
+    let context = core
+        .host_artifacts()
+        .workflow_view_context(document.reference(), &env.execution().publications)
+        .await?;
+    let mut overlay = Overlay::new(&document, &context, process, workflow_version, host)?;
     let mut workflow = process_overlay(&snapshot.read_view);
     let (mut events, mut terminal) = overlay.snapshot(snapshot.read_view)?;
     loop {
@@ -480,6 +499,7 @@ impl Overlay {
 
     fn new(
         document: &WorkflowDocument,
+        context: &lash::workflow::view::ViewContext,
         process: lash::ProcessId,
         workflow_version: u64,
         host: Arc<crate::display::HostTools>,
@@ -488,7 +508,7 @@ impl Overlay {
         let mut accumulator = WorkflowExecutionOverlayAccumulator::default();
         accumulator.set_document(lash::workflow::workflow_overlay_document(document));
         Ok(Self {
-            view: lash::workflow::view::derive(document)
+            view: lash::workflow::view::derive(document, context)
                 .map_err(|error| RunError::Invalid(error.to_string()))?,
             accumulator,
             identities: BTreeMap::new(),
@@ -1063,7 +1083,24 @@ mod tests {
             },
         )
         .unwrap();
-        let mut view = lash::workflow::view::derive(&holder).unwrap();
+        let mut content = lash_kernel_package::LinkedContent::default();
+        content
+            .documents
+            .insert(holder.identity(), holder.document().clone());
+        content.links.insert(
+            link,
+            lash::package::Link {
+                document: holder.identity(),
+                fills: Default::default(),
+            },
+        );
+        let context = lash::workflow::view::ViewContext::new(
+            holder.reference().clone(),
+            content,
+            Default::default(),
+        )
+        .unwrap();
+        let mut view = lash::workflow::view::derive(&holder, &context).unwrap();
         view.document = DocumentId::from_bytes([1; 32]);
         Overlay {
             view,
@@ -1119,6 +1156,15 @@ mod tests {
             observed_at_ms: occurrence * 10,
             step: lash::tracing::StepBodyStarted {
                 process_id: lash::ProcessId::fixture("adapter"),
+                origin: (lash::workflow::document::testkit::effect(
+                    lash::workflow::document::testkit::root_task(),
+                    Site::new(Unit::Main, [0, 0]),
+                    occurrence,
+                    Vec::new(),
+                ))
+                .position()
+                .site()
+                .clone(),
                 at: lash::workflow::document::testkit::effect(
                     lash::workflow::document::testkit::root_task(),
                     Site::new(Unit::Main, [0, 0]),

@@ -237,9 +237,9 @@ impl Embedder {
     ///
     /// # Errors
     ///
-    /// [`EmbedError::NoDialect`]; [`PackageRefusal::NativeMissing`] for a
+    /// [`EmbedError::NoDialect`]; [`WorkerLibraryRefusal::NativeMissing`] for a
     /// `Native`-only function no native is supplied for, and
-    /// [`PackageRefusal::NativeUnused`] for a native of no held function
+    /// [`WorkerLibraryRefusal::NativeUnused`] for a native of no held function
     /// that states one; [`EmbedError::Registry`].
     pub fn finish(self, library: &WorkerLibrary) -> Result<Embedding, EmbedError> {
         if self.dialects.is_empty() {

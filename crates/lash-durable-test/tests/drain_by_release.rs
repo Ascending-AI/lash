@@ -31,6 +31,9 @@ mod sim;
 #[path = "support/matrix.rs"]
 mod matrix;
 
+#[path = "support/scripted_steps.rs"]
+mod scripted_steps;
+
 use matrix::MatrixTestExt as _;
 
 use std::sync::{Arc, Mutex, OnceLock, Weak};
@@ -88,13 +91,10 @@ fn infra(error: impl std::fmt::Display) -> ProcessInfraError {
 }
 
 fn step(name: &str, tool: &str) -> StepRequest {
-    StepRequest::Tool {
+    StepRequest::Engine {
         step: StepName(name.to_owned()),
-        effect: lash_core_execution::testing::effect(tool),
-        contract: lash_vocabulary::operations::ContractId::new("fixture"),
+        kind: lash_execution_contracts::process::EngineStepKind::new(tool),
         input: json!({ "step": name }),
-        site: None,
-        matched: None,
     }
 }
 
@@ -316,10 +316,11 @@ impl ProcessSteps for DrainSteps {
         _runtime: &Arc<lash_core_execution::runtime::process::StepRuntime>,
         _process: &ProcessRecord,
         _step: &StepRequest,
+        _target: Option<&lash_core_execution::runtime::process::steps::InvocationTarget>,
         now_ms: u64,
     ) -> Result<StepAdmission, StepRefusal> {
         Ok(StepAdmission::new(
-            lash_core_execution::testing::step_tool(_step, KIND),
+            scripted_steps::tool(_step),
             ExecutionPolicy::Once,
             ExecutionLimit::starting_at(now_ms, Duration::from_secs(60), Duration::from_secs(60)),
             None,
@@ -348,9 +349,7 @@ impl ProcessSteps for DrainSteps {
         lash_core_execution::runtime::actor::round::member_body({
             let world = Arc::clone(&self.world);
             let process = process.id.clone();
-            let tool = lash_core_execution::testing::step_tool(step, KIND)
-                .as_str()
-                .to_owned();
+            let tool = scripted_steps::tool(step).as_str().to_owned();
             Box::new(move |_token| {
                 world.entries.lock_recover().push(tool.clone());
                 Box::pin(async move {

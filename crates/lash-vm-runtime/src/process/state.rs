@@ -302,6 +302,7 @@ pub(crate) struct EffectRead {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct RecordedStart {
+    pub(crate) retained_code: BTreeSet<lash_vocabulary::CallableId>,
     pub(crate) code: super::InlineRequest,
     pub(crate) from: StartedFrom,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -372,6 +373,7 @@ pub(crate) enum Issued {
         wait: lash_vocabulary::sites::WaitId,
         admission: Admission,
         use_: lash_vocabulary::names::OperationUse,
+        origin: lash_vocabulary::sites::Site,
         input: serde_json::Value,
     },
     /// A `perform` the boundary refuses: the error is raised at the

@@ -514,6 +514,7 @@ fn template_bearing_invokes_are_prepared_operator_sites() {
             &program.document,
             &program.library,
             &program.documents,
+            &program.functions,
             &program.instances,
         )
         .unwrap_or_else(|_| panic!("the invoke compiles"));

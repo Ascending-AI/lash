@@ -1,7 +1,7 @@
 {
   "cargo_only_target_count": 6,
   "cargo_package_count": 92,
-  "cargo_target_count": 366,
+  "cargo_target_count": 367,
   "facade_production_check_targets": [
     "//crates/lash-checkpoint-encoder:lash-checkpoint-encoder__fv_0200a96e__metadata[check]",
     "//crates/lash-core-effect:lash-core-effect__fv_72f14956__metadata[check]",
@@ -83581,7 +83581,7 @@
       "//third-party/vendored/lash-rmcp:lash-rmcp__fv_e2e7b48c"
     ]
   },
-  "generated_label_count": 468,
+  "generated_label_count": 469,
   "main_test_exclusions": {
     "//crates/lash-s3-store:lash-s3-store__unit_test": "requires an external service or credentials"
   },
@@ -84174,6 +84174,7 @@
     "//crates/lash:ui_fixtures__fv_ff7f79b3",
     "//crates/lash:ui_store_seam",
     "//crates/lash:workflow_laws__test",
+    "//crates/lash:workflow_view_laws__test",
     "//crates/lashctl:lashctl__unit_test",
     "//crates/lashctl:lashctl__unit_test__fv_16125dc3",
     "//crates/lashctl:lashctl__unit_test__fv_5a8d8eec",
@@ -84878,6 +84879,7 @@
     "//crates/lash:ui_fixtures__fv_ff7f79b3",
     "//crates/lash:ui_store_seam",
     "//crates/lash:workflow_laws__test",
+    "//crates/lash:workflow_view_laws__test",
     "//crates/lashctl:lashctl__unit_test",
     "//crates/lashctl:lashctl__unit_test__fv_16125dc3",
     "//crates/lashctl:lashctl__unit_test__fv_5a8d8eec",
@@ -84989,7 +84991,7 @@
     "//third-party/vendored/lash-rmcp:test_tool_routers__test",
     "//third-party/vendored/lash-rmcp:test_trace_context__test"
   ],
-  "metadata_target_count": 1544,
+  "metadata_target_count": 1545,
   "packages": [
     {
       "declared_features": [
@@ -85854,6 +85856,7 @@
         "lash-internal-vocabulary",
         "lash-kernel-doc",
         "lash-kernel-migrate",
+        "lash-kernel-package",
         "lash-kernel-state",
         "lash-kernel-vm",
         "lash-runtime",
@@ -87837,6 +87840,7 @@
       ],
       "dependencies": [
         "lash-internal-vocabulary",
+        "lash-kernel-check",
         "lash-kernel-dialect",
         "lash-kernel-doc",
         "lash-kernel-exec",
@@ -90898,6 +90902,15 @@
           "kind": "test",
           "label": "//crates/lash:workflow_laws__test",
           "tags": []
+        },
+        {
+          "build_label": "//crates/lash:workflow_view_laws__test",
+          "cargo": "workflow_view_laws",
+          "check_label": "//crates/lash:workflow_view_laws__test__rust_test__metadata[check]",
+          "clippy_label": "//crates/lash:workflow_view_laws__test__clippy[clippy.txt]",
+          "kind": "test",
+          "label": "//crates/lash:workflow_view_laws__test",
+          "tags": []
         }
       ],
       "test_batch": {
@@ -91467,6 +91480,7 @@
         "anyhow",
         "axum",
         "chrono",
+        "lash-kernel-package",
         "lash-runtime",
         "reqwest",
         "serde",
@@ -93543,6 +93557,7 @@
     "//crates/lash:ui__test__fv_e7fdb30d": 300,
     "//crates/lash:ui__test__fv_ff7f79b3": 300,
     "//crates/lash:workflow_laws__test": 300,
+    "//crates/lash:workflow_view_laws__test": 300,
     "//crates/lashctl:lashctl__unit_test": 300,
     "//crates/lashctl:lashctl__unit_test__fv_16125dc3": 300,
     "//crates/lashctl:lashctl__unit_test__fv_5a8d8eec": 300,
@@ -94001,6 +94016,7 @@
     "//crates/lash:ui__test",
     "//crates/lash:worker_host__example",
     "//crates/lash:workflow_laws__test",
+    "//crates/lash:workflow_view_laws__test",
     "//crates/lashctl:lashctl",
     "//crates/lashctl:lashctl__unit_test",
     "//crates/lashctl:operator_json_contract__test",
@@ -94544,6 +94560,7 @@
     "//crates/lash:ui__test__rust_test__metadata[check]",
     "//crates/lash:worker_host__example__metadata[check]",
     "//crates/lash:workflow_laws__test__rust_test__metadata[check]",
+    "//crates/lash:workflow_view_laws__test__rust_test__metadata[check]",
     "//crates/lashctl:lashctl__metadata[check]",
     "//crates/lashctl:lashctl__unit_test__rust_test__metadata[check]",
     "//crates/lashctl:operator_json_contract__test__rust_test__metadata[check]",
@@ -95011,6 +95028,7 @@
     "//crates/lash:ui__test__clippy[clippy.txt]",
     "//crates/lash:worker_host__example__clippy[clippy.txt]",
     "//crates/lash:workflow_laws__test__clippy[clippy.txt]",
+    "//crates/lash:workflow_view_laws__test__clippy[clippy.txt]",
     "//crates/lashctl:lashctl__clippy[clippy.txt]",
     "//crates/lashctl:lashctl__unit_test__clippy[clippy.txt]",
     "//crates/lashctl:operator_json_contract__test__clippy[clippy.txt]",
@@ -95397,6 +95415,7 @@
     "//crates/lash:ui__test",
     "//crates/lash:worker_host__example",
     "//crates/lash:workflow_laws__test",
+    "//crates/lash:workflow_view_laws__test",
     "//crates/lashctl:lashctl",
     "//crates/lashctl:lashctl__unit_test",
     "//crates/lashctl:operator_json_contract__test",
@@ -95787,6 +95806,7 @@
     "//crates/lash:ui__test",
     "//crates/lash:worker_host__example",
     "//crates/lash:workflow_laws__test",
+    "//crates/lash:workflow_view_laws__test",
     "//crates/lashctl:lashctl",
     "//crates/lashctl:lashctl__unit_test",
     "//crates/lashctl:operator_json_contract__test",
@@ -96114,6 +96134,7 @@
     "//crates/lash:processes_evidence_b__test",
     "//crates/lash:sessions_evidence__test",
     "//crates/lash:workflow_laws__test",
+    "//crates/lash:workflow_view_laws__test",
     "//crates/lashctl:lashctl__unit_test",
     "//crates/lashctl:operator_json_contract__test",
     "//crates/transcript-contract:transcript-contract__unit_test",
@@ -96326,6 +96347,7 @@
     "//crates/lash:processes_evidence_b__test",
     "//crates/lash:sessions_evidence__test",
     "//crates/lash:workflow_laws__test",
+    "//crates/lash:workflow_view_laws__test",
     "//crates/lashctl:lashctl__unit_test",
     "//crates/lashctl:operator_json_contract__test",
     "//crates/transcript-contract:transcript-contract__unit_test",
@@ -96577,6 +96599,7 @@
     "//crates/lash:processes_evidence_b__test",
     "//crates/lash:sessions_evidence__test",
     "//crates/lash:workflow_laws__test",
+    "//crates/lash:workflow_view_laws__test",
     "//crates/lashctl:lashctl__unit_test",
     "//crates/lashctl:operator_json_contract__test",
     "//crates/transcript-contract:transcript-contract__unit_test",
@@ -97088,6 +97111,7 @@
     "//crates/lash:processes_evidence_b__test",
     "//crates/lash:sessions_evidence__test",
     "//crates/lash:workflow_laws__test",
+    "//crates/lash:workflow_view_laws__test",
     "//crates/lashctl:lashctl__unit_test",
     "//crates/lashctl:operator_json_contract__test",
     "//crates/transcript-contract:transcript-contract__unit_test",
@@ -97345,6 +97369,7 @@
     "//crates/lash:sessions_evidence__test",
     "//crates/lash:ui__test",
     "//crates/lash:workflow_laws__test",
+    "//crates/lash:workflow_view_laws__test",
     "//crates/lashctl:lashctl__unit_test",
     "//crates/lashctl:operator_json_contract__test",
     "//crates/transcript-contract:transcript-contract__unit_test",

@@ -972,16 +972,7 @@ impl BackendRunner {
                 lash::persistence::LeaseIncarnationId::new("cross-backend-differential-test-boot"),
             ))
             .expect("build differential lifecycle core");
-        // Node startup installs permanent, host-pin-owned package definitions.
-        // Finish that fixture setup before the next operation's residue digest:
-        // a refused session open must be compared against an installed host.
-        self.lifecycle_backend
-            .package_store()
-            .expect("the standard core registers its workers' packages")
-            .install(&self.lifecycle_backend)
-            .await
-            .expect("install the lifecycle core's package definitions");
-        // Package installation precedes the serving node's registration.
+        // Wait for the serving node's registration.
         // Wait for this core's row too, so startup cannot move `nodes` between
         // a refused operation's before/after digests. Other cases' nodes in
         // the shared PostgreSQL store do not establish this core's readiness.

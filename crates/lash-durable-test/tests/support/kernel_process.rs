@@ -1,42 +1,93 @@
-//! Host process definitions written as kernel documents.
+//! Complete host-authored Documents linked against explicit process components.
+use lash::package::*;
 
-/// Publishes the kernel document `text` under a host pin on `backend`, and
-/// answers the start payload of its entry `entry`, without arguments.
-pub async fn payload(backend: &lash::Backend, text: &str, entry: &str) -> serde_json::Value {
-    let document = lash::workflow::document::parse_document(text).expect("the document parses");
-    let identity = lash_vm_runtime::KernelDocuments::new(backend.module_artifacts())
-        .publish(
-            &lash_core::ReferrerClaim::unguarded(lash_core::ArtifactReferrer::HostPin(
-                lash_core::HostArtifactPin::mint(),
-            ))
-            .expect("a host pin is unguarded"),
-            &lash_kernel_doc::IdentifiedDocument::new(document.clone()),
-            &lash_vm_runtime::lash_packages()
-                .map(|packages| std::sync::Arc::clone(packages.functions()))
-                .ok()
-                .and_then(|functions| {
-                    lash::workflow::document::CheckedDeclarations::required(
-                        &document,
-                        functions.as_ref(),
-                    )
-                    .ok()
-                })
-                .expect("the document's helpers are shipped"),
+/// The caller authors final kernel text and names the components it installs.
+/// Operation signatures come from those components' current declarations once;
+/// the retained Link pins their contracts for execution and cold resume.
+pub async fn publish(
+    core: &lash::LashCore,
+    text: &str,
+    env: &lash::process::ProcessEnv,
+) -> (serde_json::Value, lash::process::ProcessEnv) {
+    let mut document = lash_kernel_doc::parse_document(text).expect("the final document parses");
+    let artifacts = core.host_artifacts();
+    let pin = lash_core::HostArtifactPin::mint();
+    let (packages, environment) = namespace(core, &pin, env).await;
+    for import in document.imports.values_mut() {
+        if let lash_vocabulary::ImportKind::Operation { signature } = &mut import.kind {
+            for accepted in &packages.snapshot.advertisements {
+                if let PackageAdvertisement::Enumerated(package) = &accepted.advertisement {
+                    if package.path == import.name.package {
+                        if let Some(Member {
+                            kind: MemberKind::Operation(offer),
+                            ..
+                        }) = package.members.get(&import.name.member)
+                        {
+                            *signature = offer.requirement.signature.clone();
+                        }
+                    }
+                }
+            }
+        }
+    }
+    let start = artifacts
+        .publish_workflow(
+            &pin,
+            &lash_kernel_doc::DocumentBytes::from(document),
+            &StartSelector::Main,
+            &environment,
+            None,
         )
         .await
-        .expect("the document publishes");
-    serde_json::to_value(lash_vm_runtime::KernelProcessInput {
-        declared_packages: lash_vm_runtime::lash_packages()
-            .expect("fixture packages")
-            .surface()
-            .selection(),
-        packages: lash_vm_runtime::lash_packages()
-            .expect("lash's packages")
-            .digest(),
-        document: identity,
-        functions: document.manifest.functions.keys().copied().collect(),
-        entry: lash::workflow::document::Name::new(entry),
-        args: serde_json::Map::new(),
+        .unwrap();
+    let env = artifacts
+        .link_process_env(env, &start, &packages, &Default::default())
+        .await
+        .unwrap();
+    let payload = serde_json::to_value(lash_vm_runtime::KernelProcessInput {
+        code: lash_vm_runtime::process::InlineRequest::Linked { start },
+        args: Default::default(),
     })
-    .expect("the input encodes")
+    .unwrap();
+    (payload, env)
+}
+
+/// One explicitly installed component namespace and the host's all-package attachment.
+pub async fn namespace(
+    core: &lash::LashCore,
+    pin: &lash_core::HostArtifactPin,
+    env: &lash::process::ProcessEnv,
+) -> (
+    RecordedPackages,
+    lash_vm_runtime::WorkflowEnvironmentRequest,
+) {
+    let context = PublicationContext {
+        domain: PublicationDomain(core.backend().binding_identity().to_string()),
+        scope: PublicationScope::Host,
+        publisher: PublisherInstance("kernel-process-law".into()),
+        root: Segment::new("law").unwrap(),
+    };
+    let packages = core
+        .host_artifacts()
+        .process_namespace(pin, env, context.clone())
+        .await
+        .unwrap();
+    let request = lash_vm_runtime::WorkflowEnvironmentRequest {
+        snapshot: packages.snapshot.clone(),
+        context,
+        attachment: Attachment {
+            packages: packages
+                .snapshot
+                .advertisements
+                .iter()
+                .filter_map(|accepted| match &accepted.advertisement {
+                    PackageAdvertisement::Enumerated(package) => Some(package.path.clone()),
+                    _ => None,
+                })
+                .collect(),
+            members: Default::default(),
+            deferred: Default::default(),
+        },
+    };
+    (packages, request)
 }

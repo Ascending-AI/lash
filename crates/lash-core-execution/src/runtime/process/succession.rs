@@ -145,10 +145,23 @@ pub async fn request_process_successor(
         Err(error) => return Err(refused(carry_refusal(error)?)),
         Ok(SuccessorCarry::Carried {
             correspondence,
+            predecessor_code,
             resolutions,
             ..
         }) => {
-            crate::runtime::actor::process::validate_successor_pins(&context, &inspection, &correspondence, &resolutions)
+            let (merged, inspection) = crate::runtime::actor::process::merge_successor_debt(
+                engines.require(kind)?.as_ref(),
+                backend.package_store().as_ref(),
+                &context,
+                &new_env,
+                &inspection,
+                &predecessor_code,
+            )
+            .await
+            .map_err(PluginError::from)?;
+            let mut merged_context = context.clone();
+            merged_context.environment = merged.execution().clone();
+            crate::runtime::actor::process::validate_successor_pins(&merged_context, &inspection, &correspondence, &resolutions)
                 .map_err(|message| refused(ProcessSuccessorRefusal::Engine {
                     refusal: serde_json::json!({"kind":"incompatible_succession", "message":message}), message,
                 }))?;
@@ -160,7 +173,7 @@ pub async fn request_process_successor(
                 })
                 .collect();
             engines
-                .check_links_with_seeds(&std::sync::Arc::new(new_env.clone()), &inspection, &seeds)
+                .check_links_with_seeds(&std::sync::Arc::new(merged), &inspection, &seeds)
                 .map_err(PluginError::from)?;
         }
         Ok(SuccessorCarry::InFlight) => {}
@@ -287,7 +300,11 @@ pub async fn succession_context(
         .map_err(PluginError::from)?;
     let store = backend.stores().execution_resolutions();
     let mut resolutions = std::collections::BTreeMap::new();
-    for use_ in previous.operations.keys() {
+    for use_ in previous
+        .operations
+        .keys()
+        .chain(predecessor.execution().uses.keys())
+    {
         if let Some(record) = store
             .load(&lash_core_store::resolutions::ResolutionKey {
                 execution: execution.clone(),

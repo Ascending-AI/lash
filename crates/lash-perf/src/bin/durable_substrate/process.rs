@@ -402,6 +402,7 @@ impl ProcessSteps for BenchSteps {
         _runtime: &Arc<lash_core_execution::runtime::process::StepRuntime>,
         _process: &ProcessRecord,
         step: &StepRequest,
+        _target: Option<&lash_core_execution::runtime::process::steps::InvocationTarget>,
         now_ms: u64,
     ) -> Result<StepAdmission, StepRefusal> {
         let _ = step;
@@ -471,13 +472,10 @@ impl ProcessSteps for BenchSteps {
 
 fn probe_step(n: u64) -> Result<EngineAction, ProcessInfraError> {
     Ok(EngineAction::Steps {
-        steps: vec![StepRequest::Tool {
+        steps: vec![StepRequest::Engine {
             step: lash_execution_contracts::process::StepName(format!("probe-{n}")),
-            effect: lash_vocabulary::names::EffectName::new("probe").map_err(infra)?,
-            contract: lash_vocabulary::operations::ContractId::new("probe"),
+            kind: lash_execution_contracts::process::EngineStepKind::new("probe"),
             input: json!({}),
-            site: None,
-            matched: None,
         }],
         wake: None,
     })

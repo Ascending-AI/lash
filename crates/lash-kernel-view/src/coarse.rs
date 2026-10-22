@@ -236,6 +236,7 @@ pub(crate) fn project(
     graph: &Graph,
     _functions: &FunctionDeclarations,
     view: &mut WorkflowView,
+    context: &crate::ViewContext,
 ) {
     let (source, ranges) = lash_kernel_doc::print_document_with_ranges(document);
     view.canonical_source = source.clone();
@@ -256,6 +257,7 @@ pub(crate) fn project(
             block: scope.block.clone(),
         })
         .collect();
+    let comparisons = crate::comparison::Comparisons::new(graph, &view.dataflow.bindings, context);
     let mut projection = Projection {
         view,
         source: &source,
@@ -275,7 +277,7 @@ pub(crate) fn project(
                     (
                         HeaderRole::Condition,
                         graph.node(*condition).site.clone(),
-                        None::<ComparisonView>,
+                        comparisons.condition(node.id, *condition),
                     ),
                 )),
                 NodeKind::Stmt(StmtNode::For { iterable, .. }) => Some((

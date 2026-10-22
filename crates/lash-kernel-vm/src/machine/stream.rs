@@ -630,7 +630,7 @@ impl KernelMachine {
             Op::Continue => Ran::Depart(Completion::Continue),
             Op::Return { src } => {
                 let value = self.take(at(src));
-                if task == TaskId::MAIN && self.task(task)?.frames.len() == 1 {
+                if self.return_leaves_run(task)? {
                     // The run's result leaves the run (`K-EFF-002`): a value
                     // that cannot is refused here, where a `catch` sees it.
                     self.copy_out(&value)?;

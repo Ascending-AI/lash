@@ -30,6 +30,9 @@ mod sim;
 #[path = "support/matrix.rs"]
 mod matrix;
 
+#[path = "support/operations.rs"]
+mod operations;
+
 use matrix::MatrixTestExt as _;
 
 use std::sync::{Arc, Mutex};
@@ -148,14 +151,35 @@ impl ProcessEngine for WriteEngine {
         lash_execution_contracts::process::ProcessTraceClass::Internal
     }
 
-    async fn performed_effects(
+    async fn inspect_link(
+        &self,
+        _link: lash_vocabulary::LinkId,
+        _selector: &lash_execution_contracts::process::linking::ReachSelector,
+    ) -> Result<
+        lash_execution_contracts::process::linking::LinkInspection,
+        lash_execution_contracts::process::linking::EnginePortError,
+    > {
+        Err(
+            lash_execution_contracts::process::linking::EnginePortError::Unsupported {
+                operation: "this scripted engine has no executable document".into(),
+            },
+        )
+    }
+    async fn inspect_start(
         &self,
         _payload: &serde_json::Value,
-    ) -> Result<lash_execution_contracts::process::PerformedEffects, lash_core::ProcessEnvRefusal>
-    {
-        Ok(lash_core_execution::testing::performs(&[
-            ext_write_definition(),
-        ]))
+    ) -> Result<
+        lash_execution_contracts::process::linking::LinkInspection,
+        lash_execution_contracts::process::linking::EnginePortError,
+    > {
+        Err(
+            lash_execution_contracts::process::linking::EnginePortError::Unsupported {
+                operation: "this scripted engine has no executable document".into(),
+            },
+        )
+    }
+    fn capabilities(&self) -> lash_vocabulary::claims::NodeRequirements {
+        Default::default()
     }
 
     async fn check_args(
@@ -230,11 +254,9 @@ impl ProcessEngine for WriteEngine {
                 EngineAction::Steps {
                     steps: vec![lash_execution_contracts::process::StepRequest::Tool {
                         step,
-                        effect: lash_core_execution::testing::effect_of(&ext_write_definition()),
-                        contract: ext_write_definition().contract_id(),
+                        use_: operations::use_for(&ext_write_definition()),
                         input: payload,
                         site: None,
-                        matched: None,
                     }],
                     wake: None,
                 }
@@ -320,17 +342,12 @@ fn environment() -> lash_core::ProcessEnv {
 fn environment_admitting(
     tools: Vec<lash_vocabulary::tool_contract::ToolDefinition>,
 ) -> lash_core::ProcessEnv {
-    tools
-        .iter()
-        .fold(
-            lash_core::ProcessEnv::builder(lash::MaxToolCalls::new(16)).component(EXT_WRITE, &()),
-            |env, tool| {
-                env.link_tool(
-                    EXT_WRITE.tool_provider(lash::tool_provider_key!("tools")),
-                    tool,
-                )
-            },
-        )
+    lash_core::ProcessEnv::builder(lash::MaxToolCalls::new(16))
+        .component(EXT_WRITE, &())
+        .execution(operations::environment(
+            EXT_WRITE.tool_provider(lash::tool_provider_key!("tools")),
+            &tools,
+        ))
         .build()
         .expect("the environment builds")
 }
@@ -394,9 +411,11 @@ impl StepProof {
     /// uncut.
     async fn start_process(&self) -> Result<ProcessId, String> {
         let core = self.core();
+        let pin = lash_core::HostArtifactPin::mint();
+        operations::retain(core.backend(), &pin, &[ext_write_definition()]).await;
         let env_ref = core
             .host_artifacts()
-            .publish_process_env(&lash_core::HostArtifactPin::mint(), &environment())
+            .publish_process_env(&pin, &environment())
             .await
             .map_err(|error| format!("publish the environment: {error}"))?;
         let request = lash_execution_contracts::process::ProcessStartRequest::engine(

@@ -23,9 +23,10 @@ pub(super) fn record_effect(
     outcome: &SettledOutput,
     fleet: crate::FleetFormat,
 ) {
-    let Some(site) = step.request.site() else {
+    let Some(location) = step.request.location() else {
         return;
     };
+    let site = &location.at;
     let Some((class, code)) = effect_class(outcome) else {
         return;
     };
@@ -49,7 +50,7 @@ pub(super) fn record_effect(
         .insert(site.position().to_string(), recorded + 1);
     let operation = step.request.operation();
     let mut occurrence = lash_execution_contracts::process::ProcessEffectOccurrence::new(
-        site.clone(),
+        location.clone(),
         operation,
         class,
         code,

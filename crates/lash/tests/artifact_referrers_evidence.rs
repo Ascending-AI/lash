@@ -230,7 +230,7 @@ fn rlm_core_in_dialect(
         .plugin(Arc::new(
             lash_plugin_process_controls::SessionProcessAdminPluginFactory::new(
                 lifetime,
-                lash_core::runtime::env_policy::policy::from_run(|_| Ok(Vec::new())),
+                lash::process::env::policy::from_run(|_| Ok(Vec::new())),
             ),
         ))
         .build(lash::persistence::LeaseOwnerIdentity::opaque(
@@ -607,10 +607,17 @@ async fn a_second_cell_with_unchanged_declarations_writes_no_declaration_row() {
 
 /// FIG-6481: the frame that retains its cells' declarations ends with its
 /// session, and the relay reclaims its edges with it. Only the exact
-/// package-install roots and their declaration pointers survive deletion.
+/// artifacts held before the cell and their pointers survive deletion.
 async fn a_deleted_session_leaves_no_declaration_row(backend: Backend) {
     let fixture = Fixture::new(backend).await;
     let core = rlm_core(&fixture, vec![response(&helper_cell(1))]);
+    let before: std::collections::BTreeSet<_> =
+        fixture.kernel_document_edges().await.into_iter().collect();
+    let before_pointers: std::collections::BTreeSet<_> = fixture
+        .kernel_document_pointers()
+        .await
+        .into_iter()
+        .collect();
     let session_id = "declarations-deleted";
     let session = created_session(&core, session_id)
         .await
@@ -623,11 +630,6 @@ async fn a_deleted_session_leaves_no_declaration_row(backend: Backend) {
         .await
         .expect("cell turn");
     assert!(ran.is_success(), "the cell: {ran:?}");
-    let installed = fixture.installed_edges();
-    let installed_pointers: std::collections::BTreeSet<_> = installed
-        .iter()
-        .map(|edge| edge.artifact_ref.clone())
-        .collect();
     let held = wait_executions_released(&fixture).await;
     assert!(
         held.iter()
@@ -655,14 +657,14 @@ async fn a_deleted_session_leaves_no_declaration_row(backend: Backend) {
             .await
             .into_iter()
             .collect();
-        if edges.is_empty() && pointers == installed_pointers {
+        if edges.is_empty() && pointers == before_pointers {
             assert_eq!(
                 fixture
                     .kernel_document_edges()
                     .await
                     .into_iter()
                     .collect::<std::collections::BTreeSet<_>>(),
-                installed
+                before
             );
             break;
         }

@@ -342,12 +342,12 @@ fn a_run_from_stored_definitions_charges_exactly_as_the_writers_build() {
     let release = lash_vm_releases::helper_release().unwrap();
     let parse_int = release
         .functions
-        .named("ts.number.parse_int")
+        .named("ts.number.parse_integer")
         .next()
         .unwrap();
     let definition = |step| {
         lash_kernel_doc::parse_definition(&format!(
-        "use ts.number.parse_int = @{parse_int}\nfunction w.go(s: Text) -> Any\nkernel 1\ncharge 2\nbody {{ let n = invoke ts.number.parse_int(s, 10, false) let out = [n, {step}] return out }}\n"
+        "function w.go(s: Text) -> Any\nkernel 1\ncharge 2\nuse ts.number.parse_integer = @{parse_int}\nbody {{ let n = invoke ts.number.parse_integer(s, 10, false) let out = [n, {step}] return out }}\n"
     )).unwrap()
     };
     let (w1, w2) = (definition(1), definition(2));

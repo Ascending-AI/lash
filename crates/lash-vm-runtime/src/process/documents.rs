@@ -187,6 +187,7 @@ impl KernelDocuments {
         &self,
         claim: &ReferrerClaim,
         content: &LinkedContent,
+        labels: &BTreeMap<PackageId, String>,
     ) -> Result<(), EnginePortError> {
         for (id, document) in &content.documents {
             if document.identity() != *id {
@@ -260,6 +261,22 @@ impl KernelDocuments {
                         package: package.clone(),
                     },
                 )
+                .await
+                .map_err(store_error)?;
+        }
+        for (id, json) in labels {
+            let package = content.packages.get(id).ok_or_else(|| {
+                map_link_refusal(LinkRefusal::InvalidDocument {
+                    message: "labels name an absent Package".into(),
+                })
+            })?;
+            lash_kernel_package::read_labels(content, package, json).map_err(|error| {
+                map_link_refusal(LinkRefusal::InvalidDocument {
+                    message: error.to_string(),
+                })
+            })?;
+            self.packages
+                .put_labels(claim, id, json)
                 .await
                 .map_err(store_error)?;
         }
@@ -734,18 +751,29 @@ impl KernelDocuments {
                         artifact: document_artifact(id),
                     })?,
             ),
-            ContentRef::Link(id) => lash_execution_contracts::process::ProcessDocument::new(
-                self.load_linked(*id).await?,
-            ),
-            ContentRef::Package(id) => lash_execution_contracts::process::ProcessDocument::new(
-                self.packages
+            ContentRef::Link(id) => {
+                let content = self.load_linked(*id).await?;
+                lash_execution_contracts::process::ProcessDocument::new(
+                    content.link(*id).map_err(map_link_refusal)?.clone(),
+                )
+            }
+            ContentRef::Package(id) => {
+                let record = self
+                    .packages
                     .package(id)
                     .await
                     .map_err(store_error)?
                     .ok_or_else(|| EnginePortError::Missing {
                         artifact: package_artifact(*id),
-                    })?,
-            ),
+                    })?;
+                if record.id != *id || record.package.identity() != *id {
+                    return Err(EnginePortError::Corrupt {
+                        artifact: package_artifact(*id),
+                        message: "Package hash differs".into(),
+                    });
+                }
+                lash_execution_contracts::process::ProcessDocument::new(record.package)
+            }
         };
         Ok(LoadedContent {
             reference: reference.clone(),

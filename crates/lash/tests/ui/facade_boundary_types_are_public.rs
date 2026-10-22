@@ -1,6 +1,8 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use lash::SessionId;
+use lash::TurnId;
 use lash::direct::{
     DirectLlmClient, DirectLlmError, DirectLlmOutcome, DirectRequest, GenerationOptionOutcome,
     GenerationOptions, GenerationReceipt, LlmEventSender, LlmOutputPart, NonNegativeFiniteF64,
@@ -30,13 +32,9 @@ use lash::{
     LlmProfileRegistry, LlmProfileUnavailable, LlmProfileUnavailableReason, LlmProfiles,
     RecordedLlmProfile, RegisteredLlmProfile, RegistrationError, RunResolveError, SpecResolveError,
 };
-use lash_vocabulary::identity::SessionId;
-use lash_vocabulary::identity::TurnId;
 
 // FIG-6699: a host can use a Run's retained turn key without support traits.
-fn run_model_calls_use_the_public_turn_key(
-    run: &lash_vocabulary::identity::RunId,
-) -> &lash_vocabulary::identity::TurnId {
+fn run_model_calls_use_the_public_turn_key(run: &lash::RunId) -> &lash::TurnId {
     run.turn_id()
 }
 
@@ -106,7 +104,7 @@ fn plugin_types_are_nameable() -> PluginHost {
             lash::plugins::PluginDeclaration::initial("facade"),
             spec,
         ))],
-        lash_core::ExecutionBudgets::recommended(),
+        lash::ExecutionBudgets::recommended(),
         lash::runtime::TraceRuntime::new(Arc::new(lash::runtime::SystemClock)),
     )
 }
@@ -241,15 +239,14 @@ fn model_errors_are_nameable(
 
 fn cancellation_token_is_at_root(token: lash::CancellationToken, session: &lash::LashSession) {
     token.cancel();
-    let _: lash::CancelBuilder = session.cancel(lash::CancelTarget::Run(
-        lash_vocabulary::identity::RunId::parse("run").unwrap(),
-    ));
+    let _: lash::CancelBuilder =
+        session.cancel(lash::CancelTarget::Run(lash::RunId::parse("run").unwrap()));
     let _ = lash::CancelReceipt::Withdrawn {
-        run: lash_vocabulary::identity::RunId::parse("turn").unwrap(),
+        run: lash::RunId::parse("turn").unwrap(),
         input: Some("input".into()),
     };
     let _ = lash::CancelReceipt::Cancelled {
-        run: lash_vocabulary::identity::RunId::parse("turn").unwrap(),
+        run: lash::RunId::parse("turn").unwrap(),
         receipt: Box::new(lash::TurnCancelReceipt {
             outcome: lash::TurnCancelOutcome::UnknownOrRevoked,
         }),
@@ -426,12 +423,12 @@ fn telemetry_types_are_nameable(
 }
 
 fn typed_host_run_surface(
-    run: lash_vocabulary::identity::RunId,
+    run: lash::RunId,
     handle: lash::RunHandle<String, String>,
     error: lash::admin::PluginTaskResultError<String>,
-    page: lash::ChangePage<lash::SessionFault, Option<lash_vocabulary::identity::SessionId>>,
+    page: lash::ChangePage<lash::SessionFault, Option<lash::SessionId>>,
 ) {
-    let _: &lash_vocabulary::identity::RunId = handle.run();
+    let _: &lash::RunId = handle.run();
     let _ = (run, error, page.next, page.changes);
 }
 
@@ -439,9 +436,9 @@ fn runtime_host_strings_are_validated_before_binding(
     core: &lash::LashCore,
     session: &str,
     input: &str,
-) -> Result<(), lash_vocabulary::identity::BlankIdentity> {
-    let _builder = core.session(lash_vocabulary::identity::SessionId::parse(session)?);
-    let input = lash_vocabulary::identity::TurnId::try_from(input.to_owned())?;
+) -> Result<(), lash::BlankIdentity> {
+    let _builder = core.session(lash::SessionId::parse(session)?);
+    let input = lash::TurnId::try_from(input.to_owned())?;
     let _batch_input = lash::BatchInput::new(lash::TurnInput::text("host input")).id(input);
     Ok(())
 }

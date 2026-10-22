@@ -102,6 +102,8 @@ impl LibraryError {
 pub struct HelperRelease {
     pub content: LinkedContent,
     pub functions: FunctionRegistry,
+    /// Display sidecars keyed by exact Package identity, outside executable content.
+    pub labels: BTreeMap<PackageId, String>,
 }
 
 impl HelperRelease {
@@ -198,6 +200,23 @@ pub fn helper_release() -> Result<Arc<HelperRelease>, LibraryError> {
         }
         content.documents.insert(document_id, document);
         content.links.insert(link_id, link);
-        Ok(Arc::new(HelperRelease { content, functions }))
+        let authored: BTreeMap<PackagePath, serde_json::Value> = serde_json::from_str(
+            include_str!(concat!(env!("OUT_DIR"), "/helpers.labels.json")),
+        )
+        .map_err(LibraryError::new)?;
+        let labels = content
+            .packages
+            .iter()
+            .filter_map(|(id, package)| {
+                authored
+                    .get(&package.path)
+                    .map(|labels| (*id, labels.to_string()))
+            })
+            .collect();
+        Ok(Arc::new(HelperRelease {
+            content,
+            functions,
+            labels,
+        }))
     })
 }

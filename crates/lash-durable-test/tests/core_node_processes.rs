@@ -13,6 +13,9 @@
 // Test code: the PostgreSQL leg reads its database URL from the environment.
 #![allow(clippy::disallowed_methods, clippy::expect_used, clippy::unwrap_used)]
 
+#[path = "support/operations.rs"]
+mod operations;
+
 use lash_protocol_types::{llm::types::StreamBlockEvent, llm::types::StreamBlockKind};
 
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -1119,8 +1122,6 @@ type Advance = fn(
 struct ScriptEngine {
     kind: &'static str,
     advance: Advance,
-    /// The tools whose effects its runs perform (P3).
-    performs: fn() -> Vec<lash_vocabulary::tool_contract::ToolDefinition>,
 }
 
 /// An engine that performs no tool's effect.
@@ -1162,12 +1163,35 @@ impl lash_execution_contracts::process::ProcessEngine for ScriptEngine {
         lash_execution_contracts::process::ProcessTraceClass::Internal
     }
 
-    async fn performed_effects(
+    async fn inspect_link(
+        &self,
+        _link: lash_vocabulary::LinkId,
+        _selector: &lash_execution_contracts::process::linking::ReachSelector,
+    ) -> Result<
+        lash_execution_contracts::process::linking::LinkInspection,
+        lash_execution_contracts::process::linking::EnginePortError,
+    > {
+        Err(
+            lash_execution_contracts::process::linking::EnginePortError::Unsupported {
+                operation: "this scripted engine has no executable document".into(),
+            },
+        )
+    }
+    async fn inspect_start(
         &self,
         _payload: &serde_json::Value,
-    ) -> Result<lash_execution_contracts::process::PerformedEffects, lash_core::ProcessEnvRefusal>
-    {
-        Ok(lash_core_execution::testing::performs(&(self.performs)()))
+    ) -> Result<
+        lash_execution_contracts::process::linking::LinkInspection,
+        lash_execution_contracts::process::linking::EnginePortError,
+    > {
+        Err(
+            lash_execution_contracts::process::linking::EnginePortError::Unsupported {
+                operation: "this scripted engine has no executable document".into(),
+            },
+        )
+    }
+    fn capabilities(&self) -> lash_vocabulary::claims::NodeRequirements {
+        Default::default()
     }
 
     async fn check_args(
@@ -1429,14 +1453,20 @@ fn environment_of(
         lash::process::ProcessEnv::builder(lash::MaxToolCalls::new(16)),
         |builder, key| builder.component(*key, &()),
     );
-    tools
-        .iter()
-        .fold(builder, |builder, (component, tool)| {
-            builder.link_tool(
-                component.tool_provider(lash::tool_provider_key!("tools")),
-                tool,
-            )
-        })
+    let mut execution = lash_core_store::tool_surface::ExecutionEnvironment::empty(
+        lash_vocabulary::claims::RegistryKind::Process,
+    );
+    for (component, tool) in &tools {
+        let one = operations::environment(
+            component.tool_provider(lash::tool_provider_key!("tools")),
+            std::slice::from_ref(tool),
+        );
+        execution.roots.extend(one.roots);
+        execution.uses.extend(one.uses);
+        execution.requirements.extend(&one.requirements);
+    }
+    builder
+        .execution(execution)
         .build()
         .expect("the environment builds")
 }
@@ -1634,9 +1664,26 @@ async fn start_under(
         lash_execution_contracts::process::ProcessStartRequest,
     ) -> lash_execution_contracts::process::ProcessStartRequest,
 ) -> lash_vocabulary::identity::ProcessId {
+    let pin = lash_core::HostArtifactPin::mint();
+    let catalog = core.host_artifacts().process_catalog(env).unwrap();
+    let definitions: Vec<_> = catalog
+        .entries()
+        .iter()
+        .filter_map(|entry| {
+            let definition = lash_vocabulary::ToolDefinition {
+                manifest: entry.manifest.clone(),
+                contract: (*entry.contract).clone(),
+            };
+            env.execution()
+                .roots
+                .contains(&operations::use_for(&definition).link)
+                .then_some(definition)
+        })
+        .collect();
+    operations::retain(core.backend(), &pin, &definitions).await;
     let env_ref = core
         .host_artifacts()
-        .publish_process_env(&lash_core::HostArtifactPin::mint(), env)
+        .publish_process_env(&pin, env)
         .await
         .expect("the environment is published");
     let settings = core
@@ -1700,11 +1747,9 @@ fn tool_engine_advance(
             lash_execution_contracts::process::EngineAction::Steps {
                 steps: vec![lash_execution_contracts::process::StepRequest::Tool {
                     step: lash_execution_contracts::process::StepName("write".to_owned()),
-                    effect: lash_core_execution::testing::effect_of(&write_definition()),
-                    contract: write_definition().contract_id(),
+                    use_: operations::use_for(&write_definition()),
                     input: serde_json::json!({ "x": x }),
                     site: None,
-                    matched: None,
                 }],
                 wake: None,
             }
@@ -1730,7 +1775,6 @@ async fn host_engine_step_runs_its_catalog_tool_once(tier: Tier) {
         vec![Arc::new(ScriptEngine {
             kind: TOOL_ENGINE,
             advance: tool_engine_advance,
-            performs: writes,
         })],
         |builder| builder.process_component(write_component(&world), WRITE_COMPONENT),
     )
@@ -1792,7 +1836,6 @@ async fn a_host_starts_preparation_is_held_by_its_own_start(tier: Tier) {
         vec![Arc::new(ScriptEngine {
             kind: HOLD_ENGINE,
             advance: holding_engine_advance,
-            performs: no_tools,
         })],
         |builder| builder,
     )
@@ -1867,16 +1910,11 @@ on_every_tier!(a_host_starts_preparation_is_held_by_its_own_start);
 /// `worker()`: two sleeps, then its answer.
 const WORKER: &str = r#"kernel 1
 numbers float
-entry worker() -> Any
-
-fn worker() {
-  do sleep 5
-  do sleep 7
-  return "done"
-}
-
+import 0 operation typescript.sleep(milliseconds: Int) -> Null
 main {
-  finish null
+  do perform 0(5) as Null then yield
+  do perform 0(7) as Null then yield
+  return "done"
 }
 "#;
 
@@ -1897,22 +1935,22 @@ fn rlm_core(backend: &lash::Backend) -> lash::LashCoreBuilder {
     )
 }
 
-/// Publish the worker document under a host pin, and answer the start
-/// payload of its `worker` entry.
-async fn worker_payload(backend: &lash::Backend) -> serde_json::Value {
-    kernel_process::payload(backend, WORKER, "worker").await
-}
-
 /// A kernel process started through the core's process API runs on the
 /// core's node: its machine runs only in its `kernel_run` engine steps, from one
 /// committed snapshot to the next across its sleeps, to its terminal.
 async fn lash_vm_process_runs_to_its_terminal(tier: Tier) {
     let deployment = deploy_with(tier, Vec::new(), rlm_core).await;
-    let payload = worker_payload(&deployment.backend).await;
-    let process = start(
+    let env = lash::process::ProcessEnv::builder(lash::MaxToolCalls::new(16))
+        .component(lash::vm::KERNEL_SERVICES_CONFIG, &())
+        .build()
+        .unwrap();
+    let (payload, env) = kernel_process::publish(&deployment.core, WORKER, &env).await;
+    let process = start_under(
         &deployment.core,
+        &env,
         lash_vm_runtime::LASH_VM_ENGINE_KIND,
         payload,
+        |request| request,
     )
     .await;
     let output = ended(&deployment.core, &process).await;
@@ -2027,7 +2065,6 @@ fn isolated_engine() -> Arc<dyn lash_execution_contracts::process::ProcessEngine
     Arc::new(ScriptEngine {
         kind: ISOLATED_ENGINE,
         advance: isolated_engine_advance,
-        performs: no_tools,
     })
 }
 
@@ -2315,7 +2352,6 @@ async fn process_outcome_projections_are_readable_on_sqlite_memory() {
         vec![Arc::new(ScriptEngine {
             kind: KIND,
             advance,
-            performs: no_tools,
         })],
         |builder| builder,
     )

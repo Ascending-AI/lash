@@ -102,6 +102,7 @@ fn element(element: u64) -> EffectId {
 
 fn effect(wait: u64, identity: EffectId) -> Issued {
     Issued::Effect {
+        origin: identity.position().site().clone(),
         wait: lash_vocabulary::sites::testkit::wait_id(wait),
         admission: admitted(identity),
         use_: operation_use(),

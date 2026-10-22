@@ -22,6 +22,7 @@ fn tick(
     let wait = lash_execution_contracts::process::WaitState {
         since_ms: i64::try_from(n).expect("fixture time"),
         kind: lash_execution_contracts::process::WaitKind::Call {
+            resume_at_ms: None,
             call_id: lash_core::ToolCallId::fixture(&format!("feed-call-{n}")),
             tool_id: lash_vocabulary::tool_contract::ToolId::from("feed-fixture"),
         },

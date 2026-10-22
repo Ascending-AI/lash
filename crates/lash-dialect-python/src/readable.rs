@@ -101,8 +101,14 @@ impl regions::Regions for Printing<'_> {
             source_map: false,
             ..self.options
         };
-        let (printed, written) =
-            print_regions(self.document, self.captions, options, &regions).ok()?;
+        let result = print_regions(
+            self.document,
+            self.environment.library,
+            self.captions,
+            options,
+            &regions,
+        );
+        let (printed, written) = result.ok()?;
         Some(regions::Whole {
             source: printed.source,
             functions: written,

@@ -11,6 +11,7 @@ enum UnitSource<'a> {
 /// library body it reaches.
 pub(super) fn compile_document(
     document: &Document,
+    observed: &Document,
     library: &PreparedLibrary,
 ) -> Result<DocumentCode, Missing> {
     let prepared = &library.0;
@@ -132,28 +133,21 @@ pub(super) fn compile_document(
     let declared = std::mem::take(&mut compiler.declared);
     let mut tables = compiler.finish();
     let lash_kernel_doc::Ordinals {
-        sites: mut ordinals,
+        sites: ordinals,
         actions: action_ordinals,
         conditions: condition_sites,
-    } = document.ordinals();
-    for function in native_starts.keys() {
-        for site in [
-            Site::new(Unit::Library(*function), []),
-            Site::new(Unit::Library(*function), [0]),
-        ] {
-            let ordinal = u32::try_from(ordinals.len() + 1).expect("compiled sites fit u32");
-            ordinals.insert(site, ordinal);
-        }
-    }
+    } = observed.ordinals();
     let block_ordinals = tables
         .blocks
         .iter()
         .map(|block| {
             for (index, stmt) in block.stmts.iter().enumerate() {
-                tables.stmts[(stmt.0 as usize) - prepared.tables.stmts.len()].ordinal =
-                    NonZeroU32::new(ordinals[&block.site.child(index as u32)]);
+                tables.stmts[(stmt.0 as usize) - prepared.tables.stmts.len()].ordinal = ordinals
+                    .get(&block.site.child(index as u32))
+                    .copied()
+                    .and_then(NonZeroU32::new);
             }
-            ordinals[&block.site]
+            ordinals.get(&block.site).copied()
         })
         .collect();
     let condition_ordinals: BTreeMap<_, _> = condition_sites

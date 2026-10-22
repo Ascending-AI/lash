@@ -137,7 +137,7 @@ pub trait RunHost: Send + Sync {
     /// A provisional site entry: each task's last since the run's previous
     /// frame, taken from the next one. It neither yields a task nor admits
     /// work.
-    fn enter_site(&self, _at: &lash_vocabulary::sites::EffectId) {}
+    fn enter_site(&self, _at: &lash_vocabulary::sites::EffectLocation) {}
 
     /// The time, read once for each `clock` call the run makes.
 

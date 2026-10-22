@@ -101,7 +101,7 @@ impl lash_core::ProcessEnvPolicy for CountingPolicy {
             }
         };
         Ok(lash_core::ProcessStartChoice {
-            fits: Default::default(),
+            initial_resolutions: Vec::new(),
             env: lash_core::ProcessEnvChoice::New(limited(limit)),
             engine_settings: cx.engine_defaults()?.map(stated_settings),
         })
@@ -412,16 +412,6 @@ async fn a_start_policy_runs_once_per_committed_declaration() {
     let clock = SimClock::new();
     let policy = Counting::new(Stated::First);
     let (deployment, database) = Deployment::new(&clock, &policy, Some(bounds)).await;
-    let packages = deployment
-        .first
-        .host_artifacts()
-        .cell_packages()
-        .await
-        .expect("the closure's package snapshot");
-    let committed = limited(5)
-        .with_package_roots(lash::dialect::ExportView::namespace_roots(&packages.view()))
-        .stable_ref()
-        .unwrap();
     let script = Script::new();
     script.cut_on("a", START_OUTCOME, 1, Fault::CommitThenAbort);
     let children = deployment
@@ -446,10 +436,16 @@ async fn a_start_policy_runs_once_per_committed_declaration() {
     let declared = stated_settings(defaults(&deployment.first));
     assert_ne!(declared, defaults(&deployment.first), "A's defaults differ");
     assert_ne!(declared, defaults(&deployment.later), "B's defaults differ");
+    let env = lash_execution_contracts::process::load_process_env(
+        deployment.stores.process_env_store().as_ref(),
+        child.env_ref().unwrap(),
+    )
+    .await
+    .unwrap();
     assert_eq!(
-        child.env_ref(),
-        Some(&committed),
-        "the declared environment"
+        env.max_tool_calls(),
+        lash::MaxToolCalls::new(5),
+        "the declared tool-call limit survives the changed policy"
     );
     assert_eq!(
         child.engine_settings(),

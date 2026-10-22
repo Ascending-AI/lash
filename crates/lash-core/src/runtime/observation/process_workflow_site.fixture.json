@@ -4,6 +4,11 @@
   "label": "fn effect#1 in main",
   "last_settled": 9,
   "occurrences": 2,
+  "origin": {
+    "unit": {
+      "function": "effect"
+    }
+  },
   "state": {
     "state": "running"
   }

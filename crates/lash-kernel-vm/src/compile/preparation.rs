@@ -200,7 +200,7 @@ impl Admission {
         } else {
             library
         };
-        let own = Arc::new(compile_document(&reached, library)?);
+        let own = Arc::new(compile_document(&reached, document, library)?);
         Ok(Arc::new(Executable {
             code_base: library.0.tables.codes.len(),
             block_base: library.0.tables.blocks.len(),

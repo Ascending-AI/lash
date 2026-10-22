@@ -65,10 +65,7 @@ impl Lowerer<'_> {
         else {
             unreachable!("a source body is a fresh closure");
         };
-        let convention = source_body
-            .presentation
-            .take()
-            .map(|start| start.convention);
+        source_body.presentation = None;
         let written = self.written(function);
         let this = self.fresh("this");
         let args = self.fresh("args");
@@ -95,15 +92,6 @@ impl Lowerer<'_> {
         self.written = Some(written);
         let start = self.callable_presentation(function);
         let closure = self.emit_closure(params, block, start);
-        if let Some(Stmt::Let {
-            value: Rhs::Expr(Expr::Closure(closure)),
-            ..
-        }) = self.buf.last_stmt_mut()
-            && let Some(start) = &mut closure.presentation
-            && let Some(convention) = convention
-        {
-            start.convention = convention;
-        }
         Ok(self.function_token(function, name, closure))
     }
 

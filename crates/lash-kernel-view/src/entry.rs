@@ -59,10 +59,28 @@ pub(crate) fn entry(
     view: &WorkflowView,
 ) -> EntryView {
     let (name, params, result) = match unit {
-        Unit::Library(id) => document.functions.get(id).map(|f| (
-            document.exports.iter().find_map(|(name, e)| matches!(e, lash_kernel_doc::Export::Function(export) if export.function == *id).then(|| name.clone())),
-            f.signature.params.clone(), f.signature.result.clone()
-        )).unwrap_or((None, Vec::new(), Type::Any)),
+        Unit::Library(id) => document
+            .functions
+            .get(id)
+            .map(|definition| {
+                let exported = document
+                    .exports
+                    .iter()
+                    .find_map(|(name, export)| match export {
+                        lash_kernel_doc::Export::Function(function) if function.function == *id => {
+                            Some((name, function))
+                        }
+                        _ => None,
+                    });
+                let signature =
+                    exported.map_or(&definition.signature, |(_, function)| &function.signature);
+                (
+                    exported.map(|(name, _)| name.clone()),
+                    signature.params.clone(),
+                    signature.result.clone(),
+                )
+            })
+            .unwrap_or((None, Vec::new(), Type::Any)),
         Unit::Main | Unit::Function(_) => (None, Vec::new(), Type::Any),
     };
     let body = Site::new(unit.clone(), Vec::new());

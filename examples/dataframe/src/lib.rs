@@ -15,7 +15,7 @@ pub async fn publish_library(
     backend: &lash::Backend,
     pin: &lash::process::HostArtifactPin,
     workers: &lash::vm::WorkerService,
-    provider: Arc<dyn lash::plugins::ProcessDocumentProvider>,
+    publisher: &ScopedPackagePublisher,
     namespace: &RecordedPackages,
     context: PublicationContext,
 ) -> Result<(Package, PublicationRecord), String> {
@@ -76,12 +76,6 @@ pub async fn publish_library(
         })
         .collect::<Result<_, String>>()?;
     let package = Package { path, members };
-    let publisher = ScopedPackagePublisher::new(
-        context.clone(),
-        namespace.snapshot.clone(),
-        provider,
-        backend.package_store(),
-    );
     let publication = publisher
         .publish(
             &claim,

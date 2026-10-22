@@ -8,10 +8,11 @@ use std::collections::BTreeMap;
 pub(crate) struct Operators {
     functions: BTreeMap<FunctionId, FunctionName>,
     imports: BTreeMap<ImportSlot, Import>,
+    source_names: BTreeMap<ImportSlot, String>,
     candidates: BTreeMap<&'static str, Vec<FunctionId>>,
 }
 impl Operators {
-    pub(crate) fn new(document: &k::Document) -> Self {
+    pub(crate) fn new(document: &k::Document, library: &dyn lash_kernel_dialect::Library) -> Self {
         let functions = document.function_names();
         let mut candidates: BTreeMap<&'static str, Vec<FunctionId>> = BTreeMap::new();
         for (id, name) in &functions {
@@ -20,6 +21,15 @@ impl Operators {
             }
         }
         Self {
+            source_names: document
+                .imports
+                .iter()
+                .filter_map(|(slot, import)| {
+                    library
+                        .imported(&import.name)
+                        .map(|name| (*slot, name.to_string()))
+                })
+                .collect(),
             functions,
             imports: document.imports.clone(),
             candidates,
@@ -94,6 +104,8 @@ pub(crate) enum Authored {
     Method(String),
     /// `target[start:stop:step]`, an absent bound left empty.
     Slice,
+    /// `target[index]`, paired with the indexed-read lowering helper.
+    Index,
     /// `type(value).__name__`.
     TypeName,
 }
@@ -178,6 +190,7 @@ impl Operators {
             return Some(Authored::Builtin(name));
         }
         match label {
+            "py.getitem" => (args.len() == 2).then_some(Authored::Index),
             "py.slice" => (args.len() == 4).then_some(Authored::Slice),
             "py.type" => (args.len() == 1).then_some(Authored::TypeName),
             _ => {
@@ -207,10 +220,12 @@ impl Reference for FunctionId {
 }
 impl Reference for ImportSlot {
     fn label(&self, operators: &Operators) -> Option<String> {
-        operators
-            .imports
-            .get(self)
-            .map(|import| import.name.to_string())
+        operators.source_names.get(self).cloned().or_else(|| {
+            operators
+                .imports
+                .get(self)
+                .map(|import| import.name.to_string())
+        })
     }
 }
 impl Reference for k::FunctionTarget {

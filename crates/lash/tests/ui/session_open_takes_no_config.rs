@@ -5,7 +5,7 @@
 
 fn open_takes_no_llm_profile(core: lash::LashCore, model: lash::LlmProfileKey) {
     let _ = core
-        .session(lash_vocabulary::identity::SessionId::parse("stated-at-open").expect("nonblank host identity"))
+        .session(lash::SessionId::parse("stated-at-open").expect("nonblank host identity"))
         .session_spec(lash::SessionSpec::new(
             model,
             lash::TurnBudget::Unbounded,
@@ -14,11 +14,11 @@ fn open_takes_no_llm_profile(core: lash::LashCore, model: lash::LlmProfileKey) {
 }
 
 fn open_takes_no_parent(core: lash::LashCore) {
-    let _ = core.session(lash_vocabulary::identity::SessionId::parse("stated-at-open").expect("nonblank host identity")).parent("parent").open();
+    let _ = core.session(lash::SessionId::parse("stated-at-open").expect("nonblank host identity")).parent("parent").open();
 }
 
 fn open_takes_no_plugin_options(core: lash::LashCore, options: lash::plugins::PluginOptions) {
-    let _ = core.session(lash_vocabulary::identity::SessionId::parse("stated-at-open").expect("nonblank host identity")).plugin_options(options).open();
+    let _ = core.session(lash::SessionId::parse("stated-at-open").expect("nonblank host identity")).plugin_options(options).open();
 }
 
 fn main() {}

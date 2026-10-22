@@ -99,7 +99,13 @@ impl WorkflowView {
             .iter()
             .map(|observation| {
                 let position = observation.identity.position();
-                if matches!(position.site().unit, Unit::Library(_)) {
+                if self
+                    .execution_sites
+                    .iter()
+                    .any(|site| site.site == position)
+                {
+                    Ok(position)
+                } else if matches!(position.site().unit, Unit::Library(_)) {
                     if !self
                         .execution_sites
                         .iter()

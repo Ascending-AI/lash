@@ -123,7 +123,7 @@ async fn sleep_records_the_admitted_absolute_deadline_for_redrive() {
                 PinnedKey::of(&lash_durable::domain::WaitId([3; 16])),
                 DurableInstant(admitted),
             );
-            let arguments = serde_json::json!({"milliseconds": milliseconds});
+            let arguments = serde_json::json!(milliseconds);
             let ToolAttemptOutcome::Pending(pending) = services
                 .execute(ToolCall::new(
                     &definition.manifest,

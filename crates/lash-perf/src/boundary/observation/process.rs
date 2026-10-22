@@ -467,6 +467,7 @@ async fn append_facts(
         let wait = WaitState {
             since_ms: n as i64,
             kind: WaitKind::Call {
+                resume_at_ms: None,
                 call_id: ToolCallId::fixture(&format!("reconcile-{n}")),
                 tool_id: ToolId::from("reconcile-workload"),
             },

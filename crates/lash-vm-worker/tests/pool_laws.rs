@@ -1024,6 +1024,9 @@ fn an_observed_run_names_its_last_entered_site_on_its_next_frame() {
             wire::decode::<wire::Sites>(PayloadKind::Sites, payload)
                 .expect("sites")
                 .entered
+                .into_iter()
+                .map(|location| location.at)
+                .collect::<Vec<_>>()
         })
         .collect();
     let [entered] = &entered[..] else {

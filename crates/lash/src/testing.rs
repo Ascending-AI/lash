@@ -156,6 +156,11 @@ pub fn node_serves(core: &crate::LashCore) -> Vec<String> {
     serves
 }
 
+/// The exact capabilities the core's serving registrations advertise to the store.
+pub fn node_capabilities(core: &crate::LashCore) -> lash_core::durable_port::NodeCapabilities {
+    core.node_offers()
+}
+
 /// Decode a command's recorded outcome while explicitly settling fixture setup.
 /// These conversions are test support; hosts can decode their own settlement.
 pub trait AdminFixtureOutcome: Sized {

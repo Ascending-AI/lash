@@ -33,6 +33,55 @@ impl Dialect {
         }
     }
 }
+/// Immutable ordinary service declarations. Their identity is independent of routes and host bounds.
+pub static DIALECT_SERVICE_PACKAGES: std::sync::LazyLock<[Package; 2]> =
+    std::sync::LazyLock::new(|| {
+        [Dialect::TypeScript, Dialect::Python].map(|dialect| Package {
+            path: PackagePath::new(Segment::new(dialect.package()).expect("canonical")),
+            members: ["clock", "random", "sleep"]
+                .into_iter()
+                .map(|member| {
+                    (
+                        Segment::new(member).expect("canonical"),
+                        Member {
+                            visibility: Visibility::Public,
+                            kind: MemberKind::Operation(OperationOffer {
+                                requirement: lash_kernel_dialect::authoring::service_requirement(
+                                    &lash_kernel_dialect::service_name(dialect.package(), member),
+                                )
+                                .expect("service requirement"),
+                                intents: BTreeSet::new(),
+                                controls: TurnControls::none(),
+                                mode: if member == "sleep" {
+                                    OperationMode::Waited
+                                } else {
+                                    OperationMode::Read
+                                },
+                            }),
+                        },
+                    )
+                })
+                .collect(),
+        })
+    });
+/// Well-known timer symbols for display. Consumers compare the exact pinned Package and member.
+pub static TIMER_OPERATIONS: std::sync::LazyLock<[(PackageId, Segment); 2]> =
+    std::sync::LazyLock::new(|| {
+        DIALECT_SERVICE_PACKAGES.each_ref().map(|package| {
+            (
+                package.identity(),
+                Segment::new("sleep").expect("canonical"),
+            )
+        })
+    });
+impl Dialect {
+    fn declaration(self) -> &'static Package {
+        &DIALECT_SERVICE_PACKAGES[match self {
+            Self::TypeScript => 0,
+            Self::Python => 1,
+        }]
+    }
+}
 /// Host-selected bounds and randomness. Reads use the activation's injected
 /// clock, so no session object or global wall clock is needed by a process.
 pub struct Services {
@@ -49,10 +98,10 @@ impl Services {
         random: Arc<dyn Fn() -> u64 + Send + Sync>,
     ) -> Result<Arc<Self>, PluginError> {
         let mut definitions = BTreeMap::new();
-        for member in ["clock", "random", "sleep"] {
+        for member in dialect.declaration().members.keys().map(Segment::as_str) {
             let name = format!("{}.{member}", dialect.package());
             let input = if member == "sleep" {
-                serde_json::json!({"type":"object","properties":{"milliseconds":{"type":"integer","minimum":0}},"required":["milliseconds"],"additionalProperties":false})
+                serde_json::json!({"type":"integer","minimum":0})
             } else {
                 serde_json::json!({"type":"object","properties":{},"additionalProperties":false})
             };
@@ -73,7 +122,13 @@ impl Services {
                     )
                     .with_execution(execution)
                     .with_execution_policy(if member == "sleep" {
-                        ExecutionPolicy::Once
+                        // Timer admission only records a deadline from the original
+                        // admitted instant. Retrying an uncommitted admission is safe.
+                        ExecutionPolicy::repeatable(
+                            std::num::NonZeroU32::new(3).expect("nonzero timer attempts"),
+                            0,
+                            0,
+                        )
                     } else {
                         ExecutionPolicy::Read
                     });
@@ -105,37 +160,11 @@ impl PackageProvider for Services {
         _config: &OwnerConfigView,
         context: &PublicationContext,
     ) -> Result<Vec<PackageContribution>, PluginError> {
-        let path = PackagePath::new(Segment::new(self.dialect.package()).expect("canonical"));
-        let mut members = BTreeMap::new();
+        let package = self.dialect.declaration().clone();
         let mut routes = Vec::new();
-        for (name, definition) in &self.definitions {
-            let member = name.rsplit('.').next().expect("qualified");
-            let mode = if member == "sleep" {
-                OperationMode::Waited
-            } else {
-                OperationMode::Read
-            };
-            let offer = OperationOffer {
-                requirement: lash_kernel_dialect::authoring::service_requirement(
-                    &lash_kernel_dialect::service_name(self.dialect.package(), member),
-                )
-                .expect("service requirement"),
-                intents: BTreeSet::new(),
-                controls: TurnControls::none(),
-                mode,
-            };
-            members.insert(
-                Segment::new(member).expect("canonical"),
-                Member {
-                    visibility: Visibility::Public,
-                    kind: MemberKind::Operation(offer),
-                },
-            );
+        for definition in self.definitions.values() {
             routes.push(AdvertisedRoute {
-                operation: QualifiedOperation {
-                    package: path.clone(),
-                    name: Segment::new(member).expect("canonical"),
-                },
+                operation: definition.manifest.operation.clone(),
                 definition: definition.clone(),
                 route: OperationRoute {
                     tool: definition.manifest.id.clone(),
@@ -147,7 +176,7 @@ impl PackageProvider for Services {
                 },
             });
         }
-        let advertisement = PackageAdvertisement::Enumerated(Package { path, members });
+        let advertisement = PackageAdvertisement::Enumerated(package);
         let publication = operation_publication(context, &advertisement)
             .map_err(|error| PluginError::Package(Box::new(error)))?;
         Ok(vec![PackageContribution {
@@ -159,7 +188,7 @@ impl PackageProvider for Services {
     async fn hold(
         &self,
         _claim: &lash_core_store::artifact_referrer::ReferrerClaim,
-        _advertisement: &PackageAdvertisement,
+        _advertisements: &[&PackageAdvertisement],
     ) -> Result<(), EnginePortError> {
         Ok(())
     }
@@ -197,11 +226,7 @@ impl ToolProvider for Services {
         if call.name() != format!("{}.sleep", self.dialect.package()) {
             return failure("a read operation requires a reader");
         }
-        let Some(milliseconds) = call
-            .args
-            .get("milliseconds")
-            .and_then(serde_json::Value::as_u64)
-        else {
+        let Some(milliseconds) = call.args.as_u64() else {
             return failure("sleep takes a nonnegative integer number of milliseconds");
         };
         if let Err(error) = call.context.completion_key() {

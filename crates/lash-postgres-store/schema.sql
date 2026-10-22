@@ -919,6 +919,7 @@ CREATE TABLE IF NOT EXISTS lash_actors (
     next_due_ms BIGINT,
     formats TEXT NOT NULL,
     requires TEXT,
+    base_requires TEXT,
     state_revision BIGINT NOT NULL,
     mail_seq BIGINT NOT NULL,
     acked_seq BIGINT NOT NULL,

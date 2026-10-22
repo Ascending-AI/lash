@@ -74,6 +74,9 @@
 #[path = "support/matrix.rs"]
 mod matrix;
 
+#[path = "support/operations.rs"]
+mod operations;
+
 use matrix::MatrixTestExt as _;
 
 #[path = "support/dialect.rs"]
@@ -1705,11 +1708,9 @@ fn tool_step(
 ) -> lash_execution_contracts::process::StepRequest {
     lash_execution_contracts::process::StepRequest::Tool {
         step: lash_execution_contracts::process::StepName(step.to_owned()),
-        effect: lash_core_execution::testing::effect(&format!("tools.{tool}")),
-        contract: state_definition(tool).contract_id(),
+        use_: operations::use_for(&state_definition(tool)),
         input: serde_json::json!({ "label": label }),
         site: None,
-        matched: None,
     }
 }
 
@@ -1735,16 +1736,35 @@ impl lash_execution_contracts::process::ProcessEngine for StateEngine {
         lash_execution_contracts::process::ProcessTraceClass::Internal
     }
 
-    async fn performed_effects(
+    async fn inspect_link(
+        &self,
+        _link: lash_vocabulary::LinkId,
+        _selector: &lash_execution_contracts::process::linking::ReachSelector,
+    ) -> Result<
+        lash_execution_contracts::process::linking::LinkInspection,
+        lash_execution_contracts::process::linking::EnginePortError,
+    > {
+        Err(
+            lash_execution_contracts::process::linking::EnginePortError::Unsupported {
+                operation: "this scripted engine has no executable document".into(),
+            },
+        )
+    }
+    async fn inspect_start(
         &self,
         _payload: &serde_json::Value,
-    ) -> Result<lash_execution_contracts::process::PerformedEffects, lash_core::ProcessEnvRefusal>
-    {
-        // Its env links both tools; one-step runs perform the set alone.
-        Ok(lash_core_execution::testing::performs(&[
-            state_definition(STATE_SET),
-            state_definition(STATE_OBSERVE),
-        ]))
+    ) -> Result<
+        lash_execution_contracts::process::linking::LinkInspection,
+        lash_execution_contracts::process::linking::EnginePortError,
+    > {
+        Err(
+            lash_execution_contracts::process::linking::EnginePortError::Unsupported {
+                operation: "this scripted engine has no executable document".into(),
+            },
+        )
+    }
+    fn capabilities(&self) -> lash_vocabulary::claims::NodeRequirements {
+        Default::default()
     }
 
     async fn check_args(
@@ -1914,18 +1934,12 @@ impl lash_execution_contracts::process::ProcessEngine for StateEngine {
 /// The environment a host start states in these laws: the state
 /// component, its two tools linked.
 fn process_environment() -> lash_core::ProcessEnv {
-    [STATE_SET, STATE_OBSERVE]
-        .into_iter()
-        .fold(
-            lash_core::ProcessEnv::builder(lash_core::MaxToolCalls::new(16))
-                .component(STATE_COMPONENT, &()),
-            |builder, tool| {
-                builder.link_tool(
-                    STATE_COMPONENT.tool_provider(lash::tool_provider_key!("state")),
-                    &state_definition(tool),
-                )
-            },
-        )
+    lash_core::ProcessEnv::builder(lash_core::MaxToolCalls::new(16))
+        .component(STATE_COMPONENT, &())
+        .execution(operations::environment(
+            STATE_COMPONENT.tool_provider(lash::tool_provider_key!("state")),
+            &[state_definition(STATE_SET), state_definition(STATE_OBSERVE)],
+        ))
         .build()
         .expect("the process environment builds")
 }
@@ -2063,9 +2077,16 @@ impl Scenario for ProcessCrash {
         let _ = self.world.nodes.set(Arc::downgrade(nodes));
         // The host is outside the deployment under test: its start is uncut.
         let core = self.core();
+        let pin = lash_core::HostArtifactPin::mint();
+        operations::retain(
+            core.backend(),
+            &pin,
+            &[state_definition(STATE_SET), state_definition(STATE_OBSERVE)],
+        )
+        .await;
         let env_ref = core
             .host_artifacts()
-            .publish_process_env(&lash_core::HostArtifactPin::mint(), &process_environment())
+            .publish_process_env(&pin, &process_environment())
             .await
             .map_err(|error| format!("publish the environment: {error}"))?;
         let request = lash_execution_contracts::process::ProcessStartRequest::engine(

@@ -225,7 +225,6 @@ mod rlm_host_wrapping_inventory {
 mod codemode_inventory {
     use lash::dialect::Dialect as _;
     use lash::formats::KERNEL_DOCUMENT_SCHEMA_VERSION as _;
-    use lash::package::HeldPackages as _;
     use lash::process::KernelProcessDefinition as _;
     use lash::tools::LlmToolsPluginFactory as _;
     use lash::vm::DialectRefusal as _;

@@ -34,6 +34,8 @@
 
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
+#[path = "support/kernel_process.rs"]
+mod kernel_process;
 #[path = "support/matrix.rs"]
 mod matrix;
 #[path = "support/served.rs"]
@@ -58,37 +60,19 @@ use lash_protocol_types::sync::MutexExt as _;
 /// to each sleep and one to the return.
 const WORKER: &str = r#"kernel 1
 numbers float
-entry worker() -> Any
-
-fn worker() {
-  do sleep 5
-  do sleep 7
-  return "done"
-}
-
-main {
-  finish null
-}
+import 0 operation typescript.sleep(milliseconds: Int) -> Null
+main { do perform 0(5) as Null do perform 0(7) as Null return "done" }
 "#;
 
 /// `worker()`: a `sleep` and a call that sleeps, both inside the list
 /// it returns. Three `kernel_run` steps, as `WORKER`'s.
 const NESTED: &str = r#"kernel 1
 numbers float
-entry worker() -> Any
-
-fn inner(x) {
-  do sleep 7
-  return x
-}
-
-fn worker() {
-  let v = [1, sleep 5, call inner("b")]
-  return v
-}
-
+import 0 operation typescript.sleep(milliseconds: Int) -> Null
 main {
-  finish null
+  let inner = fn(x) { do perform 0(7) as Null return x }
+  let v = [1, perform 0(5) as Null, apply inner("b")]
+  return v
 }
 "#;
 
@@ -97,20 +81,11 @@ main {
 /// (`K-TASK-005`). Three `kernel_run` steps, as `WORKER`'s.
 const THEN_YIELD: &str = r#"kernel 1
 numbers float
-entry worker() -> Any
-
-fn inner(x) {
-  do sleep 7 then yield
-  return x
-}
-
-fn worker() {
-  let v = [1, sleep 5 then yield, call inner("b")]
-  return v
-}
-
+import 0 operation typescript.sleep(milliseconds: Int) -> Null
 main {
-  finish null
+  let inner = fn(x) { do perform 0(7) as Null then yield return x }
+  let v = [1, perform 0(5) as Null then yield, apply inner("b")]
+  return v
 }
 "#;
 
@@ -121,30 +96,19 @@ main {
 /// callee's (the condition standing `Called`) and one to the return.
 const WHILE_CONDITION: &str = r#"kernel 1
 numbers float
-entry worker() -> Any
-
-fn inner(x) {
-  do sleep 7
-  return x
-}
-
-fn worker() {
-  let n = true
-  while if(n, [sleep 5, call inner(true)][1], false) {
-    set n = false
-  }
-  return ["b", n]
-}
-
+import 0 operation typescript.sleep(milliseconds: Int) -> Null
 main {
-  finish null
+  let inner = fn(x) { do perform 0(7) as Null return x }
+  let n = true
+  while if(n, [perform 0(5) as Null, apply inner(true)][1], false) { set n = false }
+  return ["b", n]
 }
 "#;
 
 /// TypeScript source whose entry parks mid-iteration in a protocol loop
 /// over each cursor kind it has: a list, a map's and a set's tables, a
 /// text and a driver stepped through `next`. Six `kernel_run` steps.
-const TS_CURSORS: &str = r#"const worker = async () => {
+const TS_CURSORS: &str = r#"const worker = async (): Promise<string> => {
   const out = [];
   for (const x of [1, 2]) { if (x === 2) { await sleep(5); } out.push(x); }
   const m = new Map([["a", 3], ["b", 4]]);
@@ -162,7 +126,7 @@ const TS_CURSORS: &str = r#"const worker = async () => {
 /// `finally` sleeps.
 const PY_TUPLE_AND_CLEANUP: &str = r#"import asyncio
 
-async def worker():
+async def worker() -> str:
     async def child():
         try:
             await asyncio.sleep(100)
@@ -199,7 +163,7 @@ struct KernelSteps {
 
 impl KernelSteps {
     fn new(source: &'static str) -> Self {
-        Self::imported(source, None, 3)
+        Self::imported(source, None, 5)
     }
 
     fn imported(
@@ -272,74 +236,49 @@ impl KernelSteps {
 
     async fn start_process(&self) -> Result<lash_vocabulary::identity::ProcessId, String> {
         let core = self.core();
-        let document = match self.language {
-            None => lash::workflow::document::parse_document(self.source)
-                .map_err(|error| format!("the document parses: {error}"))?,
+        let env = lash::process::ProcessEnv::builder(lash::MaxToolCalls::new(16))
+            .component(lash::vm::KERNEL_SERVICES_CONFIG, &())
+            .build()
+            .unwrap();
+        let (payload, env) = match self.language {
+            None => kernel_process::publish(&core, self.source, &env).await,
             Some(language) => {
-                let env = lash::process::ProcessEnv::builder(lash::MaxToolCalls::new(4))
-                    .build()
-                    .map_err(|refusal| format!("the env builds: {refusal}"))?;
+                let pin = lash_core::HostArtifactPin::mint();
+                let (packages, request) = kernel_process::namespace(&core, &pin, &env).await;
                 let imported = core
                     .host_artifacts()
-                    .import_workflow(
-                        language,
-                        self.source,
-                        &env,
-                        core.host_artifacts()
-                            .cell_packages()
-                            .await
-                            .expect("the package gate answers")
-                            .declare_all(),
-                        None,
-                    )
+                    .import_workflow(language, self.source, &request, None)
                     .await
                     .map_err(|error| format!("import the workflow: {error}"))?;
                 let lash::workflow::WorkflowImport::Imported { document, .. } = imported else {
                     return Err(format!("the workflow imports: {imported:?}"));
                 };
-                document
-                    .to_document()
-                    .map_err(|error| format!("the imported document reads: {error}"))?
+                let start = core
+                    .host_artifacts()
+                    .publish_workflow(
+                        &pin,
+                        &document,
+                        &lash::package::StartSelector::Export(lash::workflow::document::Name::new(
+                            "worker",
+                        )),
+                        &request,
+                        None,
+                    )
+                    .await
+                    .map_err(|error| format!("publish the workflow: {error}"))?;
+                let env = core
+                    .host_artifacts()
+                    .link_process_env(&env, &start, &packages, &Default::default())
+                    .await
+                    .map_err(|error| format!("link the workflow: {error}"))?;
+                let payload = serde_json::to_value(lash_vm_runtime::KernelProcessInput {
+                    code: lash_vm_runtime::process::InlineRequest::Linked { start },
+                    args: Default::default(),
+                })
+                .unwrap();
+                (payload, env)
             }
         };
-        let identity = lash_vm_runtime::KernelDocuments::new(self.backend().module_artifacts())
-            .publish(
-                &lash_core::ReferrerClaim::unguarded(lash_core::ArtifactReferrer::HostPin(
-                    lash_core::HostArtifactPin::mint(),
-                ))
-                .expect("a host pin is unguarded"),
-                &lash_kernel_doc::IdentifiedDocument::new(document.clone()),
-                &lash_vm_runtime::lash_packages()
-                    .map(|packages| std::sync::Arc::clone(packages.functions()))
-                    .ok()
-                    .and_then(|functions| {
-                        lash::workflow::document::CheckedDeclarations::required(
-                            &document,
-                            functions.as_ref(),
-                        )
-                        .ok()
-                    })
-                    .ok_or("the document's helpers are shipped")?,
-            )
-            .await
-            .map_err(|error| format!("publish the document: {error}"))?;
-        let payload = serde_json::to_value(lash_vm_runtime::KernelProcessInput {
-            declared_packages: lash_vm_runtime::lash_packages()
-                .expect("fixture packages")
-                .surface()
-                .selection(),
-            packages: lash_vm_runtime::lash_packages()
-                .expect("lash's packages")
-                .digest(),
-            document: identity,
-            functions: document.manifest.functions.keys().copied().collect(),
-            entry: lash::workflow::document::Name::new("worker"),
-            args: serde_json::Map::new(),
-        })
-        .expect("the input encodes");
-        let env = lash::process::ProcessEnv::builder(lash::MaxToolCalls::new(4))
-            .build()
-            .map_err(|refusal| format!("the env builds: {refusal}"))?;
         let env_ref = core
             .host_artifacts()
             .publish_process_env(&lash_core::HostArtifactPin::mint(), &env)
@@ -675,7 +614,7 @@ async fn a_typescript_run_parked_in_each_loop_cursor_resumes_exactly_across_a_cu
     imported_steps_resume_exactly(
         TS_CURSORS,
         lash::workflow::document::SourceLanguage::TypeScript,
-        6,
+        11,
         "1,2,3,4,5,6,x,y,7,8",
     )
     .await;
@@ -690,7 +629,7 @@ async fn a_python_run_parked_in_a_tuple_loop_and_its_root_cleanup_resumes_exactl
     imported_steps_resume_exactly(
         PY_TUPLE_AND_CLEANUP,
         lash::workflow::document::SourceLanguage::Python,
-        4,
+        8,
         "b2",
     )
     .await;
@@ -698,3 +637,6 @@ async fn a_python_run_parked_in_a_tuple_loop_and_its_root_cleanup_resumes_exactl
 
 #[path = "kernel_step_crash_laws/paged_carry.rs"]
 mod paged_carry;
+
+#[path = "kernel_step_crash_laws/carried_callback.rs"]
+mod carried_callback;

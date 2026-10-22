@@ -63,10 +63,10 @@ pub(super) fn operation(use_: &OperationUse) -> EffectName {
         .effect_name()
     })
 }
-pub(super) fn program(
-    document: Arc<lash_kernel_doc::Document>,
-    library: lash_kernel_vm::PreparedLibrary,
-) -> lash_kernel_vm::Program {
+/// The fixture's exact Link DAG, shared by execution and display laws.
+pub(super) fn content(
+    document: &lash_kernel_doc::Document,
+) -> (lash_kernel_package::LinkedContent, lash_vocabulary::LinkId) {
     let release = lash_vm_releases::helper_release().expect("helper release");
     let mut content = release.content.clone();
     let mut fills = BTreeMap::new();
@@ -101,13 +101,20 @@ pub(super) fn program(
         fills.insert(*slot, fill);
     }
     let id = document.identity();
-    content.documents.insert(id, (*document).clone());
+    content.documents.insert(id, document.clone());
     let link = Link {
         document: id,
         fills,
     };
     let root = link.identity();
     content.links.insert(root, link);
+    (content, root)
+}
+pub(super) fn program(
+    document: Arc<lash_kernel_doc::Document>,
+    library: lash_kernel_vm::PreparedLibrary,
+) -> lash_kernel_vm::Program {
+    let (content, root) = content(&document);
     let program = lash_kernel_vm::Program::prepare(
         root,
         content

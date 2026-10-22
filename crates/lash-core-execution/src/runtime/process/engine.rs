@@ -538,10 +538,10 @@ impl ProcessEngineRegistry {
         lash_vocabulary::claims::ClaimRequirements,
         lash_execution_contracts::process::linking::EnginePortError,
     > {
-        let mut requirements = self
+        let requirements = self
             .components()
             .check_links_with_seeds(env, inspection, seeds)?;
-        requirements.extend(&crate::runtime::actor::resolutions::validate_seeds(
+        crate::runtime::actor::resolutions::validate_seeds(
             inspection,
             env.execution(),
             seeds,
@@ -549,7 +549,7 @@ impl ProcessEngineRegistry {
                 self.components()
                     .validate_seed_route(env, grant, name, definition, route, registry)
             },
-        )?);
+        )?;
         Ok(requirements)
     }
 

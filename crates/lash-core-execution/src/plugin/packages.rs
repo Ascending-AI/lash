@@ -39,12 +39,13 @@ pub trait PackageProvider: Send + Sync {
         config: &OwnerConfigView,
         context: &PublicationContext,
     ) -> Result<Vec<PackageContribution>, PluginError>;
-    /// Retain the exact advertisement under the caller's existing cleanup
-    /// owner before a round exposes it. Return authenticated provenance intact.
+    /// Retain this provider's ordered namespace advertisements under the caller's
+    /// existing cleanup owner before exposing them. Shared code is held once
+    /// for the whole slice; every advertisement must pass ownership validation.
     async fn hold(
         &self,
         claim: &ReferrerClaim,
-        advertisement: &PackageAdvertisement,
+        advertisements: &[&PackageAdvertisement],
     ) -> Result<(), EnginePortError>;
 }
 /// A publication for an operation-only or deferred advertisement. Code
@@ -202,7 +203,6 @@ impl super::ExecutionComposition {
         grant: &DeferredGrant,
         registry: super::RegistryKind,
     ) -> Result<lash_vocabulary::claims::ClaimRequirements, EnginePortError> {
-        use lash_vocabulary::claims::{CallbackRequirement, ClaimRequirements};
         let unavailable = || {
             EnginePortError::Refused(AdmissionRefusal::ProviderNotHostable {
                 provider: grant.provider.clone(),
@@ -235,26 +235,11 @@ impl super::ExecutionComposition {
             .hook
             .validate_grant(grant, registry)
             .map_err(EnginePortError::Refused)?;
-        let callback = PluginCallbackIdentity {
-            owner: registration.identity.owner().to_owned(),
-            key: format!(
-                "{}:{}",
-                CallbackSlot::DeferredPackageProvider.key_prefix(),
-                registration.identity.key()
-            ),
-        };
-        let mut requirements = ClaimRequirements::default();
-        requirements.providers.insert(grant.provider.clone());
-        requirements
-            .callbacks
-            .insert(CallbackRequirement { registry, callback });
+        let requirements = deferred_requirements(grant, registry);
         if let Some(component) = &grant.config.component {
             if component.as_str() != grant.provider.owner {
                 return Err(unavailable());
             }
-            requirements
-                .components
-                .insert((component.clone(), grant.config.format));
         } else if registry == super::RegistryKind::Process {
             return Err(unavailable());
         }
@@ -275,13 +260,6 @@ impl super::ExecutionComposition {
             {
                 return Err(unavailable());
             }
-            requirements
-                .codecs
-                .insert((payload.codec.clone(), payload.format));
-            requirements.callbacks.insert(CallbackRequirement {
-                registry,
-                callback: key.callback_identity(),
-            });
         }
         Ok(requirements)
     }
@@ -370,6 +348,7 @@ impl super::ExecutionComposition {
         store: &dyn lash_durable::packages::PackageStore,
         recorded: bool,
     ) -> Result<(), EnginePortError> {
+        let mut held = BTreeSet::new();
         for accepted in &packages.snapshot.advertisements {
             if recorded || matches!(accepted.publication.context.scope, PublicationScope::Host) {
                 store
@@ -378,7 +357,22 @@ impl super::ExecutionComposition {
                     .map_err(package_store_error)?;
                 continue;
             }
-            self.hold_package(claim, accepted).await?;
+            if held.insert(accepted.publication.context.publisher.clone()) {
+                let advertisements: Vec<_> = packages
+                    .snapshot
+                    .advertisements
+                    .iter()
+                    .filter(|candidate| {
+                        candidate.publication.context.publisher
+                            == accepted.publication.context.publisher
+                            && !matches!(
+                                candidate.publication.context.scope,
+                                PublicationScope::Host
+                            )
+                    })
+                    .collect();
+                self.hold_packages(claim, &advertisements).await?;
+            }
             if let PackageAdvertisement::Enumerated(package) = &accepted.advertisement {
                 store
                     .put_package(
@@ -399,18 +393,22 @@ impl super::ExecutionComposition {
         Ok(())
     }
 
-    /// Hold using the same registered publisher that supplied the accepted
-    /// advertisement. A recorded publication bypasses live advertisement.
-    pub async fn hold_package(
+    /// Hold one publisher's ordered namespace slice using its registered hook.
+    /// A recorded publication bypasses live advertisement.
+    pub async fn hold_packages(
         &self,
         claim: &ReferrerClaim,
-        accepted: &AcceptedAdvertisement,
+        accepted: &[&AcceptedAdvertisement],
     ) -> Result<(), EnginePortError> {
+        let Some(first) = accepted.first() else {
+            return Ok(());
+        };
+        let publisher = &first.publication.context.publisher;
         let registered = self
             .package_providers
             .iter()
             .find(|registered| {
-                accepted.publication.context.publisher.0
+                publisher.0
                     == format!(
                         "{}/{}",
                         registered.identity.owner(),
@@ -419,10 +417,21 @@ impl super::ExecutionComposition {
             })
             .ok_or_else(|| {
                 EnginePortError::Refused(AdmissionRefusal::NotOwner {
-                    path: advertisement_path(&accepted.advertisement).clone(),
+                    path: advertisement_path(&first.advertisement).clone(),
                 })
             })?;
-        registered.hook.hold(claim, &accepted.advertisement).await
+        for candidate in accepted {
+            if candidate.publication.context.publisher != *publisher {
+                return Err(EnginePortError::Refused(AdmissionRefusal::NotOwner {
+                    path: advertisement_path(&candidate.advertisement).clone(),
+                }));
+            }
+        }
+        let advertisements: Vec<_> = accepted
+            .iter()
+            .map(|candidate| &candidate.advertisement)
+            .collect();
+        registered.hook.hold(claim, &advertisements).await
     }
 
     /// Accept one coherent advertisement from committed config. No content
@@ -760,11 +769,7 @@ impl super::ExecutionComposition {
         for (use_, need) in &inspection.operations {
             let binding = match need {
                 OperationNeed::Deferred { grant, .. } => {
-                    let known = self.validate_deferred_grant(grant, registry)?;
-                    requirements.providers.extend(known.providers);
-                    requirements.codecs.extend(known.codecs);
-                    requirements.callbacks.extend(known.callbacks);
-                    requirements.components.extend(known.components);
+                    self.validate_deferred_grant(grant, registry)?;
                     UseBinding::Deferred((**grant).clone())
                 }
                 OperationNeed::Fixed { name, requirement } => {
@@ -904,6 +909,7 @@ impl super::ExecutionComposition {
             uses.insert(*use_, binding);
         }
         Ok(ExecutionEnvironment {
+            retained_code: Default::default(),
             authored: BTreeSet::new(),
             publications,
             roots: [inspection.link].into(),
@@ -912,4 +918,43 @@ impl super::ExecutionComposition {
             requirements,
         })
     }
+}
+
+/// Immutable per-use discovery debt, authored once from the pinned grant.
+pub(crate) fn deferred_requirements(
+    grant: &DeferredGrant,
+    registry: super::RegistryKind,
+) -> lash_vocabulary::claims::ClaimRequirements {
+    use lash_vocabulary::claims::{CallbackRequirement, ClaimRequirements};
+    let mut requirements = ClaimRequirements::default();
+    requirements.providers.insert(grant.provider.clone());
+    requirements.callbacks.insert(CallbackRequirement {
+        registry,
+        callback: PluginCallbackIdentity {
+            owner: grant.provider.owner.clone(),
+            key: format!(
+                "{}:{}",
+                CallbackSlot::DeferredPackageProvider.key_prefix(),
+                grant.provider.key
+            ),
+        },
+    });
+    if let Some(component) = &grant.config.component {
+        requirements
+            .components
+            .insert((component.clone(), grant.config.format));
+    }
+    if let Some(payload) = &grant.config.payload {
+        requirements
+            .codecs
+            .insert((payload.codec.clone(), payload.format));
+        let key =
+            lash_vocabulary::providers::ToolProviderHandle::from_name(registry, &payload.codec)
+                .unwrap_or_else(|_| unreachable!("admitted grant codec"));
+        requirements.callbacks.insert(CallbackRequirement {
+            registry,
+            callback: key.callback_identity(),
+        });
+    }
+    requirements
 }

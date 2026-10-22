@@ -43,8 +43,12 @@
 
 #[path = "support/dialect.rs"]
 mod dialect;
+#[path = "support/kernel_process.rs"]
+mod kernel_process;
 #[path = "support/matrix.rs"]
 mod matrix;
+#[path = "support/operations.rs"]
+mod operations;
 #[path = "support/served.rs"]
 mod served;
 #[path = "support/sim.rs"]
@@ -153,19 +157,28 @@ impl lash_core::ToolProvider for Probe {
     }
 }
 
-/// The turn's one cell: define the holding body, start it, and await it.
-fn cell() -> lash_core::llm::types::LlmResponse {
-    let body = "const body = async () => {\n  \
-           const raced = await Promise.race([tools.holdingProbe({ label: \"winner\" }), \
-           tools.holdingProbe({ label: \"loser\", hold: true })]);\n  \
-           await tools.holdingProbe({ label: \"refused\" });\n  \
-           return raced;\n};"
-        .to_owned();
-    served::cell(&format!(
-        "{body}\n\
-         const held = await processes.start({{ definition: body }});\n\
-         await control.finish(await held);"
-    ))
+/// The fixture offers its tool to code explicitly in each hosting registry.
+fn probe_plugin(
+    world: Arc<World>,
+    registry: lash_vocabulary::claims::RegistryKind,
+) -> lash::plugins::StaticPluginFactory {
+    let provider = lash_vocabulary::providers::ToolProviderHandle::new(
+        registry,
+        PROBE_COMPONENT.component(),
+        lash::tool_provider_key!("tools"),
+    );
+    lash::plugins::StaticPluginFactory::new(
+        lash::plugins::PluginDeclaration::initial(PROBE_COMPONENT.component()),
+        lash::plugins::PluginSpec::new()
+            .with_tool_provider(lash::tool_provider_key!("tools"), Arc::new(Probe { world }))
+            .with_package_provider(
+                lash::tool_provider_key!("packages"),
+                Arc::new(operations::Packages {
+                    provider,
+                    definitions: vec![probe_definition()],
+                }),
+            ),
+    )
 }
 
 /// The component that serves the probe to a process body.
@@ -174,8 +187,96 @@ const PROBE_COMPONENT: lash_core::ProcessConfigKey<()> = lash_core::ProcessConfi
     lash_vocabulary::providers::FormatVersion::ONE,
 );
 
+/// Author the raced calls as ordinary tasks. The test starts through the
+/// session's real process-control tool; function transport is tested separately.
+async fn holding_definition(
+    core: &lash::LashCore,
+) -> (
+    lash::process::ProcessDefinition,
+    lash::process::EngineLaunch,
+) {
+    let definition = probe_definition();
+    let signature = lash_vocabulary::json_schema::tool_signature(
+        &definition.contract.input_schema.canonical,
+        &definition.contract.output_schema.canonical,
+    );
+    let mut imports =
+        lash_kernel_doc::Document::new(lash_kernel_doc::NumberPolicy::Float, Vec::new());
+    imports.imports.insert(
+        lash::package::ImportSlot(0),
+        lash::package::Import {
+            name: lash::package::QualifiedName {
+                package: lash::package::PackagePath::parse("tools").unwrap(),
+                member: lash::package::Segment::new(PROBE).unwrap(),
+                type_member: None,
+            },
+            kind: lash::package::ImportKind::Operation { signature },
+        },
+    );
+    let header = lash_kernel_doc::print_document(&imports)
+        .lines()
+        .filter(|line| line.starts_with("import "))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let worker=lash_kernel_doc::parse_definition(&format!("function probe(label: Text,hold: Bool) -> Json\nkernel 1\nmetering statements\n{header}\nbody {{let input = {{label:label,hold:hold}} let answer = perform 0(input) as Json return answer}}")).unwrap();
+    let source = format!(
+        "kernel 1\nnumbers float\n{header}\ndefinition {}\nmain {{let winner = spawn call probe(\"winner\",false) let loser = spawn call probe(\"loser\",true) let tasks = [winner,loser] let raced = join race tasks do perform 0({{label: \"refused\"}}) as Json return raced}}",
+        serde_json::to_string(&lash_kernel_doc::print_definition(&worker)).unwrap()
+    );
+    let base = lash::process::ProcessEnv::builder(lash::MaxToolCalls::new(LIMIT))
+        .component(PROBE_COMPONENT, &())
+        .build()
+        .unwrap();
+    let (payload, environment) = kernel_process::publish(core, &source, &base).await;
+    let input: lash_vm_runtime::KernelProcessInput = serde_json::from_value(payload).unwrap();
+    let draft =
+        lash::vm::definition_draft(&lash::process::KernelProcessDefinition { code: input.code })
+            .unwrap();
+    let pin = lash_core::HostArtifactPin::mint();
+    let definition = core
+        .host_artifacts()
+        .publish_definition(&pin, &draft)
+        .await
+        .unwrap();
+    let env = core
+        .host_artifacts()
+        .publish_process_env(&pin, &environment)
+        .await
+        .unwrap();
+    let settings = core
+        .processes()
+        .engine_defaults(
+            lash_vm_runtime::LASH_VM_ENGINE_KIND,
+            &serde_json::Value::Null,
+        )
+        .unwrap();
+    (definition, lash::process::EngineLaunch::new(env, settings))
+}
+
+struct HoldingLaunch(Arc<Mutex<Option<lash::process::EngineLaunch>>>);
+#[lash::async_trait]
+impl lash_core::ProcessEnvPolicy for HoldingLaunch {
+    async fn choose(
+        &self,
+        _: &lash_core::ProcessEnvCx<'_>,
+    ) -> Result<lash_core::ProcessStartChoice, lash_core::ProcessEnvPolicyError> {
+        let launch = self
+            .0
+            .lock_recover()
+            .clone()
+            .expect("the host publishes before sending the turn");
+        Ok(lash_core::ProcessStartChoice {
+            env: lash_core::ProcessEnvChoice::Published(launch.env),
+            engine_settings: launch.settings,
+            initial_resolutions: launch.initial_resolutions,
+        })
+    }
+}
+
 /// The scenario, fresh for every matrix cell.
 struct Holding {
+    launch: Arc<Mutex<Option<lash::process::EngineLaunch>>>,
+    process_only: bool,
     dialect: Dialect,
     postgres_url: Option<String>,
     world: Arc<World>,
@@ -192,7 +293,7 @@ struct Holding {
 
 impl Holding {
     fn new(dialect: Dialect, postgres_url: Option<String>) -> Self {
-        Self::running(dialect, postgres_url, cell())
+        Self::running(dialect, postgres_url, served::response(Vec::new()))
     }
 
     /// The deployment whose turn runs `cell`.
@@ -204,6 +305,8 @@ impl Holding {
         let scripts = Arc::new(served::Scripts::default());
         scripts.register(INPUT, vec![cell]);
         Self {
+            launch: Arc::default(),
+            process_only: false,
             dialect,
             postgres_url,
             world: Arc::default(),
@@ -236,7 +339,29 @@ impl Holding {
         self.core
             .lock_recover()
             .get_or_insert_with(|| {
-                lash::LashCore::rlm_builder(backend.clone(), served::rlm(&backend, sim::workers(&clock)))
+                if self.process_only {
+                    let workers = sim::workers(&clock);
+                    let bounds = workers.config().run_bounds;
+                    return lash::LashCore::standard_builder(backend.clone())
+                        .plugin(Arc::new(lash::vm::KernelProcessPluginFactory::new(workers, "typescript", bounds)))
+                        .process_component(Arc::new(aggregate_services()), AGGREGATE_SERVICES)
+                        .process_component(Arc::new(probe_plugin(Arc::clone(&self.world), lash_vocabulary::claims::RegistryKind::Process)
+                            .as_component(PROBE_COMPONENT.format()).unwrap()), PROBE_COMPONENT)
+                        .serve_sessions(false)
+                        .commit_budget(lash::CommitBudget::bounded(16 * 1024 * 1024, 4096))
+                        .data_retention(lash::DataRetention::standard())
+                        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
+                        .execution_budgets(lash::ExecutionBudgets::recommended())
+                        .delta_coalescing(lash::DeltaCoalescing::recommended())
+                        .build(lash::persistence::LeaseOwnerIdentity::opaque(
+                            lash::persistence::LeaseOwnerId::new("aggregate-sleep"),
+                            lash::persistence::LeaseIncarnationId::new("aggregate-sleep-boot")))
+                        .unwrap();
+                }
+                let workers = sim::workers(&clock);
+                let bounds = workers.config().run_bounds;
+                lash::LashCore::standard_builder(backend.clone())
+                    .plugin(Arc::new(lash::vm::KernelProcessPluginFactory::new(workers,"typescript",bounds)))
                     .serve_sessions(false)
                     .commit_budget(lash::CommitBudget::bounded(16 * 1024 * 1024, 4096))
                     .data_retention(lash::DataRetention::standard())
@@ -245,40 +370,17 @@ impl Holding {
                         served::model(Arc::clone(&self.scripts)),
                         served::metadata(),
                     )
-                    // Detached: a cell's operation is admitted `Once` until
-                    // FIG-5174, so a kill inside the cell's start answers it
-                    // interrupted and ends the turn; the process the start
-                    // registered runs on regardless.
+                    // The model starts an already-linked definition; process
+                    // crash cuts retain the original turn/identity oracles.
                     .plugin(Arc::new(
                         lash::process_controls::SessionProcessAdminPluginFactory::new(|_| {
                             lash_execution_contracts::process::Lifetime::Detached
                         },
-                        lash_core::testing::run_policy_naming(&[
-                            PROBE_COMPONENT,
-                            lash::process_controls::PROCESS_CONTROLS_CONFIG,
-                        ]),),
+                        Arc::new(HoldingLaunch(Arc::clone(&self.launch))),),
                     ))
-                    // The body's `await` of the race links `processes.await`
-                    // (P2): the env names the process controls that serve it.
-                    .process_component(
-                        Arc::new(lash::process_controls::ProcessControlsComponent::new(
-                            |_| lash_execution_contracts::process::Lifetime::Detached,
-                            lash_core::testing::run_policy_naming(&[PROBE_COMPONENT]),
-                        )),
-                        lash::process_controls::PROCESS_CONTROLS_CONFIG,
-                    )
-                    .process_component(
-                        lash_core::testing::tool_component(
-                            PROBE_COMPONENT,
-                            Arc::new(Probe {
-                                world: Arc::clone(&self.world),
-                            }),
-                        ),
-                        PROBE_COMPONENT,
-                    )
-                    .plugin(lash_core::testing::tool_plugin(PROBE_COMPONENT, Arc::new(Probe {
-                        world: Arc::clone(&self.world),
-                    })))
+                    .process_component(Arc::new(probe_plugin(Arc::clone(&self.world),lash_vocabulary::claims::RegistryKind::Process)
+                        .as_component(PROBE_COMPONENT.format()).unwrap()),PROBE_COMPONENT)
+
                     .build(lash::persistence::LeaseOwnerIdentity::opaque(lash::persistence::LeaseOwnerId::new("process-holding-deployment"), lash::persistence::LeaseIncarnationId::new("process-holding-boot")))
                     .expect("the core builds")
             })
@@ -379,6 +481,13 @@ impl Holding {
         }
         if !violations.is_empty() {
             violations.push(format!("body entries: {entries:?}"));
+            violations.push(format!(
+                "model requests: {:?}",
+                self.scripts.requests(INPUT)
+            ));
+            let session = self.core().session(session()).durable().await.unwrap();
+            let read = session.read().await.unwrap().unwrap();
+            violations.push(format!("committed transcript: {:?}", read.transcript()));
         }
         violations
     }
@@ -424,6 +533,17 @@ impl Scenario for Holding {
 
     async fn start(&self, nodes: &Arc<SimNodes>) -> Result<(), String> {
         // The host is outside the deployment under test: its send is uncut.
+        let core = self.core();
+        let (definition, launch) = holding_definition(&core).await;
+        *self.launch.lock_recover() = Some(launch);
+        self.scripts.register(
+            INPUT,
+            vec![served::response(vec![served::call(
+                "start-holding",
+                "processes.start",
+                serde_json::json!({"definition_id":definition.id.to_tagged_json()}),
+            )])],
+        );
         let session = self
             .core()
             .session(session())
@@ -552,69 +672,83 @@ async fn tool_call_limit_counts_what_a_process_holds_across_a_worker_kill(tier: 
 /// eviction.
 const AGGREGATE_SLEEP_MS: u64 = 300_000;
 
-/// Publish the aggregate body and start it by id: its inline start declaration
-/// exceeds the intent byte bound. This law concerns the durable sleep, not
-/// function transport, so keep the body and the admission bound intact.
-async fn sleeping_cell(deployment: &Holding) -> lash_core::llm::types::LlmResponse {
-    let body = format!(
-        "const body = async () => {{\n  \
-           const both = await Promise.all([tools.holdingProbe({{ label: \"quick\" }}), \
-           sleep({AGGREGATE_SLEEP_MS})]);\n  \
-           return both[1] === undefined ? \"woke\" : \"early\";\n}};"
+const AGGREGATE_SERVICES: lash::process::ProcessConfigKey<()> =
+    lash::process::ProcessConfigKey::new("aggregate-services", lash::plugins::FormatVersion::ONE);
+
+fn aggregate_services() -> lash::process::StaticProcessComponent {
+    let provider = lash_vm_runtime::dialect_services::Services::new(
+        lash_vm_runtime::dialect_services::Dialect::TypeScript,
+        AGGREGATE_SERVICES.tool_provider(lash::tool_provider_key!("timer")),
+        Duration::from_secs(30),
+        Arc::new(|| 0),
+    )
+    .unwrap();
+    lash::plugins::StaticPluginFactory::new(
+        lash::plugins::PluginDeclaration::initial(AGGREGATE_SERVICES.component()),
+        lash::plugins::PluginSpec::new()
+            .with_tool_provider_registration(
+                lash::tool_provider_key!("timer"),
+                provider.registration(),
+            )
+            .with_package_provider(lash::tool_provider_key!("timer"), provider),
+    )
+    .as_component(AGGREGATE_SERVICES.format())
+    .unwrap()
+}
+
+/// Author the two tasks explicitly: the law concerns an aggregate's durable
+/// wait, and needs only the probe and ordinary timer operation.
+async fn start_sleeping_process(deployment: &Holding) {
+    let mut probe = lash_kernel_doc::parse_definition(
+        "function quick() -> Json\nkernel 1\nmetering statements\nimport 0 operation tools.holding_probe(input: Json) -> Json\nbody { let v = perform 0({label: \"quick\"}) as Json return v }"
+    ).unwrap();
+    let definition = probe_definition();
+    let signature = lash_vocabulary::json_schema::tool_signature(
+        &definition.contract.input_schema.canonical,
+        &definition.contract.output_schema.canonical,
+    );
+    probe
+        .body_mut()
+        .unwrap()
+        .imports
+        .get_mut(&lash::package::ImportSlot(0))
+        .unwrap()
+        .kind = lash::package::ImportKind::Operation { signature };
+    let sleeper = lash_kernel_doc::parse_definition(&format!(
+        "function sleeper() -> Null\nkernel 1\nmetering statements\nimport 1 operation typescript.sleep(milliseconds: Int) -> Null\nbody {{ do perform 1({AGGREGATE_SLEEP_MS}) as Null return null }}"
+    )).unwrap();
+    let source = format!(
+        "kernel 1\nnumbers float\nimport 0 operation tools.holding_probe(input: Json) -> Json\nimport 1 operation typescript.sleep(milliseconds: Int) -> Null\ndefinition {}\ndefinition {}\nmain {{ let quick = spawn call quick() let timer = spawn call sleeper() let tasks = [quick, timer] do join all tasks return \"woke\" }}",
+        serde_json::to_string(&lash_kernel_doc::print_definition(&probe)).unwrap(),
+        serde_json::to_string(&lash_kernel_doc::print_definition(&sleeper)).unwrap(),
     );
     let environment = lash::process::ProcessEnv::builder(lash::MaxToolCalls::new(LIMIT))
         .component(PROBE_COMPONENT, &())
-        .component(lash::process_controls::PROCESS_CONTROLS_CONFIG, &())
-        .link_tool(
-            PROBE_COMPONENT.tool_provider(lash::tool_provider_key!("tools")),
-            &probe_definition(),
-        )
-        .link_tool(
-            lash::process_controls::PROCESS_CONTROLS_CONFIG
-                .tool_provider(lash::tool_provider_key!("tools")),
-            &lash::process_controls::process_tool_definition(
-                lash::process_controls::ProcessControlTool::Await,
-            ),
-        )
+        .component(AGGREGATE_SERVICES, &())
         .build()
-        .expect("the sleeping workflow's environment");
-    let artifacts = deployment.core().host_artifacts();
-    let selected = artifacts.cell_packages().await.expect("the workflow gate");
-    let imported = artifacts
-        .import_workflow(
-            lash::workflow::document::SourceLanguage::TypeScript,
-            &body,
-            &environment,
-            selected.declare_all(),
-            None,
+        .unwrap();
+    let core = deployment.core();
+    let (payload, environment) = kernel_process::publish(&core, &source, &environment).await;
+    let environment = core
+        .host_artifacts()
+        .publish_process_env(&lash_core::HostArtifactPin::mint(), &environment)
+        .await
+        .unwrap();
+    let kind = lash_vm_runtime::LASH_VM_ENGINE_KIND;
+    let settings = core.processes().engine_defaults(kind, &payload).unwrap();
+    core.processes()
+        .start(
+            lash::process::ProcessStartRequest::engine(
+                kind.to_owned(),
+                payload,
+                lash::process::EngineLaunch::new(environment, settings),
+                lash::process::ProcessOriginator::host(),
+                lash::process::LifetimeDecision::Detached,
+            ),
+            core.effect_host(),
         )
         .await
-        .expect("the sleeping workflow imports");
-    let lash::workflow::WorkflowImport::Imported {
-        document, packages, ..
-    } = imported
-    else {
-        panic!("the sleeping workflow is admitted: {imported:?}");
-    };
-    let published = artifacts
-        .publish_workflow(
-            &lash_core::HostArtifactPin::mint(),
-            &document,
-            &lash::workflow::document::Name::new("body"),
-            &environment,
-            packages,
-            None,
-        )
-        .await
-        .expect("the sleeping workflow publishes");
-    let lash::workflow::WorkflowPublish::Published(publication) = published else {
-        panic!("the sleeping workflow is published: {published:?}");
-    };
-    let definition_id = publication.definition.id.to_tagged_json();
-    served::cell(&format!(
-        "await processes.start({{ definition_id: {definition_id} }});\n\
-         await control.finish(\"started\");"
-    ))
+        .unwrap();
 }
 
 /// An aggregate's sleep longer than any step bound parks the process on a
@@ -635,12 +769,11 @@ async fn an_aggregate_sleep_past_every_step_bound_wakes_at_its_deadline_across_a
             (Dialect::Postgres, Some(url))
         }
     };
-    let deployment = Holding::new(dialect, postgres_url);
+    let mut deployment = Holding::new(dialect, postgres_url);
+    deployment.process_only = true;
     let clock = SimClock::new();
     let database = deployment.database(Arc::clone(&clock)).await;
-    deployment
-        .scripts
-        .register(INPUT, vec![sleeping_cell(&deployment).await]);
+    start_sleeping_process(&deployment).await;
     let nodes = SimNodes::new(
         Arc::clone(&database),
         Arc::clone(&clock),
@@ -648,16 +781,6 @@ async fn an_aggregate_sleep_past_every_step_bound_wakes_at_its_deadline_across_a
         deployment.config(),
         deployment.activation(),
     );
-    let session = deployment
-        .core()
-        .session(session())
-        .create(lash::SessionCreation::root(served::spec(LIMIT)))
-        .await
-        .expect("the session is created");
-    session
-        .send(lash::TurnInput::text(INPUT))
-        .await
-        .expect("the turn's input is sent");
     nodes.start("a");
 
     // Run A until the process parks on its sleep, released as `waiting`.
@@ -853,7 +976,7 @@ fn dynamic_target(name: &str) -> lash_vocabulary::tool_contract::ToolDefinition 
     let object = serde_json::json!({ "type": "object", "additionalProperties": true });
     lash_vocabulary::tool_contract::ToolDefinition::raw(
         format!("tool:{name}"),
-        format!("tools.{name}"),
+        format!("search.{name}"),
         "Records each body entry's call id.",
         object.clone(),
         object,
@@ -962,17 +1085,11 @@ impl lash_core::DeferredToolProvider for Resolver {
 /// granted `call_tool`, and answers what it answered.
 const RESOLVING: &str = r#"kernel 1
 numbers float
-effect tools.call_tool(input: Record{args?: Json, target: Text}) -> Json contract "tools.call_tool/1"
-entry dynamic() -> Any
-
-fn dynamic() {
-  let request = {target: "run", args: {q: "x"}}
-  let got = perform tools.call_tool(request) as Any
-  return got
-}
-
+import 0 operation tools.call_tool(input: Record{args?: Json, target: Text}) -> Json
 main {
-  finish null
+  let request = {target: "run", args: {q: "x"}}
+  let got = perform 0(request) as Any
+  return got
 }
 "#;
 
@@ -980,36 +1097,30 @@ main {
 /// each failure, and answers both.
 const DECIDING: &str = r#"kernel 1
 numbers float
-effect tools.call_tool(input: Record{args?: Json, target: Text}) -> Json contract "tools.call_tool/1"
-entry dynamic() -> Any
-
-fn dynamic() {
+import 0 operation tools.call_tool(input: Record{args?: Json, target: Text}) -> Json
+main {
   let refusing = {target: "refused", args: {}}
   let refused = null
   try {
-    set refused = perform tools.call_tool(refusing) as Any
+    set refused = perform 0(refusing) as Any
   } catch e {
     set refused = {kind: e.kind, data: e.data}
   }
   let looking = {target: "missing"}
   let missing = null
   try {
-    set missing = perform tools.call_tool(looking) as Any
+    set missing = perform 0(looking) as Any
   } catch e {
     set missing = {kind: e.kind, data: e.data}
   }
   let package_request = {target: "package"}
   let package_refused = null
   try {
-    set package_refused = perform tools.call_tool(package_request) as Any
+    set package_refused = perform 0(package_request) as Any
   } catch e {
     set package_refused = {kind: e.kind, data: e.data}
   }
   return [refused, missing, package_refused]
-}
-
-main {
-  finish null
 }
 "#;
 
@@ -1017,22 +1128,16 @@ main {
 /// and answers it.
 const CATCHING: &str = r#"kernel 1
 numbers float
-effect tools.call_tool(input: Record{args?: Json, target: Text}) -> Json contract "tools.call_tool/1"
-entry dynamic() -> Any
-
-fn dynamic() {
+import 0 operation tools.call_tool(input: Record{args?: Json, target: Text}) -> Json
+main {
   let request = {target: "run", args: {q: "x"}}
   let caught = null
   try {
-    set caught = perform tools.call_tool(request) as Any
+    set caught = perform 0(request) as Any
   } catch e {
     set caught = {kind: e.kind, data: e.data}
   }
   return caught
-}
-
-main {
-  finish null
 }
 "#;
 
@@ -1064,6 +1169,46 @@ struct DynamicCalls {
     process: Mutex<Option<lash_vocabulary::identity::ProcessId>>,
     tripwire: Arc<Tripwire>,
     keep: Mutex<Vec<Box<dyn std::any::Any + Send>>>,
+}
+
+struct DispatchPackage(lash::tools::OperationRoute);
+#[async_trait::async_trait]
+impl lash_core::plugin::packages::PackageProvider for DispatchPackage {
+    fn roots(&self) -> BTreeSet<lash::package::Segment> {
+        [lash::package::Segment::new("tools").unwrap()].into()
+    }
+    fn advertise(
+        &self,
+        _: &lash_core::OwnerConfigView,
+        context: &lash::package::PublicationContext,
+    ) -> Result<
+        Vec<lash_core::plugin::packages::PackageContribution>,
+        lash_execution_contracts::PluginError,
+    > {
+        let lash_core_store::tool_surface::RouteSource::Dispatch { definition } = &self.0.source
+        else {
+            unreachable!()
+        };
+        let mut contributions = lash_core::plugin::packages::operation_packages(
+            &self.0.provider,
+            [definition.as_ref().clone()],
+            |_| None,
+            context,
+        )?;
+        for contribution in &mut contributions {
+            for candidate in &mut contribution.routes {
+                candidate.route = self.0.clone();
+            }
+        }
+        Ok(contributions)
+    }
+    async fn hold(
+        &self,
+        _: &lash_core::ReferrerClaim,
+        _: &[&lash::package::PackageAdvertisement],
+    ) -> Result<(), lash_execution_contracts::process::linking::EnginePortError> {
+        Ok(())
+    }
 }
 
 impl DynamicCalls {
@@ -1124,7 +1269,7 @@ impl DynamicCalls {
             let path = if diverging && earlier > 0 {
                 DIVERGED_PATH.to_owned()
             } else if target == "package" {
-                "kernel.nosuch".to_owned()
+                "tools.nosuch".to_owned()
             } else {
                 format!("search.{target}")
             };
@@ -1186,37 +1331,46 @@ impl DynamicCalls {
         self.core
             .lock_recover()
             .get_or_insert_with(|| {
-                lash::LashCore::rlm_builder(
-                    backend.clone(),
-                    served::rlm(&backend, sim::workers(&clock)),
-                )
-                .serve_sessions(false)
-                .commit_budget(lash::CommitBudget::bounded(16 * 1024 * 1024, 4096))
-                .data_retention(lash::DataRetention::standard())
-                .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
-                .execution_budgets(lash::ExecutionBudgets::recommended())
-                .delta_coalescing(lash::DeltaCoalescing::recommended())
-                .process_component(
-                    Arc::new(
-                        lash::plugins::StaticPluginFactory::new(
-                            lash::plugins::PluginDeclaration::initial(
-                                DYNAMIC_COMPONENT.component(),
-                            ),
-                            lash::plugins::PluginSpec::new().with_deferred_provider(
-                                lash::tool_provider_key!("deferred"),
-                                self.registration(),
-                            ),
-                        )
-                        .as_component(DYNAMIC_COMPONENT.format())
-                        .expect("a deferred provider is a process component"),
-                    ),
-                    DYNAMIC_COMPONENT,
-                )
-                .build(lash::persistence::LeaseOwnerIdentity::opaque(
-                    lash::persistence::LeaseOwnerId::new("process-dynamic-deployment"),
-                    lash::persistence::LeaseIncarnationId::new("process-dynamic-boot"),
-                ))
-                .expect("the core builds")
+                let workers = sim::workers(&clock);
+                let bounds = workers.config().run_bounds;
+                lash::LashCore::standard_builder(backend)
+                    .plugin(Arc::new(lash::vm::KernelProcessPluginFactory::new(
+                        workers,
+                        "typescript",
+                        bounds,
+                    )))
+                    .serve_sessions(false)
+                    .commit_budget(lash::CommitBudget::bounded(16 * 1024 * 1024, 4096))
+                    .data_retention(lash::DataRetention::standard())
+                    .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
+                    .execution_budgets(lash::ExecutionBudgets::recommended())
+                    .delta_coalescing(lash::DeltaCoalescing::recommended())
+                    .process_component(
+                        Arc::new(
+                            lash::plugins::StaticPluginFactory::new(
+                                lash::plugins::PluginDeclaration::initial(
+                                    DYNAMIC_COMPONENT.component(),
+                                ),
+                                lash::plugins::PluginSpec::new()
+                                    .with_deferred_provider(
+                                        lash::tool_provider_key!("deferred"),
+                                        self.registration(),
+                                    )
+                                    .with_package_provider(
+                                        lash::tool_provider_key!("dispatch-package"),
+                                        Arc::new(DispatchPackage(self.link())),
+                                    ),
+                            )
+                            .as_component(DYNAMIC_COMPONENT.format())
+                            .expect("a deferred provider is a process component"),
+                        ),
+                        DYNAMIC_COMPONENT,
+                    )
+                    .build(lash::persistence::LeaseOwnerIdentity::opaque(
+                        lash::persistence::LeaseOwnerId::new("process-dynamic-deployment"),
+                        lash::persistence::LeaseIncarnationId::new("process-dynamic-boot"),
+                    ))
+                    .expect("the core builds")
             })
             .clone()
     }
@@ -1237,51 +1391,11 @@ impl DynamicCalls {
     /// to the component's deferred provider.
     async fn start_process(&self) -> Result<lash_vocabulary::identity::ProcessId, String> {
         let core = self.core();
-        let document = lash::workflow::document::parse_document(self.document)
-            .map_err(|error| format!("the document parses: {error}"))?;
-        let identity = lash_vm_runtime::KernelDocuments::new(self.backend().module_artifacts())
-            .publish(
-                &lash_core::ReferrerClaim::unguarded(lash_core::ArtifactReferrer::HostPin(
-                    lash_core::HostArtifactPin::mint(),
-                ))
-                .expect("a host pin is unguarded"),
-                &lash_kernel_doc::IdentifiedDocument::new(document.clone()),
-                &lash_vm_runtime::lash_packages()
-                    .map(|packages| std::sync::Arc::clone(packages.functions()))
-                    .ok()
-                    .and_then(|functions| {
-                        lash::workflow::document::CheckedDeclarations::required(
-                            &document,
-                            functions.as_ref(),
-                        )
-                        .ok()
-                    })
-                    .expect("the document's helpers are shipped"),
-            )
-            .await
-            .map_err(|error| format!("publish the document: {error}"))?;
-        let payload = serde_json::to_value(lash_vm_runtime::KernelProcessInput {
-            declared_packages: lash_vm_runtime::lash_packages()
-                .expect("fixture packages")
-                .surface()
-                .selection(),
-            packages: lash_vm_runtime::lash_packages()
-                .expect("lash's packages")
-                .digest(),
-            document: identity,
-            functions: document.manifest.functions.keys().copied().collect(),
-            entry: lash::workflow::document::Name::new("dynamic"),
-            args: serde_json::Map::new(),
-        })
-        .expect("the input encodes");
-        let env = lash::process::ProcessEnv::builder(lash::MaxToolCalls::new(3))
+        let base = lash::process::ProcessEnv::builder(lash::MaxToolCalls::new(3))
             .component(DYNAMIC_COMPONENT, &())
-            .link(
-                lash::workflow::document::EffectName::new(CALL_TOOL_EFFECT).unwrap(),
-                self.link(),
-            )
             .build()
-            .map_err(|refusal| format!("the env builds: {refusal}"))?;
+            .unwrap();
+        let (payload, env) = kernel_process::publish(&core, self.document, &base).await;
         let env_ref = core
             .host_artifacts()
             .publish_process_env(&lash_core::HostArtifactPin::mint(), &env)
@@ -1441,7 +1555,7 @@ impl DynamicCalls {
         for (index, cause, path) in [
             (0, "dynamic_call_refused", REFUSED_PATH),
             (1, "dynamic_call_unavailable", MISSING_PATH),
-            (2, "package_namespace", "kernel.nosuch"),
+            (2, "package_namespace", "tools.nosuch"),
         ] {
             let caught = &answer[index];
             if caught["kind"] != lash_vm_runtime::TOOL_FAILED
@@ -1460,7 +1574,7 @@ impl DynamicCalls {
             .resolved
             .lock_recover()
             .iter()
-            .any(|(path, _)| path == "kernel.nosuch")
+            .any(|(path, _)| path == "tools.nosuch")
         {
             violations.push("a linked package namespace reached the provider".into());
         }
@@ -1478,7 +1592,11 @@ impl DynamicCalls {
     /// What the body caught when its grant was withheld or its transform
     /// diverged: the typed refusal, before the provider was asked or before
     /// the matched tool ran.
-    fn refused_laws(&self, answer: &serde_json::Value) -> Vec<String> {
+    fn refused_laws(
+        &self,
+        answer: &serde_json::Value,
+        use_: lash::package::OperationUse,
+    ) -> Vec<String> {
         let mut violations = Vec::new();
         let entries = self.seen.entries.lock_recover().clone();
         if !entries.is_empty() {
@@ -1495,7 +1613,7 @@ impl DynamicCalls {
                 }
                 serde_json::json!({
                     "kind": "dispatch_not_granted",
-                    "effect": CALL_TOOL_EFFECT,
+                    "effect": use_.to_string(),
                     "tool": "tool:call_tool",
                 })
             }
@@ -1546,10 +1664,22 @@ impl DynamicCalls {
                 serde_json::Value::Null
             }
         };
+        let lash::process::ProcessInput::Engine { payload, .. } = process.input.as_ref() else {
+            panic!("kernel process")
+        };
+        let input: lash_vm_runtime::KernelProcessInput =
+            serde_json::from_value(payload.clone()).unwrap();
+        let lash_vm_runtime::process::InlineRequest::Linked { start } = input.code else {
+            panic!("linked Main")
+        };
+        let use_ = lash::package::OperationUse {
+            link: start.link,
+            slot: lash::package::ImportSlot(0),
+        };
         violations.extend(match (self.grant, self.document) {
             (Grant::Pure, RESOLVING) => self.resolved_laws(&answer),
             (Grant::Pure, _) => self.decided_laws(&answer),
-            (Grant::Diverging | Grant::Withheld, _) => self.refused_laws(&answer),
+            (Grant::Diverging | Grant::Withheld, _) => self.refused_laws(&answer, use_),
         });
         if let Some(cut) = cut {
             violations.extend(zombie_laws(cut, &trace));

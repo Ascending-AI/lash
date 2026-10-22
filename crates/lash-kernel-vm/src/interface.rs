@@ -508,7 +508,7 @@ pub trait Host {
     }
     /// Passive entry into a document action. Library implementation sites
     /// are private; the document's call remains visible while they compute.
-    fn enter_site(&mut self, _at: &EffectId) {}
+    fn enter_site(&mut self, _at: &lash_vocabulary::sites::EffectLocation) {}
     /// The passive semantic observer, when the host accepts live deltas.
     /// Reading this port never consumes counts unless an observer is present.
     fn observer(&mut self) -> Option<&mut dyn RunObserver> {

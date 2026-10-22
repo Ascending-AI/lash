@@ -253,40 +253,6 @@ impl CellDeclarations {
         }
         let (pointers, edges) = rows.read().await;
         let mut violations = Vec::new();
-        let backend = self.backend();
-        let packages = backend
-            .packages()
-            .expect("the core registered packages")
-            .packages();
-        let digest = packages.digest();
-        let set = packages.set();
-        let mut bytes = [0_u8; 16];
-        bytes.copy_from_slice(&digest.as_bytes()[..16]);
-        bytes[6] = (bytes[6] & 0x0f) | 0x40;
-        bytes[8] = (bytes[8] & 0x3f) | 0x80;
-        let hex: String = bytes.iter().map(|byte| format!("{byte:02x}")).collect();
-        let id = format!("host-pin:v1:{hex}");
-        let installed: BTreeSet<Edge> = set
-            .keys()
-            .flat_map(|key| packages.artifacts()[&key].code().ids().iter().copied())
-            .map(move |function| {
-                (
-                    format!("function:{function}"),
-                    "host_pin".to_owned(),
-                    id.clone(),
-                )
-            })
-            .collect();
-        let pins: BTreeSet<_> = installed.iter().map(|(_, _, id)| id).collect();
-        let actual: BTreeSet<_> = edges
-            .iter()
-            .filter(|(_, kind, id)| kind == "host_pin" && pins.contains(id))
-            .cloned()
-            .collect();
-        if actual != installed {
-            violations
-                .push("package pins do not hold exactly their installed definitions".to_owned());
-        }
         let held: BTreeSet<String> = edges
             .iter()
             .map(|(artifact, _, _)| artifact.clone())
@@ -304,14 +270,10 @@ impl CellDeclarations {
         if !dangling.is_empty() {
             violations.push(format!("edges to no stored artifact: {dangling:?}"));
         }
-        let session_edges: BTreeSet<_> = edges.difference(&installed).collect();
+        let session_edges: BTreeSet<_> = edges.iter().collect();
         let frame = session_edges
             .iter()
-            .filter(|(artifact, kind, id)| {
-                kind == "frame_environment"
-                    && id.contains(SESSION)
-                    && artifact.starts_with("function:")
-            })
+            .filter(|(_, kind, id)| kind == "frame_environment" && id.contains(SESSION))
             .count();
         if frame == 0 || frame != session_edges.len() {
             violations.push(format!(

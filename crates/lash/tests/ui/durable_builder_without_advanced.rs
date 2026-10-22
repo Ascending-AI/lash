@@ -21,13 +21,13 @@ async fn durable_core_without_advanced(
     );
     let backend: lash::Backend = lash_conformance::backend_over(stores);
     // The RLM factory keeps its Lash VM artifacts in that same backend.
-    let factory = lash_protocol_rlm::RlmProtocolPluginFactory::new(
-        lash_protocol_rlm::RlmProtocolPluginConfig::builder()
-            .channel(lash_protocol_rlm::RlmChannel::Cell)
-            .instruction_limit(lash_protocol_rlm::InstructionBound::instructions(1_000_000))
-            .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
+    let factory = lash::rlm::RlmProtocolPluginFactory::new(
+        lash::rlm::RlmProtocolPluginConfig::builder()
+            .channel(lash::rlm::RlmChannel::Cell)
+            .instruction_limit(lash::rlm::InstructionBound::instructions(1_000_000))
+            .memory_limit(lash::rlm::MemoryBound::mebibytes(64))
             .build(),
-        lash_protocol_rlm::CellDialect::typescript(),
+        lash::rlm::CellDialect::typescript(),
     );
     lash::LashCore::rlm_builder(backend, factory)
         .llm_profiles(std::sync::Arc::new(

@@ -42,7 +42,7 @@ pub(super) fn step_trace_scope(
     };
     tracing.filter(|tracing| tracing.is_observed())?;
     let process = record.trace.as_ref()?.as_parent()?;
-    let parent = match node_site(record, step, site.as_deref()) {
+    let parent = match node_site(record, step, site.as_deref().map(|site| &site.at)) {
         Some(at) => process.container(&SpanKey::Node { at }),
         None => process,
     };
@@ -165,7 +165,7 @@ fn node_of(
     let StepRequest::Tool { site, .. } = &step.request else {
         return None;
     };
-    let at = node_site(record, step, site.as_deref())?;
+    let at = node_site(record, step, site.as_deref().map(|site| &site.at))?;
     let member = fold
         .round(RunSeq(step.run))?
         .members()
@@ -255,7 +255,7 @@ impl StepToolSpans {
             let context = TraceContext::default()
                 .for_process(step.process.clone())
                 .for_call(call.clone());
-            let issuing_node = site.as_ref().map(|at| at.position().to_string());
+            let issuing_node = site.as_ref().map(|site| site.origin.position().to_string());
             let standing = tracing
                 .unreplayed(Some(scope.clone()))
                 .selected(TraceSpanKind::Tool, &context.ids());

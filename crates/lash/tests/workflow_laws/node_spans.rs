@@ -13,33 +13,17 @@ use opentelemetry_sdk::trace::{InMemorySpanExporter, SdkTracerProvider, SpanData
 /// `nodes(name)`: performs `tools.echo` at the one site of `work`, from a
 /// three-turn loop that parks on a timer after each turn, then from two
 /// concurrently spawned tasks.
-const NODES: &str = r#"kernel 1
-numbers float
-effect tools.echo(input: Any) -> Any contract "1"
-entry nodes(name: Text) -> Any
-
-fn work(item) {
-  let input = {value: item}
-  let got = perform tools.echo(input) as Any
-  return got
+fn nodes_document() -> Document {
+    let imports = format!(
+        "{}\nimport 1 operation typescript.sleep(milliseconds: Int) -> Null",
+        echo_import_header(0)
+    );
+    let work = lash_kernel_doc::parse_definition(&format!("function work(item: Json) -> Json\nkernel 1\nmetering statements\n{imports}\nbody {{let input = {{value: item}} let got = perform 0(input) as Any return got}}")).unwrap();
+    let nodes = lash_kernel_doc::parse_definition(&format!("function nodes(name: Text) -> Json\nkernel 1\nmetering statements\n{imports}\nuse work = @{}\nbody {{for turn in [1,2,3] {{do call work(turn) do perform 1(5) as Null}} let first = spawn call work(\"x\") let second = spawn call work(\"y\") let tasks = [first,second] let every = join all tasks return every}}",work.identity())).unwrap();
+    let mut document = function_document(nodes, "nodes");
+    document.functions.insert(work.identity(), work);
+    document
 }
-
-fn nodes(name) {
-  for turn in [1, 2, 3] {
-    do call work(turn)
-    do sleep 5
-  }
-  let first = spawn call work("x")
-  let second = spawn call work("y")
-  let tasks = [first, second]
-  let every = join all tasks
-  return every
-}
-
-main {
-  finish null
-}
-"#;
 
 /// What one node exports to: its OpenTelemetry spans.
 struct Exported {
@@ -121,40 +105,18 @@ async fn publish_nodes(
     let artifacts = core.host_artifacts();
     let pin = lash::process::HostArtifactPin::mint();
     let environment = environment(false);
-    let checked = artifacts
-        .workflow_environment(&environment)
-        .await
-        .expect("the environment reads")
-        .expect("the kernel engine reads workflow documents");
-    let echo = lash::workflow::document::EffectName::new("tools.echo").expect("an effect name");
-    let mut document =
-        lash::workflow::document::parse_document(NODES).expect("the document parses");
-    document
-        .manifest
-        .effects
-        .insert(echo.clone(), checked.checker().effects[&echo].clone());
-    let draft = Draft::open(document).expect("the document opens");
-    let publication = published(
-        artifacts
-            .publish_workflow(
-                &pin,
-                &lash::workflow::document::DocumentBytes::from(draft.document().clone()),
-                &Name::new("nodes"),
-                &environment,
-                artifacts
-                    .cell_packages()
-                    .await
-                    .expect("the package gate answers")
-                    .declare_all(),
-                None,
-            )
-            .await
-            .expect("the publication answers"),
-    );
-    let env_ref = artifacts
-        .publish_process_env(&pin, &linking(&environment, &["tools.echo"]))
-        .await
-        .expect("publish the process environment");
+    let document = nodes_document();
+    let publication = publish(
+        core,
+        &pin,
+        &lash::workflow::document::DocumentBytes::from(document.clone()),
+        &Name::new("nodes"),
+        &environment,
+        None,
+    )
+    .await
+    .expect("the publication answers");
+    let env_ref = publication.env_ref;
     (env_ref, publication.definition)
 }
 
@@ -168,7 +130,25 @@ fn attribute(span: &SpanData, key: &str) -> Option<String> {
 /// The five node spans of one `nodes` run, from every node that exported
 /// some: each names its own occurrence of the one site, under the run's
 /// workflow span, with the one tool call its occurrence made beneath it.
-fn assert_five_occurrences(nodes: &[SpanData], every: &[SpanData]) {
+fn assert_five_occurrences(all_nodes: &[SpanData], every: &[SpanData]) {
+    assert_eq!(
+        all_nodes.len(),
+        8,
+        "five echo operations and three ordinary timers"
+    );
+    let function = nodes_document()
+        .functions
+        .into_iter()
+        .find(|(_, definition)| definition.name.as_str() == "work")
+        .unwrap()
+        .0;
+    let nodes = all_nodes
+        .iter()
+        .filter(|span| {
+            attribute(span, "lash.workflow.node.site")
+                .is_some_and(|site| site.starts_with(&format!("function {function}/")))
+        })
+        .collect::<Vec<_>>();
     assert_eq!(nodes.len(), 5, "one node span per occurrence: {nodes:#?}");
     let ids: std::collections::HashSet<_> = nodes
         .iter()
@@ -255,7 +235,7 @@ async fn workflow_occurrences_are_distinct_nodes() {
     core.flush_trace_sink().expect("flush the trace sink");
     assert_eq!(
         exported.spans("lash.workflow.node").len(),
-        5,
+        8,
         "a served start exports no node"
     );
     core.shutdown().await.expect("shutdown");
@@ -296,7 +276,7 @@ async fn the_registered_node_decision_wins_over_the_closing_owners_policy() {
     let completed_here = second_exported.spans("lash.workflow.node");
     assert_eq!(
         completed_here.len(),
-        4,
+        7,
         "the completing owner exports the occurrences it closed: {completed_here:#?}"
     );
     let first_nodes = first_exported.spans("lash.workflow.node");
@@ -326,20 +306,13 @@ async fn a_definition_start_attributes_loading_resolution_acquisition_and_claim_
     let (core, exported) = traced_core(stores, "definition-probe", TraceDetail::Standard).await;
     let artifacts = core.host_artifacts();
     let pin = lash::process::HostArtifactPin::mint();
-    let env = environment(false);
-    let source = "export async function run(name: string) { const values = [name, name.toUpperCase()]; return values.join(\",\"); }";
-    let lash::workflow::WorkflowImport::Imported {
-        document, packages, ..
-    } = artifacts
+    let env = source_environment(false);
+    let source = "export async function run(name: string): Promise<string> { const values = [name, name.toUpperCase()]; return values.join(\",\"); }";
+    let lash::workflow::WorkflowImport::Imported { document, .. } = artifacts
         .import_workflow(
             lash::workflow::document::SourceLanguage::TypeScript,
             source,
-            &env,
-            artifacts
-                .cell_packages()
-                .await
-                .expect("the package gate answers")
-                .declare_all(),
+            &namespace(&core, &pin, &env).await.1,
             None,
         )
         .await
@@ -347,16 +320,10 @@ async fn a_definition_start_attributes_loading_resolution_acquisition_and_claim_
     else {
         panic!("import refused")
     };
-    let publication = published(
-        artifacts
-            .publish_workflow(&pin, &document, &Name::new("run"), &env, packages, None)
-            .await
-            .expect("publish"),
-    );
-    let env_ref = artifacts
-        .publish_process_env(&pin, &linking(&env, &[]))
+    let publication = publish(&core, &pin, &document, &Name::new("run"), &env, None)
         .await
-        .expect("env");
+        .expect("publish");
+    let env_ref = publication.env_ref.clone();
     let process = start(
         &core,
         &env_ref,

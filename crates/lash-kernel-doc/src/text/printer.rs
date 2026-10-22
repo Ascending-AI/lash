@@ -700,7 +700,7 @@ impl<'a> Printer<'a> {
         let Some(start) = start else {
             return;
         };
-        self.out.push_str("start");
+        self.out.push_str("presentation");
         self.signature(&start.signature);
         match &start.representation {
             FunctionRepresentation::Bare => self.out.push_str(" bare"),

@@ -547,7 +547,9 @@ impl ProcessEngine for LawEngine {
                             use_: law_use(LAW_PARK),
 
                             input: json!({}),
-                            site: Some(Box::new(law_site(step))),
+                            site: Some(Box::new(lash_vocabulary::sites::EffectLocation::authored(
+                                law_site(step),
+                            ))),
                         })
                         .collect(),
                     wake: None,

@@ -16,6 +16,9 @@ use lash_vocabulary::{FunctionId, FunctionName};
 pub trait Library: FunctionCatalog + Send + Sync {
     /// The function `name` stands for.
     fn resolve(&self, name: &str) -> Option<FunctionId>;
+    /// Source spelling of a signature-only helper Import, projected from this library's authored names.
+    /// This supplies printer metadata and never fulfils executable code.
+    fn imported(&self, name: &lash_vocabulary::QualifiedName) -> Option<FunctionName>;
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
@@ -227,6 +230,13 @@ impl FunctionCatalog for NamedLibrary {
 }
 
 impl Library for NamedLibrary {
+    fn imported(&self, name: &lash_vocabulary::QualifiedName) -> Option<FunctionName> {
+        self.iter().find_map(|(source, _)| {
+            let source = FunctionName::new(source).ok()?;
+            (crate::authoring::helper_name(&source) == *name).then_some(source)
+        })
+    }
+
     fn resolve(&self, name: &str) -> Option<FunctionId> {
         // A name that is not a qualified name is no function's name: none
         // is registered or inserted under it.

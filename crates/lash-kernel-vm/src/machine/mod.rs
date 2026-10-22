@@ -10,6 +10,7 @@
 //! step.
 
 mod actions;
+mod callable_capture;
 mod catches;
 mod checkpoint;
 mod exec;

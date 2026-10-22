@@ -19,6 +19,9 @@
 #[path = "support/sim.rs"]
 mod sim;
 
+#[path = "support/operations.rs"]
+mod operations;
+
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -212,14 +215,35 @@ impl lash_execution_contracts::process::ProcessEngine for ScriptEngine {
         lash_execution_contracts::process::ProcessTraceClass::Internal
     }
 
-    async fn performed_effects(
+    async fn inspect_link(
+        &self,
+        _link: lash_vocabulary::LinkId,
+        _selector: &lash_execution_contracts::process::linking::ReachSelector,
+    ) -> Result<
+        lash_execution_contracts::process::linking::LinkInspection,
+        lash_execution_contracts::process::linking::EnginePortError,
+    > {
+        Err(
+            lash_execution_contracts::process::linking::EnginePortError::Unsupported {
+                operation: "this scripted engine has no executable document".into(),
+            },
+        )
+    }
+    async fn inspect_start(
         &self,
         _payload: &serde_json::Value,
-    ) -> Result<lash_execution_contracts::process::PerformedEffects, lash_core::ProcessEnvRefusal>
-    {
-        Ok(lash_core_execution::testing::performs(
-            &[write_definition()],
-        ))
+    ) -> Result<
+        lash_execution_contracts::process::linking::LinkInspection,
+        lash_execution_contracts::process::linking::EnginePortError,
+    > {
+        Err(
+            lash_execution_contracts::process::linking::EnginePortError::Unsupported {
+                operation: "this scripted engine has no executable document".into(),
+            },
+        )
+    }
+    fn capabilities(&self) -> lash_vocabulary::claims::NodeRequirements {
+        Default::default()
     }
 
     async fn check_args(
@@ -446,15 +470,13 @@ fn write(
     lash_execution_contracts::process::EngineAction::Steps {
         steps: vec![lash_execution_contracts::process::StepRequest::Tool {
             step: lash_execution_contracts::process::StepName(step.to_owned()),
-            effect: lash_core_execution::testing::effect_of(&write_definition()),
-            contract: write_definition().contract_id(),
+            use_: operations::use_for(&write_definition()),
             input: serde_json::json!({ "x": x }),
             site: site.map(|(node_id, occurrence)| {
                 Box::new(lash_protocol_types::effect_identity_fixture(
                     node_id, occurrence,
                 ))
             }),
-            matched: None,
         }],
         wake: None,
     }
@@ -467,19 +489,21 @@ fn write(
 fn environment() -> lash_core::ProcessEnv {
     lash_core::ProcessEnv::builder(lash_core::MaxToolCalls::new(16))
         .component(WRITE_COMPONENT, &())
-        .link_tool(
+        .execution(operations::environment(
             WRITE_COMPONENT.tool_provider(lash::tool_provider_key!("tools")),
-            &write_definition(),
-        )
+            &[write_definition()],
+        ))
         .build()
         .expect("the environment builds")
 }
 
 /// Start a detached process of the scripted engine.
 async fn start(core: &lash::LashCore) -> lash_vocabulary::identity::ProcessId {
+    let pin = lash_core::HostArtifactPin::mint();
+    operations::retain(core.backend(), &pin, &[write_definition()]).await;
     let env_ref = core
         .host_artifacts()
-        .publish_process_env(&lash_core::HostArtifactPin::mint(), &environment())
+        .publish_process_env(&pin, &environment())
         .await
         .expect("the environment is published");
     let request = lash_execution_contracts::process::ProcessStartRequest::engine(
@@ -1077,6 +1101,7 @@ impl lash_core_execution::runtime::process::steps::ProcessSteps for NoSteps {
         _runtime: &Arc<lash_core_execution::runtime::process::StepRuntime>,
         _process: &lash_execution_contracts::process::ProcessRecord,
         step: &lash_execution_contracts::process::StepRequest,
+        _target: Option<&lash_core_execution::runtime::process::steps::InvocationTarget>,
         _now_ms: u64,
     ) -> Result<
         lash_core_execution::runtime::process::steps::StepAdmission,

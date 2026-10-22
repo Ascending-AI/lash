@@ -113,6 +113,10 @@ pub fn process_step_body_started(
     lash_trace::StepBodyStartedObservation {
         step: lash_trace::StepBodyStarted {
             process_id: process.clone(),
+            origin: (lash_protocol_types::effect_identity_fixture(label, 1))
+                .position()
+                .site()
+                .clone(),
             at: lash_protocol_types::effect_identity_fixture(label, 1),
             call_id: crate::ToolCallId::fixture(label),
             attempt,

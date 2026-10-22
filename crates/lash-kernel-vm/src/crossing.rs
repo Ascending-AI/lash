@@ -94,82 +94,9 @@ fn function_root(
     Ok(None)
 }
 
-fn extract_function(
-    heap: &mut CrossingHeap<'_>,
-    run: &mut CrossingRun<'_>,
-    value: &PageValue,
-    budget: usize,
-    path: &mut Vec<EntityId>,
-) -> Result<lash_kernel_doc::FunctionValue, CopyError> {
-    let callable =
-        callable(heap, value)?.ok_or_else(|| raised("not_data", "no callable identity"))?;
-    let document = defining_document(run, callable)?;
-    let definition = run
-        .catalog
-        .definition(&callable.function)
-        .or_else(|| document.functions.get(&callable.function))
-        .ok_or_else(|| raised("not_data", "callable definition is not loaded"))?;
-    let mut signature = definition.signature.clone();
-    let mut convention = lash_kernel_doc::StartConvention::Direct;
-    let mut captured = Vec::new();
-    if let PageValue::Closure(id) = value {
-        if path.contains(id) {
-            return Err(raised("cycle", "a captured function holds itself").into());
-        }
-        let closure = heap.heap.closure(*id)?;
-        let site = closure.site.resolve(heap.heap.pages())?;
-        if let Some(start) = lash_kernel_doc::snapshot::closure_at(document, &site)
-            .and_then(|c| c.presentation.as_ref())
-        {
-            signature = start.signature.clone();
-            convention = start.convention.clone();
-        }
-        for index in 0..closure.captures.len() {
-            let (_, (name, cell)) = closure
-                .captures
-                .rank_get(index, heap.heap.pages())?
-                .ok_or_else(|| HeapFault::Malformed("closure capture missing".into()))?;
-            captured.push((
-                name.resolve(heap.heap.pages())?,
-                heap.heap.variable_get(cell)?,
-            ));
-        }
-        path.push(*id);
-    } else if let Some(export) = document.exports.values().find_map(|export| match export {
-        lash_kernel_doc::Export::Function(export) if export.function == callable.function => {
-            Some(export)
-        }
-        _ => None,
-    }) {
-        signature = export.signature.clone();
-        convention = export.convention.clone();
-    }
-    let mut captures = BTreeMap::new();
-    for (name, value) in captured {
-        let mut at = ArgumentPath {
-            steps: vec![name.as_str().to_owned()],
-        };
-        captures.insert(
-            name,
-            copy(heap, run, &value, &Slot::Open, &mut at, budget, path)?,
-        );
-    }
-    if matches!(value, PageValue::Closure(_)) {
-        path.pop();
-    }
-    let value = lash_kernel_doc::FunctionValue {
-        callable,
-        captures,
-        signature,
-        convention,
-        captions: lash_kernel_doc::Captions::empty(defining_document(run, callable)?.identity()),
-    };
-    let limits = lash_kernel_doc::FunctionValueLimits::standard();
-    value
-        .check(run.catalog, limits, run.data)
-        .map_err(|error| raised("not_data", error.to_string()))?;
-    Ok(value)
-}
+#[path = "crossing/captures.rs"]
+mod captures;
+use captures::extract_function;
 
 /// The declared type at one path of an effect argument: open, where every
 /// value is admitted, or the members of the union it is. No member means no
@@ -347,7 +274,7 @@ fn copy(
         )
         .into());
     };
-    if let Some(root) = function_root(heap, run, value)? {
+    if function_root(heap, run, value)?.is_some() {
         if !slot.admits_function() {
             return Err(raised(
                 "not_data",
@@ -358,7 +285,7 @@ fn copy(
             )
             .into());
         }
-        let function = extract_function(heap, run, &root, budget, path)?;
+        let function = extract_function(heap, run, value, budget, path)?;
         return Ok(Datum::FunctionValue(Box::new(function)));
     }
     Ok(match value {

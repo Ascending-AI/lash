@@ -775,9 +775,7 @@ fn read_refusal(
 }
 
 /// Heavy tool contract resolved only when a prompt or call needs its schemas.
-#[derive(
-    Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
-)]
+#[derive(Clone, Debug, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ToolContract {
     #[serde(skip)]
@@ -788,6 +786,16 @@ pub struct ToolContract {
     pub output_schema: SchemaContract,
     #[serde(default, skip_serializing_if = "ToolOutputContract::is_static")]
     pub output_contract: ToolOutputContract,
+}
+
+// The provenance hint is process-local. Equality compares the retained contract
+// facts, so a committed definition equals its deserialized immutable winner.
+impl PartialEq for ToolContract {
+    fn eq(&self, other: &Self) -> bool {
+        self.input_schema == other.input_schema
+            && self.output_schema == other.output_schema
+            && self.output_contract == other.output_contract
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

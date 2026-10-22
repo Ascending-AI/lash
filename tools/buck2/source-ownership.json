@@ -37,8 +37,7 @@
         "tests/plugin_certification.rs"
       ],
       "processes_evidence": [
-        "tests/processes_evidence.rs",
-        "tests/processes_evidence/link_laws.rs"
+        "tests/processes_evidence.rs"
       ],
       "processes_evidence_b": [
         "tests/processes_evidence_b.rs"
@@ -61,7 +60,6 @@
         "tests/workflow_laws/coarse.rs",
         "tests/workflow_laws/crossing.rs",
         "tests/workflow_laws/documents.rs",
-        "tests/workflow_laws/entry_comparison.rs",
         "tests/workflow_laws/failures.rs",
         "tests/workflow_laws/generated_source.rs",
         "tests/workflow_laws/inline_starts.rs",
@@ -69,8 +67,13 @@
         "tests/workflow_laws/packages.rs",
         "tests/workflow_laws/returned_lists.rs",
         "tests/workflow_laws/sleep_resume_at.rs",
+        "tests/workflow_laws/support.rs"
+      ],
+      "workflow_view_laws": [
+        "tests/workflow_laws/entry_comparison.rs",
         "tests/workflow_laws/value_names.rs",
-        "tests/workflow_laws/view_links.rs"
+        "tests/workflow_laws/view_links.rs",
+        "tests/workflow_view_laws.rs"
       ]
     },
     "test_data": {
@@ -381,7 +384,8 @@
         "tests/core_node_processes/process_endstates.rs",
         "tests/core_node_processes/read_tools.rs",
         "tests/core_node_processes/session_and_isolated_envs.rs",
-        "tests/support/kernel_process.rs"
+        "tests/support/kernel_process.rs",
+        "tests/support/operations.rs"
       ],
       "declared_start": [
         "tests/declared_start.rs",
@@ -407,6 +411,7 @@
         "tests/drain_by_release.rs",
         "tests/support/dialect.rs",
         "tests/support/matrix.rs",
+        "tests/support/scripted_steps.rs",
         "tests/support/sim.rs"
       ],
       "first_party_tools": [
@@ -431,7 +436,9 @@
       ],
       "kernel_step_crash_laws": [
         "tests/kernel_step_crash_laws.rs",
+        "tests/kernel_step_crash_laws/carried_callback.rs",
         "tests/kernel_step_crash_laws/paged_carry.rs",
+        "tests/support/kernel_process.rs",
         "tests/support/matrix.rs",
         "tests/support/served.rs",
         "tests/support/sim.rs"
@@ -471,6 +478,7 @@
       ],
       "pinned_code_laws": [
         "tests/pinned_code_laws.rs",
+        "tests/support/kernel_process.rs",
         "tests/support/served.rs",
         "tests/support/sim.rs"
       ],
@@ -490,20 +498,24 @@
       ],
       "process_actor_laws": [
         "tests/process_actor_laws.rs",
+        "tests/support/scripted_steps.rs",
         "tests/support/sim.rs"
       ],
       "process_crash_proof": [
         "tests/process_crash_proof.rs",
         "tests/support/matrix.rs",
+        "tests/support/scripted_steps.rs",
         "tests/support/sim.rs"
       ],
       "process_lifecycle_events": [
         "tests/process_lifecycle_events.rs",
+        "tests/support/operations.rs",
         "tests/support/sim.rs"
       ],
       "process_ran_laws": [
         "tests/process_ran_laws.rs",
         "tests/support/dialect.rs",
+        "tests/support/kernel_process.rs",
         "tests/support/matrix.rs",
         "tests/support/served.rs",
         "tests/support/sim.rs"
@@ -511,12 +523,15 @@
       "process_step_crash_proof": [
         "tests/process_step_crash_proof.rs",
         "tests/support/matrix.rs",
+        "tests/support/operations.rs",
         "tests/support/sim.rs"
       ],
       "process_tool_call_crash_laws": [
         "tests/process_tool_call_crash_laws.rs",
         "tests/support/dialect.rs",
+        "tests/support/kernel_process.rs",
         "tests/support/matrix.rs",
+        "tests/support/operations.rs",
         "tests/support/served.rs",
         "tests/support/sim.rs"
       ],
@@ -579,6 +594,7 @@
       "tool_crash_laws": [
         "tests/support/dialect.rs",
         "tests/support/matrix.rs",
+        "tests/support/operations.rs",
         "tests/support/served.rs",
         "tests/support/sim.rs",
         "tests/support/telemetry.rs",
@@ -1099,20 +1115,18 @@
     ]
   },
   "crates/lash-kernel-package": {
-    "compile_data": [
-      "labels/date.json",
-      "labels/kernel.json",
-      "labels/python.json",
-      "labels/regex.json",
-      "labels/typescript.json",
-      "labels/url.json"
-    ]
+    "compile_data": []
   },
   "examples/dataframe": {
     "compile_data": [
       "df.ts",
       "cell.ts",
       "nightly.ts"
+    ]
+  },
+  "crates/lash-vm-releases": {
+    "compile_data": [
+      "labels/*.json"
     ]
   }
 }

@@ -191,14 +191,13 @@ impl Lowerer<'_> {
             Ok(())
         });
         self.span = outer_span;
-        let Some(frame) = self.functions.pop() else {
+        let Some(_) = self.functions.pop() else {
             unreachable!("function frame is active");
         };
         let body = body?;
         self.written = Some(self.written(function));
         let start = self.callable_presentation(function);
         let closure = self.emit_closure(vec![this, args], body, start);
-        self.set_start_convention(frame.context_used || frame.arguments_used)?;
         Ok(Operand {
             plain: None,
             text_prefix: None,
@@ -369,7 +368,7 @@ impl Lowerer<'_> {
         function: &ast::Function,
         entry: &super::Positional,
     ) -> Lowering<Operand> {
-        let (made, context_used) = self.callback_closure(function, entry.arity)?;
+        let (made, _) = self.callback_closure(function, entry.arity)?;
         self.store(Place::Variable(entry.name.clone()), made);
 
         let this = self.fresh("this");
@@ -397,7 +396,6 @@ impl Lowerer<'_> {
         self.written = Some(self.written(function));
         let start = self.callable_presentation(function);
         let closure = self.emit_closure(vec![this, args], body, start);
-        self.set_start_convention(context_used)?;
         let closure = Operand {
             ty: self.facts.function(function.return_ty.as_ref()),
             ..closure

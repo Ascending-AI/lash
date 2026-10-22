@@ -554,6 +554,8 @@ pub enum UseBinding {
 #[serde(deny_unknown_fields)]
 /// Immutable accepted publications, roots, per-use routes and base claim debt. Resolution rows stay outside its hash.
 pub struct ExecutionEnvironment {
+    /// Defining callables owed to live values after an owner-carried upgrade.
+    pub retained_code: BTreeSet<lash_vocabulary::CallableId>,
     pub publications: Vec<PublicationRecord>,
     pub roots: BTreeSet<LinkId>,
     /// Cell roots admitted by this source execution; never supplied by a guest.
@@ -576,6 +578,7 @@ impl ExecutionEnvironment {
     /// Empty reach for an engine with no operation imports.
     pub fn empty(registry: RegistryKind) -> Self {
         Self {
+            retained_code: BTreeSet::new(),
             publications: Vec::new(),
             roots: BTreeSet::new(),
             authored: BTreeSet::new(),

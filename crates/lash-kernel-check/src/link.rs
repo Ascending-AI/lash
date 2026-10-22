@@ -33,6 +33,9 @@ struct ClosureFrame {
 pub(crate) struct Linker<'a> {
     catalog: &'a dyn lash_kernel_doc::FunctionCatalog,
     pub(crate) graph: Graph,
+    /// Public callable metadata retained intact for inference at the creating expression.
+    pub(crate) presentations:
+        std::collections::BTreeMap<NodeId, lash_kernel_doc::CallablePresentation>,
     pub(crate) errors: Vec<Refused>,
     /// The unit is `main`: a name nothing declares is a session binding.
     session: bool,
@@ -61,6 +64,7 @@ impl<'a> Linker<'a> {
         Self {
             catalog,
             graph: Graph::empty(),
+            presentations: Default::default(),
             errors: Vec::new(),
             session: false,
             loops: Vec::new(),
@@ -518,12 +522,26 @@ impl<'a> Linker<'a> {
                     BindingKind::Param,
                     Some(id),
                 );
+                // A lifted closure keeps lexical bindings in its graph while also
+                // remaining addressable as a callable by its FunctionId.
+                if self.graph.unit(&Unit::Library(closure.function)).is_none() {
+                    self.graph.units.push(UnitView {
+                        unit: Unit::Library(closure.function),
+                        body,
+                        params: params.clone(),
+                        signature: Some(definition.signature.clone()),
+                        effects: EffectSet::default(),
+                    });
+                }
                 self.loops = loops;
                 let captures = self
                     .closures
                     .pop()
                     .map(|frame| frame.captures)
                     .unwrap_or_default();
+                if let Some(presentation) = &closure.presentation {
+                    self.presentations.insert(id, presentation.clone());
+                }
                 ExprNode::Closure {
                     function: closure.function,
                     params,

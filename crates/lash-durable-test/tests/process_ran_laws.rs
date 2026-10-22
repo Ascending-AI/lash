@@ -31,6 +31,8 @@
 #[allow(dead_code)]
 #[path = "support/dialect.rs"]
 mod dialect;
+#[path = "support/kernel_process.rs"]
+mod kernel_process;
 #[path = "support/matrix.rs"]
 mod matrix;
 #[path = "support/served.rs"]
@@ -56,24 +58,23 @@ use lash_protocol_types::sync::MutexExt as _;
 /// draw, a second sleep, then its answer: three segments.
 const COUNTED: &str = r#"kernel 1
 numbers float
-entry counted() -> Any
-
-fn counted() {
-  let first = random
-  let low = false
-  if num.lt(first, 0.5) {
-    set low = true
-    set first = 0.25
-  }
-  do sleep 5000
-  let at = clock
-  let second = random
-  do sleep 7000
-  return [low, first, second]
-}
-
+import 0 operation typescript.sleep(milliseconds: Int) -> Null
+import 1 operation typescript.clock() -> Timestamp
+import 2 operation typescript.random() -> Bytes
 main {
-  finish null
+  let bits = perform 2() as Bytes
+  let first = invoke bytes.at(bits, 0)
+  let low = false
+  if num.lt(first, 128) {
+    set low = true
+    set first = 25
+  }
+  do perform 0(5000) as Null
+  let at = perform 1() as Timestamp
+  let next = perform 2() as Bytes
+  let second = invoke bytes.at(next, 0)
+  do perform 0(7000) as Null
+  return [low, first, second]
 }
 "#;
 
@@ -92,16 +93,54 @@ enum Plan {
     Unobserved,
 }
 
-/// The source with the library functions it calls bound.
+/// This law needs two native declarations and the ordinary dialect services.
+/// Author their complete definitions into its document, avoiding an unrelated
+/// full helper namespace on every crash-matrix cell.
 fn source() -> String {
-    let library = lash_vm_runtime::lash_packages()
-        .map(|packages| std::sync::Arc::clone(packages.functions()))
-        .expect("the shipped library");
-    let (id, _) = library
-        .iter()
-        .find(|(_, entry)| entry.definition().name.to_string() == "num.lt")
-        .expect("num.lt is shipped");
-    format!("{COUNTED}\nuse num.lt = @{id}\n")
+    let release = lash::vm::helper_release().unwrap();
+    let mut definitions = String::new();
+    for name in ["num.lt", "bytes.at"] {
+        let (id, function) = release
+            .functions
+            .iter()
+            .find(|(_, function)| function.definition().name.as_str() == name)
+            .unwrap();
+        assert!(function.definition().body().is_none());
+        definitions.push_str(&format!(
+            "native @{id}\ndefinition {}\n",
+            serde_json::to_string(&lash_kernel_doc::print_definition(function.definition()))
+                .unwrap()
+        ));
+    }
+    COUNTED.replace("main {", &format!("{definitions}main {{"))
+}
+
+const SERVICES: lash::process::ProcessConfigKey<()> =
+    lash::process::ProcessConfigKey::new("counted-services", lash::plugins::FormatVersion::ONE);
+fn services() -> lash::process::StaticProcessComponent {
+    let draws = std::sync::atomic::AtomicU64::new(0);
+    let provider = lash_vm_runtime::dialect_services::Services::new(
+        lash_vm_runtime::dialect_services::Dialect::TypeScript,
+        SERVICES.tool_provider(lash::tool_provider_key!("services")),
+        Duration::from_secs(30),
+        Arc::new(move || {
+            draws
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+                .rotate_left(63)
+        }),
+    )
+    .unwrap();
+    lash::plugins::StaticPluginFactory::new(
+        lash::plugins::PluginDeclaration::initial(SERVICES.component()),
+        lash::plugins::PluginSpec::new()
+            .with_tool_provider_registration(
+                lash::tool_provider_key!("services"),
+                provider.registration(),
+            )
+            .with_package_provider(lash::tool_provider_key!("services"), provider),
+    )
+    .as_component(SERVICES.format())
+    .unwrap()
 }
 
 /// The bounds a direct replay engine runs under.
@@ -121,6 +160,7 @@ fn bounds() -> lash_kernel_vm::Bounds {
 
 fn env(max_tool_calls: usize) -> lash::process::ProcessEnv {
     lash::process::ProcessEnv::builder(lash::MaxToolCalls::new(max_tool_calls))
+        .component(SERVICES, &())
         .build()
         .expect("the env builds")
 }
@@ -181,78 +221,49 @@ impl Counted {
         self.core
             .lock_recover()
             .get_or_insert_with(|| {
-                lash::LashCore::rlm_builder(
-                    backend.clone(),
-                    served::rlm(&backend, sim::workers(&clock)),
-                )
-                .serve_sessions(false)
-                .commit_budget(lash::CommitBudget::bounded(16 * 1024 * 1024, 4096))
-                .data_retention(lash::DataRetention::standard())
-                .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
-                .execution_budgets(lash::ExecutionBudgets::recommended())
-                .delta_coalescing(lash::DeltaCoalescing::recommended())
-                .build(lash::persistence::LeaseOwnerIdentity::opaque(
-                    lash::persistence::LeaseOwnerId::new("process-ran-deployment"),
-                    lash::persistence::LeaseIncarnationId::new("process-ran-boot"),
-                ))
-                .expect("the core builds")
+                let workers = sim::workers(&clock);
+                let bounds = workers.config().run_bounds;
+                lash::LashCore::standard_builder(backend)
+                    .plugin(Arc::new(lash::vm::KernelProcessPluginFactory::new(
+                        workers,
+                        "typescript",
+                        bounds,
+                    )))
+                    .process_component(Arc::new(services()), SERVICES)
+                    .serve_sessions(false)
+                    .commit_budget(lash::CommitBudget::bounded(16 * 1024 * 1024, 4096))
+                    .data_retention(lash::DataRetention::standard())
+                    .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
+                    .execution_budgets(lash::ExecutionBudgets::recommended())
+                    .delta_coalescing(lash::DeltaCoalescing::recommended())
+                    .build(lash::persistence::LeaseOwnerIdentity::opaque(
+                        lash::persistence::LeaseOwnerId::new("process-ran-deployment"),
+                        lash::persistence::LeaseIncarnationId::new("process-ran-boot"),
+                    ))
+                    .expect("the core builds")
             })
             .clone()
     }
 
-    async fn publish_env(&self, max_tool_calls: usize) -> lash_core::ProcessEnvRef {
-        self.core()
+    async fn publication(
+        &self,
+        max_tool_calls: usize,
+    ) -> (serde_json::Value, lash_core::ProcessEnvRef) {
+        let core = self.core();
+        let (payload, linked) =
+            kernel_process::publish(&core, &source(), &env(max_tool_calls)).await;
+        let reference = core
             .host_artifacts()
-            .publish_process_env(&lash_core::HostArtifactPin::mint(), &env(max_tool_calls))
+            .publish_process_env(&lash_core::HostArtifactPin::mint(), &linked)
             .await
-            .expect("the env publishes")
-    }
-
-    async fn payload(&self) -> serde_json::Value {
-        let document =
-            lash::workflow::document::parse_document(&source()).expect("the document parses");
-        let identity = lash_vm_runtime::KernelDocuments::new(self.backend().module_artifacts())
-            .publish(
-                &lash_core::ReferrerClaim::unguarded(lash_core::ArtifactReferrer::HostPin(
-                    lash_core::HostArtifactPin::mint(),
-                ))
-                .expect("a host pin is unguarded"),
-                &lash_kernel_doc::IdentifiedDocument::new(document.clone()),
-                &lash_vm_runtime::lash_packages()
-                    .map(|packages| std::sync::Arc::clone(packages.functions()))
-                    .ok()
-                    .and_then(|functions| {
-                        lash::workflow::document::CheckedDeclarations::required(
-                            &document,
-                            functions.as_ref(),
-                        )
-                        .ok()
-                    })
-                    .expect("the document's helpers are shipped"),
-            )
-            .await
-            .expect("the document publishes");
-        serde_json::to_value(lash_vm_runtime::KernelProcessInput {
-            declared_packages: lash_vm_runtime::lash_packages()
-                .expect("fixture packages")
-                .surface()
-                .selection(),
-            packages: lash_vm_runtime::lash_packages()
-                .expect("lash's packages")
-                .digest(),
-            document: identity,
-            functions: document.manifest.functions.keys().copied().collect(),
-            entry: lash::workflow::document::Name::new("counted"),
-            args: serde_json::Map::new(),
-        })
-        .expect("the input encodes")
+            .unwrap();
+        (payload, reference)
     }
 
     /// The host's start of `counted()`, observed as the plan says.
     async fn start_process(&self) -> Result<lash_vocabulary::identity::ProcessId, String> {
         let core = self.core();
-        let payload = self.payload().await;
-        let env_ref = self.publish_env(2).await;
+        let (payload, env_ref) = self.publication(2).await;
         let kind = lash_vm_runtime::LASH_VM_ENGINE_KIND;
         let recorded = core
             .processes()
@@ -282,12 +293,18 @@ impl Counted {
     /// Step `nodes` until the process waits on its first sleep.
     async fn first_park(&self, nodes: &SimNodes, process: &lash_vocabulary::identity::ProcessId) {
         let actor = ActorKey::process(process.as_str()).unwrap();
-        nodes.quiesce().await;
-        loop {
-            let waiting = matches!(
-                nodes.database().actor(&actor).await,
-                Ok(Some(snapshot)) if snapshot.state == ActorState::Waiting
+        tokio::time::timeout(Duration::from_secs(15), nodes.quiesce())
+            .await
+            .expect("the first process run quiesces");
+        for _ in 0..200 {
+            let state = nodes.database().actor(&actor).await.unwrap().unwrap().state;
+            assert_ne!(
+                state,
+                ActorState::Terminal,
+                "the process ended before its first park: {:?}",
+                self.core().processes().get(process).await.unwrap()
             );
+            let waiting = state == ActorState::Waiting;
             if waiting {
                 return;
             }
@@ -297,6 +314,10 @@ impl Counted {
                 nodes.script().rendered_trace()
             );
         }
+        panic!(
+            "the process did not park: {}",
+            nodes.script().rendered_trace()
+        );
     }
 
     /// Every `process.ran` record the process committed, in order.
@@ -513,7 +534,10 @@ impl Counted {
             panic!("a kernel process runs an engine");
         };
         let engine = lash_vm_runtime::KernelProcessEngine::new(
-            lash_vm_runtime::KernelDocuments::new(self.backend().module_artifacts()),
+            lash_vm_runtime::KernelDocuments::new(
+                self.backend().module_artifacts(),
+                self.backend().package_store(),
+            ),
             lash_vm_runtime::TYPESCRIPT_DIALECT,
             sim::workers(&self.clock()),
             bounds(),
@@ -573,8 +597,17 @@ impl Counted {
             SegmentAnswer::Diverged,
         );
         let redrawn = retaped(&steps, *middle, process, |output| {
-            let draw = &mut output["reads"]["random"][0];
-            *draw = serde_json::json!(draw.as_u64().expect("a recorded draw") ^ (1 << 63));
+            let draws = output["reads"]["effects"]
+                .as_array_mut()
+                .expect("the operation tape");
+            let draw = draws
+                .iter_mut()
+                .find(|read| read["use_"]["slot"] == 2)
+                .expect("the random read");
+            let bytes = &mut draw["answer"]["Ok"]["bytes"];
+            let text = bytes.as_str().expect("a recorded byte draw");
+            let first = u8::from_str_radix(&text[..2], 16).unwrap() ^ 128;
+            *bytes = serde_json::json!(format!("{first:02x}{}", &text[2..]));
         });
         expect(
             &mut violations,
@@ -720,14 +753,30 @@ impl Scenario for Counted {
     async fn start(&self, nodes: &Arc<SimNodes>) -> Result<(), String> {
         // The host is outside the deployment under test: its start is uncut.
         let process = self.start_process().await?;
+        let actor = ActorKey::process(process.as_str()).unwrap();
+        let facts = nodes
+            .database()
+            .claim_facts(None, &actor)
+            .await
+            .unwrap()
+            .actor
+            .unwrap();
+        let serves = lash::testing::node_serves(&self.core());
+        let missing: Vec<_> = facts
+            .requires
+            .iter()
+            .filter(|required| !serves.contains(required))
+            .collect();
+        assert!(
+            missing.is_empty(),
+            "the authored fixture has unserved requirements: {missing:?}"
+        );
         *self.process.lock_recover() = Some(process.clone());
         nodes.start("a");
         if self.plan == Plan::Carried {
             self.first_park(nodes, &process).await;
-            let successor = lash::process::ProcessSuccessor::new(
-                self.payload().await,
-                self.publish_env(SUCCESSOR_TOOL_CALLS).await,
-            );
+            let (payload, env) = self.publication(SUCCESSOR_TOOL_CALLS).await;
+            let successor = lash::process::ProcessSuccessor::new(payload, env);
             let asked = self
                 .core()
                 .processes()
@@ -772,8 +821,12 @@ impl Scenario for Counted {
             .expect("the process reads")
             .expect("the process is retained");
         let mut violations = Vec::new();
-        if record.lifecycle.terminal().is_none() {
-            violations.push(format!("the process did not end: {:?}", record.lifecycle));
+        match record.lifecycle.terminal() {
+            Some(lash_execution_contracts::process::ProcessTerminal::Settled { output })
+                if output.is_success() => {}
+            terminal => {
+                violations.push(format!("the counted process did not succeed: {terminal:?}"))
+            }
         }
         match self.plan {
             Plan::Counted | Plan::Carried => {

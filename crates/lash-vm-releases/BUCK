@@ -27,7 +27,9 @@ lash_rust_build_script(
         "dialect-typescript",
         "synthetic-next",
     ],
-    data = ["build.rs"] + glob(["src/**/*.rs"]),
+    data = ["build.rs"] + glob(["src/**/*.rs"] + [
+        "labels/*.json",
+    ]),
     manifest_dir = "crates/lash-vm-releases",
     package_name = "lash-internal-vm-releases",
     version = "0.0.0-dev",
@@ -47,6 +49,9 @@ lash_rust_library(
         "synthetic-next",
     ],
     exec_properties = sized_exec_properties("lash-internal-vm-releases", "lash_vm_releases"),
+    compile_data_patterns = [
+        "labels/*.json",
+    ],
     extra_compile_data = [],
     manifest_dir = "crates/lash-vm-releases",
     package_name = "lash-internal-vm-releases",
@@ -94,6 +99,9 @@ lash_rust_binary(
         "dialect-python",
         "dialect-typescript",
         "synthetic-next",
+    ],
+    compile_data_patterns = [
+        "labels/*.json",
     ],
     exec_properties = sized_exec_properties("lash-internal-vm-releases", "record_helper_data"),
     extra_compile_data = [],
@@ -153,6 +161,9 @@ lash_rust_feature_library(
         "synthetic-next",
     ],
     exec_properties = sized_exec_properties("lash-internal-vm-releases", "lash_vm_releases"),
+    compile_data_patterns = [
+        "labels/*.json",
+    ],
     extra_compile_data = [],
     manifest_dir = "crates/lash-vm-releases",
     package_name = "lash-internal-vm-releases",
@@ -177,6 +188,9 @@ lash_rust_feature_library(
         "synthetic-next",
     ],
     exec_properties = sized_exec_properties("lash-internal-vm-releases", "lash_vm_releases"),
+    compile_data_patterns = [
+        "labels/*.json",
+    ],
     extra_compile_data = [],
     manifest_dir = "crates/lash-vm-releases",
     package_name = "lash-internal-vm-releases",
@@ -202,6 +216,9 @@ lash_rust_feature_library(
         "synthetic-next",
     ],
     exec_properties = sized_exec_properties("lash-internal-vm-releases", "lash_vm_releases"),
+    compile_data_patterns = [
+        "labels/*.json",
+    ],
     extra_compile_data = [],
     manifest_dir = "crates/lash-vm-releases",
     package_name = "lash-internal-vm-releases",
@@ -224,6 +241,9 @@ lash_rust_feature_library(
         "synthetic-next",
     ],
     exec_properties = sized_exec_properties("lash-internal-vm-releases", "lash_vm_releases"),
+    compile_data_patterns = [
+        "labels/*.json",
+    ],
     extra_compile_data = [],
     manifest_dir = "crates/lash-vm-releases",
     package_name = "lash-internal-vm-releases",
@@ -249,6 +269,9 @@ lash_rust_feature_library(
         "synthetic-next",
     ],
     exec_properties = sized_exec_properties("lash-internal-vm-releases", "lash_vm_releases"),
+    compile_data_patterns = [
+        "labels/*.json",
+    ],
     extra_compile_data = [],
     manifest_dir = "crates/lash-vm-releases",
     package_name = "lash-internal-vm-releases",
@@ -274,6 +297,9 @@ lash_rust_feature_library(
         "synthetic-next",
     ],
     exec_properties = sized_exec_properties("lash-internal-vm-releases", "lash_vm_releases"),
+    compile_data_patterns = [
+        "labels/*.json",
+    ],
     extra_compile_data = [],
     manifest_dir = "crates/lash-vm-releases",
     package_name = "lash-internal-vm-releases",
@@ -296,6 +322,9 @@ lash_rust_feature_library(
         "synthetic-next",
     ],
     exec_properties = sized_exec_properties("lash-internal-vm-releases", "lash_vm_releases"),
+    compile_data_patterns = [
+        "labels/*.json",
+    ],
     extra_compile_data = [],
     manifest_dir = "crates/lash-vm-releases",
     package_name = "lash-internal-vm-releases",
@@ -321,6 +350,9 @@ lash_rust_feature_library(
         "synthetic-next",
     ],
     exec_properties = sized_exec_properties("lash-internal-vm-releases", "lash_vm_releases"),
+    compile_data_patterns = [
+        "labels/*.json",
+    ],
     extra_compile_data = [],
     manifest_dir = "crates/lash-vm-releases",
     package_name = "lash-internal-vm-releases",
@@ -343,6 +375,9 @@ lash_rust_feature_library(
         "synthetic-next",
     ],
     exec_properties = sized_exec_properties("lash-internal-vm-releases", "lash_vm_releases"),
+    compile_data_patterns = [
+        "labels/*.json",
+    ],
     extra_compile_data = [],
     manifest_dir = "crates/lash-vm-releases",
     package_name = "lash-internal-vm-releases",
@@ -367,6 +402,9 @@ lash_rust_feature_library(
         "synthetic-next",
     ],
     exec_properties = sized_exec_properties("lash-internal-vm-releases", "lash_vm_releases"),
+    compile_data_patterns = [
+        "labels/*.json",
+    ],
     extra_compile_data = [],
     manifest_dir = "crates/lash-vm-releases",
     package_name = "lash-internal-vm-releases",
@@ -391,6 +429,9 @@ lash_rust_feature_library(
         "synthetic-next",
     ],
     exec_properties = sized_exec_properties("lash-internal-vm-releases", "lash_vm_releases"),
+    compile_data_patterns = [
+        "labels/*.json",
+    ],
     extra_compile_data = [],
     manifest_dir = "crates/lash-vm-releases",
     package_name = "lash-internal-vm-releases",
@@ -416,6 +457,9 @@ lash_rust_feature_library(
         "synthetic-next",
     ],
     exec_properties = sized_exec_properties("lash-internal-vm-releases", "lash_vm_releases"),
+    compile_data_patterns = [
+        "labels/*.json",
+    ],
     extra_compile_data = [],
     manifest_dir = "crates/lash-vm-releases",
     package_name = "lash-internal-vm-releases",
@@ -440,6 +484,9 @@ lash_rust_feature_library(
         "synthetic-next",
     ],
     exec_properties = sized_exec_properties("lash-internal-vm-releases", "lash_vm_releases"),
+    compile_data_patterns = [
+        "labels/*.json",
+    ],
     extra_compile_data = [],
     manifest_dir = "crates/lash-vm-releases",
     package_name = "lash-internal-vm-releases",
@@ -464,6 +511,9 @@ lash_rust_feature_library(
         "synthetic-next",
     ],
     exec_properties = sized_exec_properties("lash-internal-vm-releases", "lash_vm_releases"),
+    compile_data_patterns = [
+        "labels/*.json",
+    ],
     extra_compile_data = [],
     manifest_dir = "crates/lash-vm-releases",
     package_name = "lash-internal-vm-releases",
@@ -486,6 +536,9 @@ lash_rust_feature_library(
         "synthetic-next",
     ],
     exec_properties = sized_exec_properties("lash-internal-vm-releases", "lash_vm_releases"),
+    compile_data_patterns = [
+        "labels/*.json",
+    ],
     extra_compile_data = [],
     manifest_dir = "crates/lash-vm-releases",
     package_name = "lash-internal-vm-releases",
@@ -510,6 +563,9 @@ lash_rust_feature_library(
         "synthetic-next",
     ],
     exec_properties = sized_exec_properties("lash-internal-vm-releases", "lash_vm_releases"),
+    compile_data_patterns = [
+        "labels/*.json",
+    ],
     extra_compile_data = [],
     manifest_dir = "crates/lash-vm-releases",
     package_name = "lash-internal-vm-releases",
@@ -536,6 +592,9 @@ lash_rust_feature_library(
         "synthetic-next",
     ],
     exec_properties = sized_exec_properties("lash-internal-vm-releases", "lash_vm_releases"),
+    compile_data_patterns = [
+        "labels/*.json",
+    ],
     extra_compile_data = [],
     manifest_dir = "crates/lash-vm-releases",
     package_name = "lash-internal-vm-releases",
@@ -558,6 +617,9 @@ lash_rust_feature_library(
         "synthetic-next",
     ],
     exec_properties = sized_exec_properties("lash-internal-vm-releases", "lash_vm_releases"),
+    compile_data_patterns = [
+        "labels/*.json",
+    ],
     extra_compile_data = [],
     manifest_dir = "crates/lash-vm-releases",
     package_name = "lash-internal-vm-releases",

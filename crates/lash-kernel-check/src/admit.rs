@@ -69,6 +69,7 @@ pub fn derive(document: &Document, catalog: &dyn FunctionCatalog) -> Result<Grap
     let mut graph = linker.graph;
     Typer {
         graph: &mut graph,
+        presentations: &linker.presentations,
         catalog: &document.functions,
         imports: &document.imports,
         errors: &mut errors,
@@ -118,6 +119,7 @@ pub fn derive_definition(
     let mut graph = linker.graph;
     Typer {
         graph: &mut graph,
+        presentations: &linker.presentations,
         catalog,
         imports: &body.imports,
         errors: &mut errors,

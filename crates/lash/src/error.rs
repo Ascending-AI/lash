@@ -5,6 +5,15 @@ use lash_vocabulary::identity::SessionId;
 /// Errors returned while configuring or operating the embedded Lash runtime.
 #[non_exhaustive]
 pub enum EmbedError {
+    /// Opaque workflow bytes failed receipt validation before publication.
+    #[cfg(feature = "codemode")]
+    #[error(transparent)]
+    WorkflowBytes(#[from] lash_kernel_doc::DocumentBytesRefusal),
+    /// A workflow source map failed validation before executable publication.
+    #[cfg(feature = "codemode")]
+    #[error(transparent)]
+    WorkflowSourceMap(#[from] lash_kernel_doc::SourceMapRefusal),
+
     /// A workflow source operation failed in the registered worker service.
     #[cfg(feature = "codemode")]
     #[error(transparent)]
@@ -514,7 +523,7 @@ impl EmbedError {
                 error.clone().into_runtime_error().is_retryable()
             }
             #[cfg(feature = "codemode")]
-            Self::WorkflowSource(_) => false,
+            Self::WorkflowSource(_) | Self::WorkflowBytes(_) | Self::WorkflowSourceMap(_) => false,
             #[cfg(feature = "codemode")]
             Self::ProcessRender(_) => false,
             Self::Runtime(err) => err.is_retryable(),
@@ -607,7 +616,7 @@ impl EmbedError {
                 error.clone().into_runtime_error().is_terminal()
             }
             #[cfg(feature = "codemode")]
-            Self::WorkflowSource(_) => true,
+            Self::WorkflowSource(_) | Self::WorkflowBytes(_) | Self::WorkflowSourceMap(_) => true,
             #[cfg(feature = "codemode")]
             Self::ProcessRender(_) => true,
             Self::MissingProtocolPlugin

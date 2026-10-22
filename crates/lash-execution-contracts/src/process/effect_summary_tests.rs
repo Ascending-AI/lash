@@ -3,7 +3,9 @@ use lash_core_store::execution_limits::MAX_PROCESS_EFFECT_OCCURRENCES;
 
 fn occurrence(node: &str, occurrence: u64) -> ProcessEffectOccurrence {
     ProcessEffectOccurrence::new(
-        lash_protocol_types::effect_identity_fixture(node, occurrence),
+        lash_vocabulary::sites::EffectLocation::authored(
+            lash_protocol_types::effect_identity_fixture(node, occurrence),
+        ),
         "fixture.operation",
         ProcessEffectOutcomeClass::Success,
         None,
@@ -22,7 +24,9 @@ fn node_key(label: &str) -> String {
 #[test]
 fn the_append_payload_is_the_serde_encoding_and_round_trips() {
     let outcome = ProcessEffectOccurrence::new(
-        lash_protocol_types::effect_identity_fixture("node", 3),
+        lash_vocabulary::sites::EffectLocation::authored(
+            lash_protocol_types::effect_identity_fixture("node", 3),
+        ),
         "fixture.disable",
         ProcessEffectOutcomeClass::Failure,
         Some(lash_protocol_types::FailureCode::lash(
@@ -65,7 +69,9 @@ fn only_failed_effects_can_carry_failure_codes() {
         ] {
             let allowed = class == ProcessEffectOutcomeClass::Failure || code.is_none();
             let outcome = ProcessEffectOccurrence::new(
-                lash_protocol_types::effect_identity_fixture("node", 1),
+                lash_vocabulary::sites::EffectLocation::authored(
+                    lash_protocol_types::effect_identity_fixture("node", 1),
+                ),
                 "fixture.disable",
                 class,
                 code,

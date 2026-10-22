@@ -72,7 +72,9 @@ impl Fixture {
     /// Commit one runtime-owned effect-summary occurrence.
     async fn commit_outcome(&self, occurrence: u64) -> ProcessEvent {
         let outcome = lash_execution_contracts::process::ProcessEffectOccurrence::new(
-            lash_protocol_types::effect_identity_fixture("node", occurrence),
+            lash_vocabulary::sites::EffectLocation::authored(
+                lash_protocol_types::effect_identity_fixture("node", occurrence),
+            ),
             "tools.echo",
             lash_execution_contracts::process::ProcessEffectOutcomeClass::Success,
             None,
@@ -463,7 +465,9 @@ impl Fixture {
             for occurrence in 0..count.min(cap) {
                 pending.push(
                     lash_execution_contracts::process::ProcessEffectOccurrence::new(
-                        lash_protocol_types::effect_identity_fixture(&node_name, occurrence),
+                        lash_vocabulary::sites::EffectLocation::authored(
+                            lash_protocol_types::effect_identity_fixture(&node_name, occurrence),
+                        ),
                         "tools.echo",
                         lash_execution_contracts::process::ProcessEffectOutcomeClass::Success,
                         None,

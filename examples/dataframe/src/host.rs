@@ -189,8 +189,19 @@ pub async fn build(
         .process_namespace(pin, &environment, context.clone())
         .await
         .map_err(|error| error.to_string())?;
-    let (package, publication) =
-        crate::publish_library(&backend, pin, &workers, &namespace, context.clone()).await?;
+    let publisher = bootstrap
+        .host_artifacts()
+        .package_publisher(context.clone(), namespace.snapshot.clone())
+        .map_err(|error| error.to_string())?;
+    let (package, publication) = crate::publish_library(
+        &backend,
+        pin,
+        &workers,
+        &publisher,
+        &namespace,
+        context.clone(),
+    )
+    .await?;
     let accepted = AcceptedAdvertisement {
         publication,
         advertisement: PackageAdvertisement::Enumerated(package),

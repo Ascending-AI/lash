@@ -38,7 +38,7 @@ pub use formats::{
 };
 pub use host::{EffectReads, ParentHost};
 /// Why a kernel migration does not carry a document or a parked run.
-pub use lash_kernel_migrate::{DocumentRefusal, ParkedRefusal};
+pub use lash_kernel_migrate::{AdoptionRefusal, DocumentRefusal, ParkedRefusal};
 pub use lash_vm_broker::kernel::loader::LoadRefusal;
 /// lash's own packages, registered once in a process: what a kernel
 /// document is linked, admitted and migrated against when the host
@@ -78,3 +78,5 @@ pub use process_plugin::{
 
 /// Statement observation requested by recorded kernel settings.
 pub use lash_kernel_vm::{Bounds as KernelBounds, ObservationMode};
+
+pub use dialect_services::{DIALECT_SERVICE_PACKAGES, TIMER_OPERATIONS};

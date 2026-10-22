@@ -92,7 +92,7 @@ async fn world(tier: Tier, inspector: &Arc<Inspector>) -> Option<World> {
         .plugin(Arc::new(
             lash::process_controls::SessionProcessAdminPluginFactory::new(
                 lash_execution_contracts::process::lifetime::detached,
-                lash_core::runtime::env_policy::policy::from_run(|_| Ok(Vec::new())),
+                lash::process::env::policy::from_run(|_| Ok(Vec::new())),
             ),
         ))
         .tools(lash::tool_provider_key!("tools"), inspector)
@@ -415,7 +415,7 @@ fn inbox_core(backend: &lash::Backend, inbox: &Arc<Inbox>) -> lash::LashCoreBuil
     const ONE: &[lash::plugins::FormatVersion] = &[lash::plugins::FormatVersion::ONE];
     const TWO: &[lash::plugins::FormatVersion] = &[FORMAT_TWO];
     let mapped = Arc::clone(inbox);
-    let policy = lash_core::runtime::env_policy::policy::from_run(move |_| {
+    let policy = lash::process::env::policy::from_run(move |_| {
         let mut entries = vec![
             lash::process::ProcessComponentEntry::new(INBOX, &(), [])?,
             lash::process::ProcessComponentEntry::new(
@@ -462,11 +462,9 @@ fn inbox_core(backend: &lash::Backend, inbox: &Arc<Inbox>) -> lash::LashCoreBuil
     .process_component(
         Arc::new(lash::process_controls::ProcessControlsComponent::new(
             lash_execution_contracts::process::lifetime::detached,
-            lash_core::runtime::env_policy::policy::restrict_or(
-                lash_core::runtime::env_policy::policy::refuse(
-                    "a process starts only inside a process here",
-                ),
-            ),
+            lash::process::env::policy::restrict_or(lash::process::env::policy::refuse(
+                "a process starts only inside a process here",
+            )),
         )),
         lash::process_controls::PROCESS_CONTROLS_CONFIG,
     )

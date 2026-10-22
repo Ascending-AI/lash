@@ -50,15 +50,15 @@ pub(super) fn document(
                     .get(&export.function)
                     .ok_or_else(|| "missing exported function".to_owned())
                     .and_then(|function| {
-                        Lifter::new(document, captions, Unit::Library(export.function))
+                        Lifter::new(document, captions, Unit::Library(export.function), library)
                             .item(name, function, export)
                     }),
             )),
             _ => None,
         })
-        .collect();
+        .collect::<BTreeMap<_, _>>();
     let main = if document.exports.is_empty() {
-        let mut lifter = Lifter::new(document, captions, Unit::Main);
+        let mut lifter = Lifter::new(document, captions, Unit::Main, library);
         let block = document.main.as_deref().unwrap_or_default();
         lifter
             .block(block, &Site::new(Unit::Main, Vec::new()))
@@ -68,7 +68,6 @@ pub(super) fn document(
             .map(Main::Module)
             .ok_or_else(|| "module has executable work outside its declarations".to_owned())
     };
-    let _ = library;
     Lifted { functions, main }
 }
 
@@ -85,6 +84,7 @@ struct Pending {
 
 pub(super) struct Lifter<'a> {
     pub(super) document: &'a k::Document,
+    library: &'a dyn lash_kernel_dialect::Library,
     captions: Option<&'a k::Captions>,
     /// The temporaries lifted and not yet read, in the order they were
     /// bound: the order the source evaluated them.
@@ -96,7 +96,12 @@ pub(super) struct Lifter<'a> {
 }
 
 impl<'a> Lifter<'a> {
-    fn new(document: &'a k::Document, captions: Option<&'a k::Captions>, unit: Unit) -> Self {
+    fn new(
+        document: &'a k::Document,
+        captions: Option<&'a k::Captions>,
+        unit: Unit,
+        library: &'a dyn lash_kernel_dialect::Library,
+    ) -> Self {
         let mut assigned = BTreeSet::new();
         let body = match &unit {
             Unit::Library(id) => document
@@ -111,6 +116,7 @@ impl<'a> Lifter<'a> {
         }
         Self {
             document,
+            library,
             captions,
             pending: Vec::new(),
             taken_captions: Vec::new(),
@@ -119,7 +125,7 @@ impl<'a> Lifter<'a> {
     }
 
     pub(super) fn library<R: Reference>(&self, id: &R) -> Option<String> {
-        id.name(self.document)
+        id.name(self.document, self.library)
     }
     pub(super) fn is<R: Reference>(&self, id: &R, name: &str) -> bool {
         let Ok(name) = lash_vocabulary::FunctionName::new(name) else {
@@ -457,24 +463,44 @@ fn assigned_in(block: &[k::Stmt], out: &mut BTreeSet<Name>) {
 }
 
 pub(super) trait Reference {
-    fn name(&self, document: &k::Document) -> Option<String>;
+    fn name(
+        &self,
+        document: &k::Document,
+        library: &dyn lash_kernel_dialect::Library,
+    ) -> Option<String>;
 }
 impl Reference for lash_vocabulary::FunctionId {
-    fn name(&self, document: &k::Document) -> Option<String> {
+    fn name(
+        &self,
+        document: &k::Document,
+        _library: &dyn lash_kernel_dialect::Library,
+    ) -> Option<String> {
         Some(document.functions.get(self)?.name.to_string())
     }
 }
 impl Reference for lash_vocabulary::ImportSlot {
-    fn name(&self, document: &k::Document) -> Option<String> {
+    fn name(
+        &self,
+        document: &k::Document,
+        library: &dyn lash_kernel_dialect::Library,
+    ) -> Option<String> {
         let name = &document.imports.get(self)?.name;
-        Some(format!("{}.{}", name.package, name.member))
+        Some(
+            library
+                .imported(name)
+                .map_or_else(|| name.to_string(), |source| source.to_string()),
+        )
     }
 }
 impl Reference for k::FunctionTarget {
-    fn name(&self, document: &k::Document) -> Option<String> {
+    fn name(
+        &self,
+        document: &k::Document,
+        library: &dyn lash_kernel_dialect::Library,
+    ) -> Option<String> {
         match self {
-            Self::Local(id) => id.name(document),
-            Self::Import(slot) => slot.name(document),
+            Self::Local(id) => id.name(document, library),
+            Self::Import(slot) => slot.name(document, library),
         }
     }
 }

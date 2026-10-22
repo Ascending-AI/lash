@@ -20,7 +20,7 @@ pub(super) async fn show(
     let documents =
         lash_vm_runtime::KernelDocuments::new(backend.module_artifacts(), store.clone());
     documents
-        .hold_helper_release(&claim, &release.content)
+        .hold_helper_release(&claim, &release.content, &release.labels)
         .await
         .unwrap();
     let mut recorded = RecordedPackages {

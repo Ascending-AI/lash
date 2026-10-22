@@ -297,7 +297,7 @@ impl Material {
 }
 
 impl Material<CompletionSource> {
-    pub fn await_timer(&mut self, timer: String) {
+    pub fn await_timer(&mut self, timer: super::CompletionTimer) {
         self.named.timer = Some(timer);
     }
 

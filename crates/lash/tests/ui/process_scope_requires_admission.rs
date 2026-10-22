@@ -1,6 +1,6 @@
 fn check(
     controller: &lash::runtime::ActorContext,
-    process_id: lash_vocabulary::identity::ProcessId,
+    process_id: lash::ProcessId,
 ) {
     // A process scope names a minted process, not an admission: a context is
     // scoped by an AdmittedScope, so a bare scope cannot scope one.

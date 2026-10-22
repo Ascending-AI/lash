@@ -169,12 +169,34 @@ impl lash_execution_contracts::process::EngineStateMigration for KernelStateMigr
                 }
             },
         };
-        let staged = engine
+        let stores = engine
+            .carry_stores
+            .as_ref()
+            .ok_or_else(|| retried("migration has no stores"))?;
+        let record = stores
+            .process_registry()
+            .get_process(process)
+            .await
+            .map_err(retried)?
+            .ok_or_else(|| retried("migration has no process record"))?;
+        let lash_execution_contracts::process::ProcessInput::Engine { launch, .. } =
+            record.input.as_ref()
+        else {
+            return Err(retried("migration has no engine launch"));
+        };
+        let env = lash_execution_contracts::process::load_process_env(
+            stores.process_env_store().as_ref(),
+            &launch.env,
+        )
+        .await
+        .map_err(retried)?;
+        let (staged, _code) = engine
             .carry_pages(
                 process,
                 &mut carried.state,
                 &carried.rewritten,
                 Some(&next),
+                &env.execution().retained_code,
                 None,
             )
             .await

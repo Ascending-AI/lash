@@ -49,6 +49,19 @@ impl EngineSuccession for KernelSuccession {
                 &lash_kernel_package::ReachSelection::Start(context.to.selector.clone()),
             )
             .map_err(|e| refuse(e.to_string()))?;
+        for callable in &context.predecessor.retained_code {
+            if !content.links.contains_key(&callable.link) {
+                let held = self
+                    .engine
+                    .documents
+                    .load_linked(callable.link)
+                    .await
+                    .map_err(|error| SuccessionError::Unavailable(error.to_string()))?;
+                content.documents.extend(held.documents);
+                content.links.extend(held.links);
+                content.packages.extend(held.packages);
+            }
+        }
         let live = context
             .predecessor
             .uses
@@ -74,6 +87,7 @@ impl EngineSuccession for KernelSuccession {
                 requirements.extend(target);
             }
         }
+        let mut predecessor_code = BTreeSet::new();
         let mut encoded = None;
         let mut own_formats = false;
         if let Some(state) = state {
@@ -121,11 +135,20 @@ impl EngineSuccession for KernelSuccession {
                     .map(|id| (*id, *id))
                     .collect(),
             };
-            let staged = self
+            let (staged, debt) = self
                 .engine
-                .carry_pages(process, &mut state, &rewritten, Some(&context.to), None)
+                .carry_pages(
+                    process,
+                    &mut state,
+                    &rewritten,
+                    Some(&context.to),
+                    &context.predecessor.retained_code,
+                    None,
+                )
                 .await
                 .map_err(|e| refuse(e.to_string()))?;
+            predecessor_code = debt;
+            requirements.machine.extend(&state.requirements.machine);
             state.payload = serde_json::to_value(KernelProcessInput {
                 code: super::InlineRequest::Linked {
                     start: context.to.clone(),
@@ -154,18 +177,11 @@ impl EngineSuccession for KernelSuccession {
             .resolutions
             .into_iter()
             .map(|(use_, entry)| {
-                let requested = context
-                    .environment
-                    .uses
-                    .keys()
-                    .find(|old| adopted.uses.get(old) == Some(&use_))
-                    .and_then(|old| {
-                        content
-                            .links
-                            .get(&old.link)
-                            .and_then(|link| content.documents.get(&link.document))
-                            .and_then(|document| document.imports.get(&old.slot))
-                    })
+                let requested = content
+                    .links
+                    .get(&use_.link)
+                    .and_then(|link| content.documents.get(&link.document))
+                    .and_then(|document| document.imports.get(&use_.slot))
                     .map(|import| import.name.clone())
                     .ok_or_else(|| refuse("adopted use has no Import"))?;
                 Ok(ResolutionRecord {
@@ -182,6 +198,7 @@ impl EngineSuccession for KernelSuccession {
             state: encoded,
             own_formats,
             correspondence: UseCorrespondence { uses: adopted.uses },
+            predecessor_code,
             resolutions,
             requirements: Box::new(requirements),
             artifacts: inspection.artifacts,

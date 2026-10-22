@@ -669,6 +669,7 @@ async fn stage<'a>(
             &inspection,
             ArtifactReferrer::ProcessRecord(prepared.process_id().clone()),
             execution_requirements,
+            lash_vocabulary::claims::RegistryKind::Process,
         );
         prepared = prepared.with_execution(membership, seeds);
     }

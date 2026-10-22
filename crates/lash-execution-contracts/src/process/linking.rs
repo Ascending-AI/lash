@@ -117,6 +117,10 @@ pub struct LoadedContent {
 )]
 /// Typed deterministic admission refusal retained across the plugin/host boundary.
 pub enum AdmissionRefusal {
+    CallableTooLarge {
+        bytes: u64,
+        limit: u64,
+    },
     UnpublishedOrigin {
         link: LinkId,
     },

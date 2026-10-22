@@ -62,7 +62,7 @@ pub struct FirstUse<'a> {
     pub execution: ExecutionId,
     pub environment: &'a ExecutionEnvironment,
     pub capabilities: &'a NodeCapabilities,
-    pub provider: &'a dyn DeferredPackageProvider,
+    pub provider: Option<&'a dyn DeferredPackageProvider>,
     pub context: DeferredResolveContext<'a>,
     pub validator: &'a dyn ResolutionValidator,
     pub clock: &'a dyn lash_core_ids::clock::Clock,
@@ -121,6 +121,12 @@ impl FirstUse<'_> {
         grant: &DeferredGrant,
         requested: &QualifiedName,
     ) -> Result<ResolutionEntry, ResolutionError> {
+        let provider = self.provider.ok_or_else(|| {
+            EnginePortError::Refused(AdmissionRefusal::ProviderNotHostable {
+                provider: grant.provider.clone(),
+                registry: self.environment.registry,
+            })
+        })?;
         let policy = grant.resolution_policy;
         let retry = policy.execution_policy.retry();
         let max_attempts = retry.map_or(1, |retry| retry.max_attempts.get());
@@ -129,7 +135,7 @@ impl FirstUse<'_> {
                 biased;
                 () = self.cancel.cancelled() => return Err(ResolutionError::Cancelled),
                 () = self.clock.sleep(policy.execution) => Err(ResolverFault { message: "resolver execution bound elapsed".into() }),
-                result = self.provider.resolve(&self.context, grant, requested) => result,
+                result = provider.resolve(&self.context, grant, requested) => result,
             };
             let attempt = match attempt {
                 Ok(answer) => self.validate_answer(grant, requested, answer),
@@ -285,7 +291,7 @@ pub fn start_requirements(
                 if grant.as_ref() == recorded =>
             {
                 if !seeded.contains(use_) {
-                    requirements.extend(&deferred(grant, environment.registry)?);
+                    deferred(grant, environment.registry)?;
                 }
             }
             _ => {
@@ -306,12 +312,19 @@ pub fn registration(
     inspection: &LinkInspection,
     referrer: lash_core_store::artifact_referrer::ArtifactReferrer,
     requirements: ClaimRequirements,
+    registry: RegistryKind,
 ) -> ExecutionRegistration {
     let uses = inspection
         .operations
         .iter()
         .filter_map(|(use_, need)| match need {
-            OperationNeed::Deferred { name, .. } => Some((*use_, name.clone())),
+            OperationNeed::Deferred { name, grant } => Some((
+                *use_,
+                lash_durable::resolutions::DeferredUse {
+                    requested: name.clone(),
+                    discovery: crate::plugin::packages::deferred_requirements(grant, registry),
+                },
+            )),
             OperationNeed::Fixed { .. } => None,
         })
         .collect::<BTreeMap<_, _>>();

@@ -151,6 +151,8 @@ pub enum SuccessorCarry {
         state: Option<Box<EngineState>>,
         own_formats: bool,
         correspondence: UseCorrespondence,
+        /// Exact creation-code roots found in the carried checkpoint.
+        predecessor_code: std::collections::BTreeSet<CallableId>,
         resolutions: Vec<ResolutionRecord>,
         requirements: Box<ClaimRequirements>,
         artifacts: Vec<ArtifactName>,

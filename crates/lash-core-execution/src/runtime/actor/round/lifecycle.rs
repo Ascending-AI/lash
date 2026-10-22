@@ -1418,7 +1418,10 @@ impl Lifecycle {
                     purpose: waits::WaitPurpose::Timer { deadline },
                 },
             );
-            source.await_timer(wait.id().to_hex());
+            source.await_timer(lash_core_store::tool_run::CompletionTimer {
+                wait: wait.id().to_hex(),
+                deadline_ms: deadline.0,
+            });
         }
         if let Some(due) = self.retry_due(execution, &output, now) {
             let record = settle_retry(tx, execution, output, due)?;
@@ -1576,7 +1579,7 @@ fn source_waits(
     }
     if let Some(timer) = &source.timer {
         refs.push(WaitRef::new(
-            WaitId::parse_hex(timer).ok_or_else(undecodable)?,
+            WaitId::parse_hex(&timer.wait).ok_or_else(undecodable)?,
             WaitKind::Timer,
         ));
     }

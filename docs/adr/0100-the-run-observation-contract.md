@@ -38,7 +38,12 @@ Version identity is the document's: the SHA-256 of its canonical form
 named by their admitted identity (task, site, occurrence, loops) through
 `CodeCallIdentities`, which commits with the park
 ([ADR 0132](0132-durability-is-state-first-over-the-lash-store.md) §8);
-telemetry attempt does not name external effects. A process opener contains
+telemetry attempt does not name external effects. Host workflow rows group by
+(task, authored origin site), keeping one latest row per key. The origin is
+the nearest authored call site on the performing stack; a directly authored
+perform uses its own site. The performing helper occurrence remains row data.
+Durable events and live notifications carry both coordinates together.
+A process opener contains
 the minted process id. Editing a node cannot weaken that admitted identity.
 
 Evidence: `crates/lash-kernel-doc/src/document.rs`,

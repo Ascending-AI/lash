@@ -150,6 +150,14 @@ impl StepRequest {
     #[must_use]
     pub fn site(&self) -> Option<&lash_vocabulary::sites::EffectId> {
         match self {
+            Self::Tool { site, .. } => site.as_deref().map(|site| &site.at),
+            Self::Engine { .. } => None,
+        }
+    }
+
+    /// The performing identity and authored origin supplied by the engine.
+    pub fn location(&self) -> Option<&lash_vocabulary::sites::EffectLocation> {
+        match self {
             Self::Tool { site, .. } => site.as_deref(),
             Self::Engine { .. } => None,
         }
@@ -609,7 +617,7 @@ pub enum StepRequest {
         step: StepName,
         use_: OperationUse,
         input: serde_json::Value,
-        site: Option<Box<EffectId>>,
+        site: Option<Box<lash_vocabulary::sites::EffectLocation>>,
     },
     Engine {
         step: StepName,

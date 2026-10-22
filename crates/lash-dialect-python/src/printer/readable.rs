@@ -119,6 +119,22 @@ impl Renderer<'_> {
         self.out.end_node();
     }
     pub(super) fn inline_body(&mut self, expr: &k::Expr) {
+        if let Some(task) = self.inline.tasks.get(&(expr as *const _)).cloned() {
+            let k::ActKind::Perform { slot, .. } = task.kind else {
+                unreachable!("task operation")
+            };
+            let Some(import) = self.document.imports.get(&slot) else {
+                self.out
+                    .refuse(PrintError::Invalid("missing task operation".into()));
+                return;
+            };
+            self.out.write("asyncio.create_task(");
+            self.operation_path(&import.name.to_string());
+            self.out.write("(");
+            self.authored_args(&task.args, true);
+            self.out.write("))");
+            return;
+        }
         match expr {
             k::Expr::Literal(l) => self.literal(l),
             k::Expr::Act(act) => self.nested_action(act, true),

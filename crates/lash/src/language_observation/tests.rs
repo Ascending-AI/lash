@@ -163,6 +163,10 @@ async fn a_process_cancelled_while_blocked_has_a_committed_cancelled_graph() {
     }
     let step = lash_trace::StepBodyStarted {
         process_id: process.clone(),
+        origin: (lash_protocol_types::effect_identity_fixture("stepped", 1))
+            .position()
+            .site()
+            .clone(),
         at: lash_protocol_types::effect_identity_fixture("stepped", 1),
         call_id: lash_protocol_types::ToolCallId::fixture("stepped"),
         attempt: 1,
@@ -483,6 +487,7 @@ impl Dispatch {
         let wait = lash_execution_contracts::process::WaitState {
             since_ms: 0,
             kind: lash_execution_contracts::process::WaitKind::Call {
+                resume_at_ms: None,
                 call_id: lash_core::ToolCallId::fixture("dispatched"),
                 tool_id: lash_vocabulary::tool_contract::ToolId::from("dispatched"),
             },
@@ -720,6 +725,7 @@ async fn an_oversized_committed_fact_invalidates_only_its_own_process() {
         let wait = lash_execution_contracts::process::WaitState {
             since_ms: 0,
             kind: lash_execution_contracts::process::WaitKind::Call {
+                resume_at_ms: None,
                 call_id: lash_core::ToolCallId::fixture("oversized"),
                 tool_id: lash_vocabulary::tool_contract::ToolId::from("x".repeat(2 * LIMIT)),
             },

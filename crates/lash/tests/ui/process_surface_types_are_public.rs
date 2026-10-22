@@ -61,7 +61,7 @@ fn paged_events_signature_is_public(processes: &Processes, from: ProcessHistoryC
 
 fn process_change_subscription_signature_is_public(
     hub: &ProcessChangeHub,
-    process_id: &lash_vocabulary::identity::ProcessId,
+    process_id: &lash::ProcessId,
 ) -> ProcessChangeSubscription {
     hub.subscribe(process_id)
 }

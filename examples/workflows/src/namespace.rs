@@ -15,6 +15,9 @@ impl FixtureNamespace {
     ) -> Result<Self> {
         let release = lash::vm::helper_release()?;
         let mut content = release.content.clone();
+        for package in lash::vm::DIALECT_SERVICE_PACKAGES.iter() {
+            content.packages.insert(package.identity(), package.clone());
+        }
         let mut packages: BTreeMap<PackagePath, BTreeMap<Segment, Member>> = BTreeMap::new();
         for (name, requirement) in effects {
             let operation = QualifiedOperation::from_effect(&name)?;

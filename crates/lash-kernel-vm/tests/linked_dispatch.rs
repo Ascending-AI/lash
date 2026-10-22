@@ -401,7 +401,13 @@ fn callable_start_installs_the_captured_environment() {
             link: link_id,
             function,
         },
-        captures: BTreeMap::from([(Name::new("captured"), Datum::Bool(true))]),
+        representation: lash_kernel_doc::FunctionRepresentation::Bare,
+        creation: None,
+        token: None,
+        captures: BTreeMap::from([(
+            Name::new("captured"),
+            lash_kernel_doc::CaptureValue::Data(Datum::Bool(true)),
+        )]),
         signature: definition.signature,
         convention: StartConvention::Direct,
         captions: lash_kernel_doc::Captions::empty(document_id),
@@ -689,6 +695,9 @@ fn callable_settled_result_must_fit_its_public_signature() {
                         link: link_id,
                         function,
                     },
+                    representation: lash_kernel_doc::FunctionRepresentation::Bare,
+                    creation: None,
+                    token: None,
                     captures: BTreeMap::new(),
                     signature: Signature {
                         params: vec![],
@@ -1214,6 +1223,10 @@ fn imported_arguments_fit_before_private_abi_adaptation() {
                     },
                 ]),
             );
+            if accepted {
+                lash_kernel_check::derive(&caller, &caller.functions)
+                    .expect("a valid callable token is admitted at the public Fn boundary");
+            }
             let caller_link = Link {
                 document: caller.identity(),
                 fills: BTreeMap::from([(

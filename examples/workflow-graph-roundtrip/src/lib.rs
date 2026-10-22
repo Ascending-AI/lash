@@ -151,9 +151,14 @@ impl SavedWorkflow {
         };
         let (view, view_unavailable, printed, source_unavailable) = match &derived {
             Ok(derived) => {
-                let (mut view, view_unavailable) = match lash::workflow::view::derive(derived)
+                let (mut view, view_unavailable) = match self
+                    .published
+                    .as_ref()
                     .map_err(|error| error.to_string())
-                {
+                    .and_then(|published| {
+                        lash::workflow::view::derive(derived, &published.context)
+                            .map_err(|error| error.to_string())
+                    }) {
                     Ok(view) => (Some(view), None),
                     Err(error) => (None, Some(error.to_string())),
                 };

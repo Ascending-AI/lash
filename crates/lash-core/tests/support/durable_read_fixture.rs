@@ -159,7 +159,9 @@ const INPUT_SOURCE_KEY: &str = "durable-read-input-source";
 
 fn fixture_effect_outcome() -> lash_execution_contracts::process::ProcessEffectOccurrence {
     lash_execution_contracts::process::ProcessEffectOccurrence::new(
-        lash_protocol_types::effect_identity_fixture("durable-read-tool-node", 1),
+        lash_vocabulary::sites::EffectLocation::authored(
+            lash_protocol_types::effect_identity_fixture("durable-read-tool-node", 1),
+        ),
         "tool:fixture",
         lash_execution_contracts::process::ProcessEffectOutcomeClass::Failure,
         Some(lash_core::FailureCode::provider("durable-read-fixture")),
@@ -1139,6 +1141,7 @@ fn waiting_process_registration(env_ref: ProcessEnvRef) -> ProcessRegistration {
 fn fixture_wait_state() -> WaitState {
     WaitState {
         kind: WaitKind::Call {
+            resume_at_ms: None,
             call_id: lash_core::ToolCallId::fixture("durable-read-wait-call"),
             tool_id: lash_vocabulary::tool_contract::ToolId::from("durable-read-wait-tool"),
         },

@@ -18,6 +18,8 @@ pub mod state_graph;
 mod step_admission;
 mod step_bodies;
 mod succession;
+mod succession_debt;
+pub(crate) use succession_debt::merge as merge_successor_debt;
 mod terminal;
 mod waiting;
 

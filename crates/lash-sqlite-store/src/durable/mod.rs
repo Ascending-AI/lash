@@ -242,6 +242,7 @@ CREATE TABLE IF NOT EXISTS actors (
     next_due_ms INTEGER,
     formats TEXT NOT NULL,
     requires TEXT,
+    base_requires TEXT,
     state_revision INTEGER NOT NULL,
     mail_seq INTEGER NOT NULL,
     acked_seq INTEGER NOT NULL,

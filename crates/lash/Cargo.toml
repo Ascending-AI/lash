@@ -240,3 +240,8 @@ name = "generated_source"
 path = "examples/generated_source.rs"
 required-features = ["worker", "typescript", "python", "dialect-typescript", "dialect-python"]
 test = false
+
+[[test]]
+name = "workflow_view_laws"
+path = "tests/workflow_view_laws.rs"
+required-features = ["codemode", "workflow-view", "typescript", "python"]

@@ -43,6 +43,7 @@ pub struct StepBodyStarted {
     /// The occurrence of the site in the process's workflow document the
     /// step runs for.
     pub at: lash_vocabulary::sites::EffectId,
+    pub origin: lash_vocabulary::sites::Site,
     /// The call the admission bound the step to.
     pub call_id: lash_protocol_types::ToolCallId,
     /// The one-based attempt of the admitted body.

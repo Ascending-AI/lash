@@ -48,25 +48,25 @@ pub mod document {
     // An explicit vocabulary keeps those names out of this module.
     pub use lash_kernel_doc::{
         ActExpr, ActKind, Action, Args, AssignOrder, Atom, Block, BodyCensus, Bytes, BytesView,
-        CallablePresentation, Callee, Catch, CheckedDeclarations, Closure, Correspondence,
-        DOCUMENT_GRAMMAR_VERSION, Datum, DeclarationRefusal as DocumentDeclarationRefusal,
-        DecodeError, DecodeMismatch, Decoder, Document, DocumentBytes, DocumentBytesRefusal,
-        EncodeError, ErrorDatum, Export, Expr, FIRST_NATIVE_VERSION, FUNCTION_VALUE_ENTRY,
-        FUNCTION_VALUE_TAG, Float, Formula, FrozenDatum, FunctionBody, FunctionCatalog,
-        FunctionDeclarations, FunctionDefinition, FunctionExport, FunctionHeader, FunctionRegistry,
-        FunctionRepresentation, FunctionTarget, FunctionValue, FunctionValueLimits,
-        FunctionValueRefusal, Guard, GuardExceeded, Handle, IdentifiedDocument, Identity,
-        ImageError, Implementation, ImplementationKind, Integer, Invalid, InvalidBytes,
-        InvalidFloat, InvalidInteger, InvalidNumberToken, InvalidReason, JoinMode, KERNEL_VERSION,
-        KernelVersion, Literal, MAX_NESTING_DEPTH, MapEntry, Measure, Member, Metering, NativeCall,
-        NativeCtor, NativeError, NativeFunction, NewObject, Node, NodeMut, NumberPolicy,
-        NumberToken, Nursery, Operand, Ordinals, ParseError, ParseErrorReason, Place,
-        PreparedAnswer, PreparedNative, ProjectionRead, Protocol, RecordEntry, RegisteredFunction,
-        RegistryError, ReleasedFunctions, Reservation, Retry, Rhs, Semantics, SequenceView,
-        SourceLanguage, SourceMap, SourceMapRefusal, SourceSite, Span, StartConvention,
-        StatementForm, StatementRuleViolation, Stmt, Survivor, TableView, TaskId, TextView,
-        Timestamp, TryStmt, TypeDef, TypeMember, ValidatedFunctions, Value, ValueKind, WorkCounter,
-        arena, check_declarations, check_statement, core_support, document_work, heap,
+        CallablePresentation, Callee, CaptureValue, Catch, CheckedDeclarations, Closure,
+        Correspondence, DOCUMENT_GRAMMAR_VERSION, Datum,
+        DeclarationRefusal as DocumentDeclarationRefusal, DecodeError, DecodeMismatch, Decoder,
+        Document, DocumentBytes, DocumentBytesRefusal, EncodeError, ErrorDatum, Export, Expr,
+        FIRST_NATIVE_VERSION, FUNCTION_VALUE_ENTRY, FUNCTION_VALUE_TAG, Float, Formula,
+        FrozenDatum, FunctionBody, FunctionCatalog, FunctionDeclarations, FunctionDefinition,
+        FunctionExport, FunctionHeader, FunctionRegistry, FunctionRepresentation, FunctionTarget,
+        FunctionValue, FunctionValueLimits, FunctionValueRefusal, Guard, GuardExceeded, Handle,
+        IdentifiedDocument, Identity, ImageError, Implementation, ImplementationKind, Integer,
+        Invalid, InvalidBytes, InvalidFloat, InvalidInteger, InvalidNumberToken, InvalidReason,
+        JoinMode, KERNEL_VERSION, KernelVersion, Literal, MAX_NESTING_DEPTH, MapEntry, Measure,
+        Member, Metering, NativeCall, NativeCtor, NativeError, NativeFunction, NewObject, Node,
+        NodeMut, NumberPolicy, NumberToken, Nursery, Operand, Ordinals, ParseError,
+        ParseErrorReason, Place, PreparedAnswer, PreparedNative, ProjectionRead, Protocol,
+        RecordEntry, RegisteredFunction, RegistryError, ReleasedFunctions, Reservation, Retry, Rhs,
+        Semantics, SequenceView, SourceLanguage, SourceMap, SourceMapRefusal, SourceSite, Span,
+        StartConvention, StatementForm, StatementRuleViolation, Stmt, Survivor, TableView, TaskId,
+        TextView, Timestamp, TryStmt, TypeDef, TypeMember, ValidatedFunctions, Value, ValueKind,
+        WorkCounter, arena, check_declarations, check_statement, core_support, document_work, heap,
         parse_definition, parse_definition_with_limits, parse_document, parse_document_with_limits,
         plan, print_definition, print_document, required_declarations, scalar, validate_definition,
         validate_definition_with_limits, validate_document, validate_document_with_limits,
@@ -84,6 +84,7 @@ pub mod document {
         MapType, Param, RecordType, RecordTypeField, Signature, Type,
     };
 
+    pub use lash_kernel_doc::linked_site::LinkedSite;
     /// Plain-language captions for a document's steps, its entries'
     /// parameters and the fields of their types, held beside it like its
     /// source map (`K-CAP-001`..`K-CAP-007`).
@@ -177,6 +178,7 @@ pub mod view {
     pub use lash_kernel_view::Use;
     pub use lash_kernel_view::ValueRef;
     pub use lash_kernel_view::ValueSource;
+    pub use lash_kernel_view::ViewContext;
     pub use lash_kernel_view::ViewError;
     pub use lash_kernel_view::WorkflowCoverage;
     pub use lash_kernel_view::WorkflowNode;
@@ -369,3 +371,12 @@ pub use lash_core::ProcessWorkflowSite;
 pub use lash_core::ProcessWorkflowSiteState;
 pub use lash_core::ProcessWorkflowWaitKind;
 pub use lash_vocabulary::observation::RunObservation;
+
+/// Immutable linked content and validation used by document hosts and editors.
+#[cfg(any(feature = "codemode", feature = "workflow-view"))]
+pub mod link {
+    pub use lash_kernel_package::{
+        LinkRefusal, LinkedContent, LinkedReach, Namespace, OperationNeed as LinkedOperationNeed,
+        ReachSelection, RetainedContent,
+    };
+}

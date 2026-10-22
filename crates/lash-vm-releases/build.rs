@@ -352,6 +352,44 @@ fn write_helper_document(
         numbers: lash_kernel_doc::NumberPolicy::BySpelling,
         private_bindings: BTreeSet::new(),
     };
+    let mut labels = BTreeMap::<PackagePath, serde_json::Value>::new();
+    for source in [
+        include_str!("labels/kernel.json"),
+        include_str!("labels/typescript.json"),
+        include_str!("labels/python.json"),
+        include_str!("labels/regex.json"),
+        include_str!("labels/date.json"),
+        include_str!("labels/url.json"),
+    ] {
+        let source: serde_json::Value = serde_json::from_str(source)?;
+        for (name, display) in source["definitions"].as_object().into_iter().flatten() {
+            if let Some((id, definition)) = document
+                .functions
+                .iter()
+                .find(|(_, definition)| definition.name.as_str() == name)
+            {
+                let public = lash_kernel_dialect::authoring::helper_name(&definition.name);
+                let key = if roots.contains(id) {
+                    "members"
+                } else {
+                    "definitions"
+                };
+                let name = if roots.contains(id) {
+                    public.member.to_string()
+                } else {
+                    name.clone()
+                };
+                labels
+                    .entry(public.package)
+                    .or_insert_with(|| serde_json::json!({"members":{}, "definitions":{}}))[key]
+                    [name] = display.clone();
+            }
+        }
+    }
+    std::fs::write(
+        out.join("helpers.labels.json"),
+        serde_json::to_vec(&labels)?,
+    )?;
     std::fs::write(
         out.join("helpers.document.json"),
         serde_json::to_vec(&document)?,

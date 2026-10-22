@@ -101,15 +101,10 @@ async fn an_engine_without_a_document_provider_reads_unsupported() {
         .publish_definition(&pin, &draft)
         .await
         .expect("publish the fixture definition");
-    assert_eq!(
-        artifacts
-            .definition_graph(&definition.id)
-            .await
-            .expect("the read answers"),
-        WorkflowRead::Unsupported {
-            engine_kind: "testing-fixture".into(),
-        }
-    );
+    assert!(matches!(
+        artifacts.definition_graph(&definition.id).await.expect("the read answers"),
+        WorkflowRead::Unsupported { engine_kind } if engine_kind == "testing-fixture"
+    ));
 
     let unheld = lash_execution_contracts::process::ProcessDefinitionDraft::new(
         "testing-fixture",
@@ -118,15 +113,10 @@ async fn an_engine_without_a_document_provider_reads_unsupported() {
     )
     .expect("the fixture descriptor")
     .id();
-    assert_eq!(
-        artifacts
-            .definition_graph(&unheld)
-            .await
-            .expect("the read answers"),
-        WorkflowRead::Unavailable(WorkflowUnavailable::Definition {
-            definition_id: unheld,
-        })
-    );
+    assert!(matches!(
+        artifacts.definition_graph(&unheld).await.expect("the read answers"),
+        WorkflowRead::Unavailable(WorkflowUnavailable::Definition { definition_id }) if definition_id == unheld
+    ));
     core.shutdown().await.expect("the core shuts down");
 }
 

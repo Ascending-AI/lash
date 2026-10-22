@@ -7,6 +7,7 @@ fn page_wait(
         &lash_execution_contracts::process::WaitState {
             since_ms: 1,
             kind: lash_execution_contracts::process::WaitKind::Call {
+                resume_at_ms: None,
                 call_id: lash_protocol_types::ToolCallId::fixture(label),
                 tool_id: lash_vocabulary::tool_contract::ToolId::new("page_fixture"),
             },
@@ -396,7 +397,9 @@ pub(super) async fn compare_bounded_process_event_pages(
         }
         recorded.push(
             lash_execution_contracts::process::ProcessEffectOccurrence::new(
-                lash_protocol_types::effect_identity_fixture("repeated-node", occurrence),
+                lash_vocabulary::sites::EffectLocation::authored(
+                    lash_protocol_types::effect_identity_fixture("repeated-node", occurrence),
+                ),
                 if is_failure { "fixture.write" } else { "now" },
                 class,
                 is_failure
@@ -419,6 +422,7 @@ pub(super) async fn compare_bounded_process_event_pages(
     let wait = lash_execution_contracts::process::WaitState {
         since_ms: 1,
         kind: lash_execution_contracts::process::WaitKind::Call {
+            resume_at_ms: None,
             call_id: lash_protocol_types::ToolCallId::fixture("process-wait-law"),
             tool_id: lash_vocabulary::tool_contract::ToolId::new("process_wait"),
         },

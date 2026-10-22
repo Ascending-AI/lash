@@ -199,20 +199,6 @@ impl ExecutionResolutions for SqliteDurableStore {
                     rusqlite::params![owner.actor.as_str(), owner.epoch.0, revision],
                     |_| Ok(()),
                 )?;
-                let mut requires = match lash_durable::parse_requires(requires.as_deref()) {
-                    Ok(requires) => requires,
-                    Err(_) => {
-                        return refuse(super::corrupt("actor requirements", owner.actor.as_str()));
-                    }
-                };
-                requires.extend(registration.requirements.tokens());
-                if let lash_durable::resolutions::ResolutionEntry::Resolved {
-                    requirements, ..
-                } = &candidate.entry
-                {
-                    requires.extend(requirements.tokens());
-                }
-                super::processes::stamp_requires(tx, owner.actor.as_str(), &requires)?;
                 let json = serde_json::to_string(&candidate)
                     .map_err(|error| rusqlite::Error::ToSqlConversionFailure(Box::new(error)))?;
                 tx.prepare_cached(SQL.insert_resolution.sql())?
@@ -222,6 +208,11 @@ impl ExecutionResolutions for SqliteDurableStore {
                         i64::from(candidate.key.use_.slot.0),
                         json
                     ])?;
+                let requires = match owner_requires(tx, &owner.actor, None)? {
+                    Ok(requires) => requires,
+                    Err(error) => return refuse(error),
+                };
+                super::processes::stamp_requires(tx, owner.actor.as_str(), &requires)?;
                 commit(CommitResolution::Inserted(candidate))
             },
         )
@@ -266,7 +257,14 @@ pub(super) fn owner_requires(
     requested: Option<&[String]>,
 ) -> Answer<Vec<String>> {
     let mut requires = match requested {
-        Some(requires) => requires.to_vec(),
+        Some(requires) => {
+            tx.prepare_cached(super::SQL.actor.stamp_requires.sql())?
+                .execute(rusqlite::params![
+                    actor.as_str(),
+                    lash_durable::encode_requires(requires)
+                ])?;
+            requires.to_vec()
+        }
         None => {
             let stored: Option<String> = tx
                 .prepare_cached(SQL.owner_revision.sql())?

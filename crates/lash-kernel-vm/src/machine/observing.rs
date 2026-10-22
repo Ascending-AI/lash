@@ -89,7 +89,7 @@ impl KernelMachine {
     fn trace_block(&mut self, task: TaskId, block: BlockId, exe: &Executable) {
         let site = &exe.block(block).site;
         if let Some(path) = self.observer.as_deref_mut().and_then(|o| o.path.as_mut())
-            && !matches!(site.unit, lash_vocabulary::sites::Unit::Library(_))
+            && exe.block_ordinal(block).is_some()
         {
             let (tasks, access) = (&mut self.tasks, self.heap.pages());
             path.push(
@@ -202,10 +202,7 @@ impl KernelMachine {
                 && let Ok(Some(running)) = self.tasks.get_mut(task.0 as usize)
                 && let Ok(Some(frame)) = running.frames.last_mut()
                 && let Some(Control::Block { block, next }) = frame.control.last()
-                && !matches!(
-                    self.exe.block(*block).site.unit,
-                    lash_vocabulary::sites::Unit::Library(_)
-                )
+                && self.exe.block_ordinal(*block).is_some()
             {
                 // The path uses the live coordinate, independently of the
                 // compiled ordinal lookup used by the accumulator.

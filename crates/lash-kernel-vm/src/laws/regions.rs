@@ -31,6 +31,7 @@ fn checked(text: &str, check: impl FnOnce(&LoopPlan, &dyn Fn(&LoopPlan) -> Resul
             &program.document,
             &program.library,
             &program.documents,
+            &program.functions,
             &program.instances,
         )
         .unwrap_or_else(|_| panic!("the loop program compiles"));
@@ -242,6 +243,7 @@ fn lowering_admits_an_island_plan_only_as_its_stream_states_it() {
             &program.document,
             &program.library,
             &program.documents,
+            &program.functions,
             &program.instances,
         )
         .unwrap_or_else(|_| panic!("the island program compiles"));

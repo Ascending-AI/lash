@@ -297,11 +297,9 @@ fn explicit_engine_advance(
             lash_execution_contracts::process::EngineAction::Steps {
                 steps: vec![lash_execution_contracts::process::StepRequest::Tool {
                     step: lash_execution_contracts::process::StepName("b".to_owned()),
-                    effect: lash_core_execution::testing::effect("b.run"),
-                    contract: b_runs()[0].contract_id(),
+                    use_: operations::use_for(&b_runs()[0]),
                     input: payload,
                     site: None,
-                    matched: None,
                 }],
                 wake: None,
             }
@@ -542,7 +540,6 @@ async fn an_isolated_tool_runs_its_process_under_its_providers_explicit_environm
         Arc::new(ScriptEngine {
             kind: EXPLICIT_ENGINE,
             advance: explicit_engine_advance,
-            performs: b_runs,
         }) as Arc<dyn lash_execution_contracts::process::ProcessEngine>
     };
     let before = stored_envs(&database);

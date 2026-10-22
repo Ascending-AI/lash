@@ -84,7 +84,7 @@ impl KernelMachine {
         {
             let occurrence = self.task(task)?.counters.advance(action.occurrence)?;
             if host.observes_sites() {
-                let identity = self.action_identity(task, &action.site, occurrence)?;
+                let identity = self.action_location(task, &action.site, occurrence)?;
                 host.enter_site(&identity);
             }
         }
@@ -235,7 +235,22 @@ impl KernelMachine {
                     }
                     target @ (Target::Code(..) | Target::Export(..)) => {
                         self.capture(task, entry, act, PhaseRecord::Called)?;
-                        self.call(task, exe, stmt, target, at, count)?
+                        let flow = self.call(task, exe, stmt, target, at, count)?;
+                        if flow == Flow::Done {
+                            // Imported code may answer natively without pushing a
+                            // frame. Its caller continues in the same statement.
+                            let frame = self.frame(task)?;
+                            let mut pending = frame.pending.take().ok_or_else(|| {
+                                fault("an inline call lost its captured operands")
+                            })?;
+                            frame.nested = None;
+                            for (role, saved) in entry.roles.iter().zip(&pending.roles) {
+                                self.put(role.reg.0 as usize, saved.value);
+                            }
+                            pending.roles.clear();
+                            self.storage.roles.push(pending.roles);
+                        }
+                        flow
                     }
                 };
                 self.active_link = self.frame(task)?.link;
@@ -544,7 +559,7 @@ impl KernelMachine {
     ) -> Result<(), Halt> {
         let occurrence = self.task(task)?.counters.advance(index)?;
         if host.observes_sites() {
-            let identity = self.action_identity(task, site, occurrence)?;
+            let identity = self.action_location(task, site, occurrence)?;
             host.enter_site(&identity);
         }
         Ok(())
@@ -959,27 +974,6 @@ impl KernelMachine {
         Ok(wait)
     }
 
-    /// The identity of the running task's entry into the action at `site`,
-    /// its `occurrence`th there.
-    fn action_identity(
-        &mut self,
-        task: TaskId,
-        site: &Site,
-        occurrence: u64,
-    ) -> Result<lash_vocabulary::sites::EffectId, Halt> {
-        let access = self.heap.pages().clone();
-        let running = self.task(task)?;
-        let loops = running.frames.loop_coordinates()?;
-        Ok(lash_kernel_doc::kernel_internals::effect_id(
-            EffectIdentity {
-                task: running.identity.resolve(&access)?,
-                site: site.clone(),
-                occurrence,
-                loops,
-            },
-        ))
-    }
-
     /// The intent records request data. Identity is projected at its host
     /// boundary from the waiting task's stable semantic coordinates.
     fn issue(
@@ -1038,6 +1032,11 @@ impl KernelMachine {
         let occurrence = running.counters.issued(index).ok_or_else(|| {
             lash_kernel_doc::heap::HeapFault::Malformed("issued occurrence is missing".into())
         })?;
+        let origin = if self.exe.authored_unit(&site.unit) {
+            site.clone()
+        } else {
+            origin
+        };
         let identity = lash_kernel_doc::kernel_internals::effect_id(EffectIdentity {
             task: running.identity.resolve(&access)?,
             site: site.clone(),
@@ -1118,7 +1117,7 @@ impl KernelMachine {
             .ok_or_else(|| fault("spawn site has no occurrence index"))?;
         let occurrence = self.task(task)?.counters.advance(index)?;
         if !matches!(site.unit, lash_vocabulary::sites::Unit::Library(_)) && host.observes_sites() {
-            let at = self.action_identity(task, site, occurrence)?;
+            let at = self.action_location(task, site, occurrence)?;
             host.enter_site(&at);
         }
 

@@ -21,11 +21,9 @@ fn write_token() -> String {
 fn write_step(step: &str, x: i64) -> lash_execution_contracts::process::StepRequest {
     lash_execution_contracts::process::StepRequest::Tool {
         step: lash_execution_contracts::process::StepName(step.to_owned()),
-        effect: lash_core_execution::testing::effect_of(&write_definition()),
-        contract: write_definition().contract_id(),
+        use_: operations::use_for(&write_definition()),
         input: serde_json::json!({ "x": x }),
         site: None,
-        matched: None,
     }
 }
 
@@ -150,7 +148,6 @@ async fn settling_one_of_two_writes_leaves_the_provider_required(tier: Tier) {
         vec![Arc::new(ScriptEngine {
             kind: TWO_WRITE_ENGINE,
             advance: two_write_engine_advance,
-            performs: writes,
         })],
         |backend| {
             lash::LashCore::standard_builder(backend.clone())
@@ -264,7 +261,6 @@ async fn a_typed_config_components_unsettled_step_is_served_after_release(tier: 
         vec![Arc::new(ScriptEngine {
             kind: TWO_WRITE_ENGINE,
             advance: two_write_engine_advance,
-            performs: writes,
         })],
         |backend| {
             lash::LashCore::standard_builder(backend.clone()).process_component(
@@ -282,10 +278,10 @@ async fn a_typed_config_components_unsettled_step_is_served_after_release(tier: 
                 label: "typed".to_owned(),
             },
         )
-        .link_tool(
+        .execution(operations::environment(
             TYPED_WRITE_COMPONENT.tool_provider(lash::tool_provider_key!("tools")),
-            &write_definition(),
-        )
+            &[write_definition()],
+        ))
         .build()
         .expect("the typed environment builds");
     let process = start_under(
@@ -330,7 +326,6 @@ async fn component_state_format_fences_old_nodes_on_sqlite_memory() {
         vec![Arc::new(ScriptEngine {
             kind: IDLE_ENGINE,
             advance: idle_engine_advance,
-            performs: writes,
         })],
         |backend| {
             lash::LashCore::standard_builder(backend.clone()).process_component(
@@ -370,7 +365,6 @@ async fn component_state_format_fences_old_nodes_on_sqlite_memory() {
         vec![Arc::new(ScriptEngine {
             kind: IDLE_ENGINE,
             advance: idle_engine_advance,
-            performs: writes,
         })],
         |backend| {
             lash::LashCore::standard_builder(backend.clone()).process_component(
@@ -560,7 +554,6 @@ async fn component_state_converts_at_a_cut_on_sqlite_memory() {
         vec![Arc::new(ScriptEngine {
             kind: IDLE_ENGINE,
             advance: idle_engine_advance,
-            performs: writes,
         })]
     };
     let build = |native| {

@@ -5,6 +5,7 @@ mod authored;
 mod names;
 mod readable;
 mod signature;
+mod task;
 use lash_kernel_dialect::{
     NamePlan, PrintError, PrintOptions, PrintedSource, SourceFormat, SourceWriter,
     check_document_depth,
@@ -22,13 +23,15 @@ pub(crate) struct Regions {
 }
 pub(crate) fn print_regions(
     document: &k::Document,
+    library: &dyn lash_kernel_dialect::Library,
     captions: Option<&k::Captions>,
     options: PrintOptions,
     regions: &Regions,
 ) -> Result<(PrintedSource, BTreeMap<Name, Range<usize>>), PrintError> {
     check_document_depth(document, options.limits)?;
     let plan = NamePlan::new(document, legal_identifier);
-    let inline = InlinePlan::new(document);
+    let operators = crate::generated_operators::Operators::new(document, library);
+    let inline = InlinePlan::new(document, &operators);
     let mut r = Renderer {
         out: SourceWriter::with_captions(options, document, captions)?,
         plan: &plan,
@@ -37,7 +40,7 @@ pub(crate) fn print_regions(
         indent: 0,
         scope: Default::default(),
         main: false,
-        operators: crate::generated_operators::Operators::new(document),
+        operators,
         captions: captions.is_some_and(|c| !c.is_empty()),
         authored: true,
         sync: BTreeSet::new(),
@@ -351,6 +354,12 @@ impl Renderer<'_> {
                 self.authored_args(args, mapped);
                 self.out.write(")");
             }
+            Some(Authored::Index) => {
+                self.authored_arg(&args[0], mapped);
+                self.out.write("[");
+                self.authored_arg(&args[1], mapped);
+                self.out.write("]");
+            }
             Some(Authored::Slice) => {
                 self.authored_arg(&args[0], mapped);
                 self.out.write("[");
@@ -431,49 +440,65 @@ impl Renderer<'_> {
 
 /// Memoize the applicability predicate in one postorder pass. This is naming/
 /// rendering work even with maps off; it creates no Sites or source tree.
-struct InlinePlan(std::collections::HashSet<*const k::Expr>);
+struct InlinePlan {
+    expressions: std::collections::HashSet<*const k::Expr>,
+    tasks: std::collections::HashMap<*const k::Expr, k::ActExpr>,
+}
 impl InlinePlan {
-    fn new(document: &k::Document) -> Self {
-        let mut plan = Self(Default::default());
+    fn new(document: &k::Document, operators: &crate::generated_operators::Operators) -> Self {
+        let mut plan = Self {
+            expressions: Default::default(),
+            tasks: Default::default(),
+        };
         if let Some(main) = &document.main {
-            plan.collect(k::Node::Block(main));
+            plan.collect(k::Node::Block(main), document, operators);
         }
         for f in document.functions.values() {
             if let Some(body) = f.body() {
-                plan.collect(k::Node::Block(&body.block));
+                plan.collect(k::Node::Block(&body.block), document, operators);
             }
         }
         plan
     }
     fn contains(&self, expr: &k::Expr) -> bool {
-        self.0.contains(&(expr as *const _))
+        self.expressions.contains(&(expr as *const _))
     }
-    fn collect(&mut self, node: k::Node<'_>) {
+    fn collect(
+        &mut self,
+        node: k::Node<'_>,
+        document: &k::Document,
+        operators: &crate::generated_operators::Operators,
+    ) {
         for child in node.children() {
-            self.collect(child);
+            self.collect(child, document, operators);
         }
         if let k::Node::Expr(expr) = node {
-            let eligible = match expr {
-                k::Expr::Literal(_) | k::Expr::Variable(_) => true,
-                k::Expr::Member(member) => match member.as_ref() {
-                    k::Member::Field { target, .. } => self.contains(target),
-                    k::Member::Index { target, index } => {
-                        self.contains(target) && self.contains(index)
+            let task = task::operation(document, operators, expr);
+            let eligible = task.is_some()
+                || match expr {
+                    k::Expr::Literal(_) | k::Expr::Variable(_) => true,
+                    k::Expr::Member(member) => match member.as_ref() {
+                        k::Member::Field { target, .. } => self.contains(target),
+                        k::Member::Index { target, index } => {
+                            self.contains(target) && self.contains(index)
+                        }
+                    },
+                    k::Expr::Call { args, .. } => args.iter().all(|arg| self.contains(arg)),
+                    k::Expr::Act(act) => act.args.iter().all(|arg| self.contains(arg)),
+                    k::Expr::List(items) | k::Expr::Tuple(items) | k::Expr::Set(items) => {
+                        items.iter().all(|e| self.contains(e))
                     }
-                },
-                k::Expr::Call { args, .. } => args.iter().all(|arg| self.contains(arg)),
-                k::Expr::Act(act) => act.args.iter().all(|arg| self.contains(arg)),
-                k::Expr::List(items) | k::Expr::Tuple(items) | k::Expr::Set(items) => {
-                    items.iter().all(|e| self.contains(e))
-                }
-                k::Expr::Map(items) => items
-                    .iter()
-                    .all(|e| self.contains(&e.key) && self.contains(&e.value)),
-                k::Expr::Record(items) => items.iter().all(|e| self.contains(&e.value)),
-                _ => false,
-            };
+                    k::Expr::Map(items) => items
+                        .iter()
+                        .all(|e| self.contains(&e.key) && self.contains(&e.value)),
+                    k::Expr::Record(items) => items.iter().all(|e| self.contains(&e.value)),
+                    _ => false,
+                };
             if eligible {
-                self.0.insert(expr as *const _);
+                self.expressions.insert(expr as *const _);
+                if let Some(task) = task {
+                    self.tasks.insert(expr as *const _, task);
+                }
             }
         }
     }

@@ -622,11 +622,17 @@ fn sort_comparisons_are_bounded_by_n_log_n() {
     }
 }
 
-/// ENTRY-CONV and FN-CROSS: a function handed to a tool keeps the same
-/// host convention as a workflow entry, including missing and extra args.
+/// ENTRY-CONV and FN-CROSS: a workflow Export and a packed frozen callable
+/// preserve the same source results, including missing and extra arguments.
 #[test]
 fn a_function_crossing_to_a_tool_uses_its_source_entry_convention() {
     for (function, packed, args, expected) in [
+        (
+            "async function f(n: number): Promise<number> { const shared = [1]; const fact = async (x: number): Promise<number> => x <= 1 ? shared[0] : x * (await fact(x - 1)); return await fact(n); }",
+            false,
+            vec![Datum::Float(lash_kernel_doc::Float::new(2.0))],
+            Datum::Float(lash_kernel_doc::Float::new(2.0)),
+        ),
         (
             "async function f(x) { return x; }",
             false,
@@ -735,15 +741,19 @@ fn a_function_crossing_to_a_tool_uses_its_source_entry_convention() {
             }
         };
         assert_eq!(
-            function.convention, convention,
-            "entry and frozen callable share the defining convention"
+            matches!(
+                convention,
+                lash_kernel_doc::StartConvention::TsArgsList { .. }
+            ),
+            packed,
+            "a workflow Export retains its selected ABI"
         );
-        assert_eq!(
+        assert!(
             matches!(
                 function.convention,
                 lash_kernel_doc::StartConvention::TsArgsList { .. }
             ),
-            packed
+            "a frozen token retains its packed closure ABI"
         );
         let document = super::lower_with_effects(&source)
             .unwrap()

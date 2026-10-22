@@ -421,7 +421,7 @@ pub(crate) fn render_with(root: &Path) -> Result<(BTreeMap<String, String>, Vec<
             )?;
             outputs.insert(format!("{prefix}source-map.{extension}.txt"), map);
             let shipped: Document = serde_json::from_slice(&serde_json::to_vec(document)?)?;
-            let (_, link) = namespace.link(shipped.clone())?;
+            let (content, link) = namespace.link(shipped.clone())?;
             let mut kernel = k::print_document(document);
             let mut views = String::new();
             let selected: Vec<_> = if entries.is_empty() {
@@ -440,7 +440,17 @@ pub(crate) fn render_with(root: &Path) -> Result<(BTreeMap<String, String>, Vec<
                         selector: entry,
                     },
                 )?;
-                let view = lash_kernel_view::derive(&checked)?;
+                let mut context = lash_kernel_view::ViewContext::new(
+                    checked.reference().clone(),
+                    content.clone(),
+                    Default::default(),
+                )?
+                .with_timer_operations(lash::vm::TIMER_OPERATIONS.iter().cloned());
+                let release = lash::vm::helper_release()?;
+                for (id, json) in &release.labels {
+                    context.add_labels(*id, json)?;
+                }
+                let view = lash_kernel_view::derive(&checked, &context)?;
                 writeln!(
                     kernel,
                     "\nunit {:?}: statements={} scopes={} sites={}",

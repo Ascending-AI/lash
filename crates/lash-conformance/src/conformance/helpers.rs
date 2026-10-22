@@ -310,6 +310,7 @@ pub(crate) fn call_wait_event(
     let wait = crate::WaitState {
         since_ms: 1,
         kind: crate::WaitKind::Call {
+            resume_at_ms: None,
             call_id: lash_core::ToolCallId::fixture(&format!("{label}:{payload}")),
             tool_id: lash_vocabulary::tool_contract::ToolId::new(label),
         },

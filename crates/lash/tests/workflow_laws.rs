@@ -12,90 +12,56 @@ use std::sync::Arc;
 
 use futures_util::StreamExt as _;
 
+use lash::workflow::WorkflowRead;
 use lash::workflow::authoring::{DataValue, Operation, ValueTarget};
 use lash::workflow::document::{Document, Expr, Literal, Name, Place, Rhs, Stmt, Unit};
 use lash::workflow::edit::{Draft, Transaction};
-use lash::workflow::{WorkflowDocumentEntry, WorkflowPublication, WorkflowPublish, WorkflowRead};
+#[path = "workflow_laws/support.rs"]
+mod support;
+use support::*;
 
 /// `guarded(name)`: binds `out` inside a `try`, sleeps once in each turn of
 /// a nested loop, and returns `out`. Written as a kernel document: no
 /// source language is involved anywhere in these laws.
-const GUARDED: &str = r#"kernel 1
-numbers float
-entry guarded(name: Text) -> Any
-
-fn guarded(name) {
+const GUARDED: &str = r#"function guarded(name: Text) -> Text
+kernel 1
+metering statements
+import 0 operation typescript.sleep(milliseconds: Int) -> Null
+body {
   let out = "start"
-  try {
-    set out = name
-  } catch e {
-    set out = "caught"
-  }
+  try { set out = name } catch e { set out = "caught" }
   for outer in [1, 2] {
-    for inner in [1] {
-      do sleep 5
-    }
+    for inner in [1] { do perform 0(5) as Null }
   }
   return out
 }
-
-main {
-  finish null
-}
 "#;
 
-/// `fan(items)`: one task for each of three elements, each performing the
-/// one `tools.echo` of the shared closure, joined together.
-const FAN: &str = r#"kernel 1
-numbers float
-effect tools.echo(input: Any) -> Any contract "1"
-entry fan(a: Any, b: Any, c: Any) -> Any
-
-fn fan(a, b, c) {
-  let work = fn(item) {
-    let input = {value: item}
-    let got = perform tools.echo(input) as Any
-    return got
-  }
-  let first = spawn apply work(a)
-  let second = spawn apply work(b)
-  let third = spawn apply work(c)
-  let tasks = [first, second, third]
-  let every = join all tasks
-  return every
+fn guarded(source: &str) -> Document {
+    let definition = lash_kernel_doc::parse_definition(source).unwrap();
+    let mut document = Document::new(lash::workflow::document::NumberPolicy::Float, Vec::new());
+    document.imports = definition.body().unwrap().imports.clone();
+    document.exports.insert(
+        Name::new("guarded"),
+        lash::workflow::document::Export::Function(lash::workflow::document::FunctionExport {
+            function: definition.identity(),
+            signature: definition.signature.clone(),
+            convention: lash::workflow::document::StartConvention::Direct,
+            asynchronous: false,
+            rest: false,
+        }),
+    );
+    document.functions.insert(definition.identity(), definition);
+    document
 }
 
-main {
-  finish null
+fn function_unit(document: &Document, name: &str) -> Unit {
+    let lash::workflow::document::Export::Function(export) = &document.exports[&Name::new(name)]
+    else {
+        panic!("function export")
+    };
+    Unit::Library(export.function)
 }
-"#;
-
-/// `supervisor(value)` starts the entry `worker` of its own document by
-/// function reference, awaits it and returns what it ended with.
-const SUPERVISOR: &str = r#"kernel 1
-numbers float
-effect processes.start(input: Any) -> Any contract "1"
-effect processes.await(input: Any) -> Any contract "1"
-entry supervisor(value: Any) -> Any
-entry worker(value: Any) -> Any
-
-fn worker(value) {
-  return [value, "worked"]
-}
-
-fn supervisor(value) {
-  let args = {value: value}
-  let request = {definition: &worker, args: args}
-  let handle = perform processes.start(request) as Any
-  let wait = {handle: handle}
-  let done = perform processes.await(wait) as Any
-  return done
-}
-
-main {
-  finish null
-}
-"#;
 
 struct Echo;
 
@@ -144,7 +110,16 @@ fn echo_component() -> lash::process::StaticProcessComponent {
     lash::plugins::StaticPluginFactory::new(
         lash::plugins::PluginDeclaration::initial(ECHO_TOOLS.component()),
         lash::plugins::PluginSpec::new()
-            .with_tool_provider(lash::tool_provider_key!("tools"), echo_tool()),
+            .with_tool_provider(lash::tool_provider_key!("tools"), echo_tool())
+            .with_package_provider(
+                lash::tool_provider_key!("tools"),
+                Arc::new(lash::package::ToolPackageProvider::new(
+                    ECHO_TOOLS.component(),
+                    lash::tool_provider_key!("tools"),
+                    [lash::package::Segment::new("tools").unwrap()].into(),
+                    echo_tool(),
+                )),
+            ),
     )
     .as_component(ECHO_TOOLS.format())
     .expect("the echo tools are a process component")
@@ -226,6 +201,7 @@ async fn builder_on_workers(
         ..workers.config().run_bounds
     };
     let builder = lash::LashCore::standard_builder(backend)
+        .process_component(Arc::new(workflow_services()), WORKFLOW_SERVICES)
         .plugin(Arc::new(lash::vm::KernelProcessPluginFactory::new(
             workers,
             lash::vm::TYPESCRIPT_DIALECT,
@@ -277,58 +253,30 @@ async fn builder_on_workers(
 /// `process_tools` the process controls, each from its component.
 fn environment(process_tools: bool) -> lash::process::ProcessEnv {
     let mut builder = lash::process::ProcessEnv::builder(lash::MaxToolCalls::new(1024))
-        .component(ECHO_TOOLS, &());
-    for tool in echo_definitions() {
-        builder = builder.link_tool(
-            ECHO_TOOLS.tool_provider(lash::tool_provider_key!("tools")),
-            &tool,
-        );
-    }
+        .component(ECHO_TOOLS, &())
+        .component(WORKFLOW_SERVICES, &());
+
     if process_tools {
-        use lash::process_controls::ProcessControlTool;
         builder = builder.component(lash::process_controls::PROCESS_CONTROLS_CONFIG, &());
-        for control in [ProcessControlTool::Start, ProcessControlTool::Await] {
-            builder = builder.link_tool(
-                lash::process_controls::PROCESS_CONTROLS_PROVIDER,
-                &lash::process_controls::process_tool_definition(control),
-            );
-        }
     }
     builder.build().expect("the environment builds")
 }
 
 /// `environment` restricted to `effects`: the env a process that performs
 /// exactly those effects starts under (LINK-EXACTLY).
-fn linking(environment: &lash::process::ProcessEnv, effects: &[&str]) -> lash::process::ProcessEnv {
-    let effects: Vec<_> = effects
-        .iter()
-        .map(|effect| lash::workflow::document::EffectName::new(*effect).expect("an effect name"))
-        .collect();
-    environment
-        .restrict(&effects)
-        .expect("the environment links each effect")
-}
-
-fn published(publish: WorkflowPublish) -> WorkflowPublication {
-    match publish {
-        WorkflowPublish::Published(publication) => *publication,
-        other => panic!("the workflow publishes: {other:?}"),
-    }
-}
-
 async fn publication_document(
     core: &lash::LashCore,
-    publication: &WorkflowPublication,
+    publication: &Publication,
 ) -> lash::workflow::WorkflowDocument {
     let lash::workflow::WorkflowDocumentRead::Read(read) = core
         .host_artifacts()
-        .execution_document(&publication.reference)
+        .execution_document(&publication.start)
         .await
         .expect("read published document")
     else {
         panic!("the publication pin retains the document");
     };
-    read.document
+    (*read).clone()
 }
 
 // The kernel-text example in `lash::workflow::document`'s module docs is
@@ -339,283 +287,6 @@ include!("../src/workflow/document_example.rs");
 #[test]
 fn the_document_module_docs_example_runs() {
     document_example();
-}
-
-/// FIG-6124: publication and start staging expose their typed env refusal
-/// through the same host accessor, without controller-wrapper knowledge.
-#[tokio::test]
-async fn a_host_start_with_a_narrow_environment_is_refused_typed() {
-    let core = core().await;
-    let artifacts = core.host_artifacts();
-    let pin = lash::process::HostArtifactPin::mint();
-    let list_env = lash::process::ProcessEnv::builder(lash::MaxToolCalls::new(1024))
-        .component(lash::process_controls::PROCESS_CONTROLS_CONFIG, &())
-        .link_tool(
-            lash::process_controls::PROCESS_CONTROLS_CONFIG
-                .tool_provider(lash::tool_provider_key!("tools")),
-            &lash::process_controls::process_tool_definition(
-                lash::process_controls::ProcessControlTool::List,
-            ),
-        )
-        .build()
-        .expect("list environment");
-    let mut document = lash::workflow::document::parse_document(
-        r#"kernel 1
-numbers float
-effect processes.list(input: Any) -> Any contract "1"
-entry list() -> Any
-fn list() {
-  let input = {}
-  let rows = perform processes.list(input) as Any
-  return rows
-}
-
-main { finish null }
-"#,
-    )
-    .expect("list document");
-    let checked = artifacts
-        .workflow_environment(&list_env)
-        .await
-        .expect("environment")
-        .expect("kernel environment");
-    let effect = lash::workflow::document::EffectName::new("processes.list").expect("effect");
-    document
-        .manifest
-        .effects
-        .insert(effect.clone(), checked.checker().effects[&effect].clone());
-    let publication = published(
-        artifacts
-            .publish_workflow(
-                &pin,
-                &lash::workflow::document::DocumentBytes::from(document.clone()),
-                &Name::new("list"),
-                &list_env,
-                artifacts
-                    .cell_packages()
-                    .await
-                    .expect("the package gate answers")
-                    .declare_all(),
-                None,
-            )
-            .await
-            .expect("publish list"),
-    );
-    let narrow = list_env.restrict(std::iter::empty()).expect("narrow env");
-    let env_ref = artifacts
-        .publish_process_env(&pin, &narrow)
-        .await
-        .expect("publish narrow env");
-    let refused = core
-        .processes()
-        .start(
-            lash::process::ProcessStartRequest::definition(
-                publication.definition.id,
-                Some(publication.definition.signature),
-                Default::default(),
-                lash::process::EngineLaunch::new(
-                    env_ref,
-                    core.processes()
-                        .engine_defaults(
-                            lash::process::LASH_VM_ENGINE_KIND,
-                            &serde_json::Value::Null,
-                        )
-                        .expect("settings"),
-                ),
-                lash::process::ProcessOriginator::host(),
-                lash::process::LifetimeDecision::Detached,
-            )
-            .with_host_start_key("narrow-env"),
-            core.effect_host(),
-        )
-        .await
-        .expect_err("the missing link refuses the start");
-    assert_eq!(
-        refused.process_env_refusal(),
-        Some(&lash::process::ProcessEnvRefusal::EffectNotLinked {
-            effect: "processes.list".into(),
-        })
-    );
-
-    let missing =
-        lash::process::ProcessConfigKey::<()>::new("missing", lash::plugins::FormatVersion::ONE);
-    let env = lash::process::ProcessEnv::builder(lash::MaxToolCalls::new(1024))
-        .component(missing, &())
-        .build()
-        .expect("candidate env");
-    let refused = artifacts
-        .publish_process_env(&pin, &env)
-        .await
-        .expect_err("uninstalled component");
-    assert_eq!(
-        refused.process_env_refusal(),
-        Some(&lash::process::ProcessEnvRefusal::ComponentNotInstalled {
-            id: "missing".into(),
-        })
-    );
-    core.shutdown().await.expect("shutdown");
-}
-
-/// FIG-6124 / LINK-EXACTLY: host capture projects a candidate to the entry's
-/// certified closure, keeping each recorded link and every other env field.
-/// Checking and starting the broader candidate still refuses extra links.
-#[tokio::test]
-async fn a_host_captures_exactly_the_published_entrys_environment() {
-    let core = core().await;
-    let artifacts = core.host_artifacts();
-    let pin = lash::process::HostArtifactPin::mint();
-    let candidate = environment(true);
-    let checked = artifacts
-        .workflow_environment(&candidate)
-        .await
-        .expect("environment")
-        .expect("kernel environment");
-    let mut document = lash::workflow::document::parse_document(SUPERVISOR).expect("document");
-    for effect in document
-        .manifest
-        .effects
-        .keys()
-        .cloned()
-        .collect::<Vec<_>>()
-    {
-        document
-            .manifest
-            .effects
-            .insert(effect.clone(), checked.checker().effects[&effect].clone());
-    }
-    let packages = artifacts
-        .cell_packages()
-        .await
-        .expect("the package gate answers");
-    let publication = published(
-        artifacts
-            .publish_workflow(
-                &pin,
-                &lash::workflow::document::DocumentBytes::from(document.clone()),
-                &Name::new("supervisor"),
-                &candidate,
-                packages.declare_all(),
-                None,
-            )
-            .await
-            .expect("publish"),
-    );
-    let captured = core
-        .processes()
-        .capture(&publication.definition.id, &candidate)
-        .await
-        .expect("capture");
-    assert_eq!(
-        captured,
-        linking(&candidate, &["processes.start", "processes.await"]).with_package_roots(
-            lash_kernel_dialect::ExportView::namespace_roots(
-                &lash_vm_runtime::lash_packages()
-                    .expect("the fixture's packages")
-                    .view(),
-            ),
-        )
-    );
-    let WorkflowRead::Inspected(inspection) = artifacts
-        .definition_graph(&publication.definition.id)
-        .await
-        .expect("read")
-    else {
-        panic!("the published workflow is readable");
-    };
-    // The definition's engine payload is available through its recorded document.
-    let payload = serde_json::to_value(lash_vm_runtime::KernelProcessInput {
-        packages: packages.digest(),
-        declared_packages: packages.surface().selection(),
-        document: inspection.document.reference().document,
-        functions: inspection
-            .document
-            .document()
-            .manifest
-            .functions
-            .keys()
-            .copied()
-            .collect(),
-        entry: Name::new("supervisor"),
-        args: Default::default(),
-    })
-    .expect("the complete published-entry payload");
-    core.processes()
-        .check_link(
-            lash::process::LASH_VM_ENGINE_KIND,
-            &payload,
-            &captured,
-            &Default::default(),
-        )
-        .await
-        .expect("captured links exactly");
-    let refused = core
-        .processes()
-        .check_link(
-            lash::process::LASH_VM_ENGINE_KIND,
-            &payload,
-            &candidate,
-            &Default::default(),
-        )
-        .await
-        .expect_err("the extra echo link is refused");
-    assert_eq!(
-        refused.process_env_refusal(),
-        Some(&lash::process::ProcessEnvRefusal::EffectNotPerformed {
-            effect: "tools.echo".into()
-        })
-    );
-    let refused = core
-        .processes()
-        .capture(&publication.definition.id, &linking(&candidate, &[]))
-        .await
-        .expect_err("missing performed effects refuse capture");
-    assert!(matches!(
-        refused.process_env_refusal(),
-        Some(lash::process::ProcessEnvRefusal::EffectNotLinked { .. })
-    ));
-    let mut links = candidate.effects().clone();
-    let await_effect =
-        lash::workflow::document::EffectName::new("processes.await").expect("effect");
-    let link = links.get_mut(&await_effect).expect("await link");
-    let tool = link.tool.to_string();
-    link.provider = lash::plugins::ToolProviderHandle::new(
-        lash_vocabulary::claims::RegistryKind::Process,
-        link.provider.owner(),
-        lash::tool_provider_key!("unserved"),
-    );
-    let unserved = lash::process::ProcessEnv::builder(candidate.max_tool_calls())
-        .effects(links)
-        .component(ECHO_TOOLS, &())
-        .component(lash::process_controls::PROCESS_CONTROLS_CONFIG, &())
-        .build()
-        .expect("unserved candidate");
-    let refused = core
-        .processes()
-        .capture(&publication.definition.id, &unserved)
-        .await
-        .expect_err("unserved recorded link refuses capture");
-    assert_eq!(
-        refused.process_env_refusal(),
-        Some(&lash::process::ProcessEnvRefusal::CaptureMissing {
-            effect: await_effect.to_string(),
-            tool,
-        })
-    );
-    // The captured pair is also accepted at the start hold point.
-    let env_ref = artifacts
-        .publish_process_env(&pin, &captured)
-        .await
-        .expect("publish captured env");
-    let process = start_with(
-        &core,
-        &env_ref,
-        &publication.definition,
-        "captured",
-        serde_json::Map::from_iter([("value".into(), serde_json::json!("captured"))]),
-    )
-    .await;
-    let _ = finished(&core, &process).await;
-    core.shutdown().await.expect("shutdown");
 }
 
 /// Starts `definition` as `guarded(name)` and answers the process.
@@ -695,40 +366,28 @@ async fn a_document_is_published_read_edited_in_a_try_region_republished_and_run
     let pin = lash::process::HostArtifactPin::mint();
     let environment = environment(true);
     let checked = artifacts
-        .workflow_environment(&environment)
+        .workflow_environment(&namespace(&core, &pin, &environment).await.1)
         .await
         .expect("the environment reads")
         .expect("the kernel engine reads workflow documents");
     let entry = Name::new("guarded");
 
-    let document: Document = lash::workflow::document::parse_document(
-        &GUARDED.replace("set out = name", "set out = \"operator\""),
+    let document = guarded(&GUARDED.replace("set out = name", "set out = \"operator\""));
+    let first = publish(
+        &core,
+        &pin,
+        &lash::workflow::document::DocumentBytes::from(document.clone()),
+        &entry,
+        &environment,
+        None,
     )
-    .expect("the document parses");
-    let first = published(
-        artifacts
-            .publish_workflow(
-                &pin,
-                &lash::workflow::document::DocumentBytes::from(document.clone()),
-                &entry,
-                &environment,
-                artifacts
-                    .cell_packages()
-                    .await
-                    .expect("the package gate answers")
-                    .declare_all(),
-                None,
-            )
-            .await
-            .expect("the publication answers"),
-    );
+    .await
+    .expect("the publication answers");
     let first_document = publication_document(&core, &first).await;
     assert_eq!(first_document.document(), &document);
     assert_eq!(
-        first.reference.entry,
-        WorkflowDocumentEntry::Entry {
-            function: entry.clone()
-        }
+        first.start.selector,
+        lash::package::StartSelector::Export(entry.clone())
     );
 
     let WorkflowRead::Inspected(inspection) = artifacts
@@ -743,7 +402,7 @@ async fn a_document_is_published_read_edited_in_a_try_region_republished_and_run
 
     // The view names the one wait of the body inside both loops.
     let graph = inspection.document.graph();
-    let unit = Unit::Function(entry.clone());
+    let unit = function_unit(&document, "guarded");
     let [sleep] = graph.execution_sites() else {
         panic!(
             "the body has one execution site: {:?}",
@@ -772,40 +431,38 @@ async fn a_document_is_published_read_edited_in_a_try_region_republished_and_run
             &checked.checker(),
         )
         .expect("the edit applies");
-    assert_ne!(applied.admitted.identity, first.reference.document);
-    let second = published(
-        artifacts
-            .publish_workflow(
-                &pin,
-                &lash::workflow::document::DocumentBytes::from(draft.document().clone()),
-                &entry,
-                &environment,
-                artifacts
-                    .cell_packages()
-                    .await
-                    .expect("the package gate answers")
-                    .declare_all(),
-                None,
-            )
-            .await
-            .expect("the publication answers"),
-    );
+    assert_ne!(applied.admitted.identity, first.document);
+    let second = publish(
+        &core,
+        &pin,
+        &lash::workflow::document::DocumentBytes::from(draft.document().clone()),
+        &entry,
+        &environment,
+        None,
+    )
+    .await
+    .expect("the publication answers");
     assert_ne!(second.definition.id, first.definition.id);
-    assert_eq!(second.reference.document, applied.admitted.identity);
+    assert_eq!(second.document, applied.admitted.identity);
     let survivor = applied
         .correspondence
         .survivor(&sleep.site)
         .expect("the wait survives the edit");
-    assert_eq!((&survivor.to, survivor.edited), (&sleep.site, false));
+    assert!(!survivor.edited);
+    assert_eq!(survivor.to.path, sleep.site.path);
 
     // The first definition is immutable: a process of it runs the document
     // it was admitted with, beside a process of the edited one.
-    let env_ref = artifacts
-        .publish_process_env(&pin, &linking(&environment, &[]))
-        .await
-        .expect("publish the process environment");
+    let env_ref = first.env_ref.clone();
     let kept = start(&core, &env_ref, &first.definition, "first", "operator").await;
-    let edited = start(&core, &env_ref, &second.definition, "second", "operator").await;
+    let edited = start(
+        &core,
+        &second.env_ref,
+        &second.definition,
+        "second",
+        "operator",
+    )
+    .await;
     assert_eq!(finished(&core, &kept).await, serde_json::json!("operator"));
     assert_eq!(finished(&core, &edited).await, serde_json::json!("edited"));
 
@@ -821,6 +478,17 @@ async fn a_document_is_published_read_edited_in_a_try_region_republished_and_run
     assert_eq!(kept_read.definition, first.definition);
 }
 
+fn is_perform(node: lash::workflow::document::Node<'_>, slot: u32) -> bool {
+    use lash::workflow::document::{ActKind, Action, Expr, Node};
+    match node {
+        Node::Action(Action::Perform { slot: found, .. }) => found.0 == slot,
+        Node::Expr(Expr::Act(act)) => {
+            matches!(act.kind,ActKind::Perform {slot:found,..} if found.0 == slot)
+        }
+        _ => false,
+    }
+}
+
 /// FIG-6323: every sleep in a loop names its own execution occurrence in
 /// the committed process log, so a host can highlight it without tracing.
 #[tokio::test]
@@ -829,57 +497,39 @@ async fn stored_sleep_waits_name_the_sleep_site_and_each_loop_occurrence() {
     let artifacts = core.host_artifacts();
     let pin = lash::process::HostArtifactPin::mint();
     let environment = environment(true);
-    let source = GUARDED
-        .replace(
-            "entry guarded",
-            "effect tools.echo(input: Any) -> Any contract \"1\"\nentry guarded",
-        )
-        .replace(
-            "do sleep 5",
-            "do sleep 6000\n      let input = {value: name}\n      do perform tools.echo(input) as Any",
-        );
-    let mut document = lash::workflow::document::parse_document(&source).expect("document");
-    let checked = artifacts
-        .workflow_environment(&environment)
-        .await
-        .expect("environment")
-        .expect("kernel");
-    let echo = lash::workflow::document::EffectName::new("tools.echo").expect("effect");
-    document
-        .manifest
-        .effects
-        .insert(echo.clone(), checked.checker().effects[&echo].clone());
-    let publication = published(
-        artifacts
-            .publish_workflow(
-                &pin,
-                &lash::workflow::document::DocumentBytes::from(document.clone()),
-                &Name::new("guarded"),
-                &environment,
-                artifacts
-                    .cell_packages()
-                    .await
-                    .expect("the package gate answers")
-                    .declare_all(),
-                None,
-            )
-            .await
-            .expect("publication"),
-    );
+    let source = GUARDED.replace("do perform 0(5) as Null",
+        "do perform 0(6000) as Null\n      let input = {value: name}\n      do perform 1(input) as Any");
+    let document =
+        guarded(&source.replace("body {", &format!("{}\nbody {{", echo_import_header(1))));
+    let publication = publish(
+        &core,
+        &pin,
+        &lash::workflow::document::DocumentBytes::from(document.clone()),
+        &Name::new("guarded"),
+        &environment,
+        None,
+    )
+    .await
+    .expect("publication");
     let publication_view = publication_document(&core, &publication).await;
     let sites = publication_view.graph().execution_sites();
     let sleep = sites
         .iter()
-        .find(|site| site.kind == lash::workflow::graph::SiteKind::Sleep)
+        .find(|site| {
+            document
+                .node(&site.site)
+                .is_some_and(|node| is_perform(node, 0))
+        })
         .expect("sleep");
     let tool = sites
         .iter()
-        .find(|site| site.kind == lash::workflow::graph::SiteKind::Perform)
+        .find(|site| {
+            document
+                .node(&site.site)
+                .is_some_and(|node| is_perform(node, 1))
+        })
         .expect("tool");
-    let env_ref = artifacts
-        .publish_process_env(&pin, &linking(&environment, &["tools.echo"]))
-        .await
-        .expect("environment");
+    let env_ref = publication.env_ref.clone();
     let process = start(
         &core,
         &env_ref,
@@ -915,9 +565,9 @@ async fn stored_sleep_waits_name_the_sleep_site_and_each_loop_occurrence() {
             .site
             .as_ref()
             .expect("a sleeping workflow names its site");
-        assert_eq!(at.position(), sleep.site);
+        assert_eq!(at.at.position(), sleep.site);
         assert_eq!(
-            at.visit(),
+            at.at.visit(),
             lash::workflow::document::testkit::visit(occurrence as u64)
         );
     }
@@ -936,13 +586,17 @@ async fn stored_sleep_waits_name_the_sleep_site_and_each_loop_occurrence() {
                 row.occurrences,
                 lash_vocabulary::sites::ObservationReader::counts(at).starts
             );
-            let lash::process::WaitKind::Sleep { until_ms } = wait.kind else {
+            let lash::process::WaitKind::Call {
+                resume_at_ms: Some(until_ms),
+                ..
+            } = wait.kind
+            else {
                 panic!("the loop waits on its sleep: {wait:?}");
             };
             assert_eq!(
                 row.state,
                 lash::workflow::ProcessWorkflowSiteState::Waiting {
-                    kind: lash::workflow::ProcessWorkflowWaitKind::Sleep,
+                    kind: lash::workflow::ProcessWorkflowWaitKind::Effect,
                     resume_at_ms: Some(until_ms),
                 }
             );
@@ -960,8 +614,7 @@ async fn stored_sleep_waits_name_the_sleep_site_and_each_loop_occurrence() {
         let entered = events
             .iter()
             .find(|event| match &event.fact {
-                lash::process::ProcessLifecycleFact::Waiting { wait }
-                | lash::process::ProcessLifecycleFact::Resumed { wait } => {
+                lash::process::ProcessLifecycleFact::Waiting { wait } => {
                     wait.execution_site().is_ok_and(|at| &at.position() == site)
                 }
                 lash::process::ProcessLifecycleFact::EffectOutcome(outcome) => {
@@ -969,21 +622,17 @@ async fn stored_sleep_waits_name_the_sleep_site_and_each_loop_occurrence() {
                 }
                 _ => false,
             })
-            .expect("committed entry");
+            .expect("the occurrence has a committed entry");
         let settled = events
             .iter()
             .rev()
             .find(|event| match &event.fact {
-                lash::process::ProcessLifecycleFact::Resumed { wait } => {
-                    matches!(wait.kind, lash::process::WaitKind::Sleep { .. })
-                        && wait.execution_site().is_ok_and(|at| &at.position() == site)
-                }
                 lash::process::ProcessLifecycleFact::EffectOutcome(outcome) => {
                     &outcome.at.position() == site
                 }
                 _ => false,
             })
-            .expect("committed settlement");
+            .expect("the ordinary operation's outcome settles its occurrence");
         assert_eq!(row.first_entered, Some(entered.sequence));
         assert_eq!(row.last_settled, Some(settled.sequence));
         assert_eq!(
@@ -1005,13 +654,7 @@ async fn stored_sleep_waits_name_the_sleep_site_and_each_loop_occurrence() {
         snapshot_overlay.current_sites.is_empty(),
         "terminal clears current sites"
     );
-    for mut row in overlay.sites {
-        // A snapshot also folds retained live origin metadata (FIG-6925).
-        // Only the perform emits an origin; its durable identity, state,
-        // occurrence count and entry/settlement sequences stay unchanged.
-        if row.at.position() == tool.site {
-            row.origin = Some(tool.statement.clone());
-        }
+    for row in overlay.sites {
         let snapshot_row = snapshot_overlay
             .sites
             .iter()
@@ -1036,44 +679,27 @@ async fn a_process_feed_names_pure_compute_calls_and_counts_their_entries() {
     let artifacts = core.host_artifacts();
     let pin = lash::process::HostArtifactPin::mint();
     let environment = environment(true);
-    let document = lash::workflow::document::parse_document(
-        r#"kernel 1
-numbers float
-entry computed(name: Text) -> Any
-fn identity(value) { return value }
-fn computed(name) {
-  for n in [1, 2] { let value = call identity(name) }
-  return name
-}
-main { finish null }
-"#,
+    let identity = lash_kernel_doc::parse_definition("function identity(value: Text) -> Text\nkernel 1\nmetering statements\nbody { return value }").unwrap();
+    let computed = lash_kernel_doc::parse_definition(&format!(
+        "function computed(name: Text) -> Text\nkernel 1\nmetering statements\nuse identity = @{}\nbody {{ for n in [1, 2] {{ let value = call identity(name) }} return name }}", identity.identity(),
+    )).unwrap();
+    let mut document = function_document(computed, "computed");
+    document.functions.insert(identity.identity(), identity);
+    let publication = publish(
+        &core,
+        &pin,
+        &lash::workflow::document::DocumentBytes::from(document.clone()),
+        &Name::new("computed"),
+        &environment,
+        None,
     )
-    .expect("pure document");
-    let publication = published(
-        artifacts
-            .publish_workflow(
-                &pin,
-                &lash::workflow::document::DocumentBytes::from(document.clone()),
-                &Name::new("computed"),
-                &environment,
-                artifacts
-                    .cell_packages()
-                    .await
-                    .expect("the package gate answers")
-                    .declare_all(),
-                None,
-            )
-            .await
-            .expect("publication"),
-    );
+    .await
+    .expect("publication");
     let publication_view = publication_document(&core, &publication).await;
     let [call] = publication_view.graph().execution_sites() else {
         panic!("one call site");
     };
-    let env_ref = artifacts
-        .publish_process_env(&pin, &linking(&environment, &[]))
-        .await
-        .expect("environment");
+    let env_ref = publication.env_ref.clone();
     let process = start(
         &core,
         &env_ref,
@@ -1101,7 +727,7 @@ main { finish null }
         // observations, before the later committed terminal settles them.
         if let ProcessObservationEventPayload::LanguageExecution(observation) = &event.payload {
             overlay
-                .observe(&publication.reference, &event.payload)
+                .observe(&publication.start, &event.payload)
                 .expect("same execution");
             if let lash_trace::TraceLanguageExecutionPayload::Node {
                 at,
@@ -1152,41 +778,24 @@ async fn a_fan_out_overlay_holds_one_row_for_each_elements_effect() {
     let artifacts = core.host_artifacts();
     let pin = lash::process::HostArtifactPin::mint();
     let environment = environment(true);
-    let checked = artifacts
-        .workflow_environment(&environment)
-        .await
-        .expect("the environment reads")
-        .expect("the kernel engine reads workflow documents");
-    let echo = lash::workflow::document::EffectName::new("tools.echo").expect("an effect name");
-    let mut document = lash::workflow::document::parse_document(FAN).expect("the document parses");
-    // The document states the signature the host offers the effect under.
-    document.manifest.effects.insert(
-        echo.clone(),
-        checked
-            .checker()
-            .effects
-            .get(&echo)
-            .expect("the host offers the tool")
-            .clone(),
+    let text = echo_import_header(0);
+    let mut document = lash_kernel_doc::parse_document(&format!("kernel 1\nnumbers float\n{text}\nmain {{ let fan = fn(a,b,c) {{ let work = fn(item) {{ let input = {{value: item}} let got = perform 0(input) as Any return got }} let first = spawn apply work(a) let second = spawn apply work(b) let third = spawn apply work(c) let tasks = [first,second,third] let every = join all tasks return every }} }}")).unwrap();
+    export_closure(
+        &mut document,
+        "fan",
+        &["a", "b", "c"],
+        lash::workflow::document::Type::Json,
     );
-    let entry = Name::new("fan");
-    let publication = published(
-        artifacts
-            .publish_workflow(
-                &pin,
-                &lash::workflow::document::DocumentBytes::from(document.clone()),
-                &entry,
-                &environment,
-                artifacts
-                    .cell_packages()
-                    .await
-                    .expect("the package gate answers")
-                    .declare_all(),
-                None,
-            )
-            .await
-            .expect("the publication answers"),
-    );
+    let publication = publish(
+        &core,
+        &pin,
+        &lash::workflow::document::DocumentBytes::from(document.clone()),
+        &Name::new("fan"),
+        &environment,
+        None,
+    )
+    .await
+    .expect("the publication answers");
     let publication_view = publication_document(&core, &publication).await;
     let performs: Vec<_> = publication_view
         .graph()
@@ -1198,10 +807,7 @@ async fn a_fan_out_overlay_holds_one_row_for_each_elements_effect() {
         panic!("the document performs at one site: {performs:?}");
     };
 
-    let env_ref = artifacts
-        .publish_process_env(&pin, &linking(&environment, &["tools.echo"]))
-        .await
-        .expect("publish the process environment");
+    let env_ref = publication.env_ref.clone();
     let args = serde_json::json!({"a": "x", "b": "y", "c": "z"});
     let serde_json::Value::Object(args) = args else {
         unreachable!()
@@ -1282,28 +888,10 @@ async fn a_fan_out_overlay_holds_one_row_for_each_elements_effect() {
     }
 }
 
-/// START-TEMPLATE: shipping &worker snapshots its code; the child gets its
-/// own launch, after the original publication pin is gone. A held worker's
-/// effects are absent from the supervisor's called-effects environment.
+/// START-TEMPLATE: a reference to worker retains its defining Link and gets
+/// its own launch after the original publication pin is gone.
 #[tokio::test]
 async fn a_process_starts_another_entry_of_its_document_by_function_reference_and_awaits_it() {
-    struct WorkerLaunch;
-    #[lash::async_trait]
-    impl lash_core::ProcessEnvPolicy for WorkerLaunch {
-        async fn choose(
-            &self,
-            cx: &lash_core::ProcessEnvCx<'_>,
-        ) -> Result<lash_core::ProcessStartChoice, lash_core::ProcessEnvPolicyError> {
-            Ok(lash_core::ProcessStartChoice {
-                fits: Default::default(),
-                env: lash_core::ProcessEnvChoice::New(linking(
-                    &environment(false),
-                    &["tools.echo"],
-                )),
-                engine_settings: cx.engine_defaults()?,
-            })
-        }
-    }
     let clock = Arc::new(lash_core::testing::TestClock::new(1_700_000_000_000));
     let stores = Arc::new(
         lash_sqlite_store::SqliteStoreSet::memory_with_clock(clock.clone())
@@ -1315,7 +903,9 @@ async fn a_process_starts_another_entry_of_its_document_by_function_reference_an
         .process_component(
             Arc::new(lash::process_controls::ProcessControlsComponent::new(
                 lash_execution_contracts::process::lifetime::session_or_starter,
-                Arc::new(WorkerLaunch),
+                lash::process::env::policy::restrict_or(lash::process::env::policy::refuse(
+                    "the child inherits its retained parent",
+                )),
             )),
             lash::process_controls::PROCESS_CONTROLS_CONFIG,
         )
@@ -1324,59 +914,51 @@ async fn a_process_starts_another_entry_of_its_document_by_function_reference_an
     let artifacts = core.host_artifacts();
     let pin = lash::process::HostArtifactPin::mint();
     let environment = environment(true);
-    let checked = artifacts
-        .workflow_environment(&environment)
-        .await
-        .expect("environment")
-        .expect("kernel environment");
-    let text = SUPERVISOR.replace("entry supervisor", "effect tools.echo(input: Any) -> Any contract \"1\"\nentry supervisor")
-        .replace("return [value, \"worked\"]", "let request = {value: value}\n  let echoed = perform tools.echo(request) as Any\n  return [echoed, \"worked\"]")
-        .replace("fn supervisor(value) {", "fn supervisor(value) {\n  do sleep 1000");
-    let mut document = lash::workflow::document::parse_document(&text).expect("document");
-    for effect in ["processes.start", "processes.await", "tools.echo"] {
-        let name = lash::workflow::document::EffectName::new(effect).expect("effect name");
-        document
-            .manifest
-            .effects
-            .insert(name.clone(), checked.checker().effects[&name].clone());
+    let mut imports = lash_kernel_doc::parse_document("kernel 1\nnumbers float\nimport 0 operation typescript.sleep(milliseconds: Int) -> Null\nmain {finish null}").unwrap();
+    for (slot, tool) in [
+        (1, lash::process_controls::ProcessControlTool::Start),
+        (2, lash::process_controls::ProcessControlTool::Await),
+    ] {
+        let (slot, import) = operation_import(
+            lash::package::ImportSlot(slot),
+            &lash::process_controls::process_tool_definition(tool),
+        );
+        imports.imports.insert(slot, import);
     }
-    let packages = artifacts
-        .cell_packages()
-        .await
-        .expect("the gate answers")
-        .digest();
-    let worker = lash_vm_runtime::definition_of_entry(
-        &document,
-        document.identity(),
-        &Name::new("worker"),
-        packages,
-        artifacts
-            .cell_packages()
-            .await
-            .unwrap()
-            .surface()
-            .selection(),
+    let (slot, import) = operation_import(lash::package::ImportSlot(3), &echo_definitions()[0]);
+    imports.imports.insert(slot, import);
+    let header = lash_kernel_doc::print_document(&imports)
+        .lines()
+        .filter(|line| line.starts_with("import "))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let worker = lash_kernel_doc::parse_definition(&format!("function worker(value: Json) -> Json\nkernel 1\nmetering statements\n{header}\nbody {{ let request = {{value: value}} let echoed = perform 3(request) as Any return [echoed, \"worked\"] }}")).unwrap();
+    let supervisor = lash_kernel_doc::parse_definition(&format!("function supervisor(value: Json) -> Json\nkernel 1\nmetering statements\n{header}\nuse worker = @{}\nbody {{ do perform 0(1000) as Null let args = {{value: value}} let request = {{definition: &worker,args: args}} let handle = perform 1(request) as Any let wait = {{handle: handle}} let done = perform 2(wait) as Any return done }}",worker.identity())).unwrap();
+    let mut document = function_document(supervisor, "supervisor");
+    document
+        .exports
+        .extend(function_document(worker.clone(), "worker").exports);
+    document.functions.insert(worker.identity(), worker);
+    let publication = publish(
+        &core,
+        &pin,
+        &document.clone().into(),
+        &Name::new("supervisor"),
+        &environment,
+        None,
     )
-    .expect("pure workflow id");
-    let worker_id =
-        lash_core::ProcessDefinitionId::from_tagged_json(&worker["id"]).expect("worker id");
-    let publication = published(
-        artifacts
-            .publish_workflow(
-                &pin,
-                &lash::workflow::document::DocumentBytes::from(document),
-                &Name::new("supervisor"),
-                &environment,
-                artifacts
-                    .cell_packages()
-                    .await
-                    .expect("the package gate answers")
-                    .declare_all(),
-                None,
-            )
-            .await
-            .expect("publish"),
-    );
+    .await
+    .unwrap();
+    let worker_draft = lash::vm::definition_draft(&lash::process::KernelProcessDefinition {
+        code: lash::vm::KernelInlineRequest::Linked {
+            start: lash::package::LinkedStart {
+                link: publication.start.link,
+                selector: lash::package::StartSelector::Export(Name::new("worker")),
+            },
+        },
+    })
+    .unwrap();
+    let worker_id = worker_draft.id();
     assert!(
         artifacts
             .get_definition(&worker_id)
@@ -1385,16 +967,7 @@ async fn a_process_starts_another_entry_of_its_document_by_function_reference_an
             .is_none(),
         "publication creates only the selected descriptor"
     );
-    let supervisor_env = linking(&environment, &["processes.start", "processes.await"]);
-    assert!(
-        !supervisor_env.effects().contains_key(
-            &lash::workflow::document::EffectName::new("tools.echo").expect("effect")
-        )
-    );
-    let env_ref = artifacts
-        .publish_process_env(&pin, &supervisor_env)
-        .await
-        .expect("publish launch");
+    let env_ref = publication.env_ref.clone();
     let mut args = serde_json::Map::new();
     args.insert("value".to_owned(), serde_json::json!("x"));
     let supervisor = start_with(&core, &env_ref, &publication.definition, "supervisor", args).await;
@@ -1438,27 +1011,30 @@ async fn a_process_starts_another_entry_of_its_document_by_function_reference_an
         finished(&core, &child.id).await,
         serde_json::json!(["x", "worked"])
     );
-    let WorkflowRead::Inspected(read) = core
-        .processes()
-        .graph(&child.id)
-        .await
-        .expect("child graph")
-    else {
-        panic!("child document")
+    let lash::process::ProcessInput::Engine { payload, .. } = child.input.as_ref() else {
+        panic!("the child is an engine execution")
+    };
+    let code: lash::vm::KernelInlineRequest =
+        serde_json::from_value(payload["code"].clone()).unwrap();
+    let lash::vm::KernelInlineRequest::Callable { link, function, .. } = code else {
+        panic!("a captured callable")
     };
     assert_eq!(
-        read.document
-            .document()
-            .entries
-            .keys()
-            .map(Name::as_str)
-            .collect::<Vec<_>>(),
-        ["run"]
+        link, publication.start.link,
+        "the child retains its defining Link"
     );
-    assert!(
-        read.document.document().main.is_empty(),
-        "the shipped document has no cell main"
+    let content = lash::vm::KernelDocuments::new(
+        core.backend().module_artifacts(),
+        core.backend().package_store(),
+    )
+    .load_linked(link)
+    .await
+    .unwrap();
+    assert_eq!(
+        &content.documents[&content.links[&link].document],
+        &document
     );
+    assert!(document.functions.contains_key(&function.callable.function));
     core.shutdown().await.expect("stop the node");
 }
 
@@ -1486,7 +1062,11 @@ async fn timer_park_after(
                 .expect("the process is retained");
             trace.push(format!("{observed:?}"));
             for wait in observed.lifecycle.waits() {
-                if let lash_execution_contracts::process::WaitKind::Sleep { until_ms } = wait.kind {
+                if let lash_execution_contracts::process::WaitKind::Call {
+                    resume_at_ms: Some(until_ms),
+                    ..
+                } = wait.kind
+                {
                     let until = u64::try_from(until_ms).expect("a nonnegative timer instant");
                     if until > after {
                         return until;
@@ -1539,28 +1119,18 @@ async fn a_process_parked_in_its_inner_loop_resumes_on_another_node_and_finishes
     let artifacts = first.host_artifacts();
     let pin = lash::process::HostArtifactPin::mint();
     let environment = environment(true);
-    let document = lash::workflow::document::parse_document(GUARDED).expect("the document parses");
-    let publication = published(
-        artifacts
-            .publish_workflow(
-                &pin,
-                &lash::workflow::document::DocumentBytes::from(document.clone()),
-                &Name::new("guarded"),
-                &environment,
-                artifacts
-                    .cell_packages()
-                    .await
-                    .expect("the package gate answers")
-                    .declare_all(),
-                None,
-            )
-            .await
-            .expect("the publication answers"),
-    );
-    let env_ref = artifacts
-        .publish_process_env(&pin, &linking(&environment, &[]))
-        .await
-        .expect("publish the process environment");
+    let document = guarded(GUARDED);
+    let publication = publish(
+        &first,
+        &pin,
+        &lash::workflow::document::DocumentBytes::from(document.clone()),
+        &Name::new("guarded"),
+        &environment,
+        None,
+    )
+    .await
+    .expect("the publication answers");
+    let env_ref = publication.env_ref.clone();
     let process = start(
         &first,
         &env_ref,
@@ -1592,7 +1162,7 @@ async fn a_process_parked_in_its_inner_loop_resumes_on_another_node_and_finishes
     else {
         panic!("a kernel process has a document");
     };
-    assert_eq!(read.document.identity(), publication.reference.document);
+    assert_eq!(read.document.identity(), publication.document);
 }
 
 /// SQLite file stores under a test clock, opened anew by each node of a
@@ -1640,25 +1210,18 @@ async fn a_sealed_env_naming_a_retired_component_builds_without_it_and_resumes()
     let artifacts = first.host_artifacts();
     let pin = lash::process::HostArtifactPin::mint();
     let environment = environment(true);
-    let document = lash::workflow::document::parse_document(GUARDED).expect("the document parses");
-    let publication = published(
-        artifacts
-            .publish_workflow(
-                &pin,
-                &lash::workflow::document::DocumentBytes::from(document.clone()),
-                &Name::new("guarded"),
-                &environment,
-                artifacts
-                    .cell_packages()
-                    .await
-                    .expect("the package gate answers")
-                    .declare_all(),
-                None,
-            )
-            .await
-            .expect("the publication answers"),
-    );
-    let sealed = linking(&environment, &[]);
+    let document = guarded(GUARDED);
+    let publication = publish(
+        &first,
+        &pin,
+        &lash::workflow::document::DocumentBytes::from(document.clone()),
+        &Name::new("guarded"),
+        &environment,
+        None,
+    )
+    .await
+    .expect("the publication answers");
+    let sealed = publication.environment.clone();
     assert!(
         sealed
             .components()
@@ -1722,10 +1285,7 @@ async fn a_new_env_naming_a_retired_component_is_refused_typed() {
     let core = core_with_process_tools(stores, "retired", true, EchoComponent::Retired).await;
     let refused = core
         .host_artifacts()
-        .publish_process_env(
-            &lash::process::HostArtifactPin::mint(),
-            &linking(&environment(true), &[]),
-        )
+        .publish_process_env(&lash::process::HostArtifactPin::mint(), &environment(true))
         .await
         .expect_err("the retired component refuses the new env");
     assert_eq!(
@@ -1740,24 +1300,17 @@ async fn a_new_env_naming_a_retired_component_is_refused_typed() {
 fn workflow_import_future_is_send() {
     fn assert_send<T: Send>(_: T) {}
 
-    let _: fn(&lash::process::HostArtifacts, &lash::process::ProcessEnv) =
+    let _: fn(&lash::process::HostArtifacts, &lash::vm::WorkflowEnvironmentRequest) =
         |artifacts, environment| {
-            assert_send(
-                artifacts.import_workflow(
-                    lash::workflow::document::SourceLanguage::Python,
-                    "async def main():\n    return None\n",
-                    environment,
-                    {
-                        let held = lash::package::lash_packages().unwrap();
-                        lash::package::CellPackages::held(&held)
-                    }
-                    .declare_all(),
-                    Some(lash::dialect::workflow::WorkflowSourceLimits {
-                        max_bytes: 1024,
-                        max_nesting: 16,
-                    }),
-                ),
-            );
+            assert_send(artifacts.import_workflow(
+                lash::workflow::document::SourceLanguage::Python,
+                "async def main():\n    return None\n",
+                environment,
+                Some(lash::dialect::workflow::WorkflowSourceLimits {
+                    max_bytes: 1024,
+                    max_nesting: 16,
+                }),
+            ));
         };
 }
 
@@ -1780,23 +1333,15 @@ async fn typescript_and_python_modules_share_one_entry_contract() {
     );
     let core = core_with_process_tools(stores, "import", false, EchoComponent::Installed).await;
     let artifacts = core.host_artifacts();
-    let environment = environment(false);
+    let environment = source_environment(false);
+    let (_, namespace) =
+        namespace(&core, &lash::process::HostArtifactPin::mint(), &environment).await;
     let import = |language, source: &'static str| {
         let artifacts = artifacts.clone();
-        let environment = environment.clone();
+        let namespace = namespace.clone();
         async move {
             artifacts
-                .import_workflow(
-                    language,
-                    source,
-                    &environment,
-                    artifacts
-                        .cell_packages()
-                        .await
-                        .expect("the package gate answers")
-                        .declare_all(),
-                    None,
-                )
+                .import_workflow(language, source, &namespace, None)
                 .await
                 .expect("import answers")
         }
@@ -1817,7 +1362,7 @@ async fn typescript_and_python_modules_share_one_entry_contract() {
             .validate(&document, &text)
             .expect("the import maps its source");
         document
-            .entries
+            .exports
             .keys()
             .map(|name| name.as_str().to_owned())
             .collect::<Vec<_>>()
@@ -1846,11 +1391,6 @@ async fn typescript_and_python_modules_share_one_entry_contract() {
             "export async function a() { return 1; }\nexport async function a() { return 2; }",
             "async def a():\n    return 1\n\n\nasync def a():\n    return 2\n",
             ModuleRefusal::DuplicateEntry,
-        ),
-        (
-            "if (true) {\n  const a = async () => 1;\n}\n",
-            "if True:\n    async def a():\n        return 1\n",
-            ModuleRefusal::EmptyModule,
         ),
         (
             "const limit = 3;\nexport async function a() { return limit; }",
@@ -1893,6 +1433,21 @@ async fn typescript_and_python_modules_share_one_entry_contract() {
         );
     }
 
+    for (language, source) in [
+        (
+            SourceLanguage::TypeScript,
+            "if (true) { const a = async () => 1; }",
+        ),
+        (
+            SourceLanguage::Python,
+            "if True:\n    async def a():\n        return 1\n",
+        ),
+    ] {
+        assert!(
+            entries(import(language, source).await, source).is_empty(),
+            "nested functions create no public Export"
+        );
+    }
     let wrapped = "export const digest = process(async (inbox: string) => inbox);";
     assert_eq!(
         code(import(SourceLanguage::TypeScript, wrapped).await, wrapped),
@@ -1919,43 +1474,26 @@ async fn typescript_and_python_modules_share_one_entry_contract() {
 /// a checker admission refusal rather than a parsing diagnostic.
 #[cfg(feature = "typescript")]
 #[tokio::test]
-async fn typescript_import_reports_missing_tools_as_admission_refusals() {
-    use lash::workflow::{WorkflowAdmissionRefusal, WorkflowImport};
+async fn a_missing_operation_is_refused_at_workflow_publication() {
     let core = core().await;
-    let document = lash::workflow::document::parse_document(
-        "kernel 1\nnumbers float\neffect missing.tool(input: Any) -> Any contract \"1\"\nentry job() -> Any\nfn job() { return null }\nmain { finish null }\n",
-    ).expect("document parses");
-    let embedding = lash_vm_worker::built_embedding(&Default::default()).expect("embedding");
-    let library = embedding.library();
-    let source = lash::typescript::print(&document, None, library, Default::default())
-        .expect("the printer accepts the document");
-    let (decoded, _) =
-        lash::typescript::read(&source.source, &document, library, Default::default())
-            .expect("exported source reads back before admission");
-    assert_eq!(document.canonical_bytes(), decoded.canonical_bytes());
-    let WorkflowImport::Admission(WorkflowAdmissionRefusal::Document(refusal)) = core
+    let pin = lash::process::HostArtifactPin::mint();
+    let document = lash_kernel_doc::parse_document("kernel 1\nnumbers float\nimport 0 operation missing.tool(input: Json) -> Json\nmain { do perform 0(null) as Json return null }").unwrap();
+    let (_, request) = namespace(&core, &pin, &source_environment(false)).await;
+    let error = core
         .host_artifacts()
-        .import_exported_workflow(
-            &source.source,
-            lash::dialect::SourceFormat::TypeScriptV1,
-            &document,
-            &environment(true),
-            core.host_artifacts()
-                .cell_packages()
-                .await
-                .unwrap()
-                .declare_all(),
+        .publish_workflow(
+            &pin,
+            &document.into(),
+            &lash::package::StartSelector::Main,
+            &request,
+            None,
         )
         .await
-        .expect("import answers")
-    else {
-        panic!("the unavailable effect is refused by admission");
-    };
-    assert!(refusal.errors.iter().any(|error| matches!(
-        error.reason,
-        lash::workflow::graph::RefusalReason::MissingEffect { .. }
-    )));
-    core.shutdown().await.expect("the node stops");
+        .unwrap_err();
+    assert!(
+        matches!(error,lash::EmbedError::Plugin(lash_execution_contracts::PluginError::Package(cause)) if matches!(*cause,lash_execution_contracts::process::linking::EnginePortError::Refused(lash_execution_contracts::process::linking::AdmissionRefusal::MissingImport {slot:lash::package::ImportSlot(0),..})))
+    );
+    core.shutdown().await.unwrap();
 }
 
 #[cfg(all(feature = "typescript", feature = "python"))]
@@ -1982,10 +1520,6 @@ mod inline_starts;
 #[path = "workflow_laws/packages.rs"]
 mod packages;
 
-#[cfg(all(feature = "typescript", feature = "python"))]
-#[path = "workflow_laws/view_links.rs"]
-mod view_links;
-
 #[cfg(all(feature = "typescript", feature = "python", feature = "workflow-view"))]
 #[path = "workflow_laws/failures.rs"]
 mod failures;
@@ -2001,17 +1535,3 @@ mod cancelled_sleep;
 #[cfg(all(feature = "typescript", feature = "python", feature = "workflow-view"))]
 #[path = "workflow_laws/sleep_resume_at.rs"]
 mod sleep_resume_at;
-
-#[cfg(all(feature = "typescript", feature = "python", feature = "workflow-view"))]
-#[path = "workflow_laws/entry_comparison.rs"]
-mod entry_comparison;
-
-#[cfg(all(feature = "typescript", feature = "python", feature = "workflow-view"))]
-#[path = "workflow_laws/value_names.rs"]
-mod value_names;
-
-fn test_packages() -> lash::package::PackageView<'static> {
-    static HELD: std::sync::LazyLock<Arc<lash::package::HeldPackages>> =
-        std::sync::LazyLock::new(|| lash::package::lash_packages().unwrap());
-    HELD.view()
-}

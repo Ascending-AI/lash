@@ -519,3 +519,19 @@ mod tests {
         token(WaitId(3), encode_body(&3_u64), serde_json::json!(3));
     }
 }
+
+/// One performing occurrence and the authored site whose operation it serves.
+/// Identity stays on the performing site; host rows are grouped by origin.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct EffectLocation {
+    pub at: EffectId,
+    pub origin: Site,
+}
+impl EffectLocation {
+    /// A producer performing directly in authored code names its own site.
+    pub fn authored(at: EffectId) -> Self {
+        let origin = at.position().site().clone();
+        Self { at, origin }
+    }
+}

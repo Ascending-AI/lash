@@ -40,6 +40,7 @@ thiserror = { workspace = true }
 serde_json = { workspace = true }
 
 [dev-dependencies]
+lash-kernel-check = { workspace = true }
 lash-kernel-lib = { workspace = true }
 lash-kernel-package = { workspace = true, features = ["testing"] }
 lash-kernel-state = { workspace = true, features = ["perf-witness"] }

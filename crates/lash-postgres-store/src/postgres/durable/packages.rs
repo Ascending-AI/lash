@@ -113,7 +113,7 @@ async fn load(
 lash_store_sql::statements! {
     /// Lock ownership before classifying a resolution or reading its winner.
     struct ResolutionPostgresStatements @ "durable_resolutions_postgres" {
-        owner = "SELECT epoch, state, state_revision, requires FROM actors WHERE actor_key = ?1 FOR UPDATE";
+        owner = "SELECT epoch, state, state_revision, base_requires FROM actors WHERE actor_key = ?1 FOR UPDATE";
     }
 }
 static POSTGRES: LazyLock<ResolutionPostgresStatements> =
@@ -221,20 +221,6 @@ async fn commit_resolution(
         .fetch_one(crate::observed_sql::executor(&mut *tx))
         .await
         .map_err(sqlx_failure)?;
-    let mut requires = lash_durable::parse_requires(requires.as_deref())
-        .map_err(|_| super::corrupt("actor requirements", owner.actor.as_str()))?;
-    requires.extend(registration.requirements.tokens());
-    if let lash_durable::resolutions::ResolutionEntry::Resolved { requirements, .. } =
-        &candidate.entry
-    {
-        requires.extend(requirements.tokens());
-    }
-    crate::observed_sql::query(super::SQL.actor.stamp_requires.sql())
-        .bind(owner.actor.as_str())
-        .bind(lash_durable::encode_requires(&requires))
-        .execute(crate::observed_sql::executor(&mut *tx))
-        .await
-        .map_err(sqlx_failure)?;
     let json = serde_json::to_string(&candidate)
         .map_err(|error| super::corrupt("resolution", &error.to_string()))?;
     crate::observed_sql::query(SQL.insert_resolution.sql())
@@ -242,6 +228,13 @@ async fn commit_resolution(
         .bind(candidate.key.use_.link.to_string())
         .bind(i64::from(candidate.key.use_.slot.0))
         .bind(json)
+        .execute(crate::observed_sql::executor(&mut *tx))
+        .await
+        .map_err(sqlx_failure)?;
+    let requires = owner_requires(tx, &owner.actor, None).await?;
+    crate::observed_sql::query(super::SQL.actor.stamp_effective_requires.sql())
+        .bind(owner.actor.as_str())
+        .bind(lash_durable::encode_requires(&requires))
         .execute(crate::observed_sql::executor(&mut *tx))
         .await
         .map_err(sqlx_failure)?;
@@ -289,7 +282,15 @@ pub(super) async fn owner_requires(
     requested: Option<&[String]>,
 ) -> Result<Vec<String>, DurableError> {
     let mut requires = match requested {
-        Some(requires) => requires.to_vec(),
+        Some(requires) => {
+            crate::observed_sql::query(super::SQL.actor.stamp_requires.sql())
+                .bind(actor.as_str())
+                .bind(lash_durable::encode_requires(requires))
+                .execute(crate::observed_sql::executor(&mut *tx))
+                .await
+                .map_err(sqlx_failure)?;
+            requires.to_vec()
+        }
         None => {
             let row: (i64, String, i64, Option<String>) =
                 crate::observed_sql::query_as(SQL.owner_revision.sql())
@@ -417,7 +418,7 @@ pub(crate) async fn register_process_execution(
         seed(tx, &actor, record).await?;
     }
     let requires = owner_requires(tx, &actor, None).await?;
-    crate::observed_sql::query(super::SQL.actor.stamp_requires.sql())
+    crate::observed_sql::query(super::SQL.actor.stamp_effective_requires.sql())
         .bind(actor.as_str())
         .bind(lash_durable::encode_requires(&requires))
         .execute(crate::observed_sql::executor(&mut *tx))

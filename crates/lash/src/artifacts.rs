@@ -128,6 +128,30 @@ impl HostArtifacts {
         }
     }
 
+    /// Bind a publisher to this host's registered kernel runtime and accepted namespace.
+    /// The supplied context fixes its ownership domain before any publication.
+    #[cfg(feature = "codemode")]
+    pub fn package_publisher(
+        &self,
+        context: lash_vocabulary::package::PublicationContext,
+        snapshot: lash_vocabulary::package::NamespaceSnapshot,
+    ) -> Result<crate::packages::ScopedPackagePublisher> {
+        let runtime = self
+            .engines
+            .document_provider(lash_vm_runtime::LASH_VM_ENGINE_KIND)
+            .ok_or_else(|| {
+                lash_execution_contracts::PluginError::Registration(
+                    "package publication requires a registered kernel document provider".into(),
+                )
+            })?;
+        Ok(crate::packages::ScopedPackagePublisher::new(
+            context,
+            snapshot,
+            runtime,
+            self.core.backend().package_store(),
+        ))
+    }
+
     /// Observe the tools the serving build's components serve for `env`'s
     /// effect links. Admits the environment and builds only its named components with
     /// `process: None`. This is an observation of the serving build, not the
@@ -278,6 +302,7 @@ impl HostArtifacts {
         packages.consumer = Some(consumer);
         let claim = claim(pin)?;
         let store = self.core.backend().package_store();
+        let mut held = std::collections::BTreeSet::new();
         for accepted in &packages.snapshot.advertisements {
             if configured.snapshot.advertisements.contains(accepted) {
                 store
@@ -285,13 +310,25 @@ impl HostArtifacts {
                     .await
                     .map_err(lash_execution_contracts::plugin_error::registry_error)?;
             } else {
-                composition
-                    .composition
-                    .hold_package(&claim, accepted)
-                    .await
-                    .map_err(|error| {
-                        lash_execution_contracts::PluginError::Package(Box::new(error))
-                    })?;
+                if held.insert(accepted.publication.context.publisher.clone()) {
+                    let advertisements: Vec<_> = packages
+                        .snapshot
+                        .advertisements
+                        .iter()
+                        .filter(|candidate| {
+                            candidate.publication.context.publisher
+                                == accepted.publication.context.publisher
+                                && !configured.snapshot.advertisements.contains(candidate)
+                        })
+                        .collect();
+                    composition
+                        .composition
+                        .hold_packages(&claim, &advertisements)
+                        .await
+                        .map_err(|error| {
+                            lash_execution_contracts::PluginError::Package(Box::new(error))
+                        })?;
+                }
                 if let PackageAdvertisement::Enumerated(package) = &accepted.advertisement {
                     store
                         .put_package(
@@ -545,6 +582,10 @@ impl HostArtifacts {
         environment: &lash_vm_runtime::WorkflowEnvironmentRequest,
         source: Option<(&crate::workflow::document::SourceMap, &str)>,
     ) -> Result<lash_vocabulary::names::LinkedStart> {
+        let typed = document.decode(lash_vocabulary::KernelDataLimits::standard())?;
+        if let Some((map, text)) = source {
+            map.validate_identified(&typed, text)?;
+        }
         let request = lash_vm_runtime::WorkflowPublishRequest {
             document: document.clone(),
             selector: selector.clone(),
@@ -557,11 +598,6 @@ impl HostArtifacts {
             .await
             .map_err(|error| lash_execution_contracts::PluginError::Package(Box::new(error)))?;
         if let Some((map, text)) = source {
-            let typed = document
-                .decode(lash_vocabulary::KernelDataLimits::standard())
-                .map_err(|refusal| {
-                    lash_execution_contracts::PluginError::Invoke(refusal.to_string())
-                })?;
             self.documents()
                 .publish_source_map(&claim, &typed, map, text)
                 .await
@@ -698,6 +734,84 @@ impl HostArtifacts {
             .into());
         }
         Ok(read)
+    }
+
+    /// Read display facts from the packages retained by this execution's recorded provenance.
+    /// The Link graph selects callees; labels remain independent sidecars.
+    #[cfg(all(feature = "codemode", feature = "workflow-view"))]
+    pub async fn workflow_view_context(
+        &self,
+        reference: &lash_vocabulary::LinkedStart,
+        publications: &[lash_vocabulary::package::PublicationRecord],
+    ) -> Result<crate::workflow::view::ViewContext> {
+        use lash_vocabulary::package::PublishedContent;
+        let documents = self.documents();
+        let store = self.core.backend().package_store();
+        let mut content = documents
+            .load_linked(reference.link)
+            .await
+            .map_err(|error| lash_execution_contracts::PluginError::Package(Box::new(error)))?;
+        let mut pending = publications
+            .iter()
+            .map(lash_vocabulary::package::PublicationRecord::key)
+            .collect::<Vec<_>>();
+        let mut seen = std::collections::BTreeSet::new();
+        let mut labels = Vec::new();
+        while let Some(key) = pending.pop() {
+            if !seen.insert(key.clone()) {
+                continue;
+            }
+            let record = store
+                .publication(&key)
+                .await
+                .map_err(lash_execution_contracts::plugin_error::registry_error)?
+                .ok_or_else(|| {
+                    lash_execution_contracts::PluginError::Invoke(
+                        "the retained display publication is missing".into(),
+                    )
+                })?;
+            pending.extend(record.imported_publications);
+            for root in record.code_links {
+                if !content.links.contains_key(&root) {
+                    let retained = documents.load_linked(root).await.map_err(|error| {
+                        lash_execution_contracts::PluginError::Package(Box::new(error))
+                    })?;
+                    content.documents.extend(retained.documents);
+                    content.links.extend(retained.links);
+                }
+            }
+            if let PublishedContent::Package(id) = record.content {
+                let package = store
+                    .package(&id)
+                    .await
+                    .map_err(lash_execution_contracts::plugin_error::registry_error)?
+                    .ok_or_else(|| {
+                        lash_execution_contracts::PluginError::Invoke(
+                            "the retained display Package is missing".into(),
+                        )
+                    })?;
+                content.packages.insert(id, package.package);
+                labels.extend(
+                    store
+                        .labels(&id)
+                        .await
+                        .map_err(lash_execution_contracts::plugin_error::registry_error)?
+                        .into_iter()
+                        .map(|json| (id, json)),
+                );
+            }
+        }
+        let mut context =
+            crate::workflow::view::ViewContext::new(reference.clone(), content, Default::default())
+                .map_err(|error| {
+                    lash_execution_contracts::PluginError::Invoke(error.to_string())
+                })?;
+        for (id, json) in labels {
+            context.add_labels(id, &json).map_err(|error| {
+                lash_execution_contracts::PluginError::Invoke(error.to_string())
+            })?;
+        }
+        Ok(context.with_timer_operations(lash_vm_runtime::TIMER_OPERATIONS.iter().cloned()))
     }
 
     /// Read the workflow document `reference` names, with the entry it

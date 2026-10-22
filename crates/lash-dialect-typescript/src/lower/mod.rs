@@ -1004,45 +1004,19 @@ impl Lowerer<'_> {
         Operand::temp(name, Ty::Unknown)
     }
 
-    /// How a function value of this signature is started when it crosses
-    /// to a tool (`K-CLO-004`). The token keeps the internal packed call ABI;
-    /// extraction exposes a host entry under the source body's convention.
+    /// A source function token always holds a closure of `(this, args)`.
+    /// Its presentation describes that retained body, including after crossing.
     fn callable_presentation(
         &mut self,
         function: &ast::Function,
     ) -> Option<lash_kernel_doc::CallablePresentation> {
         let signature = self.start_signature(function).ok()?;
-        let await_fn = self.function_target("ts.await").ok()?;
+        let convention = self.entry_convention(true).ok()?;
         Some(lash_kernel_doc::CallablePresentation {
             signature,
             representation: crate::function_values(),
-            convention: lash_kernel_doc::StartConvention::TsDirect { await_fn },
+            convention,
         })
-    }
-
-    /// A source function's crossing uses the same body test as a workflow
-    /// entry. Generated closures carry no start adapter.
-    fn set_start_convention(&mut self, packed: bool) -> Lowering<()> {
-        let Some(Stmt::Let {
-            value: Rhs::Expr(Expr::Closure(closure)),
-            ..
-        }) = self.buf.last_stmt()
-        else {
-            return Ok(());
-        };
-        if closure.presentation.is_none() {
-            return Ok(());
-        }
-        let convention = self.entry_convention(packed)?;
-        if let Some(Stmt::Let {
-            value: Rhs::Expr(Expr::Closure(closure)),
-            ..
-        }) = self.buf.last_stmt_mut()
-            && let Some(start) = &mut closure.presentation
-        {
-            start.convention = convention;
-        }
-        Ok(())
     }
 
     /// Hands the last statement what is known of the function it binds.

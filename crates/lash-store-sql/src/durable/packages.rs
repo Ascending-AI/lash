@@ -5,7 +5,7 @@ pub const RESOLUTIONS_TABLE: &str = "execution_resolutions";
 /// Owner and immutable membership, without duplicate execution key.
 pub const REGISTRATION_COLUMNS: &str = "actor_key, registration_json";
 /// The actor's fence, revision and debt inspected before a resolution write.
-pub const OWNER_COLUMNS: &str = "epoch, state, state_revision, requires";
+pub const OWNER_COLUMNS: &str = "epoch, state, state_revision, base_requires";
 
 crate::statements! {
     /// Package statements both backends issue verbatim.
@@ -54,6 +54,6 @@ crate::statements! {
         resolution_fence = "UPDATE actors SET state_revision = state_revision + 1
              WHERE actor_key = ?1 AND epoch = ?2 AND state = 'owned' AND state_revision = ?3
              RETURNING state_revision";
-        owner_revision = "SELECT epoch, state, state_revision, requires FROM actors WHERE actor_key = ?1";
+        owner_revision = "SELECT epoch, state, state_revision, base_requires FROM actors WHERE actor_key = ?1";
     }
 }

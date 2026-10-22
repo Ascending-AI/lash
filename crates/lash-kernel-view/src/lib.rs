@@ -42,7 +42,9 @@ pub use captions::{
 };
 mod coarse;
 mod comparison;
+mod context;
 pub use comparison::{ComparisonView, ValueRef, ValueSource};
+pub use context::ViewContext;
 mod entry;
 mod produced;
 pub use coarse::{
@@ -316,7 +318,7 @@ pub struct ActionView {
     /// Every canonical effect this action reaches, including calls through
     /// library bodies and statically known declared callees. Derived from the
     /// checker's effect derivation, in canonical order with duplicates removed.
-    pub performs: Vec<ImportSlot>,
+    pub performs: Vec<lash_vocabulary::OperationUse>,
     pub args: Vec<ArgumentView>,
     /// A `perform`'s declared result, else the checker's facet.
     pub result_type: Type,
@@ -331,13 +333,17 @@ pub struct ActionView {
 pub enum CalleeView {
     Library {
         id: FunctionId,
+        link: lash_vocabulary::LinkId,
         name: FunctionName,
         /// Every installed surface member backed by this identity in the
         /// cell's package set. A private definition has no members.
         exports: Vec<ExportName>,
     },
     Import(ImportSlot),
-    Effect(ImportSlot),
+    Timer {
+        use_: lash_vocabulary::OperationUse,
+    },
+    Effect(lash_vocabulary::OperationUse),
 }
 
 /// One argument of an action.
@@ -433,6 +439,8 @@ pub enum ActionRole {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum SiteKind {
+    /// A call of the runtime timer symbol, directly or through one wrapper.
+    Sleep,
     Call,
     Perform,
     Join,
@@ -447,6 +455,7 @@ pub enum SiteKind {
 impl std::fmt::Display for SiteKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(match self {
+            Self::Sleep => "sleep",
             Self::Call => "call",
             Self::Perform => "perform",
             Self::Join => "join",
@@ -479,8 +488,11 @@ pub enum ViewError {
 /// # Errors
 ///
 /// The holder's graph or declarations do not describe its document.
-pub fn derive(document: &WorkflowDocument) -> Result<WorkflowView, ViewError> {
-    derive_callable(document, &document.entry_unit())
+pub fn derive(
+    document: &WorkflowDocument,
+    context: &ViewContext,
+) -> Result<WorkflowView, ViewError> {
+    derive_callable(document, &document.entry_unit(), context)
 }
 
 /// Open a declared callable without publishing it as an entry or inlining it
@@ -492,7 +504,17 @@ pub fn derive(document: &WorkflowDocument) -> Result<WorkflowView, ViewError> {
 pub fn derive_callable(
     document: &WorkflowDocument,
     entry: &Unit,
+    context: &ViewContext,
 ) -> Result<WorkflowView, ViewError> {
+    if document.reference() != context.reference()
+        || context
+            .document(context.reference.link)
+            .is_none_or(|source| source.identity() != document.identity())
+    {
+        return Err(ViewError::NoSuchUnit {
+            unit: entry.clone(),
+        });
+    }
     let graph = document.graph();
     let functions = document.declarations();
     let document = document.document();
@@ -528,6 +550,7 @@ pub fn derive_callable(
         document,
         graph,
         functions,
+        context,
         entry: Callable {
             site: Site::new(entry.clone(), Vec::new()),
             expected: expected.unwrap_or(Type::Any),
@@ -568,7 +591,7 @@ pub fn derive_callable(
     let Walk {
         mut view, mut uses, ..
     } = walk;
-    let producers = produced::Producers::new(graph, &view.dataflow.actions);
+    let producers = produced::Producers::new(graph, &view.dataflow.actions, context);
     let bindings = graph
         .bindings()
         .iter()
@@ -603,7 +626,7 @@ pub fn derive_callable(
         .collect();
     view.dataflow.bindings = bindings;
     view.entry = entry::entry(document, entry, &view.dataflow.parameters, &view);
-    coarse::project(document, graph, functions, &mut view);
+    coarse::project(document, graph, functions, &mut view, context);
     Ok(view)
 }
 
@@ -653,6 +676,7 @@ struct Context {
 }
 
 struct Walk<'a> {
+    context: &'a ViewContext,
     ordinals: BTreeMap<Site, u32>,
     document: &'a Document,
     graph: &'a Graph,
@@ -921,6 +945,7 @@ impl<'a> Walk<'a> {
                 (
                     Some(CalleeView::Library {
                         id: *function,
+                        link: self.context.reference.link,
                         exports: self
                             .document
                             .exports
@@ -961,11 +986,23 @@ impl<'a> Walk<'a> {
                         _ => None,
                     })
                     .unwrap_or_default();
-                (Some(CalleeView::Import(*slot)), params)
+                let callee = context_callee(self.context, *slot).map_or(
+                    CalleeView::Import(*slot),
+                    |(id, definition)| CalleeView::Library {
+                        id: id.function,
+                        link: id.link,
+                        name: definition.name.clone(),
+                        exports: Vec::new(),
+                    },
+                );
+                (Some(callee), params)
             }
             (Some(Callee::Value(_)), _) => (None, Vec::new()),
             (None, Some(effect)) => (
-                Some(CalleeView::Effect(*effect)),
+                Some(CalleeView::Effect(lash_vocabulary::OperationUse {
+                    link: self.context.reference.link,
+                    slot: *effect,
+                })),
                 signature.map_or_else(Vec::new, |required| required.params.clone()),
             ),
             (None, None) => (None, Vec::new()),
@@ -1072,7 +1109,21 @@ impl<'a> Walk<'a> {
             ) => signature.map_or(Type::Any, |required| required.result.clone()),
             _ => node.facet.clone().unwrap_or(Type::Any),
         };
+        let timer = match &callee {
+            Some(CalleeView::Effect(use_)) => self.context.is_timer(*use_).then_some(*use_),
+            Some(CalleeView::Library { id, link, .. }) => {
+                self.context.only_timer(lash_vocabulary::CallableId {
+                    link: *link,
+                    function: *id,
+                })
+            }
+            _ => None,
+        };
+        let (kind, callee) = timer.map_or((kind, callee), |use_| {
+            (SiteKind::Sleep, Some(CalleeView::Timer { use_ }))
+        });
         let role = match (kind, &callee) {
+            (SiteKind::Sleep, _) => ActionRole::Wait,
             (SiteKind::Perform, _) => ActionRole::Effect,
             (SiteKind::Call | SiteKind::Spawn, Some(CalleeView::Library { .. }))
             | (SiteKind::Await, _) => ActionRole::Library,
@@ -1081,11 +1132,23 @@ impl<'a> Walk<'a> {
                 ActionRole::Task
             }
         };
-        let applies = self.links.applies(self.graph, self.functions, derived);
+        let applies = self
+            .links
+            .applies(self.graph, self.functions, derived, self.context);
         let mut performs = match &callee {
             Some(CalleeView::Effect(effect)) => std::collections::BTreeSet::from([*effect]),
-            Some(CalleeView::Library { id, .. }) => library_performs(self.functions, id),
-            Some(CalleeView::Import(slot)) => std::collections::BTreeSet::from([*slot]),
+            Some(CalleeView::Library { id, link, .. }) => {
+                self.context.reached(lash_vocabulary::CallableId {
+                    link: *link,
+                    function: *id,
+                })
+            }
+            Some(CalleeView::Import(slot)) => self
+                .context
+                .resolve(self.context.reference.link, *slot)
+                .map(|callable| self.context.reached(callable))
+                .unwrap_or_default(),
+            Some(CalleeView::Timer { use_ }) => std::collections::BTreeSet::from([*use_]),
             None => std::collections::BTreeSet::new(),
         };
         performs.extend(applied_performs(
@@ -1093,6 +1156,7 @@ impl<'a> Walk<'a> {
             self.functions,
             &mut self.links,
             &applies,
+            self.context,
         ));
         self.view.dataflow.actions.push(ActionView {
             site: node.site.clone(),
@@ -1120,7 +1184,8 @@ fn applied_performs(
     functions: &FunctionDeclarations,
     links: &mut applies::Links,
     callables: &[Site],
-) -> std::collections::BTreeSet<ImportSlot> {
+    context: &ViewContext,
+) -> std::collections::BTreeSet<lash_vocabulary::OperationUse> {
     use std::collections::BTreeSet;
     let mut effects = BTreeSet::new();
     let mut callables = callables.to_vec();
@@ -1131,7 +1196,12 @@ fn applied_performs(
         }
         if site.path.is_empty() {
             if let Some(unit) = graph.unit(&site.unit) {
-                effects.extend(unit.effects.effects.iter().cloned());
+                effects.extend(unit.effects.effects.iter().map(|slot| {
+                    lash_vocabulary::OperationUse {
+                        link: context.reference.link,
+                        slot: *slot,
+                    }
+                }));
             }
             continue;
         }
@@ -1152,7 +1222,10 @@ fn applied_performs(
             let callee = match action {
                 Some(Derived::Statement(ActionNode::Perform { slot: effect, .. }))
                 | Some(Derived::Nested(ActNode::Perform { slot: effect, .. }, _)) => {
-                    effects.insert(*effect);
+                    effects.insert(lash_vocabulary::OperationUse {
+                        link: context.reference.link,
+                        slot: *effect,
+                    });
                     None
                 }
                 Some(Derived::Statement(
@@ -1169,21 +1242,31 @@ fn applied_performs(
                 _ => None,
             };
             match callee {
-                Some(CalleeNode::Local(id)) => effects.extend(library_performs(functions, &id)),
+                Some(CalleeNode::Local(id)) => {
+                    effects.extend(context.reached(lash_vocabulary::CallableId {
+                        link: context.reference.link,
+                        function: id,
+                    }))
+                }
                 Some(CalleeNode::Import(slot)) => {
-                    effects.insert(slot);
+                    if let Some(callable) = context.resolve(context.reference.link, slot) {
+                        effects.extend(context.reached(callable));
+                    }
                 }
                 _ => {}
             }
             if let Some(action) = action {
-                callables.extend(links.applies(graph, functions, action));
+                callables.extend(links.applies(graph, functions, action, context));
             }
             match &node.kind {
                 NodeKind::Expr(ExprNode::Call { function, .. })
                 | NodeKind::Stmt(StmtNode::ReturnVia {
                     policy: lash_kernel_doc::FunctionTarget::Local(function),
                     ..
-                }) => effects.extend(library_performs(functions, function)),
+                }) => effects.extend(context.reached(lash_vocabulary::CallableId {
+                    link: context.reference.link,
+                    function: *function,
+                })),
                 _ => {}
             }
             pending.extend(node.children());
@@ -1391,3 +1474,14 @@ mod applies_tests;
 
 #[cfg(test)]
 mod display_tests;
+
+fn context_callee(
+    context: &ViewContext,
+    slot: ImportSlot,
+) -> Option<(
+    lash_vocabulary::CallableId,
+    &lash_kernel_doc::FunctionDefinition,
+)> {
+    let id = context.resolve(context.reference.link, slot)?;
+    Some((id.clone(), context.function(&id)?))
+}

@@ -245,12 +245,14 @@ pub mod package {
     pub use lash_core_store::resolutions::ResolutionSeed;
     pub use lash_core_store::tool_surface::{
         AdvertisedRoute, ExecutionEnvironment, OperationRoute, RecordedPackages, RouteSource,
+        RoutedOperation, UseBinding,
     };
     pub use lash_execution_contracts::process::linking::{
         AdmissionRefusal, ContentRef, EnginePortError, FulfilRequest, Fulfilled, LinkInspection,
-        LinkPurpose, ReachSelector,
+        LinkPurpose, LoadedContent, OperationNeed, ReachSelector,
     };
     pub use lash_tool_support::ToolPackageProvider;
+    pub use lash_vocabulary::sites::EffectLocation;
     pub use lash_vocabulary::{claims::*, names::*, package::*};
 }
 /// Standard-lock poison recovery traits for application code.

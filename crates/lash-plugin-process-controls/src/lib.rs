@@ -893,6 +893,7 @@ pub mod policy {
             builder = builder.entry(component.clone());
         }
         let mut execution = ExecutionEnvironment {
+            retained_code: Default::default(),
             publications: source.publications.clone(),
             authored: source.authored.clone(),
             roots: [cx.target.linked.link].into(),
@@ -961,24 +962,6 @@ pub mod policy {
                             }
                             entry => entry.clone(),
                         };
-                        if let ResolutionEntry::Resolved { requirements, .. } = &entry {
-                            execution
-                                .requirements
-                                .providers
-                                .extend(requirements.providers.clone());
-                            execution
-                                .requirements
-                                .codecs
-                                .extend(requirements.codecs.clone());
-                            execution
-                                .requirements
-                                .callbacks
-                                .extend(requirements.callbacks.clone());
-                            execution
-                                .requirements
-                                .components
-                                .extend(requirements.components.clone());
-                        }
                         initial_resolutions.push(ResolutionSeed { use_: *use_, entry });
                     } else {
                         let entry = components
@@ -997,14 +980,10 @@ pub mod policy {
                             ));
                         }
                         grant.config.component = Some(entry.id().clone());
-                        let known = composition
+                        composition
                             .composition
                             .validate_deferred_grant(&grant, RegistryKind::Process)
                             .map_err(|error| ProcessEnvPolicyError::Package(Box::new(error)))?;
-                        execution.requirements.providers.extend(known.providers);
-                        execution.requirements.codecs.extend(known.codecs);
-                        execution.requirements.callbacks.extend(known.callbacks);
-                        execution.requirements.components.extend(known.components);
                     }
                     UseBinding::Deferred(grant)
                 }

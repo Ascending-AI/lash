@@ -328,12 +328,19 @@ where
     fn closure(&self) -> Result<&Closure, KernelFailure> {
         self.closure
             .get_or_init(|| {
-                lash_vm_broker::kernel::loader::assemble(
-                    &self.program.document,
+                let stored = self
+                    .program
+                    .documents
+                    .values()
+                    .flat_map(|document| document.functions.iter())
+                    .filter(|(id, _)| self.program.library.registry().get(id).is_none())
+                    .map(|(id, definition)| (*id, Arc::new(definition.clone())))
+                    .collect();
+                lash_vm_broker::kernel::closure::derive(
+                    self.program.functions.iter().copied(),
                     self.program.library.registry(),
-                    &std::collections::BTreeMap::new(),
+                    &stored,
                 )
-                .map(|assembled| assembled.closure)
                 .map_err(|refusal| GraphStateFailure::Restore(refusal.into()))
             })
             .as_ref()

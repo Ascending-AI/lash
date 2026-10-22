@@ -1141,3 +1141,91 @@ async fn an_interrupted_once_effect_observation_names_the_effect() {
     );
     assert!(tools.answered().is_empty(), "Once never starts again");
 }
+
+/// HELD-CELL-MEMBERSHIP: the executor hands the consuming turn the identity
+/// it actually registered, including a pure cell that issues no tool call.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_held_cell_hands_off_its_registered_execution_for_atomic_retirement() {
+    use lash_core::core_internal::RuntimeExecutionContextRuntimeOps as _;
+    let host = open_host().await;
+    let handoff = lash_core::CellEndHandoff::held();
+    let ctx = cell_context(
+        &host,
+        SESSION,
+        TURN,
+        "membership:0",
+        Arc::new(crate::testing::NoTools),
+    )
+    .with_cell_end(handoff.clone());
+    let expected = lash_core_store::resolutions::ExecutionId::cell(
+        &lash_vocabulary::identity::SessionId::from(SESSION),
+        TURN,
+        "membership:0",
+    );
+    let mut state = typescript_state();
+    let response = run_cell(&mut state, ctx, &typescript_services(), "const answer = 1;").await;
+    assert!(response.error().is_none(), "{:?}", response.error());
+    let execution = handoff
+        .take_execution()
+        .expect("the registered cell hands off its identity");
+    assert_eq!(execution, expected);
+    assert!(
+        handoff.take_execution().is_none(),
+        "the obligation transfers once"
+    );
+    let context = host.context();
+    let resolutions = context.backend().stores().execution_resolutions();
+    let live = resolutions.requirements(context.actor()).await.unwrap();
+    assert!(
+        live.machine
+            .kernels
+            .contains(&lash_kernel_doc::KERNEL_VERSION),
+        "the registered cell contributes its machine debt: {live:?}"
+    );
+    let mut tx = context.begin().await.unwrap();
+    tx.end_execution(execution);
+    context
+        .commit(tx, lash_durable::CommitLabel::new("law.consume_cell"))
+        .await
+        .unwrap();
+    assert!(
+        resolutions
+            .requirements(context.actor())
+            .await
+            .unwrap()
+            .is_empty(),
+        "the consuming commit retires the handed-off source"
+    );
+}
+
+/// HELD-CELL-SETUP: a refusal before registration creates no execution
+/// identity for the turn to retire, and contributes no source debt.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_cell_refused_before_registration_hands_off_no_execution() {
+    use lash_core::core_internal::RuntimeExecutionContextRuntimeOps as _;
+    let host = open_host().await;
+    let handoff = lash_core::CellEndHandoff::held();
+    let ctx = cell_context(
+        &host,
+        SESSION,
+        TURN,
+        "membership:refused",
+        Arc::new(crate::testing::NoTools),
+    )
+    .with_cell_end(handoff.clone());
+    let mut state = typescript_state();
+    let response = run_cell(&mut state, ctx, &typescript_services(), "const = ;").await;
+    assert!(response.error().is_some());
+    assert!(handoff.take_execution().is_none());
+    let context = host.context();
+    assert!(
+        context
+            .backend()
+            .stores()
+            .execution_resolutions()
+            .requirements(context.actor())
+            .await
+            .unwrap()
+            .is_empty()
+    );
+}

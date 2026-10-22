@@ -241,6 +241,14 @@ fn record_at(event: TraceLanguageExecution, ms: i64) -> TraceRecord {
 fn step_body(process: &ProcessId, occurrence: u64, call: &str, attempt: u32) -> StepBodyStarted {
     StepBodyStarted {
         process_id: process.clone(),
+        origin: (occurrence_at(&site("then"), occurrence))
+            .position()
+            .site()
+            .clone(),
+        origin: (occurrence_at(&site("then"), occurrence))
+            .position()
+            .site()
+            .clone(),
         at: occurrence_at(&site("then"), occurrence),
         call_id: lash_protocol_types::ToolCallId::fixture(call),
         attempt,

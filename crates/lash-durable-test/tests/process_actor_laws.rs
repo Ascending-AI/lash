@@ -9,8 +9,11 @@
 
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
+#[path = "support/scripted_steps.rs"]
+mod scripted_steps;
 #[path = "support/sim.rs"]
 mod sim;
+
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -232,11 +235,12 @@ impl ProcessEngine for LawEngine {
                 )))
             }
             ("sleep", EngineEvent::Started { .. }) => EngineAction::Sleep {
-                until: DurableInstant(script["until_ms"].as_i64().unwrap_or_default()),
                 site: None,
+                until: DurableInstant(script["until_ms"].as_i64().unwrap_or_default()),
             },
             ("sleep", EngineEvent::Woke) => success(json!({ "slept": true })),
             ("await", EngineEvent::Started { .. }) => EngineAction::AwaitProcess {
+                site: None,
                 process: ProcessId::parse(script["await"].as_str().unwrap_or_default())
                     .map_err(infra)?,
                 bound: lash_vocabulary::tool_contract::ParkBound::Within(
@@ -244,7 +248,6 @@ impl ProcessEngine for LawEngine {
                         .as_u64()
                         .map_or(LONG, Duration::from_millis),
                 ),
-                site: None,
             },
             ("await", EngineEvent::ProcessEnded { outcome, .. }) => success(json!({
                 "ended": serde_json::to_value(lash_protocol_types::Durable(&outcome)).map_err(infra)?,
@@ -253,13 +256,10 @@ impl ProcessEngine for LawEngine {
                 success(json!({ "timed_out": true }))
             }
             ("refused_step", EngineEvent::Started { .. }) => EngineAction::Steps {
-                steps: vec![StepRequest::Tool {
+                steps: vec![StepRequest::Engine {
                     step: StepName("refused".to_owned()),
-                    effect: lash_core_execution::testing::effect(REFUSED_TOOL),
-                    contract: lash_vocabulary::operations::ContractId::new("fixture"),
+                    kind: lash_execution_contracts::process::EngineStepKind::new(REFUSED_TOOL),
                     input: json!({}),
-                    site: None,
-                    matched: None,
                 }],
                 wake: None,
             },
@@ -339,16 +339,17 @@ impl ProcessSteps for LawSteps {
         _runtime: &Arc<lash_core_execution::runtime::process::StepRuntime>,
         _process: &ProcessRecord,
         step: &StepRequest,
+        _target: Option<&lash_core_execution::runtime::process::steps::InvocationTarget>,
         now_ms: u64,
     ) -> Result<StepAdmission, StepRefusal> {
-        if lash_core_execution::testing::step_tool(step, KIND).as_str() == REFUSED_TOOL {
+        if scripted_steps::tool(step).as_str() == REFUSED_TOOL {
             return Err(StepRefusal::Refused {
                 step: step.step().0.clone(),
                 reason: "its input does not match the tool's declaration".to_owned(),
             });
         }
         Ok(StepAdmission::new(
-            lash_core_execution::testing::step_tool(step, KIND),
+            scripted_steps::tool(step),
             ExecutionPolicy::Once,
             ExecutionLimit::starting_at(now_ms, Duration::from_secs(60), Duration::from_secs(60)),
             None,

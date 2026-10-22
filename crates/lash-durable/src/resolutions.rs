@@ -17,9 +17,17 @@ use crate::{ActorKey, DurableError, Epoch, StateRevision};
 pub struct ExecutionRegistration {
     pub execution: ExecutionId,
     #[serde(with = "lash_vocabulary::ordered_pairs")]
-    pub uses: BTreeMap<OperationUse, QualifiedName>,
+    pub uses: BTreeMap<OperationUse, DeferredUse>,
     pub referrer: ArtifactReferrer,
     pub requirements: ClaimRequirements,
+}
+
+/// One live deferred use and its discovery obligation, before a winner exists.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DeferredUse {
+    pub requested: QualifiedName,
+    pub discovery: ClaimRequirements,
 }
 
 /// The same immutable outcome is returned to every competing first caller.
@@ -52,7 +60,11 @@ impl ExecutionRegistration {
     /// The recorded use, requested name and owning actor are checked together.
     pub fn validate(&self, candidate: &ResolutionRecord) -> Result<(), DurableError> {
         if self.execution != candidate.key.execution
-            || self.uses.get(&candidate.key.use_) != Some(&candidate.requested)
+            || self
+                .uses
+                .get(&candidate.key.use_)
+                .map(|use_| &use_.requested)
+                != Some(&candidate.requested)
         {
             return Err(crate::packages::PackageRefusal::ExecutionUse.into());
         }
@@ -97,38 +109,52 @@ pub fn requirements_of(
             message: format!("execution requirements: {error}"),
         })
     };
-    for json in registrations {
-        let registration: ExecutionRegistration = serde_json::from_str(&json).map_err(corrupt)?;
-        requirements.extend(&registration.requirements);
-    }
+    let mut winners = BTreeMap::new();
     for json in resolutions {
         let record: ResolutionRecord = serde_json::from_str(&json).map_err(corrupt)?;
         validate_resolution(&record)?;
-        if let ResolutionEntry::Resolved {
-            requirements: target,
-            ..
-        } = record.entry
-        {
-            requirements.extend(&target);
+        winners.insert(record.key.clone(), record);
+    }
+    for json in registrations {
+        let registration: ExecutionRegistration = serde_json::from_str(&json).map_err(corrupt)?;
+        requirements.extend(&registration.requirements);
+        for (use_, discovery) in &registration.uses {
+            match winners.get(&ResolutionKey {
+                execution: registration.execution.clone(),
+                use_: *use_,
+            }) {
+                Some(record) => {
+                    registration.validate(record)?;
+                    if let ResolutionEntry::Resolved {
+                        requirements: target,
+                        ..
+                    } = &record.entry
+                    {
+                        requirements.extend(target);
+                    }
+                }
+                None => requirements.extend(&discovery.discovery),
+            }
         }
     }
     Ok(requirements)
 }
 
 impl ExecutionRegistration {
-    /// Adoption may extend executable reach, retaining old callable uses and debt.
+    /// Adoption replaces live membership and stable debt. Historical winners stay
+    /// immutable in their own rows; dead uses owe no discovery or target debt.
     pub fn adopt(&self, successor: &Self) -> Result<Self, DurableError> {
         if self.execution != successor.execution
             || self.referrer != successor.referrer
-            || self
-                .uses
-                .iter()
-                .any(|(use_, name)| successor.uses.get(use_) != Some(name))
+            || self.uses.iter().any(|(use_, name)| {
+                successor
+                    .uses
+                    .get(use_)
+                    .is_some_and(|next| next.requested != name.requested)
+            })
         {
             return Err(crate::packages::PackageRefusal::ExecutionUse.into());
         }
-        let mut successor = successor.clone();
-        successor.requirements.extend(&self.requirements);
-        Ok(successor)
+        Ok(successor.clone())
     }
 }

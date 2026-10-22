@@ -52,10 +52,14 @@ pub const FUNCTION_VALUE_ENTRY: &str = "run";
 #[serde(deny_unknown_fields)]
 pub struct FunctionValue {
     pub callable: lash_vocabulary::names::CallableId,
-    pub captures: std::collections::BTreeMap<Name, crate::Datum>,
+    pub captures: std::collections::BTreeMap<Name, crate::CaptureValue>,
     pub signature: Signature,
     pub convention: StartConvention,
     pub captions: crate::Captions,
+    pub representation: FunctionRepresentation,
+    pub creation: Option<lash_vocabulary::sites::Site>,
+    /// Token members other than its callable slot, which is Null.
+    pub token: Option<Vec<crate::Datum>>,
 }
 
 /// How a function a closure makes is started from outside its run: the
@@ -255,7 +259,8 @@ impl FunctionValue {
                 limit: limits.max_canonical_bytes,
             });
         }
-        let _ = (catalog, data);
+        self.check_graph(data.value_depth())?;
+        let _ = catalog;
         Ok(())
     }
 

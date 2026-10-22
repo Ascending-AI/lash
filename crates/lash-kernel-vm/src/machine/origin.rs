@@ -68,3 +68,31 @@ impl KernelMachine {
         Ok(Some(SiteRef::new(&origin, self.heap.pages())?))
     }
 }
+
+impl KernelMachine {
+    /// The identity of the running task's entry into the action at `site`,
+    /// its `occurrence`th there.
+    pub(super) fn action_location(
+        &mut self,
+        task: TaskId,
+        site: &Site,
+        occurrence: u64,
+    ) -> Result<lash_vocabulary::sites::EffectLocation, super::Halt> {
+        let access = self.heap.pages().clone();
+        let running = self.task(task)?;
+        let loops = running.frames.loop_coordinates()?;
+        let at =
+            lash_kernel_doc::kernel_internals::effect_id(lash_vocabulary::sites::EffectIdentity {
+                task: running.identity.resolve(&access)?,
+                site: site.clone(),
+                occurrence,
+                loops,
+            });
+        let origin = if self.exe.authored_unit(&site.unit) {
+            site.clone()
+        } else {
+            self.origin(task)?
+        };
+        Ok(lash_vocabulary::sites::EffectLocation { at, origin })
+    }
+}

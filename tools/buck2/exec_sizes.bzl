@@ -852,6 +852,7 @@ TEST_RUN_REQUESTS = {
     "//crates/lash:ui__test__fv_e7fdb30d": {"cpu_count": 2, "memory_kb": 524288},
     "//crates/lash:ui__test__fv_ff7f79b3": {"cpu_count": 2, "memory_kb": 524288},
     "//crates/lash:workflow_laws__test": {"cpu_count": 1, "memory_kb": 524288},
+    "//crates/lash:workflow_view_laws__test": {"cpu_count": 2, "memory_kb": 524288},
     "//crates/lashctl:lashctl__unit_test": {"cpu_count": 1, "memory_kb": 262144},
     "//crates/lashctl:lashctl__unit_test__fv_16125dc3": {"cpu_count": 1, "memory_kb": 262144},
     "//crates/lashctl:lashctl__unit_test__fv_5a8d8eec": {"cpu_count": 1, "memory_kb": 262144},

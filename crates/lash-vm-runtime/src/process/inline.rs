@@ -2,7 +2,7 @@
 use super::{KernelProcessDefinition, KernelProcessEngine, definition_draft, entry_signature};
 use lash_execution_contracts::process::linking::*;
 use lash_execution_contracts::process::{InlineCode, InlineDefinition, InlineStarts};
-use lash_kernel_doc::{Datum, FunctionTarget, FunctionValue};
+use lash_kernel_doc::FunctionTarget;
 
 use lash_kernel_package::{LinkedContent, LinkedReach, ReachSelection, RetainedContent};
 use lash_vocabulary::{names::*, package::*};
@@ -64,53 +64,39 @@ pub(super) struct LoadedExecution {
     pub reach: LinkedReach,
     pub inspection: LinkInspection,
 }
-fn captured<'a>(
-    value: &'a Datum,
-    callables: &mut Vec<&'a FunctionValue>,
-    bare: &mut Vec<CallableId>,
-) {
-    let mut pending = vec![value];
-    while let Some(value) = pending.pop() {
-        match value {
-            Datum::Function(callable) => bare.push(*callable),
-            Datum::FunctionValue(function) => {
-                callables.push(function);
-                pending.extend(function.captures.values());
-            }
-            Datum::Tuple(values) | Datum::List(values) | Datum::Set(values) => {
-                pending.extend(values)
-            }
-            Datum::Map(values) => {
-                for (key, value) in values {
-                    pending.extend([key, value]);
-                }
-            }
-            Datum::Record(values) => pending.extend(values.iter().map(|(_, value)| value)),
-            Datum::Error(error) => pending.push(&error.data),
-            _ => {}
-        }
-    }
-}
 impl KernelProcessEngine {
     /// Load every captured defining instance, then derive the exact code and helper reach.
     pub(super) async fn load_execution(
         &self,
         code: &super::InlineRequest,
+        retained: &BTreeSet<CallableId>,
     ) -> Result<LoadedExecution, EnginePortError> {
         let (root, selector) = code
             .linked()
             .ok_or_else(|| invalid("unlinked code was not realized"))?;
         let mut content = self.documents.load_linked(root).await?;
         let mut callables = Vec::new();
-        let mut bare = Vec::new();
+
         if let super::InlineRequest::Callable { link, function, .. } = code {
             if *link != function.callable.link {
                 return Err(invalid("callable differs from its defining Link"));
             }
-            callables.push(function);
-            for value in function.captures.values() {
-                captured(value, &mut callables, &mut bare);
-            }
+            function
+                .check(
+                    &lash_kernel_doc::FunctionRegistry::default(),
+                    lash_kernel_doc::FunctionValueLimits::standard(),
+                    lash_vocabulary::data_limits::KernelDataLimits::standard(),
+                )
+                .map_err(|refusal| match refusal {
+                    lash_kernel_doc::FunctionValueRefusal::TooLarge { bytes, limit } => {
+                        EnginePortError::Refused(AdmissionRefusal::CallableTooLarge {
+                            bytes,
+                            limit,
+                        })
+                    }
+                    refusal => invalid(refusal.to_string()),
+                })?;
+            callables.extend(function.nodes());
         }
         let mut roots = vec![(root, super::documents::selection(&selector))];
         for callable in &callables {
@@ -120,7 +106,8 @@ impl KernelProcessEngine {
             ));
         }
         roots.extend(
-            bare.into_iter()
+            retained
+                .iter()
                 .map(|callable| (callable.link, ReachSelection::Callable(callable.function))),
         );
         let links: BTreeSet<_> = roots.iter().map(|(link, _)| *link).collect();
@@ -275,7 +262,10 @@ impl InlineStarts for KernelInlineStarts {
             }
             code => code,
         };
-        let loaded = self.engine.load_execution(&code).await?;
+        let loaded = self
+            .engine
+            .load_execution(&code, &Default::default())
+            .await?;
         let draft = definition_draft(&KernelProcessDefinition { code })
             .map_err(|error| invalid(error.to_string()))?;
         let signature = loaded.inspection.signature.as_ref().map_or(
@@ -324,7 +314,9 @@ impl InlineStarts for KernelInlineStarts {
                 .await?;
         }
         // A fresh load validates the retained origin after every acquisition.
-        self.engine.load_execution(&code).await?;
+        self.engine
+            .load_execution(&code, &Default::default())
+            .await?;
         Ok(definition)
     }
 }

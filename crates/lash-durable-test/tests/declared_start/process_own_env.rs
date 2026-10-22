@@ -293,54 +293,45 @@ impl lash::process::ProcessComponentFactory for ProbeComponent {
 /// component and the process controls.
 struct Policy;
 
-/// The environment a `new` child states: the read probe alone, linked to
-/// the probe component's tool, a tool-call limit of its own and no model.
-fn new_environment() -> lash::process::ProcessEnv {
-    lash::process::ProcessEnv::builder(lash::MaxToolCalls::new(7))
-        .component(PROBE, &())
-        .link_tool(
-            PROBE.tool_provider(lash::tool_provider_key!("tools")),
-            &probe_definition(READ),
-        )
-        .build()
-        .expect("the environment builds")
-}
-
 #[async_trait::async_trait]
 impl lash_core::ProcessEnvPolicy for Policy {
     async fn choose(
         &self,
         cx: &lash_core::ProcessEnvCx<'_>,
     ) -> Result<lash_core::ProcessStartChoice, lash_core::ProcessEnvPolicyError> {
-        match cx.label {
-            Some("inherit") => cx.restrict(),
-            Some("new") => Ok(lash_core::ProcessStartChoice {
-                fits: Default::default(),
-                env: lash_core::ProcessEnvChoice::New(new_environment()),
-                engine_settings: cx.engine_defaults()?,
-            }),
-            _ => {
-                let (Some(run), Some(surface)) = (cx.run, cx.surface) else {
-                    return Err(lash_core::ProcessEnvPolicyError::Fault(
-                        "a top-level start has its run".into(),
-                    ));
-                };
-                let entries = [PROBE, lash::process_controls::PROCESS_CONTROLS_CONFIG]
-                    .into_iter()
-                    .map(|key| lash::process::ProcessComponentEntry::new(key, &(), []))
-                    .collect::<Result<Vec<_>, _>>()
-                    .map_err(lash_core::ProcessEnvPolicyError::Refused)?;
-                Ok(lash_core::ProcessStartChoice {
-                    fits: Default::default(),
-                    env: lash_core::ProcessEnvChoice::New(
-                        cx.capture(run, surface, entries)
-                            .await
-                            .map_err(lash_core::ProcessEnvPolicyError::Refused)?,
-                    ),
-                    engine_settings: cx.engine_defaults()?,
-                })
+        let keys = match cx.label {
+            Some("inherit") => {
+                return lash::process::env::policy::restrict_or(
+                    lash::process::env::policy::refuse("the inherited child requires a parent"),
+                )
+                .choose(cx)
+                .await;
             }
+            Some("new") => vec![PROBE],
+            _ => vec![PROBE, lash::process_controls::PROCESS_CONTROLS_CONFIG],
+        };
+        let mut choice = lash::process::env::policy::from_run(move |_| {
+            keys.iter()
+                .map(|key| lash::process::ProcessComponentEntry::new(*key, &(), []))
+                .collect()
+        })
+        .choose(cx)
+        .await?;
+        if cx.label == Some("new") {
+            let lash_core::ProcessEnvChoice::New(linked) = &choice.env else {
+                panic!("explicit policy constructs an environment")
+            };
+            choice.env = lash_core::ProcessEnvChoice::New(
+                lash::process::ProcessEnv::builder(lash::MaxToolCalls::new(7))
+                    .component(PROBE, &())
+                    .packages(linked.packages().clone())
+                    .execution(linked.execution().clone())
+                    .build()
+                    .map_err(lash_core::ProcessEnvPolicyError::Refused)?,
+            );
+            choice.engine_settings = cx.engine_defaults()?;
         }
+        Ok(choice)
     }
 }
 
@@ -509,13 +500,6 @@ async fn a_process_runs_under_its_own_recorded_environment_after_its_session_is_
     let session_id = SessionId::try_from(SESSION.to_owned()).unwrap();
 
     let (backend, first) = worker(&stores, &seen, true, "first");
-    let packages = first
-        .host_artifacts()
-        .cell_packages()
-        .await
-        .expect("the start's package snapshot");
-    let new_env = new_environment()
-        .with_package_roots(lash::dialect::ExportView::namespace_roots(&packages.view()));
     let session = first
         .session(session_id.clone())
         .create(lash::SessionCreation::root(lash::SessionSpec::new(
@@ -666,9 +650,15 @@ async fn a_process_runs_under_its_own_recorded_environment_after_its_session_is_
     // narrowed tool stays; a tool the process never performs is never
     // linked, whatever the run offered.
     let linked: BTreeSet<String> = env
-        .effects()
+        .execution()
+        .uses
         .values()
-        .map(|link| link.tool.to_string())
+        .filter_map(|binding| match binding {
+            lash_core_store::tool_surface::UseBinding::Fixed(fixed) => {
+                Some(fixed.route.tool.to_string())
+            }
+            _ => None,
+        })
         .collect();
     assert!(own.catalog.is_subset(&linked), "{own:#?} within {linked:?}");
     for name in [WAIT, READ, LATER] {
@@ -703,16 +693,22 @@ async fn a_process_runs_under_its_own_recorded_environment_after_its_session_is_
     // it, never re-resolved.
     let fresh_child = labelled(&backend, "new").await;
     let restricted = stored_env(&backend, &inherited).await;
-    let read_effect = lash_core_execution::testing::effect_of(&probe_definition(READ));
     assert_eq!(
-        restricted.effects().keys().collect::<Vec<_>>(),
-        vec![&read_effect],
-        "restrict links the child's effects alone"
+        restricted.execution().uses.len(),
+        1,
+        "only the child's selected read is captured"
     );
+    for (use_, binding) in &restricted.execution().uses {
+        assert_eq!(
+            env.execution().uses.get(use_),
+            Some(binding),
+            "the inherited binding retains its defining Link and pin"
+        );
+    }
     assert_eq!(
-        restricted.effects().get(&read_effect),
-        env.effects().get(&read_effect),
-        "with the parent's recorded link"
+        restricted.packages(),
+        env.packages(),
+        "the accepted namespace survives the session"
     );
     assert_eq!(
         inherited.engine_settings(),
@@ -724,7 +720,12 @@ async fn a_process_runs_under_its_own_recorded_environment_after_its_session_is_
         parent.env_ref(),
         "a new env records its own ref"
     );
-    assert_eq!(fresh_child.env_ref(), Some(&new_env.stable_ref().unwrap()));
+    let new_env = stored_env(&backend, &fresh_child).await;
+    assert_eq!(new_env.max_tool_calls(), lash::MaxToolCalls::new(7));
+    assert!(new_env.model().is_none());
+    assert!(new_env.capabilities().is_empty());
+    assert_eq!(new_env.execution().uses.len(), 1);
+    assert_eq!(new_env.packages(), env.packages());
     for child in [&inherited, &fresh_child] {
         assert!(parent.provenance.run.is_some());
         assert_eq!(

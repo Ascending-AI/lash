@@ -344,6 +344,9 @@ impl TokenCodec for Datum {
     }
 }
 
+#[path = "function_capture_codec.rs"]
+mod capture;
+
 #[path = "graph_codec_forms.rs"]
 mod forms;
 
