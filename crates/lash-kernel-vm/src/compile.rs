@@ -616,7 +616,7 @@ impl Executable {
                     .copied()
                     .map(LinkedHook::Code)
                     .or_else(|| self.lib_of(function).map(LinkedHook::Library)),
-                doc::FunctionTarget::Import(slot) => Some(LinkedHook::Import(*slot)),
+                doc::FunctionTarget::Import(slot) => Some(LinkedHook::Import(*slot, None)),
             },
             _ => None,
         }
@@ -1035,12 +1035,12 @@ pub(crate) enum Form {
 pub(crate) enum LinkedHook {
     Library(LibId),
     Code(CodeId),
-    Import(lash_vocabulary::names::ImportSlot),
+    Import(lash_vocabulary::names::ImportSlot, Option<LibId>),
 }
 impl LinkedHook {
     pub(crate) fn library(self) -> Option<LibId> {
         match self {
-            Self::Library(lib) => Some(lib),
+            Self::Library(lib) | Self::Import(_, Some(lib)) => Some(lib),
             _ => None,
         }
     }

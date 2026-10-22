@@ -94,18 +94,14 @@ fn code_imports(
                         _ => return None,
                     };
                     let definition = document.functions.get(&callable.function)?;
-                    // Other ABIs, typed arguments and nontrivial result fitting
-                    // belong to the public call boundary, before any helper work.
+                    // Other ABIs and nontrivial result fitting belong to the
+                    // public call boundary, before any helper work. Lowering
+                    // checks each site's argument kinds before using a hint.
                     if descriptor.function != callable.function
                         || descriptor.signature != definition.signature
                         || descriptor.convention != doc::StartConvention::Direct
                         || descriptor.asynchronous
                         || descriptor.rest
-                        || !descriptor
-                            .signature
-                            .params
-                            .iter()
-                            .all(|p| p.ty == lash_vocabulary::Type::Any)
                         || super::import_result_check(&descriptor.signature.result).is_none()
                         || definition
                             .body()

@@ -650,7 +650,7 @@ impl KernelMachine {
             crate::compile::LinkedHook::Code(code) => {
                 Target::Code(code, Vec::new(), self.current_link())
             }
-            crate::compile::LinkedHook::Import(slot) => self.import_target(exe, slot)?,
+            crate::compile::LinkedHook::Import(slot, _) => self.import_target(exe, slot)?,
         };
         match target {
             Target::Export(callable, descriptor) => {

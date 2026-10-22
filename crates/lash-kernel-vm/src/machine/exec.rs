@@ -486,7 +486,7 @@ impl KernelMachine {
                             .map(crate::compile::LinkedHook::Library)
                     }),
                 lash_kernel_doc::FunctionTarget::Import(slot) => {
-                    Some(crate::compile::LinkedHook::Import(*slot))
+                    Some(crate::compile::LinkedHook::Import(*slot, None))
                 }
             }),
             Some(lash_kernel_doc::StartConvention::Direct) => Ok(None),
