@@ -3,6 +3,7 @@
 //! registries stay above it.
 pub mod claims;
 pub mod content_ids;
+pub use content_ids::HelperLibraryId;
 pub mod data_limits;
 pub mod entry_schema;
 pub use entry_schema::*;

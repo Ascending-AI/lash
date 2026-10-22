@@ -232,7 +232,7 @@ impl Tables {
 /// which is the function's content, so a parked run that pins a function
 /// resumes in the body it parked in (`K-MACH-008`).
 #[derive(Clone)]
-pub struct PreparedLibrary(Arc<Prepared>);
+pub struct PreparedLibrary(Arc<Prepared>, Arc<doc::BuildHelpers>);
 
 struct Prepared {
     charge: crate::Charge,
@@ -269,6 +269,22 @@ impl fmt::Debug for PreparedLibrary {
 }
 
 impl PreparedLibrary {
+    /// Install the immutable build image independently of ordinary definitions.
+    pub fn with_helpers(registry: Arc<FunctionRegistry>, helpers: Arc<doc::BuildHelpers>) -> Self {
+        let mut prepared = Self::new(registry);
+        prepared.1 = helpers;
+        prepared
+    }
+
+    pub fn helpers(&self) -> &Arc<doc::BuildHelpers> {
+        &self.1
+    }
+
+    pub fn with_helper_handle(mut self, helpers: Arc<doc::BuildHelpers>) -> Self {
+        self.1 = helpers;
+        self
+    }
+
     /// Prepares the registry. Each body compiles once, when first needed.
     pub fn new(registry: Arc<FunctionRegistry>) -> Self {
         Self::with_layout(registry, Layout::default())
@@ -295,6 +311,7 @@ impl PreparedLibrary {
                     ),
                 })
                 .clone()
+                .with_helper_handle(Arc::clone(&self.1))
         }
     }
 

@@ -93,8 +93,8 @@ pub use ast::{
 };
 pub use continuation::{LiveRolesError, live_roles, live_roles_in};
 pub use document::{
-    DecodeError, Document, EncodeError, Export, FunctionExport, KERNEL_VERSION, MAX_NESTING_DEPTH,
-    Ordinals, TypeDef, TypeMember,
+    DecodeError, Document, EncodeError, Export, FunctionExport, KERNEL_VERSION,
+    LibraryDependencies, MAX_NESTING_DEPTH, Ordinals, TypeDef, TypeMember,
 };
 pub use function::{
     FIRST_NATIVE_VERSION, Formula, FunctionBody, FunctionDeclarations, FunctionDefinition,
@@ -117,7 +117,7 @@ pub use native::{
 pub use number::{
     Float, Integer, InvalidFloat, InvalidInteger, InvalidNumberToken, NumberPolicy, NumberToken,
 };
-pub use released::{BodyCensus, ImageError, ReleasedFunctions};
+pub use released::{BodyCensus, BuildHelpers, ImageError, MissingHelper, ReleasedFunctions};
 
 pub use text::{
     ParseError, ParseErrorReason, parse_definition, parse_definition_with_limits,

@@ -88,3 +88,23 @@ digest!(/// Immutable linked code identity.
  LinkId);
 digest!(/// Immutable package content identity.
  PackageId);
+
+digest!(/// Identity of one immutable build-owned helper library, including its static closure.
+ HelperLibraryId);
+
+impl HelperLibraryId {
+    /// Canonical member-set identity. Callers supply the validated, closed member
+    /// universe; order and duplicate observations do not affect its identity.
+    pub fn of_members(members: impl IntoIterator<Item = crate::names::FunctionId>) -> Self {
+        let members: std::collections::BTreeSet<_> = members.into_iter().collect();
+        let domain = b"lash.helper-library";
+        let mut hash = blake3::Hasher::new();
+        hash.update(&(domain.len() as u64).to_be_bytes());
+        hash.update(domain);
+        hash.update(&(members.len() as u64).to_be_bytes());
+        for member in members {
+            hash.update(member.as_bytes());
+        }
+        Self::from_bytes(*hash.finalize().as_bytes())
+    }
+}

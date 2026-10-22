@@ -350,6 +350,7 @@ fn write_helper_document(
         functions,
         requires,
         numbers: lash_kernel_doc::NumberPolicy::BySpelling,
+        library: Default::default(),
         private_bindings: BTreeSet::new(),
     };
     let mut labels = BTreeMap::<PackagePath, serde_json::Value>::new();

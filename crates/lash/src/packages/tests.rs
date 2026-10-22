@@ -59,6 +59,7 @@ async fn a_publication_retains_its_link_after_the_installer_ends() {
             ..Default::default()
         },
         numbers: lash_kernel_doc::NumberPolicy::BySpelling,
+        library: Default::default(),
         private_bindings: Default::default(),
     };
     let documents = lash_vm_runtime::KernelDocuments::new(store.clone(), store.clone());
@@ -236,6 +237,7 @@ async fn a_public_alias_retains_internal_fills_without_lending_their_authority()
             ..Default::default()
         },
         numbers: lash_kernel_doc::NumberPolicy::BySpelling,
+        library: Default::default(),
         private_bindings: Default::default(),
     };
     document.exports.insert(

@@ -80,6 +80,10 @@ pub struct Program {
 }
 
 impl Program {
+    pub fn helpers(&self) -> &Arc<lash_kernel_doc::BuildHelpers> {
+        self.library.helpers()
+    }
+
     /// Prepare received immutable content without encoding its documents
     /// again to recover their identities. This supplies identity facts only;
     /// link validation and the machine's structural admission still apply.

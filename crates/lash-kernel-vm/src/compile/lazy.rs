@@ -412,22 +412,25 @@ impl PreparedLibrary {
         };
         drop(registered);
         let libs = functions.iter().map(|_| OnceLock::new()).collect();
-        Self(Arc::new(Prepared {
-            charge,
-            alternative: Default::default(),
-            registry,
-            layout: stated,
-            tables,
-            functions: functions.into(),
-            lib_at,
-            libs,
-            missing,
-            sites,
-            documents: Default::default(),
-            runs: runs.into(),
-            plan_sites,
-            frame_index: None,
-        }))
+        Self(
+            Arc::new(Prepared {
+                charge,
+                alternative: Default::default(),
+                registry,
+                layout: stated,
+                tables,
+                functions: functions.into(),
+                lib_at,
+                libs,
+                missing,
+                sites,
+                documents: Default::default(),
+                runs: runs.into(),
+                plan_sites,
+                frame_index: None,
+            }),
+            doc::BuildHelpers::empty(),
+        )
     }
 }
 

@@ -27,9 +27,29 @@ use crate::function_value::StartConvention;
 use lash_vocabulary::{claims::NodeRequirements, names::*, types::*};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
+/// Direct exact-ID references to immutable build library code. These are
+/// disjoint from the document's own definitions and participate in its identity.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(transparent)]
+pub struct LibraryDependencies(pub BTreeSet<FunctionId>);
+
+impl LibraryDependencies {
+    pub fn iter(&self) -> impl ExactSizeIterator<Item = &FunctionId> {
+        self.0.iter()
+    }
+    pub fn contains(&self, function: &FunctionId) -> bool {
+        self.0.contains(function)
+    }
+    pub fn insert(&mut self, function: FunctionId) -> bool {
+        self.0.insert(function)
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Document {
+    #[serde(default)]
+    pub library: LibraryDependencies,
     pub imports: BTreeMap<ImportSlot, Import>,
     pub exports: BTreeMap<Name, Export>,
     pub main: Option<Block>,
@@ -98,6 +118,7 @@ impl Document {
     /// A document with this `main` and nothing else.
     pub fn new(numbers: NumberPolicy, main: Block) -> Self {
         Self {
+            library: LibraryDependencies::default(),
             imports: BTreeMap::new(),
             exports: BTreeMap::new(),
             functions: BTreeMap::new(),
