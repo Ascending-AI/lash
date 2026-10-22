@@ -41,7 +41,9 @@ pub(super) async fn session_state_version_admission_contract(
         session_id: request.session_id.clone(),
         ..crate::RuntimeSessionState::fixture(request.config.session_policy())
     };
-    state.ensure_agent_frame_initialized();
+    state
+        .ensure_agent_frame_initialized()
+        .expect("source fixture edit is admitted");
     store
         .commit_runtime_state(crate::RuntimeCommit::persisted_state_for_test(&state))
         .await

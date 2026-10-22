@@ -2,26 +2,29 @@ use super::*;
 
 /// Commit `count` more messages over `state`, the session's head.
 async fn advance(backend: &Backend, state: &mut RuntimeSessionState, count: usize) {
-    state.ensure_agent_frame_initialized();
+    state.ensure_agent_frame_initialized().unwrap();
     for ordinal in 0..count {
-        state.session_graph.append_message(crate::Message {
-            id: format!("held-base-{}-{ordinal}", state.head_revision),
-            role: crate::MessageRole::User,
-            parts: crate::shared_parts(vec![crate::Part::text(
-                format!("held-base-{}-{ordinal}.p0", state.head_revision),
-                format!("message {ordinal} over revision {}", state.head_revision),
-                None,
-            )]),
-            origin: None,
-            reply_marker: None,
-        });
+        state
+            .session_graph
+            .append_message(crate::Message {
+                id: format!("held-base-{}-{ordinal}", state.head_revision),
+                role: crate::MessageRole::User,
+                parts: crate::shared_parts(vec![crate::Part::text(
+                    format!("held-base-{}-{ordinal}.p0", state.head_revision),
+                    format!("message {ordinal} over revision {}", state.head_revision),
+                    None,
+                )]),
+                origin: None,
+                reply_marker: None,
+            })
+            .unwrap();
     }
     let receipt = backend
         .session_store_factory()
         .commit_runtime_state(crate::store::RuntimeCommit::persisted_state_for_test(state))
         .await
         .expect("commit the messages");
-    state.apply_persisted_commit_result(receipt);
+    state.apply_persisted_commit_result(receipt).unwrap();
 }
 
 fn encoded(messages: &crate::MessageSequence) -> serde_json::Value {

@@ -64,8 +64,22 @@ impl SessionHead {
     /// when the session has no head, or the store's own typed refusal
     /// ([`refused`]), terminal when no pass would clear it.
     pub async fn load(backend: &Backend, session: &SessionId) -> Result<Self, TurnError> {
+        Self::load_in(
+            backend,
+            session,
+            &lash_protocol_types::allocation::AllocationBudget::unowned(),
+        )
+        .await
+    }
+
+    /// Hydrate a serving claim with its own source allocation ledger.
+    pub async fn load_in(
+        backend: &Backend,
+        session: &SessionId,
+        budget: &lash_protocol_types::allocation::AllocationBudget,
+    ) -> Result<Self, TurnError> {
         let store = session_store(backend, session).await?;
-        let state = load_state(&store, session, WindowSelector::Current).await?;
+        let state = load_state_in(&store, session, WindowSelector::Current, budget).await?;
         Ok(Self {
             state: Arc::new(state),
             fleet: store.fleet_format(),
@@ -146,6 +160,7 @@ impl SessionHead {
             crate::ExecutionScope::turn(self.state.session_id.clone(), run.clone()),
             budget,
         )
+        .map_err(refused)?
         .with_fleet_format(self.fleet);
         let commit = boundary
             .durable_commit(done.messages, &outcome, &[], None, None)
@@ -229,7 +244,7 @@ impl SessionOwner {
                         );
                         let memory = cx.owner_memory().cloned().ok_or_else(|| TurnError::Exec("session claim has no allocation ledger".into()))?;
                         let (allocation_budget, allocations) = lash_core_execution::runtime::actor::owner_allocation::OwnerAllocation::budget(memory, cx.actor().to_string());
-                        let mut head = SessionHead::load(cx.backend(), session).await?;
+                        let mut head = SessionHead::load_in(cx.backend(), session, &allocation_budget).await?;
                         Arc::make_mut(&mut head.state).session_graph.detach_owner_prompt_rendering();
                         let turn = cx.durable_reads()?.turn(session).await?;
                         let phase_surface = match turn
@@ -480,8 +495,23 @@ pub(crate) async fn load_state(
     session: &SessionId,
     selector: WindowSelector,
 ) -> Result<RuntimeSessionState, TurnError> {
+    load_state_in(
+        store,
+        session,
+        selector,
+        &lash_protocol_types::allocation::AllocationBudget::unowned(),
+    )
+    .await
+}
+
+async fn load_state_in(
+    store: &SessionStore,
+    session: &SessionId,
+    selector: WindowSelector,
+    budget: &lash_protocol_types::allocation::AllocationBudget,
+) -> Result<RuntimeSessionState, TurnError> {
     let current = matches!(selector, WindowSelector::Current);
-    let loaded = crate::store::load_session_window_state(store, selector)
+    let loaded = crate::store::load_session_window_state_in(store, selector, budget)
         .await
         .map_err(refused)?
         .ok_or_else(|| {

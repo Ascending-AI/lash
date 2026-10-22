@@ -38,7 +38,9 @@ pub struct PreparedTurnMachine<M: TurnProtocol = UnitTurnProtocol> {
     pub turn_driver_preamble: Arc<TurnDriverPreamble<M>>,
 }
 
-pub fn build_turn<M: TurnProtocol>(input: SansIoTurnInput<M>) -> PreparedTurnMachine<M> {
+pub fn build_turn<M: TurnProtocol>(
+    input: SansIoTurnInput<M>,
+) -> Result<PreparedTurnMachine<M>, lash_protocol_types::allocation::AllocationError> {
     let turn_events = input
         .events
         .as_slice()
@@ -67,10 +69,10 @@ pub fn build_turn<M: TurnProtocol>(input: SansIoTurnInput<M>) -> PreparedTurnMac
         input.messages,
         turn_events,
         input.protocol_run_offset,
-    );
+    )?;
 
-    PreparedTurnMachine {
+    Ok(PreparedTurnMachine {
         machine,
         turn_driver_preamble: input.turn_driver_preamble,
-    }
+    })
 }

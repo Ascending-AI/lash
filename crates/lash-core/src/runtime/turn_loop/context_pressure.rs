@@ -312,7 +312,8 @@ impl LashRuntime {
                 nodes,
                 namespace,
                 clock.as_ref(),
-            );
+            )
+            .map_err(crate::runtime::runtime_error_from_store_commit)?;
         }
         self.open_frame(
             crate::OpenAgentFrameRequest::new(

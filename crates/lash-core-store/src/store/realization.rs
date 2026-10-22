@@ -337,7 +337,7 @@ mod tests {
                 crate::NoProgressBudget::bounded(12),
             ))
         };
-        state.ensure_agent_frame_initialized();
+        state.ensure_agent_frame_initialized().unwrap();
 
         let err =
             commit_runtime_state_verified(&store, RuntimeCommit::persisted_state_for_test(&state))
@@ -370,25 +370,26 @@ mod tests {
             materialized_session: Some(state.session_id.clone()),
             ..Default::default()
         };
-        let node = crate::SessionNodeRecord {
-            node_id: "node".into(),
-            parent_node_id: None,
-            timestamp: "2026-07-27T00:00:00.000000000Z"
+        let node = crate::SessionNodeRecord::new(
+            "node".into(),
+            None,
+            "2026-07-27T00:00:00.000000000Z"
                 .parse()
                 .expect("canonical node timestamp"),
-            payload: crate::SessionNodePayload::Event {
+            crate::SessionNodePayload::Event {
                 event: crate::SessionHistoryRecord::Protocol(
                     crate::ProtocolEvent::typed("budget", serde_json::Value::Null)
                         .expect("protocol event"),
                 ),
             },
-        };
+        );
         let mut commit = RuntimeCommit::persisted_state_for_test(&state);
         commit.graph = super::super::GraphAppend::Extend {
             nodes: (0..=RuntimeCommit::MAX_COMMIT_NODE_COUNT)
-                .map(|index| crate::SessionNodeRecord {
-                    node_id: crate::NodeId::fixture(format!("node-{index}")),
-                    ..node.clone()
+                .map(|index| {
+                    let mut record = node.clone();
+                    record.node_id = crate::NodeId::fixture(format!("node-{index}"));
+                    record
                 })
                 .collect(),
         };
@@ -419,7 +420,7 @@ mod tests {
             crate::MaxToolCalls::new(1024),
             crate::NoProgressBudget::bounded(12),
         ));
-        state.ensure_agent_frame_initialized();
+        state.ensure_agent_frame_initialized().unwrap();
         let store = FacadeTestStore {
             materialized_session: Some(state.session_id.clone()),
             ..Default::default()
@@ -436,7 +437,7 @@ mod tests {
             crate::MaxToolCalls::new(1024),
             crate::NoProgressBudget::bounded(12),
         ));
-        state.ensure_agent_frame_initialized();
+        state.ensure_agent_frame_initialized().unwrap();
         let store = FacadeTestStore {
             materialized_session: Some(state.session_id.clone()),
             replayed: true,

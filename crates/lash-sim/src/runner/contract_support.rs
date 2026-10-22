@@ -601,12 +601,14 @@ pub(super) fn contract_user_message(content: &str) -> lash_core::Message {
     lash_core::Message {
         id: "m0".to_string(),
         role: lash_core::MessageRole::User,
-        parts: vec![lash_core::Part::text(
-            "m0.p0".to_string(),
-            content.to_string(),
-            None,
-        )]
-        .into(),
+        parts: std::sync::Arc::new(
+            (vec![lash_core::Part::text(
+                "m0.p0".to_string(),
+                content.to_string(),
+                None,
+            )])
+            .into(),
+        ),
         origin: None,
         reply_marker: None,
     }

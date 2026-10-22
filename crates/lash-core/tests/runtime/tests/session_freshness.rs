@@ -190,17 +190,20 @@ impl DialectOwnerPlugin {
 /// and bring the runtime to that head.
 async fn append_history(runtime: &mut LashRuntime, store: &RecordingStore, depth: usize) {
     advance_session_head(store, |state| {
-        state.session_graph.append_node_drafts_at(
-            "freshness-depth",
-            (0..depth).map(|ordinal| {
-                lash_core::session_graph::SessionNodeDraft::plugin(
-                    "freshness-depth",
-                    serde_json::json!({ "ordinal": ordinal }),
-                )
-            }),
-            lash_core::session_graph::NodeTimestamp::new(chrono::Utc::now())
-                .expect("a node timestamp"),
-        );
+        state
+            .session_graph
+            .append_node_drafts_at(
+                "freshness-depth",
+                (0..depth).map(|ordinal| {
+                    lash_core::session_graph::SessionNodeDraft::plugin(
+                        "freshness-depth",
+                        serde_json::json!({ "ordinal": ordinal }),
+                    )
+                }),
+                lash_core::session_graph::NodeTimestamp::new(chrono::Utc::now())
+                    .expect("a node timestamp"),
+            )
+            .expect("source fixture edit is admitted");
     })
     .await;
     runtime

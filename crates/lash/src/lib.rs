@@ -846,8 +846,9 @@ pub mod messages {
 
     pub use lash_core::session_graph::SharedJsonValue;
     pub use lash_core::{
-        InternalPartKind, Message, MessageOrigin, MessageRole, Part, PartKind, TurnOutputSource,
-        TurnReply, facade_support::MessageSequence, session_model::message::PartAttachment,
+        InternalPartKind, Message, MessageOrigin, MessageParts, MessageRole, Part, PartKind,
+        TurnOutputSource, TurnReply, facade_support::MessageSequence,
+        session_model::message::PartAttachment,
     };
     /// JSON map in integrator signatures, without a second direct dependency.
     pub use serde_json::Map as JsonMap;
@@ -1167,7 +1168,7 @@ pub mod http_transport {
 pub mod allocation {
     pub use lash_protocol_types::allocation::{
         AllocationBudget, AllocationError, AllocationHold, AllocationLedger, AllocationReservation,
-        ProjectionError, ReserveError,
+        ProjectionError, ReserveError, SourceCapacity, json_decode_capacity, payload_capacity,
     };
 }
 

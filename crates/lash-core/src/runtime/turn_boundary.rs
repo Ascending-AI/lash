@@ -30,7 +30,7 @@ fn derive_commit_node_ids(
     let node_id_mapping = graph.derive_node_ids(&session_id, operation)?;
     state
         .session_graph
-        .remap_node_ids(&session_id, &node_id_mapping);
+        .remap_node_ids(&session_id, &node_id_mapping)?;
     if let Some(current) = state.current_frame_node_id.as_mut()
         && let Some((_, derived)) = node_id_mapping
             .iter()
@@ -146,7 +146,7 @@ impl TurnBoundary {
     }
 
     #[cfg(test)]
-    pub(super) fn from_state(state: RuntimeSessionState) -> Self {
+    pub(super) fn from_state(state: RuntimeSessionState) -> Result<Self, StoreError> {
         let scope = crate::ExecutionScope::turn(&state.session_id, "test-turn");
         Self::from_state_with_clock(
             state,
@@ -160,7 +160,7 @@ impl TurnBoundary {
         clock: Arc<dyn crate::Clock>,
         operation_scope: crate::ExecutionScope,
         commit_budget: crate::CommitBudget,
-    ) -> Self {
+    ) -> Result<Self, StoreError> {
         let graph_appends = TurnGraphAppendDraft::from_resident_state(&state, Arc::clone(&clock));
         Self::from_state_with_graph_appends(
             state,
@@ -180,9 +180,9 @@ impl TurnBoundary {
         operation_scope: crate::ExecutionScope,
         commit_budget: crate::CommitBudget,
         graph_appends: TurnGraphAppendDraft,
-    ) -> Self {
+    ) -> Result<Self, StoreError> {
         let draft_clock = Arc::clone(&clock);
-        Self {
+        Ok(Self {
             output_cuts: lash_protocol_types::session_model::RuntimeOutputCuts::standard(),
             fleet_format: crate::FleetFormat::current(),
             stage: Some(TurnCommitStage::Drafting(Box::new(
@@ -191,7 +191,7 @@ impl TurnBoundary {
                     draft_clock,
                     operation_scope.id(),
                     graph_appends.clone(),
-                ),
+                )?,
             ))),
             clock,
             definition_engines: crate::ProcessEngineRegistry::new(),
@@ -201,7 +201,7 @@ impl TurnBoundary {
             trace: None,
             graph_appends,
             protocol_terminal_output: materialize::ProtocolTerminalOutput::default(),
-        }
+        })
     }
 
     pub(super) fn record_protocol_terminal_output(
@@ -245,8 +245,12 @@ impl TurnBoundary {
             TurnCommitStage::Finalized(finalized) => &finalized.state,
         }
     }
-    pub(super) fn apply_prepared_messages(&mut self, messages: &MessageSequence) {
-        self.draft_mut().apply_prepared_messages(messages);
+    pub(super) fn apply_prepared_messages(
+        &mut self,
+        messages: &MessageSequence,
+    ) -> Result<(), StoreError> {
+        self.draft_mut().apply_prepared_messages(messages)?;
+        Ok(())
     }
     pub(super) fn read_view(
         &self,
@@ -270,9 +274,10 @@ impl TurnBoundary {
         &mut self,
         new_messages: MessageSequence,
         cancelled: bool,
-    ) {
+    ) -> Result<(), StoreError> {
         self.draft_mut()
-            .finalize_turn_read_state(new_messages, cancelled);
+            .finalize_turn_read_state(new_messages, cancelled)?;
+        Ok(())
     }
 
     pub(super) async fn prepared_checkpoint(
@@ -286,7 +291,7 @@ impl TurnBoundary {
         if !crate::messages_are_prompt_resume_safe(messages.iter()) {
             return Ok(());
         }
-        self.apply_prepared_messages(messages);
+        self.apply_prepared_messages(messages)?;
         let plugins = session
             .as_deref()
             .map(|session| Arc::clone(session.plugins()));
@@ -346,7 +351,9 @@ impl TurnBoundary {
 
         {
             let draft = self.draft_mut();
-            draft.apply_prepared_messages(&messages);
+            draft
+                .apply_prepared_messages(&messages)
+                .map_err(|error| error.runtime_error())?;
             let state = draft.state_mut();
             state.policy = policy;
             state.turn_index = turn_index;
@@ -357,7 +364,9 @@ impl TurnBoundary {
                 state.capture_plugin_states(plugins, fleet_format)?;
             }
         }
-        let protocol_events = self.apply_event_delta(event_delta);
+        let protocol_events = self
+            .apply_event_delta(event_delta)
+            .map_err(|error| error.runtime_error())?;
         Ok(ProgressBoundaryResult { protocol_events })
     }
 
@@ -369,15 +378,16 @@ impl TurnBoundary {
         &mut self,
         messages: &MessageSequence,
         event_delta: Vec<SessionHistoryRecord>,
-    ) {
-        self.draft_mut().apply_prepared_messages(messages);
-        self.apply_event_delta(event_delta);
+    ) -> Result<(), StoreError> {
+        self.draft_mut().apply_prepared_messages(messages)?;
+        self.apply_event_delta(event_delta)?;
+        Ok(())
     }
 
     pub(super) fn apply_event_delta(
         &mut self,
         event_delta: Vec<SessionHistoryRecord>,
-    ) -> Vec<crate::ProtocolEvent> {
+    ) -> Result<Vec<crate::ProtocolEvent>, StoreError> {
         let protocol_events = event_delta
             .into_iter()
             .filter_map(|event| match event {
@@ -390,8 +400,8 @@ impl TurnBoundary {
                 .iter()
                 .cloned()
                 .map(SessionHistoryRecord::Protocol),
-        );
-        protocol_events
+        )?;
+        Ok(protocol_events)
     }
 
     fn draft_ref(&self) -> &TurnCommitDraft {
@@ -412,19 +422,19 @@ impl TurnBoundary {
         }
     }
 
-    fn final_state_mut(&mut self) -> &mut RuntimeSessionState {
+    fn final_state_mut(&mut self) -> Result<&mut RuntimeSessionState, StoreError> {
         let stage = self.stage.take();
         self.stage = Some(match stage {
             Some(TurnCommitStage::Drafting(draft)) => {
                 TurnCommitStage::Finalized(Box::new(FinalizedTurnCommitStage {
-                    state: (*draft).into_final_state(),
+                    state: (*draft).into_final_state()?,
                 }))
             }
             Some(finalized) => finalized,
             None => unreachable!("turn commit stage is only absent during this transition"),
         });
         match self.stage.as_mut() {
-            Some(TurnCommitStage::Finalized(finalized)) => &mut finalized.state,
+            Some(TurnCommitStage::Finalized(finalized)) => Ok(&mut finalized.state),
             _ => unreachable!("stage was just finalized"),
         }
     }

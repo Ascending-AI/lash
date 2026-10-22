@@ -72,13 +72,13 @@ pub fn append_conformance_event_node(
     content: &str,
 ) {
     let parent_node_id = state.session_graph.leaf_node_id.clone();
-    let node = crate::SessionNodeRecord {
-        node_id: crate::NodeId::fixture(id),
+    let node = crate::SessionNodeRecord::new(
+        crate::NodeId::fixture(id),
         parent_node_id,
-        timestamp: "2026-07-27T00:00:00.000000000Z"
+        "2026-07-27T00:00:00.000000000Z"
             .parse()
             .expect("canonical node timestamp"),
-        payload: crate::SessionNodePayload::Event {
+        crate::SessionNodePayload::Event {
             event: crate::SessionHistoryRecord::Protocol(
                 crate::ProtocolEvent::typed(
                     "conformance-event",
@@ -87,7 +87,7 @@ pub fn append_conformance_event_node(
                 .expect("conformance event"),
             ),
         },
-    };
+    );
     state
         .session_graph
         .apply_append(&crate::GraphAppend::Extend { nodes: vec![node] })
@@ -106,7 +106,7 @@ pub async fn commit_conformance_state(
     let (commit, new_node_ids) =
         crate::RuntimeCommit::persisted_state_with_operation(state, operation)?;
     let result = store.commit_runtime_state(commit).await?;
-    state.apply_persisted_commit_result(result);
+    state.apply_persisted_commit_result(result)?;
     state.mark_node_ids_persisted(new_node_ids);
     Ok(())
 }

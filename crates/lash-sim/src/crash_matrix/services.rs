@@ -440,14 +440,14 @@ impl TurnServices for SimServices {
         // its admission took.
         let backend = self.world.backend().map_err(TurnError::Exec)?;
         let window = head.window()?;
-        let messages = window.then(admitted_messages(&backend, row).await?);
+        let messages = window.then(admitted_messages(&backend, row).await?)?;
         let machine = TurnMachine::in_window(
             machine_config(&row.session, &row.run),
             window,
             messages,
             Vec::new(),
             0,
-        );
+        )?;
         Ok(self.drive(row, machine, None))
     }
 

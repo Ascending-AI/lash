@@ -487,8 +487,11 @@ impl SessionSnapshot {
 
     /// Appends non-transient messages after the active leaf for store implementors applying a
     /// snapshot delta in source order.
-    pub fn append_active_read_delta(&mut self, messages: &[crate::Message]) {
-        self.session_graph.append_active_read_delta(messages);
+    pub fn append_active_read_delta(
+        &mut self,
+        messages: &[crate::Message],
+    ) -> Result<(), crate::StoreError> {
+        self.session_graph.append_active_read_delta(messages)?;
         self.current_frame_node_id = self
             .session_graph
             .nearest_frame_node_id(self.session_graph.leaf_node_id.as_deref())
@@ -497,6 +500,7 @@ impl SessionSnapshot {
                     .expect("a graph node identity selected as a frame is non-empty")
             });
         self.agent_frames = self.session_graph.agent_frame_records(&self.session_id);
+        Ok(())
     }
 }
 #[derive(Clone)]

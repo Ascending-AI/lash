@@ -183,7 +183,7 @@ async fn preopened_store_binds_without_remapping_initial_frame() {
             lash_core::NoProgressBudget::bounded(12),
         ))
     };
-    state.ensure_agent_frame_initialized();
+    state.ensure_agent_frame_initialized().unwrap();
     let provisional_frame = state
         .current_frame_node_id
         .clone()

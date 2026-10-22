@@ -343,7 +343,7 @@ async fn admit_and_seed(store: &SqliteStore, session_id: &SessionId) {
             ),
         )
     };
-    state.ensure_agent_frame_initialized();
+    state.ensure_agent_frame_initialized().unwrap();
     store
         .commit_runtime_state(
             lash_core_store::store::RuntimeCommit::persisted_state_for_test(&state),

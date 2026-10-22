@@ -23,7 +23,7 @@ fn message(id: &str, role: MessageRole, parts: Vec<Part>) -> Message {
     Message {
         id: id.to_string(),
         role,
-        parts: parts.into(),
+        parts: std::sync::Arc::new((parts).into()),
         origin: None,
         reply_marker: None,
     }
@@ -130,7 +130,10 @@ fn omission_changes_neither_stored_history_nor_tool_pairing() {
     .map(|id| (id, PLACEHOLDER.to_owned()))
     .collect();
 
-    assert_eq!(apply_attachment_omissions(&mut view, &omissions), 2);
+    assert_eq!(
+        apply_attachment_omissions(&mut view, &omissions).unwrap(),
+        2
+    );
 
     assert_eq!(
         encoded(&stored),
@@ -175,7 +178,10 @@ fn omission_uses_policy_text_and_preserves_record_order() {
         .into_iter()
         .map(|id| (id, "mode-owned omission".to_owned()))
         .collect();
-    assert_eq!(apply_attachment_omissions(&mut view, &omissions), 2);
+    assert_eq!(
+        apply_attachment_omissions(&mut view, &omissions).unwrap(),
+        2
+    );
     assert_eq!(view[0].parts[1].content(), "mode-owned omission");
     assert_eq!(shape(&view), shape(&stored));
     assert_eq!(

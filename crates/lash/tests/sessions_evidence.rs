@@ -1186,7 +1186,7 @@ fn drain_area_witnesses() {
     type_witness::<lash::messages::SharedJsonValue>();
     // W0474: lash::messages::SharedJsonValue::0 [field]
     field_witness(|value: &lash::messages::SharedJsonValue| {
-        let _ = &value.0;
+        let _ = value.as_ref();
     });
     // W0475: lash::messages::SharedJsonValue::new [function]
     let _ = lash::messages::SharedJsonValue::new;

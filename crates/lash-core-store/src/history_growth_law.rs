@@ -19,13 +19,13 @@ fn record(id: &str, parent: &str, role: MessageRole, turn: &str) -> SessionNodeR
             cell_id: None,
         },
     };
-    SessionNodeRecord {
-        node_id: NodeId::fixture(id),
-        parent_node_id: Some(NodeId::fixture(parent)),
-        timestamp: "2026-10-19T00:00:00.000000000Z"
+    SessionNodeRecord::new(
+        NodeId::fixture(id),
+        Some(NodeId::fixture(parent)),
+        "2026-10-19T00:00:00.000000000Z"
             .parse()
             .expect("canonical node timestamp"),
-        payload: SessionNodePayload::Event {
+        SessionNodePayload::Event {
             event: SessionHistoryRecord::Conversation(ConversationRecord::from_message(Message {
                 id: id.to_owned(),
                 role,
@@ -34,7 +34,7 @@ fn record(id: &str, parent: &str, role: MessageRole, turn: &str) -> SessionNodeR
                 reply_marker: None,
             })),
         },
-    }
+    )
 }
 
 fn turn_nodes(turn: usize, parent: &str) -> Vec<SessionNodeRecord> {
@@ -50,16 +50,16 @@ fn turn_nodes(turn: usize, parent: &str) -> Vec<SessionNodeRecord> {
 /// A proven window of one frame holding `turns` committed turns.
 fn window(turns: usize) -> SessionGraph {
     let frame_key = crate::FrameKey::from_caller_material("history").expect("frame material");
-    let base = SessionNodeRecord {
-        node_id: NodeId::fixture(
+    let base = SessionNodeRecord::new(
+        NodeId::fixture(
             crate::session_graph::frame_node_id(&SessionId::from("history"), frame_key.as_str())
                 .into_inner(),
         ),
-        parent_node_id: None,
-        timestamp: "2026-10-19T00:00:00.000000000Z"
+        None,
+        "2026-10-19T00:00:00.000000000Z"
             .parse()
             .expect("canonical node timestamp"),
-        payload: SessionNodePayload::FrameOpen {
+        SessionNodePayload::FrameOpen {
             frame_key,
             reason: crate::AgentFrameReason::initial(),
             assignment: crate::AgentFrameAssignment::unconfigured(crate::SessionPolicy::new(
@@ -68,7 +68,7 @@ fn window(turns: usize) -> SessionGraph {
                 crate::NoProgressBudget::bounded(12),
             )),
         },
-    };
+    );
     let anchor = WindowAnchor {
         frame_node_id: crate::FrameNodeId::new(base.node_id.to_string()).expect("non-empty"),
         generation: 0,
@@ -107,6 +107,7 @@ fn a_turns_window_extension_allocates_independently_of_history_depth() {
         let measurement = allocation_counter::Measurement::start();
         let head = base
             .extend_window(appended, &leaf)
+            .expect("source edit is admitted")
             .expect("the turn's rows extend the window");
         head.validate_resident_integrity()
             .expect("the extended window stays proven");

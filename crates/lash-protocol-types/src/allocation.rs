@@ -123,10 +123,135 @@ pub fn payload_capacity(value: &impl serde::Serialize, inline: usize) -> u64 {
         .saturating_add(128)
 }
 
+// A sparse serde_json B-tree may allocate a full eleven-entry root for
+// one pair. Include its edges, allocator headers and the inline Value slots.
+const JSON_MAP_ENTRY_BYTES: u64 = 2048;
+
+/// Admission bound for decoding JSON into a typed source value. This scans
+/// borrowed bytes with constant space before the JSON parser allocates.
+/// Punctuation inside strings is ignored; escapes never expand beyond their
+/// encoded byte length. Malformed input still receives a conservative bound
+/// before the real decoder reports its own error.
+///
+/// Every object entry admits a full sparse B-tree node. Arrays admit minimum
+/// capacity plus geometric growth per separator (object commas only enlarge
+/// the bound). Four such representations cover the JSON value, serde's
+/// flattened content, the typed materialization and transient reallocations;
+/// encoded bytes separately cover strings and parser scratch. `inline` is
+/// the typed root, including its Arc and allocation headers.
+pub fn json_decode_capacity(source: &str, inline: usize) -> u64 {
+    let mut in_string = false;
+    let mut escaped = false;
+    let mut structure = 0u64;
+    for byte in source.bytes() {
+        if in_string {
+            if escaped {
+                escaped = false;
+            } else if byte == b'\\' {
+                escaped = true;
+            } else if byte == b'"' {
+                in_string = false;
+            }
+        } else {
+            match byte {
+                b'"' => in_string = true,
+                b':' => structure = structure.saturating_add(JSON_MAP_ENTRY_BYTES),
+                b'[' => structure = structure.saturating_add(256),
+                b',' => structure = structure.saturating_add(64),
+                _ => {}
+            }
+        }
+    }
+    structure
+        .saturating_mul(4)
+        .saturating_add((source.len() as u64).saturating_mul(8))
+        .saturating_add(inline as u64)
+        .saturating_add(512)
+}
+
 #[derive(Clone, Debug, thiserror::Error)]
 pub enum ProjectionError {
     #[error(transparent)]
     Stored(#[from] crate::StoredDataCorruption),
     #[error(transparent)]
     Allocation(#[from] AllocationError),
+}
+
+/// Heap fields a source value copies when its containing buffer detaches.
+/// Shared immutable allocations carry their own holds and are excluded.
+pub trait SourceCapacity {
+    fn owned_capacity(&self) -> u64;
+}
+
+impl<T: ?Sized> SourceCapacity for Arc<T> {
+    fn owned_capacity(&self) -> u64 {
+        0
+    }
+}
+macro_rules! inline_source {
+    ($($ty:ty),* $(,)?) => { $(impl SourceCapacity for $ty {
+        fn owned_capacity(&self) -> u64 { 0 }
+    })* };
+}
+inline_source!((), usize, u64, u32, u16, u8, i64, i32, bool);
+impl SourceCapacity for String {
+    fn owned_capacity(&self) -> u64 {
+        self.capacity() as u64 + 32
+    }
+}
+impl SourceCapacity for serde_json::Value {
+    fn owned_capacity(&self) -> u64 {
+        match self {
+            Self::String(text) => text.capacity() as u64,
+            Self::Array(values) => values.iter().fold(
+                (values.capacity() as u64).saturating_mul(std::mem::size_of::<Self>() as u64),
+                |bytes, value| bytes.saturating_add(value.owned_capacity()),
+            ),
+            Self::Object(values) => values.owned_capacity(),
+            Self::Null | Self::Bool(_) | Self::Number(_) => 0,
+        }
+    }
+}
+impl SourceCapacity for serde_json::Map<String, serde_json::Value> {
+    fn owned_capacity(&self) -> u64 {
+        self.iter().fold(
+            (self.len() as u64).saturating_mul(JSON_MAP_ENTRY_BYTES),
+            |bytes, (key, value)| {
+                bytes
+                    .saturating_add(key.owned_capacity())
+                    .saturating_add(value.owned_capacity())
+            },
+        )
+    }
+}
+
+impl SourceCapacity for crate::ConversationRecord {
+    fn owned_capacity(&self) -> u64 {
+        (self.id.capacity() as u64)
+            .saturating_add(payload_capacity(&(&self.origin, &self.reply_marker), 0))
+    }
+}
+impl SourceCapacity for crate::Message {
+    fn owned_capacity(&self) -> u64 {
+        (self.id.capacity() as u64)
+            .saturating_add(payload_capacity(&(&self.origin, &self.reply_marker), 0))
+    }
+}
+impl SourceCapacity for crate::ProtocolEvent {
+    fn owned_capacity(&self) -> u64 {
+        self.plugin_id.capacity() as u64 + 32
+    }
+}
+impl<E: SourceCapacity> SourceCapacity for crate::SessionHistoryRecord<E> {
+    fn owned_capacity(&self) -> u64 {
+        match self {
+            Self::Conversation(message) => message.owned_capacity(),
+            Self::Protocol(event) => event.owned_capacity(),
+        }
+    }
+}
+impl SourceCapacity for crate::llm::types::LlmMessage {
+    fn owned_capacity(&self) -> u64 {
+        0
+    }
 }

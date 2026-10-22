@@ -42,7 +42,7 @@ fn test_state(session_id: &SessionId) -> RuntimeSessionState {
 
 fn state_with_one_pending_node(session_id: &SessionId) -> RuntimeSessionState {
     let mut state = test_state(session_id);
-    state.ensure_agent_frame_initialized();
+    state.ensure_agent_frame_initialized().unwrap();
     state
 }
 

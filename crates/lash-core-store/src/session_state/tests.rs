@@ -74,7 +74,7 @@ fn commit_result_mismatch_remains_sticky_until_execution_state_staging() {
     let mut tampered = commit_result_for(&resident);
     let (other, _) = execution("another build's root");
     tampered.manifest.execution_ref = Some(crate::store::BlobRef(other.to_hex()));
-    resident.apply_persisted_commit_result(tampered);
+    resident.apply_persisted_commit_result(tampered).unwrap();
 
     let hydration_before_discard = resident.execution_state_hydration();
     assert!(
@@ -167,7 +167,8 @@ fn incomplete_checkpoint_component_projection_is_a_typed_error() {
     let state = RuntimeSessionState::from_snapshot(
         projected,
         crate::session_state::RuntimeSessionAuthority::fixture(),
-    );
+    )
+    .unwrap();
 
     let error = state
         .checkpoint_components
@@ -193,7 +194,7 @@ fn persisted_commit_cannot_adopt_nonadvancing_revision() {
     ));
     let mut receipt = commit_result_for(&state);
     receipt.head_revision = state.head_revision;
-    state.apply_persisted_commit_result(receipt);
+    state.apply_persisted_commit_result(receipt).unwrap();
 }
 
 fn fresh_state_with_initial_frame() -> RuntimeSessionState {
@@ -202,7 +203,7 @@ fn fresh_state_with_initial_frame() -> RuntimeSessionState {
         crate::MaxToolCalls::new(1024),
         crate::NoProgressBudget::bounded(12),
     ));
-    state.ensure_agent_frame_initialized();
+    state.ensure_agent_frame_initialized().unwrap();
     state
 }
 
@@ -244,7 +245,9 @@ fn an_unpersisted_initial_frame_opens_under_the_installed_plugin_config() {
     );
     let settled = protocol_config(serde_json::json!({ "channel": "cell" }));
     fresh.authority.plugin_config = settled.clone();
-    fresh.open_unpersisted_initial_frame_under_current_assignment();
+    fresh
+        .open_unpersisted_initial_frame_under_current_assignment()
+        .unwrap();
     assert_eq!(
         initial_frame_protocol_turn_options(&fresh),
         settled.protocol_turn_options()
@@ -256,7 +259,7 @@ fn an_unpersisted_initial_frame_opens_under_the_installed_plugin_config() {
         crate::NoProgressBudget::bounded(12),
     ));
     reopened.authority.plugin_config = settled;
-    reopened.ensure_agent_frame_initialized();
+    reopened.ensure_agent_frame_initialized().unwrap();
     assert_eq!(
         initial_frame_payload(&fresh),
         initial_frame_payload(&reopened),
@@ -278,7 +281,9 @@ fn a_persisted_initial_frame_keeps_the_config_it_opened_under() {
         .collect::<Vec<_>>();
     state.mark_node_ids_persisted(persisted);
     state.authority.plugin_config = protocol_config(serde_json::json!({ "channel": "cell" }));
-    state.open_unpersisted_initial_frame_under_current_assignment();
+    state
+        .open_unpersisted_initial_frame_under_current_assignment()
+        .unwrap();
     assert_eq!(initial_frame_protocol_turn_options(&state), opened_under);
 }
 
@@ -289,7 +294,7 @@ fn install_view(state: &mut RuntimeSessionState, config: &crate::PersistedSessio
         crate::store::persisted_session_config_from_state(state),
     )
     .with_config(config.clone());
-    state.install_run_view(&run);
+    state.install_run_view(&run).unwrap();
 }
 
 /// FIG-4646: uninstalling a run view restores the sticky config under it,
@@ -581,7 +586,7 @@ fn read_view_current_frame_is_the_initial_frame() {
         crate::NoProgressBudget::bounded(12),
     ));
     assert_read_views_current_frame(&state, None);
-    state.ensure_agent_frame_initialized();
+    state.ensure_agent_frame_initialized().unwrap();
     let initial_frame = state.current_frame_node_id.as_ref().expect("initial frame");
     assert_read_views_current_frame(&state, Some(initial_frame));
 }
@@ -602,7 +607,9 @@ fn a_durable_frame_switch_leaves_only_the_new_frame_resident() {
             crate::NoProgressBudget::bounded(12),
         ))
     };
-    state.append_active_conversation_messages(&[projection_text("a1"), projection_text("a2")]);
+    state
+        .append_active_conversation_messages(&[projection_text("a1"), projection_text("a2")])
+        .unwrap();
     let old_frame = state.current_frame_node_id.clone().expect("initial frame");
     let old_view = crate::SessionReadView::from_persisted_state(&state);
     let durable = state
@@ -632,7 +639,9 @@ fn a_durable_frame_switch_leaves_only_the_new_frame_resident() {
         state.read_model().messages.is_empty(),
         "the pending frame already owns the projection"
     );
-    state.append_active_conversation_messages(&[projection_text("b1")]);
+    state
+        .append_active_conversation_messages(&[projection_text("b1")])
+        .unwrap();
     assert_eq!(
         state.session_graph.nodes.len(),
         5,
@@ -707,7 +716,7 @@ fn a_redriven_run_executes_under_its_admitted_plugin_config_revision() {
         "outside a run the head's configuration is the installed one"
     );
 
-    state.install_run_view(&resolved);
+    state.install_run_view(&resolved).unwrap();
     let expected = crate::AdmittedPluginConfig::new(capped_plugin_config(12), 4);
     assert_eq!(state.admitted_plugin_config(), expected);
 }
@@ -718,7 +727,9 @@ fn a_redriven_run_executes_under_its_admitted_plugin_config_revision() {
 fn a_frame_captures_the_installed_plugin_config() {
     let mut state = fresh_state_with_initial_frame();
     state.authority.plugin_config = capped_plugin_config(9);
-    state.open_unpersisted_initial_frame_under_current_assignment();
+    state
+        .open_unpersisted_initial_frame_under_current_assignment()
+        .unwrap();
     let frame = state
         .session_graph
         .nodes
@@ -787,7 +798,9 @@ fn released_plugin_bodies_drop_their_cache_and_keep_only_held_addresses() {
     state.set_plugin_state(Some(crate::PluginState {
         plugins: std::collections::BTreeMap::from([("keyed".into(), initial)]),
     }));
-    state.apply_persisted_commit_result(commit_result_for(&state));
+    state
+        .apply_persisted_commit_result(commit_result_for(&state))
+        .unwrap();
     assert!(state.plugin_state().is_none());
     assert!(
         values.upgrade().is_none(),
@@ -831,7 +844,9 @@ fn a_commit_carries_the_pending_suffix_and_its_receipt_makes_only_that_durable()
             crate::NoProgressBudget::bounded(12),
         ))
     };
-    state.append_active_conversation_messages(&[projection_text("a1"), projection_text("a2")]);
+    state
+        .append_active_conversation_messages(&[projection_text("a1"), projection_text("a2")])
+        .unwrap();
     let first = state.pending_graph_commit();
     let first_ids = ids(&first);
     assert_eq!(
@@ -845,7 +860,9 @@ fn a_commit_carries_the_pending_suffix_and_its_receipt_makes_only_that_durable()
         "a fresh graph's first commit carries every node: the frame and both messages"
     );
 
-    state.append_active_conversation_messages(&[projection_text("a3")]);
+    state
+        .append_active_conversation_messages(&[projection_text("a3")])
+        .unwrap();
     let in_flight = state.session_graph.leaf_node_id.clone().expect("a3's node");
     state.mark_node_ids_persisted(first_ids.clone());
     assert!(first_ids.iter().all(|id| state.is_node_persisted(id)));

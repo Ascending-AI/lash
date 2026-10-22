@@ -122,24 +122,30 @@ async fn turn_prelude_bytes_do_not_grow_with_history_depth() {
         let message = |ordinal: usize| Message {
             id: format!("message-{ordinal:04}"),
             role: MessageRole::User,
-            parts: Arc::new(vec![Part::text(
-                format!("part-{ordinal:04}"),
-                format!("history {ordinal:04}: {}", "old transcript ".repeat(40)),
-                None,
-            )]),
+            parts: Arc::new(
+                (vec![Part::text(
+                    format!("part-{ordinal:04}"),
+                    format!("history {ordinal:04}: {}", "old transcript ".repeat(40)),
+                    None,
+                )])
+                .into(),
+            ),
             origin: None,
             reply_marker: None,
         };
-        state.ensure_agent_frame_initialized();
+        state.ensure_agent_frame_initialized().unwrap();
         for ordinal in 0..depth {
-            state.session_graph.append_message(message(ordinal));
+            state
+                .session_graph
+                .append_message(message(ordinal))
+                .unwrap();
         }
         let commit = RuntimeCommit::persisted_state_for_test(&state);
         let receipt = store
             .commit_runtime_state(commit)
             .await
             .expect("commit history");
-        state.apply_persisted_commit_result(receipt);
+        state.apply_persisted_commit_result(receipt).unwrap();
         let session_store = lash_core_store::store::SessionStore::new(store.clone(), session_id)
             .expect("session store");
         let loaded = lash_core_store::store::load_session_window_state(
@@ -155,11 +161,14 @@ async fn turn_prelude_bytes_do_not_grow_with_history_depth() {
         messages.push(message(9999));
         let history = MessageSequence::from(messages);
         let mut prompt = history.clone();
-        prompt.make_mut()[0].parts = Arc::new(vec![Part::text(
-            "omitted".into(),
-            "recorded prompt omission".into(),
-            None,
-        )]);
+        prompt.make_mut().unwrap()[0].parts = Arc::new(
+            (vec![Part::text(
+                "omitted".into(),
+                "recorded prompt omission".into(),
+                None,
+            )])
+            .into(),
+        );
         let scope = ExecutionScope::turn("prelude-history", "prelude-turn");
         let mut prelude = TurnPrelude::new(
             EffectAddress::new(scope.clone(), "turn-config").expect("address"),
@@ -184,7 +193,7 @@ async fn turn_prelude_bytes_do_not_grow_with_history_depth() {
             .expect("stored prelude");
         // Move the live head after recording. Restore must use the named
         // prefix, through a newly opened store handle, rather than Current.
-        state.session_graph.append_message(message(8888));
+        state.session_graph.append_message(message(8888)).unwrap();
         state.turn_index += 1;
         let later = RuntimeCommit::persisted_state_for_test(&state);
         store

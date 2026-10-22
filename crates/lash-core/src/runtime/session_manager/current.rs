@@ -9,10 +9,15 @@ impl CurrentOwnerCapability {
     pub(in crate::runtime::session_manager) async fn resident_state_by_id(
         &self,
         session_id: &SessionId,
-    ) -> Option<RuntimeSessionState> {
+    ) -> Result<Option<RuntimeSessionState>, lash_execution_contracts::plugin_error::PluginError>
+    {
         self.session()
             .filter(|session| session.session_id == *session_id)
             .map(|session| session.snapshot.to_runtime_state())
+            .transpose()
+            .map_err(|error| {
+                lash_execution_contracts::plugin_error::PluginError::Runtime(error.runtime_error())
+            })
     }
 
     /// The current session named `session_id`, or an unknown-session error.
@@ -38,6 +43,9 @@ impl CurrentOwnerCapability {
             .known_session(session_id)?
             .snapshot
             .to_runtime_state()
+            .map_err(|error| {
+                lash_execution_contracts::plugin_error::PluginError::Runtime(error.runtime_error())
+            })?
             .turn_scope(turn_id))
     }
 
@@ -49,7 +57,7 @@ impl CurrentOwnerCapability {
         &self,
         session_id: &SessionId,
     ) -> Result<SessionSnapshot, lash_execution_contracts::plugin_error::PluginError> {
-        if let Some(state) = self.resident_state_by_id(session_id).await {
+        if let Some(state) = self.resident_state_by_id(session_id).await? {
             return Ok(state.to_snapshot());
         }
         let unknown = || {
@@ -103,7 +111,13 @@ impl CurrentOwnerCapability {
         &self,
     ) -> Result<SessionSnapshot, lash_execution_contracts::plugin_error::PluginError> {
         let session = self.require_session("snapshot_current")?;
-        Ok(session.snapshot.to_runtime_state().to_snapshot())
+        Ok(session
+            .snapshot
+            .to_runtime_state()
+            .map_err(|error| {
+                lash_execution_contracts::plugin_error::PluginError::Runtime(error.runtime_error())
+            })?
+            .to_snapshot())
     }
 
     pub(in crate::runtime::session_manager) async fn snapshot_session(

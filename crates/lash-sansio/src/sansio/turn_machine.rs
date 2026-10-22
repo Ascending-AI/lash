@@ -6,19 +6,31 @@ use lash_protocol_types::{llm::types::StreamBlockEvent, llm::types::StreamBlockK
 
 impl<M: TurnProtocol> TurnMachine<M> {
     /// Restore only the Prompt View retained by the environment prelude.
-    pub fn adopt_prepared_messages(&mut self, messages: lash_protocol_types::MessageSequence) {
-        let messages = self.rebased(messages);
+    pub fn adopt_prepared_messages(
+        &mut self,
+        messages: lash_protocol_types::MessageSequence,
+    ) -> Result<(), lash_protocol_types::allocation::AllocationError> {
+        let messages = self
+            .rebased(messages)?
+            .clone_in(&self.config.allocation_budget)?;
         let agreed = self.agreed_prefix(&self.prompt_messages, &messages);
         self.content.rewrote(Sequence::Prompt, agreed);
         self.prompt_messages = messages;
+        Ok(())
     }
 
     /// Adopt the real inputs and outputs retained by a recorded sync.
-    pub fn adopt_committed_messages(&mut self, messages: lash_protocol_types::MessageSequence) {
-        let messages = self.rebased(messages);
+    pub fn adopt_committed_messages(
+        &mut self,
+        messages: lash_protocol_types::MessageSequence,
+    ) -> Result<(), lash_protocol_types::allocation::AllocationError> {
+        let messages = self
+            .rebased(messages)?
+            .clone_in(&self.config.allocation_budget)?;
         let agreed = self.agreed_prefix(&self.messages, &messages);
         self.content.rewrote(Sequence::Messages, agreed);
         self.messages = messages;
+        Ok(())
     }
 
     /// `messages` over the machine's window: the messages it shares with
@@ -27,19 +39,22 @@ impl<M: TurnProtocol> TurnMachine<M> {
     fn rebased(
         &self,
         messages: lash_protocol_types::MessageSequence,
-    ) -> lash_protocol_types::MessageSequence {
+    ) -> Result<
+        lash_protocol_types::MessageSequence,
+        lash_protocol_types::allocation::AllocationError,
+    > {
         let Some(window) = &self.window else {
-            return messages;
+            return Ok(messages);
         };
         // A restored sequence can share the window's base without its
         // live render cache. Reattach it even when no message rebasing is
         // needed, so projection renders only the turn's delta (FIG-6441).
         if messages.has_base(window.messages()) {
-            return messages.with_base_render_cache(window.render_cache());
+            return Ok(messages.with_base_render_cache(window.render_cache()));
         }
         let shared = window.shared_messages(&messages);
         if shared == 0 {
-            return messages;
+            return Ok(messages);
         }
         window.messages_then(shared, messages.iter().skip(shared).cloned().collect())
     }
@@ -131,17 +146,17 @@ impl<M: TurnProtocol> TurnMachine<M> {
         messages: MessageSequence,
         turn_events: Vec<SessionHistoryRecord<M::Event>>,
         protocol_run_offset: usize,
-    ) -> Self {
+    ) -> Result<Self, lash_protocol_types::allocation::AllocationError> {
         // The resident graph the turn's input was appended to wrote the
         // same records past the window into the shared buffer: adopting
         // them keeps the window's history uncopied (FIG-6889).
         let mut events = window.events().clone();
         for event in turn_events {
-            events.push_adopting(event, lash_protocol_types::same_history_record);
+            events.push_adopting(event, lash_protocol_types::same_history_record)?;
         }
         let mut machine = Self::new_shared(config, messages, events, protocol_run_offset);
         machine.window = Some(window);
-        machine
+        Ok(machine)
     }
 
     /// Start this machine at `work` instead of at the driver's first step
@@ -586,7 +601,9 @@ impl<M: TurnProtocol> TurnMachine<M> {
             .unwrap_or_default();
         let (turn_events, stored_events) = content.sequence(&checkpoint.events)?;
         for event in turn_events {
-            events.push(event);
+            events
+                .push(event)
+                .map_err(TurnCheckpointRestoreError::Allocation)?;
         }
         let (decided_completions, stored_completions) =
             content.sequence(&checkpoint.decided_completions)?;
@@ -766,7 +783,7 @@ impl<M: TurnProtocol> TurnMachine<M> {
     pub fn finish_cancelled(&mut self, evidence: lash_protocol_types::TurnCancellationEvidence) {
         let safe = lash_protocol_types::session_model::prompt_resume_safe_len(self.messages.iter());
         if safe < self.messages.len() {
-            self.messages.make_mut().truncate(safe);
+            self.messages.truncate(safe);
             self.events.truncate(self.progress_event_cursor);
             self.content.rewrote(Sequence::Messages, safe);
             self.content
@@ -830,8 +847,21 @@ impl<M: TurnProtocol> TurnMachine<M> {
     pub fn set_allocation_budget(
         &mut self,
         budget: lash_protocol_types::allocation::AllocationBudget,
-    ) {
+    ) -> Result<(), lash_protocol_types::allocation::AllocationError> {
+        let same = lash_protocol_types::AppendVec::ptr_eq(
+            &self.messages.shared(),
+            &self.prompt_messages.shared(),
+        );
+        let messages = self.messages.clone_in(&budget)?;
+        let prompt = if same {
+            messages.clone()
+        } else {
+            self.prompt_messages.clone_in(&budget)?
+        };
+        self.messages = messages;
+        self.prompt_messages = prompt;
         self.config.allocation_budget = budget;
+        Ok(())
     }
     pub fn try_poll_effect(
         &mut self,
@@ -932,19 +962,27 @@ impl<M: TurnProtocol> TurnMachine<M> {
         };
     }
 
-    pub(super) fn append_event(&mut self, event: SessionHistoryRecord<M::Event>) {
+    pub(super) fn append_event(
+        &mut self,
+        event: SessionHistoryRecord<M::Event>,
+    ) -> Result<(), lash_protocol_types::allocation::AllocationError> {
+        let mut events = self.events.clone();
+        let mut prompt = self.prompt_messages.clone();
+        let mut messages = self.messages.clone();
         match event {
             SessionHistoryRecord::Conversation(record) => {
-                self.events
-                    .push(SessionHistoryRecord::Conversation(record.clone()));
-                self.prompt_messages.push(record.to_message());
-                self.messages.push(record.to_message());
+                prompt.push(record.to_message())?;
+                messages.push(record.to_message())?;
+                events.push(SessionHistoryRecord::Conversation(record))?;
             }
-            SessionHistoryRecord::Protocol(protocol_event) => {
-                self.events
-                    .push(SessionHistoryRecord::Protocol(protocol_event));
+            SessionHistoryRecord::Protocol(event) => {
+                events.push(SessionHistoryRecord::Protocol(event))?
             }
         }
+        self.events = events;
+        self.prompt_messages = prompt;
+        self.messages = messages;
+        Ok(())
     }
 
     pub fn apply_actions(&mut self, actions: Vec<DriverAction<M>>) {
@@ -959,7 +997,10 @@ impl<M: TurnProtocol> TurnMachine<M> {
                 DriverAction::AppendEvents(events) => {
                     if !events.is_empty() {
                         for event in events {
-                            self.append_event(event);
+                            if let Err(error) = self.append_event(event) {
+                                self.projection_refusal = Some(error.into());
+                                return;
+                            }
                         }
                         progress_dirty = true;
                     }
@@ -1126,16 +1167,27 @@ impl<M: TurnProtocol> TurnMachine<M> {
                 // The notice is the turn's own output: it is recorded with
                 // the turn's events, so a reload reads it as the model did.
                 for message in superseded {
-                    self.append_event(SessionHistoryRecord::Conversation(
+                    if let Err(error) = self.append_event(SessionHistoryRecord::Conversation(
                         lash_protocol_types::session_model::ConversationRecord::from_message(
                             message,
                         ),
-                    ));
+                    )) {
+                        self.projection_refusal = Some(error.into());
+                        return;
+                    }
                 }
             }
-            self.prompt_messages
-                .extend(delivery.committed_user_messages.clone());
-            self.messages.extend(delivery.committed_user_messages);
+            let mut prompt = self.prompt_messages.clone();
+            let mut messages = self.messages.clone();
+            if let Err(error) = prompt
+                .extend(delivery.committed_user_messages.clone())
+                .and_then(|()| messages.extend(delivery.committed_user_messages))
+            {
+                self.projection_refusal = Some(error.into());
+                return;
+            }
+            self.prompt_messages = prompt;
+            self.messages = messages;
             if matches!(checkpoint, CheckpointKind::BeforeCompletion) {
                 self.protocol_iteration += 1;
                 if self

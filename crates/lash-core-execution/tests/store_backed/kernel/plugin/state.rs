@@ -84,7 +84,7 @@ mod tests {
         )
         .await
         .unwrap();
-        state.apply_persisted_commit_result(receipt);
+        state.apply_persisted_commit_result(receipt).unwrap();
         let loaded = load_state(&store, "capture-race").await;
         assert_eq!(
             loaded.plugin_state().unwrap().plugins["mock"].values["value"],
@@ -105,7 +105,7 @@ mod tests {
         )
         .await
         .unwrap();
-        state.apply_persisted_commit_result(receipt);
+        state.apply_persisted_commit_result(receipt).unwrap();
         let loaded = load_state(&store, "capture-race").await;
         assert_eq!(
             loaded.plugin_state().unwrap().plugins["mock"].values["value"],

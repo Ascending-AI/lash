@@ -31,7 +31,9 @@ fn text_message(id: &str, role: MessageRole, content: &str) -> Message {
     Message {
         id: id.to_string(),
         role,
-        parts: vec![Part::text(format!("{id}.p0"), content.to_string(), None)].into(),
+        parts: std::sync::Arc::new(
+            (vec![Part::text(format!("{id}.p0"), content.to_string(), None)]).into(),
+        ),
         origin: None,
         reply_marker: None,
     }
@@ -68,14 +70,16 @@ async fn embedded_runtime_builder_loads_state_from_store() {
             lash_core::NoProgressBudget::bounded(12),
         ))
     };
-    state.ensure_agent_frame_initialized();
+    state.ensure_agent_frame_initialized().unwrap();
     let store = lash_execution_contracts::deployment::admit_session_view(
         &catalog,
         &lash_core::testing::store_fixtures::root_session_request(&state.session_id),
     )
     .await
     .expect("admit the session");
-    state.append_active_read_delta(&[text_message("u0", MessageRole::User, "stored question")]);
+    state
+        .append_active_read_delta(&[text_message("u0", MessageRole::User, "stored question")])
+        .unwrap();
     store
         .commit_runtime_state(RuntimeCommit::persisted_state_for_test(&state))
         .await

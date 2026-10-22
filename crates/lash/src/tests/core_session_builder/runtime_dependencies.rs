@@ -121,7 +121,7 @@ async fn fork_distinguishes_collected_revision_from_unknown_and_deleted_sources(
             crate::NoProgressBudget::bounded(12),
         ))
     };
-    source_state.ensure_agent_frame_initialized();
+    source_state.ensure_agent_frame_initialized().unwrap();
     let retained_revision = source
         .commit_runtime_state(lash_core::RuntimeCommit::persisted_state_for_test(
             &source_state,
@@ -277,7 +277,7 @@ async fn fork_observer_selection_is_recoverable_and_selective() -> Result<()> {
             crate::NoProgressBudget::bounded(12),
         ))
     };
-    source_state.ensure_agent_frame_initialized();
+    source_state.ensure_agent_frame_initialized().unwrap();
     let fork_revision = source_store
         .commit_runtime_state(lash_core::RuntimeCommit::persisted_state_for_test(
             &source_state,
@@ -683,7 +683,7 @@ async fn duplicate_only_fork_intents_are_canonical(
             crate::NoProgressBudget::bounded(12),
         ))
     };
-    source_state.ensure_agent_frame_initialized();
+    source_state.ensure_agent_frame_initialized().unwrap();
     let fork_revision = source_store
         .commit_runtime_state(lash_core::RuntimeCommit::persisted_state_for_test(
             &source_state,
@@ -1073,7 +1073,7 @@ async fn a_fork_runs_under_its_branch_points_generation_not_what_the_host_passes
             crate::NoProgressBudget::bounded(12),
         ))
     };
-    source_state.ensure_agent_frame_initialized();
+    source_state.ensure_agent_frame_initialized().unwrap();
     let fork_revision = source_store
         .commit_runtime_state(lash_core::RuntimeCommit::persisted_state_for_test(
             &source_state,

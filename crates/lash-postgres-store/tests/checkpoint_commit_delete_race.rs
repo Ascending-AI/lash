@@ -78,7 +78,9 @@ async fn commit_waits_for_delete(branch: ReuseBranch) {
                 .session_policy(),
         )
     };
-    victim_state.ensure_agent_frame_initialized();
+    victim_state
+        .ensure_agent_frame_initialized()
+        .expect("source fixture edit is admitted");
     let mut victim_commit = RuntimeCommit::persisted_state_for_test(&victim_state);
     victim_commit.checkpoint.components.insert(
         "law/commit-delete-shared".to_string(),
@@ -102,7 +104,9 @@ async fn commit_waits_for_delete(branch: ReuseBranch) {
                 .session_policy(),
         )
     };
-    target_state.ensure_agent_frame_initialized();
+    target_state
+        .ensure_agent_frame_initialized()
+        .expect("source fixture edit is admitted");
     let mut target_commit = RuntimeCommit::persisted_state_for_test(&target_state);
     target_commit.checkpoint.components.insert(
         "law/commit-delete-shared".to_string(),

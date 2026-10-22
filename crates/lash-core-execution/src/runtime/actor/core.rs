@@ -610,6 +610,7 @@ impl ActorContext {
                 actual: checked.revision(),
             });
         }
+        projection.allocations.acknowledged();
         *self.inner.session_projection.lock().await = Some(super::owner_state::OwnerState::loaded(
             self.actor().clone(),
             self.epoch(),
@@ -696,13 +697,23 @@ impl ActorContext {
                 };
                 let store = lash_core_store::store::SessionStore::new(runtime, id.clone())
                     .map_err(failed)?;
+                let (allocation_budget, allocations) =
+                    super::owner_allocation::OwnerAllocation::budget(
+                        self.owner_memory().cloned().ok_or_else(|| {
+                            failed(lash_core_store::store::StoreError::Backend(
+                                "missing owner ledger".into(),
+                            ))
+                        })?,
+                        self.actor().to_string(),
+                    );
                 let (mut loaded, turn) =
                     lash_core_ids::operational_metrics::sql::classify_owner_reads(
                         lash_core_ids::operational_metrics::sql::OwnerReadClass::Recovery,
                         async {
-                            let loaded = lash_core_store::store::load_session_window_state(
+                            let loaded = lash_core_store::store::load_session_window_state_in(
                                 &store,
                                 lash_core_store::store::WindowSelector::Current,
+                                &allocation_budget,
                             )
                             .await
                             .map_err(failed)?
@@ -720,15 +731,7 @@ impl ActorContext {
                     )
                     .await?;
                 loaded.state.session_graph.detach_owner_prompt_rendering();
-                let (allocation_budget, allocations) =
-                    super::owner_allocation::OwnerAllocation::budget(
-                        self.owner_memory().cloned().ok_or_else(|| {
-                            failed(lash_core_store::store::StoreError::Backend(
-                                "missing owner ledger".into(),
-                            ))
-                        })?,
-                        self.actor().to_string(),
-                    );
+                allocations.acknowledged();
                 *owner = super::owner_state::OwnerState::loaded(
                     self.actor().clone(),
                     self.epoch(),

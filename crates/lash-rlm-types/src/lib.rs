@@ -854,6 +854,30 @@ mod projected_seed_tests {
 #[derive(Clone, Debug)]
 pub struct RlmTurnProtocol;
 
+impl lash_protocol_types::allocation::SourceCapacity for RlmProtocolEvent {
+    fn owned_capacity(&self) -> u64 {
+        let map = |values: &serde_json::Map<String, serde_json::Value>| values.owned_capacity();
+        match self {
+            Self::RlmTrajectoryEntry(_) => 0,
+            Self::RlmDiagnostic(event) => event.payload.owned_capacity(),
+            Self::RlmGlobalsPatch(body) => map(&body.set_default),
+            Self::RlmSeed(body) => body.projected.entries.iter().fold(
+                map(&body.globals).saturating_add(
+                    (body.projected.entries.capacity()
+                        * std::mem::size_of::<(String, CodeModeProjectedSeedEntry)>())
+                        as u64,
+                ),
+                |bytes, (name, entry)| {
+                    let CodeModeProjectedSeedEntry::Materialized(value) = entry;
+                    bytes
+                        .saturating_add(name.capacity() as u64)
+                        .saturating_add(value.owned_capacity())
+                },
+            ),
+        }
+    }
+}
+
 impl TurnProtocol for RlmTurnProtocol {
     type IntentOutcome = ();
     type Event = RlmProtocolEvent;

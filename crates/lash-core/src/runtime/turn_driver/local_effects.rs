@@ -241,7 +241,7 @@ pub(super) fn turn_effect_executor(
     event_tx: TurnObserver,
     scoped_effect_controller: ActorContext,
     body_replay_key: &str,
-) -> crate::RuntimeEffectLocalExecutor<'static> {
+) -> Result<crate::RuntimeEffectLocalExecutor<'static>, RuntimeError> {
     let replay_trace = crate::runtime::effect::RuntimeEffectReplayTrace::for_divergence(
         &driver.host.core.tracing,
         driver.trace.scope().cloned(),
@@ -278,6 +278,7 @@ pub(super) fn turn_effect_executor(
             driver.turn_pipeline.state().turn_scope(&driver.turn_id),
             driver.host.core.durability.commit_budget,
         )
+        .map_err(|error| error.runtime_error())?
         .with_output_cuts(driver.host.core.control.output_cuts)
         .with_definition_engines(driver.host.core.process_engines.clone())
         .with_metrics(driver.host.core.tracing.metrics().clone())
@@ -314,7 +315,7 @@ pub(super) fn turn_effect_executor(
         run_config: driver.run_config.clone(),
         surface_installed: driver.surface_installed,
     };
-    lash_core_execution::core_internal::owned_runner_executor(
+    Ok(lash_core_execution::core_internal::owned_runner_executor(
         Box::new(LocalTurnEffectRunner {
             driver: owned_driver,
             protocol_iteration: machine.protocol_iteration(),
@@ -326,7 +327,7 @@ pub(super) fn turn_effect_executor(
             event_tx,
         }),
         replay_trace,
-    )
+    ))
 }
 
 #[cfg(test)]

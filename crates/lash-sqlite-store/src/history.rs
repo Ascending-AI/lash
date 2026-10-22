@@ -313,30 +313,65 @@ fn window_nodes(
     conn: &Connection,
     session: &SessionId,
     frame: &Header,
-    from: i64,
-    to: i64,
+    generations: std::ops::RangeInclusive<i64>,
     fleet: lash_core_store::store::FleetFormat,
     decoded: &AtomicU64,
-) -> Result<(Vec<lash_core_store::session_graph::SessionNodeRecord>, u64), StoreError> {
+    budget: &lash_protocol_types::allocation::AllocationBudget,
+) -> Result<
+    (
+        Vec<lash_core_store::session_graph::SessionNodeRecord>,
+        u64,
+        lash_protocol_types::allocation::AllocationHold,
+    ),
+    StoreError,
+> {
+    let (from, to) = (*generations.start(), *generations.end());
     let mut stmt = conn
         .prepare_cached(session_sql::session_sql().graph_sqlite.window_rows.sql())
         .map_err(sqlite_error)?;
-    let rows = stmt
-        .query_map(params![session.as_str(), from, to], |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, Option<String>>(1)?,
-                row.get::<_, String>(2)?,
-                row.get::<_, i64>(3)?,
-                row.get::<_, String>(4)?,
-                row.get::<_, i64>(5)?,
-            ))
-        })
+    let count = to
+        .checked_sub(from)
+        .and_then(|distance| distance.checked_add(1))
+        .and_then(|count| usize::try_from(count).ok())
+        .ok_or_else(|| corrupt("SessionGraph", "window generation range overflows"))?;
+    let slots = budget.reserve(
+        (count.max(4) as u64)
+            .saturating_mul(
+                2 * std::mem::size_of::<lash_core_store::session_graph::SessionNodeRecord>() as u64,
+            )
+            .saturating_add(128),
+    )?;
+    let mut rows = stmt
+        .query(params![session.as_str(), from, to])
         .map_err(sqlite_error)?;
     let mut nodes = Vec::new();
     let mut total = 0;
-    for row in rows {
-        let (id, parent, body, generation, pointer, bytes) = row.map_err(sqlite_error)?;
+    while let Some(row) = rows.next().map_err(sqlite_error)? {
+        let id = row
+            .get_ref(0)
+            .map_err(sqlite_error)?
+            .as_str()
+            .map_err(|error| corrupt("SessionGraph", error.to_string()))?;
+        let parent = match row.get_ref(1).map_err(sqlite_error)? {
+            rusqlite::types::ValueRef::Null => None,
+            value => Some(
+                value
+                    .as_str()
+                    .map_err(|error| corrupt("SessionGraph", error.to_string()))?,
+            ),
+        };
+        let body = row
+            .get_ref(2)
+            .map_err(sqlite_error)?
+            .as_str()
+            .map_err(|error| corrupt("SessionGraph", error.to_string()))?;
+        let generation: i64 = row.get(3).map_err(sqlite_error)?;
+        let pointer = row
+            .get_ref(4)
+            .map_err(sqlite_error)?
+            .as_str()
+            .map_err(|error| corrupt("SessionGraph", error.to_string()))?;
+        let bytes: i64 = row.get(5).map_err(sqlite_error)?;
         if generation != from + i64::try_from(nodes.len()).unwrap_or(i64::MAX) {
             return Err(corrupt("SessionGraph", format!("generation gap at `{id}`")));
         }
@@ -354,15 +389,14 @@ fn window_nodes(
             ));
         }
         nodes.push(
-            lash_core_store::session_graph::SessionNodeRecord::decode_storage_body_for_fleet(
-                id, parent, &body, fleet,
-            )
-            .map_err(|error| corrupt("SessionGraph node", error.to_string()))?,
+            lash_core_store::session_graph::SessionNodeRecord::decode_storage_body_in(
+                id, parent, body, fleet, budget,
+            )?,
         );
         decoded.fetch_add(1, Ordering::Relaxed);
         total += bytes;
     }
-    Ok((nodes, total))
+    Ok((nodes, total, slots))
 }
 
 /// The graph of `frame`'s window up to `last`, the leaf. A window this store
@@ -372,12 +406,13 @@ fn window_nodes(
 fn window_graph(
     conn: &Connection,
     session: &SessionId,
-    frame: &Header,
-    last: &Header,
+    frame_and_leaf: (&Header, &Header),
     fleet: lash_core_store::store::FleetFormat,
     decoded: &AtomicU64,
     windows: &WindowCacheRead,
+    budget: &lash_protocol_types::allocation::AllocationBudget,
 ) -> Result<lash_core_store::session_graph::SessionGraph, StoreError> {
+    let (frame, last) = frame_and_leaf;
     let leaf: lash_protocol_types::NodeId = last.id.clone().try_into()?;
     let leaf_generation = nonnegative("SessionGraph", "generation", last.generation)?;
     let read_under = WindowFrame {
@@ -385,7 +420,7 @@ fn window_graph(
         generation: nonnegative("SessionGraph", "generation", frame.generation)?,
         external_parent: frame.parent.as_deref(),
     };
-    match windows.reuse(session, read_under, &leaf, leaf_generation)? {
+    match windows.reuse_in(session, read_under, &leaf, leaf_generation, budget)? {
         WindowReuse::Whole(graph) => return Ok(graph),
         WindowReuse::Extend {
             window,
@@ -393,23 +428,29 @@ fn window_graph(
             bytes,
         } => {
             let from = i64::try_from(from_generation).unwrap_or(i64::MAX);
-            if let Ok((nodes, added)) =
-                window_nodes(conn, session, frame, from, last.generation, fleet, decoded)
-                && let Some(graph) = window.extend_window(nodes, &leaf)
-            {
+            let (nodes, added, _slots) = window_nodes(
+                conn,
+                session,
+                frame,
+                from..=last.generation,
+                fleet,
+                decoded,
+                budget,
+            )?;
+            if let Some(graph) = window.extend_window(nodes, &leaf)? {
                 return Ok(windows.remember(session, &graph, leaf_generation, bytes + added));
             }
         }
         WindowReuse::Miss => {}
     }
-    let (nodes, bytes) = window_nodes(
+    let (nodes, bytes, _slots) = window_nodes(
         conn,
         session,
         frame,
-        frame.generation,
-        last.generation,
+        frame.generation..=last.generation,
         fleet,
         decoded,
+        budget,
     )?;
     let previous = match frame.parent.as_deref() {
         Some(parent) => {
@@ -430,7 +471,8 @@ fn window_graph(
         external_parent: frame.parent.clone().map(TryInto::try_into).transpose()?,
         previous_frame_node_id: previous,
     };
-    let graph = lash_core_store::session_graph::SessionGraph::from_window(nodes, leaf, anchor)?;
+    let graph =
+        lash_core_store::session_graph::SessionGraph::from_window_in(nodes, leaf, anchor, budget)?;
     Ok(windows.remember(session, &graph, leaf_generation, bytes))
 }
 
@@ -439,6 +481,7 @@ struct WindowReadContext {
     windows: WindowCacheRead,
     configs: Arc<lash_core_store::store_backend_support::ConfigCache>,
     chunk_size: usize,
+    budget: lash_protocol_types::allocation::AllocationBudget,
 }
 
 fn window(
@@ -453,6 +496,7 @@ fn window(
         windows,
         configs,
         chunk_size,
+        budget,
     } = read;
     let chunk_size = *chunk_size;
     let run = match &selector {
@@ -536,7 +580,15 @@ fn window(
         if frame.generation < 0 || frame.generation > last.generation {
             return Err(corrupt("SessionGraph", "frame generation exceeds leaf"));
         }
-        let graph = window_graph(conn, session, &frame, &last, fleet, decoded, windows)?;
+        let graph = window_graph(
+            conn,
+            session,
+            (&frame, &last),
+            fleet,
+            decoded,
+            windows,
+            budget,
+        )?;
         if meta.current_frame_node_id.as_ref().map(|id| id.as_str()) != Some(frame.id.as_str()) {
             config = graph
                 .nodes
@@ -567,6 +619,20 @@ impl SessionHistoryStore for SqliteStore {
         session_id: &SessionId,
         selector: WindowSelector,
     ) -> Result<Option<SessionWindowRead>, StoreError> {
+        self.load_session_window_in(
+            session_id,
+            selector,
+            &lash_protocol_types::allocation::AllocationBudget::unowned(),
+        )
+        .await
+    }
+
+    async fn load_session_window_in(
+        &self,
+        session_id: &SessionId,
+        selector: WindowSelector,
+        budget: &lash_protocol_types::allocation::AllocationBudget,
+    ) -> Result<Option<SessionWindowRead>, StoreError> {
         lash_core_ids::operational_metrics::sql::owner_state_read(
             lash_core_ids::operational_metrics::sql::OwnerStateRead::Head,
         );
@@ -577,6 +643,7 @@ impl SessionHistoryStore for SqliteStore {
             windows: self.windows.read(),
             configs: Arc::clone(&self.configs),
             chunk_size: self.conn.operational.checkpoint_ref_chunk.get(),
+            budget: budget.clone(),
         };
         self.read_connection()
             .read(move |conn| Ok(window(conn, &session, selector, fleet, &read)))

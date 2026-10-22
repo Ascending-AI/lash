@@ -246,7 +246,7 @@ pub(crate) async fn run_once_durable_checkpoint_curve(
         let turn_started = Instant::now();
         let mut phase_profile = BTreeMap::new();
         for (point_index, fixture) in fixtures.iter_mut().enumerate() {
-            append_checkpoint_curve_graph(&mut fixture.runtime_state, fixture.point, sample);
+            append_checkpoint_curve_graph(&mut fixture.runtime_state, fixture.point, sample)?;
             let prefix = fixture.point.prefix();
             // Paired center points have identical shapes. Distinct edits
             // keep both observations independent of immutable page sharing.
@@ -501,7 +501,7 @@ fn append_checkpoint_curve_graph(
     state: &mut RuntimeSessionState,
     point: CheckpointCurvePoint,
     sample: usize,
-) {
+) -> anyhow::Result<()> {
     let adds_initial_frame = state.current_frame_node_id.is_none();
     let base_bytes = point.transcript_bytes / point.message_count;
     let remainder = point.transcript_bytes % point.message_count;
@@ -519,14 +519,15 @@ fn append_checkpoint_curve_graph(
             )
         })
         .collect::<Vec<_>>();
-    state.append_active_conversation_messages(&messages);
+    state.append_active_conversation_messages(&messages)?;
     let rows_already_appended = point.message_count + usize::from(adds_initial_frame);
     for index in rows_already_appended..point.graph_rows {
         state.session_graph.append_plugin(
             "checkpoint_curve",
             serde_json::json!({"sample": sample, "row": index}),
-        );
+        )?;
     }
+    Ok(())
 }
 
 #[expect(

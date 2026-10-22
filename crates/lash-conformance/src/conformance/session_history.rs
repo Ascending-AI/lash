@@ -67,22 +67,27 @@ async fn commit_with_evidence(
         .commit_runtime_state(commit)
         .await
         .expect("commit history state");
-    state.apply_persisted_commit_result(receipt);
+    state
+        .apply_persisted_commit_result(receipt)
+        .expect("source fixture edit is admitted");
     state.mark_node_ids_persisted(new_ids);
 }
 
 fn open_frame(state: &mut RuntimeSessionState, name: &str) -> FrameNodeId {
     let key = FrameKey::from_caller_material(name).expect("frame key");
     let frame = crate::session_graph::frame_node_id(&state.session_id, key.as_str());
-    let opened = state.session_graph.append_frame_open_with_id_at(
-        frame.clone(),
-        key,
-        AgentFrameReason::new("history-conformance"),
-        AgentFrameAssignment::unconfigured(state.policy.clone()),
-        "2026-09-29T00:00:00.000000000Z"
-            .parse()
-            .expect("canonical node timestamp"),
-    );
+    let opened = state
+        .session_graph
+        .append_frame_open_with_id_at(
+            frame.clone(),
+            key,
+            AgentFrameReason::new("history-conformance"),
+            AgentFrameAssignment::unconfigured(state.policy.clone()),
+            "2026-09-29T00:00:00.000000000Z"
+                .parse()
+                .expect("canonical node timestamp"),
+        )
+        .expect("source fixture edit is admitted");
     assert!(opened, "fixture frame must have a fresh identity");
     state.current_frame_node_id = Some(frame.clone());
     state.agent_frames = state.session_graph.agent_frame_records(&state.session_id);
@@ -92,10 +97,13 @@ fn open_frame(state: &mut RuntimeSessionState, name: &str) -> FrameNodeId {
 fn append_nodes(state: &mut RuntimeSessionState, count: usize) -> Vec<NodeId> {
     (0..count)
         .map(|ordinal| {
-            state.session_graph.append_plugin(
-                "history-conformance",
-                serde_json::json!({"ordinal": ordinal, "revision": state.head_revision}),
-            )
+            state
+                .session_graph
+                .append_plugin(
+                    "history-conformance",
+                    serde_json::json!({"ordinal": ordinal, "revision": state.head_revision}),
+                )
+                .expect("source fixture edit is admitted")
         })
         .collect()
 }
@@ -128,7 +136,9 @@ async fn seed_window_fixture(
 ) -> (RuntimeSessionState, FrameNodeId) {
     let mut state = state(&format!("history-window-bounded-{extra_earlier_nodes}"));
     admit(store, &state.session_id).await;
-    state.ensure_agent_frame_initialized();
+    state
+        .ensure_agent_frame_initialized()
+        .expect("source fixture edit is admitted");
     append_nodes(&mut state, 40);
     commit(store, &mut state).await;
     let mut remaining = extra_earlier_nodes;
@@ -220,7 +230,9 @@ pub async fn history_window_reads_only_appended_rows(store: Arc<dyn ConformanceD
     let store = store.as_ref();
     let mut state = state("history-window-appended-rows");
     admit(store, &state.session_id).await;
-    state.ensure_agent_frame_initialized();
+    state
+        .ensure_agent_frame_initialized()
+        .expect("source fixture edit is admitted");
     append_nodes(&mut state, 40);
     commit(store, &mut state).await;
     let (first, decoded) = decoded_window(store, &state.session_id).await;
@@ -251,7 +263,9 @@ pub async fn history_window_reads_only_appended_rows(store: Arc<dyn ConformanceD
 pub async fn history_pages_are_bounded_and_pinned(store: Arc<dyn ConformanceDeployment>) {
     let mut state = state("history-pages");
     admit(store.as_ref(), &state.session_id).await;
-    state.ensure_agent_frame_initialized();
+    state
+        .ensure_agent_frame_initialized()
+        .expect("source fixture edit is admitted");
     append_nodes(&mut state, 5);
     commit(store.as_ref(), &mut state).await;
     let initial_frame = state
@@ -401,7 +415,9 @@ where
         let store = make(case).await;
         let mut state = state(&format!("history-corrupt-{case}"));
         admit(store.as_ref(), &state.session_id).await;
-        state.ensure_agent_frame_initialized();
+        state
+            .ensure_agent_frame_initialized()
+            .expect("source fixture edit is admitted");
         append_nodes(&mut state, 3);
         commit(store.as_ref(), &mut state).await;
         let ids = active_tail(&state, 3);
@@ -480,7 +496,9 @@ where
 pub async fn history_fork_respects_ceiling(store: Arc<dyn ConformanceDeployment>) {
     let mut source = state("history-fork-source");
     admit(store.as_ref(), &source.session_id).await;
-    source.ensure_agent_frame_initialized();
+    source
+        .ensure_agent_frame_initialized()
+        .expect("source fixture edit is admitted");
     append_nodes(&mut source, 2);
     commit(store.as_ref(), &mut source).await;
     let frame = open_frame(&mut source, "history-fork-middle");
@@ -631,7 +649,9 @@ pub async fn inflated_fork_ceiling_cannot_expose_post_fork_source_nodes(
 ) {
     let mut source = state("inflated-ceiling-source");
     admit(store.as_ref(), &source.session_id).await;
-    source.ensure_agent_frame_initialized();
+    source
+        .ensure_agent_frame_initialized()
+        .expect("source fixture edit is admitted");
     append_nodes(&mut source, 1);
     commit(store.as_ref(), &mut source).await;
     let [a0, a1] = <[NodeId; 2]>::try_from(active_tail(&source, 2)).expect("A0 and A1");
@@ -801,7 +821,9 @@ pub async fn history_selection_and_confirmation_share_one_snapshot(
     const COMMITS: u64 = 60;
     let mut state = state("history-one-snapshot");
     admit(store.as_ref(), &state.session_id).await;
-    state.ensure_agent_frame_initialized();
+    state
+        .ensure_agent_frame_initialized()
+        .expect("source fixture edit is admitted");
     commit(store.as_ref(), &mut state).await;
     let session_id = state.session_id.clone();
     let base = window(store.as_ref(), &session_id).await;
@@ -880,7 +902,9 @@ pub async fn graph_generation_overflow_rolls_back_every_write(
 ) {
     let mut state = state("history-generation-overflow");
     admit(store.as_ref(), &state.session_id).await;
-    state.ensure_agent_frame_initialized();
+    state
+        .ensure_agent_frame_initialized()
+        .expect("source fixture edit is admitted");
     append_nodes(&mut state, 1);
     commit(store.as_ref(), &mut state).await;
     let leaf = active_tail(&state, 1).remove(0);
@@ -1003,7 +1027,9 @@ pub async fn admitted_and_current_reads_of_a_head_give_one_read_model(
     let runtime: &dyn crate::store::RuntimeStore = store.as_ref();
     let mut source = state("prelude-window-source");
     admit(store.as_ref(), &source.session_id).await;
-    source.ensure_agent_frame_initialized();
+    source
+        .ensure_agent_frame_initialized()
+        .expect("source fixture edit is admitted");
     append_messages(&mut source, "source", 3);
     commit(store.as_ref(), &mut source).await;
     assert_one_read_model(store.as_ref(), &source.session_id, "a plain head").await;
@@ -1031,21 +1057,27 @@ pub async fn admitted_and_current_reads_of_a_head_give_one_read_model(
 /// Append `count` messages named after `name` to `state`'s active path.
 fn append_messages(state: &mut RuntimeSessionState, name: &str, count: usize) {
     for ordinal in 0..count {
-        state.session_graph.append_message(crate::Message {
-            id: format!("{name}-{ordinal}-{}", state.head_revision),
-            role: if ordinal % 2 == 0 {
-                crate::MessageRole::User
-            } else {
-                crate::MessageRole::Assistant
-            },
-            parts: Arc::new(vec![crate::Part::text(
-                format!("{name}-{ordinal}-{}.p0", state.head_revision),
-                format!("{name} message {ordinal}"),
-                None,
-            )]),
-            origin: None,
-            reply_marker: None,
-        });
+        state
+            .session_graph
+            .append_message(crate::Message {
+                id: format!("{name}-{ordinal}-{}", state.head_revision),
+                role: if ordinal % 2 == 0 {
+                    crate::MessageRole::User
+                } else {
+                    crate::MessageRole::Assistant
+                },
+                parts: Arc::new(
+                    (vec![crate::Part::text(
+                        format!("{name}-{ordinal}-{}.p0", state.head_revision),
+                        format!("{name} message {ordinal}"),
+                        None,
+                    )])
+                    .into(),
+                ),
+                origin: None,
+                reply_marker: None,
+            })
+            .expect("source fixture edit is admitted");
     }
 }
 

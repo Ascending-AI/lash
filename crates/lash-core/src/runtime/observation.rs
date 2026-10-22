@@ -770,13 +770,20 @@ mod tests {
         let frame_key = crate::FrameKey::from_caller_material(material).unwrap();
         let frame_node_id =
             crate::session_graph::frame_node_id(&state.session_id, frame_key.as_str());
-        assert!(state.session_graph.append_frame_open_with_id_at(
-            frame_node_id.clone(),
-            frame_key,
-            crate::AgentFrameReason::new("observation-test"),
-            crate::AgentFrameAssignment::unconfigured(state.policy.clone()),
-            <crate::SystemClock as crate::ClockWallTime>::node_timestamp(&crate::SystemClock,),
-        ));
+        assert!(
+            state
+                .session_graph
+                .append_frame_open_with_id_at(
+                    frame_node_id.clone(),
+                    frame_key,
+                    crate::AgentFrameReason::new("observation-test"),
+                    crate::AgentFrameAssignment::unconfigured(state.policy.clone()),
+                    <crate::SystemClock as crate::ClockWallTime>::node_timestamp(
+                        &crate::SystemClock,
+                    ),
+                )
+                .unwrap()
+        );
         state.refresh_current_frame_projection();
     }
 

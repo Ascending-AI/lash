@@ -47,7 +47,9 @@ fn text_message(id: &str, role: MessageRole, content: &str) -> Message {
     Message {
         id: id.to_string(),
         role,
-        parts: vec![Part::text(format!("{id}.p0"), content.to_string(), None)].into(),
+        parts: std::sync::Arc::new(
+            (vec![Part::text(format!("{id}.p0"), content.to_string(), None)]).into(),
+        ),
         origin: None,
         reply_marker: None,
     }
@@ -57,23 +59,25 @@ fn image_message(id: &str, role: MessageRole, bytes: &[u8]) -> Message {
     Message {
         id: id.to_string(),
         role,
-        parts: vec![Part::attachment_part(
-            format!("{id}.p0"),
-            String::new(),
-            Some(lash_core::session_model::message::PartAttachment {
-                reference: lash_core::AttachmentRef {
-                    id: lash_core::AttachmentId::parse(
-                        format!("{:02x}", id.bytes().fold(0u8, u8::wrapping_add)).repeat(32),
-                    )
-                    .expect("valid attachment id"),
-                    media_type: lash_core::MediaType::parse("image/png").unwrap(),
-                    byte_len: bytes.len() as u64,
-                    type_metadata: None,
-                    label: None,
-                },
-            }),
-        )]
-        .into(),
+        parts: std::sync::Arc::new(
+            (vec![Part::attachment_part(
+                format!("{id}.p0"),
+                String::new(),
+                Some(lash_core::session_model::message::PartAttachment {
+                    reference: lash_core::AttachmentRef {
+                        id: lash_core::AttachmentId::parse(
+                            format!("{:02x}", id.bytes().fold(0u8, u8::wrapping_add)).repeat(32),
+                        )
+                        .expect("valid attachment id"),
+                        media_type: lash_core::MediaType::parse("image/png").unwrap(),
+                        byte_len: bytes.len() as u64,
+                        type_metadata: None,
+                        label: None,
+                    },
+                }),
+            )])
+            .into(),
+        ),
         origin: None,
         reply_marker: None,
     }
@@ -452,7 +456,7 @@ fn standard_compaction_policy_at_compaction_pressure_only_omits_old_attachments(
     );
     let mut view = messages.clone();
     assert_eq!(
-        lash_core::plugin::apply_attachment_omissions(&mut view, &omissions),
+        lash_core::plugin::apply_attachment_omissions(&mut view, &omissions).unwrap(),
         1
     );
     assert_eq!(
@@ -714,18 +718,22 @@ fn snapshot_with_nodes(nodes: &[lash_core::SessionAppendNode]) -> SessionSnapsho
     for (ordinal, node) in nodes.iter().enumerate() {
         match node {
             lash_core::SessionAppendNode::Message { message } => {
-                state.session_graph.append_message(Message {
-                    id: format!("m-recovery-{ordinal}"),
-                    role: message.role,
-                    parts: message.parts.clone().into(),
-                    origin: message.origin.clone(),
-                    reply_marker: None,
-                });
+                state
+                    .session_graph
+                    .append_message(Message {
+                        id: format!("m-recovery-{ordinal}"),
+                        role: message.role,
+                        parts: std::sync::Arc::new((message.parts.clone()).into()),
+                        origin: message.origin.clone(),
+                        reply_marker: None,
+                    })
+                    .unwrap();
             }
             lash_core::SessionAppendNode::Plugin { plugin_type, body } => {
                 state
                     .session_graph
-                    .append_plugin(plugin_type.clone(), body.clone());
+                    .append_plugin(plugin_type.clone(), body.clone())
+                    .unwrap();
             }
             lash_core::SessionAppendNode::ProtocolEvent { .. } => {
                 panic!("fixture has no protocol events");
@@ -1184,17 +1192,16 @@ async fn pressure_retains_the_latest_physical_turn_with_its_tool_pair() {
     });
     let call_id = lash_core::ToolCallId::fixture("retained-call");
     let mut call = text_message("new-c", MessageRole::Assistant, "");
-    call.parts = vec![Part::tool_call(
+    call.parts = lash_protocol_types::shared_parts(vec![Part::tool_call(
         "c.p0".into(),
         "{}".into(),
         call_id.clone(),
         "wire-call".into(),
         "read_file".into(),
         None,
-    )]
-    .into();
+    )]);
     let mut result = text_message("new-r", MessageRole::User, "");
-    result.parts = vec![Part::tool_result(
+    result.parts = lash_protocol_types::shared_parts(vec![Part::tool_result(
         "r.p0".into(),
         vec![lash_protocol_types::ModelToolReturnPart::text(
             "tool result",
@@ -1202,8 +1209,7 @@ async fn pressure_retains_the_latest_physical_turn_with_its_tool_pair() {
         call_id,
         "read_file".into(),
         lash_protocol_types::ToolCallStatus::Success,
-    )]
-    .into();
+    )]);
     let assistant = text_message("new-a", MessageRole::Assistant, "new answer");
     let retained = vec![user, call, result, assistant];
     let mut history = vec![

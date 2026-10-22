@@ -29,6 +29,7 @@ impl<K, V> Pairs<K, V> {
     pub(super) fn len(&self) -> usize {
         usize::from(self.first.is_some()) + self.rest.len()
     }
+    #[cfg(test)]
     pub(super) fn is_empty(&self) -> bool {
         self.first.is_none() && self.rest.is_empty()
     }

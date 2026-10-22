@@ -11,13 +11,13 @@ fn first_commit_may_end_its_own_appended_frame_open() {
     let first = FrameNodeId::new("first-frame").expect("frame id");
     let successor = FrameNodeId::new("successor-frame").expect("frame id");
     let graph = lash_core_store::store::GraphAppend::Extend {
-        nodes: vec![lash_core_store::session_graph::SessionNodeRecord {
-            node_id: lash_core::NodeId::fixture(first.as_str().to_owned()),
-            parent_node_id: None,
-            timestamp: "2026-09-29T00:00:00.000000000Z"
+        nodes: vec![lash_core_store::session_graph::SessionNodeRecord::new(
+            lash_core::NodeId::fixture(first.as_str().to_owned()),
+            None,
+            "2026-09-29T00:00:00.000000000Z"
                 .parse()
                 .expect("canonical node timestamp"),
-            payload: lash_core_store::session_graph::SessionNodePayload::FrameOpen {
+            lash_core_store::session_graph::SessionNodePayload::FrameOpen {
                 frame_key: lash_protocol_types::FrameKey::from_caller_material("first-frame")
                     .expect("frame key"),
                 reason: lash_core_store::session_identity::AgentFrameReason::initial(),
@@ -29,7 +29,7 @@ fn first_commit_may_end_its_own_appended_frame_open() {
                     ),
                 ),
             },
-        }],
+        )],
     };
     let frames_left = |prior: Option<&FrameNodeId>, new_head: &FrameNodeId| {
         lash_core_store::store::frames_left_by_commit(prior, &graph, Some(new_head))
@@ -246,7 +246,9 @@ async fn committed_first_frame(
             ),
         )
     };
-    state.ensure_agent_frame_initialized_with_clock(clock);
+    state
+        .ensure_agent_frame_initialized_with_clock(clock)
+        .unwrap();
     commit_frame_opens(store, &mut state, None).await;
     state
 }
@@ -269,7 +271,7 @@ async fn commit_frame_opens(
         .commit_runtime_state(commit)
         .await
         .expect("commit frame opens");
-    state.apply_persisted_commit_result(receipt);
+    state.apply_persisted_commit_result(receipt).unwrap();
     state.mark_node_ids_persisted(appended);
 }
 

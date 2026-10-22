@@ -380,14 +380,14 @@ fn build_runtime_state(
     base.reset_initial_agent_frame_with_clock(
         crate::AgentFrameAssignment::new(policy.clone(), plugin_config),
         clock,
-    );
+    )?;
     let draft_namespace = format!("create-session:{}", base.session_id);
     append_session_nodes_to_state_with_clock(
         &mut base,
         &request.initial_nodes,
         &draft_namespace,
         clock,
-    );
+    )?;
     Ok(base)
 }
 
@@ -558,7 +558,7 @@ async fn commit_initialized_session(
         .map_err(|err| {
             lash_execution_contracts::plugin_error::PluginError::Session(err.to_string())
         })?;
-    persisted_state.apply_persisted_commit_result(result);
+    persisted_state.apply_persisted_commit_result(result)?;
     persisted_state.mark_node_ids_persisted(persisted_node_ids);
     materialized
         .runtime

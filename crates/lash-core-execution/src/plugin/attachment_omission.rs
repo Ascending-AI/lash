@@ -91,9 +91,9 @@ pub fn omit_part_attachments(part: &mut Part, placeholder: &str) -> bool {
 pub fn apply_attachment_omissions(
     messages: &mut [Message],
     omissions: &AttachmentOmissions,
-) -> usize {
+) -> Result<usize, lash_protocol_types::allocation::AllocationError> {
     if omissions.is_empty() {
-        return 0;
+        return Ok(0);
     }
     let mut omitted = 0;
     for message in messages {
@@ -105,14 +105,16 @@ pub fn apply_attachment_omissions(
         if named.is_empty() {
             continue;
         }
-        let parts = std::sync::Arc::make_mut(&mut message.parts);
+        let parts = lash_protocol_types::session_model::message::MessageParts::make_mut(
+            &mut message.parts,
+        )?;
         for (index, placeholder) in named {
             if let Some(part) = parts.get_mut(index) {
                 omitted += usize::from(omit_part_attachments(part, placeholder));
             }
         }
     }
-    omitted
+    Ok(omitted)
 }
 
 #[cfg(test)]

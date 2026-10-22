@@ -51,7 +51,7 @@ impl<'run> RuntimeTurnDriver<'run> {
             event_tx.clone(),
             scoped_effect_controller.clone(),
             envelope.invocation.effect_replay_key(),
-        );
+        )?;
         let outcome =
             super::issue::issue_effect(&scoped_effect_controller, envelope, local_executor).await?;
         // The plugin state the body's callbacks resolved publishes to the

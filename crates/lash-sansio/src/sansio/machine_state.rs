@@ -399,6 +399,8 @@ impl<M: TurnProtocol> SavedTurn<M> {
 /// Failure to decode or restore an incompatible turn checkpoint.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum TurnCheckpointRestoreError {
+    /// The serving claim could not admit a source reconstructed by restore.
+    Allocation(lash_protocol_types::allocation::AllocationError),
     /// The checkpoint was written by a different schema than this build reads.
     IncompatibleSchemaVersion { actual: u32, expected: u32 },
     /// The bytes do not match the current closed checkpoint shape.
@@ -418,6 +420,7 @@ pub enum TurnCheckpointRestoreError {
 impl std::fmt::Display for TurnCheckpointRestoreError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Self::Allocation(error) => std::fmt::Display::fmt(error, formatter),
             Self::IncompatibleSchemaVersion { actual, expected } => write!(
                 formatter,
                 "turn checkpoint is schema version {actual}, but this build requires {expected}"

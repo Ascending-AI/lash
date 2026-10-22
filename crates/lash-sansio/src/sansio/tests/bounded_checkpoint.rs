@@ -202,7 +202,9 @@ fn a_finished_turn_leaves_the_commit_its_records_to_mark_in_place() {
     let committed = window(64);
     let mut events = lash_protocol_types::AppendVec::with_capacity(128);
     for record in committed.events().iter().cloned() {
-        events.push(record);
+        events
+            .push(record)
+            .expect("source fixture edit is admitted");
     }
     let window = TurnWindow::new(
         committed.pin().clone(),
@@ -212,10 +214,13 @@ fn a_finished_turn_leaves_the_commit_its_records_to_mark_in_place() {
     let mut machine = TurnMachine::in_window(
         test_config(Arc::new(ProseDriver)),
         window.clone(),
-        window.then(vec![user_message("the turn's own input")]),
+        window
+            .then(vec![user_message("the turn's own input")])
+            .unwrap(),
         vec![conversation_event(user_message("the turn's own input"))],
         0,
-    );
+    )
+    .unwrap();
     let effects = drain_effects(&mut machine);
     let llm_id = *find_llm_call(&effects).expect("the turn's model call").0;
     machine.handle_response(Response::LlmComplete {
@@ -251,7 +256,9 @@ fn a_finished_turn_leaves_the_commit_its_records_to_mark_in_place() {
     // turn's, adopted from the slots the machine wrote.
     assert_eq!(turn_records.len(), 2, "the input and the reply");
     let mut committing = window.events().clone();
-    committing.extend_adopting(turn_records, lash_protocol_types::same_history_record);
+    committing
+        .extend_adopting(turn_records, lash_protocol_types::same_history_record)
+        .unwrap();
     let shared = committing.as_slice().as_ptr();
     let reply = committing.len() - 1;
     let SessionHistoryRecord::Conversation(mut marked) = committing[reply].clone() else {
@@ -264,7 +271,9 @@ fn a_finished_turn_leaves_the_commit_its_records_to_mark_in_place() {
             format!("{}.p0", marked.id),
         ),
     );
-    committing.replace_from(reply, [SessionHistoryRecord::Conversation(marked)]);
+    committing
+        .replace_from(reply, [SessionHistoryRecord::Conversation(marked)])
+        .expect("source fixture edit is admitted");
     assert_eq!(
         committing.as_slice().as_ptr(),
         shared,
@@ -279,12 +288,14 @@ fn window(count: usize) -> TurnWindow {
         .map(|index| {
             let id = format!("w{index}");
             Message {
-                parts: vec![Part::text(
-                    format!("{id}.p0"),
-                    format!("window message {index}: {}", "transcript text ".repeat(12)),
-                    None,
-                )]
-                .into(),
+                parts: std::sync::Arc::new(
+                    (vec![Part::text(
+                        format!("{id}.p0"),
+                        format!("window message {index}: {}", "transcript text ".repeat(12)),
+                        None,
+                    )])
+                    .into(),
+                ),
                 id,
                 role: if index % 2 == 0 {
                     MessageRole::User
@@ -314,10 +325,13 @@ fn windowed_llm_pending(window: &TurnWindow) -> (TurnMachine, EffectId, LlmReque
     let mut machine = TurnMachine::in_window(
         test_config(Arc::new(ToolBatchDriver)),
         window.clone(),
-        window.then(vec![user_message("the turn's own input")]),
+        window
+            .then(vec![user_message("the turn's own input")])
+            .unwrap(),
         Vec::new(),
         0,
-    );
+    )
+    .unwrap();
     let effects = drain_effects(&mut machine);
     let (id, request) = find_llm_call(&effects).expect("first model call");
     (machine, *id, request.clone())
@@ -631,10 +645,13 @@ fn encoded_per_phase(count: usize, rounds: usize) -> Vec<usize> {
     let mut machine = TurnMachine::in_window(
         test_config(Arc::new(ToolBatchDriver)),
         window.clone(),
-        window.then(vec![user_message("the turn's own input")]),
+        window
+            .then(vec![user_message("the turn's own input")])
+            .unwrap(),
         Vec::new(),
         0,
-    );
+    )
+    .unwrap();
     let mut store = PhaseStore::default();
     let mut encoded = Vec::new();
     let round = |machine: &mut TurnMachine, store: &mut PhaseStore, index: usize| {
@@ -737,10 +754,13 @@ fn a_phase_checkpoint_encodes_only_its_new_items() {
     let mut full = TurnMachine::in_window(
         test_config(Arc::new(ToolBatchDriver)),
         window(4),
-        window(4).then(vec![user_message("the turn's own input")]),
+        window(4)
+            .then(vec![user_message("the turn's own input")])
+            .unwrap(),
         Vec::new(),
         0,
-    );
+    )
+    .unwrap();
     let mut first = PhaseStore::default();
     drain_effects(&mut full);
     let first_phase = first.phase(&mut full, "the first model call");
@@ -767,17 +787,26 @@ fn a_narrowed_prompt_view_stores_only_where_it_differs() {
     let mut machine = TurnMachine::in_window(
         test_config(Arc::new(ToolBatchDriver)),
         window.clone(),
-        window.then(vec![user_message("the turn's own input")]),
+        window
+            .then(vec![user_message("the turn's own input")])
+            .unwrap(),
         Vec::new(),
         0,
-    );
+    )
+    .unwrap();
     let mut view = machine
         .prompt_message_sequence()
         .iter()
         .cloned()
         .collect::<Vec<_>>();
-    view[3].parts = vec![Part::text("w3.p0".to_owned(), "[omitted]".to_owned(), None)].into();
-    machine.adopt_prepared_messages(MessageSequence::from_owned(view));
+    view[3].parts = lash_protocol_types::shared_parts(vec![Part::text(
+        "w3.p0".to_owned(),
+        "[omitted]".to_owned(),
+        None,
+    )]);
+    machine
+        .adopt_prepared_messages(MessageSequence::from_owned(view))
+        .unwrap();
     let mut store = PhaseStore::default();
     let effects = drain_effects(&mut machine);
     let (llm_id, request) = find_llm_call(&effects).expect("the model call");
@@ -847,10 +876,11 @@ fn a_mode_history_policy_reconstructs_the_recorded_request_prefix() {
     let mut machine = TurnMachine::in_window(
         config(),
         committed.clone(),
-        committed.then(vec![user_message("next")]),
+        committed.then(vec![user_message("next")]).unwrap(),
         Vec::new(),
         0,
-    );
+    )
+    .unwrap();
     let effects = drain_effects(&mut machine);
     let (_, request) = find_llm_call(&effects).expect("the recorded model request");
     let saved = machine.checkpoint();

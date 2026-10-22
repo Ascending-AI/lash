@@ -130,7 +130,8 @@ impl LashRuntime {
             &request.nodes,
             &draft_namespace,
             self.host.core.clock.as_ref(),
-        );
+        )
+        .map_err(super::runtime_error_from_store_commit)?;
         if let Some(session) = self.session.as_mut() {
             let protocol_session = Arc::clone(session.plugins().protocol_session());
             let session_id = self.state.session_id.clone();
@@ -456,7 +457,12 @@ impl LashRuntime {
                 &nodes,
                 &draft_namespace,
                 self.host.core.clock.as_ref(),
-            );
+            )
+            .map_err(|error| {
+                PluginOperationInvokeError::Failed(Box::new(
+                    super::runtime_error_from_store_commit(error).into(),
+                ))
+            })?;
         }
         self.stamp_live_plugin_state()
             .map_err(|error| PluginOperationInvokeError::Failed(Box::new(error.into())))?;

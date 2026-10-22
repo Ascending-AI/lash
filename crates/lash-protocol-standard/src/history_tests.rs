@@ -43,21 +43,21 @@ fn render_transcript_prompt_orders_turns_oldest_first() {
         Message {
             id: "m0".to_string(),
             role: MessageRole::User,
-            parts: vec![part(PartKind::Text, "first")].into(),
+            parts: std::sync::Arc::new((vec![part(PartKind::Text, "first")]).into()),
             origin: None,
             reply_marker: None,
         },
         Message {
             id: "m1".to_string(),
             role: MessageRole::Assistant,
-            parts: vec![part(PartKind::Prose, "reply one")].into(),
+            parts: std::sync::Arc::new((vec![part(PartKind::Prose, "reply one")]).into()),
             origin: None,
             reply_marker: None,
         },
         Message {
             id: "m2".to_string(),
             role: MessageRole::User,
-            parts: vec![part(PartKind::Text, "second")].into(),
+            parts: std::sync::Arc::new((vec![part(PartKind::Text, "second")]).into()),
             origin: None,
             reply_marker: None,
         },
@@ -76,7 +76,7 @@ fn render_transcript_prompt_collects_attachments() {
     let msgs = vec![Message {
         id: "m0".to_string(),
         role: MessageRole::User,
-        parts: vec![attachment_part(&[9, 8, 7])].into(),
+        parts: std::sync::Arc::new((vec![attachment_part(&[9, 8, 7])]).into()),
         origin: None,
         reply_marker: None,
     }];
@@ -93,21 +93,21 @@ fn render_transcript_prompt_omits_missing_assistant_placeholder_for_current_turn
         Message {
             id: "m0".to_string(),
             role: MessageRole::User,
-            parts: vec![part(PartKind::Text, "first")].into(),
+            parts: std::sync::Arc::new((vec![part(PartKind::Text, "first")]).into()),
             origin: None,
             reply_marker: None,
         },
         Message {
             id: "m1".to_string(),
             role: MessageRole::Assistant,
-            parts: vec![part(PartKind::Prose, "reply one")].into(),
+            parts: std::sync::Arc::new((vec![part(PartKind::Prose, "reply one")]).into()),
             origin: None,
             reply_marker: None,
         },
         Message {
             id: "m2".to_string(),
             role: MessageRole::User,
-            parts: vec![part(PartKind::Text, "second")].into(),
+            parts: std::sync::Arc::new((vec![part(PartKind::Text, "second")]).into()),
             origin: None,
             reply_marker: None,
         },
@@ -126,22 +126,24 @@ fn render_transcript_prompt_preserves_tool_name_for_assistant_tool_calls() {
         Message {
             id: "m0".to_string(),
             role: MessageRole::User,
-            parts: vec![part(PartKind::Text, "what time is it")].into(),
+            parts: std::sync::Arc::new((vec![part(PartKind::Text, "what time is it")]).into()),
             origin: None,
             reply_marker: None,
         },
         Message {
             id: "m1".to_string(),
             role: MessageRole::Assistant,
-            parts: vec![Part::tool_call(
-                "m1.p0".to_string(),
-                r#"{"timezone":"UTC"}"#.to_string(),
-                ToolCallId::fixture("tc1"),
-                "tc1".to_string(),
-                "get_time".to_string(),
-                None,
-            )]
-            .into(),
+            parts: std::sync::Arc::new(
+                (vec![Part::tool_call(
+                    "m1.p0".to_string(),
+                    r#"{"timezone":"UTC"}"#.to_string(),
+                    ToolCallId::fixture("tc1"),
+                    "tc1".to_string(),
+                    "get_time".to_string(),
+                    None,
+                )])
+                .into(),
+            ),
             origin: None,
             reply_marker: None,
         },
@@ -161,18 +163,22 @@ fn mode_history_policy_selects_text_without_changing_records_or_order() {
         Message {
             id: "note".into(),
             role: MessageRole::System,
-            parts: vec![Part::output("note.p0".into(), "first".into())].into(),
+            parts: std::sync::Arc::new(
+                (vec![Part::output("note.p0".into(), "first".into())]).into(),
+            ),
             origin: None,
             reply_marker: None,
         },
         Message {
             id: "input".into(),
             role: MessageRole::User,
-            parts: vec![
-                Part::text("input.p0".into(), "second".into(), None),
-                attachment_part(b"image"),
-            ]
-            .into(),
+            parts: std::sync::Arc::new(
+                (vec![
+                    Part::text("input.p0".into(), "second".into(), None),
+                    attachment_part(b"image"),
+                ])
+                .into(),
+            ),
             origin: None,
             reply_marker: None,
         },

@@ -12,7 +12,9 @@ fn user_event(id: &str, text: &str) -> SessionHistoryRecord {
     SessionHistoryRecord::Conversation(ConversationRecord {
         id: id.to_string(),
         role: MessageRole::User,
-        parts: vec![Part::text(format!("{id}.p0"), text.to_string(), None)].into(),
+        parts: std::sync::Arc::new(
+            (vec![Part::text(format!("{id}.p0"), text.to_string(), None)]).into(),
+        ),
         origin: None,
         reply_marker: None,
     })
@@ -77,7 +79,9 @@ fn cell_prose_event(id: &str, text: &str) -> SessionHistoryRecord {
     SessionHistoryRecord::Conversation(ConversationRecord {
         id: id.to_string(),
         role: MessageRole::Assistant,
-        parts: vec![Part::text(format!("{id}.p0"), text.to_string(), None)].into(),
+        parts: std::sync::Arc::new(
+            (vec![Part::text(format!("{id}.p0"), text.to_string(), None)]).into(),
+        ),
         origin: Some(lash_core::MessageOrigin::Plugin {
             plugin_id: crate::plugin::RLM_PROTOCOL_PLUGIN_ID.to_string(),
             transient: false,
@@ -90,7 +94,9 @@ fn assistant_prose_event(id: &str, text: &str) -> SessionHistoryRecord {
     SessionHistoryRecord::Conversation(ConversationRecord {
         id: id.to_string(),
         role: MessageRole::Assistant,
-        parts: vec![Part::text(format!("{id}.p0"), text.to_string(), None)].into(),
+        parts: std::sync::Arc::new(
+            (vec![Part::text(format!("{id}.p0"), text.to_string(), None)]).into(),
+        ),
         origin: None,
         reply_marker: None,
     })
@@ -578,12 +584,14 @@ fn plugin_origin_is_not_rendered_in_history() {
     let event = SessionHistoryRecord::Conversation(ConversationRecord {
         id: "plugin".to_string(),
         role: MessageRole::User,
-        parts: vec![Part::text(
-            "plugin.p0".to_string(),
-            "synthetic plugin message".to_string(),
-            None,
-        )]
-        .into(),
+        parts: std::sync::Arc::new(
+            (vec![Part::text(
+                "plugin.p0".to_string(),
+                "synthetic plugin message".to_string(),
+                None,
+            )])
+            .into(),
+        ),
         origin: Some(lash_core::MessageOrigin::Plugin {
             plugin_id: "test".to_string(),
             transient: false,

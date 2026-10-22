@@ -48,19 +48,21 @@ fn a_result_appended_to_cached_history_keeps_its_original_provider_correlation()
     let cache = Arc::new(BaseRenderCache::new());
     let mut sequence = MessageSequence::from_base(vec![call].into()).with_base_render_cache(cache);
     sequence.render_prompt(&crate::session_model::message::HistoryPresentation::verbatim());
-    sequence.push(Message {
-        id: "result".into(),
-        role: MessageRole::User,
-        parts: shared_parts(vec![Part::tool_result(
-            "result.p0".into(),
-            vec![ModelToolReturnPart::text("resolved")],
-            call_id,
-            "lookup".into(),
-            crate::ToolCallStatus::Success,
-        )]),
-        origin: None,
-        reply_marker: None,
-    });
+    sequence
+        .push(Message {
+            id: "result".into(),
+            role: MessageRole::User,
+            parts: shared_parts(vec![Part::tool_result(
+                "result.p0".into(),
+                vec![ModelToolReturnPart::text("resolved")],
+                call_id,
+                "lookup".into(),
+                crate::ToolCallStatus::Success,
+            )]),
+            origin: None,
+            reply_marker: None,
+        })
+        .unwrap();
     let rendered =
         sequence.render_prompt(&crate::session_model::message::HistoryPresentation::verbatim());
     assert_eq!(
@@ -77,7 +79,7 @@ fn a_shared_base_witnesses_the_preserved_prefix_and_names_the_delta() {
     let base = AppendVec::from(vec![witness_message("m0", "one")]);
     let current = MessageSequence::from_base(base.clone());
     let mut next = MessageSequence::from_base(base);
-    next.push(witness_message("m1", "two"));
+    next.push(witness_message("m1", "two")).unwrap();
 
     let delta = current
         .preserved_extension_delta(&next)
@@ -101,7 +103,9 @@ fn a_rebuilt_owned_sequence_drops_the_witness() {
     let base = AppendVec::from(vec![witness_message("m0", "one")]);
     let current = MessageSequence::from_base(base.clone());
     let mut rewritten = MessageSequence::from_base(base);
-    rewritten.replace(vec![witness_message("m0", "rewritten")]);
+    rewritten
+        .replace(vec![witness_message("m0", "rewritten")])
+        .unwrap();
 
     assert!(current.preserved_extension_delta(&rewritten).is_none());
 }
@@ -110,10 +114,10 @@ fn a_rebuilt_owned_sequence_drops_the_witness() {
 fn a_diverged_delta_does_not_witness_and_a_shorter_one_does_not_either() {
     let base = AppendVec::from(vec![witness_message("m0", "one")]);
     let mut current = MessageSequence::from_base(base.clone());
-    current.push(witness_message("m1", "two"));
+    current.push(witness_message("m1", "two")).unwrap();
 
     let mut diverged = MessageSequence::from_base(base.clone());
-    diverged.push(witness_message("m1", "changed"));
+    diverged.push(witness_message("m1", "changed")).unwrap();
     assert!(current.preserved_extension_delta(&diverged).is_none());
 
     let shorter = MessageSequence::from_base(base);
@@ -165,25 +169,27 @@ fn render_prompt_repl_preserves_message_boundaries() {
         Message {
             id: "m1".to_string(),
             role: MessageRole::User,
-            parts: vec![part(PartKind::Text, "first")].into(),
+            parts: std::sync::Arc::new((vec![part(PartKind::Text, "first")]).into()),
             origin: None,
             reply_marker: None,
         },
         Message {
             id: "m2".to_string(),
             role: MessageRole::Assistant,
-            parts: vec![
-                part(PartKind::Prose, "reply one"),
-                part(PartKind::Code, "x = 1"),
-            ]
-            .into(),
+            parts: std::sync::Arc::new(
+                (vec![
+                    part(PartKind::Prose, "reply one"),
+                    part(PartKind::Code, "x = 1"),
+                ])
+                .into(),
+            ),
             origin: None,
             reply_marker: None,
         },
         Message {
             id: "m3".to_string(),
             role: MessageRole::User,
-            parts: vec![part(PartKind::Text, "second")].into(),
+            parts: std::sync::Arc::new((vec![part(PartKind::Text, "second")]).into()),
             origin: None,
             reply_marker: None,
         },
@@ -203,47 +209,53 @@ fn render_structured_prompt_preserves_tool_protocol_and_user_images() {
         Message {
             id: "m0".to_string(),
             role: MessageRole::System,
-            parts: vec![part(PartKind::Text, "note")].into(),
+            parts: std::sync::Arc::new((vec![part(PartKind::Text, "note")]).into()),
             origin: None,
             reply_marker: None,
         },
         Message {
             id: "m1".to_string(),
             role: MessageRole::User,
-            parts: vec![
-                part(PartKind::Text, "show this"),
-                attachment_part(&[1, 2, 3]),
-            ]
-            .into(),
+            parts: std::sync::Arc::new(
+                (vec![
+                    part(PartKind::Text, "show this"),
+                    attachment_part(&[1, 2, 3]),
+                ])
+                .into(),
+            ),
             origin: None,
             reply_marker: None,
         },
         Message {
             id: "m2".to_string(),
             role: MessageRole::Assistant,
-            parts: vec![Part::tool_call(
-                "m2.p0".to_string(),
-                r#"{"path":"README.md"}"#.to_string(),
-                crate::ToolCallId::fixture("tc1"),
-                "tc1".to_string(),
-                "read_file".to_string(),
-                None,
-            )]
-            .into(),
+            parts: std::sync::Arc::new(
+                (vec![Part::tool_call(
+                    "m2.p0".to_string(),
+                    r#"{"path":"README.md"}"#.to_string(),
+                    crate::ToolCallId::fixture("tc1"),
+                    "tc1".to_string(),
+                    "read_file".to_string(),
+                    None,
+                )])
+                .into(),
+            ),
             origin: None,
             reply_marker: None,
         },
         Message {
             id: "m3".to_string(),
             role: MessageRole::User,
-            parts: vec![Part::tool_result(
-                "m3.p0".to_string(),
-                vec![crate::ModelToolReturnPart::text("ok")],
-                crate::ToolCallId::fixture("tc1"),
-                "read_file".to_string(),
-                crate::ToolCallStatus::Success,
-            )]
-            .into(),
+            parts: std::sync::Arc::new(
+                (vec![Part::tool_result(
+                    "m3.p0".to_string(),
+                    vec![crate::ModelToolReturnPart::text("ok")],
+                    crate::ToolCallId::fixture("tc1"),
+                    "read_file".to_string(),
+                    crate::ToolCallStatus::Success,
+                )])
+                .into(),
+            ),
             origin: None,
             reply_marker: None,
         },
@@ -280,29 +292,33 @@ fn render_structured_prompt_preserves_empty_tool_results() {
         Message {
             id: "m0".to_string(),
             role: MessageRole::Assistant,
-            parts: vec![Part::tool_call(
-                "m0.p0".to_string(),
-                r#"{"question":"Pick one"}"#.to_string(),
-                crate::ToolCallId::fixture("ask_1"),
-                "ask_1".to_string(),
-                "ask".to_string(),
-                None,
-            )]
-            .into(),
+            parts: std::sync::Arc::new(
+                (vec![Part::tool_call(
+                    "m0.p0".to_string(),
+                    r#"{"question":"Pick one"}"#.to_string(),
+                    crate::ToolCallId::fixture("ask_1"),
+                    "ask_1".to_string(),
+                    "ask".to_string(),
+                    None,
+                )])
+                .into(),
+            ),
             origin: None,
             reply_marker: None,
         },
         Message {
             id: "m1".to_string(),
             role: MessageRole::User,
-            parts: vec![Part::tool_result(
-                "m1.p0".to_string(),
-                Vec::new(),
-                crate::ToolCallId::fixture("ask_1"),
-                "ask".to_string(),
-                crate::ToolCallStatus::Success,
-            )]
-            .into(),
+            parts: std::sync::Arc::new(
+                (vec![Part::tool_result(
+                    "m1.p0".to_string(),
+                    Vec::new(),
+                    crate::ToolCallId::fixture("ask_1"),
+                    "ask".to_string(),
+                    crate::ToolCallStatus::Success,
+                )])
+                .into(),
+            ),
             origin: None,
             reply_marker: None,
         },
@@ -336,29 +352,33 @@ fn prompt_resume_safety_accepts_completed_tool_history() {
         Message {
             id: "m0".to_string(),
             role: MessageRole::Assistant,
-            parts: vec![Part::tool_call(
-                "m0.p0".to_string(),
-                r#"{"path":"README.md"}"#.to_string(),
-                crate::ToolCallId::fixture("tc1"),
-                "tc1".to_string(),
-                "read_file".to_string(),
-                None,
-            )]
-            .into(),
+            parts: std::sync::Arc::new(
+                (vec![Part::tool_call(
+                    "m0.p0".to_string(),
+                    r#"{"path":"README.md"}"#.to_string(),
+                    crate::ToolCallId::fixture("tc1"),
+                    "tc1".to_string(),
+                    "read_file".to_string(),
+                    None,
+                )])
+                .into(),
+            ),
             origin: None,
             reply_marker: None,
         },
         Message {
             id: "m1".to_string(),
             role: MessageRole::User,
-            parts: vec![Part::tool_result(
-                "m1.p0".to_string(),
-                vec![crate::ModelToolReturnPart::text("ok")],
-                crate::ToolCallId::fixture("tc1"),
-                "read_file".to_string(),
-                crate::ToolCallStatus::Success,
-            )]
-            .into(),
+            parts: std::sync::Arc::new(
+                (vec![Part::tool_result(
+                    "m1.p0".to_string(),
+                    vec![crate::ModelToolReturnPart::text("ok")],
+                    crate::ToolCallId::fixture("tc1"),
+                    "read_file".to_string(),
+                    crate::ToolCallStatus::Success,
+                )])
+                .into(),
+            ),
             origin: None,
             reply_marker: None,
         },
@@ -378,11 +398,13 @@ fn reasoning_parts_survive_snapshot_but_never_reach_the_model() {
     let msgs = vec![Message {
         id: "m1".to_string(),
         role: MessageRole::Assistant,
-        parts: vec![
-            reasoning_part.clone(),
-            part(PartKind::Prose, "Here is the answer."),
-        ]
-        .into(),
+        parts: std::sync::Arc::new(
+            (vec![
+                reasoning_part.clone(),
+                part(PartKind::Prose, "Here is the answer."),
+            ])
+            .into(),
+        ),
         origin: None,
         reply_marker: None,
     }];
@@ -424,7 +446,7 @@ fn reasoning_parts_survive_snapshot_but_never_reach_the_model() {
     let reasoning_only = vec![Message {
         id: "m2".to_string(),
         role: MessageRole::Assistant,
-        parts: vec![reasoning_part].into(),
+        parts: std::sync::Arc::new((vec![reasoning_part]).into()),
         origin: None,
         reply_marker: None,
     }];
@@ -441,15 +463,17 @@ fn prompt_resume_safety_accepts_a_cell_contexts_call_without_a_result() {
         vec![Message {
             id: "m0".to_string(),
             role: MessageRole::Assistant,
-            parts: vec![Part::tool_call(
-                "m0.p0".to_string(),
-                r#"{"code":"finish(1)"}"#.to_string(),
-                crate::ToolCallId::fixture("tc1"),
-                "provider-call-1".to_string(),
-                "execute_code".to_string(),
-                None,
-            )]
-            .into(),
+            parts: std::sync::Arc::new(
+                (vec![Part::tool_call(
+                    "m0.p0".to_string(),
+                    r#"{"code":"finish(1)"}"#.to_string(),
+                    crate::ToolCallId::fixture("tc1"),
+                    "provider-call-1".to_string(),
+                    "execute_code".to_string(),
+                    None,
+                )])
+                .into(),
+            ),
             origin: Some(MessageOrigin::TurnOutput {
                 turn_id: crate::TurnId::from("turn-1"),
                 source: crate::TurnOutputSource::Plugin {
@@ -469,15 +493,17 @@ fn prompt_resume_safety_rejects_unmatched_tool_calls() {
     let msgs = vec![Message {
         id: "m0".to_string(),
         role: MessageRole::Assistant,
-        parts: vec![Part::tool_call(
-            "m0.p0".to_string(),
-            r#"{"path":"README.md"}"#.to_string(),
-            crate::ToolCallId::fixture("tc1"),
-            "tc1".to_string(),
-            "read_file".to_string(),
-            None,
-        )]
-        .into(),
+        parts: std::sync::Arc::new(
+            (vec![Part::tool_call(
+                "m0.p0".to_string(),
+                r#"{"path":"README.md"}"#.to_string(),
+                crate::ToolCallId::fixture("tc1"),
+                "tc1".to_string(),
+                "read_file".to_string(),
+                None,
+            )])
+            .into(),
+        ),
         origin: None,
         reply_marker: None,
     }];
@@ -498,7 +524,7 @@ fn fig1123_only_committed_turn_inputs_start_genuine_user_segments() {
         Message {
             id: "genuine".to_string(),
             role: MessageRole::User,
-            parts: vec![part(PartKind::Text, "genuine")].into(),
+            parts: std::sync::Arc::new((vec![part(PartKind::Text, "genuine")]).into()),
             origin: Some(MessageOrigin::TurnInput {
                 turn_id: TurnId::from("turn"),
                 input_id: None,
@@ -508,29 +534,33 @@ fn fig1123_only_committed_turn_inputs_start_genuine_user_segments() {
         Message {
             id: "call".to_string(),
             role: MessageRole::Assistant,
-            parts: vec![Part::tool_call(
-                "call.p0".to_string(),
-                "{}".to_string(),
-                crate::ToolCallId::fixture("synthetic"),
-                "synthetic".to_string(),
-                "tool".to_string(),
-                None,
-            )]
-            .into(),
+            parts: std::sync::Arc::new(
+                (vec![Part::tool_call(
+                    "call.p0".to_string(),
+                    "{}".to_string(),
+                    crate::ToolCallId::fixture("synthetic"),
+                    "synthetic".to_string(),
+                    "tool".to_string(),
+                    None,
+                )])
+                .into(),
+            ),
             origin: None,
             reply_marker: None,
         },
         Message {
             id: "synthetic".to_string(),
             role: MessageRole::User,
-            parts: vec![Part::tool_result(
-                "synthetic.p0".to_string(),
-                vec![crate::ModelToolReturnPart::text("synthetic")],
-                crate::ToolCallId::fixture("synthetic"),
-                "tool".to_string(),
-                crate::ToolCallStatus::Success,
-            )]
-            .into(),
+            parts: std::sync::Arc::new(
+                (vec![Part::tool_result(
+                    "synthetic.p0".to_string(),
+                    vec![crate::ModelToolReturnPart::text("synthetic")],
+                    crate::ToolCallId::fixture("synthetic"),
+                    "tool".to_string(),
+                    crate::ToolCallStatus::Success,
+                )])
+                .into(),
+            ),
             origin: Some(MessageOrigin::Plugin {
                 plugin_id: "plugin".to_string(),
                 transient: false,
@@ -648,22 +678,24 @@ fn tool_result_attachments_are_counted_and_distinctly_identified() {
         Message {
             id: "m0".into(),
             role: MessageRole::Assistant,
-            parts: vec![Part::tool_call(
-                "m0.p0".into(),
-                "{}".into(),
-                crate::ToolCallId::fixture("call-1"),
-                "call-1".into(),
-                "shot".into(),
-                None,
-            )]
-            .into(),
+            parts: std::sync::Arc::new(
+                (vec![Part::tool_call(
+                    "m0.p0".into(),
+                    "{}".into(),
+                    crate::ToolCallId::fixture("call-1"),
+                    "call-1".into(),
+                    "shot".into(),
+                    None,
+                )])
+                .into(),
+            ),
             origin: None,
             reply_marker: None,
         },
         Message {
             id: "m1".into(),
             role: MessageRole::User,
-            parts: vec![result].into(),
+            parts: std::sync::Arc::new((vec![result]).into()),
             origin: None,
             reply_marker: None,
         },
@@ -685,31 +717,99 @@ fn shared_sequence_mutation_preserves_snapshots_and_wire_values() {
     let sequences = [
         MessageSequence::from_owned(expected.clone()),
         MessageSequence::from_base(AppendVec::from(expected.clone())),
-        MessageSequence::from_base_and_delta(AppendVec::from(vec![first]), vec![second]),
+        MessageSequence::from_base_and_delta(AppendVec::from(vec![first]), vec![second]).unwrap(),
     ];
     let expected_bytes = serde_json::to_vec(&expected).unwrap();
     for original in sequences {
         let _flattened = original.shared();
         let mut writer = original.clone();
         let retained = writer.clone();
-        writer.push(witness_message("m2", "three"));
+        writer.push(witness_message("m2", "three")).unwrap();
         assert_eq!(writer.len(), 3);
         assert_eq!(writer.shared().as_slice()[2].id, "m2");
-        writer.extend(vec![witness_message("m3", "four")]);
+        writer.extend(vec![witness_message("m3", "four")]).unwrap();
         assert_eq!(writer.len(), 4);
         assert_eq!(writer.shared().as_slice()[3].id, "m3");
         let appended = writer.clone();
         let appended_bytes = serde_json::to_vec(&appended).unwrap();
-        writer.make_mut()[0] = witness_message("m0", "rewritten");
+        writer.make_mut().unwrap()[0] = witness_message("m0", "rewritten");
         assert_eq!(
             writer.shared().as_slice()[0].parts[0].content(),
             "rewritten"
         );
-        writer.replace(vec![witness_message("replacement", "new history")]);
+        writer
+            .replace(vec![witness_message("replacement", "new history")])
+            .unwrap();
         assert_eq!(writer.len(), 1);
         assert_eq!(writer.shared().as_slice()[0].id, "replacement");
         assert_eq!(serde_json::to_vec(&original).unwrap(), expected_bytes);
         assert_eq!(serde_json::to_vec(&retained).unwrap(), expected_bytes);
         assert_eq!(serde_json::to_vec(&appended).unwrap(), appended_bytes);
     }
+}
+
+/// LO-EVICT-SOURCE: a refused source join is never observable through reads.
+#[test]
+fn sequence_slot_admission_precedes_join_publication_and_reads_do_not_allocate() {
+    use crate::allocation::{
+        AllocationBudget, AllocationError, AllocationHold, AllocationLedger, ReserveError,
+    };
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+    #[derive(Clone)]
+    struct Ledger {
+        denied: Arc<AtomicBool>,
+        calls: Arc<AtomicUsize>,
+    }
+    impl AllocationLedger for Ledger {
+        fn reserve(&self, bytes: u64) -> Result<AllocationHold, AllocationError> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            if self.denied.load(Ordering::SeqCst) {
+                Err(AllocationError {
+                    kind: ReserveError::Pressure,
+                    actor: "sequence".into(),
+                    requested: bytes,
+                    capacity: 4096,
+                })
+            } else {
+                Ok(AllocationHold::default())
+            }
+        }
+        fn reserve_shared(&self, _: usize, bytes: u64) -> Result<AllocationHold, AllocationError> {
+            self.reserve(bytes)
+        }
+    }
+    let ledger = Ledger {
+        denied: Arc::new(AtomicBool::new(false)),
+        calls: Arc::new(AtomicUsize::new(0)),
+    };
+    let budget = AllocationBudget::new(ledger.clone());
+    let mut base = AppendVec::try_with_capacity(4, &budget).unwrap();
+    base.extend((0..4).map(|index| witness_message(&format!("m{index}"), "source")))
+        .unwrap();
+    let mut sequence = MessageSequence::from_base(base);
+    let held = sequence.shared();
+    let before = serde_json::to_vec(&sequence).unwrap();
+    ledger.denied.store(true, Ordering::SeqCst);
+    assert!(matches!(
+        sequence.push(witness_message("tail", "new")),
+        Err(AllocationError {
+            kind: ReserveError::Pressure,
+            ..
+        })
+    ));
+    let calls = ledger.calls.load(Ordering::SeqCst);
+    assert_eq!(sequence.as_slice().len(), 4);
+    assert_eq!(sequence.iter().count(), 4);
+    assert!(AppendVec::ptr_eq(&held, &sequence.shared()));
+    assert_eq!(serde_json::to_vec(&sequence).unwrap(), before);
+    assert_eq!(
+        ledger.calls.load(Ordering::SeqCst),
+        calls,
+        "reads never attempt a fallible source allocation"
+    );
+    ledger.denied.store(false, Ordering::SeqCst);
+    sequence.push(witness_message("tail", "new")).unwrap();
+    assert_eq!(sequence.as_slice()[4].id, "tail");
+    assert_eq!(held.len(), 4);
+    assert_eq!(held[0].parts[0].content(), "source");
 }

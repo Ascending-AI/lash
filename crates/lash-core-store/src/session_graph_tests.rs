@@ -23,16 +23,18 @@ fn text_message(id: &str, role: MessageRole, content: &str) -> Message {
 
 #[test]
 fn construction_enforces_structural_graph_integrity() {
-    let node = |id: &str, parent: Option<&str>| SessionNodeRecord {
-        node_id: NodeId::fixture(id.to_string()),
-        parent_node_id: parent.map(crate::NodeId::fixture),
-        timestamp: "2026-08-08T00:00:00.000000000Z"
-            .parse()
-            .expect("canonical node timestamp"),
-        payload: SessionNodePayload::Plugin {
-            plugin_type: "construction-integrity-test".to_string(),
-            body: SharedJsonValue::new(serde_json::json!({"id": id})),
-        },
+    let node = |id: &str, parent: Option<&str>| {
+        SessionNodeRecord::new(
+            NodeId::fixture(id.to_string()),
+            parent.map(crate::NodeId::fixture),
+            "2026-08-08T00:00:00.000000000Z"
+                .parse()
+                .expect("canonical node timestamp"),
+            SessionNodePayload::Plugin {
+                plugin_type: "construction-integrity-test".to_string(),
+                body: SharedJsonValue::new(serde_json::json!({"id": id})),
+            },
+        )
     };
 
     let mut blank_encoded = serde_json::to_value(SessionGraph::from_unchecked_nodes_for_testing(
@@ -107,16 +109,18 @@ fn rejected_graph_appends_leave_nodes_leaf_and_cached_reads_unchanged() {
     let resident_leaf = graph.leaf_node_id.clone().expect("resident leaf");
     let before_graph = serde_json::to_value(&graph).expect("serialize graph preimage");
     let before_read = graph.read_model();
-    let node = |node_id: &str, parent_node_id: &str| SessionNodeRecord {
-        node_id: NodeId::fixture(node_id.to_string()),
-        parent_node_id: Some(NodeId::fixture(parent_node_id.to_string())),
-        timestamp: "2026-09-12T00:00:00.000000000Z"
-            .parse()
-            .expect("canonical node timestamp"),
-        payload: SessionNodePayload::Plugin {
-            plugin_type: "atomic-append-test".to_string(),
-            body: SharedJsonValue::new(serde_json::json!({"node": node_id})),
-        },
+    let node = |node_id: &str, parent_node_id: &str| {
+        SessionNodeRecord::new(
+            NodeId::fixture(node_id.to_string()),
+            Some(NodeId::fixture(parent_node_id.to_string())),
+            "2026-09-12T00:00:00.000000000Z"
+                .parse()
+                .expect("canonical node timestamp"),
+            SessionNodePayload::Plugin {
+                plugin_type: "atomic-append-test".to_string(),
+                body: SharedJsonValue::new(serde_json::json!({"node": node_id})),
+            },
+        )
     };
 
     let duplicate = GraphAppend::Extend {
@@ -187,28 +191,28 @@ fn cache_build_rejects_parent_cycles() {
 fn cache_build_rejects_parent_cycles_scenario() {
     let graph = SessionGraph::from_unchecked_nodes_for_testing(
         vec![
-            SessionNodeRecord {
-                node_id: "cycle-a".into(),
-                parent_node_id: Some("cycle-b".into()),
-                timestamp: "2026-07-31T00:00:00.000000000Z"
+            SessionNodeRecord::new(
+                "cycle-a".into(),
+                Some("cycle-b".into()),
+                "2026-07-31T00:00:00.000000000Z"
                     .parse()
                     .expect("canonical node timestamp"),
-                payload: SessionNodePayload::Plugin {
+                SessionNodePayload::Plugin {
                     plugin_type: "cycle-test".to_string(),
                     body: SharedJsonValue::new(serde_json::json!({"node": "a"})),
                 },
-            },
-            SessionNodeRecord {
-                node_id: "cycle-b".into(),
-                parent_node_id: Some("cycle-a".into()),
-                timestamp: "2026-07-31T00:00:00.000000000Z"
+            ),
+            SessionNodeRecord::new(
+                "cycle-b".into(),
+                Some("cycle-a".into()),
+                "2026-07-31T00:00:00.000000000Z"
                     .parse()
                     .expect("canonical node timestamp"),
-                payload: SessionNodePayload::Plugin {
+                SessionNodePayload::Plugin {
                     plugin_type: "cycle-test".to_string(),
                     body: SharedJsonValue::new(serde_json::json!({"node": "b"})),
                 },
-            },
+            ),
         ],
         Some("cycle-b".into()),
     );
@@ -226,16 +230,18 @@ fn cache_build_rejects_parent_cycles_scenario() {
 
 #[test]
 fn cache_build_rejects_cycles_in_inactive_components() {
-    let plugin_node = |node_id: &str, parent_node_id: Option<&str>| SessionNodeRecord {
-        node_id: NodeId::fixture(node_id.to_string()),
-        parent_node_id: parent_node_id.map(crate::NodeId::fixture),
-        timestamp: "2026-07-31T00:00:00.000000000Z"
-            .parse()
-            .expect("canonical node timestamp"),
-        payload: SessionNodePayload::Plugin {
-            plugin_type: "inactive-cycle-test".to_string(),
-            body: SharedJsonValue::new(serde_json::json!({"node": node_id})),
-        },
+    let plugin_node = |node_id: &str, parent_node_id: Option<&str>| {
+        SessionNodeRecord::new(
+            NodeId::fixture(node_id.to_string()),
+            parent_node_id.map(crate::NodeId::fixture),
+            "2026-07-31T00:00:00.000000000Z"
+                .parse()
+                .expect("canonical node timestamp"),
+            SessionNodePayload::Plugin {
+                plugin_type: "inactive-cycle-test".to_string(),
+                body: SharedJsonValue::new(serde_json::json!({"node": node_id})),
+            },
+        )
     };
     let graph = SessionGraph::from_unchecked_nodes_for_testing(
         vec![
@@ -275,28 +281,28 @@ fn nearest_ancestor_walk_is_bounded_on_a_parent_cycle() {
 fn nearest_ancestor_walk_is_bounded_scenario() {
     let graph = SessionGraph::from_unchecked_nodes_for_testing(
         vec![
-            SessionNodeRecord {
-                node_id: "nearest-a".into(),
-                parent_node_id: Some("nearest-b".into()),
-                timestamp: "2026-07-31T00:00:00.000000000Z"
+            SessionNodeRecord::new(
+                "nearest-a".into(),
+                Some("nearest-b".into()),
+                "2026-07-31T00:00:00.000000000Z"
                     .parse()
                     .expect("canonical node timestamp"),
-                payload: SessionNodePayload::Plugin {
+                SessionNodePayload::Plugin {
                     plugin_type: "nearest-test".to_string(),
                     body: SharedJsonValue::new(serde_json::json!({"node": "a"})),
                 },
-            },
-            SessionNodeRecord {
-                node_id: "nearest-b".into(),
-                parent_node_id: Some("nearest-a".into()),
-                timestamp: "2026-07-31T00:00:00.000000000Z"
+            ),
+            SessionNodeRecord::new(
+                "nearest-b".into(),
+                Some("nearest-a".into()),
+                "2026-07-31T00:00:00.000000000Z"
                     .parse()
                     .expect("canonical node timestamp"),
-                payload: SessionNodePayload::Plugin {
+                SessionNodePayload::Plugin {
                     plugin_type: "nearest-test".to_string(),
                     body: SharedJsonValue::new(serde_json::json!({"node": "b"})),
                 },
-            },
+            ),
         ],
         Some("nearest-b".into()),
     );
@@ -348,8 +354,8 @@ fn read_model_preserves_distinct_nodes_with_identical_messages() {
     let mut graph = SessionGraph::default();
     let message = text_message("same-message-id", MessageRole::User, "same content");
 
-    let first = graph.append_message(message.clone());
-    let second = graph.append_message(message);
+    let first = graph.append_message(message.clone()).unwrap();
+    let second = graph.append_message(message).unwrap();
 
     assert_ne!(first, second);
     let read = graph.read_model();
@@ -360,16 +366,16 @@ fn read_model_preserves_distinct_nodes_with_identical_messages() {
 
 #[test]
 fn storage_body_excludes_indexed_graph_identity_and_parent_edge() {
-    let node = SessionNodeRecord {
-        node_id: "node-2".into(),
-        parent_node_id: Some("node-1".into()),
-        timestamp: "2026-07-27T00:00:00.000000000Z"
+    let node = SessionNodeRecord::new(
+        "node-2".into(),
+        Some("node-1".into()),
+        "2026-07-27T00:00:00.000000000Z"
             .parse()
             .expect("canonical node timestamp"),
-        payload: SessionNodePayload::Event {
+        SessionNodePayload::Event {
             event: SessionHistoryRecord::Protocol(protocol_event()),
         },
-    };
+    );
 
     let encoded = node
         .encode_storage_body(crate::store::FleetFormat::current())
@@ -414,16 +420,16 @@ fn stored_bodies_below_the_supported_generation_are_refused() {
     let window = fleet.read_window(crate::surface_format!(SESSION_NODE_BODY_SCHEMA_VERSION));
     let unsupported_generation = window.oldest() - 1;
     assert!(!window.admits(unsupported_generation));
-    let node = SessionNodeRecord {
-        node_id: "node-1".into(),
-        parent_node_id: None,
-        timestamp: "2026-08-18T00:00:00.000000000Z"
+    let node = SessionNodeRecord::new(
+        "node-1".into(),
+        None,
+        "2026-08-18T00:00:00.000000000Z"
             .parse()
             .expect("canonical node timestamp"),
-        payload: SessionNodePayload::Event {
+        SessionNodePayload::Event {
             event: SessionHistoryRecord::Protocol(protocol_event()),
         },
-    };
+    );
     let encoded = node
         .encode_storage_body(crate::store::FleetFormat::current())
         .expect("encode storage body");
@@ -515,15 +521,15 @@ fn stored_bodies_from_a_newer_generation_are_refused() {
 fn stored_frame_open_rejects_a_raw_frame_key() {
     let frame_key = crate::FrameKey::from_caller_material("strict-durable-frame")
         .expect("non-empty frame material");
-    let node = SessionNodeRecord {
-        node_id: NodeId::fixture(
+    let node = SessionNodeRecord::new(
+        NodeId::fixture(
             frame_node_id(&SessionId::from("session"), frame_key.as_str()).into_inner(),
         ),
-        parent_node_id: None,
-        timestamp: "2026-09-01T00:00:00.000000000Z"
+        None,
+        "2026-09-01T00:00:00.000000000Z"
             .parse()
             .expect("canonical node timestamp"),
-        payload: SessionNodePayload::FrameOpen {
+        SessionNodePayload::FrameOpen {
             frame_key,
             reason: crate::AgentFrameReason::initial(),
             assignment: crate::AgentFrameAssignment::unconfigured(crate::SessionPolicy::new(
@@ -532,7 +538,7 @@ fn stored_frame_open_rejects_a_raw_frame_key() {
                 crate::NoProgressBudget::bounded(12),
             )),
         },
-    };
+    );
     let mut stored: serde_json::Value = serde_json::from_str(
         &node
             .encode_storage_body(crate::store::FleetFormat::current())
@@ -568,32 +574,40 @@ fn nearest_frame_is_derived_from_ancestry() {
         crate::FrameKey::from_caller_material("first-frame").expect("non-empty frame material");
     let first = frame_node_id(&SessionId::from("session"), first_key.as_str());
     assert!(
-        graph.append_frame_open_with_id_at(
-            first.clone(),
-            first_key,
-            crate::AgentFrameReason::initial(),
-            assignment.clone(),
-            "2026-07-27T00:00:00.000000000Z"
-                .parse()
-                .expect("canonical node timestamp"),
-        )
+        graph
+            .append_frame_open_with_id_at(
+                first.clone(),
+                first_key,
+                crate::AgentFrameReason::initial(),
+                assignment.clone(),
+                "2026-07-27T00:00:00.000000000Z"
+                    .parse()
+                    .expect("canonical node timestamp"),
+            )
+            .unwrap()
     );
-    let first_message = graph.append_message(text_message("m1", MessageRole::User, "first"));
+    let first_message = graph
+        .append_message(text_message("m1", MessageRole::User, "first"))
+        .unwrap();
     let second_key =
         crate::FrameKey::from_caller_material("second-frame").expect("non-empty frame material");
     let second = frame_node_id(&SessionId::from("session"), second_key.as_str());
     assert!(
-        graph.append_frame_open_with_id_at(
-            second.clone(),
-            second_key,
-            crate::AgentFrameReason::continue_as(),
-            assignment,
-            "2026-07-27T00:00:01.000000000Z"
-                .parse()
-                .expect("canonical node timestamp"),
-        )
+        graph
+            .append_frame_open_with_id_at(
+                second.clone(),
+                second_key,
+                crate::AgentFrameReason::continue_as(),
+                assignment,
+                "2026-07-27T00:00:01.000000000Z"
+                    .parse()
+                    .expect("canonical node timestamp"),
+            )
+            .unwrap()
     );
-    let second_message = graph.append_message(text_message("m2", MessageRole::User, "second"));
+    let second_message = graph
+        .append_message(text_message("m2", MessageRole::User, "second"))
+        .unwrap();
 
     assert_eq!(
         graph
@@ -619,24 +633,26 @@ fn nearest_frame_is_derived_from_ancestry() {
 fn active_read_rewrite_preserves_draft_node_id_sequence() {
     let first = text_message("m1", MessageRole::User, "first");
     let mut graph = SessionGraph::default();
-    graph.append_message(first.clone());
+    graph.append_message(first.clone()).unwrap();
 
     let leaf_node_id = graph.leaf_node_id.clone().expect("initial leaf");
     let draft_namespace = format!("unscoped-replacement:{leaf_node_id}");
     let mut nodes = graph.nodes.clone();
-    nodes.extend((0..2).map(|ordinal| {
-        std::sync::Arc::new(SessionNodeRecord {
-            node_id: draft_node_id(&draft_namespace, ordinal),
-            parent_node_id: Some(leaf_node_id.clone()),
-            timestamp: "2026-08-20T00:00:00.000000000Z"
-                .parse()
-                .expect("canonical node timestamp"),
-            payload: SessionNodePayload::Plugin {
-                plugin_type: "pre-existing-draft".to_string(),
-                body: SharedJsonValue::new(serde_json::json!({"ordinal": ordinal})),
-            },
-        })
-    }));
+    nodes
+        .extend((0..2).map(|ordinal| {
+            std::sync::Arc::new(SessionNodeRecord::new(
+                draft_node_id(&draft_namespace, ordinal),
+                Some(leaf_node_id.clone()),
+                "2026-08-20T00:00:00.000000000Z"
+                    .parse()
+                    .expect("canonical node timestamp"),
+                SessionNodePayload::Plugin {
+                    plugin_type: "pre-existing-draft".to_string(),
+                    body: SharedJsonValue::new(serde_json::json!({"ordinal": ordinal})),
+                },
+            ))
+        }))
+        .expect("source fixture edit is admitted");
     graph = SessionGraph::from_shared_nodes(nodes, Some(leaf_node_id))
         .expect("pre-existing draft branches are structurally valid");
 
@@ -674,10 +690,10 @@ fn projection_and_replacement_retain_the_same_prefix() {
     });
 
     let mut graph = SessionGraph::default();
-    graph.append_message(first.clone());
-    graph.append_message(transient.clone());
-    graph.append_protocol_event(protocol_event());
-    graph.append_message(second.clone());
+    graph.append_message(first.clone()).unwrap();
+    graph.append_message(transient.clone()).unwrap();
+    graph.append_protocol_event(protocol_event()).unwrap();
+    graph.append_message(second.clone()).unwrap();
     let current_parts = graph
         .nodes
         .iter()
@@ -756,7 +772,9 @@ fn a_pending_frame_open_moves_the_projection_to_the_new_frame() {
         "frame-a",
         crate::AgentFrameReason::initial(),
     );
-    graph.append_message(text_message("frame-a", MessageRole::User, "a"));
+    graph
+        .append_message(text_message("frame-a", MessageRole::User, "a"))
+        .unwrap();
     assert_eq!(graph.read_model().messages.len(), 1);
 
     open_test_frame(
@@ -769,7 +787,9 @@ fn a_pending_frame_open_moves_the_projection_to_the_new_frame() {
         graph.read_model().messages.is_empty(),
         "the new frame starts an empty projection"
     );
-    graph.append_message(text_message("frame-b", MessageRole::User, "b"));
+    graph
+        .append_message(text_message("frame-b", MessageRole::User, "b"))
+        .unwrap();
     let b = graph.read_model();
     assert_eq!(b.messages.len(), 1);
     assert_eq!(b.messages[0].id, "frame-b");
@@ -793,7 +813,9 @@ fn the_tail_rewrite_covers_only_the_current_frame() {
         "frame-a",
         crate::AgentFrameReason::initial(),
     );
-    graph.append_message(text_message("a", MessageRole::User, "a"));
+    graph
+        .append_message(text_message("a", MessageRole::User, "a"))
+        .unwrap();
     open_test_frame(
         &mut graph,
         &session,
@@ -801,7 +823,7 @@ fn the_tail_rewrite_covers_only_the_current_frame() {
         crate::AgentFrameReason::continue_as(),
     );
     let b1 = text_message("b1", MessageRole::User, "b1");
-    graph.append_message(b1.clone());
+    graph.append_message(b1.clone()).unwrap();
 
     graph.rewrite_active_read_tail(&[b1, text_message("b2", MessageRole::Assistant, "b2")]);
     let read = graph.read_model();
@@ -835,15 +857,17 @@ fn open_test_frame(
     let frame_key = crate::FrameKey::from_caller_material(key).expect("non-empty material");
     let frame = frame_node_id(session, frame_key.as_str());
     assert!(
-        graph.append_frame_open_with_id_at(
-            frame.clone(),
-            frame_key,
-            reason,
-            assignment,
-            "2026-09-29T00:00:00.000000000Z"
-                .parse()
-                .expect("canonical node timestamp"),
-        )
+        graph
+            .append_frame_open_with_id_at(
+                frame.clone(),
+                frame_key,
+                reason,
+                assignment,
+                "2026-09-29T00:00:00.000000000Z"
+                    .parse()
+                    .expect("canonical node timestamp"),
+            )
+            .unwrap()
     );
     frame
 }
@@ -861,8 +885,12 @@ fn retiring_below_the_current_frame_re_anchors_the_graph() {
         "frame-a",
         crate::AgentFrameReason::initial(),
     );
-    graph.append_message(text_message("a1", MessageRole::User, "a1"));
-    graph.append_message(text_message("a2", MessageRole::Assistant, "a2"));
+    graph
+        .append_message(text_message("a1", MessageRole::User, "a1"))
+        .unwrap();
+    graph
+        .append_message(text_message("a2", MessageRole::Assistant, "a2"))
+        .unwrap();
     let a_leaf = graph.leaf_node_id.clone().expect("leaf");
     let frame_b = open_test_frame(
         &mut graph,
@@ -870,7 +898,9 @@ fn retiring_below_the_current_frame_re_anchors_the_graph() {
         "frame-b",
         crate::AgentFrameReason::continue_as(),
     );
-    graph.append_message(text_message("b1", MessageRole::User, "b1"));
+    graph
+        .append_message(text_message("b1", MessageRole::User, "b1"))
+        .unwrap();
     let pending = graph.leaf_node_id.clone().expect("leaf");
 
     let durable = graph
@@ -920,7 +950,9 @@ fn a_pending_frame_switch_retires_nothing() {
         "frame-a",
         crate::AgentFrameReason::initial(),
     );
-    graph.append_message(text_message("a1", MessageRole::User, "a1"));
+    graph
+        .append_message(text_message("a1", MessageRole::User, "a1"))
+        .unwrap();
     graph.mark_all_durable();
     open_test_frame(
         &mut graph,
@@ -940,16 +972,18 @@ fn remap_node_ids_rewrites_parents_on_child_before_parent_layouts() {
     // must still rewrite the earlier child's parent id, on both the warm
     // cache index path and the cold fallback.
     for warm_cache in [true, false] {
-        let record = |id: &str, parent: Option<&str>| SessionNodeRecord {
-            node_id: NodeId::fixture(id.to_string()),
-            parent_node_id: parent.map(crate::NodeId::fixture),
-            timestamp: "2026-08-08T00:00:00.000000000Z"
-                .parse()
-                .expect("canonical node timestamp"),
-            payload: SessionNodePayload::Plugin {
-                plugin_type: "remap-child-before-parent".to_string(),
-                body: SharedJsonValue::new(serde_json::json!({"id": id})),
-            },
+        let record = |id: &str, parent: Option<&str>| {
+            SessionNodeRecord::new(
+                NodeId::fixture(id.to_string()),
+                parent.map(crate::NodeId::fixture),
+                "2026-08-08T00:00:00.000000000Z"
+                    .parse()
+                    .expect("canonical node timestamp"),
+                SessionNodePayload::Plugin {
+                    plugin_type: "remap-child-before-parent".to_string(),
+                    body: SharedJsonValue::new(serde_json::json!({"id": id})),
+                },
+            )
         };
         let mut graph = SessionGraph::from_nodes(
             vec![record("child", Some("root")), record("root", None)],
@@ -962,10 +996,12 @@ fn remap_node_ids_rewrites_parents_on_child_before_parent_layouts() {
         }
 
         let derived_root = crate::NodeId::from("derived-root");
-        graph.remap_node_ids(
-            &crate::SessionId::from("remap-test"),
-            &[("root".into(), derived_root.clone())],
-        );
+        graph
+            .remap_node_ids(
+                &crate::SessionId::from("remap-test"),
+                &[("root".into(), derived_root.clone())],
+            )
+            .unwrap();
 
         assert_eq!(graph.nodes[1].node_id, derived_root);
         assert_eq!(
@@ -992,10 +1028,12 @@ fn remap_node_ids_rewrites_parents_on_child_before_parent_layouts() {
 #[test]
 fn event_only_appends_preserve_the_message_vec_and_render_cache() {
     let mut graph = SessionGraph::default();
-    graph.append_message(text_message("m1", MessageRole::User, "hello"));
+    graph
+        .append_message(text_message("m1", MessageRole::User, "hello"))
+        .unwrap();
     let before = graph.read_model();
 
-    graph.append_protocol_event(protocol_event());
+    graph.append_protocol_event(protocol_event()).unwrap();
     let after = graph.read_model();
 
     assert!(lash_protocol_types::AppendVec::ptr_eq(
@@ -1021,15 +1059,15 @@ mod window_anchor {
     fn frame_open(key: &str, parent: Option<&str>) -> SessionNodeRecord {
         let frame_key =
             crate::FrameKey::from_caller_material(key).expect("non-empty frame material");
-        SessionNodeRecord {
-            node_id: NodeId::fixture(
+        SessionNodeRecord::new(
+            NodeId::fixture(
                 frame_node_id(&SessionId::from("window"), frame_key.as_str()).into_inner(),
             ),
-            parent_node_id: parent.map(crate::NodeId::fixture),
-            timestamp: "2026-09-29T00:00:00.000000000Z"
+            parent.map(crate::NodeId::fixture),
+            "2026-09-29T00:00:00.000000000Z"
                 .parse()
                 .expect("canonical node timestamp"),
-            payload: SessionNodePayload::FrameOpen {
+            SessionNodePayload::FrameOpen {
                 frame_key,
                 reason: crate::AgentFrameReason::initial(),
                 assignment: crate::AgentFrameAssignment::unconfigured(crate::SessionPolicy::new(
@@ -1038,21 +1076,21 @@ mod window_anchor {
                     crate::NoProgressBudget::bounded(12),
                 )),
             },
-        }
+        )
     }
 
     fn plugin(id: &str, parent: &str) -> SessionNodeRecord {
-        SessionNodeRecord {
-            node_id: id.parse().unwrap(),
-            parent_node_id: Some(parent.parse().unwrap()),
-            timestamp: "2026-09-29T00:00:00.000000000Z"
+        SessionNodeRecord::new(
+            id.parse().unwrap(),
+            Some(parent.parse().unwrap()),
+            "2026-09-29T00:00:00.000000000Z"
                 .parse()
                 .expect("canonical node timestamp"),
-            payload: SessionNodePayload::Plugin {
+            SessionNodePayload::Plugin {
                 plugin_type: "window-anchor-test".to_string(),
                 body: SharedJsonValue::new(serde_json::json!({"id": id})),
             },
-        }
+        )
     }
 
     fn anchor_at(base: &SessionNodeRecord, generation: u64) -> WindowAnchor {
@@ -1199,9 +1237,10 @@ mod window_anchor {
     /// parent) and well-formed batches alike.
     #[test]
     fn a_proven_window_validates_appends_as_a_fresh_graph_does() {
-        let parentless = |id: &str| SessionNodeRecord {
-            parent_node_id: None,
-            ..plugin(id, "unused")
+        let parentless = |id: &str| {
+            let mut node = plugin(id, "unused");
+            node.parent_node_id = None;
+            node
         };
         let cases: Vec<(&str, Vec<SessionNodeRecord>)> = vec![
             ("one well-formed node", vec![plugin("c", "b")]),
@@ -1230,7 +1269,7 @@ mod window_anchor {
             graph
                 .validate_resident_integrity()
                 .expect("the window is proven before the append");
-            graph.append_prebuilt_nodes(appended);
+            graph.append_prebuilt_nodes(appended).unwrap();
             let incremental = graph.validate_resident_integrity();
             let fresh = SessionGraph {
                 inner: Arc::clone(&graph.inner),
@@ -1281,20 +1320,26 @@ fn held_readers_of_every_commit_share_the_frame_and_keep_what_they_saw() {
     );
     let mut held = Vec::new();
     for turn in 0..TURNS {
-        let draft = graph.append_message(text_message(
-            &format!("m{turn}"),
-            MessageRole::User,
-            &format!("turn {turn}"),
-        ));
+        let draft = graph
+            .append_message(text_message(
+                &format!("m{turn}"),
+                MessageRole::User,
+                &format!("turn {turn}"),
+            ))
+            .unwrap();
         let derived = NodeId::fixture(format!("derived-{turn}"));
         let warm = graph.read_model();
-        graph.remap_node_ids(&session, &[(draft, derived.clone())]);
-        graph.apply_realized_node_timestamps(&[RealizedNodeTimestamp {
-            node_id: derived.clone(),
-            timestamp: format!("2026-09-29T00:00:{:02}.000000000Z", turn % 60)
-                .parse()
-                .expect("canonical node timestamp"),
-        }]);
+        graph
+            .remap_node_ids(&session, &[(draft, derived.clone())])
+            .unwrap();
+        graph
+            .apply_realized_node_timestamps(&[RealizedNodeTimestamp {
+                node_id: derived.clone(),
+                timestamp: format!("2026-09-29T00:00:{:02}.000000000Z", turn % 60)
+                    .parse()
+                    .expect("canonical node timestamp"),
+            }])
+            .unwrap();
         let read = graph.read_model();
         assert!(
             lash_protocol_types::AppendVec::ptr_eq(&warm.messages, &read.messages)
@@ -1341,9 +1386,13 @@ fn held_readers_of_every_commit_share_the_frame_and_keep_what_they_saw() {
     );
 
     // A reader held before a commit rewrites its tail keeps the draft.
-    let draft = graph.append_message(text_message("late", MessageRole::User, "late"));
+    let draft = graph
+        .append_message(text_message("late", MessageRole::User, "late"))
+        .unwrap();
     let before_commit = graph.clone();
-    graph.remap_node_ids(&session, &[(draft.clone(), NodeId::from("derived-late"))]);
+    graph
+        .remap_node_ids(&session, &[(draft.clone(), NodeId::from("derived-late"))])
+        .unwrap();
     assert_eq!(before_commit.leaf_node_id.as_ref(), Some(&draft));
     assert!(before_commit.find_node(draft.as_str()).is_some());
     assert!(graph.find_node(draft.as_str()).is_none());
@@ -1358,7 +1407,9 @@ fn held_readers_of_every_commit_share_the_frame_and_keep_what_they_saw() {
         "frame-b",
         crate::AgentFrameReason::continue_as(),
     );
-    graph.append_message(text_message("b0", MessageRole::User, "b"));
+    graph
+        .append_message(text_message("b0", MessageRole::User, "b"))
+        .unwrap();
     let first_of_b = graph.read_model();
     assert_eq!(first_of_b.messages.len(), 1);
     assert_eq!(first_of_b.messages[0].id, "b0");
@@ -1367,46 +1418,60 @@ fn held_readers_of_every_commit_share_the_frame_and_keep_what_they_saw() {
     assert_eq!(held[0].0.messages[0].id, "m0");
 }
 
-/// The render cache a fold makes extends the previous render instead of
-/// re-rendering the frame, and gives exactly the render of the whole frame.
+/// LO-PREFIX: graph appends between renders preserve the admitted prefix,
+/// render only their new parts and remain equal to the full flat adapter.
 #[test]
-fn an_extended_render_cache_equals_a_fresh_render_of_the_frame() {
-    const TURNS: usize = 64;
+fn retained_graph_render_keeps_prefix_across_multiple_source_appends() {
+    use lash_protocol_types::session_model::message::HistoryPresentation;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    let calls = Arc::new(AtomicUsize::new(0));
+    let count = calls.clone();
+    let policy = HistoryPresentation::new(move |_, part| {
+        count.fetch_add(1, Ordering::SeqCst);
+        part.content().into_owned()
+    });
+    let budget = lash_protocol_types::allocation::AllocationBudget::unowned();
     let mut graph = SessionGraph::default();
-    let mut renders = Vec::new();
-    for turn in 0..TURNS {
-        graph.append_message(text_message(
-            &format!("u{turn}"),
-            MessageRole::User,
-            &format!("question {turn}"),
-        ));
-        graph.append_message(text_message(
-            &format!("a{turn}"),
-            MessageRole::Assistant,
-            &format!("answer {turn}"),
-        ));
+    let mut held = Vec::<lash_protocol_types::llm::types::RequestMessages>::new();
+    for turn in 0..64 {
+        graph
+            .append_message(text_message(
+                &format!("u{turn}"),
+                MessageRole::User,
+                &format!("question {turn}"),
+            ))
+            .unwrap();
+        graph
+            .append_message(text_message(
+                &format!("a{turn}"),
+                MessageRole::Assistant,
+                &format!("answer {turn}"),
+            ))
+            .unwrap();
         let read = graph.read_model();
-        let rendered = read.prompt_render_cache.rendered(
-            read.messages.as_slice(),
-            &lash_protocol_types::session_model::message::HistoryPresentation::verbatim(),
+        calls.store(0, Ordering::SeqCst);
+        let rendered = read
+            .prompt_render_cache
+            .rendered_retained(read.messages.as_slice(), &policy, &budget)
+            .unwrap();
+        assert_eq!(
+            calls.load(Ordering::SeqCst),
+            2,
+            "only the two new source parts render"
         );
         assert_eq!(
-            rendered.as_slice(),
-            lash_protocol_types::session_model::render_prompt(read.messages.as_slice())
-                .messages
-                .as_slice()
+            rendered.iter().cloned().collect::<Vec<_>>(),
+            lash_protocol_types::session_model::render_prompt(read.messages.as_slice()).messages
         );
-        renders.push(rendered);
+        if let Some(previous) = held.last() {
+            assert_eq!(
+                previous.shared_prefix(&rendered),
+                previous.len(),
+                "every retained reader shares the complete prefix"
+            );
+        }
+        held.push(rendered);
     }
-    let buffers = renders
-        .iter()
-        .map(|rendered| rendered.as_ptr())
-        .collect::<HashSet<_>>();
-    assert!(
-        buffers.len() <= 8,
-        "{} render buffers for {TURNS} turns: each render extends the last",
-        buffers.len()
-    );
 }
 
 /// FIG-5052: durable node time admits only the fixed-width nanosecond UTC spelling.
@@ -1474,13 +1539,13 @@ fn node_timestamp_round_trips_fixed_width_utc_instants() {
 }
 
 fn project_stored_assistant(id: &str, parts: Vec<Part>) -> crate::transcript::SessionTranscript {
-    let node = SessionNodeRecord {
-        node_id: NodeId::fixture(id),
-        parent_node_id: None,
-        timestamp: "2026-10-08T00:00:00.000000000Z"
+    let node = SessionNodeRecord::new(
+        NodeId::fixture(id),
+        None,
+        "2026-10-08T00:00:00.000000000Z"
             .parse()
             .expect("canonical node timestamp"),
-        payload: SessionNodePayload::Event {
+        SessionNodePayload::Event {
             event: SessionHistoryRecord::Conversation(crate::ConversationRecord::from_message(
                 Message {
                     id: id.into(),
@@ -1491,7 +1556,7 @@ fn project_stored_assistant(id: &str, parts: Vec<Part>) -> crate::transcript::Se
                 },
             )),
         },
-    };
+    );
     let body = node
         .encode_storage_body(crate::store::FleetFormat::current())
         .expect("encode the stored conversation node");
@@ -1661,12 +1726,18 @@ fn a_commits_added_transcript_equals_the_full_decode_less_the_base() {
 
     let empty = SessionGraph::default();
     let mut graph = SessionGraph::default();
-    graph.append_message(input("first-input", "turn-1"));
+    graph
+        .append_message(input("first-input", "turn-1"))
+        .unwrap();
     check("a first commit", &empty, &graph);
 
     let base = graph.clone();
-    graph.append_node_draft(event());
-    graph.append_node_draft(event());
+    graph
+        .append_node_draft(event())
+        .expect("source fixture edit is admitted");
+    graph
+        .append_node_draft(event())
+        .expect("source fixture edit is admitted");
     check(
         "events inherit the turn of the base's last input",
         &base,
@@ -1674,20 +1745,36 @@ fn a_commits_added_transcript_equals_the_full_decode_less_the_base() {
     );
 
     let base = graph.clone();
-    graph.append_node_draft(event());
-    graph.append_plugin("history-test", serde_json::json!({"n": 1}));
-    graph.append_message(reply("first-reply", "turn-1"));
-    graph.append_message(input("second-input", "turn-2"));
+    graph
+        .append_node_draft(event())
+        .expect("source fixture edit is admitted");
+    graph
+        .append_plugin("history-test", serde_json::json!({"n": 1}))
+        .unwrap();
+    graph
+        .append_message(reply("first-reply", "turn-1"))
+        .unwrap();
+    graph
+        .append_message(input("second-input", "turn-2"))
+        .unwrap();
     check("a reply then a new turn's input", &base, &graph);
 
     let base = graph.clone();
-    graph.append_message(output("second-output", "turn-2"));
-    graph.append_node_draft(event());
+    graph
+        .append_message(output("second-output", "turn-2"))
+        .unwrap();
+    graph
+        .append_node_draft(event())
+        .expect("source fixture edit is admitted");
     check("events after an output", &base, &graph);
 
     let base = graph.clone();
-    graph.append_plugin("history-test", serde_json::json!({"n": 2}));
-    graph.append_node_draft(event());
+    graph
+        .append_plugin("history-test", serde_json::json!({"n": 2}))
+        .unwrap();
+    graph
+        .append_node_draft(event())
+        .expect("source fixture edit is admitted");
     check("only plugin nodes since the turn's message", &base, &graph);
 
     let branch_point = graph
@@ -1706,7 +1793,350 @@ fn a_commits_added_transcript_equals_the_full_decode_less_the_base() {
         Some(branch_point),
     )
     .expect("the same nodes under an earlier leaf");
-    graph.append_node_draft(event());
-    graph.append_message(input("branch-input", "turn-3"));
+    graph
+        .append_node_draft(event())
+        .expect("source fixture edit is admitted");
+    graph
+        .append_message(input("branch-input", "turn-3"))
+        .unwrap();
     check("a head branched away from the base's leaf", &base, &graph);
+}
+
+/// LO-EVICT-SOURCE: decoding is admitted before materialization, and a
+/// directly held parts Arc remains charged after every graph/node drops.
+#[test]
+fn source_decode_admission_follows_an_escaped_parts_reader() {
+    use lash_protocol_types::allocation::{
+        AllocationBudget, AllocationError, AllocationHold, AllocationLedger, AllocationReservation,
+        ReserveError,
+    };
+    use std::sync::{
+        Arc,
+        atomic::{AtomicU64, Ordering},
+    };
+    #[derive(Clone)]
+    struct Ledger {
+        used: Arc<AtomicU64>,
+        limit: u64,
+    }
+    struct Hold {
+        ledger: Ledger,
+        bytes: u64,
+    }
+    impl Drop for Hold {
+        fn drop(&mut self) {
+            self.ledger.used.fetch_sub(self.bytes, Ordering::SeqCst);
+        }
+    }
+    impl AllocationReservation for Hold {
+        fn retain(&self) {}
+    }
+    impl AllocationLedger for Ledger {
+        fn reserve(&self, bytes: u64) -> Result<AllocationHold, AllocationError> {
+            if bytes > self.limit {
+                return Err(AllocationError {
+                    kind: ReserveError::TooLarge,
+                    actor: "source-decode".into(),
+                    requested: bytes,
+                    capacity: self.limit,
+                });
+            }
+            self.used
+                .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |used| {
+                    used.checked_add(bytes).filter(|total| *total <= self.limit)
+                })
+                .map_err(|_| AllocationError {
+                    kind: ReserveError::Pressure,
+                    actor: "source-decode".into(),
+                    requested: bytes,
+                    capacity: self.limit,
+                })?;
+            Ok(AllocationHold::new(Hold {
+                ledger: self.clone(),
+                bytes,
+            }))
+        }
+        fn reserve_shared(&self, _: usize, bytes: u64) -> Result<AllocationHold, AllocationError> {
+            self.reserve(bytes)
+        }
+    }
+    let fleet = crate::store::FleetFormat::current();
+    let message = crate::Message {
+        id: "message".into(),
+        role: crate::MessageRole::User,
+        parts: crate::shared_parts(vec![crate::Part::text(
+            "part".into(),
+            "payload".repeat(256),
+            None,
+        )]),
+        origin: None,
+        reply_marker: None,
+    };
+    let original = SessionNodeRecord::new(
+        crate::NodeId::fixture("source"),
+        None,
+        "2026-10-22T00:00:00.000000000Z".parse().unwrap(),
+        SessionNodePayload::Event {
+            event: crate::SessionHistoryRecord::Conversation(
+                crate::ConversationRecord::from_message(message),
+            ),
+        },
+    );
+    let body = original.encode_storage_body(fleet).unwrap();
+    let used = Arc::new(AtomicU64::new(0));
+    let tiny = AllocationBudget::new(Ledger {
+        used: used.clone(),
+        limit: 1,
+    });
+    let refused =
+        SessionNodeRecord::decode_storage_body_in("source", None, &body, fleet, &tiny).unwrap_err();
+    assert!(matches!(
+        refused,
+        crate::StoreError::Allocation(AllocationError {
+            kind: ReserveError::TooLarge,
+            ..
+        })
+    ));
+    assert_eq!(used.load(Ordering::SeqCst), 0);
+    let budget = AllocationBudget::new(Ledger {
+        used: used.clone(),
+        limit: 1 << 20,
+    });
+    let decoded = Arc::new(
+        SessionNodeRecord::decode_storage_body_in("source", None, &body, fleet, &budget).unwrap(),
+    );
+    assert_eq!(
+        decoded.encode_storage_body(fleet).unwrap(),
+        body,
+        "source holds have no stored representation"
+    );
+    let charged = used.load(Ordering::SeqCst);
+    assert!(charged >= body.len() as u64);
+    let parts = decoded.message().unwrap().parts;
+    drop(decoded);
+    assert_eq!(
+        used.load(Ordering::SeqCst),
+        charged,
+        "the escaped payload must own its source charge"
+    );
+    assert_eq!(parts[0].content(), "payload".repeat(256));
+    drop(parts);
+    assert_eq!(used.load(Ordering::SeqCst), 0);
+
+    let plugin = SessionNodeRecord::new(
+        crate::NodeId::fixture("plugin-source"),
+        None,
+        original.timestamp,
+        SessionNodePayload::Plugin {
+            plugin_type: "source-reader".into(),
+            body: SharedJsonValue::new(serde_json::json!({ "text": "payload".repeat(256) })),
+        },
+    );
+    let plugin_body = plugin.encode_storage_body(fleet).unwrap();
+    let decoded = SessionNodeRecord::decode_storage_body_in(
+        "plugin-source",
+        None,
+        &plugin_body,
+        fleet,
+        &budget,
+    )
+    .unwrap();
+    assert_eq!(decoded.encode_storage_body(fleet).unwrap(), plugin_body);
+    let SessionNodePayload::Plugin { body, .. } = &decoded.payload else {
+        panic!("expected plugin payload");
+    };
+    let escaped = body.clone();
+    let charged = used.load(Ordering::SeqCst);
+    drop(decoded);
+    assert_eq!(
+        used.load(Ordering::SeqCst),
+        charged,
+        "an escaped plugin reader owns its source charge"
+    );
+    assert_eq!(escaped.as_ref()["text"], "payload".repeat(256));
+    drop(escaped);
+    assert_eq!(used.load(Ordering::SeqCst), 0);
+    // Sparse nested maps have full B-tree roots despite their tiny encoding.
+    // Measure actual production decode allocations, including its JSON and
+    // flattened typed materialization, against the admission held by readers.
+    let mut nested = serde_json::Value::Null;
+    for _ in 0..60 {
+        nested = serde_json::json!({"": nested});
+    }
+    let plugin = SessionNodeRecord::new(
+        NodeId::fixture("nested-source"),
+        None,
+        original.timestamp,
+        SessionNodePayload::Plugin {
+            plugin_type: "source-reader".into(),
+            body: SharedJsonValue::new(nested),
+        },
+    );
+    let encoded = plugin.encode_storage_body(fleet).unwrap();
+    let measurement = crate::history_growth_law::allocation_counter::Measurement::start();
+    let decoded =
+        SessionNodeRecord::decode_storage_body_in("nested-source", None, &encoded, fleet, &budget)
+            .unwrap();
+    let counts = measurement.finish();
+    let charged = used.load(Ordering::SeqCst);
+    assert!(
+        charged >= counts.allocated as u64,
+        "source admission {charged} must bound the actual {} decode bytes, including sparse map roots",
+        counts.allocated
+    );
+    drop(decoded);
+    assert_eq!(used.load(Ordering::SeqCst), 0);
+}
+
+/// LO-EVICT-SOURCE: a refused cache edit never publishes a partial graph.
+#[test]
+fn source_edit_refusal_leaves_graph_and_readers_unchanged() {
+    use lash_protocol_types::allocation::{
+        AllocationBudget, AllocationError, AllocationHold, AllocationLedger, AllocationReservation,
+        ReserveError,
+    };
+    use std::sync::{
+        Arc,
+        atomic::{AtomicBool, AtomicU64, Ordering},
+    };
+    #[derive(Clone)]
+    struct Ledger {
+        refuse: Arc<AtomicBool>,
+        used: Arc<AtomicU64>,
+        fail_after: Arc<AtomicU64>,
+    }
+    struct Hold {
+        used: Arc<AtomicU64>,
+        bytes: u64,
+    }
+    impl AllocationReservation for Hold {
+        fn retain(&self) {}
+    }
+    impl Drop for Hold {
+        fn drop(&mut self) {
+            self.used.fetch_sub(self.bytes, Ordering::SeqCst);
+        }
+    }
+    impl AllocationLedger for Ledger {
+        fn reserve(&self, bytes: u64) -> Result<AllocationHold, AllocationError> {
+            let allowed = self
+                .fail_after
+                .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |left| {
+                    if left == u64::MAX {
+                        Some(left)
+                    } else {
+                        left.checked_sub(1)
+                    }
+                })
+                .is_ok();
+            if self.refuse.load(Ordering::SeqCst) || !allowed {
+                return Err(AllocationError {
+                    kind: ReserveError::Pressure,
+                    actor: "source-edit".into(),
+                    requested: bytes,
+                    capacity: 1 << 20,
+                });
+            }
+            self.used.fetch_add(bytes, Ordering::SeqCst);
+            Ok(AllocationHold::new(Hold {
+                used: self.used.clone(),
+                bytes,
+            }))
+        }
+        fn reserve_shared(&self, _: usize, bytes: u64) -> Result<AllocationHold, AllocationError> {
+            self.reserve(bytes)
+        }
+    }
+    let ledger = Ledger {
+        refuse: Arc::new(AtomicBool::new(false)),
+        used: Arc::new(AtomicU64::new(0)),
+        fail_after: Arc::new(AtomicU64::new(u64::MAX)),
+    };
+    let budget = AllocationBudget::new(ledger.clone());
+    let root = SessionNodeRecord::new(
+        NodeId::fixture("source-root"),
+        None,
+        "2026-10-22T00:00:00.000000000Z".parse().unwrap(),
+        SessionNodePayload::Plugin {
+            plugin_type: "source-edit".into(),
+            body: SharedJsonValue::new(serde_json::json!({})),
+        },
+    );
+    let mut graph = SessionGraph::from_shared_nodes_in(
+        [Arc::new(root)],
+        Some(NodeId::fixture("source-root")),
+        &budget,
+    )
+    .unwrap();
+    let reader = graph.read_model();
+    let before = serde_json::to_vec(&graph).unwrap();
+    let held = ledger.used.load(Ordering::SeqCst);
+    ledger.refuse.store(true, Ordering::SeqCst);
+    let error = graph
+        .append_plugin("source-edit", serde_json::json!({"new": true}))
+        .unwrap_err();
+    assert!(matches!(
+        error,
+        crate::StoreError::Allocation(AllocationError {
+            kind: ReserveError::Pressure,
+            ..
+        })
+    ));
+    assert_eq!(
+        serde_json::to_vec(&graph).unwrap(),
+        before,
+        "refusal must not publish a node before its indexes"
+    );
+    assert!(lash_protocol_types::AppendVec::ptr_eq(
+        &reader.active_events,
+        &graph.read_model().active_events
+    ));
+    assert_eq!(ledger.used.load(Ordering::SeqCst), held);
+    ledger.refuse.store(false, Ordering::SeqCst);
+    let mut completed = false;
+    for fail_after in 0..128 {
+        let mut draft = graph.clone();
+        let held = ledger.used.load(Ordering::SeqCst);
+        ledger.fail_after.store(fail_after, Ordering::SeqCst);
+        let result = draft.remap_node_ids(
+            &SessionId::fixture("source-edits"),
+            &[(
+                NodeId::fixture("source-root"),
+                NodeId::fixture("renamed-root"),
+            )],
+        );
+        ledger.fail_after.store(u64::MAX, Ordering::SeqCst);
+        if result.is_ok() {
+            assert!(draft.find_node("renamed-root").is_some());
+            completed = true;
+            break;
+        }
+        assert_eq!(
+            serde_json::to_vec(&draft).unwrap(),
+            before,
+            "a refused rename keeps the graph at cut {fail_after}"
+        );
+        assert!(
+            draft.find_node("source-root").is_some(),
+            "a refused rename keeps its original index at cut {fail_after}"
+        );
+        assert!(draft.find_node("renamed-root").is_none());
+        assert!(lash_protocol_types::AppendVec::ptr_eq(
+            &reader.active_events,
+            &draft.read_model().active_events
+        ));
+        assert_eq!(
+            ledger.used.load(Ordering::SeqCst),
+            held,
+            "a refused rename releases its draft at cut {fail_after}"
+        );
+    }
+    assert!(completed, "the rename eventually passes all admission cuts");
+    drop(graph);
+    assert!(
+        ledger.used.load(Ordering::SeqCst) > 0,
+        "escaped reader keeps its slots charged"
+    );
+    drop(reader);
+    assert_eq!(ledger.used.load(Ordering::SeqCst), 0);
 }

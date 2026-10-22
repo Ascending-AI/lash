@@ -216,14 +216,25 @@ fn carries_attachment(part: &Part) -> bool {
     }
 }
 
-fn strip_all_attachments(messages: &mut [Message], placeholder: &str) -> bool {
+fn strip_all_attachments(
+    messages: &mut [Message],
+    placeholder: &str,
+) -> Result<bool, ContextError> {
     let mut changed = false;
     for message in messages {
-        for part in std::sync::Arc::make_mut(&mut message.parts).iter_mut() {
+        for part in
+            lash_protocol_types::session_model::message::MessageParts::make_mut(&mut message.parts)
+                .map_err(|error| {
+                    lash_execution_contracts::PluginError::Runtime(
+                        lash_core::RuntimeError::allocation(error),
+                    )
+                })?
+                .iter_mut()
+        {
             changed |= omit_part_attachments(part, placeholder);
         }
     }
-    changed
+    Ok(changed)
 }
 
 pub(crate) fn is_compaction_summary_message(message: &Message) -> bool {
@@ -523,13 +534,24 @@ pub(crate) fn prepare_compaction_request(
             lash_core::PluginConfig::default(),
             lash_core::prompt_sections::PromptPlan::default(),
         ),
-    );
+    )
+    .map_err(|error| {
+        ContextError::Plugin(
+            lash_execution_contracts::plugin_error::PluginError::Runtime(error.runtime_error()),
+        )
+    })?;
     snapshot.policy.turn_budget = lash_core::TurnBudget::bounded(1);
-    strip_all_attachments(&mut prefix_messages, COMPACTED_ATTACHMENT_PLACEHOLDER);
+    strip_all_attachments(&mut prefix_messages, COMPACTED_ATTACHMENT_PLACEHOLDER)?;
     snapshot.set_execution_graph(lash_core::plugin::ExecutionGraphCapture::Clear);
     snapshot.last_prompt_usage = None;
     let previous_summary = extract_previous_summary(&prefix_messages);
-    snapshot.replace_active_read_state(&prefix_messages);
+    snapshot
+        .replace_active_read_state(&prefix_messages)
+        .map_err(|error| {
+            ContextError::Plugin(
+                lash_execution_contracts::plugin_error::PluginError::Runtime(error.runtime_error()),
+            )
+        })?;
     let base_prompt = match previous_summary {
         Some(previous_summary) => config
             .update_instructions

@@ -48,7 +48,10 @@ impl RuntimeSessionState {
     /// # Panics
     /// Panics in every build profile if the receipt does not advance resident
     /// state. Replay callers refresh state instead of adopting an old receipt.
-    pub fn apply_persisted_commit_result(&mut self, result: crate::store::RuntimeCommitReceipt) {
+    pub fn apply_persisted_commit_result(
+        &mut self,
+        result: crate::store::RuntimeCommitReceipt,
+    ) -> Result<(), crate::StoreError> {
         assert!(
             result.head_revision > self.head_revision,
             "adopted head revision must advance"
@@ -56,7 +59,7 @@ impl RuntimeSessionState {
         self.head_revision = result.head_revision;
         self.checkpoint_ref = Some(result.checkpoint_ref);
         self.session_graph
-            .apply_realized_node_timestamps(&result.realized_node_timestamps);
+            .apply_realized_node_timestamps(&result.realized_node_timestamps)?;
         self.agent_frames = self.session_graph.agent_frame_records(&self.session_id);
         let committed_components_match = self
             .checkpoint_components
@@ -66,6 +69,7 @@ impl RuntimeSessionState {
             committed_components_match,
             AcceptedExecutionRetention::DurableHead,
         );
+        Ok(())
     }
 
     /// Adopt the exact acknowledged postimage while keeping its validated
@@ -102,7 +106,7 @@ impl RuntimeSessionState {
         self.head_revision = result.head_revision;
         self.checkpoint_ref = Some(result.checkpoint_ref.clone());
         self.session_graph
-            .apply_realized_node_timestamps(&result.realized_node_timestamps);
+            .apply_realized_node_timestamps(&result.realized_node_timestamps)?;
         self.session_graph.mark_all_durable();
         // Cold windows carry an anchor even when their first frame is the
         // graph root. Give the prepared graph that same canonical basis.

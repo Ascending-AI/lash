@@ -46,6 +46,10 @@ fn attachment() -> crate::AttachmentId {
 }
 
 store_error_samples! {
+    Allocation(_) => StoreError::Allocation(lash_protocol_types::allocation::AllocationError {
+        kind: lash_protocol_types::allocation::ReserveError::Pressure,
+        actor: "session/sample".into(), requested: 1, capacity: 2,
+    }),
     ProcessAuthorityPruned { .. } => StoreError::ProcessAuthorityPruned {
         terminal_label: "completed".into(), pruned_at_ms: 1,
     },

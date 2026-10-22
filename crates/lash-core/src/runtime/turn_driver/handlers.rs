@@ -580,8 +580,12 @@ impl RuntimeTurnDriver<'_> {
         )
         .await
         .map_err(RuntimeEffectControllerError::into_runtime_error)?;
-        machine.adopt_committed_messages(history);
-        machine.adopt_prepared_messages(context.messages.clone());
+        machine
+            .adopt_committed_messages(history)
+            .map_err(RuntimeError::allocation)?;
+        machine
+            .adopt_prepared_messages(context.messages.clone())
+            .map_err(RuntimeError::allocation)?;
         self.prelude_base_messages = base;
         self.prepared_context = context;
         self.prelude = prelude;

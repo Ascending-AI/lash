@@ -75,20 +75,28 @@ fn state_referencing(session_id: &SessionId, reference: &AttachmentRef) -> Runti
         session_id: session_id.clone(),
         ..RuntimeSessionState::fixture(request.config.session_policy())
     };
-    state.ensure_agent_frame_initialized();
-    state.session_graph.append_message(Message {
-        id: "held-image".to_string(),
-        role: MessageRole::User,
-        origin: None,
-        parts: Arc::new(vec![Part::attachment_part(
-            "held-image-part".into(),
-            String::new(),
-            Some(lash_protocol_types::PartAttachment {
-                reference: reference.clone(),
-            }),
-        )]),
-        reply_marker: None,
-    });
+    state
+        .ensure_agent_frame_initialized()
+        .expect("source fixture edit is admitted");
+    state
+        .session_graph
+        .append_message(Message {
+            id: "held-image".to_string(),
+            role: MessageRole::User,
+            origin: None,
+            parts: Arc::new(
+                (vec![Part::attachment_part(
+                    "held-image-part".into(),
+                    String::new(),
+                    Some(lash_protocol_types::PartAttachment {
+                        reference: reference.clone(),
+                    }),
+                )])
+                .into(),
+            ),
+            reply_marker: None,
+        })
+        .expect("source fixture edit is admitted");
     state
 }
 

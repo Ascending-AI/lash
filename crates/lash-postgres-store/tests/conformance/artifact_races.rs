@@ -32,7 +32,7 @@ fn frame_state(session_id: &str) -> lash_core_store::session_state::RuntimeSessi
             ),
         )
     };
-    state.ensure_agent_frame_initialized();
+    state.ensure_agent_frame_initialized().unwrap();
     state
 }
 
@@ -45,17 +45,20 @@ fn append_successor_frame(
         lash_protocol_types::FrameKey::from_caller_material("successor-frame").expect("frame key");
     let successor = lash_core_store::session_graph::frame_node_id(&state.session_id, key.as_str());
     assert!(
-        state.session_graph.append_frame_open_with_id_at(
-            successor.clone(),
-            key,
-            lash_core_store::session_identity::AgentFrameReason::initial(),
-            lash_core_store::session_identity::AgentFrameAssignment::unconfigured(
-                state.policy.clone()
-            ),
-            "2026-09-29T00:00:00.000000000Z"
-                .parse()
-                .expect("canonical node timestamp"),
-        )
+        state
+            .session_graph
+            .append_frame_open_with_id_at(
+                successor.clone(),
+                key,
+                lash_core_store::session_identity::AgentFrameReason::initial(),
+                lash_core_store::session_identity::AgentFrameAssignment::unconfigured(
+                    state.policy.clone()
+                ),
+                "2026-09-29T00:00:00.000000000Z"
+                    .parse()
+                    .expect("canonical node timestamp"),
+            )
+            .unwrap()
     );
     state.current_frame_node_id = Some(successor.clone());
     successor
@@ -328,7 +331,7 @@ async fn commit_frame_opens(
         .commit_runtime_state(commit)
         .await
         .expect("commit frame opens");
-    state.apply_persisted_commit_result(receipt);
+    state.apply_persisted_commit_result(receipt).unwrap();
     state.mark_node_ids_persisted(appended);
 }
 

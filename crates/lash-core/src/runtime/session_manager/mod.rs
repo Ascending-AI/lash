@@ -43,18 +43,18 @@ enum CurrentSnapshot {
 }
 
 impl CurrentSnapshot {
-    fn to_runtime_state(&self) -> RuntimeSessionState {
+    fn to_runtime_state(&self) -> Result<RuntimeSessionState, crate::StoreError> {
         match self {
-            Self::Owned(snapshot) => snapshot.clone(),
+            Self::Owned(snapshot) => Ok(snapshot.clone()),
             Self::ReadModel {
                 meta,
                 messages,
                 graph_appends,
             } => {
                 let mut snapshot = meta.clone();
-                snapshot.replace_active_read_state(messages.as_slice());
-                graph_appends.overlay_on_read_state(&mut snapshot);
-                snapshot
+                snapshot.replace_active_read_state(messages.as_slice())?;
+                graph_appends.overlay_on_read_state(&mut snapshot)?;
+                Ok(snapshot)
             }
         }
     }
@@ -198,6 +198,11 @@ impl CurrentOwnerCapability {
                 let agent_frame_id = session
                     .snapshot
                     .to_runtime_state()
+                    .map_err(|error| {
+                        lash_execution_contracts::plugin_error::PluginError::Runtime(
+                            error.runtime_error(),
+                        )
+                    })?
                     .current_frame_node_id
                     .ok_or_else(|| {
                         lash_execution_contracts::plugin_error::PluginError::Session(format!(

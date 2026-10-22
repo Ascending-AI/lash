@@ -229,12 +229,14 @@ impl StandardProtocolScenario {
                             committed_user_messages: vec![lash_core::Message {
                                 id: "checkpoint-user".to_string(),
                                 role: MessageRole::User,
-                                parts: vec![lash_core::Part::text(
-                                    "checkpoint-user.p0".to_string(),
-                                    (*message).to_string(),
-                                    None,
-                                )]
-                                .into(),
+                                parts: std::sync::Arc::new(
+                                    (vec![lash_core::Part::text(
+                                        "checkpoint-user.p0".to_string(),
+                                        (*message).to_string(),
+                                        None,
+                                    )])
+                                    .into(),
+                                ),
                                 origin: None,
                                 reply_marker: None,
                             }],
@@ -531,7 +533,9 @@ fn user_message(content: &str) -> Message {
     Message {
         id: "m0".to_string(),
         role: MessageRole::User,
-        parts: vec![Part::text("m0.p0".to_string(), content.to_string(), None)].into(),
+        parts: std::sync::Arc::new(
+            (vec![Part::text("m0.p0".to_string(), content.to_string(), None)]).into(),
+        ),
         origin: None,
         reply_marker: None,
     }

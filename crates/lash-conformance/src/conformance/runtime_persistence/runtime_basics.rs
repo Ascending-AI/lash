@@ -25,7 +25,9 @@ pub async fn commit_increments_head_and_round_trips_agent_frames(store: Arc<dyn 
             lash_core::NoProgressBudget::bounded(12),
         ))
     };
-    state.ensure_agent_frame_initialized();
+    state
+        .ensure_agent_frame_initialized()
+        .expect("source fixture edit is admitted");
     let initial_frame = state.current_agent_frame().expect("initial frame");
     let assignment = initial_frame.assignment.clone();
     let initial_frame_node_id = initial_frame.frame_node_id.clone();
@@ -35,15 +37,18 @@ pub async fn commit_increments_head_and_round_trips_agent_frames(store: Arc<dyn 
     let second_frame_node_id =
         crate::session_graph::frame_node_id(&state.session_id, second_frame_key.as_str());
     assert!(
-        state.session_graph.append_frame_open_with_id_at(
-            second_frame_node_id.clone(),
-            second_frame_key,
-            custom_reason.clone(),
-            assignment,
-            "2026-07-27T00:00:00.000000000Z"
-                .parse()
-                .expect("canonical node timestamp"),
-        )
+        state
+            .session_graph
+            .append_frame_open_with_id_at(
+                second_frame_node_id.clone(),
+                second_frame_key,
+                custom_reason.clone(),
+                assignment,
+                "2026-07-27T00:00:00.000000000Z"
+                    .parse()
+                    .expect("canonical node timestamp"),
+            )
+            .expect("source fixture edit is admitted")
     );
     state.current_frame_node_id = Some(second_frame_node_id.clone());
     state.agent_frames = state
@@ -221,7 +226,9 @@ pub async fn serves_each_admitted_session_and_refuses_an_unknown_one(store: Arc<
                 lash_core::NoProgressBudget::bounded(12),
             ))
         };
-        state.ensure_agent_frame_initialized();
+        state
+            .ensure_agent_frame_initialized()
+            .expect("source fixture edit is admitted");
         state
     };
     let window = |session_id: &'static str| {

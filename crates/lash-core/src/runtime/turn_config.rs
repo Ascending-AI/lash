@@ -192,7 +192,7 @@ impl LashRuntime {
     pub(in crate::runtime) fn apply_turn_config(
         &mut self,
         resolved: &crate::ResolvedRun,
-    ) -> Result<(), crate::FormatRefusal> {
+    ) -> Result<(), RuntimeError> {
         self.install_resolved_run(resolved)?;
         debug_assert_eq!(
             self.state.config_revision,

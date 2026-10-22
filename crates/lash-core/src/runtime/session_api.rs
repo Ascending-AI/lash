@@ -111,15 +111,18 @@ impl LashRuntime {
     pub(in crate::runtime) fn install_resolved_run(
         &mut self,
         resolved: &crate::ResolvedRun,
-    ) -> Result<(), crate::FormatRefusal> {
+    ) -> Result<(), RuntimeError> {
         if let Some(session) = &self.session {
             session
                 .plugins()
                 .host()
                 .validate_config_formats(&resolved.config().plugin_config)?;
         }
-        self.state.install_run_view(resolved);
-        self.publish_resident_authority()
+        self.state
+            .install_run_view(resolved)
+            .map_err(|error| error.runtime_error())?;
+        self.publish_resident_authority()?;
+        Ok(())
     }
 
     /// Uninstall the recorded view of the run this runtime ran last and

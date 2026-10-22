@@ -78,7 +78,7 @@ impl<'a> BorrowedChronologicalMessage<'a> {
         Message {
             id: self.id.to_string(),
             role: self.role,
-            parts: std::sync::Arc::new(self.parts.to_vec()),
+            parts: std::sync::Arc::new((self.parts.to_vec()).into()),
             origin: self.origin.cloned(),
             reply_marker: self.reply_marker.cloned(),
         }

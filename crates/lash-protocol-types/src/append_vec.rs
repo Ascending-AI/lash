@@ -28,6 +28,7 @@ use std::marker::PhantomData;
 use std::ptr::NonNull;
 use std::sync::{Arc, Mutex};
 
+use crate::allocation::{AllocationBudget, AllocationError, AllocationHold, SourceCapacity};
 use crate::sync::MutexExt;
 
 /// The smallest capacity a growing buffer allocates.
@@ -45,12 +46,16 @@ struct Buffer<T> {
     /// reader's own length, and while a handle is made, dropped or changes
     /// length.
     state: Mutex<BufferState>,
+    budget: AllocationBudget,
+    _allocation: AllocationHold,
     _owns: PhantomData<T>,
 }
 
 struct BufferState {
     /// Slots `[0, initialized)` hold values; the rest are uninitialized.
     initialized: usize,
+    /// Each subsequently claimed value's owned fields, alongside its slot.
+    owned: Vec<AllocationHold>,
     /// How many live handles have each length. A slot at `index` is visible
     /// exactly to the handles longer than `index`.
     handles: BTreeMap<usize, usize>,
@@ -108,13 +113,20 @@ impl<T> Buffer<T> {
     /// Takes over `values`' allocation: its elements are the initialized
     /// slots and its spare capacity the rest. The one handle made from it
     /// is registered.
-    fn from_vec(values: Vec<T>) -> Self {
+    fn from_vec(
+        values: Vec<T>,
+        capacity: usize,
+        budget: AllocationBudget,
+        allocation: AllocationHold,
+    ) -> Self {
         let mut values = std::mem::ManuallyDrop::new(values);
         let initialized = values.len();
-        let capacity = values.capacity();
         let ptr = NonNull::new(values.as_mut_ptr()).unwrap_or(NonNull::dangling());
+        let mut owned = Vec::with_capacity(capacity);
+        owned.resize_with(initialized, AllocationHold::default);
         let mut state = BufferState {
             initialized,
+            owned,
             handles: BTreeMap::new(),
         };
         state.register(initialized);
@@ -122,6 +134,8 @@ impl<T> Buffer<T> {
             ptr,
             capacity,
             state: Mutex::new(state),
+            budget,
+            _allocation: allocation,
             _owns: PhantomData,
         }
     }
@@ -145,6 +159,55 @@ impl<T> Drop for Buffer<T> {
 }
 
 impl<T> AppendVec<T> {
+    /// The ledger that owns this buffer and every future detached buffer.
+    pub fn allocation_budget(&self) -> &AllocationBudget {
+        &self.buffer.budget
+    }
+
+    /// Allocate source slots and their handle registry under an owner budget.
+    /// The caller separately owns any allocations reachable through `T`.
+    pub fn try_with_capacity(
+        capacity: usize,
+        budget: &AllocationBudget,
+    ) -> Result<Self, AllocationError> {
+        let allocation = budget.reserve(Self::buffer_capacity_bytes(capacity))?;
+        let values = Vec::with_capacity(capacity);
+        Ok(Self::from_reserved(
+            values,
+            capacity,
+            budget.clone(),
+            allocation,
+        ))
+    }
+
+    fn buffer_capacity_bytes(capacity: usize) -> u64 {
+        // At most capacity + 1 distinct lengths can be live. Pre-admit a
+        // conservative B-tree node per length, so clone, truncate and Drop
+        // never need a fallible reservation while holding the registry lock.
+        // A clone's length is already registered by its source handle.
+        (capacity as u64)
+            .saturating_mul(
+                (std::mem::size_of::<T>() + std::mem::size_of::<AllocationHold>()) as u64,
+            )
+            .saturating_add((capacity as u64).saturating_add(1).saturating_mul(512))
+            .saturating_add(
+                (std::mem::size_of::<Buffer<T>>() + 2 * std::mem::size_of::<usize>()) as u64,
+            )
+    }
+
+    fn from_reserved(
+        values: Vec<T>,
+        capacity: usize,
+        budget: AllocationBudget,
+        allocation: AllocationHold,
+    ) -> Self {
+        let len = values.len();
+        Self {
+            buffer: Arc::new(Buffer::from_vec(values, capacity, budget, allocation)),
+            len,
+        }
+    }
+
     #[must_use]
     pub fn new() -> Self {
         Self::from(Vec::new())
@@ -210,16 +273,14 @@ impl<T> AppendVec<T> {
         if state.initialized <= len {
             return;
         }
-        let stale = state.initialized - len;
-        // Lowered first: a panicking drop below leaks, never double-drops.
-        state.initialized = len;
-        // SAFETY: slots `[len, len + stale)` are initialized, and this is
-        // the buffer's only handle, so nothing else reads them.
-        unsafe {
-            std::ptr::drop_in_place(std::ptr::slice_from_raw_parts_mut(
-                buffer.ptr.as_ptr().add(len),
-                stale,
-            ));
+        while state.initialized > len {
+            state.initialized -= 1;
+            // SAFETY: this buffer has no other handle, and moving the last
+            // initialized value out withdraws it before any destructor runs.
+            let value = unsafe { buffer.ptr.as_ptr().add(state.initialized).read() };
+            let owned = state.owned.pop();
+            drop(value);
+            drop(owned);
         }
     }
 
@@ -229,16 +290,21 @@ impl<T> AppendVec<T> {
         unsafe_code,
         reason = "the slot at the initialized length is uninitialized and within capacity"
     )]
-    fn try_push_in_place(&mut self, value: T) -> Result<(), T> {
+    fn push_in_place(
+        &mut self,
+        value: T,
+        owned: AllocationHold,
+    ) -> Result<(), (T, AllocationHold)> {
         self.reclaim_if_sole();
         let mut state = self.buffer.state.lock_recover();
         if state.initialized != self.len || self.len == self.buffer.capacity {
-            return Err(value);
+            return Err((value, owned));
         }
         // SAFETY: `len < capacity`, and the slot at `initialized` is
         // uninitialized; no handle reads it until `initialized` covers it,
         // which it does only under this lock, after the write.
         unsafe { self.buffer.ptr.as_ptr().add(self.len).write(value) };
+        state.owned.push(owned);
         state.initialized += 1;
         state.relength(self.len, self.len + 1);
         self.len += 1;
@@ -246,9 +312,10 @@ impl<T> AppendVec<T> {
     }
 }
 
-impl<T: Clone> AppendVec<T> {
-    pub fn push(&mut self, value: T) {
-        self.push_adopting(value, |_, _| false);
+impl<T: Clone + SourceCapacity> AppendVec<T> {
+    /// Append after admitting any new buffer; refusal leaves this view intact.
+    pub fn push(&mut self, value: T) -> Result<(), AllocationError> {
+        self.push_adopting(value, |_, _| false)
     }
 
     /// Appends `value`, adopting the buffer's next slot instead when another
@@ -257,44 +324,85 @@ impl<T: Clone> AppendVec<T> {
     /// Two handles that append the same values from the same point, such
     /// as a turn's read state and the graph that commits it, then share one
     /// buffer instead of forking it.
-    pub fn push_adopting(&mut self, value: T, same: impl Fn(&T, &T) -> bool) {
-        let value = match self.try_push_in_place(value) {
-            Ok(()) => return,
-            Err(value) => value,
-        };
+    pub fn push_adopting(
+        &mut self,
+        value: T,
+        same: impl Fn(&T, &T) -> bool,
+    ) -> Result<(), AllocationError> {
         if self.try_adopt(&value, &same) {
-            return;
+            return Ok(());
         }
-        self.grow(1);
-        if self.try_push_in_place(value).is_err() {
-            unreachable!("a freshly grown buffer is this handle's, with room for one more");
-        }
+        let owned = self.reserve_owned(&value)?;
+        self.push_prepared(value, owned)
     }
 
+    /// Reserve before the source's owned fields are cloned into a new slot.
+    pub fn push_cloned_adopting(
+        &mut self,
+        value: &T,
+        same: impl Fn(&T, &T) -> bool,
+    ) -> Result<(), AllocationError> {
+        if self.try_adopt(value, &same) {
+            return Ok(());
+        }
+        let owned = self.reserve_owned(value)?;
+        self.reserve(1)?;
+        self.push_prepared(value.clone(), owned)
+    }
+
+    fn reserve_owned(&self, value: &T) -> Result<AllocationHold, AllocationError> {
+        if self.buffer.budget.identity() == 0 {
+            return Ok(AllocationHold::default());
+        }
+        let bytes = value.owned_capacity();
+        if bytes == 0 {
+            return Ok(AllocationHold::default());
+        }
+        self.buffer.budget.reserve(bytes)
+    }
+
+    fn push_prepared(&mut self, value: T, owned: AllocationHold) -> Result<(), AllocationError> {
+        // Keep the pair intact across a fallible grow: tuple fields drop in
+        // order, so the value's destructor runs before its obligation ends.
+        let prepared = match self.push_in_place(value, owned) {
+            Ok(()) => return Ok(()),
+            Err(value) => value,
+        };
+        self.try_grow(1)?;
+        if self.push_in_place(prepared.0, prepared.1).is_err() {
+            unreachable!("a freshly grown buffer is private and has room for one more");
+        }
+        Ok(())
+    }
+
+    /// Each admitted append is visible in this private view; a later refusal
+    /// leaves the admitted prefix intact for the caller to discard or keep.
     pub fn extend_adopting(
         &mut self,
         values: impl IntoIterator<Item = T>,
         same: impl Fn(&T, &T) -> bool,
-    ) {
+    ) -> Result<(), AllocationError> {
         let values = values.into_iter();
-        self.reserve(values.size_hint().0);
+        self.reserve(values.size_hint().0)?;
         for value in values {
-            self.push_adopting(value, &same);
+            self.push_adopting(value, &same)?;
         }
+        Ok(())
     }
 
     /// Ensures that `additional` appends from this handle write in place,
     /// unless another handle takes the tip first.
-    pub fn reserve(&mut self, additional: usize) {
+    pub fn reserve(&mut self, additional: usize) -> Result<(), AllocationError> {
         if additional == 0 {
-            return;
+            return Ok(());
         }
         self.reclaim_if_sole();
         let at_tip = self.buffer.state.lock_recover().initialized == self.len;
         if at_tip && self.buffer.capacity - self.len < additional {
-            self.grow(additional);
+            self.try_grow(additional)?;
         }
         // Behind the tip, appends adopt or fork value by value.
+        Ok(())
     }
 
     #[expect(
@@ -325,7 +433,7 @@ impl<T: Clone> AppendVec<T> {
     /// followed by at least `len` appends in place. A batch larger than the
     /// view doubles what it needs: sized exactly, the buffer would be full
     /// again and the very next append would copy the whole batch (FIG-5673).
-    fn grow(&mut self, additional: usize) {
+    fn try_grow(&mut self, additional: usize) -> Result<(), AllocationError> {
         let doubled = self.len.saturating_mul(2);
         let required = self.len.saturating_add(additional);
         let capacity = if required > doubled {
@@ -334,67 +442,124 @@ impl<T: Clone> AppendVec<T> {
             doubled
         }
         .max(MIN_GROWN_CAPACITY);
+        let budget = self.buffer.budget.clone();
+        let owned = if budget.identity() == 0 {
+            0
+        } else {
+            self.as_slice().iter().fold(0u64, |bytes, value| {
+                bytes.saturating_add(value.owned_capacity())
+            })
+        };
+        let allocation =
+            budget.reserve(Self::buffer_capacity_bytes(capacity).saturating_add(owned))?;
         let mut values = Vec::with_capacity(capacity);
         values.extend_from_slice(self.as_slice());
-        *self = Self::from(values);
+        *self = Self::from_reserved(values, capacity, budget, allocation);
+        Ok(())
     }
 
     /// Replaces the slots from `start` on with `values`: in place when no
     /// other live handle sees any of them (a commit rewriting the records it
     /// just appended), and on a copy of this view otherwise. `start` past
     /// the end appends.
+    ///
+    /// Fallible editing for private source drafts. A refused later append
+    /// leaves its already admitted prefix; the caller owns draft publication.
     #[expect(
         unsafe_code,
         reason = "rewrites and drops initialized slots no other live handle can see, under the buffer lock"
     )]
-    pub fn replace_from(&mut self, start: usize, values: impl IntoIterator<Item = T>) {
+    pub fn replace_from(
+        &mut self,
+        start: usize,
+        values: impl IntoIterator<Item = T>,
+    ) -> Result<(), AllocationError> {
         let start = start.min(self.len);
         let mut values = values.into_iter();
-        self.reclaim_if_sole();
-        let mut replaced = Vec::new();
+        let old_count = self.len - start;
+        let capacity = old_count.max(values.size_hint().0);
+        let bytes = |capacity: usize| {
+            (capacity as u64)
+                .saturating_mul(std::mem::size_of::<(T, AllocationHold)>() as u64)
+                .saturating_add(128)
+        };
+        let mut scratch = self.buffer.budget.reserve(bytes(capacity))?;
+        let mut prepared = Vec::with_capacity(capacity);
+        // Materialize and admit the complete proposal before changing any
+        // slot. A tuple destroys its value before its associated hold.
+        for value in values.by_ref() {
+            let owned = self.reserve_owned(&value)?;
+            let value = (value, owned);
+            if prepared.len() == prepared.capacity() {
+                let capacity = prepared.len().saturating_mul(2).max(MIN_GROWN_CAPACITY);
+                let next_scratch = self.buffer.budget.reserve(bytes(capacity))?;
+                prepared.reserve_exact(capacity - prepared.len());
+                scratch = next_scratch;
+            }
+            prepared.push(value);
+        }
+        let incoming = prepared.len();
+        let end = start.saturating_add(incoming);
         let in_place = {
             let mut state = self.buffer.state.lock_recover();
-            let unseen = state.initialized == self.len && state.longest_other(self.len) <= start;
+            let unseen = state.initialized == self.len
+                && state.longest_other(self.len) <= start
+                && end <= self.buffer.capacity;
             if unseen {
-                let mut index = start;
-                while index < self.len {
-                    let Some(value) = values.next() else {
-                        break;
-                    };
-                    // SAFETY: the slot is initialized (`index < len ==
-                    // initialized`) and no other live handle is longer than
-                    // `start <= index`; the lock keeps adopters and new
-                    // handles out while it is rewritten. The old value is
-                    // dropped after the lock is released.
-                    replaced.push(unsafe { self.buffer.ptr.as_ptr().add(index).replace(value) });
-                    index += 1;
-                }
-                if index < self.len {
-                    // Fewer values than slots: the view and the buffer end
-                    // at the last slot written.
-                    let stale = self.len - index;
-                    state.initialized = index;
-                    state.relength(self.len, index);
-                    self.len = index;
-                    // SAFETY: slots `[index, index + stale)` were initialized
-                    // and no other live handle sees them; `initialized` no
-                    // longer covers them, so they are dropped exactly once.
+                let overlap = incoming.min(old_count);
+                for (offset, (value, owned)) in prepared[..overlap].iter_mut().enumerate() {
+                    // SAFETY: these initialized slots are unseen by every
+                    // other handle, and swaps run no destructor.
                     unsafe {
-                        std::ptr::drop_in_place(std::ptr::slice_from_raw_parts_mut(
-                            self.buffer.ptr.as_ptr().add(index),
-                            stale,
-                        ));
+                        std::ptr::swap(self.buffer.ptr.as_ptr().add(start + offset), value);
                     }
+                    std::mem::swap(&mut state.owned[start + offset], owned);
                 }
+                if incoming > old_count {
+                    state.owned.resize_with(end, AllocationHold::default);
+                    for offset in (old_count..incoming).rev() {
+                        let (value, owned) = prepared
+                            .pop()
+                            .unwrap_or_else(|| unreachable!("the incoming suffix is prepared"));
+                        // SAFETY: these slots are inside the allocation,
+                        // uninitialized, and still invisible to readers.
+                        unsafe {
+                            self.buffer.ptr.as_ptr().add(start + offset).write(value);
+                        }
+                        state.owned[start + offset] = owned;
+                    }
+                } else {
+                    for index in end..self.len {
+                        // SAFETY: the removed slots are initialized and
+                        // unseen. Move them to already-admitted scratch so
+                        // their destructors run only after unlock.
+                        let value = unsafe { self.buffer.ptr.as_ptr().add(index).read() };
+                        let owned = std::mem::take(&mut state.owned[index]);
+                        prepared.push((value, owned));
+                    }
+                    state.owned.truncate(end);
+                }
+                state.initialized = end;
+                state.relength(self.len, end);
+                self.len = end;
             }
             unseen
         };
-        drop(replaced);
         if !in_place {
-            self.truncate(start);
-            self.grow(0);
+            // Readers saw a changed slot, or this buffer has no room. Build
+            // the replacement privately; refusal keeps the original view.
+            let mut next = Self::try_with_capacity(end, &self.buffer.budget)?;
+            for value in &self.as_slice()[..start] {
+                next.push_cloned_adopting(value, |_, _| false)?;
+            }
+            for (value, owned) in prepared.drain(..) {
+                next.push_prepared(value, owned)?;
+            }
+            *self = next;
         }
-        self.extend_adopting(values, |_, _| false);
+        drop(prepared);
+        drop(scratch);
+        Ok(())
     }
 
     /// The whole view, mutable: in place when this is the buffer's only
@@ -403,14 +568,14 @@ impl<T: Clone> AppendVec<T> {
         unsafe_code,
         reason = "the only handle of a buffer owns every slot of it"
     )]
-    pub fn make_mut(&mut self) -> &mut [T] {
+    pub fn make_mut(&mut self) -> Result<&mut [T], AllocationError> {
         self.reclaim_if_sole();
         if Arc::get_mut(&mut self.buffer).is_none() {
-            self.grow(0);
+            self.try_grow(0)?;
         }
         // SAFETY: this is the buffer's only handle (`grow` made a fresh
         // one), so nothing else reads its slots while the borrow lives.
-        unsafe { std::slice::from_raw_parts_mut(self.buffer.ptr.as_ptr(), self.len) }
+        Ok(unsafe { std::slice::from_raw_parts_mut(self.buffer.ptr.as_ptr(), self.len) })
     }
 
     pub fn to_vec(&self) -> Vec<T> {
@@ -419,24 +584,66 @@ impl<T: Clone> AppendVec<T> {
 }
 
 impl<T> Drop for AppendVec<T> {
+    #[expect(
+        unsafe_code,
+        reason = "moves an initialized tail slot out under the registry lock after its last reader unregisters"
+    )]
     fn drop(&mut self) {
-        self.buffer.state.lock_recover().unregister(self.len);
+        let mut unregister = true;
+        loop {
+            let value = {
+                let mut state = self.buffer.state.lock_recover();
+                if unregister {
+                    state.unregister(self.len);
+                    unregister = false;
+                }
+                if state.handles.is_empty() {
+                    // The final buffer owner drops its remaining slots in one
+                    // pass through Buffer::drop, without taking the lock per slot.
+                    break;
+                }
+                let visible = state.handles.last_key_value().map_or(0, |(len, _)| *len);
+                if state.initialized <= visible {
+                    break;
+                }
+                state.initialized -= 1;
+                // SAFETY: no registered handle sees this slot. Moving it out
+                // and shortening the initialized range happen under the same
+                // lock as appends and adoption. Another writer may reuse the
+                // slot only after the value has been moved out.
+                let value = unsafe { self.buffer.ptr.as_ptr().add(state.initialized).read() };
+                let owned = state
+                    .owned
+                    .pop()
+                    .unwrap_or_else(|| unreachable!("every initialized slot has its obligation"));
+                (value, owned)
+            };
+            // A value's destructor may call back into a holder of this buffer.
+            // Never run it under the registry lock or allocate cleanup storage.
+            drop(value);
+        }
     }
 }
 
 impl<T> From<Vec<T>> for AppendVec<T> {
     fn from(values: Vec<T>) -> Self {
-        let len = values.len();
-        Self {
-            buffer: Arc::new(Buffer::from_vec(values)),
-            len,
-        }
+        let capacity = if std::mem::size_of::<T>() == 0 {
+            values.len().max(MIN_GROWN_CAPACITY)
+        } else {
+            values.capacity()
+        };
+        Self::from_reserved(
+            values,
+            capacity,
+            AllocationBudget::unowned(),
+            AllocationHold::default(),
+        )
     }
 }
 
-impl<T: Clone> Extend<T> for AppendVec<T> {
-    fn extend<I: IntoIterator<Item = T>>(&mut self, values: I) {
-        self.extend_adopting(values, |_, _| false);
+impl<T: Clone + SourceCapacity> AppendVec<T> {
+    pub fn extend(&mut self, values: impl IntoIterator<Item = T>) -> Result<(), AllocationError> {
+        self.extend_adopting(values, |_, _| false)
     }
 }
 

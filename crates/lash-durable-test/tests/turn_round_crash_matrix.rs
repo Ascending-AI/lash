@@ -506,14 +506,15 @@ impl TurnServices for L4Services {
         // The turn starts from the session head's window, with the messages
         // its admission took.
         let window = head.window()?;
-        let messages = window.then(seed::admitted_messages(&self.backend(), row).await?);
+        let messages = window.then(seed::admitted_messages(&self.backend(), row).await?)?;
         let machine = TurnMachine::in_window(
             machine_config(&row.session, &row.run),
             window,
             messages,
             Vec::new(),
             0,
-        );
+        )
+        .unwrap();
         Ok(self.drive(row, machine, None))
     }
 

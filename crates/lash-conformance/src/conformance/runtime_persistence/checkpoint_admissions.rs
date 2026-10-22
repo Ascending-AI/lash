@@ -84,7 +84,9 @@ where
     .expect("seeded checkpoint state");
     let mut ordinary_turn_projection = state.to_snapshot();
     ordinary_turn_projection.turn_index += 1;
-    state.adopt_snapshot(ordinary_turn_projection.clone());
+    state
+        .adopt_snapshot(ordinary_turn_projection.clone())
+        .expect("source fixture edit is admitted");
     let second_commit = RuntimeCommit::persisted_state_for_test(&state);
     let carried = second_commit
         .checkpoint
@@ -320,18 +322,18 @@ pub async fn commit_rejects_leaf_without_frame_open_ancestor(store: Arc<dyn Runt
             lash_core::NoProgressBudget::bounded(12),
         ))
     };
-    let node = SessionNodeRecord {
-        node_id: "unframed-root".into(),
-        parent_node_id: None,
-        timestamp: "2026-07-27T00:00:00.000000000Z"
+    let node = SessionNodeRecord::new(
+        "unframed-root".into(),
+        None,
+        "2026-07-27T00:00:00.000000000Z"
             .parse()
             .expect("canonical node timestamp"),
-        payload: SessionNodePayload::Event {
+        SessionNodePayload::Event {
             event: crate::SessionHistoryRecord::Protocol(
                 ProtocolEvent::typed("unframed", serde_json::Value::Null).expect("protocol event"),
             ),
         },
-    };
+    );
     let commit = RuntimeCommit::persisted_state_with_graph_commit(
         &state,
         crate::GraphAppend::Extend { nodes: vec![node] },
@@ -483,13 +485,13 @@ pub(super) fn sample_session_node(
         || caller_frame_node_id(session_id, id).into_inner(),
         |_| id.to_string(),
     );
-    SessionNodeRecord {
-        node_id: lash_core::NodeId::fixture(node_id),
-        parent_node_id: parent.map(lash_core::NodeId::fixture),
-        timestamp: "1970-01-01T00:00:00.000000000Z"
+    SessionNodeRecord::new(
+        lash_core::NodeId::fixture(node_id),
+        parent.map(lash_core::NodeId::fixture),
+        "1970-01-01T00:00:00.000000000Z"
             .parse()
             .expect("canonical node timestamp"),
-        payload: if parent.is_none() {
+        if parent.is_none() {
             SessionNodePayload::FrameOpen {
                 frame_key,
                 reason: AgentFrameReason::initial(),
@@ -507,7 +509,7 @@ pub(super) fn sample_session_node(
                 ),
             }
         },
-    }
+    )
 }
 
 #[expect(

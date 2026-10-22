@@ -234,7 +234,7 @@ fn state(session: &str) -> RuntimeSessionState {
             lash_core::NoProgressBudget::bounded(12),
         ))
     };
-    state.ensure_agent_frame_initialized();
+    state.ensure_agent_frame_initialized().unwrap();
     state
 }
 
@@ -502,19 +502,25 @@ pub async fn attachment_prefix_pin_keeps_the_session_edge_until_unpin(
     );
     let reference = facade.put(vec![42], image_meta()).await.unwrap();
     let mut current = state(session.as_str());
-    current.session_graph.append_message(Message {
-        id: "pinned-message".into(),
-        role: MessageRole::User,
-        origin: None,
-        parts: Arc::new(vec![Part::attachment_part(
-            "pinned-part".into(),
-            String::new(),
-            Some(lash_protocol_types::PartAttachment {
-                reference: reference.clone(),
-            }),
-        )]),
-        reply_marker: None,
-    });
+    current
+        .session_graph
+        .append_message(Message {
+            id: "pinned-message".into(),
+            role: MessageRole::User,
+            origin: None,
+            parts: Arc::new(
+                (vec![Part::attachment_part(
+                    "pinned-part".into(),
+                    String::new(),
+                    Some(lash_protocol_types::PartAttachment {
+                        reference: reference.clone(),
+                    }),
+                )])
+                .into(),
+            ),
+            reply_marker: None,
+        })
+        .unwrap();
     let commit = RuntimeCommit::persisted_state_for_test(&current)
         .with_committed_attachments([reference.id.clone()]);
     let receipt = store.commit_runtime_state(commit).await.unwrap();
@@ -586,19 +592,25 @@ pub async fn session_referrer_waits_for_graph_retirement(h: AttachmentReferrerHa
     );
     let reference = facade.put(vec![4], image_meta()).await.unwrap();
     let mut current = state(session.as_str());
-    current.session_graph.append_message(Message {
-        id: "retained-message".into(),
-        role: MessageRole::User,
-        origin: None,
-        parts: Arc::new(vec![Part::attachment_part(
-            "retained-part".into(),
-            String::new(),
-            Some(lash_protocol_types::PartAttachment {
-                reference: reference.clone(),
-            }),
-        )]),
-        reply_marker: None,
-    });
+    current
+        .session_graph
+        .append_message(Message {
+            id: "retained-message".into(),
+            role: MessageRole::User,
+            origin: None,
+            parts: Arc::new(
+                (vec![Part::attachment_part(
+                    "retained-part".into(),
+                    String::new(),
+                    Some(lash_protocol_types::PartAttachment {
+                        reference: reference.clone(),
+                    }),
+                )])
+                .into(),
+            ),
+            reply_marker: None,
+        })
+        .unwrap();
     let commit = RuntimeCommit::persisted_state_for_test(&current)
         .with_committed_attachments([reference.id.clone()]);
     let receipt = store.commit_runtime_state(commit).await.unwrap();

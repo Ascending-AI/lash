@@ -39,7 +39,22 @@ pub async fn load_session_window_state(
     store: &SessionStore,
     selector: WindowSelector,
 ) -> Result<Option<LoadedSessionWindow>, StoreError> {
-    let Some(read) = store.load_session_window(selector).await? else {
+    load_session_window_state_in(
+        store,
+        selector,
+        &lash_protocol_types::allocation::AllocationBudget::unowned(),
+    )
+    .await
+}
+
+/// Load the source under a serving claim's allocation ledger.
+/// Production stores admit source bodies and indexes before materialization.
+pub async fn load_session_window_state_in(
+    store: &SessionStore,
+    selector: WindowSelector,
+    budget: &lash_protocol_types::allocation::AllocationBudget,
+) -> Result<Option<LoadedSessionWindow>, StoreError> {
+    let Some(read) = store.load_session_window_in(selector, budget).await? else {
         return Ok(None);
     };
     validate_window_session(store.session_id(), &read)?;

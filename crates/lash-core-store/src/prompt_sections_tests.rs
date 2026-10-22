@@ -340,6 +340,7 @@ fn lo_prefix_tail_work_matches_full_render() {
         let (old, held) = owner.chunk(&template, &budget).unwrap();
         let prior = owner.clone();
         let next_source = crate::MessageSequence::from_base_and_delta(base, vec![message(depth)])
+            .unwrap()
             .with_base_render_cache(cache);
         renders.store(0, std::sync::atomic::Ordering::Relaxed);
         let decodes = RequestFragment::decodes_on_current_thread();

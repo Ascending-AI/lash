@@ -297,6 +297,7 @@ struct WindowRows<'a> {
     session_id: &'a SessionId,
     frame_id: &'a str,
     fleet: lash_core_store::store::FleetFormat,
+    budget: &'a lash_protocol_types::allocation::AllocationBudget,
     #[cfg(any(test, feature = "testing"))]
     decoded: Option<&'a std::sync::atomic::AtomicU64>,
 }
@@ -309,7 +310,37 @@ impl WindowRows<'_> {
         conn: &mut sqlx::PgConnection,
         from: i64,
         to: i64,
-    ) -> Result<(Vec<SessionNodeRecord>, u64), StoreError> {
+    ) -> Result<
+        (
+            Vec<SessionNodeRecord>,
+            u64,
+            lash_protocol_types::allocation::AllocationHold,
+        ),
+        StoreError,
+    > {
+        // Query the expanded transport bound before SQLx materializes the
+        // body rows. The projection uses the same readable-row selection.
+        let _query = self
+            .budget
+            .reserve((WINDOW_ROWS.len() as u64).saturating_add(2048))?;
+        let admission_sql = format!(
+            "SELECT coalesce(sum(octet_length(node_json) + octet_length(node_id) + coalesce(octet_length(parent_node_id), 0) + octet_length(frame_node_id) + 2048), 0)::bigint AS bytes FROM ({WINDOW_ROWS}) AS admitted"
+        );
+        let admission = crate::observed_sql::query(&admission_sql)
+            .bind(self.session_id.as_str())
+            .bind(from)
+            .bind(to)
+            .fetch_one(crate::observed_sql::executor(&mut *conn))
+            .await
+            .map_err(store_sqlx_error)?;
+        let bytes = u64_from_sql(
+            "SessionGraph",
+            "window allocation bytes",
+            admission.get("bytes"),
+        )?;
+        let transport = self
+            .budget
+            .reserve(bytes.saturating_mul(2).saturating_add(1024))?;
         let rows = crate::observed_sql::query(WINDOW_ROWS)
             .bind(self.session_id.as_str())
             .bind(from)
@@ -343,10 +374,13 @@ impl WindowRows<'_> {
                     violation: lash_core_store::store::WindowAnchorViolation::ForeignFramePointer,
                 });
             }
-            let node = SessionNodeRecord::decode_storage_body_for_fleet(
-                node_id, parent, &body, self.fleet,
-            )
-            .map_err(|error| corrupt("SessionGraph node", error.to_string()))?;
+            let node = SessionNodeRecord::decode_storage_body_in(
+                &node_id,
+                parent.as_deref(),
+                &body,
+                self.fleet,
+                self.budget,
+            )?;
             #[cfg(any(test, feature = "testing"))]
             if let Some(decoded) = self.decoded {
                 decoded.fetch_add(1, Ordering::Relaxed);
@@ -354,7 +388,7 @@ impl WindowRows<'_> {
             nodes.push(node);
             total += body.len() as u64;
         }
-        Ok((nodes, total))
+        Ok((nodes, total, transport))
     }
 }
 
@@ -381,7 +415,7 @@ async fn window_graph(
         generation,
         external_parent: external_parent.as_deref(),
     };
-    match windows.reuse(session_id, read_under, &leaf, leaf_at)? {
+    match windows.reuse_in(session_id, read_under, &leaf, leaf_at, rows.budget)? {
         WindowReuse::Whole(graph) => return Ok(graph),
         WindowReuse::Extend {
             window,
@@ -389,15 +423,14 @@ async fn window_graph(
             bytes,
         } => {
             let from = i64::try_from(from_generation).unwrap_or(i64::MAX);
-            if let Ok((nodes, added)) = rows.read(conn, from, leaf_generation).await
-                && let Some(graph) = window.extend_window(nodes, &leaf)
-            {
+            let (nodes, added, _transport) = rows.read(conn, from, leaf_generation).await?;
+            if let Some(graph) = window.extend_window(nodes, &leaf)? {
                 return Ok(windows.remember(session_id, &graph, leaf_at, bytes + added));
             }
         }
         WindowReuse::Miss => {}
     }
-    let (nodes, bytes) = rows.read(conn, first_generation, leaf_generation).await?;
+    let (nodes, bytes, _transport) = rows.read(conn, first_generation, leaf_generation).await?;
     let previous_frame_node_id = match external_parent.as_deref() {
         Some(parent) => {
             let row = readable_row(conn, session_id, parent)
@@ -428,7 +461,12 @@ async fn window_graph(
         external_parent: external_parent.map(TryInto::try_into).transpose()?,
         previous_frame_node_id,
     };
-    let graph = lash_core_store::session_graph::SessionGraph::from_window(nodes, leaf, anchor)?;
+    let graph = lash_core_store::session_graph::SessionGraph::from_window_in(
+        nodes,
+        leaf,
+        anchor,
+        rows.budget,
+    )?;
     Ok(windows.remember(session_id, &graph, leaf_at, bytes))
 }
 
@@ -479,6 +517,12 @@ pub(crate) async fn admitted_head_row(
     Ok(Some(row))
 }
 
+pub(crate) struct WindowDecode<'a> {
+    budget: &'a lash_protocol_types::allocation::AllocationBudget,
+    #[cfg(any(test, feature = "testing"))]
+    decoded: Option<&'a std::sync::atomic::AtomicU64>,
+}
+
 pub(crate) async fn window_conn(
     conn: &mut sqlx::PgConnection,
     session_id: &SessionId,
@@ -486,8 +530,11 @@ pub(crate) async fn window_conn(
     fleet: lash_core_store::store::FleetFormat,
     chunk_size: usize,
     windows: &WindowCacheRead,
-    #[cfg(any(test, feature = "testing"))] decoded: Option<&std::sync::atomic::AtomicU64>,
+    admission: WindowDecode<'_>,
 ) -> Result<Option<SessionWindowRead>, StoreError> {
+    let budget = admission.budget;
+    #[cfg(any(test, feature = "testing"))]
+    let decoded = admission.decoded;
     let run = match &selector {
         WindowSelector::Terminal(run) => Some(run),
         _ => None,
@@ -585,6 +632,7 @@ pub(crate) async fn window_conn(
             session_id,
             frame_id: &frame_id,
             fleet,
+            budget,
             #[cfg(any(test, feature = "testing"))]
             decoded,
         };
@@ -633,6 +681,20 @@ impl SessionHistoryStore for PostgresStore {
         session_id: &SessionId,
         selector: WindowSelector,
     ) -> Result<Option<SessionWindowRead>, StoreError> {
+        self.load_session_window_in(
+            session_id,
+            selector,
+            &lash_protocol_types::allocation::AllocationBudget::unowned(),
+        )
+        .await
+    }
+
+    async fn load_session_window_in(
+        &self,
+        session_id: &SessionId,
+        selector: WindowSelector,
+        budget: &lash_protocol_types::allocation::AllocationBudget,
+    ) -> Result<Option<SessionWindowRead>, StoreError> {
         lash_core_ids::operational_metrics::sql::owner_state_read(
             lash_core_ids::operational_metrics::sql::OwnerStateRead::Head,
         );
@@ -645,8 +707,11 @@ impl SessionHistoryStore for PostgresStore {
             self.fence.fleet(),
             self.pools.maintenance.checkpoint_ref_chunk as usize,
             &windows,
-            #[cfg(any(test, feature = "testing"))]
-            Some(&self.decoded_graph_node_bodies),
+            WindowDecode {
+                budget,
+                #[cfg(any(test, feature = "testing"))]
+                decoded: Some(&self.decoded_graph_node_bodies),
+            },
         )
         .await?;
         crate::observed_sql::control("COMMIT", tx.commit())

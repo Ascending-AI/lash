@@ -81,7 +81,7 @@ impl TurnGraphEditor {
         }
     }
 
-    pub(super) fn append_events<I>(&mut self, events: I)
+    pub(super) fn append_events<I>(&mut self, events: I) -> Result<(), crate::StoreError>
     where
         I: IntoIterator<Item = SessionHistoryRecord>,
     {
@@ -96,7 +96,7 @@ impl TurnGraphEditor {
             })
             .collect::<Vec<_>>();
         if events.is_empty() {
-            return;
+            return Ok(());
         }
         let nodes = self
             .append_builder
@@ -104,10 +104,11 @@ impl TurnGraphEditor {
         self.active_events.extend_adopting(
             nodes.iter().filter_map(|node| node.event().cloned()),
             same_history_record,
-        );
+        )?;
         self.active_messages
-            .extend(nodes.iter().filter_map(|node| node.message()).collect());
+            .extend(nodes.iter().filter_map(|node| node.message()))?;
         self.record_append_builder_nodes(nodes);
+        Ok(())
     }
 
     /// The messages `next` appends to the turn's read state, or `None` when
@@ -161,14 +162,17 @@ impl TurnGraphEditor {
         current.next().is_none().then_some(appended)
     }
 
-    pub(super) fn append_active_conversation_messages(&mut self, messages: &[Message]) {
+    pub(super) fn append_active_conversation_messages(
+        &mut self,
+        messages: &[Message],
+    ) -> Result<(), crate::StoreError> {
         let appendable_messages = messages
             .iter()
             .filter(|message| !message.is_transient())
             .cloned()
             .collect::<Vec<_>>();
         if appendable_messages.is_empty() {
-            return;
+            return Ok(());
         }
 
         let nodes = self
@@ -177,9 +181,10 @@ impl TurnGraphEditor {
         self.active_events.extend_adopting(
             nodes.iter().filter_map(|node| node.event().cloned()),
             same_history_record,
-        );
+        )?;
         self.record_append_builder_nodes(nodes);
-        self.active_messages.extend(appendable_messages);
+        self.active_messages.extend(appendable_messages)?;
+        Ok(())
     }
 
     /// Appends nodes minted in `draft_namespace` at the editor's current leaf
@@ -190,7 +195,7 @@ impl TurnGraphEditor {
         &mut self,
         draft_namespace: &str,
         drafts: Vec<crate::session_graph::SessionNodeDraft>,
-    ) -> Vec<NodeId> {
+    ) -> Result<Vec<NodeId>, crate::StoreError> {
         let mut builder = self.base_graph.append_builder_in_namespace(draft_namespace);
         builder.set_leaf_node_id(self.leaf_node_id());
         let nodes = builder.append_drafts_at(drafts, self.clock.node_timestamp());
@@ -199,16 +204,19 @@ impl TurnGraphEditor {
         self.active_events.extend_adopting(
             nodes.iter().filter_map(|node| node.event().cloned()),
             same_history_record,
-        );
+        )?;
         let node_ids = nodes
             .iter()
             .map(|node| node.node_id.clone())
             .collect::<Vec<_>>();
         self.record_append_builder_nodes(nodes);
-        node_ids
+        Ok(node_ids)
     }
 
-    pub(super) fn project_active_read_state(&mut self, messages: &[Message]) {
+    pub(super) fn project_active_read_state(
+        &mut self,
+        messages: &[Message],
+    ) -> Result<(), crate::StoreError> {
         let active_path = self.active_path_nodes();
         let projection = build_active_read_projection(active_path.iter().copied(), messages);
 
@@ -239,7 +247,7 @@ impl TurnGraphEditor {
             appended_messages.push(message.clone());
         }
         let durably_appended_messages = appended_messages.len();
-        self.append_active_conversation_messages(&appended_messages);
+        self.append_active_conversation_messages(&appended_messages)?;
         self.projection_diagnostics.push(ReadProjectionDiagnostic {
             durably_appended_messages,
             observation_only_messages,
@@ -250,6 +258,7 @@ impl TurnGraphEditor {
         // projection's synthetic tail to select the durable commit parent.
         self.active_events = AppendVec::from(projection.active_events);
         self.active_messages = MessageSequence::from_owned(projection.active_messages);
+        Ok(())
     }
 
     #[cfg(test)]
@@ -288,7 +297,7 @@ impl TurnGraphEditor {
             .max(self.durable_appended);
     }
 
-    pub(super) fn into_session_graph(self) -> SessionGraph {
+    pub(super) fn into_session_graph(self) -> Result<SessionGraph, crate::StoreError> {
         // Commit-draft append invariant: every node staged by this editor was
         // minted by an append builder anchored at this editor's leaf, and the
         // first one extends the leaf captured before the turn. Projection-only
@@ -308,16 +317,12 @@ impl TurnGraphEditor {
         );
         let mut graph = Arc::unwrap_or_clone(self.base_graph);
         if self.appended_nodes.is_empty() {
-            return graph;
+            return Ok(graph);
         }
-        graph
-            .apply_append(&crate::GraphAppend::Extend {
-                nodes: self.appended_nodes,
-            })
-            .unwrap_or_else(|error| {
-                panic!("turn graph editor produced an invalid append: {error}")
-            });
-        graph
+        graph.apply_append(&crate::GraphAppend::Extend {
+            nodes: self.appended_nodes,
+        })?;
+        Ok(graph)
     }
 
     fn leaf_node_id(&self) -> Option<NodeId> {
@@ -427,7 +432,9 @@ mod tests {
             vec!["first"]
         );
 
-        editor.append_active_conversation_messages(&[first]);
+        editor
+            .append_active_conversation_messages(&[first])
+            .unwrap();
         let pending = editor.graph_commit();
         assert_eq!(pending.nodes().len(), 1);
         assert_eq!(
@@ -437,7 +444,7 @@ mod tests {
         editor.mark_node_ids_persisted(pending.nodes().iter().map(|node| node.node_id.clone()));
         assert!(editor.graph_commit().nodes().is_empty());
 
-        let graph = editor.into_session_graph();
+        let graph = editor.into_session_graph().unwrap();
         assert_eq!(graph.nodes.len(), 1);
         assert_eq!(graph.read_model().messages.len(), 1);
     }
@@ -446,7 +453,9 @@ mod tests {
     fn message_delta_rejects_rewriting_the_existing_prefix() {
         let first = message("first", "one");
         let mut editor = editor();
-        editor.append_active_conversation_messages(std::slice::from_ref(&first));
+        editor
+            .append_active_conversation_messages(std::slice::from_ref(&first))
+            .unwrap();
         let rewritten = message("first", "changed");
         assert!(
             editor
@@ -464,7 +473,9 @@ mod tests {
     #[test]
     fn a_shared_read_model_base_witnesses_agreement_without_walking_history() {
         let mut graph = SessionGraph::default();
-        graph.append_active_read_delta(&[message("history", "committed")]);
+        graph
+            .append_active_read_delta(&[message("history", "committed")])
+            .unwrap();
         let graph = Arc::new(graph);
         let base_read_model = graph.read_model();
         let base = base_read_model.messages.clone();
@@ -476,7 +487,8 @@ mod tests {
             Arc::new(crate::SystemClock),
         );
 
-        let next = MessageSequence::from_base_and_delta(base, vec![message("turn", "new")]);
+        let next =
+            MessageSequence::from_base_and_delta(base, vec![message("turn", "new")]).unwrap();
 
         let delta = editor
             .message_delta_if_current_preserved(&next)
@@ -496,10 +508,12 @@ mod tests {
     #[test]
     fn a_rebuilt_message_list_falls_back_to_content_reconciliation() {
         let mut editor = editor();
-        editor.append_active_conversation_messages(&[
-            message("first", "one"),
-            message("second", "two"),
-        ]);
+        editor
+            .append_active_conversation_messages(&[
+                message("first", "one"),
+                message("second", "two"),
+            ])
+            .unwrap();
 
         let preserved = MessageSequence::from_owned(vec![
             message("first", "one"),
@@ -541,11 +555,15 @@ mod tests {
     fn projected_content_mismatch_for_a_durable_id_stays_observation_only() {
         let mut editor = editor();
         let durable = message("durable", "original");
-        editor.append_active_conversation_messages(std::slice::from_ref(&durable));
+        editor
+            .append_active_conversation_messages(std::slice::from_ref(&durable))
+            .unwrap();
         let pending = editor.graph_commit();
         editor.mark_node_ids_persisted(pending.nodes().iter().map(|node| node.node_id.clone()));
 
-        editor.project_active_read_state(&[message("durable", "projected")]);
+        editor
+            .project_active_read_state(&[message("durable", "projected")])
+            .unwrap();
 
         assert!(editor.graph_commit().nodes().is_empty());
         assert_eq!(editor.message_sequence()[0].parts[0].content(), "projected");
@@ -557,7 +575,7 @@ mod tests {
                 id_mismatches: vec!["durable".to_string()],
             }]
         );
-        let durable_graph = editor.into_session_graph();
+        let durable_graph = editor.into_session_graph().unwrap();
         assert_eq!(
             durable_graph.read_model().messages[0].parts[0].content(),
             "original"
@@ -580,18 +598,20 @@ mod tests {
     }
 
     fn active_path_walk_is_bounded_scenario() {
-        let plugin_node = |node_id: &str, parent_node_id: &str| SessionNodeRecord {
-            node_id: crate::NodeId::fixture(node_id),
-            parent_node_id: Some(crate::NodeId::fixture(parent_node_id)),
-            timestamp: "2026-07-31T00:00:00.000000000Z"
-                .parse()
-                .unwrap_or_else(|error| panic!("invalid fixture timestamp: {error}")),
-            payload: crate::SessionNodePayload::Plugin {
-                plugin_type: "turn-graph-cycle-test".to_string(),
-                body: crate::session_graph::SharedJsonValue::new(serde_json::json!({
-                    "node": node_id
-                })),
-            },
+        let plugin_node = |node_id: &str, parent_node_id: &str| {
+            SessionNodeRecord::new(
+                crate::NodeId::fixture(node_id),
+                Some(crate::NodeId::fixture(parent_node_id)),
+                "2026-07-31T00:00:00.000000000Z"
+                    .parse()
+                    .unwrap_or_else(|error| panic!("invalid fixture timestamp: {error}")),
+                crate::SessionNodePayload::Plugin {
+                    plugin_type: "turn-graph-cycle-test".to_string(),
+                    body: crate::session_graph::SharedJsonValue::new(serde_json::json!({
+                        "node": node_id
+                    })),
+                },
+            )
         };
         let mut editor = editor();
         editor.append_unchecked_nodes(vec![

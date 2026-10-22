@@ -107,10 +107,14 @@ impl<E: Clone> TurnWindow<E> {
 
     /// The window's messages followed by `delta`, sharing the window's
     /// buffer and render.
-    #[must_use]
-    pub fn then(&self, delta: Vec<Message>) -> MessageSequence {
-        MessageSequence::from_base_and_delta(self.messages.clone(), delta)
-            .with_base_render_cache(Arc::clone(&self.rendered))
+    pub fn then(
+        &self,
+        delta: Vec<Message>,
+    ) -> Result<MessageSequence, lash_protocol_types::allocation::AllocationError> {
+        Ok(
+            MessageSequence::from_base_and_delta(self.messages.clone(), delta)?
+                .with_base_render_cache(Arc::clone(&self.rendered)),
+        )
     }
 
     /// How many of `sequence`'s leading messages are the window's.
@@ -164,7 +168,11 @@ impl<E: Clone> TurnWindow<E> {
     }
 
     /// The window's first `len` messages followed by `rest`.
-    pub(super) fn messages_then(&self, len: usize, rest: Vec<Message>) -> MessageSequence {
+    pub(super) fn messages_then(
+        &self,
+        len: usize,
+        rest: Vec<Message>,
+    ) -> Result<MessageSequence, lash_protocol_types::allocation::AllocationError> {
         if len == self.messages.len() {
             return self.then(rest);
         }

@@ -32,7 +32,9 @@ pub async fn fork_inherits_history_without_execution_queues_waits_or_journals(
             lash_core::NoProgressBudget::bounded(12),
         ))
     };
-    state.ensure_agent_frame_initialized();
+    state
+        .ensure_agent_frame_initialized()
+        .expect("source fixture edit is admitted");
     append_conformance_event_node(&mut state, "shared-prefix", "shared historical prefix");
     commit_conformance_state(source.store(), &mut state)
         .await
@@ -165,7 +167,9 @@ pub async fn reclaim_races_fork_and_unpin_without_using_process_roots(
             lash_core::NoProgressBudget::bounded(12),
         ))
     };
-    state.ensure_agent_frame_initialized();
+    state
+        .ensure_agent_frame_initialized()
+        .expect("source fixture edit is admitted");
     append_conformance_event_node(&mut state, "race-prefix", "retained prefix");
     commit_conformance_state(source.store(), &mut state)
         .await

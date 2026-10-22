@@ -323,7 +323,7 @@ impl RuntimeCommit {
             "1970-01-01T00:00:00.000000001Z"
                 .parse()
                 .expect("canonical sizing timestamp")
-        });
+        })?;
         // A session command's settlement commits under its batch's queue
         // drain; every batch id has the derived id's length.
         let operation = super::OperationId::new(
@@ -505,19 +505,19 @@ mod tests {
         };
         let budget = CommitBudget::bounded(128, 512);
         let mut commit = RuntimeCommit::persisted_state_for_test_with_budget(&state, budget);
-        let node = crate::SessionNodeRecord {
-            node_id: "budget-node".into(),
-            parent_node_id: None,
-            timestamp: "2026-07-26T00:00:00.000000000Z"
+        let node = crate::SessionNodeRecord::new(
+            "budget-node".into(),
+            None,
+            "2026-07-26T00:00:00.000000000Z"
                 .parse()
                 .expect("canonical node timestamp"),
-            payload: crate::SessionNodePayload::Event {
+            crate::SessionNodePayload::Event {
                 event: crate::SessionHistoryRecord::Protocol(
                     crate::ProtocolEvent::typed("budget", serde_json::Value::Null)
                         .expect("protocol event"),
                 ),
             },
-        };
+        );
         commit.graph = crate::GraphAppend::Extend {
             nodes: vec![node.clone()],
         };

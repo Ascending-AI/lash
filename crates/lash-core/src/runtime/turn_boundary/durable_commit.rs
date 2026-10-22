@@ -112,7 +112,7 @@ impl TurnBoundary {
             }
             None => (None, ExecutionStateUpdate::Clean),
         };
-        self.finalize_turn_read_state(new_messages, cancelled);
+        self.finalize_turn_read_state(new_messages, cancelled)?;
         let fleet_format = self.fleet_format;
         let clock = std::sync::Arc::clone(&self.clock);
         let graph_appends = self.graph_appends.clone();
@@ -124,7 +124,7 @@ impl TurnBoundary {
         let output_cuts = self.output_cuts;
         let committing = self.operation_scope.clone();
         let definition_engines = self.definition_engines.clone();
-        let state = self.final_state_mut();
+        let state = self.final_state_mut()?;
         if let Some(plugins) = plugins.as_deref() {
             let captured = match after_turn {
                 Some(after_turn) => state.capture_plugin_states(
@@ -149,7 +149,7 @@ impl TurnBoundary {
             &terminal_message_id,
             &protocol_terminal_output,
             output_cuts,
-        );
+        )?;
         graph_appends
             .fold_into_final_state(state)
             .map_err(|error| StoreError::TurnOutcomeMaterializationRefused {
@@ -170,7 +170,7 @@ impl TurnBoundary {
                         record.body.clone(),
                     )],
                     clock.node_timestamp(),
-                );
+                )?;
                 record_ordinal += 1;
             }
         }

@@ -309,20 +309,22 @@ pub async fn commit_rejects_non_derived_append_node_ids(store: Arc<dyn RuntimeSt
             lash_core::NoProgressBudget::bounded(12),
         ))
     };
-    state.ensure_agent_frame_initialized();
+    state
+        .ensure_agent_frame_initialized()
+        .expect("source fixture edit is admitted");
     let operation = crate::OperationId::turn("root", "guard-turn", "final");
     let graph = crate::GraphAppend::Extend {
-        nodes: vec![crate::SessionNodeRecord {
-            node_id: "rogue-node-id".into(),
-            parent_node_id: None,
-            timestamp: "2026-07-26T10:00:00.000000000Z"
+        nodes: vec![crate::SessionNodeRecord::new(
+            "rogue-node-id".into(),
+            None,
+            "2026-07-26T10:00:00.000000000Z"
                 .parse()
                 .expect("canonical node timestamp"),
-            payload: crate::SessionNodePayload::Plugin {
+            crate::SessionNodePayload::Plugin {
                 plugin_type: "guard".to_string(),
                 body: crate::session_graph::SharedJsonValue::new(serde_json::json!({"ok": true})),
             },
-        }],
+        )],
     };
     let mut commit = RuntimeCommit::persisted_state_with_graph_commit(&state, graph);
     commit.turn_commit = RuntimeTurnCommitStamp::new(operation);
@@ -359,17 +361,19 @@ pub async fn append_rejects_existing_node_id_collision(store: Arc<dyn RuntimeSto
             lash_core::NoProgressBudget::bounded(12),
         ))
     };
-    state.ensure_agent_frame_initialized();
+    state
+        .ensure_agent_frame_initialized()
+        .expect("source fixture edit is admitted");
     let frame_key =
         crate::FrameKey::from_caller_material("collision-frame").expect("non-empty frame material");
     let colliding_id = crate::session_graph::frame_node_id(&state.session_id, frame_key.as_str());
-    let original = crate::SessionNodeRecord {
-        node_id: lash_core::NodeId::fixture(colliding_id.to_string()),
-        parent_node_id: None,
-        timestamp: "2026-07-26T10:00:00.000000000Z"
+    let original = crate::SessionNodeRecord::new(
+        lash_core::NodeId::fixture(colliding_id.to_string()),
+        None,
+        "2026-07-26T10:00:00.000000000Z"
             .parse()
             .expect("canonical node timestamp"),
-        payload: crate::SessionNodePayload::FrameOpen {
+        crate::SessionNodePayload::FrameOpen {
             frame_key: frame_key.clone(),
             reason: AgentFrameReason::new("original"),
             assignment: crate::AgentFrameAssignment::unconfigured(crate::SessionPolicy::new(
@@ -378,7 +382,7 @@ pub async fn append_rejects_existing_node_id_collision(store: Arc<dyn RuntimeSto
                 lash_core::NoProgressBudget::bounded(12),
             )),
         },
-    };
+    );
     state.session_graph = crate::SessionGraph::from_nodes(
         vec![original.clone()],
         Some(lash_core::NodeId::fixture(colliding_id.to_string())),
@@ -389,8 +393,11 @@ pub async fn append_rejects_existing_node_id_collision(store: Arc<dyn RuntimeSto
         .await
         .expect("seed colliding durable node");
 
-    let replacement = crate::SessionNodeRecord {
-        payload: crate::SessionNodePayload::FrameOpen {
+    let replacement = crate::SessionNodeRecord::new(
+        original.node_id,
+        original.parent_node_id,
+        original.timestamp,
+        crate::SessionNodePayload::FrameOpen {
             frame_key,
             reason: AgentFrameReason::new("replacement"),
             assignment: crate::AgentFrameAssignment::unconfigured(crate::SessionPolicy::new(
@@ -399,8 +406,7 @@ pub async fn append_rejects_existing_node_id_collision(store: Arc<dyn RuntimeSto
                 lash_core::NoProgressBudget::bounded(12),
             )),
         },
-        ..original
-    };
+    );
     let mut append = RuntimeCommit::persisted_state_with_graph_commit(
         &state,
         crate::GraphAppend::Extend {
@@ -539,13 +545,17 @@ pub async fn preserve_head_commit_reports_the_resident_leaf(store: Arc<dyn Runti
             lash_core::NoProgressBudget::bounded(12),
         ))
     };
-    state.ensure_agent_frame_initialized();
+    state
+        .ensure_agent_frame_initialized()
+        .expect("source fixture edit is admitted");
     let first = store
         .commit_runtime_state(RuntimeCommit::persisted_state_for_test(&state))
         .await
         .expect("seed the live head");
     let old_leaf = state.session_graph.leaf_node_id.clone();
-    state.apply_persisted_commit_result(first);
+    state
+        .apply_persisted_commit_result(first)
+        .expect("source fixture edit is admitted");
     let preserve =
         RuntimeCommit::persisted_state_with_graph_commit(&state, crate::GraphAppend::PreserveHead);
     let receipt = store
@@ -580,13 +590,17 @@ pub async fn empty_append_cannot_move_the_head(store: Arc<dyn RuntimeStore>) {
             lash_core::NoProgressBudget::bounded(12),
         ))
     };
-    state.ensure_agent_frame_initialized();
+    state
+        .ensure_agent_frame_initialized()
+        .expect("source fixture edit is admitted");
     let first = store
         .commit_runtime_state(RuntimeCommit::persisted_state_for_test(&state))
         .await
         .expect("seed the live head");
     let old_leaf = state.session_graph.leaf_node_id.clone();
-    state.apply_persisted_commit_result(first);
+    state
+        .apply_persisted_commit_result(first)
+        .expect("source fixture edit is admitted");
     let move_attempt =
         RuntimeCommit::persisted_state_with_graph_commit(&state, crate::GraphAppend::PreserveHead);
     store

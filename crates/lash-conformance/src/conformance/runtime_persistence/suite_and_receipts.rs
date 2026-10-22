@@ -225,7 +225,9 @@ pub async fn execution_state_replace_then_clear_removes_the_live_checkpoint_ref(
     )
     .await
     .expect("commit initial execution state");
-    state.apply_persisted_commit_result(initial);
+    state
+        .apply_persisted_commit_result(initial)
+        .expect("source fixture edit is admitted");
 
     lash_core::testing::stage_execution_graph(
         &mut state,
@@ -239,7 +241,9 @@ pub async fn execution_state_replace_then_clear_removes_the_live_checkpoint_ref(
     .await
     .expect("replace execution state");
     assert!(replacement.manifest.execution_ref.is_some());
-    state.apply_persisted_commit_result(replacement);
+    state
+        .apply_persisted_commit_result(replacement)
+        .expect("source fixture edit is admitted");
 
     lash_core::testing::stage_execution_graph(
         &mut state,

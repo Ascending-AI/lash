@@ -22,7 +22,7 @@ impl RuntimeTurnDriver<'_> {
         window: crate::runtime::durable::head::TurnWindow,
         messages: crate::MessageSequence,
         run_offset: usize,
-    ) -> TurnMachine {
+    ) -> Result<TurnMachine, RuntimeError> {
         let session_policy = self.policy.clone();
         // The machine starts with no environment: its protocol-start sync
         // builds the prompt and the tool surface as a recorded step, so the
@@ -62,11 +62,14 @@ impl RuntimeTurnDriver<'_> {
             emit_llm_trace: false,
             termination: self.protocol_turn_options.clone(),
             model_tool_calls,
-        });
+        })
+        .map_err(RuntimeError::allocation)?;
         self.mark_phase_end(RuntimeTurnPhase::PromptBuild);
         let mut machine = prepared.machine;
-        machine.adopt_prepared_messages(self.prepared_context.messages.clone());
         machine
+            .adopt_prepared_messages(self.prepared_context.messages.clone())
+            .map_err(RuntimeError::allocation)?;
+        Ok(machine)
     }
 
     /// The step body of an execution-environment sync: the surface the

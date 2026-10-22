@@ -432,7 +432,7 @@ async fn open_with_state_keeps_supplied_policy_without_rewriting_frame_history()
         current_frame_node_id: None,
         ..lash_core::RuntimeSessionState::fixture(unbounded())
     };
-    persisted.ensure_agent_frame_initialized();
+    persisted.ensure_agent_frame_initialized().unwrap();
     let historical_frame_id = persisted
         .current_frame_node_id
         .clone()
@@ -441,21 +441,23 @@ async fn open_with_state_keeps_supplied_policy_without_rewriting_frame_history()
         .expect("non-empty frame material");
     let frame_node_id = lash_core::facade_support::frame_node_id(&session_id, frame_key.as_str());
     let mut nodes = persisted.session_graph.nodes.clone();
-    nodes.push(Arc::new(lash_core::SessionNodeRecord {
-        node_id: lash_core::NodeId::fixture(frame_node_id.to_string()),
-        parent_node_id: persisted.session_graph.leaf_node_id.clone(),
-        timestamp: "2026-07-27T00:00:00.000000000Z"
-            .parse()
-            .expect("fixture timestamp"),
-        payload: lash_core::SessionNodePayload::FrameOpen {
-            frame_key,
-            reason: lash_core::AgentFrameReason::continue_as(),
-            assignment: lash_core::AgentFrameAssignment::unconfigured(with_model(
-                "current-frame-model",
-                22_222,
-            )),
-        },
-    }));
+    nodes
+        .push(Arc::new(lash_core::SessionNodeRecord::new(
+            lash_core::NodeId::fixture(frame_node_id.to_string()),
+            persisted.session_graph.leaf_node_id.clone(),
+            "2026-07-27T00:00:00.000000000Z"
+                .parse()
+                .expect("fixture timestamp"),
+            lash_core::SessionNodePayload::FrameOpen {
+                frame_key,
+                reason: lash_core::AgentFrameReason::continue_as(),
+                assignment: lash_core::AgentFrameAssignment::unconfigured(with_model(
+                    "current-frame-model",
+                    22_222,
+                )),
+            },
+        )))
+        .expect("source fixture edit is admitted");
     persisted.session_graph = lash_core::SessionGraph::from_shared_nodes(
         nodes,
         Some(lash_core::NodeId::fixture(frame_node_id.to_string())),

@@ -1,6 +1,7 @@
+use lash_protocol_types::allocation::{AllocationBudget, AllocationError, SourceCapacity};
 use std::collections::HashMap;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex as StdMutex};
 
 use crate::persistent_map::PersistentMap;
 use crate::session_graph::facade_ops::SessionNodeProjection;
@@ -17,34 +18,52 @@ use lash_protocol_types::{AppendVec, same_history_record, same_message};
 pub(crate) struct NodeIdIndex(PersistentMap<NodeId, usize>);
 
 impl NodeIdIndex {
-    fn from_resident(by_id: HashMap<NodeId, usize>) -> Self {
-        Self(by_id.into_iter().collect())
+    fn from_resident(
+        by_id: HashMap<NodeId, usize>,
+        budget: &AllocationBudget,
+    ) -> Result<Self, AllocationError> {
+        let mut result = Self(PersistentMap::default());
+        for (id, index) in by_id {
+            result.0 = result
+                .0
+                .with_insert(id, index, budget, |key, _| key.len() as u64)?;
+        }
+        Ok(result)
     }
 
     pub(crate) fn get(&self, node_id: &str) -> Option<usize> {
         self.0.get(node_id).copied()
     }
 
-    fn insert(&mut self, node_id: NodeId, index: usize) {
-        self.0.insert(node_id, index);
+    fn insert(
+        &mut self,
+        node_id: &NodeId,
+        index: usize,
+        budget: &AllocationBudget,
+    ) -> Result<(), AllocationError> {
+        let _copy = budget.reserve(node_id.len() as u64 + 32)?;
+        self.0 =
+            std::mem::take(&mut self.0)
+                .with_insert(node_id.clone(), index, budget, |key, _| key.len() as u64)?;
+        Ok(())
     }
 
-    pub(crate) fn rename(&mut self, from: &NodeId, to: NodeId, index: usize) {
-        self.0.remove(from.as_str());
-        self.0.insert(to, index);
+    pub(crate) fn rename(
+        &mut self,
+        from: &NodeId,
+        to: NodeId,
+        index: usize,
+        budget: &AllocationBudget,
+    ) -> Result<(), AllocationError> {
+        self.0 = std::mem::take(&mut self.0)
+            .without(from.as_str(), budget)?
+            .with_insert(to, index, budget, |key, _| key.len() as u64)?;
+        Ok(())
     }
 }
 
-/// The read model of the current frame: the shared sequences readers hold,
-/// plus the owned tail appended nodes push into.
-///
-/// The next read folds the tail onto the shared sequences in place: a
-/// reader's snapshot is a prefix of the same buffer, so neither an append
-/// nor a held reader copies the frame (FIG-4060), and every retained read
-/// model shares one frame's worth of messages (FIG-4059).
-/// `prompt_render_cache` is replaced when messages fold, keeping its `Arc`
-/// identity in step with the message sequence, and extends the previous
-/// cache's render instead of re-rendering the frame.
+/// The current frame's shared sequences. Fallible appends fold immediately,
+/// preserving sequence and render identity for every subsequent reader.
 #[derive(Clone, Debug)]
 struct ActiveReadModel {
     active_events: AppendVec<SessionHistoryRecord>,
@@ -52,8 +71,6 @@ struct ActiveReadModel {
     assistant_ids: PersistentMap<String, usize>,
     attachments: PersistentMap<crate::AttachmentId, usize>,
     prompt_render_cache: Arc<BaseRenderCache>,
-    pending_events: Vec<SessionHistoryRecord>,
-    pending_messages: Vec<Message>,
 }
 
 #[derive(Debug)]
@@ -63,7 +80,7 @@ pub(crate) struct SessionGraphCache {
     pub(crate) active_frame_indices: AppendVec<usize>,
     /// Every child edge: each parent's children's positions, in append
     /// order.
-    children: PersistentMap<usize, Vec<usize>>,
+    children: PersistentMap<usize, AppendVec<usize>>,
     /// The graph passed the full structural-integrity check, and every
     /// append since kept it (FIG-6889): an append whose id is fresh and
     /// whose parent is resident keeps it, any other edit withdraws it.
@@ -77,9 +94,9 @@ pub(crate) struct SessionGraphCache {
     /// [`lash_protocol_types::AppendVec::ptr_eq`]), so every reader of one resident
     /// graph shares these sequences.
     ///
-    /// Behind a mutex because `read_model` materializes through `&self`
-    /// while `append_node` pushes through `&mut self`.
-    active_read: StdMutex<ActiveReadModel>,
+    /// Folded by fallible edits before publication; readers only clone the shared buffers.
+    active_read: ActiveReadModel,
+    budget: AllocationBudget,
 }
 
 impl Clone for SessionGraphCache {
@@ -90,12 +107,8 @@ impl Clone for SessionGraphCache {
             active_frame_indices: self.active_frame_indices.clone(),
             children: self.children.clone(),
             proven: AtomicBool::new(self.proven()),
-            active_read: StdMutex::new(
-                self.active_read
-                    .lock()
-                    .unwrap_or_else(|poisoned| poisoned.into_inner())
-                    .clone(),
-            ),
+            active_read: self.active_read.clone(),
+            budget: self.budget.clone(),
         }
     }
 }
@@ -104,14 +117,14 @@ impl SessionGraphCache {
     pub(crate) fn build(graph: &SessionGraph) -> Result<Self, crate::StoreError> {
         let by_id = graph_node_indices(graph)?;
         let active_path_indices = ancestry_indices(graph, &by_id, graph.leaf_node_id.as_deref())?;
-        Ok(Self::from_indices(graph, by_id, active_path_indices, false))
+        Self::from_indices(graph, by_id, active_path_indices, false)
     }
 
     /// The cache of a graph that passes the full structural-integrity check
     /// ([`validate_structure`]), holding the proof.
     pub(crate) fn build_validated(graph: &SessionGraph) -> Result<Self, crate::StoreError> {
         let (by_id, active_path_indices) = validate_structure(graph)?;
-        Ok(Self::from_indices(graph, by_id, active_path_indices, true))
+        Self::from_indices(graph, by_id, active_path_indices, true)
     }
 
     fn from_indices(
@@ -119,7 +132,8 @@ impl SessionGraphCache {
         by_id: HashMap<NodeId, usize>,
         mut active_path_indices: Vec<usize>,
         proven: bool,
-    ) -> Self {
+    ) -> Result<Self, crate::StoreError> {
+        let budget = graph.nodes.allocation_budget();
         active_path_indices.reverse();
 
         let active_frame_indices = active_path_indices
@@ -135,29 +149,26 @@ impl SessionGraphCache {
         let mut children = PersistentMap::default();
         for (index, node) in graph.nodes.iter().enumerate() {
             if let Some(parent) = node.parent_node_id.as_ref().and_then(|id| by_id.get(id)) {
-                children.upsert(*parent, vec![index], |held: &mut Vec<usize>, _| {
-                    held.push(index);
-                });
+                append_child(&mut children, *parent, index, budget)?;
             }
         }
         let mut cache = Self {
-            by_id: NodeIdIndex::from_resident(by_id),
-            active_path_indices: AppendVec::from(active_path_indices),
-            active_frame_indices: AppendVec::from(active_frame_indices),
+            by_id: NodeIdIndex::from_resident(by_id, budget)?,
+            active_path_indices: admitted_sequence(active_path_indices, budget)?,
+            active_frame_indices: admitted_sequence(active_frame_indices, budget)?,
             children,
+            budget: budget.clone(),
             proven: AtomicBool::new(proven),
-            active_read: StdMutex::new(ActiveReadModel {
-                active_events: AppendVec::new(),
-                active_messages: AppendVec::new(),
+            active_read: ActiveReadModel {
+                active_events: AppendVec::try_with_capacity(0, budget)?,
+                active_messages: AppendVec::try_with_capacity(0, budget)?,
                 assistant_ids: PersistentMap::default(),
                 attachments: PersistentMap::default(),
                 prompt_render_cache: Arc::new(BaseRenderCache::new()),
-                pending_events: Vec::new(),
-                pending_messages: Vec::new(),
-            }),
+            },
         };
-        cache.rebuild_read_model(graph);
-        cache
+        cache.rebuild_read_model(graph)?;
+        Ok(cache)
     }
 
     /// Whether the graph holds the structural-integrity proof.
@@ -191,7 +202,10 @@ impl SessionGraphCache {
             && external_parent != Some(node_id)
     }
 
-    pub(crate) fn rebuild_read_model(&mut self, graph: &SessionGraph) {
+    pub(crate) fn rebuild_read_model(
+        &mut self,
+        graph: &SessionGraph,
+    ) -> Result<(), crate::StoreError> {
         let frame_start = self
             .active_frame_indices
             .last()
@@ -202,81 +216,64 @@ impl SessionGraphCache {
             })
             .unwrap_or(0);
         let frame_path = &self.active_path_indices[frame_start..];
-        let mut active_messages = Vec::with_capacity(frame_path.len());
-        let mut active_events = Vec::with_capacity(frame_path.len());
+        let budget = &self.budget;
+        // Cold construction includes the next append's spare slots. The
+        // retained path must not detach a full frame on its first edit.
+        let capacity = frame_path.len().saturating_mul(2).max(4);
+        let mut active_messages = AppendVec::try_with_capacity(capacity, budget)?;
+        let mut active_events = AppendVec::try_with_capacity(capacity, budget)?;
         let mut assistant_ids = PersistentMap::default();
         let mut attachments = PersistentMap::default();
         for idx in frame_path {
             let node = &graph.nodes[*idx];
             if let Some(event) = node.event() {
-                active_events.push(event.clone());
+                active_events.push_cloned_adopting(event, |_, _| false)?;
             }
+            let _message_copy = match node.event() {
+                Some(SessionHistoryRecord::Conversation(record)) => budget.reserve(
+                    record
+                        .owned_capacity()
+                        .saturating_add(std::mem::size_of::<Message>() as u64),
+                )?,
+                _ => Default::default(),
+            };
             if let Some(message) = node.message()
                 && !message.is_transient()
             {
                 if message.role == crate::MessageRole::Assistant {
-                    assistant_ids.upsert(
-                        message.id.clone(),
+                    insert_first(
+                        &mut assistant_ids,
+                        &message.id,
                         active_messages.len(),
-                        |first, index| {
-                            *first = (*first).min(index);
-                        },
-                    );
+                        budget,
+                    )?;
                 }
-                count_attachments(&mut attachments, &message);
-                active_messages.push(message);
+                count_attachments(&mut attachments, &message, budget)?;
+                active_messages.push(message)?;
             }
         }
-        *self
-            .active_read
-            .get_mut()
-            .unwrap_or_else(|poisoned| poisoned.into_inner()) = ActiveReadModel {
-            active_events: AppendVec::from(active_events),
-            active_messages: AppendVec::from(active_messages),
+        self.active_read = ActiveReadModel {
+            active_events,
+            active_messages,
             assistant_ids,
             attachments,
             prompt_render_cache: Arc::new(BaseRenderCache::new()),
-            pending_events: Vec::new(),
-            pending_messages: Vec::new(),
         };
+        Ok(())
     }
 
     /// The same active-frame projection owns both the message sequence and
     /// its assistant-id membership. Rebuilds and frame changes replace both.
     pub(crate) fn contains_active_assistant_message_id_before(&self, id: &str, end: usize) -> bool {
         self.active_read
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
             .assistant_ids
             .get(id)
             .is_some_and(|index| *index < end)
     }
 
-    /// The current frame's read model, materializing pending appends once.
-    ///
-    /// Each pending tail folds independently: an event-only append neither
-    /// replaces the message sequence nor the render cache built on it. A
-    /// fold appends to the shared sequences, adopting what another holder
-    /// of their buffers (a turn's read state) already appended.
+    /// Read the already-folded projection without allocating source capacity.
     pub(crate) fn active_read_model(&self) -> SessionReadModel {
-        let read = &mut *self
-            .active_read
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        if !read.pending_events.is_empty() {
-            let pending = std::mem::take(&mut read.pending_events);
-            read.active_events
-                .extend_adopting(pending, same_history_record);
-        }
-        if !read.pending_messages.is_empty() {
-            let prefix_len = read.active_messages.len();
-            let pending = std::mem::take(&mut read.pending_messages);
-            read.active_messages.extend_adopting(pending, same_message);
-            read.prompt_render_cache = Arc::new(BaseRenderCache::extending(
-                Arc::clone(&read.prompt_render_cache),
-                prefix_len,
-            ));
-        }
+        let read = &self.active_read;
         SessionReadModel {
             active_events: read.active_events.clone(),
             messages: read.active_messages.clone(),
@@ -284,22 +281,22 @@ impl SessionGraphCache {
         }
     }
 
-    pub(crate) fn replace_conversation_reply(&mut self, event: &SessionHistoryRecord) {
+    pub(crate) fn replace_conversation_reply(
+        &mut self,
+        event: &SessionHistoryRecord,
+    ) -> Result<(), AllocationError> {
         let SessionHistoryRecord::Conversation(conversation) = event else {
-            return;
+            return Ok(());
         };
         let message = conversation.to_message();
-        let read = self
-            .active_read
-            .get_mut()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let read = &mut self.active_read;
         // The marked reply is one of the newest records (FIG-6889).
         if let Some(index) = read.active_events.iter().rposition(|existing| matches!(
             existing, SessionHistoryRecord::Conversation(existing) if existing.id == conversation.id
         )) {
             let mut tail = read.active_events[index..].to_vec();
             tail[0] = event.clone();
-            read.active_events.replace_from(index, tail);
+            read.active_events.replace_from(index, tail)?;
         }
         if let Some(index) = read
             .active_messages
@@ -307,30 +304,13 @@ impl SessionGraphCache {
             .rposition(|existing| existing.id == message.id)
         {
             let old = read.active_messages[index].clone();
-            uncount_attachments(&mut read.attachments, &old);
-            count_attachments(&mut read.attachments, &message);
+            uncount_attachments(&mut read.attachments, &old, &self.budget)?;
+            count_attachments(&mut read.attachments, &message, &self.budget)?;
             let mut tail = read.active_messages[index..].to_vec();
             tail[0] = message.clone();
-            read.active_messages.replace_from(index, tail);
+            read.active_messages.replace_from(index, tail)?;
         }
-        for pending in &mut read.pending_events {
-            if matches!(pending, SessionHistoryRecord::Conversation(existing) if existing.id == conversation.id)
-            {
-                *pending = event.clone();
-            }
-        }
-        let ActiveReadModel {
-            pending_messages,
-            attachments,
-            ..
-        } = read;
-        for pending in pending_messages {
-            if pending.id == message.id {
-                uncount_attachments(attachments, pending);
-                count_attachments(attachments, &message);
-                *pending = message.clone();
-            }
-        }
+        Ok(())
     }
 
     pub(crate) fn append_node(
@@ -338,110 +318,126 @@ impl SessionGraphCache {
         node_index: usize,
         node: &SessionNodeRecord,
         extends_leaf: bool,
-    ) {
+    ) -> Result<(), AllocationError> {
         if let Some(parent_index) = node
             .parent_node_id
             .as_deref()
             .and_then(|id| self.by_id.get(id))
         {
-            self.children
-                .upsert(parent_index, vec![node_index], |held, _| {
-                    held.push(node_index)
-                });
+            append_child(&mut self.children, parent_index, node_index, &self.budget)?;
         }
-        self.by_id.insert(node.node_id.clone(), node_index);
+        self.by_id.insert(&node.node_id, node_index, &self.budget)?;
         if !extends_leaf {
-            return;
+            return Ok(());
         }
-        self.active_path_indices.push(node_index);
+        self.active_path_indices.push(node_index)?;
         if matches!(node.payload, SessionNodePayload::FrameOpen { .. }) {
-            self.active_frame_indices.push(node_index);
+            self.active_frame_indices.push(node_index)?;
         }
-        let read = self
-            .active_read
-            .get_mut()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let budget = &self.budget;
+        let read = &mut self.active_read;
         if matches!(node.payload, SessionNodePayload::FrameOpen { .. }) {
             // A pending `FrameOpen` moves the projection's start to the new
             // frame before its commit (ADR 0112 §9).
             *read = ActiveReadModel {
-                active_events: AppendVec::new(),
-                active_messages: AppendVec::new(),
+                active_events: AppendVec::try_with_capacity(0, budget)?,
+                active_messages: AppendVec::try_with_capacity(0, budget)?,
                 assistant_ids: PersistentMap::default(),
                 attachments: PersistentMap::default(),
                 prompt_render_cache: Arc::new(BaseRenderCache::new()),
-                pending_events: Vec::new(),
-                pending_messages: Vec::new(),
             };
         }
         if let Some(event) = node.event() {
-            read.pending_events.push(event.clone());
+            read.active_events
+                .push_cloned_adopting(event, same_history_record)?;
         }
+        let _message_copy = match node.event() {
+            Some(SessionHistoryRecord::Conversation(record)) => budget.reserve(
+                record
+                    .owned_capacity()
+                    .saturating_add(std::mem::size_of::<Message>() as u64),
+            )?,
+            _ => Default::default(),
+        };
         if let Some(message) = node.message()
             && !message.is_transient()
         {
             if message.role == crate::MessageRole::Assistant {
-                let index = read.active_messages.len() + read.pending_messages.len();
-                read.assistant_ids
-                    .upsert(message.id.clone(), index, |first, index| {
-                        *first = (*first).min(index);
-                    });
+                let index = read.active_messages.len();
+                insert_first(&mut read.assistant_ids, &message.id, index, budget)?;
             }
-            count_attachments(&mut read.attachments, &message);
-            read.pending_messages.push(message);
+            count_attachments(&mut read.attachments, &message, &self.budget)?;
+            let prefix_len = read.active_messages.len();
+            read.active_messages.push_adopting(message, same_message)?;
+            read.prompt_render_cache = Arc::new(BaseRenderCache::extending(
+                Arc::clone(&read.prompt_render_cache),
+                prefix_len,
+            ));
         }
+        Ok(())
     }
 
     pub(crate) fn detach_prompt_render_cache(&mut self) {
-        self.active_read
-            .get_mut()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .prompt_render_cache = Arc::new(BaseRenderCache::new());
+        self.active_read.prompt_render_cache = Arc::new(BaseRenderCache::new());
     }
 
     pub(crate) fn attachment_ids(&self) -> Vec<crate::AttachmentId> {
-        let read = self
-            .active_read
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let read = &self.active_read;
         let mut ids = Vec::new();
         read.attachments.for_each(|id, _| ids.push(id.clone()));
         ids.sort();
         ids
     }
 
-    pub(crate) fn children_of(&self, node_index: usize) -> Vec<usize> {
-        self.children.get(&node_index).cloned().unwrap_or_default()
+    pub(crate) fn children_of(&self, node_index: usize) -> impl Iterator<Item = usize> + '_ {
+        self.children
+            .get(&node_index)
+            .into_iter()
+            .flat_map(|indices| indices.iter().copied())
     }
 
     pub(crate) fn reserve_append_capacity(
         &mut self,
         additional_nodes: usize,
         additional_messages: usize,
-    ) {
-        self.active_path_indices.reserve(additional_nodes);
-        if additional_messages > 0 {
-            self.active_read
-                .get_mut()
-                .unwrap_or_else(|poisoned| poisoned.into_inner())
-                .pending_messages
-                .reserve(additional_messages);
-        }
+    ) -> Result<(), AllocationError> {
+        self.active_path_indices.reserve(additional_nodes)?;
+        self.active_frame_indices.reserve(additional_nodes)?;
+        self.active_read.active_events.reserve(additional_nodes)?;
+        self.active_read
+            .active_messages
+            .reserve(additional_messages)?;
+        Ok(())
     }
 }
 
-fn count_attachments(counts: &mut PersistentMap<crate::AttachmentId, usize>, message: &Message) {
+fn count_attachments(
+    counts: &mut PersistentMap<crate::AttachmentId, usize>,
+    message: &Message,
+    budget: &AllocationBudget,
+) -> Result<(), AllocationError> {
     for part in message.parts.iter() {
         for reference in part
             .attachments()
             .chain(part.retained_outputs().map(|retained| &retained.reference))
         {
-            counts.upsert(reference.id.clone(), 1, |count, added| *count += added);
+            let count = counts.get(&reference.id).copied().unwrap_or(0) + 1;
+            *counts = std::mem::take(counts).with_insert(
+                reference.id.clone(),
+                count,
+                budget,
+                |_, _| 0,
+            )?;
         }
     }
+    Ok(())
 }
 
-fn uncount_attachments(counts: &mut PersistentMap<crate::AttachmentId, usize>, message: &Message) {
+fn uncount_attachments(
+    counts: &mut PersistentMap<crate::AttachmentId, usize>,
+    message: &Message,
+    budget: &AllocationBudget,
+) -> Result<(), AllocationError> {
     for part in message.parts.iter() {
         for reference in part
             .attachments()
@@ -449,13 +445,58 @@ fn uncount_attachments(counts: &mut PersistentMap<crate::AttachmentId, usize>, m
         {
             match counts.get(&reference.id).copied() {
                 Some(1) => {
-                    counts.remove(&reference.id);
+                    *counts = std::mem::take(counts).without(&reference.id, budget)?;
                 }
                 Some(count) => {
-                    counts.insert(reference.id.clone(), count - 1);
+                    *counts = std::mem::take(counts).with_insert(
+                        reference.id.clone(),
+                        count - 1,
+                        budget,
+                        |_, _| 0,
+                    )?;
                 }
                 None => unreachable!("a projected message owns its attachment occurrences"),
             }
         }
     }
+    Ok(())
+}
+
+fn admitted_sequence<T: Clone + lash_protocol_types::allocation::SourceCapacity>(
+    values: Vec<T>,
+    budget: &AllocationBudget,
+) -> Result<AppendVec<T>, AllocationError> {
+    let mut sequence = AppendVec::try_with_capacity(values.len().saturating_mul(2).max(4), budget)?;
+    sequence.extend(values)?;
+    Ok(sequence)
+}
+
+fn append_child(
+    children: &mut PersistentMap<usize, AppendVec<usize>>,
+    parent: usize,
+    index: usize,
+    budget: &AllocationBudget,
+) -> Result<(), AllocationError> {
+    let mut indices = match children.get(&parent) {
+        Some(indices) => indices.clone(),
+        None => AppendVec::try_with_capacity(1, budget)?,
+    };
+    indices.push(index)?;
+    *children = std::mem::take(children).with_insert(parent, indices, budget, |_, _| 0)?;
+    Ok(())
+}
+
+fn insert_first(
+    ids: &mut PersistentMap<String, usize>,
+    id: &str,
+    index: usize,
+    budget: &AllocationBudget,
+) -> Result<(), AllocationError> {
+    if ids.get(id).is_some_and(|first| *first <= index) {
+        return Ok(());
+    }
+    let _copy = budget.reserve(id.len() as u64 + 32)?;
+    *ids = std::mem::take(ids)
+        .with_insert(id.to_owned(), index, budget, |key, _| key.capacity() as u64)?;
+    Ok(())
 }

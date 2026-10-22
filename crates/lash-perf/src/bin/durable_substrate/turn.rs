@@ -439,14 +439,14 @@ impl TurnServices for BenchServices {
             return self.cells.start(cx, row, head).await;
         }
         let window = head.window()?;
-        let messages = window.then(admitted_messages(&self.backend, row).await?);
+        let messages = window.then(admitted_messages(&self.backend, row).await?)?;
         let machine = TurnMachine::in_window(
             machine_config(&row.session, &row.run, &self.driver),
             window,
             messages,
             Vec::new(),
             0,
-        );
+        )?;
         Ok(self.drive(row, machine, None))
     }
 

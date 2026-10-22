@@ -106,7 +106,7 @@ pub use session_model::message::{MessageOrigin, TurnOutputSource, TurnReply, sam
 pub use session_model::{
     AcceptedInjectedTurnInput, BaseRenderCache, CompletionCandidate, CompletionDisposition,
     ConversationRecord, DecidedCompletion, ErrorEnvelope, FailureCode, HostNamespace,
-    InternalPartKind, InvalidNamespace, LlmUsage, MaxToolCalls, Message, MessageRole,
+    InternalPartKind, InvalidNamespace, LlmUsage, MaxToolCalls, Message, MessageParts, MessageRole,
     MessageSequence, Namespace, NoProgressBudget, Part, PartAttachment, PartKind, PluginStage,
     ProtocolEvent, ProtocolPayload, RenderedPrompt, ReportedFailure, RetryProgress,
     SessionAppendNode, SessionHistoryRecord, SessionStreamEvent, StoredDataCorruption,

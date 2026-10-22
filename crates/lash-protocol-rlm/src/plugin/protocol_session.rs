@@ -311,15 +311,18 @@ mod tests {
                 lash_core::NoProgressBudget::bounded(12),
             ),
         );
-        snapshot.session_graph.append_node_drafts_at(
-            "prompt-facts",
-            crate::driver::tests::prompt_history_fixture(true)
-                .into_iter()
-                .map(lash_core::session_graph::SessionNodeDraft::event),
-            "2026-01-01T00:00:00.000000000Z"
-                .parse()
-                .expect("canonical timestamp"),
-        );
+        snapshot
+            .session_graph
+            .append_node_drafts_at(
+                "prompt-facts",
+                crate::driver::tests::prompt_history_fixture(true)
+                    .into_iter()
+                    .map(lash_core::session_graph::SessionNodeDraft::event),
+                "2026-01-01T00:00:00.000000000Z"
+                    .parse()
+                    .expect("canonical timestamp"),
+            )
+            .unwrap();
         let history = lash_core::SessionReadView::from_snapshot(&snapshot);
         let facts = session
             .prompt_facts(

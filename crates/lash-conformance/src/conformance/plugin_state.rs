@@ -48,7 +48,9 @@ async fn commit(store: &Arc<dyn RuntimeStore>, state: &mut RuntimeSessionState) 
     )
     .await
     .expect("boundary commit");
-    state.apply_persisted_commit_result(receipt);
+    state
+        .apply_persisted_commit_result(receipt)
+        .expect("source fixture edit is admitted");
     // A receipt leaves durable references; the next storage boundary starts
     // from the checkpoint bodies the store actually retained.
     *state = crate::conformance::helpers::load_window_state(store, &state.session_id)

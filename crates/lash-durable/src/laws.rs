@@ -1225,10 +1225,11 @@ pub async fn lo_postimage_receipt_matches_reopen(
     let fleet = sessions.fleet_format();
     let mut first = None;
     for ordinal in 0..3 {
-        state.ensure_agent_frame_initialized();
+        state.ensure_agent_frame_initialized().map_err(stored)?;
         state
             .session_graph
-            .append_plugin("postimage-law", serde_json::json!({"ordinal": ordinal}));
+            .append_plugin("postimage-law", serde_json::json!({"ordinal": ordinal}))
+            .map_err(stored)?;
         state.policy.generation.seed = Some(ordinal);
         let operation = lash_core_store::store::OperationId::new(
             lash_protocol_types::ExecutionScope::runtime_operation(format!("postimage-{ordinal}")),

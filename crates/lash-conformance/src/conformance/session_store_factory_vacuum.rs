@@ -33,7 +33,9 @@ pub(super) async fn session_store_factory_delete_takes_the_sessions_pins(
         session_id: request.session_id.clone(),
         ..crate::RuntimeSessionState::fixture(request.config.session_policy())
     };
-    state.ensure_agent_frame_initialized();
+    state
+        .ensure_agent_frame_initialized()
+        .expect("source fixture edit is admitted");
     let leaf_node_id = state
         .session_graph
         .leaf_node_id
@@ -217,7 +219,9 @@ pub(super) async fn session_store_factory_vacuum_agrees_on_unpin_before_delete(
         session_id: request.session_id.clone(),
         ..crate::RuntimeSessionState::fixture(request.config.session_policy())
     };
-    state.ensure_agent_frame_initialized();
+    state
+        .ensure_agent_frame_initialized()
+        .expect("source fixture edit is admitted");
     let pinned = crate::Target::Revision(
         store
             .commit_runtime_state(crate::RuntimeCommit::persisted_state_for_test(&state))

@@ -103,9 +103,13 @@ impl RuntimeTurnDriver<'_> {
         &mut self,
         event_delta: Vec<crate::SessionHistoryRecord>,
         protocol_iteration: usize,
-    ) {
-        let protocol_events = self.turn_pipeline.apply_event_delta(event_delta);
+    ) -> Result<(), RuntimeError> {
+        let protocol_events = self
+            .turn_pipeline
+            .apply_event_delta(event_delta)
+            .map_err(|error| error.runtime_error())?;
         self.trace_protocol_steps(&protocol_events, protocol_iteration);
+        Ok(())
     }
 
     /// One `protocol_step` record per protocol event the turn records, in

@@ -465,7 +465,9 @@ pub(super) async fn selected_observer_intents(
             .expect("history source");
         let mut state = RuntimeSessionState::fixture(request.config.session_policy());
         state.session_id = source_id.clone();
-        state.ensure_agent_frame_initialized();
+        state
+            .ensure_agent_frame_initialized()
+            .expect("source fixture edit is admitted");
         let head_revision = source
             .commit_runtime_state(RuntimeCommit::persisted_state_for_test(&state))
             .await

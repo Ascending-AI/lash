@@ -82,13 +82,21 @@ impl MessageView {
         }
         let mut messages = base.clone();
         if self.truncate_to.is_some() || !self.replacements.is_empty() {
-            let changed = messages.make_mut();
-            changed.truncate(retained);
+            messages.truncate(retained);
+            let changed = messages.make_mut().map_err(|error| {
+                RuntimeEffectControllerError::from(
+                    lash_core_store::runtime_error::RuntimeError::allocation(error),
+                )
+            })?;
             for (index, message) in &self.replacements {
                 changed[*index] = message.clone();
             }
         }
-        messages.extend(self.appended.clone());
+        messages.extend(self.appended.clone()).map_err(|error| {
+            RuntimeEffectControllerError::from(
+                lash_core_store::runtime_error::RuntimeError::allocation(error),
+            )
+        })?;
         Ok(messages)
     }
 }

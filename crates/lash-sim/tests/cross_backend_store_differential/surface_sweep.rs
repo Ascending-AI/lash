@@ -842,16 +842,23 @@ impl BackendRunner {
                 format!("rows={} nodes={}", facts.rows.len(), facts.nodes.len())
             }
             SurfaceMethod::LoadSession => {
-                format!(
-                    "present={}",
-                    store
-                        .load_session_window(
-                            &session_id,
-                            lash_core::store::WindowSelector::Current,
-                        )
-                        .await?
-                        .is_some()
-                )
+                let cold = store
+                    .load_session_window(&session_id, lash_core::store::WindowSelector::Current)
+                    .await?;
+                let admitted = store
+                    .load_session_window_in(
+                        &session_id,
+                        lash_core::store::WindowSelector::Current,
+                        &lash_protocol_types::allocation::AllocationBudget::unowned(),
+                    )
+                    .await?;
+                assert_eq!(
+                    serde_json::to_value(&cold)
+                        .map_err(|error| StoreError::Backend(error.to_string()))?,
+                    serde_json::to_value(&admitted)
+                        .map_err(|error| StoreError::Backend(error.to_string()))?
+                );
+                format!("present={}", admitted.is_some())
             }
             SurfaceMethod::ListPendingTurnInputs => {
                 format!(

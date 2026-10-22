@@ -482,7 +482,7 @@ mod tests {
             .commit_runtime_state(RuntimeCommit::persisted_state_for_test(&state))
             .await
             .expect("seed checkpoint component refs");
-        state.apply_persisted_commit_result(first);
+        state.apply_persisted_commit_result(first).unwrap();
 
         state.turn_index = 2;
         state.set_plugin_state(Some(plugin_state(2)));

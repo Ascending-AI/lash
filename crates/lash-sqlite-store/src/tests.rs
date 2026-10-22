@@ -815,17 +815,22 @@ async fn commit_pair(same_operation: bool, grouped: bool) -> (Vec<String>, u64, 
     let state = durable_state(&store, &session).await;
     let commit = |name: &str| {
         let mut state = state.clone();
-        state.append_active_read_delta(&[lash_protocol_types::session_model::Message {
-            id: name.to_owned(),
-            role: lash_protocol_types::session_model::MessageRole::User,
-            origin: None,
-            parts: Arc::new(vec![lash_protocol_types::session_model::Part::text(
-                format!("{name}.p0"),
-                name.to_owned(),
-                None,
-            )]),
-            reply_marker: None,
-        }]);
+        state
+            .append_active_read_delta(&[lash_protocol_types::session_model::Message {
+                id: name.to_owned(),
+                role: lash_protocol_types::session_model::MessageRole::User,
+                origin: None,
+                parts: Arc::new(
+                    (vec![lash_protocol_types::session_model::Part::text(
+                        format!("{name}.p0"),
+                        name.to_owned(),
+                        None,
+                    )])
+                    .into(),
+                ),
+                reply_marker: None,
+            }])
+            .unwrap();
         RuntimeCommit::persisted_state_with_operation(
             &mut state,
             lash_core_store::store::OperationId::turn(
@@ -1465,17 +1470,22 @@ async fn a_terminal_writes_its_window_in_constant_bytes_at_every_history_positio
     let mut written = Vec::new();
     let mut runs = Vec::new();
     for position in 0..24_u64 {
-        state.append_active_read_delta(&[lash_protocol_types::session_model::Message {
-            id: format!("history-{position}"),
-            role: lash_protocol_types::session_model::MessageRole::User,
-            origin: None,
-            parts: Arc::new(vec![lash_protocol_types::session_model::Part::text(
-                format!("history-{position}.p0"),
-                format!("{position}:{}", "h".repeat(2_048)),
-                None,
-            )]),
-            reply_marker: None,
-        }]);
+        state
+            .append_active_read_delta(&[lash_protocol_types::session_model::Message {
+                id: format!("history-{position}"),
+                role: lash_protocol_types::session_model::MessageRole::User,
+                origin: None,
+                parts: Arc::new(
+                    (vec![lash_protocol_types::session_model::Part::text(
+                        format!("history-{position}.p0"),
+                        format!("{position}:{}", "h".repeat(2_048)),
+                        None,
+                    )])
+                    .into(),
+                ),
+                reply_marker: None,
+            }])
+            .unwrap();
         let run = lash_protocol_types::TurnId::fixture(format!("terminal-window-{position}"));
         let (commit, appended) = RuntimeCommit::persisted_state_with_operation(
             &mut state,
@@ -1486,7 +1496,7 @@ async fn a_terminal_writes_its_window_in_constant_bytes_at_every_history_positio
             .commit_runtime_state(commit)
             .await
             .expect("commit a longer history");
-        state.apply_persisted_commit_result(receipt);
+        state.apply_persisted_commit_result(receipt).unwrap();
         state.mark_node_ids_persisted(appended);
         let before = terminal_window_bytes(&store).await;
         store
@@ -1854,19 +1864,21 @@ async fn cache_release_population(delete: bool) {
             for ordinal in 0..count {
                 let session = SessionId::fixture(format!("closed-{depth}-{ordinal}"));
                 let mut state = durable_state(&store, &session).await;
-                state.ensure_agent_frame_initialized();
+                state.ensure_agent_frame_initialized().unwrap();
                 for node in 0..depth {
-                    state.session_graph.append_message(Message {
-                        id: format!("message-{node}"),
-                        role: MessageRole::User,
-                        parts: Arc::new(vec![Part::text(
-                            format!("part-{node}"),
-                            "x".repeat(4096),
-                            None,
-                        )]),
-                        origin: None,
-                        reply_marker: None,
-                    });
+                    state
+                        .session_graph
+                        .append_message(Message {
+                            id: format!("message-{node}"),
+                            role: MessageRole::User,
+                            parts: Arc::new(
+                                (vec![Part::text(format!("part-{node}"), "x".repeat(4096), None)])
+                                    .into(),
+                            ),
+                            origin: None,
+                            reply_marker: None,
+                        })
+                        .unwrap();
                 }
                 store
                     .commit_runtime_state(RuntimeCommit::persisted_state_for_test(&state))
@@ -2245,3 +2257,186 @@ mod configuration;
 
 #[path = "tests/prepared.rs"]
 mod prepared;
+
+/// LO-EVICT-SOURCE: the production serving entry admits before decoding,
+/// including when an independent cold reader keeps the store cache warm.
+#[tokio::test]
+async fn serving_window_refuses_source_before_decoding_a_cold_cached_payload() {
+    use lash_protocol_types::allocation::{
+        AllocationBudget, AllocationError, AllocationHold, AllocationLedger, AllocationReservation,
+        ReserveError,
+    };
+    struct Refuse;
+    impl AllocationLedger for Refuse {
+        fn reserve(&self, bytes: u64) -> Result<AllocationHold, AllocationError> {
+            Err(AllocationError {
+                kind: ReserveError::TooLarge,
+                actor: "source-store".into(),
+                requested: bytes,
+                capacity: 1,
+            })
+        }
+        fn reserve_shared(&self, _: usize, bytes: u64) -> Result<AllocationHold, AllocationError> {
+            self.reserve(bytes)
+        }
+    }
+    #[derive(Clone, Default)]
+    struct Counted(std::sync::Arc<std::sync::atomic::AtomicU64>);
+    struct Held {
+        used: Counted,
+        bytes: u64,
+    }
+    impl AllocationReservation for Held {
+        fn retain(&self) {}
+    }
+    impl Drop for Held {
+        fn drop(&mut self) {
+            self.used.0.fetch_sub(self.bytes, Ordering::SeqCst);
+        }
+    }
+    impl AllocationLedger for Counted {
+        fn reserve(&self, bytes: u64) -> Result<AllocationHold, AllocationError> {
+            self.0.fetch_add(bytes, Ordering::SeqCst);
+            Ok(AllocationHold::new(Held {
+                used: self.clone(),
+                bytes,
+            }))
+        }
+        fn reserve_shared(&self, _: usize, bytes: u64) -> Result<AllocationHold, AllocationError> {
+            self.reserve(bytes)
+        }
+    }
+    let store = crate::test_support::sqlite_memory_store().await.unwrap();
+    let session = SessionId::fixture("serving-source-budget");
+    let mut state = durable_state(&store, &session).await;
+    state.ensure_agent_frame_initialized().unwrap();
+    state
+        .session_graph
+        .append_plugin("source", serde_json::json!({"body": "source".repeat(1024)}))
+        .unwrap();
+    let persist = async |state: &mut lash_core_store::session_state::RuntimeSessionState,
+                         ordinal: &str| {
+        let (commit, appended) = RuntimeCommit::persisted_state_with_operation(
+            state,
+            lash_core_store::store::OperationId::turn(
+                &session,
+                lash_protocol_types::TurnId::fixture(ordinal),
+                "commit",
+            ),
+        )
+        .unwrap();
+        let receipt = store.commit_runtime_state(commit).await.unwrap();
+        state.apply_persisted_commit_result(receipt).unwrap();
+        state.mark_node_ids_persisted(appended);
+    };
+    persist(&mut state, "source-first").await;
+    let cold = store
+        .load_session_window(&session, lash_core_store::store::WindowSelector::Current)
+        .await
+        .unwrap()
+        .unwrap();
+    let decoded = store.decoded_graph_node_bodies.load(Ordering::Relaxed);
+    let error = store
+        .load_session_window_in(
+            &session,
+            lash_core_store::store::WindowSelector::Current,
+            &AllocationBudget::new(Refuse),
+        )
+        .await
+        .unwrap_err();
+    assert!(matches!(
+        error,
+        StoreError::Allocation(AllocationError {
+            kind: ReserveError::TooLarge,
+            ..
+        })
+    ));
+    assert_eq!(
+        store.decoded_graph_node_bodies.load(Ordering::Relaxed),
+        decoded,
+        "no source body may decode before its admission"
+    );
+    assert!(
+        cold.window.nodes.len() >= 2,
+        "the independent cached reader remains readable"
+    );
+    let counted = Counted::default();
+    let budget = AllocationBudget::new(counted.clone());
+    let admitted = store
+        .load_session_window_in(
+            &session,
+            lash_core_store::store::WindowSelector::Current,
+            &budget,
+        )
+        .await
+        .unwrap()
+        .unwrap();
+    let decoded = store.decoded_graph_node_bodies.load(Ordering::Relaxed);
+    let repeated = store
+        .load_session_window_in(
+            &session,
+            lash_core_store::store::WindowSelector::Current,
+            &budget,
+        )
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        store.decoded_graph_node_bodies.load(Ordering::Relaxed),
+        decoded,
+        "the admitted same-leaf graph replaces the cold cache entry"
+    );
+    let external = store
+        .load_session_window(&session, lash_core_store::store::WindowSelector::Current)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        store.decoded_graph_node_bodies.load(Ordering::Relaxed),
+        decoded,
+        "an exact cold reader shares the already-admitted graph"
+    );
+    assert!(lash_protocol_types::AppendVec::ptr_eq(
+        &admitted.window.nodes,
+        &external.window.nodes
+    ));
+    // A lease spans window versions, regardless of which ledger decoded
+    // them. An independent read must not evict the live owner's newer cache
+    // merely because it has finished returning its own immutable window.
+    state
+        .session_graph
+        .append_plugin("source", serde_json::json!({"tail": true}))
+        .unwrap();
+    persist(&mut state, "source-next").await;
+    let independent = store
+        .load_session_window(&session, lash_core_store::store::WindowSelector::Current)
+        .await
+        .unwrap()
+        .unwrap();
+    let decoded = store.decoded_graph_node_bodies.load(Ordering::Relaxed);
+    drop(independent);
+    let again = store
+        .load_session_window(&session, lash_core_store::store::WindowSelector::Current)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        store.decoded_graph_node_bodies.load(Ordering::Relaxed),
+        decoded,
+        "the serving owner's live lease keeps the newer cold window warm"
+    );
+    drop(again);
+    drop(admitted);
+    drop(repeated);
+    drop(cold);
+    assert!(
+        counted.0.load(Ordering::SeqCst) > 0,
+        "the external graph keeps the source charge after its owner drops"
+    );
+    drop(external);
+    assert_eq!(
+        counted.0.load(Ordering::SeqCst),
+        0,
+        "the last reader releases the admitted graph and its cache entry"
+    );
+}

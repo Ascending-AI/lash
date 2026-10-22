@@ -48,9 +48,9 @@ pub(super) fn materialize_turn_reply(
     message_id: &str,
     protocol_output: &ProtocolTerminalOutput,
     cuts: lash_protocol_types::session_model::RuntimeOutputCuts,
-) {
+) -> Result<(), crate::StoreError> {
     let TurnOutcome::Finished(finish) = outcome else {
-        return;
+        return Ok(());
     };
     let read_model = state.read_model();
     if read_model.messages.iter().any(|message| {
@@ -60,7 +60,7 @@ pub(super) fn materialize_turn_reply(
                 .as_ref()
                 .is_some_and(|reply| reply.turn_id() == turn_id)
     }) {
-        return;
+        return Ok(());
     }
     let text = match finish {
         TurnFinish::AssistantMessage { text } => {
@@ -76,9 +76,9 @@ pub(super) fn materialize_turn_reply(
                     state.mark_pending_turn_reply(
                         &message_id,
                         crate::TurnReply::mint(turn_id.clone(), part_id),
-                    );
+                    )?;
                 }
-                return;
+                return Ok(());
             }
             text.clone()
         }
@@ -99,7 +99,8 @@ pub(super) fn materialize_turn_reply(
             reply_marker: Some(crate::TurnReply::mint(turn_id.clone(), part_id)),
         }],
         clock,
-    );
+    )?;
+    Ok(())
 }
 
 /// The part of a protocol-authored reply that carries its text: the last
@@ -214,7 +215,8 @@ mod tests {
             TERMINAL_ID,
             &protocol_output,
             lash_protocol_types::session_model::RuntimeOutputCuts::standard(),
-        );
+        )
+        .expect("source fixture edit is admitted");
 
         assert_eq!(
             message_ids(&state),
@@ -261,7 +263,8 @@ mod tests {
             TERMINAL_ID,
             &ProtocolTerminalOutput::default(),
             lash_protocol_types::session_model::RuntimeOutputCuts::standard(),
-        );
+        )
+        .expect("source fixture edit is admitted");
 
         let messages = state.read_model().messages.clone();
         assert_eq!(
@@ -314,7 +317,8 @@ mod tests {
             TERMINAL_ID,
             &ProtocolTerminalOutput::default(),
             lash_protocol_types::session_model::RuntimeOutputCuts::standard(),
-        );
+        )
+        .expect("source fixture edit is admitted");
 
         assert_eq!(
             message_ids(&state),
@@ -353,7 +357,8 @@ mod tests {
             TERMINAL_ID,
             &ProtocolTerminalOutput::default(),
             lash_protocol_types::session_model::RuntimeOutputCuts::standard(),
-        );
+        )
+        .expect("source fixture edit is admitted");
     }
 
     fn final_value(value: serde_json::Value) -> TurnOutcome {
@@ -472,7 +477,8 @@ mod tests {
             TERMINAL_ID,
             &protocol_output,
             lash_protocol_types::session_model::RuntimeOutputCuts::standard(),
-        );
+        )
+        .expect("source fixture edit is admitted");
 
         assert_eq!(
             message_ids(&state),
@@ -502,7 +508,8 @@ mod tests {
             "first-attempt-reply",
             &ProtocolTerminalOutput::default(),
             lash_protocol_types::session_model::RuntimeOutputCuts::standard(),
-        );
+        )
+        .expect("source fixture edit is admitted");
         mark_all_persisted(&mut state);
         let before = message_ids(&state);
         materialize_turn_reply(
@@ -513,7 +520,8 @@ mod tests {
             "fresh-attempt-reply",
             &ProtocolTerminalOutput::default(),
             lash_protocol_types::session_model::RuntimeOutputCuts::standard(),
-        );
+        )
+        .expect("source fixture edit is admitted");
         assert_eq!(
             reply_markers(&state).len(),
             1,
@@ -546,7 +554,8 @@ mod tests {
             TERMINAL_ID,
             &protocol_output,
             lash_protocol_types::session_model::RuntimeOutputCuts::standard(),
-        );
+        )
+        .expect("source fixture edit is admitted");
 
         assert!(reply_markers(&state).is_empty());
         assert!(matches!(
@@ -568,7 +577,8 @@ mod tests {
             TERMINAL_ID,
             &ProtocolTerminalOutput::default(),
             lash_protocol_types::session_model::RuntimeOutputCuts::standard(),
-        );
+        )
+        .expect("source fixture edit is admitted");
 
         assert_eq!(message_ids(&state), before);
     }

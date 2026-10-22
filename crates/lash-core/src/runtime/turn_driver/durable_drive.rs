@@ -152,7 +152,12 @@ impl RuntimeDrive {
             pending,
             answered,
             row,
-        } = restore.restore(config).await?;
+        } = restore.restore(config).await.map_err(|error| match error {
+            crate::runtime::durable::session::TurnRestoreError::Checkpoint(
+                lash_sansio::TurnCheckpointRestoreError::Allocation(error),
+            ) => TurnError::Runtime(RuntimeError::allocation(error)),
+            error => TurnError::Restore(error),
+        })?;
         // The steering input the turn's checkpoints delivered before its last phase committed are bound to its run;
         // the turn's commit settles them with the rows its run took.
         driver.pending_turn_inputs.extend(delivered);
@@ -184,7 +189,8 @@ impl RuntimeDrive {
         for (messages, event_delta) in machine.progressed_boundaries() {
             driver
                 .turn_pipeline
-                .replay_progress_boundary(&messages, event_delta.to_vec());
+                .replay_progress_boundary(&messages, event_delta.to_vec())
+                .map_err(|error| TurnError::Runtime(error.runtime_error()))?;
         }
         // The tool surface the turn's last sync installed, as its checkpoint
         // records it: the live registry supplies its executors only, so a
@@ -641,8 +647,10 @@ fn fresh_machine(
 ) -> Result<TurnMachine, TurnError> {
     driver.protocol_reply.mark_run_start(&messages);
     let refused = driver.validate_recorded_selection().err();
-    let mut machine = driver.turn_machine(window, messages);
-    machine.set_allocation_budget(driver.allocation_budget.clone());
+    let mut machine = driver.turn_machine(window, messages)?;
+    machine
+        .set_allocation_budget(driver.allocation_budget.clone())
+        .map_err(RuntimeError::allocation)?;
     if let Some(event) = refused {
         machine.fail_turn(*event);
     }
@@ -1285,7 +1293,7 @@ impl TurnDrive for RuntimeDrive {
         .await
         .map_err(runtime)?;
         let driver = &mut self.driver;
-        driver.apply_final_event_delta(done.event_delta, done.protocol_iteration);
+        driver.apply_final_event_delta(done.event_delta, done.protocol_iteration)?;
         driver.turn_pipeline.record_protocol_terminal_output(
             driver
                 .protocol_reply
@@ -1508,7 +1516,7 @@ impl RuntimeTurnDriver<'static> {
         &mut self,
         window: crate::runtime::durable::head::TurnWindow,
         messages: crate::MessageSequence,
-    ) -> TurnMachine {
+    ) -> Result<TurnMachine, RuntimeError> {
         self.prepare_machine(window, messages, 0)
     }
 

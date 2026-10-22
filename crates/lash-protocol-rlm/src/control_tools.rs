@@ -694,14 +694,16 @@ mod tests {
     #[tokio::test]
     async fn continue_as_creates_empty_rlm_frame_with_seed_and_task() {
         let mut session_graph = lash_core::SessionGraph::default();
-        session_graph.append_protocol_event(rlm_protocol_event(
-            RlmProtocolEvent::RlmGlobalsPatch(lash_rlm_types::RlmGlobalsPatchPluginBody {
-                set_default: serde_json::Map::from_iter([("diary".to_string(), json!([]))]),
-            }),
-            lash_core::FleetFormat::current().writer_version(lash_core::surface_format!(
-                crate::RLM_PROTOCOL_EVENT_VERSION
-            )),
-        ));
+        session_graph
+            .append_protocol_event(rlm_protocol_event(
+                RlmProtocolEvent::RlmGlobalsPatch(lash_rlm_types::RlmGlobalsPatchPluginBody {
+                    set_default: serde_json::Map::from_iter([("diary".to_string(), json!([]))]),
+                }),
+                lash_core::FleetFormat::current().writer_version(lash_core::surface_format!(
+                    crate::RLM_PROTOCOL_EVENT_VERSION
+                )),
+            ))
+            .unwrap();
         let manager = Arc::new(BatonManager {
             snapshot: {
                 let mut snapshot = RuntimeSessionState {

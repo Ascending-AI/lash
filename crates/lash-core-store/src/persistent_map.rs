@@ -215,6 +215,7 @@ impl<K: Clone + Eq, V: Clone> Branch<K, V> {
 
     /// Removes `key`, answering whether it was present. An emptied slot is
     /// cleared; a branch left with one entry stays a branch.
+    #[cfg(test)]
     fn remove<Q>(&mut self, hash: u64, key: &Q, level: u32) -> bool
     where
         K: Borrow<Q>,
@@ -290,6 +291,7 @@ impl<K: Clone + Eq + Hash, V: Clone> PersistentMap<K, V> {
     }
 
     /// Removes `key`, answering whether it was present.
+    #[cfg(test)]
     pub(crate) fn remove<Q>(&mut self, key: &Q) -> bool
     where
         K: Borrow<Q>,

@@ -501,14 +501,17 @@ impl TurnServices for L3Services {
         // The turn starts from the session head's window, with the messages
         // its admission took.
         let window = head.window()?;
-        let messages = window.then(seed::admitted_messages(&self.backend(), row).await?);
+        let messages = window
+            .then(seed::admitted_messages(&self.backend(), row).await?)
+            .unwrap();
         let machine = TurnMachine::in_window(
             machine_config(&row.session, &row.run, self.mode),
             window,
             messages,
             Vec::new(),
             0,
-        );
+        )
+        .unwrap();
         Ok(self.drive(row, machine, None))
     }
 
@@ -1911,14 +1914,17 @@ async fn restore_after_the_head_moved(dialect: Dialect, postgres_url: Option<Str
     let mut machine = TurnMachine::in_window(
         machine_config(&session(), &run(), Mode::Plain),
         window.clone(),
-        window.then(vec![session_message(
-            "l3-input",
-            MessageRole::User,
-            "the turn's own input",
-        )]),
+        window
+            .then(vec![session_message(
+                "l3-input",
+                MessageRole::User,
+                "the turn's own input",
+            )])
+            .unwrap(),
         Vec::new(),
         0,
-    );
+    )
+    .unwrap();
     let pinned = loop {
         match machine
             .poll_effect()

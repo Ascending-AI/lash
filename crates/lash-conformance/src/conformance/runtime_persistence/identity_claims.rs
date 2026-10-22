@@ -69,7 +69,8 @@ pub async fn receipt_replay_rehydrates_recorded_node_clocks_and_ids(store: Arc<d
         .collect::<Vec<_>>();
     state
         .session_graph
-        .remap_node_ids(&state.session_id, &mapping);
+        .remap_node_ids(&state.session_id, &mapping)
+        .expect("source fixture edit is admitted");
     let observed = first
         .realized_node_timestamps
         .iter()
@@ -83,7 +84,8 @@ pub async fn receipt_replay_rehydrates_recorded_node_clocks_and_ids(store: Arc<d
         .collect::<Vec<_>>();
     state
         .session_graph
-        .apply_realized_node_timestamps(&observed);
+        .apply_realized_node_timestamps(&observed)
+        .expect("source fixture edit is admitted");
     assert!(
         state
             .session_graph
@@ -95,7 +97,9 @@ pub async fn receipt_replay_rehydrates_recorded_node_clocks_and_ids(store: Arc<d
                     .parse()
                     .expect("canonical node timestamp"))
     );
-    state.apply_persisted_commit_result(replay);
+    state
+        .apply_persisted_commit_result(replay)
+        .expect("source fixture edit is admitted");
     for realized in &first.realized_node_timestamps {
         let node = state
             .session_graph
@@ -158,7 +162,9 @@ pub async fn checkpoint_identity_is_independent_of_compression_profile(
         } else {
             loaded_conformance_state(store, &session).await
         };
-        state.ensure_agent_frame_initialized();
+        state
+            .ensure_agent_frame_initialized()
+            .expect("source fixture edit is admitted");
         let mut commit = RuntimeCommit::persisted_state_for_test(&state);
         commit.checkpoint.components.insert(
             "profile/leaf".into(),

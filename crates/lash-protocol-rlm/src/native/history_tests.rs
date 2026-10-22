@@ -110,7 +110,9 @@ fn fig1123_native_history_marks_only_real_turn_inputs_as_segment_boundaries() {
         SessionHistoryRecord::Conversation(lash_core::session_model::ConversationRecord {
             id: "real".to_string(),
             role: lash_core::MessageRole::User,
-            parts: vec![Part::text("real.p0".to_string(), "real".to_string(), None)].into(),
+            parts: std::sync::Arc::new(
+                (vec![Part::text("real.p0".to_string(), "real".to_string(), None)]).into(),
+            ),
             origin: Some(lash_core::MessageOrigin::TurnInput {
                 turn_id: TurnId::from("turn"),
                 input_id: None,
@@ -120,12 +122,14 @@ fn fig1123_native_history_marks_only_real_turn_inputs_as_segment_boundaries() {
         SessionHistoryRecord::Conversation(lash_core::session_model::ConversationRecord {
             id: "synthetic".to_string(),
             role: lash_core::MessageRole::User,
-            parts: vec![Part::text(
-                "synthetic.p0".to_string(),
-                "synthetic".to_string(),
-                None,
-            )]
-            .into(),
+            parts: std::sync::Arc::new(
+                (vec![Part::text(
+                    "synthetic.p0".to_string(),
+                    "synthetic".to_string(),
+                    None,
+                )])
+                .into(),
+            ),
             origin: Some(lash_core::MessageOrigin::Plugin {
                 plugin_id: "plugin".to_string(),
                 transient: false,
@@ -178,7 +182,9 @@ fn terminal_suppression_is_atomic_only_after_transcript_commit() {
     let message = lash_core::Message {
         id: "answer".to_string(),
         role: lash_core::MessageRole::Assistant,
-        parts: vec![Part::prose("answer.p0".to_string(), "1".to_string(), None)].into(),
+        parts: std::sync::Arc::new(
+            (vec![Part::prose("answer.p0".to_string(), "1".to_string(), None)]).into(),
+        ),
         origin: Some(lash_core::MessageOrigin::TurnOutput {
             turn_id: TurnId::from("turn"),
             source: lash_core::TurnOutputSource::Runtime,
@@ -281,7 +287,9 @@ fn reloaded_null_finish_remains_terminal_in_reconstructed_history() {
         lash_core::session_model::ConversationRecord::from_message(lash_core::Message {
             id: "answer".into(),
             role: lash_core::MessageRole::Assistant,
-            parts: vec![Part::prose("answer.p0".into(), "null".into(), None)].into(),
+            parts: std::sync::Arc::new(
+                (vec![Part::prose("answer.p0".into(), "null".into(), None)]).into(),
+            ),
             origin: Some(lash_core::MessageOrigin::TurnOutput {
                 turn_id: TurnId::from("turn"),
                 source: lash_core::TurnOutputSource::Runtime,

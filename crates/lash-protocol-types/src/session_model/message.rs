@@ -1,3 +1,7 @@
+#[path = "message/parts.rs"]
+mod parts;
+pub use parts::MessageParts;
+
 use crate::AttachmentRef;
 use crate::ToolCallId;
 use crate::TurnId;
@@ -17,13 +21,13 @@ use std::sync::{Arc, OnceLock};
 ///
 /// `parts` is `Arc`-shared so cloning a `Message` is one Arc bump per message field rather
 /// than a deep-clone of every `Part`.
-/// Mutate via `Arc::make_mut(&mut message.parts)` when truly needed; most plugin pipelines
+/// Mutate via `MessageParts::make_mut(&mut message.parts)` when truly needed; most plugin pipelines
 /// should produce a fresh `Vec<Part>` and assign it.
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct Message {
     pub id: String,
     pub role: MessageRole,
-    pub parts: Arc<Vec<Part>>,
+    pub parts: Arc<MessageParts>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub origin: Option<MessageOrigin>,
     /// Present on the one message that is its turn's reply: the runtime mints
@@ -66,8 +70,8 @@ impl TurnReply {
 }
 
 #[inline]
-pub fn shared_parts(parts: Vec<Part>) -> Arc<Vec<Part>> {
-    Arc::new(parts)
+pub fn shared_parts(parts: Vec<Part>) -> Arc<MessageParts> {
+    Arc::new(MessageParts::new(parts))
 }
 
 /// A borrowed view of the fields that define message content.
@@ -75,7 +79,7 @@ pub fn shared_parts(parts: Vec<Part>) -> Arc<Vec<Part>> {
 pub struct MessageContentRef<'a> {
     id: &'a str,
     role: MessageRole,
-    parts: &'a Arc<Vec<Part>>,
+    parts: &'a Arc<MessageParts>,
     origin: Option<&'a MessageOrigin>,
     reply_marker: Option<&'a TurnReply>,
 }
@@ -1201,18 +1205,39 @@ impl BaseRenderCache {
         }) {
             return Ok(rendered.clone());
         }
-        let prefix = self
+        // Several source appends may occur between renders. Their caches
+        // carry only the added source; follow those links to the nearest
+        // already-rendered prefix instead of rebuilding that prefix.
+        let mut previous = self
             .extends
             .lock()
             .unwrap_or_else(|p| p.into_inner())
-            .clone()
-            .and_then(|(previous, prefix_len)| {
-                let cached = previous.rendered.lock().unwrap_or_else(|p| p.into_inner());
-                let (_, _, rendered) = cached.iter().find(|(previous, owner, _)| {
-                    Arc::ptr_eq(&previous.0, &policy.0) && *owner == budget.identity()
-                })?;
-                (prefix_len <= base.len()).then(|| (rendered.clone(), prefix_len))
-            });
+            .clone();
+        let prefix = loop {
+            let Some((cache, prefix_len)) = previous else {
+                break None;
+            };
+            if prefix_len > base.len() {
+                break None;
+            }
+            let found = {
+                let cached = cache.rendered.lock().unwrap_or_else(|p| p.into_inner());
+                cached
+                    .iter()
+                    .find(|(previous, owner, _)| {
+                        Arc::ptr_eq(&previous.0, &policy.0) && *owner == budget.identity()
+                    })
+                    .map(|(_, _, rendered)| rendered.clone())
+            };
+            if let Some(rendered) = found {
+                break Some((rendered, prefix_len));
+            }
+            previous = cache
+                .extends
+                .lock()
+                .unwrap_or_else(|p| p.into_inner())
+                .clone();
+        };
         let (rendered, start) = prefix.unwrap_or_default();
         let mut tail = Vec::new();
         append_structured_prompt_tail_owned(

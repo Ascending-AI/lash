@@ -11,7 +11,7 @@ fn open_frame(graph: &mut SessionGraph, assignment: AgentFrameAssignment) {
         AgentFrameReason::initial(),
         assignment,
         "2026-10-02T00:00:00.000000000Z".parse().unwrap(),
-    );
+    ).unwrap();
 }
 
 fn main() {

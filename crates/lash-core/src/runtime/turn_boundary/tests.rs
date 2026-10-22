@@ -34,7 +34,8 @@ fn turn_draft_appends_resident_nodes_not_yet_durable() {
         state,
         Arc::new(crate::SystemClock),
         "masked-path-regression",
-    );
+    )
+    .unwrap();
     let graph = draft.graph_commit();
     let nodes = graph.nodes();
     assert_eq!(
@@ -64,17 +65,19 @@ fn state_with_graph(graph: SessionGraph) -> RuntimeSessionState {
             crate::NoProgressBudget::bounded(12),
         ))
     };
-    state.ensure_agent_frame_initialized();
+    state.ensure_agent_frame_initialized().unwrap();
     if !graph.nodes.is_empty() {
         let frame_node_id = state.current_frame_node_id.clone().expect("initial frame");
         let mut nodes = state.session_graph.nodes.clone();
-        nodes.extend(graph.nodes.iter().map(|node| {
-            let mut node = node.as_ref().clone();
-            if node.parent_node_id.is_none() {
-                node.parent_node_id = Some(crate::NodeId::fixture(frame_node_id.to_string()));
-            }
-            std::sync::Arc::new(node)
-        }));
+        nodes
+            .extend(graph.nodes.iter().map(|node| {
+                let mut node = node.as_ref().clone();
+                if node.parent_node_id.is_none() {
+                    node.parent_node_id = Some(crate::NodeId::fixture(frame_node_id.to_string()));
+                }
+                std::sync::Arc::new(node)
+            }))
+            .expect("source fixture edit is admitted");
         state.session_graph = SessionGraph::from_shared_nodes(nodes, graph.leaf_node_id.clone())
             .expect("turn-boundary fixture graph is valid");
         state.agent_frames = state.session_graph.agent_frame_records(&state.session_id);
@@ -106,7 +109,7 @@ fn agent_frame_switch_seeds_the_new_frame_without_a_tool_call_event() {
     let graph =
         SessionGraph::from_active_read_state(&[text_message("u0", MessageRole::User, "old frame")]);
     let mut state = state_with_graph(graph);
-    state.ensure_agent_frame_initialized();
+    state.ensure_agent_frame_initialized().unwrap();
     let previous_frame_node_id = state.current_frame_node_id.clone();
     let frame_key = frame_key("frame-2");
     let seed_node = crate::SessionAppendNode::message(crate::PluginMessage::text(
@@ -167,7 +170,7 @@ fn open_agent_frame_seeds_compaction_frame_and_is_replay_idempotent() {
         "old durable frame",
     )]);
     let mut state = state_with_graph(graph);
-    state.ensure_agent_frame_initialized();
+    state.ensure_agent_frame_initialized().unwrap();
     let previous_frame_node_id = state.current_frame_node_id.clone();
     let previous_frame_node_id_value = previous_frame_node_id
         .as_deref()
@@ -265,7 +268,9 @@ fn reopening_a_previous_frame_refuses_and_keeps_the_current_frame() {
             crate::NoProgressBudget::bounded(12),
         ))
     };
-    state.ensure_agent_frame_initialized_with_clock(&clock);
+    state
+        .ensure_agent_frame_initialized_with_clock(&clock)
+        .unwrap();
     let frame_a = super::super::open_agent_frame_in_state_with_clock(
         &mut state,
         frame_request(frame_key("frame-a"), AgentFrameReason::new("frame-a")),
@@ -373,7 +378,7 @@ async fn gates_advance_after_an_attachment_bearing_tool_result() {
     let mut prepared = turn_one.clone();
     prepared.push(text_message("u2", MessageRole::User, "turn two input"));
 
-    let mut pipeline = TurnBoundary::from_state(state_with_graph(SessionGraph::default()));
+    let mut pipeline = TurnBoundary::from_state(state_with_graph(SessionGraph::default())).unwrap();
     pipeline
         .prepared_checkpoint(
             SessionPolicy::new(
@@ -452,7 +457,9 @@ fn a_committed_frame_open_clears_execution_state_and_ends_the_last_committed_fra
             crate::NoProgressBudget::bounded(12),
         ))
     };
-    state.ensure_agent_frame_initialized_with_clock(&clock);
+    state
+        .ensure_agent_frame_initialized_with_clock(&clock)
+        .unwrap();
     let committed = state
         .current_frame_node_id
         .clone()
@@ -584,7 +591,9 @@ fn a_first_commit_that_switches_ends_the_first_frame_it_opens() {
             crate::NoProgressBudget::bounded(12),
         ))
     };
-    state.ensure_agent_frame_initialized_with_clock(&clock);
+    state
+        .ensure_agent_frame_initialized_with_clock(&clock)
+        .unwrap();
     let first = state
         .current_frame_node_id
         .clone()

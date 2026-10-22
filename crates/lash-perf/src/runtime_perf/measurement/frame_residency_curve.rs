@@ -102,7 +102,11 @@ async fn load_frame(
     Ok(loaded.state)
 }
 
-fn append_messages(state: &mut RuntimeSessionState, prefix: &str, count: usize) {
+fn append_messages(
+    state: &mut RuntimeSessionState,
+    prefix: &str,
+    count: usize,
+) -> anyhow::Result<()> {
     let messages = (0..count)
         .map(|index| {
             checkpoint_message(
@@ -116,7 +120,8 @@ fn append_messages(state: &mut RuntimeSessionState, prefix: &str, count: usize) 
             )
         })
         .collect::<Vec<_>>();
-    state.append_active_conversation_messages(&messages);
+    state.append_active_conversation_messages(&messages)?;
+    Ok(())
 }
 
 async fn commit_state(
@@ -144,7 +149,7 @@ fn open_next_frame(
         lash_core::AgentFrameReason::compaction(),
         lash_core::AgentFrameAssignment::unconfigured(state.policy.clone()),
         lash_core::ClockWallTime::node_timestamp(&lash_core::facade_support::SystemClock),
-    );
+    )?;
     if !opened {
         anyhow::bail!("frame residency key was reused");
     }
@@ -153,7 +158,7 @@ fn open_next_frame(
         state,
         &format!("current-{prior_rows}-{sample}"),
         CURRENT_FRAME_ROWS - 1,
-    );
+    )?;
     Ok(())
 }
 
@@ -178,11 +183,11 @@ async fn point(
         ))
     };
     if prior_rows == 0 {
-        append_messages(&mut state, "current-0-0", CURRENT_FRAME_ROWS - 1);
+        append_messages(&mut state, "current-0-0", CURRENT_FRAME_ROWS - 1)?;
         commit_state(catalog.as_ref(), &state).await?;
     } else {
         // The initial FrameOpen is one of the earlier rows.
-        append_messages(&mut state, &format!("prior-{prior_rows}"), prior_rows - 1);
+        append_messages(&mut state, &format!("prior-{prior_rows}"), prior_rows - 1)?;
         if state.session_graph.nodes.len() != prior_rows {
             anyhow::bail!("earlier history seed has the wrong row count");
         }

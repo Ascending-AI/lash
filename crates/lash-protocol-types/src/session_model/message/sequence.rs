@@ -13,18 +13,18 @@ use super::*;
 enum SequenceMode {
     Layered {
         base: AppendVec<Message>,
-        delta: Arc<Vec<Message>>,
+        delta: Option<AppendVec<Message>>,
+        joined: Option<AppendVec<Message>>,
     },
-    Owned(Arc<Vec<Message>>),
+    Owned(AppendVec<Message>),
 }
 
-/// A sequence clone shares its lists and flattened cache. Only a write
-/// detaches the edited list and invalidates that holder's cache; an effect
-/// body can retain a snapshot without copying the turn's history (FIG-5962).
+/// A clone shares its source buffers and prepared join. A fallible edit
+/// publishes a complete new view; readers and effect bodies retain their
+/// snapshots without copying the turn's history (FIG-5962).
 #[derive(Clone, Debug)]
 pub struct MessageSequence {
     mode: SequenceMode,
-    materialized: Arc<OnceLock<AppendVec<Message>>>,
     base_rendered: Option<Arc<BaseRenderCache>>,
 }
 
@@ -40,7 +40,7 @@ impl From<Vec<Message>> for MessageSequence {
     }
 }
 
-// A `MessageSequence` is a memoized base/delta rope with caches; its meaningful
+// A `MessageSequence` is a shared base/delta rope; its meaningful
 // value is the flat, materialized message list. Serialize as exactly that list
 // (and reconstruct an owned sequence on the way back) so that types embedding a
 // `MessageSequence` can derive serde with the same wire form as a plain
@@ -70,8 +70,7 @@ impl std::ops::Deref for MessageSequence {
 impl MessageSequence {
     pub fn from_owned(messages: Vec<Message>) -> Self {
         Self {
-            mode: SequenceMode::Owned(Arc::new(messages)),
-            materialized: Arc::default(),
+            mode: SequenceMode::Owned(AppendVec::from(messages)),
             base_rendered: None,
         }
     }
@@ -80,21 +79,71 @@ impl MessageSequence {
         Self {
             mode: SequenceMode::Layered {
                 base,
-                delta: Arc::default(),
+                delta: None,
+                joined: None,
             },
-            materialized: Arc::default(),
             base_rendered: None,
         }
     }
 
-    pub fn from_base_and_delta(base: AppendVec<Message>, delta: Vec<Message>) -> Self {
-        Self {
-            mode: SequenceMode::Layered {
+    pub fn from_base_and_delta(
+        base: AppendVec<Message>,
+        delta: Vec<Message>,
+    ) -> Result<Self, crate::allocation::AllocationError> {
+        let mut sequence = Self::from_base(base);
+        sequence.extend(delta)?;
+        Ok(sequence)
+    }
+
+    /// Admit independently constructed source into this serving claim. A
+    /// sequence over this ledger's immutable base keeps its sharing witness.
+    pub fn clone_in(
+        &self,
+        budget: &crate::allocation::AllocationBudget,
+    ) -> Result<Self, crate::allocation::AllocationError> {
+        fn buffer(
+            source: &AppendVec<Message>,
+            budget: &crate::allocation::AllocationBudget,
+        ) -> Result<AppendVec<Message>, crate::allocation::AllocationError> {
+            use crate::allocation::SourceCapacity;
+            if source.allocation_budget().identity() == budget.identity() {
+                return Ok(source.clone());
+            }
+            let mut next = AppendVec::try_with_capacity(source.len(), budget)?;
+            for message in source.iter() {
+                let parts = MessageParts::adopt_in(&message.parts, budget)?;
+                let _copy = budget.reserve(
+                    message
+                        .owned_capacity()
+                        .saturating_add(std::mem::size_of::<Message>() as u64),
+                )?;
+                let mut copy = message.clone();
+                copy.parts = parts;
+                next.push(copy)?;
+            }
+            Ok(next)
+        }
+        match &self.mode {
+            SequenceMode::Owned(owned) => Ok(Self {
+                mode: SequenceMode::Owned(buffer(owned, budget)?),
+                base_rendered: self.base_rendered.clone(),
+            }),
+            SequenceMode::Layered {
                 base,
-                delta: Arc::new(delta),
-            },
-            materialized: Arc::default(),
-            base_rendered: None,
+                delta,
+                joined,
+            } => {
+                if base.allocation_budget().identity() == budget.identity() {
+                    return Ok(self.clone());
+                }
+                let mut next = Self::from_base(buffer(base, budget)?);
+                if let Some(delta) = delta {
+                    // Admit its own parts before the join clones any scalar.
+                    next.extend(buffer(delta, budget)?.as_slice().iter().cloned())?;
+                }
+                let _ = joined;
+                Ok(next)
+            }
         }
     }
 
@@ -114,7 +163,9 @@ impl MessageSequence {
     pub fn len(&self) -> usize {
         match &self.mode {
             SequenceMode::Owned(owned) => owned.len(),
-            SequenceMode::Layered { base, delta } => base.len() + delta.len(),
+            SequenceMode::Layered { base, delta, .. } => {
+                base.len() + delta.as_ref().map_or(0, AppendVec::len)
+            }
         }
     }
 
@@ -137,10 +188,12 @@ impl MessageSequence {
             SequenceMode::Layered {
                 base: self_base,
                 delta: self_delta,
+                ..
             },
             SequenceMode::Layered {
                 base: next_base,
                 delta: next_delta,
+                ..
             },
         ) = (&self.mode, &next.mode)
         else {
@@ -149,6 +202,8 @@ impl MessageSequence {
         if !AppendVec::ptr_eq(self_base, next_base) {
             return None;
         }
+        let self_delta = self_delta.as_ref().map_or(&[][..], AppendVec::as_slice);
+        let next_delta = next_delta.as_ref().map_or(&[][..], AppendVec::as_slice);
         let tail = next_delta.get(self_delta.len()..)?;
         self_delta
             .iter()
@@ -181,84 +236,122 @@ impl MessageSequence {
     pub fn iter(&self) -> MessageSequenceIter<'_> {
         match &self.mode {
             SequenceMode::Owned(owned) => MessageSequenceIter::Owned(owned.iter()),
-            SequenceMode::Layered { base, delta } => {
+            SequenceMode::Layered { base, delta, .. } => {
+                let delta = delta.as_ref().map_or(&[][..], AppendVec::as_slice);
                 MessageSequenceIter::Split(base.iter().chain(delta.iter()))
             }
         }
     }
 
-    /// The flattened message list as a shared allocation. `Owned` wraps its
-    /// list once; `Layered` reuses `base` when the delta is empty and
-    /// otherwise appends the delta to `base`'s buffer, adopting messages
-    /// another holder of that buffer already appended, so the join costs
-    /// the delta, not the frame.
+    /// Edits prepare the shared join before publication, so every read is
+    /// allocation-free and cannot conceal an allocation refusal.
     fn materialize(&self) -> &AppendVec<Message> {
         match &self.mode {
-            SequenceMode::Owned(owned) => self
-                .materialized
-                .get_or_init(|| AppendVec::from(owned.as_ref().clone())),
-            SequenceMode::Layered { base, delta } if delta.is_empty() => base,
-            SequenceMode::Layered { base, delta } => self.materialized.get_or_init(|| {
-                let mut combined = base.clone();
-                combined.extend_adopting(delta.iter().cloned(), same_message);
-                combined
-            }),
+            SequenceMode::Owned(owned) => owned,
+            SequenceMode::Layered { base, joined, .. } => joined.as_ref().unwrap_or(base),
         }
     }
 
     pub fn as_slice(&self) -> &[Message] {
-        match &self.mode {
-            SequenceMode::Owned(owned) => owned.as_slice(),
-            SequenceMode::Layered { .. } => self.materialize().as_slice(),
-        }
+        self.materialize().as_slice()
     }
 
     pub fn shared(&self) -> AppendVec<Message> {
         self.materialize().clone()
     }
 
-    pub fn make_mut(&mut self) -> &mut Vec<Message> {
+    pub fn make_mut(&mut self) -> Result<&mut [Message], crate::allocation::AllocationError> {
         if matches!(self.mode, SequenceMode::Layered { .. }) {
-            let owned = self.materialize_owned();
-            self.mode = SequenceMode::Owned(Arc::new(owned));
+            let mut owned = self.shared();
+            owned.make_mut()?;
+            self.mode = SequenceMode::Owned(owned);
         }
-        self.materialized = Arc::default();
+        self.base_rendered = None;
         match &mut self.mode {
-            SequenceMode::Owned(owned) => Arc::make_mut(owned),
-            SequenceMode::Layered { .. } => unreachable!("mode was just set to Owned"),
+            SequenceMode::Owned(owned) => owned.make_mut(),
+            SequenceMode::Layered { .. } => {
+                unreachable!("the private edit just detached its source")
+            }
         }
     }
 
-    /// The flattened list for a deliberate history rewrite.
-    fn materialize_owned(&self) -> Vec<Message> {
-        match &self.mode {
-            SequenceMode::Owned(owned) => owned.as_ref().clone(),
-            SequenceMode::Layered { .. } => self.materialize().to_vec(),
-        }
-    }
-
-    pub fn push(&mut self, message: Message) {
+    /// Truncation only narrows immutable views; even cancellation under
+    /// pressure needs no allocation and preserves every held reader.
+    pub fn truncate(&mut self, len: usize) {
         match &mut self.mode {
-            SequenceMode::Owned(owned) => Arc::make_mut(owned).push(message),
-            SequenceMode::Layered { delta, .. } => Arc::make_mut(delta).push(message),
+            SequenceMode::Owned(owned) => owned.truncate(len),
+            SequenceMode::Layered {
+                base,
+                delta,
+                joined,
+            } => {
+                if len < base.len() {
+                    base.truncate(len);
+                    *delta = None;
+                    *joined = None;
+                    self.base_rendered = None;
+                } else {
+                    if let Some(delta) = delta {
+                        delta.truncate(len - base.len());
+                    }
+                    if let Some(joined) = joined {
+                        joined.truncate(len);
+                    }
+                }
+            }
         }
-        self.materialized = Arc::default();
     }
 
-    pub fn extend(&mut self, messages: Vec<Message>) {
-        if messages.is_empty() {
-            return;
+    pub fn push(&mut self, message: Message) -> Result<(), crate::allocation::AllocationError> {
+        self.extend(std::iter::once(message))
+    }
+
+    pub fn extend(
+        &mut self,
+        messages: impl IntoIterator<Item = Message>,
+    ) -> Result<(), crate::allocation::AllocationError> {
+        let mut messages = messages.into_iter().peekable();
+        if messages.peek().is_none() {
+            return Ok(());
         }
         match &mut self.mode {
-            SequenceMode::Owned(owned) => Arc::make_mut(owned).extend(messages),
-            SequenceMode::Layered { delta, .. } => Arc::make_mut(delta).extend(messages),
+            SequenceMode::Owned(owned) => {
+                let mut draft = owned.clone();
+                draft.extend(messages)?;
+                *owned = draft;
+            }
+            SequenceMode::Layered {
+                base,
+                delta,
+                joined,
+            } => {
+                let budget = base.allocation_budget();
+                let mut next_delta = match delta {
+                    Some(delta) => delta.clone(),
+                    None => AppendVec::try_with_capacity(messages.size_hint().0, budget)?,
+                };
+                let mut next_joined = joined.as_ref().unwrap_or(base).clone();
+                for message in messages {
+                    next_joined.push_cloned_adopting(&message, same_message)?;
+                    next_delta.push(message)?;
+                }
+                *delta = Some(next_delta);
+                *joined = Some(next_joined);
+            }
         }
-        self.materialized = Arc::default();
+        Ok(())
     }
 
-    pub fn replace(&mut self, messages: Vec<Message>) {
-        self.mode = SequenceMode::Owned(Arc::new(messages));
-        self.materialized = Arc::default();
+    pub fn replace(
+        &mut self,
+        messages: Vec<Message>,
+    ) -> Result<(), crate::allocation::AllocationError> {
+        let budget = self.materialize().allocation_budget();
+        let mut next = AppendVec::try_with_capacity(messages.len(), budget)?;
+        next.extend(messages)?;
+        self.mode = SequenceMode::Owned(next);
+        self.base_rendered = None;
+        Ok(())
     }
 
     pub fn render_retained(
@@ -266,7 +359,7 @@ impl MessageSequence {
         policy: &HistoryPresentation,
         budget: &crate::allocation::AllocationBudget,
     ) -> Result<crate::llm::types::RequestMessages, crate::allocation::AllocationError> {
-        let SequenceMode::Layered { base, delta } = &self.mode else {
+        let SequenceMode::Layered { base, delta, .. } = &self.mode else {
             let mut tail = Vec::new();
             append_structured_prompt_tail_owned(self.as_slice(), &[], policy, budget, |message| {
                 tail.push(message)
@@ -288,9 +381,13 @@ impl MessageSequence {
             }
         };
         let mut tail = Vec::new();
-        append_structured_prompt_tail_owned(delta, base.as_slice(), policy, budget, |message| {
-            tail.push(message)
-        })?;
+        append_structured_prompt_tail_owned(
+            delta.as_ref().map_or(&[][..], AppendVec::as_slice),
+            base.as_slice(),
+            policy,
+            budget,
+            |message| tail.push(message),
+        )?;
         rendered.append_rendered(&tail, budget)
     }
 

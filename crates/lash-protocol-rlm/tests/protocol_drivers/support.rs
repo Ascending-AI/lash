@@ -113,7 +113,9 @@ pub(crate) fn user_message(content: &str) -> Message {
     Message {
         id: "m0".to_string(),
         role: MessageRole::User,
-        parts: vec![Part::text("m0.p0".to_string(), content.to_string(), None)].into(),
+        parts: std::sync::Arc::new(
+            (vec![Part::text("m0.p0".to_string(), content.to_string(), None)]).into(),
+        ),
         origin: None,
         reply_marker: None,
     }

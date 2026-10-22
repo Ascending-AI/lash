@@ -1,6 +1,7 @@
 //! Resident graph edits preserve projections when their indexed structure stays the same.
 
 use super::*;
+use lash_protocol_types::allocation::SourceCapacity;
 
 impl SessionGraph {
     /// Resident positions for `node_ids`, in input order.
@@ -76,14 +77,47 @@ impl SessionGraph {
         self
     }
 
-    pub fn remap_node_ids(&mut self, _session_id: &SessionId, mapping: &[(NodeId, NodeId)]) {
+    pub fn remap_node_ids(
+        &mut self,
+        _session_id: &SessionId,
+        mapping: &[(NodeId, NodeId)],
+    ) -> Result<(), crate::StoreError> {
         if mapping.is_empty() {
-            return;
+            return Ok(());
         }
+        self.remap_node_ids_inner(mapping)
+    }
+
+    fn remap_node_ids_inner(
+        &mut self,
+        mapping: &[(NodeId, NodeId)],
+    ) -> Result<(), crate::StoreError> {
         // The cache indexes children by stable resident position, so a
         // parent's children resolve even in a child-before-parent layout.
         // Renaming ids does not change positions or topology.
-        let positions = self.resident_node_indices(mapping.iter().map(|(draft, _)| draft.as_str()));
+        let budget = self.nodes.allocation_budget().clone();
+        let cache = self.try_cache()?;
+        let edits_bound = mapping
+            .iter()
+            .filter_map(|(draft, _)| cache.by_id.get(draft.as_str()))
+            .map(|index| cache.children_of(index).count().saturating_add(1))
+            .fold(0usize, usize::saturating_add);
+        let replacement_bytes = mapping.iter().fold(0u64, |bytes, (_, derived)| {
+            bytes.saturating_add(derived.len() as u64 * 4 + 128)
+        });
+        let id_bytes = mapping.iter().fold(0u64, |bytes, (draft, derived)| {
+            bytes.saturating_add((draft.len() + derived.len()) as u64 * 4 + 128)
+        });
+        let _scratch = budget.reserve(
+            (edits_bound as u64)
+                .saturating_mul(1024)
+                .saturating_add((mapping.len() as u64).saturating_mul(256))
+                .saturating_add(id_bytes),
+        )?;
+        let positions = mapping
+            .iter()
+            .map(|(draft, _)| cache.by_id.get(draft.as_str()))
+            .collect::<Vec<_>>();
         let derived_by_id = mapping
             .iter()
             .map(|(draft, derived)| (draft, derived))
@@ -94,20 +128,25 @@ impl SessionGraph {
             let Some(index) = position else {
                 continue;
             };
-            edits
-                .entry(index)
-                .or_insert_with(|| self.nodes[index].as_ref().clone())
-                .node_id = derived.clone();
+            if let std::collections::btree_map::Entry::Vacant(entry) = edits.entry(index) {
+                entry.insert(self.nodes[index].clone_for_edit_in(&budget, replacement_bytes)?);
+            }
+            if let Some(record) = edits.get_mut(&index) {
+                record.node_id = derived.clone();
+            }
             renamed.push((draft.clone(), derived.clone(), index));
         }
         for (draft, derived, index) in &renamed {
             for child_index in self.cache().children_of(*index) {
                 let node = &self.nodes[child_index];
                 debug_assert_eq!(node.parent_node_id.as_ref(), Some(draft));
-                edits
-                    .entry(child_index)
-                    .or_insert_with(|| node.as_ref().clone())
-                    .parent_node_id = Some(derived.clone());
+                if let std::collections::btree_map::Entry::Vacant(entry) = edits.entry(child_index)
+                {
+                    entry.insert(node.clone_for_edit_in(&budget, replacement_bytes)?);
+                }
+                if let Some(record) = edits.get_mut(&child_index) {
+                    record.parent_node_id = Some(derived.clone());
+                }
             }
         }
         let leaf = self
@@ -116,22 +155,23 @@ impl SessionGraph {
             .and_then(|leaf| derived_by_id.get(leaf).map(|derived| (*derived).clone()));
         // Positions and payloads are unchanged, so the cache stays valid
         // once its id index follows the renames.
-        self.detach_initialized_cache_for_append();
-        if let Some(cache_lock) = Arc::get_mut(&mut self.cache)
-            && let Some(cache) = cache_lock.get_mut()
-        {
-            for (draft, derived, index) in renamed {
-                cache.by_id.rename(&draft, derived, index);
-            }
-            cache.withdraw_proof();
-        } else {
-            self.invalidate_cache();
+        let mut cache = self.try_cache()?.clone();
+        for (draft, derived, index) in renamed {
+            cache.by_id.rename(&draft, derived, index, &budget)?;
         }
+        cache.withdraw_proof();
+        let cache_lock = OnceLock::new();
+        let _ = cache_lock.set(cache);
+        let cache = Arc::new(cache_lock);
+        // Buffer replacement is the final fallible operation. If its tail
+        // is unseen, it rewrites in place after all reservations succeed.
         let data = &mut Arc::make_mut(&mut self.inner).data;
-        replace_node_records(&mut data.nodes, edits);
+        replace_node_records(&mut data.nodes, edits)?;
         if let Some(leaf) = leaf {
             data.leaf_node_id = Some(leaf);
         }
+        self.cache = cache;
+        Ok(())
     }
 
     /// Applies store-realized timestamps to the nodes a commit receipt names.
@@ -139,43 +179,66 @@ impl SessionGraph {
     /// Only the realized records are replaced; every other resident record
     /// stays pointer-identical to every snapshot. A timestamp is not part of
     /// anything the cache indexes or projects, so the cache stays.
-    pub fn apply_realized_node_timestamps(&mut self, realized: &[RealizedNodeTimestamp]) {
+    pub fn apply_realized_node_timestamps(
+        &mut self,
+        realized: &[RealizedNodeTimestamp],
+    ) -> Result<(), crate::StoreError> {
         if realized.is_empty() {
-            return;
+            return Ok(());
         }
-        let positions =
-            self.resident_node_indices(realized.iter().map(|node| node.node_id.as_str()));
+        self.apply_realized_node_timestamps_inner(realized)
+    }
+
+    fn apply_realized_node_timestamps_inner(
+        &mut self,
+        realized: &[RealizedNodeTimestamp],
+    ) -> Result<(), crate::StoreError> {
+        let budget = self.nodes.allocation_budget().clone();
+        let _scratch = budget.reserve(
+            (realized.len() as u64)
+                .saturating_mul(1024)
+                .saturating_add(128),
+        )?;
+        let by_id = &self.try_cache()?.by_id;
+        let positions = realized
+            .iter()
+            .map(|node| by_id.get(node.node_id.as_str()))
+            .collect::<Vec<_>>();
         let mut edits = std::collections::BTreeMap::<usize, SessionNodeRecord>::new();
         for (realized, position) in realized.iter().zip(positions) {
             let Some(index) = position else {
                 continue;
             };
-            edits
-                .entry(index)
-                .or_insert_with(|| self.nodes[index].as_ref().clone())
-                .timestamp = realized.timestamp;
+            if let std::collections::btree_map::Entry::Vacant(entry) = edits.entry(index) {
+                entry.insert(self.nodes[index].clone_in(&budget)?);
+            }
+            if let Some(record) = edits.get_mut(&index) {
+                record.timestamp = realized.timestamp;
+            }
         }
-        replace_node_records(&mut Arc::make_mut(&mut self.inner).data.nodes, edits);
+        replace_node_records(&mut Arc::make_mut(&mut self.inner).data.nodes, edits)?;
+        Ok(())
     }
 
     pub(super) fn reserve_append_capacity(
         &mut self,
         additional_nodes: usize,
         additional_messages: usize,
-    ) {
+    ) -> Result<(), crate::StoreError> {
         if additional_nodes == 0 {
-            return;
+            return Ok(());
         }
         self.detach_initialized_cache_for_append();
         Arc::make_mut(&mut self.inner)
             .data
             .nodes
-            .reserve(additional_nodes);
+            .reserve(additional_nodes)?;
         if let Some(cache_lock) = Arc::get_mut(&mut self.cache)
             && let Some(cache) = cache_lock.get_mut()
         {
-            cache.reserve_append_capacity(additional_nodes, additional_messages);
+            cache.reserve_append_capacity(additional_nodes, additional_messages)?;
         }
+        Ok(())
     }
 
     pub(super) fn detach_initialized_cache_for_append(&mut self) {
@@ -249,27 +312,44 @@ impl SessionGraph {
         &mut self,
         index: usize,
         marker: crate::TurnReply,
-    ) -> bool {
-        let mut record = self.nodes[index].as_ref().clone();
+    ) -> Result<bool, crate::StoreError> {
+        self.mark_conversation_reply_inner(index, marker)
+    }
+
+    fn mark_conversation_reply_inner(
+        &mut self,
+        index: usize,
+        marker: crate::TurnReply,
+    ) -> Result<bool, crate::StoreError> {
+        let budget = self.nodes.allocation_budget().clone();
+        let mut record = self.nodes[index].clone_for_edit_in(
+            &budget,
+            lash_protocol_types::allocation::payload_capacity(&marker, 0),
+        )?;
         let SessionNodePayload::Event {
             event: SessionHistoryRecord::Conversation(message),
         } = &mut record.payload
         else {
-            return false;
+            return Ok(false);
         };
         message.reply_marker = Some(marker);
+        let _event_copy = budget.reserve(
+            message
+                .owned_capacity()
+                .saturating_add(std::mem::size_of::<SessionHistoryRecord>() as u64),
+        )?;
         let event = SessionHistoryRecord::Conversation(message.clone());
-        self.detach_initialized_cache_for_append();
-        if let Some(lock) = Arc::get_mut(&mut self.cache)
-            && let Some(cache) = lock.get_mut()
-        {
-            cache.replace_conversation_reply(&event);
-        }
+        let mut cache = self.try_cache()?.clone();
+        cache.replace_conversation_reply(&event)?;
+        let cache_lock = OnceLock::new();
+        let _ = cache_lock.set(cache);
+        let cache = Arc::new(cache_lock);
         replace_node_records(
             &mut Arc::make_mut(&mut self.inner).data.nodes,
             [(index, record)].into(),
-        );
-        true
+        )?;
+        self.cache = cache;
+        Ok(true)
     }
 }
 
@@ -279,10 +359,15 @@ impl SessionGraph {
 fn replace_node_records(
     nodes: &mut AppendVec<Arc<SessionNodeRecord>>,
     mut edits: std::collections::BTreeMap<usize, SessionNodeRecord>,
-) {
+) -> Result<(), crate::StoreError> {
     let Some(start) = edits.keys().next().copied() else {
-        return;
+        return Ok(());
     };
+    let _scratch = nodes.allocation_budget().reserve(
+        ((nodes.len() - start) as u64)
+            .saturating_mul(std::mem::size_of::<Arc<SessionNodeRecord>>() as u64)
+            .saturating_add(128),
+    )?;
     let tail = (start..nodes.len())
         .map(|index| {
             edits
@@ -290,5 +375,6 @@ fn replace_node_records(
                 .map_or_else(|| Arc::clone(&nodes[index]), Arc::new)
         })
         .collect::<Vec<_>>();
-    nodes.replace_from(start, tail);
+    nodes.replace_from(start, tail)?;
+    Ok(())
 }

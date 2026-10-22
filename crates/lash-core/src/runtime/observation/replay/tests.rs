@@ -872,3 +872,38 @@ async fn a_follower_at_turn_n_reads_only_new_events() {
         );
     }
 }
+
+/// REPLAY-PUBLICATION-WORK: a batch with no language evidence cannot walk
+/// retained history to check language redelivery.
+#[test]
+fn ordinary_publication_does_not_visit_retained_language_history() {
+    let session = SessionId::from("publication-work");
+    let revision = SessionRevision::new(1);
+    let now = Instant::now();
+    let mut buffer = LiveReplaySessionBuffer::new(now, 0, "work");
+    for position in 1..=1024 {
+        let cursor = SessionCursor::new("work", &session, revision, position);
+        let event = Arc::new(SessionObservationEvent::new(None, cursor, activity("old")).unwrap());
+        buffer.events.push_back(StoredObservationEvent {
+            retained_bytes: 0,
+            position,
+            revision,
+            appended_at: now,
+            event,
+        });
+    }
+    publication::LANGUAGE_HISTORY_VISITS.with(|count| count.set(0));
+    let (fresh, overlapping) = publication::filter(
+        &buffer,
+        vec![LiveReplayEventDraft::new(None::<TurnId>, activity("new"))],
+        &session,
+    )
+    .unwrap();
+    assert_eq!(fresh.len(), 1);
+    assert!(!overlapping);
+    assert_eq!(
+        publication::LANGUAGE_HISTORY_VISITS.with(std::cell::Cell::get),
+        0,
+        "ordinary publication work must not depend on retained history"
+    );
+}

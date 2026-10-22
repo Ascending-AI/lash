@@ -186,7 +186,9 @@ impl CurrentOwnerCapability {
     > {
         if let Some(session) = self.session() {
             let plugins = self.session_plugins("owned_prompt")?;
-            let state = session.snapshot.to_runtime_state();
+            let state = session.snapshot.to_runtime_state().map_err(|error| {
+                lash_execution_contracts::plugin_error::PluginError::Runtime(error.runtime_error())
+            })?;
             return Ok(crate::runtime::owned_call::OwnedPrompt {
                 facts,
                 composition: plugins.composition(),

@@ -184,10 +184,18 @@ pub(crate) fn history_recovery_records(
 pub(crate) fn elide_oversized_parts(
     messages: &mut [Message],
     config: &StandardCompactionConfig,
-) -> usize {
+) -> Result<usize, ContextError> {
     let mut elided = 0usize;
     for message in messages {
-        for part in std::sync::Arc::make_mut(&mut message.parts).iter_mut() {
+        for part in
+            lash_protocol_types::session_model::message::MessageParts::make_mut(&mut message.parts)
+                .map_err(|error| {
+                    lash_execution_contracts::PluginError::Runtime(
+                        lash_core::RuntimeError::allocation(error),
+                    )
+                })?
+                .iter_mut()
+        {
             let mut text = part.content().into_owned();
             if config.approx_token_count(&text) < config.overflow_elide_part_threshold_tokens {
                 continue;
@@ -212,7 +220,7 @@ pub(crate) fn elide_oversized_parts(
             elided += 1;
         }
     }
-    elided
+    Ok(elided)
 }
 
 pub(crate) fn recovery_instructions(
@@ -363,7 +371,7 @@ pub(crate) async fn overflow_recovery_decision(
     // must never be the rejected oversized request with an instruction
     // appended.
     let mut summarizer_prefix = summary_prefix;
-    let elided_parts = elide_oversized_parts(&mut summarizer_prefix, config);
+    let elided_parts = elide_oversized_parts(&mut summarizer_prefix, config)?;
 
     let summarizer_budget_tokens = config.compaction_threshold(ctx.max_context_tokens.unwrap_or(0));
     let projected_tokens = summarizer_prefix

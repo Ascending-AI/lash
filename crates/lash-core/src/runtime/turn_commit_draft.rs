@@ -212,12 +212,15 @@ impl TurnGraphAppendDraft {
     }
 
     /// Overlays every recorded append on a turn-scoped read snapshot.
-    pub(in crate::runtime) fn overlay_on_read_state(&self, state: &mut RuntimeSessionState) {
+    pub(in crate::runtime) fn overlay_on_read_state(
+        &self,
+        state: &mut RuntimeSessionState,
+    ) -> Result<(), crate::StoreError> {
         let recorded = {
             let inner = self.inner.lock_recover();
             inner.recorded.clone()
         };
-        apply_recorded_appends(state, &recorded, self.clock.as_ref());
+        apply_recorded_appends(state, &recorded, self.clock.as_ref())
     }
 
     /// Records the turn's protocol `AgentFrameSwitch` outcome and answers it
@@ -305,7 +308,8 @@ impl TurnGraphAppendDraft {
             let frame_switch = inner.frame_switch.take();
             (pending, frame_switch)
         };
-        apply_recorded_appends(state, &pending, self.clock.as_ref());
+        apply_recorded_appends(state, &pending, self.clock.as_ref())
+            .map_err(|error| error.runtime_error())?;
         let Some(recorded) = frame_switch else {
             return Ok(());
         };
@@ -346,14 +350,14 @@ fn apply_recorded_appends(
     state: &mut RuntimeSessionState,
     appends: &[RecordedTurnGraphAppend],
     clock: &dyn crate::Clock,
-) {
+) -> Result<(), crate::StoreError> {
     for append in appends {
         let node_ids = append_session_nodes_to_state_with_clock(
             state,
             &append.nodes,
             &append.draft_namespace,
             clock,
-        );
+        )?;
         debug_assert!(
             matches!(
                 &append.outcome,
@@ -363,6 +367,7 @@ fn apply_recorded_appends(
             "a recorded in-turn append mints the ids it answered with"
         );
     }
+    Ok(())
 }
 
 #[derive(Debug)]
@@ -378,7 +383,7 @@ impl TurnCommitDraft {
         state: RuntimeSessionState,
         clock: Arc<dyn crate::Clock>,
         draft_namespace: &str,
-    ) -> Self {
+    ) -> Result<Self, crate::StoreError> {
         let graph_appends = TurnGraphAppendDraft::from_resident_state(&state, Arc::clone(&clock));
         Self::from_state_with_graph_appends(state, clock, draft_namespace, graph_appends)
     }
@@ -388,8 +393,8 @@ impl TurnCommitDraft {
         clock: Arc<dyn crate::Clock>,
         draft_namespace: &str,
         graph_appends: TurnGraphAppendDraft,
-    ) -> Self {
-        state.ensure_agent_frame_initialized_with_clock(clock.as_ref());
+    ) -> Result<Self, crate::StoreError> {
+        state.ensure_agent_frame_initialized_with_clock(clock.as_ref())?;
         let base_graph = Arc::new(std::mem::take(&mut state.session_graph));
         let base_read_model = base_graph.read_model();
         let graph = TurnGraphEditor::new(
@@ -399,11 +404,11 @@ impl TurnCommitDraft {
             draft_namespace,
             clock,
         );
-        Self {
+        Ok(Self {
             graph,
             state,
             graph_appends,
-        }
+        })
     }
 
     pub(super) fn state_mut(&mut self) -> &mut RuntimeSessionState {
@@ -425,17 +430,21 @@ impl TurnCommitDraft {
 
     /// Applies one boundary: the boundary's messages first, then every
     /// in-turn append queued since the previous boundary.
-    pub(super) fn apply_prepared_messages(&mut self, messages: &MessageSequence) {
-        self.apply_message_projection(messages);
-        self.fold_pending_graph_appends();
+    pub(super) fn apply_prepared_messages(
+        &mut self,
+        messages: &MessageSequence,
+    ) -> Result<(), crate::StoreError> {
+        self.apply_message_projection(messages)?;
+        self.fold_pending_graph_appends()?;
+        Ok(())
     }
 
-    fn fold_pending_graph_appends(&mut self) {
+    fn fold_pending_graph_appends(&mut self) -> Result<(), crate::StoreError> {
         for append in self.graph_appends.take_pending() {
             let drafts = session_append_node_drafts(&append.nodes, &append.draft_namespace);
             let node_ids = self
                 .graph
-                .append_node_drafts_in_namespace(&append.draft_namespace, drafts);
+                .append_node_drafts_in_namespace(&append.draft_namespace, drafts)?;
             debug_assert!(
                 matches!(
                     &append.outcome,
@@ -445,13 +454,15 @@ impl TurnCommitDraft {
                 "a queued in-turn append mints the ids it answered with"
             );
         }
+        Ok(())
     }
 
-    pub(super) fn append_events<I>(&mut self, events: I)
+    pub(super) fn append_events<I>(&mut self, events: I) -> Result<(), crate::StoreError>
     where
         I: IntoIterator<Item = SessionHistoryRecord>,
     {
-        self.graph.append_events(events);
+        self.graph.append_events(events)?;
+        Ok(())
     }
 
     pub(super) fn read_view(
@@ -475,7 +486,7 @@ impl TurnCommitDraft {
         &mut self,
         new_messages: MessageSequence,
         cancelled: bool,
-    ) {
+    ) -> Result<(), crate::StoreError> {
         let projected_messages =
             (new_messages.is_empty() && cancelled).then(|| self.graph.message_sequence());
         let projected_messages = projected_messages.as_ref().unwrap_or(&new_messages);
@@ -485,21 +496,22 @@ impl TurnCommitDraft {
             .message_delta_if_current_preserved(projected_messages)
         {
             self.graph
-                .append_active_conversation_messages(&appended_messages);
-            return;
+                .append_active_conversation_messages(&appended_messages)?;
+            return Ok(());
         }
 
         self.graph
-            .project_active_read_state(projected_messages.as_slice());
+            .project_active_read_state(projected_messages.as_slice())?;
+        Ok(())
     }
 
-    pub(super) fn into_final_state(mut self) -> RuntimeSessionState {
+    pub(super) fn into_final_state(mut self) -> Result<RuntimeSessionState, crate::StoreError> {
         // The final commit is the last boundary: appends queued since the
         // previous one extend the leaf the editor produced, never choose it.
-        self.fold_pending_graph_appends();
-        self.state.session_graph = self.graph.into_session_graph();
+        self.fold_pending_graph_appends()?;
+        self.state.session_graph = self.graph.into_session_graph()?;
         self.state.refresh_current_frame_projection();
-        self.state
+        Ok(self.state)
     }
 
     #[cfg(test)]
@@ -507,13 +519,17 @@ impl TurnCommitDraft {
         self.graph.graph_commit()
     }
 
-    fn apply_message_projection(&mut self, messages: &MessageSequence) {
+    fn apply_message_projection(
+        &mut self,
+        messages: &MessageSequence,
+    ) -> Result<(), crate::StoreError> {
         if let Some(appended_messages) = self.graph.message_delta_if_current_preserved(messages) {
             self.graph
-                .append_active_conversation_messages(&appended_messages);
+                .append_active_conversation_messages(&appended_messages)?;
         } else {
-            self.graph.project_active_read_state(messages.as_slice());
+            self.graph.project_active_read_state(messages.as_slice())?;
         }
+        Ok(())
     }
 }
 
@@ -557,11 +573,15 @@ mod tests {
                 crate::NoProgressBudget::bounded(12),
             ))
         };
-        state.ensure_agent_frame_initialized_with_clock(&clock);
-        state.append_active_conversation_messages_with_clock(
-            &[text_message("durable", "durable request")],
-            &clock,
-        );
+        state
+            .ensure_agent_frame_initialized_with_clock(&clock)
+            .unwrap();
+        state
+            .append_active_conversation_messages_with_clock(
+                &[text_message("durable", "durable request")],
+                &clock,
+            )
+            .unwrap();
         state.session_graph.mark_all_durable();
         state
     }
@@ -635,17 +655,20 @@ mod tests {
         let clock: Arc<dyn crate::Clock> = Arc::new(crate::SystemClock);
         let appends = TurnGraphAppendDraft::from_resident_state(&state, Arc::clone(&clock));
         let mut draft =
-            TurnCommitDraft::from_state_with_graph_appends(state, clock, "turn-1", appends.clone());
+            TurnCommitDraft::from_state_with_graph_appends(state, clock, "turn-1", appends.clone())
+                .unwrap();
         let durable = text_message("durable", "durable request");
         let request = text_message("request", "turn request");
         let reply = text_message("reply", "turn reply");
 
         // Boundary one carries the request; the append recorded afterwards
         // waits for boundary two.
-        draft.apply_prepared_messages(&MessageSequence::from_owned(vec![
-            durable.clone(),
-            request.clone(),
-        ]));
+        draft
+            .apply_prepared_messages(&MessageSequence::from_owned(vec![
+                durable.clone(),
+                request.clone(),
+            ]))
+            .unwrap();
         let before_reply = appended_ids(
             &appends
                 .record(
@@ -657,7 +680,7 @@ mod tests {
 
         // Read overlays show the queued node before any boundary folds it.
         let mut read_state = draft.state().clone();
-        appends.overlay_on_read_state(&mut read_state);
+        appends.overlay_on_read_state(&mut read_state).unwrap();
         assert!(
             read_state
                 .session_graph
@@ -667,11 +690,13 @@ mod tests {
 
         // Boundary two carries the reply: the queued append lands after it,
         // and the append recorded after boundary two waits for the final one.
-        draft.apply_prepared_messages(&MessageSequence::from_owned(vec![
-            durable.clone(),
-            request.clone(),
-            reply.clone(),
-        ]));
+        draft
+            .apply_prepared_messages(&MessageSequence::from_owned(vec![
+                durable.clone(),
+                request.clone(),
+                reply.clone(),
+            ]))
+            .unwrap();
         let after_reply = appended_ids(
             &appends
                 .record(
@@ -680,11 +705,13 @@ mod tests {
                 )
                 .expect("append after boundary two"),
         );
-        draft.finalize_turn_read_state(
-            MessageSequence::from_owned(vec![durable, request, reply]),
-            false,
-        );
-        let mut state = draft.into_final_state();
+        draft
+            .finalize_turn_read_state(
+                MessageSequence::from_owned(vec![durable, request, reply]),
+                false,
+            )
+            .unwrap();
+        let mut state = draft.into_final_state().unwrap();
         let finalize_hook = appended_ids(
             &appends
                 .record(
@@ -833,11 +860,15 @@ mod tests {
                 crate::NoProgressBudget::bounded(12),
             ))
         };
-        state.ensure_agent_frame_initialized_with_clock(&clock);
-        state.append_active_conversation_messages_with_clock(
-            &[text_message("old-root", "old root")],
-            &clock,
-        );
+        state
+            .ensure_agent_frame_initialized_with_clock(&clock)
+            .unwrap();
+        state
+            .append_active_conversation_messages_with_clock(
+                &[text_message("old-root", "old root")],
+                &clock,
+            )
+            .unwrap();
         let opened = super::super::state::open_agent_frame_in_state_with_clock(
             &mut state,
             OpenAgentFrameRequest::new(
@@ -849,10 +880,12 @@ mod tests {
         )
         .expect("open a new compaction frame");
         assert!(opened.opened);
-        state.append_active_conversation_messages_with_clock(
-            &[text_message("seed", "frame seed")],
-            &clock,
-        );
+        state
+            .append_active_conversation_messages_with_clock(
+                &[text_message("seed", "frame seed")],
+                &clock,
+            )
+            .unwrap();
         let durable_leaf = state
             .session_graph
             .leaf_node_id
@@ -861,14 +894,16 @@ mod tests {
         state.session_graph.mark_all_durable();
 
         let mut draft =
-            TurnCommitDraft::from_state_with_clock(state, Arc::new(clock), "replacement");
-        draft.finalize_turn_read_state(
-            MessageSequence::from_owned(vec![
-                text_message("replacement", "replacement"),
-                text_message("seed", "frame seed"),
-            ]),
-            false,
-        );
+            TurnCommitDraft::from_state_with_clock(state, Arc::new(clock), "replacement").unwrap();
+        draft
+            .finalize_turn_read_state(
+                MessageSequence::from_owned(vec![
+                    text_message("replacement", "replacement"),
+                    text_message("seed", "frame seed"),
+                ]),
+                false,
+            )
+            .unwrap();
         let commit = draft.graph_commit();
         assert_eq!(commit.nodes().len(), 1);
         assert_eq!(
@@ -884,7 +919,7 @@ mod tests {
             vec!["replacement", "seed"]
         );
 
-        let state = draft.into_final_state();
+        let state = draft.into_final_state().unwrap();
 
         assert_eq!(
             state.current_frame_node_id.as_deref(),

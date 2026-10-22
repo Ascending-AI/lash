@@ -323,15 +323,14 @@ impl NodeSpec {
     )]
     fn materialize(self, session_id: &SessionId) -> SessionNodeRecord {
         let frame_key = differential_frame_key(self.node_id);
-        SessionNodeRecord {
-            node_id: lash_core::NodeId::fixture(scoped_node_id(session_id, self.node_id)),
-            parent_node_id: self
-                .parent_node_id
+        SessionNodeRecord::new(
+            lash_core::NodeId::fixture(scoped_node_id(session_id, self.node_id)),
+            self.parent_node_id
                 .map(|node_id| lash_core::NodeId::fixture(scoped_node_id(session_id, node_id))),
-            timestamp: "2026-07-26T00:00:00.000000000Z"
+            "2026-07-26T00:00:00.000000000Z"
                 .parse()
                 .expect("canonical node timestamp"),
-            payload: if is_frame_alias(self.node_id) {
+            if is_frame_alias(self.node_id) {
                 SessionNodePayload::FrameOpen {
                     frame_key,
                     reason: lash_core::AgentFrameReason::initial(),
@@ -354,7 +353,7 @@ impl NodeSpec {
                     ),
                 }
             },
-        }
+        )
     }
 }
 

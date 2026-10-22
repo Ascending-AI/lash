@@ -192,7 +192,13 @@ impl LashRuntime {
         // Store-backed opens expose only committed history. The first graph
         // write initialises its frame; an open must not date one by the clock.
         if services.store.is_none() {
-            state.ensure_agent_frame_initialized();
+            state.ensure_agent_frame_initialized().map_err(|error| {
+                SessionError::Plugin(
+                    lash_execution_contracts::plugin_error::PluginError::Runtime(
+                        error.runtime_error(),
+                    ),
+                )
+            })?;
         }
         if state.effective_policy().model.is_none() {
             return Err(SessionError::LlmProfileUnconfigured {
@@ -765,7 +771,15 @@ impl LashRuntime {
                 .reload_invalidated_resident_session_state_for_session()
                 .await;
         }
-        flushed.apply_persisted_commit_result(result);
+        flushed
+            .apply_persisted_commit_result(result)
+            .map_err(|error| {
+                SessionError::Plugin(
+                    lash_execution_contracts::plugin_error::PluginError::Runtime(
+                        error.runtime_error(),
+                    ),
+                )
+            })?;
         flushed.mark_node_ids_persisted(persisted_node_ids);
         self.state = flushed;
         Ok(())
@@ -915,11 +929,13 @@ mod tests {
                 crate::NoProgressBudget::bounded(12),
             ))
         };
-        state.ensure_agent_frame_initialized();
-        state.append_active_conversation_messages(&[user_message(
-            "pending-user-message",
-            "persist me before parking",
-        )]);
+        state.ensure_agent_frame_initialized().unwrap();
+        state
+            .append_active_conversation_messages(&[user_message(
+                "pending-user-message",
+                "persist me before parking",
+            )])
+            .unwrap();
         let budget = crate::CommitBudget::bounded(1024 * 1024, 512);
         let first = initial_park_preview(&state, budget, crate::FleetFormat::current())
             .expect("first park preview");

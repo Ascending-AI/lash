@@ -60,6 +60,23 @@ impl SessionGraph {
         leaf_node_id: NodeId,
         anchor: WindowAnchor,
     ) -> Result<Self, crate::StoreError> {
+        Self::from_window_in(
+            nodes,
+            leaf_node_id,
+            anchor,
+            &lash_protocol_types::allocation::AllocationBudget::unowned(),
+        )
+    }
+
+    /// Admit the graph's source slots and indexes under a serving claim.
+    pub fn from_window_in(
+        nodes: Vec<SessionNodeRecord>,
+        leaf_node_id: NodeId,
+        anchor: WindowAnchor,
+        budget: &lash_protocol_types::allocation::AllocationBudget,
+    ) -> Result<Self, crate::StoreError> {
+        let _scratch =
+            budget.reserve((nodes.len() as u64).saturating_mul(64).saturating_add(128))?;
         use crate::store::WindowAnchorViolation as Violation;
         let violation = |violation: Violation| crate::StoreError::InvalidWindowAnchor {
             frame_node_id: anchor.base_node_id().clone(),
@@ -107,11 +124,12 @@ impl SessionGraph {
                 leaf_node_id: Some(leaf_node_id),
             });
         }
-        Self::from_shared_anchored_nodes(
-            nodes.into_iter().map(Arc::new).collect::<Vec<_>>(),
-            Some(leaf_node_id),
-            Some(anchor),
-        )
+        let mut admitted = lash_protocol_types::AppendVec::try_with_capacity(
+            nodes.len().saturating_mul(2).max(4),
+            budget,
+        )?;
+        admitted.extend(nodes.into_iter().map(Arc::new))?;
+        Self::from_shared_anchored_nodes(admitted, Some(leaf_node_id), Some(anchor))
     }
 
     /// Drop the durable nodes below the current frame and re-anchor the
@@ -236,27 +254,31 @@ impl SessionGraph {
         &self,
         nodes: Vec<SessionNodeRecord>,
         leaf_node_id: &NodeId,
-    ) -> Option<Self> {
-        self.anchor()?;
-        let resident = self.try_cache().ok()?;
+    ) -> Result<Option<Self>, crate::StoreError> {
+        if self.anchor().is_none() {
+            return Ok(None);
+        }
+        let resident = self.try_cache()?;
         let mut added = HashSet::with_capacity(nodes.len());
-        let mut previous = self.leaf_node_id.as_ref()?;
+        let Some(mut previous) = self.leaf_node_id.as_ref() else {
+            return Ok(None);
+        };
         for node in &nodes {
             if node.frame_open().is_some()
                 || node.parent_node_id.as_ref() != Some(previous)
                 || resident.by_id.get(node.node_id.as_str()).is_some()
                 || !added.insert(node.node_id.as_str())
             {
-                return None;
+                return Ok(None);
             }
             previous = &node.node_id;
         }
         if previous != leaf_node_id {
-            return None;
+            return Ok(None);
         }
         let mut graph = self.clone();
-        graph.append_prebuilt_nodes(nodes);
-        Some(graph)
+        graph.append_prebuilt_nodes(nodes)?;
+        Ok(Some(graph))
     }
 
     /// The first `len` nodes of this store-read window, ending at

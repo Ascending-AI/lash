@@ -20,7 +20,7 @@ pub async fn retention_conformance(factory: Arc<dyn crate::DeploymentStore>) {
         session_id: request.session_id.clone(),
         ..crate::RuntimeSessionState::fixture(request.config.session_policy())
     };
-    state.ensure_agent_frame_initialized();
+    state.ensure_agent_frame_initialized().unwrap();
     let commit = crate::RuntimeCommit::persisted_state_for_test(&state);
     let receipt = store.commit_runtime_state(commit.clone()).await.unwrap();
     assert!(!receipt.receipt_replayed);
@@ -61,7 +61,7 @@ pub async fn retention_conformance(factory: Arc<dyn crate::DeploymentStore>) {
         session_id: live_request.session_id.clone(),
         ..crate::RuntimeSessionState::fixture(live_request.config.session_policy())
     };
-    live_state.ensure_agent_frame_initialized();
+    live_state.ensure_agent_frame_initialized().unwrap();
     let live_commit = crate::RuntimeCommit::persisted_state_for_test(&live_state);
     live.commit_runtime_state(live_commit.clone())
         .await

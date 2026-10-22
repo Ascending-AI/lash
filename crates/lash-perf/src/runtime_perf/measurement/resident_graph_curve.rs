@@ -94,7 +94,7 @@ fn seed_growth_graph(resident_nodes: usize) -> anyhow::Result<ResidentGraphFixtu
                 MessageRole::Assistant
             },
             format!("Growth fixture message {index} at size {resident_nodes}."),
-        ));
+        ))?;
     }
     // Fold the appended read-model tail: a resident graph at turn start
     // holds a materialized read model, not N pending records.
@@ -199,7 +199,7 @@ pub(super) async fn run_once_resident_graph_append_curve(
                             adopted.remap_node_ids(
                                 &session_id,
                                 &[(draft_node_id, derived_node_id.clone())],
-                            );
+                            )?;
                             Ok(())
                         },
                     )?;
@@ -216,7 +216,7 @@ pub(super) async fn run_once_resident_graph_append_curve(
                             adopted.apply_realized_node_timestamps(&[RealizedNodeTimestamp {
                                 node_id: derived_node_id,
                                 timestamp: "2026-09-12T00:00:01.000000000Z".parse()?,
-                            }]);
+                            }])?;
                             Ok(())
                         },
                     )?;
@@ -252,7 +252,7 @@ pub(super) async fn run_once_resident_graph_append_curve(
                                 format!(
                                     "Measured held-snapshot append at resident size {resident_nodes}."
                                 ),
-                            ));
+                            ))?;
                             Ok(())
                         },
                     )?;
@@ -272,7 +272,7 @@ pub(super) async fn run_once_resident_graph_append_curve(
                                     serde_json::json!({"turn": turn_index}),
                                 )
                                 .map_err(anyhow::Error::from)?,
-                            );
+                            )?;
                             let read = fixture
                                 .graph
                                 .read_model();
@@ -423,7 +423,7 @@ mod append_allocation_tests {
             let before = allocator_stats();
             {
                 let mut adopted = graph.clone();
-                adopted.append_message(appended.clone());
+                adopted.append_message(appended.clone()).unwrap();
             }
             let bytes = alloc_delta(before, allocator_stats()).bytes_allocated as f64;
             if resident_nodes == 0 {
@@ -437,7 +437,7 @@ mod append_allocation_tests {
                      {resident_nodes} (cap {fixed_cap} + {slope_cap} * {resident_nodes} = {cap})"
                 );
             }
-            graph.append_message(appended);
+            graph.append_message(appended).unwrap();
             let _ = graph.read_model();
         }
     }
@@ -471,7 +471,7 @@ mod commit_scaling_tests {
         let messages = lash_protocol_types::MessageSequence::from_base_and_delta(
             base.messages,
             vec![message.clone()],
-        );
+        )?;
         let view = lash_core::SessionReadView::derived_from_persisted_state(
             state,
             state.policy.clone(),
@@ -494,14 +494,14 @@ mod commit_scaling_tests {
                 draft,
                 lash_core::NodeId::fixture(format!("committed-{turn}")),
             )],
-        );
+        )?;
         graph.apply_realized_node_timestamps(&[RealizedNodeTimestamp {
             node_id: lash_core::NodeId::fixture(format!("committed-{turn}")),
             timestamp: "2026-09-30T00:00:01.000000000Z".parse()?,
-        }]);
+        }])?;
         let mut snapshot = state.to_snapshot();
         snapshot.session_graph = graph;
-        state.adopt_snapshot(snapshot);
+        state.adopt_snapshot(snapshot)?;
         std::hint::black_box(state.read_model());
         Ok(view)
     }
@@ -513,7 +513,7 @@ mod commit_scaling_tests {
             lash_core::MaxToolCalls::new(1024),
             lash_core::NoProgressBudget::bounded(12),
         ));
-        state.ensure_agent_frame_initialized();
+        state.ensure_agent_frame_initialized()?;
         let mut held = Vec::with_capacity(turns + SAMPLES);
         for turn in 0..turns {
             held.push(commit(&mut state, turn)?);

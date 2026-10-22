@@ -32,6 +32,7 @@ pub(super) fn append_request_commit(
             &draft_namespace,
             &crate::SystemClock,
         )
+        .expect("source fixture edit is admitted")
         .len();
     let mut graph = state.pending_graph_commit();
     let mapping = graph

@@ -126,18 +126,22 @@ pub async fn session_store_factory_read_session(factory: Arc<dyn crate::Deployme
         },
         ..crate::RuntimeSessionState::fixture(request.config.session_policy())
     };
-    state.append_active_conversation_messages(&[crate::Message {
-        id: "read-only-session-message".to_string(),
-        role: crate::MessageRole::User,
-        parts: vec![crate::Part::text(
-            "read-only-session-message.p0".to_string(),
-            "committed before inspection".to_string(),
-            None,
-        )]
-        .into(),
-        origin: None,
-        reply_marker: None,
-    }]);
+    state
+        .append_active_conversation_messages(&[crate::Message {
+            id: "read-only-session-message".to_string(),
+            role: crate::MessageRole::User,
+            parts: std::sync::Arc::new(
+                (vec![crate::Part::text(
+                    "read-only-session-message.p0".to_string(),
+                    "committed before inspection".to_string(),
+                    None,
+                )])
+                .into(),
+            ),
+            origin: None,
+            reply_marker: None,
+        }])
+        .expect("source fixture edit is admitted");
     let partial_text = "provider-visible prefix before the stream failed";
     let failure_evidence = crate::TurnFailureEvidence {
         partial_output: Some(crate::TurnFailurePartialOutput::Complete {
@@ -371,7 +375,9 @@ pub async fn session_store_factory_delete_fences_stale_handles(
         session_id: request.session_id.clone(),
         ..crate::RuntimeSessionState::fixture(request.config.session_policy())
     };
-    state.ensure_agent_frame_initialized();
+    state
+        .ensure_agent_frame_initialized()
+        .expect("source fixture edit is admitted");
     stale
         .commit_runtime_state(crate::RuntimeCommit::persisted_state_for_test(&state))
         .await
@@ -720,7 +726,9 @@ async fn session_store_factory_rejects_writes_after_delete(
         session_id: request.session_id.clone(),
         ..crate::RuntimeSessionState::fixture(request.config.session_policy())
     };
-    state.ensure_agent_frame_initialized();
+    state
+        .ensure_agent_frame_initialized()
+        .expect("source fixture edit is admitted");
     assert_deleted_write(
         stale
             .commit_runtime_state(crate::RuntimeCommit::persisted_state_for_test(&state))
@@ -1050,7 +1058,9 @@ async fn session_store_factory_rejects_cross_session_graph_parents(
         session_id: first_request.session_id.clone(),
         ..crate::RuntimeSessionState::fixture(first_request.config.session_policy())
     };
-    first_state.ensure_agent_frame_initialized();
+    first_state
+        .ensure_agent_frame_initialized()
+        .expect("source fixture edit is admitted");
     first
         .commit_runtime_state(crate::RuntimeCommit::persisted_state_for_test(&first_state))
         .await
@@ -1063,33 +1073,37 @@ async fn session_store_factory_rejects_cross_session_graph_parents(
         session_id: second_request.session_id.clone(),
         ..crate::RuntimeSessionState::fixture(second_request.config.session_policy())
     };
-    second_state.ensure_agent_frame_initialized();
+    second_state
+        .ensure_agent_frame_initialized()
+        .expect("source fixture edit is admitted");
     let second_result = second
         .commit_runtime_state(crate::RuntimeCommit::persisted_state_for_test(
             &second_state,
         ))
         .await
         .expect("commit intruder's own frame");
-    second_state.apply_persisted_commit_result(second_result);
+    second_state
+        .apply_persisted_commit_result(second_result)
+        .expect("source fixture edit is admitted");
     assert!(
         !crate::conformance::helpers::node_readable(&second, &foreign_parent)
             .await
             .expect("probe unrelated history"),
         "a bound store must not expose an unrelated session's node"
     );
-    let child = crate::SessionNodeRecord {
-        node_id: "cross-session-child".into(),
-        parent_node_id: Some(crate::NodeId::fixture(foreign_parent.to_string())),
-        timestamp: "2026-07-27T00:00:00.000000000Z"
+    let child = crate::SessionNodeRecord::new(
+        "cross-session-child".into(),
+        Some(crate::NodeId::fixture(foreign_parent.to_string())),
+        "2026-07-27T00:00:00.000000000Z"
             .parse()
             .expect("canonical node timestamp"),
-        payload: crate::SessionNodePayload::Event {
+        crate::SessionNodePayload::Event {
             event: crate::SessionHistoryRecord::Protocol(
                 crate::ProtocolEvent::typed("cross-session", serde_json::Value::Null)
                     .expect("protocol event"),
             ),
         },
-    };
+    );
     let state = crate::RuntimeSessionState {
         head_revision: second_state.head_revision,
         session_id: second_state.session_id,
@@ -1153,7 +1167,9 @@ async fn session_store_factory_fork_semantics(factory: Arc<dyn crate::Deployment
     };
     let execution_root = graph.root;
     state.set_execution_graph(execution);
-    state.ensure_agent_frame_initialized();
+    state
+        .ensure_agent_frame_initialized()
+        .expect("source fixture edit is admitted");
     let root_ids = state
         .session_graph
         .nodes
@@ -1169,7 +1185,9 @@ async fn session_store_factory_fork_semantics(factory: Arc<dyn crate::Deployment
         .commit_runtime_state(crate::RuntimeCommit::persisted_state_for_test(&state))
         .await
         .expect("commit fork root");
-    state.apply_persisted_commit_result(first);
+    state
+        .apply_persisted_commit_result(first)
+        .expect("source fixture edit is admitted");
     state.mark_node_ids_persisted(root_ids);
 
     let source_id = source_request.session_id.clone();
@@ -1493,7 +1511,9 @@ async fn session_store_factory_delete_removes_store_and_is_idempotent(
         session_id: request.session_id.clone(),
         ..crate::RuntimeSessionState::fixture(request.config.session_policy())
     };
-    state.ensure_agent_frame_initialized();
+    state
+        .ensure_agent_frame_initialized()
+        .expect("source fixture edit is admitted");
     let frame = state
         .session_graph
         .nodes
@@ -1501,18 +1521,20 @@ async fn session_store_factory_delete_removes_store_and_is_idempotent(
         .map(|node| node.as_ref().clone())
         .expect("initial frame node");
     let frame_node_id = frame.node_id.clone();
-    let child_node = |node_id: &str| crate::SessionNodeRecord {
-        node_id: crate::NodeId::fixture(node_id.to_string()),
-        parent_node_id: Some(frame_node_id.clone()),
-        timestamp: "2026-07-27T00:00:00.000000000Z"
-            .parse()
-            .expect("canonical node timestamp"),
-        payload: crate::SessionNodePayload::Event {
-            event: crate::SessionHistoryRecord::Protocol(
-                crate::ProtocolEvent::typed(node_id, serde_json::Value::Null)
-                    .expect("protocol event"),
-            ),
-        },
+    let child_node = |node_id: &str| {
+        crate::SessionNodeRecord::new(
+            crate::NodeId::fixture(node_id.to_string()),
+            Some(frame_node_id.clone()),
+            "2026-07-27T00:00:00.000000000Z"
+                .parse()
+                .expect("canonical node timestamp"),
+            crate::SessionNodePayload::Event {
+                event: crate::SessionHistoryRecord::Protocol(
+                    crate::ProtocolEvent::typed(node_id, serde_json::Value::Null)
+                        .expect("protocol event"),
+                ),
+            },
+        )
     };
     let live_leaf = child_node("delete-live-leaf");
     state.session_graph = crate::SessionGraph::from_nodes(

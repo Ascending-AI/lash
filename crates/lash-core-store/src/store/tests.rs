@@ -38,9 +38,9 @@ fn intent_fixture() -> RuntimeCommit {
             crate::NoProgressBudget::bounded(12),
         ))
     };
-    state.ensure_agent_frame_initialized();
+    state.ensure_agent_frame_initialized().unwrap();
     let graph_data = state.session_graph.data_mut();
-    std::sync::Arc::make_mut(&mut graph_data.nodes.make_mut()[0]).timestamp =
+    std::sync::Arc::make_mut(&mut graph_data.nodes.make_mut().unwrap()[0]).timestamp =
         "2026-07-26T10:00:00.000000000Z"
             .parse()
             .expect("canonical node timestamp");
@@ -59,18 +59,18 @@ fn intent_fixture() -> RuntimeCommit {
         reply_marker: None,
     };
     let graph = GraphAppend::Extend {
-        nodes: vec![crate::SessionNodeRecord {
-            node_id: node_id.clone(),
-            parent_node_id: None,
-            timestamp: "2026-07-26T10:00:01.000000000Z"
+        nodes: vec![crate::SessionNodeRecord::new(
+            node_id.clone(),
+            None,
+            "2026-07-26T10:00:01.000000000Z"
                 .parse()
                 .expect("canonical node timestamp"),
-            payload: crate::SessionNodePayload::Event {
+            crate::SessionNodePayload::Event {
                 event: crate::SessionHistoryRecord::Conversation(
                     crate::ConversationRecord::from_message(message),
                 ),
             },
-        }],
+        )],
     };
     RuntimeCommit::persisted_state_with_graph_commit_and_operation(&state, graph, operation)
         .expect("build intent fixture")
@@ -446,28 +446,28 @@ fn node_derivation_remaps_in_batch_parent_edges() {
     let operation = OperationId::turn("session", "turn", "final");
     let mut graph = GraphAppend::Extend {
         nodes: vec![
-            crate::SessionNodeRecord {
-                node_id: "draft-a".into(),
-                parent_node_id: None,
-                timestamp: "2026-07-26T10:00:00.000000000Z"
+            crate::SessionNodeRecord::new(
+                "draft-a".into(),
+                None,
+                "2026-07-26T10:00:00.000000000Z"
                     .parse()
                     .expect("canonical node timestamp"),
-                payload: crate::SessionNodePayload::Plugin {
+                crate::SessionNodePayload::Plugin {
                     plugin_type: "first".to_string(),
                     body: crate::session_graph::SharedJsonValue::new(serde_json::json!({})),
                 },
-            },
-            crate::SessionNodeRecord {
-                node_id: "draft-b".into(),
-                parent_node_id: Some("draft-a".into()),
-                timestamp: "2026-07-26T10:00:00.000000000Z"
+            ),
+            crate::SessionNodeRecord::new(
+                "draft-b".into(),
+                Some("draft-a".into()),
+                "2026-07-26T10:00:00.000000000Z"
                     .parse()
                     .expect("canonical node timestamp"),
-                payload: crate::SessionNodePayload::Plugin {
+                crate::SessionNodePayload::Plugin {
                     plugin_type: "second".to_string(),
                     body: crate::session_graph::SharedJsonValue::new(serde_json::json!({})),
                 },
-            },
+            ),
         ],
     };
     graph
@@ -483,17 +483,17 @@ fn node_derivation_remaps_in_batch_parent_edges() {
 #[test]
 fn append_chain_rejects_self_parent_cycles() {
     let graph = GraphAppend::Extend {
-        nodes: vec![crate::SessionNodeRecord {
-            node_id: "cycle".into(),
-            parent_node_id: Some("cycle".into()),
-            timestamp: "2026-07-26T10:00:00.000000000Z"
+        nodes: vec![crate::SessionNodeRecord::new(
+            "cycle".into(),
+            Some("cycle".into()),
+            "2026-07-26T10:00:00.000000000Z"
                 .parse()
                 .expect("canonical node timestamp"),
-            payload: crate::SessionNodePayload::Plugin {
+            crate::SessionNodePayload::Plugin {
                 plugin_type: "cycle".to_string(),
                 body: crate::session_graph::SharedJsonValue::new(serde_json::json!({})),
             },
-        }],
+        )],
     };
 
     assert!(matches!(

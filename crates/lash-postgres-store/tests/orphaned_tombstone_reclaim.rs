@@ -70,7 +70,9 @@ async fn commit_single_root_node(
         session_id: SessionId::fixture(session_id.to_string()),
         ..lash_core_store::session_state::RuntimeSessionState::fixture(policy.clone())
     };
-    state.ensure_agent_frame_initialized();
+    state
+        .ensure_agent_frame_initialized()
+        .expect("source fixture edit is admitted");
     let leaf = state
         .session_graph
         .leaf_node_id
@@ -164,13 +166,13 @@ async fn postgres_delete_reclaims_tombstones_orphaned_by_earlier_delete_when_con
         child_state
             .session_graph
             .apply_append(&lash_core_store::store::GraphAppend::Extend {
-                nodes: vec![lash_core_store::session_graph::SessionNodeRecord {
-                    node_id: lash_core::NodeId::from("orphan-fork-child-node"),
+                nodes: vec![lash_core_store::session_graph::SessionNodeRecord::new(
+                    lash_core::NodeId::from("orphan-fork-child-node"),
                     parent_node_id,
-                    timestamp: "2026-08-17T00:00:00.000000000Z"
+                    "2026-08-17T00:00:00.000000000Z"
                         .parse()
                         .expect("canonical node timestamp"),
-                    payload: lash_core_store::session_graph::SessionNodePayload::Event {
+                    lash_core_store::session_graph::SessionNodePayload::Event {
                         event: lash_protocol_types::session_model::SessionHistoryRecord::Protocol(
                             lash_protocol_types::session_model::ProtocolEvent::typed(
                                 "orphan-fork-child-event",
@@ -179,7 +181,7 @@ async fn postgres_delete_reclaims_tombstones_orphaned_by_earlier_delete_when_con
                             .expect("typed child event"),
                         ),
                     },
-                }],
+                )],
             })
             .expect("append child node");
         child

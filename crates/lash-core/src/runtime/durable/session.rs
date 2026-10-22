@@ -1177,6 +1177,12 @@ pub enum TurnRestoreError {
     Durable(#[from] DurableError),
 }
 
+impl From<lash_protocol_types::allocation::AllocationError> for TurnError {
+    fn from(error: lash_protocol_types::allocation::AllocationError) -> Self {
+        Self::Runtime(crate::RuntimeError::allocation(error))
+    }
+}
+
 /// Why a phase run failed.
 #[derive(Debug, thiserror::Error)]
 pub enum TurnError {

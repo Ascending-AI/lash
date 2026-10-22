@@ -86,7 +86,9 @@ fn user_message(content: &str) -> Message {
     Message {
         id: "m0".to_string(),
         role: MessageRole::User,
-        parts: vec![Part::text("m0.p0".to_string(), content.to_string(), None)].into(),
+        parts: std::sync::Arc::new(
+            (vec![Part::text("m0.p0".to_string(), content.to_string(), None)]).into(),
+        ),
         origin: None,
         reply_marker: None,
     }
@@ -101,7 +103,9 @@ fn text_message(role: MessageRole, content: impl Into<String>) -> Message {
     Message {
         id: id.clone(),
         role,
-        parts: vec![Part::text(format!("{id}.p0"), content.into(), None)].into(),
+        parts: std::sync::Arc::new(
+            (vec![Part::text(format!("{id}.p0"), content.into(), None)]).into(),
+        ),
         origin: None,
         reply_marker: None,
     }
@@ -968,10 +972,12 @@ fn done_carries_unreported_final_delta() {
         lash_protocol_types::AppendVec::new(),
         0,
     );
-    machine.append_event(conversation_event(text_message(
-        MessageRole::Assistant,
-        "final",
-    )));
+    machine
+        .append_event(conversation_event(text_message(
+            MessageRole::Assistant,
+            "final",
+        )))
+        .expect("source fixture edit is admitted");
     machine.finish_with_outcome(assistant_done("final"));
 
     let effects = drain_effects(&mut machine);
@@ -990,17 +996,19 @@ fn llm_request_includes_image_prompt_parts_for_attached_images() {
     let msgs = vec![Message {
         id: "m0".to_string(),
         role: MessageRole::User,
-        parts: vec![
-            Part::attachment_part(
-                "m0.p0".to_string(),
-                String::new(),
-                Some(PartAttachment {
-                    reference: test_attachment_ref(3),
-                }),
-            ),
-            Part::text("m0.p1".to_string(), "explain this".to_string(), None),
-        ]
-        .into(),
+        parts: std::sync::Arc::new(
+            (vec![
+                Part::attachment_part(
+                    "m0.p0".to_string(),
+                    String::new(),
+                    Some(PartAttachment {
+                        reference: test_attachment_ref(3),
+                    }),
+                ),
+                Part::text("m0.p1".to_string(), "explain this".to_string(), None),
+            ])
+            .into(),
+        ),
         origin: None,
         reply_marker: None,
     }];

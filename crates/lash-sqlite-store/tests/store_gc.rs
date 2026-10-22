@@ -99,7 +99,7 @@ async fn gc_unreachable_keeps_rooted_checkpoint_blobs() {
         })
         .await
         .expect("bind session to store");
-    state.ensure_agent_frame_initialized();
+    state.ensure_agent_frame_initialized().unwrap();
     let stored = store
         .commit_runtime_state(RuntimeCommit::persisted_state_for_test(&state))
         .await
@@ -412,13 +412,13 @@ async fn sqlite_catalog_partitions_derived_node_ids_by_session() {
             &state.session_id,
             frame_key.as_str(),
         );
-        let node = lash_core_store::session_graph::SessionNodeRecord {
-            node_id: lash_protocol_types::NodeId::fixture(frame_node_id.to_string()),
-            parent_node_id: None,
-            timestamp: "2026-07-26T00:00:00.000000000Z"
+        let node = lash_core_store::session_graph::SessionNodeRecord::new(
+            lash_protocol_types::NodeId::fixture(frame_node_id.to_string()),
+            None,
+            "2026-07-26T00:00:00.000000000Z"
                 .parse()
                 .expect("canonical node timestamp"),
-            payload: lash_core_store::session_graph::SessionNodePayload::FrameOpen {
+            lash_core_store::session_graph::SessionNodePayload::FrameOpen {
                 frame_key,
                 reason: lash_core_store::session_identity::AgentFrameReason::initial(),
                 assignment: lash_core_store::session_identity::AgentFrameAssignment::unconfigured(
@@ -429,7 +429,7 @@ async fn sqlite_catalog_partitions_derived_node_ids_by_session() {
                     ),
                 ),
             },
-        };
+        );
         let mut commit = RuntimeCommit::persisted_state_for_test(state);
         commit.graph = GraphAppend::Extend {
             nodes: vec![node.clone()],
@@ -515,13 +515,13 @@ async fn sqlite_catalog_leaf_validation_is_session_scoped() {
         &first_state.session_id,
         frame_key.as_str(),
     );
-    let node = lash_core_store::session_graph::SessionNodeRecord {
-        node_id: lash_protocol_types::NodeId::fixture(frame_node_id.to_string()),
-        parent_node_id: None,
-        timestamp: "2026-07-26T00:00:00.000000000Z"
+    let node = lash_core_store::session_graph::SessionNodeRecord::new(
+        lash_protocol_types::NodeId::fixture(frame_node_id.to_string()),
+        None,
+        "2026-07-26T00:00:00.000000000Z"
             .parse()
             .expect("canonical node timestamp"),
-        payload: lash_core_store::session_graph::SessionNodePayload::FrameOpen {
+        lash_core_store::session_graph::SessionNodePayload::FrameOpen {
             frame_key,
             reason: lash_core_store::session_identity::AgentFrameReason::initial(),
             assignment: lash_core_store::session_identity::AgentFrameAssignment::unconfigured(
@@ -532,7 +532,7 @@ async fn sqlite_catalog_leaf_validation_is_session_scoped() {
                 ),
             ),
         },
-    };
+    );
     let mut first_commit = RuntimeCommit::persisted_state_for_test(&first_state);
     first_commit.graph = GraphAppend::Extend {
         nodes: vec![node.clone()],
@@ -689,7 +689,7 @@ async fn commit_single_root_node(
     .await
     .expect("create store");
     let mut state = factory_state(&store, session_id, 0).await;
-    state.ensure_agent_frame_initialized();
+    state.ensure_agent_frame_initialized().unwrap();
     let leaf = state
         .session_graph
         .leaf_node_id
@@ -818,13 +818,13 @@ async fn sqlite_delete_reclaims_fork_ancestry_orphaned_by_earlier_owner_delete()
         child_state
             .session_graph
             .apply_append(&lash_core_store::store::GraphAppend::Extend {
-                nodes: vec![lash_core_store::session_graph::SessionNodeRecord {
-                    node_id: lash_protocol_types::NodeId::from("orphan-fork-child-node"),
+                nodes: vec![lash_core_store::session_graph::SessionNodeRecord::new(
+                    lash_protocol_types::NodeId::from("orphan-fork-child-node"),
                     parent_node_id,
-                    timestamp: "2026-08-17T00:00:00.000000000Z"
+                    "2026-08-17T00:00:00.000000000Z"
                         .parse()
                         .expect("canonical node timestamp"),
-                    payload: lash_core_store::session_graph::SessionNodePayload::Event {
+                    lash_core_store::session_graph::SessionNodePayload::Event {
                         event: lash_protocol_types::session_model::SessionHistoryRecord::Protocol(
                             lash_protocol_types::session_model::ProtocolEvent::typed(
                                 "orphan-fork-child-event",
@@ -833,7 +833,7 @@ async fn sqlite_delete_reclaims_fork_ancestry_orphaned_by_earlier_owner_delete()
                             .expect("typed child event"),
                         ),
                     },
-                }],
+                )],
             })
             .expect("append child node");
         child

@@ -26,7 +26,9 @@ pub fn default_state() -> RuntimeSessionState {
         crate::MaxToolCalls::new(1024),
         crate::NoProgressBudget::bounded(12),
     ));
-    state.ensure_agent_frame_initialized();
+    state
+        .ensure_agent_frame_initialized()
+        .expect("source fixture edit is admitted");
     state
 }
 
@@ -119,14 +121,19 @@ pub trait ReadModelStateMut: ReadModelState {
 
 impl ReadModelStateMut for SessionSnapshot {
     fn append_message(&mut self, message: Message) {
-        self.session_graph.append_message(message);
+        self.session_graph
+            .append_message(message)
+            .expect("source fixture edit is admitted");
     }
 }
 
 impl ReadModelStateMut for RuntimeSessionState {
     fn append_message(&mut self, message: Message) {
-        self.ensure_agent_frame_initialized();
-        self.session_graph.append_message(message);
+        self.ensure_agent_frame_initialized()
+            .expect("source fixture edit is admitted");
+        self.session_graph
+            .append_message(message)
+            .expect("source fixture edit is admitted");
     }
 }
 
@@ -468,7 +475,9 @@ pub async fn advance_session_head(
     };
     // A writer's first graph write opens the session's initial frame; a head
     // no commit has given a graph is adopted without one (FIG-5501).
-    state.ensure_agent_frame_initialized();
+    state
+        .ensure_agent_frame_initialized()
+        .expect("source fixture edit is admitted");
     change(&mut state);
     let commit = crate::RuntimeCommit::persisted_state_for_test(&state);
     crate::SessionCommitStore::commit_runtime_state(store, commit)

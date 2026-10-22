@@ -27,7 +27,9 @@ async fn commit_session_command_run_with(
             policy: request.config.session_policy(),
             ..crate::RuntimeSessionState::fixture(request.config.session_policy())
         });
-    state.ensure_agent_frame_initialized();
+    state
+        .ensure_agent_frame_initialized()
+        .expect("source fixture edit is admitted");
     adjust(&mut state);
     let first_batch_id = run
         .first()
@@ -200,7 +202,9 @@ async fn runtime_for_config_settlement(
             policy: request.config.session_policy(),
             ..crate::RuntimeSessionState::fixture(request.config.session_policy())
         });
-    state.ensure_agent_frame_initialized();
+    state
+        .ensure_agent_frame_initialized()
+        .expect("source fixture edit is admitted");
     let host = crate::PluginHost::new(
         crate::testing::test_standard_protocol_factories(),
         lash_core::ExecutionBudgets::recommended(),

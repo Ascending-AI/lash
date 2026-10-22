@@ -183,8 +183,13 @@ pub struct SessionGraphData {
 impl SessionGraphData {
     /// The record at `index`, mutable: copied out of every snapshot that
     /// shares it, so a held snapshot never observes the edit.
-    pub fn node_mut(&mut self, index: usize) -> &mut SessionNodeRecord {
-        Arc::make_mut(&mut self.nodes.make_mut()[index])
+    pub fn node_mut(&mut self, index: usize) -> Result<&mut SessionNodeRecord, crate::StoreError> {
+        let budget = self.nodes.allocation_budget().clone();
+        let node = &mut self.nodes.make_mut()?[index];
+        if Arc::get_mut(node).is_none() {
+            *node = Arc::new(node.clone_in(&budget)?);
+        }
+        Ok(Arc::get_mut(node).unwrap_or_else(|| unreachable!("the node edit owns its record")))
     }
 }
 
@@ -269,6 +274,8 @@ pub struct SessionNodeRecord {
     pub timestamp: NodeTimestamp,
     #[serde(flatten)]
     pub payload: SessionNodePayload,
+    #[serde(skip)]
+    allocation: lash_protocol_types::allocation::AllocationHold,
 }
 
 /// Durable generation of the `node_json` graph-node body.
@@ -409,11 +416,11 @@ pub(crate) fn upcast_synthetic_node_body(
 }
 
 #[derive(serde::Serialize, serde::Deserialize)]
-struct StoredSessionNodeBody {
+struct StoredSessionNodeBody<T = SessionNodePayload> {
     schema_version: u32,
     timestamp: NodeTimestamp,
     #[serde(flatten)]
-    payload: SessionNodePayload,
+    payload: T,
 }
 
 #[derive(Clone, Debug)]
@@ -461,22 +468,50 @@ impl SessionNodeDraft {
     }
 }
 
-#[derive(Clone, Debug, Default, PartialEq)]
-pub struct SharedJsonValue(pub Arc<serde_json::Value>);
+#[derive(Clone, Debug, Default)]
+pub struct SharedJsonValue(Arc<SharedJsonStorage>);
+
+#[derive(Debug, Default)]
+struct SharedJsonStorage {
+    value: serde_json::Value,
+    allocation: lash_protocol_types::allocation::AllocationHold,
+}
 
 impl SharedJsonValue {
     pub fn new(value: serde_json::Value) -> Self {
-        Self(Arc::new(value))
+        Self(Arc::new(SharedJsonStorage {
+            value,
+            allocation: Default::default(),
+        }))
     }
 
     pub fn to_owned(&self) -> serde_json::Value {
-        self.0.as_ref().clone()
+        self.0.value.clone()
+    }
+
+    fn decoded_in(
+        &mut self,
+        allocation: lash_protocol_types::allocation::AllocationHold,
+    ) -> Result<(), crate::StoreError> {
+        let storage =
+            Arc::get_mut(&mut self.0).ok_or_else(|| crate::StoreError::StoredDataCorrupt {
+                record_kind: "SessionGraph node",
+                message: "a fresh decode unexpectedly shares plugin JSON before admission".into(),
+            })?;
+        storage.allocation = allocation;
+        Ok(())
+    }
+}
+
+impl PartialEq for SharedJsonValue {
+    fn eq(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.0, &other.0) || self.0.value == other.0.value
     }
 }
 
 impl AsRef<serde_json::Value> for SharedJsonValue {
     fn as_ref(&self) -> &serde_json::Value {
-        self.0.as_ref()
+        &self.0.value
     }
 }
 
@@ -485,7 +520,7 @@ impl serde::Serialize for SharedJsonValue {
     where
         S: serde::Serializer,
     {
-        self.0.serialize(serializer)
+        self.0.value.serialize(serializer)
     }
 }
 
@@ -683,12 +718,12 @@ impl SessionGraphAppendBuilder {
             };
             self.draft_ids.insert(node_id.clone());
             self.leaf_node_id = Some(node_id.clone());
-            nodes.push(SessionNodeRecord {
+            nodes.push(SessionNodeRecord::new(
                 node_id,
                 parent_node_id,
                 timestamp,
                 payload,
-            });
+            ));
         }
         nodes
     }
@@ -705,6 +740,70 @@ impl SessionGraphAppendBuilder {
 }
 
 impl SessionNodeRecord {
+    /// Construct an independently owned source record. Serving owners use
+    /// the budgeted decode and edit constructors before retaining values.
+    pub fn new(
+        node_id: NodeId,
+        parent_node_id: Option<NodeId>,
+        timestamp: NodeTimestamp,
+        payload: SessionNodePayload,
+    ) -> Self {
+        Self {
+            node_id,
+            parent_node_id,
+            timestamp,
+            payload,
+            allocation: Default::default(),
+        }
+    }
+
+    /// Clone the record's owned fields only after admitting their capacity.
+    /// Shared immutable payloads keep their existing allocation obligations.
+    pub fn clone_in(
+        &self,
+        budget: &lash_protocol_types::allocation::AllocationBudget,
+    ) -> Result<Self, lash_protocol_types::allocation::AllocationError> {
+        self.clone_for_edit_in(budget, 0)
+    }
+
+    pub(super) fn clone_for_edit_in(
+        &self,
+        budget: &lash_protocol_types::allocation::AllocationBudget,
+        additional: u64,
+    ) -> Result<Self, lash_protocol_types::allocation::AllocationError> {
+        // Count only fields this clone copies. Parts and JSON payloads already
+        // carry their obligation in the immutable allocation the clone shares.
+        let inline = std::mem::size_of::<Self>() + 128;
+        let payload_bytes = match &self.payload {
+            SessionNodePayload::Event {
+                event: SessionHistoryRecord::Conversation(message),
+            } => lash_protocol_types::allocation::payload_capacity(
+                &(&message.id, &message.origin, &message.reply_marker),
+                0,
+            ),
+            SessionNodePayload::Event {
+                event: SessionHistoryRecord::Protocol(event),
+            } => lash_protocol_types::allocation::payload_capacity(&event.plugin_id, 0),
+            SessionNodePayload::Plugin { plugin_type, .. } => {
+                lash_protocol_types::allocation::payload_capacity(plugin_type, 0)
+            }
+            SessionNodePayload::FrameOpen { .. } => {
+                lash_protocol_types::allocation::payload_capacity(&self.payload, 0)
+            }
+        };
+        let allocation = budget.reserve(
+            payload_bytes
+                .saturating_add(lash_protocol_types::allocation::payload_capacity(
+                    &(&self.node_id, &self.parent_node_id),
+                    inline,
+                ))
+                .saturating_add(additional),
+        )?;
+        let mut record = self.clone();
+        record.allocation = allocation;
+        Ok(record)
+    }
+
     /// Borrow the message identity carried by a conversation node.
     ///
     /// Protocol-event, plugin-state, and frame-boundary nodes return `None`.
@@ -735,7 +834,7 @@ impl SessionNodeRecord {
             schema_version: fleet_format
                 .writer_version(crate::surface_format!(SESSION_NODE_BODY_SCHEMA_VERSION)),
             timestamp: self.timestamp,
-            payload: self.payload.clone(),
+            payload: &self.payload,
         })
     }
 
@@ -809,15 +908,73 @@ impl SessionNodeRecord {
             .map_err(serde::de::Error::custom)?;
         }
         let body = serde_json::from_value::<StoredSessionNodeBody>(value)?;
-        Ok(Self {
-            node_id: NodeId::parse(node_id).map_err(serde::de::Error::custom)?,
-            parent_node_id: parent_node_id
+        Ok(Self::new(
+            NodeId::parse(node_id).map_err(serde::de::Error::custom)?,
+            parent_node_id
                 .map(NodeId::parse)
                 .transpose()
                 .map_err(serde::de::Error::custom)?,
-            timestamp: body.timestamp,
-            payload: body.payload,
-        })
+            body.timestamp,
+            body.payload,
+        ))
+    }
+
+    /// Decode under the claim's budget, admitting the expanded source before
+    /// parsing any body JSON. The same hold follows escaped immutable parts.
+    pub fn decode_storage_body_in(
+        node_id: &str,
+        parent_node_id: Option<&str>,
+        node_json: &str,
+        fleet_format: crate::store::FleetFormat,
+        budget: &lash_protocol_types::allocation::AllocationBudget,
+    ) -> Result<Self, crate::StoreError> {
+        let bytes = lash_protocol_types::allocation::json_decode_capacity(
+            node_json,
+            std::mem::size_of::<Self>() + 128,
+        )
+        .saturating_add(node_id.len() as u64)
+        .saturating_add(parent_node_id.map_or(0, str::len) as u64);
+        let allocation = budget.reserve(bytes)?;
+        let mut record = Self::decode_storage_body_for_fleet(
+            node_id.to_owned(),
+            parent_node_id.map(str::to_owned),
+            node_json,
+            fleet_format,
+        )
+        .map_err(|error| crate::StoreError::StoredDataCorrupt {
+            record_kind: "SessionGraph node",
+            message: error.to_string(),
+        })?;
+        match &mut record.payload {
+            SessionNodePayload::Event {
+                event: SessionHistoryRecord::Conversation(conversation),
+            } => {
+                let parts = Arc::get_mut(&mut conversation.parts).ok_or_else(|| {
+                    crate::StoreError::StoredDataCorrupt {
+                        record_kind: "SessionGraph node",
+                        message:
+                            "a fresh decode unexpectedly shares message parts before admission"
+                                .into(),
+                    }
+                })?;
+                parts.decoded_in(allocation.clone(), budget.clone());
+            }
+            SessionNodePayload::Event {
+                event: SessionHistoryRecord::Protocol(event),
+            } => {
+                event
+                    .payload
+                    .decoded_in(allocation.clone())
+                    .map_err(|error| crate::StoreError::StoredDataCorrupt {
+                        record_kind: "SessionGraph node",
+                        message: error.to_string(),
+                    })?;
+            }
+            SessionNodePayload::Plugin { body, .. } => body.decoded_in(allocation.clone())?,
+            SessionNodePayload::FrameOpen { .. } => {}
+        }
+        record.allocation = allocation;
+        Ok(record)
     }
 
     /// Borrows frame-boundary state for store and protocol implementors, returning `None` for event
@@ -854,29 +1011,30 @@ impl SessionNodeRecord {
 impl SessionGraph {
     /// Appends non-transient messages after the active leaf in source order for protocol
     /// implementors applying a read-model delta.
-    pub fn append_active_read_delta(&mut self, messages: &[Message]) {
+    pub fn append_active_read_delta(
+        &mut self,
+        messages: &[Message],
+    ) -> Result<(), crate::StoreError> {
         let appendable_messages = messages
             .iter()
             .filter(|message| !message.is_transient())
             .cloned()
             .collect::<Vec<_>>();
 
-        self.reserve_append_capacity(appendable_messages.len(), appendable_messages.len());
-        self.append_message_batch(appendable_messages);
+        self.append_message_batch(appendable_messages)
     }
 
     pub(crate) fn append_active_conversation_messages_at(
         &mut self,
         messages: &[Message],
         timestamp: NodeTimestamp,
-    ) {
+    ) -> Result<(), crate::StoreError> {
         let appendable_messages = messages
             .iter()
             .filter(|message| !message.is_transient())
             .cloned()
             .collect::<Vec<_>>();
-        self.reserve_append_capacity(appendable_messages.len(), appendable_messages.len());
-        self.append_message_batch_at(appendable_messages, timestamp);
+        self.append_message_batch_at(appendable_messages, timestamp)
     }
 
     /// Graph integrity follows the same pair-assertion rule as durable state: validate before
@@ -913,6 +1071,17 @@ impl SessionGraph {
         let graph = Self::from_shared_validated_parts(nodes, leaf_node_id, anchor);
         graph.validate_structural_integrity()?;
         Ok(graph)
+    }
+
+    /// Build a serving graph from records admitted under this claim.
+    pub fn from_shared_nodes_in(
+        nodes: impl IntoIterator<Item = Arc<SessionNodeRecord>>,
+        leaf_node_id: Option<NodeId>,
+        budget: &lash_protocol_types::allocation::AllocationBudget,
+    ) -> Result<Self, crate::StoreError> {
+        let mut admitted = AppendVec::try_with_capacity(0, budget)?;
+        admitted.extend(nodes)?;
+        Self::from_shared_anchored_nodes(admitted, leaf_node_id, None)
     }
 
     /// Builds a graph from nodes whose integrity is already guaranteed by the caller.
@@ -1069,30 +1238,62 @@ impl SessionGraph {
             .unwrap_or_else(|err| panic!("invalid resident session graph: {err}"))
     }
 
-    fn append_message_batch(&mut self, messages: Vec<Message>) {
-        self.append_message_batch_at(messages, crate::SystemClock.node_timestamp());
+    fn append_message_batch(&mut self, messages: Vec<Message>) -> Result<(), crate::StoreError> {
+        self.append_message_batch_at(messages, crate::SystemClock.node_timestamp())
     }
 
-    fn append_message_batch_at(&mut self, messages: Vec<Message>, timestamp: NodeTimestamp) {
+    fn append_message_batch_at(
+        &mut self,
+        messages: Vec<Message>,
+        timestamp: NodeTimestamp,
+    ) -> Result<(), crate::StoreError> {
         if messages.is_empty() {
-            return;
+            return Ok(());
         }
         self.append_node_drafts_at_inner(
             None,
             messages.into_iter().map(SessionNodeDraft::message),
             timestamp,
-        );
+        )?;
+        Ok(())
+    }
+
+    /// Edits and their derived indexes publish together after every admission.
+    pub(super) fn edit<R>(
+        &mut self,
+        edit: impl FnOnce(&mut Self) -> Result<R, crate::StoreError>,
+    ) -> Result<R, crate::StoreError> {
+        let mut draft = self.clone();
+        let result = edit(&mut draft)?;
+        draft.try_cache()?;
+        *self = draft;
+        Ok(result)
+    }
+
+    pub(crate) fn append_prebuilt_nodes(
+        &mut self,
+        nodes: Vec<SessionNodeRecord>,
+    ) -> Result<(), crate::StoreError> {
+        self.edit(|draft| draft.append_prebuilt_nodes_inner(nodes))
     }
 
     #[expect(
         clippy::expect_used,
-        reason = "the node was pushed onto `data.nodes` on the line above, so the vector is non-empty"
+        reason = "the node was just appended successfully"
     )]
-    pub(crate) fn append_prebuilt_nodes(&mut self, nodes: Vec<SessionNodeRecord>) {
+    fn append_prebuilt_nodes_inner(
+        &mut self,
+        nodes: Vec<SessionNodeRecord>,
+    ) -> Result<(), crate::StoreError> {
         if nodes.is_empty() {
-            return;
+            return Ok(());
         }
 
+        let messages = nodes
+            .iter()
+            .filter(|node| matches!(node.event(), Some(SessionHistoryRecord::Conversation(_))))
+            .count();
+        self.reserve_append_capacity(nodes.len(), messages)?;
         self.detach_initialized_cache_for_append();
         if let Some(cache_lock) = Arc::get_mut(&mut self.cache)
             && let Some(cache) = cache_lock.get_mut()
@@ -1112,7 +1313,7 @@ impl SessionGraph {
                     cache.withdraw_proof();
                 }
                 let node_id = node.node_id.clone();
-                data.nodes.push(Arc::new(node));
+                data.nodes.push(Arc::new(node))?;
                 cache.append_node(
                     data.nodes.len() - 1,
                     data.nodes
@@ -1120,22 +1321,23 @@ impl SessionGraph {
                         .expect("just appended graph node")
                         .as_ref(),
                     extends_leaf,
-                );
+                )?;
                 data.leaf_node_id = Some(node_id);
             }
-            return;
+            return Ok(());
         }
 
         let data = self.data_mut();
         for node in nodes {
             data.leaf_node_id = Some(node.node_id.clone());
-            data.nodes.push(Arc::new(node));
+            data.nodes.push(Arc::new(node))?;
         }
+        Ok(())
     }
 
     /// Appends one message after the active leaf for protocol implementors and returns its
     /// content-derived node ID.
-    pub fn append_message(&mut self, message: Message) -> NodeId {
+    pub fn append_message(&mut self, message: Message) -> Result<NodeId, crate::StoreError> {
         self.append_node_draft(SessionNodeDraft::message(message))
     }
 
@@ -1145,7 +1347,7 @@ impl SessionGraph {
         &mut self,
         plugin_type: impl Into<String>,
         body: serde_json::Value,
-    ) -> NodeId {
+    ) -> Result<NodeId, crate::StoreError> {
         self.append_node_draft(SessionNodeDraft::plugin(plugin_type, body))
     }
 
@@ -1169,7 +1371,10 @@ impl SessionGraph {
     ///
     /// The head caches this answer for bounded reads, but ancestry remains the
     /// truth and is used to validate every stored pointer.
-    pub fn append_protocol_event(&mut self, event: ProtocolEvent) -> NodeId {
+    pub fn append_protocol_event(
+        &mut self,
+        event: ProtocolEvent,
+    ) -> Result<NodeId, crate::StoreError> {
         self.append_node_draft(SessionNodeDraft::protocol_event(event))
     }
 
@@ -1177,14 +1382,21 @@ impl SessionGraph {
         clippy::expect_used,
         reason = "`append_node_drafts` returns one node id per draft, and exactly one draft was passed"
     )]
-    pub(crate) fn append_node_draft(&mut self, draft: SessionNodeDraft) -> NodeId {
-        self.append_node_drafts([draft])
+    pub(crate) fn append_node_draft(
+        &mut self,
+        draft: SessionNodeDraft,
+    ) -> Result<NodeId, crate::StoreError> {
+        Ok(self
+            .append_node_drafts([draft])?
             .into_iter()
             .next()
-            .expect("single draft append must create one node")
+            .expect("single draft append must create one node"))
     }
 
-    pub(crate) fn append_node_drafts<I>(&mut self, drafts: I) -> Vec<NodeId>
+    pub(crate) fn append_node_drafts<I>(
+        &mut self,
+        drafts: I,
+    ) -> Result<Vec<NodeId>, crate::StoreError>
     where
         I: IntoIterator<Item = SessionNodeDraft>,
     {
@@ -1198,21 +1410,21 @@ impl SessionGraph {
         reason: crate::AgentFrameReason,
         assignment: crate::AgentFrameAssignment,
         timestamp: NodeTimestamp,
-    ) -> bool {
+    ) -> Result<bool, crate::StoreError> {
         if self.find_node(frame_node_id.as_str()).is_some() {
-            return false;
+            return Ok(false);
         }
-        self.append_prebuilt_nodes(vec![SessionNodeRecord {
-            node_id: NodeId::from(frame_node_id),
-            parent_node_id: self.leaf_node_id.clone(),
+        self.append_prebuilt_nodes(vec![SessionNodeRecord::new(
+            NodeId::from(frame_node_id),
+            self.leaf_node_id.clone(),
             timestamp,
-            payload: SessionNodePayload::FrameOpen {
+            SessionNodePayload::FrameOpen {
                 frame_key,
                 reason,
                 assignment,
             },
-        }]);
-        true
+        )])?;
+        Ok(true)
     }
 
     pub(crate) fn try_agent_frame_records(
@@ -1248,7 +1460,7 @@ impl SessionGraph {
         draft_namespace: &str,
         drafts: I,
         timestamp: NodeTimestamp,
-    ) -> Vec<NodeId>
+    ) -> Result<Vec<NodeId>, crate::StoreError>
     where
         I: IntoIterator<Item = SessionNodeDraft>,
     {
@@ -1260,7 +1472,7 @@ impl SessionGraph {
         draft_namespace: Option<&str>,
         drafts: I,
         timestamp: NodeTimestamp,
-    ) -> Vec<NodeId>
+    ) -> Result<Vec<NodeId>, crate::StoreError>
     where
         I: IntoIterator<Item = SessionNodeDraft>,
     {
@@ -1280,8 +1492,8 @@ impl SessionGraph {
             .iter()
             .map(|node| node.node_id.clone())
             .collect::<Vec<_>>();
-        self.append_prebuilt_nodes(nodes);
-        node_ids
+        self.append_prebuilt_nodes(nodes)?;
+        Ok(node_ids)
     }
 
     /// Atomically applies an append's nodes and selected leaf after validating the whole proposal.
@@ -1291,6 +1503,13 @@ impl SessionGraph {
     /// and its selected leaf must resolve. Validation completes before nodes, leaf, or cached read
     /// state changes, so every refusal leaves this graph unchanged.
     pub fn apply_append(
+        &mut self,
+        append: &crate::store::GraphAppend,
+    ) -> Result<(), crate::StoreError> {
+        self.edit(|draft| draft.apply_append_inner(append))
+    }
+
+    fn apply_append_inner(
         &mut self,
         append: &crate::store::GraphAppend,
     ) -> Result<(), crate::StoreError> {
@@ -1326,11 +1545,11 @@ impl SessionGraph {
 
         let extends_active_leaf = append.nodes()[0].parent_node_id == self.leaf_node_id;
         if extends_active_leaf {
-            self.append_prebuilt_nodes(append.nodes().to_vec());
+            self.append_prebuilt_nodes(append.nodes().to_vec())?;
         } else {
             let data = self.data_mut();
             data.nodes
-                .extend(append.nodes().iter().cloned().map(Arc::new));
+                .extend(append.nodes().iter().cloned().map(Arc::new))?;
             data.leaf_node_id = append.leaf_node_id().cloned();
         }
         Ok(())

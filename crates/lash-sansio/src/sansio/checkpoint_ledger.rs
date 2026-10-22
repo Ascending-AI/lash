@@ -340,9 +340,9 @@ fn leading<E: Clone>(
         return Ok(MessageSequence::from_owned(rest));
     }
     match window {
-        Some(window) if from_window <= window.messages().len() => {
-            Ok(window.messages_then(from_window, rest))
-        }
+        Some(window) if from_window <= window.messages().len() => window
+            .messages_then(from_window, rest)
+            .map_err(TurnCheckpointRestoreError::Allocation),
         _ => Err(outside_window(
             "a message sequence starts with more of the window than it has",
         )),

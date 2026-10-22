@@ -49,15 +49,17 @@ impl ProtocolDriverHandle for MidCallNoteDriver {
                 conversation_event(Message {
                     id: "call".to_string(),
                     role: MessageRole::Assistant,
-                    parts: vec![Part::tool_call(
-                        "call.p0".to_string(),
-                        "{}".to_string(),
-                        call_id.clone(),
-                        "provider-call".to_string(),
-                        TOOL.to_string(),
-                        None,
-                    )]
-                    .into(),
+                    parts: std::sync::Arc::new(
+                        (vec![Part::tool_call(
+                            "call.p0".to_string(),
+                            "{}".to_string(),
+                            call_id.clone(),
+                            "provider-call".to_string(),
+                            TOOL.to_string(),
+                            None,
+                        )])
+                        .into(),
+                    ),
                     origin: None,
                     reply_marker: None,
                 }),
@@ -97,7 +99,7 @@ impl ProtocolDriverHandle for MidCallNoteDriver {
             DriverAction::AppendEvents(vec![conversation_event(Message {
                 id: "result".to_string(),
                 role: MessageRole::User,
-                parts: parts.into(),
+                parts: std::sync::Arc::new((parts).into()),
                 origin: None,
                 reply_marker: None,
             })]),

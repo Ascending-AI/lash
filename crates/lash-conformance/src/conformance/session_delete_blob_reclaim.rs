@@ -104,7 +104,9 @@ async fn committed_checkpoint(
         session_id: request.session_id.clone(),
         ..crate::RuntimeSessionState::fixture(request.config.session_policy())
     };
-    state.ensure_agent_frame_initialized();
+    state
+        .ensure_agent_frame_initialized()
+        .expect("source fixture edit is admitted");
     let leaf_node_id = state
         .session_graph
         .leaf_node_id
@@ -224,7 +226,9 @@ pub(super) async fn commit_content_aliased_checkpoint_roots(
         session_id: request.session_id.clone(),
         ..crate::RuntimeSessionState::fixture(request.config.session_policy())
     };
-    state.ensure_agent_frame_initialized();
+    state
+        .ensure_agent_frame_initialized()
+        .expect("source fixture edit is admitted");
     let mut commit = crate::RuntimeCommit::persisted_state_for_test(&state);
     commit.checkpoint.components.insert(
         "conformance/content-aliased-root".to_string(),
@@ -311,7 +315,9 @@ async fn advance_checkpoint(
         .expect("the session has a committed head");
     let mut snapshot = state.to_snapshot();
     snapshot.turn_index += 1;
-    state.adopt_snapshot(snapshot);
+    state
+        .adopt_snapshot(snapshot)
+        .expect("source fixture edit is admitted");
     let mut commit = crate::RuntimeCommit::persisted_state_for_test(&state);
     if !retain_owned_component {
         commit
@@ -855,20 +861,26 @@ async fn attachment_prefix_retention(backend_name: &str, handles: SessionDeleteB
         session_id: request.session_id.clone(),
         ..crate::RuntimeSessionState::fixture(request.config.session_policy())
     };
-    state.ensure_agent_frame_initialized();
-    state.session_graph.append_message(crate::Message {
-        id: "shared-image".into(),
-        role: crate::MessageRole::User,
-        origin: None,
-        parts: Arc::new(vec![crate::Part::attachment_part(
-            "shared-image-part".into(),
-            String::new(),
-            Some(lash_protocol_types::PartAttachment {
-                reference: reference.clone(),
-            }),
-        )]),
-        reply_marker: None,
-    });
+    state.ensure_agent_frame_initialized().unwrap();
+    state
+        .session_graph
+        .append_message(crate::Message {
+            id: "shared-image".into(),
+            role: crate::MessageRole::User,
+            origin: None,
+            parts: Arc::new(
+                (vec![crate::Part::attachment_part(
+                    "shared-image-part".into(),
+                    String::new(),
+                    Some(lash_protocol_types::PartAttachment {
+                        reference: reference.clone(),
+                    }),
+                )])
+                .into(),
+            ),
+            reply_marker: None,
+        })
+        .unwrap();
     let mut commit = crate::RuntimeCommit::persisted_state_for_test(&state);
     commit.committed_attachment_ids = vec![reference.id.clone()];
     let receipt = store.commit_runtime_state(commit).await.unwrap();

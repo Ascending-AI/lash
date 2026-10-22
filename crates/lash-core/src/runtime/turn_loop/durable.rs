@@ -235,7 +235,7 @@ impl LashRuntime {
             base_read_model.active_events,
         )
         .with_render_cache(base_read_model.prompt_render_cache);
-        let messages = window.then(turn_delta);
+        let messages = window.then(turn_delta).map_err(RuntimeError::allocation)?;
         // The attachment-omission history policies (ADR 0133) narrow the
         // request's view only: `messages` stays the turn's history.
         let context_transform = crate::runtime::RuntimeNamedPhase::begin(
@@ -266,7 +266,13 @@ impl LashRuntime {
             )
             .map_err(|err| err.into_turn_failure(RuntimeErrorCode::ContextPrepareTurn))?;
         if !omissions.is_empty() {
-            crate::plugin::apply_attachment_omissions(request_messages.make_mut(), &omissions);
+            crate::plugin::apply_attachment_omissions(
+                request_messages
+                    .make_mut()
+                    .map_err(RuntimeError::allocation)?,
+                &omissions,
+            )
+            .map_err(crate::RuntimeError::allocation)?;
         }
         let prepared_context = crate::session_model::context::PreparedContext {
             messages: request_messages,
@@ -363,6 +369,7 @@ impl LashRuntime {
             self.host.core.durability.commit_budget,
             turn_graph_appends.clone(),
         )
+        .map_err(|error| error.runtime_error())?
         .with_output_cuts(self.host.core.control.output_cuts)
         .with_fleet_format(self.fleet_format())
         .with_definition_engines(self.host.core.process_engines.clone())

@@ -133,7 +133,9 @@ pub(super) async fn session_store_factory_enumeration_is_read_only_and_keeps_tom
         session_id: root_request.session_id.clone(),
         ..crate::RuntimeSessionState::fixture(root_request.config.session_policy())
     };
-    state.ensure_agent_frame_initialized();
+    state
+        .ensure_agent_frame_initialized()
+        .expect("source fixture edit is admitted");
     root.commit_runtime_state(crate::RuntimeCommit::persisted_state_for_test(&state))
         .await
         .expect("commit enumeration root");

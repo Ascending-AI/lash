@@ -28,6 +28,7 @@ pub struct ProtocolPayload(Arc<Inner>);
 struct Inner {
     value: serde_json::Value,
     derived: DerivedMemo,
+    allocation: crate::allocation::AllocationHold,
 }
 
 impl ProtocolPayload {
@@ -35,7 +36,21 @@ impl ProtocolPayload {
         Self(Arc::new(Inner {
             value,
             derived: DerivedMemo::default(),
+            allocation: Default::default(),
         }))
+    }
+
+    /// Transfer a source decode's admission to the Arc readers retain.
+    pub fn decoded_in(
+        &mut self,
+        allocation: crate::allocation::AllocationHold,
+    ) -> Result<(), crate::StoredDataCorruption> {
+        let inner = Arc::get_mut(&mut self.0).ok_or_else(|| crate::StoredDataCorruption {
+            record_kind: "protocol payload".into(),
+            message: "a fresh decode unexpectedly shares its payload before admission".into(),
+        })?;
+        inner.allocation = allocation;
+        Ok(())
     }
 
     pub fn value(&self) -> &serde_json::Value {

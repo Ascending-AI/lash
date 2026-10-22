@@ -124,7 +124,7 @@ pub fn append_request_commit_with_clock_for_testing(
         nodes,
         &draft_namespace,
         clock,
-    );
+    )?;
     let mut graph = state.pending_graph_commit();
     graph.derive_node_ids(&state.session_id, &operation)?;
     let mut commit =

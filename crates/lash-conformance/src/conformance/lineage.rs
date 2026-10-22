@@ -128,12 +128,17 @@ async fn seed(
             lash_core::NoProgressBudget::bounded(12),
         ))
     };
-    state.ensure_agent_frame_initialized();
+    state
+        .ensure_agent_frame_initialized()
+        .expect("source fixture edit is admitted");
     for ordinal in 0..plugins {
-        state.session_graph.append_plugin(
-            "lineage-conformance",
-            serde_json::json!({"ordinal": ordinal}),
-        );
+        state
+            .session_graph
+            .append_plugin(
+                "lineage-conformance",
+                serde_json::json!({"ordinal": ordinal}),
+            )
+            .expect("source fixture edit is admitted");
     }
     store
         .commit_runtime_state(RuntimeCommit::persisted_state_for_test(&state))
@@ -190,10 +195,13 @@ async fn append(store: &SessionStore, count: usize) -> Vec<lash_core::NodeId> {
         .expect("load lineage append state")
         .expect("lineage append state exists");
     for ordinal in 0..count {
-        state.session_graph.append_plugin(
-            "lineage-conformance-append",
-            serde_json::json!({"ordinal": ordinal}),
-        );
+        state
+            .session_graph
+            .append_plugin(
+                "lineage-conformance-append",
+                serde_json::json!({"ordinal": ordinal}),
+            )
+            .expect("source fixture edit is admitted");
     }
     store
         .commit_runtime_state(RuntimeCommit::persisted_state_for_test(&state))

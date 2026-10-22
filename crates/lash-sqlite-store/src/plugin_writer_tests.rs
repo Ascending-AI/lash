@@ -151,7 +151,9 @@ async fn commit(
         "plugin-writer-law",
     )
     .await?;
-    state.apply_persisted_commit_result(receipt);
+    state
+        .apply_persisted_commit_result(receipt)
+        .expect("source fixture edit is admitted");
     Ok(())
 }
 

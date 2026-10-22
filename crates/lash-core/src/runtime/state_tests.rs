@@ -33,7 +33,9 @@ async fn corrupt_commit_result_cannot_forge_discarded_execution_state_residency(
         .expect("persist valid generation-A state");
 
     let mut generation_b = generation_a.clone();
-    generation_b.apply_persisted_commit_result(result_a.clone());
+    generation_b
+        .apply_persisted_commit_result(result_a.clone())
+        .unwrap();
     generation_b.set_execution_graph(crate::testing::store_fixtures::execution_graph(&format!(
         "generation-b {}",
         "b".repeat(1024)
@@ -79,7 +81,7 @@ async fn corrupt_commit_result_cannot_forge_discarded_execution_state_residency(
         let mut tampered = result_a.clone();
         tamper(&mut tampered);
         let mut resident = generation_a.clone();
-        resident.apply_persisted_commit_result(tampered);
+        resident.apply_persisted_commit_result(tampered).unwrap();
 
         let hydration = resident.execution_state_hydration();
         if !matches!(hydration, Err(crate::StoreError::StoredDataCorrupt { .. })) {

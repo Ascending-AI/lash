@@ -30,7 +30,7 @@ fn message(id: &str, references: &[&crate::AttachmentRef]) -> crate::Message {
         role: crate::MessageRole::User,
         origin: None,
         parts: Arc::new(
-            references
+            (references
                 .iter()
                 .enumerate()
                 .map(|(index, reference)| {
@@ -42,7 +42,8 @@ fn message(id: &str, references: &[&crate::AttachmentRef]) -> crate::Message {
                         }),
                     )
                 })
-                .collect(),
+                .collect::<Vec<_>>())
+            .into(),
         ),
         reply_marker: None,
     }
@@ -167,7 +168,9 @@ impl HoldLaw {
                 )
             },
         };
-        state.ensure_agent_frame_initialized();
+        state
+            .ensure_agent_frame_initialized()
+            .expect("source fixture edit is admitted");
         edit(&mut state);
         let commit = crate::RuntimeCommit::persisted_state_for_test(&state)
             .with_committed_attachments(named.iter().map(|reference| reference.id.clone()));
@@ -264,7 +267,8 @@ where
             |state| {
                 state
                     .session_graph
-                    .append_message(message("history", &[&history, &shared]));
+                    .append_message(message("history", &[&history, &shared]))
+                    .expect("source fixture edit is admitted");
             },
             &[&history, &shared],
         )
@@ -312,7 +316,10 @@ where
         } else {
             law.commit(
                 |state| {
-                    state.session_graph.append_message(message("next", &[]));
+                    state
+                        .session_graph
+                        .append_message(message("next", &[]))
+                        .expect("source fixture edit is admitted");
                 },
                 &[],
             )
@@ -360,7 +367,8 @@ async fn bounded_attachment_release(handles: SessionDeleteBlobHandles) {
         |state| {
             state
                 .session_graph
-                .append_message(message("page-history", &[&history]));
+                .append_message(message("page-history", &[&history]))
+                .expect("source fixture edit is admitted");
         },
         &[&history],
     )
@@ -385,7 +393,8 @@ async fn bounded_attachment_release(handles: SessionDeleteBlobHandles) {
         |state| {
             state
                 .session_graph
-                .append_message(message("page-next", &[]));
+                .append_message(message("page-next", &[]))
+                .expect("source fixture edit is admitted");
         },
         &[],
     )

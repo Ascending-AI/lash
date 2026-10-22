@@ -16,7 +16,7 @@ pub fn plugin_message_to_message(plugin_message: &PluginMessage, fallback_id: &s
     Message {
         id: message_id,
         role: plugin_message.role,
-        parts: Arc::new(parts),
+        parts: Arc::new((parts).into()),
         origin: plugin_message.origin.clone().or_else(|| {
             Some(crate::MessageOrigin::Plugin {
                 plugin_id: "plugin".to_string(),

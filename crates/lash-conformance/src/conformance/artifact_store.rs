@@ -242,11 +242,14 @@ fn sample_turn_prelude(turn: &'static str, text: &str) -> crate::TurnPrelude {
     let history = crate::MessageSequence::from(vec![crate::Message {
         id: format!("{turn}-input"),
         role: crate::MessageRole::User,
-        parts: Arc::new(vec![crate::Part::text(
-            format!("{turn}-input-part"),
-            text.to_owned(),
-            None,
-        )]),
+        parts: Arc::new(
+            (vec![crate::Part::text(
+                format!("{turn}-input-part"),
+                text.to_owned(),
+                None,
+            )])
+            .into(),
+        ),
         origin: None,
         reply_marker: None,
     }]);

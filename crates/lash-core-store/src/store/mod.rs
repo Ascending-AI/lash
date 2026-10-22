@@ -198,7 +198,8 @@ pub use testing::{
 };
 pub use window_load::{
     LoadedSessionWindow, load_session_read_view, load_session_window_state,
-    load_stored_session_snapshot, refresh_session_window, window_state,
+    load_session_window_state_in, load_stored_session_snapshot, refresh_session_window,
+    window_state,
 };
 
 /// Version 9 combines full effect addresses and truthful attribution with
@@ -438,7 +439,7 @@ impl RuntimeCommit {
         let mapping = graph.derive_node_ids(&state.session_id, &operation)?;
         state
             .session_graph
-            .remap_node_ids(&state.session_id, &mapping);
+            .remap_node_ids(&state.session_id, &mapping)?;
         remap_optional_node_id(&mut state.current_frame_node_id, &mapping);
         state.agent_frames = state.session_graph.agent_frame_records(&state.session_id);
         let persisted_node_ids = mapping.iter().map(|(_, derived)| derived.clone()).collect();

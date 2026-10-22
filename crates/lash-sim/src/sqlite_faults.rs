@@ -560,7 +560,9 @@ async fn run_composition_case(
         .commit_runtime_state(prefix)
         .await
         .map_err(|error| error.to_string())?;
-    state.apply_persisted_commit_result(prefix_result);
+    state
+        .apply_persisted_commit_result(prefix_result)
+        .map_err(|error| error.to_string())?;
     let durable_prefix_revision = state.head_revision;
     state.turn_index += 1;
     let target =
@@ -766,7 +768,9 @@ async fn run_seed(
         let result = store.commit_runtime_state(commit).await.map_err(|err| {
             ScenarioFailure::harness(backend, format!("prefix commit {index}: {err}"))
         })?;
-        state.apply_persisted_commit_result(result);
+        state
+            .apply_persisted_commit_result(result)
+            .map_err(|error| ScenarioFailure::harness(backend, error.to_string()))?;
     }
     let durable_prefix_revision = state.head_revision;
     let mut target_state = state.clone();

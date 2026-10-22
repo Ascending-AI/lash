@@ -211,6 +211,26 @@ impl WindowCacheRead {
         leaf: &NodeId,
         leaf_generation: u64,
     ) -> Result<WindowReuse, crate::StoreError> {
+        self.reuse_in(
+            session,
+            frame,
+            leaf,
+            leaf_generation,
+            &lash_protocol_types::allocation::AllocationBudget::unowned(),
+        )
+    }
+
+    /// Editing requires this exact ledger. A cold reader may share an exact
+    /// admitted graph, whose payload holds then live as long as that reader;
+    /// it may not extend or rebuild the owning claim's source buffers.
+    pub fn reuse_in(
+        &self,
+        session: &SessionId,
+        frame: WindowFrame<'_>,
+        leaf: &NodeId,
+        leaf_generation: u64,
+        budget: &lash_protocol_types::allocation::AllocationBudget,
+    ) -> Result<WindowReuse, crate::StoreError> {
         let mut entries = self.cache.entries.lock_recover();
         let used = entries.tick();
         let Some(entry) = entries.by_session.get_mut(session) else {
@@ -222,6 +242,12 @@ impl WindowCacheRead {
             .is_some_and(|anchor| frame.anchors(anchor))
             || leaf_generation < frame.generation
         {
+            return Ok(WindowReuse::Miss);
+        }
+        let same_ledger = entry.window.nodes.allocation_budget().identity() == budget.identity();
+        let exact = leaf_generation == entry.leaf_generation
+            && entry.window.leaf_node_id.as_ref() == Some(leaf);
+        if !same_ledger && !(budget.identity() == 0 && exact) {
             return Ok(WindowReuse::Miss);
         }
         entry.used = used;
@@ -279,6 +305,11 @@ impl WindowCacheRead {
                 (Some(anchor), Some(held_anchor)) => {
                     if held_anchor.frame_node_id == anchor.frame_node_id {
                         leaf_generation > held.leaf_generation
+                            || (leaf_generation == held.leaf_generation
+                                && window.leaf_node_id == held.window.leaf_node_id
+                                && window.nodes.allocation_budget().identity() != 0
+                                && window.nodes.allocation_budget().identity()
+                                    != held.window.nodes.allocation_budget().identity())
                     } else {
                         anchor.generation > held_anchor.generation
                     }
@@ -334,6 +365,9 @@ impl WindowCacheRead {
     /// A read invalidated by deletion owns its result without retaining it.
     pub fn attach(&self, session: &SessionId, mut graph: SessionGraph) -> SessionGraph {
         let mut entries = self.cache.entries.lock_recover();
+        // This lease owns cache lifetime only. Source attribution is checked
+        // in reuse_in; sharing a session lease never authorizes a buffer edit
+        // or lets a later claim borrow a foreign source reservation.
         let retain = entries.invalidation == self.invalidation;
         let readers = retain
             .then(|| {
@@ -394,7 +428,7 @@ mod tests {
             crate::MaxToolCalls::new(16),
             crate::NoProgressBudget::bounded(12),
         ));
-        state.ensure_agent_frame_initialized();
+        state.ensure_agent_frame_initialized().unwrap();
         let leaf = state
             .session_graph
             .leaf_node_id
@@ -454,7 +488,7 @@ mod tests {
             crate::MaxToolCalls::new(16),
             crate::NoProgressBudget::bounded(12),
         ));
-        state.ensure_agent_frame_initialized();
+        state.ensure_agent_frame_initialized().unwrap();
         let leaf = state
             .session_graph
             .leaf_node_id

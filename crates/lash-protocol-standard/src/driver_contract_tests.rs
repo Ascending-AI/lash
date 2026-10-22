@@ -59,7 +59,9 @@ fn machine(max_turns: Option<usize>) -> TurnMachine {
         vec![Message {
             id: "m0".to_string(),
             role: MessageRole::User,
-            parts: vec![Part::text("m0.p0".to_string(), "shift".to_string(), None)].into(),
+            parts: std::sync::Arc::new(
+                (vec![Part::text("m0.p0".to_string(), "shift".to_string(), None)]).into(),
+            ),
             origin: None,
             reply_marker: None,
         }],
@@ -201,7 +203,9 @@ fn machine_with(driver: StandardDriver) -> TurnMachine {
         vec![Message {
             id: "m0".to_string(),
             role: MessageRole::User,
-            parts: vec![Part::text("m0.p0".to_string(), "shift".to_string(), None)].into(),
+            parts: std::sync::Arc::new(
+                (vec![Part::text("m0.p0".to_string(), "shift".to_string(), None)]).into(),
+            ),
             origin: None,
             reply_marker: None,
         }],
@@ -777,7 +781,9 @@ fn terminal_required_standard_prose_takes_the_repair_path() {
         vec![Message {
             id: "m0".to_string(),
             role: MessageRole::User,
-            parts: vec![Part::text("m0.p0".to_string(), "shift".to_string(), None)].into(),
+            parts: std::sync::Arc::new(
+                (vec![Part::text("m0.p0".to_string(), "shift".to_string(), None)]).into(),
+            ),
             origin: None,
             reply_marker: None,
         }],

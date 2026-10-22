@@ -253,6 +253,9 @@ impl std::error::Error for StoreFault {}
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum StoreError {
+    #[error(transparent)]
+    Allocation(#[from] lash_protocol_types::allocation::AllocationError),
+
     /// A process authority read found the retained prune tombstone.
     #[error(
         "process authority is no longer retained ({terminal_label}, pruned at {pruned_at_ms}ms)"
@@ -988,6 +991,9 @@ impl StoreError {
     /// retryable.
     pub fn is_transient(&self) -> bool {
         match self {
+            Self::Allocation(error) => {
+                error.kind == lash_protocol_types::allocation::ReserveError::Pressure
+            }
             Self::ProcessAuthorityPruned { .. } => false,
             Self::PreparedProcessRegistrationStale { .. }
             | Self::Contended
@@ -1102,6 +1108,14 @@ impl StoreError {
     pub fn runtime_code(&self) -> crate::RuntimeErrorCode {
         use crate::RuntimeErrorCode as Code;
         match self {
+            Self::Allocation(error) => match error.kind {
+                lash_protocol_types::allocation::ReserveError::Pressure => {
+                    Code::OwnerMemoryPressure
+                }
+                lash_protocol_types::allocation::ReserveError::TooLarge => {
+                    Code::OwnerCapacityExceeded
+                }
+            },
             Self::ProcessAuthorityPruned { .. } => Code::ProcessNoLongerRetained,
             Self::PreparedProcessRegistrationStale { .. } | Self::Contended => {
                 Code::StoreCommitContended
@@ -1222,6 +1236,7 @@ impl StoreError {
     /// classified.
     pub fn refuses_request_content(&self) -> bool {
         match self {
+            Self::Allocation(_) => false,
             Self::ProcessAuthorityPruned { .. } => true,
             Self::TurnOutcomeMaterializationRefused { .. }
             | Self::CommitNodeBudgetExceeded { .. }
@@ -1334,6 +1349,9 @@ impl StoreError {
             });
         }
         match self {
+            Self::Allocation(error) => Some(Cause::OwnerAllocation {
+                refusal: Box::new(error.clone()),
+            }),
             Self::StoredDataCorrupt {
                 record_kind,
                 message,
@@ -1405,6 +1423,7 @@ impl StoreError {
     /// diagnostics that must use a wildcard for this non-exhaustive enum.
     pub fn variant_name(&self) -> &'static str {
         match self {
+            Self::Allocation(_) => "Allocation",
             Self::ProcessAuthorityPruned { .. } => "ProcessAuthorityPruned",
             Self::ExecutionStateCaptureFailed { .. } => "ExecutionStateCaptureFailed",
             Self::TurnOutcomeMaterializationRefused { .. } => "TurnOutcomeMaterializationRefused",

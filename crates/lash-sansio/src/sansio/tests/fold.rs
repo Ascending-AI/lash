@@ -271,7 +271,9 @@ fn checkpoint_resume_keeps_prompt_view_edits_out_of_progress_and_done() {
                 text_message(MessageRole::User, "ephemeral note"),
             ]
         };
-        machine.adopt_prepared_messages(MessageSequence::from_owned(prompt));
+        machine
+            .adopt_prepared_messages(MessageSequence::from_owned(prompt))
+            .unwrap();
         // Resume after the sync, before the request has been constructed.
         let effects = drain_unsynced_effects(&mut machine);
         let id = find_execution_environment_sync(&effects).expect("sync");

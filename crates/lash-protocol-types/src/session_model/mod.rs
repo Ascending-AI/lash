@@ -8,7 +8,7 @@ pub use failure::{
 };
 pub use message::prompt_resume_safe_len;
 pub use message::{
-    BaseRenderCache, InternalPartKind, InvalidPartCombination, Message, MessageRole,
+    BaseRenderCache, InternalPartKind, InvalidPartCombination, Message, MessageParts, MessageRole,
     MessageSequence, Part, PartAttachment, PartKind, RenderedPrompt, append_rendered_prompt,
     messages_are_prompt_resume_safe, render_prompt, shared_parts,
 };
@@ -352,7 +352,7 @@ pub fn same_history_record<PE: PartialEq>(
 pub struct ConversationRecord {
     pub id: String,
     pub role: MessageRole,
-    pub parts: Arc<Vec<Part>>,
+    pub parts: Arc<message::MessageParts>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub origin: Option<MessageOrigin>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

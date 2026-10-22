@@ -211,16 +211,18 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for NativeDriver {
                         "output_limit_retry",
                     ),
                     role: lash_core::MessageRole::System,
-                    parts: vec![lash_core::Part::text(
-                        rlm_message_id(
-                            ctx.turn_id(),
-                            ctx.protocol_iteration(),
-                            "output_limit_retry.p0",
-                        ),
-                        copy,
-                        None,
-                    )]
-                    .into(),
+                    parts: std::sync::Arc::new(
+                        (vec![lash_core::Part::text(
+                            rlm_message_id(
+                                ctx.turn_id(),
+                                ctx.protocol_iteration(),
+                                "output_limit_retry.p0",
+                            ),
+                            copy,
+                            None,
+                        )])
+                        .into(),
+                    ),
                     origin: Some(lash_core::MessageOrigin::Plugin {
                         plugin_id: crate::plugin::RLM_PROTOCOL_PLUGIN_ID.to_string(),
                         transient: false,

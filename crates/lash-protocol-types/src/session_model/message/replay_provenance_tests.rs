@@ -35,21 +35,24 @@ fn replay_request_from_reopened_message(
     let history = vec![Message {
         id: "assistant-1".to_string(),
         role: MessageRole::Assistant,
-        parts: Arc::new(vec![
-            Part::reasoning(
-                "assistant-1.p0".to_string(),
-                "neutral summary".to_string(),
-                Some(reasoning),
-            ),
-            Part::tool_call(
-                "assistant-1.p1".to_string(),
-                "{}".to_string(),
-                crate::ToolCallId::fixture("call-1"),
-                "call-1".to_string(),
-                "lookup".to_string(),
-                Some(tool),
-            ),
-        ]),
+        parts: Arc::new(
+            (vec![
+                Part::reasoning(
+                    "assistant-1.p0".to_string(),
+                    "neutral summary".to_string(),
+                    Some(reasoning),
+                ),
+                Part::tool_call(
+                    "assistant-1.p1".to_string(),
+                    "{}".to_string(),
+                    crate::ToolCallId::fixture("call-1"),
+                    "call-1".to_string(),
+                    "lookup".to_string(),
+                    Some(tool),
+                ),
+            ])
+            .into(),
+        ),
         origin: None,
         reply_marker: None,
     }];

@@ -402,7 +402,7 @@ async fn measure_store_hardening_backend_turn(
         let commit = RuntimeCommit::persisted_state_for_test(&state)
             .with_committed_attachments([attachment_id]);
         let result = store.commit_runtime_state(commit).await?;
-        state.apply_persisted_commit_result(result);
+        state.apply_persisted_commit_result(result)?;
         Ok::<(), anyhow::Error>(())
     })
     .await?;

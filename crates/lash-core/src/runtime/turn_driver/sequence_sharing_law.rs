@@ -37,16 +37,19 @@ async fn effect_executor_allocations_are_independent_of_history_depth() {
     .await
     .expect("prepare the fixture's turn");
     let mut driver = turn.driver;
-    let mut machine = driver.turn_machine(turn.window, turn.messages);
+    let mut machine = driver.turn_machine(turn.window, turn.messages).unwrap();
     // Warm the session projection and executor's fixed setup before either
     // cohort; their first-use work is unrelated to sequence history depth.
-    drop(super::super::local_effects::turn_effect_executor(
-        &mut driver,
-        &machine,
-        observer.clone(),
-        controller.clone(),
-        "sequence-sharing:body",
-    ));
+    drop(
+        super::super::local_effects::turn_effect_executor(
+            &mut driver,
+            &machine,
+            observer.clone(),
+            controller.clone(),
+            "sequence-sharing:body",
+        )
+        .unwrap(),
+    );
     let mut measured = Vec::new();
     for depth in [8, 512] {
         let history: crate::MessageSequence = (0..depth)
@@ -71,8 +74,8 @@ async fn effect_executor_allocations_are_independent_of_history_depth() {
         // executor constructor, including for effects that never read them.
         driver.prelude_base_messages = history.clone();
         driver.prepared_context.messages = history.clone();
-        machine.adopt_committed_messages(history.clone());
-        machine.adopt_prepared_messages(history);
+        machine.adopt_committed_messages(history.clone()).unwrap();
+        machine.adopt_prepared_messages(history).unwrap();
         let measurement = allocation_counter::Measurement::start();
         let executor = super::super::local_effects::turn_effect_executor(
             &mut driver,
@@ -80,7 +83,8 @@ async fn effect_executor_allocations_are_independent_of_history_depth() {
             observer.clone(),
             controller.clone(),
             "sequence-sharing:body",
-        );
+        )
+        .unwrap();
         std::hint::black_box(&executor);
         drop(executor);
         measured.push(measurement.finish());
@@ -131,7 +135,9 @@ fn protocol_reply_tracking_allocates_independently_of_history_depth() {
         prefix.truncate(turns);
         let before = crate::MessageSequence::from_base(prefix);
         let mut after = before.clone();
-        after.extend(suffix);
+        after
+            .extend(suffix)
+            .expect("source fixture edit is admitted");
         let measurement = allocation_counter::Measurement::start();
         let mut tracker = super::machine::ProtocolReplyTracker::default();
         tracker.mark_run_start(&before);
@@ -146,7 +152,9 @@ fn protocol_reply_tracking_allocates_independently_of_history_depth() {
         // A new model call excludes that reply from its successor's output.
         tracker.mark_model_call(&after);
         assert!(tracker.terminal_output(&after, &graph).is_empty());
-        after.push(message("following-reply".to_owned()));
+        after
+            .push(message("following-reply".to_owned()))
+            .expect("source fixture edit is admitted");
         assert_eq!(tracker.terminal_output(&after, &graph), ["following-reply"]);
         // Rebuilt/edited histories have no prefix witness: preserve the same
         // id semantics, including an old assistant moved after the reply.

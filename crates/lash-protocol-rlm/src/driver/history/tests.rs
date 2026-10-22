@@ -41,7 +41,7 @@ fn assistant_reasoning_event(
     SessionHistoryRecord::Conversation(ConversationRecord {
         id: id.to_string(),
         role: MessageRole::Assistant,
-        parts: parts.into(),
+        parts: std::sync::Arc::new((parts).into()),
         origin: Some(MessageOrigin::Plugin {
             plugin_id: crate::plugin::RLM_PROTOCOL_PLUGIN_ID.to_string(),
             transient: false,
@@ -360,7 +360,9 @@ fn protocol_feedback(id: &str, text: &str) -> SessionHistoryRecord {
     SessionHistoryRecord::Conversation(ConversationRecord {
         id: id.to_string(),
         role: MessageRole::System,
-        parts: vec![Part::prose(format!("{id}.p0"), text.to_string(), None)].into(),
+        parts: std::sync::Arc::new(
+            (vec![Part::prose(format!("{id}.p0"), text.to_string(), None)]).into(),
+        ),
         origin: Some(MessageOrigin::Plugin {
             plugin_id: crate::plugin::RLM_PROTOCOL_PLUGIN_ID.to_string(),
             transient: false,
@@ -430,12 +432,14 @@ fn a_failure_before_a_user_turn_survives_a_later_success() {
         SessionHistoryRecord::Conversation(ConversationRecord {
             id: "u1".to_string(),
             role: MessageRole::User,
-            parts: vec![Part::prose(
-                "u1.p0".to_string(),
-                "Now try something else.".to_string(),
-                None,
-            )]
-            .into(),
+            parts: std::sync::Arc::new(
+                (vec![Part::prose(
+                    "u1.p0".to_string(),
+                    "Now try something else.".to_string(),
+                    None,
+                )])
+                .into(),
+            ),
             origin: None,
             reply_marker: None,
         }),
@@ -515,12 +519,14 @@ fn a_host_system_message_survives_the_scrub() {
         SessionHistoryRecord::Conversation(ConversationRecord {
             id: "h1".to_string(),
             role: MessageRole::System,
-            parts: vec![Part::prose(
-                "h1.p0".to_string(),
-                "Reminder: never write outside the workspace.".to_string(),
-                None,
-            )]
-            .into(),
+            parts: std::sync::Arc::new(
+                (vec![Part::prose(
+                    "h1.p0".to_string(),
+                    "Reminder: never write outside the workspace.".to_string(),
+                    None,
+                )])
+                .into(),
+            ),
             origin: Some(MessageOrigin::Plugin {
                 plugin_id: "some-other-plugin".to_string(),
                 transient: false,
@@ -548,12 +554,14 @@ fn a_surviving_cells_prose_is_not_taken_by_the_scrub() {
         SessionHistoryRecord::Conversation(ConversationRecord {
             id: "h1".to_string(),
             role: MessageRole::System,
-            parts: vec![Part::prose(
-                "h1.p0".to_string(),
-                "Reminder: stay in the workspace.".to_string(),
-                None,
-            )]
-            .into(),
+            parts: std::sync::Arc::new(
+                (vec![Part::prose(
+                    "h1.p0".to_string(),
+                    "Reminder: stay in the workspace.".to_string(),
+                    None,
+                )])
+                .into(),
+            ),
             origin: Some(MessageOrigin::Plugin {
                 plugin_id: "some-other-plugin".to_string(),
                 transient: false,
@@ -580,7 +588,9 @@ fn fig1123_cell_history_marks_only_real_turn_inputs_as_segment_boundaries() {
         SessionHistoryRecord::Conversation(ConversationRecord {
             id: "real".to_string(),
             role: MessageRole::User,
-            parts: vec![Part::text("real.p0".to_string(), "real".to_string(), None)].into(),
+            parts: std::sync::Arc::new(
+                (vec![Part::text("real.p0".to_string(), "real".to_string(), None)]).into(),
+            ),
             origin: Some(MessageOrigin::TurnInput {
                 turn_id: lash_core::TurnId::from("turn"),
                 input_id: None,
@@ -590,12 +600,14 @@ fn fig1123_cell_history_marks_only_real_turn_inputs_as_segment_boundaries() {
         SessionHistoryRecord::Conversation(ConversationRecord {
             id: "synthetic".to_string(),
             role: MessageRole::User,
-            parts: vec![Part::text(
-                "synthetic.p0".to_string(),
-                "synthetic".to_string(),
-                None,
-            )]
-            .into(),
+            parts: std::sync::Arc::new(
+                (vec![Part::text(
+                    "synthetic.p0".to_string(),
+                    "synthetic".to_string(),
+                    None,
+                )])
+                .into(),
+            ),
             origin: Some(MessageOrigin::Plugin {
                 plugin_id: "plugin".to_string(),
                 transient: false,

@@ -974,7 +974,7 @@ mod sweep {
             .expect("read the created child")
             .expect("created head")
             .state;
-            state.ensure_agent_frame_initialized();
+            state.ensure_agent_frame_initialized().unwrap();
             inner
                 .commit_runtime_state(lash_core::RuntimeCommit::persisted_state_for_test(&state))
                 .await

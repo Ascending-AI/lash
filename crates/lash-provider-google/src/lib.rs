@@ -457,18 +457,21 @@ mod tests {
             Message {
                 id: assistant_id.to_string(),
                 role: MessageRole::Assistant,
-                parts: Arc::new(durable_parts),
+                parts: Arc::new((durable_parts).into()),
                 origin: None,
                 reply_marker: None,
             },
             Message {
                 id: "google-regression.user".to_string(),
                 role: MessageRole::User,
-                parts: Arc::new(vec![Part::text(
-                    "google-regression.user.p0".to_string(),
-                    "continue".to_string(),
-                    None,
-                )]),
+                parts: Arc::new(
+                    (vec![Part::text(
+                        "google-regression.user.p0".to_string(),
+                        "continue".to_string(),
+                        None,
+                    )])
+                    .into(),
+                ),
                 origin: None,
                 reply_marker: None,
             },
