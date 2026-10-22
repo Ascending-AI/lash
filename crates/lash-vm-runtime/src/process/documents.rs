@@ -14,7 +14,7 @@ use lash_vocabulary::names::DocumentId;
 use lash_vocabulary::names::SourceMapId;
 use lash_vocabulary::tokens::{TokenCodec as _, TokenWriter, logical_digest};
 use lash_vocabulary::{names::*, package::*};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::sync::{Arc, Mutex, OnceLock};
 
 pub(crate) fn document_artifact(document: &DocumentId) -> ArtifactName {
@@ -65,7 +65,34 @@ type HelperPreparation = OnceLock<Result<Arc<PreparedHelperRelease>, EnginePortE
 struct DocumentPreparations {
     linked: LinkedContent,
     helpers: BTreeMap<[u8; 32], Arc<HelperPreparation>>,
+    documents: VecDeque<Arc<PreparedDocument>>,
+    document_bytes: usize,
+    #[cfg(test)]
+    validations: usize,
 }
+// The existing document owner retains at most sixteen preparations and
+// eight MiB of encoded content, including the input and decoded body's copy.
+const DOCUMENTS: usize = 16;
+const DOCUMENT_BYTES: usize = 8 * 1024 * 1024;
+
+struct PreparedDocument {
+    id: DocumentId,
+    bytes: Arc<[u8]>,
+    checked: OnceLock<Result<IdentifiedDocument, EnginePortError>>,
+}
+
+impl DocumentPreparations {
+    fn document(&mut self, id: &DocumentId, bytes: &[u8]) -> Option<Arc<PreparedDocument>> {
+        let at = self
+            .documents
+            .iter()
+            .position(|prepared| prepared.id == *id && prepared.bytes.as_ref() == bytes)?;
+        let prepared = self.documents.remove(at)?;
+        self.documents.push_back(Arc::clone(&prepared));
+        Some(prepared)
+    }
+}
+
 struct PreparedHelperRelease {
     documents: Vec<IdentifiedDocument>,
     links: Vec<LinkRecord>,
@@ -178,9 +205,15 @@ impl PreparedHelperRelease {
 }
 
 #[derive(Default)]
-pub(crate) struct ProcessPreparations;
+pub(crate) struct ProcessPreparations {
+    prepared: Arc<Mutex<DocumentPreparations>>,
+}
 impl ProcessPreparations {
-    pub(crate) fn bind(&self, engine: super::KernelProcessEngine) -> super::KernelProcessEngine {
+    pub(crate) fn bind(
+        &self,
+        mut engine: super::KernelProcessEngine,
+    ) -> super::KernelProcessEngine {
+        engine.documents.prepared = Arc::clone(&self.prepared);
         engine
     }
 }
@@ -296,6 +329,20 @@ impl KernelDocuments {
             prepared: Arc::new(Mutex::new(DocumentPreparations::default())),
         }
     }
+    /// A current runtime binding sharing only this owner's pure content
+    /// preparations. Reads and retention always use the supplied ports.
+    pub fn bind(
+        &self,
+        store: Arc<dyn ModuleArtifactStore>,
+        packages: Arc<dyn PackageStore>,
+    ) -> Self {
+        Self {
+            store,
+            packages,
+            prepared: Arc::clone(&self.prepared),
+        }
+    }
+
     /// Bootstrap build-owned helper content under the receiving owner's existing claim.
     /// Advertisement acceptance follows this operation; cancellation leaves only that claim's debt.
     pub async fn hold_helper_release(
@@ -398,7 +445,80 @@ impl KernelDocuments {
         else {
             return Ok(None);
         };
-        let document = IdentifiedDocument::decode_standard(&bytes).map_err(|error| {
+        Self::check_current(&self.prepared, id, &bytes).map(Some)
+    }
+
+    fn check_current(
+        prepared: &Mutex<DocumentPreparations>,
+        id: &DocumentId,
+        bytes: &[u8],
+    ) -> Result<IdentifiedDocument, EnginePortError> {
+        if bytes.len() > DOCUMENT_BYTES / 2 {
+            return Self::decode_current(prepared, id, bytes);
+        }
+        let known = prepared
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .document(id, bytes);
+        let slot = match known {
+            Some(known) => known,
+            None => {
+                // Copy outside the inventory lock, then reclassify under the
+                // same owner: concurrent first readers share one preparation.
+                let candidate = Arc::new(PreparedDocument {
+                    id: *id,
+                    bytes: bytes.into(),
+                    checked: OnceLock::new(),
+                });
+                let mut owner = prepared
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                if let Some(known) = owner.document(id, bytes) {
+                    known
+                } else {
+                    let size = 2 * bytes.len();
+                    while owner.documents.len() >= DOCUMENTS
+                        || owner.document_bytes + size > DOCUMENT_BYTES
+                    {
+                        if let Some(old) = owner.documents.pop_front() {
+                            owner.document_bytes -= 2 * old.bytes.len();
+                        }
+                    }
+                    owner.document_bytes += size;
+                    owner.documents.push_back(Arc::clone(&candidate));
+                    candidate
+                }
+            }
+        };
+        // The slot is pure content, not a read or retention fact. Every caller
+        // fetched current bytes before lookup; equality above checks them all.
+        let checked = slot
+            .checked
+            .get_or_init(|| Self::decode_current(prepared, id, bytes))
+            .clone();
+        if checked.is_err() {
+            let mut owner = prepared
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            if let Some(at) = owner
+                .documents
+                .iter()
+                .position(|known| Arc::ptr_eq(known, &slot))
+            {
+                owner.documents.remove(at);
+                owner.document_bytes -= 2 * slot.bytes.len();
+            }
+        }
+        checked
+    }
+
+    fn decode_current(
+        prepared: &Mutex<DocumentPreparations>,
+        id: &DocumentId,
+        bytes: &[u8],
+    ) -> Result<IdentifiedDocument, EnginePortError> {
+        let artifact = document_artifact(id);
+        let document = IdentifiedDocument::decode_standard(bytes).map_err(|error| {
             EnginePortError::Corrupt {
                 artifact: artifact.clone(),
                 message: error.to_string(),
@@ -410,13 +530,19 @@ impl KernelDocuments {
                 message: "Document content hash differs".into(),
             });
         }
+        #[cfg(test)]
+        {
+            prepared.lock().unwrap().validations += 1;
+        }
+        #[cfg(not(test))]
+        let _ = prepared;
         lash_kernel_doc::validate_document(&document, &document.functions).map_err(|e| {
             EnginePortError::Corrupt {
                 artifact: document_artifact(id),
                 message: e.to_string(),
             }
         })?;
-        Ok(Some(document))
+        Ok(document)
     }
     pub async fn get(&self, id: &DocumentId) -> Result<Option<Document>, EnginePortError> {
         Ok(self
@@ -1014,3 +1140,102 @@ impl KernelDocuments {
 }
 
 pub(super) use map_link_refusal as refused;
+
+#[cfg(test)]
+mod residency_laws {
+    use super::*;
+
+    /// FIG-7135: cold cells and cuts validate each current document content
+    /// once while resident; neither a supplied id nor an old read admits bytes.
+    #[test]
+    fn cold_document_validation_is_bounded_by_content_not_cells_or_cuts() {
+        let prepared = Mutex::new(DocumentPreparations::default());
+        let mut document = Document::new(lash_kernel_doc::NumberPolicy::BySpelling, vec![]);
+        for index in 0..32 {
+            let definition = lash_kernel_doc::parse_definition(&format!(
+                "function retained_{index}() -> Null\nkernel 1\ncharge 1\nbody {{ return null }}"
+            ))
+            .unwrap();
+            document.functions.insert(definition.identity(), definition);
+        }
+        let document = IdentifiedDocument::new(document);
+        for _cell in 0..4 {
+            for _cut in 0..3 {
+                let current_bytes = document.body().to_vec();
+                let checked =
+                    KernelDocuments::check_current(&prepared, &document.id(), &current_bytes)
+                        .expect("current valid bytes");
+                assert_eq!(checked.id(), document.id());
+            }
+        }
+        assert_eq!(
+            prepared.lock().unwrap().validations,
+            1,
+            "cold cells and cuts repeated structural document validation"
+        );
+        let changed =
+            IdentifiedDocument::new(Document::new(lash_kernel_doc::NumberPolicy::Float, vec![]));
+        assert!(
+            matches!(KernelDocuments::check_current(&prepared, &document.id(), changed.body()),
+            Err(EnginePortError::Corrupt { message, .. }) if message == "Document content hash differs")
+        );
+        assert!(
+            matches!(KernelDocuments::check_current(&prepared, &document.id(), &[255]),
+            Err(EnginePortError::Corrupt { message, .. }) if message != "Document content hash differs")
+        );
+        let invalid = IdentifiedDocument::new(
+            lash_kernel_doc::parse_document("kernel 1\nnumbers float\nmain { break }").unwrap(),
+        );
+        assert!(matches!(
+            KernelDocuments::check_current(&prepared, &invalid.id(), invalid.body()),
+            Err(EnginePortError::Corrupt { .. })
+        ));
+    }
+
+    /// FIG-7135: racing cold readers share validation; retained preparation
+    /// remains bounded and an evicted identity earns validation again.
+    #[test]
+    fn cold_document_residency_serializes_races_and_revalidates_after_eviction() {
+        let prepared = Arc::new(Mutex::new(DocumentPreparations::default()));
+        let document = IdentifiedDocument::new(Document::new(
+            lash_kernel_doc::NumberPolicy::BySpelling,
+            vec![],
+        ));
+        let barrier = Arc::new(std::sync::Barrier::new(4));
+        let checked = std::thread::scope(|scope| {
+            let readers: Vec<_> = (0..4)
+                .map(|_| {
+                    let prepared = Arc::clone(&prepared);
+                    let barrier = Arc::clone(&barrier);
+                    let bytes = document.body().to_vec();
+                    let id = document.id();
+                    scope.spawn(move || {
+                        barrier.wait();
+                        KernelDocuments::check_current(&prepared, &id, &bytes).unwrap()
+                    })
+                })
+                .collect();
+            readers
+                .into_iter()
+                .map(|reader| reader.join().unwrap())
+                .collect::<Vec<_>>()
+        });
+        assert_eq!(prepared.lock().unwrap().validations, 1);
+        for read in &checked {
+            assert!(Arc::ptr_eq(checked[0].shared(), read.shared()));
+        }
+        for index in 0..DOCUMENTS {
+            let mut other = (*document.document()).clone();
+            other
+                .private_bindings
+                .insert(Name::new(format!("resident_{index}")));
+            let other = IdentifiedDocument::new(other);
+            KernelDocuments::check_current(&prepared, &other.id(), other.body()).unwrap();
+            let owner = prepared.lock().unwrap();
+            assert!(owner.documents.len() <= DOCUMENTS);
+            assert!(owner.document_bytes <= DOCUMENT_BYTES);
+        }
+        KernelDocuments::check_current(&prepared, &document.id(), document.body()).unwrap();
+        assert_eq!(prepared.lock().unwrap().validations, DOCUMENTS + 2);
+    }
+}
