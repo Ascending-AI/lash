@@ -685,6 +685,7 @@ fn state_definition(name: &str) -> lash_vocabulary::tool_contract::ToolDefinitio
 #[derive(Clone)]
 struct StatePlugin {
     world: Arc<World>,
+    code_operations: bool,
 }
 
 impl StatePlugin {
@@ -739,6 +740,20 @@ impl StatePlugin {
                     view: Some(view),
                 }))
             })?;
+        reg.package_provider_bound(lash::tool_provider_key!("operations"), |this, _| {
+            Ok(Arc::new(operations::Packages {
+                provider: lash_vocabulary::providers::ToolProviderHandle::new(
+                    lash_vocabulary::claims::RegistryKind::Session,
+                    STATE_PLUGIN,
+                    lash::tool_provider_key!("tools"),
+                ),
+                definitions: if this.code_operations {
+                    vec![state_definition(STATE_SET), state_definition(STATE_OBSERVE)]
+                } else {
+                    Vec::new()
+                },
+            }))
+        })?;
         Ok(())
     }
 }
@@ -1000,14 +1015,38 @@ impl Crash {
                         served::model(Arc::clone(&self.scripts)),
                         served::metadata(),
                     )
-                    .tools(
-                        lash::tool_provider_key!("probe"),
-                        Arc::new(Probe {
-                            world: Arc::clone(&self.world),
-                        }),
-                    )
+                    .plugin(Arc::new(lash::plugins::StaticPluginFactory::new(
+                        lash::plugins::PluginDeclaration::initial("probe"),
+                        lash::plugins::PluginSpec::new()
+                            .with_tool_provider(
+                                lash::tool_provider_key!("probe"),
+                                Arc::new(Probe {
+                                    world: Arc::clone(&self.world),
+                                }),
+                            )
+                            .with_package_provider(
+                                lash::tool_provider_key!("operations"),
+                                Arc::new(operations::Packages {
+                                    provider: lash_vocabulary::providers::ToolProviderHandle::new(
+                                        lash_vocabulary::claims::RegistryKind::Session,
+                                        "probe",
+                                        lash::tool_provider_key!("probe"),
+                                    ),
+                                    definitions: if self.turn.code()
+                                        && !matches!(
+                                            self.turn,
+                                            Turn::StateCell | Turn::StatePairCell
+                                        ) {
+                                        vec![probe_definition()]
+                                    } else {
+                                        Vec::new()
+                                    },
+                                }),
+                            ),
+                    )))
                     .plugin(Arc::new(StatePlugin {
                         world: Arc::clone(&self.world),
+                        code_operations: matches!(self.turn, Turn::StateCell | Turn::StatePairCell),
                     }))
                     .build(lash::persistence::LeaseOwnerIdentity::opaque(
                         lash::persistence::LeaseOwnerId::new("tool-crash-deployment"),
