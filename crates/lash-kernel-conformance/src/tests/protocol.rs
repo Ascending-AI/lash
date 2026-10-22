@@ -28,6 +28,10 @@ pub(super) fn files() -> &'static [(&'static str, &'static str)] {
     CORPUS_FILES
 }
 
+pub(super) fn register_probes(registry: &mut FunctionRegistry) {
+    execution::register_probes(registry);
+}
+
 mod rule_cases {
     include!("protocol_cases.rs");
 }
