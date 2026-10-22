@@ -140,6 +140,7 @@ pub(crate) struct Facts {
     direct_calls: HashSet<String>,
     /// Declared results of tools whose root no source or session binding shadows.
     effect_results: BTreeMap<String, Ty>,
+    imported: BTreeMap<String, Vec<String>>,
     /// What the packages in view declare their members give.
     packages: super::packages::Packages,
 }
@@ -180,6 +181,7 @@ impl Facts {
             &|expr| numbers.is(expr),
         );
         let mut facts = Self {
+            imported: program.imported.clone(),
             effect_results: effects
                 .iter()
                 .filter(|(name, _)| {
@@ -351,6 +353,25 @@ impl Facts {
         ty
     }
 
+    /// Resolve source imports before consulting the same package/operation
+    /// contracts the lowerer uses. A lexical binding still shadows the root.
+    fn callable_path(&self, callee: &Expr) -> Option<String> {
+        let path = effect_path(callee)?;
+        let (root, suffix) = path.split_once('.').unwrap_or((&path, ""));
+        if self.named.contains(root) {
+            return None;
+        }
+        let Some(target) = self.imported.get(root) else {
+            return Some(path);
+        };
+        let mut path = target.join(".");
+        if !suffix.is_empty() {
+            path.push('.');
+            path.push_str(suffix);
+        }
+        Some(path)
+    }
+
     /// What a call of `callee` gives when it calls a package member: a
     /// function or static by its path, whose root the source does not bind,
     /// or a method of a value whose package type is known.
@@ -367,7 +388,7 @@ impl Facts {
                 _ => None,
             };
         }
-        let path = effect_path(callee)?;
+        let path = self.callable_path(callee)?;
         let root = path.split('.').next()?;
         if !self.packages.is_root(root) || self.named.contains(root) {
             return None;
@@ -495,7 +516,8 @@ impl Facts {
                 Expr::Call { callee, .. } if self.package_call(callee).is_some() => self
                     .package_call(callee)
                     .map_or(Ty::Unknown, |gives| gives.called(true)),
-                Expr::Call { callee, .. } => effect_path(callee)
+                Expr::Call { callee, .. } => self
+                    .callable_path(callee)
                     .and_then(|path| self.effect_results.get(&path).cloned())
                     .unwrap_or(Ty::Unknown),
                 _ => Ty::Unknown,

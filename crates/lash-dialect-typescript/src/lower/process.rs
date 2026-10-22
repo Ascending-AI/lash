@@ -315,6 +315,10 @@ fn durable_type(annotation: Option<&TypeAnnotation>, refusal: DiagnosticCode) ->
         TypeShape::Undefined => Type::Union(vec![Type::Null, Type::Absent]),
         TypeShape::StringLiteral => Type::Text,
         TypeShape::Array(element) => Type::List(Box::new(durable_type(Some(element), refusal)?)),
+        TypeShape::Dictionary(value) => Type::Record(RecordType {
+            fields: Vec::new(),
+            rest: Some(Box::new(durable_type(Some(value), refusal)?)),
+        }),
         TypeShape::Object(fields) => Type::Record(RecordType {
             fields: fields
                 .iter()

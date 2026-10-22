@@ -28,6 +28,12 @@ pub(crate) async fn resolve_use(
     let Some(OperationNeed::Deferred { name, .. }) = inspection.operations.get(&use_) else {
         return Err(EnginePortError::Refused(AdmissionRefusal::MissingRoute { use_ }).into());
     };
+    // Discovery commits its immutable winner before the first tool park.
+    // Make the held response's execution registration durable first, under
+    // the same owner, so that winner has an admitted execution to belong to.
+    if let Some(held) = ctx.held_response() {
+        held.commit_alone(ctx.actor_context()).await?;
+    }
     let composition = ctx.package_composition();
     let provider = composition.deferred_package_provider(&grant.provider);
     let handle = lash_vocabulary::providers::ToolProviderHandle::from_name(

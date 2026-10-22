@@ -100,6 +100,7 @@ export async function digest(
   inbox: string,
   count: number,
   flags: boolean[],
+  columns: Record<string, number[]>,
   topic: { title: string; urgent?: boolean },
   mode: "fast" | "slow" | null,
   named: Topic,
@@ -117,6 +118,13 @@ export async function digest(
                     param("inbox", Type::Text),
                     param("count", Type::Number),
                     param("flags", Type::List(Box::new(Type::Bool))),
+                    param(
+                        "columns",
+                        Type::Record(RecordType {
+                            fields: vec![],
+                            rest: Some(Box::new(Type::List(Box::new(Type::Number)))),
+                        })
+                    ),
                     param(
                         "topic",
                         Type::Record(RecordType {

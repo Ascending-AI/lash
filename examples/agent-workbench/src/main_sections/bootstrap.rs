@@ -311,12 +311,26 @@ pub(crate) async fn workbench_core_builder(
                 lash::rlm::RlmProtocolPluginFactory::new(rlm_config, dialect.cell_dialect())
                     .with_worker_service(rlm_workers.context("RLM worker was not prewarmed")?);
             // The chat's own finish tool takes the place of Lash's.
-            LashCore::rlm_builder(host_backend, factory).tools(
-                lash::tool_provider_key!("chat-reply"),
+            let reply: Arc<dyn lash::tools::ToolProvider> =
                 Arc::new(lash::tools::FinishToolProvider::new([
                     plugins::chat_reply_tool(),
-                ])),
-            )
+                ]));
+            LashCore::rlm_builder(host_backend, factory).plugin(Arc::new(
+                lash::plugins::StaticPluginFactory::new(
+                    lash::plugins::PluginDeclaration::initial("chat-reply"),
+                    lash::plugins::PluginSpec::new()
+                        .with_tool_provider(lash::tool_provider_key!("chat-reply"), reply.clone())
+                        .with_package_provider(
+                            lash::tool_provider_key!("chat-reply"),
+                            Arc::new(lash::package::ToolPackageProvider::new(
+                                "chat-reply",
+                                lash::tool_provider_key!("chat-reply"),
+                                [lash::package::Segment::new("chat")?].into(),
+                                reply,
+                            )),
+                        ),
+                ),
+            ))
         }
     }
     .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
@@ -326,7 +340,28 @@ pub(crate) async fn workbench_core_builder(
     .live_replay_store(live_replay)
     .delta_coalescing(delta_coalescing_from_environment()?);
     if let Some(tool_provider) = tool_provider {
-        builder = builder.tools(lash::tool_provider_key!("host-tools"), tool_provider);
+        let roots = tool_provider
+            .tool_manifests(&Default::default())?
+            .into_iter()
+            .map(|manifest| manifest.operation.package.as_slice()[0].clone())
+            .collect();
+        builder = builder.plugin(Arc::new(lash::plugins::StaticPluginFactory::new(
+            lash::plugins::PluginDeclaration::initial("host-tools"),
+            lash::plugins::PluginSpec::new()
+                .with_tool_provider(
+                    lash::tool_provider_key!("host-tools"),
+                    tool_provider.clone(),
+                )
+                .with_package_provider(
+                    lash::tool_provider_key!("host-tools"),
+                    Arc::new(lash::package::ToolPackageProvider::new(
+                        "host-tools",
+                        lash::tool_provider_key!("host-tools"),
+                        roots,
+                        tool_provider,
+                    )),
+                ),
+        )));
     }
     let shutdown_marker =
         shutdown_marker::factory_from_env("agent-workbench").map_err(anyhow::Error::msg)?;

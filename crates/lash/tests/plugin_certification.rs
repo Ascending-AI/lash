@@ -413,22 +413,9 @@ async fn supplied_but_unexercised_resolver_is_distinct_from_no_scenario() {
 #[tokio::test]
 async fn deferred_state_free_provider_is_full_under_a_supporting_protocol() {
     use lash::tools::*;
-    use std::collections::BTreeMap;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     struct Resolver(Arc<AtomicUsize>);
-    #[lash::async_trait]
-    impl ToolProvider for Resolver {
-        fn tool_manifests(&self, _: &OwnerConfigView) -> Result<Vec<ToolManifest>, PluginError> {
-            Ok(Vec::new())
-        }
-        fn resolve_contract(&self, _: &str, _: &OwnerConfigView) -> Option<Arc<ToolContract>> {
-            None
-        }
-        async fn execute(&self, _: ToolCall<'_>) -> ToolAttemptOutcome {
-            panic!("the resolver never executes the selected tool")
-        }
-    }
     fn definition() -> ToolDefinition {
         ToolDefinition::raw(
             "remote:send_email",
@@ -441,31 +428,38 @@ async fn deferred_state_free_provider_is_full_under_a_supporting_protocol() {
         .with_execution(std::time::Duration::from_secs(1))
     }
     #[lash::async_trait]
-    impl DeferredToolProvider for Resolver {
+    impl lash::package::DeferredPackageProvider for Resolver {
+        fn validate_grant(
+            &self,
+            grant: &lash::package::DeferredGrant,
+            registry: RegistryKind,
+        ) -> Result<(), lash::package::AdmissionRefusal> {
+            validate_resolver_grant(grant, registry)
+        }
         async fn resolve(
             &self,
             _: &DeferredResolveContext<'_>,
-            paths: &[&str],
-        ) -> BTreeMap<String, DeferredOutcome> {
+            _: &lash::package::DeferredGrant,
+            requested: &lash::package::QualifiedName,
+        ) -> Result<lash::package::DeferredAnswer, lash::package::ResolverFault> {
             self.0.fetch_add(1, Ordering::SeqCst);
-            paths
-                .iter()
-                .filter(|path| **path == "tools.send_email")
-                .map(|path| {
-                    (
-                        (*path).into(),
-                        DeferredOutcome::resolved(
-                            ToolProviderHandle::new(
-                                RegistryKind::Session,
-                                "host",
-                                lash::tool_provider_key!("tools"),
-                            ),
-                            definition(),
-                            None,
-                        ),
-                    )
-                })
-                .collect()
+            if requested.to_string() != "tools.send_email" {
+                return Ok(lash::package::DeferredAnswer::Unavailable { note: None });
+            }
+            let definition = definition();
+            let route = lash::tools::OperationRoute::resolved(
+                ToolProviderHandle::new(
+                    RegistryKind::Session,
+                    "host",
+                    lash::tool_provider_key!("tools"),
+                ),
+                definition.clone(),
+                None,
+            );
+            Ok(lash::package::DeferredAnswer::Resolved {
+                definition: Box::new(definition),
+                route: Box::new(route),
+            })
         }
     }
     struct Host(Arc<AtomicUsize>);
@@ -489,7 +483,7 @@ async fn deferred_state_free_provider_is_full_under_a_supporting_protocol() {
     #[lash::async_trait]
     impl PluginScenario for DeferredScenario {
         fn callback(&self) -> PluginCallbackIdentity {
-            PluginCallbackIdentity::tool_provider("resolver", "deferred")
+            resolver_callback()
         }
         async fn prepare(&self, harness: &mut PluginHarness) -> Result<(), PluginHarnessError> {
             harness
@@ -508,10 +502,7 @@ async fn deferred_state_free_provider_is_full_under_a_supporting_protocol() {
             harness
                 .install(Arc::new(StaticPluginFactory::new(
                     PluginDeclaration::initial("host"),
-                    PluginSpec::new().with_tool_provider(
-                        lash::tool_provider_key!("tools"),
-                        Arc::new(Host(Arc::clone(&self.executed))),
-                    ),
+                    deferred_host(Arc::new(Host(Arc::clone(&self.executed)))),
                 )))
                 .await?;
             harness.create(PluginOptions::default()).await?;
@@ -545,11 +536,9 @@ async fn deferred_state_free_provider_is_full_under_a_supporting_protocol() {
     let executed = Arc::new(AtomicUsize::new(0));
     let factory = Arc::new(StaticPluginFactory::new(
         PluginDeclaration::initial("resolver"),
-        PluginSpec::new().with_deferred_provider(
+        PluginSpec::new().with_deferred_package_provider(
             lash::tool_provider_key!("deferred"),
-            lash::tools::DeferredToolProviderRegistration::new(Arc::new(Resolver(Arc::clone(
-                &resolved,
-            )))),
+            Arc::new(Resolver(Arc::clone(&resolved))),
         ),
     ));
     let unavailable = certify_plugin(factory.clone()).await.unwrap();
@@ -568,7 +557,9 @@ async fn deferred_state_free_provider_is_full_under_a_supporting_protocol() {
     assert_eq!(
         executed.load(Ordering::SeqCst),
         1,
-        "the selected executable ran once across reopen"
+        "the selected executable ran once across reopen; resolved={}; reports={:#?}",
+        resolved.load(Ordering::SeqCst),
+        report.reports
     );
     assert_eq!(
         resolved.load(Ordering::SeqCst),
@@ -598,7 +589,6 @@ async fn deferred_state_free_provider_is_full_under_a_supporting_protocol() {
 mod deferred_laws {
     use super::*;
     use lash::tools::*;
-    use std::collections::BTreeMap;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     struct Resolver {
@@ -606,22 +596,13 @@ mod deferred_laws {
         resolutions: Arc<AtomicUsize>,
         definition: ToolDefinition,
     }
-    #[lash::async_trait]
-    impl ToolProvider for Resolver {
-        fn tool_manifests(&self, _: &OwnerConfigView) -> Result<Vec<ToolManifest>, PluginError> {
-            Ok(Vec::new())
-        }
-        fn resolve_contract(&self, _: &str, _: &OwnerConfigView) -> Option<Arc<ToolContract>> {
-            None
-        }
-        async fn execute(&self, _: ToolCall<'_>) -> ToolAttemptOutcome {
-            panic!("the resolver is not an executable")
-        }
-    }
     fn definition(id: &str, name: &str) -> Result<ToolDefinition, PluginError> {
         ToolDefinition::raw(
             id,
-            format!("tools.{name}"),
+            format!(
+                "{}.{name}",
+                if name == "lookup" { "local" } else { "tools" }
+            ),
             name,
             serde_json::json!({"type":"object","properties":{},"additionalProperties":false}),
             serde_json::json!({"type":"string"}),
@@ -630,31 +611,36 @@ mod deferred_laws {
         .map_err(|error| PluginError::Registration(error.to_string()))
     }
     #[lash::async_trait]
-    impl DeferredToolProvider for Resolver {
+    impl lash::package::DeferredPackageProvider for Resolver {
+        fn validate_grant(
+            &self,
+            grant: &lash::package::DeferredGrant,
+            registry: RegistryKind,
+        ) -> Result<(), lash::package::AdmissionRefusal> {
+            validate_resolver_grant(grant, registry)
+        }
         async fn resolve(
             &self,
             _: &DeferredResolveContext<'_>,
-            paths: &[&str],
-        ) -> BTreeMap<String, DeferredOutcome> {
+            _: &lash::package::DeferredGrant,
+            requested: &lash::package::QualifiedName,
+        ) -> Result<lash::package::DeferredAnswer, lash::package::ResolverFault> {
             self.resolutions.fetch_add(1, Ordering::SeqCst);
-            paths
-                .iter()
-                .filter(|path| !self.empty && **path == "tools.send_email")
-                .map(|path| {
-                    (
-                        (*path).into(),
-                        DeferredOutcome::resolved(
-                            ToolProviderHandle::new(
-                                RegistryKind::Session,
-                                "host",
-                                lash::tool_provider_key!("tools"),
-                            ),
-                            self.definition.clone(),
-                            None,
-                        ),
-                    )
-                })
-                .collect()
+            if self.empty || requested.to_string() != "tools.send_email" {
+                return Ok(lash::package::DeferredAnswer::Unavailable { note: None });
+            }
+            Ok(lash::package::DeferredAnswer::Resolved {
+                route: Box::new(lash::tools::OperationRoute::resolved(
+                    ToolProviderHandle::new(
+                        RegistryKind::Session,
+                        "host",
+                        lash::tool_provider_key!("tools"),
+                    ),
+                    self.definition.clone(),
+                    None,
+                )),
+                definition: Box::new(self.definition.clone()),
+            })
         }
     }
     struct Host;
@@ -664,7 +650,7 @@ mod deferred_laws {
             Ok(vec![definition("host:lookup", "lookup")?.manifest])
         }
         fn resolve_contract(&self, name: &str, _: &OwnerConfigView) -> Option<Arc<ToolContract>> {
-            if name != "tools.lookup" {
+            if name != "local.lookup" {
                 return None;
             }
             Some(Arc::new(definition("host:lookup", "lookup").ok()?.contract))
@@ -679,7 +665,7 @@ mod deferred_laws {
     #[lash::async_trait]
     impl PluginScenario for Scenario {
         fn callback(&self) -> PluginCallbackIdentity {
-            PluginCallbackIdentity::tool_provider("resolver", "deferred")
+            resolver_callback()
         }
         async fn prepare(&self, harness: &mut PluginHarness) -> Result<(), PluginHarnessError> {
             let protocol: Arc<dyn PluginFactory> = Arc::new(
@@ -697,8 +683,7 @@ mod deferred_laws {
             harness
                 .install(Arc::new(StaticPluginFactory::new(
                     PluginDeclaration::initial("host"),
-                    PluginSpec::new()
-                        .with_tool_provider(lash::tool_provider_key!("tools"), Arc::new(Host)),
+                    deferred_host(Arc::new(Host)),
                 )))
                 .await?;
             harness.create(PluginOptions::default()).await
@@ -730,13 +715,13 @@ mod deferred_laws {
     ) -> Result<Arc<dyn PluginFactory>, PluginError> {
         Ok(Arc::new(StaticPluginFactory::new(
             PluginDeclaration::initial("resolver"),
-            PluginSpec::new().with_deferred_provider(
+            PluginSpec::new().with_deferred_package_provider(
                 lash::tool_provider_key!("deferred"),
-                lash::tools::DeferredToolProviderRegistration::new(Arc::new(Resolver {
+                Arc::new(Resolver {
                     empty,
                     resolutions,
                     definition: definition("remote:send_email", "send_email")?,
-                })),
+                }),
             ),
         )))
     }
@@ -747,7 +732,7 @@ mod deferred_laws {
     async fn static_call_cannot_certify_an_empty_deferred_resolver() {
         let resolutions = Arc::new(AtomicUsize::new(0));
         let scenario: Arc<dyn PluginScenario> = Arc::new(Scenario {
-            code: "await tools.lookup({}); await tools.sendEmail({});",
+            code: "await local.lookup({}); await tools.sendEmail({});",
         });
         let report = certify_plugin_with(
             factory(true, Arc::clone(&resolutions)).unwrap(),
@@ -1063,3 +1048,9 @@ async fn a_state_capable_provider_that_does_not_publish_stays_unavailable() {
         "{report:#?}"
     );
 }
+
+#[cfg(feature = "rlm")]
+#[path = "../src/testing/plugin_harness/certification/packages.rs"]
+mod packages;
+#[cfg(feature = "rlm")]
+use packages::*;

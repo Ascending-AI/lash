@@ -35,6 +35,7 @@ pub struct WorkflowCreator {
     pub namespace: RecordedPackages,
     pub environment: ProcessEnv,
     pub context: PublicationContext,
+    settings: lash::process::KernelRecordedSettings,
 }
 impl WorkflowCreator {
     pub async fn create(
@@ -88,7 +89,7 @@ impl WorkflowCreator {
                         .into_iter()
                         .collect(),
                     env,
-                    settings: None,
+                    settings: Some(self.settings.clone().into_engine_settings()),
                     initial_resolutions: Vec::new(),
                 },
                 key,
@@ -217,7 +218,12 @@ pub async fn build(
     };
     drop(bootstrap);
     let core = build_core(configured)?;
+    let settings = core
+        .processes()
+        .kernel_engine_defaults()
+        .map_err(|error| error.to_string())?;
     let creator = WorkflowCreator {
+        settings,
         artifacts: core.host_artifacts(),
         workers,
         namespace,

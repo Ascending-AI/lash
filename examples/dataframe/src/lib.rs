@@ -60,6 +60,12 @@ pub async fn publish_library(
         })
         .await
         .map_err(|error| error.to_string())?;
+    // This document owner prepared the Link; retain it under the host pin
+    // before the independently constructed publisher exposes its identity.
+    documents
+        .hold(&claim, &ContentRef::Link(linked.content.identity()))
+        .await
+        .map_err(|error| error.to_string())?;
     let members = exports
         .into_iter()
         .map(|name| {

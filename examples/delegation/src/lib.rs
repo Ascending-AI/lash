@@ -170,16 +170,24 @@ impl DelegationPluginFactory {
     /// Register it with [`lash::LashCoreBuilder::process_component`].
     #[expect(
         clippy::expect_used,
-        reason = "the spec fills only a tool provider, which a process component admits"
+        reason = "canonical package root and a process component admitting tools and packages"
     )]
     pub fn component(&self) -> Arc<dyn lash::process::ProcessComponentFactory> {
+        let runner = tool::spawn_provider(Arc::clone(&self.child), true);
         Arc::new(
             lash::plugins::StaticPluginFactory::new(
                 Self::declaration(),
-                lash::plugins::PluginSpec::new().with_tool_provider(
-                    lash::tool_provider_key!("spawn"),
-                    tool::spawn_provider(Arc::clone(&self.child), true),
-                ),
+                lash::plugins::PluginSpec::new()
+                    .with_tool_provider(lash::tool_provider_key!("spawn"), runner.clone())
+                    .with_package_provider(
+                        lash::tool_provider_key!("spawn"),
+                        Arc::new(lash::package::ToolPackageProvider::new(
+                            DELEGATION_PLUGIN_ID,
+                            lash::tool_provider_key!("spawn"),
+                            [lash::package::Segment::new("agents").expect("canonical root")].into(),
+                            runner,
+                        )),
+                    ),
             )
             .as_component(DELEGATION_CONFIG.format())
             .expect("spawn_agent is a process component"),
@@ -283,6 +291,29 @@ impl DelegationSessionPlugin {
             lash::tool_provider_key!("submit-error"),
             move |this, _state| Ok(tool::submit_error_provider(this.delegated)),
         )?;
+
+        reg.package_provider_bound(lash::tool_provider_key!("spawn"), |this, _| {
+            Ok(Arc::new(lash::package::ToolPackageProvider::new(
+                DELEGATION_PLUGIN_ID,
+                lash::tool_provider_key!("spawn"),
+                [lash::package::Segment::new("agents").map_err(|error| {
+                    lash::plugins::PluginError::Registration(error.to_string())
+                })?]
+                .into(),
+                tool::spawn_provider(Arc::clone(&this.child), !this.delegated),
+            )))
+        })?;
+        reg.package_provider_bound(lash::tool_provider_key!("submit-error"), |this, _| {
+            Ok(Arc::new(lash::package::ToolPackageProvider::new(
+                DELEGATION_PLUGIN_ID,
+                lash::tool_provider_key!("submit-error"),
+                [lash::package::Segment::new("task").map_err(|error| {
+                    lash::plugins::PluginError::Registration(error.to_string())
+                })?]
+                .into(),
+                tool::submit_error_provider(this.delegated),
+            )))
+        })?;
 
         reg.prompt().section(
             lash::plugins::PromptSectionSpec::new(

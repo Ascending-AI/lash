@@ -39,6 +39,7 @@ pub(crate) enum TypeShape {
     StringLiteral,
     Array(Box<TypeAnnotation>),
     Object(Vec<TypeAnnotationField>),
+    Dictionary(Box<TypeAnnotation>),
     Union(Vec<TypeAnnotation>),
     Function(Box<TypeAnnotation>),
     /// A named type: a local `type` alias or a host named-data type such as
@@ -177,8 +178,7 @@ fn object_shape(literal: &swc::TsTypeLit) -> Option<Vec<TypeAnnotationField>> {
     Some(fields)
 }
 
-/// `Array<T>` is the one generic the durable subset has; every other type
-/// argument list names a shape the runtime cannot carry.
+/// Arrays and string-keyed records have data-only kernel shapes.
 fn reference_shape(reference: &swc::TsTypeRef) -> TypeShape {
     let Some(name) = entity_name(&reference.type_name) else {
         return TypeShape::Unsupported("a qualified type reference");
@@ -187,6 +187,13 @@ fn reference_shape(reference: &swc::TsTypeRef) -> TypeShape {
         (None, _) => TypeShape::Reference(name),
         (Some(params), "Array" | "ReadonlyArray") if params.params.len() == 1 => {
             TypeShape::Array(Box::new(convert_type(&params.params[0])))
+        }
+        (Some(params), "Record")
+            if params.params.len() == 2
+                && matches!(params.params[0].as_ref(), swc::TsType::TsKeywordType(keyword)
+                if keyword.kind == swc::TsKeywordTypeKind::TsStringKeyword) =>
+        {
+            TypeShape::Dictionary(Box::new(convert_type(&params.params[1])))
         }
         (Some(_), _) => TypeShape::Unsupported("a generic type reference"),
     }

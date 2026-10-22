@@ -140,6 +140,27 @@ impl CallbackCounts {
                 counts: self.clone(),
             });
         }
+        for registered in &mut contributions.deferred_package_providers {
+            let callback = PluginCallbackIdentity {
+                owner: registered.identity.owner().to_owned(),
+                key: format!(
+                    "{}:{}",
+                    CallbackSlot::DeferredPackageProvider.key_prefix(),
+                    registered.identity.key()
+                ),
+            };
+            self.0
+                .entries
+                .lock_recover()
+                .resolutions
+                .entry(callback.clone())
+                .or_default();
+            registered.hook = Arc::new(CountedPackageResolver {
+                inner: Arc::clone(&registered.hook),
+                callback,
+                counts: self.clone(),
+            });
+        }
         if let Some(registered) = &mut contributions.deferred_provider {
             let callback = registered.identity.callback_identity();
             self.0
@@ -248,6 +269,38 @@ impl crate::DeferredToolProvider for CountedProvider<dyn crate::DeferredToolProv
             .entry(self.callback.clone())
             .or_default() += 1;
         self.inner.resolve(cx, paths).await
+    }
+}
+struct CountedPackageResolver {
+    inner: Arc<dyn crate::plugin::packages::DeferredPackageProvider>,
+    callback: PluginCallbackIdentity,
+    counts: CallbackCounts,
+}
+#[async_trait::async_trait]
+impl crate::plugin::packages::DeferredPackageProvider for CountedPackageResolver {
+    fn validate_grant(
+        &self,
+        grant: &lash_vocabulary::package::DeferredGrant,
+        registry: RegistryKind,
+    ) -> Result<(), lash_execution_contracts::process::linking::AdmissionRefusal> {
+        self.inner.validate_grant(grant, registry)
+    }
+    async fn resolve(
+        &self,
+        cx: &crate::DeferredResolveContext<'_>,
+        grant: &lash_vocabulary::package::DeferredGrant,
+        requested: &lash_vocabulary::names::QualifiedName,
+    ) -> Result<crate::plugin::packages::DeferredAnswer, crate::plugin::packages::ResolverFault>
+    {
+        *self
+            .counts
+            .0
+            .entries
+            .lock_recover()
+            .resolutions
+            .entry(self.callback.clone())
+            .or_default() += 1;
+        self.inner.resolve(cx, grant, requested).await
     }
 }
 struct CountedPressure {

@@ -490,26 +490,12 @@ fn decode_expiry_checks<V: serde::de::DeserializeOwned + lash_core::tool_run::Ra
     Ok(checks)
 }
 
-// Cell reports and catalogue keys retain the tools' operations, by effect
-// name, never ToolIds. Construct this identity only from those two typed
-// records: a ToolId cannot participate in the membership comparison by
-// exposing its string spelling.
-#[derive(PartialEq, Eq, PartialOrd, Ord)]
-struct RecordedToolName<'a>(std::borrow::Cow<'a, str>);
-impl<'a> RecordedToolName<'a> {
-    fn catalogue(entry: &'a crate::tools::SurfaceEntry) -> Self {
-        Self(std::borrow::Cow::Owned(entry.definition.manifest.tool()))
-    }
-    fn call(record: &'a lash_core::ToolCallRecord) -> Self {
-        Self(std::borrow::Cow::Borrowed(&record.tool))
-    }
-}
-
 impl PluginDiagnostics {
-    /// Join the retained resolver authority to completed calls outside its
-    /// catalogue. S6 admits such cell calls only through deferred grants; the
-    /// selected executable can belong to a different plugin. No live inventory
-    /// supplies an identity, and no callback is invoked by this observation.
+    /// Attribute completed calls under the round's retained deferred packages.
+    /// A deferred path excludes enumerated members and descendant packages, so
+    /// its canonical operation name selects exactly the resolver whose grant
+    /// admitted the call. Executable identity and today's roster supply none of
+    /// this authority.
     pub(crate) async fn deferred_selections(
         &self,
         record: &RecordLocator,
@@ -529,9 +515,6 @@ impl PluginDiagnostics {
                 .await?
                 .and_then(|phase| phase.surface)
         else {
-            return Ok(Vec::new());
-        };
-        let Some(resolver) = surface.deferred() else {
             return Ok(Vec::new());
         };
         let facts = store
@@ -557,15 +540,43 @@ impl PluginDiagnostics {
             .in_scope(|| lash_core::cell_report_of(&facts, row, &self.core.transcript_decoders()))
             .map_err(lash_core::durable_port::DurableError::Graph)?
             .unwrap_or_default();
-        let catalogue: BTreeSet<_> = surface
-            .tools()
-            .values()
-            .map(RecordedToolName::catalogue)
-            .collect();
         Ok(calls
             .into_iter()
-            .filter(|call| !catalogue.contains(&RecordedToolName::call(call)))
-            .map(|call| (resolver.callback_identity(), call.call_id))
+            .filter_map(|call| {
+                let effect = lash_vocabulary::EffectName::new(&call.tool).ok()?;
+                let operation =
+                    lash_vocabulary::names::QualifiedOperation::from_effect(&effect).ok()?;
+                surface
+                    .packages()
+                    .snapshot
+                    .advertisements
+                    .iter()
+                    .find_map(|accepted| {
+                        let lash_vocabulary::package::PackageAdvertisement::Deferred(package) =
+                            &accepted.advertisement
+                        else {
+                            return None;
+                        };
+                        operation
+                            .package
+                            .as_slice()
+                            .starts_with(package.path.as_slice())
+                            .then(|| {
+                                (
+                                    crate::plugins::PluginCallbackIdentity {
+                                        owner: package.provider.owner.clone(),
+                                        key: format!(
+                                            "{}:{}",
+                                            crate::plugins::CallbackSlot::DeferredPackageProvider
+                                                .key_prefix(),
+                                            package.provider.key
+                                        ),
+                                    },
+                                    call.call_id.clone(),
+                                )
+                            })
+                    })
+            })
             .collect())
     }
 }

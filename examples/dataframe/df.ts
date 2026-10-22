@@ -1,4 +1,4 @@
-import { read_csv } from "io";
+import { readCsv } from "io";
 
 export function to_cols(rows: Record<string, number>[]): Record<string, number[]> {
     const cols: Record<string, number[]> = {};
@@ -12,7 +12,7 @@ export function to_cols(rows: Record<string, number>[]): Record<string, number[]
 }
 
 export async function load(path: string): Promise<Record<string, number>[]> {
-    const text = await read_csv(path);
+    const text = await readCsv({ path });
     const started = Date.now();
     const lines = text.trim().split("\n");
     const keys = lines[0].split(",");

@@ -474,6 +474,7 @@ fn recorded_at_cut(slot: CallbackSlot) -> bool {
         CallbackSlot::BeforeTurn
             | CallbackSlot::CellFailureFeedback
             | CallbackSlot::ToolProvider
+            | CallbackSlot::DeferredPackageProvider
             | CallbackSlot::ToolArgsCheck
             | CallbackSlot::ToolResultCheck
             | CallbackSlot::ToolArgsTransform
@@ -772,7 +773,12 @@ async fn attribution_law(
 mod workflows_create;
 
 #[cfg(all(test, feature = "rlm"))]
+#[path = "certification/packages.rs"]
+mod packages;
+
+#[cfg(all(test, feature = "rlm"))]
 mod tests {
+    use super::packages::*;
     use super::workflows_create;
     use crate as lash;
     use lash::plugins::*;
@@ -852,14 +858,14 @@ mod tests {
     #[lash::async_trait]
     impl ToolProvider for Host {
         fn tool_manifests(&self, _: &OwnerConfigView) -> Result<Vec<ToolManifest>, PluginError> {
-            Ok(vec![definition("host:lookup", "tools.lookup")?.manifest])
+            Ok(vec![definition("host:lookup", "local.lookup")?.manifest])
         }
         fn resolve_contract(&self, name: &str, _: &OwnerConfigView) -> Option<Arc<ToolContract>> {
-            if name != "tools.lookup" {
+            if name != "local.lookup" {
                 return None;
             }
             Some(Arc::new(
-                definition("host:lookup", "tools.lookup").ok()?.contract,
+                definition("host:lookup", "local.lookup").ok()?.contract,
             ))
         }
         async fn execute(&self, _: ToolCall<'_>) -> ToolAttemptOutcome {
@@ -870,6 +876,7 @@ mod tests {
         code: &'static str,
         callback: PluginCallbackIdentity,
         deferred: Option<Arc<AtomicUsize>>,
+        packages: bool,
     }
     #[lash::async_trait]
     impl PluginScenario for Scenario {
@@ -892,8 +899,12 @@ mod tests {
             harness
                 .install(Arc::new(StaticPluginFactory::new(
                     PluginDeclaration::initial("host"),
-                    PluginSpec::new()
-                        .with_tool_provider(lash::tool_provider_key!("tools"), Arc::new(Host)),
+                    if self.packages {
+                        deferred_host(Arc::new(Host))
+                    } else {
+                        PluginSpec::new()
+                            .with_tool_provider(lash::tool_provider_key!("tools"), Arc::new(Host))
+                    },
                 )))
                 .await?;
             if let Some(resolutions) = &self.deferred {
@@ -948,15 +959,22 @@ mod tests {
     async fn certification_decodes_each_cell_report_once() {
         let decoded = Arc::new(AtomicUsize::new(0));
         let scenario: Arc<dyn PluginScenario> = Arc::new(Scenario {
-            code: "await tools.lookup({}); await tools.sendEmail({}); await tools.sendEmail({}); await tools.sendEmail({});",
-            callback: PluginCallbackIdentity::tool_provider("resolver", "deferred"),
+            code: "await local.lookup({}); await tools.sendEmail({}); await tools.sendEmail({}); await tools.sendEmail({});",
+            callback: resolver_callback(),
             deferred: None,
+            packages: true,
         });
         let report = crate::plugin_diagnostics::CELL_REPORT_DECODES
             .scope(
                 Arc::clone(&decoded),
                 certify_plugin_with(
-                    factory(false, Arc::new(AtomicUsize::new(0))).unwrap(),
+                    Arc::new(StaticPluginFactory::new(
+                        PluginDeclaration::initial("resolver"),
+                        PluginSpec::new().with_deferred_package_provider(
+                            lash::tool_provider_key!("deferred"),
+                            Arc::new(PackageResolver),
+                        ),
+                    )),
                     HostPolicy::standard(),
                     &[scenario],
                 ),
@@ -990,6 +1008,7 @@ mod tests {
                 key: "cell_failure_feedback:names".into(),
             },
             deferred,
+            packages: false,
         })
     }
 
@@ -1063,6 +1082,42 @@ mod tests {
                     .iter()
                     .any(|report| report.law == law && report.result == PluginLawResult::Passed)
             );
+        }
+    }
+    struct PackageResolver;
+    #[lash::async_trait]
+    impl lash::package::DeferredPackageProvider for PackageResolver {
+        fn validate_grant(
+            &self,
+            grant: &lash::package::DeferredGrant,
+            registry: RegistryKind,
+        ) -> Result<(), lash::package::AdmissionRefusal> {
+            validate_resolver_grant(grant, registry)
+        }
+        async fn resolve(
+            &self,
+            _: &DeferredResolveContext<'_>,
+            _: &lash::package::DeferredGrant,
+            _: &lash::package::QualifiedName,
+        ) -> Result<lash::package::DeferredAnswer, lash::package::ResolverFault> {
+            let definition =
+                definition("remote:send_email", "tools.send_email").map_err(|error| {
+                    lash::package::ResolverFault {
+                        message: error.to_string(),
+                    }
+                })?;
+            Ok(lash::package::DeferredAnswer::Resolved {
+                route: Box::new(lash::tools::OperationRoute::resolved(
+                    ToolProviderHandle::new(
+                        RegistryKind::Session,
+                        "host",
+                        lash::tool_provider_key!("tools"),
+                    ),
+                    definition.clone(),
+                    None,
+                )),
+                definition: Box::new(definition),
+            })
         }
     }
 }

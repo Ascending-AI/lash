@@ -390,6 +390,16 @@ fn build_turn_core(
     };
     let shutdown_marker =
         crate::shutdown_marker::factory_from_env("toolbench").map_err(anyhow::Error::msg)?;
+    let tools = if channel == crate::ChannelSelection::Standard {
+        world.standard_provider()
+    } else {
+        world.provider()
+    };
+    let roots = tools
+        .tool_manifests(&Default::default())?
+        .into_iter()
+        .map(|manifest| manifest.operation.package.as_slice()[0].clone())
+        .collect();
     let core = builder
         .trace_sink(Arc::new(telemetry.capture.clone()))
         .trace_detail(lash::tracing::TraceDetailPolicy::extended_models())
@@ -408,11 +418,17 @@ fn build_turn_core(
             model,
             lash::RegisteredLlmProfile::new(profile_metadata(model)?, provider),
         )?))
-        .tools(lash::tool_provider_key!("tools"), if channel == crate::ChannelSelection::Standard {
-            world.standard_provider()
-        } else {
-            world.provider()
-        })
+        .plugin(Arc::new(lash::plugins::StaticPluginFactory::new(
+            lash::plugins::PluginDeclaration::initial("tools"),
+            lash::plugins::PluginSpec::new()
+                .with_tool_provider(lash::tool_provider_key!("tools"), tools.clone())
+                .with_package_provider(
+                    lash::tool_provider_key!("tools"),
+                    Arc::new(lash::package::ToolPackageProvider::new(
+                        "tools", lash::tool_provider_key!("tools"), roots, tools,
+                    )),
+                ),
+        )))
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .data_retention(lash::DataRetention::standard())
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024)).execution_budgets(lash::ExecutionBudgets::recommended()).delta_coalescing(lash::DeltaCoalescing::recommended())

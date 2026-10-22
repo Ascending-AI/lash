@@ -75,7 +75,7 @@ impl CellReads {
         route: &lash_core::ReadRoute,
         args: &[Datum],
     ) -> Result<serde_json::Value, ErrorDatum> {
-        let args = CellArgs
+        let args = CellArgs::Direct
             .args(args)
             .map_err(|refusal| refusal.error(effect))?;
         // The protocol's argument projection, as its transform applies it

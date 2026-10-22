@@ -231,6 +231,7 @@ pub fn core(
     node: &str,
     serve: bool,
 ) -> Result<lash::LashCore, String> {
+    let tools = ext_write(witness.clone(), hold);
     lash::LashCore::rlm_builder(
         backend.clone(),
         lash::rlm::RlmProtocolPluginFactory::new(
@@ -250,10 +251,21 @@ pub fn core(
     .delta_coalescing(lash::DeltaCoalescing::recommended())
     .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
     .serve_test_llm_profile(model(witness.clone(), hold), metadata())
-    .tools(
-        lash::tool_provider_key!("tools"),
-        ext_write(witness.clone(), hold),
-    )
+    .plugin(Arc::new(lash::plugins::StaticPluginFactory::new(
+        lash::plugins::PluginDeclaration::initial("tools"),
+        lash::plugins::PluginSpec::new()
+            .with_tool_provider(lash::tool_provider_key!("tools"), tools.clone())
+            .with_package_provider(
+                lash::tool_provider_key!("tools"),
+                Arc::new(lash::package::ToolPackageProvider::new(
+                    "tools",
+                    lash::tool_provider_key!("tools"),
+                    [lash::package::Segment::new("tools").map_err(|error| error.to_string())?]
+                        .into(),
+                    tools,
+                )),
+            ),
+    )))
     .build(lash::persistence::LeaseOwnerIdentity::opaque(
         lash::persistence::LeaseOwnerId::new(node),
         lash::persistence::LeaseIncarnationId::new(format!("{node}-boot")),

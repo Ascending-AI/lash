@@ -291,7 +291,6 @@ impl super::ExecutionComposition {
             || manifest.operation.package != requested.package
             || manifest.operation.name != requested.member
             || route.provider.registry() != registry
-            || route.provider.owner() != grant.provider.owner
             || route.tool != manifest.id
             || route.policy != manifest.execution_policy
             || route.policy == lash_vocabulary::ExecutionPolicy::Read

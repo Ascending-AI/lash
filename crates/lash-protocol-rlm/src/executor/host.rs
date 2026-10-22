@@ -372,14 +372,22 @@ impl CellHost<'_> {
             .ctx
             .operation_grant(route, &contract)
             .map_err(|failure| tool_failed(&failure))?;
-        let args = CellArgs
+        let projection = if matches!(
+            self.envelope.environment.uses.get(&request.use_),
+            Some(UseBinding::Deferred(_))
+        ) {
+            CellArgs::Deferred
+        } else {
+            CellArgs::Direct
+        };
+        let args = projection
             .args(&request.args)
             .map_err(|refusal| refusal.error(&request.use_))?;
         let invocation = ToolInvocation::new(call, route.tool.clone(), args)
             .with_issuing_language_node_id(request.identity.position().to_string())
             .with_execution_grant(grant);
         let cell = CellCall::of(&invocation, contract);
-        let frozen = FrozenRequest::tool(cell.clone(), request.args.clone(), &CellArgs)
+        let frozen = FrozenRequest::tool(cell.clone(), request.args.clone(), &projection)
             .map_err(|refusal| refused(TOOL_ARGUMENTS, refusal.to_string()))?;
         Ok((invocation, cell, frozen))
     }
@@ -414,21 +422,40 @@ impl ArgsRefusal {
 /// form. It reads data only: a frozen request holds the arguments that left
 /// the cell under this projection's identity, never the JSON it makes
 /// (FIG-5887 §3), and reads back the same on any later build.
-pub(super) struct CellArgs;
+pub(super) enum CellArgs {
+    Direct,
+    Deferred,
+}
 
 /// The projection identity of a call's arguments.
 pub(super) const CALL_ARGS: &str = "lash-cell-args/v1";
+const DEFERRED_CALL_ARGS: &str = "lash-cell-deferred-args/v1";
 
 impl CellArgs {
     /// The projection named `id`.
     pub(super) fn named(id: &str) -> Result<Self, String> {
         match id {
-            CALL_ARGS => Ok(Self),
+            CALL_ARGS => Ok(Self::Direct),
+            DEFERRED_CALL_ARGS => Ok(Self::Deferred),
             other => Err(format!("no argument projection `{other}`")),
         }
     }
 
     pub(super) fn args(&self, args: &[Datum]) -> Result<serde_json::Value, ArgsRefusal> {
+        // Deferred imports carry the source argument list as one JSON
+        // operand. Narrow it only here, under the projection the frozen
+        // request retains, before fitting the selected tool's contract.
+        let args = match self {
+            Self::Direct => args,
+            Self::Deferred => match args {
+                [Datum::List(args)] => args,
+                _ => {
+                    return Err(ArgsRefusal::NotJson(
+                        "a deferred call must retain its source argument list".into(),
+                    ));
+                }
+            },
+        };
         lash_vm_runtime::tool_input(
             args,
             |input| {
@@ -445,7 +472,10 @@ impl CellArgs {
 
 impl lash_vm_broker::kernel::graph::ArgumentProjection for CellArgs {
     fn id(&self) -> &str {
-        CALL_ARGS
+        match self {
+            Self::Direct => CALL_ARGS,
+            Self::Deferred => DEFERRED_CALL_ARGS,
+        }
     }
 
     fn project(&self, args: &[Datum]) -> Result<serde_json::Value, String> {

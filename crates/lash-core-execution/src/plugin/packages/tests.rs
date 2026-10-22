@@ -260,13 +260,13 @@ fn a_pinned_target_needs_its_executor_without_rediscovery() {
     .with_execution(std::time::Duration::from_secs(10));
     let grant = DeferredGrant {
         provider: ProviderName {
-            owner: "test_protocol".into(),
+            owner: "resolver_plugin".into(),
             key: "resolver".into(),
         },
         context: PublicationContext {
             domain: PublicationDomain("test".into()),
             scope: PublicationScope::Host,
-            publisher: PublisherInstance("test_protocol/resolver".into()),
+            publisher: PublisherInstance("resolver_plugin/resolver".into()),
             root: Segment::new("service").unwrap(),
         },
         path: PackagePath::parse("service").unwrap(),
@@ -315,6 +315,56 @@ fn a_pinned_target_needs_its_executor_without_rediscovery() {
     assert_eq!(requirements.providers.len(), 1);
     assert!(!requirements.providers.contains(&grant.provider));
     assert_eq!(requirements.callbacks.len(), 1);
+    // L-DEFERRED-PIN: choosing another owner cannot cross registries, invent
+    // an executor, or authorize a name outside the pinned deferred path.
+    let invalid_routes = [
+        OperationRoute {
+            provider: super::super::ToolProviderHandle::new(
+                super::super::RegistryKind::Process,
+                "test_protocol",
+                crate::tool_provider_key!("executor"),
+            ),
+            ..route.clone()
+        },
+        OperationRoute {
+            provider: super::super::ToolProviderHandle::new(
+                super::super::RegistryKind::Session,
+                "unregistered",
+                crate::tool_provider_key!("executor"),
+            ),
+            ..route.clone()
+        },
+    ];
+    for invalid in invalid_routes {
+        assert!(matches!(
+            composition.validate_resolved_route(
+                &grant,
+                &name,
+                &definition,
+                &invalid,
+                super::super::RegistryKind::Session
+            ),
+            Err(EnginePortError::Refused(
+                AdmissionRefusal::NotVisible { .. }
+            ))
+        ));
+    }
+    let outside = QualifiedName {
+        package: PackagePath::parse("another_scope").unwrap(),
+        ..name.clone()
+    };
+    assert!(matches!(
+        composition.validate_resolved_route(
+            &grant,
+            &outside,
+            &definition,
+            &route,
+            super::super::RegistryKind::Session
+        ),
+        Err(EnginePortError::Refused(
+            AdmissionRefusal::NotVisible { .. }
+        ))
+    ));
 }
 
 /// A2: sessions only add disjoint paths; a package member is a leaf,

@@ -268,7 +268,7 @@ async fn a_childs_request_states_only_the_hosts_configuration_and_the_call() {
     assert!(spawn.output_schema.is_some());
 }
 
-/// The tools a session built under `namespace` is offered.
+/// The code operations a session built under `namespace` is offered.
 fn offered(namespace: Option<DelegatedChild>) -> Vec<String> {
     let factory: Arc<dyn PluginFactory> = Arc::new(DelegationPluginFactory::new(
         child_spec(),
@@ -302,10 +302,23 @@ fn offered(namespace: Option<DelegatedChild>) -> Vec<String> {
         ))
         .expect("the session builds");
     session
-        .tool_catalog()
-        .expect("the catalog")
+        .pin_resolved_tool_surface()
+        .expect("the package surface")
+        .surface
+        .packages()
+        .snapshot
+        .advertisements
         .iter()
-        .filter_map(|tool| tool["name"].as_str().map(str::to_owned))
+        .filter_map(|accepted| match &accepted.advertisement {
+            lash::package::PackageAdvertisement::Enumerated(package) => Some(package),
+            lash::package::PackageAdvertisement::Deferred(_) => None,
+        })
+        .flat_map(|package| {
+            package
+                .members
+                .keys()
+                .map(|name| format!("{}.{name}", package.path))
+        })
         .collect()
 }
 
