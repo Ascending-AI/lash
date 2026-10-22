@@ -1150,7 +1150,7 @@ impl lash_core_store::session_state::SessionPluginStateSource for PluginSession 
         &self,
         config: &PluginConfig,
         fleet: crate::FleetFormat,
-    ) -> Result<Option<Arc<[u8]>>, crate::RuntimeError> {
+    ) -> Result<Option<lash_kernel_doc::allocation::SharedBytes>, crate::RuntimeError> {
         self.capture_native_view(Some(config), fleet)
             .map_err(|error| crate::RuntimeEffectControllerError::from(error).into_runtime_error())
     }

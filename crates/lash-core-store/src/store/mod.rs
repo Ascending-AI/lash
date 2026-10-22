@@ -15,7 +15,7 @@ pub use checkpoint::{
     CHECKPOINT_COMPONENT_ENCODING_VERSION, CheckpointComponentDescriptor, CheckpointExecution,
     HydratedCheckpointComponent, HydratedSessionCheckpoint, PLUGIN_ADMISSION_CHECKPOINT_COMPONENT,
     PLUGIN_STATE_CHECKPOINT_COMPONENT, RETIRED_TOOL_STATE_CHECKPOINT_COMPONENT,
-    SESSION_CHECKPOINT_SCHEMA_VERSION, SessionCheckpoint,
+    SESSION_CHECKPOINT_SCHEMA_VERSION, SessionCheckpoint, SharedCheckpointAddress,
     ensure_checkpoint_component_encoding_version, ensure_checkpoint_component_hash_agreement,
 };
 pub mod admission_plan;
@@ -266,23 +266,67 @@ fn build_persisted_turn_state(state: &crate::RuntimeSessionState) -> crate::Pers
     }
 }
 
-pub(crate) fn encode_checkpoint_component<T: serde::Serialize>(
+/// Encode a checkpoint body only after admitting its exact output and
+/// scratch capacity. The writer refuses a serializer that grows between
+/// the count and write passes, before its output could exceed admission.
+pub fn encode_checkpoint_component<T: serde::Serialize>(
     key: &str,
     value: &T,
-) -> Result<Vec<u8>, StoreError> {
-    rmp_serde::to_vec_named(value).map_err(|error| StoreError::RecordEncodingFailed {
+    budget: &lash_protocol_types::allocation::AllocationBudget,
+) -> Result<crate::checkpoint_graph::SharedBytes, StoreError> {
+    let failed = |error: rmp_serde::encode::Error| StoreError::RecordEncodingFailed {
         record_kind: format!("checkpoint component `{key}`"),
         message: error.to_string(),
-    })
+    };
+    let mut counted = lash_protocol_types::core_support::EncodedLength::default();
+    rmp_serde::encode::write_named(&mut counted, value).map_err(failed)?;
+    let len = counted.len();
+    // Conversion to shared bytes keeps the original Vec alive until the
+    // immutable allocation is complete; both capacities are admitted here.
+    let allocation = budget.reserve((len as u64).saturating_mul(2).saturating_add(256))?;
+    struct Output {
+        bytes: Vec<u8>,
+        limit: usize,
+    }
+    impl std::io::Write for Output {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            if bytes.len() > self.limit.saturating_sub(self.bytes.len()) {
+                return Err(std::io::Error::other(
+                    "checkpoint serialization exceeded its admitted length",
+                ));
+            }
+            self.bytes.extend_from_slice(bytes);
+            Ok(bytes.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+    let mut bytes = Vec::new();
+    bytes
+        .try_reserve_exact(len)
+        .map_err(|error| StoreError::RecordEncodingFailed {
+            record_kind: format!("checkpoint component `{key}`"),
+            message: error.to_string(),
+        })?;
+    let mut output = Output { bytes, limit: len };
+    rmp_serde::encode::write_named(&mut output, value).map_err(failed)?;
+    Ok(crate::checkpoint_graph::SharedBytes::from_admitted(
+        output.bytes,
+        allocation,
+        budget.clone(),
+    ))
 }
 
 fn build_checkpoint_from_persisted_state(
     state: &crate::RuntimeSessionState,
     fleet_format: FleetFormat,
 ) -> Result<HydratedSessionCheckpoint, StoreError> {
-    state
-        .checkpoint_components
-        .build_checkpoint(build_persisted_turn_state(state), fleet_format)
+    state.checkpoint_components.build_checkpoint(
+        build_persisted_turn_state(state),
+        fleet_format,
+        state.session_graph.nodes.allocation_budget(),
+    )
 }
 
 impl RuntimeCommit {

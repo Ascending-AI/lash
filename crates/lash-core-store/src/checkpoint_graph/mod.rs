@@ -38,6 +38,7 @@
 //! There is no format version field, no fallback reader and no second
 //! spelling of any value.
 
+pub use lash_kernel_doc::allocation::SharedBytes;
 pub mod bodies;
 pub mod commit;
 pub mod config;

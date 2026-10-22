@@ -646,11 +646,7 @@ impl<R: LeasedReads + ?Sized> ActivationPages<R> {
         }
         if !missing.is_empty() {
             let fetched = self.fetch(&missing).await?;
-            cache.keep(
-                fetched
-                    .iter()
-                    .map(|page| (page.id, Arc::clone(&page.bytes))),
-            );
+            cache.keep(fetched.iter().map(|page| (page.id, page.bytes.clone())));
             read.extend(fetched);
         }
         Ok(read)
@@ -875,7 +871,8 @@ impl<R: LeasedReads + ?Sized> ActivationPages<R> {
         let mut left = budget;
         let mut warm = Vec::new();
         while !level.is_empty() && left > 0 && warm.len() < self.limits.batch_pages {
-            let mut bytes: BTreeMap<NodeId, Arc<[u8]>> = BTreeMap::new();
+            let mut bytes: BTreeMap<NodeId, lash_kernel_doc::allocation::SharedBytes> =
+                BTreeMap::new();
             let mut committed = Vec::new();
             for id in &level {
                 match self.spool.read(id) {
@@ -1112,7 +1109,10 @@ pub fn frame_page(body: &PageBody) -> Result<FramedPage, HeapFault> {
 /// `page`, read as `id`, checked as it crosses to a worker: named by the
 /// digest of exactly its bytes, which must be `id`, and framed
 /// canonically. The digest is taken once, by the envelope that crosses.
-fn crossing(id: NodeId, page: &Arc<[u8]>) -> Result<(PageEnvelope, VerifiedNode), PageRefusal> {
+fn crossing(
+    id: NodeId,
+    page: &lash_kernel_doc::allocation::SharedBytes,
+) -> Result<(PageEnvelope, VerifiedNode), PageRefusal> {
     let crossing = PageEnvelope::new(page.to_vec());
     if crossing.id() != id.0 {
         return Err(PageRefusal::Corrupt);
@@ -1120,7 +1120,7 @@ fn crossing(id: NodeId, page: &Arc<[u8]>) -> Result<(PageEnvelope, VerifiedNode)
     let node = VerifiedNode::check_decoded(
         EncodedNode {
             id,
-            bytes: Arc::clone(page),
+            bytes: page.clone(),
         },
         &DecodeLimits::within_total(u64::MAX),
     )

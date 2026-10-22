@@ -34,7 +34,7 @@ struct Pages {
     budget: u64,
     bytes: u64,
     tick: u64,
-    pages: HashMap<NodeId, (Arc<[u8]>, u64)>,
+    pages: HashMap<NodeId, (lash_kernel_doc::allocation::SharedBytes, u64)>,
     order: BTreeMap<u64, NodeId>,
 }
 
@@ -75,12 +75,12 @@ impl PageCache {
 
     /// The bytes of `page`, when a reader fetched them.
     #[must_use]
-    pub fn get(&self, page: &NodeId) -> Option<Arc<[u8]>> {
+    pub fn get(&self, page: &NodeId) -> Option<lash_kernel_doc::allocation::SharedBytes> {
         let mut pages = self.lock();
         pages.tick += 1;
         let tick = pages.tick;
         let (bytes, used) = pages.pages.get_mut(page)?;
-        let (bytes, last) = (Arc::clone(bytes), std::mem::replace(used, tick));
+        let (bytes, last) = (bytes.clone(), std::mem::replace(used, tick));
         pages.order.remove(&last);
         pages.order.insert(tick, *page);
         Some(bytes)
@@ -93,7 +93,10 @@ impl PageCache {
     }
 
     /// Keeps `pages`, committed pages a reader fetched from the store.
-    pub fn keep(&self, pages: impl IntoIterator<Item = (NodeId, Arc<[u8]>)>) {
+    pub fn keep(
+        &self,
+        pages: impl IntoIterator<Item = (NodeId, lash_kernel_doc::allocation::SharedBytes)>,
+    ) {
         let mut cache = self.lock();
         for (id, bytes) in pages {
             let size = bytes.len() as u64;
@@ -198,8 +201,11 @@ impl HintBook {
 mod tests {
     use super::*;
 
-    fn page(n: u8, len: usize) -> (NodeId, Arc<[u8]>) {
-        (NodeId([n; 32]), Arc::from(vec![n; len]))
+    fn page(n: u8, len: usize) -> (NodeId, lash_kernel_doc::allocation::SharedBytes) {
+        (
+            NodeId([n; 32]),
+            lash_kernel_doc::allocation::SharedBytes::from(vec![n; len]),
+        )
     }
 
     /// The cache never holds more than its budget, and what it drops is

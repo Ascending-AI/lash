@@ -2,6 +2,7 @@
 //! Shared by release generation and runtime storage without pulling runtime
 //! services into the build host.
 
+pub use lash_kernel_doc::allocation;
 mod blob;
 mod budget;
 pub mod encode;

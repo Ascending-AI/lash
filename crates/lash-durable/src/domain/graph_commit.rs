@@ -265,7 +265,7 @@ pub struct CheckedGraph {
 #[derive(Clone, Debug)]
 pub struct CheckedNode {
     pub id: NodeId,
-    pub bytes: std::sync::Arc<[u8]>,
+    pub bytes: lash_kernel_doc::allocation::SharedBytes,
     pub children: Vec<NodeId>,
 }
 

@@ -794,10 +794,10 @@ impl<'a> From<&'a HydratedSessionCheckpoint> for CheckpointIntent<'a> {
                 .map(|(key, component)| {
                     let blob_ref = match component {
                         HydratedCheckpointComponent::Changed { body_ref, .. } => {
-                            Some(body_ref.clone())
+                            Some(body_ref.as_ref().clone())
                         }
                         HydratedCheckpointComponent::Unchanged { descriptor } => {
-                            Some(descriptor.blob_ref.clone())
+                            Some(descriptor.blob_ref.as_ref().clone())
                         }
                         HydratedCheckpointComponent::Hydrated { body, .. } => {
                             let blob_ref = BlobRef::for_content(body);

@@ -870,7 +870,7 @@ impl PageStore for PostgresDurableStore {
             .map(|page| match found.get(page) {
                 Some(bytes) => Ok(StoredPage {
                     id: *page,
-                    bytes: bytes.clone(),
+                    bytes: bytes.clone().into(),
                 }),
                 None => Err(DurableError::Graph(GraphRefusal::MissingNode(*page))),
             })

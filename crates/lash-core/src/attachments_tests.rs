@@ -1712,7 +1712,8 @@ fn pinned_session_attachment_acceptance_survives_model_catalogue_change() {
                 &crate::plugin::prompt::PromptCatalogSnapshot::default(),
             )
             .expect("the recorded config reads")
-            .publish(&mut config),
+            .publish(&mut config)
+            .expect("config allocation admitted"),
         crate::ConfigTransactionOutcome::Applied { .. }
     ));
     let policy = config.session_policy();

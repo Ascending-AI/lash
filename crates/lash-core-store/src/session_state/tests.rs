@@ -175,6 +175,7 @@ fn incomplete_checkpoint_component_projection_is_a_typed_error() {
         .build_checkpoint(
             crate::PersistedTurnState::default(),
             crate::store::FleetFormat::current(),
+            &lash_protocol_types::allocation::AllocationBudget::unowned(),
         )
         .expect_err("snapshot projection cannot prove the complete keyed set");
 
@@ -757,8 +758,8 @@ fn a_checkpoint_naming_the_retired_tool_state_component_is_refused() {
             crate::store::RETIRED_TOOL_STATE_CHECKPOINT_COMPONENT.to_owned(),
             crate::store::HydratedCheckpointComponent::Changed {
                 encoding_version: crate::store::CHECKPOINT_COMPONENT_ENCODING_VERSION,
-                body_ref: crate::BlobRef::for_content(body),
-                body: std::sync::Arc::from(&body[..]),
+                body_ref: crate::BlobRef::for_content(body).into(),
+                body: (&body[..]).into(),
             },
         )]
         .into_iter()

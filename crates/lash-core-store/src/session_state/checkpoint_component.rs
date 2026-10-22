@@ -6,6 +6,7 @@
 //! whose body was released holds `ResidentCheckpointComponentBody`'s payload
 //! `None`.
 
+use lash_kernel_doc::allocation::SharedBytes;
 use std::sync::Arc;
 
 #[derive(Clone, Debug, serde::Serialize)]
@@ -14,7 +15,7 @@ pub(super) enum ResidentCheckpointComponentBody {
         snapshot: Option<crate::PluginState>,
         map: PluginStateRecord,
     },
-    Opaque(Option<Arc<[u8]>>),
+    Opaque(Option<SharedBytes>),
 }
 
 /// The head's namespace map as resident state keeps it, with which values
@@ -85,7 +86,7 @@ pub(super) enum PendingCheckpointComponentBody {
         snapshot: crate::PluginState,
         map: PluginStateRecord,
     },
-    Opaque(Arc<[u8]>),
+    Opaque(SharedBytes),
 }
 
 impl PendingCheckpointComponentBody {
@@ -161,7 +162,7 @@ impl ResidentCheckpointComponent {
     }
 
     /// The resident bytes of an opaque component.
-    pub(super) fn opaque_body(&self) -> Option<Arc<[u8]>> {
+    pub(super) fn opaque_body(&self) -> Option<SharedBytes> {
         match self {
             Self::Unchanged {
                 body: ResidentCheckpointComponentBody::Opaque(body),
@@ -170,7 +171,7 @@ impl ResidentCheckpointComponent {
             Self::Changed {
                 body: PendingCheckpointComponentBody::Opaque(body),
                 ..
-            } => Some(Arc::clone(body)),
+            } => Some(body.clone()),
             _ => None,
         }
     }
@@ -182,10 +183,11 @@ impl ResidentCheckpointComponent {
             Self::Unchanged { body, .. } => {
                 std::mem::replace(body, ResidentCheckpointComponentBody::Opaque(None))
             }
-            Self::Changed { body, .. } => {
-                std::mem::replace(body, PendingCheckpointComponentBody::Opaque(Arc::default()))
-                    .into_resident()
-            }
+            Self::Changed { body, .. } => std::mem::replace(
+                body,
+                PendingCheckpointComponentBody::Opaque(SharedBytes::default()),
+            )
+            .into_resident(),
         };
         if let ResidentCheckpointComponentBody::PluginState { map, .. } = &mut body {
             map.adopt_bodies();
@@ -301,7 +303,7 @@ pub(super) fn assemble_plugin_state(
             })?;
         if component
             .descriptor()
-            .map(|descriptor| &descriptor.blob_ref)
+            .map(|descriptor| descriptor.blob_ref.as_ref())
             != Some(&entry.values)
         {
             return Err(crate::StoreError::StoredDataCorrupt {

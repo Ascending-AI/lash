@@ -71,7 +71,7 @@ impl Host for Answering {
 struct Uncommitted;
 
 impl CommittedPages for Uncommitted {
-    fn page(&self, _page: &NodeId) -> Option<Arc<[u8]>> {
+    fn page(&self, _page: &NodeId) -> Option<lash_core_store::checkpoint_graph::SharedBytes> {
         None
     }
 }

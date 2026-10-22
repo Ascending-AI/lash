@@ -29,7 +29,7 @@ impl SessionPluginStateSource for CommittedPlugins<'_> {
         &self,
         config: &crate::PluginConfig,
         fleet: crate::store::FleetFormat,
-    ) -> Result<Option<std::sync::Arc<[u8]>>, crate::RuntimeError> {
+    ) -> Result<Option<lash_kernel_doc::allocation::SharedBytes>, crate::RuntimeError> {
         self.plugins.capture_plugin_admission(config, fleet)
     }
 

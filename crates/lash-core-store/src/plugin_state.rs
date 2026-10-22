@@ -498,7 +498,11 @@ pub fn fork_checkpoint_plugin_state(
     if forked == map {
         return Ok(false);
     }
-    let body = crate::store::encode_checkpoint_component(key, &forked)?;
+    let body = crate::store::encode_checkpoint_component(
+        key,
+        &forked,
+        &lash_protocol_types::allocation::AllocationBudget::unowned(),
+    )?;
     checkpoint.components.insert(
         key.to_owned(),
         crate::store::HydratedCheckpointComponent::changed_for_fleet(body, fleet_format),

@@ -137,7 +137,7 @@ impl<'a> Payload<'a> {
         match self {
             Payload::Graph(bytes) => Ok(GraphNode {
                 id: NodeId::of_envelope(bytes),
-                bytes: std::sync::Arc::from(bytes),
+                bytes: bytes.into(),
             }),
             Payload::Json(_) => Err(Extraction::Undecodable {
                 format,
@@ -327,7 +327,7 @@ mod tests {
                     (
                         format!("component-{index}"),
                         lash_core::store::CheckpointComponentDescriptor {
-                            blob_ref: lash_core::store::BlobRef(blob.clone()),
+                            blob_ref: lash_core::store::BlobRef(blob.clone()).into(),
                             encoding_version: *encoding,
                         },
                     )
