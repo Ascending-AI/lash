@@ -9,7 +9,7 @@ use lash_kernel_doc::{Correspondence, Survivor};
 
 use lash_vocabulary::names::DocumentId;
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use lash_kernel_check::{Admitted, Environment, admit};
 use lash_kernel_doc::{
@@ -455,6 +455,7 @@ impl Working {
         base: DocumentId,
         environment: &Environment<'_>,
     ) -> Result<Published, EditRefusal> {
+        self.refresh_dependencies(environment.functions);
         let reidentified = self.document.reidentify_functions().map_err(|message| {
             crate::refusal::refused(
                 None,
@@ -488,6 +489,75 @@ impl Working {
             admitted,
             correspondence,
         })
+    }
+
+    /// An edit can remove the last call of a native helper. Rebuild local
+    /// body dependencies before hashing them, then release native definitions
+    /// no retained code uses. Guest declarations remain authored document data,
+    /// including declarations no start currently reaches.
+    fn refresh_dependencies(&mut self, catalog: &dyn lash_kernel_doc::FunctionCatalog) {
+        let names = self.document.function_names();
+        for function in self.document.functions.values_mut() {
+            if function.has_native() {
+                continue;
+            }
+            if let Some(body) = function.body_mut() {
+                body.functions = Node::Block(&body.block)
+                    .functions_within()
+                    .into_iter()
+                    .filter_map(|id| names.get(&id).cloned().map(|name| (id, name)))
+                    .collect();
+                body.imports = Node::Block(&body.block)
+                    .imports_within()
+                    .into_iter()
+                    .filter_map(|slot| {
+                        self.document
+                            .imports
+                            .get(&slot)
+                            .cloned()
+                            .map(|import| (slot, import))
+                    })
+                    .collect();
+            }
+        }
+        let mut retained: BTreeSet<_> = self
+            .document
+            .functions
+            .iter()
+            .filter(|(_, function)| !function.has_native())
+            .map(|(id, _)| *id)
+            .chain(
+                lash_kernel_check::requirements(&self.document, catalog)
+                    .functions
+                    .into_keys(),
+            )
+            .collect();
+        let mut pending: Vec<_> = retained.iter().copied().collect();
+        while let Some(id) = pending.pop() {
+            if let Some(body) = self
+                .document
+                .functions
+                .get(&id)
+                .and_then(|function| function.body())
+            {
+                for dependency in Node::Block(&body.block).functions_within() {
+                    if retained.insert(dependency) {
+                        pending.push(dependency);
+                    }
+                }
+            }
+        }
+        self.document
+            .functions
+            .retain(|id, _| retained.contains(id));
+        self.document
+            .requires
+            .natives
+            .retain(|id| retained.contains(id));
+        self.shadows.retain(|unit, _| match unit {
+            Unit::Library(id) => retained.contains(id),
+            _ => true,
+        });
     }
 
     /// The correspondence the shadows hold, from `base` to the document of
