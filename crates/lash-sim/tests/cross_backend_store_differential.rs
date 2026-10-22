@@ -2068,7 +2068,7 @@ async fn cross_backend_store_differential_agrees() {
             for runner in &mut runners {
                 runner.surface.answer = None;
                 let before = runner.residue_digest().await;
-                let result = runner.apply(operation).await;
+                let result = Box::pin(runner.apply(operation)).await;
                 let (observation, changed_tables) = runner
                     .observe(&before, case.name.comparison(), result)
                     .await;

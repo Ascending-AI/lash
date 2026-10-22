@@ -1358,8 +1358,9 @@ mod tests {
     #[tokio::test]
     async fn lo_root_retirement_work_ignores_unrelated_edges() {
         use lash_core_store::checkpoint_graph::{
-            EncodeBudget, ExplicitLimit, GraphStaging, NodeKind, TokenWriter, TypedBody,
+            EncodeBudget, ExplicitLimit, GraphStaging, NodeKind, TypedBody,
         };
+        use lash_vocabulary::tokens::TokenWriter;
         let mut work = Vec::new();
         for size in [32, 4096] {
             let set = crate::SqliteStoreSet::memory().await.unwrap();
