@@ -613,6 +613,33 @@ impl<'s> GraphDecoder<'s> {
         }
     }
 
+    /// Plain tokens between references carry no graph work. Locate the
+    /// first failing original event under the receiving limit after prior
+    /// substitutions, before any later child read or placement refusal.
+    fn unplaced_prefix_limit(
+        &self,
+        scan: &LogicalScan,
+        end: usize,
+        out: Option<&TokenWriter>,
+        copied: usize,
+    ) -> Result<(), GraphRefusal> {
+        let source_limit = out.map_or(self.limits.logical_bytes, |writer| {
+            self.limits
+                .logical_bytes
+                .saturating_sub(writer.len() as u64)
+                .saturating_add(copied as u64)
+        });
+        if let Some(at) = scan.first_event_past(source_limit).filter(|at| *at <= end) {
+            let actual = out.map_or(at, |writer| writer.len() + at - copied);
+            self.limit(
+                DecodeDimension::LogicalBytes,
+                actual as u64,
+                self.limits.logical_bytes,
+            )?;
+        }
+        Ok(())
+    }
+
     /// Puts every placed value of `placed` back inline, refusing an inline
     /// value over the bound and a placed one under it.
     fn unplace<'p>(&mut self, id: NodeId, placed: &'p [u8]) -> Result<Cow<'p, [u8]>, GraphRefusal> {
@@ -624,8 +651,11 @@ impl<'s> GraphDecoder<'s> {
         })?;
         let mut out: Option<TokenWriter> = None;
         let mut copied = 0;
-        for step in scan.placement_steps() {
+        for step in scan.placement_changes() {
+            #[cfg(test)]
+            UNPLACE_STEPS.with(|count| count.set(count.get() + 1));
             let start = step.start;
+            self.unplaced_prefix_limit(&scan, start, out.as_ref(), copied)?;
             match step.placement {
                 Placement::Oversized => {
                     return Err(non_canonical(id, CanonicalFault::InvalidPlacement));
@@ -661,7 +691,6 @@ impl<'s> GraphDecoder<'s> {
                         copied = step.end;
                     }
                 }
-                Placement::Inline => {}
             }
             self.limit(
                 DecodeDimension::LogicalBytes,
@@ -671,6 +700,7 @@ impl<'s> GraphDecoder<'s> {
                 self.limits.logical_bytes,
             )?;
         }
+        self.unplaced_prefix_limit(&scan, placed.len(), out.as_ref(), copied)?;
         Ok(out.map_or(Cow::Borrowed(placed), |mut writer| {
             writer.raw(&placed[copied..]);
             Cow::Owned(writer.into_bytes())
@@ -709,9 +739,60 @@ fn leaf_payload<'s>(
 }
 
 #[cfg(test)]
+thread_local! {
+    static UNPLACE_STEPS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+
+#[cfg(test)]
 mod preparation_tests {
     use super::super::node::write_envelope;
     use super::*;
+
+    /// FIG-7135: only referenced children require per-event unplacement;
+    /// arbitrarily long plain token spans use their prepared boundaries.
+    #[test]
+    fn unplacement_visits_references_without_walking_plain_tokens() {
+        let child = NodeId([0xb2; 32]);
+        struct Opaque {
+            child: NodeId,
+            reads: std::cell::Cell<usize>,
+        }
+        impl NodeSource for Opaque {
+            fn fetch(&self, id: &NodeId) -> Option<StoredNode<'_>> {
+                self.reads.set(self.reads.get() + 1);
+                (*id == self.child).then_some(StoredNode {
+                    encoding: BlobEncoding::Opaque,
+                    bytes: &[0],
+                })
+            }
+        }
+        let source = Opaque {
+            child,
+            reads: std::cell::Cell::new(0),
+        };
+        let mut tokens = TokenWriter::new();
+        tokens.seq(10_002);
+        for n in 0..10_000 {
+            tokens.unsigned(n);
+        }
+        tokens.child(child.child_ref());
+        tokens.bool(true);
+        let placed = tokens.into_bytes();
+        UNPLACE_STEPS.with(|count| count.set(0));
+        for _ in 0..12 {
+            let mut decoder = GraphDecoder::new(&source, DecodeLimits::within_total(1 << 20));
+            assert_eq!(
+                &*decoder.unplace(NodeId([0xb3; 32]), &placed).unwrap(),
+                placed
+            );
+        }
+        assert_eq!(source.reads.get(), 12, "every current child is still read");
+        assert_eq!(
+            UNPLACE_STEPS.with(std::cell::Cell::get),
+            12,
+            "plain spans must not become per-token unplacement work"
+        );
+    }
 
     /// FIG-7135: unplacement consumes ordered prepared token facts, rather
     /// than parsing the same checked logical content for every cold read.

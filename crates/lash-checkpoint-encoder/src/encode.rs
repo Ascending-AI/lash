@@ -819,7 +819,7 @@ pub struct LogicalScan {
     at: Vec<(usize, [u8; 32])>,
     pub(crate) children: Vec<[u8; 32]>,
     ends: Vec<usize>,
-    oversized_inline: Option<usize>,
+    oversized_inline: Option<(usize, usize)>,
 }
 
 /// One validated logical token event, retained in its original order.
@@ -833,7 +833,6 @@ pub struct PlacementStep {
 /// The part of a canonical token event graph placement needs.
 #[derive(Clone, Copy, Debug)]
 pub enum Placement {
-    Inline,
     Oversized,
     Child(ChildRef),
 }
@@ -914,10 +913,10 @@ impl LogicalScan {
             match event {
                 TokenEvent::Child(child) => at.push((start, child.0)),
                 TokenEvent::Text(text) if token_len(text.len()) > INLINE_TOKEN_MAX => {
-                    oversized_inline.get_or_insert(start);
+                    oversized_inline.get_or_insert((start, reader.position()));
                 }
                 TokenEvent::Bytes(bytes) if token_len(bytes.len()) > INLINE_TOKEN_MAX => {
-                    oversized_inline.get_or_insert(start);
+                    oversized_inline.get_or_insert((start, reader.position()));
                 }
                 _ => {}
             }
@@ -934,27 +933,41 @@ impl LogicalScan {
         })
     }
 
-    /// Placement facts in validated token order. The first oversized inline
-    /// value is marked; a consumer must refuse at it before later events.
-    pub fn placement_steps(&self) -> impl Iterator<Item = PlacementStep> + '_ {
+    /// Events that may change placement, in validated token order. Plain
+    /// spans are admitted with [`Self::first_event_past`] instead of walking
+    /// them. A consumer must refuse the first oversized inline value.
+    pub fn placement_changes(&self) -> impl Iterator<Item = PlacementStep> + '_ {
         let mut references = self.at.iter().peekable();
-        let mut start = 0;
-        self.ends.iter().map(move |end| {
-            let placement = if self.oversized_inline == Some(start) {
-                Placement::Oversized
-            } else if let Some((_, digest)) = references.next_if(|(at, _)| *at == start) {
-                Placement::Child(ChildRef(*digest))
-            } else {
-                Placement::Inline
-            };
-            let step = PlacementStep {
-                start,
-                end: *end,
-                placement,
-            };
-            start = *end;
-            step
+        let mut oversized = self.oversized_inline;
+        std::iter::from_fn(move || {
+            if let Some((start, end)) = oversized
+                && references.peek().is_none_or(|(at, _)| *at >= start)
+            {
+                oversized = None;
+                return Some(PlacementStep {
+                    start,
+                    end,
+                    placement: Placement::Oversized,
+                });
+            }
+            references.next().map(|(start, digest)| PlacementStep {
+                start: *start,
+                end: *start + LOGICAL_REF_LEN,
+                placement: Placement::Child(ChildRef(*digest)),
+            })
         })
+    }
+
+    /// The first token whose original end exceeds `limit`. The common
+    /// admitted case is constant work; a tight limit uses binary search,
+    /// retaining the exact event the sequential reader would refuse at.
+    pub fn first_event_past(&self, limit: u64) -> Option<usize> {
+        if *self.ends.last()? as u64 <= limit {
+            return None;
+        }
+        self.ends
+            .get(self.ends.partition_point(|end| *end as u64 <= limit))
+            .copied()
     }
 
     fn slot(&self, digest: &[u8; 32]) -> u64 {
@@ -1081,8 +1094,7 @@ mod cache_tests {
                 to_physical(&logical.clone(), NodeKind::FROZEN_VALUE).unwrap();
             assert_eq!(children, [[0x61; 32], [0x62; 32]]);
             assert!(!physical.is_empty());
-            let scan = LogicalScan::scan(&logical.clone(), NodeKind(0)).unwrap();
-            assert_eq!(scan.placement_steps().count(), 5);
+            let _scan = LogicalScan::scan(&logical.clone(), NodeKind(0)).unwrap();
         }
         assert_eq!(
             REFERENCE_SCANS.with(std::cell::Cell::get),
