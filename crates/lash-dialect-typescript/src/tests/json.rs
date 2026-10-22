@@ -237,7 +237,7 @@ fn run(program: &Program, entry: &str, case: &Case) -> Ran {
 
 /// One input: a start value, how `build` shapes it and the arguments after
 /// the value (a replacer and a space).
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 struct Case {
     value: Datum,
     mode: u8,
@@ -504,19 +504,10 @@ fn cases() -> Vec<(Case, Arc<Program>)> {
         let odds = if round % 2 == 0 { 0 } else { 12 };
         values.push(value(&mut bits, 4, &mut budget, odds));
     }
-    // Repeated Smith prints denote the same input. Keep each distinct graph;
-    // every one still runs under all build modes and its replacer/space case.
-    let mut unique = Vec::new();
-    for value in values {
-        if !unique.contains(&value) {
-            unique.push(value);
-        }
-    }
-    println!("JSON classifier distinct inputs: {}", unique.len());
     let mut programs = BTreeMap::new();
     let library = machine::prepared().clone();
     let mut cases = Vec::new();
-    for value in unique {
+    for value in values {
         let roots = callable_links(&value);
         let program = programs
             .entry(roots.clone())
@@ -547,7 +538,16 @@ fn cases() -> Vec<(Case, Arc<Program>)> {
             program,
         ));
     }
-    cases
+    // Repeated prints may produce identical graphs, but their independently
+    // drawn tails can differ. Deduplicate only complete, exactly equal cases.
+    let mut unique = Vec::new();
+    for (case, program) in cases {
+        if !unique.iter().any(|(seen, _)| seen == &case) {
+            unique.push((case, program));
+        }
+    }
+    println!("JSON classifier distinct cases: {}", unique.len());
+    unique
 }
 
 /// The plain path writes what the generic walk writes, raises what it

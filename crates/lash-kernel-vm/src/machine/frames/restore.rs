@@ -249,12 +249,7 @@ pub(super) fn frame(
     {
         return Err(malformed("a frame has excess saved control rows").into());
     }
-    let library = match (
-        &code.site.unit,
-        code.site.path.is_empty()
-            && !code.charged
-            && !matches!(&code.site.unit, Unit::Library(function) if exe.native_starts.contains_key(function)),
-    ) {
+    let library = match (&code.site.unit, code.site.path.is_empty() && !code.charged) {
         (Unit::Library(function), true) => {
             let lib = exe
                 .lib_of(function)

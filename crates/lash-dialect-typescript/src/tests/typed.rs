@@ -109,23 +109,33 @@ fn a_tools_declared_result_type_is_stated_and_known() {
                   const a = (await stats.any()) + 1;";
     let lowered = lower_against(source, &[], &effects).unwrap();
     // The Import owns its public signature; the action selects that slot.
-    let performed: BTreeMap<_, _> = lowered
+    let mut pending = lowered
         .document
-        .ordinal_nodes()
-        .into_iter()
-        .filter_map(|(_, node)| {
-            let lash_kernel_doc::Node::Expr(lash_kernel_doc::Expr::Act(action)) = node else {
-                return None;
-            };
-            let lash_kernel_doc::ActKind::Perform { slot, result, .. } = &action.kind else {
-                return None;
-            };
-            Some((
-                lowered.document.imports[slot].name.to_string(),
+        .units()
+        .map(|(_, body)| lash_kernel_doc::Node::Block(body))
+        .collect::<Vec<_>>();
+    let mut performed = BTreeMap::new();
+    while let Some(node) = pending.pop() {
+        pending.extend(node.children());
+        let operation = match node {
+            lash_kernel_doc::Node::Expr(lash_kernel_doc::Expr::Act(action)) => match &action.kind {
+                lash_kernel_doc::ActKind::Perform { slot, result, .. } => Some((*slot, result)),
+                _ => None,
+            },
+            lash_kernel_doc::Node::Action(lash_kernel_doc::Action::Perform {
+                slot,
+                result,
+                ..
+            }) => Some((*slot, result)),
+            _ => None,
+        };
+        if let Some((slot, result)) = operation {
+            performed.insert(
+                lowered.document.imports[&slot].name.to_string(),
                 result.clone(),
-            ))
-        })
-        .collect();
+            );
+        }
+    }
     for (name, signature) in effects {
         assert_eq!(performed[&name.to_string()], signature.result);
     }

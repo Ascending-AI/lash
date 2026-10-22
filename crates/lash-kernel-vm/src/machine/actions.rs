@@ -1133,14 +1133,20 @@ impl KernelMachine {
             ),
             Target::Export(..) => Err(fault("an export resolved to another export").into()),
         };
+        let started = started.and_then(|flow| {
+            if flow == Flow::Done
+                && let Some(export) = &export
+            {
+                let value = self.regs[args];
+                self.check_public_result(exe, &value, &export.signature.result)?;
+            }
+            Ok(flow)
+        });
         match started {
             Ok(Flow::Step) => {}
             // A function with no frame has run to its end already.
             Ok(Flow::Done) => {
                 let value = self.take(args);
-                if let Some(export) = &export {
-                    self.check_public_result(exe, &value, &export.signature.result)?;
-                }
                 self.end_task(child, Ok(value))?;
                 self.put(args, handle);
                 self.refresh_charging(task)?;

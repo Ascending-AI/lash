@@ -770,6 +770,172 @@ fn callable_settled_result_must_fit_its_public_signature() {
     }
 }
 
+/// An immediate library export's public result failure belongs to the spawned
+/// child. The spawner receives its handle and observes that error at join.
+#[test]
+fn spawned_immediate_export_result_failure_ends_the_child() {
+    struct Null;
+    impl lash_kernel_doc::NativeFunction for Null {
+        fn call(
+            &self,
+            _: lash_kernel_doc::NativeCall<'_, '_>,
+        ) -> Result<lash_kernel_doc::Value, lash_kernel_doc::NativeError> {
+            Ok(lash_kernel_doc::Value::Null)
+        }
+    }
+    for native in [false, true] {
+        let mut definition = function(
+            "test.child",
+            Signature {
+                params: vec![],
+                result: Type::Any,
+            },
+            BTreeMap::new(),
+            vec![Stmt::Return { value: null() }],
+        );
+        let body = definition.body().expect("guest body").clone();
+        let charge = lash_kernel_doc::Formula::Constant(0);
+        definition.implementation = if native {
+            Implementation::Both { body, charge }
+        } else {
+            Implementation::Guest {
+                body,
+                metering: Metering::Formula(charge),
+            }
+        };
+        let function = definition.identity();
+        let public = Signature {
+            params: vec![],
+            result: Type::Bool,
+        };
+        let mut child = document(
+            BTreeMap::new(),
+            BTreeMap::from([(function, definition.clone())]),
+            None,
+        );
+        child.exports.insert(
+            Name::new("child"),
+            lash_kernel_doc::Export::Function(FunctionExport {
+                function,
+                signature: public.clone(),
+                convention: StartConvention::Direct,
+                asynchronous: true,
+                rest: false,
+            }),
+        );
+        let child_id = child.identity();
+        let child_link = Link {
+            document: child_id,
+            fills: BTreeMap::new(),
+        };
+        let child_link_id = child_link.identity();
+        let root = document(
+            BTreeMap::from([(
+                ImportSlot(0),
+                Import {
+                    name: QualifiedName {
+                        package: lash_vocabulary::PackagePath::parse("worker").unwrap(),
+                        member: lash_vocabulary::Segment::new("child").unwrap(),
+                        type_member: None,
+                    },
+                    kind: ImportKind::Code {
+                        signature: public,
+                        convention: Convention::Direct,
+                    },
+                },
+            )]),
+            BTreeMap::new(),
+            Some(vec![
+                Stmt::Let {
+                    name: Name::new("child"),
+                    value: Rhs::Action(Action::Spawn {
+                        callee: Callee::Import(ImportSlot(0)),
+                        args: vec![],
+                    }),
+                },
+                Stmt::Try(lash_kernel_doc::TryStmt {
+                    body: vec![Stmt::Let {
+                        name: Name::new("answer"),
+                        value: Rhs::Action(Action::Join {
+                            task: Atom::Variable(Name::new("child")),
+                        }),
+                    }],
+                    catch: Some(lash_kernel_doc::Catch {
+                        binding: Name::new("error"),
+                        body: vec![Stmt::Return {
+                            value: Expr::Variable(Name::new("error")),
+                        }],
+                    }),
+                    finally: None,
+                }),
+                Stmt::Return { value: null() },
+            ]),
+        );
+        let root_id = root.identity();
+        let link = Link {
+            document: root_id,
+            fills: BTreeMap::from([(
+                ImportSlot(0),
+                Fill::Export {
+                    link: child_link_id,
+                    export: ExportName {
+                        name: Name::new("child"),
+                        member: None,
+                    },
+                },
+            )]),
+        };
+        let link_id = link.identity();
+        let mut registry = FunctionRegistry::new();
+        registry
+            .register(
+                definition,
+                native.then(|| Arc::new(Null) as Arc<dyn lash_kernel_doc::NativeFunction>),
+            )
+            .expect("child definition");
+        let program = Program::prepare(
+            link_id,
+            BTreeMap::from([(root_id, Arc::new(root)), (child_id, Arc::new(child))]),
+            &BTreeMap::from([(link_id, link), (child_link_id, child_link)]),
+            PageId([9; 32]),
+            PreparedLibrary::new(Arc::new(registry)),
+        )
+        .expect("linked child");
+        let mut machine = KernelMachine::start(
+            program,
+            bounds(),
+            CellStart {
+                owner: PageId([8; 32]),
+                target: Target::Main,
+                args: vec![],
+                session: None,
+                modes: BTreeMap::new(),
+                host: vec![],
+            },
+            Box::new(Pages::default()),
+        )
+        .expect("spawn program");
+        loop {
+            match machine
+                .run(&mut Passive, 100_000)
+                .expect("child failure stays in guest")
+            {
+                Step::Slice => {}
+                Step::Ended(End::Finished(done)) => {
+                    let Datum::Error(error) = done.result else {
+                        panic!("join did not observe child error: {done:?}")
+                    };
+                    assert_eq!(error.kind, "function_result");
+                    break;
+                }
+                other => {
+                    panic!("child result failure escaped spawn or left a live child: {other:?}")
+                }
+            }
+        }
+    }
+}
+
 /// K-HOST and K-CHG: a synchronous native export needs no Main or guest
 /// body, and its declared formula is the charge on that path.
 #[test]
@@ -1014,6 +1180,7 @@ fn native_export_settlement_runs_the_defining_hook_after_cold_restore() {
         registry
             .register(definition, Some(Arc::new(Answer)))
             .unwrap_or_else(|error| panic!("linked law fixture: {error:?}"));
+        let links = BTreeMap::from([(link.identity(), link.clone())]);
         let program = Program::prepare(
             link.identity(),
             BTreeMap::from([(document.identity(), Arc::new(document))]),
@@ -1022,41 +1189,126 @@ fn native_export_settlement_runs_the_defining_hook_after_cold_restore() {
             PreparedLibrary::new(Arc::new(registry)),
         )
         .unwrap_or_else(|error| panic!("linked law fixture: {error:?}"));
-        let pages = Pages::default();
-        let mut machine = KernelMachine::start(
-            program.clone(),
-            bounds(),
-            CellStart {
-                owner: PageId([8; 32]),
-                target: Target::Entry(Name::new("answer")),
-                args: vec![],
-                session: None,
-                modes: BTreeMap::new(),
-                host: vec![],
-            },
-            Box::new(pages.clone()),
-        )
-        .unwrap_or_else(|error| panic!("linked law fixture: {error:?}"));
-        let requested = request(&mut machine);
-        let saved = machine
-            .checkpoint()
-            .unwrap_or_else(|error| panic!("linked law fixture: {error:?}"));
-        machine = KernelMachine::open(program, bounds(), &saved.checkpoint(), Box::new(pages))
-            .unwrap_or_else(|error| panic!("linked law fixture: {error:?}"));
-        machine
-            .deliver(requested.wait, Outcome::Completed(Datum::Null))
-            .unwrap_or_else(|error| panic!("linked law fixture: {error:?}"));
-        loop {
-            match machine
-                .run(&mut Passive, 100_000)
-                .unwrap_or_else(|error| panic!("linked law fixture: {error:?}"))
-            {
-                Step::Slice => {}
-                Step::Ended(End::Finished(done)) => {
-                    assert_eq!(done.result, Datum::Bool(kind != 2));
-                    break;
+        for via in 0..3 {
+            let (program, target) = if via == 0 {
+                (program.clone(), Target::Entry(Name::new("answer")))
+            } else {
+                let callee = Callee::Import(ImportSlot(0));
+                let mut main = vec![Stmt::Let {
+                    name: Name::new("answer"),
+                    value: Rhs::Action(if via == 1 {
+                        Action::Call {
+                            callee,
+                            args: vec![],
+                        }
+                    } else {
+                        Action::Spawn {
+                            callee,
+                            args: vec![],
+                        }
+                    }),
+                }];
+                if via == 2 {
+                    main.push(Stmt::Let {
+                        name: Name::new("joined"),
+                        value: Rhs::Action(Action::Join {
+                            task: Atom::Variable(Name::new("answer")),
+                        }),
+                    });
                 }
-                other => panic!("native settlement did not complete: {other:?}"),
+                main.push(Stmt::Return {
+                    value: Expr::Variable(Name::new(if via == 2 { "joined" } else { "answer" })),
+                });
+                let descriptor = match &program.document.exports[&Name::new("answer")] {
+                    lash_kernel_doc::Export::Function(export) => export,
+                    _ => unreachable!(),
+                };
+                let caller = self::document(
+                    BTreeMap::from([(
+                        ImportSlot(0),
+                        Import {
+                            name: QualifiedName {
+                                package: lash_vocabulary::PackagePath::parse("worker")
+                                    .expect("package"),
+                                member: lash_vocabulary::Segment::new("answer").expect("member"),
+                                type_member: None,
+                            },
+                            kind: ImportKind::Code {
+                                signature: descriptor.signature.clone(),
+                                convention: descriptor.convention.semantic(),
+                            },
+                        },
+                    )]),
+                    BTreeMap::new(),
+                    Some(main),
+                );
+                let caller_id = caller.identity();
+                let caller_link = Link {
+                    document: caller_id,
+                    fills: BTreeMap::from([(
+                        ImportSlot(0),
+                        Fill::Export {
+                            link: program.link,
+                            export: ExportName {
+                                name: Name::new("answer"),
+                                member: None,
+                            },
+                        },
+                    )]),
+                };
+                let root = caller_link.identity();
+                let mut links = links.clone();
+                links.insert(root, caller_link);
+                let mut documents = program.documents.clone();
+                documents.insert(caller_id, Arc::new(caller));
+                (
+                    Program::prepare(
+                        root,
+                        documents,
+                        &links,
+                        PageId([9; 32]),
+                        program.library.clone(),
+                    )
+                    .expect("imported native"),
+                    Target::Main,
+                )
+            };
+            let pages = Pages::default();
+            let mut machine = KernelMachine::start(
+                program.clone(),
+                bounds(),
+                CellStart {
+                    owner: PageId([8; 32]),
+                    target,
+                    args: vec![],
+                    session: None,
+                    modes: BTreeMap::new(),
+                    host: vec![],
+                },
+                Box::new(pages.clone()),
+            )
+            .unwrap_or_else(|error| panic!("linked law fixture: {error:?}"));
+            let requested = request(&mut machine);
+            let saved = machine
+                .checkpoint()
+                .unwrap_or_else(|error| panic!("linked law fixture: {error:?}"));
+            machine = KernelMachine::open(program, bounds(), &saved.checkpoint(), Box::new(pages))
+                .unwrap_or_else(|error| panic!("linked law fixture: {error:?}"));
+            machine
+                .deliver(requested.wait, Outcome::Completed(Datum::Null))
+                .unwrap_or_else(|error| panic!("linked law fixture: {error:?}"));
+            loop {
+                match machine
+                    .run(&mut Passive, 100_000)
+                    .unwrap_or_else(|error| panic!("linked law fixture: {error:?}"))
+                {
+                    Step::Slice => {}
+                    Step::Ended(End::Finished(done)) => {
+                        assert_eq!(done.result, Datum::Bool(kind != 2));
+                        break;
+                    }
+                    other => panic!("native settlement did not complete: {other:?}"),
+                }
             }
         }
     }
