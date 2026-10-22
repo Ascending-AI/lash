@@ -589,8 +589,8 @@ pub use lash_core_execution::ModuleArtifactRefusal;
 
 pub use lash_core_execution::{
     DriverAction, DriverContextView, Effect, HostTurnProtocol, PreparedTurnMachine,
-    ProjectorContext, ProtocolDriverState, SansIoTurnInput, TurnDriverConfig, TurnDriverPreamble,
-    TurnMachine, TurnMachineConfig,
+    ProjectorContext, ProtocolDriverState, RetainedEffect, SansIoTurnInput, TurnDriverConfig,
+    TurnDriverPreamble, TurnMachine, TurnMachineConfig,
 };
 pub use lash_protocol_types::{
     InvalidToolCallId, ToolCallAdmission, ToolCallId, ToolCallPosition, ToolCallRoot,

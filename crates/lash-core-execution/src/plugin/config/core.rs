@@ -313,7 +313,7 @@ pub(super) fn registration() -> Result<RegisteredOwner, ConfigRegistrationError>
     })?;
     reg.command::<SetAttachmentAcceptance>(|core, command| {
         changed(CoreConfig {
-            attachment_acceptance: std::sync::Arc::new(command.acceptance),
+            attachment_acceptance: std::sync::Arc::new(command.acceptance.into()),
             ..core.clone()
         })
     })?;

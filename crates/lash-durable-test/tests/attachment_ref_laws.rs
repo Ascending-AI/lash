@@ -341,7 +341,7 @@ async fn send(url: bool, tools: bool) -> Sent {
         lash::MaxToolCalls::new(4),
         lash_core::NoProgressBudget::bounded(12),
     )
-    .attachment_acceptance(Arc::new(catalogue()));
+    .attachment_acceptance(Arc::new(catalogue().into()));
     core.session(id.clone())
         .create(lash::SessionCreation::root(spec))
         .await

@@ -164,25 +164,6 @@ impl<M: TurnProtocol> TurnMachine<M> {
         Ok(machine)
     }
 
-    /// Start this machine at `work` instead of at the driver's first step
-    /// (FIG-4739): the turn continues a run whose earlier turn ended at a
-    /// segment boundary while it waited on `work`, and issues it again. The
-    /// machine syncs its environment first, as every turn does, and then
-    /// waits on `work` where the driver would have prepared an iteration.
-    pub fn resume_with(&mut self, work: PendingWork<M>) {
-        let hold = match self.config.allocation_budget.reserve(
-            lash_protocol_types::allocation::payload_capacity(&work, 1024).saturating_mul(2),
-        ) {
-            Ok(hold) => hold,
-            Err(error) => {
-                self.projection_refusal = Some(error.into());
-                return;
-            }
-        };
-        self.resume_work = Some(work);
-        self.retained.resume = hold;
-    }
-
     /// The code execution the machine waits on, if that is what it waits on:
     /// its language, its code and the driver state that answers it.
     pub fn waiting_exec(&self) -> Option<(&str, &str, &M::DriverState)> {
@@ -230,14 +211,12 @@ impl<M: TurnProtocol> TurnMachine<M> {
     /// and the checkpoint taken next names this request, so a restore
     /// re-delivers it unchanged. Answers `false`, changing nothing, when the
     /// machine waits on no model call under `id`.
-    pub fn admit_request(&mut self, id: EffectId, request: Arc<RetainedLlmRequest>) -> bool {
-        let request = match request.adopt_in(&self.config.allocation_budget) {
-            Ok(request) => Arc::new(request),
-            Err(error) => {
-                self.projection_refusal = Some(error.into());
-                return false;
-            }
-        };
+    pub fn admit_request(
+        &mut self,
+        id: EffectId,
+        request: Arc<RetainedLlmRequest>,
+    ) -> Result<bool, lash_protocol_types::allocation::AllocationError> {
+        let request = Arc::new(request.adopt_in(&self.config.allocation_budget)?);
         match &mut self.state {
             MachineState::Waiting {
                 effect_id,
@@ -247,30 +226,9 @@ impl<M: TurnProtocol> TurnMachine<M> {
                 ..
             } if *effect_id == id => {
                 *pending = request;
-                true
+                Ok(true)
             }
-            _ => false,
-        }
-    }
-
-    /// Record the cancellation request the host has observed for this turn.
-    /// The first observation wins; later ones are ignored.
-    pub fn record_cancellation_evidence(
-        &mut self,
-        evidence: lash_protocol_types::TurnCancellationEvidence,
-    ) {
-        if self.observed_cancellation.is_none() {
-            let hold = match self.config.allocation_budget.reserve(
-                lash_protocol_types::allocation::payload_capacity(&evidence, 128),
-            ) {
-                Ok(hold) => hold,
-                Err(error) => {
-                    self.projection_refusal = Some(error.into());
-                    return;
-                }
-            };
-            self.observed_cancellation = Some(evidence);
-            self.retained.cancellation = hold;
+            _ => Ok(false),
         }
     }
 
@@ -476,11 +434,6 @@ impl<M: TurnProtocol> TurnMachine<M> {
         self.content.stored(stored)
     }
 
-    /// The checkpoint over `base`, the chains a committed checkpoint stored,
-    /// whose sequences are unchanged through `floors`; its content every
-    /// blob it did not keep from `base`, the chains it is stored as and how
-    /// many items it encoded.
-
     /// Re-hydrate a machine from a checkpoint, the content it names and the
     /// committed window it started from ([`TurnCheckpoint::window_pin`]). The
     /// schema version, window and environment are validated before any
@@ -495,6 +448,17 @@ impl<M: TurnProtocol> TurnMachine<M> {
             checkpoint,
             content,
         } = saved;
+        let decode_capacity = content.iter().fold(4096u64, |bytes, (_, text)| {
+            bytes.saturating_add(lash_protocol_types::allocation::json_decode_capacity(
+                std::str::from_utf8(text).unwrap_or(""),
+                1024,
+            ))
+        });
+        let _decode = config
+            .allocation_budget
+            .reserve(decode_capacity)
+            .map_err(TurnCheckpointRestoreError::Allocation)?;
+        let budget = config.allocation_budget.clone();
         if checkpoint.schema_version != TURN_CHECKPOINT_SCHEMA_VERSION {
             return Err(TurnCheckpointRestoreError::IncompatibleSchemaVersion {
                 actual: checkpoint.schema_version,
@@ -520,9 +484,17 @@ impl<M: TurnProtocol> TurnMachine<M> {
             .map_err(TurnCheckpointRestoreError::Allocation)?;
         let mut checkpoint = (*checkpoint.0).clone();
         checkpoint.allocation = allocation;
+        let restored_allocation = checkpoint.allocation.clone();
         let side_effect_outbox = checkpoint
             .pending_effects
             .into_iter()
+            .map(|effect| {
+                Arc::new(lash_protocol_types::allocation::Allocated::new(
+                    effect,
+                    restored_allocation.clone(),
+                    budget.clone(),
+                ))
+            })
             .collect::<VecDeque<_>>();
         let (messages, stored_messages) = checkpoint.messages.restore(&content, window.as_ref())?;
         let (prompt_messages, stored_prompt) =
@@ -554,7 +526,7 @@ impl<M: TurnProtocol> TurnMachine<M> {
             completions: stored_completions,
             request,
         });
-        let machine = Self {
+        let mut machine = Self {
             projection_refusal: None,
             retained: MachineAdmission::default(),
             config,
@@ -579,6 +551,9 @@ impl<M: TurnProtocol> TurnMachine<M> {
             content: ledger,
         };
         machine.check_parked_state()?;
+        machine
+            .set_allocation_budget(budget)
+            .map_err(TurnCheckpointRestoreError::Allocation)?;
         Ok(machine)
     }
 
@@ -654,10 +629,7 @@ impl<M: TurnProtocol> TurnMachine<M> {
     }
 
     fn emit(&mut self, event: SessionStreamEvent) {
-        if !self.admit_growth(&event) {
-            return;
-        }
-        self.side_effect_outbox.push_back(Effect::Emit(event));
+        self.enqueue(Effect::Emit(event));
     }
 
     /// A progress boundary is one a host may persist and resume from, so
@@ -672,17 +644,17 @@ impl<M: TurnProtocol> TurnMachine<M> {
             &&self.events.as_slice()[self.progress_event_cursor.min(self.events.len())..],
             1024,
         );
-        match self
+        let _scratch = match self
             .config
             .allocation_budget
             .reserve(bound.saturating_mul(4))
         {
-            Ok(hold) => self.retained.growth.push(hold),
+            Ok(hold) => hold,
             Err(error) => {
                 self.projection_refusal = Some(error.into());
                 return;
             }
-        }
+        };
         if !lash_protocol_types::session_model::messages_are_prompt_resume_safe(
             self.messages.iter(),
         ) {
@@ -694,12 +666,25 @@ impl<M: TurnProtocol> TurnMachine<M> {
             .iter()
             .any(|record| matches!(record, SessionHistoryRecord::Protocol(_)))
         {
+            let allocation = match self.config.allocation_budget.reserve(
+                ((self.progress_boundaries.len() as u64 + 1)
+                    * std::mem::size_of::<ProgressBoundary>() as u64)
+                    .saturating_mul(2)
+                    .saturating_add(256),
+            ) {
+                Ok(hold) => hold,
+                Err(error) => {
+                    self.projection_refusal = Some(error.into());
+                    return;
+                }
+            };
+            self.retained.boundaries = allocation;
             self.progress_boundaries.push(ProgressBoundary {
                 messages: self.messages.len(),
                 events: delivered..self.progress_event_cursor,
             });
         }
-        self.side_effect_outbox.push_back(Effect::Progress {
+        self.enqueue(Effect::Progress {
             messages: self.messages.clone(),
             event_delta,
             protocol_iteration: self.protocol_iteration,
@@ -766,9 +751,24 @@ impl<M: TurnProtocol> TurnMachine<M> {
     /// records, edits the one buffer they share in place instead of copying
     /// the window around a record this machine still sees (FIG-6910).
     fn finish(&mut self, outcome: TurnOutcome) {
-        if !self.admit_growth(&outcome) {
-            return;
-        }
+        let capacity = lash_protocol_types::allocation::payload_capacity(
+            &(
+                &outcome,
+                &self.events.as_slice()[self.progress_event_cursor.min(self.events.len())..],
+            ),
+            1024,
+        );
+        let _scratch = match self
+            .config
+            .allocation_budget
+            .reserve(capacity.saturating_mul(2))
+        {
+            Ok(hold) => hold,
+            Err(error) => {
+                self.projection_refusal = Some(error.into());
+                return;
+            }
+        };
         self.emit(SessionStreamEvent::TurnOutcome { outcome });
         self.emit(SessionStreamEvent::Done);
         let msgs = std::mem::take(&mut self.messages);
@@ -783,7 +783,7 @@ impl<M: TurnProtocol> TurnMachine<M> {
         self.content.rewrote(Sequence::Events, window_events);
         let protocol_iteration = self.protocol_iteration;
         self.state = MachineState::Finished;
-        self.side_effect_outbox.push_back(Effect::Done {
+        self.enqueue(Effect::Done {
             messages: msgs,
             event_delta,
             protocol_iteration,
@@ -800,53 +800,15 @@ impl<M: TurnProtocol> TurnMachine<M> {
         delta
     }
 
-    /// Drain the next pending effect. Returns `None` when the host must call
-    /// `handle_response()` before more effects become available.
-
-    pub fn try_poll_effect(
-        &mut self,
-    ) -> Result<Option<Effect<M>>, lash_protocol_types::allocation::ProjectionError> {
-        let effect = self.poll_effect();
-        match self.projection_refusal.take() {
-            Some(error) => Err(error),
-            None => Ok(effect),
-        }
-    }
-
-    pub fn poll_effect(&mut self) -> Option<Effect<M>> {
-        if let Some(effect) = self.poll_scheduled_effect() {
-            return Some(effect);
-        }
-
-        match &self.state {
-            MachineState::PreparingProtocol => {
-                self.prepare_protocol();
-                self.poll_scheduled_effect()
-            }
-            MachineState::PrepareIteration => {
-                self.prepare_protocol_iteration();
-                self.poll_scheduled_effect()
-            }
-            _ => None,
-        }
-    }
-
-    fn poll_scheduled_effect(&mut self) -> Option<Effect<M>> {
-        if let Some(effect) = self.side_effect_outbox.pop_front() {
-            return Some(effect);
-        }
-        self.state.poll_outstanding_effect()
-    }
-
     // ─── State transitions ───
 
     /// The protocol-start sync: the only way an environment reaches the
     /// machine.
-    fn prepare_protocol(&mut self) {
+    pub(super) fn prepare_protocol(&mut self) {
         self.start(PendingWork::SyncExecutionEnvironment);
     }
 
-    fn prepare_protocol_iteration(&mut self) {
+    pub(super) fn prepare_protocol_iteration(&mut self) {
         if self
             .config
             .turn_budget
@@ -889,21 +851,12 @@ impl<M: TurnProtocol> TurnMachine<M> {
                 return;
             }
         };
-        let work = match work {
-            PendingWork::Llm {
-                request,
-                driver_state,
-            } => match request.adopt_in(&self.config.allocation_budget) {
-                Ok(request) => PendingWork::Llm {
-                    request: Arc::new(request),
-                    driver_state,
-                },
-                Err(error) => {
-                    self.projection_refusal = Some(error.into());
-                    return;
-                }
-            },
-            work => work,
+        let work = match Self::adopt_work(&work, &self.config.allocation_budget) {
+            Ok(work) => work,
+            Err(error) => {
+                self.projection_refusal = Some(error.into());
+                return;
+            }
         };
         self.retained.state = hold;
         if matches!(work, PendingWork::Llm { .. }) {
@@ -927,12 +880,6 @@ impl<M: TurnProtocol> TurnMachine<M> {
             delivery: EffectDeliveryStatus::Pending,
         };
     }
-
-    /// Prepare the actual parts/payload carrier and scalar copy before the
-    /// history buffer claims it. The temporary obligation lives until that
-    /// buffer has admitted its own copy; escaped sources own their own holds.
-    /// A conversation also prepares its two message projections before their
-    /// buffers claim them, so admit all three scalar copies up front.
 
     pub(super) fn append_event(
         &mut self,
@@ -990,9 +937,16 @@ impl<M: TurnProtocol> TurnMachine<M> {
                     self.start(work);
                 }
                 DriverAction::ReportToolCalls { completed } => {
-                    if !self.admit_growth(&completed) {
-                        return;
-                    }
+                    let _scratch = match self.config.allocation_budget.reserve(
+                        lash_protocol_types::allocation::payload_capacity(&completed, 1024)
+                            .saturating_mul(4),
+                    ) {
+                        Ok(hold) => hold,
+                        Err(error) => {
+                            self.projection_refusal = Some(error.into());
+                            return;
+                        }
+                    };
                     let accounting = completed
                         .iter()
                         .map(|outcome| SessionStreamEvent::ToolCall {
@@ -1004,8 +958,7 @@ impl<M: TurnProtocol> TurnMachine<M> {
                         })
                         .collect::<Vec<_>>();
                     let id = self.next_id();
-                    self.side_effect_outbox
-                        .push_back(Effect::ReportToolCalls { id, completed });
+                    self.enqueue(Effect::ReportToolCalls { id, completed });
                     for event in accounting {
                         self.emit(event);
                     }
@@ -1064,9 +1017,15 @@ impl<M: TurnProtocol> TurnMachine<M> {
         &mut self,
         response: Response<M::IntentOutcome>,
     ) -> Result<(), TokenUsageOverflow> {
-        if !self.admit_growth(&response) {
-            return Ok(());
-        }
+        let _response = match self.config.allocation_budget.reserve(
+            lash_protocol_types::allocation::payload_capacity(&response, 1024).saturating_mul(4),
+        ) {
+            Ok(hold) => hold,
+            Err(error) => {
+                self.projection_refusal = Some(error.into());
+                return Ok(());
+            }
+        };
         let Some(answered) = self.state.take_waiting(response) else {
             return Ok(());
         };
@@ -1155,11 +1114,12 @@ impl<M: TurnProtocol> TurnMachine<M> {
                 superseded,
             } = on_empty
             {
-                self.decided_completions
-                    .push(lash_protocol_types::DecidedCompletion {
-                        candidate: *candidate,
-                        disposition: lash_protocol_types::CompletionDisposition::Superseded,
-                    });
+                if !self.decide_completion(
+                    *candidate,
+                    lash_protocol_types::CompletionDisposition::Superseded,
+                ) {
+                    return;
+                }
                 // The notice is the turn's own output: it is recorded with
                 // the turn's events, so a reload reads it as the model did.
                 for message in superseded {
@@ -1213,11 +1173,12 @@ impl<M: TurnProtocol> TurnMachine<M> {
             CheckpointResumeAction::Finish(outcome) => self.finish(outcome),
             CheckpointResumeAction::Complete { candidate, .. } => {
                 let outcome = candidate.outcome();
-                self.decided_completions
-                    .push(lash_protocol_types::DecidedCompletion {
-                        candidate: *candidate,
-                        disposition: lash_protocol_types::CompletionDisposition::Accepted,
-                    });
+                if !self.decide_completion(
+                    *candidate,
+                    lash_protocol_types::CompletionDisposition::Accepted,
+                ) {
+                    return;
+                }
                 self.finish(outcome);
             }
         }
@@ -1388,7 +1349,7 @@ impl<M: TurnProtocol> TurnMachine<M> {
         self.last_call_usage = Some(usage.clone());
         if self.config.emit_llm_trace {
             let response_parts = self.llm_response_debug_parts(llm_response);
-            self.side_effect_outbox.push_back(Effect::Log {
+            self.enqueue(Effect::Log {
                 event: LogEvent::LlmDebug {
                     session_id: self.config.session_id.clone(),
                     protocol_iteration: self.protocol_iteration,
@@ -1405,7 +1366,7 @@ impl<M: TurnProtocol> TurnMachine<M> {
 
     fn record_llm_error(&mut self, error: &LlmCallError) {
         if self.config.emit_llm_trace {
-            self.side_effect_outbox.push_back(Effect::Log {
+            self.enqueue(Effect::Log {
                 event: LogEvent::LlmError {
                     session_id: self.config.session_id.clone(),
                     protocol_iteration: self.protocol_iteration,

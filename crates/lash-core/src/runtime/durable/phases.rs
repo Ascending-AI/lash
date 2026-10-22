@@ -372,7 +372,7 @@ async fn phase_loop(
     cx: &ActorContext,
     services: &dyn TurnServices,
     drive: &mut Box<dyn TurnDrive>,
-    mut pending: Option<Effect>,
+    mut pending: Option<crate::RetainedEffect>,
     row: &TurnRow,
     heads: &mut SessionOwner,
     held: &mut Option<StagedReceipt>,
@@ -431,26 +431,17 @@ async fn phase_loop(
     let mut answered_cell: Option<tool_round::AnsweredCell> = None;
     let mut boundary = OutputBoundary::default();
     loop {
-        let effect = match pending.take() {
+        let retained_effect = match pending.take() {
             Some(effect) => effect,
-            None => match drive.machine().try_poll_effect().map_err(|error| {
-                TurnError::Runtime(match error {
-                    lash_protocol_types::allocation::ProjectionError::Allocation(error) => {
-                        crate::RuntimeError::allocation(error)
-                    }
-                    lash_protocol_types::allocation::ProjectionError::Stored(error) => {
-                        crate::RuntimeEffectControllerError::stored_data_corrupt(
-                            error.record_kind,
-                            error.message,
-                        )
-                        .into_runtime_error()
-                    }
-                })
-            })? {
-                Some(effect) => effect,
-                None => return Err(TurnError::Exec("the turn machine stalled".to_owned())),
-            },
+            None => drive
+                .machine()
+                .poll_effect()
+                .map_err(super::session::projection_runtime_error)?
+                .ok_or_else(|| TurnError::Exec("the turn machine stalled".to_owned()))?,
         };
+        // This copy is bounded by the delivery source's second representation
+        // and the source stays alive across the complete asynchronous step.
+        let effect = retained_effect.as_ref().as_ref().clone();
         // Only the receipt's emissions, its progress boundary (the commit
         // draft's, in memory), a checkpoint no callback runs at (it commits
         // nothing; what it delivers binds in the next commit), a native
@@ -586,7 +577,7 @@ async fn phase_loop(
                                     drive.model_unsent(cx, id, refused).await?;
                                     continue;
                                 }
-                                if !drive.machine().admit_request(id, Arc::clone(&request)) {
+                                if !drive.machine().admit_request(id, Arc::clone(&request))? {
                                     return Err(TurnError::Exec(format!(
                                         "the turn machine does not wait on model call {id:?}"
                                     )));

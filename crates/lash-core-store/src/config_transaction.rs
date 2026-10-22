@@ -43,7 +43,9 @@ pub struct CoreConfig {
         default,
         skip_serializing_if = "crate::provider::AttachmentCapabilitySnapshot::is_empty_arc"
     )]
-    pub attachment_acceptance: std::sync::Arc<crate::provider::AttachmentCapabilitySnapshot>,
+    pub attachment_acceptance: std::sync::Arc<
+        lash_protocol_types::allocation::Allocated<crate::provider::AttachmentCapabilitySnapshot>,
+    >,
     pub turn_budget: crate::TurnBudget,
     pub max_tool_calls: crate::MaxToolCalls,
     pub no_progress_budget: crate::NoProgressBudget,

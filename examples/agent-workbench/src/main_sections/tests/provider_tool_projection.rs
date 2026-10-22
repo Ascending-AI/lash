@@ -7,7 +7,7 @@ use super::*;
 /// plugin stack over a durable SQLite memory backend.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn every_tool_a_standard_workbench_turn_offers_projects_under_every_provider_tool_dialect() {
-    let offered = Arc::new(Mutex::new(None::<Arc<Vec<lash::plugins::LlmToolSpec>>>));
+    let offered = Arc::new(Mutex::new(None::<Arc<lash::llm::types::LlmToolSpecs>>));
     let provider = lash::testing::TestProvider::builder()
         .kind("workbench-harness")
         .complete({

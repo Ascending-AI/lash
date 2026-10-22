@@ -1,5 +1,4 @@
 use super::*;
-use std::sync::Arc;
 
 fn recorded_model() -> crate::LlmProfileConfig {
     crate::LlmProfileConfig::new(crate::RecordedLlmProfile::mint(
@@ -17,7 +16,7 @@ fn runtime_feedback_is_not_part_of_initial_composition_identity() {
     let mut request =
         crate::direct::build_llm_request(crate::DirectRequest::text("user"), recorded_model())
             .unwrap();
-    request.instructions = Some(Arc::from("I"));
+    request.instructions = Some(lash_protocol_types::llm::types::RequestText::from("I"));
     let before = trace_composition_key(&request, &[]);
     request.messages.insert(
         0,
@@ -33,7 +32,9 @@ fn runtime_feedback_is_not_part_of_initial_composition_identity() {
             .rendered_system_prompt,
         "I"
     );
-    request.instructions = Some(Arc::from("changed"));
+    request.instructions = Some(lash_protocol_types::llm::types::RequestText::from(
+        "changed",
+    ));
     assert_ne!(trace_composition_key(&request, &[]), before);
 }
 
@@ -42,13 +43,13 @@ fn runtime_feedback_composition_identity_includes_instruction_authority() {
     let mut request =
         crate::direct::build_llm_request(crate::DirectRequest::text("user"), recorded_model())
             .unwrap();
-    request.instructions = Some(Arc::from("I"));
+    request.instructions = Some(lash_protocol_types::llm::types::RequestText::from("I"));
     let before = trace_composition_key(&request, &[]);
     request.model.metadata_mut().capability.instruction_role = crate::InstructionRole::Developer;
     assert_ne!(trace_composition_key(&request, &[]), before);
     request.instructions = None;
     let absent = trace_composition_key(&request, &[]);
-    request.instructions = Some(Arc::from(""));
+    request.instructions = Some(lash_protocol_types::llm::types::RequestText::from(""));
     assert_ne!(trace_composition_key(&request, &[]), absent);
 }
 

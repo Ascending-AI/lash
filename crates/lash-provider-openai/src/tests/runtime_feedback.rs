@@ -5,7 +5,9 @@ pub(super) fn request_with_instructions(
     messages: Vec<LlmMessage>,
 ) -> LlmRequest {
     let mut req = request(messages);
-    req.instructions = Some(Arc::from(instructions));
+    req.instructions = Some(lash_protocol_types::llm::types::RequestText::from(
+        instructions,
+    ));
     req
 }
 
@@ -93,7 +95,7 @@ fn runtime_feedback_chat_cache_distinguishes_instructions_and_explicit_fences() 
 #[test]
 fn runtime_feedback_codex_always_emits_instructions_string() {
     let mut req = request(vec![LlmMessage::text(LlmRole::User, "U")]);
-    for instructions in [None, Some(Arc::from("")), Some(Arc::from(" I "))] {
+    for instructions in [None, Some("".into()), Some(" I ".into())] {
         req.instructions = instructions;
         let body = crate::testing::serialize_codex_request(&req, CacheRetention::None).unwrap();
         assert_eq!(

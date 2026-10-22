@@ -1059,7 +1059,7 @@ pub struct RestoredTurn {
     /// phase committed, which the resumed drive settles with its commit.
     pub delivered: Vec<crate::AdmittedTurnInputs>,
     /// The effect the checkpoint re-delivers, if it is waiting on one.
-    pub pending: Option<Effect>,
+    pub pending: Option<crate::RetainedEffect>,
     /// The pinned call's receipt, which no derivation has answered, if
     /// `model.answer` committed one beside the phase.
     pub answered: Option<ModelAnswer>,
@@ -1073,7 +1073,7 @@ pub struct OpenTurn {
     /// The turn's drive, holding its machine.
     pub drive: Box<dyn TurnDrive>,
     /// The effect the checkpoint re-delivers, if it is waiting on one.
-    pub pending: Option<Effect>,
+    pub pending: Option<crate::RetainedEffect>,
     /// The turn's row.
     pub row: TurnRow,
 }
@@ -1149,6 +1149,8 @@ pub(super) async fn paid_answer(
 /// Why a turn could not be restored from its rows.
 #[derive(Debug, thiserror::Error)]
 pub enum TurnRestoreError {
+    #[error(transparent)]
+    Runtime(#[from] crate::RuntimeError),
     /// The row names no checkpoint to restore from.
     #[error("turn {0} has no checkpoint")]
     NoCheckpoint(TurnId),
@@ -1439,8 +1441,10 @@ impl<'a> TurnRestore<'a> {
         self.cx.probe().checkpoint_restored(&row.session, &row.run);
         let mut machine = TurnMachine::restore_from_checkpoint(config, saved, window)?;
         // The turn's next phase builds on the content this one stored.
-        stored.restored(&mut machine)?;
-        let pending = next_work(&mut machine);
+        stored
+            .restored(&mut machine)
+            .map_err(lash_sansio::TurnCheckpointRestoreError::Allocation)?;
+        let pending = next_work(&mut machine)?;
         Ok(RestoredTurn {
             machine,
             namespaces,
@@ -1455,11 +1459,33 @@ impl<'a> TurnRestore<'a> {
 /// The machine's next effect that needs work from the host, passing over
 /// what only reports: emits, progress and logs. Their content is the
 /// machine's own state, committed with its next checkpoint.
-fn next_work(machine: &mut TurnMachine) -> Option<Effect> {
+fn next_work(machine: &mut TurnMachine) -> Result<Option<crate::RetainedEffect>, TurnRestoreError> {
     loop {
-        match machine.poll_effect()? {
-            Effect::Emit(_) | Effect::Progress { .. } | Effect::Log { .. } => {}
-            effect => return Some(effect),
+        let Some(effect) = machine.poll_effect().map_err(projection_runtime_error)? else {
+            return Ok(None);
+        };
+        if !matches!(
+            effect.as_ref().as_ref(),
+            Effect::Emit(_) | Effect::Progress { .. } | Effect::Log { .. }
+        ) {
+            return Ok(Some(effect));
+        }
+    }
+}
+
+pub(super) fn projection_runtime_error(
+    error: lash_protocol_types::allocation::ProjectionError,
+) -> crate::RuntimeError {
+    match error {
+        lash_protocol_types::allocation::ProjectionError::Allocation(error) => {
+            crate::RuntimeError::allocation(error)
+        }
+        lash_protocol_types::allocation::ProjectionError::Stored(error) => {
+            crate::RuntimeEffectControllerError::stored_data_corrupt(
+                error.record_kind,
+                error.message,
+            )
+            .into_runtime_error()
         }
     }
 }

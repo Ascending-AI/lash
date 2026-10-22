@@ -2,6 +2,10 @@
 use super::*;
 
 impl<M: TurnProtocol> TurnMachine<M> {
+    /// The checkpoint over `base`, the chains a committed checkpoint stored,
+    /// whose sequences are unchanged through `floors`; its content every
+    /// blob it did not keep from `base`, the chains it is stored as and how
+    /// many items it encoded.
     pub(in crate::sansio) fn record(
         &self,
         base: Option<&StoredChains>,
@@ -95,7 +99,7 @@ impl<M: TurnProtocol> TurnMachine<M> {
             pending_effects: self
                 .side_effect_outbox
                 .iter()
-                .cloned()
+                .map(|effect| effect.as_ref().as_ref().clone())
                 .map(|effect| match effect {
                     Effect::Emit(SessionStreamEvent::Error(ReportedFailure {
                         message: _,

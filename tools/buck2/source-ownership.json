@@ -1050,6 +1050,7 @@
       "src/llm/types/retained_request.rs",
       "src/llm/types/retry.rs",
       "src/llm/types/stream_block.rs",
+      "src/llm/types/tool_sources.rs",
       "src/llm/types/types_contract_tests.rs",
       "src/llm/types_tests.rs",
       "src/llm/wire_corpus.rs",

@@ -41,7 +41,7 @@ pub struct ProcessEnv {
         default,
         skip_serializing_if = "crate::provider::AttachmentCapabilitySnapshot::is_empty_arc"
     )]
-    attachments: Arc<AttachmentCapabilitySnapshot>,
+    attachments: Arc<lash_protocol_types::allocation::Allocated<AttachmentCapabilitySnapshot>>,
     limits: ProcessLimits,
     /// The link of each effect the process performs, exactly: a start is
     /// refused unless these are the effects its entry calls or spawns.
@@ -485,7 +485,7 @@ impl ProcessEnv {
         ProcessEnvBuilder {
             env: Self {
                 model: None,
-                attachments: Arc::new(AttachmentCapabilitySnapshot::default()),
+                attachments: Arc::new(AttachmentCapabilitySnapshot::default().into()),
                 limits: ProcessLimits::new(max_tool_calls),
                 effects: BTreeMap::new(),
                 components: Vec::new(),
@@ -570,7 +570,9 @@ impl ProcessEnv {
         self.model.as_ref()
     }
 
-    pub fn attachments(&self) -> &Arc<AttachmentCapabilitySnapshot> {
+    pub fn attachments(
+        &self,
+    ) -> &Arc<lash_protocol_types::allocation::Allocated<AttachmentCapabilitySnapshot>> {
         &self.attachments
     }
 
@@ -690,7 +692,10 @@ impl ProcessEnvBuilder {
     }
 
     #[must_use]
-    pub fn attachments(mut self, attachments: Arc<AttachmentCapabilitySnapshot>) -> Self {
+    pub fn attachments(
+        mut self,
+        attachments: Arc<lash_protocol_types::allocation::Allocated<AttachmentCapabilitySnapshot>>,
+    ) -> Self {
         self.env.attachments = attachments;
         self
     }

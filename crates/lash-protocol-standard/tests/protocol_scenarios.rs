@@ -545,7 +545,11 @@ fn user_message(content: &str) -> Message {
 /// empty environment on the way.
 fn drain_effects(machine: &mut TurnMachine) -> Vec<Effect> {
     let mut effects = Vec::new();
-    while let Some(effect) = machine.poll_effect() {
+    while let Some(effect) = machine
+        .poll_effect()
+        .expect("effect admitted")
+        .map(|effect| effect.as_ref().as_ref().clone())
+    {
         if let Effect::SyncExecutionEnvironment { id } = effect {
             machine.handle_response(sansio::Response::ExecutionEnvironmentSynced {
                 id,

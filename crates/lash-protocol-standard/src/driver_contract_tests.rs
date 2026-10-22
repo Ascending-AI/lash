@@ -74,7 +74,11 @@ fn machine(max_turns: Option<usize>) -> TurnMachine {
 /// way by an environment whose `finish` and `switch` end the turn.
 fn drain(machine: &mut TurnMachine) -> Vec<Effect> {
     let mut effects = Vec::new();
-    while let Some(effect) = machine.poll_effect() {
+    while let Some(effect) = machine
+        .poll_effect()
+        .unwrap()
+        .map(|effect| effect.as_ref().as_ref().clone())
+    {
         if let Effect::SyncExecutionEnvironment { id } = effect {
             machine.handle_response(sansio::Response::ExecutionEnvironmentSynced {
                 id,

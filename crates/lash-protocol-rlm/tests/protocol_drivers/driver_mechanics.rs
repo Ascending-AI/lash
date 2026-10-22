@@ -594,7 +594,7 @@ fn rlm_checkpoint_redrives_pending_exec_code_with_driver_state() {
         .expect("exec effect");
     assert_eq!(code, "console.log(\"hi\");");
 
-    let checkpoint = roundtrip_turn_checkpoint(machine.checkpoint());
+    let checkpoint = roundtrip_turn_checkpoint(machine.checkpoint().expect("checkpoint admitted"));
     let mut restored = TurnMachine::restore_from_checkpoint(test_config(), checkpoint, None)
         .expect("supported checkpoint");
     let effects = drain_effects(&mut restored);
@@ -732,7 +732,9 @@ fn user_stop_is_terminal_without_feedback_or_model_reinvocation_live_and_replay(
 
                 let mut effects = drain_effects(&mut machine);
                 if restore_pending_exec {
-                    let checkpoint = roundtrip_turn_checkpoint(machine.checkpoint());
+                    let checkpoint = roundtrip_turn_checkpoint(
+                        machine.checkpoint().expect("checkpoint admitted"),
+                    );
                     machine = TurnMachine::restore_from_checkpoint(test_config(), checkpoint, None)
                         .expect("supported checkpoint");
                     effects = drain_effects(&mut machine);
@@ -1070,7 +1072,7 @@ fn rlm_checkpoint_after_exec_fanout_tool_outputs_preserves_structured_outcomes()
     );
     assert!(!emitted[2].3.is_success());
 
-    let checkpoint = roundtrip_turn_checkpoint(machine.checkpoint());
+    let checkpoint = roundtrip_turn_checkpoint(machine.checkpoint().expect("checkpoint admitted"));
     let mut restored = TurnMachine::restore_from_checkpoint(test_config(), checkpoint, None)
         .expect("supported checkpoint");
     let effects = drain_effects(&mut restored);
@@ -1943,7 +1945,11 @@ fn drive_rlm_to_second_llm_request(
     let mut requests = Vec::new();
     let mut execs_answered = 0usize;
     loop {
-        let Some(effect) = machine.poll_effect() else {
+        let Some(effect) = machine
+            .poll_effect()
+            .unwrap()
+            .map(|effect| effect.as_ref().as_ref().clone())
+        else {
             panic!("machine finished before a second LLM call");
         };
         match effect {
@@ -2136,7 +2142,11 @@ fn drain_synced(
     environment: &sansio::ExecutionEnvironmentSync,
 ) -> Vec<Effect> {
     let mut effects = Vec::new();
-    while let Some(effect) = machine.poll_effect() {
+    while let Some(effect) = machine
+        .poll_effect()
+        .unwrap()
+        .map(|effect| effect.as_ref().as_ref().clone())
+    {
         if let Effect::SyncExecutionEnvironment { id, .. } = effect {
             machine.handle_response(Response::ExecutionEnvironmentSynced {
                 id,

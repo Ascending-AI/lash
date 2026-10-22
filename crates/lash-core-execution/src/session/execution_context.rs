@@ -98,6 +98,7 @@ pub(super) enum ChronologicalRead {
         events: lash_protocol_types::AppendVec<crate::SessionHistoryRecord>,
         messages: crate::MessageSequence,
         projected: std::sync::OnceLock<Arc<crate::ChronologicalProjection>>,
+        _allocation: lash_protocol_types::allocation::AllocationHold,
     },
 }
 
@@ -1136,36 +1137,51 @@ impl<'run> RuntimeExecutionContext<'run> {
             .cloned()
     }
 
-    pub fn chronological_projection(&self) -> Arc<crate::ChronologicalProjection> {
+    pub fn chronological_projection(
+        &self,
+    ) -> Result<Arc<crate::ChronologicalProjection>, lash_protocol_types::allocation::AllocationError>
+    {
         match self.chronological_projection.as_ref() {
-            ChronologicalRead::Owned(projection) => Arc::clone(projection),
+            ChronologicalRead::Owned(projection) => Ok(Arc::clone(projection)),
             ChronologicalRead::Turn {
                 events,
                 messages,
                 projected,
-            } => Arc::clone(projected.get_or_init(|| {
-                Arc::new(crate::ChronologicalProjection::from_turn_view(
+                ..
+            } => {
+                if let Some(projection) = projected.get() {
+                    return Ok(Arc::clone(projection));
+                }
+                let projection = Arc::new(crate::ChronologicalProjection::from_turn_view_in(
                     events.as_slice(),
                     messages,
-                ))
-            })),
+                    messages.allocation_budget(),
+                )?);
+                // Only successful complete projections publish. A racing
+                // loser releases its complete reservation with its draft.
+                let _ = projected.set(Arc::clone(&projection));
+                Ok(projected.get().cloned().unwrap_or(projection))
+            }
         }
     }
 
     /// This execution's immutable turn history, shared without projecting it.
     #[doc(hidden)]
-    #[must_use]
     pub fn with_turn_history(
         mut self,
         events: lash_protocol_types::AppendVec<crate::SessionHistoryRecord>,
         messages: crate::MessageSequence,
-    ) -> Self {
+    ) -> Result<Self, lash_protocol_types::allocation::AllocationError> {
+        let allocation = messages
+            .allocation_budget()
+            .reserve((std::mem::size_of::<ChronologicalRead>() + 16) as u64)?;
         self.chronological_projection = Arc::new(ChronologicalRead::Turn {
             events,
             messages,
             projected: std::sync::OnceLock::new(),
+            _allocation: allocation,
         });
-        self
+        Ok(self)
     }
 
     /// Visit this execution's chronological history without copying its

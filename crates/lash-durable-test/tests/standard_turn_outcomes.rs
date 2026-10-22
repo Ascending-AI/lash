@@ -907,22 +907,25 @@ fn attachment_spec() -> lash::SessionSpec {
         llm::capability::AttachmentAcceptanceRule, llm::capability::AttachmentAcceptor,
         llm::capability::AttachmentCapabilitySnapshot,
     };
-    served::spec(8).attachment_acceptance(Arc::new(AttachmentCapabilitySnapshot {
-        revision: "standard-turn-outcomes".to_owned(),
-        acceptors: vec![AttachmentAcceptor {
-            provider: "mock".to_owned(),
-            rules: vec![AttachmentAcceptanceRule {
-                positions: vec![AttachmentPosition::Message, AttachmentPosition::ToolResult],
-                media_types: vec!["image/png".to_owned()],
-                media_families: Vec::new(),
-                forms: DeliveryForms {
-                    bytes: true,
-                    url: false,
-                    provider_file: false,
-                },
+    served::spec(8).attachment_acceptance(Arc::new(
+        (AttachmentCapabilitySnapshot {
+            revision: "standard-turn-outcomes".to_owned(),
+            acceptors: vec![AttachmentAcceptor {
+                provider: "mock".to_owned(),
+                rules: vec![AttachmentAcceptanceRule {
+                    positions: vec![AttachmentPosition::Message, AttachmentPosition::ToolResult],
+                    media_types: vec!["image/png".to_owned()],
+                    media_families: Vec::new(),
+                    forms: DeliveryForms {
+                        bytes: true,
+                        url: false,
+                        provider_file: false,
+                    },
+                }],
             }],
-        }],
-    }))
+        })
+        .into(),
+    ))
 }
 
 /// An attachment the target cannot read is omitted per request; its tool succeeds
@@ -1073,6 +1076,7 @@ async fn pdf_session_after_model_switch(check_first: bool, omission: Option<&'st
     let mut acceptance = attachment_spec()
         .attachment_acceptance
         .unwrap()
+        .as_ref()
         .as_ref()
         .clone();
     acceptance.acceptors[0].rules[0]

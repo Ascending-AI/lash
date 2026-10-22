@@ -28,7 +28,7 @@ fn the_builder_states_no_generation(
 
 fn the_builder_states_no_attachment_acceptance(
     backend: lash::Backend,
-    acceptance: std::sync::Arc<lash::provider::AttachmentCapabilitySnapshot>,
+    acceptance: std::sync::Arc<lash_protocol_types::allocation::Allocated<lash::provider::AttachmentCapabilitySnapshot>>,
 ) {
     let _ = lash::LashCore::standard_builder(backend).attachment_acceptance(acceptance);
 }

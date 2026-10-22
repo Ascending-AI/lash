@@ -143,7 +143,11 @@ pub(super) fn call(id: &str, name: &str, args: &str) -> LlmOutputPart {
 /// empty environment on the way.
 pub(super) fn drain(machine: &mut TurnMachine) -> Vec<Effect> {
     let mut effects = Vec::new();
-    while let Some(effect) = machine.poll_effect() {
+    while let Some(effect) = machine
+        .poll_effect()
+        .unwrap()
+        .map(|effect| effect.as_ref().as_ref().clone())
+    {
         if let Effect::SyncExecutionEnvironment { id } = effect {
             machine.handle_response(lash_core::sansio::Response::ExecutionEnvironmentSynced {
                 id,

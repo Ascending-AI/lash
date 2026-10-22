@@ -702,7 +702,11 @@ fn rlm_contract_config_with_turn_options(
 
 fn drain_rlm_contract_effects(machine: &mut lash_core::TurnMachine) -> Vec<lash_core::Effect> {
     let mut effects = Vec::new();
-    while let Some(effect) = machine.poll_effect() {
+    while let Some(effect) = machine
+        .poll_effect()
+        .expect("effect admitted")
+        .map(|effect| effect.as_ref().as_ref().clone())
+    {
         if let lash_core::Effect::SyncExecutionEnvironment { id, .. } = effect {
             effects.push(effect);
             machine.handle_response(lash_core::sansio::Response::ExecutionEnvironmentSynced {

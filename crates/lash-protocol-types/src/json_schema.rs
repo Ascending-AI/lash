@@ -128,16 +128,16 @@ fn preparation_capacity(value: &Value) -> u64 {
                             per_program.saturating_add((text.len() as u64).saturating_mul(4096)),
                         ));
                     };
-                    if key == "pattern" {
-                        if let Some(text) = value.as_str() {
-                            pattern(text);
-                        }
+                    if key == "pattern"
+                        && let Some(text) = value.as_str()
+                    {
+                        pattern(text);
                     }
-                    if key == "patternProperties" {
-                        if let Some(properties) = value.as_object() {
-                            for name in properties.keys() {
-                                pattern(name);
-                            }
+                    if key == "patternProperties"
+                        && let Some(properties) = value.as_object()
+                    {
+                        for name in properties.keys() {
+                            pattern(name);
                         }
                     }
                     scan(value, nodes, refs, compositions, regex);

@@ -260,18 +260,18 @@ impl<M: TurnProtocol> Clone for CheckpointData<M> {
     fn clone(&self) -> Self {
         Self {
             allocation: self.allocation.clone(),
-            schema_version: self.schema_version.clone(),
+            schema_version: self.schema_version,
             state: self.state.clone(),
             pending_effects: self.pending_effects.clone(),
-            next_effect_id: self.next_effect_id.clone(),
+            next_effect_id: self.next_effect_id,
             window: self.window.clone(),
             messages: self.messages.clone(),
             prompt_messages: self.prompt_messages.clone(),
             events: self.events.clone(),
-            progress_event_cursor: self.progress_event_cursor.clone(),
+            progress_event_cursor: self.progress_event_cursor,
             progress_boundaries: self.progress_boundaries.clone(),
-            protocol_iteration: self.protocol_iteration.clone(),
-            protocol_run_offset: self.protocol_run_offset.clone(),
+            protocol_iteration: self.protocol_iteration,
+            protocol_run_offset: self.protocol_run_offset,
             cumulative_usage: self.cumulative_usage.clone(),
             last_call_usage: self.last_call_usage.clone(),
             environment: self.environment.clone(),
@@ -573,7 +573,7 @@ pub struct TurnMachine<M: TurnProtocol = UnitTurnProtocol> {
     pub(super) projection_refusal: Option<lash_protocol_types::allocation::ProjectionError>,
     pub(super) config: TurnMachineConfig<M>,
     pub(super) state: MachineState<M>,
-    pub(super) side_effect_outbox: VecDeque<Effect<M>>,
+    pub(super) side_effect_outbox: VecDeque<RetainedEffect<M>>,
     pub(super) next_effect_id: u64,
     /// The committed window the turn started from: its messages lead
     /// `messages`, its records lead `events`, and the checkpoint names it
@@ -622,7 +622,9 @@ pub(super) struct MachineAdmission {
     pub(super) resume: lash_protocol_types::allocation::AllocationHold,
     pub(super) cancellation: lash_protocol_types::allocation::AllocationHold,
     pub(super) environment: lash_protocol_types::allocation::AllocationHold,
-    pub(super) growth: Vec<lash_protocol_types::allocation::AllocationHold>,
+    pub(super) completions: lash_protocol_types::allocation::AllocationHold,
+    pub(super) boundaries: lash_protocol_types::allocation::AllocationHold,
+    pub(super) outbox: lash_protocol_types::allocation::AllocationHold,
 }
 
 /// The Run control a tool result carried: the namespaced code and message

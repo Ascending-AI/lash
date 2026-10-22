@@ -665,7 +665,9 @@ impl TurnDrive for L3Drive {
             composition
         };
         let mut request = request.materialize();
-        request.instructions = Some(Arc::from(composition.instructions()));
+        request.instructions = Some(lash_protocol_types::llm::types::RequestText::from(
+            composition.instructions(),
+        ));
         let generation = {
             let mut seen = self.services.seen.lock_recover();
             seen.lowerings += 1;
@@ -1928,6 +1930,8 @@ async fn restore_after_the_head_moved(dialect: Dialect, postgres_url: Option<Str
     let pinned = loop {
         match machine
             .poll_effect()
+            .unwrap()
+            .map(|effect| effect.as_ref().as_ref().clone())
             .expect("the machine reaches its model call")
         {
             Effect::SyncExecutionEnvironment { id } => {
@@ -1941,7 +1945,7 @@ async fn restore_after_the_head_moved(dialect: Dialect, postgres_url: Option<Str
         }
     };
     let checkpoint = PhaseCheckpoint {
-        saved: machine.checkpoint(),
+        saved: machine.checkpoint().expect("checkpoint admitted"),
         delivered: Vec::new(),
         before_turn: Vec::new(),
         trace: None,
@@ -2014,7 +2018,8 @@ async fn restore_after_the_head_moved(dialect: Dialect, postgres_url: Option<Str
         serde_json::to_string(machine.events().as_slice()).unwrap(),
         "the restored turn's history is its window's"
     );
-    let Some(Effect::LlmCall { request, .. }) = restored.pending else {
+    let Some(Effect::LlmCall { request, .. }) = restored.pending.as_deref().map(AsRef::as_ref)
+    else {
         panic!("the restored turn re-delivers its model call");
     };
     assert_eq!(

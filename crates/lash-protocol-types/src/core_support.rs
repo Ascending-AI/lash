@@ -15,7 +15,6 @@ use std::sync::Arc;
 use serde_json::Value;
 
 use crate::blake3_domains::BLAKE3_DOMAINS;
-use crate::llm::types::LlmToolSpec;
 use crate::{
     AttachmentId, AttachmentTypeMetadata, ConversationRecord, LlmProfileEffortValidationCategory,
     MediaType, Message, ModelToolReturn, ModelToolReturnPart, ProtocolEvent, SessionAppendNode,

@@ -82,20 +82,29 @@ impl SegmentContext {
 /// ids). Build it, then hand it to [`SegmentCache::segments`].
 pub struct SegmentKey {
     hasher: blake3::Hasher,
+    reusable: bool,
 }
 
 impl SegmentKey {
     pub fn new(context: &SegmentContextKey) -> Self {
         let mut hasher = blake3::Hasher::new_derive_key(SEGMENT_KEY_DOMAIN);
         hasher.update(&context.0);
-        Self { hasher }
+        Self {
+            hasher,
+            reusable: true,
+        }
     }
 
     /// A source message, by its never-reused block identity, role and
     /// user-segment marker. Naming it retains none of its source allocation.
     #[must_use]
     pub fn message(mut self, message: &LlmMessage) -> Self {
-        self.hasher.update(&message.blocks.identity().to_be_bytes());
+        match message.blocks.identity() {
+            Some(identity) => {
+                self.hasher.update(&identity.to_be_bytes());
+            }
+            None => self.reusable = false,
+        }
         self.hasher.update(&[
             match message.role {
                 LlmRole::System => 0,
@@ -232,7 +241,8 @@ impl SegmentCache {
             return Ok(Self(None, budget.clone()));
         };
         let entries = shared.lock();
-        let metadata = budget.reserve((std::mem::size_of::<Shared>() + 16) as u64)?;
+        let metadata =
+            budget.reserve((std::mem::size_of::<Shared>() + 16) as u64 + ENTRY_ALLOCATION_BYTES)?;
         let mut copied = Entries {
             bytes: 0,
             clock: entries.clock,
@@ -305,8 +315,12 @@ impl SegmentCache {
         allocation_bytes: u64,
         lower: impl FnOnce(AllocationHold) -> Result<T, E>,
     ) -> Result<Arc<Allocated<T>>, E> {
+        let reusable = key.reusable;
         let digest = key.hasher.finalize().into();
-        if let Some(value) = self.0.as_ref().and_then(|shared| shared.get(&digest)) {
+        if let Some(value) = reusable
+            .then(|| self.0.as_ref().and_then(|shared| shared.get(&digest)))
+            .flatten()
+        {
             return Ok(value);
         }
         let budget = self.allocation_budget();
@@ -318,7 +332,7 @@ impl SegmentCache {
             allocation_bytes.saturating_add((std::mem::size_of::<Allocated<T>>() + 16) as u64),
         )?;
         let value = Arc::new(Allocated::new(lower(hold.clone())?, hold, budget));
-        if let Some(shared) = &self.0 {
+        if reusable && let Some(shared) = &self.0 {
             shared.insert(digest, &value, metadata);
         }
         Ok(value)
@@ -333,6 +347,7 @@ impl SegmentCache {
         allocation_bytes: u64,
         update: impl FnOnce(Option<Arc<Allocated<T>>>, AllocationHold) -> Result<T, E>,
     ) -> Result<Arc<Allocated<T>>, E> {
+        let reusable = key.reusable;
         let digest = key.hasher.finalize().into();
         let budget = self.allocation_budget();
         let metadata = match &self.0 {
@@ -342,9 +357,11 @@ impl SegmentCache {
         let hold = budget.reserve(
             allocation_bytes.saturating_add((std::mem::size_of::<Allocated<T>>() + 16) as u64),
         )?;
-        let prior = self.0.as_ref().and_then(|shared| shared.get(&digest));
+        let prior = reusable
+            .then(|| self.0.as_ref().and_then(|shared| shared.get(&digest)))
+            .flatten();
         let value = Arc::new(Allocated::new(update(prior, hold.clone())?, hold, budget));
-        if let Some(shared) = &self.0 {
+        if reusable && let Some(shared) = &self.0 {
             shared.insert(digest, &value, metadata);
         }
         Ok(value)
@@ -362,6 +379,7 @@ impl SegmentCache {
         allocation_bytes: u64,
         update: impl FnOnce(Option<Arc<Allocated<T>>>, AllocationHold) -> F,
     ) -> Result<Arc<Allocated<T>>, E> {
+        let reusable = key.reusable;
         let digest = key.hasher.finalize().into();
         let budget = self.allocation_budget();
         let metadata = match &self.0 {
@@ -371,13 +389,15 @@ impl SegmentCache {
         let hold = budget.reserve(
             allocation_bytes.saturating_add((std::mem::size_of::<Allocated<T>>() + 16) as u64),
         )?;
-        let prior = self.0.as_ref().and_then(|shared| shared.get(&digest));
+        let prior = reusable
+            .then(|| self.0.as_ref().and_then(|shared| shared.get(&digest)))
+            .flatten();
         let value = Arc::new(Allocated::new(
             update(prior, hold.clone()).await?,
             hold,
             budget,
         ));
-        if let Some(shared) = &self.0 {
+        if reusable && let Some(shared) = &self.0 {
             shared.insert(digest, &value, metadata);
         }
         Ok(value)

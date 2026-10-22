@@ -17,7 +17,6 @@
 const LASH_LLM_REQUEST_CONTENT_DOMAIN_VERSION: &str = "lash-llm-request-content/v1";
 
 use std::io;
-use std::sync::Arc;
 
 use lash_protocol_types::core_support::Blake3DomainHasher;
 use serde::Serialize;
@@ -164,7 +163,7 @@ impl ContentDigest {
     }
 }
 
-fn digest_instructions(instructions: &Arc<str>) -> ContentDigest {
+fn digest_instructions(instructions: &crate::llm::types::RequestText) -> ContentDigest {
     let mut hasher = Blake3DomainHasher::new(LASH_LLM_REQUEST_CONTENT_DOMAIN_VERSION);
     hasher.update(instructions.as_bytes());
     ContentDigest {
@@ -190,6 +189,7 @@ impl io::Write for HashWriter {
 #[cfg(test)]
 mod tests {
     use serde_json::Value;
+    use std::sync::Arc;
 
     use super::super::validation::validate_replayed_effect_envelope;
     use super::*;
@@ -197,7 +197,9 @@ mod tests {
 
     fn request(messages: Vec<LlmMessage>) -> super::super::LlmRequestSpec {
         super::super::LlmRequestSpec {
-            instructions: Some(Arc::from("be brief")),
+            instructions: Some(lash_protocol_types::llm::types::RequestText::from(
+                "be brief",
+            )),
             model: lash_protocol_types::llm_profile::LlmProfileConfig::new(
                 lash_protocol_types::llm_profile::RecordedLlmProfile::mint(
                     lash_protocol_types::llm_profile::LlmProfileKey::new("request-fixture"),

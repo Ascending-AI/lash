@@ -60,7 +60,9 @@ pub struct DirectRequest {
         default,
         skip_serializing_if = "crate::provider::AttachmentCapabilitySnapshot::is_empty_arc"
     )]
-    pub attachment_acceptance: Arc<crate::provider::AttachmentCapabilitySnapshot>,
+    pub attachment_acceptance: Arc<
+        lash_protocol_types::allocation::Allocated<crate::provider::AttachmentCapabilitySnapshot>,
+    >,
     #[serde(default)]
     pub messages: Vec<DirectMessage>,
     #[serde(default)]
@@ -281,7 +283,7 @@ impl DirectLlmClient {
         let output_for_validation = request.output.clone();
         let model = self.model.clone();
         let mut llm_request = build_llm_request(request, model)?;
-        llm_request.instructions = self.instructions.clone();
+        llm_request.instructions = self.instructions.clone().map(Into::into);
         llm_request.stream_events =
             transport_stream_events_for_direct(&self.provider, llm_request.stream_events.take());
         let request_model = llm_request.model.wire_model().to_string();
@@ -497,7 +499,7 @@ pub fn build_llm_request(
         instructions: None,
         model,
         messages: llm_messages,
-        tools: Vec::new().into(),
+        tools: Arc::new(Vec::new().into()),
         tool_choice: LlmToolChoice::None,
         attachment_acceptance,
         generation,

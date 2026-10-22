@@ -84,7 +84,9 @@ pub struct ExecutionFacts {
     pub model: Option<crate::LlmProfileConfig>,
     pub generation: crate::GenerationOptions,
     pub charge_safety: crate::ChargeSafetyPolicy,
-    pub attachment_acceptance: Arc<crate::provider::AttachmentCapabilitySnapshot>,
+    pub attachment_acceptance: Arc<
+        lash_protocol_types::allocation::Allocated<crate::provider::AttachmentCapabilitySnapshot>,
+    >,
     pub max_tool_calls: crate::MaxToolCalls,
     pub render: Option<crate::RecordedRender>,
 }
@@ -164,5 +166,7 @@ pub struct RecordedCallFacts {
         default,
         skip_serializing_if = "crate::provider::AttachmentCapabilitySnapshot::is_empty_arc"
     )]
-    pub attachment_acceptance: Arc<crate::provider::AttachmentCapabilitySnapshot>,
+    pub attachment_acceptance: Arc<
+        lash_protocol_types::allocation::Allocated<crate::provider::AttachmentCapabilitySnapshot>,
+    >,
 }

@@ -736,22 +736,25 @@ async fn attachment_pruning_never_rewrites_the_durable_message() -> Result<()> {
         ))
         .trace_sink(trace.clone())
         .build(lash_facade_tests::runtime_lease_owner())?;
-    let acceptance = Arc::new(AttachmentCapabilitySnapshot {
-        revision: "standard-compaction-attachment-prune".into(),
-        acceptors: vec![AttachmentAcceptor {
-            provider: "standard-compaction-frame-test".into(),
-            rules: vec![AttachmentAcceptanceRule {
-                positions: vec![AttachmentPosition::Message],
-                media_types: vec!["image/png".into()],
-                media_families: Vec::new(),
-                forms: DeliveryForms {
-                    bytes: true,
-                    url: false,
-                    provider_file: false,
-                },
+    let acceptance = Arc::new(
+        (AttachmentCapabilitySnapshot {
+            revision: "standard-compaction-attachment-prune".into(),
+            acceptors: vec![AttachmentAcceptor {
+                provider: "standard-compaction-frame-test".into(),
+                rules: vec![AttachmentAcceptanceRule {
+                    positions: vec![AttachmentPosition::Message],
+                    media_types: vec!["image/png".into()],
+                    media_families: Vec::new(),
+                    forms: DeliveryForms {
+                        bytes: true,
+                        url: false,
+                        provider_file: false,
+                    },
+                }],
             }],
-        }],
-    });
+        })
+        .into(),
+    );
     let session = created_session_with(
         &core,
         lash::SessionId::parse(session_id).expect("nonblank host identity"),

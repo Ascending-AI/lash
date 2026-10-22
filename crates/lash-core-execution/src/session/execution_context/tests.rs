@@ -53,7 +53,7 @@ fn test_execution_context_with_env_store(
         config: crate::plugin::OwnerConfigView::session((plugins).admitted_plugin_config()),
         execution_budgets: (plugins).execution_budgets(),
         state: plugins,
-        tools: Arc::new((NoopTools).into()),
+        tools: Arc::new(NoopTools),
         routes: crate::SurfaceTools::default(),
         tool_catalog: Arc::new(crate::ToolCatalog::from_tool_definitions(Vec::new())),
         sessions: Arc::new(crate::testing::MockSessionManager::default()),
@@ -304,10 +304,12 @@ fn chronological_cache_attempts_admission_before_materializing_a_turn_projection
         refuse: refuse.clone(),
     });
     let messages = crate::MessageSequence::default().clone_in(&budget).unwrap();
-    let context = test_execution_context().with_turn_history(Default::default(), messages);
+    let context = test_execution_context()
+        .with_turn_history(Default::default(), messages)
+        .unwrap();
     attempts.store(0, std::sync::atomic::Ordering::SeqCst);
     refuse.store(true, std::sync::atomic::Ordering::SeqCst);
-    let _projection = context.chronological_projection();
+    assert!(context.chronological_projection().is_err());
     assert!(
         attempts.load(std::sync::atomic::Ordering::SeqCst) > 0,
         "chronological cache must ask the serving ledger before materializing"

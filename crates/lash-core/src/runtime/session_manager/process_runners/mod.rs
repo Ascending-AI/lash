@@ -106,7 +106,7 @@ impl RuntimeSessionServices {
             config: crate::plugin::OwnerConfigView::components(Arc::clone(&engine.env)),
             execution_budgets: core.control.execution_budgets.clone(),
             state: engine.state.clone(),
-            tools: Arc::new((routes.clone()).into()),
+            tools: Arc::new(routes.clone()),
             routes,
             tool_catalog: catalog,
             sessions: services.state_service(),

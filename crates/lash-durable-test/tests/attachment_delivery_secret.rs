@@ -322,7 +322,7 @@ async fn delivered_values_stay_out_of_records_across_crash_and_resend() {
         let session = core
             .session(session_id.clone())
             .create(lash::SessionCreation::root(
-                served::spec(4).attachment_acceptance(Arc::new(catalogue())),
+                served::spec(4).attachment_acceptance(Arc::new(catalogue().into())),
             ))
             .await
             .expect("the session is created");

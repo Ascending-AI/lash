@@ -259,9 +259,9 @@ fn lo_prefix_tail_work_matches_full_render() {
         instructions: None,
         model: crate::LlmProfileConfig::new(crate::RecordedLlmProfile::mint(crate::LlmProfileKey::new("prefix"), lash_protocol_types::llm_profile::LlmProfileMetadata::builder("prefix").context_window_tokens(32000).cache_retention(lash_protocol_types::llm::capability::CacheRetention::Short).build().unwrap())),
         messages: Vec::new(), tools: Arc::new((Vec::new()).into()), tool_choice: LlmToolChoice::None,
-        attachment_acceptance: Arc::new(lash_protocol_types::llm::types::AttachmentCapabilitySnapshot {
+        attachment_acceptance: Arc::new((lash_protocol_types::llm::types::AttachmentCapabilitySnapshot {
             revision:"prefix".into(),acceptors:vec![lash_protocol_types::llm::types::AttachmentAcceptor {provider:"prefix".into(),rules:vec![lash_protocol_types::llm::types::AttachmentAcceptanceRule {positions:vec![lash_protocol_types::llm::attachment_delivery::AttachmentPosition::Message],media_types:vec!["image/png".into()],media_families:vec![],forms:lash_protocol_types::llm::attachment_delivery::DeliveryForms {bytes:true,url:true,provider_file:false}}]}]
-        }), generation: Default::default(),
+        }).into()), generation: Default::default(),
         scope: LlmRequestScope::new("prefix","frame","call"), output_spec: None,
         stream_events: None, provider_trace: None, attempt_control: Default::default(),
     }

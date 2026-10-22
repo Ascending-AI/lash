@@ -651,7 +651,9 @@ pub fn test_runtime_plugin_host(
 }
 
 pub struct TestRuntime {
-    attachment_acceptance: Arc<crate::provider::AttachmentCapabilitySnapshot>,
+    attachment_acceptance: Arc<
+        lash_protocol_types::allocation::Allocated<crate::provider::AttachmentCapabilitySnapshot>,
+    >,
     plugins: Vec<Arc<dyn crate::PluginFactory>>,
     tools: Arc<dyn crate::ToolProvider>,
     transport: TestProvider,
@@ -671,7 +673,7 @@ impl TestRuntime {
         Self {
             attachment_acceptance: Default::default(),
             plugins: crate::testing::test_standard_protocol_factories(),
-            tools: Arc::new((EmptyTools).into()),
+            tools: Arc::new(EmptyTools),
             transport,
             host: test_host_config(backend),
             store: None,
@@ -682,7 +684,11 @@ impl TestRuntime {
 
     pub fn attachment_acceptance(
         mut self,
-        snapshot: Arc<crate::provider::AttachmentCapabilitySnapshot>,
+        snapshot: Arc<
+            lash_protocol_types::allocation::Allocated<
+                crate::provider::AttachmentCapabilitySnapshot,
+            >,
+        >,
     ) -> Self {
         self.attachment_acceptance = snapshot;
         self

@@ -618,7 +618,11 @@ pub(super) fn drain_contract_turn_machine_effects(
     machine: &mut lash_core::TurnMachine,
 ) -> Vec<lash_core::Effect> {
     let mut effects = Vec::new();
-    while let Some(effect) = machine.poll_effect() {
+    while let Some(effect) = machine
+        .poll_effect()
+        .expect("effect admitted")
+        .map(|effect| effect.as_ref().as_ref().clone())
+    {
         // The contract is about the driver; the environment it runs in is
         // empty.
         if let lash_core::Effect::SyncExecutionEnvironment { id } = effect {

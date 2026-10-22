@@ -184,6 +184,15 @@ impl<T: PartialEq> PartialEq for Allocated<T> {
 }
 impl<T: Eq> Eq for Allocated<T> {}
 
+impl<T: schemars::JsonSchema> schemars::JsonSchema for Allocated<T> {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        T::schema_name()
+    }
+    fn json_schema(generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        T::json_schema(generator)
+    }
+}
+
 /// A constant-space preflight of a value's encoded structure. Sparse maps and
 /// empty array elements still require heap slots even when their text is tiny.
 /// The bound includes strings, collection slots and transient clone/decode work.

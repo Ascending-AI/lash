@@ -266,5 +266,5 @@ roles = ["Assistant", "Event", "Tool", "User"]
 
 "crates/lash-core-store/src/prompt_sections_tests.rs#reserve_shared" = { reads = 1, outputs = 0, kind = "evidence-read", reason = "LO-PREFIX compares full rendered request evidence and held-reader allocation lifetimes (FIG-7121)." }
 
-"crates/lash-protocol-types/src/llm/provider_body/canonical.rs#of_retained_request" = { reads = 4, outputs = 0, kind = "projection-core", reason = "The persistent request path shares or counts immutable message nodes for lowering and journaling; it selects no transcript reply (FIG-7121)." }
+"crates/lash-protocol-types/src/llm/provider_body/canonical.rs#of_retained_request" = { reads = 5, outputs = 0, kind = "projection-core", reason = "The persistent request path shares or counts immutable message nodes for lowering and journaling; it selects no transcript reply (FIG-7121)." }
 "crates/lash-core-store/src/session_read_view.rs#shared_chronological_projection" = { reads = 1, outputs = 0, kind = "projection-core", reason = "Reuse the admitted chronological memo or prepare it through the fallible source-budget constructor before publication (FIG-7124)." }

@@ -256,7 +256,7 @@ pub trait Provider: Send + Sync + std::fmt::Debug {
             let (live, delivered) =
                 super::slot_delivery::fill_slots(&*self, &template, deliveries, valid_through_ms)
                     .await?;
-            Ok((template, live, delivered))
+            Ok::<_, LlmTransportError>((template, live, delivered))
         };
         let (template, live, delivered) = match timeout {
             None => prepare.await,

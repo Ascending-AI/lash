@@ -14,7 +14,8 @@ pub struct SessionPolicy {
     /// The attachment-acceptance rules the session renders attachments
     /// against (ADR 0026). Session config of its own: a model change keeps
     /// them, and only an explicit change replaces them.
-    pub attachment_acceptance: Arc<AttachmentCapabilitySnapshot>,
+    pub attachment_acceptance:
+        Arc<lash_protocol_types::allocation::Allocated<AttachmentCapabilitySnapshot>>,
     /// Required turn-budget decision. A host must choose either a non-zero
     /// bound or explicit unbounded execution; absence is never interpreted.
     pub turn_budget: TurnBudget,

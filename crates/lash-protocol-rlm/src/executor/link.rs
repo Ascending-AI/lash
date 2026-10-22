@@ -69,6 +69,11 @@ pub(super) async fn link_cell(
                 crate::projection::HostBindingsError::Journal(error) => {
                     Refused::Nested(Box::new(error))
                 }
+                crate::projection::HostBindingsError::Allocation(error) => {
+                    Refused::Nested(Box::new(lash_core::RuntimeEffectControllerError::from(
+                        lash_core::RuntimeError::allocation(error),
+                    )))
+                }
                 crate::projection::HostBindingsError::Refused(message) => host_failure(message),
             })?
     };

@@ -2,8 +2,9 @@ use lash_protocol_types::{
     llm::attachment_delivery::AttachmentPosition, llm::attachment_delivery::DeliveryForms,
 };
 #[cfg(test)]
-pub(crate) fn attachment_test_acceptance()
--> std::sync::Arc<lash_core::provider::AttachmentCapabilitySnapshot> {
+pub(crate) fn attachment_test_acceptance() -> std::sync::Arc<
+    lash_protocol_types::allocation::Allocated<lash_core::provider::AttachmentCapabilitySnapshot>,
+> {
     use lash_core::provider::{
         AttachmentAcceptanceRule, AttachmentAcceptor, AttachmentCapabilitySnapshot,
     };
@@ -52,21 +53,24 @@ pub(crate) fn attachment_test_acceptance()
             provider_file: false,
         },
     }];
-    std::sync::Arc::new(AttachmentCapabilitySnapshot {
-        revision: "test-host-revision-1".into(),
-        acceptors: vec![
-            AttachmentAcceptor {
-                provider: "openai".into(),
-                rules: rules_0.clone(),
-            },
-            AttachmentAcceptor {
-                provider: "codex".into(),
-                rules: rules_0,
-            },
-            AttachmentAcceptor {
-                provider: "openai-compatible".into(),
-                rules: rules_1,
-            },
-        ],
-    })
+    std::sync::Arc::new(
+        (AttachmentCapabilitySnapshot {
+            revision: "test-host-revision-1".into(),
+            acceptors: vec![
+                AttachmentAcceptor {
+                    provider: "openai".into(),
+                    rules: rules_0.clone(),
+                },
+                AttachmentAcceptor {
+                    provider: "codex".into(),
+                    rules: rules_0,
+                },
+                AttachmentAcceptor {
+                    provider: "openai-compatible".into(),
+                    rules: rules_1,
+                },
+            ],
+        })
+        .into(),
+    )
 }

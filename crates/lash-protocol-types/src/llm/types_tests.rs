@@ -412,3 +412,35 @@ fn a_completed_call_with_absent_usage_is_unknown_and_explicit_zero_is_known() {
     call.attempts[0].usage = Some(LlmUsage::default());
     assert_eq!(call.usage().expect("explicit zero").unknown_calls, 0);
 }
+
+#[test]
+fn request_adoption_keeps_escaped_instructions_and_attachment_catalogue_charged() {
+    let ledger = crate::allocation::testing::Ledger::default();
+    ledger.limit(u64::MAX);
+    let mut flat = replay_request(Vec::new());
+    flat.instructions = Some("x".repeat(16 * 1024).into());
+    flat.attachment_acceptance = std::sync::Arc::new(
+        (AttachmentCapabilitySnapshot {
+            revision: "r".repeat(16 * 1024),
+            acceptors: Vec::new(),
+        })
+        .into(),
+    );
+    let cold = RetainedLlmRequest::from_request(flat);
+    let request = cold.adopt_in(&ledger.budget()).unwrap();
+    let instructions = request.instructions.clone().unwrap();
+    let catalogue = request.attachment_acceptance.clone();
+    drop(cold);
+    drop(request);
+    assert!(
+        ledger.used() >= 32 * 1024,
+        "escaping both sources retains their complete preparation obligations"
+    );
+    drop(instructions);
+    assert!(
+        ledger.used() >= 16 * 1024,
+        "the catalogue has an independent source obligation"
+    );
+    drop(catalogue);
+    assert_eq!(ledger.used(), 0);
+}

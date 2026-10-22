@@ -169,7 +169,7 @@ impl TraceRuntime {
     /// every session this runtime traces.
     pub fn composition_tool_fingerprints(
         &self,
-        tools: &Arc<Vec<crate::llm::types::LlmToolSpec>>,
+        tools: &Arc<crate::llm::types::LlmToolSpecs>,
     ) -> Arc<Vec<[u8; 32]>> {
         self.parts
             .compositions

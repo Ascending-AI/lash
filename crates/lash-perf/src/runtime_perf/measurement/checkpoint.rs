@@ -580,7 +580,7 @@ impl CheckpointConfigs {
     fn new() -> Self {
         Self {
             llm: Arc::new(CheckpointDriver::Llm),
-            tools: Arc::new((CheckpointDriver::Tools).into()),
+            tools: Arc::new(CheckpointDriver::Tools),
             exec: Arc::new(CheckpointDriver::Exec),
         }
     }
@@ -1010,12 +1010,21 @@ fn assert_restored_exec(
 }
 
 fn drain_checkpoint_machine(machine: &mut TurnMachine) {
-    while machine.poll_effect().is_some() {}
+    while machine
+        .poll_effect()
+        .unwrap()
+        .map(|effect| effect.as_ref().as_ref().clone())
+        .is_some()
+    {}
 }
 
 fn next_checkpoint_effect(machine: &mut TurnMachine) -> Option<Effect> {
     loop {
-        match machine.poll_effect()? {
+        match machine
+            .poll_effect()
+            .unwrap()
+            .map(|effect| effect.as_ref().as_ref().clone())?
+        {
             // The profiled checkpoints carry the environment this sync
             // records.
             Effect::SyncExecutionEnvironment { id } => {

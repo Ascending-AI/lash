@@ -2,8 +2,9 @@ use lash_protocol_types::{
     llm::attachment_delivery::AttachmentPosition, llm::attachment_delivery::DeliveryForms,
 };
 #[cfg(any(test, feature = "testing"))]
-pub fn attachment_test_acceptance() -> std::sync::Arc<crate::provider::AttachmentCapabilitySnapshot>
-{
+pub fn attachment_test_acceptance() -> std::sync::Arc<
+    lash_protocol_types::allocation::Allocated<crate::provider::AttachmentCapabilitySnapshot>,
+> {
     use crate::provider::{
         AttachmentAcceptanceRule, AttachmentAcceptor, AttachmentCapabilitySnapshot,
     };
@@ -96,33 +97,36 @@ pub fn attachment_test_acceptance() -> std::sync::Arc<crate::provider::Attachmen
             provider_file: true,
         },
     }];
-    std::sync::Arc::new(AttachmentCapabilitySnapshot {
-        revision: "test-host-revision-1".into(),
-        acceptors: vec![
-            AttachmentAcceptor {
-                provider: "sim".into(),
-                rules: rules_0.clone(),
-            },
-            AttachmentAcceptor {
-                provider: "test".into(),
-                rules: rules_0.clone(),
-            },
-            AttachmentAcceptor {
-                provider: "openai".into(),
-                rules: rules_0,
-            },
-            AttachmentAcceptor {
-                provider: "openai-compatible".into(),
-                rules: rules_1,
-            },
-            AttachmentAcceptor {
-                provider: "anthropic".into(),
-                rules: rules_2,
-            },
-            AttachmentAcceptor {
-                provider: "google_oauth".into(),
-                rules: rules_3,
-            },
-        ],
-    })
+    std::sync::Arc::new(
+        (AttachmentCapabilitySnapshot {
+            revision: "test-host-revision-1".into(),
+            acceptors: vec![
+                AttachmentAcceptor {
+                    provider: "sim".into(),
+                    rules: rules_0.clone(),
+                },
+                AttachmentAcceptor {
+                    provider: "test".into(),
+                    rules: rules_0.clone(),
+                },
+                AttachmentAcceptor {
+                    provider: "openai".into(),
+                    rules: rules_0,
+                },
+                AttachmentAcceptor {
+                    provider: "openai-compatible".into(),
+                    rules: rules_1,
+                },
+                AttachmentAcceptor {
+                    provider: "anthropic".into(),
+                    rules: rules_2,
+                },
+                AttachmentAcceptor {
+                    provider: "google_oauth".into(),
+                    rules: rules_3,
+                },
+            ],
+        })
+        .into(),
+    )
 }

@@ -14,9 +14,7 @@ use crate::ExecResponse;
 use crate::ExecutionScope;
 use crate::LlmRequest as CoreLlmRequest;
 use crate::LlmResponse;
-use crate::llm::types::{
-    LlmEventSender, LlmOutputSpec, LlmProviderTraceSender, LlmToolChoice, LlmToolSpec,
-};
+use crate::llm::types::{LlmEventSender, LlmOutputSpec, LlmProviderTraceSender, LlmToolChoice};
 use crate::sansio::{ExecutionEnvironmentSync, ExecutionEnvironmentSyncFailure};
 use lash_execution_contracts::process::ProcessAwaitOutput;
 use lash_execution_contracts::process::ProcessExecutionContext;
@@ -1075,7 +1073,7 @@ const _: () = assert!(std::mem::size_of::<RuntimeEffectOutcome>() <= 128);
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct LlmRequestSpec {
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub instructions: Option<Arc<str>>,
+    pub instructions: Option<crate::llm::types::RequestText>,
     pub model: lash_protocol_types::llm_profile::LlmProfileConfig,
     pub messages: lash_protocol_types::llm::types::RequestMessages,
     pub tools: Arc<lash_protocol_types::llm::types::LlmToolSpecs>,
@@ -1086,7 +1084,9 @@ pub struct LlmRequestSpec {
         default,
         skip_serializing_if = "crate::provider::AttachmentCapabilitySnapshot::is_empty_arc"
     )]
-    pub attachment_acceptance: Arc<crate::provider::AttachmentCapabilitySnapshot>,
+    pub attachment_acceptance: Arc<
+        lash_protocol_types::allocation::Allocated<crate::provider::AttachmentCapabilitySnapshot>,
+    >,
     #[serde(default)]
     pub generation: crate::GenerationOptions,
     pub scope: crate::LlmRequestScope,

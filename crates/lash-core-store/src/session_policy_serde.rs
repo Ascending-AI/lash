@@ -62,7 +62,11 @@ impl<'de> serde::Deserialize<'de> for SessionPolicy {
             #[serde(default)]
             model: Option<LlmProfileConfig>,
             #[serde(default)]
-            attachment_acceptance: std::sync::Arc<crate::provider::AttachmentCapabilitySnapshot>,
+            attachment_acceptance: std::sync::Arc<
+                lash_protocol_types::allocation::Allocated<
+                    crate::provider::AttachmentCapabilitySnapshot,
+                >,
+            >,
             turn_budget: TurnBudget,
             max_tool_calls: MaxToolCalls,
             no_progress_budget: NoProgressBudget,

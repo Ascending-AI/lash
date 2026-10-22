@@ -388,7 +388,7 @@ pub(crate) fn workbench_session_defaults(
         output_token_cap,
         ..Default::default()
     })
-    .attachment_acceptance(Arc::new(workbench_attachment_acceptance()))
+    .attachment_acceptance(Arc::new(workbench_attachment_acceptance().into()))
 }
 
 /// Where a workbench core reports: its trace sink, and the diagnostic

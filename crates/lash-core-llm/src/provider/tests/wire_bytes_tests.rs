@@ -57,22 +57,25 @@ fn canonical_route() -> ProviderRouteIdentity {
 fn variants(messages: Vec<LlmMessage>) -> Vec<(&'static str, LlmRequest)> {
     let mut base = empty_request();
     base.messages = messages;
-    base.attachment_acceptance = Arc::new(crate::provider::AttachmentCapabilitySnapshot {
-        revision: "corpus".into(),
-        acceptors: vec![crate::provider::AttachmentAcceptor {
-            provider: "canonical".into(),
-            rules: vec![crate::provider::AttachmentAcceptanceRule {
-                positions: vec![AttachmentPosition::Message, AttachmentPosition::ToolResult],
-                media_types: vec!["image/png".into()],
-                media_families: vec![],
-                forms: DeliveryForms {
-                    bytes: true,
-                    url: true,
-                    provider_file: true,
-                },
+    base.attachment_acceptance = Arc::new(
+        (crate::provider::AttachmentCapabilitySnapshot {
+            revision: "corpus".into(),
+            acceptors: vec![crate::provider::AttachmentAcceptor {
+                provider: "canonical".into(),
+                rules: vec![crate::provider::AttachmentAcceptanceRule {
+                    positions: vec![AttachmentPosition::Message, AttachmentPosition::ToolResult],
+                    media_types: vec!["image/png".into()],
+                    media_families: vec![],
+                    forms: DeliveryForms {
+                        bytes: true,
+                        url: true,
+                        provider_file: true,
+                    },
+                }],
             }],
-        }],
-    });
+        })
+        .into(),
+    );
     let mut instructed = base.clone();
     instructed.instructions = Some("You are a careful coding agent.".into());
     instructed.tools = Arc::new((vec![corpus_tool()]).into());
@@ -135,9 +138,9 @@ fn a_reused_prefix_sends_the_bytes_a_cold_lowering_sends() {
                 }
                 // A narrower acceptance is another context: the slots it
                 // pins accept less.
-                Arc::make_mut(&mut request.attachment_acceptance).acceptors[0].rules[0]
-                    .forms
-                    .url = false;
+                let mut acceptance = request.attachment_acceptance.as_ref().as_ref().clone();
+                acceptance.acceptors[0].rules[0].forms.url = false;
+                request.attachment_acceptance = Arc::new(acceptance.into());
                 let warm = RecordedRequestTemplate::of_request(canonical_route(), &request, &cache)
                     .unwrap();
                 let cold = RecordedRequestTemplate::of_request(

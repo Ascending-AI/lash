@@ -469,6 +469,9 @@ impl RuntimeTurnDriver<'_> {
             .execution_context(event_tx, Arc::default())
             .map_err(crate::RuntimeEffectControllerError::from)?
             .with_turn_history(active_events, messages)
+            .map_err(|error| {
+                crate::RuntimeEffectControllerError::from(crate::RuntimeError::allocation(error))
+            })?
             .with_tracing(tracing)
             .with_code_block_graph_key(code_block_graph_key)
             .with_cell_end(self.cell_end.clone())

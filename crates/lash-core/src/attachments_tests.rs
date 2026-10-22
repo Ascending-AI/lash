@@ -1676,10 +1676,13 @@ fn pinned_session_attachment_acceptance_survives_model_catalogue_change() {
     );
     policy.model = Some(recorded("attachment-model"));
     policy.attachment_acceptance = lash_core_store::attachments::attachment_test_acceptance();
-    let changed_host = Arc::new(crate::provider::AttachmentCapabilitySnapshot {
-        revision: "test-host-revision-2".to_string(),
-        acceptors: Vec::new(),
-    });
+    let changed_host = Arc::new(
+        (crate::provider::AttachmentCapabilitySnapshot {
+            revision: "test-host-revision-2".to_string(),
+            acceptors: Vec::new(),
+        })
+        .into(),
+    );
     // A model command moves the session to another model; its acceptance is
     // its own recorded field and stays.
     let registry = crate::ConfigRegistry::build(&[]).expect("the core owner registers");

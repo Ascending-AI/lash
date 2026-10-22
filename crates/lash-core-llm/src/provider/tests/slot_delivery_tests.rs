@@ -462,22 +462,25 @@ async fn canonical_call_recovers_the_admitted_slots_without_a_second_backend_rea
         })
         .collect(),
     ));
-    request.attachment_acceptance = Arc::new(crate::provider::AttachmentCapabilitySnapshot {
-        revision: "admitted".into(),
-        acceptors: vec![crate::provider::AttachmentAcceptor {
-            provider: "slots".into(),
-            rules: vec![crate::provider::AttachmentAcceptanceRule {
-                positions: vec![AttachmentPosition::Message],
-                media_types: vec!["image/png".into()],
-                media_families: vec![],
-                forms: DeliveryForms {
-                    bytes: true,
-                    url: true,
-                    provider_file: true,
-                },
+    request.attachment_acceptance = Arc::new(
+        (crate::provider::AttachmentCapabilitySnapshot {
+            revision: "admitted".into(),
+            acceptors: vec![crate::provider::AttachmentAcceptor {
+                provider: "slots".into(),
+                rules: vec![crate::provider::AttachmentAcceptanceRule {
+                    positions: vec![AttachmentPosition::Message],
+                    media_types: vec!["image/png".into()],
+                    media_families: vec![],
+                    forms: DeliveryForms {
+                        bytes: true,
+                        url: true,
+                        provider_file: true,
+                    },
+                }],
             }],
-        }],
-    });
+        })
+        .into(),
+    );
     let template = Arc::new(
         RecordedRequestTemplate::of_request(slot_route(), &request, &SegmentCache::disabled())
             .unwrap()

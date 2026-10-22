@@ -10,7 +10,6 @@ use std::sync::Arc;
 use crate::sansio::{
     ChatContextProjector, ContextProjector, ProtocolDriverHandle, TurnProtocol, UnitTurnProtocol,
 };
-use lash_protocol_types::llm::types::LlmToolSpec;
 
 #[derive(Clone)]
 pub struct TurnDriverConfig<M: TurnProtocol = UnitTurnProtocol> {

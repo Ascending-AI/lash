@@ -543,6 +543,8 @@ impl lash_sansio::TurnProtocol for HostTurnProtocol {
 ///
 /// Protocol-engine implementors shift these effects; applications use the facade.
 pub type Effect = lash_sansio::Effect<HostTurnProtocol>;
+/// An immutable admitted effect source delivered by the turn machine.
+pub type RetainedEffect = lash_sansio::RetainedEffect<HostTurnProtocol>;
 /// Host-specialized driver action for protocol-engine implementors.
 ///
 /// # Integrator class

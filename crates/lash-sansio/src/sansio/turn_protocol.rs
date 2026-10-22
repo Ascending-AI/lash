@@ -377,7 +377,7 @@ pub fn place_prompt(
     current_context: Option<Arc<str>>,
     has_current_context_prefix: bool,
 ) {
-    request.instructions = instructions;
+    request.instructions = instructions.map(Into::into);
     if let Some(context) = current_context {
         if has_current_context_prefix && let Some(prefix) = request.messages.last_mut() {
             let mut blocks = prefix.blocks.to_vec();
@@ -1075,7 +1075,10 @@ impl<M: TurnProtocol> ContextProjector<M> for ChatContextProjector {
             attempt_control: Default::default(),
         };
         Ok(Arc::new(RetainedLlmRequest::admitted_envelope(
-            request, messages, hold,
+            request,
+            messages,
+            hold,
+            &ctx.config.allocation_budget,
         )))
     }
 }
@@ -1296,8 +1299,11 @@ pub struct TurnMachineConfig<M: TurnProtocol = UnitTurnProtocol> {
     /// that can tell a productive attempt from a stalled one.
     pub no_progress_budget: lash_protocol_types::NoProgressBudget,
     /// The session's recorded attachment-acceptance rules.
-    pub attachment_acceptance:
-        Arc<lash_protocol_types::llm::capability::AttachmentCapabilitySnapshot>,
+    pub attachment_acceptance: Arc<
+        lash_protocol_types::allocation::Allocated<
+            lash_protocol_types::llm::capability::AttachmentCapabilitySnapshot,
+        >,
+    >,
     pub generation: lash_protocol_types::llm::types::GenerationOptions,
     pub session_id: SessionId,
     /// The committed active frame whose history is being projected.

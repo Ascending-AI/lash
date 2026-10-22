@@ -823,10 +823,13 @@ fn core_commands_keep_what_they_do_not_name() {
         recorded("base-model", 1000, &["low"])
             .with_reasoning(crate::ReasoningSelection::Effort("low".to_string())),
     );
-    base.attachment_acceptance = Arc::new(crate::provider::AttachmentCapabilitySnapshot {
-        revision: "recorded-acceptance".to_string(),
-        acceptors: Vec::new(),
-    });
+    base.attachment_acceptance = Arc::new(
+        (crate::provider::AttachmentCapabilitySnapshot {
+            revision: "recorded-acceptance".to_string(),
+            acceptors: Vec::new(),
+        })
+        .into(),
+    );
     let models = catalog(&[
         ("base-model", 1000, &["low"]),
         ("next-model", 2000, &["low"]),

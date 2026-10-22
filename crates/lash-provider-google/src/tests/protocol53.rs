@@ -137,7 +137,7 @@ fn protocol53_schema_contract_modes_apply_to_every_dialect_and_site() {
                 } else {
                     let mut tools = req.tools.as_ref().as_ref().clone();
                     tools[0].input_schema = contract;
-                    req.tools = Arc::new((tools.into()).into());
+                    req.tools = Arc::new(tools.into());
                 }
                 let body = request_body(&req);
                 let schema = if output {

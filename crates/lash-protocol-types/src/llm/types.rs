@@ -212,14 +212,6 @@ pub use super::stream_senders::{
     LlmEventSender, LlmProviderTraceDirection, LlmProviderTraceEvent, LlmProviderTraceSender,
 };
 
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct LlmToolSpec {
-    pub name: String,
-    pub description: String,
-    pub input_schema: SchemaContract,
-    pub output_schema: SchemaContract,
-}
-
 #[derive(Clone, Debug, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub enum LlmToolChoice {
     #[default]
@@ -492,23 +484,24 @@ pub enum LlmContentBlock {
 #[serde(transparent)]
 pub struct LlmMessageBlocks {
     #[serde(skip, default = "next_message_blocks_identity")]
-    identity: u64,
+    identity: Option<u64>,
     blocks: Vec<LlmContentBlock>,
     #[serde(skip)]
     _holds: Vec<crate::allocation::AllocationHold>,
     #[serde(skip)]
     budget: crate::allocation::AllocationBudget,
 }
-// Identities never repeat within a process, including after all source readers
-// drop. A cache can therefore name a source without retaining its allocation.
-fn next_message_blocks_identity() -> u64 {
+// Issued identities never repeat. Exhaustion disables identity reuse for
+// new blocks instead of wrapping or terminating the host. The cache then
+// lowers these sources cold, without retaining their source allocations.
+fn next_message_blocks_identity() -> Option<u64> {
     static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
     NEXT.fetch_update(
         std::sync::atomic::Ordering::Relaxed,
         std::sync::atomic::Ordering::Relaxed,
         |next| next.checked_add(1),
     )
-    .unwrap_or_else(|_| std::process::abort())
+    .ok()
 }
 impl Default for LlmMessageBlocks {
     fn default() -> Self {
@@ -517,7 +510,7 @@ impl Default for LlmMessageBlocks {
 }
 impl LlmMessageBlocks {
     /// The immutable source's process-local identity, never reused on drop.
-    pub fn identity(&self) -> u64 {
+    pub fn identity(&self) -> Option<u64> {
         self.identity
     }
     pub fn adopt_in(
@@ -1035,40 +1028,14 @@ impl GenerationReceipt {
     }
 }
 
-/// Immutable tool directory. Its actual Arc carries the directory obligation;
-/// each schema carries its own prepared JSON, validator and type obligations.
-pub type LlmToolSpecs = crate::allocation::Allocated<Vec<LlmToolSpec>>;
-
-impl LlmToolSpecs {
-    pub fn adopt_tools_in(
-        source: &Arc<Self>,
-        budget: &crate::allocation::AllocationBudget,
-    ) -> Result<Arc<Self>, crate::allocation::AllocationError> {
-        if source.allocation_budget().identity() == budget.identity() {
-            return Ok(Arc::clone(source));
-        }
-        let allocation = budget.reserve(crate::allocation::payload_capacity(
-            source.as_ref(),
-            std::mem::size_of::<Self>() + 16,
-        ))?;
-        let mut tools = Vec::with_capacity(source.len());
-        for tool in source.iter() {
-            tools.push(LlmToolSpec {
-                name: tool.name.clone(),
-                description: tool.description.clone(),
-                input_schema: tool.input_schema.adopt_in(budget)?,
-                output_schema: tool.output_schema.adopt_in(budget)?,
-            });
-        }
-        Ok(Arc::new(Self::new(tools, allocation, budget.clone())))
-    }
-}
+mod tool_sources;
+pub use tool_sources::{LlmToolSpec, LlmToolSpecs, RequestText};
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct LlmRequest {
     /// Initial session instructions, separate from runtime feedback in messages.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub instructions: Option<Arc<str>>,
+    pub instructions: Option<RequestText>,
     pub model: crate::llm_profile::LlmProfileConfig,
     pub messages: Vec<LlmMessage>,
     pub tools: Arc<crate::llm::types::LlmToolSpecs>,
@@ -1080,7 +1047,8 @@ pub struct LlmRequest {
         default,
         skip_serializing_if = "crate::llm::capability::AttachmentCapabilitySnapshot::is_empty_arc"
     )]
-    pub attachment_acceptance: Arc<crate::llm::capability::AttachmentCapabilitySnapshot>,
+    pub attachment_acceptance:
+        Arc<crate::allocation::Allocated<crate::llm::capability::AttachmentCapabilitySnapshot>>,
     #[serde(default)]
     pub generation: GenerationOptions,
     pub scope: LlmRequestScope,

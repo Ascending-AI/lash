@@ -7,6 +7,7 @@ pub struct RequestMessages(
     crate::persistent_sequence::PersistentSequence<AdmittedMessage>,
     MessageTotals,
     MessageDigests,
+    crate::allocation::AllocationBudget,
 );
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -214,6 +215,19 @@ impl<'de> serde::Deserialize<'de> for RequestMessages {
 
 impl RequestMessages {
     /// The compatible v1 journal digest, finalized without visiting history.
+    fn clone_in(
+        &self,
+        budget: &crate::allocation::AllocationBudget,
+    ) -> Result<Self, crate::allocation::AllocationError> {
+        if self.3.identity() == budget.identity() {
+            return Ok(self.clone());
+        }
+        let mut result = Self::default();
+        for message in self.iter() {
+            result = result.append(std::slice::from_ref(message), budget)?;
+        }
+        Ok(result)
+    }
     pub fn content_digest(&self) -> String {
         self.2.finish()
     }
@@ -228,6 +242,10 @@ impl RequestMessages {
         tail: &[LlmMessage],
         budget: &crate::allocation::AllocationBudget,
     ) -> Result<Self, crate::allocation::AllocationError> {
+        if !self.is_empty() && self.3.identity() != budget.identity() {
+            return self.clone_in(budget)?.append(tail, budget);
+        }
+
         if tail.is_empty() {
             return Ok(self.clone());
         }
@@ -253,6 +271,7 @@ impl RequestMessages {
                 dependent: self.1.dependent + totals.dependent,
             },
             self.2.append(self.len(), tail.iter(), budget)?,
+            budget.clone(),
         ))
     }
     pub(crate) fn append_rendered(
@@ -271,6 +290,7 @@ impl RequestMessages {
             },
             self.2
                 .append(self.len(), tail.iter().map(|entry| &entry.message), budget)?,
+            budget.clone(),
         ))
     }
     pub fn prefix(
@@ -278,6 +298,10 @@ impl RequestMessages {
         len: usize,
         budget: &crate::allocation::AllocationBudget,
     ) -> Result<Self, crate::allocation::AllocationError> {
+        if !self.is_empty() && self.3.identity() != budget.identity() {
+            return self.clone_in(budget)?.prefix(len, budget);
+        }
+
         if len == self.len() {
             return Ok(self.clone());
         }
@@ -291,6 +315,7 @@ impl RequestMessages {
                 dependent: self.1.dependent - removed.dependent,
             },
             self.2.prefix(len, self, budget)?,
+            budget.clone(),
         ))
     }
     pub fn attachments(&self) -> impl Iterator<Item = &AttachmentRef> {
@@ -336,6 +361,7 @@ pub struct RetainedLlmRequest {
 struct AdmittedEnvelope {
     request: LlmRequest,
     _hold: crate::allocation::AllocationHold,
+    budget: crate::allocation::AllocationBudget,
 }
 
 impl RetainedLlmRequest {
@@ -343,6 +369,11 @@ impl RetainedLlmRequest {
         &self,
         budget: &crate::allocation::AllocationBudget,
     ) -> Result<Self, crate::allocation::AllocationError> {
+        if self.envelope.budget.identity() == budget.identity()
+            && self.messages.3.identity() == budget.identity()
+        {
+            return Ok(self.clone());
+        }
         let hold = budget.reserve(crate::allocation::payload_capacity(
             self.envelope(),
             std::mem::size_of::<AdmittedEnvelope>() + 256,
@@ -354,9 +385,26 @@ impl RetainedLlmRequest {
         let tools = LlmToolSpecs::adopt_tools_in(&self.tools, budget)?;
         let mut request = self.envelope().clone();
         request.tools = tools;
-        Ok(Self::admitted_envelope(request, messages, hold))
+        Self::adopt_output_schema(&mut request, budget)?;
+        Ok(Self::admitted_envelope(request, messages, hold, budget))
     }
 
+    fn adopt_output_schema(
+        request: &mut LlmRequest,
+        budget: &crate::allocation::AllocationBudget,
+    ) -> Result<(), crate::allocation::AllocationError> {
+        request.instructions = request
+            .instructions
+            .as_ref()
+            .map(|text| text.adopt_in(budget))
+            .transpose()?;
+        request.attachment_acceptance =
+            crate::allocation::Allocated::adopt_in(&request.attachment_acceptance, budget)?;
+        if let Some(LlmOutputSpec::JsonSchema(schema)) = &mut request.output_spec {
+            schema.schema = schema.schema.adopt_in(budget)?;
+        }
+        Ok(())
+    }
     pub fn estimated_tokens(&self) -> u32 {
         (((self.messages.1.chars + self.model.wire_model().len() as u128) / 4).max(1))
             .try_into()
@@ -398,6 +446,7 @@ impl RetainedLlmRequest {
             envelope: Arc::new(AdmittedEnvelope {
                 request,
                 _hold: Default::default(),
+                budget: Default::default(),
             }),
             messages,
         }
@@ -424,12 +473,14 @@ impl RetainedLlmRequest {
         request: LlmRequest,
         messages: RequestMessages,
         hold: crate::allocation::AllocationHold,
+        budget: &crate::allocation::AllocationBudget,
     ) -> Self {
         debug_assert!(request.messages.is_empty());
         Self {
             envelope: Arc::new(AdmittedEnvelope {
                 request,
                 _hold: hold,
+                budget: budget.clone(),
             }),
             messages,
         }
@@ -446,7 +497,8 @@ impl RetainedLlmRequest {
         let messages =
             RequestMessages::from_messages(std::mem::take(&mut request.messages), budget)?;
         request.tools = LlmToolSpecs::adopt_tools_in(&request.tools, budget)?;
-        Ok(Self::admitted_envelope(request, messages, hold))
+        Self::adopt_output_schema(&mut request, budget)?;
+        Ok(Self::admitted_envelope(request, messages, hold, budget))
     }
     /// Admit a borrowed callback result before cloning any owned envelope fields.
     pub fn try_from_flat(
@@ -472,7 +524,7 @@ impl RetainedLlmRequest {
             provider_trace,
             attempt_control,
         } = request;
-        let envelope = LlmRequest {
+        let mut envelope = LlmRequest {
             instructions: instructions.clone(),
             model: model.clone(),
             messages: Vec::new(),
@@ -486,7 +538,8 @@ impl RetainedLlmRequest {
             provider_trace: provider_trace.clone(),
             attempt_control: attempt_control.clone(),
         };
-        Ok(Self::admitted_envelope(envelope, messages, hold))
+        Self::adopt_output_schema(&mut envelope, budget)?;
+        Ok(Self::admitted_envelope(envelope, messages, hold, budget))
     }
     pub fn edit_envelope(
         &mut self,
@@ -502,9 +555,12 @@ impl RetainedLlmRequest {
         let hold = budget.reserve(bound)?;
         let mut request = self.envelope.request.clone();
         edit(&mut request);
+        request.tools = LlmToolSpecs::adopt_tools_in(&request.tools, budget)?;
+        Self::adopt_output_schema(&mut request, budget)?;
         self.envelope = Arc::new(AdmittedEnvelope {
             request,
             _hold: hold,
+            budget: budget.clone(),
         });
         Ok(())
     }

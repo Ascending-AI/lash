@@ -318,14 +318,21 @@ pub(super) async fn restore(
 async fn settle_restored_answer(
     cx: &ActorContext,
     drive: &mut dyn TurnDrive,
-    pending: Option<Effect>,
+    pending: Option<crate::RetainedEffect>,
 ) -> Result<(), TurnError> {
-    let Some(Effect::LlmCall { id, .. }) = pending.or_else(|| drive.machine().poll_effect()) else {
+    let retained = match pending {
+        Some(effect) => Some(effect),
+        None => drive
+            .machine()
+            .poll_effect()
+            .map_err(super::session::projection_runtime_error)?,
+    };
+    let Some(Effect::LlmCall { id, .. }) = retained.as_deref().map(AsRef::as_ref) else {
         return Err(TurnError::Exec(
             "the restored receipt answers no model call the turn waits on".to_owned(),
         ));
     };
-    drive.settle_cancelled_answer(cx, id).await
+    drive.settle_cancelled_answer(cx, *id).await
 }
 
 /// The tool calls the cell `row`'s turn stopped on completed, when the turn's
@@ -335,14 +342,20 @@ async fn stopped_cell(
     cx: &ActorContext,
     drive: &mut dyn TurnDrive,
     row: &TurnRow,
-    pending: Option<Effect>,
+    pending: Option<crate::RetainedEffect>,
 ) -> Result<Option<AnsweredCell>, TurnError> {
     let UnfinishedPhase::Tools { run, .. } = &row.phase else {
         return Ok(None);
     };
     // The restored machine re-delivers the cell, which names its snapshot.
-    let Some(Effect::ExecCode { id, .. }) = pending.or_else(|| drive.machine().poll_effect())
-    else {
+    let retained = match pending {
+        Some(effect) => Some(effect),
+        None => drive
+            .machine()
+            .poll_effect()
+            .map_err(super::session::projection_runtime_error)?,
+    };
+    let Some(Effect::ExecCode { id, .. }) = retained.as_deref().map(AsRef::as_ref) else {
         return Ok(None);
     };
     if RunSeq(id.0) != *run {
@@ -355,9 +368,9 @@ async fn stopped_cell(
     if facts.rows.iter().any(|stored| stored.run == *run) {
         return Ok(None);
     }
-    let calls = drive.stopped_cell_calls(cx, id).await?;
+    let calls = drive.stopped_cell_calls(cx, *id).await?;
     Ok((!calls.is_empty()).then_some(AnsweredCell {
-        id,
+        id: *id,
         calls,
         held: None,
         response: None,
@@ -611,7 +624,12 @@ async fn stop_commit(
         drive.machine().finish_cancelled(evidence);
     }
     loop {
-        match drive.machine().poll_effect() {
+        let retained = drive
+            .machine()
+            .poll_effect()
+            .map_err(super::session::projection_runtime_error)?;
+        let effect = retained.as_deref().map(|effect| effect.as_ref().clone());
+        match effect {
             Some(Effect::Done {
                 messages,
                 event_delta,

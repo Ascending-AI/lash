@@ -200,7 +200,7 @@ impl RuntimeDrive {
         // The session's state after the turn's last consumed cell is
         // installed before any model continuation or cell compiles.
         restore_working(cx, &mut driver, &row).await?;
-        if let Some(crate::Effect::ExecCode { id, .. }) = &pending {
+        if let Some(crate::Effect::ExecCode { id, .. }) = pending.as_deref().map(AsRef::as_ref) {
             check_cell_snapshot(cx, &driver, &machine, *id).await?;
         }
         let mut drive = Self::assemble(

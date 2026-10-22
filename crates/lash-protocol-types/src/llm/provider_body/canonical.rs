@@ -108,7 +108,7 @@ const HISTORY_CHUNK_MESSAGES: usize = 32;
 struct LoweredMessage {
     role: crate::llm::types::LlmRole,
     starts_user_segment: bool,
-    source_identity: u64,
+    source_identity: Option<u64>,
     item: RequestSegment,
 }
 
@@ -178,6 +178,7 @@ impl LoweredHistory {
                     .take_while(|(held, message)| {
                         held.role == message.role
                             && held.starts_user_segment == message.starts_user_segment
+                            && held.source_identity.is_some()
                             && held.source_identity == message.blocks.identity()
                     })
                     .count();
@@ -405,7 +406,13 @@ impl RecordedRequestTemplate {
                         Some(prior) => prior.items.prefix(shared, budget)?,
                         None => super::RequestItems::default(),
                     };
-                    let mut tail = Vec::new();
+                    let tail_count = request.messages().len().saturating_sub(shared);
+                    let _scratch =
+                        budget
+                            .reserve((tail_count as u64).saturating_mul(
+                                std::mem::size_of::<RequestSegment>() as u64 + 32,
+                            ))?;
+                    let mut tail = Vec::with_capacity(tail_count);
                     for message in request.messages().iter_from(shared) {
                         let hold = budget.reserve(crate::allocation::payload_capacity(
                             message,

@@ -35,6 +35,11 @@ use lash_protocol_types::{
 };
 use lash_protocol_types::{session_model::Message, session_model::MessageSequence};
 
+/// Immutable pins returned to a host, retaining their directory obligation.
+pub type CheckpointPins = Arc<
+    lash_protocol_types::allocation::Allocated<Vec<(CheckpointContentRef, CheckpointContentPin)>>,
+>;
+
 /// How many leading items of each of the machine's sequences are unchanged
 /// since a checkpoint: `usize::MAX` for one that only grew.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -462,7 +467,7 @@ impl ContentLedger {
         &mut self,
         chains: StoredChains,
         content: &mut TurnCheckpointContent,
-    ) -> Result<Vec<(CheckpointContentRef, CheckpointContentPin)>, AllocationError> {
+    ) -> Result<CheckpointPins, AllocationError> {
         let allocation = self.budget.reserve(
             (chains.blobs().count() as u64)
                 .saturating_mul(4096)
@@ -483,10 +488,14 @@ impl ContentLedger {
         self.staged = Some(Stored {
             chains,
             pins: held,
-            _allocation: vec![allocation],
+            _allocation: vec![allocation.clone()],
         });
         self.staged_floors = Floors::default();
-        Ok(answer)
+        Ok(Arc::new(lash_protocol_types::allocation::Allocated::new(
+            answer,
+            allocation,
+            self.budget.clone(),
+        )))
     }
 
     /// Stage `chains`, read back from a restored checkpoint, for the host
@@ -533,10 +542,9 @@ impl ContentLedger {
             .blobs()
             .all(|digest| held.contains_key(digest));
         held.retain(|digest, _| staged.chains.blobs().any(|blob| blob == digest));
-        let mut staged = self
-            .staged
-            .take()
-            .expect("staged checkpoint remains under this exclusive borrow");
+        let Some(mut staged) = self.staged.take() else {
+            return Ok(());
+        };
         if complete {
             staged.pins = held;
             staged._allocation = allocations;
@@ -560,7 +568,7 @@ pub struct CheckpointDelta<M: TurnProtocol> {
     pub saved: SavedTurn<M>,
     /// The blobs it names that a committed checkpoint stored, by the pin
     /// the host gave each.
-    pub held: Vec<(CheckpointContentRef, CheckpointContentPin)>,
+    pub held: CheckpointPins,
     /// How many items, and values, the checkpoint encoded.
     pub encoded: usize,
 }

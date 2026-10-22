@@ -16,8 +16,7 @@ use lash_protocol_types::LlmCallError;
 use lash_protocol_types::{CheckpointKind, ModelToolReturn, ToolCallOutput, TurnOutcome, TurnStop};
 use lash_protocol_types::{
     llm::types::LlmOutputPart, llm::types::LlmRequest, llm::types::LlmResponse,
-    llm::types::LlmTerminalReason, llm::types::LlmToolChoice, llm::types::LlmToolSpec,
-    llm::types::ProviderReplayMeta,
+    llm::types::LlmTerminalReason, llm::types::LlmToolChoice, llm::types::ProviderReplayMeta,
 };
 use lash_protocol_types::{
     session_model::LlmUsage, session_model::Message, session_model::MessageSequence,
@@ -52,6 +51,9 @@ pub trait TurnProtocol: Send + Sync + 'static {
 #[derive(Clone, Debug, Serialize, serde::Deserialize)]
 pub struct UnitTurnProtocol;
 
+pub type RetainedEffect<M = UnitTurnProtocol> =
+    Arc<lash_protocol_types::allocation::Allocated<Effect<M>>>;
+
 mod turn_protocol;
 use turn_protocol::AnsweredWork;
 pub use turn_protocol::{
@@ -66,7 +68,7 @@ pub use turn_protocol::{
 mod checkpoint_content;
 pub use checkpoint_content::{CheckpointContentPin, CheckpointContentRef, TurnCheckpointContent};
 mod checkpoint_ledger;
-pub use checkpoint_ledger::CheckpointDelta;
+pub use checkpoint_ledger::{CheckpointDelta, CheckpointPins};
 use checkpoint_ledger::{
     CheckpointMessages, CheckpointPrompt, ContentLedger, Floors, Sequence, StoredChains,
     StoredRequest,

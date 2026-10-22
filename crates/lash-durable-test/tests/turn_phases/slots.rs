@@ -114,22 +114,25 @@ pub(super) async fn adapter_template(
     let mut request = request.clone();
     request.generation.output_token_cap = std::num::NonZeroUsize::new(1024);
     // The host accepts the image inline, the form the SQLite store delivers.
-    request.attachment_acceptance = Arc::new(lash_core::provider::AttachmentCapabilitySnapshot {
-        revision: "l3".into(),
-        acceptors: vec![lash_core::provider::AttachmentAcceptor {
-            provider: "anthropic".into(),
-            rules: vec![lash_core::provider::AttachmentAcceptanceRule {
-                positions: vec![AttachmentPosition::Message],
-                media_types: vec![image.reference.media_type.as_str().to_owned()],
-                media_families: Vec::new(),
-                forms: lash_protocol_types::llm::attachment_delivery::DeliveryForms {
-                    bytes: true,
-                    url: false,
-                    provider_file: false,
-                },
+    request.attachment_acceptance = Arc::new(
+        (lash_core::provider::AttachmentCapabilitySnapshot {
+            revision: "l3".into(),
+            acceptors: vec![lash_core::provider::AttachmentAcceptor {
+                provider: "anthropic".into(),
+                rules: vec![lash_core::provider::AttachmentAcceptanceRule {
+                    positions: vec![AttachmentPosition::Message],
+                    media_types: vec![image.reference.media_type.as_str().to_owned()],
+                    media_families: Vec::new(),
+                    forms: lash_protocol_types::llm::attachment_delivery::DeliveryForms {
+                        bytes: true,
+                        url: false,
+                        provider_file: false,
+                    },
+                }],
             }],
-        }],
-    });
+        })
+        .into(),
+    );
     request
         .messages
         .push(lash_core::llm::types::LlmMessage::new(

@@ -123,7 +123,11 @@ pub(crate) fn user_message(content: &str) -> Message {
 
 pub(crate) fn drain_effects(machine: &mut TurnMachine) -> Vec<Effect> {
     let mut effects = Vec::new();
-    while let Some(effect) = machine.poll_effect() {
+    while let Some(effect) = machine
+        .poll_effect()
+        .unwrap()
+        .map(|effect| effect.as_ref().as_ref().clone())
+    {
         if let Effect::SyncExecutionEnvironment { id, .. } = effect {
             effects.push(effect);
             machine.handle_response(Response::ExecutionEnvironmentSynced {

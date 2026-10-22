@@ -310,9 +310,12 @@ fn discarded_continuations_are_recorded_and_excluded_from_history_in_both_dialec
                 }
                 let id = execs[0].0;
                 // The note also survives the cell's checkpoint boundary.
-                machine =
-                    TurnMachine::restore_from_checkpoint(config(), machine.checkpoint(), None)
-                        .unwrap();
+                machine = TurnMachine::restore_from_checkpoint(
+                    config(),
+                    machine.checkpoint().expect("checkpoint admitted"),
+                    None,
+                )
+                .unwrap();
                 drain(&mut machine);
                 machine.handle_response(Response::ExecResult {
                     id,

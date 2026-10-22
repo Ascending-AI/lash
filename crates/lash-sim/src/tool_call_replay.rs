@@ -14,7 +14,9 @@ const RAW_ARGS: &str = r#"{"path": "a.txt", "content": "he said "hi"}"#;
 
 fn malformed_history_request(model: &str) -> LlmRequest {
     LlmRequest {
-        instructions: Some(Arc::from("stable system")),
+        instructions: Some(lash_protocol_types::llm::types::RequestText::from(
+            "stable system",
+        )),
         model: lash_protocol_types::llm_profile::LlmProfileConfig::new(
             lash_protocol_types::llm_profile::RecordedLlmProfile::mint(
                 lash_protocol_types::llm_profile::LlmProfileKey::new("request-fixture"),

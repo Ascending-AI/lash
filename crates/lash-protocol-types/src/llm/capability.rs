@@ -850,7 +850,7 @@ impl AttachmentCapabilitySnapshot {
     pub fn is_empty(&self) -> bool {
         self.revision.is_empty() && self.acceptors.is_empty()
     }
-    pub fn is_empty_arc(snapshot: &std::sync::Arc<Self>) -> bool {
+    pub fn is_empty_arc(snapshot: &std::sync::Arc<crate::allocation::Allocated<Self>>) -> bool {
         snapshot.is_empty()
     }
     pub fn forms(

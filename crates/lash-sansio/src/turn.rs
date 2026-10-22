@@ -26,8 +26,11 @@ pub struct SansIoTurnInput<M: TurnProtocol = UnitTurnProtocol> {
     pub no_progress_budget: lash_protocol_types::NoProgressBudget,
     /// The session's recorded attachment-acceptance rules every request of
     /// the turn carries.
-    pub attachment_acceptance:
-        Arc<lash_protocol_types::llm::capability::AttachmentCapabilitySnapshot>,
+    pub attachment_acceptance: Arc<
+        lash_protocol_types::allocation::Allocated<
+            lash_protocol_types::llm::capability::AttachmentCapabilitySnapshot,
+        >,
+    >,
     pub generation: lash_protocol_types::llm::types::GenerationOptions,
     pub emit_llm_trace: bool,
     pub termination: M::Termination,

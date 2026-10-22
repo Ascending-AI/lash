@@ -116,6 +116,8 @@ struct ContentData {
     #[serde(skip)]
     allocation: AllocationHold,
     #[serde(skip)]
+    growth: Vec<AllocationHold>,
+    #[serde(skip)]
     budget: AllocationBudget,
 }
 impl PartialEq for ContentData {
@@ -130,12 +132,17 @@ impl TurnCheckpointContent {
         Self(Arc::new(ContentData {
             map: BTreeMap::new(),
             allocation,
+            growth: Vec::new(),
             budget,
         }))
     }
     pub(super) fn allocation(&self) -> AllocationHold {
         self.0.allocation.clone()
     }
+    #[expect(
+        clippy::expect_used,
+        reason = "the private Arc was detached under this exclusive borrow and has no Weak readers"
+    )]
     fn data_mut(&mut self) -> Result<&mut ContentData, AllocationError> {
         if Arc::get_mut(&mut self.0).is_none() {
             let allocation =
@@ -147,6 +154,7 @@ impl TurnCheckpointContent {
             self.0 = Arc::new(ContentData {
                 map: self.0.map.clone(),
                 allocation,
+                growth: Vec::new(),
                 budget: self.0.budget.clone(),
             });
         }
@@ -187,6 +195,11 @@ impl TurnCheckpointContent {
         digest: CheckpointContentRef,
         bytes: Vec<u8>,
     ) -> Result<(), TurnCheckpointRestoreError> {
+        let allocation = self
+            .0
+            .budget
+            .reserve((bytes.len() as u64).saturating_mul(2).saturating_add(4096))
+            .map_err(TurnCheckpointRestoreError::Allocation)?;
         if CheckpointContentRef::of_bytes(&bytes) != digest {
             return Err(TurnCheckpointRestoreError::CorruptContent { content: digest.0 });
         }
@@ -194,10 +207,11 @@ impl TurnCheckpointContent {
             String::from_utf8(bytes).map_err(|_| TurnCheckpointRestoreError::CorruptContent {
                 content: digest.0.clone(),
             })?;
-        self.data_mut()
-            .map_err(TurnCheckpointRestoreError::Allocation)?
-            .map
-            .insert(digest, text);
+        let data = self
+            .data_mut()
+            .map_err(TurnCheckpointRestoreError::Allocation)?;
+        data.map.insert(digest, text);
+        data.growth.push(allocation);
         Ok(())
     }
 

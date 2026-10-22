@@ -17,7 +17,9 @@ pub struct SessionSpec {
     pub reasoning: Option<ReasoningSelection>,
     /// The attachment-acceptance rules the session renders attachments
     /// against (ADR 0026). `None` keeps the neutral rules.
-    pub attachment_acceptance: Option<std::sync::Arc<AttachmentCapabilitySnapshot>>,
+    pub attachment_acceptance: Option<
+        std::sync::Arc<lash_protocol_types::allocation::Allocated<AttachmentCapabilitySnapshot>>,
+    >,
     pub turn_budget: TurnBudget,
     /// The tool-call limit: the total one cell may make, and the number a
     /// process may hold at once.
@@ -127,7 +129,9 @@ impl SessionSpec {
     /// against.
     pub fn attachment_acceptance(
         mut self,
-        acceptance: std::sync::Arc<AttachmentCapabilitySnapshot>,
+        acceptance: std::sync::Arc<
+            lash_protocol_types::allocation::Allocated<AttachmentCapabilitySnapshot>,
+        >,
     ) -> Self {
         self.attachment_acceptance = Some(acceptance);
         self

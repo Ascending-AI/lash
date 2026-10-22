@@ -116,7 +116,11 @@ fn text_message(role: MessageRole, content: impl Into<String>) -> Message {
 /// else never has to serve one.
 fn drain_effects(machine: &mut TurnMachine) -> Vec<Effect> {
     let mut effects = Vec::new();
-    while let Some(effect) = machine.poll_effect() {
+    while let Some(effect) = machine
+        .poll_effect()
+        .unwrap()
+        .map(|effect| effect.as_ref().as_ref().clone())
+    {
         if let Effect::SyncExecutionEnvironment { id } = effect {
             machine.handle_response(Response::ExecutionEnvironmentSynced {
                 id,
@@ -132,7 +136,11 @@ fn drain_effects(machine: &mut TurnMachine) -> Vec<Effect> {
 /// Every effect the machine has ready, the syncs included and unanswered.
 fn drain_unsynced_effects(machine: &mut TurnMachine) -> Vec<Effect> {
     let mut effects = Vec::new();
-    while let Some(effect) = machine.poll_effect() {
+    while let Some(effect) = machine
+        .poll_effect()
+        .unwrap()
+        .map(|effect| effect.as_ref().as_ref().clone())
+    {
         effects.push(effect);
     }
     effects
@@ -2339,7 +2347,7 @@ fn machine_phase_growth_refuses_before_publishing_work() {
         driver_state: Value::Null,
     })]);
     assert!(
-        machine.try_poll_effect().is_err(),
+        machine.poll_effect().is_err(),
         "phase growth must refuse before publishing work"
     );
     assert!(machine.waiting_exec().is_none());
@@ -2387,8 +2395,38 @@ fn machine_cancellation_growth_refuses_before_retaining_evidence() {
         "x".repeat(16 * 1024),
     ));
     assert!(
-        machine.try_poll_effect().is_err(),
+        machine.poll_effect().is_err(),
         "cancellation source must be admitted before retention"
     );
     assert!(machine.observed_cancellation.is_none());
+}
+
+#[test]
+fn an_escaped_effect_keeps_its_scalar_source_charged_after_the_machine_drops() {
+    let used = Arc::new(AtomicU64::new(0));
+    let budget = lash_protocol_types::allocation::AllocationBudget::new(MachineCapLedger {
+        used: used.clone(),
+        calls: Default::default(),
+        limit: u64::MAX,
+    });
+    let mut machine = TurnMachine::new(
+        test_config(Arc::new(ProseDriver)),
+        Vec::new(),
+        Vec::new().into(),
+        0,
+    );
+    machine.set_allocation_budget(budget).unwrap();
+    machine.apply_actions(vec![DriverAction::Emit(SessionStreamEvent::LlmRequest {
+        protocol_iteration: 0,
+        message_count: 0,
+        tool_list: "x".repeat(16 * 1024),
+    })]);
+    let effect = machine.poll_effect().unwrap().unwrap();
+    drop(machine);
+    assert!(
+        used.load(Ordering::SeqCst) >= 16 * 1024,
+        "escaped effect owns its retained scalar source"
+    );
+    drop(effect);
+    assert_eq!(used.load(Ordering::SeqCst), 0);
 }

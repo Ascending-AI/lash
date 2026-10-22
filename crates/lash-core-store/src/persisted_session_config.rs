@@ -13,7 +13,9 @@ pub struct PersistedSessionConfig {
         default,
         skip_serializing_if = "crate::provider::AttachmentCapabilitySnapshot::is_empty_arc"
     )]
-    pub attachment_acceptance: std::sync::Arc<crate::provider::AttachmentCapabilitySnapshot>,
+    pub attachment_acceptance: std::sync::Arc<
+        lash_protocol_types::allocation::Allocated<crate::provider::AttachmentCapabilitySnapshot>,
+    >,
     /// The bound on protocol iterations per turn (FIG-4376). Like every
     /// execution control below it is session config: recorded at creation and
     /// snapshotted per root in its recorded

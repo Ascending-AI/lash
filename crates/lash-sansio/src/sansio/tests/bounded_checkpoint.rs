@@ -599,7 +599,7 @@ impl PhaseStore {
             serde_json::to_vec(&full.checkpoint).expect("full body"),
             "{phase}: the delta is the full checkpoint"
         );
-        for (digest, pin) in &delta.held {
+        for (digest, pin) in delta.held.iter() {
             assert!(
                 self.blobs.contains_key(digest) && *pin == Self::pin(digest),
                 "{phase}: held blob {digest} was stored under its pin"

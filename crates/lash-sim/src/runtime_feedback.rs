@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 fn request(messages: Vec<LlmMessage>) -> LlmRequest {
     LlmRequest {
-        instructions: Some(Arc::from("I")),
+        instructions: Some(lash_protocol_types::llm::types::RequestText::from("I")),
         model: lash_protocol_types::llm_profile::LlmProfileConfig::new(
             lash_protocol_types::llm_profile::RecordedLlmProfile::mint(
                 lash_protocol_types::llm_profile::LlmProfileKey::new("request-fixture"),
@@ -198,7 +198,7 @@ fn witness(wire: Wire) {
         "{wire:?}"
     );
     // Leading feedback, both with and without initial instructions (mutation pin).
-    for instructions in [Some(Arc::from("I")), None] {
+    for instructions in [Some("I".into()), None] {
         let mut req = request(vec![
             text(LlmRole::System, "leading"),
             text(LlmRole::User, "U"),

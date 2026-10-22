@@ -262,10 +262,8 @@ impl PhaseStored {
     pub(super) fn restored(
         self,
         machine: &mut crate::TurnMachine,
-    ) -> Result<(), crate::RuntimeError> {
-        machine
-            .checkpoint_stored(self.content)
-            .map_err(crate::RuntimeError::allocation)
+    ) -> Result<(), lash_protocol_types::allocation::AllocationError> {
+        machine.checkpoint_stored(self.content)
     }
 }
 

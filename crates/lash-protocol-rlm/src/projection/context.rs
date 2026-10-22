@@ -237,6 +237,7 @@ pub fn rlm_history_projection(
 pub(crate) enum HostBindingsError {
     /// The step that records them failed.
     Journal(lash_core::RuntimeEffectControllerError),
+    Allocation(lash_protocol_types::allocation::AllocationError),
     Refused(String),
 }
 
@@ -276,7 +277,10 @@ pub(crate) async fn cell_host_bindings(
         )));
     }
     if mentions(source, HISTORY_PROJECTION) {
-        let history = RlmHistoryProjection::from_chronological(&ctx.chronological_projection())
+        let projection = ctx
+            .chronological_projection()
+            .map_err(HostBindingsError::Allocation)?;
+        let history = RlmHistoryProjection::from_chronological(&projection)
             .map_err(|error| HostBindingsError::Refused(error.to_string()))?;
         bindings.insert(HISTORY_PROJECTION.to_owned(), history.value());
     }

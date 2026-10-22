@@ -5,7 +5,9 @@ pub(super) fn request_with_instructions(
     messages: Vec<LlmMessage>,
 ) -> LlmRequest {
     let mut req = request(messages);
-    req.instructions = Some(Arc::from(instructions));
+    req.instructions = Some(lash_protocol_types::llm::types::RequestText::from(
+        instructions,
+    ));
     req
 }
 

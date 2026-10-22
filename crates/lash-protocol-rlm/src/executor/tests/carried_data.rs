@@ -29,7 +29,7 @@ impl Session {
             host: open_host().await,
             state: crate::testing::session_state(dialect),
             services: cell_services(dialect, workers),
-            tools: Arc::new((CellTools::default()).into()),
+            tools: Arc::new(CellTools::default()),
             cells: 0,
         }
     }
