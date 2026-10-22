@@ -819,7 +819,7 @@ fn benchmark_plugin_factories(
     effect_host: &lash::runtime::ActorContext,
     settlement_control: Option<&Arc<BenchmarkSettlementControl>>,
     tool_catalog_observer: Option<&Arc<BenchmarkToolCatalogObserver>>,
-) -> BenchmarkPlugins {
+) -> anyhow::Result<BenchmarkPlugins> {
     let wiring = scenario.wiring();
     let benchmark_tool = settlement_control.map_or_else(
         || BenchmarkEchoTool::new(effect_host.clone()),
@@ -829,13 +829,22 @@ fn benchmark_plugin_factories(
     );
     let benchmark_tool: Arc<dyn lash_core::ToolProvider> = Arc::new(benchmark_tool);
     let mut components: Vec<BenchmarkComponent> = vec![(
-        lash_core::testing::tool_component(RUNTIME_PERF_TOOLS, Arc::clone(&benchmark_tool)),
+        Arc::new(
+            crate::perf_support::tool_plugin(
+                RUNTIME_PERF_TOOLS.component(),
+                lash::tool_provider_key!("tools"),
+                Arc::clone(&benchmark_tool),
+            )?
+            .as_component(RUNTIME_PERF_TOOLS.format())?,
+        ),
         RUNTIME_PERF_TOOLS,
     )];
-    let mut factories: Vec<Arc<dyn PluginFactory>> = vec![Arc::new(StaticPluginFactory::new(
-        lash_core::plugin::PluginDeclaration::initial("runtime_perf_tools"),
-        PluginSpec::new().with_tool_provider(lash::tool_provider_key!("tools"), benchmark_tool),
-    ))];
+    let mut factories: Vec<Arc<dyn PluginFactory>> =
+        vec![Arc::new(crate::perf_support::tool_plugin(
+            "runtime_perf_tools",
+            lash::tool_provider_key!("tools"),
+            benchmark_tool,
+        )?)];
     if wiring.llm_query_plugin {
         factories.push(Arc::new(LlmToolsPluginFactory::default()));
         components.push((
@@ -869,22 +878,18 @@ fn benchmark_plugin_factories(
         factories.push(Arc::new(delegation));
     }
     if wiring.oblique_tools_plugin {
-        factories.push(Arc::new(StaticPluginFactory::new(
-            lash_core::plugin::PluginDeclaration::initial("runtime_perf_oblique_tools"),
-            PluginSpec::new().with_tool_provider(
-                lash::tool_provider_key!("tools"),
-                Arc::new(BenchmarkObliqueTools),
-            ),
-        )));
+        factories.push(Arc::new(crate::perf_support::tool_plugin(
+            "runtime_perf_oblique_tools",
+            lash::tool_provider_key!("tools"),
+            Arc::new(BenchmarkObliqueTools),
+        )?));
     }
     if wiring.large_tool_catalog_plugin {
-        factories.push(Arc::new(StaticPluginFactory::new(
-            lash_core::plugin::PluginDeclaration::initial("runtime_perf_large_tool_catalog"),
-            PluginSpec::new().with_tool_provider(
-                lash::tool_provider_key!("tools"),
-                Arc::new(BenchmarkLargeToolCatalog::default()),
-            ),
-        )));
+        factories.push(Arc::new(crate::perf_support::tool_plugin(
+            "runtime_perf_large_tool_catalog",
+            lash::tool_provider_key!("tools"),
+            Arc::new(BenchmarkLargeToolCatalog::default()),
+        )?));
     }
     if let Some(observer) = tool_catalog_observer {
         let composition_observer = Arc::clone(observer);
@@ -902,10 +907,10 @@ fn benchmark_plugin_factories(
         )));
     }
 
-    BenchmarkPlugins {
+    Ok(BenchmarkPlugins {
         factories,
         components,
-    }
+    })
 }
 
 /// The in-process lane: lash's durable engine over a fresh SQLite memory
@@ -979,10 +984,11 @@ pub(crate) async fn build_embed_core(
             factory.worker_service().pool()?;
             benchmark_rlm_builder(backend.clone(), provider, factory)
                 .with_explicit_ephemeral_facets()
-                .tools(
+                .plugin(Arc::new(crate::perf_support::tool_plugin(
+                    "tools",
                     lash::tool_provider_key!("tools"),
                     Arc::new(BenchmarkEchoTool::new(effect_host)),
-                )
+                )?))
                 .build(runtime_perf_owner())
                 .map(BenchmarkCore::Rlm)
                 .map_err(anyhow::Error::from)
@@ -1040,7 +1046,7 @@ pub(crate) async fn build_runtime(
         &effect_host,
         settlement_control.as_ref(),
         tool_catalog_observer.as_ref(),
-    );
+    )?;
     let mut plugin_stack = runtime_perf_plugin_stack(
         scenario.uses_standard_compaction(),
         execution_mode.is_standard(),
@@ -1218,7 +1224,7 @@ pub(crate) async fn build_runtime_with_stores(
     );
     let backend = durable_backend(layered)?;
     let effect_host = lash::runtime::ActorContext::detached(backend.clone());
-    let plugins = benchmark_plugin_factories(scenario, &effect_host, None, None);
+    let plugins = benchmark_plugin_factories(scenario, &effect_host, None, None)?;
     let mut plugin_stack = runtime_perf_plugin_stack(
         scenario.uses_standard_compaction(),
         mode_id.is_standard(),

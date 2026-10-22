@@ -124,11 +124,11 @@ impl Tools {
 fn workload_component(
     tools: Arc<dyn lash_core::ToolProvider>,
 ) -> Result<lash::process::StaticProcessComponent> {
-    Ok(lash::plugins::StaticPluginFactory::new(
-        lash::plugins::PluginDeclaration::initial(WORKLOAD_TOOLS.component()),
-        lash::plugins::PluginSpec::new()
-            .with_tool_provider(lash::tool_provider_key!("tools"), tools),
-    )
+    Ok(crate::perf_support::tool_plugin(
+        WORKLOAD_TOOLS.component(),
+        lash::tool_provider_key!("tools"),
+        tools,
+    )?
     .as_component(WORKLOAD_TOOLS.format())?)
 }
 
@@ -238,7 +238,11 @@ impl Fleet {
                     );
                     let tools: Arc<dyn lash_core::ToolProvider> = Arc::new(Tools::new(meter)?);
                     lash::LashCore::rlm_builder(backend, factory)
-                        .tools(lash::tool_provider_key!("tools"), Arc::clone(&tools))
+                        .plugin(Arc::new(crate::perf_support::tool_plugin(
+                            "tools",
+                            lash::tool_provider_key!("tools"),
+                            Arc::clone(&tools),
+                        )?))
                         .process_component(Arc::new(workload_component(tools)?), WORKLOAD_TOOLS)
                 }
                 Flavor::Chat => lash::LashCore::standard_builder(backend)

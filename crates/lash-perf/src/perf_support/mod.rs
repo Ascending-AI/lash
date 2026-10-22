@@ -12,6 +12,67 @@ pub mod tempdir;
 pub mod time;
 pub mod trace_file;
 
+/// Register a benchmark runner and its code package under the same owner/key.
+/// Package roots come from the runner's manifests, as in a production host.
+///
+/// # Errors
+/// Returns a refusal to enumerate the runner's tool manifests.
+pub fn tool_plugin(
+    owner: &'static str,
+    key: lash::plugins::ToolProviderKey,
+    tools: std::sync::Arc<dyn lash_core::ToolProvider>,
+) -> Result<lash::plugins::StaticPluginFactory, lash::plugins::PluginError> {
+    let packages = tool_packages(owner, key, std::sync::Arc::clone(&tools))?;
+    Ok(lash::plugins::StaticPluginFactory::new(
+        lash::plugins::PluginDeclaration::initial(owner),
+        lash::plugins::PluginSpec::new()
+            .with_tool_provider(key, tools)
+            .with_package_provider(key, packages),
+    ))
+}
+
+/// Advertise the operation packages of a benchmark's registered tool runner.
+/// Read registrations use this alongside their explicit read adapter.
+///
+/// # Errors
+/// Returns a refusal to enumerate the runner's tool manifests.
+pub fn tool_packages(
+    owner: &'static str,
+    key: lash::plugins::ToolProviderKey,
+    tools: std::sync::Arc<dyn lash_core::ToolProvider>,
+) -> Result<std::sync::Arc<dyn lash::package::PackageProvider>, lash::plugins::PluginError> {
+    let roots = tools
+        .tool_manifests(&lash_core::OwnerConfigView::default())?
+        .into_iter()
+        .map(|manifest| manifest.operation.package.as_slice()[0].clone())
+        .collect();
+    Ok(std::sync::Arc::new(
+        lash::package::ToolPackageProvider::new(owner, key, roots, tools),
+    ))
+}
+
+/// Capture linked operations and machine requirements with the production
+/// process-controls policy, translating providers to their registered twins.
+pub fn process_policy(
+    components: &[lash_core::ProcessConfigKey<()>],
+) -> std::sync::Arc<dyn lash_core::ProcessEnvPolicy> {
+    let mut components = components.to_vec();
+    if !components
+        .iter()
+        .any(|key| key.component() == lash::vm::KERNEL_SERVICES_CONFIG.component())
+    {
+        components.push(lash::vm::KERNEL_SERVICES_CONFIG);
+    }
+    lash_plugin_process_controls::policy::restrict_or(
+        lash_plugin_process_controls::policy::from_run(move |_| {
+            components
+                .iter()
+                .map(|key| lash_core::ProcessComponentEntry::new(*key, &(), std::iter::empty()))
+                .collect()
+        }),
+    )
+}
+
 /// Refuse a PostgreSQL performance run that cannot retain acknowledged local
 /// commits across power loss. Provisioning owns these settings; the harness
 /// validates them before opening its measured window, without changing them.

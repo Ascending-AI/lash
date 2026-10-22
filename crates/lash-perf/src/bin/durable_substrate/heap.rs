@@ -67,6 +67,48 @@ const _: () = assert!(matches!(
 ));
 const LIMIT: Duration = Duration::from_secs(120);
 
+/// A failed heap turn retains its typed activity evidence for its caller.
+#[derive(Debug)]
+struct HeapTurnFailure {
+    scenario: String,
+    h: usize,
+    gate: Option<usize>,
+    output: Box<lash::TurnOutput>,
+}
+
+impl std::fmt::Display for HeapTurnFailure {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}/{}", self.scenario, self.h)?;
+        match self.gate {
+            Some(phase) => write!(f, " ended before gate {phase}"),
+            None => write!(f, " turn failed"),
+        }?;
+        write!(f, ": {:?}", self.output.outcome)?;
+        for activity in &self.output.activities {
+            if let lash::TurnEvent::Error(failure) = &activity.event {
+                write!(f, "; {failure:?}")?;
+            }
+        }
+        Ok(())
+    }
+}
+impl std::error::Error for HeapTurnFailure {}
+
+fn turn_failure(
+    scenario: &str,
+    h: usize,
+    gate: Option<usize>,
+    output: lash::TurnOutput,
+) -> anyhow::Error {
+    let error = HeapTurnFailure {
+        scenario: scenario.to_owned(),
+        h,
+        gate,
+        output: Box::new(output),
+    };
+    anyhow::Error::new(error)
+}
+
 #[derive(Clone, Debug, serde::Serialize)]
 pub struct Row {
     scenario: String,
@@ -259,7 +301,7 @@ impl StaticToolExecute for Gate {
 fn source(scenario: &str, h: usize, cell: usize) -> String {
     let seed = match scenario {
         "objects-update" => format!("let kept = []; for (let i=0; i<{h}; i++) kept.push({{v:i}});"),
-        "string-length" => format!("let kept = \"x\".repeat({});", h * 256),
+        "string-length" => format!("let kept: string = \"x\".repeat({});", h * 256),
         "drop-subgraph" => format!(
             "let kept = []; let dropped = []; for (let i=0; i<{h}; i++) {{kept.push(i); dropped.push({{v:i}});}}"
         ),
@@ -432,10 +474,11 @@ async fn sample_with_stores(
             .context_window_tokens(1_000_000)
             .build()?,
     )
-    .tools(
+    .plugin(Arc::new(lash_perf::perf_support::tool_plugin(
+        "heap-meter",
         lash::tool_provider_key!("heap-meter"),
         Arc::new(StaticToolProvider::new(vec![tool], Gate(gate_sender))),
-    )
+    )?))
     .build(lash::persistence::LeaseOwnerIdentity::opaque(
         lash::persistence::LeaseOwnerId::new("heap-meter"),
         lash::persistence::LeaseIncarnationId::new(format!("{scenario}-{h}")),
@@ -458,17 +501,25 @@ async fn sample_with_stores(
         for phase in 0..=expected {
             let received = tokio::select! {
                 phase = gates.recv() => phase.context("gate sender closed")?,
-                result = &mut output => anyhow::bail!("{scenario}/{h} ended before gate {phase}: {:?}", result?.outcome),
+                result = &mut output => return Err(turn_failure(scenario, h, Some(phase), result?)),
             };
-            ensure!(received == phase, "gate {received} arrived instead of {phase}");
+            ensure!(
+                received == phase,
+                "gate {received} arrived instead of {phase}"
+            );
             // The tool merely offers a pending outcome. The engine commits
             // its wait and releases/resets the machine before this observer
             // supplies the external completion through the production API.
             let call = loop {
-                let calls = core.completions().parked(lash::admin::CallOwner::Session(session_id.clone())).await?;
+                let calls = core
+                    .completions()
+                    .parked(lash::admin::CallOwner::Session(session_id.clone()))
+                    .await?;
                 let stats = meter.pool.stats();
-                if stats.workers > 0 && stats.idle == stats.workers
-                    && let Some(call) = calls.into_iter().next() {
+                if stats.workers > 0
+                    && stats.idle == stats.workers
+                    && let Some(call) = calls.into_iter().next()
+                {
                     break call;
                 }
                 tokio::time::sleep(Duration::from_millis(1)).await;
@@ -484,21 +535,30 @@ async fn sample_with_stores(
                 != RetirementProgress::default()
             {}
             meter.park(phase);
-            ensure!(matches!(core.completions().resolve(call.key.as_str(), lash::Resolution::Ok(serde_json::json!({}))).await?,
-                lash::durable::ResolveAnswer::Resolved), "gate resolution refused");
+            ensure!(
+                matches!(
+                    core.completions()
+                        .resolve(
+                            call.key.as_str(),
+                            lash::Resolution::Ok(serde_json::json!({}))
+                        )
+                        .await?,
+                    lash::durable::ResolveAnswer::Resolved
+                ),
+                "gate resolution refused"
+            );
         }
         let output = output.await?;
         meter.tail();
         anyhow::Ok(output)
-    }).await.context("heap cell never completed");
+    })
+    .await
+    .context("heap cell never completed");
     core.shutdown().await?;
     let output = result??;
-    ensure!(
-        matches!(output.outcome, lash::TurnOutcome::Finished(_)),
-        "heap turn failed: {:?}: {:?}",
-        output.outcome,
-        output.outcome.error_cause()
-    );
+    if !matches!(output.outcome, lash::TurnOutcome::Finished(_)) {
+        return Err(turn_failure(scenario, h, None, output));
+    }
     let rows = meter
         .state
         .lock()
@@ -805,6 +865,46 @@ pub async fn run(run: &super::Run<'_>, sizes: &[usize], only: &[String]) -> Resu
 
 #[cfg(test)]
 mod tests {
+    /// FIG-7163: the heap verdict must preserve the controller's typed code,
+    /// even when the committed outcome intentionally exposes a broad class.
+    #[test]
+    fn a_heap_failure_retains_its_typed_controller_refusal() {
+        let code =
+            lash_core::FailureCode::from(&lash_core::RuntimeErrorCode::RuntimeEffectScopeMismatch);
+        let event = lash_protocol_types::session_model::make_error_event(
+            lash_core::TurnFailureKind::RuntimeEffectController,
+            Some(code.clone()),
+            "the effect belongs to another scope",
+            None,
+            lash_protocol_types::session_model::RuntimeOutputCuts::standard(),
+        );
+        let lash_protocol_types::SessionStreamEvent::Error(failure) = event else {
+            panic!("the controller reports an error");
+        };
+        let output = lash::TurnOutput::new(
+            lash::TurnOutcome::Stopped(lash::TurnStop::RuntimeError {
+                cause: lash::TurnErrorCause::new(lash::TurnErrorCode::EffectRefused),
+            }),
+            vec![lash::TurnActivity::independent(lash::TurnEvent::Error(
+                failure,
+            ))],
+        );
+        let error = super::turn_failure("string-length", 100, Some(0), output);
+        let retained = error
+            .downcast_ref::<super::HeapTurnFailure>()
+            .expect("the verdict retains the complete typed turn failure");
+        let lash::TurnEvent::Error(failure) = &retained.output.activities[0].event else {
+            panic!("the controller failure is retained");
+        };
+        let envelope = failure.envelope.as_ref().expect("the typed error envelope");
+        assert_eq!(
+            envelope.kind,
+            lash_core::TurnFailureKind::RuntimeEffectController
+        );
+        assert_eq!(envelope.code.as_ref(), Some(&code));
+        assert_eq!(envelope.user_message, "the effect belongs to another scope");
+    }
+
     /// FIG-6620: unavailable SQLite work stays absent on PostgreSQL; genuine
     /// measured zero and accepted publication/page counts stay available.
     #[test]

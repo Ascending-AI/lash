@@ -12,7 +12,7 @@ pub(super) async fn agent_started_process_tool_call_graph_execution()
         "Start a process that calls the app lookup tool.",
         vec![
             r#"<typescript>
-const definition = async () => {
+const definition = async (): Promise<{ ok: boolean }> => {
   const value = await tools.appLookup({});
   return value;
 };
@@ -43,9 +43,9 @@ pub(super) async fn agent_nested_process_start_await_execution()
         "Start a parent process that starts and awaits a child process.",
         vec![
             r#"<typescript>
-const parent = async () => {
+const parent = async (): Promise<{ parent: string }> => {
   const handle = await processes.start({
-    definition: async () => { return { child: 'done' }; }
+    definition: async (): Promise<{ child: string }> => { return { child: 'done' }; }
   });
   const inner = await handle;
   return { parent: inner.child };
@@ -71,7 +71,7 @@ pub(super) async fn agent_started_process_child_spawn_execution()
         "Run a Lash VM process that spawns a subagent and returns its value.",
         vec![
             r#"<typescript>
-const spawnChild = async () => {
+const spawnChild = async (): Promise<{ len: number }> => {
   const result = await agents.spawn({
     task: "Finish `{ len: chunk.length }` using the seeded `chunk` variable.",
     seed: { chunk: ["a", "b"] },
@@ -104,7 +104,7 @@ pub(super) async fn agent_session_turn_process_child_execution()
         &SessionId::from("sim-agent-session-turn-process-child-contract"),
         "Start a child process and await its result.",
         r#"<typescript>
-const child = async () => { return { child: 'done' }; };
+const child = async (): Promise<{ child: string }> => { return { child: 'done' }; };
 const handle = await processes.start({ definition: child });
 const result = await handle;
 await control.finish(result);
@@ -123,7 +123,7 @@ pub(super) async fn agent_parallel_spawn_and_join_execution()
         &SessionId::from("sim-agent-parallel-spawn-join-contract"),
         "Start two processes, await both, and finish their joined result.",
         r#"<typescript>
-const child = async (value: string) => { return value; };
+const child = async (value: string): Promise<string> => { return value; };
 const left = await processes.start({ definition: child, args: { value: "left" } });
 const right = await processes.start({ definition: child, args: { value: "right" } });
 const leftValue = await left;
@@ -134,4 +134,47 @@ await control.finish({ joined: [leftValue, rightValue] });
     )
     .await?;
     Ok(result)
+}
+
+/// The contract host's session/process twins advertise the same operations.
+pub(super) fn contract_tool_plugin(
+    owner: &'static str,
+    tools: Arc<dyn lash_core::ToolProvider>,
+) -> Result<lash::plugins::StaticPluginFactory, FixedScriptRunnerError> {
+    let roots = tools
+        .tool_manifests(&lash_core::OwnerConfigView::default())
+        .map_err(|error| FixedScriptRunnerError::Runtime(error.to_string()))?
+        .into_iter()
+        .map(|manifest| manifest.operation.package.as_slice()[0].clone())
+        .collect();
+    Ok(lash::plugins::StaticPluginFactory::new(
+        lash::plugins::PluginDeclaration::initial(owner),
+        lash::plugins::PluginSpec::new()
+            .with_package_provider(
+                lash::tool_provider_key!("tools"),
+                Arc::new(lash::package::ToolPackageProvider::new(
+                    owner,
+                    lash::tool_provider_key!("tools"),
+                    roots,
+                    Arc::clone(&tools),
+                )),
+            )
+            .with_tool_provider(lash::tool_provider_key!("tools"), tools),
+    ))
+}
+
+/// Keep the actual cell refusal in a failed scripted contract's evidence.
+pub(super) async fn contract_cell_failures(events: &RuntimeProofRecordingEvents) -> Vec<String> {
+    events
+        .snapshot()
+        .await
+        .iter()
+        .filter_map(|activity| match &activity.event {
+            lash::TurnEvent::CodeBlockCompleted {
+                result: lash::transcript::CellOutcome::Failed(error),
+                ..
+            } => Some(format!("{error:?}")),
+            _ => None,
+        })
+        .collect()
 }

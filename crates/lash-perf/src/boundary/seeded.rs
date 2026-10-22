@@ -261,24 +261,35 @@ pub(super) async fn run(args: &Args) -> Result<Receipt> {
     plugins.push(Arc::new(
         lash_plugin_process_controls::SessionProcessAdminPluginFactory::new(
             lash_execution_contracts::process::lifetime::session_or_starter,
-            lash_core::testing::run_policy_naming(&components),
+            crate::perf_support::process_policy(&components),
         ),
     ));
     let core = lash::LashCore::rlm_builder(backend, factory)
         .serve_test_llm_profile(provider, facade::metadata()?)
         .process_component(
-            lash_core::testing::tool_component(TOOLS, Arc::clone(&tools)),
+            Arc::new(
+                crate::perf_support::tool_plugin(
+                    TOOLS.component(),
+                    lash::tool_provider_key!("tools"),
+                    Arc::clone(&tools),
+                )?
+                .as_component(TOOLS.format())?,
+            ),
             TOOLS,
         )
         .process_component(
             Arc::new(lash_plugin_process_controls::ProcessControlsComponent::new(
                 lash_execution_contracts::process::lifetime::session_or_starter,
-                lash_core::testing::run_policy_naming(&components),
+                crate::perf_support::process_policy(&components),
             )),
             lash_plugin_process_controls::PROCESS_CONTROLS_CONFIG,
         )
         .plugins(plugins)
-        .plugin(lash_core::testing::tool_plugin(TOOLS, tools))
+        .plugin(Arc::new(crate::perf_support::tool_plugin(
+            TOOLS.component(),
+            lash::tool_provider_key!("tools"),
+            tools,
+        )?))
         .commit_budget(lash::CommitBudget::bounded(16 * 1024 * 1024, 4096))
         .data_retention(lash::DataRetention::standard())
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))

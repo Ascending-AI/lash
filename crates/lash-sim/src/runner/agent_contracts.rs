@@ -513,9 +513,9 @@ async fn facade_final_value_execution_inner(
                 .map_err(|error| FixedScriptRunnerError::Assertion(error.to_string()))?,
         );
     if process_surface == ProcessTools::Installed {
-        builder = with_contract_processes(builder, tools, None);
+        builder = with_contract_processes(builder, tools, None)?;
     } else if let Some(tools) = tools {
-        builder = builder.tools(lash::tool_provider_key!("tools"), tools);
+        builder = builder.plugin(Arc::new(contract_tool_plugin("tools", tools)?));
     }
     let core = builder
         .build(crate::sim_process_owner())
@@ -535,14 +535,14 @@ async fn facade_final_value_execution_inner(
         .await?
         .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?
         .outcome;
+    let cell_failures = contract_cell_failures(&events).await;
     let final_value = result
         .finished()
         .map(|(_, value)| value)
         .cloned()
         .ok_or_else(|| {
             FixedScriptRunnerError::Assertion(format!(
-                "{provider_kind} finished without TurnFinish::Finished: {:?}",
-                result
+                "{provider_kind} finished without TurnFinish::Finished: {result:?}; cell failures: {cell_failures:?}"
             ))
         })?;
     require(
@@ -711,7 +711,7 @@ async fn facade_agent_durable_input_execution_with(
         "lash_runtime agent durable input",
         vec![
             r#"<typescript>
-const requestAnswer = async () => {
+const requestAnswer = async (): Promise<{ request_id: string; answer: string }> => {
   const result = await tools.mockInputRequest({ question: "Need input?" });
   return result;
 };
@@ -763,7 +763,8 @@ await control.finish({ recovered: true });
                 Err(err) => format!("its task failed to join: {err}"),
             };
             return Err(FixedScriptRunnerError::Assertion(format!(
-                "the durable input turn ended before its process asked for input: {ended}"
+                "the durable input turn ended before its process asked for input: {ended}; cell failures: {:?}",
+                contract_cell_failures(&events).await
             )));
         }
     };
@@ -883,7 +884,7 @@ async fn agent_process_contract_core_with_options(
                 .build()
                 .map_err(|error| FixedScriptRunnerError::Assertion(error.to_string()))?);
     let delegation = install_delegation.then(|| agent_contract_delegation_plugin(provider_kind));
-    builder = with_contract_processes(builder, tools, delegation);
+    builder = with_contract_processes(builder, tools, delegation)?;
     let core = builder
         .build(crate::sim_process_owner())
         .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
@@ -904,15 +905,28 @@ fn with_contract_processes(
     builder: lash::LashCoreBuilder,
     tools: Option<Arc<dyn lash_core::ToolProvider>>,
     delegation: Option<delegation::DelegationPluginFactory>,
-) -> lash::LashCoreBuilder {
-    let mut components = vec![lash_plugin_process_controls::PROCESS_CONTROLS_CONFIG];
+) -> Result<lash::LashCoreBuilder, FixedScriptRunnerError> {
+    let mut components = vec![
+        lash_plugin_process_controls::PROCESS_CONTROLS_CONFIG,
+        lash::vm::KERNEL_SERVICES_CONFIG,
+    ];
     components.extend(tools.is_some().then_some(CONTRACT_TOOLS));
     components.extend(
         delegation
             .is_some()
             .then_some(delegation::DELEGATION_CONFIG),
     );
-    let policy = || lash_core::testing::run_policy_naming(&components);
+    let policy = || {
+        let components = components.clone();
+        lash_plugin_process_controls::policy::restrict_or(
+            lash_plugin_process_controls::policy::from_run(move |_| {
+                components
+                    .iter()
+                    .map(|key| lash_core::ProcessComponentEntry::new(*key, &(), std::iter::empty()))
+                    .collect()
+            }),
+        )
+    };
     let mut builder = builder
         .plugin(Arc::new(
             lash_plugin_process_controls::SessionProcessAdminPluginFactory::new(
@@ -930,17 +944,24 @@ fn with_contract_processes(
     if let Some(tools) = tools {
         builder = builder
             .process_component(
-                lash_core::testing::tool_component(CONTRACT_TOOLS, Arc::clone(&tools)),
+                Arc::new(
+                    contract_tool_plugin(CONTRACT_TOOLS.component(), Arc::clone(&tools))?
+                        .as_component(CONTRACT_TOOLS.format())
+                        .map_err(|error| FixedScriptRunnerError::Runtime(error.to_string()))?,
+                ),
                 CONTRACT_TOOLS,
             )
-            .plugin(lash_core::testing::tool_plugin(CONTRACT_TOOLS, tools));
+            .plugin(Arc::new(contract_tool_plugin(
+                CONTRACT_TOOLS.component(),
+                tools,
+            )?));
     }
     if let Some(delegation) = delegation {
         builder = builder
             .process_component(delegation.component(), delegation::DELEGATION_CONFIG)
             .plugin(Arc::new(delegation));
     }
-    builder
+    Ok(builder)
 }
 
 /// The host's delegation tool (`examples/delegation`): each child runs the
@@ -1050,14 +1071,14 @@ async fn agent_process_execution_result(
         .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?
         .ok_or_else(|| FixedScriptRunnerError::Assertion("missing committed head".into()))?
         .to_snapshot();
+    let cell_failures = contract_cell_failures(&events).await;
     let final_value = result
         .finished()
         .map(|(_, value)| value)
         .cloned()
         .ok_or_else(|| {
             FixedScriptRunnerError::Assertion(format!(
-                "{provider_kind} finished without TurnFinish::Finished: {:?}",
-                result
+                "{provider_kind} finished without TurnFinish::Finished: {result:?}; cell failures: {cell_failures:?}"
             ))
         })?;
     require(

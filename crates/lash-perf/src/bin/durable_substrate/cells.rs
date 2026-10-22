@@ -69,7 +69,11 @@ pub fn core(
     .execution_budgets(lash::ExecutionBudgets::recommended())
     .delta_coalescing(lash::DeltaCoalescing::recommended())
     .serve_test_llm_profile(model(scripts, recorder), metadata()?)
-    .tools(lash::tool_provider_key!("tools"), echo()?)
+    .plugin(Arc::new(lash_perf::perf_support::tool_plugin(
+        "tools",
+        lash::tool_provider_key!("tools"),
+        echo()?,
+    )?))
     .build(lash::persistence::LeaseOwnerIdentity::opaque(
         lash::persistence::LeaseOwnerId::new("durable-substrate"),
         lash::persistence::LeaseIncarnationId::new("durable-substrate-boot"),

@@ -196,10 +196,25 @@ fn core(
     .execution_budgets(lash::ExecutionBudgets::recommended())
     .delta_coalescing(lash::DeltaCoalescing::recommended())
     .serve_test_llm_profile(model(Arc::downgrade(world)), metadata()?)
-    .tools(
-        lash::tool_provider_key!("tools"),
-        ext_write(Arc::downgrade(world))?,
-    );
+    .plugin(Arc::new({
+        let tools = ext_write(Arc::downgrade(world))?;
+        lash::plugins::StaticPluginFactory::new(
+            lash::plugins::PluginDeclaration::initial("tools"),
+            lash::plugins::PluginSpec::new()
+                .with_package_provider(
+                    lash::tool_provider_key!("tools"),
+                    Arc::new(lash::package::ToolPackageProvider::new(
+                        "tools",
+                        lash::tool_provider_key!("tools"),
+                        [lash::package::Segment::new("tools")
+                            .map_err(|error| error.to_string())?]
+                        .into(),
+                        Arc::clone(&tools),
+                    )),
+                )
+                .with_tool_provider(lash::tool_provider_key!("tools"), tools),
+        )
+    }));
     let builder = if watched {
         builder.plugin(Arc::new(Watch))
     } else {

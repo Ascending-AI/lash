@@ -541,16 +541,14 @@ pub(super) fn build_core(
         latency_provider(spec.provider, Arc::clone(&timing), holds).into_handle()
     };
     let mut plugins = lash::PluginStack::new();
-    plugins.push(Arc::new(lash::plugins::StaticPluginFactory::new(
-        lash_core::plugin::PluginDeclaration::initial("latency_tools"),
-        lash::plugins::PluginSpec::new().with_tool_provider(
-            lash::tool_provider_key!("tools"),
-            Arc::new(super::chat_loop::StampedTools::new(
-                crate::runtime_perf::providers::BenchmarkEchoTool::new(effect_host.clone()),
-                timing,
-            )),
-        ),
-    )));
+    plugins.push(Arc::new(crate::perf_support::tool_plugin(
+        "latency_tools",
+        lash::tool_provider_key!("tools"),
+        Arc::new(super::chat_loop::StampedTools::new(
+            crate::runtime_perf::providers::BenchmarkEchoTool::new(effect_host.clone()),
+            timing,
+        )),
+    )?));
     let builder = if spec.provider == LatencyProviderKind::Cell {
         lash::LashCore::rlm_builder(backend, super::chat_loop::cell_protocol()?)
     } else {

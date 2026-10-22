@@ -437,10 +437,20 @@ async fn measure_with_stores(
     let mut builder = lash::LashCore::rlm_builder(backend, factory)
         .plugin(Arc::new(lash::plugins::StaticPluginFactory::new(
             lash::plugins::PluginDeclaration::initial("read-benchmark"),
-            lash::plugins::PluginSpec::new().with_tool_provider_registration(
-                lash::tool_provider_key!("observations"),
-                ToolProviderRegistration::new(tools).with_reads(Arc::new(Adapter(answers.clone()))),
-            ),
+            lash::plugins::PluginSpec::new()
+                .with_package_provider(
+                    lash::tool_provider_key!("observations"),
+                    lash_perf::perf_support::tool_packages(
+                        "read-benchmark",
+                        lash::tool_provider_key!("observations"),
+                        tools.clone(),
+                    )?,
+                )
+                .with_tool_provider_registration(
+                    lash::tool_provider_key!("observations"),
+                    ToolProviderRegistration::new(tools)
+                        .with_reads(Arc::new(Adapter(answers.clone()))),
+                ),
         )))
         .serve_sessions(true)
         .commit_budget(lash::CommitBudget::bounded(64 * 1024 * 1024, 4096))

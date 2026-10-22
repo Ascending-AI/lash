@@ -313,11 +313,11 @@ await control.finish(first.value);"#,
         RuntimePerfScenario::RlmProcessHandles => {
             let text = typescript_block(
                 r#"
-const benchmarkEchoProcess = async (value: string, ordinal: number) => {
+const benchmarkEchoProcess = async (value: string, ordinal: number): Promise<{ value: string; ordinal: number | null }> => {
   return await tools.benchmarkEcho({ value: value, ordinal: ordinal });
 };
 
-const benchmarkSlowProcess = async (value: string, delay_ms: number) => {
+const benchmarkSlowProcess = async (value: string, delay_ms: number): Promise<{ value: string; delay_ms: number }> => {
   return await tools.benchmarkSlow({ value: value, delay_ms: delay_ms });
 };
 
