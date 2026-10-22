@@ -324,8 +324,9 @@ pub fn is_semantic(kind: NodeKind) -> bool {
 /// references are full digests: the body's distinct children become the
 /// sorted child table and each reference its slot. Nothing is placed: a
 /// body that does not fit `bound` (at most [`MAX_NODE_BYTES`]) is refused,
-/// never split. The body is read once and the envelope written once, and
-/// nothing is hashed: whoever sends or stages the page names it
+/// never split. The body is scanned once per resident content and the
+/// envelope written once. Scan lookup hashes the logical input; whoever
+/// sends or stages the page takes its envelope's identity hash
 /// ([`FramedPage::named`], FIG-6932).
 ///
 /// # Errors
