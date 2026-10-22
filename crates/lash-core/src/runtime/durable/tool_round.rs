@@ -577,6 +577,16 @@ pub(super) async fn consume_answered_cell(
     };
     let id = cell.id;
     let held = cell.take_emissions();
+    if let Some(writes) = held.response.as_ref().and_then(crate::HeldResponse::writes) {
+        // A cell that answered before saving still owes its model response
+        // and execution registration. Keep that draft before the writes that
+        // consume it, retaining the fresh transaction's mailbox/cancel read.
+        let consuming = tx.take_domain();
+        tx.append(writes)?;
+        for write in consuming {
+            tx.write(write);
+        }
+    }
     report_answered_cell(tx, row, answered)?;
     drive.consume_cell(cx, tx, id, working).await?;
     Ok(held)

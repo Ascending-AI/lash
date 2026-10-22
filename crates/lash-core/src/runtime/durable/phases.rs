@@ -1046,18 +1046,28 @@ async fn phase_loop(
                     // failure ended the turn), which it discards.
                     let discarded = drive.discarded_cell(cx).await?;
                     let mut cell_closes = Vec::new();
-                    if let Some(cell) = &mut answered_cell {
+                    if let Some(cell) = &answered_cell {
                         drive.finishing_cell_calls(&cell.calls);
-                        let mut held = cell.take_emissions();
-                        cell_closes.extend(held.take_close());
-                        tool_round::release_cell_emissions(
-                            cx,
-                            drive.as_mut(),
-                            held,
-                            CommitLabel::TURN_COMMIT,
-                        )
-                        .await?;
                     }
+                    // Stage the held response before releasing its emissions:
+                    // release acknowledges it and clears the original draft.
+                    let mut held = tool_round::consume_answered_cell(
+                        cx,
+                        drive.as_mut(),
+                        &mut tx,
+                        row,
+                        &mut answered_cell,
+                        false,
+                    )
+                    .await?;
+                    cell_closes.extend(held.take_close());
+                    tool_round::release_cell_emissions(
+                        cx,
+                        drive.as_mut(),
+                        held,
+                        CommitLabel::TURN_COMMIT,
+                    )
+                    .await?;
                     // The turn commits, and its run answers, the outcome the
                     // model produced.
                     let done = TurnDone {
@@ -1090,15 +1100,6 @@ async fn phase_loop(
                     if let Some(present) = carry.take() {
                         present.write(&mut tx);
                     }
-                    tool_round::consume_answered_cell(
-                        cx,
-                        drive.as_mut(),
-                        &mut tx,
-                        row,
-                        &mut answered_cell,
-                        false,
-                    )
-                    .await?;
                     // The commit settles what the turn's checkpoints delivered:
                     // bound to the run first, as the settlement requires.
                     if let Some(bind) = bind_delivered(drive.as_ref(), &session, &run) {
