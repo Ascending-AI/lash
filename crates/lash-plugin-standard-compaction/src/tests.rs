@@ -495,14 +495,17 @@ fn compaction_request_identity_is_stable_across_reconstructed_nested_maps() {
     // A recorded namespace with nested maps: a reconstructed snapshot must
     // hash to the same identity whatever order its maps were rebuilt in.
     state.plugin_config = lash_core::PluginConfig::for_protocol(Some("protocol".to_string()));
-    state.plugin_config.insert(
-        "protocol",
-        serde_json::json!({
-            "prompt": { "intro": "i", "instructions": ["a", "b"], "context": ["c"] },
-            "render": { "print": { "max_chars": 10 }, "preview": { "max_chars": 20 } },
-            "behaviour": { "zeta": 1, "alpha": 2, "mid": { "y": 1, "x": 2 } },
-        }),
-    );
+    state
+        .plugin_config
+        .insert(
+            "protocol",
+            serde_json::json!({
+                "prompt": { "intro": "i", "instructions": ["a", "b"], "context": ["c"] },
+                "render": { "print": { "max_chars": 10 }, "preview": { "max_chars": 20 } },
+                "behaviour": { "zeta": 1, "alpha": 2, "mid": { "y": 1, "x": 2 } },
+            }),
+        )
+        .unwrap();
 
     let snapshot_value = serde_json::to_value(&state).expect("serialize snapshot");
     let expected = compaction_request_identity(&state, "same prompt")

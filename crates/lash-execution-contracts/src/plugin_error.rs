@@ -1554,3 +1554,16 @@ pub fn registry_error(error: lash_durable::DurableError) -> crate::PluginError {
 
 #[cfg(test)]
 mod error_class_tests;
+
+impl From<lash_core_store::plugin_state::ConfigAdmissionError> for PluginError {
+    fn from(error: lash_core_store::plugin_state::ConfigAdmissionError) -> Self {
+        match error {
+            lash_core_store::plugin_state::ConfigAdmissionError::Format(error) => {
+                Self::Format(error)
+            }
+            lash_core_store::plugin_state::ConfigAdmissionError::Allocation(error) => {
+                Self::Runtime(crate::RuntimeError::allocation(error))
+            }
+        }
+    }
+}

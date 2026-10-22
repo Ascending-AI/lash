@@ -61,16 +61,23 @@ pub(super) fn outside_writer_range(commit: TurnCommit) -> Result<TurnCommit, Tur
     let mut runtime =
         lash_core_store::store::decode_session_commit(&commit.commit.json).map_err(store)?;
     let mut execution = runtime.config.clone();
-    runtime.config.plugin_config.insert_versioned(
-        WRITER_PLUGIN,
-        lash_core_ids::FormatVersion::ONE,
-        serde_json::json!({}),
-    );
-    execution.plugin_config.insert_versioned(
-        WRITER_PLUGIN,
-        lash_core_ids::FormatVersion::new(2).expect("2 is a format version"),
-        serde_json::json!({}),
-    );
+    runtime
+        .config
+        .plugin_config
+        .insert_versioned(
+            WRITER_PLUGIN,
+            lash_core_ids::FormatVersion::ONE,
+            serde_json::json!({}),
+        )
+        .unwrap();
+    execution
+        .plugin_config
+        .insert_versioned(
+            WRITER_PLUGIN,
+            lash_core_ids::FormatVersion::new(2).expect("2 is a format version"),
+            serde_json::json!({}),
+        )
+        .unwrap();
     runtime.execution_config = Some(Box::new(execution));
     Ok(TurnCommit {
         postimage: commit.postimage,

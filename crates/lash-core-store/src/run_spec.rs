@@ -405,6 +405,9 @@ fn apply_owner_options(
     let applied = owners
         .apply_run_options(&config.plugin_config, owner, options)
         .map_err(|fault| match fault {
+            crate::config_transaction::ConfigFault::Allocation(error) => {
+                RunResolveError::Allocation(error)
+            }
             crate::config_transaction::ConfigFault::Refused(refusal) => {
                 RunResolveError::Refused(RunShapeRefusal::Owner { refusal })
             }
@@ -412,7 +415,7 @@ fn apply_owner_options(
                 RunResolveError::RecordedCorrupt(corrupt)
             }
         })?;
-    config.plugin_config.insert(owner.to_string(), applied);
+    config.plugin_config.insert(owner.to_string(), applied)?;
     Ok(())
 }
 
@@ -588,6 +591,8 @@ pub enum RunShapeRefusal {
 /// Why a spec did not resolve to a recorded shape.
 #[derive(Debug, thiserror::Error)]
 pub enum RunResolveError {
+    #[error(transparent)]
+    Allocation(#[from] lash_protocol_types::allocation::AllocationError),
     /// The spec's model key has no binding on this deployment: a redeploy
     /// repairs it, so it is never the run's recorded outcome.
     #[error(transparent)]

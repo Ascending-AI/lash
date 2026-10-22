@@ -45,7 +45,7 @@ pub struct PluginTransitionRecord {
     pub request: PluginTransitionRequest,
     pub source: crate::BlobRef,
     pub namespaces: BTreeMap<String, Result<PluginNamespaceState, PluginError>>,
-    pub config: Result<PluginConfig, FormatRefusal>,
+    pub config: Result<PluginConfig, lash_core_store::plugin_state::ConfigAdmissionError>,
     /// The executor bound from the converted candidate by the recorded transition.
     pub generation: Option<crate::ExecutableGeneration>,
     pub publication: Option<Box<crate::store::RuntimeCommit>>,
@@ -98,7 +98,10 @@ impl PluginHost {
         let preflight = self
             .validate_state_formats(state)
             .and_then(|()| self.validate_config_formats(config));
-        let native_config = preflight.clone().and_then(|()| self.decode_config(config));
+        let native_config = preflight
+            .clone()
+            .map_err(lash_core_store::plugin_state::ConfigAdmissionError::from)
+            .and_then(|()| self.decode_config(config));
         let mut namespaces: BTreeMap<String, Result<PluginNamespaceState, PluginError>> = state
             .plugins
             .iter()

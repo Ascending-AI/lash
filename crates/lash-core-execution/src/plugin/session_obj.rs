@@ -540,7 +540,7 @@ impl PluginSession {
     pub fn committed_plugin_config(
         &self,
         config: &PluginConfig,
-    ) -> Result<Option<PluginConfig>, FormatRefusal> {
+    ) -> Result<Option<PluginConfig>, lash_core_store::plugin_state::ConfigAdmissionError> {
         let Some(writers) = self.recorded_writers() else {
             return Ok(None);
         };

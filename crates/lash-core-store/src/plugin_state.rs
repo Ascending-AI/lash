@@ -166,8 +166,140 @@ pub struct PluginConfigNamespace {
     #[schemars(with = "std::num::NonZeroU32")]
     pub format_version: FormatVersion,
     // Immutable canonical JSON, shared by admitted snapshots and their views.
-    pub value: std::sync::Arc<Value>,
+    pub value: ConfigJson,
 }
+
+/// A namespace format refusal or a refusal to retain its materialized config.
+#[derive(
+    Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema, thiserror::Error,
+)]
+pub enum ConfigAdmissionError {
+    #[error(transparent)]
+    Format(#[from] FormatRefusal),
+    #[error(transparent)]
+    Allocation(#[from] lash_protocol_types::allocation::AllocationError),
+}
+impl From<ConfigAdmissionError> for crate::runtime_error::RuntimeEffectControllerError {
+    fn from(error: ConfigAdmissionError) -> Self {
+        match error {
+            ConfigAdmissionError::Format(error) => error.into(),
+            ConfigAdmissionError::Allocation(error) => crate::StoreError::Allocation(error).into(),
+        }
+    }
+}
+
+impl From<ConfigAdmissionError> for crate::runtime_error::RuntimeError {
+    fn from(error: ConfigAdmissionError) -> Self {
+        crate::runtime_error::RuntimeEffectControllerError::from(error).into_runtime_error()
+    }
+}
+
+/// Immutable namespace JSON. The reservation belongs to the same allocation
+/// every namespace and protocol reader shares; its serde form is bare JSON.
+#[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(transparent)]
+pub struct ConfigJson(std::sync::Arc<ConfigJsonStorage>);
+
+#[derive(Debug, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(transparent)]
+struct ConfigJsonStorage {
+    value: Value,
+    #[serde(skip)]
+    allocation: lash_protocol_types::allocation::AllocationHold,
+    #[serde(skip)]
+    budget: lash_protocol_types::allocation::AllocationBudget,
+}
+
+impl ConfigJson {
+    /// Independently constructed input. Serving owners adopt it with `clone_in`.
+    pub fn new(value: Value) -> Self {
+        Self(std::sync::Arc::new(ConfigJsonStorage {
+            value,
+            allocation: Default::default(),
+            budget: Default::default(),
+        }))
+    }
+
+    /// Admit independently supplied JSON before retaining its allocation.
+    pub fn new_in(
+        value: Value,
+        budget: &lash_protocol_types::allocation::AllocationBudget,
+    ) -> Result<Self, lash_protocol_types::allocation::AllocationError> {
+        use lash_protocol_types::allocation::SourceCapacity;
+        let allocation = budget.reserve(
+            value
+                .owned_capacity()
+                .saturating_add(std::mem::size_of::<ConfigJsonStorage>() as u64 + 64),
+        )?;
+        Ok(Self(std::sync::Arc::new(ConfigJsonStorage {
+            value,
+            allocation,
+            budget: budget.clone(),
+        })))
+    }
+
+    /// Reserve the full JSON allocation before copying foreign source data.
+    pub fn clone_in(
+        &self,
+        budget: &lash_protocol_types::allocation::AllocationBudget,
+    ) -> Result<Self, lash_protocol_types::allocation::AllocationError> {
+        use lash_protocol_types::allocation::SourceCapacity;
+        if self.0.budget.identity() == budget.identity() {
+            return Ok(self.clone());
+        }
+        let allocation = budget.reserve(
+            self.0
+                .value
+                .owned_capacity()
+                .saturating_add(std::mem::size_of::<ConfigJsonStorage>() as u64 + 64),
+        )?;
+        Ok(Self(std::sync::Arc::new(ConfigJsonStorage {
+            value: self.0.value.clone(),
+            allocation,
+            budget: budget.clone(),
+        })))
+    }
+
+    /// Transfer a source decode's reservation before exposing any readers.
+    pub(crate) fn decoded_in(
+        &mut self,
+        allocation: lash_protocol_types::allocation::AllocationHold,
+        budget: lash_protocol_types::allocation::AllocationBudget,
+    ) -> Result<(), crate::StoreError> {
+        let storage = std::sync::Arc::get_mut(&mut self.0).ok_or_else(|| {
+            crate::StoreError::StoredDataCorrupt {
+                record_kind: "PluginConfig",
+                message: "a fresh decode unexpectedly shares namespace JSON before admission"
+                    .into(),
+            }
+        })?;
+        storage.allocation = allocation;
+        storage.budget = budget;
+        Ok(())
+    }
+}
+impl From<Value> for ConfigJson {
+    fn from(value: Value) -> Self {
+        Self::new(value)
+    }
+}
+impl AsRef<Value> for ConfigJson {
+    fn as_ref(&self) -> &Value {
+        &self.0.value
+    }
+}
+impl std::ops::Deref for ConfigJson {
+    type Target = Value;
+    fn deref(&self) -> &Value {
+        self.as_ref()
+    }
+}
+impl PartialEq for ConfigJson {
+    fn eq(&self, other: &Self) -> bool {
+        std::sync::Arc::ptr_eq(&self.0, &other.0) || self.0.value == other.0.value
+    }
+}
+impl Eq for ConfigJson {}
 
 /// How a fork treats a plugin namespace: what the plugin declares its state
 /// means (D-SESSIONLAW), recorded with the namespace so a fork made after a

@@ -416,11 +416,13 @@ fn plugin_formats_refuse_before_callbacks_and_preserve_bytes() {
     );
 
     let mut config = crate::PluginConfig::default();
-    config.insert_versioned(
-        "format-probe",
-        crate::FormatVersion::new(u32::MAX).unwrap(),
-        serde_json::json!({"old": 17}),
-    );
+    config
+        .insert_versioned(
+            "format-probe",
+            crate::FormatVersion::new(u32::MAX).unwrap(),
+            serde_json::json!({"old": 17}),
+        )
+        .unwrap();
     let config_bytes = rmp_serde::to_vec_named(&config).unwrap();
     let result = host.build_session(PluginSessionRequest::creation(
         "bad-config",
@@ -665,11 +667,13 @@ fn plugin_state_refusals_are_distinct_typed_and_pre_callback() {
     assert_eq!(refusal.stored.get(), 1);
     assert_eq!(refusal.readable.get(), 2);
     let mut config = crate::PluginConfig::default();
-    config.insert_versioned(
-        "no-migrate",
-        crate::FormatVersion::ONE,
-        serde_json::json!({"old": 17}),
-    );
+    config
+        .insert_versioned(
+            "no-migrate",
+            crate::FormatVersion::ONE,
+            serde_json::json!({"old": 17}),
+        )
+        .unwrap();
     let config_bytes = rmp_serde::to_vec_named(&config).unwrap();
     let result = host.build_session(PluginSessionRequest::creation(
         "unreadable-config",
@@ -756,11 +760,13 @@ fn plugin_formats_convert_only_in_recorded_transition() {
     .unwrap();
     let before = rmp_serde::to_vec_named(&snapshot).unwrap();
     let mut config = crate::PluginConfig::default();
-    config.insert_versioned(
-        "format-probe",
-        crate::FormatVersion::ONE,
-        serde_json::json!({"old": 17}),
-    );
+    config
+        .insert_versioned(
+            "format-probe",
+            crate::FormatVersion::ONE,
+            serde_json::json!({"old": 17}),
+        )
+        .unwrap();
     let mut results = Vec::new();
     for owner in ["first-decode", "replay-decode"] {
         let session = host
@@ -828,16 +834,20 @@ fn plugin_formats_stamp_every_state_write() {
     }))
     .unwrap();
     let mut config = crate::PluginConfig::default();
-    config.insert_versioned(
-        "format-probe",
-        crate::FormatVersion::new(2).unwrap(),
-        serde_json::json!({"native": 18}),
-    );
-    config.insert_versioned(
-        "inactive",
-        crate::FormatVersion::new(99).unwrap(),
-        serde_json::json!({"opaque": 5}),
-    );
+    config
+        .insert_versioned(
+            "format-probe",
+            crate::FormatVersion::new(2).unwrap(),
+            serde_json::json!({"native": 18}),
+        )
+        .unwrap();
+    config
+        .insert_versioned(
+            "inactive",
+            crate::FormatVersion::new(99).unwrap(),
+            serde_json::json!({"opaque": 5}),
+        )
+        .unwrap();
     for version in [1, 2] {
         let writer = crate::FormatVersion::new(version).unwrap();
         let writers = BTreeMap::from([("format-probe".into(), writer)]);

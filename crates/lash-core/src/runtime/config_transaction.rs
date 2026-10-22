@@ -191,13 +191,13 @@ impl LashRuntime {
                 &crate::store::plugin_writers::PluginAdmission::default(),
                 &self.prompt_catalog()?,
             )
-            .map_err(|corrupt| {
-                crate::RuntimeEffectControllerError::from(corrupt.into_store_error())
-                    .into_runtime_error()
-            })?;
+            .map_err(super::turn_config::config_fault)
+            .map_err(crate::RuntimeEffectControllerError::into_runtime_error)?;
         let mut candidate = base.clone();
         if matches!(
-            resolution.publish(&mut candidate),
+            resolution
+                .publish(&mut candidate)
+                .map_err(RuntimeError::allocation)?,
             crate::ConfigTransactionOutcome::Applied { .. }
         ) && candidate.plugin_config != base.plugin_config
             && let Err(error) = super::config_ops::validate_config_tool_catalog(
@@ -218,7 +218,8 @@ impl LashRuntime {
                 }
             }
         }
-        let outcome = publish_config_resolution(&resolution, &mut next);
+        let outcome =
+            publish_config_resolution(&resolution, &mut next).map_err(RuntimeError::allocation)?;
         if matches!(outcome, crate::ConfigTransactionOutcome::Applied { .. }) {
             self.install_resident_state(next)
                 .map_err(RuntimeError::from)?;
@@ -301,7 +302,8 @@ impl LashRuntime {
             return Ok(true);
         }
         let previous = self.session_policy();
-        let outcome = publish_config_resolution(&resolution, &mut self.state);
+        let outcome = publish_config_resolution(&resolution, &mut self.state)
+            .map_err(RuntimeError::allocation)?;
         if matches!(outcome, crate::ConfigTransactionOutcome::Applied { .. }) {
             self.publish_resident_authority()?;
             let current = self.session_policy();
@@ -518,24 +520,24 @@ impl LashRuntime {
 fn publish_config_resolution(
     resolution: &crate::ConfigResolution,
     state: &mut crate::RuntimeSessionState,
-) -> crate::ConfigTransactionOutcome {
+) -> Result<crate::ConfigTransactionOutcome, lash_protocol_types::allocation::AllocationError> {
     if resolution.base_revision != state.config_revision
         && matches!(
             resolution.result,
             crate::ConfigResolutionDecision::Applied { .. }
         )
     {
-        return crate::ConfigTransactionOutcome::Stale {
+        return Ok(crate::ConfigTransactionOutcome::Stale {
             expected: resolution.base_revision,
             actual: state.config_revision,
-        };
+        });
     }
     let mut config = crate::store::persisted_session_config_from_state(state);
-    let outcome = resolution.publish(&mut config);
+    let outcome = resolution.publish(&mut config)?;
     if matches!(outcome, crate::ConfigTransactionOutcome::Applied { .. }) {
         crate::runtime::state::adopt_session_config(state, &config);
     }
-    outcome
+    Ok(outcome)
 }
 
 /// The first execution of one `ResolveConfigTransaction` step: it resolves
@@ -604,18 +606,22 @@ impl RuntimeEffectLocalRunner for ResolveConfigTransactionRunner {
                 &writers,
                 &self.prompts,
             )
-            .map_err(crate::RecordedNamespaceCorrupt::into_store_error)?;
+            .map_err(super::turn_config::config_fault)?;
         if let (Some(host), crate::ConfigResolutionDecision::Applied { namespaces, .. }) =
             (&self.plugin_host, &mut resolution.result)
         {
             let mut candidate = crate::PluginConfig::default();
-            candidate.apply_namespace_updates(namespaces);
+            candidate
+                .apply_namespace_updates(namespaces)
+                .map_err(RuntimeError::allocation)?;
             let native = host.decode_config(&candidate)?;
             *namespaces = native.namespaces().clone();
         }
         let mut candidate = self.base.clone();
         if matches!(
-            resolution.publish(&mut candidate),
+            resolution
+                .publish(&mut candidate)
+                .map_err(RuntimeError::allocation)?,
             crate::ConfigTransactionOutcome::Applied { .. }
         ) && candidate.plugin_config != self.base.plugin_config
             && let Err(error) = super::config_ops::validate_config_tool_catalog(

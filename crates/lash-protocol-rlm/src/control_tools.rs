@@ -725,17 +725,21 @@ mod tests {
                 snapshot.authority.plugin_config = lash_core::PluginConfig::for_protocol(Some(
                     crate::RLM_PROTOCOL_PLUGIN_ID.to_string(),
                 ));
-                snapshot.authority.plugin_config.insert(
-                    crate::RLM_PROTOCOL_PLUGIN_ID,
-                    lash_core::ProtocolTurnOptions::typed(lash_rlm_types::RlmCreateExtras {
-                        termination: Some(lash_core::TerminationMode::TerminalRequired),
-                        ..Default::default()
-                    })
-                    .expect("valid rlm options")
-                    .payload
-                    .as_ref()
-                    .clone(),
-                );
+                snapshot
+                    .authority
+                    .plugin_config
+                    .insert(
+                        crate::RLM_PROTOCOL_PLUGIN_ID,
+                        lash_core::ProtocolTurnOptions::typed(lash_rlm_types::RlmCreateExtras {
+                            termination: Some(lash_core::TerminationMode::TerminalRequired),
+                            ..Default::default()
+                        })
+                        .expect("valid rlm options")
+                        .payload
+                        .as_ref()
+                        .clone(),
+                    )
+                    .unwrap();
                 snapshot
             },
             created: Mutex::new(Vec::new()),

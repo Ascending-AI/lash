@@ -659,7 +659,9 @@ mod tests {
         ));
 
         let mut config = crate::PluginConfig::default();
-        config.insert_versioned("probe", version(3), serde_json::json!({}));
+        config
+            .insert_versioned("probe", version(3), serde_json::json!({}))
+            .unwrap();
         let mut found = PluginPublication::default();
         found.add_config(&config);
         assert_eq!(found, publication(&[("probe", FormatNamespace::Config, 3)]));

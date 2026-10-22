@@ -665,8 +665,8 @@ pub use plugin::NoRunOptions;
 pub use plugin::OwnerChange;
 pub use plugin::OwnerConfigView;
 pub use plugin::PluginConfig;
-pub use plugin::PluginConfigNamespace;
 pub use plugin::SessionGraphAppendResult;
+pub use plugin::{ConfigAdmissionError, ConfigJson, PluginConfigNamespace};
 
 pub use plugin::PluginExtensions;
 pub use plugin::PluginNamespaceState;
