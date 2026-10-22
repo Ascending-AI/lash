@@ -490,3 +490,33 @@ fn label_definition_index_visits_each_document_once() {
         "label work must follow distinct Documents, not advertised aliases: visited {visits}, bound {expected}"
     );
 }
+
+/// Fresh inspection is contextual admission even when content was decoded
+/// structurally. Missing declared helpers cannot disappear from required reach.
+#[test]
+fn fresh_inspection_refuses_missing_declared_helpers() {
+    let mut document = Document::new(NumberPolicy::BySpelling, vec![]);
+    document.library.insert(FunctionId::from_bytes([61; 32]));
+    lash_kernel_doc::validate_document_structure(&document).unwrap();
+    let link = Link {
+        document: document.identity(),
+        fills: BTreeMap::new(),
+    };
+    let root = link.identity();
+    let content = LinkedContent {
+        documents: [(document.identity(), document)].into(),
+        links: [(root, link)].into(),
+        ..Default::default()
+    };
+    assert!(matches!(
+        content.inspect(
+            root,
+            &ReachSelection::AllExports,
+            lash_kernel_doc::BuildHelpers::empty().as_ref()
+        ),
+        Err(LinkRefusal::InvalidDocument { .. })
+    ));
+    content
+        .inspect_ordinary(root, &ReachSelection::AllExports)
+        .expect("ordinary retained integrity needs no helper catalog");
+}

@@ -521,7 +521,8 @@ fn service_conversion_formulas_bound_their_executed_work() {
         let definition = fixture.library.definition(&id).unwrap();
         let body = definition.body().unwrap();
         let bound = definition.charge().unwrap().evaluate(&mut |_, _| 1);
-        let mut document = fixture.helpers.clone();
+        let mut document = Document::new(lash_kernel_doc::NumberPolicy::BySpelling, vec![]);
+        document.imports = body.imports.clone();
         let mut main = Vec::new();
         for (parameter, value) in definition.signature.params.iter().zip(arguments) {
             // Host start values are excluded from the measured work.
@@ -540,7 +541,14 @@ fn service_conversion_formulas_bound_their_executed_work() {
             });
         }
         main.extend(body.block.clone());
+        let used = lash_kernel_doc::Node::Block(&main).functions_within();
         document.main = Some(main);
+        lash_kernel_dialect::authoring::include_library_dependencies(
+            &mut document,
+            used,
+            &fixture.library,
+        )
+        .expect("inline body dependencies");
         let mut script = Script {
             draws: VecDeque::from([u64::MAX]),
             ..Default::default()

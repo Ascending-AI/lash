@@ -364,6 +364,9 @@ pub(crate) fn closure_code(
     site: &Site,
     captures: &[lash_vocabulary::Name],
 ) -> Result<CodeId, HeapFault> {
+    if !exe.admits_callable(callable) {
+        return Err(malformed("a closure has no admitted defining origin"));
+    }
     exe.closure_at(&callable.function, site, captures)
         .or_else(|| {
             // Saving freezes free Main bindings into the closure. Its body

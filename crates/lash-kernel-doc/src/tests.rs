@@ -616,10 +616,10 @@ fn saved_child_of_removed_helper_keeps_only_its_live_pin() {
     };
     let selection = Selection::Restored(RestoreSelection {
         pins: [child_id].into(),
-        live: [callable.clone()].into(),
+        live: [callable].into(),
     });
     let value = FunctionValue {
-        callable: callable.clone(),
+        callable,
         captures: Default::default(),
         signature: child.signature,
         convention: StartConvention::Direct,

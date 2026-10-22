@@ -1,6 +1,6 @@
 //! Fresh fulfilment chooses compatible signatures; existing Links retain their pins.
 use crate::{LinkRefusal, LinkedContent};
-use lash_kernel_doc::{Document, Export, FunctionExport, FunctionTarget, Node};
+use lash_kernel_doc::{Document, Export, FunctionExport, FunctionTarget};
 
 use lash_vocabulary::names::FunctionId;
 use lash_vocabulary::{names::*, package::*, types::Type};

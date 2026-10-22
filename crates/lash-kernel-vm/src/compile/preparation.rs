@@ -584,6 +584,35 @@ mod tests {
         package::{Fill, Link},
     };
 
+    /// A closure creation before the saved continuation can refer to a helper
+    /// omitted by the live proof. Compiling retained Main bytes must not panic.
+    #[test]
+    fn unselected_removed_closure_does_not_panic_during_preparation() {
+        let missing = FunctionId::from_bytes([41; 32]);
+        let mut document = Document::new(
+            doc::NumberPolicy::BySpelling,
+            vec![doc::Stmt::Print {
+                value: doc::Expr::Closure(Box::new(doc::Closure {
+                    function: missing,
+                    presentation: None,
+                })),
+            }],
+        );
+        document.library.insert(missing);
+        let library = PreparedLibrary::new(Arc::new(doc::FunctionRegistry::declarations()));
+        let code = compile_document(
+            &document,
+            &BTreeMap::new(),
+            &library,
+            &BTreeSet::new(),
+            &BTreeMap::new(),
+        );
+        assert!(
+            code.is_ok(),
+            "dead closure code is outside the restored executable selection"
+        );
+    }
+
     /// FIG-7135: starts share immutable import-source facts, and selecting one
     /// function never copies the unrelated retained library definitions.
     #[test]

@@ -163,6 +163,15 @@ impl LinkedContent {
         selector: &ReachSelection,
         catalog: &dyn lash_kernel_doc::FunctionCatalog,
     ) -> Result<LinkedReach, LinkRefusal> {
+        for artifact in self.retain_reach(root)? {
+            if let RetainedContent::Document(id) = artifact {
+                lash_kernel_doc::validate_document(self.document(id)?, catalog).map_err(
+                    |error| LinkRefusal::InvalidDocument {
+                        message: error.to_string(),
+                    },
+                )?;
+            }
+        }
         self.inspect_with(root, selector, catalog, None)
     }
 

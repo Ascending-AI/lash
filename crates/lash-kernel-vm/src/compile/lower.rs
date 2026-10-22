@@ -798,13 +798,14 @@ impl Compiler<'_> {
                 // A closure runs only where it is applied, in the body that
                 // made it or wherever it escapes to: wherever it runs, it is
                 // ordinary code, charged as it runs (`K-CHG-007`).
-                let definition = self
-                    .resolve
-                    .library
-                    .registry
-                    .get(&closure.function)
-                    .unwrap_or_else(|| unreachable!("admitted closure definition"))
-                    .definition();
+                let Some(registered) = self.resolve.library.registry.get(&closure.function) else {
+                    // Restored selection can exclude a completed creation site.
+                    // Keep its original code position without requiring dead code.
+                    let name = self.name(Name::new(closure.function.to_string()));
+                    ops.push(Op::Unbound { dst, name });
+                    return;
+                };
+                let definition = registered.definition();
                 let params: Vec<_> = definition
                     .signature
                     .params
