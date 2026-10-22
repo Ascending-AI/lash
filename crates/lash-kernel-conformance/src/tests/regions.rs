@@ -469,7 +469,9 @@ fn bounds(program: &[Weight], limit: u64) -> Vec<u64> {
             .copied()
             .collect()
     };
-    let whole = program.iter().map(|weight| weight.units()).sum::<u64>();
+    let whole = program
+        .iter()
+        .fold(0_u64, |total, weight| total.saturating_add(weight.units()));
     if whole < limit {
         chosen.push(whole + 1);
     }
