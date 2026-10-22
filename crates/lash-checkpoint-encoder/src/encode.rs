@@ -42,7 +42,7 @@ use lash_vocabulary::tokens::varint_len;
 
 use super::node::{
     EncodedNode, Framing, INDEX_FANOUT, INLINE_TOKEN_MAX, LEAF_PAYLOAD_MAX, MAX_NODE_BYTES, NodeId,
-    envelope_len, parse_envelope, write_envelope,
+    check_decoded, envelope_len, write_envelope,
 };
 use super::refusal::GraphRefusal;
 use super::registry::{BodyShape, NodeKind};
@@ -463,7 +463,11 @@ impl GraphStaging {
                 limit: MAX_NODE_BYTES,
             });
         }
-        parse_envelope(&node.bytes, Some(node.id))?;
+        check_decoded(
+            &node.bytes,
+            node.id,
+            &crate::DecodeLimits::within_total(u64::MAX),
+        )?;
         if !self.nodes.contains_key(&node.id) {
             self.budget.charge(node.len())?;
             self.nodes.insert(node.id, node);
@@ -884,6 +888,8 @@ impl LogicalScan {
         if logical.len() > CACHE_BYTES {
             return Self::scan_uncached(logical, kind).map(Arc::new);
         }
+        #[cfg(feature = "perf-witness")]
+        crate::perf_witness::record_hash_pass(logical.len());
         let key = (
             EncodingKind::LogicalScan,
             TypedBody::logical(logical).digest(),
@@ -930,7 +936,6 @@ impl LogicalScan {
 
     /// Placement facts in validated token order. The first oversized inline
     /// value is marked; a consumer must refuse at it before later events.
-    #[must_use]
     pub fn placement_steps(&self) -> impl Iterator<Item = PlacementStep> + '_ {
         let mut references = self.at.iter().peekable();
         let mut start = 0;
