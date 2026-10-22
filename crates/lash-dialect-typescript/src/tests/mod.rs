@@ -216,3 +216,38 @@ fn a_host_source_policy_allows_a_larger_typescript_cell() {
 mod linked;
 mod linked_inspection;
 mod linked_reads;
+
+/// FIG-7135: preparing independent cells shares immutable helper source;
+/// the number of release graph snapshots cannot grow with the cell count.
+#[test]
+fn cell_preparation_shares_the_helper_release_without_copying_its_graph() {
+    use std::sync::Arc;
+
+    let library = machine::prepared().clone();
+    linked::HELPER_SNAPSHOTS.with(|copies| copies.set(0));
+    let programs: Vec<_> = [
+        "'first'.trim()",
+        "'second'.slice(1)",
+        "'third'.includes('h')",
+    ]
+    .into_iter()
+    .map(|source| {
+        linked::program(
+            Arc::clone(lower(source).unwrap().document.shared()),
+            library.clone(),
+        )
+    })
+    .collect();
+    for (id, document) in &programs[0].documents {
+        if *id != programs[0].document.identity() {
+            for program in &programs[1..] {
+                assert!(Arc::ptr_eq(document, &program.documents[id]));
+            }
+        }
+    }
+    assert!(programs.windows(2).all(|pair| pair[0].link != pair[1].link));
+    assert!(
+        linked::HELPER_SNAPSHOTS.with(|copies| copies.get()) <= 1,
+        "cell preparation must share one published helper graph"
+    );
+}
