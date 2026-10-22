@@ -9,19 +9,17 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, OnceLock};
 
 use lash_kernel_dialect::{Environment, Lowered, NamedLibrary};
-use lash_kernel_doc::{
-    Datum, EffectName, ErrorDatum, FunctionRegistry, Handle, Integer, Name, Param, Signature,
-    Timestamp, Type,
-};
+use lash_kernel_doc::{Datum, ErrorDatum, Handle};
+
 use lash_kernel_vm::kernel_internals::conformance::{self, Checkpoint};
 use lash_kernel_vm::{
     Bounds, End, Host, KernelMachine, Machine, Outcome, Park, PreparedLibrary, Program, Request,
-    RunError, Step, WaitId, register_machine_functions,
+    RunError, Step, WaitId,
 };
+use lash_vocabulary::{EffectName, Name, Param, Signature, Type};
 use serde::Deserialize;
 
 use super::pages::{self, Session};
-use crate::define_helpers;
 
 pub(super) struct Installed {
     pub(super) prepared: PreparedLibrary,
@@ -33,30 +31,16 @@ pub(super) struct Installed {
 pub(super) fn installed() -> &'static Installed {
     static INSTALLED: OnceLock<Installed> = OnceLock::new();
     INSTALLED.get_or_init(|| {
-        let mut registry = FunctionRegistry::new();
-        register_machine_functions(&mut registry).unwrap_or_else(|error| panic!("{error}"));
-        lash_kernel_lib::register_numbers(&mut registry).unwrap_or_else(|error| panic!("{error}"));
-        lash_kernel_lib::register_collections(&mut registry)
-            .unwrap_or_else(|error| panic!("{error}"));
-        lash_kernel_lib::register_text_json(&mut registry)
-            .unwrap_or_else(|error| panic!("{error}"));
-        // A package value's brand, which the helpers read to seal one.
-        lash_kernel_lib::register_brands(&mut registry).unwrap_or_else(|error| panic!("{error}"));
-        let mut library =
-            NamedLibrary::from_registry(&registry).unwrap_or_else(|error| panic!("{error}"));
-        let mut helpers = Vec::new();
-        for definition in define_helpers(&mut library).unwrap_or_else(|error| panic!("{error}")) {
-            helpers.push(
-                registry
-                    .register(definition, None)
-                    .unwrap_or_else(|error| panic!("{error}")),
-            );
-        }
-        // The operations' natives, as a worker installs them.
-        lash_ext_py_core::implement(&mut registry, helpers)
-            .unwrap_or_else(|error| panic!("{error}"));
+        let embedding =
+            lash_vm_worker::built_embedding(&Default::default()).expect("built packages");
+        let registry = Arc::clone(embedding.registry().expect("installed natives"));
+        let roots = lash_vm_releases::helper_release()
+            .expect("helper release")
+            .resolver_roots();
+        let library =
+            NamedLibrary::resolving(&registry, |id| roots.contains(id)).expect("exported names");
         Installed {
-            prepared: PreparedLibrary::new(Arc::new(registry)),
+            prepared: PreparedLibrary::new(registry),
             library,
         }
     })
@@ -96,12 +80,8 @@ fn lower_with(
         source,
         &Environment::new(
             library(),
-            &lash_kernel_dialect::Namespaces::of_effects(
-                effects,
-                &lash_kernel_doc::ContractId::new("1"),
-                controls(),
-            )
-            .expect("the test's effects are operations"),
+            &crate::tests::linked::namespaces(effects, controls())
+                .expect("the test's effects are operations"),
         ),
         lash_kernel_dialect::Mode::Cell(lash_kernel_dialect::CellEnvironment {
             bindings,
@@ -113,18 +93,18 @@ fn lower_with(
 /// The laws' turn-ending tool: `control.finish(x)` ends the turn with `x`,
 /// where a law's host offers it.
 pub(crate) fn controls() -> &'static std::collections::BTreeMap<
-    lash_kernel_doc::EffectName,
+    lash_vocabulary::EffectName,
     std::collections::BTreeSet<lash_kernel_dialect::EffectControl>,
 > {
     static CONTROLS: std::sync::OnceLock<
         std::collections::BTreeMap<
-            lash_kernel_doc::EffectName,
+            lash_vocabulary::EffectName,
             std::collections::BTreeSet<lash_kernel_dialect::EffectControl>,
         >,
     > = std::sync::OnceLock::new();
     CONTROLS.get_or_init(|| {
         std::collections::BTreeMap::from([(
-            lash_kernel_doc::EffectName::new("control.finish").expect("a tool's name"),
+            lash_vocabulary::EffectName::new("control.finish").expect("a tool's name"),
             std::collections::BTreeSet::from([lash_kernel_dialect::EffectControl::Finish]),
         )])
     })
@@ -146,7 +126,68 @@ pub(crate) fn lower(source: &str) -> Result<Lowered, lash_kernel_dialect::Diagno
 /// The kernel text of the document `source` lowers to.
 pub(crate) fn kernel_text(source: &str) -> String {
     let lowered = lower(source).unwrap_or_else(|error| panic!("{error}"));
-    lash_kernel_doc::print_document(&lowered.document)
+    let printed = lash_kernel_doc::print_document(&lowered.document);
+    let mut text = String::new();
+    for definition in lowered.document.functions.values() {
+        if lash_kernel_doc::FunctionCatalog::header(library(), &definition.identity()).is_none()
+            && matches!(
+                definition.implementation,
+                lash_kernel_doc::Implementation::Guest {
+                    metering: lash_kernel_doc::Metering::Statements,
+                    ..
+                }
+            )
+        {
+            text.push_str(&lash_kernel_doc::print_definition(definition));
+        }
+    }
+    if let Some(at) = printed.find("main {") {
+        text.push_str(&printed[at..]);
+    }
+    text
+}
+
+/// Whether authored code invokes this exact imported helper.
+pub(crate) fn calls_helper(source: &str, helper: &str) -> bool {
+    use lash_kernel_dialect::Library as _;
+    use lash_kernel_doc::{ActKind, Action, Callee, Expr, Node};
+    let lowered = lower(source).unwrap_or_else(|error| panic!("{error}"));
+    let document = &lowered.document;
+    let function = library().resolve(helper).expect("known helper");
+    let slot = super::linked::helper_slot(document, helper);
+    let matches = |callee: &Callee| match callee {
+        Callee::Local(id) => *id == function,
+        Callee::Import(found) => Some(*found) == slot,
+        _ => false,
+    };
+    let mut pending = document
+        .units()
+        .filter(|(unit, _)| match unit {
+            lash_vocabulary::sites::Unit::Library(id) => {
+                lash_kernel_doc::FunctionCatalog::header(library(), id).is_none()
+            }
+            lash_vocabulary::sites::Unit::Main => true,
+            _ => false,
+        })
+        .map(|(_, body)| Node::Block(body))
+        .collect::<Vec<_>>();
+    while let Some(node) = pending.pop() {
+        pending.extend(node.children());
+        if match node {
+            Node::Expr(Expr::Call {
+                function: called, ..
+            }) => *called == function,
+            Node::Expr(Expr::Act(action)) => match &action.kind {
+                ActKind::Call(callee) => matches(callee),
+                _ => false,
+            },
+            Node::Action(Action::Call { callee, .. }) => matches(callee),
+            _ => false,
+        } {
+            return true;
+        }
+    }
+    false
 }
 
 pub(super) const BOUNDS: Bounds = Bounds {
@@ -166,14 +207,14 @@ struct Console {
 }
 
 impl Host for Console {
-    fn clock(&mut self) -> Timestamp {
-        Timestamp {
-            nanoseconds: Integer::from(0),
-        }
-    }
-
-    fn random(&mut self) -> u64 {
-        0
+    fn perform(
+        &mut self,
+        use_: &lash_vocabulary::OperationUse,
+        _: &[Datum],
+        _: &lash_vocabulary::sites::PositionLabel,
+        _: &lash_vocabulary::sites::Site,
+    ) -> Result<Result<Datum, lash_kernel_doc::ErrorDatum>, lash_kernel_vm::HostFault> {
+        crate::tests::linked::read(use_, 0)
     }
 
     fn read(&mut self, _handle: &Handle, _request: &Datum) -> Result<Datum, ErrorDatum> {
@@ -236,17 +277,30 @@ fn shown(datum: Option<&Datum>) -> String {
 /// `sleep:50`.
 fn label(request: &Request) -> String {
     match request {
-        Request::Effect(effect) => format!("{}:{}", effect.effect, shown(effect.args.first())),
-        Request::Sleep(sleep) => format!("sleep:{}", sleep.duration.as_millis()),
+        Request::Effect(effect) => {
+            let name = crate::tests::linked::operation(&effect.use_);
+            if name.as_str() == "python.sleep" {
+                let Some(Datum::Int(milliseconds)) = effect.args.first() else {
+                    panic!("sleep milliseconds")
+                };
+                format!("sleep:{milliseconds}")
+            } else {
+                format!("{name}:{}", shown(effect.args.first()))
+            }
+        }
     }
 }
 
 fn answer(request: &Request) -> (WaitId, Outcome) {
     match request {
-        Request::Sleep(sleep) => (sleep.wait, Outcome::Elapsed),
         Request::Effect(effect) => {
-            let argument = effect.args.first().cloned().unwrap_or(Datum::Null);
-            let outcome = if effect.effect.as_str() == "host.boom" {
+            let argument =
+                if crate::tests::linked::operation(&effect.use_).as_str() == "python.sleep" {
+                    Datum::Null
+                } else {
+                    effect.args.first().cloned().unwrap_or(Datum::Null)
+                };
+            let outcome = if crate::tests::linked::operation(&effect.use_).as_str() == "host.boom" {
                 Outcome::Failed(ErrorDatum {
                     kind: "boom".to_string(),
                     message: shown(Some(&argument)),
@@ -304,27 +358,14 @@ fn start(
         panic!("{refused}\n{text}");
     }
     let mut environment = lash_kernel_check::Environment::new(library());
-    environment.effects = (effects)
-        .iter()
-        .map(|(effect, signature)| {
-            (
-                effect.clone(),
-                lash_kernel_doc::OperationRequirement::new(
-                    signature.clone(),
-                    lash_kernel_doc::ContractId::new("1"),
-                ),
-            )
-        })
-        .collect();
     environment.bindings = names;
     if let Err(refusal) = lash_kernel_check::admit(&lowered.document, &environment) {
         panic!("{refusal:?}\n{text}");
     }
-    let program = Program {
-        closure: pages::CLOSURE,
-        document: Arc::clone(lowered.document.shared()),
-        library: installed().prepared.clone(),
-    };
+    let program = crate::tests::linked::program(
+        Arc::clone(lowered.document.shared()),
+        installed().prepared.clone(),
+    );
     let machine = pages::start(program, BOUNDS, &session);
     (machine, text)
 }
@@ -334,11 +375,10 @@ fn start(
 #[test]
 fn builtin_range_loop_uses_constant_space() {
     let lowered = lower("for i in range(100000):\n    print(i)\n    break\nprint(i)\n").unwrap();
-    let program = Program {
-        closure: pages::CLOSURE,
-        document: Arc::clone(lowered.document.shared()),
-        library: installed().prepared.clone(),
-    };
+    let program = crate::tests::linked::program(
+        Arc::clone(lowered.document.shared()),
+        installed().prepared.clone(),
+    );
     let mut machine = pages::start(
         program,
         Bounds {
@@ -379,11 +419,10 @@ fn a_key_sort_computes_each_key_once_and_charges_alike_in_any_order() {
              print(calls == [{listed}, {listed}])\nprint(ys)\nprint(xs)\n"
         );
         let lowered = lower(&source).unwrap_or_else(|error| panic!("{error}"));
-        let program = Program {
-            closure: pages::CLOSURE,
-            document: Arc::clone(lowered.document.shared()),
-            library: installed().prepared.clone(),
-        };
+        let program = crate::tests::linked::program(
+            Arc::clone(lowered.document.shared()),
+            installed().prepared.clone(),
+        );
         let observed = execution_observation(program, BOUNDS, false);
         assert!(
             matches!(observed.end, End::Finished(_)),
@@ -434,11 +473,10 @@ fn a_key_sort_bills_large_captured_keys_exactly_in_any_order() {
                  xs.sort(key=rank, reverse=True)\nprint(ys)\nprint(xs)\n"
             );
             let lowered = lower(&source).unwrap_or_else(|error| panic!("{error}"));
-            let program = Program {
-                closure: pages::CLOSURE,
-                document: Arc::clone(lowered.document.shared()),
-                library: installed().prepared.clone(),
-            };
+            let program = crate::tests::linked::program(
+                Arc::clone(lowered.document.shared()),
+                installed().prepared.clone(),
+            );
             let observed = execution_observation(program, BOUNDS, false);
             assert!(
                 matches!(observed.end, End::Finished(_)),
@@ -471,11 +509,10 @@ fn dict_same_size_key_replacement_raises_within_charge_bound() {
         let source =
             format!("d = {initial}\nfor k in d:\n    print(k)\n    del d[k]\n    d[k + 'x'] = 1\n");
         let lowered = lower(&source).unwrap();
-        let program = Program {
-            document: Arc::clone(lowered.document.shared()),
-            library: installed().prepared.clone(),
-            closure: pages::CLOSURE,
-        };
+        let program = crate::tests::linked::program(
+            Arc::clone(lowered.document.shared()),
+            installed().prepared.clone(),
+        );
         let bounds = Bounds {
             charge_limit: 20_000,
             ..BOUNDS
@@ -542,11 +579,7 @@ pub(super) fn entry_output(
     args: Vec<Datum>,
 ) -> (Datum, Vec<String>) {
     let session = Session::default();
-    let program = Program {
-        closure: pages::CLOSURE,
-        document: Arc::new(document),
-        library: installed().prepared.clone(),
-    };
+    let program = crate::tests::linked::program(Arc::new(document), installed().prepared.clone());
     let mut machine = KernelMachine::start(
         program,
         BOUNDS,
@@ -604,7 +637,6 @@ fn run_cell(
         pending.retain(|request| {
             let wait = match request {
                 Request::Effect(effect) => effect.wait,
-                Request::Sleep(sleep) => sleep.wait,
             };
             !park.withdrawn.contains(&wait)
         });
@@ -887,7 +919,11 @@ fn paged_arithmetic_keeps_held_definitions_and_exact_charge() {
         .iter()
         .map(|name| library().resolve(name).unwrap())
         .collect();
-    let mut previous = NamedLibrary::resolving(current, |id| !ids.contains(id)).unwrap();
+    let roots = lash_vm_releases::helper_release()
+        .expect("helper release")
+        .resolver_roots();
+    let mut previous =
+        NamedLibrary::resolving(current, |id| roots.contains(id) && !ids.contains(id)).unwrap();
     let definitions = lash_kernel_dialect::define_functions(PREVIOUS_ARITHMETIC, &mut previous)
         .expect("the previous arithmetic definitions resolve");
     let mut registry = current.as_ref().clone();
@@ -908,21 +944,14 @@ fn paged_arithmetic_keeps_held_definitions_and_exact_charge() {
             ARITHMETIC_RESUME,
             &Environment::new(
                 named,
-                &lash_kernel_dialect::Namespaces::of_effects(
-                    &effects,
-                    &lash_kernel_doc::ContractId::new("1"),
-                    &Default::default(),
-                )
-                .expect("the test's effects are operations"),
+                &crate::tests::linked::namespaces(&effects, &Default::default())
+                    .expect("the test's effects are operations"),
             ),
             lash_kernel_dialect::Mode::Cell(lash_kernel_dialect::CellEnvironment::first()),
         )
         .expect("the arithmetic witness lowers");
-        let program = Program {
-            closure: pages::CLOSURE,
-            document: Arc::clone(lowered.document.shared()),
-            library: prepared.clone(),
-        };
+        let program =
+            crate::tests::linked::program(Arc::clone(lowered.document.shared()), prepared.clone());
         let straight = execution_observation(program.clone(), BOUNDS, false);
         assert!(
             matches!(straight.end, End::Finished(_)),
@@ -968,7 +997,7 @@ fn integer_facts_remove_loop_guards_and_preserve_bigints() {
         (vec!["9223372036854775810".into()], "ok".into())
     );
     assert!(
-        !kernel_text(source).contains("py.iadd"),
+        !calls_helper(source, "py.iadd"),
         "proven integer addition is direct"
     );
 }
@@ -991,13 +1020,13 @@ def outer():
 outer()
 "#;
     assert_eq!(output(source), (vec!["abb".into()], "ok".into()));
-    assert!(kernel_text(source).contains("py.iadd"));
+    assert!(calls_helper(source, "py.iadd"));
     for read_only in [
         "x = 1\ndef read():\n    return x\nfor i in range(2):\n    x += i\nprint(read())",
         "x = 1\nread = lambda: x\nfor i in range(2):\n    x += i\nprint(read())",
     ] {
         assert_eq!(output(read_only), (vec!["2".into()], "ok".into()));
-        assert!(kernel_text(read_only).contains("py.iadd"));
+        assert!(calls_helper(read_only, "py.iadd"));
     }
 }
 
@@ -1017,7 +1046,7 @@ fn integer_facts_exclude_string_and_float_reassignments() {
         ("x = 1\nif True:\n    x = 1.5\nx += 1\nprint(x)", "2.5"),
     ] {
         assert_eq!(output(source), (vec![expected.into()], "ok".into()));
-        assert!(kernel_text(source).contains("py.iadd"));
+        assert!(calls_helper(source, "py.iadd"));
     }
 }
 
@@ -1041,7 +1070,7 @@ f(True)
         output(source),
         (vec!["unbound".into(), "2".into()], "ok".into())
     );
-    assert!(kernel_text(source).contains("py.iadd"));
+    assert!(calls_helper(source, "py.iadd"));
 }
 
 /// FIG-6115: Python implicitly deletes an except target; the next read
@@ -1068,7 +1097,7 @@ f()
         output(source),
         (vec!["deleted".into(), "2".into()], "ok".into())
     );
-    assert!(kernel_text(source).contains("py.iadd"));
+    assert!(calls_helper(source, "py.iadd"));
     assert_eq!(
         lower("x = 1\ndel x")
             .expect_err("variable del is outside the dialect")
@@ -1091,7 +1120,7 @@ x += 1
 print(x)
 "#;
     assert_eq!(output(source), (vec!["2.5".into()], "ok".into()));
-    assert!(kernel_text(source).contains("py.iadd"));
+    assert!(calls_helper(source, "py.iadd"));
 }
 
 /// FIG-6115: supported bool-to-int conversion remains guarded; integer
@@ -1148,13 +1177,12 @@ for i in range(3):
         await host.echo(s)
 print(s)
 "#;
-    assert!(!kernel_text(source).contains("py.iadd"));
+    assert!(!calls_helper(source, "py.iadd"));
     let lowered = lower(source).expect("the integer loop lowers");
-    let program = Program {
-        closure: pages::CLOSURE,
-        document: Arc::clone(lowered.document.shared()),
-        library: installed().prepared.clone(),
-    };
+    let program = crate::tests::linked::program(
+        Arc::clone(lowered.document.shared()),
+        installed().prepared.clone(),
+    );
     let straight = execution_observation(program.clone(), BOUNDS, false);
     assert!(matches!(straight.end, End::Finished(_)));
     assert_eq!(straight.lines, ["9223372036854775810"]);
@@ -1184,7 +1212,7 @@ def f(range):
 f(lambda n: [1.5])
 "#;
     assert_eq!(output(source), (vec!["2.5".into()], "ok".into()));
-    assert!(kernel_text(source).contains("py.iadd"));
+    assert!(calls_helper(source, "py.iadd"));
     assert_eq!(
         session(&["x = 1.5", "for i in range(2):\n    x += 1\nprint(x)"]),
         ["3.5"]
@@ -1597,7 +1625,10 @@ fn python_awaits_add_no_turn() {
         await asyncio.gather(a, b)\n";
     let text = kernel_text(source);
     assert!(!text.contains("then yield"), "{text}");
-    assert!(text.contains("via py.await"), "{text}");
+    let lowered = lower(source).unwrap();
+    let slot =
+        super::linked::helper_slot(&lowered.document, "py.await").expect("await policy import");
+    assert!(text.contains(&format!("via import {}", slot.0)), "{text}");
     for order in [
         ["host.echo:i", "host.echo:p"],
         ["host.echo:p", "host.echo:i"],
@@ -1626,9 +1657,9 @@ xs.append(await host.echo('last'))
 print(xs)
 "#;
     let text = kernel_text(source);
-    assert!(!text.contains("py.method.append"), "{text}");
-    assert!(!text.contains("py.add"), "{text}");
-    assert!(!text.contains("invoke py.str("), "{text}");
+    assert!(!calls_helper(source, "py.method.append"), "{text}");
+    assert!(!calls_helper(source, "py.add"), "{text}");
+    assert!(!calls_helper(source, "py.str"), "{text}");
     assert!(text.contains("num.to_text"), "{text}");
     assert!(text.contains("text.concat"), "{text}");
     let direct = run(source, &[]);
@@ -1699,7 +1730,7 @@ fn sequence_facts_reject_incompatible_or_unbound_definitions() {
             "[2]",
         ),
     ] {
-        assert!(kernel_text(source).contains(helper), "{source}");
+        assert!(calls_helper(source, helper), "{source}");
         assert_eq!(
             output(source),
             (vec![expected.into()], "ok".into()),
@@ -1727,10 +1758,11 @@ await build()
 "#;
     let lowered = lower(source).unwrap();
     let registry = Arc::clone(installed().prepared.registry());
-    let program = |layout| Program {
-        closure: pages::CLOSURE,
-        document: Arc::clone(lowered.document.shared()),
-        library: prepare_with_layout(Arc::clone(&registry), layout),
+    let program = |layout| {
+        crate::tests::linked::program(
+            Arc::clone(lowered.document.shared()),
+            prepare_with_layout(Arc::clone(&registry), layout),
+        )
     };
     let on = program(Layout(0));
     let off = program(Layout(0).without_regions());

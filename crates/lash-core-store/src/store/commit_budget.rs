@@ -290,7 +290,7 @@ impl RuntimeCommit {
     /// manifest: a head whose bare commit exceeds the budget refuses every
     /// write, a session command's settlement included.
     pub(super) fn validate_created_head_budget(
-        session_id: &crate::SessionId,
+        session_id: &lash_vocabulary::identity::SessionId,
         config: crate::PersistedSessionConfig,
         commit_budget: CommitBudget,
         fleet_format: super::FleetFormat,
@@ -300,7 +300,7 @@ impl RuntimeCommit {
     }
 
     fn created_head_budget_probe(
-        session_id: &crate::SessionId,
+        session_id: &lash_vocabulary::identity::SessionId,
         config: crate::PersistedSessionConfig,
         commit_budget: CommitBudget,
         fleet_format: super::FleetFormat,
@@ -423,7 +423,7 @@ impl RuntimeCommit {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::SessionId;
+    use lash_vocabulary::identity::SessionId;
 
     #[test]
     fn created_head_budget_probe_has_a_fixed_full_precision_timestamp() {
@@ -636,9 +636,10 @@ mod tests {
                 ),
             );
             commit.turn_commit = bare.turn_commit.clone();
-            commit
-                .command_outcomes
-                .insert(crate::BatchId::from("qwb:settled"), outcome);
+            commit.command_outcomes.insert(
+                lash_vocabulary::identity::BatchId::from("qwb:settled"),
+                outcome,
+            );
             commit
         };
         // A refusal whose encoded record is `bytes` long.

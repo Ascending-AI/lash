@@ -1,65 +1,65 @@
 kernel 1
 numbers by_spelling
-effect corpus.capture(input: Record{list: List(Any)}) -> Json contract "8be2f3c2bb16abe57355aa08cb729511defddba2c4adeb4b1744edd4e7d329e1"
-use abs = @627d3fa925484d12b13ecfa198a1a07f3d88fb6f75df2c907ff4b9373105ead9
-use add = @7e4f2312e59326d1b501e7b4d092549da7b8db86c07ada94902ee61f3317b537
-use bool.not = @740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d
-use brand.of = @bd9a21264286394a5cd731fecaa03951fb50517689667675c0788623eb529dc1
-use div_floor = @e6cd29e23878b70c30d6243e68ec3cd427006b152f6d63b42d7fc9dee624c9eb
-use eq = @b50ea78f1b8899c52026719706a58480a99f1d90dcd04a6954be8f2c23cd8954
-use error.new = @94cb9716bc8ce4815dfcc5451d7f6d00901c7ed7aeba0d131da241a5f750d064
-use format.decimal_parts = @deca028ad69c6201e1bd21f8e4e8a06f04f569de81bf874d0dea167f9c6d43f0
-use int.to_text = @6ff2248639e3120f65b26cbddc76b695039f8bba6cc5987e5603eb1c81dfef29
-use kind = @3e2a9836b16b3ade4f7fcc2d56d1fb203dffed4bd5d7f4bf800df213c8c8c5f7
-use le = @7de8b2c2348a4e977e3cf159982ef820be6f7e51e8f810ad8ed8367418e7e169
-use list.concat = @3da975dd77f0c49e6cc2b4066a44091d1807247dfe97e1f524a79709ad92f9f5
-use list.len = @70d92c79f9c69cfe8cda0752cf30f5f0db0499a1bbffeeed9e2abddad9cf302b
-use lt = @a9e0784f1de47d5d04963535be1cd88bdd1a23bf1313aad8ef0f3af874d5e9d0
-use map.contains = @5a66ffea6554dc3cceb26c77fe239e0ab2ecd7dbbb0654104ab865df84ec75d3
-use num.neg = @56b094872b8ca6408c2131c289eb04021b8a02d1151f834f22d7f45fe0ea6ea9
-use num.to_text = @8d546dfc65b783924003ce02bde5f212533c8196845edf7caff51e44aafee0f7
-use py.add = @ed414085bf1e69a6fd9d099e3e6bf23069e67cf6b190488a8c33a033f4a2012f
-use py.arg_missing = @c9577269a338e9de71987d8f4aa60455693ac5af4eb2774138e6958d05790ce9
-use py.exc.args = @737dfacb5f36f56833d4516dea274ae918a7a50bb7e25c06c2ef81e9261619a8
-use py.exc.name = @fc83b0ea9d71ee72309df257cff6e29f5f6183d497225973d0b49a30a2a63d8e
-use py.fail = @da24400da6ab4bd87448a8afed5a80c5fd45bb814d74bd244c3c9b5bc5b10078
-use py.float_text = @adb78c2f89919421fa42883ceea9b15408fe24e45cd0f210c06cb09a4b35fe8c
-use py.getitem = @0168eab03c380b9e0218cf276f115be2c956e975ab0ef5c86351123cdfd93fd7
-use py.index = @1c7404535f45a90df835bc45d94dd8b7ea6c843b5cb64ecdfd85cc9f662c537d
-use py.operand_error = @c0e26c1c4cb4e647cd9d7d7ae906cedde64578296dc7de7603856bc2f10bfee7
-use py.reply = @9069f1a97a82e155fe11114065351d42262bd0be81a4a8c41f522dfbb431d5d5
-use py.repr = @e54f3de12c265c41fcd8093a6b56ffd0b33000e40e222deb91514539b13e10fb
-use py.setitem = @56a7cb2d7a29d652cd71cc2b0d9b964ef0d03dd753c83ad4709eb637b7e73490
-use py.text.printable = @01878cd4854f27491d88ce96898abd21b4fc2fee18220ff44d09a29f0bf629fe
-use py.text_repr = @a5473618f0e9fd2726bf23653f6a1a1553d9779addd065432d53dd6187668fe2
-use py.type = @7f6673f469e839af64e8f42364bc60cba2a5bdfa0be97b4b7f9e013d63d06f98
-use record.contains = @c5ee063554dd9a59526868c163b1a3282db896327967a522d00fcde29c91c25c
-use record.keys = @3048431a57b64b680843cd96770d99536bab12b83c3c7788856614e555b4985c
-use same = @1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578
-use set.len = @3b70dd4bec191dc3c00a32a3aee61fa82e4e4b7256aac2668f25739b0b7a4d38
-use sub = @59b9d484a581bca4a1909189b23b1f4363670e1af545c6b28c6110f6ee95b01a
-use text.concat = @ba1c1b7fe1ae760637dddbee3751c5dfbe05ed7b4f3e7792af355dc80d5ff6bb
-use text.find = @d6a03b25b47babadb575f8207e993332ab6a8f7b53e8dd5257e8b45c6ad17451
-use text.from_code_points = @15ee852f242cc41febea71421a0af456926ad0f91429c4c96f1217c5b8732e43
-use text.get = @04442e8b0037608a734e4e93b04c62f6c031cc039f13ae147827ba9d32f22db3
-use text.join = @79aad37e7cebc78b176b7458ed56e625112872a7faf900143e331db02c601a0f
-use text.len = @a6c5541c537bca274e439467011e6f2a631cad9a29a4cca7a7710763e675f716
-use text.repeat = @ca62f99d0b5b81be587148f931be7dcd29cae182ebc2ab6452b239cc50ead43a
-use text.slice = @649f38eba0f5c8ce04da0c9ad8cf52c7fd5189fd9301d6ee3a7c65026bad5e81
-use text.split = @acfd50807c41e73f1bb1c4811459ba182f363914657804e6c7b4583a08241c0a
-use text.to_code_points = @f8e1c771241bcf79d4e804e35177d17075d8bafa331fd4d14446f4aa4538c2dc
-use text.upper_u17_0_0 = @a9d412b1ecfed3de7a78d9aa17829cae8396a1180adf0f3f681bc56d4d44170e
-use tuple.concat = @cb471f6847d41251a688fd3703cc1461b95db6cae5f54601979e8c6947953be9
-use tuple.len = @2eced051afe955ac8dbeed3762acd4b8ce74b7a4ed15763ea47dfd01e5cc5f71
-
+import 0 code py.h_n11_arg_missing(callee: Text) -> Any direct
+import 1 code py.h_n7_getitem(target: Any, index: Any) -> Any direct
+import 2 operation corpus.capture(input: Record{list: List(Any)}) -> Json
+import 3 code py.h_n5_reply(value: Any) -> Any direct
+import 4 code py.h_n7_setitem(target: Any, index: Any, value: Any) -> Null direct
+native @04100a3772ec564e8bdc38f90d5678f50f6395ae42c373d3239143cfaadfc478
+native @048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544
+native @0723f439a90b73307ee94404072dce60f6b1d14719c064e2833e347f0e6e66e8
+native @1b715c6aff4658af53a1c93402fef826a1da902ab3ad5e88eaa3d129c408d198
+native @35bb1ffe986ce56141c6044b8e744f28ea47970fd2d2797355e58ae8872948a7
+native @40590fcc56fe886746ecbc896b0342e86e0f5b80b06165b243b68224d4fea6d8
+native @437a840ac049289e2d17e0301dc7957a7d23e007a7eabbaad265d3a9511a53b9
+native @70a2957eac0b2e11b3f1add4e4d773d9db6f46e22a5980ed3c0bf2d4add71e45
+native @7482cfd6b4c420a9c241554beaea7b98eb0406fc157fbca927237ed49928ed92
+native @9781b2aa7f33a6620d09cdae4e0cbd1262f5d77f276da0a0f68882f8208e41f0
+native @a5e04a7ac396a4ce1fbbd8702824791bd6eb5e5c2555f6873ead5324d108ee9d
+native @a7bfb9ebea42304cf4e3def3369cc78c4b54438286827cee7c155ffa31f7cce2
+native @ae33c2221d0ff425d59ee19d6f6bf4cb95a35ed2b57c934efe22fb6db0ee50a9
+native @afda671c83e2eb2d3da14b8870f9ccb4ef95e60cbeddd97772ce10bbc8b13169
+native @c00cf80881ccac569a1263a3b0a9c6589c0a0f75e1902fe5453b77b86427afef
+native @c598dd9b847fb6caf2154e3c43f6ee00c8b87419fa8caacd63415e704a4023aa
+native @d934d34968ad85193c362f12551af1b92c09f82923630d73cedf6383afefa55b
+native @ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5
+native @de7ce6931fd93dde5062927fd4d24e0786ce2957bfb00542b5ddbcb7353ccdf3
+native @df2a1a04d84d1a924b3a01004431802561579881c84b726b743db234aca50d7e
+native @e5f5e7081794f244d696377835fa16cadf6f6c49d53e947fc928b49494989ca3
+native @e87e1d24465e81b9b004ae8a6be0bee205aff93b76f141d32f728f0b127cbf68
+native @f47eff31eb6ab5a5bb2a2495830ee82bc313363956107391b89c43d8135e7fb7
+native @f9b078af7519f6d1ad25157de49683a8f9d98ce8671f7b8dd50adf1308135372
+definition "function eq(arg0: Any, arg1: Any) -> Bool\nkernel 1\nerrors \"arity\"\ncharge sum(1, product(sum(deep(arg0), deep(arg1)), sum(deep(arg0), deep(arg1))), deep(result))\nnative\n"
+definition "function same(arg0: Any, arg1: Any) -> Bool\nkernel 1\nerrors \"arity\"\ncharge sum(1, sum(min(size(arg0), size(arg1)), nested(arg0), nested(arg1)), deep(result))\nnative\n"
+definition "function text.join(items: List(Text), separator: Text) -> Text\nkernel 1\ncharge sum(1, deep(items), deep(separator), deep(result))\nnative\n"
+definition "function py.fail(name: Text, message: Text) -> Any\nkernel 1\ncharge 4\nnative\nuse error.new = @e5f5e7081794f244d696377835fa16cadf6f6c49d53e947fc928b49494989ca3\nbody {\n  throw error.new(name, message, ((message,), null))\n}\n"
+definition "function tuple.len(xs: Any) -> Int\nkernel 1\nerrors \"cyclic_value\", \"index_out_of_range\", \"invalid_key\", \"key_missing\", \"too_deep\", \"type_error\"\ncharge 1\nnative\n"
+definition "function list.len(xs: List(Any)) -> Int\nkernel 1\nerrors \"cyclic_value\", \"index_out_of_range\", \"invalid_key\", \"key_missing\", \"too_deep\", \"type_error\"\ncharge 1\nnative\n"
+definition "function tuple.concat(xs: Any, other: Any) -> Any\nkernel 1\nerrors \"cyclic_value\", \"index_out_of_range\", \"invalid_key\", \"key_missing\", \"too_deep\", \"type_error\"\ncharge sum(1, size(xs), size(other), size(result))\nnative\n"
+definition "function local.function(x: Any) -> Any\nkernel 1\nmetering statements\nimport 0 code py.h_n11_arg_missing(callee: Text) -> Any direct\nimport 1 code py.h_n7_getitem(target: Any, index: Any) -> Any direct\nuse py.add = @70a2957eac0b2e11b3f1add4e4d773d9db6f46e22a5980ed3c0bf2d4add71e45\nuse same = @048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544\nbody {\n  return let(t1 = if(same(x, absent), invoke import 0(\"add\"), null), invoke py.add(invoke py.add(x, limit), invoke import 1(shared, 0)))\n}\n"
+definition "function py.add(left: Any, right: Any) -> Any\nkernel 1\ncharge sum(4, size(left), size(right))\nnative 2\nuse add = @c00cf80881ccac569a1263a3b0a9c6589c0a0f75e1902fe5453b77b86427afef\nuse kind = @ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5\nuse list.concat = @a7bfb9ebea42304cf4e3def3369cc78c4b54438286827cee7c155ffa31f7cce2\nuse py.operand_error = @9781b2aa7f33a6620d09cdae4e0cbd1262f5d77f276da0a0f68882f8208e41f0\nuse same = @048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544\nuse text.concat = @df2a1a04d84d1a924b3a01004431802561579881c84b726b743db234aca50d7e\nuse tuple.concat = @437a840ac049289e2d17e0301dc7957a7d23e007a7eabbaad265d3a9511a53b9\nbody {\n  let k = kind(left)\n  let r = kind(right)\n  if same(k, \"integer\") {\n    if same(r, \"integer\") {\n      return add(left, right)\n    }\n    if same(r, \"float\") {\n      return add(left, right)\n    }\n  }\n  if same(k, \"float\") {\n    if same(r, \"integer\") {\n      return add(left, right)\n    }\n    if same(r, \"float\") {\n      return add(left, right)\n    }\n  }\n  if same(k, r) {\n    if same(k, \"text\") {\n      return text.concat(left, right)\n    }\n    if same(k, \"list\") {\n      return list.concat(left, right)\n    }\n    if same(k, \"tuple\") {\n      return tuple.concat(left, right)\n    }\n  }\n  do invoke py.operand_error(\"+\", left, right)\n  return null\n}\n"
+definition "function text.len(text: Text) -> Int\nkernel 1\ncharge sum(1, deep(text), deep(result))\nnative\n"
+definition "function py.operand_error(operator: Text, left: Any, right: Any) -> Any\nkernel 1\ncharge 8\nnative\nuse py.fail = @1b715c6aff4658af53a1c93402fef826a1da902ab3ad5e88eaa3d129c408d198\nuse py.type = @f9b078af7519f6d1ad25157de49683a8f9d98ce8671f7b8dd50adf1308135372\nuse text.join = @0723f439a90b73307ee94404072dce60f6b1d14719c064e2833e347f0e6e66e8\nbody {\n  let left_type = invoke py.type(left)\n  let right_type = invoke py.type(right)\n  let hoisted4 = text.join([\"unsupported operand type(s) for \", operator, \": '\", left_type, \"' and '\", right_type, \"'\"], \"\")\n  do invoke py.fail(\"TypeError\", hoisted4)\n  return null\n}\n"
+definition "function text.slice(text: Text, start: Int, end: Int) -> Text\nkernel 1\ncharge sum(1, deep(text), deep(start), deep(end), deep(result))\nnative\n"
+definition "function list.concat(xs: List(Any), other: Any) -> List(Any)\nkernel 1\nerrors \"cyclic_value\", \"index_out_of_range\", \"invalid_key\", \"key_missing\", \"too_deep\", \"type_error\"\ncharge sum(1, size(xs), size(other), size(result))\nnative\n"
+definition "function record.contains(xs: Record{..Any}, key: Text) -> Bool\nkernel 1\nerrors \"cyclic_value\", \"index_out_of_range\", \"invalid_key\", \"key_missing\", \"too_deep\", \"type_error\"\ncharge sum(1, size(xs), size(key))\nnative\n"
+definition "function py.exc.name(value: Any) -> Text\nkernel 1\ncharge 6\nnative\nuse bool.not = @f47eff31eb6ab5a5bb2a2495830ee82bc313363956107391b89c43d8135e7fb7\nuse kind = @ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5\nuse map.contains = @d934d34968ad85193c362f12551af1b92c09f82923630d73cedf6383afefa55b\nuse same = @048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544\nbody {\n  if bool.not(same(kind(value), \"error\")) {\n    return \"Exception\"\n  }\n  let kinds = map{\"type_error\": \"TypeError\", \"unbound_variable\": \"NameError\", \"index_out_of_range\": \"IndexError\", \"key_missing\": \"KeyError\", \"invalid_key\": \"TypeError\", \"division_by_zero\": \"ZeroDivisionError\", \"number_range\": \"OverflowError\", \"unordered\": \"ValueError\", \"text_boundary\": \"ValueError\", \"arity\": \"TypeError\", \"cycle\": \"ValueError\", \"cyclic_value\": \"ValueError\", \"not_data\": \"TypeError\", \"effect_result\": \"TypeError\", \"cancelled\": \"CancelledError\", \"join_self\": \"RuntimeError\", \"empty_join\": \"ValueError\", \"all_failed\": \"RuntimeError\", \"too_deep\": \"RecursionError\", \"number_parse\": \"ValueError\", \"zero_step\": \"ValueError\", \"invalid_scalar\": \"ValueError\", \"invalid_utf16\": \"ValueError\", \"invalid_utf8\": \"ValueError\", \"json_syntax\": \"ValueError\", \"json_depth\": \"ValueError\", \"json_number\": \"ValueError\", \"json_key\": \"TypeError\"}\n  let name = value.kind\n  if map.contains(kinds, name) {\n    return kinds[name]\n  }\n  return name\n}\n"
+definition "function add(arg0: Number, arg1: Number) -> Number\nkernel 1\nerrors \"arity\", \"number_range\", \"type_error\"\ncharge sum(1, sum(deep(arg0), deep(arg1)), deep(result))\nnative\n"
+definition "function text.split(text: Text, separator: Text, limit?: Int) -> List(Text)\nkernel 1\ncharge sum(1, deep(text), deep(separator), deep(limit), deep(result))\nnative\n"
+definition "function map.contains(xs: Map(Any, Any), key: Any) -> Bool\nkernel 1\nerrors \"cyclic_value\", \"index_out_of_range\", \"invalid_key\", \"key_missing\", \"too_deep\", \"type_error\"\ncharge sum(1, size(xs), deep(key))\nnative\n"
+definition "function kind(arg0: Any) -> Text\nkernel 1\nerrors \"arity\"\ncharge sum(1, 0, deep(result))\nnative\n"
+definition "function brand.of(value: Any) -> Union(Tuple(Text, Text), Absent)\nkernel 1\ncharge 8\nnative\nuse eq = @04100a3772ec564e8bdc38f90d5678f50f6395ae42c373d3239143cfaadfc478\nuse kind = @ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5\nuse record.contains = @ae33c2221d0ff425d59ee19d6f6bf4cb95a35ed2b57c934efe22fb6db0ee50a9\nuse same = @048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544\nuse tuple.len = @35bb1ffe986ce56141c6044b8e744f28ea47970fd2d2797355e58ae8872948a7\nbody {\n  if same(kind(value), \"record\") {\n    if record.contains(value, \"__lash_brand\") {\n      let brand = value.__lash_brand\n      if same(kind(brand), \"tuple\") {\n        if eq(tuple.len(brand), 2) {\n          if same(kind(brand[0]), \"text\") {\n            if same(kind(brand[1]), \"text\") {\n              return brand\n            }\n          }\n        }\n      }\n    }\n  }\n  return absent\n}\n"
+definition "function text.concat(text: Text, other: Text) -> Text\nkernel 1\ncharge sum(1, deep(text), deep(other), deep(result))\nnative\n"
+definition "function error.new(kind: Text, message: Text, data?: Any) -> Error\nkernel 1\nerrors \"type_error\"\ncharge sum(1, size(kind), size(message), size(result))\nnative\n"
+definition "function text.upper_u17_0_0(text: Text) -> Text\nkernel 1\ncharge sum(1, deep(text), deep(result))\nnative\n"
+definition "function bool.not(x: Bool) -> Bool\nkernel 1\nerrors \"type_error\"\ncharge 1\nnative\n"
+definition "function py.type(value: Any) -> Text\nkernel 1\ncharge sum(8, size(result))\nnative\nuse brand.of = @de7ce6931fd93dde5062927fd4d24e0786ce2957bfb00542b5ddbcb7353ccdf3\nuse kind = @ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5\nuse list.len = @40590fcc56fe886746ecbc896b0342e86e0f5b80b06165b243b68224d4fea6d8\nuse py.exc.name = @afda671c83e2eb2d3da14b8870f9ccb4ef95e60cbeddd97772ce10bbc8b13169\nuse same = @048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544\nuse text.concat = @df2a1a04d84d1a924b3a01004431802561579881c84b726b743db234aca50d7e\nuse text.join = @0723f439a90b73307ee94404072dce60f6b1d14719c064e2833e347f0e6e66e8\nuse text.len = @7482cfd6b4c420a9c241554beaea7b98eb0406fc157fbca927237ed49928ed92\nuse text.slice = @a5e04a7ac396a4ce1fbbd8702824791bd6eb5e5c2555f6873ead5324d108ee9d\nuse text.split = @c598dd9b847fb6caf2154e3c43f6ee00c8b87419fa8caacd63415e704a4023aa\nuse text.upper_u17_0_0 = @e87e1d24465e81b9b004ae8a6be0bee205aff93b76f141d32f728f0b127cbf68\nbody {\n  let k = kind(value)\n  if same(k, \"record\") {\n    let brand = invoke brand.of(value)\n    if same(brand, absent) {\n      return k\n    }\n    let parts = []\n    for part in text.split(brand[1], \"_\") metered 2 {\n      let head = text.upper_u17_0_0(text.slice(part, 0, 1))\n      set parts[list.len(parts)] = text.concat(head, text.slice(part, 1, text.len(part)))\n    }\n    return text.join(parts, \"\")\n  }\n  if same(k, \"null\") {\n    return \"NoneType\"\n  }\n  if same(k, \"integer\") {\n    return \"int\"\n  }\n  if same(k, \"text\") {\n    return \"str\"\n  }\n  if same(k, \"map\") {\n    return \"dict\"\n  }\n  if same(k, \"closure\") {\n    return \"function\"\n  }\n  if same(k, \"task\") {\n    return \"Task\"\n  }\n  if same(k, \"error\") {\n    let name = invoke py.exc.name(value)\n    return name\n  }\n  return k\n}\n"
 main {
   let limit = 3
   let shared = [1]
-  let add = fn(x) start(x: Int) -> Any bare direct {
-    return let(t1 = if(same(x, absent), invoke py.arg_missing("add"), null), invoke py.add(invoke py.add(x, limit), invoke py.getitem(shared, 0)))
-  }
-  do let(t2 = [1, add], let(t3 = {list: t2}, invoke py.reply(perform corpus.capture(t3) as Json)))
-  do invoke py.setitem(shared, 0, 9)
+  let add = fn local.function presentation(x: Int) -> Any bare direct
+  do let(t3 = [1, add], let(t4 = {list: t3}, invoke import 3(perform 2(t4) as Json)))
+  do invoke import 4(shared, 0, 9)
 }
 
 unit Main: statements=6 scopes=2 sites=13

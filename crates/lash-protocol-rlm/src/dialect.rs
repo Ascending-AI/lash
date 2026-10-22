@@ -9,8 +9,8 @@ use lash_core::{ExecRequest, ExecResponse, RuntimeExecutionContext, SessionError
 use lash_kernel_doc::NumberPolicy;
 use lash_rlm_types::RlmGlobalsPatchPluginBody;
 use lash_tool_presenter_api::ToolPresenterSlot;
-use lash_tool_shape::SchemaShape;
 use lash_vm_client::service::runtime_ops::ServiceRuntimeOps as _;
+use lash_vocabulary::tool_shape::SchemaShape;
 
 pub use python::PythonPrompts;
 pub use typescript::TypescriptPrompts;
@@ -294,6 +294,7 @@ impl DialectPromptVocabulary {
 /// dialect's kernel package.
 #[derive(Clone)]
 pub(crate) struct CodeModeDialectServices {
+    pub(crate) documents: Option<lash_vm_runtime::KernelDocuments>,
     pub(crate) presentation: crate::RlmPresentationConfig,
     /// The complete config the session's tool presenter was admitted with.
     pub(crate) tool_presentation: serde_json::Value,
@@ -306,9 +307,6 @@ pub(crate) struct CodeModeDialectServices {
     pub(crate) channel: crate::plugin::RlmChannel,
     /// What a stored kernel definition is carried forward with.
     pub(crate) kernel: crate::executor::KernelCarry,
-    /// Which package set a cell is lowered under; `None` is lash's own
-    /// (FIG-6918).
-    pub(crate) packages: Option<Arc<dyn crate::plugin::PackageGate>>,
 }
 
 /// The label under a discovery session's listed tools: whether the listing
@@ -319,7 +317,7 @@ pub(crate) struct CodeModeDialectServices {
 /// The operation named by the effect name `effect` as `spelling` writes
 /// it; `effect` itself when it names no canonical operation.
 pub(crate) fn spelled_effect(spelling: lash_kernel_dialect::Spelling, effect: &str) -> String {
-    lash_kernel_dialect::operation_text::parse(effect).map_or_else(
+    lash_vocabulary::operation_text::parse(effect).map_or_else(
         |_| effect.to_owned(),
         |operation| lash_kernel_dialect::spell_operation(spelling, &operation),
     )
@@ -361,34 +359,59 @@ pub(crate) struct SessionDialect {
 }
 
 impl SessionDialect {
-    /// The package set the session's next round is written under: the
-    /// fleet gate's answer now, or lash's own for a host with no gate.
-    /// An empty serving fleet durably installs and answers the writer's
-    /// own set. This round's cell keeps the surface shown in its prompt;
-    /// a later round asks again.
-    ///
-    /// # Errors
-    ///
-    /// The gate's typed `NoCompatibleSnapshot` for a nonempty incompatible
-    /// fleet, or a retryable survey, installation or surface-load failure.
-    pub(crate) async fn round_packages(&self) -> Result<crate::plugin::CellPackages, SessionError> {
-        match &self.services.packages {
-            Some(gate) => gate
-                .writable()
-                .await
-                .map_err(|error| SessionError::Plugin(error.into())),
-            None => lash_vm_runtime::lash_packages()
-                .map_err(|error| SessionError::Protocol(error.to_string()))
-                .map(|held| crate::plugin::CellPackages::held(&held)),
+    pub(crate) async fn package_surface(
+        &self,
+        packages: &lash_core_store::tool_surface::RecordedPackages,
+    ) -> Result<Option<String>, SessionError> {
+        use lash_vocabulary::package::*;
+        // Compiler helpers remain executable Imports. Their accepted publisher
+        // provenance excludes them only from model-facing declarations.
+        let attachment = Attachment {
+            members: Default::default(),
+            packages: packages
+                .snapshot
+                .advertisements
+                .iter()
+                .filter(|accepted| {
+                    !lash_vm_runtime::is_helper_publication(&accepted.publication.context)
+                })
+                .filter_map(|accepted| match &accepted.advertisement {
+                    PackageAdvertisement::Enumerated(package) => Some(package.path.clone()),
+                    _ => None,
+                })
+                .collect(),
+            deferred: Default::default(),
+        };
+        if attachment.packages.is_empty() {
+            return Ok(None);
         }
-    }
-
-    /// The code exports of `packages`, the round's package surface, in the
-    /// session's dialect's spelling (§2.3, P3): `None` when the set
-    /// exports no code.
-    pub(crate) fn package_surface(&self, packages: &crate::plugin::CellPackages) -> Option<String> {
-        let surface = crate::package_surface::render(&packages.view(), self.language().spelling());
-        (!surface.is_empty()).then_some(surface)
+        let Some(documents) = &self.services.documents else {
+            if packages.snapshot.advertisements.iter().any(|accepted| matches!(&accepted.advertisement, PackageAdvertisement::Enumerated(package) if attachment.packages.contains(&package.path) && package.members.values().any(|member| matches!(member.kind, MemberKind::Export {..})))) {
+                return Err(SessionError::Plugin(lash_execution_contracts::PluginError::Package(Box::new(lash_execution_contracts::process::linking::EnginePortError::Unavailable { message: "package code documentation has no runtime document provider".into() }))));
+            }
+            return Ok(None);
+        };
+        let context = packages.consumer.clone().ok_or_else(|| {
+            SessionError::Plugin(lash_execution_contracts::PluginError::Package(Box::new(
+                lash_execution_contracts::process::linking::EnginePortError::Unavailable {
+                    message: "round has no authenticated package consumer context".into(),
+                },
+            )))
+        })?;
+        let namespaces = documents
+            .namespace(&lash_vm_runtime::WorkflowEnvironmentRequest {
+                snapshot: packages.snapshot.clone(),
+                context,
+                attachment,
+            })
+            .await
+            .map_err(|error| {
+                SessionError::Plugin(lash_execution_contracts::PluginError::Package(Box::new(
+                    error,
+                )))
+            })?;
+        let text = crate::package_surface::render(&namespaces, self.language().spelling());
+        Ok((!text.is_empty()).then_some(text))
     }
 
     pub(crate) fn read_only_variables_prompt(
@@ -421,6 +444,7 @@ impl SessionDialect {
             reserved_names: Vec::new(),
             events: Arc::default(),
             services: CodeModeDialectServices {
+                documents: None,
                 workers: lash_vm_client::service::Service::default(),
                 execution_bounds: crate::plugin::ExecutionBounds::unbounded(),
                 code_renderer: Default::default(),
@@ -428,7 +452,6 @@ impl SessionDialect {
                 presentation: crate::RlmPresentationConfig::standard(),
                 tool_presentation,
                 kernel: crate::executor::KernelCarry::default(),
-                packages: None,
             },
         }
     }
@@ -483,7 +506,10 @@ impl SessionDialect {
 
     /// A catalog tool's call path in the selected dialect: its operation,
     /// spelled by the dialect.
-    pub(crate) fn tool_call_path(&self, manifest: &lash_core::ToolManifest) -> String {
+    pub(crate) fn tool_call_path(
+        &self,
+        manifest: &lash_vocabulary::tool_contract::ToolManifest,
+    ) -> String {
         lash_kernel_dialect::spell_operation(self.language().spelling(), &manifest.operation)
     }
 
@@ -570,7 +596,10 @@ impl SessionDialect {
     /// How a cell calls the finish tool `manifest`: Lash's `control.finish`
     /// as the dialect spells it, or a host's own by its call path. Its input
     /// is what the catalog documents.
-    pub(crate) fn finish_call(&self, manifest: &lash_core::ToolManifest) -> String {
+    pub(crate) fn finish_call(
+        &self,
+        manifest: &lash_vocabulary::tool_contract::ToolManifest,
+    ) -> String {
         if manifest.id.as_str() == crate::control_tools::FINISH_TOOL_ID {
             return self.prompt_vocabulary().finish_call.to_owned();
         }
@@ -853,13 +882,13 @@ impl DialectSession {
             ctx,
             request,
             &CellServices {
+                documents: self.services.documents.clone(),
                 events: Arc::clone(&self.events),
                 workers: self.services.workers.clone(),
                 execution_bounds: self.services.execution_bounds,
                 channel: self.services.channel,
                 code_renderer: self.services.code_renderer.clone(),
                 prompts: self.dialect.prompts(),
-                packages: self.services.packages.clone(),
                 kernel: self.services.kernel.clone(),
             },
             session_projected_bindings,
@@ -964,7 +993,10 @@ impl DialectSession {
     /// earlier cell wrote.
     /// Notes that the round's prompt shows `packages`: the round's cell is
     /// written under it.
-    pub(crate) fn shows_packages(&mut self, packages: crate::plugin::CellPackages) {
+    pub(crate) fn shows_packages(
+        &mut self,
+        packages: lash_core_store::tool_surface::RecordedPackages,
+    ) {
         self.state.shows_packages(packages);
     }
 
@@ -1035,6 +1067,63 @@ impl DialectSession {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// FIG-7109: compiler helper exports are callable by lowering but never
+    /// model-facing package declarations. Provenance, not the path, selects them.
+    #[tokio::test]
+    async fn compiler_helper_publications_do_not_enter_the_model_package_surface() {
+        use lash_vocabulary::{names::*, package::*};
+        let root = Segment::new("implementation").unwrap();
+        let package = Package {
+            path: PackagePath::new(root.clone()),
+            members: [(
+                Segment::new("helper").unwrap(),
+                Member {
+                    visibility: Visibility::Public,
+                    kind: MemberKind::Export {
+                        link: LinkId::from_bytes([1; 32]),
+                        export: ExportName {
+                            name: Name::new("helper"),
+                            member: None,
+                        },
+                    },
+                },
+            )]
+            .into(),
+        };
+        let mut packages = lash_core_store::tool_surface::RecordedPackages::default();
+        let publication = PublicationRecord {
+            context: PublicationContext {
+                domain: PublicationDomain("prompt-law".into()),
+                scope: PublicationScope::Host,
+                publisher: PublisherInstance(format!(
+                    "{}/helpers",
+                    lash_vm_runtime::KERNEL_SERVICES_OWNER
+                )),
+                root,
+            },
+            path: package.path.clone(),
+            content: PublishedContent::Package(package.identity()),
+            code_links: [LinkId::from_bytes([1; 32])].into(),
+            imported_publications: vec![],
+        };
+        packages
+            .snapshot
+            .advertisements
+            .push(AcceptedAdvertisement {
+                publication,
+                advertisement: PackageAdvertisement::Enumerated(package),
+            });
+        // No document provider is needed to omit compiler implementation code.
+        let dialect = SessionDialect::prompt_only(CellDialect::typescript());
+        assert_eq!(dialect.package_surface(&packages).await.unwrap(), None);
+        // The same path published by a host still owes code documentation.
+        packages.snapshot.advertisements[0]
+            .publication
+            .context
+            .publisher = PublisherInstance("host/helpers".into());
+        assert!(dialect.package_surface(&packages).await.is_err());
+    }
 
     struct ExtensionFixture;
 
@@ -1199,9 +1288,18 @@ mod tests {
             let mut session = DialectSession::new(extension_fixture(), services);
             let handler =
                 crate::testing::DurableHost::open(crate::testing::default_cell_scope()).await;
+            let ctx = crate::testing::recorded_cell_context(
+                &handler,
+                "test-session",
+                "test-turn",
+                "exec-code:0",
+                Arc::new(crate::testing::NoTools),
+            )
+            .await;
+            session.shows_packages(ctx.recorded_packages().clone());
             let response = session
                 .execute(
-                    lash_core::testing::code_execution_context(handler.ports()),
+                    ctx,
                     ExecRequest {
                         code: "const payload = `".to_string(),
                     },
@@ -1241,9 +1339,18 @@ mod tests {
                 DialectSession::new(crate::dialect::CellDialect::typescript(), services);
             let handler =
                 crate::testing::DurableHost::open(crate::testing::default_cell_scope()).await;
+            let ctx = crate::testing::recorded_cell_context(
+                &handler,
+                "test-session",
+                "test-turn",
+                "exec-code:0",
+                Arc::new(crate::testing::NoTools),
+            )
+            .await;
+            session.shows_packages(ctx.recorded_packages().clone());
             let response = session
                 .execute(
-                    lash_core::testing::code_execution_context(handler.ports()),
+                    ctx,
                     ExecRequest {
                         code: "const payload = `".to_string(),
                     },
@@ -1275,6 +1382,7 @@ mod tests {
 #[cfg(test)]
 pub(crate) fn test_dialect_services() -> CodeModeDialectServices {
     CodeModeDialectServices {
+        documents: None,
         kernel: crate::executor::KernelCarry::default(),
         presentation: crate::RlmPresentationConfig::standard(),
         tool_presentation: crate::dialect::CellDialect::typescript()
@@ -1286,7 +1394,6 @@ pub(crate) fn test_dialect_services() -> CodeModeDialectServices {
         execution_bounds: crate::plugin::ExecutionBounds::unbounded(),
         code_renderer: Default::default(),
         channel: crate::plugin::RlmChannel::Cell,
-        packages: None,
     }
 }
 

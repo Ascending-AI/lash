@@ -5,9 +5,11 @@
 use std::collections::BTreeMap;
 
 use lash_kernel_doc::{
-    Caption, CaptionEntry, Captions, CaptionsRefusal, Name, Node, Site, SourceLanguage, SourceMap,
-    SourceMapRefusal, SourceSite, Span, Stmt, Unit,
+    Caption, CaptionEntry, Captions, CaptionsRefusal, Node, SourceLanguage, SourceMap,
+    SourceMapRefusal, SourceSite, Span, Stmt,
 };
+
+use lash_vocabulary::sites::{Site, Unit};
 
 use crate::Written;
 
@@ -108,17 +110,24 @@ pub fn site_layers(
     source: &str,
     language: SourceLanguage,
     main: &[Note],
-    functions: &BTreeMap<Name, Vec<Note>>,
+    functions: &BTreeMap<lash_vocabulary::FunctionId, Vec<Note>>,
     declared: &[CaptionEntry],
 ) -> Result<SiteLayers, SiteLayersRefusal> {
     let mut layers = Layers::default();
-    layers.block(&document.main, main, &Site::new(Unit::Main, Vec::new()));
+    if let Some(main_block) = &document.main {
+        layers.block(main_block, main, &Site::new(Unit::Main, Vec::new()));
+    }
     for (name, function) in &document.functions {
         if let Some(notes) = functions.get(name) {
             layers.block(
-                &function.body,
+                &function
+                    .body()
+                    .ok_or_else(|| SourceMapRefusal::Site {
+                        site: Site::new(Unit::Library(*name), Vec::new()),
+                    })?
+                    .block,
                 notes,
-                &Site::new(Unit::Function(name.clone()), Vec::new()),
+                &Site::new(Unit::Library(*name), Vec::new()),
             );
         }
     }
@@ -128,20 +137,60 @@ pub fn site_layers(
             .filter(|entry| entry.target.site().is_some() || entry.target.kind(document).is_some())
             .cloned(),
     );
+    let mut origins = BTreeMap::new();
+    let mut bodies = BTreeMap::new();
+    for site in layers.written.keys() {
+        let Some(Node::Expr(lash_kernel_doc::Expr::Closure(closure))) = document.node(site) else {
+            continue;
+        };
+        let span = layers
+            .sites
+            .iter()
+            .filter(|located| {
+                located.site.unit == site.unit && site.path.starts_with(&located.site.path)
+            })
+            .max_by_key(|located| located.site.path.len())
+            .and_then(|located| located.ranges.first())
+            .copied();
+        let mut reached = std::collections::BTreeSet::new();
+        let mut pending = vec![closure.function];
+        while let Some(function) = pending.pop() {
+            if !reached.insert(function) {
+                continue;
+            }
+            if let Some(body) = document
+                .functions
+                .get(&function)
+                .and_then(|definition| definition.body())
+            {
+                pending.extend(Node::Block(&body.block).functions_within());
+                if let Some(span) = span {
+                    origins
+                        .entry(Site::new(Unit::Library(function), Vec::new()))
+                        .or_insert(span);
+                }
+            }
+        }
+        bodies.insert(site.clone(), reached);
+    }
+    for (site, span) in origins {
+        if !layers.sites.iter().any(|located| located.site == site) {
+            layers.sites.push(SourceSite {
+                site,
+                ranges: vec![span],
+                implicit: None,
+            });
+        }
+    }
     let source_map = SourceMap::new_identified(document, source, language, layers.sites)?;
     let captions = Captions::new_identified(document, layers.captions)?;
     for (site, written) in &mut layers.written {
-        let body = site.child(0);
-        written.captions = captions
-            .entries()
-            .iter()
-            .filter_map(|entry| {
-                let site = entry.target.site()?;
-                (site.unit == body.unit).then_some(())?;
-                let path = site.path.strip_prefix(body.path.as_slice())?;
-                Some((path.to_vec(), entry.caption.clone()))
-            })
-            .collect();
+        let Some(functions) = bodies.get(site) else {
+            continue;
+        };
+        written.captions = captions.entries().iter().filter(|entry| {
+            entry.target.site().is_some_and(|site| matches!(&site.unit, Unit::Library(function) if functions.contains(function)))
+        }).cloned().collect();
     }
     Ok(SiteLayers {
         source_map,

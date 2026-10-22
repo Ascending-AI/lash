@@ -1,6 +1,6 @@
 //! Shared SQL and identity helpers backends implement their store tier with.
 
-use lash_protocol_types::SessionId;
+use lash_vocabulary::identity::SessionId;
 
 mod append_identity;
 mod config_cache;
@@ -61,7 +61,7 @@ pub use window_cache::{
 /// own, so the committed-turn fact cannot drift between tiers.
 pub fn turn_commit_receipt_storage_key(
     session_id: &SessionId,
-    turn_id: &lash_protocol_types::TurnId,
+    turn_id: &lash_vocabulary::identity::TurnId,
 ) -> Result<String, crate::StoreError> {
     crate::OperationId::new(
         crate::ExecutionScope::turn(session_id.clone(), turn_id.clone()),

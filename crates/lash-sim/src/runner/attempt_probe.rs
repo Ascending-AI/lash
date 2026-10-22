@@ -118,20 +118,24 @@ async fn probe_session(
         .serve_test_llm_profile(provider_handle, model.clone())
         .build(crate::sim_process_owner())
         .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
-    core.session(lash_core::SessionId::fixture(session_id.to_string()))
-        .create(lash::SessionCreation::root(
-            lash::SessionSpec::new(
-                model.wire_model,
-                lash::TurnBudget::Unbounded,
-                lash::MaxToolCalls::new(1024),
-                lash_core::NoProgressBudget::bounded(12),
-            )
-            .charge_safety(charge_safety),
-        ))
-        .await
-        .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
+    core.session(lash_vocabulary::identity::SessionId::fixture(
+        session_id.to_string(),
+    ))
+    .create(lash::SessionCreation::root(
+        lash::SessionSpec::new(
+            model.wire_model,
+            lash::TurnBudget::Unbounded,
+            lash::MaxToolCalls::new(1024),
+            lash_core::NoProgressBudget::bounded(12),
+        )
+        .charge_safety(charge_safety),
+    ))
+    .await
+    .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
     let session = core
-        .session(lash_core::SessionId::fixture(session_id.to_string()))
+        .session(lash_vocabulary::identity::SessionId::fixture(
+            session_id.to_string(),
+        ))
         .open()
         .await
         .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
@@ -142,7 +146,9 @@ async fn probe_session(
     let accepted = session
         .durable()
         .send(lash::TurnInput::text("Run the attempt usage probe."))
-        .id(lash_core::TurnId::fixture(format!("{session_id}-turn")))
+        .id(lash_vocabulary::identity::TurnId::fixture(format!(
+            "{session_id}-turn"
+        )))
         .await
         .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
     let _outcome = crate::backend::settle_handle(accepted, events.clone()).await;
@@ -393,14 +399,14 @@ mod tests {
                 lash::NoProgressBudget::bounded(12),
             )
         };
-        let parent_id = lash::SessionId::fixture("usage-parent");
+        let parent_id = lash_vocabulary::identity::SessionId::fixture("usage-parent");
         let parent = core
             .session(parent_id.clone())
             .create(lash::SessionCreation::root(spec()))
             .await
             .unwrap();
         let child = core
-            .session(lash::SessionId::fixture("usage-child"))
+            .session(lash_vocabulary::identity::SessionId::fixture("usage-child"))
             .create(lash::SessionCreation::child_of(parent_id, spec()))
             .await
             .unwrap();
@@ -414,7 +420,7 @@ mod tests {
         .into_iter()
         .enumerate()
         {
-            let turn = lash::TurnId::fixture(name);
+            let turn = lash_vocabulary::identity::TurnId::fixture(name);
             let handle = parent
                 .send(lash::TurnInput::text(name))
                 .id(turn.clone())
@@ -494,7 +500,7 @@ mod tests {
             expected,
             "known zero must not replace absent crash usage"
         );
-        let child_turn = lash::TurnId::fixture("usage-child-turn");
+        let child_turn = lash_vocabulary::identity::TurnId::fixture("usage-child-turn");
         let handle = child
             .send(lash::TurnInput::text("child"))
             .id(child_turn.clone())
@@ -514,7 +520,7 @@ mod tests {
         );
         assert!(
             child
-                .read_turn_model_calls(&lash::TurnId::fixture("usage-mixed"))
+                .read_turn_model_calls(&lash_vocabulary::identity::TurnId::fixture("usage-mixed"))
                 .await
                 .unwrap()
                 .is_empty()

@@ -15,7 +15,6 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use lash_core_execution::ProcessId;
 use lash_core_execution::ToolCallOutput;
 use lash_core_execution::ToolCancellation;
 use lash_core_execution::runtime::process::steps::{ProcessSteps, StepAdmission, StepRefusal};
@@ -34,7 +33,10 @@ use lash_execution_contracts::process::ProcessOutcome;
 use lash_execution_contracts::process::ProcessRecord;
 use lash_execution_contracts::process::StepName;
 use lash_execution_contracts::process::StepRequest;
-use lash_protocol_types::{ExecutionLimit, ExecutionPolicy, ToolId};
+use lash_protocol_types::ExecutionLimit;
+use lash_vocabulary::identity::ProcessId;
+use lash_vocabulary::tool_contract::ExecutionPolicy;
+use lash_vocabulary::tool_contract::ToolId;
 use serde_json::{Value, json};
 
 use super::world::{BodyEntry, World};
@@ -62,13 +64,10 @@ fn infra(error: impl std::fmt::Display) -> ProcessInfraError {
 }
 
 fn step(name: &str, tool: &str) -> StepRequest {
-    StepRequest::Tool {
+    StepRequest::Engine {
         step: StepName(name.to_owned()),
-        effect: lash_core_execution::testing::effect(tool),
-        contract: lash_core::ContractId::new("fixture"),
+        kind: lash_execution_contracts::process::EngineStepKind::new(tool),
         input: json!({ "step": name }),
-        site: None,
-        matched: None,
     }
 }
 
@@ -116,12 +115,39 @@ impl ProcessEngine for SimProcessEngine {
         lash_execution_contracts::process::ProcessTraceClass::Internal
     }
 
-    async fn performed_effects(
+    async fn inspect_link(
+        &self,
+        link: lash_vocabulary::LinkId,
+        selector: &lash_execution_contracts::process::linking::ReachSelector,
+    ) -> Result<
+        lash_execution_contracts::process::linking::LinkInspection,
+        lash_execution_contracts::process::linking::EnginePortError,
+    > {
+        Ok(lash_execution_contracts::process::linking::LinkInspection {
+            link,
+            document: lash_vocabulary::DocumentId::from_bytes([0; 32]),
+            selector: selector.clone(),
+            operations: Default::default(),
+            machine: Default::default(),
+            artifacts: Vec::new(),
+            signature: None,
+        })
+    }
+    async fn inspect_start(
         &self,
         _payload: &serde_json::Value,
-    ) -> Result<lash_execution_contracts::process::PerformedEffects, lash_core::ProcessEnvRefusal>
-    {
-        Ok(lash_execution_contracts::process::PerformedEffects::new())
+    ) -> Result<
+        lash_execution_contracts::process::linking::LinkInspection,
+        lash_execution_contracts::process::linking::EnginePortError,
+    > {
+        Err(
+            lash_execution_contracts::process::linking::EnginePortError::Unsupported {
+                operation: "generic fixture has no linked code".into(),
+            },
+        )
+    }
+    fn capabilities(&self) -> lash_vocabulary::claims::NodeRequirements {
+        Default::default()
     }
 
     async fn check_args(
@@ -216,9 +242,9 @@ impl ProcessEngine for SimProcessEngine {
                 if settled == 2 {
                     EngineAction::PinKey {
                         name: KeyName(KEY.to_owned()),
-                        bound: lash_core_execution::ParkBound::Within(Duration::from_millis(
-                            KEY_MS,
-                        )),
+                        bound: lash_vocabulary::tool_contract::ParkBound::Within(
+                            Duration::from_millis(KEY_MS),
+                        ),
                     }
                 } else {
                     EngineAction::Idle
@@ -233,7 +259,9 @@ impl ProcessEngine for SimProcessEngine {
                 EngineAction::AwaitProcess {
                     process: ProcessId::parse(script["await"].as_str().unwrap_or_default())
                         .map_err(infra)?,
-                    bound: lash_core_execution::ParkBound::Within(Duration::from_millis(AWAIT_MS)),
+                    bound: lash_vocabulary::tool_contract::ParkBound::Within(
+                        Duration::from_millis(AWAIT_MS),
+                    ),
                     site: None,
                 }
             }
@@ -302,6 +330,13 @@ impl ProcessEngine for SimProcessEngine {
     }
 }
 
+fn fixture_tool(step: &StepRequest) -> ToolId {
+    let StepRequest::Engine { kind, .. } = step else {
+        unreachable!("the fixture emits engine steps")
+    };
+    ToolId::new(kind.0.clone())
+}
+
 fn policy(tool: &ToolId) -> ExecutionPolicy {
     if tool.as_str() == AGAIN {
         ExecutionPolicy::repeatable(std::num::NonZeroU32::MIN.saturating_add(2), 0, 0)
@@ -335,11 +370,12 @@ impl ProcessSteps for SimSteps {
         _runtime: &Arc<lash_core_execution::runtime::process::StepRuntime>,
         _process: &ProcessRecord,
         step: &StepRequest,
+        _target: Option<&lash_core_execution::runtime::process::steps::InvocationTarget>,
         now_ms: u64,
     ) -> Result<StepAdmission, StepRefusal> {
         Ok(StepAdmission::new(
-            lash_core_execution::testing::step_tool(step, KIND),
-            policy(&lash_core_execution::testing::step_tool(step, KIND)),
+            fixture_tool(step),
+            policy(&fixture_tool(step)),
             ExecutionLimit::starting_at(now_ms, Duration::from_secs(60), Duration::from_secs(60)),
             None,
         ))
@@ -368,7 +404,7 @@ impl ProcessSteps for SimSteps {
             let call = execution.call();
             let world = Arc::clone(&self.world);
             let process = process.id.clone();
-            let tool = lash_core_execution::testing::step_tool(step, KIND);
+            let tool = fixture_tool(step);
             let call = call.clone();
             Box::new(move |_token| {
                 Box::pin(async move {

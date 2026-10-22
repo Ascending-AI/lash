@@ -44,7 +44,7 @@
 //!   what the simulator steers.
 //!
 use super::StoreError;
-use crate::SessionId;
+use lash_vocabulary::identity::SessionId;
 
 /// Tracing target every fencing-verdict diagnostic is emitted under.
 ///

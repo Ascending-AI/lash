@@ -26,14 +26,23 @@
 
 use std::cell::Cell;
 
-use lash_core_store::checkpoint_graph::{
-    DecodeLimits, GraphDecoder, GraphRefusal, GraphStaging, NodeId, NodeKind, TokenCodec,
-    TokenError, TokenReader, TokenWriter, TypedBody,
-};
-use lash_core_store::tool_run::{
-    AttemptOutcome, AvailableEvidence, CompletionSource, KnownFailure, KnownFailureReason,
-    LimitCause, MaterialDigest, MaterialLocation, MaterialOwner, MaterialRef, MaterialRole,
-};
+use lash_core_store::checkpoint_graph::DecodeLimits;
+use lash_core_store::checkpoint_graph::GraphDecoder;
+use lash_core_store::checkpoint_graph::GraphRefusal;
+use lash_core_store::checkpoint_graph::GraphStaging;
+use lash_core_store::checkpoint_graph::NodeId;
+use lash_core_store::checkpoint_graph::NodeKind;
+use lash_core_store::checkpoint_graph::TypedBody;
+use lash_core_store::tool_run::AttemptOutcome;
+use lash_core_store::tool_run::AvailableEvidence;
+use lash_core_store::tool_run::CompletionSource;
+use lash_core_store::tool_run::KnownFailure;
+use lash_core_store::tool_run::KnownFailureReason;
+use lash_core_store::tool_run::MaterialDigest;
+use lash_core_store::tool_run::MaterialLocation;
+use lash_core_store::tool_run::MaterialOwner;
+use lash_core_store::tool_run::MaterialRef;
+use lash_core_store::tool_run::MaterialRole;
 use lash_durable::domain::graph::RunFactKind;
 use lash_protocol_types::{
     tool_output::graph::AnswerSlot, tool_output::graph::FrozenJson,
@@ -42,6 +51,12 @@ use lash_protocol_types::{
     tool_output::graph::decode_output, tool_output::graph::encode_json,
     tool_output::graph::encode_output,
 };
+
+use lash_vocabulary::tokens::TokenCodec;
+use lash_vocabulary::tokens::TokenError;
+use lash_vocabulary::tokens::TokenReader;
+use lash_vocabulary::tokens::TokenWriter;
+use lash_vocabulary::tool_contract::LimitCause;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 
@@ -250,9 +265,10 @@ fn encode_attempt(outcome: &AttemptOutcome, out: &mut TokenWriter) {
             encode_material_ref(reference, out);
         }
         AttemptOutcome::Waiting(source) => {
-            out.sum(1, 3);
+            out.sum(1, 4);
             out.text(&source.wait);
             source.terminal.encode(out);
+            source.timer.encode(out);
             encode_material_ref(&source.metadata, out);
         }
         AttemptOutcome::Failed(failure) => {
@@ -290,10 +306,11 @@ fn decode_attempt(input: &mut TokenReader<'_>) -> Result<AttemptOutcome, TokenEr
             AttemptOutcome::Completed(decode_material_ref(input)?)
         }
         1 => {
-            expect(3)?;
+            expect(4)?;
             AttemptOutcome::Waiting(CompletionSource {
                 wait: input.text()?.to_owned(),
                 terminal: Option::decode(input)?,
+                timer: Option::decode(input)?,
                 metadata: decode_material_ref(input)?,
             })
         }
@@ -730,7 +747,7 @@ pub fn stage_value(
     value: &serde_json::Value,
 ) -> Result<MaterialNode, GraphRefusal> {
     let mut body = TokenWriter::new();
-    body.sum(lash_protocol_types::tool_output::graph::FROZEN_JSON, 1);
+    body.sum(lash_vocabulary::tokens::FROZEN_JSON, 1);
     encode_json(value, &mut body);
     staging
         .encode(
@@ -841,10 +858,11 @@ pub enum AdmitMember {
 /// A member's pin, as its admission recorded it: never refreshed.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PinnedMember {
+    pub admitted_at: i64,
     pub call: ToolCallId,
     pub tool: String,
     pub request: MaterialRef,
-    pub policy: lash_protocol_types::ExecutionPolicy,
+    pub policy: lash_vocabulary::tool_contract::ExecutionPolicy,
     pub limit_expires_at_ms: u64,
     pub limit_max_slice_ms: u64,
     /// The completion wait pinned with the admission, by its id's hex: a
@@ -852,7 +870,7 @@ pub struct PinnedMember {
     /// park's deadline is the wait row's alone.
     pub wait_id: Option<String>,
     pub trace: Option<lash_trace::DurableTraceScope>,
-    pub declaration: Option<crate::ToolDeclaration>,
+    pub declaration: Option<lash_vocabulary::tool_declaration::ToolDeclaration>,
     /// The callbacks the admission bound ([`ExecutionDraft::binding`]).
     ///
     /// [`ExecutionDraft::binding`]: super::ExecutionDraft::binding
@@ -864,6 +882,7 @@ impl PinnedMember {
     #[must_use]
     pub fn of(draft: &super::ExecutionDraft) -> Self {
         Self {
+            admitted_at: draft.admitted_at().0,
             call: draft.call().clone(),
             tool: draft.tool().as_str().to_owned(),
             request: draft.request().clone(),
@@ -902,7 +921,7 @@ impl PinnedMember {
         owner: &lash_durable::domain::OwnerKey,
         waits: &super::PinnedWaits,
     ) -> Result<super::ExecutionDraft, &'static str> {
-        let tool = crate::ToolId::new(self.tool.clone());
+        let tool = lash_vocabulary::tool_contract::ToolId::new(self.tool.clone());
         let pinned = self
             .wait_id
             .as_deref()
@@ -917,6 +936,7 @@ impl PinnedMember {
             .transpose()?
             .flatten();
         Ok(super::ExecutionDraft::new(
+            lash_durable::DurableInstant(self.admitted_at),
             self.call.clone(),
             tool,
             self.request.clone(),
@@ -936,7 +956,8 @@ impl PinnedMember {
 
 impl TokenCodec for PinnedMember {
     fn encode(&self, out: &mut TokenWriter) {
-        out.seq(10);
+        out.seq(11);
+        out.signed(self.admitted_at);
         out.text(self.call.as_str());
         out.text(&self.tool);
         encode_material_ref(&self.request, out);
@@ -950,8 +971,9 @@ impl TokenCodec for PinnedMember {
     }
 
     fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
-        input.expect_struct(10)?;
+        input.expect_struct(11)?;
         Ok(Self {
+            admitted_at: input.signed()?,
             call: decode_call_id(input)?,
             tool: input.text()?.to_owned(),
             request: decode_material_ref(input)?,

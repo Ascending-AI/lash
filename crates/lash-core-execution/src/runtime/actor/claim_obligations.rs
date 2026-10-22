@@ -35,14 +35,15 @@ use lash_core_store::checkpoint_graph::bodies::{ExecRoot, ExecStatus};
 use lash_core_store::checkpoint_graph::{
     BlobEncoding, DecodeLimits, EncodedNode, GraphDecoder, NodeId, NodeKind, NodeSource, StoredNode,
 };
-use lash_core_store::obligations::{ObligationToken, RegistryKind};
 use lash_durable::domain::graph::{ExecRootWrite, RunFactKind, RunFactWrite, RunFacts};
 use lash_durable::domain::{ExecKey, ModelCall, OwnerKey, RootOwner, TurnWrite, UnfinishedPhase};
 use lash_durable::{ActorTx, DomainWrite, DurableError, DurableReads, Epoch};
+use lash_vocabulary::claims::ObligationToken;
+use lash_vocabulary::claims::RegistryKind;
 
 use crate::ToolCallId;
-use crate::plugin::PluginCallbackIdentity;
 use crate::tool_run::AdmittedBinding;
+use lash_vocabulary::providers::PluginCallbackIdentity;
 
 /// Where an outstanding use of a claim token is recorded.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -120,7 +121,7 @@ pub struct RequiresMismatch {
 pub struct ExecutionDebts {
     pub exec: ExecKey,
     pub owed: Vec<PluginCallbackIdentity>,
-    pub requirements: lash_kernel_doc::ExecutionRequirements,
+    pub requirements: lash_vocabulary::claims::ClaimRequirements,
 }
 
 /// An actor's outstanding recorded work, as the claim tokens each record
@@ -151,9 +152,9 @@ impl RecordedWork {
     /// `record`, owing nothing else yet.
     #[must_use]
     pub fn process(
-        process: &crate::ProcessId,
+        process: &lash_vocabulary::identity::ProcessId,
         environment: impl IntoIterator<Item = ObligationToken>,
-        record: &lash_kernel_doc::ExecutionRequirements,
+        record: &lash_vocabulary::claims::ClaimRequirements,
     ) -> Self {
         let mut work = Self {
             registry: RegistryKind::Process,
@@ -184,7 +185,7 @@ impl RecordedWork {
     pub async fn read_session_within(
         reads: &dyn DurableReads,
         heads: &dyn crate::store::SessionCommitStore,
-        session: &crate::SessionId,
+        session: &lash_vocabulary::identity::SessionId,
         limits: DecodeLimits,
         max_rows: usize,
     ) -> Result<Self, DurableError> {
@@ -204,7 +205,7 @@ impl RecordedWork {
     /// fault of the store.
     pub async fn read_head(
         heads: &dyn crate::store::SessionCommitStore,
-        session: &crate::SessionId,
+        session: &lash_vocabulary::identity::SessionId,
     ) -> Result<Self, DurableError> {
         let mut work = Self::session();
         let head = heads
@@ -228,7 +229,7 @@ impl RecordedWork {
     /// A read's refusal, or a record that does not decode.
     pub(crate) async fn read_turn(
         reads: &dyn DurableReads,
-        session: &crate::SessionId,
+        session: &lash_vocabulary::identity::SessionId,
         limits: DecodeLimits,
         phase_limits: DecodeLimits,
     ) -> Result<Self, DurableError> {
@@ -241,7 +242,7 @@ impl RecordedWork {
     async fn read_turn_into(
         &mut self,
         reads: &dyn DurableReads,
-        session: &crate::SessionId,
+        session: &lash_vocabulary::identity::SessionId,
         mut limits: DecodeLimits,
         phase_limits: DecodeLimits,
         max_rows: Option<usize>,
@@ -404,10 +405,10 @@ impl RecordedWork {
         owner: OwnerKey,
         call: ToolCallId,
         binding: Option<&AdmittedBinding>,
-        matched: Option<&lash_core_store::tool_surface::OperationLink>,
+        matched: Option<&lash_core_store::tool_surface::OperationRoute>,
     ) {
         let registry = self.registry;
-        let mut linked = lash_kernel_doc::ExecutionRequirements::default();
+        let mut linked = lash_vocabulary::claims::ClaimRequirements::default();
         if let Some(link) = matched {
             link.require(&mut linked);
         }
@@ -577,7 +578,7 @@ impl RecordedWork {
                 self.owe(
                     exec,
                     &[],
-                    &lash_kernel_doc::ExecutionRequirements::default(),
+                    &lash_vocabulary::claims::ClaimRequirements::default(),
                 );
             }
         }
@@ -649,7 +650,7 @@ impl RecordedWork {
         &mut self,
         exec: &ExecKey,
         owed: &[PluginCallbackIdentity],
-        requirements: &lash_kernel_doc::ExecutionRequirements,
+        requirements: &lash_vocabulary::claims::ClaimRequirements,
     ) {
         let registry = self.registry;
         let tokens: Vec<ObligationToken> = owed
@@ -676,7 +677,7 @@ impl RecordedWork {
 fn read_limit(actual: u64, limit: u64) -> DurableError {
     DurableError::Graph(
         lash_core_store::checkpoint_graph::GraphRefusal::DecodeLimit {
-            dimension: lash_core_store::checkpoint_graph::DecodeDimension::Nodes,
+            dimension: lash_vocabulary::tokens::DecodeDimension::Nodes,
             actual,
             limit,
         },
@@ -738,7 +739,7 @@ fn corrupt(record: &str, reason: &str) -> DurableError {
 /// The ledger one claim of a session commits its obligations through.
 #[derive(Debug)]
 pub(super) struct SessionObligations {
-    session: crate::SessionId,
+    session: lash_vocabulary::identity::SessionId,
     /// Held across each commit, so commits stage and land in one order.
     state: tokio::sync::Mutex<State>,
 }
@@ -756,7 +757,10 @@ struct State {
 
 impl SessionObligations {
     /// The ledger of a claim of session `session`, which carried `requires`.
-    pub(super) fn claimed(session: crate::SessionId, requires: &[String]) -> Self {
+    pub(super) fn claimed(
+        session: lash_vocabulary::identity::SessionId,
+        requires: &[String],
+    ) -> Self {
         let mut written = requires.to_vec();
         written.sort();
         written.dedup();
@@ -773,7 +777,7 @@ impl SessionObligations {
     /// outstanding `work` and the `written` requirements the store holds.
     #[cfg(test)]
     pub(super) fn seeded(
-        session: crate::SessionId,
+        session: lash_vocabulary::identity::SessionId,
         work: RecordedWork,
         written: Vec<String>,
     ) -> Self {
@@ -811,7 +815,7 @@ impl SessionObligations {
         commit: F,
     ) -> Result<T, DurableError>
     where
-        R: Fn(crate::SessionId, ReadScope) -> ReadFut,
+        R: Fn(lash_vocabulary::identity::SessionId, ReadScope) -> ReadFut,
         ReadFut: std::future::Future<Output = Result<RecordedWork, DurableError>>,
         F: FnOnce(ActorTx) -> Fut,
         Fut: std::future::Future<Output = Result<T, DurableError>>,
@@ -879,7 +883,7 @@ impl SessionObligations {
         written: Option<&[String]>,
     ) -> Result<RecordedWork, DurableError>
     where
-        R: Fn(crate::SessionId, ReadScope) -> ReadFut,
+        R: Fn(lash_vocabulary::identity::SessionId, ReadScope) -> ReadFut,
         ReadFut: std::future::Future<Output = Result<RecordedWork, DurableError>>,
     {
         let session = || self.session.clone();

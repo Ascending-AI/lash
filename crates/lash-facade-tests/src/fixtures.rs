@@ -79,7 +79,10 @@ impl ToolProvider for LongTextTools {
     fn tool_manifests(
         &self,
         _config: &lash_core::OwnerConfigView,
-    ) -> std::result::Result<Vec<lash_core::ToolManifest>, lash::plugins::PluginError> {
+    ) -> std::result::Result<
+        Vec<lash_vocabulary::tool_contract::ToolManifest>,
+        lash::plugins::PluginError,
+    > {
         Ok(vec![long_text_tool_definition().manifest()])
     }
 
@@ -87,7 +90,7 @@ impl ToolProvider for LongTextTools {
         &self,
         name: &str,
         _config: &lash_core::OwnerConfigView,
-    ) -> Option<Arc<lash_core::ToolContract>> {
+    ) -> Option<Arc<lash_vocabulary::tool_contract::ToolContract>> {
         (name == "tools.app_lookup").then(|| Arc::new(long_text_tool_definition().contract()))
     }
 
@@ -96,8 +99,8 @@ impl ToolProvider for LongTextTools {
     }
 }
 
-fn long_text_tool_definition() -> lash_core::ToolDefinition {
-    lash_core::ToolDefinition::raw(
+fn long_text_tool_definition() -> lash_vocabulary::tool_contract::ToolDefinition {
+    lash_vocabulary::tool_contract::ToolDefinition::raw(
         "tool:app_lookup",
         "tools.app_lookup",
         "Look up verbose app state.",
@@ -132,12 +135,12 @@ pub fn role_and_text(message: &lash_core::Message) -> (String, String) {
 
 pub const DIRECT_PROMPT: &str = "raw prompt";
 
-fn direct_probe_definition() -> lash_core::ToolDefinition {
-    lash_core::ToolDefinition::raw(
+fn direct_probe_definition() -> lash_vocabulary::tool_contract::ToolDefinition {
+    lash_vocabulary::tool_contract::ToolDefinition::raw(
         "tool:direct_probe",
         "tools.direct_probe",
         "Ask the model directly and answer what it said.",
-        lash_core::ToolDefinition::default_input_schema(),
+        lash_vocabulary::tool_contract::ToolDefinition::default_input_schema(),
         serde_json::json!({ "type": "object", "additionalProperties": true }),
     )
     .expect("valid declared tool schemas")
@@ -152,7 +155,10 @@ impl ToolProvider for DirectProbe {
     fn tool_manifests(
         &self,
         _config: &lash_core::OwnerConfigView,
-    ) -> std::result::Result<Vec<lash_core::ToolManifest>, lash::plugins::PluginError> {
+    ) -> std::result::Result<
+        Vec<lash_vocabulary::tool_contract::ToolManifest>,
+        lash::plugins::PluginError,
+    > {
         Ok(vec![direct_probe_definition().manifest()])
     }
 
@@ -160,7 +166,7 @@ impl ToolProvider for DirectProbe {
         &self,
         name: &str,
         _config: &lash_core::OwnerConfigView,
-    ) -> Option<Arc<lash_core::ToolContract>> {
+    ) -> Option<Arc<lash_vocabulary::tool_contract::ToolContract>> {
         (name == "tools.direct_probe").then(|| Arc::new(direct_probe_definition().contract()))
     }
 

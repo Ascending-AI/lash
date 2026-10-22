@@ -1,5 +1,5 @@
-use crate::ProcessId;
 use lash_protocol_types::sync::MutexExt;
+use lash_vocabulary::identity::ProcessId;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, Weak};
 

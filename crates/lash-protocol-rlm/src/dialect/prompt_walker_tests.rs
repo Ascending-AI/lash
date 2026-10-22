@@ -160,7 +160,7 @@ async fn assembled_prompt_fragments_with_projection(
     projected_value: serde_json::Value,
 ) -> Vec<(&'static str, String)> {
     let vocabulary = dialect.prompt_vocabulary();
-    let tool = lash_core::ToolDefinition::raw(
+    let tool = lash_vocabulary::tool_contract::ToolDefinition::raw(
         "tool:test/web_fetch",
         "web.fetch",
         "Fetch a URL",
@@ -178,7 +178,7 @@ async fn assembled_prompt_fragments_with_projection(
     // `processes.list`. The first fixture's schema is one string field, so the
     // tool-docs fragment never rendered a collection or record type label and
     // the walker could not see what a TypeScript reader is shown for them.
-    let listing = lash_core::ToolDefinition::raw(
+    let listing = lash_vocabulary::tool_contract::ToolDefinition::raw(
         "tool:test/list_process_handles",
         "processes.list",
         "List process runs visible to this session",
@@ -217,7 +217,7 @@ async fn assembled_prompt_fragments_with_projection(
     // and a field without a description. Every fixture above is a closed
     // object, which is the one shape the retired signature rows and the
     // widened `Record<string, unknown>` never showed up in.
-    let imported = lash_core::ToolDefinition::raw(
+    let imported = lash_vocabulary::tool_contract::ToolDefinition::raw(
         "tool:test/issues_search",
         "tracker.issues_search",
         "[MCP tracker] Search issues.",
@@ -289,8 +289,10 @@ async fn assembled_prompt_fragments_with_projection(
         "deferred-tool advertisement",
         crate::catalogue_preview(
             [crate::CataloguePreviewEntry::new(
-                lash_core::IntoOperation::into_operation("workbench_deferred.stats")
-                    .expect("a canonical operation"),
+                lash_vocabulary::tool_contract::IntoOperation::into_operation(
+                    "workbench_deferred.stats",
+                )
+                .expect("a canonical operation"),
             )],
             &crate::CataloguePreviewOptions::default(),
         )

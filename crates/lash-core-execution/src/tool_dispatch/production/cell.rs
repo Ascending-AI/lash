@@ -37,9 +37,12 @@ use crate::runtime::actor::round::{
 use crate::runtime::actor::waits::Resolution;
 use crate::session::tool_execution::{ToolInvocation, ToolInvocationReply};
 use crate::tool_run::CompletionSource;
-use lash_core_store::checkpoint_graph::{TokenCodec, TokenError, TokenReader, TokenWriter};
 use lash_core_store::tool_run::Material;
 use lash_core_store::tool_run::SettledOutput;
+use lash_vocabulary::tokens::TokenCodec;
+use lash_vocabulary::tokens::TokenError;
+use lash_vocabulary::tokens::TokenReader;
+use lash_vocabulary::tokens::TokenWriter;
 
 /// One tool call a cell makes, as its admitted member's frozen request
 /// carries it: everything its body is built from again, on any owner.
@@ -48,12 +51,12 @@ pub struct CellCall {
     /// The call's lash-minted identity.
     pub id: crate::ToolCallId,
     /// The tool it calls.
-    pub tool_id: crate::ToolId,
+    pub tool_id: lash_vocabulary::tool_contract::ToolId,
     /// Its arguments.
     pub args: serde_json::Value,
     /// The contract the cell's code requires of the call's operation: the
     /// one its tool must serve (OP-CONTRACT-PIN).
-    pub contract: lash_kernel_doc::ContractId,
+    pub contract: lash_vocabulary::operations::ContractId,
     /// The grant a deferred resolution pinned, for a tool outside the
     /// catalog.
     pub execution_grant: Option<Box<crate::ToolExecutionGrant>>,
@@ -65,7 +68,10 @@ impl CellCall {
     /// The call `invocation` makes, pinned to `contract`, the one the
     /// cell's code requires.
     #[must_use]
-    pub fn of(invocation: &ToolInvocation, contract: lash_kernel_doc::ContractId) -> Self {
+    pub fn of(
+        invocation: &ToolInvocation,
+        contract: lash_vocabulary::operations::ContractId,
+    ) -> Self {
         Self {
             id: invocation.id.clone(),
             tool_id: invocation.tool_id.clone(),
@@ -126,9 +132,9 @@ impl CellCall {
         input.expect_struct(4)?;
         Ok(Self {
             id,
-            tool_id: crate::ToolId::new(input.text()?),
+            tool_id: lash_vocabulary::tool_contract::ToolId::new(input.text()?),
             args,
-            contract: lash_kernel_doc::ContractId::decode(input)?,
+            contract: lash_vocabulary::operations::ContractId::decode(input)?,
             execution_grant: decode_opt_tree(input)?.map(Box::new),
             issuing_language_node_id: Option::decode(input)?,
         })
@@ -415,7 +421,7 @@ impl CellMembers {
         }
         Err(
             lash_execution_contracts::plugin_error::PluginError::ToolRegistrationRefused {
-                source: Box::new(crate::RegistrationRefused::UnregisteredIsolationEngine {
+                source: Box::new(lash_vocabulary::tool_contract::RegistrationRefused::UnregisteredIsolationEngine {
                     tool: definition.manifest.tool(),
                     engine: engine.to_owned(),
                 }),

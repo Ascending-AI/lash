@@ -72,10 +72,8 @@ pub use ids::{
     MailSeq, NodeId, StateRevision,
 };
 pub use node_wakes::{BootLiveness, NodeWakeEvent, NodeWakeFeed, NodeWakes, WakeBatch};
-pub use packages::{
-    ArtifactDigest, ExecutionRequirements, NodeCapabilities, NodeCapability, PackageArtifact,
-    PackageCatalog, PackageSetDigest, StoredSet,
-};
+pub use packages::{ClaimRequirements, NodeCapabilities, NodeCapability};
+pub mod resolutions;
 pub use port::{
     ActorCommit, ActorSnapshot, ActorState, ClaimActorFacts, ClaimCause, ClaimFacts,
     ClaimNodeFacts, ClaimPurpose, Claimed, DurableStore, HeartbeatOutcome, MailCommit, NodeLease,

@@ -27,14 +27,18 @@ use lash_core_store::execution_state::{
     ExecutionGraphCapture, ExecutionGraphPurpose, HydratedExecutionGraph,
 };
 use lash_durable::domain::pages::RootLease;
+use lash_kernel_doc::Datum;
+use lash_kernel_doc::KERNEL_VERSION;
+use lash_kernel_doc::NumberPolicy;
 use lash_kernel_doc::heap::{HeapFault, PageGrant, PageId, PageRef};
-use lash_kernel_doc::{Datum, FunctionId, KERNEL_VERSION, Name, NumberPolicy};
 use lash_kernel_state::paged::session::{Note, SessionNotes, edit_notes, read_notes};
 use lash_kernel_state::paged::{PageAnswer, PageBody, PageSource, SessionRoot};
 use lash_kernel_vm::{SessionEditor, SessionValue};
 use lash_vm_broker::kernel::closure::Closure;
 use lash_vm_broker::kernel::pages::{ParentSeal, SharedSpool, SpoolRoot, answer_page};
 use lash_vm_client::service::LowerFunction;
+use lash_vocabulary::names::FunctionId;
+use lash_vocabulary::names::Name;
 
 use super::pages::{PageAccessError, SessionPageAccess};
 use super::snapshot::SessionOpenError;
@@ -60,8 +64,6 @@ struct Version {
     /// The library functions the session's saved functions pin, together
     /// (FIG-5799): bounded by the build's library, never by the session.
     pins: BTreeSet<FunctionId>,
-    /// The package set the saved functions are linked to (K-LIB-009).
-    linked: Option<lash_kernel_doc::PackageSetDigest>,
 }
 
 impl Default for Version {
@@ -82,7 +84,6 @@ impl Version {
             cells: 0,
             notes: SessionNotes::EMPTY,
             pins: BTreeSet::new(),
-            linked: None,
         }
     }
 }
@@ -128,10 +129,12 @@ struct Pending {
     releases: bool,
 }
 
-/// Why a cell's saved functions could not be relinked to its package set.
+/// Why a cell's saved functions could not be relinked against its Namespaces.
 #[derive(Debug, thiserror::Error)]
 pub(super) enum RelinkError {
-    #[error("the cell's package set does not assemble: {0}")]
+    #[error(transparent)]
+    Package(#[from] lash_execution_contracts::process::linking::EnginePortError),
+    #[error("the cell's Namespaces do not assemble: {0}")]
     Library(String),
     #[error(transparent)]
     Pages(#[from] PageAccessError),
@@ -146,6 +149,7 @@ pub(super) struct CellChanges {
 /// cells are written in, and the bookkeeping its captures are built from.
 pub struct CodeModeExecutionState {
     dialect: Arc<str>,
+    pub(super) documents: Option<lash_vm_runtime::KernelDocuments>,
     numbers: NumberPolicy,
     current: Version,
     /// The descriptor the store holds as of the last acknowledged capture
@@ -158,14 +162,9 @@ pub struct CodeModeExecutionState {
     closures: BTreeMap<NodeId, Closure>,
     /// The closures an acknowledged capture installed.
     installed_closures: BTreeSet<NodeId>,
-    /// The package set the session's latest prompt showed: the fleet
-    /// gate's answer for its round, which the round's cell is written
-    /// under while this node holds it (P3).
-    shown: Option<crate::plugin::CellPackages>,
-    /// The surface of every set this state's cells were written under, by
-    /// digest: the releases a stale value's message names beside the
-    /// node's own (FIG-6993).
-    read: BTreeMap<lash_kernel_doc::PackageSetDigest, Arc<lash_kernel_package::SurfaceSnapshot>>,
+    /// The Current advertisement snapshot shown by the session's latest
+    /// prompt and retained for its round's cell (P3).
+    shown: Option<lash_core_store::tool_surface::RecordedPackages>,
     pending: Option<Pending>,
     /// Whether the state as it stands is a turn's working state no session
     /// revision publishes yet: the turn's final capture owes it even when
@@ -207,13 +206,13 @@ impl CodeModeExecutionState {
     pub(crate) fn new(dialect: impl Into<Arc<str>>, numbers: NumberPolicy) -> Self {
         Self {
             dialect: dialect.into(),
+            documents: None,
             numbers,
             current: Version::default(),
             installed: None,
             closures: BTreeMap::new(),
             installed_closures: BTreeSet::new(),
             shown: None,
-            read: BTreeMap::new(),
             pending: None,
             final_owed: false,
             active: None,
@@ -485,7 +484,6 @@ impl CodeModeExecutionState {
                 session,
                 notes: version.notes,
                 pins: version.pins.clone(),
-                linked: version.linked,
             },
         )?;
         let id = NodeId(page.id.0);
@@ -543,13 +541,24 @@ impl CodeModeExecutionState {
     /// A saved function's description as a cell is lowered against it,
     /// carried to this build's kernel version.
     fn lower_function(&self, name: &Name, meta: &[u8]) -> Result<LowerFunction, String> {
-        let function =
-            LowerFunction::from_description(meta, lash_kernel_doc::KernelDataLimits::standard())
-                .map_err(|error| format!("the saved function `{name}` does not decode: {error}"))?;
+        let function = LowerFunction::from_description_with(
+            meta,
+            lash_vocabulary::data_limits::KernelDataLimits::standard(),
+            |body| match self
+                .view
+                .functions
+                .as_ref()
+                .and_then(|known| known.get(name))
+            {
+                Some(known) if known.document.body() == body => Ok(known.document.clone()),
+                _ => lash_kernel_doc::IdentifiedDocument::decode_standard(body),
+            },
+        )
+        .map_err(|error| format!("the saved function `{name}` does not decode: {error}"))?;
         match self.kernel.saved_function(&function.clone().into_saved()) {
             Ok(None) => Ok(function),
             Ok(Some(carried)) => Ok(LowerFunction {
-                document: lash_kernel_doc::IdentifiedDocument::new(carried.document),
+                document: carried.document,
                 ..function
             }),
             Err(refusal) => Err(refusal.to_string()),
@@ -569,45 +578,80 @@ impl CodeModeExecutionState {
     /// A library that does not assemble, and the pages' faults.
     pub(super) async fn relink(
         &mut self,
-        cell: &crate::plugin::CellPackages,
-    ) -> Result<(), RelinkError> {
-        let packages = cell.digest();
-        self.read
-            .entry(packages)
-            .or_insert_with(|| Arc::clone(cell.surface()));
-        if self.current.linked == Some(packages) {
-            return Ok(());
-        }
-        let view = cell.view();
-        let library = view
-            .library(view.catalog())
-            .map_err(|error| RelinkError::Library(error.to_string()))?;
+        documents: &lash_vm_runtime::KernelDocuments,
+        boundary: &lash_vm_runtime::HostBoundary,
+        claim: &lash_core::ReferrerClaim,
+    ) -> Result<BTreeSet<lash_vocabulary::LinkId>, RelinkError> {
         let mut functions = self.view.functions.clone().unwrap_or_default();
         let mut rewritten = Vec::new();
         let mut dropped = Vec::new();
         for (name, function) in &mut functions {
-            match lash_kernel_dialect::relink_saved(&function.clone().into_saved(), &library, &view)
-            {
-                Ok(relinked) if relinked.document.identity() == function.document.id() => {}
+            let saved = function.clone().into_saved();
+            documents
+                .admit_identified_document(claim, &function.document)
+                .await
+                .map_err(RelinkError::Package)?;
+            let fulfilled = documents
+                .fulfil(&lash_execution_contracts::process::linking::FulfilRequest {
+                    document: function.document.id(),
+                    selector: lash_execution_contracts::process::linking::ReachSelector::AllExports,
+                    snapshot: boundary.snapshot.clone(),
+                    context: boundary.context.clone(),
+                    purpose: lash_execution_contracts::process::linking::LinkPurpose::Cell,
+                })
+                .await
+                .map_err(RelinkError::Package)?;
+            documents
+                .hold(
+                    claim,
+                    &lash_execution_contracts::process::linking::ContentRef::Link(
+                        fulfilled.inspection.link,
+                    ),
+                )
+                .await
+                .map_err(RelinkError::Package)?;
+            match lash_kernel_dialect::relink_saved(&saved, &fulfilled.content) {
+                Ok(relinked) if relinked.callable == function.callable => {}
                 Ok(relinked) => {
-                    let closure = lash_vm_broker::kernel::closure::derive(
-                        relinked.document.manifest.functions.keys().copied(),
-                        view.catalog(),
-                        &std::collections::BTreeMap::new(),
+                    function.callable = relinked.callable;
+                    function.link = relinked.callable.link;
+                    let content = documents
+                        .load_linked(function.link)
+                        .await
+                        .map_err(|error| RelinkError::Library(error.to_string()))?;
+                    let reach = content
+                        .inspect(
+                            function.link,
+                            &lash_kernel_package::ReachSelection::AllExports,
+                        )
+                        .map_err(|error| RelinkError::Library(error.to_string()))?;
+                    let held = self
+                        .kernel
+                        .library()
+                        .map_err(|error| RelinkError::Library(error.to_string()))?;
+                    let loaded = lash_vm_broker::kernel::loader::declare_reach(
+                        &function.document,
+                        &content
+                            .documents
+                            .iter()
+                            .map(|(id, document)| (*id, Arc::new(document.clone())))
+                            .collect(),
+                        &reach.functions,
+                        &reach.machine,
+                        &held,
                     )
-                    .map_err(|refusal| RelinkError::Library(refusal.to_string()))?;
-                    function.against = relinked.against;
-                    function.document = lash_kernel_doc::IdentifiedDocument::new(relinked.document);
-                    rewritten.push((name.clone(), function.description(), closure));
+                    .map_err(|error| RelinkError::Library(error.to_string()))?;
+                    rewritten.push((name.clone(), function.description(), loaded.closure));
                 }
                 Err(unusable) => dropped.push((
                     name.clone(),
                     function.held.as_ref().map(|held| held.binding.clone()),
                     unusable.to_string(),
+                    saved.environment,
                 )),
             }
         }
-        for (name, _, _) in &dropped {
+        for (name, _, _, _) in &dropped {
             functions.remove(name);
         }
         // A relinked record names its new closure, which the cell's run
@@ -627,10 +671,9 @@ impl CodeModeExecutionState {
             }
         }
         let mut next = self.current.clone();
-        next.linked = Some(packages);
         next.pins = functions
             .values()
-            .flat_map(|function| function.document.manifest.functions.keys().copied())
+            .flat_map(|function| function.document.functions.keys().copied())
             .collect();
         // Each dropped function's name, and the binding dropped with it.
         let mut unbound: Vec<(Name, Name)> = Vec::new();
@@ -650,9 +693,9 @@ impl CodeModeExecutionState {
                     )
                 })
                 .collect();
-            let drops: Vec<(Name, Option<Name>)> = dropped
+            let drops: Vec<(Name, Option<Name>, lash_kernel_doc::heap::EntityId)> = dropped
                 .iter()
-                .map(|(name, holder, _)| (name.clone(), holder.clone()))
+                .map(|(name, holder, _, environment)| (name.clone(), holder.clone(), *environment))
                 .collect();
             let (session, removed) = self
                 .pages
@@ -665,9 +708,11 @@ impl CodeModeExecutionState {
                     // generated name takes the binding that held it, while
                     // that binding still refers to it.
                     let mut removed = Vec::new();
-                    for (name, holder) in &drops {
+                    for (name, holder, environment) in &drops {
                         let holder = match holder {
-                            Some(holder) if editor.refers(holder, name)? => Some(holder.clone()),
+                            Some(holder) if editor.refers(holder, environment)? => {
+                                Some(holder.clone())
+                            }
                             Some(_) => None,
                             None => Some(name.clone()),
                         };
@@ -683,14 +728,14 @@ impl CodeModeExecutionState {
             next.session = Some(session);
             unbound = removed;
             let root = self.current.notes;
-            let functions: Vec<Name> = dropped.iter().map(|(name, _, _)| name.clone()).collect();
+            let functions: Vec<Name> = dropped.iter().map(|(name, _, _, _)| name.clone()).collect();
             let notes: Vec<(Name, String)> = unbound
                 .iter()
                 .filter_map(|(function, binding)| {
                     dropped
                         .iter()
-                        .find(|(name, _, _)| name == function)
-                        .map(|(_, _, why)| (binding.clone(), why.clone()))
+                        .find(|(name, _, _, _)| name == function)
+                        .map(|(_, _, why, _)| (binding.clone(), why.clone()))
                 })
                 .collect();
             next.notes = self
@@ -709,7 +754,7 @@ impl CodeModeExecutionState {
                 .await?;
         }
         if let Some(notes) = &mut self.view.notes {
-            for (name, _, _) in &dropped {
+            for (name, _, _, _) in &dropped {
                 if let Some(note) = notes.get_mut(name) {
                     note.saved = None;
                     if note.not_carried.is_none() {
@@ -723,9 +768,9 @@ impl CodeModeExecutionState {
                 names.remove(binding);
             }
             self.view.values.remove(binding);
-            if let (Some(notes), Some((_, _, why))) = (
+            if let (Some(notes), Some((_, _, why, _))) = (
                 &mut self.view.notes,
-                dropped.iter().find(|(name, _, _)| name == function),
+                dropped.iter().find(|(name, _, _, _)| name == function),
             ) {
                 let note = notes.entry(binding.clone()).or_default();
                 note.not_carried = Some(why.clone());
@@ -738,7 +783,13 @@ impl CodeModeExecutionState {
         } else {
             next
         };
-        Ok(())
+        Ok(self
+            .view
+            .functions
+            .as_ref()
+            .into_iter()
+            .flat_map(|functions| functions.values().map(|function| function.link))
+            .collect())
     }
 
     /// Marks the start of a cell: the session as it stands is what a
@@ -810,6 +861,10 @@ impl CodeModeExecutionState {
             self.pages.hold(run);
         }
         self.stage_carry(carry, not_carried).await
+    }
+
+    pub(super) fn hold_run(&mut self, run: super::pages::HeldRun) {
+        self.pages.hold(run);
     }
 
     async fn stage_carry(
@@ -941,7 +996,7 @@ impl CodeModeExecutionState {
         if let Some(functions) = &self.view.functions {
             next.pins = functions
                 .values()
-                .flat_map(|function| function.document.manifest.functions.keys().copied())
+                .flat_map(|function| function.document.functions.keys().copied())
                 .collect();
         }
         self.current = self.seal_descriptor(next, spool)?;
@@ -1027,20 +1082,17 @@ impl CodeModeExecutionState {
         }
     }
 
-    /// Notes that the round's prompt showed `packages`, the gate's answer
-    /// for the round.
-    pub(crate) fn shows_packages(&mut self, packages: crate::plugin::CellPackages) {
+    /// Notes the Current advertisement snapshot shown by the round's prompt.
+    pub(crate) fn shows_packages(
+        &mut self,
+        packages: lash_core_store::tool_surface::RecordedPackages,
+    ) {
         self.shown = Some(packages);
     }
 
-    /// The package set the session's latest prompt showed.
-    pub(crate) fn shown_packages(&self) -> Option<crate::plugin::CellPackages> {
+    /// The Current advertisement snapshot the session's latest prompt showed.
+    pub(crate) fn shown_packages(&self) -> Option<lash_core_store::tool_surface::RecordedPackages> {
         self.shown.clone()
-    }
-
-    /// The surfaces of the sets this state's cells were written under.
-    pub(crate) fn read_surfaces(&self) -> Vec<&lash_kernel_package::SurfaceSnapshot> {
-        self.read.values().map(AsRef::as_ref).collect()
     }
 
     /// The session's descriptor as it stands, if it holds one.
@@ -1193,7 +1245,6 @@ impl CodeModeExecutionState {
             cells: read.cells,
             notes: read.notes,
             pins: read.pins,
-            linked: read.linked,
         };
         self.installed = Some(graph.root);
         self.final_owed = purpose == ExecutionGraphPurpose::Working;

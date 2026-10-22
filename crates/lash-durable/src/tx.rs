@@ -10,7 +10,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use lash_core_store::checkpoint_graph::{
     EncodeBudget, EncodedNode, ExplicitLimit, GraphCommitBudget, GraphRefusal, GraphStaging, NodeId,
 };
-use lash_protocol_types::{SessionId, TurnId};
+use lash_vocabulary::identity::SessionId;
+use lash_vocabulary::identity::TurnId;
 
 use crate::domain::RootOwner;
 use crate::domain::namespace_value::NamespaceValue;
@@ -101,7 +102,7 @@ pub struct ActorTx {
     graph: BTreeMap<NodeId, EncodedNode>,
     reads: BTreeSet<NodeId>,
     budget: Option<GraphCommitBudget>,
-    owed: BTreeMap<NodeId, Vec<lash_core_store::store::plugin_writers::PluginCallbackIdentity>>,
+    owed: BTreeMap<NodeId, Vec<lash_vocabulary::providers::PluginCallbackIdentity>>,
 }
 
 /// What a fenced read saw of one owned actor.
@@ -286,7 +287,11 @@ impl ActorTx {
                 // Keep wakes for cross-actor delivery and scope changes.
                 | DomainWrite::Wait(_)
                 | DomainWrite::Process(_) => true,
-                DomainWrite::RunFact(_)
+                DomainWrite::RegisterExecution(_)
+                | DomainWrite::EndExecution(_)
+                | DomainWrite::AdoptExecution(_)
+                | DomainWrite::SeedResolution(_)
+                | DomainWrite::RunFact(_)
                 | DomainWrite::ExecRoot(_)
                 | DomainWrite::EffectAdmission(_)
                 | DomainWrite::Prompt(_)
@@ -297,6 +302,34 @@ impl ActorTx {
 
     /// Write `write` when this transaction commits, after the fence and the
     /// writes recorded before it.
+    /// Record a validated inherited resolution with execution admission.
+    pub fn seed_resolution(&mut self, record: crate::resolutions::ResolutionRecord) -> &mut Self {
+        self.write(DomainWrite::SeedResolution(record))
+    }
+
+    /// Extend use membership during an explicitly validated adoption.
+    pub fn adopt_execution(
+        &mut self,
+        record: crate::resolutions::ExecutionRegistration,
+    ) -> &mut Self {
+        self.write(DomainWrite::AdoptExecution(record))
+    }
+
+    /// Retire source debt; set_requires supplies remaining non-execution debt.
+    pub fn end_execution(&mut self, execution: crate::resolutions::ExecutionId) -> &mut Self {
+        // Force the source reducer to refresh debt, preserving other tokens.
+        self.write(DomainWrite::EndExecution(execution))
+    }
+
+    /// Register the committing actor's execution before its first resolution.
+    pub fn register_execution(
+        &mut self,
+        registration: crate::resolutions::ExecutionRegistration,
+    ) -> &mut Self {
+        self.write(DomainWrite::RegisterExecution(registration))
+    }
+
+    /// Apply a domain write after the ownership fence, in recorded order.
     pub fn write(&mut self, write: DomainWrite) -> &mut Self {
         self.domain.push(write);
         self
@@ -371,7 +404,7 @@ impl ActorTx {
     pub fn owe(
         &mut self,
         root: NodeId,
-        owed: Vec<lash_core_store::store::plugin_writers::PluginCallbackIdentity>,
+        owed: Vec<lash_vocabulary::providers::PluginCallbackIdentity>,
     ) -> &mut Self {
         self.owed.insert(root, owed);
         self
@@ -382,7 +415,7 @@ impl ActorTx {
     pub fn owed(
         &self,
         root: &NodeId,
-    ) -> Option<&[lash_core_store::store::plugin_writers::PluginCallbackIdentity]> {
+    ) -> Option<&[lash_vocabulary::providers::PluginCallbackIdentity]> {
         self.owed.get(root).map(Vec::as_slice)
     }
 

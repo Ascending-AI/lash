@@ -10,9 +10,11 @@
 //! step.
 
 mod actions;
+mod callable_capture;
 mod catches;
 mod checkpoint;
 mod exec;
+mod export_abi;
 mod foreign;
 mod frames;
 pub(crate) mod islands;
@@ -28,6 +30,7 @@ mod park_laws;
 mod plan_regions;
 mod plans;
 pub(crate) mod project;
+mod public_value;
 mod queue;
 mod raises;
 mod refine;
@@ -44,7 +47,10 @@ use std::sync::Arc;
 
 use lash_kernel_doc::arena::ArenaHandle;
 use lash_kernel_doc::heap::PageValue;
-use lash_kernel_doc::{Datum, DocumentId, Name, TaskId, Value};
+use lash_kernel_doc::{Datum, TaskId, Value};
+
+use lash_vocabulary::names::DocumentId;
+use lash_vocabulary::names::Name;
 
 use crate::compile::Layout;
 use crate::compile::{BlockId, CodeId, Executable, LibId, StmtId};
@@ -88,7 +94,7 @@ pub(crate) enum Halt {
 
 impl Halt {
     /// Preserve the innermost library definition that caused a bound.
-    fn in_function(mut self, function: &lash_kernel_doc::FunctionName) -> Self {
+    fn in_function(mut self, function: &lash_vocabulary::names::FunctionName) -> Self {
         if let Self::Bound(exceeded) = &mut self {
             exceeded.function.get_or_insert_with(|| function.clone());
         }
@@ -129,7 +135,7 @@ impl Interrupt {
             data: None,
         }))
     }
-    fn in_function(self, function: &lash_kernel_doc::FunctionName) -> Self {
+    fn in_function(self, function: &lash_vocabulary::names::FunctionName) -> Self {
         match self {
             Self::Halt(halt) => Self::from((*halt).in_function(function)),
             other => other,
@@ -295,7 +301,6 @@ struct Storage {
     frames: Vec<Box<Frame>>,
     entry_sites: Vec<Option<lash_kernel_state::paged::SiteRef>>,
     /// Each closure code's site, which every closure of it shares.
-    closure_sites: Vec<Option<Arc<lash_kernel_doc::Site>>>,
     /// A spent closure call's capture buffer, which the next one's cells
     /// are copied into.
     captures: Vec<ArenaHandle>,
@@ -313,6 +318,9 @@ struct Storage {
 }
 
 struct Frame {
+    convention: Option<lash_kernel_doc::StartConvention>,
+    public_result: Option<lash_vocabulary::types::Type>,
+    link: lash_vocabulary::content_ids::LinkId,
     code: CodeId,
     // Rebuilt from the admitted code; never written to a frame row.
     charging: bool,
@@ -366,6 +374,7 @@ struct Task {
 /// `run` and `deliver`.
 pub struct KernelMachine {
     program: Program,
+    active_link: lash_vocabulary::content_ids::LinkId,
     /// The document's identity, which a parked run pins, once it has been
     /// taken.
     document: Option<DocumentId>,
@@ -378,7 +387,7 @@ pub struct KernelMachine {
     heap: PagedHeap,
     /// The objects the run executes on; the heap is their projection.
     arena: SharedArena,
-    limits: lash_kernel_doc::KernelDataLimits,
+    limits: lash_vocabulary::data_limits::KernelDataLimits,
     closure: PageId,
     owner: PageId,
     tasks: tasks::Tasks,
@@ -398,7 +407,7 @@ pub struct KernelMachine {
     withdrawn_ever: Tree<u64>,
     /// The mode each effect is performed in, bound at the start and saved
     /// with the run (`K-EFF-012`).
-    modes: Tree<lash_kernel_state::paged::NameRef>,
+    modes: Tree<lash_vocabulary::names::OperationUse>,
     /// The session's saved functions ([`FunctionRecord`]s by declared
     /// name), when the run is a session cell.
     ///
@@ -571,43 +580,96 @@ impl KernelMachine {
         self.steps.verified
     }
 
-    /// Binds `modes` to a run that has executed nothing: each read names an
-    /// effect the document's manifest declares.
-    fn bind_modes(&mut self, modes: crate::interface::EffectModes) -> Result<(), StartError> {
-        for effect in modes.reads() {
-            if !self.program.document.manifest.effects.contains_key(effect) {
-                return Err(StartError::UndeclaredRead {
-                    effect: effect.clone(),
-                });
+    fn current_link(&self) -> lash_vocabulary::content_ids::LinkId {
+        self.active_link
+    }
+
+    /// The defining Link owns this call, including unwind and early error exits.
+    fn in_link<R>(&mut self, link: lash_vocabulary::LinkId, run: impl FnOnce(&mut Self) -> R) -> R {
+        struct Restore<'a> {
+            machine: &'a mut KernelMachine,
+            previous: lash_vocabulary::LinkId,
+        }
+        impl Drop for Restore<'_> {
+            fn drop(&mut self) {
+                self.machine.active_link = self.previous;
             }
-            let name = Name::new(effect.as_str());
-            self.modes.write(
-                lash_kernel_state::kernel_internals::metadata::metadata_key(&name),
-                lash_kernel_state::paged::NameRef::new(&name, self.heap.pages())?,
-                self.heap.pages(),
-            )?;
+        }
+        let previous = self.active_link;
+        let scope = Restore {
+            machine: self,
+            previous,
+        };
+        scope.machine.active_link = link;
+        run(&mut *scope.machine)
+    }
+
+    /// Read bindings are pinned by use; unresolved uses always wait.
+    fn bind_modes(&mut self, modes: crate::interface::EffectModes) -> Result<(), StartError> {
+        for (use_, mode) in modes {
+            let declared = self
+                .program
+                .instances
+                .get(&use_.link)
+                .and_then(|instance| instance.slots.get(&use_.slot));
+            if !matches!(declared, Some(crate::interface::PreparedSlot::Operation(found)) if *found == use_)
+            {
+                return Err(StartError::UndeclaredRead { use_ });
+            }
+            if mode == lash_vocabulary::package::OperationMode::Read {
+                self.modes
+                    .write(operation_key(&use_), use_, self.heap.pages())?;
+            }
         }
         Ok(())
     }
+
     fn effect_mode(
         &self,
-        effect: &lash_kernel_doc::EffectName,
-    ) -> Result<crate::interface::EffectMode, HeapFault> {
-        let name = Name::new(effect.as_str());
+        use_: &lash_vocabulary::names::OperationUse,
+    ) -> Result<lash_vocabulary::package::OperationMode, HeapFault> {
         Ok(
             if self
                 .modes
-                .get(
-                    &lash_kernel_state::kernel_internals::metadata::metadata_key(&name),
-                    self.heap.pages(),
-                )?
+                .get(&operation_key(use_), self.heap.pages())?
                 .is_some()
             {
-                crate::interface::EffectMode::Read
+                lash_vocabulary::package::OperationMode::Read
             } else {
-                crate::interface::EffectMode::Recorded
+                lash_vocabulary::package::OperationMode::Waited
             },
         )
+    }
+
+    fn operation(
+        &mut self,
+        task: TaskId,
+        slot: lash_vocabulary::names::ImportSlot,
+    ) -> Result<lash_vocabulary::names::OperationUse, Halt> {
+        let link = self.frame(task)?.link;
+        self.operation_in_link(link, slot)
+    }
+
+    fn operation_in_link(
+        &self,
+        link: lash_vocabulary::LinkId,
+        slot: lash_vocabulary::ImportSlot,
+    ) -> Result<lash_vocabulary::OperationUse, Halt> {
+        match self
+            .program
+            .instances
+            .get(&link)
+            .and_then(|instance| instance.slots.get(&slot))
+        {
+            Some(crate::interface::PreparedSlot::Operation(use_))
+                if use_.link == link && use_.slot == slot =>
+            {
+                Ok(*use_)
+            }
+            _ => Err(fault(
+                "perform slot is not an operation of the running Link",
+            )),
+        }
     }
 
     /// The task `task`: the running task through its cursor
@@ -987,6 +1049,7 @@ impl KernelMachine {
 
     /// Runs one statement of `task`, or resumes the one it waits in.
     fn step(&mut self, task: TaskId, host: &mut dyn Host, exe: &Executable) -> Result<(), Halt> {
+        self.active_link = self.frame(task)?.link;
         self.tasks.protect(Some(task));
         let result = self.step_protected(task, host, exe);
         // The prepared statement owns the kill set, including on park,
@@ -1302,6 +1365,12 @@ impl KernelMachine {
         // The executable is the run's for its whole life.
         let exe = Arc::clone(&self.exe);
         loop {
+            if let Some(end) = self.end.take() {
+                if let Err(halt) = self.publish_holdings() {
+                    return self.ended_by(halt);
+                }
+                return Ok(self.finish_with(end));
+            }
             let task = match self.current {
                 Some(task) => task,
                 None => match self.ready.pop_front().map_err(MachineError::Heap)? {
@@ -1586,4 +1655,10 @@ impl KernelMachine {
             Err("the frame has no row".to_string())
         }
     }
+}
+
+fn operation_key(use_: &lash_vocabulary::names::OperationUse) -> Vec<u8> {
+    let mut key = use_.link.as_bytes().to_vec();
+    key.extend_from_slice(&use_.slot.0.to_be_bytes());
+    key
 }

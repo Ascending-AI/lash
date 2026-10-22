@@ -71,7 +71,10 @@ use super::session::{
 use super::session_close::{Closing, close_pass};
 use super::tool_round::AnsweredCell;
 use super::turn_scope::continue_scope_ends;
-use crate::{ActorContext, Effect, SessionId, TurnCancelMode};
+use crate::ActorContext;
+use crate::Effect;
+use crate::TurnCancelMode;
+use lash_vocabulary::identity::SessionId;
 
 /// Whether the session's unfinished turn must stop now, as of a fenced
 /// read: it accepted an `Immediate` cancel request, or the session's close
@@ -599,7 +602,7 @@ async fn stop_commit(
     drive: &mut dyn TurnDrive,
     evidence: crate::runtime::TurnCancellationEvidence,
     heads: &mut HeadCache,
-    session: &crate::SessionId,
+    session: &lash_vocabulary::identity::SessionId,
 ) -> Result<TurnCommit, TurnError> {
     let outcome = crate::TurnOutcome::Stopped(crate::TurnStop::Cancelled {
         evidence: evidence.clone(),

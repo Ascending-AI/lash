@@ -5,8 +5,10 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use lash_kernel_doc::arena::{ArenaHandle, ShortText};
-use lash_kernel_doc::{Float, FunctionId, FunctionRegistry, TaskId, ValueKind};
+use lash_kernel_doc::{Float, FunctionRegistry, TaskId, ValueKind};
+
 use lash_kernel_exec::Weight;
+use lash_vocabulary::names::FunctionId;
 
 use super::super::{ISLAND_DEPTH, Island, Scratch};
 use super::*;
@@ -36,9 +38,7 @@ fn probes(
 
 fn machine() -> Embedder {
     Embedder::with(
-        "fn tag(x) { return same(kind(x), \"record\") }\n\
-         fn loop(x) { let r = false let i = 0 while num.lt(i, 2) { set r = same(kind(x), \"record\") let named = kind(x) set r = same(named, \"record\") set i = num.add(i, 1) } return r }\n\
-         main { let r = call tag(null) let q = call loop(null) finish q }",
+        "definition \"function tag(x: Any) -> Any\\nkernel 1\\nmetering statements\\nbody {  return same(kind(x), \\\"record\\\")  }\"\n\ndefinition \"function loop(x: Any) -> Any\\nkernel 1\\nmetering statements\\nbody {  let r = false let i = 0 while num.lt(i, 2) { set r = same(kind(x), \\\"record\\\") let named = kind(x) set r = same(named, \\\"record\\\") set i = num.add(i, 1) } return r  }\"\n\nmain { let r = call tag(null) let q = call loop(null) finish q }",
         Setup {
             probes: Some(probes),
             ..Setup::default()
@@ -73,8 +73,7 @@ fn values() -> Vec<Value> {
         Value::Closure(handle),
         Value::Error(handle),
         Value::Task(TaskId::MAIN),
-        Value::Function(ShortText::new("f").unwrap()),
-        Value::LongFunction(handle),
+        Value::Function(handle),
         Value::Handle(handle),
         Value::TaskRef(TaskId::MAIN),
         Value::ObjectRef(handle),
@@ -97,6 +96,7 @@ fn island_run(
     let mut scratch = Scratch::default();
     let tape = ChargeTape::new();
     let mut island = Island {
+        link: machine.current_link(),
         exe: &exe,
         stream: exe.document_stream(),
         arena: &mut arena,
@@ -347,7 +347,8 @@ fn operand_probes(
     lash_kernel_lib::numbers()
         .into_iter()
         .filter(|(definition, _)| definition.name.as_str() == "num.lt")
-        .map(|(definition, native)| {
+        .map(|(mut definition, native)| {
+            definition.name = lash_vocabulary::FunctionName::new("typed_lt").unwrap();
             (
                 "typed_lt",
                 registry.register(definition, Some(native)).unwrap(),
@@ -358,12 +359,7 @@ fn operand_probes(
 
 fn operand_machine() -> Embedder {
     Embedder::with(
-        "fn compare(x, y) { return typed_lt(x, y) }\n\
-         fn echo(x) { return x }\n\
-         fn outer(x) { return call echo(typed_lt(x, 2)) }\n\
-         fn method(receiver, x) { return x }\n\
-         fn prefixed(x) { return call method(null, typed_lt(x, 2)) }\n\
-         main { let r = call outer(1) finish r }",
+        "definition \"function compare(x: Any, y: Any) -> Any\\nkernel 1\\nmetering statements\\nbody {  return typed_lt(x, y)  }\"\n\ndefinition \"function echo(x: Any) -> Any\\nkernel 1\\nmetering statements\\nbody {  return x  }\"\n\ndefinition \"function outer(x: Any) -> Any\\nkernel 1\\nmetering statements\\nbody {  return call echo(typed_lt(x, 2))  }\"\n\ndefinition \"function method(receiver: Any, x: Any) -> Any\\nkernel 1\\nmetering statements\\nbody {  return x  }\"\n\ndefinition \"function prefixed(x: Any) -> Any\\nkernel 1\\nmetering statements\\nbody {  return call method(null, typed_lt(x, 2))  }\"\n\nmain { let r = call outer(1) finish r }",
         Setup {
             probes: Some(operand_probes),
             ..Setup::default()
@@ -378,7 +374,14 @@ fn operand_machine() -> Embedder {
 fn specialised_operands_stop_with_the_general_paths_held_registers() {
     let mut embedder = operand_machine();
     let exe = Arc::clone(&embedder.machine.exe);
-    let code = exe.declared[&lash_kernel_doc::Name::new("compare")];
+    let id = embedder
+        .document
+        .functions
+        .iter()
+        .find(|(_, f)| f.name.as_str() == "compare")
+        .unwrap()
+        .0;
+    let code = exe.declared[id];
     let plan = &exe.islands.plans[exe.island_of(code).unwrap() as usize];
     let StatementKind::Return { value, .. } = &plan.body.statements[0].kind else {
         panic!("compare returns its operator")

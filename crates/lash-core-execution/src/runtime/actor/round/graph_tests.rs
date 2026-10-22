@@ -200,18 +200,23 @@ fn a_settled_call_is_one_outcome_node_that_rebuilds_its_presentation_after_colle
 fn every_round_fact_round_trips_through_its_node() {
     let mut staging = staging();
     let parked = stage_value(&mut staging, &serde_json::json!({"wait": "w"})).unwrap();
-    let waiting = parked
+    let mut waiting = parked
         .material(owner(), MaterialRole::AttemptOutput)
         .parked("w".to_owned());
+    waiting.await_timer(lash_core_store::tool_run::CompletionTimer {
+        wait: "timer".into(),
+        deadline_ms: 7250,
+    });
     let report = ReportView::default().stage(&mut staging).unwrap();
     let request = Material::journal_local(owner(), MaterialRole::PreparedRequest, "r".to_owned());
     for fact in [
         RoundFact::Admit {
             members: vec![AdmitMember::Pinned(Box::new(PinnedMember {
+                admitted_at: 0,
                 call: ToolCallId::fixture("a"),
                 tool: "query".to_owned(),
                 request: request.reference().clone(),
-                policy: lash_protocol_types::ExecutionPolicy::Once,
+                policy: lash_vocabulary::tool_contract::ExecutionPolicy::Once,
                 limit_expires_at_ms: 9,
                 limit_max_slice_ms: 4,
                 wait_id: Some("ab".to_owned()),

@@ -112,7 +112,7 @@ async fn finalization_identifies_a_committed_turn_readable_on_another_node() -> 
         .build(lash_facade_tests::runtime_lease_owner())
     };
     let core = deploy(true)?;
-    let session_id = lash::SessionId::from("finalized-identity");
+    let session_id = lash_vocabulary::identity::SessionId::from("finalized-identity");
     core.session(session_id.clone())
         .create(lash::SessionCreation::root(mock_session_spec()))
         .await?;
@@ -160,7 +160,8 @@ async fn finalization_identifies_a_committed_turn_readable_on_another_node() -> 
             .collect::<Vec<_>>(),
         call_ids
     );
-    let run = lash::RunId::parse(first.turn_id.as_str()).expect("the event names a nonblank run");
+    let run = lash_vocabulary::identity::RunId::parse(first.turn_id.as_str())
+        .expect("the event names a nonblank run");
     let window = serde_json::to_value(
         session
             .durable()
@@ -242,7 +243,8 @@ async fn finalization_identifies_a_committed_turn_readable_on_another_node() -> 
     release_observer.add_permits(1);
     let later = observations.recv().await.expect("the later observer ran");
     assert_ne!(first.turn_id, later.turn_id);
-    let later_run = lash::RunId::parse(later.turn_id.as_str()).expect("a finalization names a run");
+    let later_run = lash_vocabulary::identity::RunId::parse(later.turn_id.as_str())
+        .expect("a finalization names a run");
     session
         .pin(lash::Target::Turn(later.turn_id.clone()))
         .await?;
@@ -390,7 +392,7 @@ async fn finalization_identifies_a_committed_turn_readable_on_another_node() -> 
     );
     assert!(
         durable
-            .committed_turn(&lash::TurnId::fixture("unknown-turn"))
+            .committed_turn(&lash_vocabulary::identity::TurnId::fixture("unknown-turn"))
             .await?
             .is_none()
     );
@@ -487,7 +489,7 @@ async fn restore_notifications_identify_reopened_and_revision_zero_heads() -> Re
                 )
                 .expect("fixture transition address"),
             ),
-            owner: lash_core::RuntimeOwner::Session(unpersisted.clone()),
+            owner: lash_vocabulary::identity::RuntimeOwner::Session(unpersisted.clone()),
             base: lash_core::plugin::PluginTransitionBase::Session {
                 head: lash_core::store::SessionHeadRef {
                     generation: 0,

@@ -10,13 +10,14 @@
 
 use super::publication::{StateAuthority, StateDesk};
 use super::*;
-use crate::plugin::{FormatVersion, ProcessComposition};
+use crate::plugin::ProcessComposition;
 use lash_durable::domain::TurnNamespaceWrite;
+use lash_vocabulary::providers::FormatVersion;
 
 /// The state sink of one process activation's step tools.
 pub struct ComponentState {
     state: Arc<Mutex<PluginStateRegistry>>,
-    owner: crate::RuntimeOwner,
+    owner: lash_vocabulary::identity::RuntimeOwner,
     reducers: BTreeMap<String, BTreeMap<String, StateReducer>>,
     formats: BTreeMap<String, FormatVersion>,
     evidence: lash_core_store::execution_limits::EvidenceLimits,
@@ -29,7 +30,7 @@ impl ComponentState {
     /// `data_limits`.
     #[must_use]
     pub fn new(
-        process: crate::ProcessId,
+        process: lash_vocabulary::identity::ProcessId,
         composition: &ProcessComposition,
         evidence: lash_core_store::execution_limits::EvidenceLimits,
         diagnostics: lash_core_store::execution_limits::DiagnosticLimits,
@@ -38,7 +39,7 @@ impl ComponentState {
         composition.state.lock_recover().diagnostics = diagnostics;
         Self {
             state: Arc::clone(&composition.state),
-            owner: crate::RuntimeOwner::Process(process),
+            owner: lash_vocabulary::identity::RuntimeOwner::Process(process),
             reducers: composition.reducers.clone(),
             formats: composition.formats.clone(),
             evidence,
@@ -133,7 +134,7 @@ impl crate::plugin::ExecutionState for ComponentState {
             })
             .collect()
     }
-    fn owner(&self) -> &crate::RuntimeOwner {
+    fn owner(&self) -> &lash_vocabulary::identity::RuntimeOwner {
         &self.owner
     }
     fn evidence_limits(&self) -> lash_core_store::execution_limits::EvidenceLimits {

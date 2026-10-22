@@ -155,12 +155,21 @@ pub enum ProxyKind {
 
 /// The site a cold closure's placeholder body holds until it is decoded:
 /// one shared empty site, so a proxy allocates none.
-static COLD_CLOSURE_SITE: LazyLock<Arc<lash_kernel_doc::Site>> = LazyLock::new(|| {
-    Arc::new(lash_kernel_doc::Site::new(
-        lash_kernel_doc::Unit::Main,
-        &[] as &[u32],
-    ))
-});
+static COLD_CLOSURE_SITE: LazyLock<Arc<lash_kernel_doc::arena::ClosureIdentity>> =
+    LazyLock::new(|| {
+        let link = lash_vocabulary::content_ids::LinkId::from_bytes([0; 32]);
+        Arc::new(lash_kernel_doc::arena::ClosureIdentity {
+            capture_names: Vec::new(),
+            callable: lash_vocabulary::names::CallableId {
+                link,
+                function: lash_vocabulary::names::FunctionId::from_bytes([0; 32]),
+            },
+            site: lash_kernel_doc::linked_site::LinkedSite {
+                link,
+                site: lash_vocabulary::sites::Site::new(lash_vocabulary::sites::Unit::Main, []),
+            },
+        })
+    });
 
 impl ProxyKind {
     /// The cold placeholder body of a proxy of this kind.
@@ -189,7 +198,7 @@ impl ProxyKind {
                 chunks: cold(),
             }),
             Self::Closure => Body::Closure {
-                site: Arc::clone(&*COLD_CLOSURE_SITE),
+                identity: Arc::clone(&*COLD_CLOSURE_SITE),
                 captures: Box::new([]),
                 code: None,
             },
@@ -654,14 +663,18 @@ impl Arena {
         }
     }
 
-    /// A function name value: inline when short.
-    pub fn function(&mut self, name: &str) -> Value {
-        match ShortText::new(name) {
-            Some(short) => Value::Function(short),
-            None => Value::LongFunction(self.insert(
-                Body::LongFunction(resident_text(name.into())),
-                Facts::default(),
-            )),
+    /// An admitted function reference, including its defining Link.
+    pub fn function(&mut self, callable: lash_vocabulary::names::CallableId) -> Value {
+        Value::Function(self.insert(Body::Function(Box::new(callable)), Facts::default()))
+    }
+
+    pub fn callable(
+        &self,
+        handle: ArenaHandle,
+    ) -> Result<lash_vocabulary::names::CallableId, NativeError> {
+        match self.body(handle)? {
+            Body::Function(callable) => Ok(**callable),
+            _ => Err(NativeError::Malformed("a function names another body")),
         }
     }
 
@@ -867,11 +880,8 @@ impl Arena {
             NewObject::Timestamp(nanoseconds) => {
                 return Ok((Body::Timestamp(nanoseconds), Facts::default()));
             }
-            NewObject::LongFunction(name) => {
-                return Ok((
-                    Body::LongFunction(resident_text(name.as_ref().into())),
-                    Facts::default(),
-                ));
+            NewObject::Function(callable) => {
+                return Ok((Body::Function(Box::new(callable)), Facts::default()));
             }
             NewObject::Error {
                 kind,
@@ -1434,7 +1444,7 @@ fn has_cold(body: &Body) -> bool {
         Body::Map(table) | Body::Set(table) | Body::Record(table) => {
             table.chunks.first_cold().is_some()
         }
-        Body::LongText(text) | Body::LongFunction(text) => cold(&text.chunks),
+        Body::LongText(text) => cold(&text.chunks),
         Body::Bytes(bytes) => cold(&bytes.chunks),
         _ => false,
     }
@@ -1446,7 +1456,7 @@ fn body_values(body: &Body) -> u64 {
     1 + match body {
         Body::List(sequence) | Body::Tuple(sequence) => sequence.chunks.resident_len(),
         Body::Map(table) | Body::Set(table) | Body::Record(table) => table.chunks.resident_len(),
-        Body::LongText(text) | Body::LongFunction(text) => text.summary.utf8_bytes / 16,
+        Body::LongText(text) => text.summary.utf8_bytes / 16,
         Body::Bytes(bytes) => bytes.len / 16,
         Body::Closure { captures, .. } => captures.len() as u64,
         _ => 0,
@@ -1479,7 +1489,7 @@ pub fn each_member(body: &Body, visit: &mut impl FnMut(&Value)) {
         | Body::LongText(_)
         | Body::Bytes(_)
         | Body::Timestamp(_)
-        | Body::LongFunction(_)
+        | Body::Function(_)
         | Body::Handle(_) => {}
     }
 }

@@ -324,7 +324,7 @@ async fn a_saved_function_is_called_after_a_cold_restore() {
     let code = "rate = 3\nasync def scale(value: int = 14) -> int:\n    return value * rate";
     saved_cell(&mut source, &host, "exec-code:0", tools.clone(), code).await;
     let held = source.lowering_functions();
-    let written = held[&lash_kernel_doc::Name::new("scale")]
+    let written = held[&lash_vocabulary::names::Name::new("scale")]
         .written
         .as_ref()
         .expect("Python metadata");
@@ -363,7 +363,7 @@ async fn a_saved_function_is_refused_where_a_tool_it_calls_is_missing() {
     assert!(
         source
             .lowering_functions()
-            .contains_key(&lash_kernel_doc::Name::new("shout")),
+            .contains_key(&lash_vocabulary::names::Name::new("shout")),
         "{:?}",
         source.not_carried()
     );
@@ -376,28 +376,22 @@ async fn a_saved_function_is_refused_where_a_tool_it_calls_is_missing() {
     restored
         .restore_execution_graph(&saved, lash_core::plugin::ExecutionGraphPurpose::Working)
         .expect("restore");
+    let ctx = cell_context(
+        &host,
+        SESSION,
+        TURN,
+        "exec-code:1",
+        Arc::new(super::saved_functions::NoTools),
+    );
     let refused = run_cell(
         &mut restored,
-        cell_context(
-            &host,
-            SESSION,
-            TURN,
-            "exec-code:1",
-            Arc::new(super::saved_functions::NoTools),
-        ),
+        ctx.clone(),
         &python_services(),
         "await control.finish(await shout('b'))",
     )
     .await;
-    let error = refused.error().expect("missing tool refuses the cell");
-    assert!(
-        error.message.contains("PY_SAVED_FUNCTION_UNUSABLE")
-            && error.message.contains(
-                "the saved function `shout` calls `echo.say`, which this session does not offer"
-            ),
-        "{}",
-        error.message
-    );
+    assert!(refused.error().is_some(), "missing tool refuses the cell");
+    super::saved_functions::assert_package_refusal(&ctx, false);
     assert_eq!(tools.answered(), ["a"]);
 }
 
@@ -446,10 +440,10 @@ async fn a_function_that_captures_a_task_is_not_carried_and_says_so() {
     assert_eq!(
         state
             .not_carried()
-            .get(&lash_kernel_doc::Name::new("later")),
+            .get(&lash_vocabulary::names::Name::new("later")),
         Some(
             &lash_kernel_dialect::NotSaved::Capture {
-                name: lash_kernel_doc::Name::new("pending"),
+                name: lash_vocabulary::names::Name::new("pending"),
                 why: lash_kernel_dialect::CaptureRefusal::Task,
             }
             .to_string()

@@ -8,7 +8,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use lash_kernel_dialect::{EffectControl, Environment, Lowered};
-use lash_kernel_doc::{EffectName, Name, Param, Signature, Stmt, Type};
+use lash_kernel_doc::Stmt;
+use lash_vocabulary::{EffectName, Name, Param, Signature, Type};
 
 use super::machine;
 use crate::Diagnostic;
@@ -37,12 +38,8 @@ fn lower_against_control(source: &str) -> Result<Lowered, Diagnostic> {
         source,
         &Environment::new(
             super::library(),
-            &lash_kernel_dialect::Namespaces::of_effects(
-                &effects,
-                &lash_kernel_doc::ContractId::new("1"),
-                &controls,
-            )
-            .expect("the test's effects are operations"),
+            &crate::tests::linked::namespaces(&effects, &controls)
+                .expect("the test's effects are operations"),
         ),
         lash_kernel_dialect::Mode::Cell(lash_kernel_dialect::CellEnvironment::first()),
     )
@@ -53,6 +50,7 @@ fn ends_main(lowered: &Lowered) -> bool {
         .document
         .main
         .iter()
+        .flatten()
         .any(|stmt| matches!(stmt, Stmt::Finish { .. }))
 }
 

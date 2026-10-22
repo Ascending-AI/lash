@@ -6,7 +6,6 @@
 //! [`parse_document`]: lash_kernel_doc::parse_document
 #![expect(
     clippy::expect_used,
-    clippy::unwrap_used,
     reason = "test target: the documented example fails by panicking"
 )]
 

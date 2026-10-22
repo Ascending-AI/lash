@@ -3,7 +3,7 @@
   "cases": [
     {
       "name": "mixed arithmetic converts integer with even ties",
-      "document": "kernel 1\nnumbers by_spelling\nuse add = @7e4f2312e59326d1b501e7b4d092549da7b8db86c07ada94902ee61f3317b537\nmain {  finish [add(9007199254740993, 0.0), add(9007199254740995, 0.0)] }\n",
+      "document": "kernel 1\nnumbers by_spelling\nnative @c00cf80881ccac569a1263a3b0a9c6589c0a0f75e1902fe5453b77b86427afef\ndefinition \"function add(arg0: Number, arg1: Number) -> Number\\nkernel 1\\nerrors \\\"arity\\\", \\\"number_range\\\", \\\"type_error\\\"\\ncharge sum(1, sum(deep(arg0), deep(arg1)), deep(result))\\nnative\\n\"\nmain {\n  finish [add(9007199254740993, 0.0), add(9007199254740995, 0.0)]\n}\n",
       "expected": {
         "prints": [],
         "trace": [],
@@ -23,7 +23,7 @@
     },
     {
       "name": "integer conversion at overflow raises number range",
-      "document": "kernel 1\nnumbers by_spelling\nuse add = @7e4f2312e59326d1b501e7b4d092549da7b8db86c07ada94902ee61f3317b537\nmain {  try { print add(179769313486231590772930519078902473361797697894230657273430081157732675805500963132708477322407536021120113879871393357658789768814416622492847430639474124377767893424865485276302219601246094119453082952085005768838150682342462881473913110540827237163350510684586298239947245938479716304835356329624224137216, 0.0) } catch e { finish e.kind } finish null }\n",
+      "document": "kernel 1\nnumbers by_spelling\nnative @c00cf80881ccac569a1263a3b0a9c6589c0a0f75e1902fe5453b77b86427afef\ndefinition \"function add(arg0: Number, arg1: Number) -> Number\\nkernel 1\\nerrors \\\"arity\\\", \\\"number_range\\\", \\\"type_error\\\"\\ncharge sum(1, sum(deep(arg0), deep(arg1)), deep(result))\\nnative\\n\"\nmain {\n  try {\n    print add(179769313486231590772930519078902473361797697894230657273430081157732675805500963132708477322407536021120113879871393357658789768814416622492847430639474124377767893424865485276302219601246094119453082952085005768838150682342462881473913110540827237163350510684586298239947245938479716304835356329624224137216, 0.0)\n  } catch e {\n    finish e.kind\n  }\n  finish null\n}\n",
       "expected": {
         "prints": [],
         "trace": [],

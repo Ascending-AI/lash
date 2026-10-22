@@ -403,7 +403,7 @@ async fn execute(factory: &McpPluginFactory) -> lash_core::ToolOutcome {
     let lash_core::ToolAttemptOutcome::Done { result, .. } = provider
         .execute(lash_core::ToolCall::new(
             &manifest,
-            &lash_core::ToolContract::default(),
+            &lash_vocabulary::tool_contract::ToolContract::default(),
             &json!({}),
             &context,
         ))

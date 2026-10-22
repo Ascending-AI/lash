@@ -13,7 +13,8 @@ use lash_core::{
     SessionCursor, SessionObservationEvent, SessionRevision,
 };
 use lash_protocol_types::sync::MutexExt;
-use lash_protocol_types::{ProcessId, SessionId};
+use lash_vocabulary::identity::ProcessId;
+use lash_vocabulary::identity::SessionId;
 use serde::Serialize;
 
 use super::super::Meter;

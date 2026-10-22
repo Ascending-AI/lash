@@ -7,7 +7,7 @@ use lash_durable::domain::graph_commit::CheckedGraph;
 /// no list position supplies identity. Application keeps the original write
 /// order and reaches every refusal under the original fences.
 pub(super) type PreparedSessions = std::collections::BTreeMap<
-    (lash_protocol_types::SessionId, u64),
+    (lash_vocabulary::identity::SessionId, u64),
     std::collections::BTreeMap<
         String,
         Result<lash_core_store::store::RuntimeCommitPlanner, DurableError>,
@@ -89,13 +89,29 @@ pub(super) fn apply_owner(
     let Some(revision) = fence else {
         return refuse(fenced(tx, write.actor(), write.epoch(), write.revision())?);
     };
+    if write.domain().iter().any(|domain| {
+        matches!(
+            domain,
+            DomainWrite::RegisterExecution(_)
+                | DomainWrite::EndExecution(_)
+                | DomainWrite::AdoptExecution(_)
+                | DomainWrite::SeedResolution(_)
+        )
+    }) && revision - 1 != write.revision().0
+    {
+        return refuse(DurableError::ResolutionRevisionConflict {
+            actor: write.actor().clone(),
+            expected: write.revision(),
+            current: StateRevision(revision - 1),
+        });
+    }
     // A session's unfinished turn's accepted cancel, read under the fence
     // before the commit writes: the receipt reports a cancel that arrived
     // after the owner's open.
     let (turn_cancel, open_roots) = match write.actor().kind() {
         lash_durable::ActorKind::Session => {
             let Ok(session) =
-                lash_protocol_types::SessionId::try_from(write.actor().id().to_owned())
+                lash_vocabulary::identity::SessionId::try_from(write.actor().id().to_owned())
             else {
                 return refuse(corrupt("session id", write.actor().id()));
             };
@@ -156,8 +172,23 @@ pub(super) fn apply_owner(
             rusqlite::params![actor, formats.as_str()],
         )?;
     }
-    if let Some(requires) = write.requires() {
-        processes::stamp_requires(tx, &actor, requires)?;
+    if write.requires().is_some()
+        || write.domain().iter().any(|write| {
+            matches!(
+                write,
+                DomainWrite::RegisterExecution(_)
+                    | DomainWrite::EndExecution(_)
+                    | DomainWrite::AdoptExecution(_)
+                    | DomainWrite::SeedResolution(_)
+                    | DomainWrite::Process(lash_durable::domain::ProcessWrite::Terminal { .. })
+            )
+        })
+    {
+        let requires = match packages::owner_requires(tx, write.actor(), write.requires())? {
+            Ok(requires) => requires,
+            Err(error) => return refuse(error),
+        };
+        processes::stamp_requires(tx, &actor, &requires)?;
     }
     if let Some(through) = write.ack() {
         cached_execute(tx, SQL.actor.ack.sql(), rusqlite::params![actor, through.0])?;

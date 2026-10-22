@@ -1,6 +1,8 @@
 //! Statements and control flow.
 
-use lash_kernel_doc::{AssignOrder, Expr, Literal, Member, Name, Place, Stmt};
+use lash_kernel_doc::{AssignOrder, Expr, Literal, Member, Place, Stmt};
+
+use lash_vocabulary::Name;
 
 use super::patterns::Mode;
 use super::{
@@ -125,7 +127,7 @@ impl Lowerer<'_> {
                 // A declaration's caption names the statement that binds
                 // it, where its hoisting put it.
                 if let ast::Stmt::Spanned(span, inner) = statement {
-                    self.own_captions(span.start, inner, before, None);
+                    self.own_captions(span.start, inner, before, None)?;
                 }
             }
         }
@@ -181,7 +183,7 @@ impl Lowerer<'_> {
                 let before = self.buf.len();
                 let result = self.lower_statement(inner);
                 if result.is_ok() {
-                    self.own_captions(span.start, inner, before, entry);
+                    self.own_captions(span.start, inner, before, entry)?;
                 }
                 self.span = outer;
                 result
@@ -647,9 +649,9 @@ impl Lowerer<'_> {
     ) -> Lowering<()> {
         let subject = self.lower_expr(subject)?;
         let via = lash_kernel_doc::Protocol {
-            open: self.function("ts.for_of.open")?,
-            next: Some(self.function("ts.for_of.next")?),
-            item: Some(self.function("ts.for_of.item")?),
+            open: self.function_target("ts.for_of.open")?,
+            next: Some(self.function_target("ts.for_of.next")?),
+            item: Some(self.function_target("ts.for_of.item")?),
             check: None,
         };
         let mut item = self.temp();

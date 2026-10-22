@@ -4,7 +4,7 @@
 
 use super::*;
 use crate::support::TurnInput;
-use lash_protocol_types::SessionId;
+use lash_vocabulary::identity::SessionId;
 
 fn stated_budgets() -> crate::ExecutionBudgets {
     let budgets = crate::ExecutionBudgets::new(crate::ExecutionBudgetsConfig {

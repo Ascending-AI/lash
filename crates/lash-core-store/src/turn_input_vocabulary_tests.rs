@@ -29,7 +29,7 @@ fn durable_turn_input_drops_runtime_correlation_and_attempt_identity() {
     struct Correlation;
 
     let mut input = TurnInput::text("accepted words");
-    input.trace_turn_id = Some(crate::TurnId::from("attempt-a"));
+    input.trace_turn_id = Some(lash_vocabulary::identity::TurnId::from("attempt-a"));
     input.turn_context.set_runtime_correlation(Correlation);
     let durable = input.durable_projection();
     assert!(durable.trace_turn_id.is_none());
@@ -90,7 +90,7 @@ fn accepted_only_rebinds_active_turn_open_states() {
     assert_eq!(
         pending.accepted(),
         Some(TurnInputState::Accepted(ActiveTurnIngress {
-            turn_id: crate::TurnId::from("turn-a"),
+            turn_id: lash_vocabulary::identity::TurnId::from("turn-a"),
             min_boundary: TurnInputCheckpointBoundary::AfterWork,
         }))
     );

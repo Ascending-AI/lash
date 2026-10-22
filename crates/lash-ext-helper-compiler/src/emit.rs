@@ -20,9 +20,10 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use lash_kernel_doc::{
-    ActKind, Action, AssignOrder, Atom, Callee, Expr, FunctionId, Literal, Member, Name, Place,
-    Rhs, Stmt,
+    ActKind, Action, AssignOrder, Atom, Callee, Expr, Literal, Member, Place, Rhs, Stmt,
 };
+
+use lash_vocabulary::{FunctionId, Name};
 
 use crate::library::Library;
 
@@ -310,11 +311,7 @@ impl Emitter<'_> {
     fn count_expr(&self, expr: &Expr) -> u32 {
         let all = |exprs: &[Expr]| exprs.iter().map(|expr| self.count_expr(expr)).sum::<u32>();
         match expr {
-            Expr::Literal(_)
-            | Expr::Variable(_)
-            | Expr::Closure(_)
-            | Expr::Clock
-            | Expr::Random => 0,
+            Expr::Literal(_) | Expr::Variable(_) | Expr::Closure(_) => 0,
             Expr::Tuple(items) | Expr::List(items) | Expr::Set(items) => all(items),
             Expr::Map(entries) => entries
                 .iter()
@@ -331,7 +328,7 @@ impl Emitter<'_> {
             Expr::Call { function, args } => u32::from(!self.answers(function)) + all(args),
             Expr::Act(act) => {
                 let own = match &act.kind {
-                    ActKind::Call(Callee::Library(function)) => !self.answers(function),
+                    ActKind::Call(Callee::Local(function)) => !self.answers(function),
                     ActKind::Call(_) | ActKind::Perform { .. } => true,
                     _ => false,
                 };
@@ -349,7 +346,7 @@ impl Emitter<'_> {
         match rhs {
             Rhs::Expr(expr) => self.count_expr(expr),
             Rhs::Action(Action::Call {
-                callee: Callee::Library(function),
+                callee: Callee::Local(function),
                 ..
             }) => u32::from(!self.answers(function)),
             Rhs::Action(Action::Call { .. } | Action::Perform { .. }) => 1,
@@ -648,7 +645,7 @@ impl Emitter<'_> {
                 self.library_call(function, &roles, dst, len as usize)?;
             }
             Expr::Act(act) => match &act.kind {
-                ActKind::Call(Callee::Library(function)) => {
+                ActKind::Call(Callee::Local(function)) => {
                     let roles = self.roles();
                     let len = self.exprs(&act.args, dst)?;
                     self.library_call(function, &roles, dst, len as usize)?;
@@ -714,7 +711,7 @@ impl Emitter<'_> {
                     .push(self.expr_paths[&std::ptr::from_ref(expr)].clone());
                 self.op(&format!("ctx.closure({at}, {dst})?;"));
             }
-            Expr::Clock | Expr::Random | Expr::Read(_) => {
+            Expr::Read(_) => {
                 return Err(Unsupported("reads the host".into()));
             }
         }
@@ -739,7 +736,7 @@ impl Emitter<'_> {
         match rhs {
             Rhs::Expr(expr) => self.expr(expr, 0),
             Rhs::Action(Action::Call {
-                callee: Callee::Library(function),
+                callee: Callee::Local(function),
                 args,
             }) => {
                 self.reg(0);

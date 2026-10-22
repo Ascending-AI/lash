@@ -8,14 +8,17 @@ use std::path::Path;
 use anyhow::{Context, Result, ensure};
 use lash_kernel_check::{Environment as Checker, WorkflowDocument};
 use lash_kernel_dialect::{CellEnvironment, Environment, Lowered, Mode, PrintOptions};
-use lash_kernel_doc::{
-    self as k, Captions, Document, Expr, Name, Node, Site, SourceLanguage, Unit,
-    WorkflowDocumentEntry,
-};
+use lash_kernel_doc::{self as k, Captions, Document, Expr, Node, SourceLanguage};
 use lash_kernel_edit::{Draft, Transaction};
+use lash_vocabulary::names::Name;
+use lash_vocabulary::sites::Site;
+use lash_vocabulary::sites::Unit;
 use serde::{Deserialize, Serialize};
 
 mod cell;
+mod namespace;
+use lash_vocabulary::names::{LinkedStart, StartSelector};
+use namespace::FixtureNamespace;
 mod printed;
 mod readable;
 
@@ -178,7 +181,7 @@ fn written_captions(source: &str, lang: SourceLanguage) -> usize {
     }
 }
 
-pub(crate) fn code_sites(document: &Document) -> Vec<Site> {
+pub(crate) fn code_sites(document: &Document, library: &dyn k::FunctionCatalog) -> Vec<Site> {
     fn walk(node: Node<'_>, site: Site, out: &mut Vec<Site>) {
         if matches!(
             node,
@@ -191,17 +194,11 @@ pub(crate) fn code_sites(document: &Document) -> Vec<Site> {
         }
     }
     let mut sites = Vec::new();
-    walk(
-        Node::Block(&document.main),
-        Site::new(Unit::Main, vec![]),
-        &mut sites,
-    );
-    for (name, function) in &document.functions {
-        walk(
-            Node::Block(&function.body),
-            Site::new(Unit::Function(name.clone()), vec![]),
-            &mut sites,
-        );
+    for (unit, body) in document.units() {
+        if matches!(&unit, Unit::Library(id) if library.definition(id).is_some()) {
+            continue;
+        }
+        walk(Node::Block(body), Site::new(unit, vec![]), &mut sites);
     }
     sites
 }
@@ -240,6 +237,43 @@ pub fn tools() -> Result<Vec<lash::tools::ToolDefinition>> {
     ])
 }
 
+/// Source-only corpus operation fixtures, projected from explicit Packages.
+pub fn corpus_namespaces(
+    effects: &BTreeMap<lash_vocabulary::EffectName, lash_vocabulary::Signature>,
+    controls: &BTreeMap<lash_vocabulary::EffectName, BTreeSet<lash_kernel_dialect::EffectControl>>,
+) -> Result<lash_kernel_dialect::Namespaces> {
+    let requirements = effects
+        .iter()
+        .map(|(name, signature)| {
+            (
+                name.clone(),
+                lash_vocabulary::OperationRequirement::new(
+                    signature.clone(),
+                    lash_vocabulary::ContractId::new("1"),
+                ),
+            )
+        })
+        .collect();
+    let controls = controls
+        .iter()
+        .map(|(name, kinds)| {
+            let mut controls = lash_vocabulary::TurnControls::none();
+            for kind in kinds {
+                controls = match kind {
+                    lash_kernel_dialect::EffectControl::Finish => {
+                        controls.with_finish(lash_vocabulary::JsonSchema::any())
+                    }
+                    lash_kernel_dialect::EffectControl::SwitchAgentFrame => {
+                        controls.with_switch_agent_frame()
+                    }
+                };
+            }
+            (name.clone(), controls)
+        })
+        .collect();
+    FixtureNamespace::new(requirements, &controls)?.namespaces()
+}
+
 /// Generate review artifacts, checking reproducible import, exact source
 /// reading, SM-ORDER/SM-COVER, closed edit replay and cell crossing structure.
 /// Only entry names and refusal codes are compared between dialects.
@@ -254,28 +288,21 @@ pub fn render(root: &Path) -> Result<BTreeMap<String, String>> {
 )]
 pub(crate) fn render_with(root: &Path) -> Result<(BTreeMap<String, String>, Vec<Lifted>)> {
     let mut report = Vec::new();
-    let packages = lash::package::lash_packages()?;
-    let package_view = packages.view();
     let embedding = lash_vm_worker::built_embedding(&Default::default())?;
     let registry = embedding.registry()?;
-    let mut boundary = lash::vm::HostBoundary::new();
-    for tool in tools()? {
-        boundary.offer_operation(
-            tool.manifest.operation.clone(),
-            lash::vm::offered_tool(
-                &tool.manifest,
-                &tool.contract,
-                lash::dialect::OfferedSource::Catalog {
-                    tool: tool.manifest.id.to_string(),
-                },
+    let mut effects = BTreeMap::new();
+    for definition in tools()? {
+        effects.insert(
+            definition.operation().effect_name(),
+            lash_vocabulary::OperationRequirement::new(
+                lash_vocabulary::json_schema::tool_signature(
+                    &definition.contract.input_schema.canonical,
+                    &definition.contract.output_schema.canonical,
+                ),
+                definition.contract_id(),
             ),
-        )?;
+        );
     }
-    let mut effects = boundary
-        .operations()
-        .iter()
-        .map(|(operation, offered)| (operation.effect_name(), offered.requirement.clone()))
-        .collect::<BTreeMap<_, _>>();
     // The original source-shape probes name these host effects. They are
     // fixture declarations; the example's offered toolbox stays in tools().
     for name in [
@@ -287,43 +314,43 @@ pub(crate) fn render_with(root: &Path) -> Result<(BTreeMap<String, String>, Vec<
         "web.search",
     ] {
         effects.insert(
-            k::EffectName::new(name)?,
-            k::OperationRequirement::new(
-                k::Signature {
-                    params: vec![k::Param {
+            lash_vocabulary::EffectName::new(name)?,
+            lash_vocabulary::OperationRequirement::new(
+                lash_vocabulary::Signature {
+                    params: vec![lash_vocabulary::Param {
                         name: "input".into(),
-                        ty: k::Type::Any,
+                        ty: lash_vocabulary::Type::Any,
                         optional: false,
                     }],
-                    result: k::Type::Any,
+                    result: lash_vocabulary::Type::Any,
                 },
-                k::ContractId::new("1"),
+                lash_vocabulary::ContractId::new("1"),
             ),
         );
     }
     // Finish belongs only to cells; it is not a process tool offered by the example.
     effects.insert(
-        k::EffectName::new("control.finish")?,
-        k::OperationRequirement::new(
-            k::Signature {
-                params: vec![k::Param {
+        lash_vocabulary::EffectName::new("control.finish")?,
+        lash_vocabulary::OperationRequirement::new(
+            lash_vocabulary::Signature {
+                params: vec![lash_vocabulary::Param {
                     name: Name::new("input"),
-                    ty: k::Type::Any,
+                    ty: lash_vocabulary::Type::Any,
                     optional: false,
                 }],
-                result: k::Type::Any,
+                result: lash_vocabulary::Type::Any,
             },
-            k::ContractId::new("1"),
+            lash_vocabulary::ContractId::new("1"),
         ),
     );
     let controls = BTreeMap::from([(
-        k::EffectName::new("control.finish")?,
-        BTreeSet::from([lash_kernel_dialect::EffectControl::Finish]),
+        lash_vocabulary::EffectName::new("control.finish")?,
+        lash_vocabulary::TurnControls::finish(lash_vocabulary::JsonSchema::any()),
     )]);
-    let env_namespaces = lash_kernel_dialect::Namespaces::of_requirements(&effects, &controls)?;
+    let namespace = FixtureNamespace::new(effects, &controls)?;
+    let env_namespaces = namespace.namespaces()?;
     let env = Environment::new(embedding.library(), &env_namespaces);
-    let mut checker = Checker::new(registry.as_ref());
-    checker.effects = effects.clone();
+    let checker = Checker::new(registry.as_ref());
     let mut outputs = BTreeMap::new();
     let mut seen = BTreeSet::new();
     for case in catalog(root)? {
@@ -345,7 +372,10 @@ pub(crate) fn render_with(root: &Path) -> Result<(BTreeMap<String, String>, Vec<
             let prefix = format!("{}/", case.name);
             if let Some(expected) = &case.refusal {
                 let Err(diagnostic) = lowered else {
-                    anyhow::bail!("MODULE-CONTRACT: refused case must refuse");
+                    anyhow::bail!(
+                        "MODULE-CONTRACT: {} {extension}: refused case must refuse ({expected})",
+                        case.name
+                    );
                 };
                 ensure!(
                     &diagnostic.code == expected,
@@ -376,8 +406,11 @@ pub(crate) fn render_with(root: &Path) -> Result<(BTreeMap<String, String>, Vec<
             );
             let document = &*lowered.document;
             let entries: Vec<_> = document
-                .entries
-                .keys()
+                .exports
+                .iter()
+                .filter_map(|(name, export)| {
+                    matches!(export, k::Export::Function(_)).then_some(name)
+                })
                 .map(|name| name.as_str().to_owned())
                 .collect();
             ensure!(
@@ -387,42 +420,53 @@ pub(crate) fn render_with(root: &Path) -> Result<(BTreeMap<String, String>, Vec<
             );
             let map = readable::source_map(
                 &lowered,
+                env.library,
                 &source,
                 case.exceptions
                     .get(extension)
                     .context("dialect exceptions must be declared")?,
             )?;
             outputs.insert(format!("{prefix}source-map.{extension}.txt"), map);
-            let declarations = registry.export_declarations();
-            // No parser, live registry or engine is available below this seam:
-            // the same serialized document/declarations a stored read supplies.
             let shipped: Document = serde_json::from_slice(&serde_json::to_vec(document)?)?;
-            let held: k::FunctionDeclarations =
-                serde_json::from_slice(&serde_json::to_vec(&declarations)?)?;
+            let (content, link) = namespace.link(shipped.clone())?;
             let mut kernel = k::print_document(document);
             let mut views = String::new();
             let selected: Vec<_> = if entries.is_empty() {
-                vec![WorkflowDocumentEntry::Main]
+                vec![StartSelector::Main]
             } else {
                 entries
                     .iter()
-                    .map(|name| WorkflowDocumentEntry::Entry {
-                        function: Name::new(name),
-                    })
+                    .map(|name| StartSelector::Export(Name::new(name)))
                     .collect()
             };
             for entry in selected {
-                let checked = WorkflowDocument::derive(shipped.clone(), entry, &held)?;
-                let view = lash_kernel_view::derive(&checked, &package_view)?;
+                let checked = WorkflowDocument::entered(
+                    shipped.clone(),
+                    LinkedStart {
+                        link,
+                        selector: entry,
+                    },
+                )?;
+                let mut context = lash_kernel_view::ViewContext::new(
+                    checked.reference().clone(),
+                    content.clone(),
+                    Default::default(),
+                )?
+                .with_timer_operations(lash::vm::TIMER_OPERATIONS.iter().cloned());
+                let release = lash::vm::helper_release()?;
+                for (id, json) in &release.labels {
+                    context.add_labels(*id, json)?;
+                }
+                let view = lash_kernel_view::derive(&checked, &context)?;
                 writeln!(
                     kernel,
                     "\nunit {:?}: statements={} scopes={} sites={}",
                     checked.entry_unit(),
                     view.statements.len(),
                     view.scopes.len(),
-                    code_sites(document).len()
+                    code_sites(document, env.library).len()
                 )?;
-                views.push_str(&readable::view(&checked, &view, &package_view)?);
+                views.push_str(&readable::view(&checked, &view)?);
                 views.push_str(&readable::captions(&checked, &view, &lowered.captions)?);
             }
             outputs.insert(format!("{prefix}kernel.{extension}.txt"), kernel);
@@ -431,18 +475,22 @@ pub(crate) fn render_with(root: &Path) -> Result<(BTreeMap<String, String>, Vec<
                 environment: &env,
                 mode,
             };
-            let source = roundtrip(document, &lowered.captions, lang, &printing)?;
+            let source = roundtrip(document, &lowered.captions, lang, &printing)
+                .with_context(|| format!("{} {extension}: authored print/read", case.name))?;
             report.push(Lifted::of(&case.name, lang, false, document, &source));
             if case.mode == CaseMode::Module
-                && let Some(transaction) = canvas_edit(document)
+                && let Some(transaction) = canvas_edit(document, env.library)
             {
                 let mut draft = Draft::open(document.clone())?;
                 let applied = draft.apply(&transaction, &checker)?;
                 let rekeyed = lowered
                     .captions
-                    .rekey(&applied.correspondence, draft.document())
+                    .rekey(&applied.correspondence, document, draft.document())
                     .context("captions rekey through the canvas edit")?;
-                let edited = roundtrip(draft.document(), &rekeyed.captions, lang, &printing)?;
+                let edited = roundtrip(draft.document(), &rekeyed.captions, lang, &printing)
+                    .with_context(|| {
+                        format!("{} {extension}: edited authored print/read", case.name)
+                    })?;
                 report.push(Lifted::of(
                     &case.name,
                     lang,
@@ -458,7 +506,8 @@ pub(crate) fn render_with(root: &Path) -> Result<(BTreeMap<String, String>, Vec<
                 outputs.insert(format!("{prefix}edits/1.{extension}.txt"), text);
             }
             if case.mode == CaseMode::Cell {
-                let text = cell::crossing(&lowered, registry.clone())?;
+                let text = cell::crossing(&lowered, registry.clone(), &namespace)
+                    .with_context(|| format!("{} {extension}: cell crossing", case.name))?;
                 outputs.insert(format!("{prefix}cell-1.{extension}.txt"), text);
             }
         }
@@ -469,9 +518,12 @@ pub(crate) fn render_with(root: &Path) -> Result<(BTreeMap<String, String>, Vec<
 /// The canvas edit the corpus records: the first tool argument of the first
 /// step that performs a tool, set to a text; or, in a workflow with no such
 /// argument, the first text a statement holds.
-pub(crate) fn canvas_edit(document: &Document) -> Option<Transaction> {
+pub(crate) fn canvas_edit(
+    document: &Document,
+    library: &dyn k::FunctionCatalog,
+) -> Option<Transaction> {
     use lash_kernel_edit::authoring::{DataValue, Operation, ValueTarget};
-    let sites = code_sites(document);
+    let sites = code_sites(document, library);
     let argument = sites.iter().find(|site| match document.node(site) {
         Some(Node::Expr(Expr::Act(action))) => {
             matches!(&action.kind, k::ActKind::Perform { .. })
@@ -537,23 +589,19 @@ fn edit(
     checker: &Checker<'_>,
     printing: &Printing<'_>,
 ) -> Result<(String, String)> {
-    let transaction = canvas_edit(document).context("edit fixture needs a perform")?;
+    let transaction =
+        canvas_edit(document, checker.functions).context("edit fixture needs a perform")?;
     #[derive(Serialize, Deserialize)]
     #[serde(deny_unknown_fields)]
     struct Replay {
-        context: BTreeMap<k::EffectName, k::OperationRequirement>,
         transaction: Transaction,
     }
-    let json = serde_json::to_string_pretty(&Replay {
-        context: checker.effects.clone(),
-        transaction,
-    })? + "\n";
+    let json = serde_json::to_string_pretty(&Replay { transaction })? + "\n";
     let replay: Replay = serde_json::from_str(&json)?;
     let mut draft = Draft::open(document.clone())?;
     let applied = draft.apply(&replay.transaction, checker)?;
     let mut repeated = Draft::open(document.clone())?;
-    let mut context = Checker::new(checker.functions);
-    context.effects = replay.context;
+    let context = Checker::new(checker.functions);
     let again = repeated.apply(&replay.transaction, &context)?;
     ensure!(
         draft.document().canonical_bytes() == repeated.document().canonical_bytes()
@@ -579,7 +627,7 @@ fn edit(
     // The host's sidecar follows the edit: survivors move with their steps,
     // and the ones whose step the edit wrote are marked for review.
     let rekeyed = captions
-        .rekey(&applied.correspondence, draft.document())
+        .rekey(&applied.correspondence, document, draft.document())
         .context("captions rekey through the edit's correspondence")?;
     writeln!(text, "\nCaptions to review:")?;
     for site in &rekeyed.touched {

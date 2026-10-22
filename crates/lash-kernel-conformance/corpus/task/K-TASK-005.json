@@ -3,7 +3,7 @@
   "cases": [
     {
       "name": "delivery order appends tasks to ready queue",
-      "document": "kernel 1\nnumbers by_spelling\neffect echo(value: Int) -> Int contract \"1\"\nfn child(value) { print value let answer = perform echo(value) as Int print answer return answer }\n\nmain {\nlet a = spawn call child(1)\nlet b = spawn call child(2)\nlet tasks = [a, b]\nlet answer = join all tasks\nfinish answer\n}\n",
+      "document": "kernel 1\nnumbers by_spelling\nimport 0 operation host.echo(value: Int) -> Int\ndefinition \"function child(value: Any) -> Any\\nkernel 1\\nmetering statements\\nimport 0 operation host.echo(value: Int) -> Int\\nbody {\\n  print value\\n  let answer = perform 0(value) as Int\\n  print answer\\n  return answer\\n}\\n\"\nmain {\n  let a = spawn invoke child(1)\n  let b = spawn invoke child(2)\n  let tasks = [a, b]\n  let answer = join all tasks\n  finish answer\n}\n",
       "expected": {
         "prints": [
           {
@@ -34,7 +34,7 @@
         "trace": [
           {
             "effect": {
-              "effect": "echo",
+              "effect": "host.echo",
               "args": [
                 {
                   "int": "1"
@@ -45,7 +45,7 @@
           },
           {
             "effect": {
-              "effect": "echo",
+              "effect": "host.echo",
               "args": [
                 {
                   "int": "2"
@@ -83,7 +83,7 @@
     },
     {
       "name": "a then yield wait continues in arrival order with a joined task's, delivered first",
-      "document": "kernel 1\nnumbers by_spelling\neffect echo(value: Int) -> Int contract \"1\"\nfn inplace() { let a = perform echo(1) as Int then yield print a return a }\nfn wait() { let b = perform echo(2) as Int return b }\nfn promised() { let t = spawn call wait() let b = join t print b return b }\n\nmain {\nlet x = spawn call inplace()\nlet y = spawn call promised()\nlet tasks = [x, y]\nlet answer = join all tasks\nfinish answer\n}\n",
+      "document": "kernel 1\nnumbers by_spelling\nimport 0 operation host.echo(value: Int) -> Int\ndefinition \"function inplace() -> Any\\nkernel 1\\nmetering statements\\nimport 0 operation host.echo(value: Int) -> Int\\nbody {\\n  let a = perform 0(1) as Int then yield\\n  print a\\n  return a\\n}\\n\"\ndefinition \"function wait() -> Any\\nkernel 1\\nmetering statements\\nimport 0 operation host.echo(value: Int) -> Int\\nbody {\\n  let b = perform 0(2) as Int\\n  return b\\n}\\n\"\ndefinition \"function promised() -> Any\\nkernel 1\\nmetering statements\\nimport 0 operation host.echo(value: Int) -> Int\\nuse inplace = @18ff02f539acd4a98a892a6ceb0a070cab617b70f7626c7071af333a153333e0\\nuse wait = @842115475e9c96c7f4eaf925e55604e18bdc6b135974309d248e6141df1c0c3b\\nbody {\\n  let t = spawn invoke wait()\\n  let b = join t\\n  print b\\n  return b\\n}\\n\"\nmain {\n  let x = spawn invoke inplace()\n  let y = spawn invoke promised()\n  let tasks = [x, y]\n  let answer = join all tasks\n  finish answer\n}\n",
       "expected": {
         "prints": [
           {
@@ -108,7 +108,7 @@
         "trace": [
           {
             "effect": {
-              "effect": "echo",
+              "effect": "host.echo",
               "args": [
                 {
                   "int": "1"
@@ -119,7 +119,7 @@
           },
           {
             "effect": {
-              "effect": "echo",
+              "effect": "host.echo",
               "args": [
                 {
                   "int": "2"
@@ -157,7 +157,7 @@
     },
     {
       "name": "a then yield wait continues in arrival order with a joined task's, delivered second",
-      "document": "kernel 1\nnumbers by_spelling\neffect echo(value: Int) -> Int contract \"1\"\nfn inplace() { let a = perform echo(1) as Int then yield print a return a }\nfn wait() { let b = perform echo(2) as Int return b }\nfn promised() { let t = spawn call wait() let b = join t print b return b }\n\nmain {\nlet x = spawn call inplace()\nlet y = spawn call promised()\nlet tasks = [x, y]\nlet answer = join all tasks\nfinish answer\n}\n",
+      "document": "kernel 1\nnumbers by_spelling\nimport 0 operation host.echo(value: Int) -> Int\ndefinition \"function inplace() -> Any\\nkernel 1\\nmetering statements\\nimport 0 operation host.echo(value: Int) -> Int\\nbody {\\n  let a = perform 0(1) as Int then yield\\n  print a\\n  return a\\n}\\n\"\ndefinition \"function wait() -> Any\\nkernel 1\\nmetering statements\\nimport 0 operation host.echo(value: Int) -> Int\\nbody {\\n  let b = perform 0(2) as Int\\n  return b\\n}\\n\"\ndefinition \"function promised() -> Any\\nkernel 1\\nmetering statements\\nimport 0 operation host.echo(value: Int) -> Int\\nuse inplace = @18ff02f539acd4a98a892a6ceb0a070cab617b70f7626c7071af333a153333e0\\nuse wait = @842115475e9c96c7f4eaf925e55604e18bdc6b135974309d248e6141df1c0c3b\\nbody {\\n  let t = spawn invoke wait()\\n  let b = join t\\n  print b\\n  return b\\n}\\n\"\nmain {\n  let x = spawn invoke inplace()\n  let y = spawn invoke promised()\n  let tasks = [x, y]\n  let answer = join all tasks\n  finish answer\n}\n",
       "expected": {
         "prints": [
           {
@@ -182,7 +182,7 @@
         "trace": [
           {
             "effect": {
-              "effect": "echo",
+              "effect": "host.echo",
               "args": [
                 {
                   "int": "1"
@@ -193,7 +193,7 @@
           },
           {
             "effect": {
-              "effect": "echo",
+              "effect": "host.echo",
               "args": [
                 {
                   "int": "2"
@@ -231,7 +231,7 @@
     },
     {
       "name": "a failure delivered to a then yield wait reaches catch only after its turn",
-      "document": "kernel 1\nnumbers by_spelling\neffect echo(value: Int) -> Int contract \"1\"\neffect fails(value: Int) -> Int contract \"1\"\nfn guarded() { try { let a = perform fails(1) as Int then yield print a } catch e { print \"caught\" } return null }\nfn other() { let b = perform echo(2) as Int print b return b }\n\nmain {\nlet x = spawn call guarded()\nlet y = spawn call other()\nlet tasks = [x, y]\ndo join all tasks\nfinish null\n}\n",
+      "document": "kernel 1\nnumbers by_spelling\nimport 0 operation host.echo(value: Int) -> Int\nimport 1 operation host.fails(value: Int) -> Int\ndefinition \"function guarded() -> Any\\nkernel 1\\nmetering statements\\nimport 0 operation host.echo(value: Int) -> Int\\nimport 1 operation host.fails(value: Int) -> Int\\nbody {\\n  try {\\n    let a = perform 1(1) as Int then yield\\n    print a\\n  } catch e {\\n    print \\\"caught\\\"\\n  }\\n  return null\\n}\\n\"\ndefinition \"function other() -> Any\\nkernel 1\\nmetering statements\\nimport 0 operation host.echo(value: Int) -> Int\\nimport 1 operation host.fails(value: Int) -> Int\\nbody {\\n  let b = perform 0(2) as Int\\n  print b\\n  return b\\n}\\n\"\nmain {\n  let x = spawn invoke guarded()\n  let y = spawn invoke other()\n  let tasks = [x, y]\n  do join all(tasks)\n  finish null\n}\n",
       "expected": {
         "prints": [
           {
@@ -247,7 +247,7 @@
         "trace": [
           {
             "effect": {
-              "effect": "fails",
+              "effect": "host.fails",
               "args": [
                 {
                   "int": "1"
@@ -258,7 +258,7 @@
           },
           {
             "effect": {
-              "effect": "echo",
+              "effect": "host.echo",
               "args": [
                 {
                   "int": "2"

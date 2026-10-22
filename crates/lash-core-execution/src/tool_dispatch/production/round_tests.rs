@@ -5,15 +5,15 @@ use super::*;
 use lash_core_store::tool_run::Material;
 use lash_core_store::tool_run::SettledOutput;
 
-fn integer() -> crate::JsonSchema {
-    crate::JsonSchema::admit(serde_json::json!({ "type": "integer" }))
+fn integer() -> lash_vocabulary::json_schema::JsonSchema {
+    lash_vocabulary::json_schema::JsonSchema::admit(serde_json::json!({ "type": "integer" }))
         .expect("an integer schema is admitted")
 }
 
 /// The output of a call that parked under `declaration` on a process
 /// whose terminal is a Finish with `value`.
 fn resolved_finish(
-    declaration: crate::ToolDeclaration,
+    declaration: lash_vocabulary::tool_declaration::ToolDeclaration,
     value: serde_json::Value,
 ) -> ToolCallOutput {
     let owner = crate::EffectOpener::turn("session", "turn");
@@ -26,7 +26,7 @@ fn resolved_finish(
         },
         launch: None,
         declaration,
-        output_schema: crate::JsonSchema::any(),
+        output_schema: lash_vocabulary::json_schema::JsonSchema::any(),
     };
     let parked = Material::journal_local(
         MaterialOwner::Run {
@@ -66,8 +66,8 @@ fn resolved_finish(
 /// a value it admits settles carrying that schema as its witness.
 #[test]
 fn a_parked_finish_settles_under_the_declaration_its_park_recorded() {
-    let declaration = crate::ToolDeclaration {
-        controls: crate::TurnControls::finish(integer()),
+    let declaration = lash_vocabulary::tool_declaration::ToolDeclaration {
+        controls: lash_vocabulary::tool_declaration::TurnControls::finish(integer()),
         ..Default::default()
     };
     let refused = resolved_finish(declaration.clone(), serde_json::json!("seven"));
@@ -79,7 +79,7 @@ fn a_parked_finish_settles_under_the_declaration_its_park_recorded() {
         matches!(
             failure.cause.as_deref(),
             Some(crate::ToolFailureCause::Declaration {
-                refusal: crate::DeclarationRefusal::FinishValueMismatch { value_schema, .. },
+                refusal: lash_vocabulary::tool_declaration::DeclarationRefusal::FinishValueMismatch { value_schema, .. },
             }) if **value_schema == integer()
         ),
         "{failure:?}"
@@ -173,7 +173,7 @@ async fn an_empty_invalid_version_batch_emits_only_a_batch_refusal() {
 /// recorded provider routes after the protocol projects its callable catalog.
 #[test]
 fn an_operation_absent_from_the_callable_catalog_cannot_be_admitted_from_routes() {
-    let definition = crate::ToolDefinition::raw(
+    let definition = lash_vocabulary::tool_contract::ToolDefinition::raw(
         "private",
         "dataframe.run",
         "private",

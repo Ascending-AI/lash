@@ -1,51 +1,12 @@
 kernel 1
 numbers by_spelling
-use add = @7e4f2312e59326d1b501e7b4d092549da7b8db86c07ada94902ee61f3317b537
-use bool.not = @740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d
-use brand.of = @bd9a21264286394a5cd731fecaa03951fb50517689667675c0788623eb529dc1
-use eq = @b50ea78f1b8899c52026719706a58480a99f1d90dcd04a6954be8f2c23cd8954
-use error.new = @94cb9716bc8ce4815dfcc5451d7f6d00901c7ed7aeba0d131da241a5f750d064
-use kind = @3e2a9836b16b3ade4f7fcc2d56d1fb203dffed4bd5d7f4bf800df213c8c8c5f7
-use list.copy = @9582e9497de80ffe91797c946b2d48fc9e1621735e02d33bf53c8c828a41d63a
-use list.len = @70d92c79f9c69cfe8cda0752cf30f5f0db0499a1bbffeeed9e2abddad9cf302b
-use map.contains = @5a66ffea6554dc3cceb26c77fe239e0ab2ecd7dbbb0654104ab865df84ec75d3
-use map.keys = @c0ca090ea752577550298c1dc3ea7697df5676465337d814ffe3b4c265b5dc16
-use map.len = @eca67654cffa061303e34a549e20bb70b7668a3e655709d36fd1c2fdd6b2956d
-use py.exc.name = @fc83b0ea9d71ee72309df257cff6e29f5f6183d497225973d0b49a30a2a63d8e
-use py.fail = @da24400da6ab4bd87448a8afed5a80c5fd45bb814d74bd244c3c9b5bc5b10078
-use py.for_in.check = @9c19a00e95592dd7c0bb299ea5df5908af7176c5e66457c782dd81d954b58830
-use py.for_in.open = @6493a17d666515acdb0be8f73eef0f455873f1508f8bd296c11773152a7b7e3f
-use py.iadd = @db032522a59b5ed49f7f09ed109e2de89b7f2899360c89623aa5e9334f178976
-use py.operand_error = @c0e26c1c4cb4e647cd9d7d7ae906cedde64578296dc7de7603856bc2f10bfee7
-use py.to_list = @06faa35183e7d3cf9672082edef24b054a0a038c8322eba3e9cf90e709c86ef5
-use py.type = @7f6673f469e839af64e8f42364bc60cba2a5bdfa0be97b4b7f9e013d63d06f98
-use record.contains = @c5ee063554dd9a59526868c163b1a3282db896327967a522d00fcde29c91c25c
-use record.keys = @3048431a57b64b680843cd96770d99536bab12b83c3c7788856614e555b4985c
-use same = @1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578
-use set.keys = @aa084b5d26e265b6f2ebbcb088dccbe68dc6c6b52b97b987914d08192529bc4c
-use set.len = @3b70dd4bec191dc3c00a32a3aee61fa82e4e4b7256aac2668f25739b0b7a4d38
-use sub = @59b9d484a581bca4a1909189b23b1f4363670e1af545c6b28c6110f6ee95b01a
-use text.concat = @ba1c1b7fe1ae760637dddbee3751c5dfbe05ed7b4f3e7792af355dc80d5ff6bb
-use text.join = @79aad37e7cebc78b176b7458ed56e625112872a7faf900143e331db02c601a0f
-use text.len = @a6c5541c537bca274e439467011e6f2a631cad9a29a4cca7a7710763e675f716
-use text.slice = @649f38eba0f5c8ce04da0c9ad8cf52c7fd5189fd9301d6ee3a7c65026bad5e81
-use text.split = @acfd50807c41e73f1bb1c4811459ba182f363914657804e6c7b4583a08241c0a
-use text.upper_u17_0_0 = @a9d412b1ecfed3de7a78d9aa17829cae8396a1180adf0f3f681bc56d4d44170e
-use tuple.concat = @cb471f6847d41251a688fd3703cc1461b95db6cae5f54601979e8c6947953be9
-use tuple.len = @2eced051afe955ac8dbeed3762acd4b8ce74b7a4ed15763ea47dfd01e5cc5f71
-use tuple.values = @5273a8716ecc76558fb60aa870684b3dc9068f466d745fa7ec00b80ac6936152
-entry demo(items: List(Int)) -> Any
-
-fn demo(items) {
-  let total = 0
-  for item in items via (open py.for_in.open, check py.for_in.check) {
-    set total = invoke py.iadd(total, item)
-  }
-  return total
-}
-
+import 0 code py.h_n6_for_in_n4_open(value: Any) -> Any direct
+import 1 code py.h_n6_for_in_n5_check(value: Any, size: Int, remaining: Int, more: Bool) -> Int direct
+import 2 code py.h_n4_iadd(left: Any, right: Any) -> Any direct
+export demo "{\"kind\":\"function\",\"value\":{\"function\":\"67b6f6265e5f90f0a6becd314d3bd83ca7b2f75dac0ceb809228b6525c682c19\",\"signature\":{\"params\":[{\"name\":\"items\",\"ty\":{\"list\":\"int\"}}],\"result\":\"int\"},\"convention\":{\"kind\":\"direct\"},\"asynchronous\":true,\"rest\":false}}"
+definition "function local.function(items: Any) -> Any\nkernel 1\nmetering statements\nimport 0 code py.h_n6_for_in_n4_open(value: Any) -> Any direct\nimport 1 code py.h_n6_for_in_n5_check(value: Any, size: Int, remaining: Int, more: Bool) -> Int direct\nimport 2 code py.h_n4_iadd(left: Any, right: Any) -> Any direct\nbody {\n  let total = 0\n  for item in items via (open import 0, check import 1) {\n    set total = invoke import 2(total, item)\n  }\n  return total\n}\n"
 main {
-  let demo = &demo
+  let demo = &local.function
 }
 
-unit Function(Name("demo")): statements=4 scopes=2 sites=6
+unit Library(FunctionId(67b6f6265e5f90f0a6becd314d3bd83ca7b2f75dac0ceb809228b6525c682c19)): statements=4 scopes=2 sites=6

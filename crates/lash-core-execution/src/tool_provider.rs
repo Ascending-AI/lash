@@ -1,18 +1,21 @@
-use crate::ProcessId;
-use crate::SessionId;
 pub(crate) use completion_support::AttemptCompletionSupport;
+use lash_vocabulary::identity::ProcessId;
+use lash_vocabulary::identity::SessionId;
 use std::sync::{Arc, Mutex};
 
 use lash_protocol_types::llm::types::ProviderReplayMeta;
 use lash_protocol_types::sync::MutexExt;
 use serde::{Deserialize, Serialize};
 
+use crate::ToolOutcome;
 use crate::plugin::OwnerConfigView;
 use crate::plugin::SessionLifecycleService;
 use crate::plugin::SessionSnapshot;
 use crate::plugin::SessionStateService;
-use crate::{ToolContract, ToolId, ToolManifest, ToolOutcome};
 use lash_execution_contracts::plugin_error::PluginError;
+use lash_vocabulary::tool_contract::ToolContract;
+use lash_vocabulary::tool_contract::ToolId;
+use lash_vocabulary::tool_contract::ToolManifest;
 
 mod attachments;
 mod completion_support;
@@ -49,7 +52,7 @@ pub use session::ToolSessionLlmProfile;
 /// explicit session.
 #[derive(Clone)]
 pub struct AttemptSessionReads {
-    owner: crate::RuntimeOwner,
+    owner: lash_vocabulary::identity::RuntimeOwner,
     sessions: Arc<dyn SessionStateService>,
     /// The policy of the environment the attempt runs under: a process
     /// owner's model reads answer from it.
@@ -63,7 +66,7 @@ impl AttemptSessionReads {
     /// Integrator class 3 read of the attempt owner's effective model policy.
     pub async fn model(&self) -> Result<session::ToolSessionLlmProfile, PluginError> {
         let (model, attachment_acceptance, generation) = match &self.owner {
-            crate::RuntimeOwner::Session(session_id) => {
+            lash_vocabulary::identity::RuntimeOwner::Session(session_id) => {
                 let policy = self.sessions.snapshot_session(session_id).await?.policy;
                 (
                     policy.model,
@@ -71,7 +74,7 @@ impl AttemptSessionReads {
                     policy.generation,
                 )
             }
-            crate::RuntimeOwner::Process(_) => (
+            lash_vocabulary::identity::RuntimeOwner::Process(_) => (
                 self.facts.model.clone(),
                 Arc::clone(&self.facts.attachment_acceptance),
                 self.facts.generation.clone(),
@@ -93,13 +96,12 @@ impl AttemptSessionReads {
     /// controller. A process owner has no session and is refused.
     pub async fn snapshot_current(&self) -> Result<SessionSnapshot, PluginError> {
         match &self.owner {
-            crate::RuntimeOwner::Session(session_id) => {
+            lash_vocabulary::identity::RuntimeOwner::Session(session_id) => {
                 self.sessions.snapshot_session(session_id).await
             }
-            crate::RuntimeOwner::Process(process_id) => Err(crate::runtime::not_a_session_runtime(
-                "snapshot_current",
-                process_id,
-            )),
+            lash_vocabulary::identity::RuntimeOwner::Process(process_id) => Err(
+                crate::runtime::not_a_session_runtime("snapshot_current", process_id),
+            ),
         }
     }
 
@@ -111,20 +113,22 @@ impl AttemptSessionReads {
     /// Integrator class 3 read of the owner's serialized tool catalog.
     pub async fn tool_catalog(&self) -> Result<Vec<serde_json::Value>, PluginError> {
         match &self.owner {
-            crate::RuntimeOwner::Session(session_id) => {
+            lash_vocabulary::identity::RuntimeOwner::Session(session_id) => {
                 self.sessions.tool_catalog(session_id).await
             }
-            crate::RuntimeOwner::Process(_) => Ok(self.pinned_catalog()?.as_ref().clone()),
+            lash_vocabulary::identity::RuntimeOwner::Process(_) => {
+                Ok(self.pinned_catalog()?.as_ref().clone())
+            }
         }
     }
 
     /// Integrator class 3 shared read of the immutable serialized tool catalog.
     pub async fn shared_tool_catalog(&self) -> Result<Arc<Vec<serde_json::Value>>, PluginError> {
         match &self.owner {
-            crate::RuntimeOwner::Session(session_id) => {
+            lash_vocabulary::identity::RuntimeOwner::Session(session_id) => {
                 self.sessions.shared_tool_catalog(session_id).await
             }
-            crate::RuntimeOwner::Process(_) => self.pinned_catalog(),
+            lash_vocabulary::identity::RuntimeOwner::Process(_) => self.pinned_catalog(),
         }
     }
 
@@ -144,7 +148,7 @@ impl AttemptSessionReads {
 /// Integrator class 3 controller-free process reads for a recorded leaf attempt.
 #[derive(Clone)]
 pub struct AttemptProcessReads {
-    owner: crate::RuntimeOwner,
+    owner: lash_vocabulary::identity::RuntimeOwner,
     processes: Arc<dyn crate::ProcessService>,
 }
 
@@ -177,13 +181,14 @@ pub(crate) enum ToolExecutionRoute {
     #[default]
     Catalog,
     Granted {
-        provider: crate::plugin::ToolProviderHandle,
+        provider: lash_vocabulary::providers::ToolProviderHandle,
     },
 }
 
 /// Integrator class 3 sealed, controller-free environment for a recorded leaf attempt.
 #[derive(Clone)]
 pub struct AttemptContext<'run> {
+    admission_now: lash_durable::DurableInstant,
     live: crate::ToolLivePublisher,
     fleet_format: crate::FleetFormat,
     /// Who the attempt runs for: a session on its admitted frame, or a
@@ -213,7 +218,7 @@ pub struct AttemptContext<'run> {
     /// captured by the deep tool-dispatch futures.
     parent_invocation: Option<Box<crate::RuntimeInvocation>>,
     prepared_payload: serde_json::Value,
-    tool_execution_binding: Option<crate::ExecutionBinding>,
+    tool_execution_binding: Option<lash_vocabulary::providers::ExecutionBinding>,
     /// The run's resolved config the attempt executes under.
     config: crate::plugin::OwnerConfigView,
     call_id: lash_protocol_types::ToolCallId,
@@ -239,13 +244,11 @@ pub struct AttemptContext<'run> {
     /// The routes of the surface the attempt was admitted under: what a
     /// start's capture links from. `None` outside a runtime dispatch.
     routes: Option<crate::SurfaceTools>,
-    /// The grants the declaring cell's committed deferred matches recorded,
-    /// by effect path: what a start's capture links an effect the surface
-    /// does not offer from. Empty outside a cell.
-    recorded_grants: crate::session::RecordedGrants,
-    /// The package set the declaring cell is linked under: what a function
-    /// it starts inline is linked under (FIG-6993). `None` outside a cell.
-    linked_packages: Option<lash_kernel_doc::PackageSetDigest>,
+    linked_execution: Option<crate::LinkedExecution>,
+    resolution_pins: std::collections::BTreeMap<
+        lash_vocabulary::names::OperationUse,
+        lash_core_store::resolutions::ResolutionEntry,
+    >,
     definition_engines: crate::ProcessEngineRegistry,
     pub(crate) resolved_run: Option<Arc<crate::ResolvedRun>>,
     /// The environments [`declare_launch`](Self::declare_launch) held under
@@ -288,6 +291,7 @@ impl ToolCompletionState {
 /// effect controller.
 #[derive(Clone)]
 pub(crate) struct ToolContext<'run> {
+    pub(crate) admission_now: Option<lash_durable::DurableInstant>,
     pub(crate) owner: crate::ExecutionOwner,
     pub(crate) sessions: Arc<dyn SessionStateService>,
     pub(crate) session_lifecycle: Arc<dyn SessionLifecycleService>,
@@ -301,7 +305,7 @@ pub(crate) struct ToolContext<'run> {
     pub(crate) attachment_store: Arc<crate::RuntimeAttachmentStore>,
     pub(crate) direct_completions: crate::DirectCompletionClient<'run>,
     pub(crate) prepared_payload: serde_json::Value,
-    pub(crate) tool_execution_binding: Option<crate::ExecutionBinding>,
+    pub(crate) tool_execution_binding: Option<lash_vocabulary::providers::ExecutionBinding>,
     tool_execution_route: ToolExecutionRoute,
     /// The identity of the admitted call this context runs.
     pub(crate) call_id: lash_protocol_types::ToolCallId,
@@ -317,7 +321,7 @@ pub(crate) struct ToolContext<'run> {
     pub(crate) live: Option<Arc<crate::trace::LiveStep>>,
     /// The registered provider the call's admitted binding resolved to:
     /// what its body's capability is bound from.
-    pub(crate) executable: Option<crate::plugin::PluginCallbackIdentity>,
+    pub(crate) executable: Option<lash_vocabulary::providers::PluginCallbackIdentity>,
 }
 
 #[derive(Clone)]
@@ -363,7 +367,7 @@ pub(crate) struct ToolContextBuilder<'run> {
     attachment_store: Arc<crate::RuntimeAttachmentStore>,
     direct_completions: crate::DirectCompletionClient<'run>,
     prepared_payload: serde_json::Value,
-    tool_execution_binding: Option<crate::ExecutionBinding>,
+    tool_execution_binding: Option<lash_vocabulary::providers::ExecutionBinding>,
     tool_execution_route: ToolExecutionRoute,
     call_id: lash_protocol_types::ToolCallId,
     completion: ToolCompletionState,
@@ -439,6 +443,7 @@ impl<'run> ToolContextBuilder<'run> {
 
     pub(crate) fn build(self) -> ToolContext<'run> {
         ToolContext {
+            admission_now: None,
             owner: self.owner,
             sessions: self.sessions,
             session_lifecycle: self.session_lifecycle,
@@ -508,6 +513,7 @@ impl<'run> ToolContext<'run> {
 
     pub(crate) fn to_static(&self) -> Option<ToolContext<'static>> {
         Some(ToolContext {
+            admission_now: self.admission_now,
             owner: self.owner.clone(),
             sessions: Arc::clone(&self.sessions),
             session_lifecycle: Arc::clone(&self.session_lifecycle),
@@ -639,7 +645,7 @@ impl<'run> ToolContext<'run> {
     /// to.
     pub(crate) fn with_executable(
         mut self,
-        identity: crate::plugin::PluginCallbackIdentity,
+        identity: lash_vocabulary::providers::PluginCallbackIdentity,
     ) -> Self {
         self.executable = Some(identity);
         self
@@ -652,7 +658,7 @@ impl<'run> ToolContext<'run> {
 
     pub(crate) fn with_tool_execution_binding(
         mut self,
-        binding: Option<crate::ExecutionBinding>,
+        binding: Option<lash_vocabulary::providers::ExecutionBinding>,
     ) -> Self {
         self.tool_execution_binding = binding;
         self
@@ -660,7 +666,7 @@ impl<'run> ToolContext<'run> {
 
     pub(crate) fn with_granted_provider(
         mut self,
-        provider: crate::plugin::ToolProviderHandle,
+        provider: lash_vocabulary::providers::ToolProviderHandle,
     ) -> Self {
         self.tool_execution_route = ToolExecutionRoute::Granted { provider };
         self
@@ -742,14 +748,17 @@ pub struct PreparedToolBatchCall {
 /// pending completion consumption are projected back through this order.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct PreparedToolBatch {
-    pub batch_id: crate::BatchId,
+    pub batch_id: lash_vocabulary::identity::BatchId,
     pub calls: Vec<PreparedToolBatchCall>,
 }
 
 impl PreparedToolBatch {
     /// Freezes source-order prepared calls for protocol and process-engine implementors; execution
     /// may be concurrent, but launch and completion projection retain this order.
-    pub fn new(batch_id: impl Into<crate::BatchId>, calls: Vec<PreparedToolCall>) -> Self {
+    pub fn new(
+        batch_id: impl Into<lash_vocabulary::identity::BatchId>,
+        calls: Vec<PreparedToolCall>,
+    ) -> Self {
         Self::new_with_grants(
             batch_id,
             calls.into_iter().map(|call| (call, None)).collect(),
@@ -757,7 +766,7 @@ impl PreparedToolBatch {
     }
 
     pub(crate) fn new_with_grants(
-        batch_id: impl Into<crate::BatchId>,
+        batch_id: impl Into<lash_vocabulary::identity::BatchId>,
         calls: Vec<(PreparedToolCall, Option<ToolExecutionGrant>)>,
     ) -> Self {
         Self {
@@ -776,14 +785,14 @@ impl PreparedToolBatch {
 #[derive(Clone)]
 pub struct ToolPrepareContext {
     fleet_format: crate::FleetFormat,
-    owner: crate::RuntimeOwner,
+    owner: lash_vocabulary::identity::RuntimeOwner,
     sessions: Arc<dyn SessionStateService>,
     /// The catalog the call is dispatched against: a process owner's catalog
     /// reads answer from it.
     tool_catalog: Option<Arc<crate::ToolCatalog>>,
     turn_context: crate::TurnContext,
     call_id: lash_protocol_types::ToolCallId,
-    tool_execution_binding: Option<crate::ExecutionBinding>,
+    tool_execution_binding: Option<lash_vocabulary::providers::ExecutionBinding>,
     tool_execution_route: ToolExecutionRoute,
     /// The originator of the process chain the call runs in, when it runs
     /// inside a process.
@@ -797,11 +806,11 @@ impl ToolPrepareContext {
         self.fleet_format
     }
     pub(crate) fn with_execution_binding(
-        owner: crate::RuntimeOwner,
+        owner: lash_vocabulary::identity::RuntimeOwner,
         sessions: Arc<dyn SessionStateService>,
         turn_context: crate::TurnContext,
         call_id: lash_protocol_types::ToolCallId,
-        tool_execution_binding: Option<crate::ExecutionBinding>,
+        tool_execution_binding: Option<lash_vocabulary::providers::ExecutionBinding>,
         fleet_format: crate::FleetFormat,
         config: crate::plugin::OwnerConfigView,
     ) -> Self {
@@ -830,7 +839,7 @@ impl ToolPrepareContext {
     /// A prepare context for tests of a provider's `prepare` step.
     #[cfg(any(test, feature = "testing"))]
     pub fn for_testing(
-        owner: crate::RuntimeOwner,
+        owner: lash_vocabulary::identity::RuntimeOwner,
         sessions: Arc<dyn SessionStateService>,
         process_originator: Option<lash_execution_contracts::process::ProcessOriginator>,
     ) -> Self {
@@ -863,7 +872,7 @@ impl ToolPrepareContext {
 
     pub(crate) fn with_granted_provider(
         mut self,
-        provider: crate::plugin::ToolProviderHandle,
+        provider: lash_vocabulary::providers::ToolProviderHandle,
     ) -> Self {
         self.tool_execution_route = ToolExecutionRoute::Granted { provider };
         self
@@ -874,7 +883,7 @@ impl ToolPrepareContext {
     }
 
     /// Who the call being prepared runs for.
-    pub fn owner(&self) -> &crate::RuntimeOwner {
+    pub fn owner(&self) -> &lash_vocabulary::identity::RuntimeOwner {
         &self.owner
     }
 
@@ -882,11 +891,10 @@ impl ToolPrepareContext {
     /// [`PluginError::NotASessionRuntime`] inside a process.
     pub fn session_id(&self) -> Result<&SessionId, PluginError> {
         match &self.owner {
-            crate::RuntimeOwner::Session(session_id) => Ok(session_id),
-            crate::RuntimeOwner::Process(process_id) => Err(crate::runtime::not_a_session_runtime(
-                "prepare_session_id",
-                process_id,
-            )),
+            lash_vocabulary::identity::RuntimeOwner::Session(session_id) => Ok(session_id),
+            lash_vocabulary::identity::RuntimeOwner::Process(process_id) => Err(
+                crate::runtime::not_a_session_runtime("prepare_session_id", process_id),
+            ),
         }
     }
 
@@ -897,7 +905,7 @@ impl ToolPrepareContext {
 
     /// The execution binding of the deferred match this call runs on, its
     /// readability already checked; `None` for a call that carries none.
-    pub fn tool_execution_binding(&self) -> Option<&crate::ExecutionBinding> {
+    pub fn tool_execution_binding(&self) -> Option<&lash_vocabulary::providers::ExecutionBinding> {
         self.tool_execution_binding.as_ref()
     }
 
@@ -926,10 +934,12 @@ impl ToolPrepareContext {
 
     pub async fn tool_catalog(&self) -> Result<Vec<serde_json::Value>, PluginError> {
         match &self.owner {
-            crate::RuntimeOwner::Session(session_id) => {
+            lash_vocabulary::identity::RuntimeOwner::Session(session_id) => {
                 self.sessions.tool_catalog(session_id).await
             }
-            crate::RuntimeOwner::Process(_) => Ok(self.pinned_catalog()?.as_ref().clone()),
+            lash_vocabulary::identity::RuntimeOwner::Process(_) => {
+                Ok(self.pinned_catalog()?.as_ref().clone())
+            }
         }
     }
 
@@ -939,10 +949,10 @@ impl ToolPrepareContext {
         &self,
     ) -> Result<std::sync::Arc<Vec<serde_json::Value>>, PluginError> {
         match &self.owner {
-            crate::RuntimeOwner::Session(session_id) => {
+            lash_vocabulary::identity::RuntimeOwner::Session(session_id) => {
                 self.sessions.shared_tool_catalog(session_id).await
             }
-            crate::RuntimeOwner::Process(_) => self.pinned_catalog(),
+            lash_vocabulary::identity::RuntimeOwner::Process(_) => self.pinned_catalog(),
         }
     }
 
@@ -1029,7 +1039,7 @@ impl<'a> ToolCall<'a> {
 /// # Declaration
 ///
 /// What a body may do beyond an inline Done result is declared on its
-/// manifest as a [`ToolDeclaration`](crate::ToolDeclaration): `may_defer`
+/// manifest as a [`ToolDeclaration`](lash_vocabulary::tool_declaration::ToolDeclaration): `may_defer`
 /// for a body that returns Deferred, `intents` for the Lash intent kinds a
 /// Done result declares, and `isolated` for a call that runs as a process
 /// from its start. Admission records the declaration with the manifest the
@@ -1134,7 +1144,7 @@ pub trait ToolProvider: Send + Sync + 'static {
     /// key (S8). A recorded binding whose codec is this provider and whose
     /// format is not listed parks, typed, before the call is prepared: the
     /// provider's own reader never sees it.
-    fn readable_binding_formats(&self) -> &'static [crate::FormatVersion] {
+    fn readable_binding_formats(&self) -> &'static [lash_vocabulary::providers::FormatVersion] {
         &[]
     }
     /// The codec payload a link to the advertised tool `manifest` records:
@@ -1146,7 +1156,7 @@ pub trait ToolProvider: Send + Sync + 'static {
         &self,
         _manifest: &ToolManifest,
         _config: &OwnerConfigView,
-    ) -> Option<(crate::FormatVersion, serde_json::Value)> {
+    ) -> Option<(lash_vocabulary::providers::FormatVersion, serde_json::Value)> {
         None
     }
     /// The start of the process an isolated call (its manifest names an

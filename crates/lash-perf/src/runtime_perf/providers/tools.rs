@@ -439,8 +439,8 @@ fn benchmark_async_tool_definition() -> ToolDefinition {
     .expect("valid declared tool schemas")
     .with_execution(std::time::Duration::from_secs(120))
     .with_declaration(
-        lash_core::ToolDeclaration::deferring(),
-        Some(lash_core::ParkBound::Within(
+        lash_vocabulary::tool_declaration::ToolDeclaration::deferring(),
+        Some(lash_vocabulary::tool_contract::ParkBound::Within(
             std::time::Duration::from_secs(120),
         )),
     )
@@ -696,7 +696,7 @@ fn oblique_judge_direct_request(candidate_ids: &[String]) -> DirectRequest {
         DirectJsonSchema {
             name: "runtime_perf_oblique_judge".to_string(),
             strict: true,
-            schema: lash_protocol_types::SchemaContract::admit(serde_json::json!({
+            schema: lash_vocabulary::schema_contract::SchemaContract::admit(serde_json::json!({
                 "type": "object",
                 "additionalProperties": false,
                 "required": ["ranked_doc_ids", "rationale"],
@@ -797,7 +797,7 @@ fn gmail_like_tool_definition(index: usize, name: &str) -> ToolDefinition {
         definition.contract.output_contract = ToolOutputContract::from_input_schema(
             "projection",
             Some(
-                lash_protocol_types::JsonSchema::admit(serde_json::json!({
+                lash_vocabulary::json_schema::JsonSchema::admit(serde_json::json!({
                     "type": "object",
                     "properties": {
                         "id": { "type": "string" },

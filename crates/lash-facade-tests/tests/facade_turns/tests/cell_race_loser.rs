@@ -23,8 +23,8 @@ struct RaceTools {
     midpoint: Arc<tokio::sync::Notify>,
 }
 
-fn definition(name: &str) -> lash_core::ToolDefinition {
-    lash_core::ToolDefinition::raw(
+fn definition(name: &str) -> lash_vocabulary::tool_contract::ToolDefinition {
+    lash_vocabulary::tool_contract::ToolDefinition::raw(
         format!("tool:{name}"),
         format!("tools.{name}"),
         "A race operand.",
@@ -40,7 +40,10 @@ impl ToolProvider for RaceTools {
     fn tool_manifests(
         &self,
         _config: &lash_core::OwnerConfigView,
-    ) -> std::result::Result<Vec<lash_core::ToolManifest>, lash::plugins::PluginError> {
+    ) -> std::result::Result<
+        Vec<lash_vocabulary::tool_contract::ToolManifest>,
+        lash::plugins::PluginError,
+    > {
         Ok({
             [FAST, SLOW]
                 .into_iter()
@@ -53,7 +56,7 @@ impl ToolProvider for RaceTools {
         &self,
         name: &str,
         _config: &lash_core::OwnerConfigView,
-    ) -> Option<Arc<lash_core::ToolContract>> {
+    ) -> Option<Arc<lash_vocabulary::tool_contract::ToolContract>> {
         let Some(("tools", name)) = name.split_once('.') else {
             return None;
         };
@@ -118,7 +121,10 @@ async fn l06_race_loser_body_progresses_while_the_program_sleeps() -> Result<()>
         Arc::new(tools.clone()),
     )?;
     let session = core
-        .session(lash::SessionId::parse("race-loser-progress").expect("nonblank host identity"))
+        .session(
+            lash_vocabulary::identity::SessionId::parse("race-loser-progress")
+                .expect("nonblank host identity"),
+        )
         .create(lash::SessionCreation::root(mock_session_spec()))
         .await?;
     let handle = session.send(TurnInput::text("race then sleep")).await?;
@@ -178,7 +184,10 @@ impl ToolProvider for ClosingTools {
     fn tool_manifests(
         &self,
         _config: &lash_core::OwnerConfigView,
-    ) -> std::result::Result<Vec<lash_core::ToolManifest>, lash::plugins::PluginError> {
+    ) -> std::result::Result<
+        Vec<lash_vocabulary::tool_contract::ToolManifest>,
+        lash::plugins::PluginError,
+    > {
         Ok({
             [FAST, SLOW]
                 .into_iter()
@@ -191,7 +200,7 @@ impl ToolProvider for ClosingTools {
         &self,
         name: &str,
         _config: &lash_core::OwnerConfigView,
-    ) -> Option<Arc<lash_core::ToolContract>> {
+    ) -> Option<Arc<lash_vocabulary::tool_contract::ToolContract>> {
         let Some(("tools", name)) = name.split_once('.') else {
             return None;
         };
@@ -240,7 +249,10 @@ async fn closing_race(loser: Loser) -> Result<(bool, lash_core::ToolCallOutput)>
         Arc::new(tools.clone()),
     )?;
     let session = core
-        .session(lash::SessionId::parse("closing-race").expect("nonblank host identity"))
+        .session(
+            lash_vocabulary::identity::SessionId::parse("closing-race")
+                .expect("nonblank host identity"),
+        )
         .create(lash::SessionCreation::root(mock_session_spec()))
         .await?;
     let events = RecordingEvents::default();
@@ -341,14 +353,16 @@ impl Default for BackoffTools {
     }
 }
 
-fn backoff_definition(name: &str) -> lash_core::ToolDefinition {
+fn backoff_definition(name: &str) -> lash_vocabulary::tool_contract::ToolDefinition {
     let definition = definition(name);
     if name == SLOW {
-        definition.with_execution_policy(lash_core::ExecutionPolicy::repeatable(
-            std::num::NonZeroU32::new(2).expect("nonzero attempt bound"),
-            BACKOFF_MS,
-            BACKOFF_MS,
-        ))
+        definition.with_execution_policy(
+            lash_vocabulary::tool_contract::ExecutionPolicy::repeatable(
+                std::num::NonZeroU32::new(2).expect("nonzero attempt bound"),
+                BACKOFF_MS,
+                BACKOFF_MS,
+            ),
+        )
     } else {
         definition
     }
@@ -359,7 +373,10 @@ impl ToolProvider for BackoffTools {
     fn tool_manifests(
         &self,
         _config: &lash_core::OwnerConfigView,
-    ) -> std::result::Result<Vec<lash_core::ToolManifest>, lash::plugins::PluginError> {
+    ) -> std::result::Result<
+        Vec<lash_vocabulary::tool_contract::ToolManifest>,
+        lash::plugins::PluginError,
+    > {
         Ok({
             [FAST, SLOW]
                 .into_iter()
@@ -372,7 +389,7 @@ impl ToolProvider for BackoffTools {
         &self,
         name: &str,
         _config: &lash_core::OwnerConfigView,
-    ) -> Option<Arc<lash_core::ToolContract>> {
+    ) -> Option<Arc<lash_vocabulary::tool_contract::ToolContract>> {
         let Some(("tools", name)) = name.split_once('.') else {
             return None;
         };
@@ -412,7 +429,10 @@ async fn closing_in_backoff() -> Result<(Duration, usize, Option<lash_core::Tool
         Arc::new(tools.clone()),
     )?;
     let session = core
-        .session(lash::SessionId::parse("closing-backoff").expect("nonblank host identity"))
+        .session(
+            lash_vocabulary::identity::SessionId::parse("closing-backoff")
+                .expect("nonblank host identity"),
+        )
         .create(lash::SessionCreation::root(mock_session_spec()))
         .await?;
     let events = RecordingEvents::default();

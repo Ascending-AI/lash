@@ -5,9 +5,10 @@
 //! live beside it. The session-facing mapping into `SessionError` stays in
 //! `lash-core`.
 
+use crate::RuntimeEffectKind;
 pub use crate::executable_generation::{ExecutableGeneration, ExecutableGenerationRefusal};
-use crate::{RuntimeEffectKind, SessionId};
-pub use lash_vm_protocol::page::HostResource;
+pub use lash_protocol_types::engine_fault::HostResource;
+use lash_vocabulary::identity::SessionId;
 use serde::{Deserialize, Serialize};
 
 mod attachment_retention;
@@ -22,8 +23,6 @@ pub use cause::{OwnerRevisionConflict, RuntimeErrorCause, StoredDataCorruption};
 pub use controller::RuntimeEffectControllerError;
 pub use recorded_refusal::RecordedRefusal;
 pub(crate) mod llm_profile_unavailable;
-mod package_gate;
-pub use package_gate::SnapshotCandidate;
 mod run_shape;
 mod tool_call_limit;
 pub(crate) use classification::RuntimeErrorClass;
@@ -414,7 +413,6 @@ runtime_error_codes! {
         /// no surface to be written under, and fails. It is the fleet, not
         /// the cell: a deploy that brings the nodes into agreement clears
         /// it, and the gate never answers a partial surface instead.
-        NoCompatibleSnapshot = "no_compatible_snapshot" => Terminal,
         // a registered definition refuses the same context the same way.
         /// A registered run definition refused the spec's context (FIG-3838):
         /// deterministic, so it is recorded as the run's failure.
@@ -536,7 +534,7 @@ runtime_error_codes! {
         /// turn parks for a build of its own generation.
         RetiredGeneration = "retired_generation" => Parked,
         // a binding the cell's journal names moved; only its recorded results serve it.
-        /// A redriven code cell needed a host tool binding its journaled binding
+        /// A redriven code cell needed a host operation binding its journaled binding
         /// set names, and the live tool for it is now missing or changed
         /// (FIG-3587). The binding is served only from recorded results: a call
         /// that would reach the live tool refuses, before anything is claimed.
@@ -950,10 +948,7 @@ impl RuntimeError {
     /// [`HostResource::is_retryable`] states whether redrive can succeed.
     #[must_use]
     pub fn host_resource(&self) -> Option<HostResource> {
-        use lash_vm_protocol::{
-            InfrastructureOutcome,
-            page::{HeapFault, PageRefusal},
-        };
+        use lash_protocol_types::engine_fault::{HeapFault, InfrastructureOutcome, PageRefusal};
 
         let RuntimeErrorCause::VmWorker { outcome } = self.cause.as_ref()? else {
             return None;
@@ -1103,7 +1098,7 @@ impl RuntimeError {
 
     /// The input a send was refused for because the host forsook its id
     /// ([`RuntimeErrorCode::TurnInputForsaken`]), from the structured cause.
-    pub fn forsaken_input(&self) -> Option<&crate::InputId> {
+    pub fn forsaken_input(&self) -> Option<&lash_vocabulary::identity::InputId> {
         match self.cause.as_ref()? {
             RuntimeErrorCause::TurnInputForsaken { input_id } => Some(input_id),
             _ => None,
@@ -1112,7 +1107,7 @@ impl RuntimeError {
 
     /// Extracts the deleted session ID for effect-host implementors only from structured
     /// session-deletion causes, returning `None` for all other errors.
-    pub fn deleted_session_id(&self) -> Option<&crate::SessionId> {
+    pub fn deleted_session_id(&self) -> Option<&lash_vocabulary::identity::SessionId> {
         match self.cause.as_ref()? {
             RuntimeErrorCause::SessionDeleted { session_id } => Some(session_id),
             RuntimeErrorCause::ControlPhaseExpired { .. }
@@ -1134,10 +1129,10 @@ impl RuntimeError {
             | RuntimeErrorCause::StoredDataCorrupt { .. }
             | RuntimeErrorCause::ModuleArtifactRefused { .. }
             | RuntimeErrorCause::RunShapeRefused { .. }
-            | RuntimeErrorCause::NoCompatibleSnapshot { .. }
             | RuntimeErrorCause::ConfigRefused { .. }
             | RuntimeErrorCause::MissingRecordedProcessConfig { .. }
             | RuntimeErrorCause::OwnerRevisionConflict(_)
+            | RuntimeErrorCause::PackageStoreRefused { .. }
             | RuntimeErrorCause::StoreRefusal { .. }
             | RuntimeErrorCause::PluginStateUnrecorded { .. }
             | RuntimeErrorCause::PluginStateEffectOwnerMismatch

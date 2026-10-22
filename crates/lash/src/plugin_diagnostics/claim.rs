@@ -37,7 +37,7 @@ pub(super) fn explain(
                         inventory.entries.iter().zip(&inventory.readiness).find_map(
                             |(entry, readiness)| match &entry.key {
                                 crate::plugins::ContributionKey::Callback(key)
-                                    if crate::plugins::ObligationToken::for_callback(
+                                    if lash_vocabulary::claims::ObligationToken::for_callback(
                                         entry.registry,
                                         key,
                                     )

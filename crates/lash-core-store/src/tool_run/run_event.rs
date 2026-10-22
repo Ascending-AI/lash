@@ -99,8 +99,34 @@ pub struct CompletionSource {
     /// The process terminal wait a runtime-owned resolver awaits, by its
     /// id's hex.
     pub terminal: Option<String>,
+    /// An ordinary operation's committed timer and absolute deadline.
+    pub timer: Option<CompletionTimer>,
     /// The parked call's pending completion.
     pub metadata: MaterialRef,
+}
+
+/// A timer's identity and absolute deadline, recorded together when the park commits.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CompletionTimer {
+    pub wait: String,
+    pub deadline_ms: i64,
+}
+impl lash_vocabulary::tokens::TokenCodec for CompletionTimer {
+    fn encode(&self, out: &mut lash_vocabulary::tokens::TokenWriter) {
+        out.seq(2);
+        out.text(&self.wait);
+        self.deadline_ms.encode(out);
+    }
+    fn decode(
+        input: &mut lash_vocabulary::tokens::TokenReader<'_>,
+    ) -> Result<Self, lash_vocabulary::tokens::TokenError> {
+        input.expect_struct(2)?;
+        Ok(Self {
+            wait: input.text()?.to_owned(),
+            deadline_ms: i64::decode(input)?,
+        })
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -119,7 +145,7 @@ pub enum KnownFailureReason {
     StartRefused,
 }
 
-pub use lash_protocol_types::LimitCause;
+use lash_vocabulary::tool_contract::LimitCause;
 
 /// Only material actually retained before an attempt stopped.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]

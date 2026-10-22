@@ -3,7 +3,7 @@
   "cases": [
     {
       "name": "a declared effect must be provided",
-      "document": "kernel 1\nnumbers by_spelling\neffect echo(value: Int) -> Int contract \"1\"\nmain { let answer = perform echo(1) as Int finish answer }",
+      "document": "kernel 1\nnumbers by_spelling\nimport 0 operation host.echo(value: Int) -> Int\nmain {\n  let answer = perform 0(1) as Int\n  finish answer\n}\n",
       "expected": {
         "prints": [],
         "end": "refused",

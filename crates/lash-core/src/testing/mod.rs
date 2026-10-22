@@ -54,7 +54,6 @@ pub use lash_core_execution::testing::UnavailableTurnPreludeStore;
 pub use lash_core_execution::testing::behavior_transcript;
 pub use lash_core_execution::testing::cancelled_code_execution_context;
 pub use lash_core_execution::testing::code_execution_context;
-pub use lash_core_execution::testing::code_execution_context_for_process;
 pub use lash_core_execution::testing::code_execution_context_with_deferred_provider;
 pub use lash_core_execution::testing::code_execution_context_with_invocation;
 pub use lash_core_execution::testing::code_execution_context_with_process_dependencies;

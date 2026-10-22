@@ -21,7 +21,7 @@
 //!   their constructors, so the host can share one pool across every
 //!   materialized provider.
 
-use crate::SessionId;
+use lash_vocabulary::identity::SessionId;
 use std::sync::Arc;
 
 use lash_trace::{TraceDetailPolicy, TraceSink};

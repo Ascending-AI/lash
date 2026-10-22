@@ -28,7 +28,6 @@ use axum::routing::{get, post};
 use axum::{Json, Router};
 use lash::workflow::document::{Captions, FunctionRegistry, Name, Site, print_document};
 use lash::workflow::edit::{Draft, Location, Transaction};
-use lash::workflow::{WorkflowDocument, WorkflowDocumentEntry};
 use tokio::sync::mpsc;
 use tokio_stream::StreamExt;
 use tokio_stream::wrappers::ReceiverStream;
@@ -48,6 +47,7 @@ pub struct StartupError(String);
 
 #[derive(Clone)]
 pub struct AppState {
+    namespace_pin: lash::process::HostArtifactPin,
     store: Arc<Mutex<Option<SavedWorkflow>>>,
     /// Held across a save, and across a run's start: a save releases the pin
     /// of the version it supersedes, which a start must not race.
@@ -59,14 +59,13 @@ pub struct AppState {
     host: Arc<display::HostTools>,
     catalog: Arc<catalog::Catalog>,
     function_labels: std::collections::BTreeMap<String, String>,
-    packages: Arc<lash::package::HeldPackages>,
 }
 
 /// The saved version: host revision state. The workflow itself is the
 /// draft's document; lash holds its definition.
 #[derive(Clone)]
 struct SavedWorkflow {
-    package_set: Option<lash::package::WorkflowPackages>,
+    namespace: Option<runtime::Namespace>,
     version: u64,
     /// The workflow as the host edits it.
     draft: Draft,
@@ -85,7 +84,6 @@ struct SavedWorkflow {
     review: Vec<Site>,
     dialect: Dialect,
     function_labels: std::collections::BTreeMap<String, String>,
-    packages: Arc<lash::package::HeldPackages>,
 }
 
 /// How a saved version came to be, which says what authored source and
@@ -95,7 +93,7 @@ pub(crate) enum Origin {
     Document,
     /// Imported from this source, with the captions it spells.
     Imported {
-        packages: lash::package::WorkflowPackages,
+        packages: Box<runtime::Namespace>,
         dialect: Dialect,
         text: String,
         map: Option<lash::workflow::document::SourceMap>,
@@ -119,7 +117,7 @@ impl SavedWorkflow {
         &self,
         core: &lash::LashCore,
         workers: &lash::vm::WorkerService,
-        functions: &FunctionRegistry,
+        _functions: &FunctionRegistry,
     ) -> WorkflowView {
         let document = self.draft.document().clone();
         // Saved views link only the declarations retained by their publication.
@@ -129,17 +127,10 @@ impl SavedWorkflow {
                 .execution_document(&published.reference)
                 .await
             {
-                Ok(lash::workflow::WorkflowDocumentRead::Read(read)) => Ok(read.document),
+                Ok(lash::workflow::WorkflowDocumentRead::Read(read)) => Ok(*read),
                 other => Err(format!("stored document unavailable: {other:?}")),
             },
-            Err(_) => WorkflowDocument::derive(
-                document.clone(),
-                WorkflowDocumentEntry::Entry {
-                    function: self.entry.clone(),
-                },
-                functions,
-            )
-            .map_err(|error| error.to_string()),
+            Err(_) => Err("the draft has no admitted Link".into()),
         };
         let mut authored = self.authored.clone();
         if let Some(authored) = &mut authored
@@ -160,13 +151,17 @@ impl SavedWorkflow {
         };
         let (view, view_unavailable, printed, source_unavailable) = match &derived {
             Ok(derived) => {
-                let (mut view, view_unavailable) =
-                    match lash::workflow::view::derive(derived, &self.packages.view())
-                        .map_err(|error| error.to_string())
-                    {
-                        Ok(view) => (Some(view), None),
-                        Err(error) => (None, Some(error.to_string())),
-                    };
+                let (mut view, view_unavailable) = match self
+                    .published
+                    .as_ref()
+                    .map_err(|error| error.to_string())
+                    .and_then(|published| {
+                        lash::workflow::view::derive(derived, &published.context)
+                            .map_err(|error| error.to_string())
+                    }) {
+                    Ok(view) => (Some(view), None),
+                    Err(error) => (None, Some(error.to_string())),
+                };
                 let options = lash::dialect::PrintOptions {
                     source_map: true,
                     ..Default::default()
@@ -290,12 +285,15 @@ impl SavedWorkflow {
         correspondence: &lash::workflow::document::Correspondence,
         result: &lash::workflow::document::Document,
     ) -> Result<(Captions, Vec<Site>), ErrorResponse> {
-        let rekeyed = self.captions.rekey(correspondence, result).ok_or_else(|| {
-            ErrorResponse::invalid(
-                "captions",
-                "the edit does not start at the captions' document",
-            )
-        })?;
+        let rekeyed = self
+            .captions
+            .rekey(correspondence, self.draft.document(), result)
+            .ok_or_else(|| {
+                ErrorResponse::invalid(
+                    "captions",
+                    "the edit does not start at the captions' document",
+                )
+            })?;
         let mut review: Vec<Site> = self
             .review
             .iter()
@@ -315,16 +313,14 @@ impl AppState {
     /// version 1.
     pub async fn new(runtime: WorkflowHost) -> Result<Self, StartupError> {
         let core = runtime.core;
-        let environment = runtime::workflow_environment(&core)
+        let environment = runtime::workflow_environment(&core, &runtime.pin)
             .await
             .map_err(|error| StartupError(error.to_string()))?;
-        let catalog = catalog::Catalog::load(&core, &environment)
+        let catalog = catalog::Catalog::load(&core, &runtime.pin, &environment)
             .await
             .map_err(|error| StartupError(error.to_string()))?;
-        let packages =
-            lash::package::lash_packages().map_err(|error| StartupError(error.to_string()))?;
-        let package_view = packages.view();
         let state = Self {
+            namespace_pin: runtime.pin,
             store: Arc::new(Mutex::new(None)),
             publishing: Arc::new(tokio::sync::Mutex::new(())),
             host: runtime.tools,
@@ -332,19 +328,7 @@ impl AppState {
             commands: runtime::CommandClient::new(core.clone()),
             core,
             catalog: Arc::new(catalog),
-            packages: Arc::clone(&packages),
-            function_labels: packages
-                .functions()
-                .iter()
-                .filter_map(|(id, function)| {
-                    package_view.display_for_function(id).map(|display| {
-                        (
-                            function.definition().name.to_string(),
-                            display.title.clone(),
-                        )
-                    })
-                })
-                .collect(),
+            function_labels: Default::default(),
         };
         let opening = state
             .catalog
@@ -370,7 +354,7 @@ impl AppState {
     }
 
     async fn environment(&self) -> Result<lash::workflow::WorkflowEnvironment, ErrorResponse> {
-        runtime::workflow_environment(&self.core)
+        runtime::workflow_environment(&self.core, &self.namespace_pin)
             .await
             .map_err(|error| ErrorResponse::invalid("environment", error))
     }
@@ -393,23 +377,18 @@ impl AppState {
             _ => None,
         };
         let existing_packages = match &origin {
-            Origin::Imported { packages, .. } => Some(packages.clone()),
-            Origin::Edited { .. } | Origin::Read { .. } => self.current().package_set,
+            Origin::Imported { packages, .. } => Some((**packages).clone()),
+            Origin::Edited { .. } | Origin::Read { .. } => self.current().namespace,
             Origin::Document => None,
         };
         let selected = match existing_packages {
             Some(packages) => Ok(packages),
-            None => self
-                .core
-                .host_artifacts()
-                .cell_packages()
-                .await
-                .map(|packages| packages.declare_all()),
+            None => runtime::namespace(&self.core, &self.namespace_pin).await,
         };
         let packages = selected.as_ref().ok().cloned();
         let publication = match selected {
             Ok(packages) => runtime::publish(&self.core, &draft, &entry, packages, source).await,
-            Err(error) => Err(runtime::RunError::Lash(error)),
+            Err(error) => Err(error),
         };
         let (published, publication) = match publication {
             Ok(publication) => (Ok(publication.published.clone()), Some(publication)),
@@ -456,7 +435,7 @@ impl AppState {
                     }),
             };
             let saved = SavedWorkflow {
-                package_set: packages,
+                namespace: packages,
                 version,
                 draft,
                 entry,
@@ -466,7 +445,6 @@ impl AppState {
                 review,
                 dialect,
                 function_labels: self.function_labels.clone(),
-                packages: Arc::clone(&self.packages),
             };
             let superseded = store
                 .replace(saved.clone())
@@ -514,7 +492,7 @@ async fn read_environment(
 ) -> Result<Json<EnvironmentView>, ErrorResponse> {
     let environment = state.environment().await?;
     Ok(Json(EnvironmentView {
-        effects: serde_json::to_value(environment.checker().effects)
+        namespaces: serde_json::to_value(environment.namespaces())
             .map_err(|error| ErrorResponse::invalid("environment", error))?,
         functions: environment
             .functions()
@@ -546,7 +524,7 @@ async fn select_workflow(
         .ok_or_else(|| ErrorResponse::unknown_workflow(&request.id))?
         .map_err(|refusal| ErrorResponse::invalid("dialect", refusal))?;
     let entry = request.entry.unwrap_or_else(|| example.entry.clone());
-    if !example.document.entries.contains_key(&entry) {
+    if !example.document.exports.contains_key(&entry) {
         return Err(ErrorResponse::invalid(
             "entry",
             "Select a declared workflow entry",
@@ -570,7 +548,7 @@ async fn open_workflow(
     Json(request): Json<OpenWorkflowRequest>,
 ) -> Result<Json<WorkflowView>, ErrorResponse> {
     let environment = state.environment().await?;
-    let document = runtime::complete(*request.document, &environment)
+    let document = runtime::validate_document(*request.document)
         .map_err(|error| ErrorResponse::invalid("document", error))?;
     let draft = Draft::open(document)
         .map_err(|error| ErrorResponse::invalid("document", format!("{error:?}")))?;
@@ -826,11 +804,4 @@ impl IntoResponse for ErrorResponse {
     fn into_response(self) -> Response {
         (self.status, Json(self.body)).into_response()
     }
-}
-
-#[cfg(test)]
-fn test_packages() -> lash::package::PackageView<'static> {
-    static HELD: std::sync::LazyLock<Arc<lash::package::HeldPackages>> =
-        std::sync::LazyLock::new(|| lash::package::lash_packages().unwrap());
-    HELD.view()
 }

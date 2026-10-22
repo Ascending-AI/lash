@@ -1,14 +1,16 @@
 //! CONF-NATIVE, CONF-SHAPE and CONF-METER over installed packages.
 #![allow(clippy::unwrap_used, reason = "a malformed law fixture fails its law")]
 
-use std::collections::BTreeSet;
 use std::sync::Arc;
 
-use lash_ext_helper_compiler::library::{Dialect, Library};
-use lash_kernel_doc::{
-    Datum, FunctionRegistry, Implementation, NativeCall, NativeError, NativeFunction, Type, Value,
-};
-use lash_kernel_package::{HeldPackages, Package, PackageSources};
+use lash_kernel_doc::Datum;
+use lash_kernel_doc::FunctionRegistry;
+use lash_kernel_doc::Implementation;
+use lash_kernel_doc::NativeCall;
+use lash_kernel_doc::NativeError;
+use lash_kernel_doc::NativeFunction;
+use lash_kernel_doc::Value;
+use lash_vocabulary::types::Type;
 
 use super::{Kit, Law, Witness};
 use crate::{Case, Expected, ExpectedEnd};
@@ -29,15 +31,7 @@ fn case(name: &str, document: String) -> Case {
 }
 
 fn close(mut case: Case, registry: &FunctionRegistry) -> Case {
-    let mut document = lash_kernel_doc::parse_document(&case.document).unwrap();
-    let required = lash_kernel_check::requirements(&document, registry);
-    document.manifest.functions = required.functions;
-    for (effect, bodies) in required.performs {
-        document
-            .manifest
-            .effects
-            .insert(effect, bodies.into_values().next().unwrap());
-    }
+    let document = crate::document_fixture::authored(&case.document, registry);
     case.document = lash_kernel_doc::print_document(&document);
     case
 }
@@ -108,79 +102,57 @@ fn sample(ty: &Type, variant: usize) -> String {
 /// Every installed Both function gets a typed empty-input witness; native-only
 /// definitions are counted explicitly because they have no body to compare.
 #[test]
-fn conf_native_six_packages_and_dataframe() {
+fn conf_native_helper_documents() {
     let (held, registry) = installed();
-    let view = held.view();
-    let mut owners = BTreeSet::new();
+    let view = Arc::clone(&held);
     let mut both = 0;
     let mut native_only = 0;
     let registry = Arc::new(registry);
     let kit = Kit::new(view, registry.clone());
     let mut witnesses = vec![];
-    for package in held.view().packages() {
-        owners.insert(package.path().to_string());
-        for id in package.ids() {
-            let function = registry.get(&id).unwrap();
-            let definition = function.definition();
-            match &definition.implementation {
-                Implementation::Native => {
-                    native_only += 1;
-                    continue;
-                }
-                Implementation::Body(_) => continue,
-                Implementation::Both(_) => {}
+    for id in held.functions.keys().copied() {
+        let function = registry.get(&id).unwrap();
+        let definition = function.definition();
+        match &definition.implementation {
+            Implementation::Native { .. } => {
+                native_only += 1;
+                continue;
             }
-            if function.native().is_none() {
-                // Both permits an optional native; Python currently installs plans.
-                assert!(
-                    function.plan().is_some(),
-                    "{} lacks an implementation",
-                    function.name()
-                );
-            }
-            for variant in 0..9 {
-                let args = definition
-                    .signature
-                    .params
-                    .iter()
-                    .map(|p| sample(&p.ty, variant))
-                    .collect::<Vec<_>>()
-                    .join(", ");
-                let document = format!(
-                    "kernel 1\nnumbers by_spelling\nuse {} = @{id}\nmain {{ let answer = invoke {}({args}) finish answer }}",
-                    function.name(),
-                    function.name()
-                );
-                let witness = Witness {
-                    function: id,
-                    law: Law::Native,
-                    case: close(case(function.name(), document), &registry),
-                };
-                witnesses.push(witness);
-            }
-            both += 1;
+            Implementation::Guest { .. } => continue,
+            Implementation::Both { .. } => {}
         }
+        if function.native().is_none() {
+            // Both permits an optional native; Python currently installs plans.
+            assert!(
+                function.plan().is_some(),
+                "{} lacks an implementation",
+                function.name()
+            );
+        }
+        for variant in 0..9 {
+            let args = definition
+                .signature
+                .params
+                .iter()
+                .map(|p| sample(&p.ty, variant))
+                .collect::<Vec<_>>()
+                .join(", ");
+            let document = format!(
+                "kernel 1\nnumbers by_spelling\n# local definition {} @{id}\nmain {{ let answer = invoke {}({args}) finish answer }}",
+                function.name(),
+                function.name()
+            );
+            let witness = Witness {
+                function: id,
+                law: Law::Native,
+                case: close(case(function.name(), document), &registry),
+            };
+            witnesses.push(witness);
+        }
+        both += 1;
     }
-    assert_eq!(
-        owners,
-        [
-            "kernel",
-            "regex.ecma",
-            "date.ecma",
-            "url.whatwg",
-            "typescript",
-            "python",
-            "dataframe"
-        ]
-        .into_iter()
-        .map(str::to_owned)
-        .collect()
-    );
     let checked = kit.check_all(&witnesses).unwrap();
-    println!(
-        "CONF-NATIVE: packages={} Both={both} native-only={native_only} witnesses={checked}",
-        owners.len()
-    );
+    println!("CONF-NATIVE: Both={both} native-only={native_only} witnesses={checked}");
 }
 
 struct Wrong;
@@ -190,52 +162,24 @@ impl NativeFunction for Wrong {
     }
 }
 
-fn planted(kernel: &Package, shape: bool) -> Package {
-    let (kernel_source, surface) = if shape {
-        (
-            "function planted.name(self: item) -> Text\nkernel 1\ncharge 2\nnative\nbody { return self.name }",
-            "type item = Record{name: Text}\n  property name(self: item) -> Text = planted.name",
-        )
-    } else {
-        (
-            "function planted.answer() -> Int\nkernel 1\ncharge 2\nnative\nbody { return 42 }",
-            "function answer() -> Int = planted.answer",
-        )
-    };
-    Package::build(
-        "planted",
-        "1.0",
-        &PackageSources {
-            kernel: kernel_source,
-            surface,
-            labels: "",
-        },
-        &[kernel],
-    )
-    .unwrap()
-}
-
 /// The kit rejects a wrong native, naming the value difference.
 #[test]
 fn conf_native_wrong_native_names_the_difference() {
-    let base = Library::of(Dialect::Python).unwrap();
-    let kernel = base.packages[0].clone();
-    let package = planted(&kernel, false);
-    let id = package.function("planted.answer").unwrap();
-    let held = HeldPackages::install([kernel, package]).unwrap();
-    let mut registry = FunctionRegistry::declarations();
-    held.register_into(&mut registry, &|function| {
-        if *function == id {
-            Some(Arc::new(Wrong))
-        } else {
-            base.registry
-                .get(function)
-                .and_then(|f| f.native().cloned())
-        }
-    })
+    let definition = lash_kernel_doc::parse_definition(
+        "function planted.answer() -> Int\nkernel 1\ncharge 2\nnative\nbody { return 42 }",
+    )
     .unwrap();
+    let id = definition.identity();
+    let mut document =
+        lash_kernel_doc::Document::new(lash_kernel_doc::NumberPolicy::BySpelling, vec![]);
+    document.functions.insert(id, definition.clone());
+    let held = Arc::new(document);
+    let mut registry = FunctionRegistry::declarations();
+    registry
+        .register(definition, Some(Arc::new(Wrong)))
+        .unwrap();
     let registry = Arc::new(registry);
-    let kit = Kit::new(held.view(), registry.clone());
+    let kit = Kit::new(Arc::clone(&held), registry.clone());
     let witness = Witness {
         function: id,
         law: Law::Native,
@@ -243,7 +187,7 @@ fn conf_native_wrong_native_names_the_difference() {
             case(
                 "wrong native",
                 format!(
-                    "kernel 1\nnumbers by_spelling\nuse planted.answer = @{id}\nmain {{ let answer = invoke planted.answer() finish answer }}"
+                    "kernel 1\nnumbers by_spelling\n# local definition planted.answer @{id}\nmain {{ let answer = invoke planted.answer() finish answer }}"
                 ),
             ),
             &registry,
@@ -251,140 +195,27 @@ fn conf_native_wrong_native_names_the_difference() {
     };
     let error = kit.check(&witness).unwrap_err().to_string();
     assert!(
-        error.contains("CONF-NATIVE planted planted.answer")
+        error.contains("CONF-NATIVE")
+            && error.contains("planted.answer")
             && error.contains("value or error differs"),
         "{error}"
     );
 }
 
-/// The kit rejects a native that returns without its generated shape check.
-#[test]
-fn conf_shape_skipped_check_names_the_difference() {
-    let base = Library::of(Dialect::Python).unwrap();
-    let kernel = base.packages[0].clone();
-    let package = planted(&kernel, true);
-    let id = package.function("planted.name").unwrap();
-    let held = HeldPackages::install([kernel, package]).unwrap();
-    let mut registry = FunctionRegistry::declarations();
-    held.register_into(&mut registry, &|function| {
-        if *function == id {
-            Some(Arc::new(Wrong))
-        } else {
-            base.registry
-                .get(function)
-                .and_then(|f| f.native().cloned())
-        }
-    })
-    .unwrap();
-    let registry = Arc::new(registry);
-    let kit = Kit::new(held.view(), registry.clone());
-    let witness = Witness {
-        function: id,
-        law: Law::Shape,
-        case: close(
-            case(
-                "missing name",
-                format!(
-                    "kernel 1\nnumbers by_spelling\nuse planted.name = @{id}\nmain {{ let answer = invoke planted.name({{__lash_brand: (\"planted\", \"item\"), __lash_built: b\"00\"}}) finish answer }}"
-                ),
-            ),
-            &registry,
-        ),
-    };
-    let error = kit.check(&witness).unwrap_err().to_string();
-    assert!(
-        error.contains("CONF-SHAPE planted planted.name")
-            && error.contains("value or error differs"),
-        "{error}"
-    );
-    let brand = |package: &str| {
-        Datum::Tuple(vec![
-            Datum::Text(package.into()),
-            Datum::Text("item".into()),
-        ])
-    };
-    for (input, expected_kind) in [
-        (Datum::Null, "type_error"),
-        (
-            Datum::Record(vec![("__lash_brand".into(), brand("other"))]),
-            "type_error",
-        ),
-        (
-            Datum::Record(vec![
-                ("name".into(), Datum::Int(3.into())),
-                ("__lash_brand".into(), brand("planted")),
-                (
-                    "__lash_built".into(),
-                    Datum::Bytes(lash_kernel_doc::Bytes::new(vec![0])),
-                ),
-            ]),
-            "package.stale_value",
-        ),
-    ] {
-        let mut case = close(
-            case(
-                "shape input",
-                format!(
-                    "kernel 1\nnumbers by_spelling\nuse planted.name = @{id}\nentry probe(value: Any) -> Any\nfn probe(value) {{ let answer = invoke planted.name(value) return answer }}\nmain {{ finish null }}"
-                ),
-            ),
-            &registry,
-        );
-        case.environment.entry = Some(lash_kernel_doc::Name::new("probe"));
-        case.environment.args = vec![input];
-        let (body, _) = super::observe(
-            &kit.bodies,
-            &case,
-            lash_kernel_vm::kernel_internals::Layout(3),
-        )
-        .unwrap();
-        assert!(
-            matches!(&body.end, ExpectedEnd::Uncaught(Datum::Error(error)) if error.kind == expected_kind),
-            "{body:?}"
-        );
-        let error = kit
-            .check(&Witness {
-                function: id,
-                law: Law::Shape,
-                case,
-            })
-            .unwrap_err();
-        assert!(error.0.contains("value or error differs"), "{error}");
-    }
-    let good = close(
-        case(
-            "valid shape",
-            format!(
-                "kernel 1\nnumbers by_spelling\nuse planted.name = @{id}\nmain {{ let answer = invoke planted.name({{name: \"good\", __lash_brand: (\"planted\", \"item\"), __lash_built: b\"00\"}}) finish answer }}"
-            ),
-        ),
-        &registry,
-    );
-    let (body, _) = super::observe(
-        &kit.bodies,
-        &good,
-        lash_kernel_vm::kernel_internals::Layout(3),
-    )
-    .unwrap();
-    assert_eq!(body.end, ExpectedEnd::Finished(Datum::Text("good".into())));
-}
-
-/// A host-controlled polling loop is not bounded by any argument or result.
 #[test]
 fn conf_meter_unbounded_performing_loop_names_the_difference() {
-    let base = Library::of(Dialect::Python).unwrap();
-    let kernel = base.packages[0].clone();
-    let package = Package::build("planted", "1.0", &PackageSources {
-        kernel: "effect planted.poll() -> Bool contract \"planted.poll/1\"\nfunction planted.polling() -> Null\nkernel 1\ncharge 2\nbody { let again = true while again { set again = perform planted.poll() as Bool } return null }",
-        surface: "operation poll() -> Bool contract \"planted.poll/1\"\nasync function polling() -> Null = planted.polling",
-        labels: "",
-    }, &[&kernel]).unwrap();
-    let held = HeldPackages::install([kernel, package]).unwrap();
-    let error = super::audit_metering(&held.view(), &super::LoopBounds::new())
+    let definition = lash_kernel_doc::parse_definition("function planted.polling() -> Null\nkernel 1\ncharge 2\nimport 0 operation planted.poll() -> Bool\nbody { let again = true while again { set again = perform 0() as Bool } return null }").unwrap();
+    let mut document =
+        lash_kernel_doc::Document::new(lash_kernel_doc::NumberPolicy::BySpelling, vec![]);
+    document.functions.insert(definition.identity(), definition);
+    let held = Arc::new(document);
+    let error = super::audit_metering(&held, &super::LoopBounds::new())
         .unwrap_err()
         .to_string();
     assert!(
-        error.contains("CONF-METER planted planted.polling") && error.contains("declare metered N"),
+        error.contains("CONF-METER")
+            && error.contains("planted.polling")
+            && error.contains("declare metered N"),
         "{error}"
     );
 }
@@ -396,7 +227,7 @@ fn conf_meter_performing_callback_plan_emits_the_bodys_events() {
     let (held, registry) = installed();
     let id = registry.named("ts.array.forEach").next().unwrap();
     let document = format!(
-        "kernel 1\nnumbers by_spelling\neffect echo(value: Any) -> Null contract \"1\"\nuse ts.array.forEach = @{id}\nmain {{ let visit = fn(context, args) {{ let value = args[0] do perform echo(value) as Null return null }} let callbacks = [visit] let xs = [1, 2] do invoke ts.array.forEach(xs, callbacks) finish null }}"
+        "kernel 1\nnumbers by_spelling\nimport 0 operation host.echo(value: Any) -> Null\n# local definition ts.array.forEach @{id}\nmain {{ let visit = fn(context, args) {{ let value = args[0] do perform 0(value) as Null return null }} let callbacks = [visit] let xs = [1, 2] do invoke ts.array.forEach(xs, callbacks) finish null }}"
     );
     let mut case = close(case("metered callback performs twice", document), &registry);
     case.environment.deliveries = (0..2)
@@ -409,7 +240,7 @@ fn conf_meter_performing_callback_plan_emits_the_bodys_events() {
         })
         .collect();
     let registry = Arc::new(registry);
-    let kit = Kit::new(held.view(), registry);
+    let kit = Kit::new(Arc::clone(&held), registry);
     let (reference, tape) = super::observe(
         &kit.bodies,
         &case,
@@ -428,99 +259,23 @@ fn conf_meter_performing_callback_plan_emits_the_bodys_events() {
     .unwrap();
 }
 
-/// CONF-SHAPE: a Both prologue checks nested package types with the same
-/// path and artifact data as a body-only member, then runs valid input.
-#[test]
-fn conf_shape_both_members_check_nested_values_with_their_own_artifacts() {
-    let base = Library::of(Dialect::Python).unwrap();
-    let kernel = base.packages[0].clone();
-    let package = Package::build("nested", "1.0", &PackageSources {
-        kernel: "function nested.name(self: bundle, children: List(item)) -> Text\nkernel 1\ncharge 2\nnative\nbody { return self.item.name }",
-        surface: "type item = Record{name: Text}\ntype bundle = Record{item: item}\n  method name(self: bundle, children: List(item)) -> Text = nested.name",
-        labels: "",
-    }, &[&kernel]).unwrap();
-    let id = package.function("nested.name").unwrap();
-    let held = HeldPackages::install([kernel, package]).unwrap();
-    let mut registry = FunctionRegistry::declarations();
-    held.register_into(&mut registry, &|function| {
-        base.registry
-            .get(function)
-            .and_then(|f| f.native().cloned())
-    })
-    .unwrap();
-    let registry = Arc::new(registry);
-    let kit = Kit::new(held.view(), registry.clone());
-    let good = "{name: \"good\", __lash_brand: (\"nested\", \"item\"), __lash_built: b\"01\"}";
-    let stale = "{name: 3, __lash_brand: (\"nested\", \"item\"), __lash_built: b\"01\"}";
-    for (item, children, expected_path) in [
-        (stale, format!("[{good}]"), "self.item.name"),
-        (good, format!("[{stale}]"), "children[].name"),
-    ] {
-        let case = close(
-            case(
-                "nested shape",
-                format!(
-                    "kernel 1\nnumbers by_spelling\nuse nested.name = @{id}\nmain {{ let bundle = {{item: {item}, __lash_brand: (\"nested\", \"bundle\"), __lash_built: b\"02\"}} let children = {children} let name = invoke nested.name(bundle, children) finish name }}"
-                ),
-            ),
-            &registry,
-        );
-        let (body, _) = super::observe(
-            &kit.bodies,
-            &case,
-            lash_kernel_vm::kernel_internals::Layout(3),
-        )
-        .unwrap();
-        let ExpectedEnd::Uncaught(Datum::Error(error)) = body.end else {
-            panic!("{body:?}");
-        };
-        let stale = lash_kernel_package::StaleValue::of(&error).unwrap();
-        assert_eq!(stale.at, expected_path);
-        assert_eq!(stale.current, id, "a Both prologue names its own member");
-        let Datum::Record(fields) = error.data else {
-            panic!("stale data is a record")
-        };
-        assert!(fields.contains(&(
-            "built".into(),
-            Datum::Bytes(lash_kernel_doc::Bytes::new(vec![1]))
-        )));
-        kit.check(&Witness {
-            function: id,
-            law: Law::Shape,
-            case,
-        })
-        .unwrap();
-    }
-    let case = close(
-        case(
-            "valid nested shape",
-            format!(
-                "kernel 1\nnumbers by_spelling\nuse nested.name = @{id}\nmain {{ let bundle = {{item: {good}, __lash_brand: (\"nested\", \"bundle\"), __lash_built: b\"02\"}} let children = [{good}] let name = invoke nested.name(bundle, children) finish name }}"
-            ),
-        ),
-        &registry,
-    );
-    let (body, _) = super::observe(
-        &kit.bodies,
-        &case,
-        lash_kernel_vm::kernel_internals::Layout(3),
-    )
-    .unwrap();
-    assert_eq!(body.end, ExpectedEnd::Finished(Datum::Text("good".into())));
-}
-
 /// Runs `main` with `uses` under the reference bodies and the installed
 /// code, which must agree in every observation and charge event. Returns
 /// the reference observations and how many two-unit events it charged.
 fn metered_events(
-    kit: &Kit<'_>,
+    kit: &Kit,
     registry: &FunctionRegistry,
     uses: &[&str],
     main: &str,
 ) -> (crate::Observations, usize) {
     let uses = uses
         .iter()
-        .map(|name| format!("use {name} = @{}\n", registry.named(name).next().unwrap()))
+        .map(|name| {
+            format!(
+                "# local definition {name} @{}\n",
+                registry.named(name).next().unwrap()
+            )
+        })
         .collect::<String>();
     let case = close(
         case(main, format!("kernel 1\nnumbers by_spelling\n{uses}{main}")),
@@ -551,7 +306,7 @@ fn metered_events(
 /// visits than for `n = 8`. Each size runs beside a control that makes the
 /// same guest calls without the library, so guest events cancel out.
 fn metered_slope(
-    kit: &Kit<'_>,
+    kit: &Kit,
     registry: &FunctionRegistry,
     uses: &[&str],
     main: impl Fn(u32, bool) -> String,
@@ -733,7 +488,7 @@ impl Traversal {
 fn conf_meter_live_alias_traversals_charge_every_visit_of_a_grown_and_cleared_input() {
     let (held, registry) = installed();
     let registry = Arc::new(registry);
-    let kit = Kit::new(held.view(), registry.clone());
+    let kit = Kit::new(Arc::clone(&held), registry.clone());
     let mut failures = vec![];
     for traversal in TRAVERSALS {
         let uses = traversal.uses();
@@ -768,12 +523,17 @@ fn conf_meter_live_alias_traversals_charge_every_visit_of_a_grown_and_cleared_in
 fn conf_meter_bounded_traversals_stop_at_the_reference_visit() {
     let (held, registry) = installed();
     let registry = Arc::new(registry);
-    let kit = Kit::new(held.view(), registry.clone());
+    let kit = Kit::new(Arc::clone(&held), registry.clone());
     for traversal in TRAVERSALS {
         let uses = traversal
             .uses()
             .iter()
-            .map(|name| format!("use {name} = @{}\n", registry.named(name).next().unwrap()))
+            .map(|name| {
+                format!(
+                    "# local definition {name} @{}\n",
+                    registry.named(name).next().unwrap()
+                )
+            })
             .collect::<String>();
         let mut case = close(
             case(
@@ -822,7 +582,7 @@ fn conf_meter_bounded_traversals_stop_at_the_reference_visit() {
 fn conf_meter_coerced_text_trip_counts_charge_every_test() {
     let (held, registry) = installed();
     let registry = Arc::new(registry);
-    let kit = Kit::new(held.view(), registry.clone());
+    let kit = Kit::new(Arc::clone(&held), registry.clone());
     let slope = metered_slope(
         &kit,
         &registry,
@@ -852,7 +612,7 @@ fn conf_meter_coerced_text_trip_counts_charge_every_test() {
 fn conf_meter_task_joins_charge_every_collected_result() {
     let (held, registry) = installed();
     let registry = Arc::new(registry);
-    let kit = Kit::new(held.view(), registry.clone());
+    let kit = Kit::new(Arc::clone(&held), registry.clone());
     let slope = metered_slope(
         &kit,
         &registry,
@@ -866,9 +626,7 @@ fn conf_meter_task_joins_charge_every_collected_result() {
                 "try { let out = invoke tasks.wait_all() } catch e { }".to_owned()
             };
             format!(
-                "fn one() {{ do yield return 1 }}\nfn bad() {{ do yield throw \"bad\" }}\nfn spawner() {{ do yield let b = spawn call bad() return b }}\n\
-                 main {{ let hs = [] let i = 0 while num.lt(i, {n}) {{ set hs[i] = spawn call one() set i = num.add(i, 1) }} \
-                 let s = spawn call spawner() {run} finish i }}"
+                "definition \"function one() -> Any\\nkernel 1\\nmetering statements\\nimport 0 operation host.echo(x: Any) -> Any\\nbody {{ do yield return 1 }}\"\n\ndefinition \"function bad() -> Any\\nkernel 1\\nmetering statements\\nimport 0 operation host.echo(x: Any) -> Any\\nbody {{ do yield throw \\\"bad\\\" }}\"\n\ndefinition \"function spawner() -> Any\\nkernel 1\\nmetering statements\\nimport 0 operation host.echo(x: Any) -> Any\\nbody {{ do yield let b = spawn call bad() return b }}\"\n\nmain {{ let hs = [] let i = 0 while num.lt(i, {n}) {{ set hs[i] = spawn call one() set i = num.add(i, 1) }} let s = spawn call spawner() {run} finish i }}"
             )
         },
     );
@@ -879,7 +637,7 @@ fn conf_meter_task_joins_charge_every_collected_result() {
 /// thread, failing the law if either does not stop within a minute. The
 /// two must agree in every observation and charge event.
 fn stopping(
-    kit: &Kit<'_>,
+    kit: &Kit,
     registry: &Arc<FunctionRegistry>,
     helper: &str,
     main: &str,
@@ -889,7 +647,7 @@ fn stopping(
     let mut case = close(
         case(
             main,
-            format!("kernel 1\nnumbers by_spelling\nuse {helper} = @{id}\n{main}"),
+            format!("kernel 1\nnumbers by_spelling\n# local definition {helper} @{id}\n{main}"),
         ),
         registry,
     );
@@ -922,7 +680,7 @@ fn stopping(
 fn conf_meter_ratio_of_a_non_finite_number_raises_at_entry() {
     let (held, registry) = installed();
     let registry = Arc::new(registry);
-    let kit = Kit::new(held.view(), registry.clone());
+    let kit = Kit::new(Arc::clone(&held), registry.clone());
     for value in ["nan", "inf", "-inf"] {
         let main = format!("main {{ let r = invoke ts.number.ratio({value}) finish r }}");
         let body = stopping(&kit, &registry, "ts.number.ratio", &main, 1_000_000);
@@ -939,7 +697,7 @@ fn conf_meter_ratio_of_a_non_finite_number_raises_at_entry() {
 fn conf_meter_padding_to_an_infinite_count_stops_at_the_charge_bound() {
     let (held, registry) = installed();
     let registry = Arc::new(registry);
-    let kit = Kit::new(held.view(), registry.clone());
+    let kit = Kit::new(Arc::clone(&held), registry.clone());
     let body = stopping(
         &kit,
         &registry,
@@ -964,7 +722,7 @@ fn conf_meter_padding_to_an_infinite_count_stops_at_the_charge_bound() {
 fn conf_meter_loops_before_guest_code_charge_inputs_detached_later() {
     let (held, registry) = installed();
     let registry = Arc::new(registry);
-    let kit = Kit::new(held.view(), registry.clone());
+    let kit = Kit::new(Arc::clone(&held), registry.clone());
     let slope = metered_slope(
         &kit,
         &registry,

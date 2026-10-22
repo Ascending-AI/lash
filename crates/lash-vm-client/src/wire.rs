@@ -9,23 +9,28 @@
 //! A document is not one of these: it crosses as its canonical token body
 //! (`lash_kernel_doc::IdentifiedDocument::body`), never as JSON.
 
+use lash_protocol_types::engine_fault::PayloadKind;
 use std::borrow::Cow;
-use std::time::Duration;
 
-use lash_kernel_doc::graph_tokens::{decode_body, encode_body};
 use lash_kernel_doc::heap::{PageGrant, PageId, PageRef};
-use lash_kernel_doc::{
-    Datum, EffectId, EffectName, ErrorDatum, FunctionId, FunctionName, Handle, Name, TaskLabel,
-    Type,
-};
+use lash_kernel_doc::{Datum, ErrorDatum, Handle};
+
 use lash_kernel_state::paged::SessionRoot;
 use lash_kernel_vm::{
     Bound, BoundExceeded, EffectModes, EffectRequest, End, Finished, Outcome, Park, Request,
-    RunError, SleepRequest, Target, WaitId,
+    RunError, Target, WaitId,
 };
 use lash_vm_broker::kernel::MachinePark;
+use lash_vm_protocol::EncodedPayload;
 use lash_vm_protocol::page::PageCapability;
-use lash_vm_protocol::{EncodedPayload, PayloadKind};
+
+use lash_vocabulary::names::FunctionId;
+use lash_vocabulary::names::FunctionName;
+use lash_vocabulary::names::Name;
+use lash_vocabulary::sites::EffectId;
+use lash_vocabulary::sites::TaskLabel;
+use lash_vocabulary::tokens::{decode_body, encode_body};
+use lash_vocabulary::types::Type;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
@@ -119,7 +124,7 @@ pub fn encode<T: Serialize>(kind: PayloadKind, value: &T) -> Result<EncodedPaylo
 ///
 /// # Errors
 ///
-/// [`WorkerLimit::EffectValue`](lash_vm_protocol::WorkerLimit::EffectValue)
+/// [`WorkerLimit::EffectValue`](lash_protocol_types::worker_limit::WorkerLimit::EffectValue)
 /// past the bound, and a payload breach when the value has no JSON
 /// encoding.
 pub fn encode_within<T: Serialize>(
@@ -131,8 +136,8 @@ pub fn encode_within<T: Serialize>(
     let size = json.written.saturating_add(bin_header_bytes(json.written));
     if size > bound {
         return Err(
-            lash_vm_protocol::InfrastructureOutcome::WorkerLimitExceeded {
-                limit: lash_vm_protocol::WorkerLimit::EffectValue { size, bound },
+            lash_protocol_types::engine_fault::InfrastructureOutcome::WorkerLimitExceeded {
+                limit: lash_protocol_types::worker_limit::WorkerLimit::EffectValue { size, bound },
             }
             .into(),
         );
@@ -237,7 +242,7 @@ pub fn from_json<T: DeserializeOwned>(kind: PayloadKind, json: &[u8]) -> Result<
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Sites {
-    pub entered: Vec<EffectId>,
+    pub entered: Vec<lash_vocabulary::sites::EffectLocation>,
     pub ran: lash_kernel_vm::SiteCounts,
     /// The statement path since the previous frame, when the start asked
     /// for it: each task's consecutive starts, as document ordinals.
@@ -337,14 +342,14 @@ impl CarryWire {
 #[serde(deny_unknown_fields)]
 pub struct StartWire {
     /// The entry to run; `None` runs the document's `main`.
-    pub entry: Option<Name>,
+    pub target: Target,
     pub args: Vec<Datum>,
     /// The carried session a cell opens in place.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub session: Option<CarryWire>,
     /// The effects the run performs as reads (`K-EFF-012`).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub reads: Vec<EffectName>,
+    pub reads: Vec<lash_vocabulary::names::OperationUse>,
     /// The host's read-only bindings a cell's `main` starts with.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub host: Vec<(Name, Datum)>,
@@ -357,14 +362,16 @@ pub struct StartWire {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SaveWire {
+    #[serde(with = "lash_vocabulary::ordered_pairs")]
     pub controls: std::collections::BTreeMap<
-        EffectName,
+        lash_vocabulary::names::OperationUse,
         std::collections::BTreeSet<lash_kernel_dialect::EffectControl>,
     >,
     /// What the source wrote of each function the cell's document makes,
     /// by the site of its closure ([`lash_kernel_dialect::Lowered::written`]).
     #[serde(with = "lash_kernel_dialect::written_table")]
-    pub written: std::collections::BTreeMap<lash_kernel_doc::Site, lash_kernel_dialect::Written>,
+    pub written:
+        std::collections::BTreeMap<lash_vocabulary::sites::Site, lash_kernel_dialect::Written>,
 }
 
 impl StartWire {
@@ -379,13 +386,15 @@ impl StartWire {
         host: Vec<(Name, Datum)>,
     ) -> Self {
         Self {
-            entry: match target {
-                Target::Main => None,
-                Target::Entry(name) => Some(name),
-            },
+            target,
             args,
             session,
-            reads: modes.reads().iter().cloned().collect(),
+            reads: modes
+                .iter()
+                .filter_map(|(use_, mode)| {
+                    (*mode == lash_vocabulary::package::OperationMode::Read).then_some(*use_)
+                })
+                .collect(),
             host,
         }
     }
@@ -393,13 +402,16 @@ impl StartWire {
     /// The target this wire runs.
     #[must_use]
     pub fn target(&self) -> Target {
-        self.entry.clone().map_or(Target::Main, Target::Entry)
+        self.target.clone()
     }
 
     /// The effect modes this wire carries.
     #[must_use]
     pub fn modes(&self) -> EffectModes {
-        EffectModes::reading(self.reads.clone())
+        self.reads
+            .iter()
+            .map(|use_| (*use_, lash_vocabulary::package::OperationMode::Read))
+            .collect()
     }
 }
 
@@ -409,38 +421,15 @@ impl StartWire {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct EffectRead {
-    pub effect: EffectName,
+    pub use_: lash_vocabulary::names::OperationUse,
     pub args: Vec<Datum>,
-    pub site: lash_kernel_doc::PositionLabel,
-    pub origin: lash_kernel_doc::Site,
+    pub site: lash_vocabulary::sites::PositionLabel,
+    pub origin: lash_vocabulary::sites::Site,
 }
 
 /// The parent's answer to an [`EffectRead`]: the effect's result, or the
 /// error the guest raises at the `perform`.
 pub type EffectAnswer = Result<Datum, ErrorDatum>;
-
-/// Canonical nanoseconds within one second, checked at payload admission.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(try_from = "u32", into = "u32")]
-pub struct SubsecondNanos(u32);
-
-impl TryFrom<u32> for SubsecondNanos {
-    type Error = &'static str;
-
-    fn try_from(value: u32) -> Result<Self, Self::Error> {
-        if value < 1_000_000_000 {
-            Ok(Self(value))
-        } else {
-            Err("sleep nanoseconds must be below one second")
-        }
-    }
-}
-
-impl From<SubsecondNanos> for u32 {
-    fn from(value: SubsecondNanos) -> Self {
-        value.0
-    }
-}
 
 /// One wait a park requests ([`Request`]).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -449,16 +438,10 @@ pub enum RequestWire {
     Effect {
         wait: WaitId,
         identity: EffectId,
-        effect: EffectName,
+        use_: lash_vocabulary::names::OperationUse,
         args: Vec<Datum>,
         result: Type,
-        origin: lash_kernel_doc::Site,
-    },
-    Sleep {
-        wait: WaitId,
-        identity: EffectId,
-        seconds: u64,
-        nanoseconds: SubsecondNanos,
+        origin: lash_vocabulary::sites::Site,
     },
 }
 
@@ -483,16 +466,10 @@ impl From<Park> for ParkWire {
                     Request::Effect(request) => RequestWire::Effect {
                         wait: request.wait,
                         identity: request.identity,
-                        effect: request.effect,
+                        use_: request.use_,
                         args: request.args,
                         result: request.result,
                         origin: request.origin,
-                    },
-                    Request::Sleep(sleep) => RequestWire::Sleep {
-                        wait: sleep.wait,
-                        identity: sleep.identity,
-                        seconds: sleep.duration.as_secs(),
-                        nanoseconds: SubsecondNanos(sleep.duration.subsec_nanos()),
                     },
                 })
                 .collect(),
@@ -515,31 +492,17 @@ impl TryFrom<ParkWire> for MachinePark {
                     RequestWire::Effect {
                         wait,
                         identity,
-                        effect,
+                        use_,
                         args,
                         result,
                         origin,
                     } => Ok(Request::Effect(EffectRequest {
                         wait,
                         identity,
-                        effect,
+                        use_,
                         args,
                         result,
                         origin,
-                    })),
-                    RequestWire::Sleep {
-                        wait,
-                        identity,
-                        seconds,
-                        nanoseconds,
-                    } => Ok(Request::Sleep(SleepRequest {
-                        wait,
-                        identity,
-                        duration: Duration::from_secs(seconds)
-                            .checked_add(Duration::from_nanos(u64::from(nanoseconds.0)))
-                            .ok_or_else(|| {
-                                PoolError::payload(PayloadKind::Park, "sleep duration overflows")
-                            })?,
                     })),
                 })
                 .collect::<Result<_, PoolError>>()?,
@@ -556,7 +519,6 @@ impl TryFrom<ParkWire> for MachinePark {
 pub enum OutcomeWire {
     Completed(Datum),
     Failed(ErrorDatum),
-    Elapsed,
 }
 
 impl From<Outcome> for OutcomeWire {
@@ -564,7 +526,6 @@ impl From<Outcome> for OutcomeWire {
         match outcome {
             Outcome::Completed(value) => Self::Completed(value),
             Outcome::Failed(error) => Self::Failed(error),
-            Outcome::Elapsed => Self::Elapsed,
         }
     }
 }
@@ -574,7 +535,6 @@ impl From<OutcomeWire> for Outcome {
         match wire {
             OutcomeWire::Completed(value) => Self::Completed(value),
             OutcomeWire::Failed(error) => Self::Failed(error),
-            OutcomeWire::Elapsed => Self::Elapsed,
         }
     }
 }
@@ -608,12 +568,12 @@ pub enum EndWire {
     Failed(Datum),
     Uncaught {
         error: Datum,
-        site: Option<lash_kernel_doc::Site>,
+        site: Option<lash_vocabulary::sites::Site>,
     },
     TasksOutstanding {
         unfinished: Vec<TaskLabel>,
         unobserved: Vec<TaskLabel>,
-        sources: Vec<(TaskLabel, lash_kernel_doc::PositionLabel)>,
+        sources: Vec<(TaskLabel, lash_vocabulary::sites::PositionLabel)>,
     },
     Deadlock {
         waiting: Vec<TaskLabel>,
@@ -847,8 +807,8 @@ mod tests {
                 matches!(
                     refused,
                     Err(PoolError::Infrastructure(
-                        lash_vm_protocol::InfrastructureOutcome::WorkerLimitExceeded {
-                            limit: lash_vm_protocol::WorkerLimit::EffectValue { size: named, bound: stated },
+                        lash_protocol_types::engine_fault::InfrastructureOutcome::WorkerLimitExceeded {
+                            limit: lash_protocol_types::worker_limit::WorkerLimit::EffectValue { size: named, bound: stated },
                         }
                     )) if named == size && stated == bound
                 ),
@@ -859,34 +819,5 @@ mod tests {
             encode_within(PayloadKind::Outcome, &outcome, size).unwrap(),
             whole
         );
-    }
-
-    /// V11: decoding refuses normalization and overflow before park conversion.
-    #[test]
-    fn park_payloads_refuse_noncanonical_sleep_durations() {
-        let identity = lash_kernel_doc::testkit::effect(
-            lash_kernel_doc::testkit::root_task(),
-            lash_kernel_doc::Site::new(lash_kernel_doc::Unit::Main, [0, 0]),
-            0,
-            vec![],
-        );
-        for seconds in [0, u64::MAX] {
-            for nanoseconds in [0, 999_999_999, 1_000_000_000, u32::MAX] {
-                let json = serde_json::json!({"requests": [{"sleep": {"wait": lash_kernel_doc::testkit::wait_id(0), "identity": identity, "seconds": seconds, "nanoseconds": nanoseconds}}], "withdrawn": [], "outstanding": 0, "live": 0});
-                let payload = encode(PayloadKind::Park, &json).unwrap();
-                let decoded = decode::<ParkWire>(PayloadKind::Park, &payload);
-                if nanoseconds < 1_000_000_000 {
-                    let park = MachinePark::try_from(decoded.unwrap()).unwrap();
-                    let Request::Sleep(sleep) = &park.requests[0] else {
-                        panic!("sleep")
-                    };
-                    assert_eq!(sleep.duration.as_secs(), seconds);
-                    assert_eq!(sleep.duration.subsec_nanos(), nanoseconds);
-                } else {
-                    assert!(decoded.is_err());
-                    assert!(SubsecondNanos::try_from(nanoseconds).is_err());
-                }
-            }
-        }
     }
 }

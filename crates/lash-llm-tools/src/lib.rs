@@ -1,15 +1,20 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use lash_core::AttemptContext;
+use lash_core::ToolCall;
+use lash_core::ToolOutcome;
+use lash_core::ToolProvider;
+use lash_core::facade_support::DirectJsonSchema;
+use lash_core::facade_support::DirectMessage;
+use lash_core::facade_support::DirectOutputSpec;
+use lash_core::facade_support::DirectPart;
+use lash_core::facade_support::DirectRequest;
+use lash_core::facade_support::DirectRole;
 use lash_core::plugin::PluginFactory;
-use lash_core::{
-    AttemptContext, ToolCall, ToolDefinition, ToolOutcome, ToolProvider,
-    facade_support::DirectJsonSchema, facade_support::DirectMessage,
-    facade_support::DirectOutputSpec, facade_support::DirectPart, facade_support::DirectRequest,
-    facade_support::DirectRole,
-};
 use lash_execution_contracts::plugin_error::PluginError;
 use lash_tool_support::{StaticToolExecute, StaticToolProvider};
+use lash_vocabulary::tool_contract::ToolDefinition;
 use serde_json::{Value, json};
 
 /// The plugin id `llm_query` registers under.
@@ -41,7 +46,7 @@ pub const LLM_QUERY_INSTRUCTIONS: &str = "Answer the focused sub-question using 
 /// turn prompt (ADR 0133 §8).
 #[derive(Clone, Debug, Default)]
 pub struct LlmToolsPluginFactory {
-    pub output_schema_limits: lash_protocol_types::schema_contract::OutputSchemaLimits,
+    pub output_schema_limits: lash_vocabulary::schema_contract::OutputSchemaLimits,
 }
 
 impl PluginFactory for LlmToolsPluginFactory {
@@ -126,8 +131,10 @@ fn llm_query_section() -> Result<
 
 /// The config key a process environment names for `llm_query`
 /// (FIG-6034 §3.2).
-pub const LLM_TOOLS_CONFIG: lash_core::ProcessConfigKey<()> =
-    lash_core::ProcessConfigKey::new(LLM_TOOLS_PLUGIN_ID, lash_core::FormatVersion::ONE);
+pub const LLM_TOOLS_CONFIG: lash_core::ProcessConfigKey<()> = lash_core::ProcessConfigKey::new(
+    LLM_TOOLS_PLUGIN_ID,
+    lash_vocabulary::providers::FormatVersion::ONE,
+);
 
 /// `llm_query` as a process component: a process whose environment names
 /// [`LLM_TOOLS_CONFIG`] asks its sub-questions of the model its environment
@@ -198,16 +205,14 @@ impl From<lash_core::ToolFailure> for LlmQueryError {
     }
 }
 pub struct LlmToolsProvider {
-    output_schema_limits: lash_protocol_types::schema_contract::OutputSchemaLimits,
+    output_schema_limits: lash_vocabulary::schema_contract::OutputSchemaLimits,
 }
 
 pub fn llm_query_provider() -> StaticToolProvider<LlmToolsProvider> {
-    llm_query_provider_with_limits(
-        lash_protocol_types::schema_contract::OutputSchemaLimits::standard(),
-    )
+    llm_query_provider_with_limits(lash_vocabulary::schema_contract::OutputSchemaLimits::standard())
 }
 pub fn llm_query_provider_with_limits(
-    limits: lash_protocol_types::schema_contract::OutputSchemaLimits,
+    limits: lash_vocabulary::schema_contract::OutputSchemaLimits,
 ) -> StaticToolProvider<LlmToolsProvider> {
     StaticToolProvider::new(
         vec![llm_query_tool_definition()],
@@ -225,7 +230,7 @@ impl LlmToolsProvider {
     ) -> Result<Value, LlmQueryError> {
         let task = required_string(args, "task")?;
         let inputs = args.get("inputs").cloned().unwrap_or(Value::Null);
-        let output_schema = lash_protocol_types::schema_contract::parse_output_schema_with_limits(
+        let output_schema = lash_vocabulary::schema_contract::parse_output_schema_with_limits(
             args.get("output"),
             self.output_schema_limits,
         )
@@ -238,9 +243,9 @@ impl LlmToolsProvider {
         // The sub-question runs on the session's behalf, so it carries the
         // session's sampling intent rather than provider defaults.
         let generation = session_model.generation;
-        let response_schema = lash_protocol_types::JsonSchema::admit(llm_query_response_schema(
-            output_schema.as_ref(),
-        ))
+        let response_schema = lash_vocabulary::json_schema::JsonSchema::admit(
+            llm_query_response_schema(output_schema.as_ref()),
+        )
         .map_err(|source| {
             lash_core::ToolFailure::invalid_request("unusable_output_schema", source.to_string())
                 .with_cause(lash_core::ToolFailureCause::SchemaAdmission { source })
@@ -249,7 +254,7 @@ impl LlmToolsProvider {
 
         let output = DirectOutputSpec::JsonSchema(DirectJsonSchema {
             name: "llm_query_result".to_string(),
-            schema: lash_protocol_types::SchemaContract::new(response_schema.clone()),
+            schema: lash_vocabulary::schema_contract::SchemaContract::new(response_schema.clone()),
             strict: true,
         });
 
@@ -340,7 +345,7 @@ pub fn llm_query_tool_definition() -> ToolDefinition {
     .with_output_from_input_schema(
         "output",
         Some(
-            lash_protocol_types::JsonSchema::admit(json!({ "type": "string" }))
+            lash_vocabulary::json_schema::JsonSchema::admit(json!({ "type": "string" }))
                 .expect("valid output default schema"),
         ),
     )
@@ -405,7 +410,7 @@ fn llm_query_response_schema(output_schema: Option<&Value>) -> Value {
 
 fn parse_llm_query_result(
     text: &str,
-    schema: &lash_protocol_types::JsonSchema,
+    schema: &lash_vocabulary::json_schema::JsonSchema,
 ) -> Result<Value, LlmQueryError> {
     let trimmed = text.trim();
     if trimmed.is_empty() {
@@ -488,7 +493,6 @@ mod tests {
     use std::sync::Mutex;
 
     use async_trait::async_trait;
-    use lash_core::SessionId;
     use lash_core::SessionSnapshot;
     use lash_core::ToolCall;
     use lash_core::plugin::runtime_host::{
@@ -498,6 +502,7 @@ mod tests {
     use lash_execution_contracts::plugin_error::PluginError;
     use lash_execution_contracts::session_types::SessionCreateRequest;
     use lash_execution_contracts::session_types::SessionHandle;
+    use lash_vocabulary::identity::SessionId;
 
     async fn run_llm_query(
         provider: &StaticToolProvider<LlmToolsProvider>,
@@ -567,8 +572,8 @@ mod tests {
     impl lash_core::plugin::SessionReadService for DirectCompletionManager {
         async fn committed_turn(
             &self,
-            _session_id: &lash_core::SessionId,
-            _turn_id: &lash_core::TurnId,
+            _session_id: &lash_vocabulary::identity::SessionId,
+            _turn_id: &lash_vocabulary::identity::TurnId,
         ) -> Result<
             Option<lash_core::transcript::CommittedTurnWithCalls>,
             lash_core::plugin::CommittedTurnReadError,
@@ -604,8 +609,8 @@ mod tests {
     impl SessionStateService for DirectCompletionManager {
         async fn turn_scope(
             &self,
-            _session_id: &lash_core::SessionId,
-            _turn_id: &lash_core::TurnId,
+            _session_id: &lash_vocabulary::identity::SessionId,
+            _turn_id: &lash_vocabulary::identity::TurnId,
         ) -> Result<lash_core::ExecutionScope, lash_execution_contracts::plugin_error::PluginError>
         {
             Err(
@@ -630,7 +635,7 @@ mod tests {
     impl SessionGraphService for DirectCompletionManager {
         async fn append_session_nodes(
             &self,
-            _session_id: &lash_core::SessionId,
+            _session_id: &lash_vocabulary::identity::SessionId,
             _request: lash_core::AppendSessionNodesRequest,
         ) -> Result<
             lash_core::SessionGraphAppendResult,
@@ -679,7 +684,7 @@ mod tests {
                 "count": { "type": "integer" }
             }
         });
-        let schema = lash_protocol_types::JsonSchema::admit(
+        let schema = lash_vocabulary::json_schema::JsonSchema::admit(
             serde_json::json!({ "type": "object", "properties": { "value": output } }),
         )
         .expect("valid result schema");

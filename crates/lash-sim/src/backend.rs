@@ -73,7 +73,7 @@ impl SimEngine {
     /// ([`crate::session_hold`]).
     pub fn hold_session(
         &self,
-        session: &lash::SessionId,
+        session: &lash_vocabulary::identity::SessionId,
     ) -> Result<crate::session_hold::SessionHold, FixedScriptRunnerError> {
         self.holds
             .hold(session)
@@ -95,7 +95,7 @@ impl SimEngine {
     pub async fn run_text_turn(
         &self,
         session: &lash::LashSession,
-        turn_id: impl Into<lash::TurnId>,
+        turn_id: impl Into<lash_vocabulary::identity::TurnId>,
         prompt: impl Into<String>,
     ) -> Result<lash::Result<lash::TurnOutput>, FixedScriptRunnerError> {
         let prompt = prompt.into();
@@ -117,7 +117,7 @@ impl SimEngine {
     pub async fn run_turn(
         &self,
         session: &lash::LashSession,
-        turn_id: impl Into<lash::TurnId>,
+        turn_id: impl Into<lash_vocabulary::identity::TurnId>,
         events: Arc<dyn lash::TurnActivitySink>,
         build: SimTurnBuild,
     ) -> Result<lash::Result<lash::TurnOutput>, FixedScriptRunnerError> {
@@ -168,7 +168,11 @@ impl lash::TurnActivitySink for CollectedTurnActivity {
         }
     }
 
-    async fn emit_for_turn(&self, turn_id: &lash::TurnId, activity: lash::TurnActivity) {
+    async fn emit_for_turn(
+        &self,
+        turn_id: &lash_vocabulary::identity::TurnId,
+        activity: lash::TurnActivity,
+    ) {
         self.activities.lock_recover().push(activity.clone());
         if let Some(live) = &self.live {
             live.emit_for_turn(turn_id, activity).await;

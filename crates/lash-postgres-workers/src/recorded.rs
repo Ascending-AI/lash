@@ -32,7 +32,9 @@ use lash_execution_contracts::deployment::DeploymentStore;
 use lash_execution_contracts::module_artifacts::ModuleArtifactStore;
 use lash_execution_contracts::process::ProcessEnvStore;
 use lash_execution_contracts::process::ProcessRegistry;
-use lash_protocol_types::{ProcessId, SessionId, TurnId};
+use lash_vocabulary::identity::ProcessId;
+use lash_vocabulary::identity::SessionId;
+use lash_vocabulary::identity::TurnId;
 use tokio::sync::Notify;
 
 use crate::events::{Event, report};
@@ -205,59 +207,6 @@ impl DurableStore for RecordedStore {
         self.inner.actor_requirements(after, limit).await
     }
 
-    async fn install_packages(
-        &self,
-        artifacts: &[lash_durable::packages::ArtifactInstall],
-        sets: &[lash_durable::packages::SetInstall],
-    ) -> Result<(), DurableError> {
-        self.inner.install_packages(artifacts, sets).await
-    }
-
-    async fn package_catalog(&self) -> Result<lash_durable::PackageCatalog, DurableError> {
-        self.inner.package_catalog().await
-    }
-
-    async fn package_surface(
-        &self,
-        digest: &lash_durable::PackageSetDigest,
-    ) -> Result<Option<Vec<u8>>, DurableError> {
-        self.inner.package_surface(digest).await
-    }
-
-    async fn package_paths(
-        &self,
-        functions: &[lash_durable::packages::FunctionId],
-    ) -> Result<
-        std::collections::BTreeMap<
-            lash_durable::packages::FunctionId,
-            std::collections::BTreeSet<String>,
-        >,
-        DurableError,
-    > {
-        self.inner.package_paths(functions).await
-    }
-
-    async fn internal_operations(
-        &self,
-        operations: &[lash_durable::packages::EffectName],
-    ) -> Result<
-        std::collections::BTreeMap<
-            lash_durable::packages::EffectName,
-            std::collections::BTreeSet<String>,
-        >,
-        DurableError,
-    > {
-        self.inner.internal_operations(operations).await
-    }
-
-    async fn package_labels(
-        &self,
-        artifacts: &[lash_durable::ArtifactDigest],
-    ) -> Result<std::collections::BTreeMap<lash_durable::ArtifactDigest, Vec<String>>, DurableError>
-    {
-        self.inner.package_labels(artifacts).await
-    }
-
     async fn owned(&self, node: &NodeLease) -> Result<Vec<Claimed>, DurableError> {
         let owned = self.inner.owned(node).await;
         if let Ok(owned) = &owned {
@@ -372,7 +321,7 @@ impl DurableStore for RecordedStore {
 impl DurableReads for RecordedStore {
     async fn model_call_pins(
         &self,
-        session: &lash_protocol_types::SessionId,
+        session: &lash_vocabulary::identity::SessionId,
         owner: &str,
     ) -> Result<Vec<lash_durable::domain::ModelCallPinRow>, DurableError> {
         self.inner.model_call_pins(session, owner).await
@@ -380,7 +329,7 @@ impl DurableReads for RecordedStore {
 
     async fn model_calls(
         &self,
-        session: &lash_protocol_types::SessionId,
+        session: &lash_vocabulary::identity::SessionId,
         owner: &str,
     ) -> Result<Vec<lash_core_store::model_calls::ModelCallRecord>, DurableError> {
         self.inner.model_calls(session, owner).await
@@ -435,15 +384,15 @@ impl DurableReads for RecordedStore {
 
     async fn cell_roots(
         &self,
-        session: &lash_protocol_types::SessionId,
-        run: &lash_protocol_types::TurnId,
+        session: &lash_vocabulary::identity::SessionId,
+        run: &lash_vocabulary::identity::TurnId,
     ) -> Result<Vec<ExecRootRow>, DurableError> {
         self.inner.cell_roots(session, run).await
     }
     async fn cell_roots_within(
         &self,
-        session: &lash_protocol_types::SessionId,
-        run: &lash_protocol_types::TurnId,
+        session: &lash_vocabulary::identity::SessionId,
+        run: &lash_vocabulary::identity::TurnId,
         max_rows: usize,
     ) -> Result<Vec<lash_durable::domain::ExecRootRow>, DurableError> {
         self.inner.cell_roots_within(session, run, max_rows).await
@@ -621,6 +570,13 @@ impl RecordedStores {
 }
 
 impl StoreSet for RecordedStores {
+    fn package_store(&self) -> Arc<dyn lash_durable::packages::PackageStore> {
+        self.inner.package_store()
+    }
+    fn execution_resolutions(&self) -> Arc<dyn lash_durable::resolutions::ExecutionResolutions> {
+        self.inner.execution_resolutions()
+    }
+
     fn durable_store(&self) -> Arc<dyn DurableStore> {
         Arc::clone(&self.store) as _
     }

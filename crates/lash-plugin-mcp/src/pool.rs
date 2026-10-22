@@ -26,6 +26,7 @@ use admission::RemoteCompletion;
 pub(crate) use admission::linked_server;
 
 use lash_protocol_types::{sync::LockResultExt, sync::MutexExt, sync::RwLockExt};
+
 use std::collections::BTreeMap;
 use std::sync::Mutex;
 use std::sync::RwLock;
@@ -48,10 +49,17 @@ use serde_json::Value;
 use serde_json::json;
 use tokio::time::timeout;
 
-use lash_core::{
-    AttachmentCreateMeta, AttemptContext, MediaType, ToolCallOutput, ToolDefinition, ToolId,
-    ToolOutcome, ToolValue, ToolView, ToolViewBlock, ToolViewMeta,
-};
+use lash_core::AttachmentCreateMeta;
+use lash_core::AttemptContext;
+use lash_core::MediaType;
+use lash_core::ToolCallOutput;
+use lash_core::ToolOutcome;
+use lash_core::ToolValue;
+use lash_core::ToolView;
+use lash_core::ToolViewBlock;
+use lash_core::ToolViewMeta;
+use lash_vocabulary::tool_contract::ToolDefinition;
+use lash_vocabulary::tool_contract::ToolId;
 
 use crate::call_failure::{McpCallFailure, McpServiceFailure};
 #[cfg(test)]
@@ -108,7 +116,7 @@ pub struct McpConnectionPool {
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "kind", content = "cause", rename_all = "snake_case")]
 pub enum McpServerFault {
-    UnusableSchema(Box<lash_core::ToolCatalogBuildError>),
+    UnusableSchema(Box<lash_vocabulary::ToolCatalogBuildError>),
     Connection(String),
 }
 

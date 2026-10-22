@@ -4,8 +4,8 @@ use std::error::Error;
 use std::time::{Duration, Instant};
 
 use lash::dialect::{PrintOptions, PrintedSource, SourceFormat};
+use lash::workflow::WorkflowDocument;
 use lash::workflow::document::{self as k, Document, Expr, Literal, Node, Rhs, Stmt};
-use lash::workflow::{WorkflowDocument, WorkflowDocumentEntry};
 
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
 
@@ -49,8 +49,8 @@ fn fixture(width: usize, depth: usize) -> Result<Document> {
             else_block: Vec::new(),
         }];
     }
-    body.extend(document.main);
-    document.main = body;
+    body.extend(document.main.take().unwrap_or_default());
+    document.main = Some(body);
     Ok(document)
 }
 
@@ -112,12 +112,18 @@ async fn measure(iterations: u32) -> Result<()> {
         ("deep", 1, 20),
     ] {
         let document = fixture(width, depth)?;
-        let nodes = count(Node::Block(&document.main));
+        let nodes = count(Node::Block(document.main.as_deref().unwrap_or_default()));
         let document_bytes = document.canonical_bytes().len();
-        let view = WorkflowDocument::derive(
+        let link = lash::package::Link {
+            document: document.identity(),
+            fills: Default::default(),
+        };
+        let view = WorkflowDocument::entered(
             document.clone(),
-            WorkflowDocumentEntry::Main,
-            &k::FunctionRegistry::default(),
+            lash::package::LinkedStart {
+                link: link.identity(),
+                selector: lash::package::StartSelector::Main,
+            },
         )?;
         for format in [SourceFormat::TypeScriptV1, SourceFormat::PythonV1] {
             for maps in [false, true] {

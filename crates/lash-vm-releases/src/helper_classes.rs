@@ -16,9 +16,11 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use lash_kernel_doc::{
-    ActKind, Action, Atom, Block, Callee, Expr, FunctionDefinition, FunctionId, Implementation,
-    Literal, Member, Name, Place, Rhs, Stmt, Type,
+    ActKind, Action, Atom, Block, Callee, Expr, FunctionDefinition, FunctionTarget, Implementation,
+    Literal, Member, Node, Place, Rhs, Stmt,
 };
+
+use lash_vocabulary::{FunctionId, Name, Type};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
 enum Class {
@@ -77,6 +79,7 @@ struct Graph {
     values: Vec<Origins>,
     units: Vec<Unit>,
     functions: BTreeMap<FunctionId, usize>,
+    definitions: BTreeMap<FunctionId, FunctionDefinition>,
     flows: Vec<(Slot, Slot)>,
     calls: Vec<Call>,
     /// Lexically contained bodies must also satisfy the helper's classification.
@@ -143,13 +146,28 @@ impl Graph {
                 continue;
             }
             match &definitions[&id].implementation {
-                Implementation::Body(body) | Implementation::Both(body) => {
+                Implementation::Guest { body, .. } | Implementation::Both { body, .. } => {
                     pending.extend(body.functions.keys().copied());
                 }
-                Implementation::Native => {}
+                Implementation::Native { .. } => {}
             }
         }
-        let mut graph = Self::default();
+        let mut anonymous = BTreeSet::new();
+        for id in &reachable {
+            if let Some(body) = definitions[id].body() {
+                let mut pending = vec![Node::Block(&body.block)];
+                while let Some(node) = pending.pop() {
+                    if let Node::Expr(Expr::Closure(closure)) = node {
+                        anonymous.insert(closure.function);
+                    }
+                    pending.extend(node.children());
+                }
+            }
+        }
+        let mut graph = Self {
+            definitions: definitions.clone(),
+            ..Self::default()
+        };
         let mut scopes = BTreeMap::new();
         for id in &reachable {
             let definition = &definitions[id];
@@ -170,10 +188,12 @@ impl Graph {
             let definition = &definitions[id];
             let unit = graph.functions[id];
             match &definition.implementation {
-                Implementation::Body(body) | Implementation::Both(body) => {
-                    graph.block(&body.block, &scopes[id], unit)?;
+                Implementation::Guest { body, .. } | Implementation::Both { body, .. } => {
+                    if !anonymous.contains(id) {
+                        graph.block(&body.block, &scopes[id], unit)?;
+                    }
                 }
-                Implementation::Native => {
+                Implementation::Native { .. } => {
                     graph.units[unit].native_result =
                         Some(can_hold_closure(&definition.signature.result));
                 }
@@ -189,9 +209,13 @@ impl Graph {
 
     fn literal(&mut self, value: &Literal) -> Slot {
         let slot = self.slot();
-        // Declared functions belong to the guest document, never the release.
-        if matches!(value, Literal::Function(_)) {
-            self.values[slot].unknown = true;
+        if let Literal::Function(id) = value {
+            match self.functions.get(id) {
+                Some(unit) => {
+                    self.values[slot].closures.insert(*unit);
+                }
+                None => self.values[slot].unknown = true,
+            }
         }
         slot
     }
@@ -237,10 +261,21 @@ impl Graph {
             Expr::Literal(value) => self.literal(value),
             Expr::Member(member) => self.member(member, scope, owner)?,
             Expr::Closure(closure) => {
+                let definition = self
+                    .definitions
+                    .get(&closure.function)
+                    .ok_or_else(|| format!("release lacks closure {}", closure.function))?
+                    .clone();
+                let body = definition
+                    .body()
+                    .ok_or_else(|| "closure has no body".to_owned())?;
                 let mut captured = scope.clone();
-                let unit = self.unit(closure.params.clone(), &mut captured);
+                let unit = self.unit(
+                    definition.signature.params.iter().map(|p| p.name.clone()),
+                    &mut captured,
+                );
                 self.contains.push((owner, unit));
-                self.block(&closure.body, &captured, unit)?;
+                self.block(&body.block, &captured, unit)?;
                 let slot = self.slot();
                 self.values[slot].closures.insert(unit);
                 slot
@@ -278,10 +313,6 @@ impl Graph {
                 }
                 result
             }
-            Expr::Clock | Expr::Random => {
-                self.units[owner].class = Class::Body;
-                self.slot()
-            }
             Expr::Read(read) => {
                 self.units[owner].class = Class::Body;
                 self.expr(&read.handle, scope, owner)?;
@@ -297,15 +328,13 @@ impl Graph {
                     .map(|arg| self.expr(arg, scope, owner))
                     .collect::<Result<Vec<_>, _>>()?;
                 match &act.kind {
-                    ActKind::Call(Callee::Library(id)) | ActKind::Await(id) => {
-                        self.library_call(*id, args, owner)?
-                    }
+                    ActKind::Call(Callee::Local(id)) => self.library_call(*id, args, owner)?,
+                    ActKind::Await(target) => self.target_call(target.clone(), args, owner)?,
                     ActKind::Call(Callee::Value(name)) => {
                         self.call(Self::variable(scope, name)?, args, owner)
                     }
-                    ActKind::Call(Callee::Declared(_))
+                    ActKind::Call(Callee::Import(_))
                     | ActKind::Perform { .. }
-                    | ActKind::Sleep { .. }
                     | ActKind::Yield
                     | ActKind::Cancel
                     | ActKind::Join
@@ -321,6 +350,22 @@ impl Graph {
         })
     }
 
+    fn target_call(
+        &mut self,
+        target: FunctionTarget,
+        args: Vec<Slot>,
+        owner: usize,
+    ) -> Result<Slot, String> {
+        match target {
+            FunctionTarget::Local(id) => self.library_call(id, args, owner),
+            FunctionTarget::Import(_) => {
+                self.units[owner].class = Class::Body;
+                let result = self.slot();
+                self.values[result].unknown = true;
+                Ok(result)
+            }
+        }
+    }
     fn library_call(
         &mut self,
         id: FunctionId,
@@ -356,9 +401,9 @@ impl Graph {
                     .map(|arg| self.atom(arg, scope))
                     .collect::<Result<Vec<_>, _>>()?;
                 match callee {
-                    Callee::Library(id) => self.library_call(*id, args, owner)?,
+                    Callee::Local(id) => self.library_call(*id, args, owner)?,
                     Callee::Value(name) => self.call(Self::variable(scope, name)?, args, owner),
-                    Callee::Declared(_) => {
+                    Callee::Import(_) => {
                         self.units[owner].class = Class::Body;
                         let result = self.slot();
                         self.values[result].unknown = true;
@@ -368,10 +413,9 @@ impl Graph {
             }
             Action::Await { policy, value } => {
                 let args = vec![self.atom(value, scope)?];
-                self.library_call(*policy, args, owner)?
+                self.target_call(policy.clone(), args, owner)?
             }
             Action::Perform { .. }
-            | Action::Sleep { .. }
             | Action::Join { .. }
             | Action::JoinMany { .. }
             | Action::Yield
@@ -452,13 +496,15 @@ impl Graph {
                         // The hooks are library calls: on the iterated
                         // value, what open gives, and its items.
                         Some(via) => {
-                            let source = self.library_call(via.open, vec![iterable], owner)?;
-                            for hook in [via.next, via.check].into_iter().flatten() {
-                                let stepped = self.library_call(hook, vec![source], owner)?;
+                            let source =
+                                self.target_call(via.open.clone(), vec![iterable], owner)?;
+                            for hook in [via.next.clone(), via.check.clone()].into_iter().flatten()
+                            {
+                                let stepped = self.target_call(hook, vec![source], owner)?;
                                 self.alias(stepped, item);
                             }
-                            if let Some(hook) = via.item {
-                                let element = self.library_call(hook, vec![source, item], owner)?;
+                            if let Some(hook) = via.item.clone() {
+                                let element = self.target_call(hook, vec![source, item], owner)?;
                                 self.alias(element, item);
                             }
                             self.alias(source, item);
@@ -486,7 +532,7 @@ impl Graph {
                 }
                 Stmt::ReturnVia { value, policy } => {
                     let held = self.expr(value, &scope, owner)?;
-                    let value = self.library_call(*policy, vec![held], owner)?;
+                    let value = self.target_call(policy.clone(), vec![held], owner)?;
                     self.flow(value, self.units[owner].result);
                     self.escapes.push(value);
                 }
@@ -673,7 +719,7 @@ fn helper_release_census_matches_checked_call_graph() {
 /// fail the very same comparison used for the reviewed release census.
 #[test]
 fn argument_apply_changes_total_census() {
-    let definition = lash_kernel_doc::parse_definition(
+    let (definition, locals) = lash_kernel_doc::parse_definition_with_locals(
         "function helper(value: Any) -> Any\nkernel 1\ncharge 1\nbody {\n\
          let value = value\n\
          let local = fn() { return value }\n\
@@ -686,14 +732,19 @@ fn argument_apply_changes_total_census() {
     let pinned = "helper\ttotal\n";
     assert_eq!(
         census(
-            &BTreeMap::from([(id, definition.clone())]),
+            &locals
+                .iter()
+                .cloned()
+                .map(|d| (d.identity(), d))
+                .chain([(id, definition.clone())])
+                .collect(),
             &BTreeSet::from([id])
         )
         .expect("the fixture analyzes"),
         pinned
     );
     let mut seeded = definition;
-    let Implementation::Body(body) = &mut seeded.implementation else {
+    let Implementation::Guest { body, .. } = &mut seeded.implementation else {
         panic!("a kernel body")
     };
     body.block.insert(
@@ -707,8 +758,16 @@ fn argument_apply_changes_total_census() {
         },
     );
     let id = seeded.identity();
-    let changed = census(&BTreeMap::from([(id, seeded)]), &BTreeSet::from([id]))
-        .expect("the seeded fixture analyzes");
+    let changed = census(
+        &locals
+            .iter()
+            .cloned()
+            .map(|d| (d.identity(), d))
+            .chain([(id, seeded)])
+            .collect(),
+        &BTreeSet::from([id]),
+    )
+    .expect("the seeded fixture analyzes");
     assert_eq!(changed, "helper\toperation\n");
     assert_eq!(
         diff(pinned, &changed),
@@ -717,7 +776,7 @@ fn argument_apply_changes_total_census() {
 
     // K-EVAL-001/002: the initializer sees the outer origin, and even an
     // unselected branch contributes its closure to the conservative census.
-    let conditional = lash_kernel_doc::parse_definition(
+    let (conditional, locals) = lash_kernel_doc::parse_definition_with_locals(
         r#"function helper(value: Any) -> Any
 kernel 1
 charge 1
@@ -732,8 +791,15 @@ body {
     .expect("conditional closures and an expression-local alias");
     let id = conditional.identity();
     assert_eq!(
-        census(&BTreeMap::from([(id, conditional)]), &BTreeSet::from([id]))
-            .expect("conditional closures analyze"),
+        census(
+            &locals
+                .into_iter()
+                .map(|d| (d.identity(), d))
+                .chain([(id, conditional)])
+                .collect(),
+            &BTreeSet::from([id])
+        )
+        .expect("conditional closures analyze"),
         "helper\toperation\n"
     );
 }
@@ -751,12 +817,17 @@ pub(super) fn current_census() -> Result<String, String> {
             definitions.insert(definition.identity(), definition);
         }
     }
+    let roots = crate::helper_release()
+        .map_err(|error| error.to_string())?
+        .resolver_roots();
     let mut actual = String::new();
     for dialect in [crate::PYTHON, crate::TYPESCRIPT] {
         let code = read(
             crate::package(dialect).ok_or_else(|| format!("release lacks {dialect} package"))?,
         )?;
-        let exports = (0..code.len()).map(|at| code.id(at)).collect();
+        // Released images include anonymous bodies; analyze those in their
+        // defining scope, reached from the package's authored exports.
+        let exports = code.ids().filter(|id| roots.contains(id)).collect();
         actual.push_str(&census(&definitions, &exports)?);
     }
     Ok(actual)

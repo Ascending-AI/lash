@@ -27,6 +27,9 @@ synthetic-next = ["lash-kernel-doc/synthetic-next", "lash-kernel-state/synthetic
 workspace = true
 
 [dependencies]
+schemars = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+lash-vocabulary = { workspace = true }
 lash-kernel-dialect = { workspace = true }
 lash-kernel-doc = { workspace = true }
 lash-kernel-exec = { workspace = true }
@@ -37,6 +40,7 @@ thiserror = { workspace = true }
 serde_json = { workspace = true }
 
 [dev-dependencies]
+lash-kernel-check = { workspace = true }
 lash-kernel-lib = { workspace = true }
 lash-kernel-package = { workspace = true, features = ["testing"] }
 lash-kernel-state = { workspace = true, features = ["perf-witness"] }

@@ -11,7 +11,7 @@
 //! Nodes are never observed through `load_session`: that constructs a
 //! `SessionGraph` read model whose id indexes can hide duplicate durable rows.
 
-use lash_protocol_types::SessionId;
+use lash_vocabulary::identity::SessionId;
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
@@ -324,10 +324,13 @@ impl NodeSpec {
     fn materialize(self, session_id: &SessionId) -> SessionNodeRecord {
         let frame_key = differential_frame_key(self.node_id);
         SessionNodeRecord {
-            node_id: lash_core::NodeId::fixture(scoped_node_id(session_id, self.node_id)),
-            parent_node_id: self
-                .parent_node_id
-                .map(|node_id| lash_core::NodeId::fixture(scoped_node_id(session_id, node_id))),
+            node_id: lash_vocabulary::identity::NodeId::fixture(scoped_node_id(
+                session_id,
+                self.node_id,
+            )),
+            parent_node_id: self.parent_node_id.map(|node_id| {
+                lash_vocabulary::identity::NodeId::fixture(scoped_node_id(session_id, node_id))
+            }),
             timestamp: "2026-07-26T00:00:00.000000000Z"
                 .parse()
                 .expect("canonical node timestamp"),
@@ -637,7 +640,7 @@ fn checkpoint_bodies() -> HydratedSessionCheckpoint {
     // The head's namespace map names each namespace's values body by content
     // address, and the body is a component of its own.
     let namespace = PluginNamespaceState {
-        format_version: lash_core::FormatVersion::ONE,
+        format_version: lash_vocabulary::providers::FormatVersion::ONE,
         generation: 11,
         publication: Default::default(),
         fork: Default::default(),
@@ -783,8 +786,8 @@ fn differential_attachment_id() -> AttachmentId {
 }
 
 /// The process identity used by the session-ownership fixtures.
-fn differential_process_owner_id() -> lash_protocol_types::ProcessId {
-    lash_protocol_types::ProcessId::fixture("differential-process-owner")
+fn differential_process_owner_id() -> lash_vocabulary::identity::ProcessId {
+    lash_vocabulary::identity::ProcessId::fixture("differential-process-owner")
 }
 
 #[expect(
@@ -969,16 +972,7 @@ impl BackendRunner {
                 lash::persistence::LeaseIncarnationId::new("cross-backend-differential-test-boot"),
             ))
             .expect("build differential lifecycle core");
-        // Node startup installs permanent, host-pin-owned package definitions.
-        // Finish that fixture setup before the next operation's residue digest:
-        // a refused session open must be compared against an installed host.
-        self.lifecycle_backend
-            .packages()
-            .expect("the standard core registers its workers' packages")
-            .install(&self.lifecycle_backend)
-            .await
-            .expect("install the lifecycle core's package definitions");
-        // Package installation precedes the serving node's registration.
+        // Wait for the serving node's registration.
         // Wait for this core's row too, so startup cannot move `nodes` between
         // a refused operation's before/after digests. Other cases' nodes in
         // the shared PostgreSQL store do not establish this core's readiness.
@@ -1160,7 +1154,9 @@ impl BackendRunner {
                         head_revision,
                         relation: SessionRelation::Fork {
                             source_session_id: self.session_id.clone(),
-                            source_node_id: Some(lash_core::NodeId::fixture(node_id)),
+                            source_node_id: Some(lash_vocabulary::identity::NodeId::fixture(
+                                node_id,
+                            )),
                         },
                         config: lash_core::PersistedSessionConfig::new(
                             lash_core::TurnBudget::Unbounded,
@@ -1180,21 +1176,23 @@ impl BackendRunner {
                 self.factory().unpin(&self.session_id, &head).await?;
                 Ok(None)
             }
-            StoreOperation::EnqueueNextTurnInput => {
-                self.store()
-                    .enqueue_pending_turn_input(
-                        PendingTurnInputDraft::new(
-                            &self.session_id,
-                            TurnInputIngress::NextTurn,
-                            TurnInput::text("generation-fenced input"),
-                        )
-                        .with_input_id(lash_core::InputId::fixture(
-                            format!("{}:input", self.session_id),
-                        )),
+            StoreOperation::EnqueueNextTurnInput => self
+                .store()
+                .enqueue_pending_turn_input(
+                    PendingTurnInputDraft::new(
+                        &self.session_id,
+                        TurnInputIngress::NextTurn,
+                        TurnInput::text("generation-fenced input"),
                     )
-                    .await
-                    .map(|_| None)
-            }
+                    .with_input_id(
+                        lash_vocabulary::identity::InputId::fixture(format!(
+                            "{}:input",
+                            self.session_id
+                        )),
+                    ),
+                )
+                .await
+                .map(|_| None),
             StoreOperation::EnqueueQueuedWork => self
                 .store()
                 .enqueue_queued_work(

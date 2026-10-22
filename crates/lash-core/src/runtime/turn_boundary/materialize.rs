@@ -1,4 +1,4 @@
-use crate::TurnId;
+use lash_vocabulary::identity::TurnId;
 use std::collections::BTreeSet;
 
 use crate::{Message, MessageRole, Part, PartKind, TurnFinish, TurnOutcome, shared_parts};

@@ -18,9 +18,9 @@ use super::context::ToolDispatchContext;
 pub(super) fn hook_context(
     context: &ToolDispatchContext<'_>,
     call_id: &crate::ToolCallId,
-    tool_id: &crate::ToolId,
+    tool_id: &lash_vocabulary::tool_contract::ToolId,
     tool_name: &str,
-    argument_projection: crate::ToolArgumentProjectionPolicy,
+    argument_projection: lash_vocabulary::tool_contract::ToolArgumentProjectionPolicy,
 ) -> ToolHookContext {
     ToolHookContext {
         owner: context.owner.runtime_owner(),

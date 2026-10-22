@@ -1,6 +1,5 @@
 //! Live worker compatibility. Crate versions are diagnostic only.
-use serde::{Deserialize, Serialize};
-use thiserror::Error;
+use lash_protocol_types::engine_fault::ProtocolVersionRefusal;
 
 /// Wire shapes change in place at version 1 until the 1.0 freeze ends.
 ///
@@ -32,18 +31,6 @@ pub const WORKER_PROTOCOL_VERSION: u32 = 1;
 pub const WORKER_PROTOCOL_VERSION: u32 = 2;
 /// Oldest worker wire version the parent can read.
 pub const MIN_SUPPORTED_WORKER_PROTOCOL_VERSION: u32 = WORKER_PROTOCOL_VERSION;
-
-#[derive(Clone, Debug, PartialEq, Eq, Error, Serialize, Deserialize, schemars::JsonSchema)]
-#[error(
-    "worker protocol {worker_version} is outside parent range {minimum_supported_version}..={parent_version} (parent crate {parent_crate_version}, worker crate {worker_crate_version})"
-)]
-pub struct ProtocolVersionRefusal {
-    pub parent_version: u32,
-    pub minimum_supported_version: u32,
-    pub worker_version: u32,
-    pub parent_crate_version: String,
-    pub worker_crate_version: String,
-}
 
 pub fn check_worker_protocol_version(
     worker_version: u32,

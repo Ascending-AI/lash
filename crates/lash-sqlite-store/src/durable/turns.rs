@@ -20,8 +20,9 @@ use lash_durable::domain::{
     TurnEnd, TurnNamespace, TurnRow, TurnWrite, UnfinishedPhase,
 };
 use lash_durable::{ActorKey, DurableError, DurableInstant, Epoch, Woken};
-use lash_protocol_types::{SessionId, TurnId};
 use lash_store_sql::durable::turns::TurnStatements;
+use lash_vocabulary::identity::SessionId;
+use lash_vocabulary::identity::TurnId;
 use rusqlite::{Connection, OptionalExtension};
 
 use super::{Answer, Committing, corrupt, integer, node_ref};
@@ -485,6 +486,7 @@ pub(super) fn apply(
                 integer(commit.now.0)?,
             )
             .map_err(crate::sqlite_conversion_error)?;
+            super::packages::end_actor_executions(tx, commit.actor)?;
             // The cells the turn stopped in are never resumed, and the
             // turn's cancel request is answered by its terminal: neither has
             // a reader left. Nor has the turn's own ledger: its transcript

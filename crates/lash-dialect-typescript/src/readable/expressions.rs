@@ -1,7 +1,9 @@
 //! Expressions: operators from the library calls they lower to, waits from
 //! their actions, and the scoped forms of `&&`, `||`, `??` and calls.
 
-use lash_kernel_doc::{self as k, Name};
+use lash_kernel_doc::{self as k};
+
+use lash_vocabulary::Name;
 
 use super::lift::{Lift, Lifter, refuse};
 use super::source::{self, Expr, Part};
@@ -74,8 +76,8 @@ impl Lifter<'_> {
         Ok(Expr::Ident(self.binding(name)?))
     }
 
-    fn native(&mut self, function: &k::FunctionId, args: &[k::Expr]) -> Lift<Expr> {
-        let Some(name) = self.library(function).map(str::to_owned) else {
+    fn native(&mut self, function: &lash_vocabulary::FunctionId, args: &[k::Expr]) -> Lift<Expr> {
+        let Some(name) = self.library(function) else {
             return refuse("a call of a function the manifest does not list");
         };
         match (name.as_str(), args) {
@@ -136,11 +138,30 @@ impl Lifter<'_> {
         let bound = k::Expr::Variable(name.clone());
         // `await sleep(ms)` gives undefined.
         if let k::Expr::Act(act) = value
-            && let k::ActKind::Sleep { then_yield: true } = act.kind
+            && let k::ActKind::Perform {
+                slot,
+                then_yield: true,
+                ..
+            } = act.kind
+            && self.document.imports.get(&slot).is_some_and(|import| {
+                import.name == lash_kernel_dialect::service_name("typescript", "sleep")
+            })
             && let [duration] = act.args.as_slice()
             && matches!(body, k::Expr::Literal(k::Literal::Absent))
         {
-            let duration = self.expr(duration)?;
+            let k::Expr::Act(conversion) = duration else {
+                return refuse("a sleep duration conversion");
+            };
+            let k::ActKind::Call(k::Callee::Import(slot)) = &conversion.kind else {
+                return refuse("a sleep duration helper import");
+            };
+            if !self.helper_import(slot, "ts.sleep_duration") {
+                return refuse("the selected sleep duration helper");
+            }
+            let [authored] = conversion.args.as_slice() else {
+                return refuse("one authored sleep duration");
+            };
+            let duration = self.expr(authored)?;
             return Ok(Expr::Unary(
                 "await ",
                 Box::new(Expr::Call(
@@ -172,6 +193,9 @@ impl Lifter<'_> {
             let left = self.expr(value)?;
             let right = self.expr(then)?;
             return Ok(Expr::Binary("??", Box::new(left), Box::new(right)));
+        }
+        if *body == bound {
+            return self.expr(value);
         }
         if let Some(call) = self.call(name, value, body)? {
             return Ok(call);
@@ -246,11 +270,11 @@ impl Lifter<'_> {
     pub(super) fn act(&mut self, act: &k::ActExpr) -> Lift<Expr> {
         match &act.kind {
             k::ActKind::Perform {
-                effect,
+                slot,
                 then_yield: true,
                 ..
             } => {
-                let callee = self.operation(effect)?;
+                let callee = self.operation(slot)?;
                 let mut args = Vec::with_capacity(act.args.len());
                 for arg in &act.args {
                     args.push(self.crossing(arg)?);
@@ -266,8 +290,8 @@ impl Lifter<'_> {
                 };
                 Ok(Expr::Unary("await ", Box::new(self.expr(value)?)))
             }
-            k::ActKind::Call(k::Callee::Library(id)) => {
-                let Some(name) = self.library(id).map(str::to_owned) else {
+            k::ActKind::Call(k::Callee::Import(id)) => {
+                let Some(name) = self.library(id) else {
                     return refuse("a call of a function the manifest does not list");
                 };
                 self.helper(&name, &act.args)
@@ -279,7 +303,7 @@ impl Lifter<'_> {
     /// An argument crossing to a tool: the boundary copy is implicit.
     fn crossing(&mut self, arg: &k::Expr) -> Lift<Expr> {
         if let k::Expr::Act(boundary) = arg
-            && let k::ActKind::Call(k::Callee::Library(id)) = &boundary.kind
+            && let k::ActKind::Call(k::Callee::Import(id)) = &boundary.kind
             && self.is(id, "ts.boundary")
             && let [value] = boundary.args.as_slice()
         {
@@ -289,8 +313,21 @@ impl Lifter<'_> {
     }
 
     /// The dotted path a call of `effect` is written as.
-    fn operation(&self, effect: &k::EffectName) -> Lift<Expr> {
-        let path = crate::printer::operation_path(effect);
+    fn operation(&self, slot: &lash_vocabulary::ImportSlot) -> Lift<Expr> {
+        let name = &self
+            .document
+            .imports
+            .get(slot)
+            .ok_or_else(|| "missing operation import".to_owned())?
+            .name;
+        let operation = lash_vocabulary::QualifiedOperation {
+            package: name.package.clone(),
+            name: name.member.clone(),
+        };
+        let path = lash_kernel_dialect::spell_operation(
+            lash_kernel_dialect::Spelling::TypeScript,
+            &operation,
+        );
         let mut segments = path.split('.');
         let Some(root) = segments.next().filter(|root| source::identifier(root)) else {
             return refuse("an operation whose root TypeScript cannot spell");
@@ -306,6 +343,73 @@ impl Lifter<'_> {
     /// implements.
     fn helper(&mut self, name: &str, args: &[k::Expr]) -> Lift<Expr> {
         match (name, args) {
+            (
+                "ts.promise.start",
+                [
+                    k::Expr::Closure(work),
+                    k::Expr::Literal(k::Literal::Absent),
+                    k::Expr::List(inputs),
+                ],
+            ) => {
+                let definition = self
+                    .document
+                    .functions
+                    .get(&work.function)
+                    .ok_or_else(|| "missing pending tool wrapper".to_owned())?;
+                let [_, params] = definition.signature.params.as_slice() else {
+                    return refuse("pending tool wrapper parameters");
+                };
+                let Some(body) = definition.body() else {
+                    return refuse("pending tool wrapper body");
+                };
+                let [
+                    k::Stmt::Return {
+                        value: k::Expr::Act(performed),
+                    },
+                ] = body.block.as_slice()
+                else {
+                    return refuse("pending tool wrapper return");
+                };
+                let k::ActKind::Perform {
+                    slot,
+                    then_yield: false,
+                    ..
+                } = performed.kind
+                else {
+                    return refuse("pending tool wrapper perform");
+                };
+                let [k::Expr::Act(boundary)] = performed.args.as_slice() else {
+                    return refuse("pending tool wrapper input");
+                };
+                if !matches!(&boundary.kind, k::ActKind::Call(k::Callee::Import(id)) if self.is(id, "ts.boundary"))
+                {
+                    return refuse("pending tool wrapper boundary");
+                }
+                let [k::Expr::Member(member)] = boundary.args.as_slice() else {
+                    return refuse("pending tool wrapper operand");
+                };
+                if !matches!(&**member, k::Member::Index { target: k::Expr::Variable(name), index: k::Expr::Literal(k::Literal::Float(index)) } if *name == params.name && index.get() == 0.0)
+                    || inputs.len() != 1
+                {
+                    return refuse("pending tool wrapper argument position");
+                }
+                let callee = self.operation(&slot)?;
+                let args = inputs
+                    .iter()
+                    .map(|input| self.expr(input))
+                    .collect::<Lift<_>>()?;
+                Ok(Expr::Call(Box::new(callee), args))
+            }
+
+            // A captured lexical read checks its TDZ cell before returning
+            // the variable. The source read recreates that check on lowering.
+            (
+                "ts.tdz",
+                [
+                    k::Expr::Variable(name),
+                    k::Expr::Literal(k::Literal::Text(label)),
+                ],
+            ) if name.as_str() == label => self.variable(name),
             ("ts.strict_equals", [left, right]) => self.binary("===", left, right),
             ("ts.strict_not_equals", [left, right]) => self.binary("!==", left, right),
             ("ts.not", [value]) => Ok(Expr::Unary("!", Box::new(self.expr(value)?))),
@@ -314,6 +418,11 @@ impl Lifter<'_> {
                 let property = &name["ts.property.".len()..];
                 let target = self.expr(target)?;
                 Ok(Expr::Field(Box::new(target), property.to_owned()))
+            }
+            ("ts.get_numeric", [target, key]) => {
+                let target = self.expr(target)?;
+                let key = self.expr(key)?;
+                Ok(Expr::Index(Box::new(target), Box::new(key)))
             }
             ("ts.read", [target, k::Expr::Literal(k::Literal::Text(field))]) => {
                 let target = self.expr(target)?;

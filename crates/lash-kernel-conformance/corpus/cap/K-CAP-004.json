@@ -3,7 +3,7 @@
   "cases": [
     {
       "name": "captions are rekeyed outside the run",
-      "document": "kernel 1\nnumbers by_spelling\nfn helper() { return 1 }\nmain {\n let flag = true\n if flag { print 1 } else { print 2 }\n try { print 3 } catch e { print e } finally { print 4 }\n for item in [5] { print item }\n let r = call helper()\n finish r\n}\n",
+      "document": "kernel 1\nnumbers by_spelling\ndefinition \"function helper() -> Any\\nkernel 1\\nmetering statements\\nbody {\\n  return 1\\n}\\n\"\nmain {\n  let flag = true\n  if flag {\n    print 1\n  } else {\n    print 2\n  }\n  try {\n    print 3\n  } catch e {\n    print e\n  } finally {\n    print 4\n  }\n  for item in [5] {\n    print item\n  }\n  let r = invoke helper()\n  finish r\n}\n",
       "expected": {
         "prints": [
           {

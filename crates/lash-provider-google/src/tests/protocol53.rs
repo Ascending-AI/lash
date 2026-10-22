@@ -1,6 +1,8 @@
 use super::*;
 use lash_core::llm::types::LlmOutputSpec;
-use lash_protocol_types::{ProviderFailureKind, SchemaContract, SchemaDialect};
+use lash_protocol_types::ProviderFailureKind;
+use lash_vocabulary::schema_contract::SchemaContract;
+use lash_vocabulary::schema_contract::SchemaDialect;
 
 fn provider() -> GoogleOAuthProvider {
     GoogleOAuthProvider::new(std::sync::Arc::new(
@@ -12,7 +14,7 @@ fn projected_contract() -> SchemaContract {
         .expect("valid declared schema")
         .with_override(
             SchemaDialect::GoogleSchema,
-            lash_protocol_types::JsonSchema::admit(
+            lash_vocabulary::json_schema::JsonSchema::admit(
                 json!({"type":"object","properties":{"projected":{"type":"string"}}}),
             )
             .expect("valid declared projection schema"),
@@ -25,7 +27,7 @@ fn tool_request(model: &str) -> LlmRequest {
         name: "lookup".into(),
         description: "lookup".into(),
         input_schema: projected_contract(),
-        output_schema: lash_protocol_types::SchemaContract::admit(json!({}))
+        output_schema: lash_vocabulary::schema_contract::SchemaContract::admit(json!({}))
             .expect("valid declared schema"),
     }]);
     req
@@ -55,7 +57,8 @@ fn protocol53_lookalike_name_does_not_supply_dialect() {
 
 #[test]
 fn protocol53_schema_contract_modes_apply_to_every_dialect_and_site() {
-    use lash_core::{GoogleDialect, ProjectionMode};
+    use lash_core::GoogleDialect;
+    use lash_vocabulary::schema_contract::ProjectionMode;
     for dialect in [
         GoogleDialect::Legacy,
         GoogleDialect::Gemini3,
@@ -88,8 +91,10 @@ fn protocol53_schema_contract_modes_apply_to_every_dialect_and_site() {
                         name: "lookup".into(),
                         description: "lookup".into(),
                         input_schema: contract,
-                        output_schema: lash_protocol_types::SchemaContract::admit(json!({}))
-                            .expect("valid declared schema"),
+                        output_schema: lash_vocabulary::schema_contract::SchemaContract::admit(
+                            json!({}),
+                        )
+                        .expect("valid declared schema"),
                     }]);
                 }
                 let result = GoogleOAuthProvider::build_request(&provider(), &req, vec![], None);

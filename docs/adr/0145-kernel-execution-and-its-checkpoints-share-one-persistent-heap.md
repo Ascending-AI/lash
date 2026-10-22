@@ -474,11 +474,11 @@ build that interprets it. That migrator must land before the first breaking
 kernel version after 1.0.
 
 Package changes use identity retention and explicit adoption. A parked run
-pins an execution closure; installing another package set does not replace
-those identities. Document adoption refuses a changed operation contract;
+pins its Link DAG and Execution Environment; publishing another Package does
+not replace those identities. Document adoption refuses a changed operation contract;
 parked adoption refuses `state_not_carried` because heap pages are not
-carried. A session relinks its saved functions to each cell's package
-set; package values check their shape on use. The
+carried. A session relinks its saved functions against each cell's
+Namespaces while preserving resolved pins; package values check their shape on use. The
 [host-package guide](../host-packages.md) gives the host-facing rules.
 
 ## Consequences

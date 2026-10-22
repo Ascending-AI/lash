@@ -131,7 +131,7 @@ fn for_loops_keep_update_order_bindings_and_parks() {
     let lowered = super::lower_with_effects("for (; await host.echo(false);) {}")
         .expect("an awaiting test lowers");
     assert!(
-        lowered.document.main.iter().any(|stmt| matches!(
+        lowered.document.main.iter().flatten().any(|stmt| matches!(
             stmt,
             lash_kernel_doc::Stmt::While {
                 condition: lash_kernel_doc::Expr::Literal(lash_kernel_doc::Literal::Bool(true)),

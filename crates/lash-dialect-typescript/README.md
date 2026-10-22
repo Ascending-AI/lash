@@ -8,9 +8,9 @@ Programs call their namespaces directly, without imports: `dataframe.col(x)`
 calls code, `q.reduceByKey(keys, values)` calls a value member and
 `await inbox.sendItem(input)` performs the canonical `inbox.send_item`
 operation. Package values expose only declared members and check their
-representation on use. A new cell uses its selected package set; a
-parked run keeps its exact function identities. A session relinks its
-saved functions to each cell's set; see the guide for saving limitations.
+representation on use. A new cell uses its round's Current snapshot; a
+parked run keeps its exact Link and Execution Environment. A session relinks its
+saved functions against each cell's Namespaces while preserving resolved pins; see the guide for saving limitations.
 
 ## How an operation is lowered
 

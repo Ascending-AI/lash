@@ -27,7 +27,8 @@ use super::RuntimeError;
 use crate::TurnOutcome;
 use crate::TurnStop;
 use lash_execution_contracts::backend::Backend;
-use lash_protocol_types::{InputId, SessionId};
+use lash_vocabulary::identity::InputId;
+use lash_vocabulary::identity::SessionId;
 
 /// What a cancel request did.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -290,7 +291,9 @@ impl TurnWorkDriver {
             request.address.session_id.clone(),
             &request.address.turn_id,
         )
-        .and_then(|operation| lash_protocol_types::BatchId::parse(operation.operation_id).ok()) else {
+        .and_then(|operation| {
+            lash_vocabulary::identity::BatchId::parse(operation.operation_id).ok()
+        }) else {
             return Ok(OperationCancelOutcome::UnknownOrRevoked);
         };
         let evidence = request.evidence();

@@ -14,9 +14,11 @@
 //! An origin is reported with a request and handed to the host with a
 //! read-bound `perform`. It is never part of an effect's identity.
 
+use lash_kernel_doc::TaskId;
 use lash_kernel_doc::heap::HeapFault;
-use lash_kernel_doc::{Site, TaskId, Unit};
 use lash_kernel_state::paged::SiteRef;
+use lash_vocabulary::sites::Site;
+use lash_vocabulary::sites::Unit;
 
 use super::KernelMachine;
 use super::actions::Target;
@@ -54,15 +56,43 @@ impl KernelMachine {
         site: &Site,
         target: &Target,
     ) -> Result<Option<SiteRef>, HeapFault> {
-        let library = |unit: &Unit| matches!(unit, Unit::Library(_));
+        let library = |unit: &Unit| !exe.authored_unit(unit);
         let rooted_in_library = match target {
-            Target::Library(_) => true,
-            Target::Code(code, _) => library(&exe.code(*code).site.unit),
+            Target::Library(..) | Target::Export(..) => true,
+            Target::Code(code, _, _) => library(&exe.code(*code).site.unit),
         };
         if !library(&site.unit) && !rooted_in_library {
             return Ok(None);
         }
         let origin = self.origin(parent)?;
         Ok(Some(SiteRef::new(&origin, self.heap.pages())?))
+    }
+}
+
+impl KernelMachine {
+    /// The identity of the running task's entry into the action at `site`,
+    /// its `occurrence`th there.
+    pub(super) fn action_location(
+        &mut self,
+        task: TaskId,
+        site: &Site,
+        occurrence: u64,
+    ) -> Result<lash_vocabulary::sites::EffectLocation, super::Halt> {
+        let access = self.heap.pages().clone();
+        let running = self.task(task)?;
+        let loops = running.frames.loop_coordinates()?;
+        let at =
+            lash_kernel_doc::kernel_internals::effect_id(lash_vocabulary::sites::EffectIdentity {
+                task: running.identity.resolve(&access)?,
+                site: site.clone(),
+                occurrence,
+                loops,
+            });
+        let origin = if self.exe.authored_unit(&site.unit) {
+            site.clone()
+        } else {
+            self.origin(task)?
+        };
+        Ok(lash_vocabulary::sites::EffectLocation { at, origin })
     }
 }

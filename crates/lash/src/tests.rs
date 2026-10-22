@@ -3,7 +3,7 @@ use lash_core::facade_support::PluginFactory;
 use lash_core::facade_support::ProviderHandle;
 use lash_core::plugin::StaticPluginFactory;
 use lash_core::{ToolProvider, TurnActivity};
-use lash_protocol_types::SessionId;
+use lash_vocabulary::identity::SessionId;
 use std::sync::Arc;
 
 use lash_protocol_types::sync::MutexExt;

@@ -1,16 +1,26 @@
-use lash_protocol_types::SessionId;
 use lash_protocol_types::sync::MutexExt;
+use lash_vocabulary::identity::SessionId;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
+use lash_core::LlmOutputPart;
+use lash_core::LlmResponse;
+use lash_core::SessionAppendNode;
+use lash_core::SessionNodePayload;
+use lash_core::ToolAttemptOutcome;
+use lash_core::ToolCall;
+use lash_core::ToolOutcome;
+use lash_core::ToolProvider;
+use lash_core::TurnInput;
 use lash_core::facade_support::SessionGraphFacadeOps;
-use lash_core::{
-    LlmOutputPart, LlmResponse, SessionAppendNode, SessionNodePayload, ToolAttemptOutcome,
-    ToolCall, ToolContract, ToolDefinition, ToolManifest, ToolOutcome, ToolProvider, TurnInput,
-    facade_support::TraceRecord, facade_support::TraceSink, facade_support::TraceSinkError,
-    facade_support::TurnStop,
-};
+use lash_core::facade_support::TraceRecord;
+use lash_core::facade_support::TraceSink;
+use lash_core::facade_support::TraceSinkError;
+use lash_core::facade_support::TurnStop;
+use lash_vocabulary::tool_contract::ToolContract;
+use lash_vocabulary::tool_contract::ToolDefinition;
+use lash_vocabulary::tool_contract::ToolManifest;
 use serde_json::{Value, json};
 
 #[derive(Default)]
@@ -103,7 +113,7 @@ fn switch_tool_definition() -> ToolDefinition {
         "tools.switch_frame",
         "Switch to the seeded follow-on frame.",
         ToolDefinition::default_input_schema(),
-        lash_core::TurnControls::switch_agent_frame(),
+        lash_vocabulary::tool_declaration::TurnControls::switch_agent_frame(),
     )
     .expect("valid declared tool schemas")
     .with_execution(std::time::Duration::from_secs(120))
@@ -240,7 +250,7 @@ fn canonical_seed_nodes(state: &lash_core::SessionSnapshot, frame_id: &str) -> V
             state
                 .session_graph
                 .nearest_frame_node_id(Some(&node.node_id))
-                .map(lash_core::NodeId::as_str)
+                .map(lash_vocabulary::identity::NodeId::as_str)
                 == Some(frame_id)
         })
         .filter_map(|node| match &node.payload {
@@ -339,7 +349,7 @@ async fn admitted_switch_is_seeded_queued_after_earlier_work_and_exactly_once() 
         .expect("open sim session");
     let first = session
         .send(TurnInput::text("first queued turn"))
-        .id(lash::TurnId::parse("first").expect("nonblank host identity"))
+        .id(lash_vocabulary::identity::TurnId::parse("first").expect("nonblank host identity"))
         .await
         .expect("send first turn");
     first_provider_started_rx
@@ -347,7 +357,7 @@ async fn admitted_switch_is_seeded_queued_after_earlier_work_and_exactly_once() 
         .expect("first provider call started");
     let second = session
         .send(TurnInput::text("second queued turn"))
-        .id(lash::TurnId::parse("second").expect("nonblank host identity"))
+        .id(lash_vocabulary::identity::TurnId::parse("second").expect("nonblank host identity"))
         .await
         .expect("send second turn while chain is active");
     release_first_provider_tx
@@ -428,7 +438,7 @@ impl BoundedSwitchTools {
             format!("terminal.tool{index}"),
             "Switch to the next frame in the bounded chain.",
             ToolDefinition::default_input_schema(),
-            lash_core::TurnControls::switch_agent_frame(),
+            lash_vocabulary::tool_declaration::TurnControls::switch_agent_frame(),
         )
         .expect("valid declared tool schemas")
         .with_execution(std::time::Duration::from_secs(120))
@@ -993,7 +1003,7 @@ await local_actions.continueAs({
 /// that verb to report.
 async fn created_session(
     core: &lash::LashCore,
-    session_id: impl Into<lash::SessionId>,
+    session_id: impl Into<lash_vocabulary::identity::SessionId>,
 ) -> lash::SessionBuilder {
     let session_id = session_id.into();
     match core

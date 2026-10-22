@@ -94,8 +94,6 @@ macro_rules! hook_key {
     }};
 }
 
-pub use lash_core_store::plugin_registrations::{ToolProviderKey, ToolProviderKeyError};
-
 /// A provider key validated at compile time.
 #[macro_export]
 macro_rules! tool_provider_key {
@@ -109,6 +107,7 @@ macro_rules! tool_provider_key {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use lash_vocabulary::providers::{ToolProviderKey, ToolProviderKeyError};
 
     #[test]
     fn keys_are_validated_names() {

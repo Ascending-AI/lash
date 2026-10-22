@@ -35,8 +35,10 @@ const START_TURN_CHILD: &str = "start_turn_child";
 const START_TURN_CHILD_OPERATION: &str = "tools.start_turn_child";
 
 /// The component that serves the law's tools to a process body.
-const BLOB_COMPONENT: lash_core::ProcessConfigKey<()> =
-    lash_core::ProcessConfigKey::new("attachment-referrer-tools", lash_core::FormatVersion::ONE);
+const BLOB_COMPONENT: lash_core::ProcessConfigKey<()> = lash_core::ProcessConfigKey::new(
+    "attachment-referrer-tools",
+    lash_vocabulary::providers::FormatVersion::ONE,
+);
 
 /// How long a law waits for a referrer state, running the cleanup relay's due
 /// pass as it goes.
@@ -101,8 +103,11 @@ impl Witness {
     }
 }
 
-fn tool_definition(name: &str, input: serde_json::Value) -> lash_core::ToolDefinition {
-    lash_core::ToolDefinition::raw(
+fn tool_definition(
+    name: &str,
+    input: serde_json::Value,
+) -> lash_vocabulary::tool_contract::ToolDefinition {
+    lash_vocabulary::tool_contract::ToolDefinition::raw(
         format!("tool:{name}"),
         format!("tools.{name}"),
         format!("The {name} law tool."),
@@ -122,11 +127,11 @@ fn text_input() -> serde_json::Value {
     })
 }
 
-fn put_blob_definition() -> lash_core::ToolDefinition {
+fn put_blob_definition() -> lash_vocabulary::tool_contract::ToolDefinition {
     tool_definition(PUT_BLOB, text_input())
 }
 
-fn hold_definition() -> lash_core::ToolDefinition {
+fn hold_definition() -> lash_vocabulary::tool_contract::ToolDefinition {
     tool_definition(
         HOLD,
         serde_json::json!({
@@ -137,11 +142,11 @@ fn hold_definition() -> lash_core::ToolDefinition {
     )
 }
 
-fn start_turn_child_definition() -> lash_core::ToolDefinition {
+fn start_turn_child_definition() -> lash_vocabulary::tool_contract::ToolDefinition {
     tool_definition(START_TURN_CHILD, text_input())
         .with_declaration(
-            lash_core::ToolDeclaration::default()
-                .with_intents([lash_core::ToolIntentKind::StartProcess]),
+            lash_vocabulary::tool_declaration::ToolDeclaration::default()
+                .with_intents([lash_vocabulary::ToolIntentKind::StartProcess]),
             None,
         )
         .expect("a valid tool declaration")
@@ -239,7 +244,7 @@ impl ToolProvider for BlobTools {
         &self,
         _config: &lash_core::OwnerConfigView,
     ) -> std::result::Result<
-        Vec<lash_core::ToolManifest>,
+        Vec<lash_vocabulary::tool_contract::ToolManifest>,
         lash_execution_contracts::plugin_error::PluginError,
     > {
         Ok({
@@ -255,7 +260,7 @@ impl ToolProvider for BlobTools {
         &self,
         name: &str,
         _config: &lash_core::OwnerConfigView,
-    ) -> Option<Arc<lash_core::ToolContract>> {
+    ) -> Option<Arc<lash_vocabulary::tool_contract::ToolContract>> {
         let Some(("tools", name)) = name.split_once('.') else {
             return None;
         };
@@ -514,7 +519,8 @@ impl Law {
 
     /// Create the root session `name` on `core` and open it.
     async fn session_on(core: &lash::LashCore, name: &str) -> lash::LashSession {
-        let session_id = lash::SessionId::try_from(name.to_owned()).expect("a session id");
+        let session_id =
+            lash_vocabulary::identity::SessionId::try_from(name.to_owned()).expect("a session id");
         core.session(session_id.clone())
             .create(lash::SessionCreation::root(served::spec(1024)))
             .await
@@ -608,7 +614,7 @@ impl Law {
     /// `process_id`'s record is gone. A process's output is published before
     /// its record is retired for prune (its scope cascade and consumer hold
     /// settle after), so one pass may find nothing to prune.
-    async fn prune(&self, process_id: &lash_core::ProcessId) {
+    async fn prune(&self, process_id: &lash_vocabulary::identity::ProcessId) {
         tokio::time::timeout(SETTLE, async {
             loop {
                 self.core
@@ -672,7 +678,7 @@ impl Law {
         sessions
     }
 
-    async fn process_terminal(&self, process_id: &lash_core::ProcessId) {
+    async fn process_terminal(&self, process_id: &lash_vocabulary::identity::ProcessId) {
         tokio::time::timeout(SETTLE, self.core.processes().await_output(process_id))
             .await
             .expect("the process reaches its terminal")
@@ -681,7 +687,7 @@ impl Law {
 
     async fn record(
         &self,
-        process_id: &lash_core::ProcessId,
+        process_id: &lash_vocabulary::identity::ProcessId,
     ) -> lash_execution_contracts::process::ProcessRecord {
         self.backend
             .process_registry()
@@ -717,7 +723,7 @@ fn blob_id(text: &str) -> AttachmentId {
     lash_core::attachments::content_id(text.as_bytes())
 }
 
-fn started_process_id(output: &lash::TurnOutput) -> lash_core::ProcessId {
+fn started_process_id(output: &lash::TurnOutput) -> lash_vocabulary::identity::ProcessId {
     serde_json::from_value(
         output
             .outcome
@@ -859,7 +865,8 @@ await control.finish(started);"
     law.witness.release_one();
     law.process_terminal(&child).await;
     law.prune(&child).await;
-    let child_session = lash_core::SessionId::fixture(format!("session:process:{child}"));
+    let child_session =
+        lash_vocabulary::identity::SessionId::fixture(format!("session:process:{child}"));
     let committed = law
         .wait_referrers(&id, "the child session's edge alone", |found| {
             found == [ArtifactReferrer::Session(child_session.clone())]
@@ -971,7 +978,9 @@ fn upload_store(
     lash_core::facade_support::RuntimeAttachmentStore::new_with_clock(
         law.backend.attachment_store(),
         law.backend.attachment_referrers(),
-        lash_core::RuntimeOwner::Session(lash_core::SessionId::fixture(name)),
+        lash_vocabulary::identity::RuntimeOwner::Session(
+            lash_vocabulary::identity::SessionId::fixture(name),
+        ),
         Arc::clone(&law.clock) as Arc<dyn lash_core::Clock>,
         lash_core::facade_support::AttachmentPolicy::standard(),
     )
@@ -1019,9 +1028,9 @@ async fn upload_expiry_is_local(tier: Tier) {
     let upload_b = upload_of(&held_b).expect("B's upload still holds it");
     assert_ne!(upload_a, upload_b, "each put mints its own upload");
     assert!(
-        held_b.contains(&ArtifactReferrer::Session(lash_core::SessionId::from(
-            session_id
-        ))),
+        held_b.contains(&ArtifactReferrer::Session(
+            lash_vocabulary::identity::SessionId::from(session_id)
+        )),
         "B's commit acquired the session: {held_b:?}"
     );
 
@@ -1068,9 +1077,9 @@ async fn queued_input_outlives_its_upload_expiry(tier: Tier) {
     .await
     .expect("the drained core still accepts the input");
     law.wait_referrers(&queued.id, "the enqueue's session edge", |found| {
-        found.contains(&ArtifactReferrer::Session(lash_core::SessionId::from(
-            session_id,
-        )))
+        found.contains(&ArtifactReferrer::Session(
+            lash_vocabulary::identity::SessionId::from(session_id),
+        ))
     })
     .await;
     law.clock.advance(1001);
@@ -1085,7 +1094,7 @@ async fn queued_input_outlives_its_upload_expiry(tier: Tier) {
     );
 
     let serving = Law::core(&law.backend, &law.queue, &law.witness, "second-build");
-    let _ = serving.session(lash::SessionId::from(session_id));
+    let _ = serving.session(lash_vocabulary::identity::SessionId::from(session_id));
     let output = tokio::time::timeout(WATCHDOG, accepted.output())
         .await
         .expect("deadlock watchdog: the queued turn never settled")
@@ -1231,7 +1240,7 @@ impl lash_core::AttachmentReferrers for AdoptionCut {
 
     async fn session_referrer_state(
         &self,
-        id: &lash_core::SessionId,
+        id: &lash_vocabulary::identity::SessionId,
     ) -> Result<lash_core::store::SessionReferrerState, lash_core::StoreError> {
         self.inner.session_referrer_state(id).await
     }

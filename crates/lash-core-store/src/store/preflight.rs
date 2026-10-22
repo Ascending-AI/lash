@@ -26,9 +26,9 @@
 //! a found version is readable, is one build-wide question that belongs with
 //! the format manifest rather than duplicated per backend.
 
-use crate::ProcessId;
-use crate::SessionId;
 use async_trait::async_trait;
+use lash_vocabulary::identity::ProcessId;
+use lash_vocabulary::identity::SessionId;
 
 use super::error::StoreError;
 

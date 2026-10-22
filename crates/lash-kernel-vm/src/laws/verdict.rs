@@ -2,7 +2,8 @@
 //! growth's frame is unpublished: the capacity meter counts storage and
 //! control as they grow, and decides at its next verdict point (FIG-6791).
 
-use lash_kernel_doc::{Datum, FunctionName};
+use lash_kernel_doc::Datum;
+use lash_vocabulary::names::FunctionName;
 
 use super::embedder::{Embedder, ROOMY, Setup, text};
 use crate::machine::Boundary;
@@ -33,17 +34,8 @@ fn verdict(text: &str, bounds: Bounds, slice: u64, collect: bool) -> (End, Vec<D
 #[test]
 fn growing_local_holdings_have_one_verdict_before_the_next_print() {
     let program = r#"
-fn local(n) {
-  let a = null
-  let b = null
-  let c = null
-  print "before"
-  set a = work.repeat(n)
-  set b = work.repeat(n)
-  set c = work.repeat(n)
-  print "escaped"
-  return [a, b, c]
-}
+definition "function local(n: Any) -> Any\nkernel 1\nmetering statements\nbody { \n  let a = null\n  let b = null\n  let c = null\n  print \"before\"\n  set a = work.repeat(n)\n  set b = work.repeat(n)\n  set c = work.repeat(n)\n  print \"escaped\"\n  return [a, b, c]\n }"
+
 main {
   let s = work.repeat(16777216)
   let out = call local(16777216)
@@ -73,17 +65,11 @@ main {
 #[test]
 fn frames_grown_past_the_bound_have_a_verdict_before_the_next_print() {
     let program = r#"
-fn deep(n) {
-  if num.lt(n, 2000) {
-    let r = call deep(num.add(n, 1))
-    return r
-  }
-  print "bottom"
-  return 0
-}
+definition "function deep(self: Any, n: Any) -> Any\nkernel 1\nmetering statements\nbody { \n  if num.lt(n, 2000) {\n    let r = apply self(self, num.add(n, 1))\n    return r\n  }\n  print \"bottom\"\n  return 0\n }"
+
 main {
   print "before"
-  let r = call deep(0)
+  let r = call deep(&deep, 0)
   return r
 }
 "#;

@@ -13,13 +13,13 @@
 //! [`DurableSerialize`] lets hosts opt their own containers into that format.
 //! [`serialize_durable`] is the field adapter for derived `Serialize` containers:
 //! `#[serde(serialize_with = "lash::persistence::serialize_durable")]`.
-pub use lash_core_store::checkpoint_graph::{
-    DecodeLimits as GraphDecodeLimits, GraphReadPolicy, KernelDataLimits,
-};
+pub use lash_core_store::checkpoint_graph::DecodeLimits as GraphDecodeLimits;
+pub use lash_core_store::checkpoint_graph::GraphReadPolicy;
 pub use lash_execution_contracts::backend::ProcessAuthorityReads;
 pub use lash_protocol_types::Durable;
 pub use lash_protocol_types::DurableSerialize;
 pub use lash_protocol_types::durable_serde::serialize as serialize_durable;
+pub use lash_vocabulary::data_limits::KernelDataLimits;
 
 pub use lash_core::ProcessOpScope;
 pub use lash_core::StagedProcessStart;

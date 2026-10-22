@@ -4,9 +4,10 @@
 use std::sync::{Arc, OnceLock};
 
 use lash_kernel_dialect::{Environment, NamedLibrary};
-use lash_kernel_doc::{Datum, ErrorDatum, Handle, Integer, Timestamp};
+use lash_kernel_doc::{Datum, ErrorDatum, Handle};
+
 use lash_kernel_vm::{
-    Bounds, CellStart, End, Host, Machine, Outcome, PreparedLibrary, Program, Request, Step, Target,
+    Bounds, CellStart, End, Host, Machine, Outcome, PreparedLibrary, Request, Step, Target,
 };
 
 struct Kernel {
@@ -33,14 +34,6 @@ fn kernel() -> &'static Kernel {
 struct NoHost;
 
 impl Host for NoHost {
-    fn clock(&mut self) -> Timestamp {
-        Timestamp {
-            nanoseconds: Integer::from(0),
-        }
-    }
-    fn random(&mut self) -> u64 {
-        0
-    }
     fn read(&mut self, _handle: &Handle, _request: &Datum) -> Result<Datum, ErrorDatum> {
         Err(ErrorDatum {
             kind: "no_projection".into(),
@@ -60,12 +53,9 @@ fn run(source: &str) -> End {
 
 fn drive(source: &str, expected: &[Vec<Datum>]) -> End {
     let kernel = kernel();
-    let environment_namespaces = lash_kernel_dialect::Namespaces::of_effects(
-        &super::machine::effects(),
-        &lash_kernel_doc::ContractId::new("1"),
-        super::controls(),
-    )
-    .expect("the test's effects are operations");
+    let environment_namespaces =
+        crate::tests::linked::namespaces(&super::machine::effects(), super::controls())
+            .expect("the test's effects are operations");
     let environment = Environment::new(&kernel.library, &environment_namespaces);
     let lowered = crate::lower(
         source,
@@ -83,11 +73,7 @@ fn drive_document(
 ) -> End {
     let kernel = kernel();
     let text = lash_kernel_doc::print_document(&document);
-    let program = Program {
-        closure: super::pages::CLOSURE,
-        document: Arc::new(document),
-        library: kernel.prepared.clone(),
-    };
+    let program = crate::tests::linked::program(Arc::new(document), kernel.prepared.clone());
     let bounds = Bounds {
         memory_meter: lash_kernel_vm::MemoryMeter::On,
         charge: lash_kernel_vm::Charge::Exact,
@@ -126,12 +112,20 @@ fn drive_document(
             Step::Parked(park) => {
                 for request in park.requests {
                     match request {
-                        Request::Sleep(request) => {
-                            machine.deliver(request.wait, Outcome::Elapsed).unwrap();
-                        }
-                        Request::Effect(effect) if effect.effect.as_str() == "control.finish" => {
+                        Request::Effect(effect)
+                            if crate::tests::linked::operation(&effect.use_).as_str()
+                                == "control.finish" =>
+                        {
                             finished_with =
                                 Some(effect.args.first().cloned().unwrap_or(Datum::Null));
+                            machine
+                                .deliver(effect.wait, Outcome::Completed(Datum::Null))
+                                .unwrap();
+                        }
+                        Request::Effect(effect)
+                            if super::linked::operation(&effect.use_).as_str()
+                                == "typescript.sleep" =>
+                        {
                             machine
                                 .deliver(effect.wait, Outcome::Completed(Datum::Null))
                                 .unwrap();
@@ -551,12 +545,12 @@ fn json_encoding_of_boundary_arrays_uses_null_for_sparse_slots() {
     let uses = kernel
         .library
         .iter()
-        .map(|(name, id)| format!("use {name} = @{id}\n"))
+        .map(|(name, _)| format!("use {name}\n"))
         .collect::<String>();
     let text = format!(
-        "kernel 1\nnumbers float\n{uses}main {{\nlet guest = [(), absent]\nlet copied = invoke ts.boundary(guest)\nlet encoded = json.stringify(copied)\nif same(guest[0], ()) {{}} else {{ throw \"guest was changed\" }}\nfinish encoded\n}}\n"
+        "{uses}function law.main() -> Any\nkernel 1\nmetering statements\nbody {{\nlet guest = [(), absent]\nlet copied = invoke ts.boundary(guest)\nlet encoded = json.stringify(copied)\nif same(guest[0], ()) {{}} else {{ throw \"guest was changed\" }}\nfinish encoded\n}}\n"
     );
-    let document = lash_kernel_doc::parse_document(&text).unwrap();
+    let document = super::linked_inspection::main(&text, &kernel.library);
     let end = drive_document(document, &[], &text);
     assert!(
         matches!(end, End::Finished(finished) if finished.result == Datum::Text("[null,null]".into()))
@@ -571,13 +565,14 @@ fn console_subtrees_keep_depth_and_cycle_failure_order() {
     let uses = kernel
         .library
         .iter()
-        .map(|(name, id)| format!("use {name} = @{id}\n"))
+        .map(|(name, _)| format!("use {name}\n"))
         .collect::<String>();
     let text = format!(
-        r#"kernel 1
-numbers float
-{uses}
-main {{
+        r#"{uses}
+function law.main() -> Any
+kernel 1
+metering statements
+body {{
   let leaf = map{{"n": 2.0}}
   let value = leaf
   let i = 0
@@ -595,7 +590,7 @@ main {{
 }}
 "#
     );
-    let document = lash_kernel_doc::parse_document(&text).unwrap();
+    let document = super::linked_inspection::main(&text, &kernel.library);
     let end = drive_document(document, &[], &text);
     assert!(
         matches!(&end, End::Finished(finished) if finished.result == Datum::List(vec![
@@ -775,7 +770,7 @@ fn guarded_search_and_join_match_generic_array_semantics() {
         for setup in [
             "let xs = {\"0\": 1.0, length: 1.0} let args = [1.0]",
             "let xs = null let args = []",
-            "let xs = [1.0, 2.0] let args = [absent, {valueOf: fn(this, args) { print \"from\" set xs[0] = () do perform host.echo(2.0) as Any return 0.0 }}]",
+            "let xs = [1.0, 2.0] let args = [absent, {valueOf: fn(this, args) { print \"from\" set xs[0] = () do perform 0(2.0) as Any return 0.0 }}]",
             "let xs = [] let args = [null, {valueOf: fn(this, args) { throw \"not reached\" }}]",
             "let object = {x: 1.0} let xs = [object, {x: 1.0}] let args = [object]",
             "let xs = [1.0] let args = [1.0, {valueOf: fn(this, args) { print \"throw\" throw \"bad start\" }}]",
@@ -791,7 +786,7 @@ fn guarded_search_and_join_match_generic_array_semantics() {
         "let xs = [\"a\", (), null, absent, 3.0] let args = [\"|\"]",
         "let xs = [\"a\", \"b\", null, absent, ()] let args = [\"😀\"]",
         "let xs = [\"😀\", \"é\", {toString: fn(this, args) { print \"late element\" return \"z\" }}] let args = [\"|\"]",
-        "let xs = [\"a\", \"b\"] let args = [{toString: fn(this, args) { print \"separator\" do perform host.echo(1.0) as Any set xs[0] = \"changed\" return \"|\" }}]",
+        "let xs = [\"a\", \"b\"] let args = [{toString: fn(this, args) { print \"separator\" do perform 0(1.0) as Any set xs[0] = \"changed\" return \"|\" }}]",
         "let xs = [{toString: fn(this, args) { print \"element\" throw \"bad element\" }}] let args = [{toString: fn(this, args) { print \"separator first\" return \"|\" }}]",
         "let xs = {\"0\": \"a\", length: 2.0} let args = []",
         "let xs = null let args = []",
@@ -819,14 +814,6 @@ struct ArrayPathHost {
 }
 
 impl Host for ArrayPathHost {
-    fn clock(&mut self) -> Timestamp {
-        Timestamp {
-            nanoseconds: Integer::from(0),
-        }
-    }
-    fn random(&mut self) -> u64 {
-        0
-    }
     fn read(&mut self, _: &Handle, _: &Datum) -> Result<Datum, ErrorDatum> {
         Err(ErrorDatum {
             kind: "no_projection".into(),
@@ -843,24 +830,17 @@ impl Host for ArrayPathHost {
 }
 
 fn observe_array_path(method: &str, setup: &str, generic: bool) -> (String, Vec<String>, u64) {
-    let mut source = String::from(
-        "kernel 1\nnumbers by_spelling\neffect host.echo(x: Any) -> Any contract \"1\"\n",
-    );
-    for (name, id) in kernel().library.iter() {
-        source.push_str(&format!("use {name} = @{id}\n"));
+    let mut source = String::from("");
+    for (name, _) in kernel().library.iter() {
+        source.push_str(&format!("use {name}\n"));
     }
     let prefix = if generic { "generic_" } else { "" };
     source.push_str(&format!(
-        "main {{ {setup} let answer = invoke ts.array.{prefix}{method}(xs, args) return answer }}"
+        "function law.main() -> Any\nkernel 1\nmetering statements\nimport 0 operation host.echo(x: Any) -> Any\nbody {{ {setup} let answer = invoke ts.array.{prefix}{method}(xs, args) return answer }}"
     ));
-    let document =
-        lash_kernel_doc::parse_document(&source).unwrap_or_else(|error| panic!("{error}\n{setup}"));
+    let document = super::linked_inspection::main(&source, &kernel().library);
     let mut machine = super::pages::start(
-        Program {
-            closure: super::pages::CLOSURE,
-            document: Arc::new(document),
-            library: kernel().prepared.clone(),
-        },
+        crate::tests::linked::program(Arc::new(document), kernel().prepared.clone()),
         Bounds {
             memory_meter: lash_kernel_vm::MemoryMeter::On,
             charge: lash_kernel_vm::Charge::Exact,
@@ -901,14 +881,14 @@ fn observe_array_path(method: &str, setup: &str, generic: bool) -> (String, Vec<
                 for request in park.requests {
                     match request {
                         Request::Effect(effect) => {
-                            host.events
-                                .push(format!("effect:{}:{:?}", effect.effect, effect.args));
+                            host.events.push(format!(
+                                "effect:{}:{:?}",
+                                crate::tests::linked::operation(&effect.use_),
+                                effect.args
+                            ));
                             machine
                                 .deliver(effect.wait, Outcome::Completed(effect.args[0].clone()))
                                 .unwrap();
-                        }
-                        Request::Sleep(sleep) => {
-                            machine.deliver(sleep.wait, Outcome::Elapsed).unwrap();
                         }
                     }
                 }

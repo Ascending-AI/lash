@@ -12,12 +12,19 @@ use std::any::Any;
 use std::fmt;
 use std::sync::{Arc, OnceLock};
 
+use super::AttemptOutcome;
+use super::AvailableEvidence;
+use super::CompletionSource;
+use super::KnownFailure;
+use super::KnownFailureReason;
+use super::MaterialDigest;
+use super::MaterialLocation;
+use super::MaterialOwner;
+use super::MaterialRef;
+use super::MaterialRefusal;
+use super::MaterialRole;
 use super::material::{text_reference, value_reference};
-use super::{
-    AttemptOutcome, AvailableEvidence, CompletionSource, KnownFailure, KnownFailureReason,
-    LimitCause, MaterialDigest, MaterialLocation, MaterialOwner, MaterialRef, MaterialRefusal,
-    MaterialRole,
-};
+use lash_vocabulary::tool_contract::LimitCause;
 use serde::{Deserialize, Serialize};
 
 /// What names one material: the reference whose payload rides beside it.
@@ -281,6 +288,7 @@ impl Material {
             named: CompletionSource {
                 wait,
                 terminal: None,
+                timer: None,
                 metadata: self.named,
             },
             payload: self.payload,
@@ -289,6 +297,10 @@ impl Material {
 }
 
 impl Material<CompletionSource> {
+    pub fn await_timer(&mut self, timer: super::CompletionTimer) {
+        self.named.timer = Some(timer);
+    }
+
     /// The park, also racing the process terminal wait `terminal`, by its
     /// id's hex. The wait is not part of the material.
     pub fn await_terminal(&mut self, terminal: String) {

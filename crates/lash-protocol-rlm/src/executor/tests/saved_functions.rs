@@ -291,7 +291,7 @@ impl lash_core::ToolProvider for NoTools {
         &self,
         _config: &lash_core::OwnerConfigView,
     ) -> std::result::Result<
-        Vec<lash_core::ToolManifest>,
+        Vec<lash_vocabulary::tool_contract::ToolManifest>,
         lash_execution_contracts::plugin_error::PluginError,
     > {
         Ok(Vec::new())
@@ -299,9 +299,9 @@ impl lash_core::ToolProvider for NoTools {
 
     fn resolve_manifest_by_id(
         &self,
-        _id: &lash_core::ToolId,
+        _id: &lash_vocabulary::tool_contract::ToolId,
         _config: &lash_core::OwnerConfigView,
-    ) -> Option<lash_core::ToolManifest> {
+    ) -> Option<lash_vocabulary::tool_contract::ToolManifest> {
         None
     }
 
@@ -309,7 +309,7 @@ impl lash_core::ToolProvider for NoTools {
         &self,
         _name: &str,
         _config: &lash_core::OwnerConfigView,
-    ) -> Option<Arc<lash_core::ToolContract>> {
+    ) -> Option<Arc<lash_vocabulary::tool_contract::ToolContract>> {
         None
     }
 
@@ -377,28 +377,22 @@ async fn a_saved_function_is_refused_where_a_tool_it_calls_is_missing() {
     assert!(
         source
             .lowering_functions()
-            .contains_key(&lash_kernel_doc::Name::new("shout")),
+            .contains_key(&lash_vocabulary::names::Name::new("shout")),
         "{:?}",
         source.not_carried()
     );
 
     let mut seeded = restored(&host, &mut source).await;
+    let ctx = cell_context(&host, SESSION, TURN, "exec-code:1", Arc::new(NoTools));
     let refused = run_cell(
         &mut seeded,
-        cell_context(&host, SESSION, TURN, "exec-code:1", Arc::new(NoTools)),
+        ctx.clone(),
         &typescript_services(),
         "await control.finish(await shout(\"b\"));",
     )
     .await;
-    let failure = refused.error().expect("the cell is refused");
-    assert!(
-        failure.message.contains("TS_SAVED_FUNCTION_UNUSABLE")
-            && failure.message.contains(
-                "the saved function `shout` calls `echo.say`, which this session does not offer"
-            ),
-        "{}",
-        failure.message
-    );
+    assert!(refused.error().is_some(), "the cell is refused");
+    assert_package_refusal(&ctx, false);
     assert_eq!(tools.answered(), vec!["a"], "nothing of the cell ran");
 }
 
@@ -466,12 +460,12 @@ async fn a_function_that_captures_a_task_is_not_carried_and_says_so() {
     );
     let not_carried = state.not_carried();
     let why = not_carried
-        .get(&lash_kernel_doc::Name::new("later"))
+        .get(&lash_vocabulary::names::Name::new("later"))
         .expect("the session records why `later` was not kept");
     assert_eq!(
         why,
         &lash_kernel_dialect::NotSaved::Capture {
-            name: lash_kernel_doc::Name::new("pending"),
+            name: lash_vocabulary::names::Name::new("pending"),
             why: lash_kernel_dialect::CaptureRefusal::Task,
         }
         .to_string()
@@ -499,13 +493,15 @@ async fn a_function_that_captures_a_task_is_not_carried_and_says_so() {
 struct EchoEndsTheTurn;
 
 impl EchoEndsTheTurn {
-    fn definition() -> lash_core::ToolDefinition {
-        lash_core::ToolDefinition::control(
+    fn definition() -> lash_vocabulary::tool_contract::ToolDefinition {
+        lash_vocabulary::tool_contract::ToolDefinition::control(
             "tool:echo",
             "echo.say",
             "Echo the text back, ending the turn",
-            lash_core::ToolDefinition::default_input_schema(),
-            lash_core::TurnControls::finish(lash_core::JsonSchema::any()),
+            lash_vocabulary::tool_contract::ToolDefinition::default_input_schema(),
+            lash_vocabulary::tool_declaration::TurnControls::finish(
+                lash_vocabulary::json_schema::JsonSchema::any(),
+            ),
         )
         .expect("valid declared tool schema")
         .with_execution(std::time::Duration::from_secs(120))
@@ -518,7 +514,7 @@ impl lash_core::ToolProvider for EchoEndsTheTurn {
         &self,
         _config: &lash_core::OwnerConfigView,
     ) -> std::result::Result<
-        Vec<lash_core::ToolManifest>,
+        Vec<lash_vocabulary::tool_contract::ToolManifest>,
         lash_execution_contracts::plugin_error::PluginError,
     > {
         Ok(vec![Self::definition().manifest()])
@@ -528,7 +524,7 @@ impl lash_core::ToolProvider for EchoEndsTheTurn {
         &self,
         name: &str,
         _config: &lash_core::OwnerConfigView,
-    ) -> Option<Arc<lash_core::ToolContract>> {
+    ) -> Option<Arc<lash_vocabulary::tool_contract::ToolContract>> {
         (name == "echo.say" || name == "tool:echo").then(|| Arc::new(Self::definition().contract()))
     }
 
@@ -554,28 +550,22 @@ async fn a_saved_function_is_refused_where_a_tool_it_calls_now_ends_the_turn() {
     )
     .await;
     let mut seeded = restored(&host, &mut source).await;
+    let ctx = cell_context(
+        &host,
+        SESSION,
+        TURN,
+        "exec-code:1",
+        Arc::new(EchoEndsTheTurn),
+    );
     let refused = run_cell(
         &mut seeded,
-        cell_context(
-            &host,
-            SESSION,
-            TURN,
-            "exec-code:1",
-            Arc::new(EchoEndsTheTurn),
-        ),
+        ctx.clone(),
         &typescript_services(),
         "const said = await shout(\"b\");",
     )
     .await;
-    let failure = refused.error().expect("the cell is refused");
-    assert!(
-        failure.message.contains("TS_SAVED_FUNCTION_UNUSABLE")
-            && failure
-                .message
-                .contains("the saved function `shout` calls `echo.say`, which now ends the turn"),
-        "{}",
-        failure.message
-    );
+    assert!(refused.error().is_some(), "the cell is refused");
+    assert_package_refusal(&ctx, true);
     assert!(refused.tool_calls.is_empty(), "nothing of the cell ran");
 }
 
@@ -604,7 +594,7 @@ async fn a_function_that_calls_control_finish_is_refused_and_never_saved() {
     assert!(
         !state
             .lowering_functions()
-            .contains_key(&lash_kernel_doc::Name::new("done"))
+            .contains_key(&lash_vocabulary::names::Name::new("done"))
     );
 }
 
@@ -631,4 +621,29 @@ async fn a_positional_function_saved_in_one_cell_accepts_generic_calls_in_the_ne
         finish_of(&called),
         serde_json::json!({ "plain": "x", "spread": "y", "apply": "z", "missing": 7, "length": 0 })
     );
+}
+
+/// Relink refusals retain the package cause across the host boundary.
+pub(super) fn assert_package_refusal(ctx: &lash_core::RuntimeExecutionContext<'_>, changed: bool) {
+    use lash_execution_contracts::process::linking::{AdmissionRefusal, EnginePortError};
+    let error = ctx
+        .take_nested_effect_error()
+        .expect("typed relink failure")
+        .into_runtime_error();
+    let Some(lash_core::RuntimeErrorCause::PluginOperation { failure }) = error.cause else {
+        panic!("relink lost its typed package cause: {error:?}");
+    };
+    let lash_execution_contracts::plugin_error::PluginError::Package(error) =
+        serde_json::from_value(failure.payload).expect("decode package cause")
+    else {
+        panic!("relink changed its package cause");
+    };
+    let name = match (*error, changed) {
+        (EnginePortError::Refused(AdmissionRefusal::MissingImport { name, .. }), false)
+        | (EnginePortError::Refused(AdmissionRefusal::SignatureMismatch { name, .. }), true) => {
+            name
+        }
+        (other, _) => panic!("unexpected relink cause: {other:?}"),
+    };
+    assert_eq!(name.to_string(), "echo.say");
 }

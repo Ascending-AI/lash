@@ -9,7 +9,8 @@
 //! same commit as the state revision.
 
 use crate::ids::{DurableInstant, Epoch};
-use lash_protocol_types::{CancelOrigin, ProcessId};
+use lash_protocol_types::CancelOrigin;
+use lash_vocabulary::identity::ProcessId;
 
 use super::keys::ScopeKey;
 
@@ -82,6 +83,10 @@ pub struct ProcessStartRows {
     /// The prepared registration (its observers, the minted process id and
     /// the instant it was prepared at), encoded by its owner.
     pub registration_json: String,
+    /// Validated linked execution membership for this new process.
+    pub execution: Option<Box<crate::resolutions::ExecutionRegistration>>,
+    /// Validated inherited pins, committed before the process is claimable.
+    pub initial_resolutions: Vec<crate::resolutions::ResolutionRecord>,
 }
 
 /// A process write inside an owner commit.

@@ -79,7 +79,7 @@ mod tests {
 
         async fn session_referrer_state(
             &self,
-            id: &crate::SessionId,
+            id: &lash_vocabulary::identity::SessionId,
         ) -> Result<SessionReferrerState, StoreError> {
             self.inner.session_referrer_state(id).await
         }

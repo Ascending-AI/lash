@@ -2,7 +2,9 @@
 
 use std::sync::Arc;
 
-use lash_protocol_types::{JsonSchema, ToolContract, ToolManifest};
+use lash_vocabulary::json_schema::JsonSchema;
+use lash_vocabulary::tool_contract::ToolContract;
+use lash_vocabulary::tool_contract::ToolManifest;
 use serde_json::Value;
 
 use crate::{
@@ -156,7 +158,7 @@ impl ToolPresenter for WrappedToolPresenter {
         section
             .omitted
             .extend(filtered.into_iter().map(|tool| tool.manifest.id.clone()));
-        let order = |id: &lash_protocol_types::ToolId| {
+        let order = |id: &lash_vocabulary::tool_contract::ToolId| {
             request
                 .tools
                 .iter()

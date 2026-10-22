@@ -3,7 +3,7 @@
   "cases": [
     {
       "name": "all immutable key kinds and nested tuples are legal",
-      "document": "kernel 1\nnumbers by_spelling\nuse map.len = @eca67654cffa061303e34a549e20bb70b7668a3e655709d36fd1c2fdd6b2956d\nuse ref = @45d4961349c42b673de1c1e92b4122299b421191ead13812e4d5f978f1323c65\nmain { let xs = [] let r = ref(xs) let m = map{null: 0, true: 1, 2: 2, 3.5: 3, \"x\": 4, b\"00ff\": 5, clock: 6, r: 7, (null, (true, 2,),): 8} finish map.len(m) }\n",
+      "document": "kernel 1\nnumbers by_spelling\nimport 0 operation host.clock() -> Timestamp\nnative @3536009c2e2586efd0959aaef06b545981e14eba3cf77a4446fa3ce79edb6981\nnative @d21d114a7a631d9f599332a33f6371422eb99c16a11fe9bb4e987316057eb5e6\ndefinition \"function ref(arg0: Any) -> Any\\nkernel 1\\nerrors \\\"arity\\\", \\\"type_error\\\"\\ncharge sum(1, sum(deep(arg0)), deep(result))\\nnative\\n\"\ndefinition \"function map.len(xs: Map(Any, Any)) -> Int\\nkernel 1\\nerrors \\\"cyclic_value\\\", \\\"index_out_of_range\\\", \\\"invalid_key\\\", \\\"key_missing\\\", \\\"too_deep\\\", \\\"type_error\\\"\\ncharge 1\\nnative\\n\"\nmain {\n  let xs = []\n  let r = ref(xs)\n  let m = map{null: 0, true: 1, 2: 2, 3.5: 3, \"x\": 4, b\"00ff\": 5, perform 0() as Timestamp: 6, r: 7, (null, (true, 2)): 8}\n  finish map.len(m)\n}\n",
       "expected": {
         "prints": [],
         "trace": [],
@@ -16,8 +16,19 @@
       "environment": {
         "host": [
           {
-            "clock": "9"
+            "perform": {
+              "effect": "host.clock",
+              "args": [],
+              "answer": {
+                "Ok": {
+                  "timestamp": "9"
+                }
+              }
+            }
           }
+        ],
+        "reads": [
+          "host.clock"
         ]
       }
     },
@@ -179,7 +190,7 @@
     },
     {
       "name": "map refuses key error.new(\"x\", \"y\")",
-      "document": "kernel 1\nnumbers by_spelling\nuse error.new = @94cb9716bc8ce4815dfcc5451d7f6d00901c7ed7aeba0d131da241a5f750d064\nmain { let x = error.new(\"x\", \"y\")  try { print map{x: 1} } catch e { finish e.kind } finish null }\n",
+      "document": "kernel 1\nnumbers by_spelling\nnative @e5f5e7081794f244d696377835fa16cadf6f6c49d53e947fc928b49494989ca3\ndefinition \"function error.new(kind: Text, message: Text, data?: Any) -> Error\\nkernel 1\\nerrors \\\"type_error\\\"\\ncharge sum(1, size(kind), size(message), size(result))\\nnative\\n\"\nmain {\n  let x = error.new(\"x\", \"y\")\n  try {\n    print map{x: 1}\n  } catch e {\n    finish e.kind\n  }\n  finish null\n}\n",
       "expected": {
         "prints": [],
         "trace": [],
@@ -192,7 +203,7 @@
     },
     {
       "name": "set refuses member error.new(\"x\", \"y\")",
-      "document": "kernel 1\nnumbers by_spelling\nuse error.new = @94cb9716bc8ce4815dfcc5451d7f6d00901c7ed7aeba0d131da241a5f750d064\nmain { let x = error.new(\"x\", \"y\")  try { print set{x} } catch e { finish e.kind } finish null }\n",
+      "document": "kernel 1\nnumbers by_spelling\nnative @e5f5e7081794f244d696377835fa16cadf6f6c49d53e947fc928b49494989ca3\ndefinition \"function error.new(kind: Text, message: Text, data?: Any) -> Error\\nkernel 1\\nerrors \\\"type_error\\\"\\ncharge sum(1, size(kind), size(message), size(result))\\nnative\\n\"\nmain {\n  let x = error.new(\"x\", \"y\")\n  try {\n    print set{x}\n  } catch e {\n    finish e.kind\n  }\n  finish null\n}\n",
       "expected": {
         "prints": [],
         "trace": [],
@@ -205,7 +216,7 @@
     },
     {
       "name": "a function reference is a legal key, one per function it names",
-      "document": "kernel 1\nnumbers by_spelling\nfn f() { return null }\nfn g() { return null }\nmain { let x = &f let y = &f let z = &g let m = map{x: 1, z: 3} set m[y] = 2 finish m }\n",
+      "document": "kernel 1\nnumbers by_spelling\ndefinition \"function f() -> Any\\nkernel 1\\nmetering statements\\nbody {\\n  return null\\n}\\n\"\ndefinition \"function g() -> Any\\nkernel 1\\nmetering statements\\nbody {\\n  return null\\n}\\n\"\nmain {\n  let x = &f\n  let y = &f\n  let z = &g\n  let m = map{x: 1, z: 3}\n  set m[y] = 2\n  finish m\n}\n",
       "expected": {
         "prints": [],
         "trace": [],
@@ -214,7 +225,10 @@
             "map": [
               [
                 {
-                  "function": "f"
+                  "function": {
+                    "link": "b9c7f84122483f0ab770a3103f44730326c536c34f73a5a02b3705f31030298d",
+                    "function": "3a3fa83c0b17c0b051937e32fdfb794c36af6c0ebe001a46fb5d64311b375880"
+                  }
                 },
                 {
                   "int": "2"
@@ -222,7 +236,10 @@
               ],
               [
                 {
-                  "function": "g"
+                  "function": {
+                    "link": "b9c7f84122483f0ab770a3103f44730326c536c34f73a5a02b3705f31030298d",
+                    "function": "5f4b8367dc19ece12d7645266db3c3421033ce1659c617e6c5f16ae6f23bd948"
+                  }
                 },
                 {
                   "int": "3"
@@ -235,7 +252,7 @@
     },
     {
       "name": "a set holds a function reference once",
-      "document": "kernel 1\nnumbers by_spelling\nfn f() { return null }\nmain { let x = &f let y = &f let s = set{x, y} finish s }\n",
+      "document": "kernel 1\nnumbers by_spelling\ndefinition \"function f() -> Any\\nkernel 1\\nmetering statements\\nbody {\\n  return null\\n}\\n\"\nmain {\n  let x = &f\n  let y = &f\n  let s = set{x, y}\n  finish s\n}\n",
       "expected": {
         "prints": [],
         "trace": [],
@@ -243,7 +260,10 @@
           "finished": {
             "set": [
               {
-                "function": "f"
+                "function": {
+                  "link": "5d3e9c39b7283bcdf51bb00c87a2b942f6cd9e5fb4bcb611a0ef75c1d64c6857",
+                  "function": "3a3fa83c0b17c0b051937e32fdfb794c36af6c0ebe001a46fb5d64311b375880"
+                }
               }
             ]
           }
@@ -278,7 +298,7 @@
     },
     {
       "name": "a task handle must be used through its ref as a key",
-      "document": "kernel 1\nnumbers by_spelling\nfn f() { return null } main { let t = spawn call f() try { print map{t: 1} } catch e { finish e.kind } finish null }\n",
+      "document": "kernel 1\nnumbers by_spelling\ndefinition \"function f() -> Any\\nkernel 1\\nmetering statements\\nbody {\\n  return null\\n}\\n\"\nmain {\n  let t = spawn invoke f()\n  try {\n    print map{t: 1}\n  } catch e {\n    finish e.kind\n  }\n  finish null\n}\n",
       "expected": {
         "prints": [],
         "trace": [],
@@ -291,13 +311,13 @@
     },
     {
       "name": "host handles are not legal keys",
-      "document": "kernel 1\nnumbers by_spelling\neffect resource() -> Handle(\"db\") contract \"1\"\nmain { let h = perform resource() as Handle(\"db\") try { print set{h} } catch e { finish e.kind } finish null }\n",
+      "document": "kernel 1\nnumbers by_spelling\nimport 0 operation host.resource() -> Handle(\"db\")\nmain {\n  let h = perform 0() as Handle(\"db\")\n  try {\n    print set{h}\n  } catch e {\n    finish e.kind\n  }\n  finish null\n}\n",
       "expected": {
         "prints": [],
         "trace": [
           {
             "effect": {
-              "effect": "resource",
+              "effect": "host.resource",
               "args": [],
               "result": {
                 "handle": "db"

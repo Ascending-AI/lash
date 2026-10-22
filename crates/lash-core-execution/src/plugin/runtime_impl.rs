@@ -1,4 +1,5 @@
-use crate::{RuntimeOwner, SessionId};
+use lash_vocabulary::identity::RuntimeOwner;
+use lash_vocabulary::identity::SessionId;
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 use std::sync::{Mutex as StdMutex, Weak};
@@ -9,6 +10,7 @@ use super::*;
 
 #[derive(Clone)]
 pub struct PluginHost {
+    pub(super) package_namespace: Arc<super::packages::HostPackageNamespace>,
     data_limits: crate::runtime::RuntimeDataLimits,
     prompt_render_pool: Option<Arc<super::prompt::PromptRenderPool>>,
     trace_runtime: crate::trace::TraceRuntime,
@@ -183,6 +185,7 @@ impl PluginHost {
         let extensions = PluginExtensions::default();
         let config_registry = Arc::new(std::sync::OnceLock::new());
         Self {
+            package_namespace: Arc::new(super::packages::HostPackageNamespace::default()),
             data_limits: crate::runtime::RuntimeDataLimits::standard(),
             prompt_render_pool: None,
             factories: Arc::new(all_factories),
@@ -251,6 +254,7 @@ impl PluginHost {
 
     pub fn isolated_registry(&self) -> Self {
         Self {
+            package_namespace: Arc::clone(&self.package_namespace),
             data_limits: self.data_limits,
             prompt_render_pool: self.prompt_render_pool.clone(),
             factories: Arc::clone(&self.factories),
@@ -396,7 +400,7 @@ impl PluginHost {
             return Err(super::CreationConfigError::Recipe(Box::new(
                 PluginError::Runtime(
                     super::RetirementRefusal::Admission {
-                        registry: crate::RegistryKind::Session,
+                        registry: lash_vocabulary::claims::RegistryKind::Session,
                         id: id.clone(),
                     }
                     .into_runtime_error(),
@@ -698,11 +702,11 @@ impl PluginHost {
         let recipes = self.recipes()?;
         for (slot, port) in [
             (
-                lash_core_store::tool_run::CallbackSlot::ProtocolSession,
+                lash_vocabulary::providers::CallbackSlot::ProtocolSession,
                 RequiredPort::ProtocolSession,
             ),
             (
-                lash_core_store::tool_run::CallbackSlot::ProtocolDriver,
+                lash_vocabulary::providers::CallbackSlot::ProtocolDriver,
                 RequiredPort::ProtocolDriver,
             ),
         ] {
@@ -756,7 +760,7 @@ impl PluginHost {
             })
             .collect::<Vec<_>>();
         Ok(InstalledInventory {
-            scope: InventoryScope::Deployment(lash_core_store::obligations::RegistryKind::Session),
+            scope: InventoryScope::Deployment(lash_vocabulary::claims::RegistryKind::Session),
             readiness: vec![readiness; entries.len()],
             entries,
             stateless: self

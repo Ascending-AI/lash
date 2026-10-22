@@ -1,14 +1,10 @@
 kernel 1
 numbers by_spelling
-entry demo() -> Any
-
-fn demo() {
-  do sleep(5.0)
-  return "awake"
-}
-
+import 0 code py.h_n5_sleep(seconds: Any) -> Null direct
+export demo "{\"kind\":\"function\",\"value\":{\"function\":\"d977a9ebd923fc515aef4734a03fcda74d819dbbf8cdae9cf22b5f98a09f27f9\",\"signature\":{\"result\":\"text\"},\"convention\":{\"kind\":\"direct\"},\"asynchronous\":true,\"rest\":false}}"
+definition "function local.function() -> Any\nkernel 1\nmetering statements\nimport 0 code py.h_n5_sleep(seconds: Any) -> Null direct\nbody {\n  do invoke import 0(0.005)\n  return \"awake\"\n}\n"
 main {
-  let demo = &demo
+  let demo = &local.function
 }
 
-unit Function(Name("demo")): statements=2 scopes=1 sites=4
+unit Library(FunctionId(d977a9ebd923fc515aef4734a03fcda74d819dbbf8cdae9cf22b5f98a09f27f9)): statements=2 scopes=1 sites=4

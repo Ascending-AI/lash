@@ -35,7 +35,7 @@ async fn every_tool_a_standard_workbench_turn_offers_projects_under_every_provid
         lash::process::lifetime::starter,
     ));
     let deferred_tools =
-        deferred_tools::WorkbenchDeferredTools::in_memory().expect("open the deferred-tool grants");
+        deferred_tools::WorkbenchDeferredTools::in_memory().expect("open the deferred tool offers");
     let approvals = approvals::WorkbenchApprovals::in_memory().expect("open the approval ledger");
     let mcp: Arc<dyn PluginFactory> = Arc::new(
         lash::mcp::McpPluginFactory::builder(BTreeMap::new())

@@ -6,13 +6,17 @@ use super::*;
 /// the store's typed cause, and no process is recorded.
 async fn a_kernel_process_whose_document_is_not_stored_is_refused_at_its_start(tier: Tier) {
     let deployment = deploy_with(tier, Vec::new(), rlm_core).await;
-    let mut payload = worker_payload(&deployment.backend).await;
-    let other = lash::workflow::document::parse_document(
-        "kernel 1\nnumbers float\n\nmain {\n  finish \"unpublished\"\n}\n",
-    )
-    .expect("the document parses")
-    .identity();
-    payload["document"] = serde_json::to_value(other).expect("the identity encodes");
+    let missing = lash_vocabulary::LinkId::from_bytes([0x7a; 32]);
+    let payload = serde_json::to_value(lash_vm_runtime::KernelProcessInput {
+        code: lash_vm_runtime::process::InlineRequest::Linked {
+            start: lash_vocabulary::LinkedStart {
+                link: missing,
+                selector: lash_vocabulary::StartSelector::Main,
+            },
+        },
+        args: Default::default(),
+    })
+    .unwrap();
     let env_ref = deployment
         .core
         .host_artifacts()
@@ -41,7 +45,7 @@ async fn a_kernel_process_whose_document_is_not_stored_is_refused_at_its_start(t
         .expect_err("a start over a document no store holds is refused");
     let spelled = format!("{refused:?}");
     assert!(
-        spelled.contains("ArtifactMissing") && spelled.contains(&other.to_string()),
+        spelled.contains("Missing") && spelled.contains(&missing.to_string()),
         "the refusal names the missing document: {spelled}"
     );
 }
@@ -57,7 +61,6 @@ async fn a_detached_process_outlives_its_deleted_session_and_accepts_host_cancel
         vec![Arc::new(ScriptEngine {
             kind: HOLD_ENGINE,
             advance: holding_engine_advance,
-            performs: no_tools,
         })],
         // The session runs no turn; its creation needs a served profile.
         |builder| {
@@ -147,16 +150,18 @@ async fn a_sleeping_kernel_process_ends_cancelled(tier: Tier, state: SleepState)
         },
     };
     let deployment = deploy_configured(tier, settings, Vec::new(), rlm_core).await;
-    let payload = kernel_process::payload(
-        &deployment.backend,
-        "kernel 1\nnumbers float\nentry sleeper() -> Any\n\nfn sleeper() {\n  do sleep 3600000\n  return \"woke\"\n}\n\nmain {\n  finish null\n}\n",
-        "sleeper",
-    )
-    .await;
-    let process = start(
+    let env = lash::process::ProcessEnv::builder(lash::MaxToolCalls::new(16))
+        .component(lash::vm::KERNEL_SERVICES_CONFIG, &())
+        .build()
+        .unwrap();
+    let (payload, env) = kernel_process::publish(&deployment.core,
+        "kernel 1\nnumbers float\nimport 0 operation typescript.sleep(milliseconds: Int) -> Null\nmain { do perform 0(3600000) as Null then yield return \"woke\" }\n", &env).await;
+    let process = start_under(
         &deployment.core,
+        &env,
         lash_vm_runtime::LASH_VM_ENGINE_KIND,
         payload,
+        |request| request,
     )
     .await;
     let registry = deployment.backend.process_registry();
@@ -217,11 +222,19 @@ async fn a_sleeping_kernel_process_ends_cancelled(tier: Tier, state: SleepState)
 }
 
 async fn a_lash_vm_process_cancelled_while_its_sleep_is_hot_ends_cancelled(tier: Tier) {
-    a_sleeping_kernel_process_ends_cancelled(tier, SleepState::Hot).await;
+    Box::pin(a_sleeping_kernel_process_ends_cancelled(
+        tier,
+        SleepState::Hot,
+    ))
+    .await;
 }
 
 async fn a_lash_vm_process_cancelled_after_idle_eviction_of_its_sleep_ends_cancelled(tier: Tier) {
-    a_sleeping_kernel_process_ends_cancelled(tier, SleepState::Suspended).await;
+    Box::pin(a_sleeping_kernel_process_ends_cancelled(
+        tier,
+        SleepState::Suspended,
+    ))
+    .await;
 }
 
 on_every_tier!(a_lash_vm_process_cancelled_while_its_sleep_is_hot_ends_cancelled);

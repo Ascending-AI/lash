@@ -15,7 +15,6 @@ pub use lash_core::durable_port::*;
 use lash_execution_contracts::backend::Backend;
 pub use lash_execution_contracts::backend::BackendParts;
 pub use lash_execution_contracts::backend::DurableBuildError;
-pub use lash_execution_contracts::backend::NodePackages;
 use lash_execution_contracts::backend::StoreSet;
 use lash_execution_contracts::process::ProcessEngine;
 pub use lash_execution_contracts::projection::NoProjectionProviders;
@@ -312,7 +311,7 @@ pub struct StrandedWork {
     /// The actor's stored key.
     pub actor: String,
     /// What it requires and no live node offers it all of.
-    pub lacks: ExecutionRequirements,
+    pub lacks: lash_vocabulary::claims::ClaimRequirements,
 }
 
 /// One page of the strand report: the stranded work among the unfinished

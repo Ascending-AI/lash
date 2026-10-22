@@ -5,9 +5,11 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use lash_kernel_doc::{
-    Datum, Float, FunctionId, FunctionRegistry, NativeCall, NativeError, NativeFunction,
-    PreparedNative, Value, parse_definition,
+    Datum, Float, FunctionRegistry, NativeCall, NativeError, NativeFunction, PreparedNative, Value,
+    parse_definition,
 };
+
+use lash_vocabulary::names::FunctionId;
 
 use super::embedder::{Embedder, ROOMY, Setup, text};
 use crate::{Bounds, End, Layout, Machine, Step};
@@ -187,19 +189,14 @@ body {{
 }
 
 const PROGRAM: &str = r#"
-fn sibling() { let reply = perform echo("peer") as Any return reply }
-fn numeric(n) {
-  let pair = (law.scalar(n), perform echo("park") as Any)
-  let next = pair[0]
-  print next
-  let delivered = pair[1]
-  set n = fn() { print "fallback" return delivered }
-  return law.scalar(n)
-}
+definition "function sibling() -> Any\nkernel 1\nmetering statements\nbody {  let reply = perform 0(\"peer\") as Any return reply  }"
+
+definition "function numeric(n: Any) -> Any\nkernel 1\nmetering statements\nbody { \n  let pair = (law.scalar(n), perform 0(\"park\") as Any)\n  let next = pair[0]\n  print next\n  let delivered = pair[1]\n  set n = fn() { print \"fallback\" return delivered }\n  return law.scalar(n)\n }"
+
 main {
   let peer = spawn call sibling()
   let value = call numeric(2.0)
-  let truth_pair = (law.truth(true), perform echo("truth") as Any)
+  let truth_pair = (law.truth(true), perform 0("truth") as Any)
   print truth_pair[0]
   let fallback = fn() { return false }
   print law.truth(fallback)
@@ -321,19 +318,20 @@ fn operators_fall_back_to_the_body_after_a_parameter_changes_kind() {
 }
 
 const LIST_PROGRAM: &str = r#"
-fn sibling() { let reply = perform echo("peer") as Any return reply }
+definition "function sibling() -> Any\nkernel 1\nmetering statements\nbody {  let reply = perform 0(\"peer\") as Any return reply  }"
+
 main {
   let peer = spawn call sibling()
   let count = 0
   let slow = fn() {
     set count = num.add(count, 1)
-    let delivered = perform echo("slow") as Any
+    let delivered = perform 0("slow") as Any
     return delivered
   }
   let items = [1.0, slow, 2.0]
   let out = []
   for x in items via (open law.open, item law.item) {
-    let delivered = perform echo(x) as Any
+    let delivered = perform 0(x) as Any
     set out[list.len(out)] = delivered
   }
   for x in (3.0,) via (open law.open, item law.item) {
@@ -400,11 +398,9 @@ fn fused_list_items_decline_and_resume_through_the_original_header() {
 #[test]
 fn an_operator_past_the_depth_bound_is_refused_before_its_prepared_entry_answers() {
     const DEEP: &str = r#"
-fn up(n) {
-  if num.lt(n, 3) { return call up(num.add(n, 1)) }
-  return law.scalar(1.0)
-}
-main { return call up(0) }
+definition "function up(self: Any, n: Any) -> Any\nkernel 1\nmetering statements\nbody { \n  if num.lt(n, 3) { return apply self(self, num.add(n, 1)) }\n  return law.scalar(1.0)\n }"
+
+main { return call up(&up, 0) }
 "#;
     let (mut answered, mut refused) = (0, 0);
     for call_depth in 1..9 {
@@ -493,31 +489,36 @@ fn template_bearing_invokes_are_prepared_operator_sites() {
     }));
     registry.install_plans(&[plan]).unwrap();
     let source = format!(
-        "{}numbers by_spelling\nuse law.templated = @{function}\nmain {{ return (invoke law.templated(2.0),) }}",
+        "{}numbers by_spelling\nmain {{ return (invoke law.templated(2.0),) }}",
         fixture.header
     );
-    let mut document = lash_kernel_doc::parse_document(&source).unwrap();
-    document.main = vec![lash_kernel_doc::Stmt::Return {
+    let mut document = super::embedder::document(&source, &registry);
+    document.main = Some(vec![lash_kernel_doc::Stmt::Return {
         value: lash_kernel_doc::Expr::Act(Box::new(lash_kernel_doc::ActExpr {
-            kind: lash_kernel_doc::ActKind::Call(lash_kernel_doc::Callee::Library(function)),
+            kind: lash_kernel_doc::ActKind::Call(lash_kernel_doc::Callee::Local(function)),
             args: vec![lash_kernel_doc::Expr::Literal(
                 lash_kernel_doc::Literal::Float(Float::new(2.0)),
             )],
         })),
-    }];
-    let program = crate::Program {
-        closure: lash_kernel_doc::heap::PageId([8; 32]),
-        document: Arc::new(document),
-        library: crate::PreparedLibrary::new(Arc::new(registry)),
-    };
+    }]);
+    let program = crate::laws::embedder::program(
+        Arc::new(document),
+        crate::PreparedLibrary::new(Arc::new(registry)),
+    );
     let admitted = program
         .library
         .admit(&program.document, Default::default())
         .unwrap_or_else(|_| panic!("the invoke is admitted"));
     let exe = admitted
-        .executable(&program.document, &program.library)
+        .executable(
+            &program.document,
+            &program.library,
+            &program.documents,
+            &program.functions,
+            &program.instances,
+        )
         .unwrap_or_else(|_| panic!("the invoke compiles"));
-    let (stream, _, _) = exe.statement(exe.block(exe.code(exe.main).body).stmts[0]);
+    let (stream, _, _) = exe.statement(exe.block(exe.code(exe.main.unwrap()).body).stmts[0]);
     let invoke = stream
         .nested
         .iter()
@@ -645,9 +646,9 @@ fn statement_root_operators_use_the_kernel_with_the_certified_charge() {
         (end, embedder.machine.meters().charged, steps, checkpoints)
     }
     for source in [
-        "main { let i = 0 let s = 0 while num.lt(i, 5) { set s = invoke law.pair(s, i) set i = num.add(i, 1) } let answer = perform echo(s) as Any return answer }",
-        "main { let out = [] let i = 0 let s = 0 while num.lt(i, 5) { set s = invoke law.pair(s, i) set out[list.len(out)] = s set i = num.add(i, 1) } let answer = perform echo(s) as Any return answer }",
-        "fn sum(a, b) { let s = law.pair(a, b) return s } main { let s = call sum(3, 7) let answer = perform echo(s) as Any return answer }",
+        "main { let i = 0 let s = 0 while num.lt(i, 5) { set s = invoke law.pair(s, i) set i = num.add(i, 1) } let answer = perform 0(s) as Any return answer }",
+        "main { let out = [] let i = 0 let s = 0 while num.lt(i, 5) { set s = invoke law.pair(s, i) set out[list.len(out)] = s set i = num.add(i, 1) } let answer = perform 0(s) as Any return answer }",
+        "definition \"function sum(a: Any, b: Any) -> Any\\nkernel 1\\nmetering statements\\nbody {  let s = law.pair(a, b) return s  }\"\n main { let s = call sum(3, 7) let answer = perform 0(s) as Any return answer }",
     ] {
         for charge in [crate::Charge::Exact, crate::Charge::Off] {
             let bounds = Bounds { charge, ..ROOMY };
@@ -747,8 +748,8 @@ fn a_site_formula_charges_what_the_immediate_formula_charges() {
         if arity > 3 {
             continue;
         }
-        let charge = Plan::new(&definition.charge, params);
-        let fast = Fast::new(&definition.charge, params, &charge, true);
+        let charge = Plan::new(definition.charge().unwrap(), params);
+        let fast = Fast::new(definition.charge().unwrap(), params, &charge, true);
         // Each operand is a constant, a fresh construction or neither.
         for roles in 0..3_usize.pow(arity as u32) {
             let role = |at: usize| roles / 3_usize.pow(at as u32) % 3;
@@ -783,7 +784,7 @@ fn a_site_formula_charges_what_the_immediate_formula_charges() {
                             expected,
                             "{}: {:?}, roles {roles}, args {args:?}, result {result:?}, held {held}",
                             definition.name.as_str(),
-                            definition.charge
+                            definition.charge()
                         );
                         compared += 1;
                     }

@@ -58,10 +58,10 @@ pub use lash_core_execution::testing::kernel_internals::{plugin_state_view, publ
 pub mod causal {
     pub fn direct_effect_invocation(
         execution_scope: &crate::ExecutionScope,
-        owner: &crate::RuntimeOwner,
+        owner: &lash_vocabulary::identity::RuntimeOwner,
         usage_source: &str,
         replay_discriminator: String,
-        turn_id: Option<&crate::TurnId>,
+        turn_id: Option<&lash_vocabulary::identity::TurnId>,
         caused_by: Option<crate::CausalRef>,
     ) -> crate::RuntimeEffectInvocation {
         crate::runtime::causal::direct_effect_invocation(

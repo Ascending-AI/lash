@@ -13,7 +13,6 @@ use std::process::Stdio;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use lash_core_execution::ProcessId;
 use lash_durable::{DurableStore, Notifier};
 use lash_execution_contracts::backend::Backend;
 use lash_execution_contracts::backend::BackendParts;
@@ -26,6 +25,7 @@ use lash_postgres_workers::events::{Command, Event, Report};
 use lash_postgres_workers::node::{Database, stores};
 use lash_postgres_workers::process::WorkerEngine;
 use lash_postgres_workers::witness::Hold;
+use lash_vocabulary::identity::ProcessId;
 use sqlx::postgres::PgPool;
 use tokio::io::{AsyncBufReadExt as _, AsyncWriteExt as _};
 use tokio::process::{Child, ChildStdin};

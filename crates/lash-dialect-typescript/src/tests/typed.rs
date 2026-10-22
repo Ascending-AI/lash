@@ -4,64 +4,85 @@
 
 use std::collections::BTreeMap;
 
-use lash_kernel_doc::{EffectName, Signature, Type, print_document};
+use lash_vocabulary::{EffectName, Signature, Type};
 
 use super::{lower_against, main_text};
 
-/// The statements of `source`'s lowered `main` that compute something: a
-/// direct kernel call or a helper call, without the binding's name, or the
-/// call a `return` gives. A function's calling convention (its closure, its
-/// token and its positional arguments) is not one.
-fn operations(source: &str) -> Vec<String> {
-    main_text(source)
-        .lines()
-        .filter_map(|line| {
-            let line = line.trim();
-            line.split_once(" = ")
-                .map(|(_, value)| value)
-                .or_else(|| line.strip_prefix("return "))
-        })
-        .map(str::to_string)
-        .filter(|value| value.contains('('))
-        .filter(|value| {
-            !value.starts_with("fn(")
-                && !value.starts_with("(\"ts.function\"")
-                && !value.contains("invoke ts.pad(")
-        })
-        .collect()
-}
-
-/// Where a type is not known the operation is the helper: an unannotated
-/// parameter, `any`, a union that nothing has narrowed, an operator with
-/// no kernel function of its own, and a value asserted `as any`. An
-/// operation helper, which states a native, is called inside the
-/// expression (FIG-6440); any other is invoked.
+/// Unknown operands retain the semantic helper, whether its implementation
+/// is a native call or an imported code body.
 #[test]
 fn unknown_types_keep_the_helper() {
-    for (params, body, expected) in [
-        ("a, b", "a + b", "ts.add(a, b)"),
-        ("a: any, b: number", "a + b", "ts.add(a, b)"),
-        ("a: number | string, b: number", "a + b", "ts.add(a, b)"),
-        ("a: number, b: string", "a + b", "ts.add(a, b)"),
-        ("a: number, b: number", "a ** b", "invoke ts.pow(a, b)"),
-        ("a: string, b: string", "a < b", "ts.lt(a, b)"),
-        (
-            "a: string, b: string",
-            "a === b",
-            "invoke ts.strict_equals(a, b)",
-        ),
-        ("a: number, b: number", "(a as any) + b", "ts.add(a, b)"),
-        ("a: Missing, b: number", "a + b", "ts.add(a, b)"),
+    for (params, expression, helper) in [
+        ("a, b", "a + b", "ts.add"),
+        ("a: any, b: number", "a + b", "ts.add"),
+        ("a: number | string, b: number", "a + b", "ts.add"),
+        ("a: number, b: string", "a + b", "ts.add"),
+        ("a: number, b: number", "a ** b", "ts.pow"),
+        ("a: string, b: string", "a < b", "ts.lt"),
+        ("a: string, b: string", "a === b", "ts.strict_equals"),
+        ("a: number, b: number", "(a as any) + b", "ts.add"),
+        ("a: Missing, b: number", "a + b", "ts.add"),
     ] {
-        let operations = operations(&format!("function f({params}) {{ return {body}; }}"));
-        assert_eq!(operations, [expected], "({params}) => {body}");
+        let document = super::lower(&format!("function f({params}) {{ return {expression}; }}"))
+            .unwrap()
+            .document;
+        assert!(calls_helper(&document, helper), "{params}: {expression}");
     }
-    // A type parameter is whatever the caller passes, even when the source
-    // declares a type of the same name.
-    assert_eq!(
-        operations("type T = number; function f<T>(a: T, b: T) { return a + b; }"),
-        ["ts.add(a, b)"]
+    let document = super::lower("type T = number; function f<T>(a: T, b: T) { return a + b; }")
+        .unwrap()
+        .document;
+    assert!(calls_helper(&document, "ts.add"));
+}
+
+fn calls_helper(document: &lash_kernel_doc::Document, helper: &str) -> bool {
+    let function = lash_kernel_dialect::Library::resolve(super::library(), helper).unwrap();
+    let name = lash_kernel_dialect::authoring::helper_name(
+        &lash_vocabulary::FunctionName::new(helper).unwrap(),
     );
+    let mut nodes = document
+        .units()
+        .filter(|(unit, _)| match unit {
+            lash_vocabulary::sites::Unit::Library(id) => {
+                lash_kernel_doc::FunctionCatalog::header(super::library(), id).is_none()
+                    && matches!(
+                        document.functions[id].implementation,
+                        lash_kernel_doc::Implementation::Guest {
+                            metering: lash_kernel_doc::Metering::Statements,
+                            ..
+                        }
+                    )
+            }
+            lash_vocabulary::sites::Unit::Main => true,
+            _ => false,
+        })
+        .map(|(_, block)| lash_kernel_doc::Node::Block(block))
+        .collect::<Vec<_>>();
+    let mut walked = Vec::new();
+    while let Some(node) = nodes.pop() {
+        nodes.extend(node.children());
+        walked.push(node);
+    }
+    walked.into_iter().any(|node| match node {
+        lash_kernel_doc::Node::Expr(lash_kernel_doc::Expr::Call {
+            function: called, ..
+        }) => *called == function,
+        lash_kernel_doc::Node::Expr(lash_kernel_doc::Expr::Act(action)) => match action.kind {
+            lash_kernel_doc::ActKind::Call(lash_kernel_doc::Callee::Local(called)) => {
+                called == function
+            }
+            lash_kernel_doc::ActKind::Call(lash_kernel_doc::Callee::Import(slot)) => {
+                document.imports[&slot].name == name
+            }
+            _ => false,
+        },
+        lash_kernel_doc::Node::Action(lash_kernel_doc::Action::Call { callee, .. }) => match callee
+        {
+            lash_kernel_doc::Callee::Local(called) => *called == function,
+            lash_kernel_doc::Callee::Import(slot) => document.imports[slot].name == name,
+            _ => false,
+        },
+        _ => false,
+    })
 }
 
 /// A tool's declared result type is stated at its `perform`, so an `Int`
@@ -87,32 +108,40 @@ fn a_tools_declared_result_type_is_stated_and_known() {
     let source = "const n = (await stats.count()) + 1; const r = (await stats.ratio()) * 2; \
                   const a = (await stats.any()) + 1;";
     let lowered = lower_against(source, &[], &effects).unwrap();
-    let text = print_document(&lowered.document);
-    for expected in [
-        "perform stats.count() as Int",
-        "perform stats.ratio() as Float",
-        "perform stats.any() as Any",
-    ] {
-        assert!(text.contains(expected), "missing `{expected}` in\n{text}");
+    // The Import owns its public signature; the action selects that slot.
+    let mut pending = lowered
+        .document
+        .units()
+        .map(|(_, body)| lash_kernel_doc::Node::Block(body))
+        .collect::<Vec<_>>();
+    let mut performed = BTreeMap::new();
+    while let Some(node) = pending.pop() {
+        pending.extend(node.children());
+        let operation = match node {
+            lash_kernel_doc::Node::Expr(lash_kernel_doc::Expr::Act(action)) => match &action.kind {
+                lash_kernel_doc::ActKind::Perform { slot, result, .. } => Some((*slot, result)),
+                _ => None,
+            },
+            lash_kernel_doc::Node::Action(lash_kernel_doc::Action::Perform {
+                slot,
+                result,
+                ..
+            }) => Some((*slot, result)),
+            _ => None,
+        };
+        if let Some((slot, result)) = operation {
+            performed.insert(
+                lowered.document.imports[&slot].name.to_string(),
+                result.clone(),
+            );
+        }
     }
-    let computed = |name: &str| {
-        text.lines()
-            .find_map(|line| line.trim().strip_prefix(&format!("let {name} = ")))
-            .unwrap_or_else(|| panic!("no `{name}` in\n{text}"))
-            .to_string()
-    };
-    assert!(
-        computed("n").starts_with("num.add(num.to_float(perform stats.count() as Int then yield)"),
-        "{text}"
-    );
-    assert!(
-        computed("r").starts_with("num.mul(perform stats.ratio() as Float then yield"),
-        "{text}"
-    );
-    assert!(
-        computed("a").starts_with("ts.add(perform stats.any() as Any then yield"),
-        "{text}"
-    );
+    for (name, signature) in effects {
+        assert_eq!(performed[&name.to_string()], signature.result);
+    }
+    for helper in ["num.add", "num.mul", "ts.add"] {
+        assert!(calls_helper(&lowered.document, helper), "{helper}");
+    }
 }
 
 /// What a cell finishes with, which every law below finishes as JSON text.
@@ -206,7 +235,7 @@ fn a_function_binding_nothing_else_is_assigned_calls_its_closure() {
 /// `toString` of its own to run.
 #[test]
 fn a_float_in_a_template_is_spelled_as_javascript_spells_it() {
-    assert!(main_text("const n = 1 + 1; const s = `${n}`;").contains("ts.number.to_string(n)"));
+    assert!(main_text("const n = 1 + 1; const s = `${n}`;").contains("ts.number.format_value(n)"));
     assert_eq!(
         finished(
             "const n = 0.1 + 0.2; \
@@ -220,11 +249,12 @@ fn a_float_in_a_template_is_spelled_as_javascript_spells_it() {
 /// what they give is a list the source can use in place.
 #[test]
 fn a_built_in_array_methods_new_array_is_a_list() {
-    let text = main_text("const xs = [1, 2]; const ys = xs.map((x) => x); ys.push(3);");
-    assert!(
-        !text.contains("ts.method.push") && !text.contains("ts.array.push"),
-        "{text}"
-    );
+    let source = "const xs = [1, 2]; const ys = xs.map((x) => x); ys.push(3);";
+    let text = main_text(source);
+    let lowered = super::lower(source).unwrap();
+    for helper in ["ts.member.push", "ts.array.push"] {
+        assert!(!calls_helper(&lowered.document, helper), "{helper}\n{text}");
+    }
     assert_eq!(
         finished(
             "const xs = [1, , 3]; const ys = xs.map((x) => x * 2); ys.push(8); \
@@ -288,7 +318,7 @@ fn a_shadowed_name_types_each_binding_by_what_it_holds() {
         (
             receivers.len(),
             held,
-            text.contains("invoke ts.member.push("),
+            calls_helper(&super::lower(source).unwrap().document, "ts.member.push"),
         )
     };
     for (source, expected) in [
@@ -547,7 +577,7 @@ fn plain_record_fresh_literal_field_aliases_keep_admission() {
 #[test]
 fn plain_record_restored_brand_markers_keep_admission() {
     let bindings = super::pages::Session::seeded([(
-        lash_kernel_doc::Name::new("marker"),
+        lash_vocabulary::Name::new("marker"),
         lash_kernel_doc::Datum::Tuple(vec![
             lash_kernel_doc::Datum::Text("date.ecma".into()),
             lash_kernel_doc::Datum::Text("invalid_date".into()),
@@ -614,7 +644,7 @@ fn plain_record_proofs_hold_for_function_locals_and_numeric_writes() {
 #[test]
 fn plain_record_keys_that_may_be_text_keep_brand_admission() {
     let bindings = super::pages::Session::seeded([(
-        lash_kernel_doc::Name::new("marker"),
+        lash_vocabulary::Name::new("marker"),
         lash_kernel_doc::Datum::Tuple(vec![
             lash_kernel_doc::Datum::Text("date.ecma".into()),
             lash_kernel_doc::Datum::Text("invalid_date".into()),
@@ -695,12 +725,19 @@ fn plain_record_proofs_survive_text_keys_with_an_ordinary_prefix() {
        }\n\
        await control.finish(body());";
     let text = super::main_text_with_effects(source);
-    for refused in ["__lash_brand", "kind(", "ts.set", "ts.get_computed"] {
+    for refused in ["__lash_brand", "kind("] {
         assert!(!text.contains(refused), "{refused}\n{text}");
+    }
+    let lowered = super::lower_with_effects(source).unwrap();
+    for helper in ["ts.set", "ts.get_computed"] {
+        assert!(!calls_helper(&lowered.document, helper), "{helper}\n{text}");
     }
     let guarded = source.replace("const counts = {};", "const counts = opaque({});");
     let guarded = format!("function opaque(x) {{ return x; }} {guarded}");
-    assert!(super::main_text_with_effects(&guarded).contains("ts.get_computed"));
+    assert!(calls_helper(
+        &super::lower_with_effects(&guarded).unwrap().document,
+        "ts.get_computed"
+    ));
     assert_eq!(super::machine::end(source), super::machine::end(&guarded));
 }
 
@@ -712,7 +749,7 @@ fn plain_record_proofs_survive_text_keys_with_an_ordinary_prefix() {
 #[test]
 fn plain_record_text_keys_that_may_be_the_brand_keep_admission() {
     let bindings = super::pages::Session::seeded([(
-        lash_kernel_doc::Name::new("marker"),
+        lash_vocabulary::Name::new("marker"),
         lash_kernel_doc::Datum::Tuple(vec![
             lash_kernel_doc::Datum::Text("date.ecma".into()),
             lash_kernel_doc::Datum::Text("invalid_date".into()),
@@ -776,7 +813,13 @@ fn plain_record_text_keys_that_may_name_a_member_keep_the_helper() {
          const key = 'to' + tail; const other = 'to' + 'X'; r[other] = 1; \
          return [typeof r[key], typeof r.toString, r[other]]; } await control.finish(body());";
     let text = super::main_text_with_effects(source);
-    assert!(text.contains("ts.get_computed"), "{text}");
+    assert!(
+        calls_helper(
+            &super::lower_with_effects(source).unwrap().document,
+            "ts.get_computed"
+        ),
+        "{text}"
+    );
     assert!(text.contains("\"__lash_brand\""), "{text}");
     let guarded = source.replace("const r = {", "const r = opaque({");
     let guarded = guarded.replace("a: 1 };", "a: 1 });");
@@ -934,7 +977,8 @@ fn stable_paths_keep_hop_failures_and_lazy_evaluation() {
 /// a mid-loop park cannot share source facts with a later guest mutation.
 #[test]
 fn stable_paths_keep_restored_roots_and_nonterminal_effects_guarded() {
-    use lash_kernel_doc::{Datum, Name};
+    use lash_kernel_doc::Datum;
+    use lash_vocabulary::Name;
     let source = "let sum = 0; for (let i = 0; i < 2; i++) { sum += r.a.b.leaf; r.a.b = { leaf: 7 }; } await control.finish(sum);";
     let bindings = super::pages::Session::seeded([(
         Name::new("r"),

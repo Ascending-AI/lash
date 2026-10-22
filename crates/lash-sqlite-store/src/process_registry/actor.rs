@@ -3,7 +3,7 @@
 //! so the registry row and the actor's rows commit together.
 
 use super::*;
-use lash_protocol_types::ProcessId;
+use lash_vocabulary::identity::ProcessId;
 
 /// What recording a cancel request found.
 pub(crate) enum CancelRecorded {

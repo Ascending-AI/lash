@@ -52,8 +52,8 @@ use lash_durable_test::{
     Cut, Fault, Matrix, Scenario, SimClock, SimNodes, SimNodesConfig, Stored, Tripwire, WriteKind,
 };
 use lash_execution_contracts::backend::StoreSet;
-use lash_protocol_types::SessionId;
 use lash_protocol_types::sync::MutexExt as _;
+use lash_vocabulary::identity::SessionId;
 
 use dialect::Dialect;
 use served::Tier;

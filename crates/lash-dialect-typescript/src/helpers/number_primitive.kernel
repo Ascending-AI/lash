@@ -35,11 +35,11 @@ use ts.number.digit
 use ts.number.layout
 use ts.number.parse
 use ts.number.parse_decimal
-use ts.number.parse_int
+use ts.number.parse_integer
 use ts.number.parts
 use ts.number.ratio
 use ts.number.round_decimal
-use ts.number.to_string
+use ts.number.format_value
 
 # ECMA-262 Tables 31 and 32: WhiteSpace (including BOM, excluding NEL)
 # and LineTerminator. The kernel trims a caller-supplied scalar set; the
@@ -70,7 +70,7 @@ body {
   return -1
 }
 
-function ts.number.parse_int(source: Text, radix: Int, whole: Bool) -> Number
+function ts.number.parse_integer(source: Text, radix: Int, whole: Bool) -> Number
 kernel 1
 errors "type_error", "RangeError"
 charge sum(12, product(size(source), 16))
@@ -200,7 +200,7 @@ body {
     let first = text.slice(number_body, 0, 1)
     if same(first, "+") { return nan }
     if same(first, "-") { return nan }
-    let parsed = invoke ts.number.parse_int(number_body, base, true)
+    let parsed = invoke ts.number.parse_integer(number_body, base, true)
     return parsed
   }
   let parsed = invoke ts.number.parse_decimal(source, true)
@@ -257,7 +257,7 @@ body {
   return text.concat(text.slice(digits, 0, point), text.concat(".", text.slice(digits, point, text.len(digits))))
 }
 
-function ts.number.to_string(value: Number) -> Text
+function ts.number.format_value(value: Number) -> Text
 kernel 1
 errors "type_error", "RangeError"
 charge sum(8, size(value), deep(result))

@@ -6,12 +6,18 @@
 //! result. A document's variables are untyped, so most facets are `Any`, and
 //! a check refuses only what can never be right.
 
+use lash_kernel_doc::FunctionTarget;
+use lash_vocabulary::names::{Import, ImportKind, ImportSlot};
 use std::collections::BTreeMap;
 
-use lash_kernel_doc::{
-    EffectName, Function, FunctionCatalog, JoinMode, Literal, MapType, Name, OperationRequirement,
-    RecordType, RecordTypeField, Signature, Type,
-};
+use lash_kernel_doc::{FunctionCatalog, JoinMode, Literal};
+
+use lash_vocabulary::names::Name;
+use lash_vocabulary::types::MapType;
+use lash_vocabulary::types::RecordType;
+use lash_vocabulary::types::RecordTypeField;
+use lash_vocabulary::types::Signature;
+use lash_vocabulary::types::Type;
 
 use crate::graph::{
     ActNode, ActionNode, AtomNode, CalleeNode, ExprNode, Graph, MemberNode, NodeId, NodeKind,
@@ -22,12 +28,12 @@ use crate::types::{common, disjoint, function_of, stable, union};
 
 pub(crate) struct Typer<'a> {
     pub(crate) graph: &'a mut Graph,
+    pub(crate) presentations: &'a BTreeMap<NodeId, lash_kernel_doc::CallablePresentation>,
     pub(crate) catalog: &'a dyn FunctionCatalog,
     /// The operations the code may perform: the document's manifest, or a
     /// library body's own `effects`.
-    pub(crate) effects: &'a BTreeMap<EffectName, OperationRequirement>,
+    pub(crate) imports: &'a BTreeMap<ImportSlot, Import>,
     /// The declared functions a literal may reference.
-    pub(crate) declared: Option<&'a BTreeMap<Name, Function>>,
     pub(crate) errors: &'a mut Vec<Refused>,
 }
 
@@ -120,7 +126,7 @@ impl Typer<'_> {
             StmtNode::Break { .. } | StmtNode::Continue { .. } => {}
             StmtNode::ReturnVia { value, policy } => {
                 let found = self.value(value);
-                self.nested_call(&CalleeNode::Library(policy), &[value], &[found]);
+                self.nested_call(&target_callee(&policy), &[value], &[found]);
             }
             StmtNode::Return { value }
             | StmtNode::Throw { value }
@@ -183,11 +189,10 @@ impl Typer<'_> {
             Literal::Float(_) => Type::Float,
             Literal::Text(_) => Type::Text,
             Literal::Bytes(_) => Type::Bytes,
-            Literal::Function(name) => function_of(
-                self.declared
-                    .and_then(|declared| declared.get(name))
-                    .map_or(&[][..], |function| &function.params),
-            ),
+            Literal::Function(id) => self
+                .catalog
+                .header(id)
+                .map_or(Type::Any, |h| Type::Function(Box::new(h.signature.clone()))),
         }
     }
 
@@ -206,7 +211,17 @@ impl Typer<'_> {
         match expr {
             ExprNode::Literal(literal) => self.literal(&literal),
             ExprNode::Variable(reference) => self.reference(&reference),
-            ExprNode::Tuple(items) => Type::Tuple(self.values(&items)),
+            ExprNode::Tuple(items) => {
+                let values = self.values(&items);
+                let token = items.iter().enumerate().find_map(|(index, item)| {
+                    let presentation = self.presentations.get(item)?;
+                    let lash_kernel_doc::FunctionRepresentation::Token { tag, callable } = &presentation.representation else { return None; };
+                    let first = self.graph.node(*items.first()?).kind.clone();
+                    (*callable as usize == index && matches!(first, NodeKind::Expr(ExprNode::Literal(Literal::Text(found))) if found == *tag))
+                        .then(|| Type::Function(Box::new(presentation.signature.clone())))
+                });
+                token.unwrap_or(Type::Tuple(values))
+            }
             ExprNode::List(items) => Type::List(Box::new(common(self.values(&items)))),
             ExprNode::Set(items) => Type::Set(Box::new(common(self.values(&items)))),
             ExprNode::Map(entries) => {
@@ -275,8 +290,6 @@ impl Typer<'_> {
                 self.bind(binding, &facet);
                 self.value(body)
             }
-            ExprNode::Clock => Type::Timestamp,
-            ExprNode::Random => Type::Float,
             ExprNode::Read { handle, request } => {
                 self.value(handle);
                 self.value(request);
@@ -289,19 +302,23 @@ impl Typer<'_> {
                     ActNode::Spawn(callee) => {
                         Type::Task(Box::new(stable(&self.nested_call(&callee, &args, &found))))
                     }
-                    ActNode::Perform { effect, result } => {
-                        if let Some(required) = self.effects.get(&effect) {
-                            let signature = required.signature.clone();
+                    ActNode::Perform { slot, result } => {
+                        if let Some(Import {
+                            kind: ImportKind::Operation { signature },
+                            ..
+                        }) = self.imports.get(&slot)
+                        {
+                            let signature = signature.clone();
                             for (index, found) in found.iter().enumerate() {
                                 let site = self.graph.node(args[index]).site.clone();
-                                self.argument(effect.as_str(), &signature, index, found, &site);
+                                self.argument("Import", &signature, index, found, &site);
                             }
                             if disjoint(&result, &signature.result) {
                                 let site = self.graph.node(id).site.clone();
                                 self.errors.push(refused(
                                     Some(&site),
                                     RefusalReason::PerformResult {
-                                        effect: effect.clone(),
+                                        slot,
                                         declared: signature.result,
                                         stated: result.clone(),
                                     },
@@ -316,26 +333,39 @@ impl Typer<'_> {
                     },
                     ActNode::JoinMany(mode) => join_many(mode),
                     ActNode::Await(policy) => {
-                        self.nested_call(&CalleeNode::Library(policy), &args, &found)
+                        self.nested_call(&target_callee(&policy), &args, &found)
                     }
-                    ActNode::Sleep => Type::Any,
                     ActNode::Yield | ActNode::Cancel => Type::Null,
                 }
             }
         }
     }
 
+    fn call_signature(&self, callee: &CalleeNode) -> Option<(String, Signature)> {
+        match callee {
+            CalleeNode::Local(id) => self
+                .catalog
+                .header(id)
+                .map(|h| (h.name.to_string(), h.signature.clone())),
+            CalleeNode::Import(slot) => match self.imports.get(slot) {
+                Some(Import {
+                    name,
+                    kind: ImportKind::Code { signature, .. },
+                }) => Some((
+                    format!("{}.{}", name.package, name.member),
+                    signature.clone(),
+                )),
+                _ => None,
+            },
+            CalleeNode::Value(_) => None,
+        }
+    }
     /// What a nested call of `callee` yields, after checking a library
     /// callee's arguments, of types `found`.
     fn nested_call(&mut self, callee: &CalleeNode, args: &[NodeId], found: &[Type]) -> Type {
-        let CalleeNode::Library(function) = callee else {
+        let Some((name, signature)) = self.call_signature(callee) else {
             return Type::Any;
         };
-        let Some(definition) = self.catalog.definition(function) else {
-            return Type::Any;
-        };
-        let signature = definition.signature.clone();
-        let name = definition.name.to_string();
         for (index, found) in found.iter().enumerate() {
             let site = self.graph.node(args[index]).site.clone();
             self.argument(&name, &signature, index, found, &site);
@@ -352,7 +382,7 @@ impl Typer<'_> {
         signature: &Signature,
         index: usize,
         found: &Type,
-        site: &lash_kernel_doc::Site,
+        site: &lash_vocabulary::sites::Site,
     ) {
         let Some(param) = signature.params.get(index) else {
             return;
@@ -384,14 +414,9 @@ impl Typer<'_> {
     /// What a call of `callee` yields, after checking a library callee's
     /// arguments.
     fn call(&mut self, id: NodeId, callee: &CalleeNode, args: &[AtomNode]) -> Type {
-        let CalleeNode::Library(function) = callee else {
+        let Some((name, signature)) = self.call_signature(callee) else {
             return Type::Any;
         };
-        let Some(definition) = self.catalog.definition(function) else {
-            return Type::Any;
-        };
-        let signature = definition.signature.clone();
-        let name = definition.name.to_string();
         self.arguments(id, &name, &signature, args);
         signature.result
     }
@@ -402,20 +427,20 @@ impl Typer<'_> {
             ActionNode::Spawn { callee, args } => {
                 Type::Task(Box::new(stable(&self.call(id, callee, args))))
             }
-            ActionNode::Perform {
-                effect,
-                args,
-                result,
-            } => {
-                if let Some(required) = self.effects.get(effect) {
-                    let signature = required.signature.clone();
-                    self.arguments(id, effect.as_str(), &signature, args);
+            ActionNode::Perform { slot, args, result } => {
+                if let Some(Import {
+                    kind: ImportKind::Operation { signature },
+                    ..
+                }) = self.imports.get(slot)
+                {
+                    let signature = signature.clone();
+                    self.arguments(id, "Import", &signature, args);
                     if disjoint(result, &signature.result) {
                         let site = self.graph.node(id).site.clone();
                         self.errors.push(refused(
                             Some(&site),
                             RefusalReason::PerformResult {
-                                effect: effect.clone(),
+                                slot: *slot,
                                 declared: signature.result,
                                 stated: result.clone(),
                             },
@@ -429,13 +454,11 @@ impl Typer<'_> {
                 _ => Type::Any,
             },
             ActionNode::JoinMany { mode, .. } => join_many(*mode),
-            ActionNode::Await { policy, value } => self.call(
-                id,
-                &CalleeNode::Library(*policy),
-                std::slice::from_ref(value),
-            ),
+            ActionNode::Await { policy, value } => {
+                self.call(id, &target_callee(policy), std::slice::from_ref(value))
+            }
             ActionNode::Cancel { .. } => Type::Null,
-            ActionNode::Sleep { .. } | ActionNode::Yield => Type::Any,
+            ActionNode::Yield => Type::Any,
         }
     }
 }
@@ -476,5 +499,12 @@ fn index_facet(target: &Type) -> Type {
         Type::Map(map) => map.value.clone(),
         Type::Set(_) => Type::Bool,
         _ => Type::Any,
+    }
+}
+
+fn target_callee(target: &FunctionTarget) -> CalleeNode {
+    match target {
+        FunctionTarget::Local(id) => CalleeNode::Local(*id),
+        FunctionTarget::Import(slot) => CalleeNode::Import(*slot),
     }
 }

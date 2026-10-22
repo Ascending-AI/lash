@@ -22,7 +22,8 @@ macro_rules! operation {
             type Output = String;
             type Error = String;
             const ERROR_TYPE: &'static str = Self::NAME;
-            const ERROR_VERSION: lash_core::FormatVersion = lash_core::FormatVersion::ONE;
+            const ERROR_VERSION: lash_vocabulary::providers::FormatVersion =
+                lash_vocabulary::providers::FormatVersion::ONE;
             fn error_class(_: &Self::Error) -> lash_protocol_types::PluginFailureClass {
                 lash_protocol_types::PluginFailureClass::Terminal
             }
@@ -100,7 +101,7 @@ async fn a_session_operation_keeps_its_artifact_referrer_live_until_settlement()
         .build(lash_facade_tests::runtime_lease_owner())?;
     let session = created_session(
         &core,
-        lash::SessionId::parse("operation-artifact-lifetime").unwrap(),
+        lash_vocabulary::identity::SessionId::parse("operation-artifact-lifetime").unwrap(),
     )
     .await
     .open()
@@ -161,7 +162,8 @@ async fn operation_run_follow_returns_the_task_terminal() -> Result<()> {
         .build(lash_facade_tests::runtime_lease_owner())?;
         let session = created_session(
             &core,
-            lash::SessionId::parse("operation-run-follow").expect("nonblank host identity"),
+            lash_vocabulary::identity::SessionId::parse("operation-run-follow")
+                .expect("nonblank host identity"),
         )
         .await
         .open()
@@ -185,13 +187,13 @@ async fn operation_run_follow_returns_the_task_terminal() -> Result<()> {
         let result = tokio::time::timeout(
             Duration::from_secs(2),
             session
-                .run(lash::RunId::parse(operation.run_id().as_str()).unwrap())
+                .run(lash_vocabulary::identity::RunId::parse(operation.run_id().as_str()).unwrap())
                 .outcome(),
         )
         .await
         .expect("a completed operation Run must answer its follower")?;
         assert_eq!(
-            result.run().map(lash::RunId::as_str),
+            result.run().map(lash_vocabulary::identity::RunId::as_str),
             Some(operation.run_id().as_str())
         );
         assert!(
@@ -203,7 +205,7 @@ async fn operation_run_follow_returns_the_task_terminal() -> Result<()> {
         drop(session);
         assert_eq!(
             durable
-                .run(lash::RunId::parse(operation.run_id().as_str()).unwrap())
+                .run(lash_vocabulary::identity::RunId::parse(operation.run_id().as_str()).unwrap())
                 .result()
                 .await?
                 .output,
@@ -250,7 +252,8 @@ async fn operation_run_cancel_does_not_infect_a_fresh_operation() -> Result<()> 
         .build(lash_facade_tests::runtime_lease_owner())?;
         let session = created_session(
             &core,
-            lash::SessionId::parse("operation-run-cancel").expect("nonblank host identity"),
+            lash_vocabulary::identity::SessionId::parse("operation-run-cancel")
+                .expect("nonblank host identity"),
         )
         .await
         .open()
@@ -356,7 +359,8 @@ async fn a_session_lifetime_process_survives_operation_completion() -> Result<()
             .build(lash_facade_tests::runtime_lease_owner())?;
         let session = created_session(
             &core,
-            lash::SessionId::parse("operation-session-process").expect("nonblank host identity"),
+            lash_vocabulary::identity::SessionId::parse("operation-session-process")
+                .expect("nonblank host identity"),
         )
         .await
         .open()
@@ -366,7 +370,7 @@ async fn a_session_lifetime_process_survives_operation_completion() -> Result<()
             .start_task_raw(Task::NAME, serde_json::json!(""), "start")
             .await?;
         let operation = lash_core::tool_run::OperationRun::for_run_id(
-            lash::SessionId::from("operation-session-process"),
+            lash_vocabulary::identity::SessionId::from("operation-session-process"),
             run.run().turn_id(),
         )
         .unwrap();
@@ -374,7 +378,7 @@ async fn a_session_lifetime_process_survives_operation_completion() -> Result<()
         let started = result.output.as_str().unwrap_or_default().to_owned();
         let started_ids = started
             .split(' ')
-            .map(lash_core::ProcessId::parse)
+            .map(lash_vocabulary::identity::ProcessId::parse)
             .collect::<std::result::Result<Vec<_>, _>>()
             .expect("the task answers its processes");
         let [process_id, until_id] = started_ids.as_slice() else {
@@ -435,7 +439,8 @@ impl PluginOperation for FailureProbe {
     type Output = String;
     type Error = QuotaRefusal;
     const ERROR_TYPE: &'static str = "accept.quota";
-    const ERROR_VERSION: lash_core::FormatVersion = lash_core::FormatVersion::ONE;
+    const ERROR_VERSION: lash_vocabulary::providers::FormatVersion =
+        lash_vocabulary::providers::FormatVersion::ONE;
     fn error_class(_: &Self::Error) -> lash::plugins::PluginFailureClass {
         lash::plugins::PluginFailureClass::Terminal
     }
@@ -486,7 +491,7 @@ async fn plugin_operation_failure_reaches_the_facade_as_a_typed_settlement() -> 
             },
             PluginDeclarationError::NativeFormatNotWritable {
                 plugin: "accept".into(),
-                format_version: lash_core::FormatVersion::new(2).unwrap(),
+                format_version: lash_vocabulary::providers::FormatVersion::new(2).unwrap(),
             },
         ] {
             let original = PluginError::Declaration(refusal);
@@ -502,8 +507,8 @@ async fn plugin_operation_failure_reaches_the_facade_as_a_typed_settlement() -> 
             let original = PluginError::Format(lash_core::FormatRefusal {
                 plugin: "accept".into(),
                 namespace,
-                stored: lash_core::FormatVersion::new(2).unwrap(),
-                readable: lash_core::FormatVersion::ONE,
+                stored: lash_vocabulary::providers::FormatVersion::new(2).unwrap(),
+                readable: lash_vocabulary::providers::FormatVersion::ONE,
             });
             let envelope = PluginOperationFailure::from(original.clone());
             assert_eq!(serde_json::to_value(original)?, envelope.payload);
@@ -576,7 +581,8 @@ async fn plugin_operation_failure_reaches_the_facade_as_a_typed_settlement() -> 
         .build(lash_facade_tests::runtime_lease_owner())?;
         let session = created_session(
             &core,
-            lash::SessionId::parse("typed-plugin-settlement").expect("nonblank host identity"),
+            lash_vocabulary::identity::SessionId::parse("typed-plugin-settlement")
+                .expect("nonblank host identity"),
         )
         .await
         .open()
@@ -664,7 +670,8 @@ async fn agent_scenario_plugin_reserved_source_key_refusal_is_typed() -> Result<
         .build(lash_facade_tests::runtime_lease_owner())?;
         let session = created_session(
             &core,
-            lash::SessionId::parse("reserved-plugin-keys").expect("nonblank host identity"),
+            lash_vocabulary::identity::SessionId::parse("reserved-plugin-keys")
+                .expect("nonblank host identity"),
         )
         .await
         .open()
@@ -717,7 +724,8 @@ async fn task_run_result_decodes_output_and_declared_error() -> Result<()> {
         .build(lash_facade_tests::runtime_lease_owner())?;
         let session = created_session(
             &core,
-            lash::SessionId::parse("typed-task-result").expect("nonblank host identity"),
+            lash_vocabulary::identity::SessionId::parse("typed-task-result")
+                .expect("nonblank host identity"),
         )
         .await
         .open()
@@ -745,7 +753,8 @@ async fn task_run_result_decodes_output_and_declared_error() -> Result<()> {
             type Output = String;
             type Error = String;
             const ERROR_TYPE: &'static str = "future.accept.task";
-            const ERROR_VERSION: lash_core::FormatVersion = lash_core::FormatVersion::ONE;
+            const ERROR_VERSION: lash_vocabulary::providers::FormatVersion =
+                lash_vocabulary::providers::FormatVersion::ONE;
             fn error_class(_: &Self::Error) -> lash::plugins::PluginFailureClass {
                 lash::plugins::PluginFailureClass::Terminal
             }

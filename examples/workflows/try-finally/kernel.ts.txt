@@ -1,27 +1,12 @@
 kernel 1
 numbers float
-effect corpus.echo(input?: Json) -> Json contract "52910906e3f939a5ce2e34bd105cd37184ead8ac272080fcbff759b3b6db6560"
-use kind = @3e2a9836b16b3ade4f7fcc2d56d1fb203dffed4bd5d7f4bf800df213c8c8c5f7
-use same = @1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578
-use ts.await = @18a30299db399e09c5772b4431f1c4baf6e139a164f476b6fe173b1447d54a6f
-use ts.promise.adopt = @ec07dd4e314068cde58b9c1223c9fc11094029f4f5fe6f8d325a12e10b32a475
-use ts.promise.is = @0f99cae1fc6ad1ff6812fb50d4070182ec247c6fe07f1a7b049a4fa7aa9c82a5
-entry demo() -> Any ts_direct(ts.await)
-
-fn demo() {
-  let `result` = "start"
-  try {
-    set `result` = perform corpus.echo("try") as Json then yield
-  } catch error {
-    set `result` = "caught"
-  } finally {
-    do perform corpus.echo("finally") as Json then yield
-  }
-  return `result` via ts.promise.adopt
-}
-
+import 0 operation corpus.echo(input?: Json) -> Json
+import 1 code ts.h_n7_promise_n5_adopt(value: Any) -> Any direct
+import 2 code ts.h_n5_await(value: Any) -> Any direct
+export demo "{\"kind\":\"function\",\"value\":{\"function\":\"b4a5ce1a75a9f0cfd88f254a82043af35b45d3e0d00cf3e205b42f4a55900505\",\"signature\":{\"result\":\"text\"},\"convention\":{\"kind\":\"ts_direct\",\"value\":{\"await_fn\":{\"kind\":\"import\",\"value\":2}}},\"asynchronous\":true,\"rest\":false}}"
+definition "function local.function() -> Any\nkernel 1\nmetering statements\nimport 0 operation corpus.echo(input?: Json) -> Json\nimport 1 code ts.h_n7_promise_n5_adopt(value: Any) -> Any direct\nbody {\n  let `result` = \"start\"\n  try {\n    set `result` = perform 0(\"try\") as Json then yield\n  } catch error {\n    set `result` = \"caught\"\n  } finally {\n    do perform 0(\"finally\") as Json then yield\n  }\n  return `result` via import 1\n}\n"
 main {
-  let demo = &demo
+  let demo = &local.function
 }
 
-unit Function(Name("demo")): statements=6 scopes=4 sites=9
+unit Library(FunctionId(b4a5ce1a75a9f0cfd88f254a82043af35b45d3e0d00cf3e205b42f4a55900505)): statements=6 scopes=4 sites=9

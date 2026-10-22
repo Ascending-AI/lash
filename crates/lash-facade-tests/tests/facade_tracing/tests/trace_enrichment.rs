@@ -280,11 +280,11 @@ async fn the_enricher_sees_every_span_before_sampling_on_every_owner_and_nothing
         (BLOCKED_SESSION, "l10-blocked-turn"),
     ] {
         let receipt = first
-            .session(lash::SessionId::parse(session).expect("an id"))
+            .session(lash_vocabulary::identity::SessionId::parse(session).expect("an id"))
             .create(lash::SessionCreation::root(mock_session_spec()))
             .await?
             .send(TurnInput::text("enriched"))
-            .id(lash::TurnId::parse(turn).expect("an id"))
+            .id(lash_vocabulary::identity::TurnId::parse(turn).expect("an id"))
             .await?;
         sends.push(receipt);
     }
@@ -521,13 +521,16 @@ async fn flooded_tool_span(
         sdk_attributes,
     );
     let core = builder.build(lash_facade_tests::runtime_lease_owner())?;
-    let output = created_session(&core, lash::SessionId::parse("l22-flooded").expect("an id"))
-        .await
-        .open()
-        .await?
-        .send(TurnInput::text("call the tool"))
-        .output()
-        .await?;
+    let output = created_session(
+        &core,
+        lash_vocabulary::identity::SessionId::parse("l22-flooded").expect("an id"),
+    )
+    .await
+    .open()
+    .await?
+    .send(TurnInput::text("call the tool"))
+    .output()
+    .await?;
     assert!(
         matches!(output.outcome, lash::TurnOutcome::Finished(_)),
         "{:?}",

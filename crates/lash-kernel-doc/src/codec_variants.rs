@@ -8,12 +8,12 @@
 //! without it keeps its bytes. The binary codecs read these tables; nothing
 //! derives a number from declaration order again.
 
-use crate::graph_tokens::CodecVariant;
 use crate::{
     ActKind, Action, AssignOrder, Atom, Callee, Datum, Expr, Formula, Identity, Implementation,
-    JoinMode, Literal, Measure, Member, NumberPolicy, Operand, Place, Rhs, Stmt, TaskIdentity,
-    Type, Unit,
+    JoinMode, Literal, Measure, Member, NumberPolicy, Operand, Place, Rhs, Stmt,
 };
+
+use lash_vocabulary::tokens::CodecVariant;
 
 #[doc(hidden)]
 impl CodecVariant for crate::heap::PageValue {
@@ -136,9 +136,6 @@ impl CodecVariant for Action {
             Self::Perform {
                 then_yield: false, ..
             } => 1,
-            Self::Sleep {
-                then_yield: false, ..
-            } => 2,
             Self::Join { .. } => 3,
             Self::JoinMany { .. } => 4,
             Self::Yield => 5,
@@ -147,9 +144,6 @@ impl CodecVariant for Action {
             Self::Perform {
                 then_yield: true, ..
             } => 8,
-            Self::Sleep {
-                then_yield: true, ..
-            } => 9,
             Self::Await { .. } => 10,
         }
     }
@@ -171,9 +165,9 @@ impl CodecVariant for JoinMode {
 impl CodecVariant for Callee {
     fn codec_variant(&self) -> u32 {
         match self {
-            Self::Declared(..) => 0,
+            Self::Local(..) => 0,
             Self::Value(..) => 1,
-            Self::Library(..) => 2,
+            Self::Import(..) => 2,
         }
     }
 }
@@ -218,8 +212,6 @@ impl CodecVariant for Expr {
             Self::Member(..) => 7,
             Self::Closure(..) => 8,
             Self::Call { .. } => 9,
-            Self::Clock => 10,
-            Self::Random => 11,
             Self::Read(..) => 12,
             Self::If { .. } => 13,
             Self::Let { .. } => 14,
@@ -236,7 +228,6 @@ impl CodecVariant for ActKind {
             Self::Perform {
                 then_yield: false, ..
             } => 1,
-            Self::Sleep { then_yield: false } => 2,
             Self::Spawn(..) => 3,
             Self::Join => 4,
             Self::JoinMany(..) => 5,
@@ -244,7 +235,6 @@ impl CodecVariant for ActKind {
             Self::Perform {
                 then_yield: true, ..
             } => 7,
-            Self::Sleep { then_yield: true } => 8,
             Self::Yield => 9,
             Self::Cancel => 10,
         }
@@ -272,53 +262,14 @@ impl CodecVariant for Place {
 }
 
 #[doc(hidden)]
-impl CodecVariant for Unit {
-    fn codec_variant(&self) -> u32 {
-        match self {
-            Self::Main => 0,
-            Self::Function(..) => 1,
-            Self::Library(..) => 2,
-        }
-    }
-}
-
 #[doc(hidden)]
-impl CodecVariant for Type {
-    fn codec_variant(&self) -> u32 {
-        match self {
-            Self::Any => 0,
-            Self::Null => 1,
-            Self::Absent => 2,
-            Self::Bool => 3,
-            Self::Int => 4,
-            Self::Float => 5,
-            Self::Number => 6,
-            Self::Text => 7,
-            Self::Bytes => 8,
-            Self::Timestamp => 9,
-            Self::Tuple(..) => 10,
-            Self::List(..) => 11,
-            Self::Map(..) => 12,
-            Self::Set(..) => 13,
-            Self::Record(..) => 14,
-            Self::Enum(..) => 15,
-            Self::Function(..) => 16,
-            Self::Task(..) => 17,
-            Self::Error => 18,
-            Self::Handle(..) => 19,
-            Self::Union(..) => 20,
-            Self::Json => 21,
-        }
-    }
-}
-
 #[doc(hidden)]
 impl CodecVariant for Implementation {
     fn codec_variant(&self) -> u32 {
         match self {
-            Self::Native => 0,
-            Self::Body(..) => 1,
-            Self::Both(..) => 2,
+            Self::Native { .. } => 0,
+            Self::Guest { .. } => 1,
+            Self::Both { .. } => 2,
         }
     }
 }
@@ -364,15 +315,6 @@ impl CodecVariant for Measure {
 }
 
 #[doc(hidden)]
-impl CodecVariant for TaskIdentity {
-    fn codec_variant(&self) -> u32 {
-        match self {
-            Self::Main => 0,
-            Self::Spawned(..) => 1,
-        }
-    }
-}
-
 #[doc(hidden)]
 impl CodecVariant for NumberPolicy {
     fn codec_variant(&self) -> u32 {

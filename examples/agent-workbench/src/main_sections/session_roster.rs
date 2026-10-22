@@ -1,5 +1,5 @@
 use super::*;
-use lash::SessionId;
+use lash_vocabulary::identity::SessionId;
 
 // The workbench's session roster: which sessions the sidebar lists, which one
 // a query-less `/api/` call serves, and how a retired slot is replaced or,

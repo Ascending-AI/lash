@@ -3,11 +3,11 @@ use crate::*;
 use std::sync::Arc;
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct GraphFactObservation {
-    pub node_id: crate::NodeId,
-    pub parent_node_id: Option<crate::NodeId>,
+    pub node_id: lash_vocabulary::identity::NodeId,
+    pub parent_node_id: Option<lash_vocabulary::identity::NodeId>,
     pub owning_session_id: SessionId,
     pub generation: u64,
-    pub frame_node_id: crate::NodeId,
+    pub frame_node_id: lash_vocabulary::identity::NodeId,
     pub is_frame: bool,
 }
 

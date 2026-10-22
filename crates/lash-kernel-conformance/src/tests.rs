@@ -59,6 +59,7 @@ pub(super) fn corpus_registry() -> lash_kernel_doc::FunctionRegistry {
     lash_kernel_lib::register_numbers(&mut registry).expect("register numeric natives");
     lash_kernel_lib::register_text_json(&mut registry).expect("register text and JSON natives");
     lash_kernel_lib::register_collections(&mut registry).expect("register collection functions");
+    protocol::register_probes(&mut registry);
     lash_ext_regex_ecma::register(&mut registry).expect("register regex natives");
     lash_ext_regex_ecma::implement(
         &mut registry,
@@ -244,9 +245,11 @@ fn admitted_corpus_library_identities_are_current() {
                 continue;
             }
             let document = parse_document(&case.document).expect("admitted case parses");
-            for (id, name) in &document.manifest.functions {
+            // Guest definitions are document-local code, including lifted closures.
+            // Only the explicit native requirements must be installed by the host.
+            for id in &document.requires.natives {
                 if registry.get(id).is_none() {
-                    missing.push(format!("{} {}: {name} = @{id}", shard.rule, case.name));
+                    missing.push(format!("{} {}: native @{id}", shard.rule, case.name));
                 }
             }
         }
@@ -356,21 +359,19 @@ fn expected_effect_sites_address_document_actions() {
                 let document = document.as_ref().expect("identity case parses");
                 let actual = match document.node(&identity.site) {
                     Some(lash_kernel_doc::Node::Action(lash_kernel_doc::Action::Perform {
-                        effect,
+                        slot,
                         ..
-                    })) => effect,
+                    })) => slot,
                     Some(lash_kernel_doc::Node::Expr(lash_kernel_doc::Expr::Act(act))) => {
-                        let lash_kernel_doc::ActKind::Perform { effect, .. } = &act.kind else {
+                        let lash_kernel_doc::ActKind::Perform { slot, .. } = &act.kind else {
                             panic!("{}: expected effect site is not a perform", case.name);
                         };
-                        effect
+                        slot
                     }
                     _ => panic!("{}: expected effect site is not a perform", case.name),
                 };
-                assert_eq!(actual.as_str(), effect);
-                if let lash_kernel_doc::kernel_internals::TaskIdentity::Spawned(spawn) =
-                    &identity.task
-                {
+                assert_eq!(&document.imports[actual].name.to_string(), effect);
+                if let lash_vocabulary::sites::TaskIdentity::Spawned(spawn) = &identity.task {
                     assert!(matches!(
                         document.node(&spawn.site),
                         Some(lash_kernel_doc::Node::Action(

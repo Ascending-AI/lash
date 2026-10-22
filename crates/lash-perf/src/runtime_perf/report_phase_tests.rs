@@ -15,6 +15,7 @@ use crate::runtime_perf::scenarios::ScenarioPhaseContract;
 use lash_core::runtime::RuntimeTurnPhaseProbe;
 use lash_core::store::QueuedWorkStore as _;
 use lash_core::{SessionCatalogStore as _, SessionListFilter};
+use lash_vocabulary::tokens::TokenWriter;
 
 /// FIG-6620: changing phase observation or losing its identity refuses history.
 #[test]
@@ -65,22 +66,50 @@ fn prepared_graph_work_counts_materialization_and_lookup() {
     let encoded_work = witness.snapshot();
     assert_eq!(encoded_work.graph_envelopes, 1);
     assert_eq!(encoded_work.graph_encoded_bytes, bytes);
+    let encoding_lookups = 2;
+    let logical_scan_lookups = 1;
+    let materialization_hashes = 1;
+    let encoding_hashes = encoding_lookups + logical_scan_lookups + materialization_hashes;
     assert_eq!(
-        encoded_work.hash_passes, 3,
-        "two lookups and one materialization"
+        encoded_work.hash_passes, encoding_hashes,
+        "encoding lookups, logical scan lookup, and envelope materialization"
     );
-    assert_eq!(encoded_work.hashed_bytes, 2 * body.len() as u64 + bytes);
+    let encoded_hash_bytes = (encoding_lookups + logical_scan_lookups) * body.len() as u64 + bytes;
+    assert_eq!(encoded_work.hashed_bytes, encoded_hash_bytes);
     graph.adopt(graph.nodes()[&root].clone()).unwrap();
     let work = witness.snapshot();
     assert_eq!(
-        work.hash_passes, 4,
-        "adoption still hashes the supplied envelope"
+        work.hash_passes - encoded_work.hash_passes,
+        1,
+        "adoption hashes the supplied current envelope once"
     );
-    assert_eq!(work.hashed_bytes, 2 * body.len() as u64 + 2 * bytes);
+    assert_eq!(
+        work.hash_passes,
+        encoding_hashes + 1,
+        "adoption still hashes the supplied envelope once"
+    );
+    assert_eq!(work.hashed_bytes, encoded_hash_bytes + bytes);
     assert_eq!(work.graph_adopt_attempts, 1);
     assert_eq!(work.graph_adopt_bytes, bytes);
     assert_eq!(work.graph_envelopes, 1);
     assert_eq!(work.graph_encoded_bytes, bytes);
+}
+
+/// GRAPH-WORK: every logical-scan lookup hashes its complete current
+/// input, including cache hits shared across diagnostic node kinds.
+#[test]
+fn logical_scan_lookup_hashes_are_measured() {
+    use lash_core_store::checkpoint_graph::NodeKind;
+    use lash_core_store::checkpoint_graph::encode::LogicalScan;
+    let witness = lash_core::perf_witness::Collector::install().expect("scan witness");
+    let mut body = TokenWriter::new();
+    body.text("FIG-7135 measured logical scan lookup");
+    let body = body.into_bytes();
+    LogicalScan::scan(&body, NodeKind::TEXT_LEAF).unwrap();
+    LogicalScan::scan(&body.clone(), NodeKind(0)).unwrap();
+    let work = witness.snapshot();
+    assert_eq!(work.hash_passes, 2, "both scan lookup hashes are measured");
+    assert_eq!(work.hashed_bytes, 2 * body.len() as u64);
 }
 
 fn high_traffic_config() -> HighTrafficConfig {
@@ -116,7 +145,9 @@ async fn postgres_pool_checkout_wait_is_recorded_for_runtime_store_reads() {
         lash_core::perf_witness::Collector::install().expect("install pool checkout witness");
 
     let batches = store
-        .list_queued_work(&lash_core::SessionId::from("pool-wait-witness"))
+        .list_queued_work(&lash_vocabulary::identity::SessionId::from(
+            "pool-wait-witness",
+        ))
         .await
         .expect("read queued work through the runtime store");
     assert!(batches.is_empty());

@@ -22,7 +22,10 @@
 
 use std::sync::Arc;
 
-use lash_protocol_types::{JsonSchema, ToolContract, ToolId, ToolManifest};
+use lash_vocabulary::json_schema::JsonSchema;
+use lash_vocabulary::tool_contract::ToolContract;
+use lash_vocabulary::tool_contract::ToolId;
+use lash_vocabulary::tool_contract::ToolManifest;
 use serde_json::Value;
 
 pub mod listing;
@@ -40,15 +43,18 @@ pub use wrap::WrappedToolPresenter;
 /// ```
 /// let document = lash_tool_presenter_api::import_schema(&serde_json::json!({"type":"string"}))?;
 /// assert_eq!(document.roots.len(), 1);
-/// # Ok::<(), lash_tool_shape::ShapeImportRefusal>(())
+/// # Ok::<(), lash_vocabulary::tool_shape::ShapeImportRefusal>(())
 /// ```
 ///
 /// # Errors
 /// Returns a typed refusal only for non-schema values or malformed schema keywords.
 pub fn import_schema(
     schema: &Value,
-) -> Result<lash_tool_shape::SchemaDocument, lash_tool_shape::ShapeImportRefusal> {
-    lash_tool_shape::SchemaDocument::from_json_schema(schema, usize::MAX)
+) -> Result<
+    lash_vocabulary::tool_shape::SchemaDocument,
+    lash_vocabulary::tool_shape::ShapeImportRefusal,
+> {
+    lash_vocabulary::tool_shape::SchemaDocument::from_json_schema(schema, usize::MAX)
 }
 
 /// The default one-line request notice for an attachment a model cannot read.
@@ -246,7 +252,7 @@ pub enum PresentationRefusal {
     #[error("tool schema cannot be presented: {cause}")]
     Shape {
         #[from]
-        cause: lash_tool_shape::ShapeImportRefusal,
+        cause: lash_vocabulary::tool_shape::ShapeImportRefusal,
     },
     /// The presenter does not take this config.
     #[error("tool presenter `{presenter}` refuses its config: {reason}")]
@@ -272,7 +278,7 @@ impl PresentationRefusal {
     /// The stable, machine-readable cause documented on [`Self`]. A host
     /// presenter's custom code is returned unchanged.
     pub fn code(&self) -> &str {
-        use lash_tool_shape::ShapeImportRefusal;
+        use lash_vocabulary::tool_shape::ShapeImportRefusal;
         match self {
             Self::Custom { code, .. } => code,
             Self::Shape {

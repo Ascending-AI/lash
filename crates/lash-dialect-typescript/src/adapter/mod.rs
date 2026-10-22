@@ -39,6 +39,7 @@ pub const MAX_SOURCE_NESTING_DEPTH: usize = 28;
 #[derive(Clone, Debug)]
 pub(crate) struct Program {
     pub(crate) statements: Vec<Stmt>,
+    pub(crate) imported: BTreeMap<String, Vec<String>>,
     /// The name of every type parameter a function of the source declares.
     /// Inside that function the name is the parameter, whatever `type` or
     /// `interface` shares it.
@@ -491,12 +492,13 @@ fn parse_from_goal(
     }
     let program = Program {
         statements: converted?,
+        imported: adapter.imported.take(),
         type_parameters: adapter.type_parameters.take(),
         captions: adapter.captions.take(),
         comments: adapter.comments.ranges().to_vec(),
     };
     if let Some(diagnostic) = adapter.reserved_identifier.take() {
-        return Err(crate::lower::printed_source_reference(&program).unwrap_or(diagnostic));
+        return Err(diagnostic);
     }
     if workflow {
         // Two entries of one name break the workflow contract before they
@@ -509,6 +511,7 @@ fn parse_from_goal(
 
 #[derive(Default)]
 struct Adapter<'a> {
+    imported: RefCell<BTreeMap<String, Vec<String>>>,
     max_nesting: usize,
     /// The text SWC read, whose byte offsets every span indexes.
     source: &'a str,
@@ -579,6 +582,53 @@ impl Adapter<'_> {
                 .iter()
                 .map(|item| match item {
                     swc::ModuleItem::Stmt(stmt) => self.convert_listed(stmt, None),
+                    swc::ModuleItem::ModuleDecl(swc::ModuleDecl::Import(import)) => {
+                        let module = import.src.value.to_string_lossy();
+                        let path = module.split('.').map(str::to_owned).collect::<Vec<_>>();
+                        if path
+                            .iter()
+                            .any(|part| !lash_vocabulary::Segment::is_canonical(part))
+                        {
+                            return Err(reject(
+                                DiagnosticCode::ImportExportUnsupported,
+                                "a module path outside the advertised packages",
+                                Some(source_span(import.span)),
+                            ));
+                        }
+                        for specifier in &import.specifiers {
+                            let (local, member) = match specifier {
+                                swc::ImportSpecifier::Named(named) => {
+                                    let member = named
+                                        .imported
+                                        .as_ref()
+                                        .map(|name| match name {
+                                            swc::ModuleExportName::Ident(id) => id.sym.to_string(),
+                                            swc::ModuleExportName::Str(text) => {
+                                                text.value.to_string_lossy().into_owned()
+                                            }
+                                        })
+                                        .unwrap_or_else(|| named.local.sym.to_string());
+                                    (named.local.sym.to_string(), Some(member))
+                                }
+                                swc::ImportSpecifier::Namespace(namespace) => {
+                                    (namespace.local.sym.to_string(), None)
+                                }
+                                swc::ImportSpecifier::Default(default) => {
+                                    (default.local.sym.to_string(), Some("default".to_owned()))
+                                }
+                            };
+                            let mut target = path.clone();
+                            target.extend(member);
+                            if self.imported.borrow_mut().insert(local, target).is_some() {
+                                return Err(reject(
+                                    DiagnosticCode::ImportExportUnsupported,
+                                    "a duplicate imported binding",
+                                    Some(source_span(import.span)),
+                                ));
+                            }
+                        }
+                        Ok(Stmt::Empty)
+                    }
                     swc::ModuleItem::ModuleDecl(swc::ModuleDecl::ExportDecl(export))
                         if self.workflow =>
                     {

@@ -191,7 +191,7 @@ the literal `"high"`. The view follows a condition variable only when the
 statement right before the control binds it to the comparison and nothing
 else reads or reassigns it, as a lowering's temporary is. Which library
 functions compare is each package's display declaration
-(`MemberDisplay::comparison` in the supplied `PackageView`), not a table of dialect names
+(`MemberDisplay::comparison` in the retained `ViewContext`), not a table of dialect names
 in the view or the host. Anything else, such as a reassigned variable, a
 call no library declares a comparison or a converted operand, has no
 `comparison`: show the condition's expression instead, never a guess.
@@ -200,19 +200,18 @@ A host that vendors lash reads the schema's TypeScript declaration from
 `lash::workflow::view::TYPESCRIPT_DECLARATION` — the same bytes as the
 checked-in `v1.d.ts` — to check its own copy hermetically.
 
-A document carries no labels and no presentation. A library call's
-`CalleeView::Library { id, name, member }` names the function by identity and
-by the name its `use` line gives it. `member` lists every installed
-`{package, member}` mapping in the selected set; the two canonical dotted
-paths stay paired. Each action's `performs` lists the canonical operations
-it reaches through checked bodies. An `ActionObservation` carries the
-request's authored `origin` alongside its unchanged effect identity, so
-library effects can be drawn at their calling statement. Pass the selected `lash::package::PackageView`
-into `derive` and `derive_callable`. Its `display(package, member)` reads a
-canonical member's display facts, and `display_for_function(id)` joins a
-private or exported definition by identity. `packages.title(&id, &name)`
-answers the title, or the bare document name for a definition that set does
-not label. Display data never enters execution identity.
+A Document's executable identity excludes labels and source maps. A library
+call's `CalleeView::Library { id, link, name, exports }` names the callable's
+FunctionId and defining Link; `exports` lists that Document's public export
+names. Imports remain explicit slots. Each action's `performs` lists the
+Operation Uses it reaches through linked bodies.
+
+Pass a retained `lash::workflow::view::ViewContext` to `derive` and
+`derive_callable`. `core.host_artifacts().workflow_view_context(start,
+publications)` loads the exact Link graph and independent display sidecars
+from the execution's recorded publications. Display facts do not authorize
+execution or enter code identity. Process observation rows group by task and
+authored origin site; each row retains the actual performing helper identity.
 Lash keeps no per-node host data: wording,
 icons, layout and step labels are the host's, keyed by site.
 
@@ -239,7 +238,7 @@ lists, each under its own identity, and every read links it against those:
 never against the reading build's library. A process keeps them for as long
 as it keeps its document, and a code cell's frame keeps them for as long as
 the frame lives, across its cells, so a build that removed an artifact from
-its serving package set still reads and draws the document. A declaration that is
+its advertised Packages still reads and draws the document. A declaration that is
 gone or does not hash to its identity is `WorkflowUnavailable::Artifact` or
 `WorkflowUnavailable::Corrupt`, not a fallback to another definition.
 

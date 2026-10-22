@@ -8,8 +8,11 @@
 use std::sync::{Arc, OnceLock};
 
 use arbitrary::{Arbitrary, Unstructured};
-use lash_kernel_doc::{Document, FunctionRegistry, Name, parse_document};
+use lash_kernel_doc::Document;
+use lash_kernel_doc::FunctionRegistry;
+
 use lash_kernel_vm::{Bounds, PreparedLibrary};
+use lash_vocabulary::names::Name;
 
 mod runner;
 #[cfg(test)]
@@ -59,12 +62,9 @@ fn library() -> &'static Library {
             .unwrap_or_else(|error| panic!("text definitions: {error}"));
         lash_kernel_lib::register_collections(&mut registry)
             .unwrap_or_else(|error| panic!("collection bodies: {error}"));
-        let mut header = String::from(
-            "kernel 1\nnumbers by_spelling\neffect echo(x: Any) -> Any contract \"1\"\n",
+        let header = String::from(
+            "kernel 1\nnumbers by_spelling\nimport 0 operation host.echo(x: Any) -> Any\nimport 1 operation typescript.sleep(milliseconds: Int) -> Null\nimport 2 operation typescript.clock() -> Timestamp\nimport 3 operation typescript.random() -> Bytes\n",
         );
-        for (id, function) in registry.iter() {
-            header.push_str(&format!("use {} = @{id}\n", function.definition().name));
-        }
         let registry = Arc::new(registry);
         Library {
             prepared: PreparedLibrary::new(Arc::clone(&registry)),
@@ -79,7 +79,6 @@ impl Smith {
     /// from an executor defect. Projection handles are supplied at start.
     pub fn admit(&self) -> Result<lash_kernel_check::Admitted, lash_kernel_check::Refusal> {
         let mut env = lash_kernel_check::Environment::new(library().registry.as_ref());
-        env.effects = self.document.manifest.effects.clone();
         env.bindings.insert(Name::new("projection"));
         lash_kernel_check::admit(&self.document, &env)
     }
@@ -92,17 +91,7 @@ impl<'a> Arbitrary<'a> for Smith {
         // Real declared calls, waits in cleanup, and shared-cell closures are
         // available to every fragment. These definitions are themselves bounded.
         text.push_str(
-            "fn worker(x) { let y = perform echo(x) as Any do sleep 1 return y }\n\
-             fn delayed(x) { do yield let y = perform echo(x) as Any return y }\n\
-             fn quick(x) { return x }\n\
-             fn depart(mode) { try {\n\
-             if eq(mode, 0) { return 7 }\n\
-             if eq(mode, 1) { throw 9 }\n\
-             if eq(mode, 2) { finish 11 }\n\
-             if eq(mode, 3) { fail 13 }\n\
-             return 17\n\
-             } catch e { return e } finally { do sleep 1 print \"finally\" } }\n\
-             main { let acc = 0\n",
+            "definition \"function worker(x: Any) -> Any\\nkernel 1\\nmetering statements\\nimport 0 operation host.echo(x: Any) -> Any\\nimport 1 operation typescript.sleep(milliseconds: Int) -> Null\\nbody { let y = perform 0(x) as Any do perform 1(1) as Null return y }\"\n\ndefinition \"function delayed(x: Any) -> Any\\nkernel 1\\nmetering statements\\nimport 0 operation host.echo(x: Any) -> Any\\nimport 1 operation typescript.sleep(milliseconds: Int) -> Null\\nbody { do yield let y = perform 0(x) as Any return y }\"\n\ndefinition \"function quick(x: Any) -> Any\\nkernel 1\\nmetering statements\\nimport 0 operation host.echo(x: Any) -> Any\\nimport 1 operation typescript.sleep(milliseconds: Int) -> Null\\nbody { return x }\"\n\ndefinition \"function depart(mode: Any) -> Any\\nkernel 1\\nmetering statements\\nimport 0 operation host.echo(x: Any) -> Any\\nimport 1 operation typescript.sleep(milliseconds: Int) -> Null\\nbody { try {\\nif eq(mode, 0) { return 7 }\\nif eq(mode, 1) { throw 9 }\\nif eq(mode, 2) { finish 11 }\\nif eq(mode, 3) { fail 13 }\\nreturn 17\\n} catch e { return e } finally { do perform 1(1) as Null print \\\"finally\\\" } }\"\n\nmain { let acc = 0\n",
         );
         for _ in 0..count {
             let kind = u.int_in_range(0..=FRAGMENT_KINDS - 1)?;
@@ -121,16 +110,9 @@ impl<'a> Arbitrary<'a> for Smith {
             2 => "fail acc\n}",
             _ => "throw acc\n}",
         });
-        let mut document = parse_document(&text)
-            .unwrap_or_else(|error| panic!("smith grammar must parse: {error}"));
+        let document = crate::document_fixture::authored(&text, &library().registry);
         // `use` resolves textual names; only the reachable identities belong
         // in the final manifest (including the dependencies of real bodies).
-        let requirements = lash_kernel_check::requirements(&document, library().registry.as_ref());
-        document.manifest.functions = requirements.functions;
-        document
-            .manifest
-            .effects
-            .retain(|name, _| requirements.effects.contains(name));
         let choices = u.int_in_range(1..=8u8)?;
         let mut slices = Vec::new();
         for _ in 0..choices {
@@ -175,19 +157,19 @@ fn fragment(kind: u8, width: u8, trips: u8, value: i16, mode: u8) -> String {
         8 => format!("let shared = {value} let f = fn(x) {{ set shared = num.add(shared, x) return shared }} let a = apply f(1) let b = apply f(2) set acc = num.add(acc, b) print (a, b)"),
         9 => format!("let x = call quick({value}) print x"),
         10 => format!("try {{ let x = call worker({value}) print x }} catch e {{ print e }}"),
-        11 => "do sleep 1 do yield".into(),
+        11 => "do perform 1(1) as Null do yield".into(),
         12 => format!("let a = spawn call worker({value}) let b = spawn call worker(2) let hs = [a, b] try {{ let rs = join {} hs print rs }} catch e {{ print e }}", ["all", "settled", "race", "any", "all"][usize::from(mode)]),
         13 => format!("let h = spawn call worker({value}) do yield do cancel h try {{ let r = join h print r }} catch e {{ print e.kind }}"),
-        14 => format!("try {{ throw [{value}, \"error\"] }} catch e {{ print e }} finally {{ do sleep 1 }}"),
+        14 => format!("try {{ throw [{value}, \"error\"] }} catch e {{ print e }} finally {{ do perform 1(1) as Null }}"),
         15 => format!("let x = call depart({mode}) print x"),
         16 => format!("let text = text.repeat(\"abcdλ\", {}) print json.stringify({{text: text, xs: [{xs}]}})", u16::from(width) * u16::from(trips)),
-        17 => format!("let xs = [{xs}] let f = fn(x) {{ set acc = num.add(acc, 1) let y = perform echo(x) as Any return y }} try {{ let ys = invoke collection.map(xs, f) print ys }} catch e {{ print e }}"),
+        17 => format!("let xs = [{xs}] let f = fn(x) {{ set acc = num.add(acc, 1) let y = perform 0(x) as Any return y }} try {{ let ys = invoke collection.map(xs, f) print ys }} catch e {{ print e }}"),
         18 => format!("let xs = [{xs}] do invoke list.insert(xs, 0, {value}) let old = invoke list.pop(xs) print old do invoke list.clear(xs) print xs"),
-        19 => "print clock print random try { print read(projection, \"request\") } catch e { print e }".into(),
+        19 => "let now = perform 2() as Timestamp print now let bits = perform 3() as Bytes print bits try { print read(projection, \"request\") } catch e { print e }".into(),
         20 => "let f = &quick let h = spawn apply f(7) let joined = join h print joined".into(),
         // The child yields before asking, so the spawner's own request is
         // issued first. Slicing must preserve that request order (G1).
-        21 => format!("let h = spawn call delayed({value}) let own = perform echo(2) as Any let child = join h print (own, child)"),
+        21 => format!("let h = spawn call delayed({value}) let own = perform 0(2) as Any let child = join h print (own, child)"),
         // Admitted error-producing expressions, including native errors.
         _ => format!("try {{ print num.div({value}, 0) }} catch e {{ print e.kind }} try {{ print [1][9] }} catch e {{ print e.kind }}"),
     }

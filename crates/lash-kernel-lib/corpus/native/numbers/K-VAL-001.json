@@ -3,7 +3,7 @@
   "cases": [
     {
       "name": "kind null",
-      "function": "3e2a9836b16b3ade4f7fcc2d56d1fb203dffed4bd5d7f4bf800df213c8c8c5f7",
+      "function": "ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5",
       "args": [
         "null"
       ],
@@ -19,7 +19,7 @@
     },
     {
       "name": "kind absent",
-      "function": "3e2a9836b16b3ade4f7fcc2d56d1fb203dffed4bd5d7f4bf800df213c8c8c5f7",
+      "function": "ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5",
       "args": [
         "absent"
       ],
@@ -35,7 +35,7 @@
     },
     {
       "name": "kind bool",
-      "function": "3e2a9836b16b3ade4f7fcc2d56d1fb203dffed4bd5d7f4bf800df213c8c8c5f7",
+      "function": "ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5",
       "args": [
         {
           "bool": false
@@ -53,7 +53,7 @@
     },
     {
       "name": "kind integer",
-      "function": "3e2a9836b16b3ade4f7fcc2d56d1fb203dffed4bd5d7f4bf800df213c8c8c5f7",
+      "function": "ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5",
       "args": [
         {
           "int": "1"
@@ -71,7 +71,7 @@
     },
     {
       "name": "kind float",
-      "function": "3e2a9836b16b3ade4f7fcc2d56d1fb203dffed4bd5d7f4bf800df213c8c8c5f7",
+      "function": "ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5",
       "args": [
         {
           "float": "1.0"
@@ -89,7 +89,7 @@
     },
     {
       "name": "kind text",
-      "function": "3e2a9836b16b3ade4f7fcc2d56d1fb203dffed4bd5d7f4bf800df213c8c8c5f7",
+      "function": "ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5",
       "args": [
         {
           "text": "x"
@@ -107,7 +107,7 @@
     },
     {
       "name": "kind bytes",
-      "function": "3e2a9836b16b3ade4f7fcc2d56d1fb203dffed4bd5d7f4bf800df213c8c8c5f7",
+      "function": "ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5",
       "args": [
         {
           "bytes": "00ff"
@@ -125,7 +125,7 @@
     },
     {
       "name": "kind timestamp",
-      "function": "3e2a9836b16b3ade4f7fcc2d56d1fb203dffed4bd5d7f4bf800df213c8c8c5f7",
+      "function": "ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5",
       "args": [
         {
           "timestamp": "0"
@@ -143,7 +143,7 @@
     },
     {
       "name": "kind tuple",
-      "function": "3e2a9836b16b3ade4f7fcc2d56d1fb203dffed4bd5d7f4bf800df213c8c8c5f7",
+      "function": "ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5",
       "args": [
         {
           "tuple": [
@@ -165,7 +165,7 @@
     },
     {
       "name": "kind list",
-      "function": "3e2a9836b16b3ade4f7fcc2d56d1fb203dffed4bd5d7f4bf800df213c8c8c5f7",
+      "function": "ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5",
       "args": [
         {
           "list": [
@@ -187,7 +187,7 @@
     },
     {
       "name": "kind map",
-      "function": "3e2a9836b16b3ade4f7fcc2d56d1fb203dffed4bd5d7f4bf800df213c8c8c5f7",
+      "function": "ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5",
       "args": [
         {
           "map": [
@@ -214,7 +214,7 @@
     },
     {
       "name": "kind set",
-      "function": "3e2a9836b16b3ade4f7fcc2d56d1fb203dffed4bd5d7f4bf800df213c8c8c5f7",
+      "function": "ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5",
       "args": [
         {
           "set": [
@@ -236,7 +236,7 @@
     },
     {
       "name": "kind record",
-      "function": "3e2a9836b16b3ade4f7fcc2d56d1fb203dffed4bd5d7f4bf800df213c8c8c5f7",
+      "function": "ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5",
       "args": [
         {
           "record": [
@@ -261,7 +261,7 @@
     },
     {
       "name": "kind error",
-      "function": "3e2a9836b16b3ade4f7fcc2d56d1fb203dffed4bd5d7f4bf800df213c8c8c5f7",
+      "function": "ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5",
       "args": [
         {
           "error": {
@@ -283,10 +283,10 @@
     },
     {
       "name": "kind function",
-      "function": "3e2a9836b16b3ade4f7fcc2d56d1fb203dffed4bd5d7f4bf800df213c8c8c5f7",
+      "function": "ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5",
       "args": [
         {
-          "function": "f"
+          "function": {"link":"1111111111111111111111111111111111111111111111111111111111111111","function":"ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"}
         }
       ],
       "expected": {
@@ -301,7 +301,7 @@
     },
     {
       "name": "kind handle",
-      "function": "3e2a9836b16b3ade4f7fcc2d56d1fb203dffed4bd5d7f4bf800df213c8c8c5f7",
+      "function": "ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5",
       "args": [
         {
           "handle": {

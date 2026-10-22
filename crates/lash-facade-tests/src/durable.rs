@@ -2,7 +2,7 @@ use super::*;
 use std::sync::Mutex as StdMutex;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use lash_core::SessionId;
+use lash_vocabulary::identity::SessionId;
 
 /// Catalog wrapper that counts which seam a caller reached for, and fails
 /// the by-id seam once a law arms it.
@@ -94,12 +94,12 @@ pub fn core_serving(backend: lash_execution_contracts::backend::Backend, serve: 
         .expect("standard core")
 }
 
-pub fn id(text: &str) -> lash::SessionId {
-    lash::SessionId::parse(text).expect("nonblank host identity")
+pub fn id(text: &str) -> lash_vocabulary::identity::SessionId {
+    lash_vocabulary::identity::SessionId::parse(text).expect("nonblank host identity")
 }
 
-pub fn turn(text: &str) -> lash::TurnId {
-    lash::TurnId::parse(text).expect("nonblank host identity")
+pub fn turn(text: &str) -> lash_vocabulary::identity::TurnId {
+    lash_vocabulary::identity::TurnId::parse(text).expect("nonblank host identity")
 }
 
 pub async fn create(core: &LashCore, session: &str) -> lash::DurableSession {
@@ -346,7 +346,10 @@ impl lash_core::store::RuntimeStoreDecorator for NoByIdLookupFactory {
 
 impl lash_core::DeploymentStoreDecorator for NoByIdLookupFactory {}
 
-pub fn drained_input(durable: &lash::DurableSession, id: &str) -> lash_core::InputId {
+pub fn drained_input(
+    durable: &lash::DurableSession,
+    id: &str,
+) -> lash_vocabulary::identity::InputId {
     durable.input_id(&turn(id))
 }
 
@@ -401,7 +404,10 @@ impl ToolProvider for SecondLookupHeld {
     fn tool_manifests(
         &self,
         config: &lash_core::OwnerConfigView,
-    ) -> std::result::Result<Vec<lash_core::ToolManifest>, lash::plugins::PluginError> {
+    ) -> std::result::Result<
+        Vec<lash_vocabulary::tool_contract::ToolManifest>,
+        lash::plugins::PluginError,
+    > {
         AppTools.tool_manifests(config)
     }
 
@@ -409,7 +415,7 @@ impl ToolProvider for SecondLookupHeld {
         &self,
         name: &str,
         config: &lash_core::OwnerConfigView,
-    ) -> Option<Arc<lash_core::ToolContract>> {
+    ) -> Option<Arc<lash_vocabulary::tool_contract::ToolContract>> {
         AppTools.resolve_contract(name, config)
     }
 

@@ -1,8 +1,9 @@
 const RUNTIME_TURN_CONTRACT_ORACLE: crate::trace::OracleId<'static> =
     crate::trace::OracleId::real("runtime.turn_contract");
 use lash_core::facade_support::SessionGraphFacadeOps;
-use lash_protocol_types::SessionId;
 use lash_protocol_types::{llm::types::StreamBlockEvent, llm::types::StreamBlockKind};
+
+use lash_vocabulary::identity::SessionId;
 use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize, ser::SerializeStruct};
@@ -751,7 +752,7 @@ mod tests {
         .expect("test nodes");
         let missing_parent = lash_core::SessionGraph::from_unchecked_nodes_for_testing(
             missing_parent_nodes,
-            Some(lash_core::NodeId::from("child")),
+            Some(lash_vocabulary::identity::NodeId::from("child")),
         );
         let facts = runtime_graph_invariant_facts(&missing_parent);
         assert!(!facts.passed());
@@ -778,7 +779,7 @@ mod tests {
         .expect("test nodes");
         let cycle = lash_core::SessionGraph::from_unchecked_nodes_for_testing(
             cycle_nodes,
-            Some(lash_core::NodeId::from("b")),
+            Some(lash_vocabulary::identity::NodeId::from("b")),
         );
         let facts = runtime_graph_invariant_facts(&cycle);
         assert!(!facts.passed());

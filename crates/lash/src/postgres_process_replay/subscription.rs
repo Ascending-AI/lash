@@ -4,11 +4,12 @@
 use std::sync::Arc;
 
 use futures_util::Stream;
+use lash_core::ProcessObservationEvent;
+use lash_core::ProcessReplayGapReason;
+use lash_core::ProcessReplayStoreError;
+use lash_core::ProcessSequence;
 use lash_core::runtime::ParsedProcessObservationCursor;
-use lash_core::{
-    ProcessId, ProcessObservationEvent, ProcessReplayGapReason, ProcessReplayStoreError,
-    ProcessSequence,
-};
+use lash_vocabulary::identity::ProcessId;
 use sqlx::Row as _;
 
 use super::schema::{Incarnation, column, db_error, ensure_incarnation, micros, position};

@@ -24,6 +24,6 @@ impl Costs {
     /// The table of the version `document` states. A document a machine
     /// runs is validated, so its version is one this build interprets.
     pub(crate) fn of_document(document: &lash_kernel_doc::Document) -> Self {
-        Self::of(KernelVersion::of(document.manifest.kernel).unwrap_or(KernelVersion::NEWEST))
+        Self::of(KernelVersion::of(document.kernel()).unwrap_or(KernelVersion::NEWEST))
     }
 }

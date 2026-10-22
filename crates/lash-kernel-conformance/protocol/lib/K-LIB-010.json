@@ -3,7 +3,7 @@
   "cases": [
     {
       "name": "machine functions are recognised by identity inside expressions",
-      "document": "kernel 1\nnumbers by_spelling\nuse tasks.unfinished = @5e80cb13afcf53414557d360bb2c75280ba4316c3929d6a76150ee665a80596b\nmain { finish tasks.unfinished() }\n",
+      "document": "kernel 1\nnumbers by_spelling\nnative @128407c53bdfd565fbbdeba91c153db7af4babaf691b82948f320faffec64632\ndefinition \"function tasks.unfinished() -> List(Task(Any))\\nkernel 1\\ncharge size(result)\\nnative\\n\"\nmain {\n  finish tasks.unfinished()\n}\n",
       "expected": {
         "prints": [],
         "trace": [],
@@ -16,7 +16,7 @@
     },
     {
       "name": "deref is an expression and returns the same mutable object",
-      "document": "kernel 1\nnumbers by_spelling\nuse deref = @12677ad7e3e9aab3865fdbd2799e5c17d9d207b757de5a56c60b6911444f3207\nuse ref = @45d4961349c42b673de1c1e92b4122299b421191ead13812e4d5f978f1323c65\nmain { let a = [1] let b = deref(ref(a)) set b[0] = 7 finish a[0] }\n",
+      "document": "kernel 1\nnumbers by_spelling\nnative @1f19e940ec199769e419707cc9592a2fe52b58b70b37efec416fcd5d4a1855c1\nnative @3536009c2e2586efd0959aaef06b545981e14eba3cf77a4446fa3ce79edb6981\ndefinition \"function deref(r: Any) -> Any\\nkernel 1\\ncharge 1\\nnative\\n\"\ndefinition \"function ref(arg0: Any) -> Any\\nkernel 1\\nerrors \\\"arity\\\", \\\"type_error\\\"\\ncharge sum(1, sum(deep(arg0)), deep(result))\\nnative\\n\"\nmain {\n  let a = [1]\n  let b = deref(ref(a))\n  set b[0] = 7\n  finish a[0]\n}\n",
       "expected": {
         "prints": [],
         "trace": [],

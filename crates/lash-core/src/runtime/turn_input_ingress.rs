@@ -1,8 +1,8 @@
 #[allow(unused_imports)]
 use crate::CheckpointKind;
-#[allow(unused_imports)]
-use crate::SessionId;
 pub use lash_core_store::turn_input_vocabulary::*;
+#[allow(unused_imports)]
+use lash_vocabulary::identity::SessionId;
 
 /// Generates the checkpoint enumeration an admission can name, from one variant list.
 ///
@@ -30,7 +30,7 @@ turn_input_admission_checkpoints!(AfterWork, BeforeCompletion);
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::TurnId;
+    use lash_vocabulary::identity::TurnId;
 
     #[test]
     fn turn_input_state_decode_rejects_scope_disagreement() {

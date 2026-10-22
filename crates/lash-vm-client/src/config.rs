@@ -46,13 +46,13 @@ pub struct Deadlines {
     /// The pool's queue and a durable park that released the worker do
     /// not. A code-mode cell saves what it held with each park and resumes
     /// with it, so the cap holds across its activations and owners. Passing
-    /// it ends the run with [`lash_vm_protocol::WorkerLimit::Wall`]
+    /// it ends the run with [`lash_protocol_types::worker_limit::WorkerLimit::Wall`]
     /// (FIG-6786).
     pub execution_wall: Duration,
     /// How long the parent waits on its host for one host read (a clock,
     /// random, projection or planned-read answer, or a limiter's decision)
     /// while the run holds its worker. Passing it ends the run with
-    /// [`lash_vm_protocol::WorkerLimit::HostRead`] and discards the worker.
+    /// [`lash_protocol_types::worker_limit::WorkerLimit::HostRead`] and discards the worker.
     /// A durable park releases its worker and has no such bound.
     pub host_read: Duration,
 }
@@ -80,31 +80,31 @@ impl Deadlines {
 
     /// What an execution meets past its cumulative CPU budget, whether the
     /// parent's accounting or the worker's own ceiling saw it.
-    pub(crate) fn cpu_limit(&self) -> lash_vm_protocol::WorkerLimit {
-        lash_vm_protocol::WorkerLimit::Cpu {
+    pub(crate) fn cpu_limit(&self) -> lash_protocol_types::worker_limit::WorkerLimit {
+        lash_protocol_types::worker_limit::WorkerLimit::Cpu {
             bound_ms: millis(self.cumulative_cpu),
         }
     }
 
     /// What an execution meets once it has held its workers past its wall
     /// time.
-    pub(crate) fn wall_limit(&self) -> lash_vm_protocol::WorkerLimit {
-        lash_vm_protocol::WorkerLimit::Wall {
+    pub(crate) fn wall_limit(&self) -> lash_protocol_types::worker_limit::WorkerLimit {
+        lash_protocol_types::worker_limit::WorkerLimit::Wall {
             bound_ms: millis(self.execution_wall),
         }
     }
 }
 
 /// What a run meets when its host answers one read later than `bound`.
-pub(crate) fn host_read_limit(bound: Duration) -> lash_vm_protocol::WorkerLimit {
-    lash_vm_protocol::WorkerLimit::HostRead {
+pub(crate) fn host_read_limit(bound: Duration) -> lash_protocol_types::worker_limit::WorkerLimit {
+    lash_protocol_types::worker_limit::WorkerLimit::HostRead {
         bound_ms: millis(bound),
     }
 }
 
 /// What an exchange meets when it computes or serializes past `bound`.
-pub(crate) fn deadline_limit(bound: Duration) -> lash_vm_protocol::WorkerLimit {
-    lash_vm_protocol::WorkerLimit::Deadline {
+pub(crate) fn deadline_limit(bound: Duration) -> lash_protocol_types::worker_limit::WorkerLimit {
+    lash_protocol_types::worker_limit::WorkerLimit::Deadline {
         bound_ms: millis(bound),
     }
 }
@@ -117,8 +117,8 @@ fn millis(duration: Duration) -> u64 {
 #[derive(Clone, Copy, Debug, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct WorkerTuning {
-    pub diagnostic_bytes: lash_vm_protocol::DetailLimit,
-    pub kernel_data: lash_kernel_doc::KernelDataLimits,
+    pub diagnostic_bytes: lash_protocol_types::engine_fault::DetailLimit,
+    pub kernel_data: lash_vocabulary::data_limits::KernelDataLimits,
     /// Parent reads while idle or awaiting a host projection. This is not compute spend.
     pub parent_wait: Duration,
     pub inbound_buffer_bytes: std::num::NonZeroUsize,
@@ -171,8 +171,8 @@ impl WorkerTuning {
     /// frames; the other working values have no workload measurements.
     pub const fn standard() -> Self {
         Self {
-            diagnostic_bytes: lash_vm_protocol::DetailLimit::standard(),
-            kernel_data: lash_kernel_doc::KernelDataLimits::standard(),
+            diagnostic_bytes: lash_protocol_types::engine_fault::DetailLimit::standard(),
+            kernel_data: lash_vocabulary::data_limits::KernelDataLimits::standard(),
             parent_wait: Duration::from_secs(86_400),
             inbound_buffer_bytes: std::num::NonZeroUsize::MIN.saturating_add(16 * 1024 - 1),
             typescript_source_bytes: 64 * 1024,
@@ -196,7 +196,7 @@ impl Default for WorkerTuning {
 /// installs it from its bootstrap, the pool's recorded configuration, and
 /// reads nothing live. Its system calls are always the worker's fixed
 /// allowlist; a call outside it kills the process
-/// ([`lash_vm_protocol::SupervisorEvidence::ForbiddenSyscall`]).
+/// ([`lash_protocol_types::engine_fault::SupervisorEvidence::ForbiddenSyscall`]).
 #[derive(Clone, Copy, Debug, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct WorkerConfinement {
@@ -303,7 +303,7 @@ pub struct PoolConfig {
     pub entry: WorkerEntry,
     /// The parent's own and retained packages. Omission selects the parent's
     /// shipped packages once at pool start; workers register no package list.
-    pub packages: Option<std::sync::Arc<lash_kernel_package::HeldPackages>>,
+    pub library: Option<std::sync::Arc<crate::packages::WorkerLibrary>>,
     pub min_workers: usize,
     pub max_workers: usize,
     pub max_queue_items: usize,
@@ -312,7 +312,7 @@ pub struct PoolConfig {
     pub protocol: ProtocolBounds,
     /// The ceiling the pool admits each run's bounds up to. A run states
     /// its own bounds; one asking for more of any is refused with
-    /// [`lash_vm_protocol::RunRefusal::AboveCeiling`], naming the bound,
+    /// [`lash_protocol_types::engine_fault::RunRefusal::AboveCeiling`], naming the bound,
     /// what it asked and this ceiling, never clamped to it (FIG-6827).
     pub run_bounds: RunBounds,
     /// What one code-mode cell may grow to over its life.
@@ -359,13 +359,19 @@ impl PoolConfig {
     /// # Errors
     ///
     /// The shipped packages do not assemble: a defect of the build.
-    pub fn held_packages(
+    pub fn worker_library(
         &self,
-    ) -> Result<std::sync::Arc<lash_kernel_package::HeldPackages>, lash_vm_releases::LibraryError>
+    ) -> Result<std::sync::Arc<crate::packages::WorkerLibrary>, lash_vm_releases::LibraryError>
     {
-        self.packages
-            .clone()
-            .map_or_else(lash_vm_releases::lash_packages, Ok)
+        match &self.library {
+            Some(library) => Ok(library.clone()),
+            None => {
+                let release = lash_vm_releases::helper_release()?;
+                crate::packages::WorkerLibrary::new(&release.functions, release.resolver_roots())
+                    .map(std::sync::Arc::new)
+                    .map_err(lash_vm_releases::LibraryError::new)
+            }
+        }
     }
 
     /// Prewarm one process, admit at most four, and bound waiting input to
@@ -384,7 +390,7 @@ impl PoolConfig {
     pub fn standard(entry: WorkerEntry) -> Self {
         Self {
             entry,
-            packages: None,
+            library: None,
             min_workers: 1,
             max_workers: 4,
             max_queue_items: 2,

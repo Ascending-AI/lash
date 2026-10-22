@@ -1,6 +1,7 @@
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
-use lash_kernel_doc::graph_tokens::{decode_body, encode_body};
+use lash_vocabulary::tokens::decode_body;
+use lash_vocabulary::tokens::encode_body;
 
 use super::*;
 use crate::{AttachmentId, AttachmentRef, MediaType, ToolCallOutput, ToolFailure};

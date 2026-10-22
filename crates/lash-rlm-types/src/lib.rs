@@ -2,8 +2,9 @@ use lash_protocol_types::{
     CellFailure, CellFailureKind, CellOutcome, CellRecord, ExecutedCall, ExecutedCallOutcome,
     OutputValue, RetainedValue, TerminationMode, ValueShape,
 };
+
 use lash_sansio::TurnProtocol;
-use lash_tool_shape::SchemaDocument;
+use lash_vocabulary::tool_shape::SchemaDocument;
 
 /// One executed call as a cell's `history` shows it: the operation and how
 /// it settled, with no arguments and no host identity. A view derived from
@@ -311,7 +312,8 @@ mod rlm_step_serde_tests {
     use std::collections::BTreeSet;
 
     use lash_protocol_types::{CellFailure, CellFailureKind};
-    use lash_tool_shape::ShapeKind;
+
+    use lash_vocabulary::tool_shape::ShapeKind;
 
     use lash_protocol_types::{CellOutcome, CellRecord};
 
@@ -584,8 +586,9 @@ mod rlm_step_serde_tests {
                 .all(|field| field.name != "images")
         );
         assert_ne!(
-            document.canonical_identity(lash_tool_shape::DefinitionId(0)),
-            super::history_item_document(true).canonical_identity(lash_tool_shape::DefinitionId(0)),
+            document.canonical_identity(lash_vocabulary::tool_shape::DefinitionId(0)),
+            super::history_item_document(true)
+                .canonical_identity(lash_vocabulary::tool_shape::DefinitionId(0)),
             "filter the source before importing so identity describes the displayed history"
         );
     }

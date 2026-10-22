@@ -97,8 +97,8 @@ impl Observer {
 
     /// The claim token of its config-change observer.
     fn token(&self) -> String {
-        lash::plugins::ObligationToken::for_callback(
-            lash::plugins::RegistryKind::Session,
+        lash_vocabulary::claims::ObligationToken::for_callback(
+            lash_vocabulary::claims::RegistryKind::Session,
             &self.identity(),
         )
         .into_string()
@@ -187,7 +187,7 @@ impl Observer {
 async fn open(world: &World, name: &str) -> lash::LashSession {
     world
         .core
-        .session(lash::SessionId::try_from(name.to_owned()).unwrap())
+        .session(lash_vocabulary::identity::SessionId::try_from(name.to_owned()).unwrap())
         .open()
         .await
         .expect("the session opens")
@@ -234,7 +234,9 @@ async fn owed(
     backend
         .stores()
         .session_store_factory()
-        .load_session_head_meta(&lash::SessionId::try_from(name.to_owned()).unwrap())
+        .load_session_head_meta(
+            &lash_vocabulary::identity::SessionId::try_from(name.to_owned()).unwrap(),
+        )
         .await
         .expect("read the session's head")
         .expect("the session has a head")
@@ -520,7 +522,7 @@ async fn a_pending_change_is_owed_to_its_recorded_observers_until_delivered_or_r
     );
     let held = world
         .core
-        .session(lash::SessionId::try_from(name.to_owned()).unwrap())
+        .session(lash_vocabulary::identity::SessionId::try_from(name.to_owned()).unwrap())
         .durable()
         .await
         .expect("the durable session");
@@ -544,7 +546,7 @@ async fn a_pending_change_is_owed_to_its_recorded_observers_until_delivered_or_r
         .await;
     let resumed = world
         .core
-        .session(lash::SessionId::try_from(name.to_owned()).unwrap())
+        .session(lash_vocabulary::identity::SessionId::try_from(name.to_owned()).unwrap())
         .durable()
         .await
         .expect("the durable session");
@@ -564,7 +566,9 @@ async fn a_pending_change_is_owed_to_its_recorded_observers_until_delivered_or_r
         .backend
         .stores()
         .session_store_factory()
-        .load_session_head_meta(&lash::SessionId::try_from(name.to_owned()).unwrap())
+        .load_session_head_meta(
+            &lash_vocabulary::identity::SessionId::try_from(name.to_owned()).unwrap(),
+        )
         .await
         .expect("read the session's head")
         .expect("the session has a head");
@@ -652,7 +656,7 @@ async fn config_retirement_is_not_config_on_sqlite_memory() {
             .await;
         let session = world
             .core
-            .session(lash::SessionId::try_from(name.to_owned()).unwrap())
+            .session(lash_vocabulary::identity::SessionId::try_from(name.to_owned()).unwrap())
             .durable()
             .await
             .expect("the session reopens");
@@ -674,7 +678,7 @@ async fn config_retirement_is_not_config_on_sqlite_memory() {
             .await;
         let session = world
             .core
-            .session(lash::SessionId::try_from(name.to_owned()).unwrap())
+            .session(lash_vocabulary::identity::SessionId::try_from(name.to_owned()).unwrap())
             .durable()
             .await
             .expect("the settled session reopens");
@@ -683,7 +687,9 @@ async fn config_retirement_is_not_config_on_sqlite_memory() {
             .backend
             .stores()
             .session_store_factory()
-            .load_session_head_meta(&lash::SessionId::try_from(name.to_owned()).unwrap())
+            .load_session_head_meta(
+                &lash_vocabulary::identity::SessionId::try_from(name.to_owned()).unwrap(),
+            )
             .await
             .expect("read the reopened head")
             .expect("the session has a head");
@@ -797,7 +803,7 @@ impl CutDelivery {
                 "{commands} session.command commits landed, not the change's and its retirement"
             ));
         }
-        let id = lash::SessionId::try_from(CUT_SESSION.to_owned()).unwrap();
+        let id = lash_vocabulary::identity::SessionId::try_from(CUT_SESSION.to_owned()).unwrap();
         match self
             .backend()
             .stores()
@@ -874,7 +880,7 @@ impl Scenario for CutDelivery {
     async fn start(&self, nodes: &Arc<SimNodes>) -> Result<(), String> {
         // The host is outside the deployment under test: its submission and
         // its send are uncut.
-        let id = lash::SessionId::try_from(CUT_SESSION.to_owned()).unwrap();
+        let id = lash_vocabulary::identity::SessionId::try_from(CUT_SESSION.to_owned()).unwrap();
         let session = self
             .core()
             .session(id.clone())

@@ -5,14 +5,17 @@
 //! the typed datum encoder writes. Every other JSON-schema slot is data, and
 //! a function there raises `not_data` naming its path.
 
-use lash_kernel_doc::{FUNCTION_VALUE_TAG, FunctionValue, FunctionValueLimits, KernelDataLimits};
+use lash_kernel_doc::FUNCTION_VALUE_TAG;
+use lash_kernel_doc::FunctionValue;
+use lash_kernel_doc::FunctionValueLimits;
+use lash_vocabulary::data_limits::KernelDataLimits;
 
 use super::*;
 
 /// `keep.run`: a tool that keeps every call's arguments, in order. Its
 /// input marks each slot a law passes a function in; `forged` is data.
 struct Keeps {
-    tool: fn() -> lash_core::ToolDefinition,
+    tool: fn() -> lash_vocabulary::tool_contract::ToolDefinition,
     received: std::sync::Mutex<Vec<serde_json::Value>>,
 }
 
@@ -23,7 +26,7 @@ impl Default for Keeps {
 }
 
 impl Keeps {
-    fn of(tool: fn() -> lash_core::ToolDefinition) -> Self {
+    fn of(tool: fn() -> lash_vocabulary::tool_contract::ToolDefinition) -> Self {
         Self {
             tool,
             received: std::sync::Mutex::default(),
@@ -35,7 +38,7 @@ impl Keeps {
     }
 }
 
-fn keep() -> lash_core::ToolDefinition {
+fn keep() -> lash_vocabulary::tool_contract::ToolDefinition {
     let function = serde_json::json!({ "x-lash": { "kind": "function" } });
     let mut properties = serde_json::Map::new();
     for name in ["pick", "a", "b", "c", "d", "run"] {
@@ -67,7 +70,7 @@ impl lash_core::ToolProvider for Keeps {
         &self,
         _config: &lash_core::OwnerConfigView,
     ) -> std::result::Result<
-        Vec<lash_core::ToolManifest>,
+        Vec<lash_vocabulary::tool_contract::ToolManifest>,
         lash_execution_contracts::plugin_error::PluginError,
     > {
         Ok(vec![(self.tool)().manifest()])
@@ -77,7 +80,7 @@ impl lash_core::ToolProvider for Keeps {
         &self,
         name: &str,
         _config: &lash_core::OwnerConfigView,
-    ) -> Option<Arc<lash_core::ToolContract>> {
+    ) -> Option<Arc<lash_vocabulary::tool_contract::ToolContract>> {
         let tool = (self.tool)();
         (name == tool.manifest.tool() || name == tool.id().as_str())
             .then(|| Arc::new(tool.contract()))
@@ -106,8 +109,8 @@ fn crossing_services(dialect: &CellDialect) -> super::super::CellServices {
 /// The function value `json` carries, read as every consumer reads one:
 /// within the standard limits, validated against the build's library.
 fn function_value(json: &serde_json::Value) -> FunctionValue {
-    let functions = lash_vm_runtime::lash_packages()
-        .map(|packages| std::sync::Arc::clone(packages.functions()))
+    let functions = lash_vm_releases::helper_release()
+        .map(|release| std::sync::Arc::new(release.functions.clone()))
         .expect("the build's library");
     FunctionValue::from_transport_json(
         json,
@@ -122,6 +125,12 @@ fn function_value(json: &serde_json::Value) -> FunctionValue {
 /// selected, committing the session after each, and answers what
 /// `keep.run` received.
 async fn kept(dialect: &CellDialect, cells: &[&str]) -> Vec<serde_json::Value> {
+    kept_with_host(dialect, cells).await.0
+}
+async fn kept_with_host(
+    dialect: &CellDialect,
+    cells: &[&str],
+) -> (Vec<serde_json::Value>, DurableHost) {
     let tools = Arc::new(Keeps::default());
     let host = open_host().await;
     let services = crossing_services(dialect);
@@ -148,7 +157,7 @@ async fn kept(dialect: &CellDialect, cells: &[&str]) -> Vec<serde_json::Value> {
         );
         crate::testing::commit_working(&mut state, &host).await;
     }
-    tools.received()
+    (tools.received(), host)
 }
 
 /// FN-CROSS: a capturing async function nested anywhere in an ordinary
@@ -164,7 +173,7 @@ async fn a_capturing_function_in_a_tool_input_reaches_the_tool_as_a_function_val
         ),
         (
             CellDialect::python(),
-            "limit = 3\n\n\nasync def add(x: int):\n    return x + limit\n\n\nawait keep.run({'nested': {'list': [1, add]}})",
+            "limit = 3\n\n\nasync def add(x: int):\n    return x + limit\n\n\npayload = {'nested': {'list': [1, add]}}\nawait keep.run(payload)",
         ),
     ];
     for (dialect, code) in cases {
@@ -172,8 +181,7 @@ async fn a_capturing_function_in_a_tool_input_reaches_the_tool_as_a_function_val
         let crossed = &received[0]["nested"]["list"][1];
         assert_eq!(received[0]["nested"]["list"][0], serde_json::json!(1));
         let value = function_value(crossed);
-        assert_eq!(value.entry.as_str(), "run", "{}", dialect.name());
-        let signature = value.signature().expect("the entry's signature");
+        let signature = value.signature();
         assert_eq!(
             signature
                 .params
@@ -183,10 +191,6 @@ async fn a_capturing_function_in_a_tool_input_reaches_the_tool_as_a_function_val
             ["x"],
             "{}",
             dialect.name()
-        );
-        assert!(
-            value.document.main.is_empty(),
-            "a function value runs no main"
         );
     }
 }
@@ -246,7 +250,7 @@ async fn a_function_that_cannot_cross_raises_before_the_call() {
 /// `x-lash` marker declares, the same marker under `anyOf` beside null (as
 /// pydantic and MCP spell an optional function), an open object, a text
 /// and a closed object.
-fn slots() -> lash_core::ToolDefinition {
+fn slots() -> lash_vocabulary::tool_contract::ToolDefinition {
     typed_definition(
         "tool:slots_take",
         "slots.take",
@@ -274,7 +278,7 @@ fn slots() -> lash_core::ToolDefinition {
 /// with an `Optional[Callable]` field and a field of a marked `$defs` type:
 /// an open object (no `additionalProperties`), as MCP servers write theirs
 /// too.
-fn open_take() -> lash_core::ToolDefinition {
+fn open_take() -> lash_vocabulary::tool_contract::ToolDefinition {
     typed_definition(
         "tool:model_take",
         "model.take",
@@ -308,7 +312,7 @@ async fn slots_raised(dialect: &CellDialect, input: &str) -> (String, Vec<serde_
 /// What `<module>.take(input)` raised, as [`slots_raised`] does for
 /// `slots.take`, `tool` being that operation.
 async fn take_raised(
-    tool: fn() -> lash_core::ToolDefinition,
+    tool: fn() -> lash_vocabulary::tool_contract::ToolDefinition,
     module: &str,
     dialect: &CellDialect,
     input: &str,
@@ -356,10 +360,7 @@ async fn a_function_crosses_in_a_slot_the_x_lash_function_marker_declares() {
         let (raised, received) = slots_raised(&dialect, input).await;
         assert_eq!(raised, "none", "{}", dialect.name());
         assert_eq!(received[0]["args"], serde_json::json!({"n": 1}));
-        assert_eq!(
-            function_value(&received[0]["definition"]).entry.as_str(),
-            "run"
-        );
+        function_value(&received[0]["definition"]);
     }
 }
 
@@ -397,10 +398,7 @@ async fn a_function_crosses_in_a_nullable_slot_the_x_lash_marker_declares_under_
         assert!(slot.contains(callable), "{}: {signature}", dialect.name());
         let (raised, received) = slots_raised(&dialect, function).await;
         assert_eq!(raised, "none", "{}", dialect.name());
-        assert_eq!(
-            function_value(&received[0]["fallback"]).entry.as_str(),
-            "run"
-        );
+        function_value(&received[0]["fallback"]);
         let (raised, received) = slots_raised(&dialect, null).await;
         assert_eq!(raised, "none", "{}", dialect.name());
         assert_eq!(received[0]["fallback"], serde_json::Value::Null);
@@ -441,12 +439,7 @@ async fn a_function_crosses_in_a_marked_slot_of_an_open_object_and_behind_a_loca
         let (raised, received) = take_raised(open_take, "model", &dialect, crossing).await;
         assert_eq!(raised, "none", "{}", dialect.name());
         for slot in ["callback", "handler"] {
-            assert_eq!(
-                function_value(&received[0][slot]).entry.as_str(),
-                "run",
-                "{}: {slot}",
-                dialect.name()
-            );
+            function_value(&received[0][slot]);
         }
         assert_eq!(received[0]["extra"], serde_json::json!({"n": 1}));
         let (raised, received) = take_raised(open_take, "model", &dialect, extra).await;
@@ -507,25 +500,6 @@ async fn a_function_in_a_json_schema_data_slot_raises_not_data_naming_its_path()
 /// the dialect knew of a capture's type shapes the code it wrote, so both
 /// are part of the code; the functions here read their capture alike in
 /// either cell.
-#[tokio::test(flavor = "multi_thread")]
-async fn equal_code_and_captures_cross_as_one_document() {
-    let received = kept(
-        &CellDialect::typescript(),
-        &[
-            "const limit = 3;\nconst a = async (x: number) => [x, limit];\nconst b = async (x: number) => [x, limit];\nawait keep.run({ a, b });\nawait keep.run({ a });",
-            "const c = async (x: number) => [x, limit];\nconst other = 4;\nconst d = async (x: number) => [x, other];\nawait keep.run({ c, d });",
-        ],
-    )
-    .await;
-    let id = |json: &serde_json::Value| function_value(json).document.identity();
-    let a = id(&received[0]["a"]);
-    assert_eq!(a, id(&received[0]["b"]), "another binding's name");
-    assert_eq!(a, id(&received[1]["a"]), "a repeated send");
-    assert_eq!(a, id(&received[2]["c"]), "a later cell");
-    assert_ne!(a, id(&received[2]["d"]), "a changed capture");
-    assert_eq!(received[0]["a"], received[2]["c"], "the canonical form");
-}
-
 /// FN-TAG: a record a guest writes under the reserved key reaches the tool
 /// as escaped plain data, never as a function value, beside a function
 /// value the typed encoder wrote once in its canonical form.
@@ -565,7 +539,7 @@ async fn a_call_that_shipped_a_function_reads_back_identically_after_a_restart()
     let services = crossing_services(&CellDialect::typescript());
     let mut host = open_host().await;
     let tools = Arc::new(CellTools::default());
-    let resumed = crash_at_the_held_call_and_resume(&mut host, &tools, &services, None, code).await;
+    let resumed = crash_at_the_held_call_and_resume(&mut host, &tools, &services, code).await;
     assert_eq!(
         finish_of(&resumed),
         serde_json::json!(["first", "interrupted"])
@@ -599,23 +573,37 @@ async fn a_call_that_shipped_a_function_reads_back_identically_after_a_restart()
 /// it is saved and sent from a later cell. Captures prepend code and crossing
 /// canonicalizes names; the two titles must still name their own statements.
 async fn captioned_function(dialect: CellDialect, source: &str, send: &str) {
-    let received = kept(&dialect, &[source, send]).await;
+    let (received, host) = kept_with_host(&dialect, &[source, send]).await;
     for args in received {
         let value = function_value(&args["run"]);
         let captions = &value.captions;
-        let encoded = lash_kernel_doc::graph_tokens::encode_body(&value);
+        let encoded = lash_vocabulary::tokens::encode_body(&value);
         let decoded: FunctionValue =
-            lash_kernel_doc::graph_tokens::decode_body(&encoded).expect("stored function value");
+            lash_vocabulary::tokens::decode_body(&encoded).expect("stored function value");
         assert_eq!(decoded, value, "captions survive the stored token boundary");
-        captions
-            .validate(&value.document)
-            .expect("new document sites");
+        let context = host.context();
+        let backend = context.backend();
+        let linked = backend
+            .package_store()
+            .link(&value.callable.link)
+            .await
+            .unwrap()
+            .unwrap();
+        let bytes = backend
+            .module_artifacts()
+            .get_module_artifact(&linked.link.document.to_string())
+            .await
+            .unwrap()
+            .unwrap();
+        let document =
+            lash_vocabulary::tokens::decode_body::<lash_kernel_doc::Document>(&bytes).unwrap();
+        captions.validate(&document).expect("new document sites");
         let titles: Vec<_> = captions
             .entries()
             .iter()
             .map(|entry| {
                 let site = entry.target.site().expect("statement caption");
-                let node = value.document.node(site).expect("captioned statement");
+                let node = document.node(site).expect("captioned statement");
                 (entry.caption.title(), format!("{node:?}"))
             })
             .collect();

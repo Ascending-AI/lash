@@ -7,8 +7,9 @@ use crate::{Library, NamedLibrary, SourceError, define_functions};
 /// signature, through either the worker JSON or stored token boundary.
 #[test]
 fn written_refuses_a_second_start_signature() {
-    use lash_kernel_doc::graph_tokens::{TokenCodec as _, TokenWriter, decode_body};
-    use lash_kernel_doc::{Signature, SourceLanguage, Type};
+    use lash_kernel_doc::SourceLanguage;
+    use lash_vocabulary::tokens::{TokenCodec as _, TokenWriter, decode_body};
+    use lash_vocabulary::{Signature, Type};
 
     let signature = Signature {
         params: Vec::new(),
@@ -72,7 +73,7 @@ fn a_helper_source_is_resolved_by_name_in_order() {
     assert_eq!(definitions.len(), 2);
     let twice = library.resolve("demo.twice").unwrap();
     assert_eq!(twice, definitions[0].identity());
-    let Implementation::Body(body) = &definitions[1].implementation else {
+    let Implementation::Guest { body, .. } = &definitions[1].implementation else {
         panic!("a helper has a body");
     };
     assert!(body.functions.contains_key(&twice));
@@ -84,7 +85,7 @@ fn a_helper_source_is_resolved_by_name_in_order() {
 fn a_definition_lists_only_the_functions_its_body_calls() {
     let mut library = kernel_library();
     let definitions = define_functions(HELPERS, &mut library).unwrap();
-    let Implementation::Body(body) = &definitions[0].implementation else {
+    let Implementation::Guest { body, .. } = &definitions[0].implementation else {
         panic!("a helper has a body");
     };
     let names: Vec<&str> = body.functions.values().map(|name| name.as_str()).collect();
@@ -117,6 +118,7 @@ fn a_name_is_defined_once() {
 #[test]
 fn named_libraries_share_registered_definition_facts() {
     use lash_kernel_doc::{FunctionCatalog, FunctionRegistry, parse_definition};
+
     let mut registry = FunctionRegistry::declarations();
     let function = registry
         .register(
@@ -146,4 +148,153 @@ fn named_libraries_share_registered_definition_facts() {
         ));
     }
     assert_eq!(calls.get(), 1);
+}
+
+/// L-ALIAS: canonical helper names retain package ownership and never select
+/// one of two source definitions that project to the same member.
+#[test]
+fn helper_name_collisions_are_refused_at_definition_owner() {
+    use lash_vocabulary::FunctionName;
+    let name = crate::authoring::helper_name(&FunctionName::new("ts.new_TypeError").unwrap());
+    assert_eq!(name.package.to_string(), "ts");
+    assert_eq!(name.member.as_str(), "h_n14_new_type_error");
+    let mut library = NamedLibrary::new();
+    let define = |name: &str| {
+        parse_definition(&format!(
+            "function {name}() -> Null\nkernel 1\ncharge 1\nbody {{ return null }}"
+        ))
+        .unwrap()
+    };
+    library.insert(define("ts.new_TypeError")).unwrap();
+    assert!(matches!(
+        library.insert(define("ts.new_type_error")),
+        Err(crate::LibraryError::ImportCollision { .. })
+    ));
+}
+
+/// Helper package names admit numeric suffix words in shipped constants.
+#[test]
+fn helper_numeric_suffix_words_are_canonical() {
+    let name = lash_vocabulary::FunctionName::new("ts.math.SQRT1_2").unwrap();
+    assert_eq!(
+        crate::authoring::helper_name(&name).member.as_str(),
+        "h_n4_math_n8_sqrt1_n2"
+    );
+}
+
+/// FIG-7135: adding helpers projects each newly admitted name once rather
+/// than projecting every earlier name again for its collision check.
+#[test]
+fn helper_collision_admission_projects_each_name_once() {
+    let mut library = NamedLibrary::new();
+    crate::authoring::HELPER_PROJECTIONS.with(|count| count.set(0));
+    for index in 0..64 {
+        let definition = parse_definition(&format!(
+            "function law.helper_{index}() -> Null\nkernel 1\ncharge 1\nbody {{ return null }}"
+        ))
+        .unwrap();
+        library.insert(definition).unwrap();
+    }
+    assert!(
+        crate::authoring::HELPER_PROJECTIONS.with(|count| count.get()) <= 64,
+        "helper admission repeated canonical projection: {}",
+        crate::authoring::HELPER_PROJECTIONS.with(|count| count.get())
+    );
+}
+
+/// FIG-7135: a helper's local import slot never selects a root operation.
+#[test]
+fn terminal_readback_projects_each_units_exact_import_contract() {
+    use lash_kernel_doc::{
+        ActExpr, ActKind, Document, Expr, FunctionBody, Literal, Metering, NumberPolicy, Stmt,
+    };
+    use lash_vocabulary::{
+        EffectName, Import, ImportKind, ImportSlot, Name, PackagePath, QualifiedName, Segment,
+        Signature, Type,
+    };
+    use std::collections::BTreeMap;
+
+    let import = |member: &str| Import {
+        name: QualifiedName {
+            package: PackagePath::parse("corpus").unwrap(),
+            member: Segment::new(member).unwrap(),
+            type_member: None,
+        },
+        kind: ImportKind::Operation {
+            signature: Signature {
+                params: vec![],
+                result: Type::Any,
+            },
+        },
+    };
+    let ordinary = import("echo");
+    let terminal = import("stop");
+    let mut document = Document::new(NumberPolicy::Float, vec![]);
+    document.imports = BTreeMap::from([
+        (ImportSlot(0), ordinary.clone()),
+        (ImportSlot(7), terminal.clone()),
+    ]);
+    let mut function =
+        parse_definition("function helper.stop() -> Any\nkernel 1\ncharge 1\nnative\n").unwrap();
+    function.implementation = Implementation::Guest {
+        metering: Metering::Statements,
+        body: FunctionBody {
+            functions: BTreeMap::new(),
+            imports: BTreeMap::from([(ImportSlot(0), terminal)]),
+            block: vec![Stmt::Finish {
+                value: Expr::Let {
+                    name: Name::new("t1"),
+                    value: Box::new(Expr::Act(Box::new(ActExpr {
+                        kind: ActKind::Perform {
+                            slot: ImportSlot(0),
+                            result: Type::Any,
+                            then_yield: true,
+                        },
+                        args: vec![],
+                    }))),
+                    body: Box::new(Expr::Literal(Literal::Null)),
+                },
+            }],
+        },
+    };
+    document
+        .functions
+        .insert(function.identity(), function.clone());
+    let namespaces = crate::regions::namespaces(&document).unwrap();
+    assert!(
+        namespaces
+            .controls(&EffectName::new("corpus.echo").unwrap())
+            .is_none()
+    );
+    assert!(
+        namespaces
+            .controls(&EffectName::new("corpus.stop").unwrap())
+            .is_some()
+    );
+
+    // Equal names with a different signature are not the same import contract.
+    let Implementation::Guest { body, .. } = &mut function.implementation else {
+        unreachable!()
+    };
+    let mut mismatched = ordinary;
+    mismatched.kind = ImportKind::Operation {
+        signature: Signature {
+            params: vec![],
+            result: Type::Text,
+        },
+    };
+    body.imports.insert(ImportSlot(0), mismatched);
+    document.functions.clear();
+    document.functions.insert(function.identity(), function);
+    let namespaces = crate::regions::namespaces(&document).unwrap();
+    assert!(
+        namespaces
+            .controls(&EffectName::new("corpus.echo").unwrap())
+            .is_none()
+    );
+    assert!(
+        namespaces
+            .controls(&EffectName::new("corpus.stop").unwrap())
+            .is_none()
+    );
 }

@@ -28,6 +28,7 @@ testing = ["lash-store-sql/testing", "lash-execution-contracts/testing"]
 synthetic-next = ["lash-core-store/synthetic-next", "lash-execution-contracts/synthetic-next"]
 
 [dependencies]
+lash-vocabulary = { workspace = true }
 lash-trace = { workspace = true }
 lash-core-ids = { workspace = true }
 lash-execution-contracts = { workspace = true }

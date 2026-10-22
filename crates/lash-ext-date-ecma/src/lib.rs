@@ -5,11 +5,22 @@
 //! arithmetic and JavaScript coercion live in the dialect's kernel helpers.
 mod calendar;
 
+use lash_kernel_doc::Args;
+use lash_kernel_doc::Float;
+use lash_kernel_doc::FunctionRegistry;
+use lash_kernel_doc::Integer;
+use lash_kernel_doc::NativeCall;
+use lash_kernel_doc::NativeError;
+use lash_kernel_doc::NativeFunction;
+use lash_kernel_doc::NewObject;
+use lash_kernel_doc::RegistryError;
+use lash_kernel_doc::Value;
 use lash_kernel_doc::arena::ShortText;
-use lash_kernel_doc::{
-    Args, Float, FunctionId, FunctionRegistry, Integer, NativeCall, NativeError, NativeFunction,
-    NewObject, RecordType, RecordTypeField, RegistryError, Type, Value, parse_definition,
-};
+use lash_kernel_doc::parse_definition;
+use lash_vocabulary::names::FunctionId;
+use lash_vocabulary::types::RecordType;
+use lash_vocabulary::types::RecordTypeField;
+use lash_vocabulary::types::Type;
 use num_traits::ToPrimitive;
 use std::{collections::BTreeMap, sync::Arc};
 
@@ -279,6 +290,7 @@ pub fn native(
 mod tests {
     use super::*;
     use lash_kernel_doc::{Datum, WorkCounter};
+
     use lash_kernel_state::arena::Bench;
 
     /// BRAND-ONE: a native constructor returns its canonical package/type

@@ -5,8 +5,10 @@
 
 use std::sync::Arc;
 
-use lash_kernel_doc::{Datum, ErrorDatum, Float, Handle, Integer, Name, Timestamp, parse_document};
+use lash_kernel_doc::{Datum, ErrorDatum, Float, Handle, Integer, Timestamp};
+
 use lash_kernel_vm::{Bounds, CellStart, End, Host, Machine, Program, RunError, Step, Target};
+use lash_vocabulary::Name;
 
 use super::machine;
 
@@ -47,14 +49,17 @@ const USES: [&str; 25] = [
     "text.len",
     "ts.number.parts",
     "ts.number.layout",
-    "ts.number.to_string",
+    "ts.number.format_value",
 ];
 
 /// `ts.boundary` as it was before `collection.holds_none` let plain data
 /// cross uncopied, with the program's function tokens left to the run's
 /// copy-out (FIG-6381).
 const FORMER_BOUNDARY: &str = r#"
-fn former_boundary(value) {
+function former_boundary(value: Any) -> Any
+kernel 1
+metering statements
+body {
   let k = kind(value)
   if same(k, "text") { return value }
   if same(k, "float") { return value }
@@ -113,9 +118,12 @@ fn former_boundary(value) {
 }
 "#;
 
-/// `ts.number.to_string` as it was before integers were asked first.
+/// `ts.number.format_value` as it was before integers were asked first.
 const FORMER_NUMBER_TO_STRING: &str = r#"
-fn former_number_to_string(value) {
+function former_number_to_string(value: Any) -> Any
+kernel 1
+metering statements
+body {
   if num.is_nan(value) { return "NaN" }
   if eq(value, inf) { return "Infinity" }
   if eq(value, -inf) { return "-Infinity" }
@@ -139,20 +147,19 @@ fn former_number_to_string(value) {
 /// cannot carry: shared values, cycles, function tokens, closures, holes
 /// in place and nesting past the start's depth.
 const ENTRIES: &str = r#"
-entry boundary(v: Any, mode: Int) -> Any
-entry former_boundary_entry(v: Any, mode: Int) -> Any
-entry boundary_cost(v: Any, mode: Int) -> Any
-entry former_boundary_cost(v: Any, mode: Int) -> Any
-entry idle(v: Any, mode: Int) -> Any
-entry number_text(v: Any, mode: Int) -> Any
-entry former_number_text(v: Any, mode: Int) -> Any
-fn nest(v, n) {
+function nest(v: Any, n: Any) -> Any
+kernel 1
+metering statements
+body {
   let d = v
   let i = 0
   while num.lt(i, n) { set d = [d] set i = num.add(i, 1) }
   return d
 }
-fn build(v, mode) {
+function build(v: Any, mode: Any) -> Any
+kernel 1
+metering statements
+body {
   let shout = fn(this, args) { print "called" return "shout" }
   if eq(mode, 1) { return [v, v] }
   if eq(mode, 2) { let r = {head: v} set r.self = r return r }
@@ -174,86 +181,123 @@ fn build(v, mode) {
   if num.lt(mode, 200) {} else {
     if num.lt(mode, 300) {
       let n = num.sub(mode, 200)
-      let d = call nest(v, n)
+      let d = invoke nest(v, n)
       return {a: d, b: [[d]]}
     }
     let n = num.sub(mode, 300)
-    let d = call nest(v, n)
+    let d = invoke nest(v, n)
     return {b: [[d]], a: d}
   }
   if num.lt(mode, 100) {} else {
     let n = num.sub(mode, 100)
-    let d = call nest(v, n)
+    let d = invoke nest(v, n)
     return d
   }
   return v
 }
-fn report(out, x, mode) {
+function report(out: Any, x: Any, mode: Any) -> Any
+kernel 1
+metering statements
+body {
   if num.lt(99, mode) { return (kind(out), eq(out, x)) }
   if eq(mode, 6) { return (out.value, x.value, kind(out.f)) }
   print out
   return (out, x)
 }
-fn boundary(v, mode) {
-  let x = call build(v, mode)
+function boundary(v: Any, mode: Int) -> Any
+kernel 1
+metering statements
+body {
+  let x = invoke build(v, mode)
   let out = invoke ts.boundary(x)
-  let reported = call report(out, x, mode)
+  let reported = invoke report(out, x, mode)
   return reported
 }
-fn former_boundary_entry(v, mode) {
-  let x = call build(v, mode)
-  let out = call former_boundary(x)
-  let reported = call report(out, x, mode)
+function former_boundary_entry(v: Any, mode: Int) -> Any
+kernel 1
+metering statements
+body {
+  let x = invoke build(v, mode)
+  let out = invoke former_boundary(x)
+  let reported = invoke report(out, x, mode)
   return reported
 }
-fn boundary_cost(v, mode) {
-  let x = call build(v, mode)
+function boundary_cost(v: Any, mode: Int) -> Any
+kernel 1
+metering statements
+body {
+  let x = invoke build(v, mode)
   let out = invoke ts.boundary(x)
   return null
 }
-fn former_boundary_cost(v, mode) {
-  let x = call build(v, mode)
-  let out = call former_boundary(x)
+function former_boundary_cost(v: Any, mode: Int) -> Any
+kernel 1
+metering statements
+body {
+  let x = invoke build(v, mode)
+  let out = invoke former_boundary(x)
   return null
 }
-fn number_text(v, mode) {
-  let out = invoke ts.number.to_string(v)
+function number_text(v: Any, mode: Int) -> Any
+kernel 1
+metering statements
+body {
+  let out = invoke ts.number.format_value(v)
   return out
 }
-fn former_number_text(v, mode) {
-  let out = call former_number_to_string(v)
+function former_number_text(v: Any, mode: Int) -> Any
+kernel 1
+metering statements
+body {
+  let out = invoke former_number_to_string(v)
   return out
 }
-fn idle(v, mode) {
-  let x = call build(v, mode)
+function idle(v: Any, mode: Int) -> Any
+kernel 1
+metering statements
+body {
+  let x = invoke build(v, mode)
   return null
 }
-main { }
 "#;
 
 fn program() -> &'static Program {
     static PROGRAM: std::sync::OnceLock<Program> = std::sync::OnceLock::new();
     PROGRAM.get_or_init(|| {
-        let registry = machine::registry();
-        let mut text = String::from("kernel 1\nnumbers float\n");
-        for name in USES {
-            let (id, _) = registry
-                .iter()
-                .find(|(_, function)| function.definition().name.as_str() == name)
-                .unwrap_or_else(|| panic!("{name} is registered"));
-            text.push_str(&format!("use {name} = @{id}\n"));
-        }
-        text.push_str(ENTRIES);
+        let _registry = machine::registry();
+        let mut text = USES
+            .iter()
+            .map(|name| format!("use {name}\n"))
+            .collect::<String>();
+        text.push_str("use former_boundary\n");
+        text.push_str("use former_number_to_string\n");
+        text.push_str("use nest\n");
+        text.push_str("use build\n");
+        text.push_str("use report\n");
+        text.push_str("use boundary\n");
+        text.push_str("use former_boundary_entry\n");
+        text.push_str("use boundary_cost\n");
+        text.push_str("use former_boundary_cost\n");
+        text.push_str("use number_text\n");
+        text.push_str("use former_number_text\n");
+        text.push_str("use idle\n");
         text.push_str(FORMER_BOUNDARY);
         text.push_str(FORMER_NUMBER_TO_STRING);
-        let mut document = parse_document(&text).unwrap_or_else(|error| panic!("{error}"));
-        document.manifest.functions =
-            lash_kernel_check::requirements(&document, registry.as_ref()).functions;
-        Program {
-            closure: super::pages::CLOSURE,
-            document: Arc::new(document),
-            library: machine::prepared().clone(),
-        }
+        text.push_str(ENTRIES);
+        let document = super::linked_inspection::definitions(
+            &text,
+            &[
+                "boundary",
+                "former_boundary_entry",
+                "boundary_cost",
+                "former_boundary_cost",
+                "idle",
+                "number_text",
+                "former_number_text",
+            ],
+            super::library(),
+        );
+        crate::tests::linked::program(Arc::new(document), machine::prepared().clone())
     })
 }
 
@@ -263,14 +307,14 @@ struct Console {
 }
 
 impl Host for Console {
-    fn clock(&mut self) -> Timestamp {
-        Timestamp {
-            nanoseconds: Integer::from(0),
-        }
-    }
-
-    fn random(&mut self) -> u64 {
-        0
+    fn perform(
+        &mut self,
+        use_: &lash_vocabulary::OperationUse,
+        _: &[Datum],
+        _: &lash_vocabulary::sites::PositionLabel,
+        _: &lash_vocabulary::sites::Site,
+    ) -> Result<Result<Datum, lash_kernel_doc::ErrorDatum>, lash_kernel_vm::HostFault> {
+        crate::tests::linked_reads::read(use_, 0)
     }
 
     fn read(&mut self, _handle: &Handle, _request: &Datum) -> Result<Datum, ErrorDatum> {
@@ -516,7 +560,7 @@ fn the_boundary_matches_its_former_copy_and_walk() {
     println!("boundary differential: cases={cases} plain containers={containers}");
 }
 
-/// `ts.number.to_string` spells every number as its former body did: the
+/// `ts.number.format_value` spells every number as its former body did: the
 /// spelling traps (signed zero, NaN, the infinities, the 2^53 edge,
 /// exponent thresholds, subnormals, the largest float), kernel integers
 /// small and past 2^53, and generated floats of every exponent, integral

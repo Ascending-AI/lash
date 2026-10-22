@@ -1,46 +1,28 @@
 --- before
 -kernel 1
 -numbers by_spelling
--effect corpus.echo(input?: Json) -> Json contract "52910906e3f939a5ce2e34bd105cd37184ead8ac272080fcbff759b3b6db6560"
--use kind = @3e2a9836b16b3ade4f7fcc2d56d1fb203dffed4bd5d7f4bf800df213c8c8c5f7
--use list.len = @70d92c79f9c69cfe8cda0752cf30f5f0db0499a1bbffeeed9e2abddad9cf302b
--use py.reply = @9069f1a97a82e155fe11114065351d42262bd0be81a4a8c41f522dfbb431d5d5
--use record.contains = @c5ee063554dd9a59526868c163b1a3282db896327967a522d00fcde29c91c25c
--use record.keys = @3048431a57b64b680843cd96770d99536bab12b83c3c7788856614e555b4985c
--use same = @1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578
--entry demo() -> Any
--
--fn demo() {
--  return invoke py.reply(perform corpus.echo("hello") as Json)
--}
--
+-import 0 operation corpus.echo(input?: Json) -> Json
+-import 1 code py.h_n5_reply(value: Any) -> Any direct
+-export demo "{\"kind\":\"function\",\"value\":{\"function\":\"94a7ec890d63e7e6b7d1706b69d0e7dd80fa408bd1eb08ff9f65d06fc35d2f39\",\"signature\":{\"result\":\"text\"},\"convention\":{\"kind\":\"direct\"},\"asynchronous\":true,\"rest\":false}}"
+-definition "function local.function() -> Any\nkernel 1\nmetering statements\nimport 0 operation corpus.echo(input?: Json) -> Json\nimport 1 code py.h_n5_reply(value: Any) -> Any direct\nbody {\n  return invoke import 1(perform 0(\"hello\") as Json)\n}\n"
 -main {
--  let demo = &demo
+-  let demo = &local.function
 -}
 +++ after
 +kernel 1
 +numbers by_spelling
-+effect corpus.echo(input?: Json) -> Json contract "52910906e3f939a5ce2e34bd105cd37184ead8ac272080fcbff759b3b6db6560"
-+use kind = @3e2a9836b16b3ade4f7fcc2d56d1fb203dffed4bd5d7f4bf800df213c8c8c5f7
-+use list.len = @70d92c79f9c69cfe8cda0752cf30f5f0db0499a1bbffeeed9e2abddad9cf302b
-+use py.reply = @9069f1a97a82e155fe11114065351d42262bd0be81a4a8c41f522dfbb431d5d5
-+use record.contains = @c5ee063554dd9a59526868c163b1a3282db896327967a522d00fcde29c91c25c
-+use record.keys = @3048431a57b64b680843cd96770d99536bab12b83c3c7788856614e555b4985c
-+use same = @1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578
-+entry demo() -> Any
-+
-+fn demo() {
-+  return invoke py.reply(perform corpus.echo("edited λ") as Json)
-+}
-+
++import 0 operation corpus.echo(input?: Json) -> Json
++import 1 code py.h_n5_reply(value: Any) -> Any direct
++export demo "{\"kind\":\"function\",\"value\":{\"function\":\"d172731ec2e5a413ad16738798da40fd6d57fee48344f75bdbb38c64447773bb\",\"signature\":{\"result\":\"text\"},\"convention\":{\"kind\":\"direct\"},\"asynchronous\":true,\"rest\":false}}"
++definition "function local.function() -> Any\nkernel 1\nmetering statements\nimport 0 operation corpus.echo(input?: Json) -> Json\nimport 1 code py.h_n5_reply(value: Any) -> Any direct\nbody {\n  return invoke import 1(perform 0(\"edited λ\") as Json)\n}\n"
 +main {
-+  let demo = &demo
++  let demo = &local.function
 +}
 
 Correspondence:
 {
-  "base": "c2dc2261174815326673d067b946a1ef798102a220d3bfc3afd5f2676fa8675a",
-  "result": "b73d7d3cdc6992c1f3cb214fd7a4975d642d440dac74f85cf69a2d5435bc1e90",
+  "base": "4eb7006a5c9a73e0a8cf093cc0b164a01723fd35888e02a6a84653443f29679d",
+  "result": "e680d3a6119beb7029db50cc8fed1e066487a0e62283418469773379ddc4e5e0",
   "entries": [
     {
       "from": {
@@ -83,19 +65,19 @@ Correspondence:
     {
       "from": {
         "unit": {
-          "function": "demo"
+          "library": "94a7ec890d63e7e6b7d1706b69d0e7dd80fa408bd1eb08ff9f65d06fc35d2f39"
         }
       },
       "to": {
         "unit": {
-          "function": "demo"
+          "library": "d172731ec2e5a413ad16738798da40fd6d57fee48344f75bdbb38c64447773bb"
         }
       }
     },
     {
       "from": {
         "unit": {
-          "function": "demo"
+          "library": "94a7ec890d63e7e6b7d1706b69d0e7dd80fa408bd1eb08ff9f65d06fc35d2f39"
         },
         "path": [
           0
@@ -103,7 +85,7 @@ Correspondence:
       },
       "to": {
         "unit": {
-          "function": "demo"
+          "library": "d172731ec2e5a413ad16738798da40fd6d57fee48344f75bdbb38c64447773bb"
         },
         "path": [
           0
@@ -113,7 +95,7 @@ Correspondence:
     {
       "from": {
         "unit": {
-          "function": "demo"
+          "library": "94a7ec890d63e7e6b7d1706b69d0e7dd80fa408bd1eb08ff9f65d06fc35d2f39"
         },
         "path": [
           0,
@@ -122,7 +104,7 @@ Correspondence:
       },
       "to": {
         "unit": {
-          "function": "demo"
+          "library": "d172731ec2e5a413ad16738798da40fd6d57fee48344f75bdbb38c64447773bb"
         },
         "path": [
           0,
@@ -133,7 +115,7 @@ Correspondence:
     {
       "from": {
         "unit": {
-          "function": "demo"
+          "library": "94a7ec890d63e7e6b7d1706b69d0e7dd80fa408bd1eb08ff9f65d06fc35d2f39"
         },
         "path": [
           0,
@@ -143,7 +125,7 @@ Correspondence:
       },
       "to": {
         "unit": {
-          "function": "demo"
+          "library": "d172731ec2e5a413ad16738798da40fd6d57fee48344f75bdbb38c64447773bb"
         },
         "path": [
           0,
@@ -157,11 +139,11 @@ Correspondence:
 }
 
 Captions to review:
-fn demo "Say hello"
-fn demo/0 "Send a greeting and give back the reply"
+function d172731ec2e5a413ad16738798da40fd6d57fee48344f75bdbb38c64447773bb "Say hello"
+function d172731ec2e5a413ad16738798da40fd6d57fee48344f75bdbb38c64447773bb/0 "Send a greeting and give back the reply"
 
 Reprinted source:
 #: Say hello
-async def demo():
+async def demo() -> str:
     #: Send a greeting and give back the reply
     return await corpus.echo("edited λ")

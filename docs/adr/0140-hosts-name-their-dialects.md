@@ -70,24 +70,22 @@ A worker whose embedding lacks that dialect refuses the run before it reads
 the document or the parked state:
 `RunRefusal::DialectNotInstalled { dialect }`, a terminal typed refusal.
 
-### One package installation supplies parent and workers
+### Linked code and worker native declarations have separate lifetimes
 
-The parent installs lash's code-only packages and host packages together.
-Every worker derives its registry from that installation; the embedding
-supplies natives by function identity. A shipped worker receives the
-registry in a pool-start frame. The selected dependency-closed package set
-chooses the names in scope for a cell. A parked run keeps an execution
-closure containing its exact function identities.
+The build emits helper Documents and ordinary Packages. The host publishes code
+under scoped provenance and retains its full Link DAG. Workers receive native
+declarations in WorkerLibrary; each run loads the reached Documents and Link
+slot tables before execution. Current fixes the round's Namespaces at round start.
 
 ## Consequences
 
 - A helper executable is built for its host's dialects. Recipes that build it
   with Cargo pass the dialect features.
-- A worker must hold the run's recorded dialect and exact code identities.
-  Code-only packages and user-visible package surfaces share installation.
-- New cells lower against the selected set, and a session relinks its
-  saved functions to it at each cell start; changing the set does not
-  relink a parked run or a published workflow.
+- A worker must hold the run's recorded dialect and meet its machine requirements.
+- A new round records accepted plugin advertisements with committed config.
+  Existing cells, saved callables and workflows retain their defining Links.
+- Model tools require explicit provider registration; service Packages do not
+  change model exposure.
 
 ## Executable evidence
 

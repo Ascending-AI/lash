@@ -5,22 +5,11 @@
 //! numbers are the format: a new variant takes an unused number, and no
 //! variant is renumbered when the Rust declaration moves.
 
-use lash_kernel_doc::graph_tokens::CodecVariant;
+use lash_vocabulary::tokens::CodecVariant;
 
 use crate::session::CellControl;
-use crate::tool_contract::LimitCause;
-use crate::tool_declaration::TurnControlKind;
-use crate::tool_output::{ToolControl, TurnControl};
 
-#[doc(hidden)]
-impl CodecVariant for TurnControlKind {
-    fn codec_variant(&self) -> u32 {
-        match self {
-            Self::Finish => 0,
-            Self::SwitchAgentFrame => 1,
-        }
-    }
-}
+use crate::tool_output::{ToolControl, TurnControl};
 
 #[doc(hidden)]
 impl CodecVariant for TurnControl {
@@ -49,17 +38,6 @@ impl CodecVariant for CellControl {
         match self {
             Self::Finish { .. } => 0,
             Self::SwitchAgentFrame { .. } => 1,
-        }
-    }
-}
-
-#[doc(hidden)]
-impl CodecVariant for LimitCause {
-    fn codec_variant(&self) -> u32 {
-        match self {
-            Self::ExecutionSlice => 0,
-            Self::ExecutionTotal => 1,
-            Self::WaitDeadline => 2,
         }
     }
 }

@@ -21,10 +21,12 @@ use lash_protocol_types::{
     llm::attachment_delivery::DeliverySecret, llm::attachment_delivery::ProviderAccepts,
     llm::attachment_delivery::ProviderFileScope,
 };
+
 use lash_protocol_types::{
     llm::capability::AttachmentAcceptanceRule, llm::capability::AttachmentAcceptor,
     llm::capability::AttachmentCapabilitySnapshot,
 };
+
 use lash_transport_failure::{LlmTransportError, TransportRetryVerdict};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
@@ -333,7 +335,7 @@ pub(super) async fn run(operations: usize, ledger_cap: usize) -> Result<Receipt>
         let workload = crate::workload::Workload::smoke_v1()?;
         let generator = crate::workload::Generator::new(&workload, "boundary-slots")?;
         for n in 0..operations {
-            let id = lash::SessionId::try_from(format!("slots-{n}"))?;
+            let id = lash_vocabulary::identity::SessionId::try_from(format!("slots-{n}"))?;
             core.session(id.clone())
                 .create(lash::SessionCreation::root(
                     facade::spec()?.attachment_acceptance(Arc::new(catalogue.clone())),

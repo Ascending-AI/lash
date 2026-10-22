@@ -28,15 +28,16 @@ use std::time::Duration;
 
 use lash_core_store::checkpoint_graph::stage::{StageFault, StageLeaseId, StageSpool};
 use lash_core_store::checkpoint_graph::{GraphStaging, NodeId};
+use lash_durable::DurableError;
 use lash_durable::domain::graph::RootOwner;
 use lash_durable::domain::pages::{RootLease, RootLeaseRequest};
-use lash_durable::{DurableError, DurableInstant};
-use lash_kernel_doc::{DocumentId, ErrorDatum};
+use lash_kernel_doc::ErrorDatum;
 use lash_kernel_vm::{
     Bound, BoundExceeded, Bounds, DeliverError, EffectRequest, End, MachineError, OpenError,
     Outcome, Request, RunError, StartError, WaitId,
 };
-use lash_vm_protocol::{CheckpointRefusal, InfrastructureOutcome};
+use lash_protocol_types::engine_fault::{CheckpointRefusal, InfrastructureOutcome};
+use lash_vocabulary::names::DocumentId;
 use tokio_util::sync::CancellationToken;
 
 use super::closure::Closure;
@@ -971,7 +972,6 @@ impl KernelBroker<'_> {
         live: u64,
     ) -> Result<Vec<EffectAdmission>, KernelFailure> {
         let park = ledger.next_park();
-        let mut now = None::<DurableInstant>;
         let mut admit = Vec::with_capacity(requests.len());
         let mut executions = 0_u64;
         for request in requests {
@@ -995,24 +995,8 @@ impl KernelBroker<'_> {
                     EffectAdmission {
                         identity: request.identity,
                         wait: request.wait,
-                        effect: Some(request.effect),
+                        effect: Some(request.use_),
                         admit: how,
-                    }
-                }
-                Request::Sleep(sleep) => {
-                    let now = match now {
-                        Some(now) => now,
-                        None => *now.insert(self.store.context().durable_now().await?),
-                    };
-                    let millis = i64::try_from(sleep.duration.as_millis()).unwrap_or(i64::MAX);
-                    EffectAdmission {
-                        identity: sleep.identity,
-                        wait: sleep.wait,
-                        effect: None,
-                        admit: AdmitAs::Sleep {
-                            duration: sleep.duration,
-                            until: DurableInstant(now.0.saturating_add(millis)),
-                        },
                     }
                 }
             });
@@ -1045,7 +1029,6 @@ impl KernelBroker<'_> {
 fn wait_of(request: &Request) -> WaitId {
     match request {
         Request::Effect(request) => request.wait,
-        Request::Sleep(sleep) => sleep.wait,
     }
 }
 

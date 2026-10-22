@@ -3,7 +3,8 @@ use super::DeploymentViewExt as _;
 use super::session_delete_blob_reclaim::{
     SessionDeleteBlobProbe, commit_content_aliased_checkpoint_roots,
 };
-use lash_protocol_types::{ProcessId, SessionId};
+use lash_vocabulary::identity::ProcessId;
+use lash_vocabulary::identity::SessionId;
 use pretty_assertions::assert_eq;
 use std::sync::Arc;
 

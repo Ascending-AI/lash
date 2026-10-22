@@ -8,20 +8,18 @@
 
 use std::sync::Arc;
 
-use lash_kernel_vm::{Bounds, Program};
+use lash_kernel_vm::Bounds;
 
 use super::machine::{BOUNDS, ending, execution_observation, installed, lower};
-use super::pages;
 
 /// How `source` ends and what it prints, the same uninterrupted and
 /// reopened at every safe point.
 fn run(source: &str) -> (String, Vec<String>) {
     let lowered = lower(source).unwrap_or_else(|error| panic!("{error}"));
-    let program = Program {
-        document: Arc::clone(lowered.document.shared()),
-        library: installed().prepared.clone(),
-        closure: pages::CLOSURE,
-    };
+    let program = crate::tests::linked::program(
+        Arc::clone(lowered.document.shared()),
+        installed().prepared.clone(),
+    );
     let bounds = Bounds {
         charge_limit: 200_000,
         ..BOUNDS

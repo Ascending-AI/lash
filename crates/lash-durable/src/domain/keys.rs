@@ -3,7 +3,9 @@
 use std::fmt;
 
 use crate::ids::ActorKey;
-use lash_protocol_types::{ProcessId, SessionId, TurnId};
+use lash_vocabulary::identity::ProcessId;
+use lash_vocabulary::identity::SessionId;
+use lash_vocabulary::identity::TurnId;
 
 /// A code cell's identity within its turn.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]

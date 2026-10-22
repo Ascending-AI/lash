@@ -1,6 +1,7 @@
 //! Versioned provider-variation fixture matrix at the transport seam.
 
 use lash_protocol_types::{llm::types::StreamBlockEvent, llm::types::StreamBlockKind};
+
 use std::collections::BTreeSet;
 use std::sync::{Arc, Mutex};
 
@@ -17,10 +18,12 @@ use lash_protocol_types::{
     llm::types::LlmStreamEvent, llm::types::LlmStreamEvidence, llm::types::LlmTerminalReason,
     llm::types::LlmToolChoice,
 };
+
 use lash_protocol_types::{
     session_model::Message, session_model::MessageRole, session_model::render_prompt,
     session_model::shared_parts,
 };
+
 use lash_provider_anthropic::AnthropicProvider;
 use lash_provider_google::GoogleOAuthProvider;
 use lash_provider_openai::codex::ws_testing::{ScriptedWsAction, spawn_scripted_websocket};

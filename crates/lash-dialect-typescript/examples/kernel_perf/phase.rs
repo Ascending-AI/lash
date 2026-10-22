@@ -68,7 +68,7 @@ pub(super) fn identity(
     artifact: &str,
     result: &Datum,
     charge: u64,
-    path: &lash_kernel_vm::ExecutionPath,
+    path: &lash_vocabulary::observation::ExecutionPath,
 ) -> Json {
     let mut result = serde_json::to_value(result).expect("Datum JSON");
     result.sort_all_objects();

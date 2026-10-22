@@ -379,7 +379,8 @@ async fn sample_with_stores(
         .context("the durable store publishes heap pages")?;
     let pool = service.pool()?;
     let spools = service.spools()?;
-    let session_id = lash::SessionId::try_from(format!("heap-{scenario}-{h}"))?;
+    let session_id =
+        lash_vocabulary::identity::SessionId::try_from(format!("heap-{scenario}-{h}"))?;
     let meter = Arc::new(Meter {
         actor: super::turn::session_actor(&session_id)?.to_string(),
         recorder,

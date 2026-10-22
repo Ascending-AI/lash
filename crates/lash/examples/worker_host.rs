@@ -16,8 +16,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         return Ok(());
     }
     // The parent registers its packages once: lash's own, here.
-    let packages = lash::package::lash_packages()?;
-    println!("holds {} packages", packages.artifacts().len());
+    let release = lash_vm_releases::helper_release()?;
+    println!("holds {} packages", release.content.packages.len());
     let entry = WorkerEntry::reexec()?;
     let service = WorkerService::new(WorkerPoolConfig::standard(entry));
     let pool = service.pool()?;

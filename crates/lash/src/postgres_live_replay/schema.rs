@@ -17,7 +17,7 @@
 //!   gone and the incarnation rotates.
 
 use lash_core::{LiveReplayStoreError, SessionCursor, SessionRevision};
-use lash_protocol_types::SessionId;
+use lash_vocabulary::identity::SessionId;
 use sqlx::{PgPool, Postgres, Row as _, Transaction};
 
 use super::codec::Doorbell;

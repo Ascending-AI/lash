@@ -1,19 +1,34 @@
 kernel 1
 numbers float
-use kind = @3e2a9836b16b3ade4f7fcc2d56d1fb203dffed4bd5d7f4bf800df213c8c8c5f7
-use same = @1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578
-use ts.await = @18a30299db399e09c5772b4431f1c4baf6e139a164f476b6fe173b1447d54a6f
-use ts.promise.adopt = @ec07dd4e314068cde58b9c1223c9fc11094029f4f5fe6f8d325a12e10b32a475
-use ts.promise.is = @0f99cae1fc6ad1ff6812fb50d4070182ec247c6fe07f1a7b049a4fa7aa9c82a5
-entry demo() -> Any ts_direct(ts.await)
-
-fn demo() {
-  do let(t1 = sleep(5.0) then yield, absent)
-  return "awake" via ts.promise.adopt
-}
-
+import 0 code ts.h_n14_sleep_duration(milliseconds: Any) -> Int direct
+import 1 operation typescript.sleep(milliseconds: Int) -> Null
+import 2 code ts.h_n7_promise_n5_adopt(value: Any) -> Any direct
+import 3 code ts.h_n5_await(value: Any) -> Any direct
+native @04100a3772ec564e8bdc38f90d5678f50f6395ae42c373d3239143cfaadfc478
+native @1aad1a79381293bdcd04432b82bd1e45fe6804d78bb50cea35de94a314cadc4c
+native @1c50cd669ab12c8c1448a422ad8da57414f9cecb204e2761bf3ed6de239dc2f0
+native @258b427119318e6e11a25be7866f951c5db191e871da4f4079bb8e7e90dabfdc
+native @28477ea05b4cec8b7586dd348a019909277c14292e34e55caab3a93b3de920a9
+native @36aa71c777b08d863d82b98d25bafe3e5baaf5c7c07c3adfa7d8d6b9addb729a
+native @39021a05d55349b01f61bd7eb946ca0d0d3b98df43ad90a30d5fd04dfd588398
+native @ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5
+native @e5f5e7081794f244d696377835fa16cadf6f6c49d53e947fc928b49494989ca3
+native @f47eff31eb6ab5a5bb2a2495830ee82bc313363956107391b89c43d8135e7fb7
+export demo "{\"kind\":\"function\",\"value\":{\"function\":\"20f5d52debaf67ff53653f1b9def3c8d80f9025de3e1ca22b06a609ba5eac5c6\",\"signature\":{\"result\":\"text\"},\"convention\":{\"kind\":\"ts_direct\",\"value\":{\"await_fn\":{\"kind\":\"import\",\"value\":3}}},\"asynchronous\":true,\"rest\":false}}"
+definition "function eq(arg0: Any, arg1: Any) -> Bool\nkernel 1\nerrors \"arity\"\ncharge sum(1, product(sum(deep(arg0), deep(arg1)), sum(deep(arg0), deep(arg1))), deep(result))\nnative\n"
+definition "function num.to_float(arg0: Number) -> Float\nkernel 1\nerrors \"arity\", \"number_range\", \"type_error\"\ncharge sum(1, sum(deep(arg0)), deep(result))\nnative\n"
+definition "function num.lt(arg0: Number, arg1: Number) -> Bool\nkernel 1\nerrors \"arity\", \"type_error\"\ncharge sum(1, product(sum(deep(arg0), deep(arg1)), sum(deep(arg0), deep(arg1))), deep(result))\nnative\n"
+definition "function local.function() -> Any\nkernel 1\nmetering statements\nimport 0 code ts.h_n14_sleep_duration(milliseconds: Any) -> Int direct\nimport 1 operation typescript.sleep(milliseconds: Int) -> Null\nimport 2 code ts.h_n7_promise_n5_adopt(value: Any) -> Any direct\nbody {\n  do let(t1 = perform 1(invoke import 0(5.0)) as Null then yield, absent)\n  return \"awake\" via import 2\n}\n"
+definition "function num.floor(arg0: Number) -> Number\nkernel 1\nerrors \"arity\", \"type_error\"\ncharge sum(1, sum(deep(arg0)), deep(result))\nnative\n"
+definition "function num.le(arg0: Number, arg1: Number) -> Bool\nkernel 1\nerrors \"arity\", \"type_error\"\ncharge sum(1, product(sum(deep(arg0), deep(arg1)), sum(deep(arg0), deep(arg1))), deep(result))\nnative\n"
+definition "function ts.sleep_duration(milliseconds: Any) -> Int\nkernel 1\ncharge 1024\nuse bool.not = @f47eff31eb6ab5a5bb2a2495830ee82bc313363956107391b89c43d8135e7fb7\nuse eq = @04100a3772ec564e8bdc38f90d5678f50f6395ae42c373d3239143cfaadfc478\nuse error.new = @e5f5e7081794f244d696377835fa16cadf6f6c49d53e947fc928b49494989ca3\nuse float.to_int = @36aa71c777b08d863d82b98d25bafe3e5baaf5c7c07c3adfa7d8d6b9addb729a\nuse kind = @ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5\nuse num.floor = @258b427119318e6e11a25be7866f951c5db191e871da4f4079bb8e7e90dabfdc\nuse num.is_finite = @39021a05d55349b01f61bd7eb946ca0d0d3b98df43ad90a30d5fd04dfd588398\nuse num.le = @28477ea05b4cec8b7586dd348a019909277c14292e34e55caab3a93b3de920a9\nuse num.lt = @1c50cd669ab12c8c1448a422ad8da57414f9cecb204e2761bf3ed6de239dc2f0\nuse num.to_float = @1aad1a79381293bdcd04432b82bd1e45fe6804d78bb50cea35de94a314cadc4c\nbody {\n  let number = milliseconds\n  if bool.not(eq(kind(number), \"integer\")) {\n    if bool.not(eq(kind(number), \"float\")) {\n      throw error.new(\"type_error\", \"sleep takes a number of milliseconds\")\n    }\n  }\n  set number = num.to_float(number)\n  if num.lt(number, 0.0) {\n    throw error.new(\"number_range\", \"`sleep` takes a duration that is finite and not negative\")\n  }\n  if bool.not(num.is_finite(number)) {\n    throw error.new(\"number_range\", \"`sleep` takes a duration that is finite and not negative\")\n  }\n  if num.le(9.223372036854776e18, number) {\n    return 9223372036854775807\n  }\n  return float.to_int(num.floor(number))\n}\n"
+definition "function float.to_int(arg0: Float) -> Int\nkernel 1\nerrors \"arity\", \"number_range\", \"type_error\"\ncharge sum(1, sum(deep(arg0)), deep(result))\nnative\n"
+definition "function num.is_finite(arg0: Number) -> Bool\nkernel 1\nerrors \"arity\", \"type_error\"\ncharge sum(1, sum(deep(arg0)), deep(result))\nnative\n"
+definition "function kind(arg0: Any) -> Text\nkernel 1\nerrors \"arity\"\ncharge sum(1, 0, deep(result))\nnative\n"
+definition "function error.new(kind: Text, message: Text, data?: Any) -> Error\nkernel 1\nerrors \"type_error\"\ncharge sum(1, size(kind), size(message), size(result))\nnative\n"
+definition "function bool.not(x: Bool) -> Bool\nkernel 1\nerrors \"type_error\"\ncharge 1\nnative\n"
 main {
-  let demo = &demo
+  let demo = &local.function
 }
 
-unit Function(Name("demo")): statements=2 scopes=1 sites=4
+unit Library(FunctionId(20f5d52debaf67ff53653f1b9def3c8d80f9025de3e1ca22b06a609ba5eac5c6)): statements=2 scopes=1 sites=5

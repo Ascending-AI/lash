@@ -37,6 +37,8 @@ pub(super) struct SurfaceScratch {
 /// One fallible store-trait method, executed as a compared differential step.
 #[derive(Clone, Copy, Debug)]
 pub(super) enum SurfaceMethod {
+    LinkedPackageStore,
+    ExecutionResolutions,
     ProcessAuthority,
     EnvironmentBytes,
     LoadSession,
@@ -198,6 +200,8 @@ pub(super) enum SurfaceMethod {
 impl SurfaceMethod {
     pub(super) fn label(self) -> &'static str {
         match self {
+            Self::LinkedPackageStore => "surface:linked_package_store",
+            Self::ExecutionResolutions => "surface:execution_resolutions",
             Self::ProcessAuthority => "surface:process_authority",
             Self::EnvironmentBytes => "surface:environment_bytes",
             Self::LoadSession => "surface:load_session",
@@ -371,6 +375,8 @@ pub(super) fn surface_sweep_case() -> GeneratedCase {
     GeneratedCase {
         name: CaseName::StoreSurfaceSweep,
         operations: vec![
+            surface(SurfaceMethod::LinkedPackageStore),
+            surface(SurfaceMethod::ExecutionResolutions),
             // The seed commit stamps a turn so the inventory can work
             // `committed_turn_exists` over a turn that is actually committed.
             StoreOperation::Commit {
@@ -670,11 +676,179 @@ impl BackendRunner {
         let store = self.store();
         let session_id = self.session_id.clone();
         let answer = match method {
+            SurfaceMethod::ExecutionResolutions => {
+                let stores = self.lifecycle_backend.stores();
+                lash_durable::laws::a_resolution_winner_and_its_claim_debt_commit_atomically(
+                    stores.durable_store().as_ref(),
+                    stores.execution_resolutions().as_ref(),
+                )
+                .await
+                .map_err(|error| StoreError::Backend(error.to_string()))?;
+                let resolutions = stores.execution_resolutions();
+                let missing = lash_core_store::resolutions::ResolutionKey {
+                    execution: lash_core_store::resolutions::ExecutionId(
+                        "process:unregistered-resolution".to_owned(),
+                    ),
+                    use_: lash_vocabulary::names::OperationUse {
+                        link: lash_vocabulary::package::LinkId::from_bytes([0; 32]),
+                        slot: lash_vocabulary::names::ImportSlot(0),
+                    },
+                };
+                assert!(
+                    resolutions
+                        .load(&missing)
+                        .await
+                        .map_err(|error| StoreError::Backend(error.to_string()))?
+                        .is_none()
+                );
+                assert_eq!(
+                    resolutions
+                        .requirements(
+                            &lash_core::durable_port::ActorKey::process("resolution-owner")
+                                .map_err(|error| StoreError::Backend(error.to_string()))?
+                        )
+                        .await
+                        .map_err(|error| StoreError::Backend(error.to_string()))?,
+                    lash_durable::packages::vocabulary::claims::ClaimRequirements::default()
+                );
+                "one immutable winner and atomic claim debt".to_owned()
+            }
+            SurfaceMethod::LinkedPackageStore => {
+                use lash_core_store::artifact_referrer::{
+                    ArtifactReferrer, HostArtifactPin, ReferrerClaim, ResolvedArtifactCleanup,
+                };
+                use lash_core_store::packages::{LinkRecord, PackageRecord};
+                use lash_durable::packages::vocabulary::{names::*, package::*};
+                let stores = self.lifecycle_backend.stores();
+                let packages = stores.package_store();
+                let referrer = ArtifactReferrer::HostPin(HostArtifactPin::mint());
+                let claim = ReferrerClaim::unguarded(referrer.clone())
+                    .map_err(|error| StoreError::Backend(error.to_string()))?;
+                let modules = stores.module_artifacts();
+                let document = DocumentId::from_bytes([73; 32]);
+                modules
+                    .publish_module_artifact(
+                        &claim,
+                        &document.to_string(),
+                        b"package surface document",
+                    )
+                    .await
+                    .map_err(|error| StoreError::Backend(error.to_string()))?;
+                let link = Link {
+                    document,
+                    fills: Default::default(),
+                };
+                let link = LinkRecord {
+                    id: link.identity(),
+                    link,
+                };
+                let package = Package {
+                    path: lash_vocabulary::PackagePath::parse("surface")
+                        .map_err(|error| StoreError::Backend(format!("{error}")))?,
+                    members: [(
+                        lash_vocabulary::Segment::new("run")
+                            .map_err(|error| StoreError::Backend(format!("{error}")))?,
+                        Member {
+                            visibility: Visibility::Public,
+                            kind: MemberKind::Export {
+                                link: link.id,
+                                export: ExportName {
+                                    name: Name::new("run"),
+                                    member: None,
+                                },
+                            },
+                        },
+                    )]
+                    .into(),
+                };
+                let package = PackageRecord {
+                    id: package.identity(),
+                    package,
+                };
+                let publication = PublicationRecord {
+                    context: PublicationContext {
+                        domain: PublicationDomain("surface".into()),
+                        scope: PublicationScope::Host,
+                        publisher: PublisherInstance("surface".into()),
+                        root: lash_vocabulary::Segment::new("surface")
+                            .map_err(|error| StoreError::Backend(format!("{error}")))?,
+                    },
+                    path: package.package.path.clone(),
+                    content: PublishedContent::Package(package.id),
+                    code_links: [link.id].into(),
+                    imported_publications: Vec::new(),
+                };
+                packages
+                    .put_link(&claim, &link, &[])
+                    .await
+                    .map_err(|error| StoreError::Backend(error.to_string()))?;
+                packages
+                    .put_package(&claim, &package)
+                    .await
+                    .map_err(|error| StoreError::Backend(error.to_string()))?;
+                packages
+                    .put_labels(&claim, &package.id, "{}")
+                    .await
+                    .map_err(|error| StoreError::Backend(error.to_string()))?;
+                assert_eq!(
+                    packages
+                        .labels(&package.id)
+                        .await
+                        .map_err(|error| StoreError::Backend(error.to_string()))?,
+                    vec!["{}".to_owned()]
+                );
+                let key = packages
+                    .publish(&claim, &publication)
+                    .await
+                    .map_err(|error| StoreError::Backend(error.to_string()))?;
+                packages
+                    .acquire_publication(&claim, &key)
+                    .await
+                    .map_err(|error| StoreError::Backend(error.to_string()))?;
+                assert_eq!(
+                    packages
+                        .link(&link.id)
+                        .await
+                        .map_err(|error| StoreError::Backend(error.to_string()))?,
+                    Some(link.clone())
+                );
+                assert_eq!(
+                    packages
+                        .package(&package.id)
+                        .await
+                        .map_err(|error| StoreError::Backend(error.to_string()))?,
+                    Some(package)
+                );
+                assert_eq!(
+                    packages
+                        .publication(&key)
+                        .await
+                        .map_err(|error| StoreError::Backend(error.to_string()))?,
+                    Some(publication)
+                );
+                packages
+                    .end_package_referrer(&ResolvedArtifactCleanup {
+                        referrer,
+                        carries: Vec::new(),
+                    })
+                    .await
+                    .map_err(|error| StoreError::Backend(error.to_string()))?;
+                assert!(
+                    packages
+                        .link(&link.id)
+                        .await
+                        .map_err(|error| StoreError::Backend(error.to_string()))?
+                        .is_none()
+                );
+                "publication acquired and reclaimed with its closure".to_owned()
+            }
             SurfaceMethod::ProcessAuthority => {
                 let record = self
                     .lifecycle_backend
                     .process_authority_reads()
-                    .process_authority(&lash_core::ProcessId::fixture("surface:unknown-process"))
+                    .process_authority(&lash_vocabulary::identity::ProcessId::fixture(
+                        "surface:unknown-process",
+                    ))
                     .await?;
                 format!("present={}", record.is_some())
             }
@@ -841,7 +1015,7 @@ impl BackendRunner {
                 // The keyed point read answers what the list answers for the
                 // row: `Open`, `Admitted` naming its run, or nothing once
                 // the row is terminal or unknown (FIG-3976).
-                let input = lash_core::InputId::fixture(if known {
+                let input = lash_vocabulary::identity::InputId::fixture(if known {
                     format!("{session_id}:input")
                 } else {
                     UNKNOWN_INPUT_ID.to_string()
@@ -889,7 +1063,9 @@ impl BackendRunner {
                 let page = store
                     .load_ancestors(
                         &session_id,
-                        lash_core::store::HistoryAnchor::Node(lash_core::NodeId::fixture(node_id)),
+                        lash_core::store::HistoryAnchor::Node(
+                            lash_vocabulary::identity::NodeId::fixture(node_id),
+                        ),
                         lash_core::store::HistoryBudget {
                             max_nodes: std::num::NonZeroU32::MIN,
                             max_bytes: std::num::NonZeroU64::MIN.saturating_add(1024 * 1024 - 1),
@@ -902,9 +1078,9 @@ impl BackendRunner {
                 let page = store
                     .load_ancestors(
                         &session_id,
-                        lash_core::store::HistoryAnchor::Node(lash_core::NodeId::from(
-                            "fig-2841-unknown-node",
-                        )),
+                        lash_core::store::HistoryAnchor::Node(
+                            lash_vocabulary::identity::NodeId::from("fig-2841-unknown-node"),
+                        ),
                         lash_core::store::HistoryBudget {
                             max_nodes: std::num::NonZeroU32::MIN,
                             max_bytes: std::num::NonZeroU64::MIN.saturating_add(1024 * 1024 - 1),
@@ -1024,8 +1200,8 @@ impl BackendRunner {
                 let admission = store
                     .admit_at_checkpoint(&lash_core::store::CheckpointAdmissionRequest {
                         session_id: session_id.clone(),
-                        run: lash_core::TurnId::from(SURFACE_CHECKPOINT_RUN_ID),
-                        turn_id: lash_core::TurnId::from("fig-2841-surface-turn"),
+                        run: lash_vocabulary::identity::TurnId::from(SURFACE_CHECKPOINT_RUN_ID),
+                        turn_id: lash_vocabulary::identity::TurnId::from("fig-2841-surface-turn"),
                         checkpoint: lash_core::CheckpointKind::AfterWork,
                         step: "fig-2841-surface-checkpoint".to_string(),
                         max_inputs: 1,
@@ -1088,7 +1264,7 @@ impl BackendRunner {
                 let exists = store
                     .committed_turn_exists(
                         &session_id,
-                        &lash_core::TurnId::from(SURFACE_COMMITTED_TURN_ID),
+                        &lash_vocabulary::identity::TurnId::from(SURFACE_COMMITTED_TURN_ID),
                     )
                     .await?;
                 format!("exists={exists}")
@@ -1097,7 +1273,7 @@ impl BackendRunner {
                 let exists = store
                     .committed_turn_exists(
                         &session_id,
-                        &lash_core::TurnId::from(UNCOMMITTED_TURN_ID),
+                        &lash_vocabulary::identity::TurnId::from(UNCOMMITTED_TURN_ID),
                     )
                     .await?;
                 format!("exists={exists}")
@@ -1105,7 +1281,7 @@ impl BackendRunner {
             SurfaceMethod::RunTerminal => {
                 // The kind and cause are caller-supplied facts; the instant
                 // is the backend clock's and is not compared.
-                let run = lash_core::TurnId::from(SURFACE_RUN_ID);
+                let run = lash_vocabulary::identity::TurnId::from(SURFACE_RUN_ID);
                 match store.run_terminal(&session_id, &run).await? {
                     Some(terminal) => {
                         let cause = match &terminal.cause {
@@ -1123,7 +1299,7 @@ impl BackendRunner {
                 }
             }
             SurfaceMethod::EndRefusedRun => {
-                let run = lash_core::TurnId::from(SURFACE_RUN_ID);
+                let run = lash_vocabulary::identity::TurnId::from(SURFACE_RUN_ID);
                 let refusal = lash_core::RuntimeError::new(
                     lash_core::RuntimeErrorCode::StoreCommitSuperseded,
                     "the head moved under the run's commit",
@@ -1142,8 +1318,9 @@ impl BackendRunner {
                 }
             }
             SurfaceMethod::EndCommandRun => {
-                let run =
-                    lash_core::TurnId::fixture(format!("shift-commands:{session_id}-surface"));
+                let run = lash_vocabulary::identity::TurnId::fixture(format!(
+                    "shift-commands:{session_id}-surface"
+                ));
                 let end = match store.end_command_run(&session_id, &run, 1).await? {
                     lash_core::store::RunEndOutcome::Ended(terminal) => {
                         format!("ended={:?}/{:?}", terminal.kind(), terminal.cause)
@@ -1160,14 +1337,16 @@ impl BackendRunner {
                 format!("{end} recorded={recorded:?}")
             }
             SurfaceMethod::RunBinding => {
-                let input = lash_core::InputId::fixture(format!("{session_id}:input"));
+                let input =
+                    lash_vocabulary::identity::InputId::fixture(format!("{session_id}:input"));
                 match store.run_binding(&session_id, &input).await? {
                     Some(run) => format!("bound={run}"),
                     None => "bound=none".to_string(),
                 }
             }
             SurfaceMethod::RunOfInput => {
-                let input = lash_core::InputId::fixture(format!("{session_id}:input"));
+                let input =
+                    lash_vocabulary::identity::InputId::fixture(format!("{session_id}:input"));
                 match store.run_of_input(&session_id, &input).await? {
                     Some(run) => format!("run={run}"),
                     None => "run=none".to_string(),
@@ -1186,7 +1365,8 @@ impl BackendRunner {
                         )
                     })
                 };
-                let input = lash_core::InputId::fixture(format!("{session_id}:input"));
+                let input =
+                    lash_vocabulary::identity::InputId::fixture(format!("{session_id}:input"));
                 let FollowFacts::Input(input) = store
                     .follow_facts(&session_id, &FollowSubject::Input(input))
                     .await?
@@ -1198,7 +1378,9 @@ impl BackendRunner {
                 let FollowFacts::Run(run) = store
                     .follow_facts(
                         &session_id,
-                        &FollowSubject::Run(lash_core::TurnId::from(SURFACE_RUN_ID)),
+                        &FollowSubject::Run(lash_vocabulary::identity::TurnId::from(
+                            SURFACE_RUN_ID,
+                        )),
                     )
                     .await?
                 else {
@@ -1217,7 +1399,7 @@ impl BackendRunner {
                 )
             }
             SurfaceMethod::BoundTurnScopes => {
-                let run = lash_core::TurnId::from(SURFACE_RUN_ID);
+                let run = lash_vocabulary::identity::TurnId::from(SURFACE_RUN_ID);
                 let scopes = store
                     .bound_turn_scopes(&session_id, &run)
                     .await?
@@ -1235,7 +1417,7 @@ impl BackendRunner {
                             TurnInput::text("input under a run spec"),
                         )
                         .with_source_key("surface:run-spec-input")
-                        .with_input_id(lash_core::InputId::fixture(format!(
+                        .with_input_id(lash_vocabulary::identity::InputId::fixture(format!(
                             "{session_id}:run-spec-input"
                         )))
                         .with_run_spec(surface_run_spec()),
@@ -1308,10 +1490,14 @@ impl BackendRunner {
                             // Every backend mints unkeyed ids its own way, so
                             // the sweep names each row it adds.
                             draft(added, "input added by a batch").with_input_id(
-                                lash_core::InputId::fixture(format!("{session_id}:{added}")),
+                                lash_vocabulary::identity::InputId::fixture(format!(
+                                    "{session_id}:{added}"
+                                )),
                             ),
                             draft("surface:run-spec-input", resent_text).with_input_id(
-                                lash_core::InputId::fixture(format!("{session_id}:run-spec-input")),
+                                lash_vocabulary::identity::InputId::fixture(format!(
+                                    "{session_id}:run-spec-input"
+                                )),
                             ),
                         ],
                     )?)
@@ -1333,7 +1519,9 @@ impl BackendRunner {
                         TurnInput::text(text),
                     )
                     .with_source_key(key)
-                    .with_input_id(lash_core::InputId::fixture(format!("{session_id}:{key}")))
+                    .with_input_id(lash_vocabulary::identity::InputId::fixture(format!(
+                        "{session_id}:{key}"
+                    )))
                     .with_run_spec(surface_run_spec())
                 };
                 let admission = store
@@ -1372,12 +1560,13 @@ impl BackendRunner {
                 }
             }
             SurfaceMethod::BindRunInputs { conflicting } => {
-                let run = lash_core::TurnId::from(if conflicting {
+                let run = lash_vocabulary::identity::TurnId::from(if conflicting {
                     SURFACE_OTHER_RUN_ID
                 } else {
                     SURFACE_RUN_ID
                 });
-                let input = lash_core::InputId::fixture(format!("{session_id}:input"));
+                let input =
+                    lash_vocabulary::identity::InputId::fixture(format!("{session_id}:input"));
                 store.bind_run_inputs(&session_id, &run, &[input]).await?;
                 "bound".to_string()
             }
@@ -1456,7 +1645,9 @@ impl BackendRunner {
             ),
             SurfaceMethod::EndAttachmentReferrer => {
                 let referrer = lash_core::ArtifactReferrer::ProcessRecord(
-                    lash_core::ProcessId::fixture(&format!("surface-ended:{session_id}")),
+                    lash_vocabulary::identity::ProcessId::fixture(&format!(
+                        "surface-ended:{session_id}"
+                    )),
                 );
                 store.end_attachment_referrer(&referrer).await?;
                 "ended".to_string()

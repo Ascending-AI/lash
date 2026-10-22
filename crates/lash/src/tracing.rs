@@ -39,12 +39,12 @@ pub use lash_trace::{
     LashIdentity, ProcessStartPhase, ProcessStartPhaseTime, ProducerKind, ProducerOutcome,
     ProducerSpan, ProducerSpec, ProductObservationSink, SpanKey, SpanRole, TraceAttemptId,
     TraceAttemptLink, TraceAttemptObservation, TraceCall, TraceCaller, TraceCarrier, TraceCause,
-    TraceDomainCompletion, TraceDomainStatus, TraceDomainSubject, TraceEventKind, TraceIdentity,
-    TraceIds, TraceLinkMode, TraceLinks, TraceModelAttempt, TraceModelAttemptSpan, TraceModelCall,
-    TraceParent, TracePosition, TraceRecordIdentity, TraceScopeAdmission, TraceScopeId,
-    TraceScopeKind, TraceScopeOffer, TraceScopeOwner, TraceSpanKind, TraceStateBudget,
-    TraceStateLimits, TraceTimestamp, TraceToolOwner, TraceTransitionKind, W3cSpanId,
-    W3cTraceFlags, W3cTraceId, W3cTraceState, derive_span,
+    TraceDomainCompletion, TraceDomainStatus, TraceDomainSubject, TraceEventKind,
+    TraceExecutionCode, TraceIdentity, TraceIds, TraceLinkMode, TraceLinks, TraceModelAttempt,
+    TraceModelAttemptSpan, TraceModelCall, TraceParent, TracePosition, TraceRecordIdentity,
+    TraceScopeAdmission, TraceScopeId, TraceScopeKind, TraceScopeOffer, TraceScopeOwner,
+    TraceSpanKind, TraceStateBudget, TraceStateLimits, TraceTimestamp, TraceToolOwner,
+    TraceTransitionKind, W3cSpanId, W3cTraceFlags, W3cTraceId, W3cTraceState, derive_span,
 };
 pub use lash_trace::{TRACESTATE_CHAR_LIMIT, TRACESTATE_MEMBER_LIMIT};
 
@@ -58,7 +58,6 @@ pub use lash_core::{
     facade_support::TraceRecord, facade_support::TraceRuntimeScope,
     facade_support::TraceRuntimeSubject, facade_support::TraceSinkError,
 };
-pub use lash_protocol_types::ExecutionNodeKind;
 #[cfg(feature = "otel-trace")]
 pub use lash_trace::otel::api as otel;
 

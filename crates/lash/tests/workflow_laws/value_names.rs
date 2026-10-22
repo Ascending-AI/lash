@@ -3,9 +3,9 @@
 //! and kept through print and read in TypeScript and Python, and a binding
 //! that holds an awaited tool call's reply names that `perform`.
 use lash::dialect::SourceFormat;
+use lash::workflow::WorkflowDocument;
 use lash::workflow::document::{self as k, Captions, Document};
-use lash::workflow::view::{BindingView, SiteKind, WorkflowView, derive};
-use lash::workflow::{WorkflowDocument, WorkflowDocumentEntry};
+use lash::workflow::view::{BindingView, SiteKind, WorkflowView, derive_callable};
 use std::collections::BTreeMap;
 
 const TYPESCRIPT: &str = r#"export async function route(priority: string) {
@@ -48,12 +48,7 @@ fn lower(format: SourceFormat, source: &str) -> (Document, Captions) {
             result: k::Type::Any,
         },
     )]);
-    let environment_namespaces = lash::dialect::Namespaces::of_effects(
-        &effects,
-        &lash::workflow::document::ContractId::new("1"),
-        &Default::default(),
-    )
-    .expect("the test's effects are operations");
+    let environment_namespaces = super::namespaces(effects);
     let environment = lash::dialect::Environment::new(embedding.library(), &environment_namespaces);
     let mode = lash::dialect::Mode::Module;
     let lowered = match format {
@@ -69,16 +64,9 @@ fn lower(format: SourceFormat, source: &str) -> (Document, Captions) {
 
 /// The checked holder and view of `document` entered at `route`.
 fn view(document: Document) -> (WorkflowDocument, WorkflowView) {
-    let embedding = lash_vm_worker::built_embedding(&Default::default()).expect("embedding");
-    let functions = embedding
-        .registry()
-        .expect("registry")
-        .export_declarations();
-    let entry = WorkflowDocumentEntry::Entry {
-        function: k::Name::new("route"),
-    };
-    let holder = WorkflowDocument::derive(document, entry, &functions).expect("link");
-    let view = derive(&holder, &super::test_packages()).expect("view");
+    let unit = super::export_unit(&document, "route");
+    let (holder, context) = super::holder(document);
+    let view = derive_callable(&holder, &unit, &context).expect("view");
     (holder, view)
 }
 
@@ -152,7 +140,7 @@ fn a_binding_caption_round_trips_through_print_and_read_in_typescript_and_python
                 lash::python::print(&document, Some(&captions), embedding.library(), options)
             }
         }
-        .expect("print with captions");
+        .unwrap_or_else(|error| panic!("{format:?} print with captions: {error:?}"));
         assert!(printed.dropped.is_empty(), "{format:?} drops no caption");
         let (read, read_captions) = match format {
             SourceFormat::TypeScriptV1 => lash::typescript::read(

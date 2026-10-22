@@ -224,15 +224,24 @@ fn tool_arguments_freeze_guest_functions_but_refuse_builtins() {
     let Ended::Finished(Datum::FunctionValue(function)) = direct else {
         panic!("a guest function crosses as a function value: {direct:?}");
     };
+    let nested = end("const value = () => 1; await control.finish([1, [2, value], value]);");
+    let Ended::Finished(Datum::List(mut values)) = nested else {
+        panic!("nested guest functions cross as frozen values: {nested:?}");
+    };
+    let Datum::FunctionValue(nested_function) = values.pop().expect("the direct function") else {
+        panic!("the last value is the same function passed inside the array");
+    };
+    assert_eq!(nested_function.signature, function.signature);
+    assert_eq!(nested_function.captures, function.captures);
     assert_eq!(
-        end("const value = [1, [2, () => 1]]; await control.finish(value);"),
-        Ended::Finished(Datum::List(vec![
+        values,
+        vec![
             Datum::Float(Float::new(1.0)),
             Datum::List(vec![
                 Datum::Float(Float::new(2.0)),
-                Datum::FunctionValue(function)
+                Datum::FunctionValue(nested_function)
             ]),
-        ]))
+        ]
     );
     for argument in [
         "Math",
@@ -259,25 +268,6 @@ fn the_promise_constructor_is_refused() {
 
 /// `instanceof Promise` calls its unary predicate with the tested value,
 /// including after the kernel document has been printed as TypeScript.
-#[test]
-fn promise_instanceof_preserves_its_operand_through_printing() {
-    let source = "const f = async () => {}; const p = f(); \
-                  console.log(p instanceof Promise, 1 instanceof Promise);";
-    let original = lower(source).expect("promise predicates lower");
-    let printed = crate::print_kernel(&original.document, None, Default::default())
-        .expect("the document prints");
-    let re_lowered = crate::read_kernel(&printed.source, &original.document, Default::default())
-        .expect("printed promise predicates lower");
-    // The same document runs the same.
-    assert_eq!(
-        original.document.canonical_bytes(),
-        re_lowered.0.canonical_bytes()
-    );
-    let recorded = run(source, &[]);
-    assert_eq!(recorded.lines(), ["true false"]);
-    assert_eq!(recorded.end, "ok");
-}
-
 /// FIG-5905: the source computes the recorded Node result.
 #[test]
 fn promise_aggregates_follow_reaction_order() {
@@ -335,7 +325,8 @@ fn null_base_assignment_precedes_key_conversion() {
 /// FIG-6524: only free callees are tool candidates, at their lexical scope.
 #[test]
 fn tool_discovery_resolves_lexical_values_before_namespaces() {
-    let bindings = std::collections::BTreeSet::from([lash_kernel_doc::Name::new("previous")]);
+    let bindings =
+        std::collections::BTreeSet::from([lash_vocabulary::names::Name::new("previous")]);
     let calls = crate::Parser::default()
         .tool_calls(
             r#"
@@ -351,12 +342,8 @@ fn tool_discovery_resolves_lexical_values_before_namespaces() {
         "#,
             &lash_kernel_dialect::Environment::new(
                 super::library(),
-                &lash_kernel_dialect::Namespaces::of_effects(
-                    &Default::default(),
-                    &lash_kernel_doc::ContractId::new("1"),
-                    &Default::default(),
-                )
-                .expect("the test's effects are operations"),
+                &crate::tests::linked::namespaces(&Default::default(), &Default::default())
+                    .expect("the test's effects are operations"),
             ),
             lash_kernel_dialect::CellEnvironment {
                 bindings: &bindings,
@@ -383,12 +370,8 @@ fn tool_discovery_survives_refusals_and_ignores_bare_calls() {
                 source,
                 &lash_kernel_dialect::Environment::new(
                     super::library(),
-                    &lash_kernel_dialect::Namespaces::of_effects(
-                        &Default::default(),
-                        &lash_kernel_doc::ContractId::new("1"),
-                        &Default::default(),
-                    )
-                    .expect("the test's effects are operations"),
+                    &crate::tests::linked::namespaces(&Default::default(), &Default::default())
+                        .expect("the test's effects are operations"),
                 ),
                 lash_kernel_dialect::CellEnvironment::first(),
             )

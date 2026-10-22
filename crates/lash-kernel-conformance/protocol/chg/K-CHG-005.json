@@ -1,107 +1,107 @@
 {
-  "rule": "K-CHG-005",
   "cases": [
     {
-      "name": "deep of (1, 2) is 7",
-      "document": "kernel 1\nnumbers by_spelling\nuse probe.deep = @e5e9f004f359eee0f93f56c110bea16dd3897fcd83b9c78c638fd05030b0dcc7\nfn f() { return null }\nmain { let x = (1, 2) finish probe.deep(x) }\n",
-      "expected": {
-        "prints": [],
-        "trace": [],
-        "end": {
-          "finished": "null"
-        },
-        "charged": 17
-      },
+      "document": "kernel 1\nnumbers by_spelling\nnative @981f9d3fc02ed2a960715d6fa159b273c9f5f3c8b670e1a79ae14e1742f690bb\ndefinition \"function f() -> Any\\nkernel 1\\nmetering statements\\nuse probe.deep = @981f9d3fc02ed2a960715d6fa159b273c9f5f3c8b670e1a79ae14e1742f690bb\\nbody {\\n  return null\\n}\\n\"\ndefinition \"function probe.deep(x: Any) -> Any\\nkernel 1\\ncharge deep(x)\\nnative\\n\"\nmain {\n  let x = (1, 2)\n  finish probe.deep(x)\n}\n",
       "environment": {
         "bounds": {
           "charge": 18446744073709551615
         }
-      }
+      },
+      "expected": {
+        "charged": 17,
+        "end": {
+          "finished": "null"
+        },
+        "prints": [],
+        "trace": []
+      },
+      "name": "deep of (1, 2) is 7"
     },
     {
-      "name": "deep of [1, 2] is 7",
-      "document": "kernel 1\nnumbers by_spelling\nuse probe.deep = @e5e9f004f359eee0f93f56c110bea16dd3897fcd83b9c78c638fd05030b0dcc7\nfn f() { return null }\nmain { let x = [1, 2] finish probe.deep(x) }\n",
-      "expected": {
-        "prints": [],
-        "trace": [],
-        "end": {
-          "finished": "null"
-        },
-        "charged": 17
-      },
+      "document": "kernel 1\nnumbers by_spelling\nnative @981f9d3fc02ed2a960715d6fa159b273c9f5f3c8b670e1a79ae14e1742f690bb\ndefinition \"function f() -> Any\\nkernel 1\\nmetering statements\\nuse probe.deep = @981f9d3fc02ed2a960715d6fa159b273c9f5f3c8b670e1a79ae14e1742f690bb\\nbody {\\n  return null\\n}\\n\"\ndefinition \"function probe.deep(x: Any) -> Any\\nkernel 1\\ncharge deep(x)\\nnative\\n\"\nmain {\n  let x = [1, 2]\n  finish probe.deep(x)\n}\n",
       "environment": {
         "bounds": {
           "charge": 18446744073709551615
         }
-      }
+      },
+      "expected": {
+        "charged": 17,
+        "end": {
+          "finished": "null"
+        },
+        "prints": [],
+        "trace": []
+      },
+      "name": "deep of [1, 2] is 7"
     },
     {
-      "name": "deep of map{1:2} is 7",
-      "document": "kernel 1\nnumbers by_spelling\nuse probe.deep = @e5e9f004f359eee0f93f56c110bea16dd3897fcd83b9c78c638fd05030b0dcc7\nfn f() { return null }\nmain { let x = map{1:2} finish probe.deep(x) }\n",
-      "expected": {
-        "prints": [],
-        "trace": [],
-        "end": {
-          "finished": "null"
-        },
-        "charged": 16
-      },
+      "document": "kernel 1\nnumbers by_spelling\nnative @981f9d3fc02ed2a960715d6fa159b273c9f5f3c8b670e1a79ae14e1742f690bb\ndefinition \"function f() -> Any\\nkernel 1\\nmetering statements\\nuse probe.deep = @981f9d3fc02ed2a960715d6fa159b273c9f5f3c8b670e1a79ae14e1742f690bb\\nbody {\\n  return null\\n}\\n\"\ndefinition \"function probe.deep(x: Any) -> Any\\nkernel 1\\ncharge deep(x)\\nnative\\n\"\nmain {\n  let x = map{1: 2}\n  finish probe.deep(x)\n}\n",
       "environment": {
         "bounds": {
           "charge": 18446744073709551615
         }
-      }
+      },
+      "expected": {
+        "charged": 16,
+        "end": {
+          "finished": "null"
+        },
+        "prints": [],
+        "trace": []
+      },
+      "name": "deep of map{1:2} is 7"
     },
     {
-      "name": "deep of {a:[1]} is 6",
-      "document": "kernel 1\nnumbers by_spelling\nuse probe.deep = @e5e9f004f359eee0f93f56c110bea16dd3897fcd83b9c78c638fd05030b0dcc7\nfn f() { return null }\nmain { let x = {a:[1]} finish probe.deep(x) }\n",
-      "expected": {
-        "prints": [],
-        "trace": [],
-        "end": {
-          "finished": "null"
-        },
-        "charged": 16
-      },
+      "document": "kernel 1\nnumbers by_spelling\nnative @981f9d3fc02ed2a960715d6fa159b273c9f5f3c8b670e1a79ae14e1742f690bb\ndefinition \"function f() -> Any\\nkernel 1\\nmetering statements\\nuse probe.deep = @981f9d3fc02ed2a960715d6fa159b273c9f5f3c8b670e1a79ae14e1742f690bb\\nbody {\\n  return null\\n}\\n\"\ndefinition \"function probe.deep(x: Any) -> Any\\nkernel 1\\ncharge deep(x)\\nnative\\n\"\nmain {\n  let x = {a: [1]}\n  finish probe.deep(x)\n}\n",
       "environment": {
         "bounds": {
           "charge": 18446744073709551615
         }
-      }
+      },
+      "expected": {
+        "charged": 16,
+        "end": {
+          "finished": "null"
+        },
+        "prints": [],
+        "trace": []
+      },
+      "name": "deep of {a:[1]} is 6"
     },
     {
-      "name": "deep of shared list is 7",
-      "document": "kernel 1\nnumbers by_spelling\nuse probe.deep = @e5e9f004f359eee0f93f56c110bea16dd3897fcd83b9c78c638fd05030b0dcc7\nmain { let a = [1] let x = [a,a] finish probe.deep(x) }\n",
-      "expected": {
-        "prints": [],
-        "trace": [],
-        "end": {
-          "finished": "null"
-        },
-        "charged": 21
-      },
+      "document": "kernel 1\nnumbers by_spelling\nnative @981f9d3fc02ed2a960715d6fa159b273c9f5f3c8b670e1a79ae14e1742f690bb\ndefinition \"function probe.deep(x: Any) -> Any\\nkernel 1\\ncharge deep(x)\\nnative\\n\"\nmain {\n  let a = [1]\n  let x = [a, a]\n  finish probe.deep(x)\n}\n",
       "environment": {
         "bounds": {
           "charge": 18446744073709551615
         }
-      }
+      },
+      "expected": {
+        "charged": 21,
+        "end": {
+          "finished": "null"
+        },
+        "prints": [],
+        "trace": []
+      },
+      "name": "deep of shared list is 7"
     },
     {
-      "name": "deep of cyclic list is 2",
-      "document": "kernel 1\nnumbers by_spelling\nuse probe.deep = @e5e9f004f359eee0f93f56c110bea16dd3897fcd83b9c78c638fd05030b0dcc7\nmain { let x = [] set x[0] = x finish probe.deep(x) }\n",
-      "expected": {
-        "prints": [],
-        "trace": [],
-        "end": {
-          "finished": "null"
-        },
-        "charged": 12
-      },
+      "document": "kernel 1\nnumbers by_spelling\nnative @981f9d3fc02ed2a960715d6fa159b273c9f5f3c8b670e1a79ae14e1742f690bb\ndefinition \"function probe.deep(x: Any) -> Any\\nkernel 1\\ncharge deep(x)\\nnative\\n\"\nmain {\n  let x = []\n  set x[0] = x\n  finish probe.deep(x)\n}\n",
       "environment": {
         "bounds": {
           "charge": 18446744073709551615
         }
-      }
+      },
+      "expected": {
+        "charged": 12,
+        "end": {
+          "finished": "null"
+        },
+        "prints": [],
+        "trace": []
+      },
+      "name": "deep of cyclic list is 2"
     }
-  ]
+  ],
+  "rule": "K-CHG-005"
 }

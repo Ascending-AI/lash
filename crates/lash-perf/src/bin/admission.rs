@@ -5,7 +5,12 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use anyhow::{Context, Result, ensure};
-use lash_kernel_doc::{EffectName, FunctionCatalog, Name, Param, Signature, Type};
+use lash_kernel_doc::FunctionCatalog;
+use lash_vocabulary::names::EffectName;
+use lash_vocabulary::names::Name;
+use lash_vocabulary::types::Param;
+use lash_vocabulary::types::Signature;
+use lash_vocabulary::types::Type;
 
 #[repr(C)]
 #[derive(Default)]
@@ -77,8 +82,8 @@ fn main() -> Result<()> {
     );
     let counter = Counter::open()?;
     let (standard, assembly) = counter.measure(|| {
-        lash_vm_releases::lash_packages()
-            .map(|packages| std::sync::Arc::clone(packages.functions()))
+        lash_vm_releases::helper_release()
+            .map(|release| std::sync::Arc::new(release.functions.clone()))
     })?;
     let standard = standard?;
     let (embedding, boot) = counter
@@ -118,18 +123,38 @@ fn main() -> Result<()> {
             at = end.max(start);
         }
     }
-    let controls = BTreeMap::from([(
+    let _controls = BTreeMap::from([(
         EffectName::new("control.finish")?,
         BTreeSet::from([lash_kernel_dialect::EffectControl::Finish]),
     )]);
     let bindings = BTreeSet::new();
     let functions = BTreeMap::new();
-    let environment_namespaces = lash_kernel_dialect::Namespaces::of_effects(
-        &effects,
-        &lash_kernel_doc::ContractId::new("1"),
-        &controls,
-    )
-    .context("the spike's effects are operations")?;
+    let mut packages: BTreeMap<_, BTreeMap<_, _>> = BTreeMap::new();
+    for (effect, signature) in &effects {
+        let operation = lash_vocabulary::QualifiedOperation::from_effect(effect)?;
+        let offer = lash_vocabulary::OperationOffer {
+            requirement: lash_vocabulary::OperationRequirement::new(
+                signature.clone(),
+                lash_vocabulary::ContractId::new("1"),
+            ),
+            mode: lash_vocabulary::OperationMode::Waited,
+            intents: Default::default(),
+            controls: if effect.as_str() == "control.finish" {
+                lash_vocabulary::TurnControls::finish(lash_vocabulary::JsonSchema::any())
+            } else {
+                lash_vocabulary::TurnControls::none()
+            },
+        };
+        packages.entry(operation.package).or_default().insert(
+            operation.name,
+            lash_kernel_dialect::NamespaceMember {
+                visibility: lash_vocabulary::Visibility::Public,
+                kind: lash_kernel_dialect::NamespaceKind::Operation(offer.into()),
+            },
+        );
+    }
+    let environment_namespaces =
+        lash_kernel_dialect::Namespaces::new(packages, Default::default(), &|_| false)?;
     let environment =
         lash_kernel_dialect::Environment::new(embedding.library(), &environment_namespaces);
     let lowered = embedding
@@ -155,8 +180,6 @@ fn main() -> Result<()> {
         &unregistered
     };
     let environment = lash_kernel_check::Environment {
-        effects: document.manifest.effects.clone(),
-        internal: Box::new(|_| false),
         functions: catalog,
         bindings: BTreeSet::new(),
     };
@@ -177,7 +200,7 @@ fn main() -> Result<()> {
     println!(
         "{}",
         serde_json::json!({
-            "mode": mode, "document_bytes": document.to_json()?.len(), "reached_helpers": document.manifest.functions.len(),
+            "mode": mode, "document_bytes": document.to_json()?.len(), "reached_helpers": document.functions.len(),
             "registry_helpers": standard.len(), "assembly_instructions": assembly, "worker_boot_instructions": boot,
             "first_admit_instructions": cold, "admit_instructions": repeated / 30, "admits": 30,
         })

@@ -3,7 +3,7 @@
   "cases": [
     {
       "name": "task handles retain ended results",
-      "document": "kernel 1\nnumbers by_spelling\nfn value() { return 7 }\nmain {\nlet h = spawn call value() let a = join h let b = join h finish (a, b)\n}\n",
+      "document": "kernel 1\nnumbers by_spelling\ndefinition \"function value() -> Any\\nkernel 1\\nmetering statements\\nbody {\\n  return 7\\n}\\n\"\nmain {\n  let h = spawn invoke value()\n  let a = join h\n  let b = join h\n  finish (a, b)\n}\n",
       "expected": {
         "prints": [],
         "end": {

@@ -14,14 +14,23 @@
 //! with retained revisions; its tool surface is a TurnContent node. The
 //! first phase that holds them stages them (FIG-6021, FIG-6599).
 
+use lash_core_store::checkpoint_graph::EncodeBudget;
+use lash_core_store::checkpoint_graph::ExplicitLimit;
+use lash_core_store::checkpoint_graph::GraphDecoder;
+use lash_core_store::checkpoint_graph::GraphRefusal;
+use lash_core_store::checkpoint_graph::GraphStaging;
+use lash_core_store::checkpoint_graph::NodeId;
+use lash_core_store::checkpoint_graph::NodeKind;
+use lash_core_store::checkpoint_graph::NodeSource;
+use lash_core_store::checkpoint_graph::TypedBody;
 use lash_core_store::checkpoint_graph::bodies::PhaseRoot as PhaseRootBody;
-use lash_core_store::checkpoint_graph::{
-    EncodeBudget, ExplicitLimit, GraphDecoder, GraphRefusal, GraphStaging, NodeId, NodeKind,
-    NodeSource, TokenCodec, TokenError, TokenReader, TokenWriter, TypedBody,
-};
 use lash_sansio::{
     CheckpointContentPin, CheckpointContentRef, SavedTurn, TurnCheckpoint, TurnCheckpointContent,
 };
+use lash_vocabulary::tokens::TokenCodec;
+use lash_vocabulary::tokens::TokenError;
+use lash_vocabulary::tokens::TokenReader;
+use lash_vocabulary::tokens::TokenWriter;
 
 use super::run_config::{RecordedRunConfig, RunConfigStored};
 use super::session::PhaseCheckpoint;
@@ -473,8 +482,8 @@ pub struct RecordedPluginPhase {
 /// Read only retained evidence. Absence is not evidence of a pruning history.
 pub async fn read_plugin_phase(
     reads: &dyn lash_durable::DurableReads,
-    session: &crate::SessionId,
-    run: &crate::TurnId,
+    session: &lash_vocabulary::identity::SessionId,
+    run: &lash_vocabulary::identity::TurnId,
 ) -> Result<Option<RecordedPluginPhase>, lash_durable::DurableError> {
     Ok(read_phase(reads, session, run)
         .await?
@@ -490,8 +499,8 @@ pub async fn read_plugin_phase(
 /// A retired phase has no retained events.
 pub async fn read_protocol_events(
     reads: &dyn lash_durable::DurableReads,
-    session: &crate::SessionId,
-    run: &crate::TurnId,
+    session: &lash_vocabulary::identity::SessionId,
+    run: &lash_vocabulary::identity::TurnId,
 ) -> Result<Vec<crate::ProtocolEvent>, lash_durable::DurableError> {
     let Some(phase) = read_phase(reads, session, run).await? else {
         return Ok(Vec::new());
@@ -513,8 +522,8 @@ pub async fn read_protocol_events(
 
 async fn read_phase(
     reads: &dyn lash_durable::DurableReads,
-    session: &crate::SessionId,
-    run: &crate::TurnId,
+    session: &lash_vocabulary::identity::SessionId,
+    run: &lash_vocabulary::identity::TurnId,
 ) -> Result<Option<PhaseCheckpoint>, lash_durable::DurableError> {
     let limits = lash_core_store::checkpoint_graph::DecodeLimits::within_total(16 * 1024 * 1024);
     let graph = match reads

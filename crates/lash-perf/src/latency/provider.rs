@@ -12,6 +12,7 @@
 //! case's way of keeping a run in flight behind the measured input.
 
 use lash_protocol_types::{llm::types::StreamBlockEvent, llm::types::StreamBlockKind};
+
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -23,9 +24,9 @@ use lash_core::llm::types::{
 };
 use lash_core::provider::ProviderOptions;
 use lash_core::testing::TestProvider;
-use lash_protocol_types::SessionId;
 use lash_protocol_types::sync::MutexExt;
 use lash_transport_failure::LlmTransportError;
+use lash_vocabulary::identity::SessionId;
 
 use super::loop_spans::CallStamp;
 use lash_core_ids::perf_witness::latency::Stamp;

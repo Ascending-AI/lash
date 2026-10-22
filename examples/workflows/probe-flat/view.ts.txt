@@ -1,19 +1,19 @@
-unit Function(Name("demo"))
-statement fn demo/0 ordinal=3 depth=0 block=fn demo Let { name: Name("greeting"), value: Expr(Literal(Text("Inbox review started"))) }
-statement fn demo/1 ordinal=4 depth=0 block=fn demo Do { value: Act(ActExpr { kind: Perform { effect: QualifiedName("display.show_message"), result: Any, then_yield: true }, args: [Act(ActExpr { kind: Call(Library(FunctionId(ac89e50257ae69e06fe10e8faa4c6567d50315aca6fcecee2a967bdc8b4af23b))), args: [Record([RecordEntry { field: "text", value: Variable(Name("greeting")) }])] })] }) }
-statement fn demo/2 ordinal=5 depth=0 block=fn demo Let { name: Name("emails"), value: Expr(Act(ActExpr { kind: Perform { effect: QualifiedName("gmail.list_recent"), result: Any, then_yield: true }, args: [Act(ActExpr { kind: Call(Library(FunctionId(ac89e50257ae69e06fe10e8faa4c6567d50315aca6fcecee2a967bdc8b4af23b))), args: [Record([RecordEntry { field: "count", value: Literal(Float(Float(3.0))) }])] })] })) }
-statement fn demo/3 ordinal=6 depth=0 block=fn demo Do { value: Act(ActExpr { kind: Perform { effect: QualifiedName("display.set_status"), result: Any, then_yield: true }, args: [Act(ActExpr { kind: Call(Library(FunctionId(ac89e50257ae69e06fe10e8faa4c6567d50315aca6fcecee2a967bdc8b4af23b))), args: [Record([RecordEntry { field: "key", value: Literal(Text("inbox")) }, RecordEntry { field: "value", value: Literal(Text("Reviewed three mock emails")) }])] })] }) }
-statement fn demo/4 ordinal=7 depth=0 block=fn demo ReturnVia { value: Variable(Name("emails")), policy: FunctionId(ec07dd4e314068cde58b9c1223c9fc11094029f4f5fe6f8d325a12e10b32a475) }
-scope fn demo ordinal=2 depth=0 Entry
-action fn demo/1/0 Some(Effect(QualifiedName("display.show_message")))
-action fn demo/1/0/0 library id=ac89e50257ae69e06fe10e8faa4c6567d50315aca6fcecee2a967bdc8b4af23b name=ts.boundary label="TypeScript boundary"
-action fn demo/2/0 Some(Effect(QualifiedName("gmail.list_recent")))
-action fn demo/2/0/0 library id=ac89e50257ae69e06fe10e8faa4c6567d50315aca6fcecee2a967bdc8b4af23b name=ts.boundary label="TypeScript boundary"
-action fn demo/3/0 Some(Effect(QualifiedName("display.set_status")))
-action fn demo/3/0/0 library id=ac89e50257ae69e06fe10e8faa4c6567d50315aca6fcecee2a967bdc8b4af23b name=ts.boundary label="TypeScript boundary"
-caption callable 0 block=fn demo "Review the inbox"
-caption node 0 site=fn demo/0 "Choose the opening message"
-caption node 2 site=fn demo/1 "Show that the review started"
-caption node 4 site=fn demo/2 "Get the three newest emails"
-caption node 6 site=fn demo/3 "Mark the inbox as reviewed"
-caption node 7 site=fn demo/4 "Give back the emails"
+unit Library(FunctionId(03baf543cc121698dfd8a3679c48a01dbea054404aa47b94af158b8ae6b3711e))
+statement function 03baf543cc121698dfd8a3679c48a01dbea054404aa47b94af158b8ae6b3711e/0 ordinal=3 depth=0 block=function 03baf543cc121698dfd8a3679c48a01dbea054404aa47b94af158b8ae6b3711e Let { name: Name("greeting"), value: Expr(Literal(Text("Inbox review started"))) }
+statement function 03baf543cc121698dfd8a3679c48a01dbea054404aa47b94af158b8ae6b3711e/1 ordinal=4 depth=0 block=function 03baf543cc121698dfd8a3679c48a01dbea054404aa47b94af158b8ae6b3711e Do { value: Act(ActExpr { kind: Perform { slot: ImportSlot(0), result: Any, then_yield: true }, args: [Act(ActExpr { kind: Call(Import(ImportSlot(1))), args: [Record([RecordEntry { field: "text", value: Variable(Name("greeting")) }])] })] }) }
+statement function 03baf543cc121698dfd8a3679c48a01dbea054404aa47b94af158b8ae6b3711e/2 ordinal=5 depth=0 block=function 03baf543cc121698dfd8a3679c48a01dbea054404aa47b94af158b8ae6b3711e Let { name: Name("emails"), value: Expr(Act(ActExpr { kind: Perform { slot: ImportSlot(2), result: Any, then_yield: true }, args: [Act(ActExpr { kind: Call(Import(ImportSlot(1))), args: [Record([RecordEntry { field: "count", value: Literal(Float(Float(3.0))) }])] })] })) }
+statement function 03baf543cc121698dfd8a3679c48a01dbea054404aa47b94af158b8ae6b3711e/3 ordinal=6 depth=0 block=function 03baf543cc121698dfd8a3679c48a01dbea054404aa47b94af158b8ae6b3711e Do { value: Act(ActExpr { kind: Perform { slot: ImportSlot(3), result: Any, then_yield: true }, args: [Act(ActExpr { kind: Call(Import(ImportSlot(1))), args: [Record([RecordEntry { field: "key", value: Literal(Text("inbox")) }, RecordEntry { field: "value", value: Literal(Text("Reviewed three mock emails")) }])] })] }) }
+statement function 03baf543cc121698dfd8a3679c48a01dbea054404aa47b94af158b8ae6b3711e/4 ordinal=7 depth=0 block=function 03baf543cc121698dfd8a3679c48a01dbea054404aa47b94af158b8ae6b3711e ReturnVia { value: Variable(Name("emails")), policy: Import(ImportSlot(4)) }
+scope function 03baf543cc121698dfd8a3679c48a01dbea054404aa47b94af158b8ae6b3711e ordinal=2 depth=0 Entry
+action function 03baf543cc121698dfd8a3679c48a01dbea054404aa47b94af158b8ae6b3711e/1/0 Some(Effect(OperationUse { link: LinkId(454967e669df), slot: ImportSlot(0) }))
+action function 03baf543cc121698dfd8a3679c48a01dbea054404aa47b94af158b8ae6b3711e/1/0/0 library id=411d0271271abca69b93d661ad438465fe469441a6c6b9202a85d9b4c9bf03b0 name=ts.boundary exports=[]
+action function 03baf543cc121698dfd8a3679c48a01dbea054404aa47b94af158b8ae6b3711e/2/0 Some(Effect(OperationUse { link: LinkId(454967e669df), slot: ImportSlot(2) }))
+action function 03baf543cc121698dfd8a3679c48a01dbea054404aa47b94af158b8ae6b3711e/2/0/0 library id=411d0271271abca69b93d661ad438465fe469441a6c6b9202a85d9b4c9bf03b0 name=ts.boundary exports=[]
+action function 03baf543cc121698dfd8a3679c48a01dbea054404aa47b94af158b8ae6b3711e/3/0 Some(Effect(OperationUse { link: LinkId(454967e669df), slot: ImportSlot(3) }))
+action function 03baf543cc121698dfd8a3679c48a01dbea054404aa47b94af158b8ae6b3711e/3/0/0 library id=411d0271271abca69b93d661ad438465fe469441a6c6b9202a85d9b4c9bf03b0 name=ts.boundary exports=[]
+caption callable 0 block=function 03baf543cc121698dfd8a3679c48a01dbea054404aa47b94af158b8ae6b3711e "Review the inbox"
+caption node 0 site=function 03baf543cc121698dfd8a3679c48a01dbea054404aa47b94af158b8ae6b3711e/0 "Choose the opening message"
+caption node 2 site=function 03baf543cc121698dfd8a3679c48a01dbea054404aa47b94af158b8ae6b3711e/1 "Show that the review started"
+caption node 4 site=function 03baf543cc121698dfd8a3679c48a01dbea054404aa47b94af158b8ae6b3711e/2 "Get the three newest emails"
+caption node 6 site=function 03baf543cc121698dfd8a3679c48a01dbea054404aa47b94af158b8ae6b3711e/3 "Mark the inbox as reviewed"
+caption node 7 site=function 03baf543cc121698dfd8a3679c48a01dbea054404aa47b94af158b8ae6b3711e/4 "Give back the emails"

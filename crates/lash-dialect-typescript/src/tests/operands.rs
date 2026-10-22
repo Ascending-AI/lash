@@ -47,17 +47,15 @@ fn native_expression_depth_respects_the_document_limit() {
         operand_spans: None,
     });
     let program = ast::Program {
+        imported: Default::default(),
         statements: vec![ast::Stmt::Expr(expr)],
         type_parameters: Default::default(),
         captions: Default::default(),
         comments: Vec::new(),
     };
-    let environment_namespaces = lash_kernel_dialect::Namespaces::of_effects(
-        &Default::default(),
-        &lash_kernel_doc::ContractId::new("1"),
-        &Default::default(),
-    )
-    .expect("the test's effects are operations");
+    let environment_namespaces =
+        crate::tests::linked::namespaces(&Default::default(), &Default::default())
+            .expect("the test's effects are operations");
     let environment =
         lash_kernel_dialect::Environment::new(super::library(), &environment_namespaces);
     let lowered = crate::lower::lower(

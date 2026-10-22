@@ -62,6 +62,7 @@ required-features = ["default"]
 workspace = true
 
 [dependencies]
+lash-vocabulary = { workspace = true }
 lash-core-ids = { workspace = true }
 lash-execution-contracts = { workspace = true }
 lash-transport-failure = { workspace = true }

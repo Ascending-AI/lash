@@ -78,7 +78,8 @@ async fn sends_run_once_each_in_arrival_order_one_at_a_time() -> Result<()> {
     let (core, witness) = witnessed_core().await?;
     let session = created_session(
         &core,
-        lash::SessionId::parse("arrival-order").expect("nonblank host identity"),
+        lash_vocabulary::identity::SessionId::parse("arrival-order")
+            .expect("nonblank host identity"),
     )
     .await
     .open()
@@ -94,13 +95,17 @@ async fn sends_run_once_each_in_arrival_order_one_at_a_time() -> Result<()> {
         queued.push(
             session
                 .send(TurnInput::text(text))
-                .id(lash::TurnId::parse(format!("{text}-input")).expect("nonblank host identity"))
+                .id(
+                    lash_vocabulary::identity::TurnId::parse(format!("{text}-input"))
+                        .expect("nonblank host identity"),
+                )
                 .await?,
         );
     }
     let repeated = session
         .send(TurnInput::text("third"))
-        .id(lash::TurnId::parse("third-input").expect("nonblank host identity"))
+        .id(lash_vocabulary::identity::TurnId::parse("third-input")
+            .expect("nonblank host identity"))
         .await?;
     assert_eq!(
         repeated.input_id(),
@@ -146,7 +151,8 @@ async fn dropping_a_send_handle_stops_nothing() -> Result<()> {
     let (core, witness) = witnessed_core().await?;
     let session = created_session(
         &core,
-        lash::SessionId::parse("dropped-handle").expect("nonblank host identity"),
+        lash_vocabulary::identity::SessionId::parse("dropped-handle")
+            .expect("nonblank host identity"),
     )
     .await
     .open()

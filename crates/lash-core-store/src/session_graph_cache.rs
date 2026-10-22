@@ -2,13 +2,16 @@ use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex as StdMutex};
 
+use crate::BaseRenderCache;
+use crate::Message;
 use crate::persistent_map::PersistentMap;
 use crate::session_graph::facade_ops::SessionNodeProjection;
 use crate::session_graph::{SessionGraph, SessionNodePayload, SessionNodeRecord, SessionReadModel};
 use crate::session_graph_integrity::{ancestry_indices, graph_node_indices, validate_structure};
 use crate::session_model::SessionHistoryRecord;
-use crate::{BaseRenderCache, Message, NodeId};
 use lash_protocol_types::{AppendVec, same_history_record, same_message};
+
+use lash_vocabulary::identity::NodeId;
 
 /// Every resident node's position by id. Persistent: every snapshot of the
 /// graph shares it, and the store's window and each runtime that adopted it

@@ -12,7 +12,7 @@
 //! answer, so a later call answers the same retained outcome.
 
 use lash_core::ActorContext;
-use lash_protocol_types::core_support::RunIdCoreSupport;
+use lash_vocabulary::identity::RunIdCoreSupport;
 mod batch;
 mod cancel;
 mod follow;
@@ -24,10 +24,13 @@ use std::task::{Context, Poll};
 
 use futures_util::Stream;
 use futures_util::future::BoxFuture;
+use lash_core::LiveReplayStore;
 use lash_core::facade_support::DurableSessionOps;
 use lash_core::runtime::{TurnInputAcceptanceReceipt, TurnInputIngress};
-use lash_core::{InputId, LiveReplayStore, SessionId, TurnId};
 use lash_protocol_types::sync::MutexExt;
+use lash_vocabulary::identity::InputId;
+use lash_vocabulary::identity::SessionId;
+use lash_vocabulary::identity::TurnId;
 use tokio::sync::mpsc;
 
 use crate::durable_session::DurableSession;
@@ -548,13 +551,13 @@ pub enum SendOutcome {
     /// An explicitly completed host task, read from its operation receipt.
     #[non_exhaustive]
     OperationSettled {
-        run: crate::RunId,
+        run: lash_vocabulary::identity::RunId,
         outcome: Box<lash_core::runtime::PluginOperationCommandOutcome>,
         gaps: Vec<lash_core::facade_support::LiveReplayGap>,
     },
     #[non_exhaustive]
     Settled {
-        run: crate::RunId,
+        run: lash_vocabulary::identity::RunId,
         output: Box<TurnOutput>,
         gaps: Vec<lash_core::facade_support::LiveReplayGap>,
     },
@@ -569,7 +572,7 @@ pub enum SendOutcome {
     /// refusal the same way, with no `run`.
     #[non_exhaustive]
     Refused {
-        run: Option<crate::RunId>,
+        run: Option<lash_vocabulary::identity::RunId>,
         refusal: Box<lash_core::RuntimeError>,
         gaps: Vec<lash_core::facade_support::LiveReplayGap>,
     },
@@ -644,7 +647,7 @@ pub enum TurnStatus {
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ParkedTurn {
     pub session_id: SessionId,
-    pub run: crate::RunId,
+    pub run: lash_vocabulary::identity::RunId,
     /// Why the session parked, as its actor recorded it: a recorded model
     /// no deployment serves names its key
     /// ([`SessionParkReason::profile_key`](crate::SessionParkReason::profile_key)).
@@ -675,7 +678,7 @@ impl SendOutcome {
         }
     }
 
-    pub fn run(&self) -> Option<&crate::RunId> {
+    pub fn run(&self) -> Option<&lash_vocabulary::identity::RunId> {
         match self {
             Self::Settled { run, .. } | Self::OperationSettled { run, .. } => Some(run),
             Self::Parked { parked, .. } => Some(&parked.run),
@@ -838,7 +841,7 @@ async fn settle(
 /// Whether the host forsook `input`'s id in `store`'s session.
 async fn input_forsaken(
     store: &lash_core::store::SessionStore,
-    input: &lash_core::InputId,
+    input: &lash_vocabulary::identity::InputId,
 ) -> Result<bool> {
     let facts = store
         .follow_facts(&lash_core::store::FollowSubject::Input(input.clone()))
@@ -1030,14 +1033,14 @@ impl SendHandle {
     /// The run this input is bound to, once a run has taken it: the run
     /// that executes it, which under a merging drain or a steer is not the
     /// input's own. `None` until then, and for a withdrawn input.
-    pub async fn run(&self) -> Result<Option<crate::RunId>> {
+    pub async fn run(&self) -> Result<Option<lash_vocabulary::identity::RunId>> {
         let context = self.target.context().await?;
         context
             .parts
             .store
             .run_binding(&self.receipt.input_id)
             .await
-            .map(|run| run.map(crate::RunId::from_turn_id))
+            .map(|run| run.map(lash_vocabulary::identity::RunId::from_turn_id))
             .map_err(EmbedError::Store)
     }
 }
@@ -1047,7 +1050,7 @@ impl SendHandle {
 pub struct RunHandle<Output = serde_json::Value, Error = lash_core::plugin::PluginOperationFailure>
 {
     target: SendTarget,
-    run: crate::RunId,
+    run: lash_vocabulary::identity::RunId,
     cursor: lash_core::SessionCursor,
     shared: Arc<HandleShared>,
     operation_name: Option<&'static str>,
@@ -1074,7 +1077,7 @@ impl<Output, Error> Clone for RunHandle<Output, Error> {
 
 impl<Output, Error> RunHandle<Output, Error> {
     /// The logical Run identity, including for operation Runs.
-    pub fn run(&self) -> &crate::RunId {
+    pub fn run(&self) -> &lash_vocabulary::identity::RunId {
         &self.run
     }
 
@@ -1305,7 +1308,7 @@ async fn send_context(target: &SendTarget, ids: &[&str]) -> Result<SendContext> 
 }
 
 /// A handle on `run`; its cursor is the observation's current position.
-pub(crate) fn run(target: SendTarget, run: crate::RunId) -> RunHandle {
+pub(crate) fn run(target: SendTarget, run: lash_vocabulary::identity::RunId) -> RunHandle {
     let cursor = target.current_cursor();
     RunHandle {
         target,
@@ -1366,7 +1369,7 @@ impl Stream for TurnEvents {
 pub enum CancelTarget {
     /// A logical run, including the run a queued input will open. The same
     /// atomic request withdraws that input or cancels its admitted run.
-    Run(crate::RunId),
+    Run(lash_vocabulary::identity::RunId),
 }
 
 /// Builder for one cancel (ADR 0039).
@@ -1446,7 +1449,7 @@ pub enum CancelReceipt {
     /// task's command is withdrawn only while no run entered it; the cancel
     /// of an entered task is [`Cancelled`](Self::Cancelled) (FIG-5343).
     Withdrawn {
-        run: crate::RunId,
+        run: lash_vocabulary::identity::RunId,
         /// The withdrawn input, or `None` for an operation task command.
         input: Option<InputId>,
     },
@@ -1455,7 +1458,7 @@ pub enum CancelReceipt {
     /// conflicts. This records cancellation intent, not proof execution has
     /// stopped; await the run's outcome for its terminal.
     Cancelled {
-        run: crate::RunId,
+        run: lash_vocabulary::identity::RunId,
         receipt: Box<TurnCancelReceipt>,
     },
     /// No queued input or open run accepts this request: the id is unknown,

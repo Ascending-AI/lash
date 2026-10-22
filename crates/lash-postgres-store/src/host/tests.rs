@@ -498,10 +498,9 @@ fn offline_validation_applies_parser_and_value_rules() {
 /// durations and timeout words, and refuses missing or unknown node fields.
 #[test]
 fn the_host_schema_agrees_with_serde_json_shapes() {
-    let schema = lash_protocol_types::json_schema::JsonSchema::admit(
-        serde_json::from_str(JSON_SCHEMA).unwrap(),
-    )
-    .unwrap();
+    let schema =
+        lash_vocabulary::json_schema::JsonSchema::admit(serde_json::from_str(JSON_SCHEMA).unwrap())
+            .unwrap();
     let standard = serde_json::to_value(PostgresHostConfig::standard()).unwrap();
     let development = serde_json::to_value(PostgresHostConfig::development()).unwrap();
     let mut cases = vec![serde_json::json!({}), standard.clone(), development];

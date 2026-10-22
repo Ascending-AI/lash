@@ -4,20 +4,35 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use lash_kernel_check::{
-    Environment, RefusalReason, admit, derive, derive_definition, requirements,
-};
-use lash_kernel_doc::{
-    Document, FunctionDefinition, FunctionRegistry, Implementation, InvalidReason, Name,
-    NativeCall, NativeError, NativeFunction, Node, Site, SourceLanguage, SourceMap, SourceSite,
-    Span, Unit, Value, parse_definition, parse_document, print_definition, print_document,
-    validate_definition, validate_document,
-};
+use lash_kernel_check::{Environment, RefusalReason, admit, derive, derive_definition};
+use lash_kernel_doc::Document;
+use lash_kernel_doc::FunctionDefinition;
+use lash_kernel_doc::FunctionRegistry;
+use lash_kernel_doc::Implementation;
+use lash_kernel_doc::InvalidReason;
+use lash_kernel_doc::NativeCall;
+use lash_kernel_doc::NativeError;
+use lash_kernel_doc::NativeFunction;
+use lash_kernel_doc::Node;
+use lash_kernel_doc::SourceLanguage;
+use lash_kernel_doc::SourceMap;
+use lash_kernel_doc::SourceSite;
+use lash_kernel_doc::Span;
+use lash_kernel_doc::Value;
+use lash_kernel_doc::parse_definition;
+use lash_kernel_doc::parse_document;
+use lash_kernel_doc::print_definition;
+use lash_kernel_doc::print_document;
+use lash_kernel_doc::validate_definition;
+use lash_kernel_doc::validate_document;
 use lash_kernel_vm::kernel_internals::Layout;
 use lash_kernel_vm::{
     CellStart, DeliverError, Delivered, End, KernelMachine, Machine, Outcome, PreparedLibrary,
     Program, Request, Step,
 };
+use lash_vocabulary::names::Name;
+use lash_vocabulary::sites::Site;
+use lash_vocabulary::sites::Unit;
 
 use crate::{Case, ExpectedEnd, MachineRunner, Shard, check_case};
 
@@ -41,6 +56,21 @@ fn definition(text: &str) -> FunctionDefinition {
 
 fn doc(text: &str) -> Document {
     parse_document(text).expect("parse the rule's document")
+}
+
+fn calling(definitions: &[FunctionDefinition], main: &str) -> Document {
+    let mut source = HEADER.to_owned();
+    for definition in definitions {
+        source.push_str(&format!(
+            "definition {}\n",
+            serde_json::to_string(&print_definition(definition)).unwrap()
+        ));
+        if definition.has_native() {
+            source.push_str(&format!("native @{}\n", definition.identity()));
+        }
+    }
+    source.push_str(main);
+    doc(&source)
 }
 
 fn same_registry(text: &str, native: bool) -> FunctionRegistry {
@@ -135,7 +165,10 @@ fn definition_parts() {
     assert_eq!(original.signature.params[0].name.as_str(), "x");
     assert!(original.errors.contains("probe.error"));
     assert_eq!(original.guard.as_ref().unwrap().unit, "step");
-    assert!(matches!(original.implementation, Implementation::Native));
+    assert!(matches!(
+        original.implementation,
+        Implementation::Native { .. }
+    ));
     assert_eq!(
         FunctionDefinition::from_json(&original.to_json().unwrap()).unwrap(),
         original
@@ -148,9 +181,10 @@ fn implementations() {
         let original = definition(text);
         let catalog = same_registry(text, text != BODY);
         let id = original.identity();
-        let expression = doc(&format!(
-            "{HEADER}use probe.same = @{id}\nmain {{ finish probe.same(7) }}"
-        ));
+        let expression = calling(
+            std::slice::from_ref(&original),
+            "main { finish probe.same(7) }",
+        );
         let result = validate_document(&expression, &catalog);
         if text == BODY {
             assert!(
@@ -159,9 +193,10 @@ fn implementations() {
         } else {
             result.unwrap();
         }
-        let statement = doc(&format!(
-            "{HEADER}use probe.same = @{id}\nmain {{ let x = invoke probe.same(7) finish x }}"
-        ));
+        let statement = calling(
+            &[original],
+            "main { let x = invoke probe.same(7) finish x }",
+        );
         admit(&statement, &Environment::new(&catalog)).unwrap();
     }
 }
@@ -189,20 +224,37 @@ fn callbacks() {
 
 fn body_rules() {
     let catalog = FunctionRegistry::new();
-    for (statement, native) in [
-        ("do perform echo(1) as Int", false),
-        ("do sleep 1", true),
-        ("do yield", true),
+    for (statement, native, imports) in [
+        ("do perform 0(1) as Int", false, ""),
+        (
+            "do perform 0(1) as Int",
+            true,
+            "import 0 operation corpus.echo(value: Int) -> Int\n",
+        ),
+        ("do yield", true, ""),
     ] {
         let text = format!(
-            "function probe.bad() -> Any\nkernel 1\ncharge 1\n{}body {{ {statement} }}",
+            "function probe.bad() -> Any\nkernel 1\ncharge 1\n{}{imports}body {{ {statement} }}",
             if native { "native\n" } else { "" }
         );
         let invalid = validate_definition(&definition(&text), &catalog).unwrap_err();
-        assert!(matches!(
-            *invalid.reason,
-            InvalidReason::EffectNotDeclared { .. } | InvalidReason::NativeBodyMayWait { .. }
-        ));
+        if native {
+            let form = if imports.is_empty() {
+                lash_kernel_doc::StatementForm::Yield
+            } else {
+                lash_kernel_doc::StatementForm::Perform
+            };
+            assert!(
+                matches!(*invalid.reason, InvalidReason::NativeBodyMayWait { form: found } if found == form)
+            );
+        } else {
+            assert!(matches!(
+                *invalid.reason,
+                InvalidReason::Import {
+                    slot: lash_vocabulary::ImportSlot(0)
+                }
+            ));
+        }
     }
 }
 
@@ -214,23 +266,20 @@ fn outer(inner: &FunctionDefinition) -> FunctionDefinition {
 }
 
 fn manifest_closure() {
-    let mut registry = same_registry(BODY, false);
     let inner = definition(BODY);
     let outer = outer(&inner);
-    let outer_id = registry.register(outer, None).unwrap();
     let inner_id = inner.identity();
-    let mut document = doc(&format!(
-        "{HEADER}use probe.outer = @{outer_id}\nmain {{ let x = invoke probe.outer(7) finish x }}"
-    ));
-    let needs = requirements(&document, &registry);
-    assert_eq!(needs.functions.len(), 2);
-    assert!(needs.functions.contains_key(&inner_id));
-    let errors = admit(&document, &Environment::new(&registry))
-        .unwrap_err()
-        .errors;
-    assert!(errors.iter().any(|e| matches!(e.reason, RefusalReason::FunctionNotListed { function, .. } if function == inner_id)));
-    document.manifest.functions.insert(inner_id, inner.name);
-    admit(&document, &Environment::new(&registry)).unwrap();
+    let outer_id = outer.identity();
+    let mut document = Document::new(
+        lash_kernel_doc::NumberPolicy::BySpelling,
+        vec![lash_kernel_doc::Stmt::Return {
+            value: lash_kernel_doc::Expr::Literal(lash_kernel_doc::Literal::Null),
+        }],
+    );
+    document.functions.insert(outer_id, outer);
+    assert!(admit(&document, &Environment::new(&document.functions)).is_err());
+    document.functions.insert(inner_id, inner);
+    admit(&document, &Environment::new(&document.functions)).unwrap();
 }
 
 fn missing_transitive() {
@@ -238,14 +287,15 @@ fn missing_transitive() {
     let outer = outer(&inner);
     let id = outer.identity();
     let inner_id = inner.identity();
+    let document = calling(
+        std::slice::from_ref(&outer),
+        "main { let x = invoke probe.outer(7) finish x }",
+    );
     let catalog = BTreeMap::from([(id, outer)]);
-    let document = doc(&format!(
-        "{HEADER}use probe.outer = @{id}\nuse probe.same = @{inner_id}\nmain {{ let x = invoke probe.outer(7) finish x }}"
-    ));
     let errors = admit(&document, &Environment::new(&catalog))
         .unwrap_err()
         .errors;
-    assert!(errors.iter().any(|e| matches!(e.reason, RefusalReason::MissingFunction { function, .. } if function == inner_id)));
+    assert!(errors.iter().any(|e| matches!(e.reason, RefusalReason::Invalid(InvalidReason::FunctionNotListed { function }) if function == inner_id)));
 }
 
 fn reached_body_rules() {
@@ -254,10 +304,11 @@ fn reached_body_rules() {
             "function probe.bad() -> Any\nkernel 1\ncharge 1\nbody {{ {statement} }}"
         ));
         let id = bad.identity();
+        let document = calling(
+            std::slice::from_ref(&bad),
+            "main { let x = invoke probe.bad() finish x }",
+        );
         let catalog = BTreeMap::from([(id, bad)]);
-        let document = doc(&format!(
-            "{HEADER}use probe.bad = @{id}\nmain {{ let x = invoke probe.bad() finish x }}"
-        ));
         let errors = admit(&document, &Environment::new(&catalog))
             .unwrap_err()
             .errors;
@@ -276,8 +327,7 @@ fn typed_refusals(shard: &Shard, registry: &FunctionRegistry) {
             continue;
         }
         let document = doc(&case.document);
-        let mut env = Environment::new(registry);
-        env.effects = document.manifest.effects.clone();
+        let env = Environment::new(registry);
         let errors = admit(&document, &env).unwrap_err().errors;
         assert!(errors.iter().any(|error| match shard.rule.as_str() {
             "K-ADM-005" => matches!(error.reason, RefusalReason::ArgumentType { .. }),
@@ -293,16 +343,11 @@ fn adoption() {
     let first_id = first.identity();
     let next_id = registry.register(corrected.clone(), None).unwrap();
     assert_ne!(first_id, next_id);
-    let text = format!(
-        "{HEADER}use probe.same = @{first_id}\nmain {{ let x = invoke probe.same(7) finish x }}"
-    );
-    for (text, result) in [
-        (&text, 7),
-        (
-            &text.replace(&first_id.to_string(), &next_id.to_string()),
-            9,
-        ),
-    ] {
+    for (definition, result) in [(first, 7), (corrected, 9)] {
+        let text = print_document(&calling(
+            &[definition],
+            "main { let x = invoke probe.same(7) finish x }",
+        ));
         let mut case = super::case("adopt a corrected library identity");
         case.document = text.clone();
         case.expected.end = ExpectedEnd::Finished(lash_kernel_doc::Datum::Int(result.into()));
@@ -335,9 +380,11 @@ fn native_versions() {
 
 fn native_repeat() {
     let registry = Arc::new(same_registry(NATIVE, true));
-    let id = definition(NATIVE).identity();
     let mut case = super::case("equal native arguments cold and warm");
-    case.document = format!("{HEADER}use probe.same = @{id}\nmain {{ finish probe.same(7) }}");
+    case.document = print_document(&calling(
+        &[definition(NATIVE)],
+        "main { finish probe.same(7) }",
+    ));
     case.expected.end = ExpectedEnd::Finished(lash_kernel_doc::Datum::Int(7.into()));
     let mut warm = MachineRunner::<KernelMachine>::new(registry);
     let first = check_case(&mut warm, &case).unwrap();
@@ -375,15 +422,17 @@ fn stored_encoding(shard: &Shard) {
     let json = document.to_json().unwrap();
     assert_eq!(Document::from_json(&json).unwrap(), document);
     let mut tree: serde_json::Value = serde_json::from_str(&json).unwrap();
-    assert!(tree.get("functions").is_none());
-    assert!(tree["manifest"].get("effects").is_none());
+    assert!(tree.get("manifest").is_none());
+    assert!(tree["functions"].is_object());
+    assert!(tree["imports"].is_object());
+    assert_eq!(tree["requires"]["kernels"], serde_json::json!([1]));
     assert_eq!(
         tree["main"][0]["finish"]["value"]["tuple"][0],
         serde_json::json!({"literal": {"int": "1"}})
     );
     for pointer in [
         "",
-        "/manifest",
+        "/requires",
         "/main/0/finish",
         "/main/0/finish/value/tuple/0/literal",
     ] {
@@ -437,22 +486,26 @@ fn site_order(shard: &Shard, registry: &FunctionRegistry) {
     fn walk(document: &Document, site: Site, result: &mut Vec<Site>) {
         let node = document.node(&site).unwrap();
         result.push(site.clone());
+        if let Node::Expr(lash_kernel_doc::Expr::Closure(closure)) = node {
+            walk(
+                document,
+                Site::new(Unit::Library(closure.function), []),
+                result,
+            );
+        }
         for (index, _) in node.children().iter().enumerate() {
-            let mut child = site.clone();
-            child.path.push(index as u32);
-            walk(document, child, result);
+            walk(document, site.child(index as u32), result);
         }
     }
     let document = doc(&shard.cases[0].document);
     let graph = derive(&document, registry).unwrap();
     let mut sites = Vec::new();
     walk(&document, Site::new(Unit::Main, []), &mut sites);
-    for name in document.functions.keys() {
-        walk(
-            &document,
-            Site::new(Unit::Function(name.clone()), []),
-            &mut sites,
-        );
+    for id in document.functions.keys() {
+        let root = Site::new(Unit::Library(*id), []);
+        if !sites.contains(&root) {
+            walk(&document, root, &mut sites);
+        }
     }
     assert_eq!(
         graph
@@ -486,18 +539,19 @@ fn charge_invariance(shard: &Shard, registry: &FunctionRegistry) {
     let resumed = check_case(&mut runner, &case).unwrap();
     case.environment.resume = false;
     assert_eq!(check_case(&mut runner, &case).unwrap(), resumed);
-    let id = definition(BOTH).identity();
-    let document = doc(&format!(
-        "{HEADER}use probe.same = @{id}\nmain {{ let x = invoke probe.same(7) finish x }}"
-    ));
+    let document = calling(
+        &[definition(BOTH)],
+        "main { let x = invoke probe.same(7) finish x }",
+    );
     let mut observations = Vec::new();
     for native in [false, true] {
         for layout in [Layout(0), Layout(37)] {
-            let program = Program {
-                closure: crate::pages::CLOSURE,
-                document: Arc::new(document.clone()),
-                library: PreparedLibrary::new(Arc::new(same_registry(BOTH, native))),
-            };
+            let program = crate::machine::prepare_document(
+                &(PreparedLibrary::new(Arc::new(same_registry(BOTH, native)))),
+                Arc::new(document.clone()),
+                None,
+            )
+            .expect("prepare linked law document");
             let mut machine = crate::pages::start_with_layout(
                 program,
                 crate::CaseBounds::default().into(),
@@ -536,11 +590,12 @@ fn instance_isolation(shard: &Shard, registry: &FunctionRegistry) {
 }
 
 fn program(case: &Case, registry: &FunctionRegistry) -> Program {
-    Program {
-        closure: crate::pages::CLOSURE,
-        document: Arc::new(doc(&case.document)),
-        library: PreparedLibrary::new(Arc::new(registry.clone())),
-    }
+    crate::machine::prepare_document(
+        &PreparedLibrary::new(Arc::new(registry.clone())),
+        Arc::new(doc(&case.document)),
+        None,
+    )
+    .expect("prepare linked law document")
 }
 
 fn delivery_errors(shard: &Shard, registry: &FunctionRegistry) {
@@ -554,10 +609,8 @@ fn delivery_errors(shard: &Shard, registry: &FunctionRegistry) {
     let Step::Parked(park) = machine.run(&mut host, u64::MAX).unwrap() else {
         panic!("effect parks")
     };
-    let Request::Effect(request) = &park.requests[0] else {
-        panic!("effect request")
-    };
-    let before = lash_kernel_doc::graph_tokens::encode_body(
+    let Request::Effect(request) = &park.requests[0];
+    let before = lash_vocabulary::tokens::encode_body(
         &machine
             .seal(crate::pages::BUDGET)
             .unwrap()
@@ -572,7 +625,7 @@ fn delivery_errors(shard: &Shard, registry: &FunctionRegistry) {
         Err(DeliverError::UnknownWait { .. })
     ));
     assert_eq!(
-        lash_kernel_doc::graph_tokens::encode_body(
+        lash_vocabulary::tokens::encode_body(
             &machine
                 .seal(crate::pages::BUDGET)
                 .unwrap()
@@ -590,7 +643,7 @@ fn delivery_errors(shard: &Shard, registry: &FunctionRegistry) {
             .unwrap(),
         Delivered::Accepted
     );
-    let accepted = lash_kernel_doc::graph_tokens::encode_body(
+    let accepted = lash_vocabulary::tokens::encode_body(
         &machine
             .seal(crate::pages::BUDGET)
             .unwrap()
@@ -605,7 +658,7 @@ fn delivery_errors(shard: &Shard, registry: &FunctionRegistry) {
         Err(DeliverError::AlreadyDelivered { .. })
     ));
     assert_eq!(
-        lash_kernel_doc::graph_tokens::encode_body(
+        lash_vocabulary::tokens::encode_body(
             &machine
                 .seal(crate::pages::BUDGET)
                 .unwrap()
@@ -622,12 +675,6 @@ fn delivery_errors(shard: &Shard, registry: &FunctionRegistry) {
 
 struct ProbeHost;
 impl lash_kernel_vm::Host for ProbeHost {
-    fn clock(&mut self) -> lash_kernel_doc::Timestamp {
-        panic!("no clock in this case")
-    }
-    fn random(&mut self) -> u64 {
-        panic!("no random in this case")
-    }
     fn read(
         &mut self,
         _: &lash_kernel_doc::Handle,
@@ -646,21 +693,21 @@ impl lash_kernel_vm::Host for ProbeHost {
 fn identity_document(shard: &Shard) {
     let document = doc(&shard.cases[0].document);
     let expected = if shard.rule == "K-ID-001" {
-        "bbe2c448d21e1c03d359bde09174a1d8440d2b617b92616eb7836bb180b5d838"
+        "f56ff66ec20ab44e3cf2deae747174fd4524acffc7ca2a4a5706db2e90e4ddbc"
     } else {
-        "ce0ece8bcc22ba85f70553afdf75efaa279cbe661c2e8f5baf15d5f8f05c96ab"
+        "05e4ee472e70edc69dd2e26133af3c09ab5e9f05eab2604e3572a5869c252a75"
     };
     assert_eq!(document.identity().to_string(), expected);
     // K-ID-003: the canonical form is the document's logical token body,
     // which decodes back to it, and the identity is that body's digest.
     let bytes = document.canonical_bytes();
     assert_eq!(
-        lash_kernel_doc::graph_tokens::decode_body::<Document>(&bytes).unwrap(),
+        lash_vocabulary::tokens::decode_body::<Document>(&bytes).unwrap(),
         document
     );
     assert_eq!(
         document.identity().as_bytes(),
-        &lash_kernel_doc::graph_tokens::logical_digest(&bytes)
+        &lash_vocabulary::tokens::logical_digest(&bytes)
     );
     if shard.rule == "K-ID-001" {
         // Two sources mapped onto one document share its identity.
@@ -678,7 +725,7 @@ fn identity_definition() {
     let original = definition(NATIVE);
     assert_eq!(
         original.identity().to_string(),
-        "7ed045f645382b2ce50e6c57fe9266565c87b5ee157c103698eed1059b3c8b8e"
+        "081d3941dffce3df102fd8cd9cae4f8ffbe9f776be0286bbcfd40671dc087430"
     );
     let first = original.identity();
     let json: serde_json::Value = serde_json::from_str(&original.to_json().unwrap()).unwrap();
@@ -689,15 +736,25 @@ fn identity_definition() {
             serde_json::json!({"params": [{"name": "x", "ty": "int"}], "result": "any"}),
         ),
         ("errors", serde_json::json!(["probe.error"])),
-        ("charge", serde_json::json!({"constant": 6})),
+        (
+            "/implementation/native/charge",
+            serde_json::json!({"constant": 6}),
+        ),
         (
             "guard",
             serde_json::json!({"unit": "step", "limit": {"constant": 9}}),
         ),
-        ("implementation", serde_json::json!({"body": {"block": []}})),
+        (
+            "implementation",
+            serde_json::to_value(definition(BODY).implementation).unwrap(),
+        ),
     ] {
         let mut changed = json.clone();
-        changed[field] = value;
+        if field.starts_with('/') {
+            *changed.pointer_mut(field).unwrap() = value;
+        } else {
+            changed[field] = value;
+        }
         let changed = FunctionDefinition::from_json(&changed.to_string()).unwrap();
         assert_ne!(changed.identity(), first, "{field}");
         assert_eq!(changed.kernel, 1);

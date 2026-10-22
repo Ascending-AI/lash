@@ -14,7 +14,7 @@ use lash_core_store::store::RunStore as _;
 use lash_core_store::store::SessionCatalogStore as _;
 use lash_core_store::store::SessionHistoryStore as _;
 use lash_core_store::store::TurnInputStore as _;
-use lash_protocol_types::TurnId;
+use lash_vocabulary::identity::TurnId;
 use sqlx::postgres::PgPoolOptions;
 use std::time::Duration;
 
@@ -435,7 +435,7 @@ async fn postgres_graph_generation_uniqueness_is_typed() {
         &mut connection,
         &session_id,
         3,
-        &lash_protocol_types::NodeId::fixture(second_node.as_str()),
+        &lash_vocabulary::identity::NodeId::fixture(second_node.as_str()),
     )
     .await;
     assert!(matches!(
@@ -786,7 +786,7 @@ async fn admitted_input_fixture(
 ) -> (
     PostgresStore,
     lash_core_store::session_state::RuntimeSessionState,
-    lash_protocol_types::InputId,
+    lash_vocabulary::identity::InputId,
 ) {
     let session_id = SessionId::fixture(format!("{label}:{}", uuid::Uuid::new_v4()));
     let store = storage.store();
@@ -1060,7 +1060,7 @@ async fn durable_labels_observe_physical_cost_and_group_members() {
                 lash_core_store::checkpoint_graph::ExplicitLimit::new(u64::MAX),
             ),
         );
-        let mut body = lash_core_store::checkpoint_graph::TokenWriter::new();
+        let mut body = lash_vocabulary::tokens::TokenWriter::new();
         body.text(&format!("outcome {ordinal}"));
         let record = staging
             .encode(
@@ -1072,7 +1072,7 @@ async fn durable_labels_observe_physical_cost_and_group_members() {
         tx.write(DomainWrite::RunFact(RunFactWrite::Append {
             owner: OwnerKey::Turn(
                 SessionId::from("cost-law"),
-                lash_protocol_types::TurnId::from("run"),
+                lash_vocabulary::identity::TurnId::from("run"),
             ),
             run: RunSeq(0),
             ordinal: Ordinal(ordinal),

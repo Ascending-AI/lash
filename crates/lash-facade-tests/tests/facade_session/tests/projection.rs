@@ -71,7 +71,7 @@ async fn presentation_step_only_changes_model_observation() -> Result<()> {
     .build(lash_facade_tests::runtime_lease_owner())?;
     let session = created_session(
         &core,
-        lash::SessionId::parse("projection").expect("nonblank host identity"),
+        lash_vocabulary::identity::SessionId::parse("projection").expect("nonblank host identity"),
     )
     .await
     .open()

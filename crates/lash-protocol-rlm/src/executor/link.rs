@@ -1,4 +1,4 @@
-//! Link a fresh cell under its selected package set, or restore its admitted envelope.
+//! Link a fresh cell against Current, or restore its admitted envelope.
 use super::*;
 
 /// Lower a fresh cell against its surface, or restore its admitted envelope.
@@ -46,9 +46,10 @@ pub(super) async fn link_cell(
                 })?;
             state.note_pages(ended_root_pages(snapshots, resumed.root).as_ref());
         }
+        ctx.cell_execution_registered(execution_id(snapshots.exec()));
         return Ok(LinkedCell {
             document: envelope.document.clone(),
-            boundary: envelope.boundary().map_err(host_failure)?,
+
             envelope,
             // The machine resumes from its parked state, not from a start.
             host: Vec::new(),
@@ -73,236 +74,238 @@ pub(super) async fn link_cell(
             })?
     };
 
-    // Each catalog tool is an offered operation, under its canonical name:
-    // the effect a cell of any dialect performs it as.
-    let mut boundary = HostBoundary::new();
-    // The catalog tools that declare a read, by effect: what the cell's
-    // read plan is drawn from.
-    let mut read_tools = BTreeMap::new();
-    for tool in ctx.tool_catalog().entries() {
-        boundary
-            .offer_operation(
-                tool.manifest.operation.clone(),
-                lash_vm_runtime::offered_tool(
-                    &tool.manifest,
-                    &tool.contract,
-                    lash_kernel_dialect::OfferedSource::Catalog {
-                        tool: tool.manifest.id.to_string(),
-                    },
-                ),
-            )
-            .map_err(|error| host_failure(format!("invalid host tool surface: {error}")))?;
-        if tool.manifest.execution_policy == lash_core::ExecutionPolicy::Read {
-            read_tools.insert(
-                tool.manifest.operation.effect_name(),
-                tool.manifest.id.clone(),
-            );
-        }
-    }
-
     state
         .prepare_cell(ctx.session_pages())
         .await
-        .map_err(|error| host_failure(format!("the session's state is not readable: {error}")))?;
-    let packages = packages::select(state, services).await?;
-    // Every carried saved function is relinked by name to the cell's
-    // surface, or dropped naming it (RELINK-CLOSURE): what the cell lowers
-    // and what it calls of the session come from the one surface.
-    state.relink(&packages).await.map_err(|error| {
-        host_failure(format!(
-            "the session's saved functions are not relinked: {error}"
-        ))
-    })?;
-    let package_view = packages::prepare(&packages, &mut boundary);
-    // On a path a package of the cell's surface owns, the package's
-    // declared contract is authoritative: a tool that does not serve it is
-    // refused (PKG-RUNNER).
-    for tool in ctx.tool_catalog().entries() {
-        let effect = tool.manifest.operation.effect_name();
-        if let Some(owner) = lash_vm_runtime::owned_operation(&package_view, &effect) {
-            lash_execution_contracts::process::check_runner(
-                &effect,
-                &owner,
-                &tool.manifest,
-                &tool.contract,
-            )
-            .map_err(|refusal| host_failure(format!("invalid host tool surface: {refusal}")))?;
-        }
-    }
+        .map_err(|error| host_failure(error.to_string()))?;
+    let packages = state
+        .shown_packages()
+        .ok_or_else(|| host_failure("the round recorded no package surface"))?;
+    let context = packages
+        .consumer
+        .clone()
+        .ok_or_else(|| host_failure("the round recorded no trusted consumer context"))?;
+    let documents = state
+        .documents
+        .as_ref()
+        .ok_or_else(|| host_failure("the cell has no document owner"))?
+        .clone();
+    let boundary = HostBoundary {
+        snapshot: packages.snapshot.clone(),
+        context: context.clone(),
+        attachment: lash_vocabulary::package::Attachment {
+            members: BTreeSet::new(),
+            packages: packages
+                .snapshot
+                .advertisements
+                .iter()
+                .filter_map(|accepted| match &accepted.advertisement {
+                    lash_vocabulary::PackageAdvertisement::Enumerated(package) => {
+                        Some(package.path.clone())
+                    }
+                    _ => None,
+                })
+                .collect(),
+            deferred: packages
+                .snapshot
+                .advertisements
+                .iter()
+                .filter_map(|accepted| match &accepted.advertisement {
+                    lash_vocabulary::PackageAdvertisement::Deferred(package) => {
+                        Some(package.path.clone())
+                    }
+                    _ => None,
+                })
+                .collect(),
+        },
+    };
+    let authored = state
+        .relink(
+            &documents,
+            &boundary,
+            &ctx.execution_claim()
+                .map_err(|error| host_failure(error.to_string()))?,
+        )
+        .await
+        .map_err(|error| match error {
+            session::RelinkError::Package(error) => package_error(error),
+            other => host_failure(other.to_string()),
+        })?;
+    let namespaces = boundary
+        .namespaces(&documents)
+        .await
+        .map_err(package_error)?;
     let mut names = state.names();
     names.extend(projected.keys().map(|name| Name::new(name.as_str())));
 
-    // gather → decide → offer: the run's deferred provider matches the
-    // paths no surface tool answers, and the matches commit before the cell
-    // is lowered. A committed match is never resolved again.
-    let mut discovery_failure = None;
-    let outcomes =
-        if ctx.parent_invocation().is_some() && !matches!(ctx.deferred_provider(), Ok(None)) {
-            let _phase = ctx.named_phase("codemode_lash_vm.deferred_resolve");
-            let calls = services
-                .workers
-                .request_accounted(Request::ToolCalls {
-                    dialect: state.dialect().to_owned(),
-                    source: code.to_owned(),
-                    bindings: names.clone(),
-                    functions: state.lowering_functions(),
-                    operations: boundary.operations().clone(),
-                    packages: crate::plugin::package_wire(&packages),
-                })
-                .await;
-            let calls = match calls {
-                Ok(Response::ToolCalls(calls)) => calls,
-                Ok(Response::Lowered { .. } | Response::Printed(_) | Response::Read { .. }) => {
-                    discovery_failure = Some(Err(lash_vm_client::PoolError::breach(
-                        lash_vm_protocol::SequenceFault::UnexpectedServiceResponse,
-                    )));
-                    BTreeSet::new()
-                }
-                other => {
-                    discovery_failure = Some(other);
-                    BTreeSet::new()
-                }
-            };
-            let candidates = calls
-                .into_iter()
-                .filter(|path| {
-                    !lash_kernel_doc::EffectName::new(path.as_str())
-                        .is_ok_and(|name| boundary.effect(&name).is_some())
-                })
-                .collect::<BTreeSet<_>>();
-            if candidates.is_empty() {
-                BTreeMap::new()
-            } else {
-                crate::deferred::journal_deferred_matches(candidates, ctx, &package_view)
-                    .await
-                    .map_err(|error| Refused::Nested(Box::new(error.runtime_effect_error())))?
-                    .unwrap_or_default()
-            }
-        } else {
-            BTreeMap::new()
-        };
-    if let Some((_, matched)) = outcomes
-        .iter()
-        .find(|(path, _)| lash_kernel_dialect::ExportView::owns_namespace(&package_view, path))
-        && let lash_core::DeferredOutcome::Refused { reason } = &matched.outcome
-    {
-        return Err(host_failure(reason.clone()));
-    }
-    let grants = crate::deferred::offer_deferred_matches(&mut boundary, &outcomes, ctx)
-        .map_err(|error| Refused::Nested(Box::new(error.runtime_effect_error())))?;
-    let unavailable_notes = crate::deferred::offer_unavailable_notes(&outcomes, &mut boundary);
-    // Each offered tool by its operation, as this dialect's cells call it:
-    // what a repair names.
-    let spelling = services.prompts.spelling();
-    let grant_calls = boundary
-        .operations()
-        .iter()
-        .filter(|(_, offered)| !matches!(offered.source, OfferedSource::Unavailable { .. }))
-        .map(|(operation, _)| {
-            (
-                operation.effect_name().to_string(),
-                lash_kernel_dialect::spell_operation(spelling, operation),
-            )
+    let lowered = services
+        .workers
+        .request_for_run(Request::Lower {
+            dialect: state.dialect().to_owned(),
+            source: code.to_owned(),
+            namespaces,
+            bindings: names,
+            functions: state.lowering_functions(),
         })
-        .collect::<BTreeMap<_, _>>();
-    let candidates = read_candidates(ctx, &boundary, &grants, read_tools);
-    // The worker plans as reads exactly the candidates; every other
-    // offered operation stays a recorded perform.
-    let mut operations = boundary.operations().clone();
-    for (operation, offered) in &mut operations {
-        offered.read = candidates.contains_key(&operation.effect_name());
-    }
-    // The worker that lowers the cell starts its run (FIG-5921).
-    let lowered = match discovery_failure {
-        Some(failure) => failure,
-        None => {
-            services
-                .workers
-                .request_for_run(Request::Lower {
-                    dialect: state.dialect().to_owned(),
-                    source: code.to_owned(),
-                    operations,
-                    bindings: names,
-                    functions: state.lowering_functions(),
-                    packages: crate::plugin::package_wire(&packages),
-                })
-                .await
-        }
-    };
-    let (document, source_map, written, function_values, reached) = match lowered {
+        .await;
+    let (document, source_map, mut written, function_values) = match lowered {
         Ok(Response::Lowered {
             document,
             source_map,
             written,
             function_values,
-            reads,
             ..
-        }) => (document, source_map, written, function_values, reads),
-        Ok(Response::DialectRefused(mut refusal)) => {
-            let feedback =
-                crate::feedback::contribute_repairs(&mut refusal, code, &grant_calls, ctx);
+        }) => (document, source_map, written, function_values),
+        Ok(Response::DialectRefused(refusal)) => {
             let observation = CellObservation::of_refusal(refusal);
             trace::emit_step_trace(ctx, Err(&observation.code()));
-            let mut failure =
-                observation.failure(code, None, services.channel, services.prompts.as_ref());
-            failure.feedback = feedback;
-            return Err(Refused::Cell(Box::new(failure)));
+            return Err(Refused::Cell(Box::new(observation.failure(
+                code,
+                None,
+                services.channel,
+                services.prompts.as_ref(),
+            ))));
         }
         Ok(Response::UnknownDialect { dialect }) => {
-            return Err(host_failure(format!(
-                "this session's cells are written in `{dialect}`, and no worker has that dialect installed"
-            )));
+            return Err(host_failure(format!("no worker has dialect {dialect}")));
         }
-        Ok(
-            Response::Printed(_)
-            | Response::Read { .. }
-            | Response::ToolCalls(_)
-            | Response::UndeclaredMembers { .. },
-        ) => {
+        Ok(_) => {
             return Err(Refused::Worker(Box::new(
                 lash_vm_client::PoolError::breach(
-                    lash_vm_protocol::SequenceFault::UnexpectedServiceResponse,
+                    lash_protocol_types::engine_fault::SequenceFault::UnexpectedServiceResponse,
                 ),
             )));
         }
-        Err(error) => {
-            trace::emit_step_trace(ctx, Err(&error.to_string()));
-            return Err(Refused::Worker(Box::new(error)));
-        }
+        Err(error) => return Err(Refused::Worker(Box::new(error))),
     };
     trace::emit_step_trace(ctx, Ok(()));
     // The worker's token body is decoded here, once: the identity is its
     // digest, and the envelope, the store and every checkout share all
     // three.
     let document =
-        IdentifiedDocument::decode(&document, lash_kernel_doc::KernelDataLimits::standard())
+        IdentifiedDocument::decode(&document, lash_vocabulary::KernelDataLimits::standard())
             .map_err(|error| host_failure(format!("the worker's document is not one: {error}")))?;
-    packages::admit(&document, &boundary, &packages)?;
+    let claim = ctx
+        .execution_claim()
+        .map_err(|error| host_failure(error.to_string()))?;
+    let id = documents
+        .admit_identified_document(&claim, &document)
+        .await
+        .map_err(package_error)?;
+    let mut fulfilled = documents
+        .fulfil(&lash_execution_contracts::process::linking::FulfilRequest {
+            document: id,
+            selector: lash_execution_contracts::process::linking::ReachSelector::Start(
+                lash_vocabulary::names::StartSelector::Main,
+            ),
+            snapshot: packages.snapshot.clone(),
+            context,
+            purpose: lash_execution_contracts::process::linking::LinkPurpose::Cell,
+        })
+        .await
+        .map_err(package_error)?;
+    for link in &authored {
+        let saved = documents
+            .inspect_link(
+                *link,
+                &lash_execution_contracts::process::linking::ReachSelector::AllExports,
+            )
+            .await
+            .map_err(package_error)?;
+        fulfilled.inspection.operations.extend(saved.operations);
+        fulfilled
+            .inspection
+            .machine
+            .kernels
+            .extend(saved.machine.kernels);
+        fulfilled
+            .inspection
+            .machine
+            .natives
+            .extend(saved.machine.natives);
+        fulfilled.inspection.artifacts.extend(saved.artifacts);
+    }
+    let mut environment = lash_core::facade_support::select_routes(
+        &fulfilled.inspection,
+        lash_vocabulary::claims::RegistryKind::Session,
+        &packages.routes,
+        packages.publications(),
+        |grant, registry| {
+            ctx.package_composition()
+                .validate_deferred_grant(grant, registry)
+        },
+    )
+    .map_err(package_error)?;
+    environment.authored.extend(authored);
+    environment.authored.insert(fulfilled.inspection.link);
+    documents
+        .hold(
+            &claim,
+            &lash_execution_contracts::process::linking::ContentRef::Link(
+                fulfilled.inspection.link,
+            ),
+        )
+        .await
+        .map_err(package_error)?;
+    let package_store = ctx.actor_context().backend().stores().package_store();
+    for publication in &environment.publications {
+        let key = publication.key();
+        package_store
+            .acquire_publication(&claim, &key)
+            .await
+            .map_err(|error| host_failure(error.to_string()))?;
+        if package_store
+            .publication(&key)
+            .await
+            .map_err(|error| host_failure(error.to_string()))?
+            .as_ref()
+            != Some(publication)
+        {
+            return Err(host_failure(
+                "accepted publication differs from retained provenance",
+            ));
+        }
+    }
+    let execution = execution_id(snapshots.exec());
+    let mut tx = ctx
+        .actor_context()
+        .begin()
+        .await
+        .map_err(|error| host_failure(error.to_string()))?;
+    tx.register_execution(lash_core::facade_support::registration(
+        execution.clone(),
+        &fulfilled.inspection,
+        claim.referrer(),
+        environment.requirements.clone(),
+        environment.registry,
+    ));
+    ctx.actor_context()
+        .commit(tx, lash_durable::CommitLabel::new("execution.register"))
+        .await
+        .map_err(|error| host_failure(error.to_string()))?;
+    ctx.cell_execution_registered(execution);
+    for function in state.lowering_functions().values() {
+        if let Some(facts) = &function.written {
+            written.insert(
+                lash_vocabulary::sites::Site::new(
+                    lash_vocabulary::sites::Unit::Library(function.callable.function),
+                    Vec::new(),
+                ),
+                facts.clone(),
+            );
+        }
+    }
     let envelope = CellEnvelope {
         code: CellEnvelope::code_digest(code),
         dialect: state.dialect().to_owned(),
-        packages: packages.digest(),
+        link: fulfilled.inspection.link,
+        inspection: fulfilled.inspection,
+        environment,
         document,
         source_map,
         written,
         function_values,
-        effects: CellEnvelope::record_effects(&boundary, |tool| {
-            ctx.tool_catalog()
-                .entries()
-                .iter()
-                .map(|entry| &entry.manifest)
-                .chain(grants.values().map(lash_core::ToolExecutionGrant::manifest))
-                .find(|manifest| &manifest.id == tool)
-                .map(|manifest| manifest.declaration().controls.clone())
-                .unwrap_or_default()
-        }),
-        grants,
-        unavailable_notes,
         projected: projected.keys().cloned().collect(),
-        reads: candidates
-            .into_iter()
-            .filter(|(effect, _)| reached.contains(effect))
-            .collect(),
     };
     let document = envelope.document.clone();
     if let Some(map) = &envelope.source_map {
@@ -320,18 +323,36 @@ pub(super) async fn link_cell(
         .map(|(name, value)| {
             (
                 Name::new(name.as_str()),
-                crate::cell_value::json_datum(value, document.manifest.numbers),
+                crate::cell_value::json_datum(value, document.numbers),
             )
         })
         .collect();
     Ok(LinkedCell {
         envelope,
         document,
-        boundary,
         host,
         ledgers: CellHostLedgers::default(),
         graph: host::HostGraph::default(),
         open_sites: BTreeMap::new(),
         resumed: false,
     })
+}
+
+fn package_error(error: lash_execution_contracts::process::linking::EnginePortError) -> Refused {
+    Refused::Nested(Box::new(
+        lash_execution_contracts::plugin_error::PluginError::Package(Box::new(error)).into(),
+    ))
+}
+
+pub(super) fn execution_id(
+    exec: &lash_vm_broker::ExecKey,
+) -> lash_core_store::resolutions::ExecutionId {
+    match exec {
+        lash_vm_broker::ExecKey::Cell(session, turn, cell) => {
+            lash_core_store::resolutions::ExecutionId::cell(session, turn, cell.as_str())
+        }
+        lash_vm_broker::ExecKey::Process(process) => {
+            lash_core_store::resolutions::ExecutionId::process(process)
+        }
+    }
 }

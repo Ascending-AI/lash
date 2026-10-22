@@ -68,6 +68,7 @@ mod sim;
 mod matrix;
 
 use lash_protocol_types::{llm::types::StreamBlockEvent, llm::types::StreamBlockKind};
+
 use matrix::MatrixTestExt as _;
 
 use std::num::{NonZeroU32, NonZeroU64};
@@ -90,7 +91,8 @@ use lash_execution_contracts::backend::BackendParts;
 use lash_execution_contracts::backend::StoreSet;
 use lash_execution_contracts::projection::NoProjectionProviders;
 use lash_protocol_types::sync::MutexExt as _;
-use lash_protocol_types::{SessionId, TurnId};
+use lash_vocabulary::identity::SessionId;
+use lash_vocabulary::identity::TurnId;
 
 use dialect::Dialect;
 
@@ -1277,4 +1279,20 @@ async fn a_turn_killed_at_every_label_commits_its_last_calls_prompt_usage() {
             "the matrix never cut {label}"
         );
     }
+}
+
+/// FIG-7109: killing the owner after model admission must not make the
+/// restored cell depend on a prompt rendering to recover its package imports.
+#[tokio::test]
+async fn a_cell_restored_after_model_start_uses_its_recorded_packages() {
+    let report = Matrix::new()
+        .labels(&[CommitLabel::MODEL_START])
+        .faults(&[Fault::CommitThenAbort])
+        .run_test(PromptUsage::new)
+        .await;
+    report.assert_held();
+    assert!(
+        report.labels().contains(&CommitLabel::MODEL_START) && !report.cells.is_empty(),
+        "the law must kill the owner after model admission"
+    );
 }

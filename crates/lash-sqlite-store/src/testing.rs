@@ -4,6 +4,7 @@
 //! factories arm no pause, and production builds do not compile the points.
 
 use lash_protocol_types::{sync::LockResultExt, sync::MutexExt};
+
 use std::sync::{Arc, Condvar, Mutex};
 
 pub use crate::migration::{SqliteMigrationFault, SqliteMigrationHook, SqliteMigrationStep};

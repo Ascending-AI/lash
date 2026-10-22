@@ -1,14 +1,18 @@
 //! Codec, refusal and transition witnesses of the tool-run contract.
 
-use lash_protocol_types::{ToolCallId, ToolIntentKind};
+use lash_protocol_types::ToolCallId;
+use lash_vocabulary::ToolIntentKind;
 use serde_json::json;
 
 use super::*;
+use crate::ExecutionScope;
 use crate::artifact_referrer::{ArtifactName, ArtifactStoreId};
 use crate::await_event_identity::{AwaitEventKey, AwaitEventWaitIdentity};
 use crate::effect_opener::EffectOpener;
-use crate::store::plugin_writers::PluginCallbackIdentity;
-use crate::{ExecutionScope, ProcessId};
+use lash_vocabulary::identity::ProcessId;
+use lash_vocabulary::providers::PluginCallbackIdentity;
+use lash_vocabulary::providers::{CallbackSlot, StateAuthority};
+use lash_vocabulary::tool_declaration::{DeclarationRefusal, OutcomeShape, ToolDeclaration};
 
 const DIGEST_A: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 const DIGEST_B: &str = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
@@ -176,7 +180,7 @@ fn declarations_refuse_typed() {
         may_defer: true,
         intents: vec![ToolIntentKind::CancelProcess],
         isolated: false,
-        controls: lash_protocol_types::TurnControls::none(),
+        controls: lash_vocabulary::tool_declaration::TurnControls::none(),
     };
     assert_eq!(deferring.admits(OutcomeShape::Deferred), Ok(()));
     assert_eq!(
@@ -628,7 +632,7 @@ fn only_sequential_turn_and_tool_result_check_callbacks_publish_state() {
 #[test]
 fn the_state_frontier_applies_each_publication_once_in_order() {
     let resolution = |ordinal: u64, predecessor: Option<u64>, segment: u32| StateResolution {
-        format_version: lash_core_ids::FormatVersion::ONE,
+        format_version: lash_vocabulary::providers::FormatVersion::ONE,
         publisher: crate::EffectAddress::new(
             ExecutionScope::turn("session-1", "turn-1"),
             "attempt:a",

@@ -1,20 +1,20 @@
 {
-  "rule": "K-LJSON-005",
   "cases": [
     {
-      "name": "stringify cycle begins at an immutable tuple and crosses a heap object",
-      "document": "kernel 1\nnumbers by_spelling\nuse json.stringify = @93ee5ca13b2cc141c42f0599311f5c7e7859eefc5af55c394223bb55d77817f4\nmain { let xs = [null] let wrapped = (xs,) set xs[0] = wrapped try { print json.stringify(wrapped) } catch e { print e.kind } }",
+      "document": "kernel 1\nnumbers by_spelling\nnative @b93d1d34db3b20cd8781bd45de3d855c00df25a5cb1ff5aee6751eca59e91d51\ndefinition \"function json.stringify(value: Any) -> Text\\nkernel 1\\nerrors \\\"json_depth\\\", \\\"json_key\\\", \\\"json_number\\\"\\ncharge sum(1, deep(value), deep(result))\\nnative\\n\"\nmain {\n  let xs = [null]\n  let wrapped = (xs,)\n  set xs[0] = wrapped\n  try {\n    print json.stringify(wrapped)\n  } catch e {\n    print e.kind\n  }\n}\n",
       "expected": {
+        "end": {
+          "finished": "null"
+        },
         "prints": [
           {
             "text": "cycle"
           }
         ],
-        "end": {
-          "finished": "null"
-        },
         "trace": []
-      }
+      },
+      "name": "stringify cycle begins at an immutable tuple and crosses a heap object"
     }
-  ]
+  ],
+  "rule": "K-LJSON-005"
 }

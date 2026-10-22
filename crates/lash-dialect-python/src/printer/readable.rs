@@ -1,6 +1,7 @@
 //! Native expression and statement rendering; exact generic suites live in the parent.
-use super::authored::{authored_awaits, seconds};
-use super::{BindingScope, PrintError, Renderer, attribute_identifier, awaits, k};
+use super::authored::authored_awaits;
+use super::{BindingScope, PrintError, Renderer, attribute_identifier, k};
+use lash_vocabulary::Name;
 
 /// The binding strength of atoms, calls and members.
 const PRIMARY: u8 = 10;
@@ -113,17 +114,52 @@ impl Renderer<'_> {
         self.out.end_node();
     }
     pub(super) fn inline_expr(&mut self, expr: &k::Expr) {
+        if self.expression_depth >= self.max_depth {
+            self.out.refuse(PrintError::Depth {
+                limit: self.max_depth,
+            });
+            return;
+        }
+        self.expression_depth += 1;
         self.out.begin_node(None);
         self.inline_body(expr);
         self.out.end_node();
+        self.expression_depth -= 1;
     }
     pub(super) fn inline_body(&mut self, expr: &k::Expr) {
         match expr {
             k::Expr::Literal(l) => self.literal(l),
             k::Expr::Act(act) => self.nested_action(act, true),
-            k::Expr::Variable(n) => self.name(n),
-            k::Expr::Clock => self.out.write("k.clock()"),
-            k::Expr::Random => self.out.write("k.random()"),
+            k::Expr::Variable(n) => {
+                if let Some(value) = self.substitutions.remove(n) {
+                    self.inline_expr(&value);
+                    self.substitutions.insert(n.clone(), value);
+                } else if let Some(comprehension) = self.comprehensions.remove(n) {
+                    self.comprehension(&comprehension);
+                    self.comprehensions.insert(n.clone(), comprehension);
+                } else {
+                    self.name(n);
+                }
+            }
+            k::Expr::If { cond, then, r#else } => {
+                self.out.write("(");
+                self.inline_expr(then);
+                self.out.write(" if ");
+                self.inline_expr(cond);
+                self.out.write(" else ");
+                self.inline_expr(r#else);
+                self.out.write(")");
+            }
+            k::Expr::Let { name, value, body } => {
+                let previous = self.substitutions.insert(name.clone(), *value.clone());
+                self.inline_expr(body);
+                if let Some(previous) = previous {
+                    self.substitutions.insert(name.clone(), previous);
+                } else {
+                    self.substitutions.remove(name);
+                }
+            }
+            k::Expr::Closure(closure) => self.lambda(closure),
             k::Expr::Call { function, args } => {
                 if let Some(token) = self.operators.token(function, args, &self.scope.types) {
                     match token {
@@ -199,18 +235,9 @@ impl Renderer<'_> {
                 }
                 self.out.write("}");
             }
-            k::Expr::Record(items) => {
-                self.out.write("record({");
-                for (i, item) in items.iter().enumerate() {
-                    if i > 0 {
-                        self.out.write(", ");
-                    }
-                    self.out.json(&item.field);
-                    self.out.write(": ");
-                    self.inline_expr(&item.value);
-                }
-                self.out.write("})");
-            }
+            k::Expr::Record(_) => self.out.refuse(PrintError::Invalid(
+                "record has no authored spelling outside a typed boundary".into(),
+            )),
             k::Expr::Member(member) if matches!(member.as_ref(), k::Member::Field { field, .. } if !attribute_identifier(field)) =>
             {
                 let k::Member::Field { target, field } = member.as_ref() else {
@@ -244,217 +271,143 @@ impl Renderer<'_> {
                 .refuse(PrintError::Invalid("ineligible inline expression".into())),
         }
     }
-    /// As for a helper call, only a child with no native expression inverse
-    /// requires a suite; no argument is hoisted or replaced by a temporary.
-    pub(super) fn nested_action_suite(&mut self, act: &k::ActExpr) {
-        self.out.write("with k.");
-        match &act.kind {
-            k::ActKind::Call(callee) | k::ActKind::Spawn(callee) => {
-                self.out.write(if matches!(act.kind, k::ActKind::Call(_)) {
-                    "call("
-                } else {
-                    "spawn("
-                });
-                self.callee(callee);
-            }
-            k::ActKind::Perform {
-                effect,
-                result,
-                then_yield,
-            } => {
-                self.out.write("perform(");
-                self.out.json(effect);
-                self.out.write(", ");
-                self.metadata(result);
-                self.out
-                    .write(if *then_yield { ", True" } else { ", False" });
-            }
-            k::ActKind::Sleep { then_yield } => self.out.write(if *then_yield {
-                "sleep(True"
-            } else {
-                "sleep(False"
-            }),
-            k::ActKind::Yield => self.out.write("yield_("),
-            k::ActKind::Cancel => self.out.write("cancel("),
-            k::ActKind::Join => self.out.write("join("),
-            k::ActKind::JoinMany(mode) => {
-                self.out.write("join_many(");
-                self.out.json(match mode {
-                    k::JoinMode::All => "all",
-                    k::JoinMode::AllSettled => "all_settled",
-                    k::JoinMode::Race => "race",
-                    k::JoinMode::Any => "any",
-                });
-            }
-            k::ActKind::Await(policy) => {
-                self.out.write("await_(");
-                self.helper(policy);
-            }
-        }
-        self.suite();
-        if act.args.is_empty() {
-            self.empty();
-        }
-        for arg in &act.args {
-            self.expr(arg);
-        }
-    }
-    fn nested_action(&mut self, act: &k::ActExpr, grouped: bool) {
-        if self.authored && self.authored_action(act, grouped) {
-            return;
-        }
+    pub(super) fn nested_action(&mut self, act: &k::ActExpr, grouped: bool) {
         if grouped {
             self.out.write("(");
         }
-        if let k::ActKind::Call(k::Callee::Library(id)) = &act.kind
-            && self.authored_call(id, &act.args, true)
-        {
-            if grouped {
-                self.out.write(")");
-            }
-            return;
-        }
         match &act.kind {
-            k::ActKind::Call(callee) | k::ActKind::Spawn(callee) => {
-                let spawn = matches!(act.kind, k::ActKind::Spawn(_));
-                let sync = self.authored
-                    && matches!(callee, k::Callee::Value(name) if self.sync.contains(name));
-                self.out.write(if spawn {
-                    "spawn("
-                } else if sync {
-                    ""
+            k::ActKind::Call(callee) => {
+                let target = match callee {
+                    k::Callee::Local(id) => Some(k::FunctionTarget::Local(*id)),
+                    k::Callee::Import(slot) => Some(k::FunctionTarget::Import(*slot)),
+                    _ => None,
+                };
+                if let Some(target) = target {
+                    if self.operators.is(&target, "py.reply") {
+                        if let [k::Expr::Act(performed)] = act.args.as_slice() {
+                            self.nested_action(performed, false);
+                        } else {
+                            self.out.refuse(PrintError::Invalid(
+                                "reply has no authored operation".into(),
+                            ));
+                        }
+                    } else if self.operators.is(&target, "py.sleep") {
+                        self.out.write("await asyncio.sleep(");
+                        self.authored_args(&act.args, true);
+                        self.out.write(")");
+                    } else if self.operators.is(&target, "py.time") {
+                        self.out.write("time.time()");
+                    } else if self.operators.is(&target, "py.gather") {
+                        self.gather(&act.args);
+                    } else if self.name_check(&target, &act.args) {
+                    } else if let Some(token) = self.operators.action_token(&target, &act.args) {
+                        self.operator(token, &act.args);
+                    } else if !self.authored_call(&target, &act.args, true) {
+                        self.helper(&target);
+                        self.out.write("(");
+                        self.authored_args(&act.args, true);
+                        self.out.write(")");
+                    }
                 } else {
-                    "await "
-                });
-                match callee {
-                    k::Callee::Declared(name) => {
-                        self.out.write("declared.");
-                        self.name(name);
+                    if !matches!(callee,k::Callee::Value(name) if self.sync.contains(name)) {
+                        self.out.write("await ");
                     }
-                    k::Callee::Value(name) => self.name(name),
-                    k::Callee::Library(id) => self.helper(id),
+                    self.callee(callee);
+                    self.out.write("(");
+                    self.authored_args(&act.args, true);
+                    self.out.write(")");
                 }
-                self.out.write(if spawn { ", [" } else { "(" });
-                for (i, arg) in act.args.iter().enumerate() {
-                    if i > 0 {
-                        self.out.write(", ");
-                    }
-                    self.inline_expr(arg);
-                }
-                self.out.write(if spawn { "])" } else { ")" });
             }
             k::ActKind::Perform {
-                effect,
-                result,
-                then_yield,
+                slot,
+                then_yield: false,
+                ..
             } => {
+                let Some(import) = self.document.imports.get(slot) else {
+                    self.out
+                        .refuse(PrintError::Invalid("missing operation import".into()));
+                    return;
+                };
                 self.out.write("await ");
-                self.operation_path(effect.as_str());
+                self.operation_path(&import.name.to_string());
                 self.out.write("(");
-                for (i, arg) in act.args.iter().enumerate() {
-                    if i > 0 {
-                        self.out.write(", ");
-                    }
-                    self.inline_expr(arg);
-                }
-                // Authored source takes the result its operation declares.
-                if *result != k::Type::Any && !self.authored {
-                    if !act.args.is_empty() {
-                        self.out.write(", ");
-                    }
-                    self.out.write("result=");
-                    self.metadata(result);
-                }
-                if *then_yield {
-                    if !act.args.is_empty() || (*result != k::Type::Any && !self.authored) {
-                        self.out.write(", ");
-                    }
-                    self.out.write("then_yield=True");
-                }
+                self.operation_args(import, &act.args);
                 self.out.write(")");
             }
-            kind => {
-                match kind {
-                    k::ActKind::Sleep { .. } => self.out.write("await sleep("),
-                    k::ActKind::Yield => self.out.write("await yield_task("),
-                    k::ActKind::Cancel => self.out.write("await cancel("),
-                    k::ActKind::Join => self.out.write("await join("),
-                    k::ActKind::JoinMany(mode) => self.out.write(match mode {
-                        k::JoinMode::All => "await join_all(",
-                        k::JoinMode::AllSettled => "await join_all_settled(",
-                        k::JoinMode::Race => "await join_race(",
-                        k::JoinMode::Any => "await join_any(",
-                    }),
-                    k::ActKind::Await(policy) => {
-                        if self.operators.unique("py.await") == Some(*policy) {
-                            self.out.write("await (");
-                        } else {
-                            self.out.write("await_by(");
-                            self.helper(policy);
-                            self.out.write(", ");
-                        }
-                    }
-                    _ => unreachable!(),
-                }
-                for (i, arg) in act.args.iter().enumerate() {
-                    if i > 0 {
-                        self.out.write(", ");
-                    }
-                    self.inline_expr(arg);
-                }
-                if matches!(kind, k::ActKind::Sleep { then_yield: true }) {
-                    self.out.write(", then_yield=True");
-                }
+            k::ActKind::Await(policy) if self.operators.is(policy, "py.await") => {
+                self.out.write("await ");
+                self.authored_args(&act.args, true);
+            }
+            k::ActKind::Spawn(callee)
+                if super::task::target(callee)
+                    .is_some_and(|target| self.operators.is(&target, "py.task.run")) =>
+            {
+                self.out.write("asyncio.create_task(");
+                self.task_coroutine(act);
                 self.out.write(")");
             }
+            _ => self.out.refuse(PrintError::Invalid(
+                "action has no authored Python spelling".into(),
+            )),
         }
         if grouped {
             self.out.write(")");
         }
     }
-    /// An action as its author wrote it, when that differs from its
-    /// kernel spelling: an operation's reply, `await op(...)`, and a pause,
-    /// `await asyncio.sleep(seconds)`.
-    fn authored_action(&mut self, act: &k::ActExpr, grouped: bool) -> bool {
-        let reply = matches!(&act.kind, k::ActKind::Call(k::Callee::Library(id))
-            if self.operators.unique("py.reply") == Some(*id));
-        let seconds = match (&act.kind, act.args.as_slice()) {
-            (k::ActKind::Sleep { then_yield: false }, [k::Expr::Literal(milliseconds)]) => {
-                seconds(milliseconds)
+    /// The single record input of an operation is authored as keyword
+    /// fields. Resolve the retained operand binding without losing its order.
+    pub(super) fn operation_args(&mut self, import: &lash_vocabulary::Import, args: &[k::Expr]) {
+        if let lash_vocabulary::ImportKind::Operation { signature } = &import.kind
+            && let [param] = signature.params.as_slice()
+            && let lash_vocabulary::Type::Record(record) = &param.ty
+            && let [input] = args
+            && let Some(k::Expr::Record(fields)) = self.resolved(input).cloned()
+            && fields
+                .iter()
+                .all(|field| attribute_identifier(&field.field))
+        {
+            for (index, field) in fields.iter().enumerate() {
+                if index > 0 {
+                    self.out.write(", ");
+                }
+                self.out.write(&field.field);
+                self.out.write("=");
+                self.operation_input(&field.value, record_field(record, &field.field));
             }
-            _ => None,
-        };
-        match act.args.as_slice() {
-            [k::Expr::Act(performed)]
-                if reply && matches!(performed.kind, k::ActKind::Perform { .. }) =>
-            {
-                if grouped {
-                    self.out.write("(");
-                }
-                self.out.begin_node(None);
-                self.nested_action(performed, false);
-                self.out.end_node();
-                if grouped {
-                    self.out.write(")");
-                }
-                true
-            }
-            _ => match seconds {
-                Some(seconds) => {
-                    self.out.write(if grouped {
-                        "(await asyncio.sleep("
-                    } else {
-                        "await asyncio.sleep("
-                    });
-                    self.implicit();
-                    self.out.write(&seconds);
-                    self.out.write(if grouped { "))" } else { ")" });
-                    true
-                }
-                None => false,
-            },
+        } else {
+            self.authored_args(args, true);
         }
     }
+
+    /// A dictionary literal at a declared record boundary lowers directly to
+    /// that record; dictionaries in untyped positions remain Python maps.
+    fn operation_input(&mut self, value: &k::Expr, ty: &lash_vocabulary::Type) {
+        if let lash_vocabulary::Type::Record(record) = ty
+            && let Some(k::Expr::Record(fields)) = self.resolved(value).cloned()
+        {
+            if self.expression_depth >= self.max_depth {
+                self.out.refuse(PrintError::Depth {
+                    limit: self.max_depth,
+                });
+                return;
+            }
+            self.expression_depth += 1;
+            self.out.write("{");
+            for (index, field) in fields.iter().enumerate() {
+                if index > 0 {
+                    self.out.write(", ");
+                }
+                self.out.json(&field.field);
+                self.out.write(": ");
+                self.operation_input(&field.value, record_field(record, &field.field));
+            }
+            self.out.write("}");
+            self.expression_depth -= 1;
+        } else {
+            self.inline_expr(value);
+        }
+    }
+
     // The caller owns the block's indentation and any clause label. Empty
     // suites spell pass, so every real block has a nonempty final-text range.
     pub(super) fn readable_block(&mut self, block: &k::Block) {
@@ -463,9 +416,7 @@ impl Renderer<'_> {
         if block.is_empty() {
             self.empty();
         }
-        for stmt in block {
-            self.node(k::Node::Stmt(stmt), None);
-        }
+        self.authored_statements(block);
         self.indent -= 1;
         self.out.end_node();
     }
@@ -536,11 +487,19 @@ impl Renderer<'_> {
                 value: k::Rhs::Expr(k::Expr::Closure(c)),
                 ..
             } => {
-                let asynchronous = if self.authored {
-                    authored_awaits(&c.body, &self.sync)
-                } else {
-                    awaits(&c.body)
+                let Some(definition) = self.document.functions.get(&c.function) else {
+                    return false;
                 };
+                let Some(body) = definition.body() else {
+                    return false;
+                };
+                let params = definition
+                    .signature
+                    .params
+                    .iter()
+                    .map(|p| p.name.clone())
+                    .collect::<Vec<_>>();
+                let asynchronous = authored_awaits(&body.block, &self.sync);
                 if self.authored && !asynchronous {
                     self.sync.insert(name.clone());
                 }
@@ -548,22 +507,28 @@ impl Renderer<'_> {
                     .write(if asynchronous { "async def " } else { "def " });
                 self.name(name);
                 self.out.begin_node(None); // Closure expression
-                match &c.start {
-                    Some(start) if self.authored => self.annotated(&c.params, start),
-                    _ => self.parameters(&c.params),
+                match &c.presentation {
+                    Some(start) if self.authored => self.annotated(&params, start),
+                    _ => self.parameters(&params),
                 }
-                let (_, annotation) = self
-                    .scope
+                self.scope
                     .bind(name, Some(matches!(stmt, k::Stmt::Let { .. })));
-                if let Some(annotation) = annotation {
+                if let Some(annotation) = c
+                    .presentation
+                    .as_ref()
+                    .and_then(|start| super::authored::annotation(&start.signature.result))
+                {
                     self.out.write(" -> ");
-                    self.out.write(annotation);
+                    self.out.write(&annotation);
                 }
-                let parent = std::mem::replace(&mut self.scope, BindingScope::new(&c.params));
+                let parent = std::mem::replace(&mut self.scope, BindingScope::new(&params));
                 let outer_main = self.main;
                 self.main = false;
                 self.out.write(":\n");
-                self.readable_block(&c.body);
+                self.root_block(
+                    &body.block,
+                    Some(&lash_vocabulary::sites::Unit::Library(c.function)),
+                );
                 self.main = outer_main;
                 self.scope = parent;
                 self.out.end_node();
@@ -740,12 +705,8 @@ impl Renderer<'_> {
         }
         true
     }
-    fn binding_annotation(&mut self, name: &k::Name, declaration: bool) {
-        let (_, annotation) = self.scope.bind(name, Some(declaration));
-        if let Some(annotation) = annotation {
-            self.out.write(": ");
-            self.out.write(annotation);
-        }
+    fn binding_annotation(&mut self, name: &Name, declaration: bool) {
+        self.scope.bind(name, Some(declaration));
     }
 
     /// An operation as its dotted path: Python spells canonical names
@@ -764,4 +725,17 @@ impl Renderer<'_> {
         }
         self.out.write(&path);
     }
+}
+
+fn record_field<'a>(
+    record: &'a lash_vocabulary::RecordType,
+    name: &str,
+) -> &'a lash_vocabulary::Type {
+    record
+        .fields
+        .iter()
+        .find(|field| field.name == name)
+        .map(|field| &field.ty)
+        .or(record.rest.as_deref())
+        .unwrap_or(&lash_vocabulary::Type::Any)
 }

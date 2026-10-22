@@ -5,13 +5,13 @@
 //! a 4 GiB payload, a 4-billion-element array, a 4 GiB string — and each is
 //! refused having allocated a few kilobytes at most.
 
+use lash_protocol_types::engine_fault::{CodecRefusal, ExecutionLease, FrameEpoch, OwnerEpoch};
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::cell::Cell;
 
 use lash_vm_protocol::{
-    CodecRefusal, DecodeLimits, EncodedPayload, ExecutionLease, FRAME_MAGIC, FrameCodec,
-    FrameEpoch, HostReadId, HostReadKind, MessageFence, OwnerEpoch, WorkerFrame, WorkerMessage,
-    WorkerPhase,
+    DecodeLimits, EncodedPayload, FRAME_MAGIC, FrameCodec, HostReadId, HostReadKind, MessageFence,
+    WorkerFrame, WorkerMessage, WorkerPhase,
 };
 
 struct CountingAllocator;

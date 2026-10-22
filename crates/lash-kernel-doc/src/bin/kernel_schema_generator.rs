@@ -9,6 +9,7 @@ use lash_kernel_doc::{
     Captions, Correspondence, Document, FunctionDeclarations, FunctionDefinition, KERNEL_VERSION,
     SourceMap,
 };
+
 use schemars::JsonSchema;
 use serde_json::{Value, json};
 

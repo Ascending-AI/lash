@@ -22,8 +22,8 @@
 
 use super::*;
 use crate::session_sql::session_sql;
-use lash_protocol_types::SessionId;
-use lash_protocol_types::TurnId;
+use lash_vocabulary::identity::SessionId;
+use lash_vocabulary::identity::TurnId;
 
 fn read_session_state_version_conn(
     conn: &rusqlite::Connection,

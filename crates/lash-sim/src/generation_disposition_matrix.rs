@@ -13,12 +13,14 @@ use lash_core::provider::{
 };
 use lash_llm_transport::LlmHttpTransport;
 use lash_protocol_types::{FailureCode, TurnFailureCode};
+
 use lash_protocol_types::{
     llm::types::GenerationOptionOutcome as Outcome, llm::types::GenerationReceipt,
     llm::types::LlmEventSender, llm::types::LlmMessage, llm::types::LlmRequest,
     llm::types::LlmRequestScope, llm::types::LlmRole, llm::types::LlmToolChoice,
     llm::types::LlmToolSpec,
 };
+
 use lash_provider_anthropic::AnthropicProvider;
 use lash_provider_google::GoogleOAuthProvider;
 use lash_provider_openai::codex::ws_testing::{ScriptedWsAction, spawn_scripted_websocket};
@@ -277,12 +279,14 @@ impl Setting {
                 request.tools = Arc::new(vec![LlmToolSpec {
                     name: "lookup".into(),
                     description: "Lookup".into(),
-                    input_schema: lash_protocol_types::SchemaContract::admit(
+                    input_schema: lash_vocabulary::schema_contract::SchemaContract::admit(
                         json!({"type":"object"}),
                     )
                     .expect("valid declared schema"),
-                    output_schema: lash_protocol_types::SchemaContract::admit(json!({}))
-                        .expect("valid declared schema"),
+                    output_schema: lash_vocabulary::schema_contract::SchemaContract::admit(json!(
+                        {}
+                    ))
+                    .expect("valid declared schema"),
                 }]);
                 request.generation.parallel_tool_calls = Some(false);
                 json!(false)

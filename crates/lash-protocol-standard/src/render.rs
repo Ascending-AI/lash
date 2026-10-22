@@ -2,11 +2,14 @@ use std::collections::BTreeMap;
 use std::fmt;
 use std::sync::Arc;
 
+use lash_core::RecordedRender;
+use lash_core::RuntimeErrorCode;
+use lash_core::ToolCallOutcome;
+use lash_core::ToolCallOutput;
+use lash_core::ToolViewBlock;
 use lash_core::facade_support::{ModelToolReturn, ModelToolReturnPart, ToolPresentationInput};
-use lash_core::{
-    RecordedRender, RuntimeErrorCode, ToolCallOutcome, ToolCallOutput, ToolId, ToolViewBlock,
-};
 use lash_render::{CutKind, CutReport, RenderParams, RenderParamsPatch, Rendered, ShownRange};
+use lash_vocabulary::tool_contract::ToolId;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -649,11 +652,14 @@ fn renderer_unavailable(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use lash_core::AttachmentId;
+    use lash_core::AttachmentRef;
+    use lash_core::AttachmentStoreError;
+    use lash_core::MediaType;
+    use lash_core::ToolView;
+    use lash_core::ToolViewMeta;
     use lash_core::facade_support::{ToolPresentationArtifacts, ToolResultProjectionContext};
-    use lash_core::{
-        AttachmentId, AttachmentRef, AttachmentStoreError, MediaType, SessionId, ToolView,
-        ToolViewMeta,
-    };
+    use lash_vocabulary::identity::SessionId;
     use std::future::Future;
     use std::pin::Pin;
     use std::sync::atomic::{AtomicUsize, Ordering};
@@ -714,7 +720,7 @@ mod tests {
         artifacts: Arc<Artifacts>,
     ) -> ToolResultProjectionContext {
         ToolResultProjectionContext {
-            owner: lash_core::RuntimeOwner::Session(SessionId::from("test")),
+            owner: lash_vocabulary::identity::RuntimeOwner::Session(SessionId::from("test")),
             call_id: lash_core::ToolCallId::fixture("call"),
             tool_id: ToolId::new("tool:test"),
             tool_name: "display name".into(),

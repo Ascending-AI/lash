@@ -15,10 +15,12 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use lash_core_store::tool_surface::ExecutionEnvironment;
+use lash_execution_contracts::process::linking::LinkInspection;
 use lash_kernel_dialect::Written;
-use lash_kernel_dialect::{Offered, OfferedSource, QualifiedOperation};
-use lash_kernel_doc::{Datum, EffectName, IdentifiedDocument, Site};
-use lash_vm_runtime::HostBoundary;
+use lash_kernel_doc::{Datum, IdentifiedDocument};
+use lash_vocabulary::package::LinkId;
+use lash_vocabulary::sites::Site;
 
 use super::host::{CellHostLedgers, HostGraph, LedgerCall, LedgerCallState};
 use super::host_graph::{CallStatus, CellEnd, HostState};
@@ -26,19 +28,6 @@ use super::host_graph::{CallStatus, CellEnd, HostState};
 /// version_surface = "coexist"
 /// version_guard(items(LASH_CODEMODE_CELL_SEGMENT_CODE_DOMAIN_VERSION, code_digest))
 const LASH_CODEMODE_CELL_SEGMENT_CODE_DOMAIN_VERSION: &str = "lash-codemode-cell-segment-code/v1";
-
-/// One effect the cell was lowered against.
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct RecordedEffect {
-    pub tool: lash_core::ToolId,
-    /// The requirement the cell was lowered against: the tool's signature
-    /// and the contract it served.
-    pub requirement: lash_kernel_doc::OperationRequirement,
-    /// The turn controls the tool declared when the cell was lowered: what
-    /// the cell's control admission reads at every park.
-    pub controls: lash_core::TurnControls,
-}
 
 /// What a cell is, recorded when it was lowered and the same at every park.
 #[derive(Clone)]
@@ -51,10 +40,9 @@ pub struct CellEnvelope {
     /// The kernel document the cell runs, decoded once where it was lowered
     /// or read back, with its identity and token body.
     pub document: IdentifiedDocument,
-    /// The package set the document was lowered against, the cell's
-    /// `CellPackages`: what a resumed cell is written under. The document's
-    /// closure lists identities, which do not name their set.
-    pub packages: lash_kernel_doc::PackageSetDigest,
+    pub link: LinkId,
+    pub environment: ExecutionEnvironment,
+    pub inspection: LinkInspection,
     /// Where each statement of the document came from in the source, when
     /// the dialect gave a map: what a failure locates its tasks by, at
     /// whichever activation the cell ends. Nothing a run or a save needs is
@@ -67,21 +55,9 @@ pub struct CellEnvelope {
     /// What the dialect's function values are, where its sessions keep the
     /// functions a cell binds ([`lash_kernel_dialect::Dialect::function_values`]).
     pub function_values: Option<lash_kernel_doc::FunctionRepresentation>,
-    /// The effects the document was lowered against.
-    pub effects: BTreeMap<EffectName, RecordedEffect>,
-    /// The grants the cell's deferred resolutions recorded.
-    pub grants: BTreeMap<lash_core::ToolId, lash_core::ToolExecutionGrant>,
-    /// Recorded host explanations for unavailable call paths; no authority.
-    pub unavailable_notes: BTreeMap<String, String>,
     /// The read-only host bindings the cell started with: they are the
     /// host's, and are not the session's when the cell ends.
     pub projected: BTreeSet<String>,
-    /// The cell's read plan (ADR 0144): each effect `main` reaches whose
-    /// tool declares a read, with the provider the run's surface retained
-    /// for it. The cell performs these as reads, answered inside their
-    /// statements and recorded nowhere but the cell's saved state; its
-    /// roots owe each provider's reader while the cell lives.
-    pub reads: BTreeMap<EffectName, lash_core::ProviderKey>,
 }
 
 impl CellEnvelope {
@@ -90,79 +66,6 @@ impl CellEnvelope {
             LASH_CODEMODE_CELL_SEGMENT_CODE_DOMAIN_VERSION,
             code.as_bytes(),
         )
-    }
-
-    /// The grants the cell's committed deferred matches recorded, by the
-    /// effect path each matched tool's binding names: what a start the
-    /// cell declares captures an effect the run's surface does not offer
-    /// from, never resolving it again. A path two grants name is left out,
-    /// so neither is captured in place of the other.
-    pub(super) fn recorded_grants(&self) -> BTreeMap<EffectName, lash_core::ToolExecutionGrant> {
-        let mut grants = BTreeMap::new();
-        let mut conflicted = BTreeSet::new();
-        for grant in self.grants.values() {
-            let effect = grant.manifest().operation.effect_name();
-            if grants.insert(effect.clone(), grant.clone()).is_some() {
-                conflicted.insert(effect);
-            }
-        }
-        for effect in conflicted {
-            grants.remove(&effect);
-        }
-        grants
-    }
-
-    /// The tools `boundary` offers, as the envelope records them: each with
-    /// the turn controls `controls` says its tool declares. An unavailable
-    /// note is no tool, and is recorded as a note.
-    pub(super) fn record_effects(
-        boundary: &HostBoundary,
-        controls: impl Fn(&lash_core::ToolId) -> lash_core::TurnControls,
-    ) -> BTreeMap<EffectName, RecordedEffect> {
-        boundary
-            .operations()
-            .iter()
-            .filter_map(|(operation, offered)| {
-                let (OfferedSource::Catalog { tool } | OfferedSource::Deferred { tool }) =
-                    &offered.source
-                else {
-                    return None;
-                };
-                let tool = lash_core::ToolId::new(tool.as_str());
-                Some((
-                    operation.effect_name(),
-                    RecordedEffect {
-                        controls: controls(&tool),
-                        tool,
-                        requirement: offered.requirement.clone(),
-                    },
-                ))
-            })
-            .collect()
-    }
-
-    /// The boundary the cell was lowered against.
-    pub(super) fn boundary(&self) -> Result<HostBoundary, String> {
-        let mut boundary = HostBoundary::new();
-        for (name, effect) in &self.effects {
-            let operation =
-                QualifiedOperation::from_effect(name).map_err(|error| error.to_string())?;
-            boundary
-                .offer_operation(
-                    operation,
-                    Offered {
-                        visibility: lash_kernel_dialect::Visibility::Public,
-                        requirement: effect.requirement.clone(),
-                        controls: lash_vm_runtime::effect_controls(&effect.controls),
-                        read: false,
-                        source: OfferedSource::Catalog {
-                            tool: effect.tool.to_string(),
-                        },
-                    },
-                )
-                .map_err(|error| error.to_string())?;
-        }
-        Ok(boundary)
     }
 }
 
@@ -175,10 +78,10 @@ pub(super) struct ResumedCell {
     pub cell: CellEnvelope,
     pub prints: Vec<Datum>,
     pub ledgers: CellHostLedgers,
-    pub started_process_ids: Vec<lash_core::ProcessId>,
+    pub started_process_ids: Vec<lash_vocabulary::identity::ProcessId>,
     pub graph: HostGraph,
     /// The effect identity each open call was performed at.
-    pub open_sites: BTreeMap<lash_core::ToolCallId, lash_kernel_doc::EffectId>,
+    pub open_sites: BTreeMap<lash_core::ToolCallId, lash_vocabulary::sites::EffectId>,
     /// The session an ended root's end names, as the activation that
     /// recorded the end left it: its descriptor page, which the session
     /// adopts (FIG-6315). None for a parked root.
@@ -235,7 +138,7 @@ pub(super) fn load_cell(
     graph.installed.insert(envelope);
     let mut open_sites = BTreeMap::new();
     for summary in state.calls.items() {
-        if !cell.effects.contains_key(&summary.operation) {
+        if !cell.environment.uses.contains_key(&summary.operation) {
             return Err(format!(
                 "the cell ledger names an unrecorded effect: {}",
                 summary.operation
@@ -285,7 +188,8 @@ pub(super) fn load_cell(
             }
         };
         ledgers.calls.push(LedgerCall {
-            operation: summary.operation.clone(),
+            control: state.control_attempt == Some(summary.ordinal),
+            operation: summary.operation,
             effect: summary.effect.clone(),
             state: call_state,
         });
@@ -409,7 +313,11 @@ pub(crate) fn recorded_cell_ledger(
 pub(crate) fn check_cell_snapshot(cell: &lash_core::plugin::StoredCell) -> Result<(), String> {
     use lash_core_store::checkpoint_graph::bodies::{ExecRoot, ExecStatus};
     let loaded = load_cell(&cell.graph, cell.row.root, cell.read_limits)?;
-    loaded.cell.boundary()?;
+    if loaded.cell.link != loaded.cell.inspection.link
+        || !loaded.cell.environment.roots.contains(&loaded.cell.link)
+    {
+        return Err("cell envelope Link and environment disagree".into());
+    }
     let mut decoder = GraphDecoder::new(&cell.graph, cell.read_limits);
     let body: ExecRoot = decoder
         .decode(cell.row.root, NodeKind::EXEC_ROOT)
@@ -445,11 +353,17 @@ pub(crate) fn check_cell_snapshot(cell: &lash_core::plugin::StoredCell) -> Resul
 
 // --- The envelope as checkpoint graph nodes (FIG-5887 §3) -------------------
 
-use lash_core_store::checkpoint_graph::{
-    GraphDecoder, GraphRefusal, GraphStaging, NodeId, NodeKind, TokenCodec, TokenError,
-    TokenReader, TokenWriter, TypedBody,
-};
+use lash_core_store::checkpoint_graph::GraphDecoder;
+use lash_core_store::checkpoint_graph::GraphRefusal;
+use lash_core_store::checkpoint_graph::GraphStaging;
+use lash_core_store::checkpoint_graph::NodeId;
+use lash_core_store::checkpoint_graph::NodeKind;
+use lash_core_store::checkpoint_graph::TypedBody;
 use lash_vm_broker::round_graph::{decode_opt_tree, decode_tree, encode_opt_tree, encode_tree};
+use lash_vocabulary::tokens::TokenCodec;
+use lash_vocabulary::tokens::TokenError;
+use lash_vocabulary::tokens::TokenReader;
+use lash_vocabulary::tokens::TokenWriter;
 
 fn graph_invalid(kind: NodeKind, reason: impl std::fmt::Display) -> GraphRefusal {
     GraphRefusal::InvalidBody {
@@ -458,115 +372,39 @@ fn graph_invalid(kind: NodeKind, reason: impl std::fmt::Display) -> GraphRefusal
     }
 }
 
-/// Kind 12: the effects a cell was lowered against, each with its tool,
-/// signature and declared controls; the grants its deferred resolutions
-/// recorded, including unavailable notes; its projected binding names;
-/// and its read plan. All sorted.
+/// Kind 12: immutable per-use routes and selected reach, outside mutable resolution rows.
 #[derive(Clone, Debug, PartialEq)]
 pub struct EffectTable {
-    pub effects: BTreeMap<EffectName, RecordedEffect>,
-    pub grants: BTreeMap<lash_core::ToolId, lash_core::ToolExecutionGrant>,
-    /// Recorded host explanations for unavailable call paths; no authority.
-    pub unavailable_notes: BTreeMap<String, String>,
+    pub environment: ExecutionEnvironment,
+    pub inspection: LinkInspection,
     pub projected: BTreeSet<String>,
-    /// Each planned read's effect, with its retained provider.
-    pub reads: BTreeMap<EffectName, lash_core::ProviderKey>,
 }
-
 impl TokenCodec for EffectTable {
     fn encode(&self, out: &mut TokenWriter) {
-        out.seq(5);
-        out.map(self.effects.len() as u64);
-        for (name, effect) in &self.effects {
-            name.encode(out);
-            out.seq(3);
-            out.text(effect.tool.as_str());
-            effect.requirement.encode(out);
-            encode_tree(&effect.controls, out);
-        }
-        out.map(self.grants.len() as u64);
-        for (tool, grant) in &self.grants {
-            out.text(tool.as_str());
-            encode_tree(grant, out);
-        }
-        encode_tree(&self.unavailable_notes, out);
-        out.seq(self.projected.len() as u64);
-        for name in &self.projected {
-            out.text(name);
-        }
-        encode_tree(&self.reads, out);
+        out.seq(3);
+        encode_tree(&self.environment, out);
+        encode_tree(&self.inspection, out);
+        encode_tree(&self.projected, out);
     }
-
     fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
-        let unsorted = || {
-            TokenError::NonCanonical(
-                lash_core_store::checkpoint_graph::CanonicalFault::UnsortedOrDuplicateKey,
-            )
-        };
-        input.expect_struct(5)?;
-        let mut effects = BTreeMap::new();
-        for _ in 0..input.map()? {
-            let name = EffectName::decode(input)?;
-            input.expect_struct(3)?;
-            let effect = RecordedEffect {
-                tool: lash_core::ToolId::new(input.text()?),
-                requirement: lash_kernel_doc::OperationRequirement::decode(input)?,
-                controls: decode_tree(input)?,
-            };
-            if effects
-                .last_key_value()
-                .is_some_and(|(last, _)| last >= &name)
-            {
-                return Err(unsorted());
-            }
-            effects.insert(name, effect);
-        }
-        let mut grants = BTreeMap::new();
-        for _ in 0..input.map()? {
-            let tool = lash_core::ToolId::new(input.text()?);
-            let grant = decode_tree(input)?;
-            if grants
-                .last_key_value()
-                .is_some_and(|(last, _)| last >= &tool)
-            {
-                return Err(unsorted());
-            }
-            grants.insert(tool, grant);
-        }
-        let unavailable_notes = decode_tree(input)?;
-        let mut projected = BTreeSet::new();
-        for _ in 0..input.seq()? {
-            let name = input.text()?.to_owned();
-            if projected.last().is_some_and(|last: &String| last >= &name) {
-                return Err(unsorted());
-            }
-            projected.insert(name);
-        }
-        let reads: BTreeMap<EffectName, lash_core::ProviderKey> = decode_tree(input)?;
-        if reads.keys().any(|effect| !effects.contains_key(effect)) {
-            return Err(TokenError::Invalid(
-                "the read plan names an effect the cell was not lowered against".to_owned(),
-            ));
-        }
+        input.expect_struct(3)?;
         Ok(Self {
-            effects,
-            grants,
-            unavailable_notes,
-            projected,
-            reads,
+            environment: decode_tree(input)?,
+            inspection: decode_tree(input)?,
+            projected: decode_tree(input)?,
         })
     }
 }
 
 /// Kind 15: what a cell is, staged once when it is lowered and named by
-/// every park's root: no park copies it. It names the package set the
-/// document was lowered against beside the document.
+/// every park's root: no park copies it. It retains the Document and its
+/// immutable Link alongside its source and execution metadata.
 struct EnvelopeBody {
     code: String,
     dialect: String,
-    document_id: lash_kernel_doc::DocumentId,
+    document_id: lash_vocabulary::names::DocumentId,
     document: NodeId,
-    packages: lash_kernel_doc::PackageSetDigest,
+    link: LinkId,
     source_map: Option<NodeId>,
     written: NodeId,
     function_values: Option<lash_kernel_doc::FunctionRepresentation>,
@@ -580,7 +418,7 @@ impl TokenCodec for EnvelopeBody {
         out.text(&self.dialect);
         self.document_id.encode(out);
         self.document.encode(out);
-        self.packages.encode(out);
+        self.link.encode(out);
         self.source_map.encode(out);
         self.written.encode(out);
         encode_opt_tree(self.function_values.as_ref(), out);
@@ -592,9 +430,9 @@ impl TokenCodec for EnvelopeBody {
         Ok(Self {
             code: input.text()?.to_owned(),
             dialect: input.text()?.to_owned(),
-            document_id: lash_kernel_doc::DocumentId::decode(input)?,
+            document_id: lash_vocabulary::names::DocumentId::decode(input)?,
             document: NodeId::decode(input)?,
-            packages: lash_kernel_doc::PackageSetDigest::decode(input)?,
+            link: LinkId::decode(input)?,
             source_map: Option::decode(input)?,
             written: NodeId::decode(input)?,
             function_values: decode_opt_tree(input)?,
@@ -631,7 +469,7 @@ impl CellEnvelope {
             dialect: self.dialect.clone(),
             document_id,
             document: staging.encode(NodeKind::DOCUMENT, logical)?,
-            packages: self.packages,
+            link: self.link,
             source_map: self
                 .source_map
                 .as_ref()
@@ -642,11 +480,9 @@ impl CellEnvelope {
             effects: staging.encode_value(
                 NodeKind::EFFECT_TABLE,
                 &EffectTable {
-                    effects: self.effects.clone(),
-                    grants: self.grants.clone(),
-                    unavailable_notes: self.unavailable_notes.clone(),
+                    environment: self.environment.clone(),
+                    inspection: self.inspection.clone(),
                     projected: self.projected.clone(),
-                    reads: self.reads.clone(),
                 },
             )?,
         };
@@ -694,15 +530,13 @@ impl CellEnvelope {
             code: body.code,
             dialect: body.dialect,
             document,
-            packages: body.packages,
+            link: body.link,
             source_map,
             written,
             function_values: body.function_values,
-            effects: table.effects,
-            grants: table.grants,
-            unavailable_notes: table.unavailable_notes,
+            environment: table.environment,
+            inspection: table.inspection,
             projected: table.projected,
-            reads: table.reads,
         };
         Ok(envelope)
     }

@@ -27,11 +27,13 @@ use lash_core_store::checkpoint_graph::stage::{CandidateManifest, ManifestEntry,
 use lash_core_store::checkpoint_graph::{
     EncodedNode, GraphRefusal, GraphStaging, NodeId, NodeKind, TypedBody,
 };
-use lash_kernel_doc::graph_tokens::{
+use lash_kernel_doc::{FunctionDefinition, FunctionRegistry};
+
+use lash_protocol_types::engine_fault::KernelRestoreRefusal;
+use lash_vocabulary::names::FunctionId;
+use lash_vocabulary::tokens::{
     ChildRef, TokenCodec, TokenError, TokenReader, TokenWriter, check_ascending, encode_body,
 };
-use lash_kernel_doc::{FunctionDefinition, FunctionId, FunctionRegistry};
-use lash_vm_protocol::KernelRestoreRefusal;
 
 /// One function a closure holds.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -292,7 +294,12 @@ impl Member<'_> {
             Member::Held(registered) => registered.callees().iter().copied().collect(),
             Member::Stored(definition) => definition
                 .body()
-                .map(|body| body.functions.keys().copied().collect())
+                .map(|body| {
+                    lash_kernel_doc::Node::Block(&body.block)
+                        .functions_within()
+                        .into_iter()
+                        .collect()
+                })
                 .unwrap_or_default(),
         }
     }

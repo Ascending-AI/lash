@@ -3,7 +3,7 @@
   "cases": [
     {
       "name": "committed outcome survives a crash before the perform continues",
-      "document": "kernel 1\nnumbers by_spelling\neffect echo(n: Int) -> Int contract \"1\"\nmain { let answer = perform echo(1) as Int finish answer }\n",
+      "document": "kernel 1\nnumbers by_spelling\nimport 0 operation host.echo(n: Int) -> Int\nmain {\n  let answer = perform 0(1) as Int\n  finish answer\n}\n",
       "environment": {
         "deliveries": [
           [
@@ -29,7 +29,7 @@
         "trace": [
           {
             "effect": {
-              "effect": "echo",
+              "effect": "host.echo",
               "args": [
                 {
                   "int": "1"

@@ -382,6 +382,13 @@ impl SqliteStoreSet {
 }
 
 impl lash_execution_contracts::backend::StoreSet for SqliteStoreSet {
+    fn package_store(&self) -> Arc<dyn lash_durable::packages::PackageStore> {
+        self.inner.process_env_store.clone()
+    }
+    fn execution_resolutions(&self) -> Arc<dyn lash_durable::resolutions::ExecutionResolutions> {
+        Arc::new(SqliteStoreSet::durable_store(self))
+    }
+
     fn durable_store(&self) -> Arc<dyn lash_durable::DurableStore> {
         Arc::new(SqliteStoreSet::durable_store(self))
     }
@@ -562,7 +569,7 @@ mod tests {
         let uri = stores.database_uri();
         let store = stores.open_store().await.expect("open catalog");
         let request = lash_core_execution::testing::store_fixtures::session_store_request(
-            &lash_protocol_types::SessionId::from("memory-lifetime"),
+            &lash_vocabulary::identity::SessionId::from("memory-lifetime"),
             "memory-lifetime",
             lash_core_store::session_identity::SessionRelation::Root,
         );

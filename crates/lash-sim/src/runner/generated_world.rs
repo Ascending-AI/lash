@@ -5,8 +5,8 @@ use super::runtime_boundaries::RuntimeBoundaryHarness;
 use super::*;
 use crate::backend_fault::GeneratedBackendFaultHarness;
 use crate::scheduler::QueuedIngressMode;
-use lash_protocol_types::SessionId;
 use lash_protocol_types::sync::MutexExt as _;
+use lash_vocabulary::identity::SessionId;
 
 mod provider_turn;
 mod suspend;
@@ -450,7 +450,7 @@ impl GeneratedRuntimeWorld {
         let mut send = runtime_session
             .durable
             .send(lash::TurnInput::text(text.to_string()))
-            .id(lash_core::TurnId::fixture(source_key));
+            .id(lash_vocabulary::identity::TurnId::fixture(source_key));
         let observed_active_turn_id = event
             .payload
             .get("active_turn_id")
@@ -478,7 +478,7 @@ impl GeneratedRuntimeWorld {
         };
         if ingress_mode == QueuedIngressMode::ActiveTurn {
             send = send.ingress(lash_core::TurnInputIngress::active_turn(
-                lash_core::TurnId::fixture(active_turn_id),
+                lash_vocabulary::identity::TurnId::fixture(active_turn_id),
                 lash_core::TurnInputCheckpointBoundary::AfterWork,
             ));
         }

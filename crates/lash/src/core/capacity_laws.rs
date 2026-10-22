@@ -178,7 +178,7 @@ async fn facade_observation_publisher_yields_at_the_host_batch() {
 async fn facade_fetch_horizon_is_recorded_for_cold_resends() {
     use crate::tests::host::created_session;
     let backend = crate::tests::sqlite_memory_store_backend().await;
-    let turn = crate::TurnId::parse("fetch-turn").unwrap();
+    let turn = lash_vocabulary::identity::TurnId::parse("fetch-turn").unwrap();
     // The call's request, read while the call is open: its settlement
     // releases it.
     let admitted = Arc::new(std::sync::Mutex::new(None));
@@ -192,7 +192,7 @@ async fn facade_fetch_horizon_is_recorded_for_cold_resends() {
                     let row = backend
                         .durable()
                         .prompt_snapshot(&crate::prompt::PromptCallKey {
-                            session: crate::SessionId::from("fetch-horizon"),
+                            session: lash_vocabulary::identity::SessionId::from("fetch-horizon"),
                             call: crate::prompt::ModelCallId::Turn {
                                 run: turn,
                                 ordinal: 1,

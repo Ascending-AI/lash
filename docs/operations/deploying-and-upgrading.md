@@ -208,62 +208,36 @@ affected state while investigating the refusal.
 
 ## Roll a build that changes packages
 
-Build the new dependency-closed package set into the new build. Each node
-installs its set when it starts and advertises its capabilities: its
-natives, kernel versions, providers, codec versions and own set. The
-package gate writes each new cell under the newest live surface the writer
-and every live serving node can run. A serving node decodes the current
-session format or a carried session format, even if it serves only the latter.
-With a nonempty fleet, a body-only release is written as soon as one node of
-it is live, and the older surface again once its nodes stop. A release that
-adds a native-only function is written only once no live node lacks the
-native. When a nonempty fleet has no live surface every serving node can run
-(two releases each adding a native the other lacks), new cells fail typed
-`no_compatible_snapshot` until the fleet agrees: finish or roll back the
-deploy.
+Publish the build's Packages under their scoped provenance and retain the full
+Link DAGs. Each node advertises its native implementations, kernel versions,
+providers and codecs. Current is the session and host plugin advertisement
+snapshot at round start. Keep that same snapshot through prompt construction,
+cell lowering and publication; the next round samples Current again.
 
-When no serving nodes remain, including before first registration, after
-lease expiry or total shutdown, surface acquisition durably installs and
-answers the caller's complete own set. A publishing host needs no serving
-lease. The gate chooses neither the latest historical set nor a global
-default: different publishers may choose different sets while the fleet is
-empty. Survey or installation failures are errors, never evidence of absence.
-With a nonempty serving fleet, even one advertising no candidate, the usual
-compatibility rule and typed refusal apply. An unregistered publisher does
-not promote a surface into a running fleet.
+An execution's immutable Link fixes its import fills. Its Execution Environment
+pins the reached Operations and Deferred resolutions. A capable node may claim
+it when the node meets its Machine Requirements. Publishing code requires no
+serving lease or agreement across live nodes. Started durable work waits until
+a real node meets its format and hard requirements. A rollback lacking a
+required native, kernel, provider or codec can strand that work; deploying a
+capable node makes it runnable. `lashctl stranded list` diagnoses actors' hard
+capability deficits; it does not list every published definition or certify
+general queue liveness.
 
-Use one acquired surface handle through import and publication, preserving
-the exact declared selection. A round's cell uses the surface its prompt
-showed; a fresh round surveys again. Selection is a point-in-time answer:
-a node registering afterwards does not change the chosen snapshot.
-Admission before serving grants no lease and promises no immediate execution.
-Started durable work waits until a real node meets its format and hard
-requirements. A later rollback lacking a required native, kernel, provider
-or codec can strand that work; deploying a capable node makes it runnable.
-`lashctl stranded list` diagnoses actors' hard-capability deficits; it does
-not list every published definition or certify general queue liveness.
+Parked runs and published workflows keep their exact Link DAGs and function
+identities. Resume loads those retained definitions and requires any reached
+native-only implementations. Saved session functions are relinked against the
+next cell's Namespaces, preserving their resolved Operation pins. Relinking
+refuses a changed Operation contract or a missing required Export. Published
+workflow adoption is explicit; a parked adoption without a carried state
+refuses `state_not_carried`.
 
-Parked runs and published workflows keep their exact function identities.
-Resume requires those definitions and any native-only implementations;
-changing the installed set does not adopt them. A session relinks its
-saved functions by name to each cell's package set at the cell's start, and
-drops one whose callee that set removed or re-signed, naming both. A value
-with an incompatible representation raises
-`package.stale_value` when used. Document adoption refuses a changed operation
-requirement with `operation_contract_changed`; parked adoption refuses
-`state_not_carried`.
-
-Each node writes its set into the store when it starts: the surface
-snapshot, execution requirements, every definition and the release
-labels. These are never deleted and outlive the installing node, so no
-build retains another's artifacts. A set whose code is all body-backed can
-be read, lowered and run by nodes of any build. Work is claimed by its
-hard requirements, so a node that lacks a native, kernel, provider or codec
-version a run needs never claims it to run; the work stays parked rather
-than failing. Before retiring a build, run `lashctl stranded list` with the
-next build's nodes live: each actor it names needs what only the retiring
-build offers, and is run again once a node offering it is live. The
-[host-package guide](../host-packages.md) covers identities, runner contracts,
+Retained Documents, Links, Packages and sidecar labels outlive the node that
+published them. Body-backed code runs on any node that meets its requirements.
+Before retiring a build, run `lashctl stranded list` with the next build's nodes
+live: each actor it names needs what only the retiring build offers, and runs
+again once a node offering it is live. The
+[host-package guide](../host-packages.md) covers identities, Operation routing,
 storage and explicit adoption.
 
 ## Finalize the release

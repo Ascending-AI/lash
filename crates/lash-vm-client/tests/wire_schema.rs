@@ -1,7 +1,8 @@
 //! Independent vectors for the custom capability encoding at the carry boundary.
 use lash_kernel_doc::Datum;
+use lash_protocol_types::engine_fault::PageRefusal;
 use lash_vm_client::wire::{CarryWire, PageLink, StartWire};
-use lash_vm_protocol::page::{PageAuthority, PageCapability, PageRefusal, PageReply};
+use lash_vm_protocol::page::{PageAuthority, PageCapability, PageReply};
 use serde_json::json;
 
 // Reviewed 1.0 bytes: page 00..1f, kind, little-endian authority and epoch,
@@ -50,7 +51,7 @@ fn page_and_carry_wire_vectors_preserve_the_1_0_contract() -> Result<(), Box<dyn
         assert_eq!(rmp_serde::from_slice::<PageCapability>(&bytes)?, value);
     }
     let start = StartWire {
-        entry: Some("next".into()),
+        target: lash_kernel_vm::Target::Entry("next".into()),
         args: vec![Datum::Bool(true)],
         session: Some(CarryWire {
             root: vec![0, 128, 255],

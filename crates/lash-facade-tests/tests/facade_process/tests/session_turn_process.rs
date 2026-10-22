@@ -4,12 +4,12 @@ use lash_facade_tests::session_process::*;
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn observation_names_the_child_session_of_an_unnamed_start() -> Result<()> {
-    observed_child_session_matches_execution(false).await
+    Box::pin(observed_child_session_matches_execution(false)).await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn observation_names_the_child_session_of_a_named_start() -> Result<()> {
-    observed_child_session_matches_execution(true).await
+    Box::pin(observed_child_session_matches_execution(true)).await
 }
 
 /// A child turn that panics ends its process with a typed failure, never a
@@ -41,7 +41,9 @@ async fn child_turn_panic_is_typed_and_the_parent_remains_alive() -> Result<()> 
         "the panicked child's process ends a typed failure: {output:?}"
     );
     let parent = core
-        .session(lash::SessionId::parse(PARENT).expect("nonblank host identity"))
+        .session(
+            lash_vocabulary::identity::SessionId::parse(PARENT).expect("nonblank host identity"),
+        )
         .open()
         .await?;
     let answer = tokio::time::timeout(
@@ -92,7 +94,9 @@ async fn a_session_turn_process_cancelled_mid_turn_ends_cancelled_and_keeps_its_
         "the process ends cancelled: {output:?}"
     );
     let child = core
-        .session(lash::SessionId::parse(CHILD).expect("nonblank host identity"))
+        .session(
+            lash_vocabulary::identity::SessionId::parse(CHILD).expect("nonblank host identity"),
+        )
         .open()
         .await?;
     tokio::time::timeout(std::time::Duration::from_secs(30), async {
@@ -182,7 +186,9 @@ async fn a_partially_created_child_finishes_from_its_recorded_creation_request()
         "the finished child's turn answered: {output:?}"
     );
     let child = core
-        .session(lash::SessionId::parse(CHILD).expect("nonblank host identity"))
+        .session(
+            lash_vocabulary::identity::SessionId::parse(CHILD).expect("nonblank host identity"),
+        )
         .open()
         .await?;
     let window = child
@@ -242,12 +248,14 @@ async fn a_session_turn_on_an_unserved_profile_is_repaired_by_a_serving_deployme
     .await?;
     // The child parks once its passes exhaust the activation-loop budget,
     // or else this deployment's claim runs it and the redrive is a no-op.
-    core.session(lash::SessionId::parse(CHILD).expect("nonblank host identity"))
-        .open()
-        .await?
-        .durable()
-        .redrive("operator")
-        .await?;
+    core.session(
+        lash_vocabulary::identity::SessionId::parse(CHILD).expect("nonblank host identity"),
+    )
+    .open()
+    .await?
+    .durable()
+    .redrive("operator")
+    .await?;
     let output = tokio::time::timeout(
         std::time::Duration::from_secs(60),
         core.processes().await_output(&started.process_id),

@@ -30,7 +30,7 @@ use lash::workflow::document::{Document, Name};
 use lash::workflow::edit::{Draft, Location, Transaction};
 use lash::workflow::{
     WorkflowDocument, WorkflowDocumentRead, WorkflowExecutionOverlayAccumulator,
-    WorkflowOverlaySettlement, WorkflowOverlayTerminal, WorkflowPublish, WorkflowRead,
+    WorkflowOverlaySettlement, WorkflowOverlayTerminal, WorkflowRead,
 };
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -55,19 +55,11 @@ const HOST_TOOLS: ProcessConfigKey<()> =
 /// `processes.await` from the process controls, for the processes a workflow
 /// defines inline.
 fn environment() -> Result<ProcessEnv> {
-    use lash::process_controls::{ProcessControlTool, process_tool_definition};
-    let host_tools = HOST_TOOLS.tool_provider(lash::tool_provider_key!("tools"));
-    let controls = lash::process_controls::PROCESS_CONTROLS_PROVIDER;
-    let mut env = ProcessEnv::builder(lash::MaxToolCalls::new(1024))
+    Ok(ProcessEnv::builder(lash::MaxToolCalls::new(1024))
         .component(HOST_TOOLS, &())
-        .component(lash::process_controls::PROCESS_CONTROLS_CONFIG, &());
-    for tool in tool_definitions() {
-        env = env.link_tool(host_tools.clone(), &tool);
-    }
-    for control in [ProcessControlTool::Start, ProcessControlTool::Await] {
-        env = env.link_tool(controls.clone(), &process_tool_definition(control));
-    }
-    Ok(env.build()?)
+        .component(lash::process_controls::PROCESS_CONTROLS_CONFIG, &())
+        .component(lash::vm::KERNEL_SERVICES_CONFIG, &())
+        .build()?)
 }
 
 /// The host's two tools. `review.request` defers: its process parks until
@@ -186,10 +178,20 @@ fn builder_over(backend: lash::Backend, bodies: &std::path::Path) -> Result<lash
             ledger: Arc::new(Mutex::new(ledger)),
         },
     ));
+    let packages = Arc::new(lash::package::ToolPackageProvider::new(
+        HOST_TOOLS.component(),
+        lash::tool_provider_key!("tools"),
+        tool_definitions()
+            .iter()
+            .map(|tool| tool.manifest.operation.package.as_slice()[0].clone())
+            .collect(),
+        tools.clone(),
+    ));
     let host_tools = lash::plugins::StaticPluginFactory::new(
         lash::plugins::PluginDeclaration::initial(HOST_TOOLS.component()),
         lash::plugins::PluginSpec::new()
-            .with_tool_provider(lash::tool_provider_key!("tools"), Arc::clone(&tools)),
+            .with_tool_provider(lash::tool_provider_key!("tools"), Arc::clone(&tools))
+            .with_package_provider(lash::tool_provider_key!("tools"), packages),
     )
     .as_component(HOST_TOOLS.format())?;
     // A process a turn starts runs the turn's recorded model and tools,
@@ -318,11 +320,50 @@ fn document_json(document: &WorkflowDocument) -> Result<Value> {
 /// process of it is offered, each with its signature, and the library
 /// functions the workers hold, each name with its identity. Whoever writes a
 /// document for this host reads the identities it references from here.
+async fn namespace(
+    host: &Host,
+) -> Result<(
+    lash::package::RecordedPackages,
+    lash::workflow::WorkflowEnvironmentRequest,
+)> {
+    use lash::package::*;
+    let context = PublicationContext {
+        domain: PublicationDomain(host.core.backend().binding_identity().to_string()),
+        scope: PublicationScope::Host,
+        publisher: PublisherInstance("e2e-workflows".into()),
+        root: Segment::new("workflow")?,
+    };
+    let packages = host
+        .core
+        .host_artifacts()
+        .process_namespace(&host.pin, &environment()?, context.clone())
+        .await?;
+    let attachment = Attachment {
+        members: Default::default(),
+        deferred: Default::default(),
+        packages: packages
+            .snapshot
+            .advertisements
+            .iter()
+            .filter_map(|accepted| match &accepted.advertisement {
+                PackageAdvertisement::Enumerated(package) => Some(package.path.clone()),
+                _ => None,
+            })
+            .collect(),
+    };
+    let request = lash::workflow::WorkflowEnvironmentRequest {
+        snapshot: packages.snapshot.clone(),
+        context,
+        attachment,
+    };
+    Ok((packages, request))
+}
+
 async fn read_environment(State(host): State<Host>) -> ApiResult {
     let environment = host
         .core
         .host_artifacts()
-        .workflow_environment(&environment().map_err(api_error)?)
+        .workflow_environment(&namespace(&host).await.map_err(api_error)?.1)
         .await
         .map_err(api_error)?
         .context("this core reads no workflow documents")
@@ -333,7 +374,7 @@ async fn read_environment(State(host): State<Host>) -> ApiResult {
         .map(|(id, function)| (function.definition().name.to_string(), id.to_string()))
         .collect();
     Ok(Json(json!({
-        "effects": serde_json::to_value(environment.checker().effects).map_err(api_error)?,
+        "namespaces": serde_json::to_value(environment.namespaces()).map_err(api_error)?,
         "functions": functions,
     })))
 }
@@ -349,14 +390,14 @@ async fn read_requirements(
     let environment = host
         .core
         .host_artifacts()
-        .workflow_environment(&environment().map_err(api_error)?)
+        .workflow_environment(&namespace(&host).await.map_err(api_error)?.1)
         .await
         .map_err(api_error)?
         .context("this core reads no workflow documents")
         .map_err(api_error)?;
     let required = lash::workflow::graph::requirements(&document, environment.functions());
     Ok(Json(json!({
-        "effects": serde_json::to_value(&required.effects).map_err(api_error)?,
+        "imports": serde_json::to_value(&required.imports).map_err(api_error)?,
         "functions": serde_json::to_value(&required.functions).map_err(api_error)?,
     })))
 }
@@ -417,7 +458,7 @@ async fn edit_draft(State(host): State<Host>, Json(request): Json<EditDraft>) ->
     let environment = host
         .core
         .host_artifacts()
-        .workflow_environment(&environment().map_err(api_error)?)
+        .workflow_environment(&namespace(&host).await.map_err(api_error)?.1)
         .await
         .map_err(api_error)?
         .context("this core reads no workflow documents")
@@ -472,59 +513,44 @@ async fn publish_draft(State(host): State<Host>, Json(request): Json<PublishDraf
         .clone()
         .context("no draft is open")
         .map_err(api_error)?;
-    let publish = host
+    let (_, namespace) = namespace(&host).await.map_err(api_error)?;
+    let start = host
         .core
         .host_artifacts()
         .publish_workflow(
             &host.pin,
             &lash::workflow::document::DocumentBytes::from(draft.document().clone()),
-            &request.entry,
-            &environment().map_err(api_error)?,
-            host.core
-                .host_artifacts()
-                .cell_packages()
-                .await
-                .map_err(api_error)?
-                .declare_all(),
+            &lash::package::StartSelector::Export(request.entry),
+            &namespace,
             None,
         )
         .await
         .map_err(api_error)?;
-    Ok(Json(match publish {
-        WorkflowPublish::Published(publication) => {
-            let WorkflowRead::Inspected(inspection) = host
-                .core
-                .host_artifacts()
-                .definition_graph(&publication.definition.id)
-                .await
-                .map_err(api_error)?
-            else {
-                return Err(api_error("published workflow cannot be inspected"));
-            };
-            json!({
-                "published": true,
-                "definition": definition_json(&publication.definition).map_err(api_error)?,
-                "workflow": document_json(&inspection.document).map_err(api_error)?,
-                // Lash publishes documents, not drafts: where each node of the
-                // document the draft was opened on sits now is this host's own
-                // read of its draft.
-                "correspondence":
-                    serde_json::to_value(draft.correspondence_since_open()).map_err(api_error)?,
-            })
-        }
-        WorkflowPublish::Refused(refusal) => json!({
-            "published": false,
-            "refused": refusal.to_string(),
+    let descriptor = lash::vm::definition_draft(&lash::process::KernelProcessDefinition {
+        code: lash::vm::KernelInlineRequest::Linked { start },
+    })
+    .map_err(api_error)?;
+    let definition = host
+        .core
+        .host_artifacts()
+        .publish_definition(&host.pin, &descriptor)
+        .await
+        .map_err(api_error)?;
+    let WorkflowRead::Inspected(inspection) = host
+        .core
+        .host_artifacts()
+        .definition_graph(&definition.id)
+        .await
+        .map_err(api_error)?
+    else {
+        return Err(api_error("published workflow cannot be inspected"));
+    };
+    Ok(Json(
+        json!({ "published": true, "definition": definition_json(&definition).map_err(api_error)?,
+            "workflow": document_json(&inspection.document).map_err(api_error)?,
+            "correspondence": serde_json::to_value(draft.correspondence_since_open()).map_err(api_error)?,
         }),
-        WorkflowPublish::SourceMapRefused(refusal) => json!({
-            "published": false,
-            "refused": refusal.to_string(),
-        }),
-        WorkflowPublish::Unsupported { engine_kind } => json!({
-            "published": false,
-            "unsupported": engine_kind.to_string(),
-        }),
-    }))
+    ))
 }
 
 /// A published definition as lash reads it: its identity and signature,
@@ -585,8 +611,25 @@ async fn start_run(State(host): State<Host>, Json(request): Json<StartRun>) -> A
         .map_err(api_error)?
         .with_context(|| format!("no definition {}", request.definition))
         .map_err(api_error)?;
+    let (packages, _) = namespace(&host).await.map_err(api_error)?;
+    let WorkflowRead::Inspected(inspection) = artifacts
+        .definition_graph(&definition.id)
+        .await
+        .map_err(api_error)?
+    else {
+        return Err(api_error("definition unavailable"));
+    };
+    let env = artifacts
+        .link_process_env(
+            &environment().map_err(api_error)?,
+            inspection.document.reference(),
+            &packages,
+            &BTreeMap::new(),
+        )
+        .await
+        .map_err(api_error)?;
     let env_ref = artifacts
-        .publish_process_env(&host.pin, &environment().map_err(api_error)?)
+        .publish_process_env(&host.pin, &env)
         .await
         .map_err(api_error)?;
     // The run states its kernel settings: this build's dialect and bounds.
@@ -707,11 +750,11 @@ async fn attach_observer(State(host): State<Host>, Path(process): Path<String>) 
         .await
         .map_err(api_error)?
     {
-        WorkflowDocumentRead::Read(read) => read.document,
+        WorkflowDocumentRead::Read(read) => *read,
         other => return Err(api_error(format!("the document does not read: {other:?}"))),
     };
     let mut accumulator = WorkflowExecutionOverlayAccumulator::default();
-    accumulator.set_document(lash::workflow::WorkflowOverlayDocument::of(&document));
+    accumulator.set_document(lash::workflow::workflow_overlay_document(&document));
     let mut state = Observed {
         document: document_json(&document).map_err(api_error)?,
         ..Observed::default()
@@ -863,212 +906,8 @@ async fn read_observer(
 }
 
 #[cfg(test)]
-#[expect(clippy::panic, reason = "test module: these laws fail by panicking")]
 mod tests {
     use super::*;
-    use lash::workflow::authoring::{DataValue, ValueTarget};
-    use lash::workflow::document::{
-        ActKind, Action, EffectName, Expr, Literal, Node, Site, Stmt, Type, Unit, parse_document,
-    };
-    use lash::workflow::edit::Position;
-
-    /// The workflow S38 runs, as a kernel document whose library functions
-    /// are named and resolved against the host's environment.
-    const ORDER_REVIEW: &str = include_str!("workflow/order_review.kernel");
-    const ENTRY: &str = "order_review";
-
-    async fn workflow_host(bodies: &std::path::Path) -> Host {
-        let stores = Arc::new(
-            lash::sqlite::SqliteStoreSet::memory()
-                .await
-                .expect("open a SQLite memory store set"),
-        );
-        let backend = lash::durable::DurableBackendBuilder::new(stores)
-            .build()
-            .expect("the durable backend builds");
-        let core = builder_over(backend, bodies)
-            .expect("the workflow host's builder")
-            .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
-            .data_retention(lash::DataRetention::standard())
-            .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-            .execution_budgets(lash::ExecutionBudgets::recommended())
-            .delta_coalescing(lash::DeltaCoalescing::recommended())
-            .build(lash::persistence::LeaseOwnerIdentity::opaque(
-                lash::persistence::LeaseOwnerId::new("workflow-host"),
-                lash::persistence::LeaseIncarnationId::new("workflow-host-boot"),
-            ))
-            .expect("the core builds");
-        host(core)
-    }
-
-    fn answered(answer: ApiResult) -> Value {
-        match answer {
-            Ok(Json(value)) => value,
-            Err((status, message)) => panic!("the route answers: {status} {message}"),
-        }
-    }
-
-    /// The fixture as a document this host admits: each `@{name}` is the
-    /// identity the host's environment gives that library function, each
-    /// effect carries the signature the host offers it under, and the
-    /// manifest lists every function the host says the code reaches.
-    async fn fixture(host: &Host) -> Document {
-        let environment = answered(read_environment(State(host.clone())).await);
-        let mut text = ORDER_REVIEW.to_owned();
-        for (name, id) in environment["functions"].as_object().expect("functions") {
-            text = text.replace(
-                &format!("@{{{name}}}"),
-                &format!("@{}", id.as_str().expect("an identity")),
-            );
-        }
-        let mut document = parse_document(&text).expect("the fixture parses");
-        for (effect, requirement) in &mut document.manifest.effects {
-            *requirement =
-                serde_json::from_value(environment["effects"][effect.to_string()].clone())
-                    .unwrap_or_else(|error| panic!("the host offers `{effect}`: {error}"));
-        }
-        let required = answered(
-            read_requirements(State(host.clone()), Json(Box::new(document.clone()))).await,
-        );
-        document.manifest.functions = serde_json::from_value(required["functions"].clone())
-            .expect("the functions the document reaches");
-        document
-    }
-
-    /// Every site of the entry's body whose node `wanted` accepts, in
-    /// document order.
-    fn sites(document: &Document, wanted: impl Fn(Node<'_>) -> bool) -> Vec<Site> {
-        fn walk(
-            node: Node<'_>,
-            site: Site,
-            wanted: &impl Fn(Node<'_>) -> bool,
-            found: &mut Vec<Site>,
-        ) {
-            if wanted(node) {
-                found.push(site.clone());
-            }
-            for (index, child) in (0u32..).zip(node.children()) {
-                walk(child, site.child(index), wanted, found);
-            }
-        }
-        let entry = Name::new(ENTRY);
-        let mut found = Vec::new();
-        walk(
-            Node::Block(&document.functions[&entry].body),
-            Site::new(Unit::Function(entry), Vec::new()),
-            &wanted,
-            &mut found,
-        );
-        found
-    }
-
-    fn one(document: &Document, what: &str, wanted: impl Fn(Node<'_>) -> bool) -> Site {
-        let found = sites(document, wanted);
-        let [site] = found.as_slice() else {
-            panic!("the entry has one {what}: {found:?}");
-        };
-        site.clone()
-    }
-
-    fn is_text(node: Node<'_>, text: &str) -> bool {
-        matches!(node, Node::Expr(Expr::Literal(Literal::Text(value))) if value == text)
-    }
-
-    fn performs(node: Node<'_>, effect: &str) -> bool {
-        match node {
-            Node::Action(Action::Perform {
-                effect: performed, ..
-            }) => performed.as_str() == effect,
-            Node::Expr(Expr::Act(act)) => {
-                matches!(&act.kind, lash::workflow::document::ActKind::Perform { effect: performed, .. } if performed.as_str() == effect)
-            }
-            _ => false,
-        }
-    }
-
-    /// The four edits S38 makes: inside the `try` region one more recorded
-    /// entry and another final status; inside the inner loop a higher review
-    /// threshold and every line recorded twice.
-    fn edits(document: &Document) -> Vec<Operation> {
-        let region = one(document, "try", |node| {
-            matches!(node, Node::Stmt(Stmt::Try(_)))
-        });
-        let inner = sites(document, |node| {
-            matches!(node, Node::Stmt(Stmt::For { .. }))
-        })
-        .pop()
-        .expect("the inner loop");
-        let inner_body = inner.child(1);
-        let record = sites(document, |node| {
-            matches!(node, Node::Stmt(Stmt::Do { value }) if performs(Node::Expr(value), "ledger.record"))
-        })
-        .into_iter()
-        .find(|site| site.path.starts_with(&inner_body.path))
-        .expect("the inner loop records");
-        let base = document.identity();
-        let Node::Expr(Expr::Act(act)) = document.node(&record.child(0)).unwrap() else {
-            panic!("the record action")
-        };
-        let ActKind::Perform { effect, result, .. } = &act.kind else {
-            panic!("the record performs an effect")
-        };
-        let data_args = act
-            .args
-            .iter()
-            .map(|expr| match expr {
-                Expr::Variable(name) => DataValue::Variable(name.clone()),
-                Expr::Literal(value) => DataValue::Literal(value.clone()),
-                _ => panic!("the fixture's ledger arguments are already bound"),
-            })
-            .collect();
-        vec![
-            Operation::InsertStep {
-                base,
-                at: Position::end(region.child(0)),
-                effect: EffectName::new("ledger.record").unwrap(),
-                args: vec![DataValue::Record(vec![
-                    lash::workflow::authoring::DataRecordEntry {
-                        field: "entry".into(),
-                        value: DataValue::Literal(Literal::Text("signed-off".into())),
-                    },
-                ])],
-                result: Type::Any,
-                binding: Some(Name::new("signed")),
-            },
-            Operation::SetValue {
-                base,
-                target: ValueTarget::Literal {
-                    expression: one(document, "status literal", |node| is_text(node, "reviewed")),
-                },
-                value: DataValue::Literal(Literal::Text("signed-off".into())),
-            },
-            Operation::SetValue {
-                base,
-                target: ValueTarget::Literal {
-                    expression: one(document, "threshold literal", |node| {
-                        matches!(node, Node::Expr(Expr::Literal(Literal::Int(_))))
-                    }),
-                },
-                value: DataValue::Literal(Literal::Int(3.into())),
-            },
-            Operation::InsertStep {
-                base,
-                at: Position::end(inner_body),
-                effect: effect.clone(),
-                args: data_args,
-                result: result.clone(),
-                binding: None,
-            },
-        ]
-    }
-
-    fn order() -> Value {
-        json!({"groups": [
-            {"name": "a", "lines": [{"sku": "a1", "qty": 5}, {"sku": "a2", "qty": 1}]},
-            {"name": "b", "lines": [{"sku": "b1", "qty": 3}, {"sku": "b2", "qty": 4}]},
-            {"name": "c", "lines": [{"sku": "c1", "qty": 1}, {"sku": "c2", "qty": 6}]},
-        ]})
-    }
 
     fn bodies(path: &std::path::Path) -> Vec<Value> {
         std::fs::read_to_string(path)
@@ -1102,235 +941,5 @@ mod tests {
         assert_eq!(bodies(&path), vec![first.clone()]);
         file.write_all(b"\n").expect("publish the record's newline");
         assert_eq!(bodies(&path), vec![first, second]);
-    }
-
-    /// Run `definition` over the order to its end, approving each review as
-    /// its body records it, with a follower attached from the start.
-    async fn run(
-        host: &Host,
-        bodies_at: &std::path::Path,
-        definition: &Value,
-        key: &str,
-    ) -> (String, Value, Value) {
-        let mut args = serde_json::Map::new();
-        args.insert("order".to_owned(), order());
-        let started = answered(
-            start_run(
-                State(host.clone()),
-                Json(StartRun {
-                    definition: serde_json::from_value(definition["id"].clone())
-                        .expect("a definition id"),
-                    key: key.to_owned(),
-                    args,
-                }),
-            )
-            .await,
-        );
-        let process = started["process"].as_str().expect("a process").to_owned();
-        let attached = answered(attach_observer(State(host.clone()), Path(process.clone())).await);
-        let observer = attached["observer"]
-            .as_str()
-            .expect("an observer")
-            .to_owned();
-        let output = tokio::spawn(run_output(State(host.clone()), Path(process.clone())));
-        let mut approved = std::collections::BTreeSet::new();
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(120);
-        while !output.is_finished() {
-            assert!(
-                std::time::Instant::now() < deadline,
-                "the {key} run settles"
-            );
-            for body in bodies(bodies_at) {
-                let Some(completion) = body["completion"].as_str() else {
-                    continue;
-                };
-                if body["process"] == process.as_str() && approved.insert(completion.to_owned()) {
-                    host.core
-                        .completions()
-                        .resolve(completion, lash::Resolution::Ok(json!({"approved": true})))
-                        .await
-                        .expect("the review resolves");
-                }
-            }
-            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-        }
-        let output = answered(output.await.expect("the output request"));
-        let observed = answered(
-            read_observer(
-                State(host.clone()),
-                Path(observer),
-                Query(ReadObserver {
-                    until: Some("terminal".to_owned()),
-                }),
-            )
-            .await,
-        );
-        (process, output, observed)
-    }
-
-    /// FIG-5757: the workflow host works on kernel documents alone. It admits
-    /// a document written against its environment, reads the definition back,
-    /// applies kernel edits inside the `try` region and the inner loop as one
-    /// transaction, publishes the edited document as a second definition,
-    /// and runs both: each run ends as its own document says, and a follower
-    /// folds each run's feed into an overlay of that document's sites.
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn the_workflow_host_admits_edits_republishes_runs_and_shows_a_kernel_document() {
-        let directory = tempfile::tempdir().expect("a body ledger directory");
-        let bodies_at = directory.path().join("bodies.jsonl");
-        let host = workflow_host(&bodies_at).await;
-        let document = fixture(&host).await;
-
-        answered(
-            open_draft(
-                State(host.clone()),
-                Json(OpenDraft::Document(Box::new(document.clone()))),
-            )
-            .await,
-        );
-        let publish = || async {
-            answered(
-                publish_draft(
-                    State(host.clone()),
-                    Json(PublishDraft {
-                        entry: Name::new(ENTRY),
-                    }),
-                )
-                .await,
-            )
-        };
-        let first = publish().await;
-        assert_eq!(
-            first["published"], true,
-            "the document is admitted: {first}"
-        );
-        let read = answered(
-            read_definition(
-                State(host.clone()),
-                Json(ReadDefinition {
-                    definition: serde_json::from_value(first["definition"]["id"].clone())
-                        .expect("a definition id"),
-                }),
-            )
-            .await,
-        );
-        assert_eq!(read["read"], "inspected");
-        assert_eq!(read["workflow"], first["workflow"]);
-        assert_eq!(
-            read["workflow"]["document"],
-            serde_json::to_value(&document).expect("the document serializes")
-        );
-
-        let edited = answered(
-            edit_draft(
-                State(host.clone()),
-                Json(EditDraft {
-                    edits: edits(&document),
-                }),
-            )
-            .await,
-        );
-        assert_eq!(edited["applied"], true, "the edits apply: {edited}");
-        let second = publish().await;
-        assert_eq!(
-            second["published"], true,
-            "the edited document is admitted: {second}"
-        );
-        assert_ne!(second["definition"]["id"], first["definition"]["id"]);
-        assert_ne!(
-            second["workflow"]["reference"]["document"],
-            first["workflow"]["reference"]["document"]
-        );
-
-        for (key, publication, status, approved, skipped, recorded) in [
-            (
-                "generated",
-                &first,
-                "reviewed",
-                json!(["a/a1", "b/b1", "b/b2", "c/c2"]),
-                json!(["a2", "c1"]),
-                6,
-            ),
-            (
-                "edited",
-                &second,
-                "signed-off",
-                json!(["a/a1", "b/b2", "c/c2"]),
-                json!(["a2", "b1", "c1"]),
-                13,
-            ),
-        ] {
-            let (process, output, observed) =
-                run(&host, &bodies_at, &publication["definition"], key).await;
-            assert_eq!(
-                output["value"],
-                json!({
-                    "status": status,
-                    "approved": approved,
-                    "skipped": skipped,
-                    "audited": {"status": status},
-                }),
-                "the {key} run ends as its own document says: {output}"
-            );
-            let records = bodies(&bodies_at)
-                .into_iter()
-                .filter(|body| {
-                    body["process"] == process.as_str() && body["tool"] == "ledger.record"
-                })
-                .count();
-            assert_eq!(
-                records, recorded,
-                "the {key} run records what its document says"
-            );
-            assert!(
-                observed["error"].is_null() && observed["terminal"] == "Completed",
-                "the follower follows the {key} run to its end: {observed}"
-            );
-            let overlay = &observed["overlay"];
-            assert_eq!(
-                overlay["document"]["reference"],
-                publication["workflow"]["reference"]
-            );
-            assert!(
-                overlay["status"] == "completed" && overlay["mismatches"] == json!([]),
-                "the {key} overlay settles on its document's sites: {overlay}"
-            );
-            // The overlay lists only execution sites of the run's document,
-            // and the review site shows one occurrence for each line the
-            // document's threshold reviews.
-            let ran: Document = serde_json::from_value(publication["workflow"]["document"].clone())
-                .expect("the published document");
-            let review = serde_json::to_value(
-                one(&ran, "review", |node| performs(node, "review.request")).position(),
-            )
-            .expect("a site");
-            let listed = overlay["sites"].as_array().expect("the overlay's sites");
-            let known = publication["workflow"]["execution_sites"]
-                .as_array()
-                .expect("the document's execution sites");
-            assert!(
-                listed.iter().all(|row| known.iter().any(|site| {
-                    let site: lash::workflow::document::Site =
-                        serde_json::from_value(site["site"].clone()).expect("document site");
-                    serde_json::to_value(site.position()).expect("position token")
-                        == row["site"]["site"]
-                })),
-                "the {key} overlay lists only its document's sites: {listed:?}"
-            );
-            let reviews = approved.as_array().map_or(0, Vec::len);
-            let row = listed
-                .iter()
-                .find(|row| row["site"]["site"] == review)
-                .expect("the overlay lists the review site");
-            assert!(
-                row["status"] == "completed"
-                    && row["occurrence"]
-                        == json!(lash::workflow::document::testkit::visit(
-                            (reviews - 1) as u64
-                        ))
-                    && row["summary"]["terminal_count"] == reviews,
-                "the {key} review site ran once for each reviewed line: {row}"
-            );
-        }
     }
 }

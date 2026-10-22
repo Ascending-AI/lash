@@ -123,6 +123,8 @@ impl TryFrom<ProcessDefinitionDraftFields> for ProcessDefinitionDraft {
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 #[non_exhaustive]
 pub enum ProcessDefinitionDraftError {
+    #[error("process code has not been realized")]
+    UnlinkedCode,
     #[error("a process definition names no engine kind")]
     EmptyEngineKind,
     #[error("a process definition artifact has an empty reference")]

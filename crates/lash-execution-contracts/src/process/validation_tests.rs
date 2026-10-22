@@ -40,11 +40,13 @@ fn plan_append(
 
 fn effect_summary_request() -> crate::ProcessEventAppendRequest {
     ProcessEffectOccurrence::new(
-        lash_protocol_types::effect_identity_fixture("resource_operation:node", 1),
+        lash_vocabulary::sites::EffectLocation::authored(
+            lash_protocol_types::effect_identity_fixture("operation:node", 1),
+        ),
         "fixture.operation",
         ProcessEffectOutcomeClass::Failure,
         Some(crate::FailureCode::from_foreign_wire("fixture:failed")),
-        "lash_vm:scope:resource:17:fixture.operation:23:resource_operation:node:1",
+        "lash_vm:scope:resource:17:fixture.operation:23:operation:node:1",
         crate::FleetFormat::current(),
     )
     .append_request()
@@ -259,7 +261,9 @@ fn a_resume_ends_only_its_own_wait() {
     let sleep = WaitState {
         since_ms: 1,
         kind: WaitKind::Sleep { until_ms: 900 },
-        site: Some(lash_protocol_types::effect_identity_fixture("nap", 1)),
+        site: Some(lash_vocabulary::sites::EffectLocation::authored(
+            lash_protocol_types::effect_identity_fixture("nap", 1),
+        )),
     };
     let child = WaitState {
         since_ms: 1,
@@ -318,8 +322,9 @@ fn a_resume_cannot_return_an_ended_process_to_running() {
     let wait = WaitState {
         since_ms: 1,
         kind: crate::WaitKind::Call {
+            resume_at_ms: None,
             call_id: crate::ToolCallId::fixture("resume-call"),
-            tool_id: crate::ToolId::from("resume-tool"),
+            tool_id: lash_vocabulary::tool_contract::ToolId::from("resume-tool"),
         },
         site: None,
     };
@@ -391,8 +396,9 @@ fn a_persisted_record_accepts_every_runtime_lifecycle_fact() {
         serde_json::from_slice(&encoded).expect("decode pre-upgrade row");
     let wait = WaitState {
         kind: WaitKind::Call {
+            resume_at_ms: None,
             call_id: crate::ToolCallId::fixture("pre-upgrade-call"),
-            tool_id: crate::ToolId::from("pre-upgrade-tool"),
+            tool_id: lash_vocabulary::tool_contract::ToolId::from("pre-upgrade-tool"),
         },
         since_ms: 2,
         site: None,

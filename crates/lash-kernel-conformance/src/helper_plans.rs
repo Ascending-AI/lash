@@ -13,7 +13,8 @@ pub(crate) mod slots;
 pub(crate) mod sorts;
 
 use crate::projection::{Plan, Projector};
-use lash_kernel_doc::{Datum, ErrorDatum, Handle, Integer, Timestamp};
+use lash_kernel_doc::{Datum, ErrorDatum, Handle};
+
 use lash_kernel_vm::kernel_internals::{Layout, prepare_with_layout};
 use lash_kernel_vm::{Bounds, CellStart, Host, Machine, Outcome, Program, Request, Step, Target};
 
@@ -75,22 +76,37 @@ fn generated_plan_indexes_are_in_function_identity_order() {
 #[path = "../../lash-dialect-typescript/shared/helper_differential/runner.rs"]
 pub(crate) mod runner;
 
+#[derive(Default)]
 pub(crate) struct World {
-    pub(crate) bits: u64,
-    pub(crate) stride: u64,
-    pub(crate) nanoseconds: i64,
     pub(crate) prints: Vec<Datum>,
+    bits: u64,
+    stride: u64,
+    nanoseconds: i64,
 }
 impl Host for World {
-    fn clock(&mut self) -> Timestamp {
-        Timestamp {
-            nanoseconds: Integer::from(self.nanoseconds),
-        }
-    }
-    fn random(&mut self) -> u64 {
-        let bits = self.bits;
-        self.bits = bits.wrapping_add(self.stride);
-        bits
+    fn perform(
+        &mut self,
+        use_: &lash_vocabulary::OperationUse,
+        _: &[Datum],
+        _: &lash_vocabulary::sites::PositionLabel,
+        _: &lash_vocabulary::sites::Site,
+    ) -> Result<Result<Datum, ErrorDatum>, lash_kernel_vm::HostFault> {
+        let operation = crate::linked::operation(use_);
+        Ok(Ok(match operation.as_str() {
+            "typescript.clock" | "python.clock" => Datum::Timestamp(lash_kernel_doc::Timestamp {
+                nanoseconds: self.nanoseconds.into(),
+            }),
+            "typescript.random" | "python.random" => {
+                let bits = self.bits;
+                self.bits = self.bits.wrapping_add(self.stride);
+                Datum::Bytes(lash_kernel_doc::Bytes::new(bits.to_be_bytes().as_slice()))
+            }
+            _ => {
+                return Err(lash_kernel_vm::HostFault::new(format!(
+                    "unexpected read {operation}"
+                )));
+            }
+        }))
     }
     fn read(&mut self, _: &Handle, _: &Datum) -> Result<Datum, ErrorDatum> {
         Err(ErrorDatum {
@@ -211,7 +227,7 @@ fn run_with_work<const L: u64>(
             args: Vec::new(),
             session: None,
             owner: crate::pages::OWNER,
-            modes: Default::default(),
+            modes: runner::modes(program),
             host: Vec::new(),
         },
         Box::new(source.clone()),
@@ -223,7 +239,7 @@ fn run_with_work<const L: u64>(
         bits: case.bits,
         stride: case.stride,
         nanoseconds: case.nanoseconds,
-        prints: Vec::new(),
+        ..World::default()
     };
     let mut requests = Vec::new();
     let end = loop {
@@ -237,10 +253,13 @@ fn run_with_work<const L: u64>(
                 for request in park.requests {
                     let (wait, outcome) = match &request {
                         Request::Effect(effect) => {
-                            assert_eq!(effect.effect.as_str(), "host.observe");
+                            let operation = crate::linked::operation(&effect.use_);
+                            assert!(
+                                operation.as_str() == "host.observe"
+                                    || operation.as_str().ends_with(".sleep")
+                            );
                             (effect.wait, Outcome::Completed(Datum::Null))
                         }
-                        Request::Sleep(sleep) => (sleep.wait, Outcome::Elapsed),
                     };
                     requests.push(request);
                     machine.deliver(wait, outcome).unwrap();
@@ -549,18 +568,14 @@ fn control_program(source: &str) -> Program {
         control::PLANS.len(),
         "the compiled control fixture matches its admitted bodies"
     );
-    let mut source = format!("kernel 1\nnumbers by_spelling\n{source}\n");
-    for (function, registered) in registry.iter() {
-        source.push_str(&format!(
-            "use {} = @{function}\n",
-            registered.definition().name
-        ));
-    }
-    Program {
-        closure: crate::pages::CLOSURE,
-        document: Arc::new(lash_kernel_doc::parse_document(&source).unwrap()),
-        library: lash_kernel_vm::PreparedLibrary::new(Arc::new(registry)),
-    }
+    let source = format!("kernel 1\nnumbers by_spelling\n{source}\n");
+    let document = crate::document_fixture::authored(&source, &registry);
+    crate::machine::prepare_document(
+        &lash_kernel_vm::PreparedLibrary::new(Arc::new(registry)),
+        Arc::new(document),
+        None,
+    )
+    .expect("prepare control document")
 }
 
 fn compare_control(source: &str, charge: u64) -> Observed {
@@ -640,7 +655,7 @@ fn generated_closures_share_cells_and_keep_ordinary_charge_and_depth() {
     for depth in 190..=200 {
         compare_control(
             &format!(
-                "fn descend(n, f) {{ if eq(n, 0) {{ let value = apply f() return value }} let next = num.sub(n, 1) let value = call descend(next, f) return value }} main {{ let pair = invoke law.factory(5) let peek = pair.peek let value = call descend({depth}, peek) return value }}"
+                "definition \"function descend(self: Any, n: Any, f: Any) -> Any\\nkernel 1\\nmetering statements\\nimport 0 operation host.echo(x: Any) -> Any\\nbody {{ if eq(n, 0) {{ let value = apply f() return value }} let next = num.sub(n, 1) let value = apply self(self, next, f) return value }}\"\n main {{ let pair = invoke law.factory(5) let peek = pair.peek let value = call descend(&descend, {depth}, peek) return value }}"
             ),
             1_000_000,
         );
@@ -740,12 +755,12 @@ fn uri_decode_completion_price_bounds_delegated_work_on_return_and_raise() {
             ] {
                 let input = format!("{prefix}{suffix}");
                 let source = format!(
-                    "kernel 1\nnumbers by_spelling\nuse decode = @{function}\nmain {{ let answer = invoke decode(null, [{input:?}]) return answer }}"
+                    "kernel 1\nnumbers by_spelling\n# local definition decode @{function}\nmain {{ let answer = invoke @{function}(null, [{input:?}]) return answer }}"
                 );
-                let program = Program {
-                    document: Arc::new(lash_kernel_doc::parse_document(&source).unwrap()),
-                    ..base.clone()
-                };
+                let document = crate::document_fixture::authored(&source, base.library.registry());
+                let program =
+                    crate::machine::prepare_document(&base.library, Arc::new(document), None)
+                        .unwrap();
                 let mut machine = crate::pages::start(
                     program,
                     Bounds {
@@ -768,12 +783,7 @@ fn uri_decode_completion_price_bounds_delegated_work_on_return_and_raise() {
                     },
                 )
                 .unwrap();
-                let mut world = World {
-                    bits: 0,
-                    stride: 0,
-                    nanoseconds: 0,
-                    prints: Vec::new(),
-                };
+                let mut world = World::default();
                 machine.count_work();
                 let step = machine.run(&mut world, u64::MAX).unwrap();
                 let Step::Ended(end) = step else {

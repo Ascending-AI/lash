@@ -5,14 +5,19 @@
 //! The mode validates every call path before it gets here; this crate only
 //! spells.
 
-use lash_protocol_types::{JsonSchema, ToolContract, ToolManifest};
 use lash_tool_presenter_api::{
     PresentationRefusal, PresentedToolSection, ToolPresentationEntry, ToolPresentationRequest,
     ToolPresenter, import_schema, listing,
 };
+use lash_vocabulary::json_schema::JsonSchema;
+use lash_vocabulary::tool_contract::ToolContract;
+use lash_vocabulary::tool_contract::ToolManifest;
 use std::collections::{BTreeMap, BTreeSet};
 
-use lash_tool_shape::{DefinitionId, ReadableNameAllocator, SchemaDocument, SchemaShape};
+use lash_vocabulary::tool_shape::DefinitionId;
+use lash_vocabulary::tool_shape::ReadableNameAllocator;
+use lash_vocabulary::tool_shape::SchemaDocument;
+use lash_vocabulary::tool_shape::SchemaShape;
 
 mod types;
 use serde_json::Value;
@@ -318,7 +323,7 @@ pub fn render_tool_doc(
     }
     let root = |document: &SchemaDocument, names: &BTreeMap<DefinitionId, String>| {
         if names.contains_key(&DefinitionId(0)) {
-            lash_tool_shape::ShapeKind::Ref(DefinitionId(0)).into()
+            lash_vocabulary::tool_shape::ShapeKind::Ref(DefinitionId(0)).into()
         } else {
             document.roots[0].clone()
         }
@@ -436,33 +441,35 @@ fn scope_union_notes(
 ) -> Vec<String> {
     fn collect(shape: &SchemaShape, path: &str, scopes: &mut Vec<String>) {
         match &shape.kind {
-            lash_tool_shape::ShapeKind::Union(members) => {
+            lash_vocabulary::tool_shape::ShapeKind::Union(members) => {
                 for (member, arm) in members.iter().zip(shape.union_arm_paths(path)) {
                     scopes.push(types::note_text(&arm));
                     collect(member, &arm, scopes);
                 }
             }
-            lash_tool_shape::ShapeKind::Object(object) => {
+            lash_vocabulary::tool_shape::ShapeKind::Object(object) => {
                 for field in &object.fields {
                     collect(&field.shape, &format!("{path}.{}", field.name), scopes);
                 }
-                if let lash_tool_shape::ExtraKeys::Open(extra) = &object.extra_keys {
+                if let lash_vocabulary::tool_shape::ExtraKeys::Open(extra) = &object.extra_keys {
                     collect(extra, &format!("{path}.*"), scopes);
                 }
             }
-            lash_tool_shape::ShapeKind::List(item) => collect(item, &format!("{path}[]"), scopes),
-            lash_tool_shape::ShapeKind::Tuple(items) => {
+            lash_vocabulary::tool_shape::ShapeKind::List(item) => {
+                collect(item, &format!("{path}[]"), scopes)
+            }
+            lash_vocabulary::tool_shape::ShapeKind::Tuple(items) => {
                 for (index, item) in items.iter().enumerate() {
                     collect(item, &format!("{path}[{index}]"), scopes);
                 }
             }
-            lash_tool_shape::ShapeKind::Intersection(items) => {
+            lash_vocabulary::tool_shape::ShapeKind::Intersection(items) => {
                 for item in items {
                     collect(item, path, scopes);
                 }
             }
-            lash_tool_shape::ShapeKind::Process(Some(process))
-            | lash_tool_shape::ShapeKind::Function(Some(process)) => {
+            lash_vocabulary::tool_shape::ShapeKind::Process(Some(process))
+            | lash_vocabulary::tool_shape::ShapeKind::Function(Some(process)) => {
                 for param in &process.params {
                     collect(&param.shape, &format!("{path}({})", param.name), scopes);
                 }
@@ -598,10 +605,10 @@ mod tests {
         assert!(!text.contains("Any"), "{text}");
         let signature = emit_tool_signature(
             "outil_été",
-            &lash_tool_shape::ShapeKind::Str.into(),
+            &lash_vocabulary::tool_shape::ShapeKind::Str.into(),
             false,
             &BTreeMap::new(),
-            &lash_tool_shape::ShapeKind::Null.into(),
+            &lash_vocabulary::tool_shape::ShapeKind::Null.into(),
             &BTreeMap::new(),
         )
         .expect("the mode accepts Unicode callable names");
@@ -785,9 +792,9 @@ mod tests {
         for _ in 0..10 {
             schema = json!({"type":"array", "items":schema});
         }
-        let doc = lash_tool_shape::SchemaDocument::import(
+        let doc = lash_vocabulary::tool_shape::SchemaDocument::import(
             &schema,
-            lash_tool_shape::ImportLimits {
+            lash_vocabulary::tool_shape::ImportLimits {
                 max_depth: 2,
                 max_nodes: 2,
             },

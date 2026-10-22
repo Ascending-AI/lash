@@ -40,6 +40,8 @@ pub enum HoldEnvError {
     /// fenced claim. Retryable; never recorded as a refusal.
     #[error(transparent)]
     Fault(PluginError),
+    #[error(transparent)]
+    Admission(lash_execution_contracts::process::linking::EnginePortError),
 }
 
 /// What a hold reads and writes through: the environment store (and the
@@ -184,117 +186,110 @@ fn publish_error(error: ArtifactStoreError, env: &ProcessEnv) -> HoldEnvError {
     }
 }
 
-/// Hold the environment `choice` states under the execution claim of
-/// `scope`, with its settings checked against the `kind` engine for
-/// `payload`, and its links checked under `choice.fits` against the engine's
-/// performed effects and serving components before sealing the launch. `Restrict` holds `enclosing`'s environment restricted to the
-/// effects `payload` performs, and is refused outside a process.
+/// Hold a host-selected complete environment after ordinary linked-start checks.
+/// Spawn inheritance and restriction are implemented by the host policy.
 pub(crate) async fn hold_launch(
     engines: &super::ProcessEngineRegistry,
     scope: &crate::ExecutionScope,
-    enclosing: Option<&super::EnclosingProcess>,
     choice: &super::ProcessStartChoice,
     kind: &str,
     payload: &serde_json::Value,
+    packages: Option<&lash_core_store::tool_surface::RecordedPackages>,
 ) -> Result<super::EngineLaunch, HoldEnvError> {
-    let performed = engines
-        .performed_effects(kind, payload)
+    let inspection = engines
+        .inspect_code(kind, payload)
         .await
-        .map_err(HoldEnvError::Refused)?;
-    hold_launch_performing(engines, scope, enclosing, choice, kind, payload, &performed).await
+        .map_err(port_error)?;
+    hold_launch_performing(engines, scope, choice, kind, payload, &inspection, packages).await
 }
 
-/// [`hold_launch`] for a start whose engine already said what it performs:
-/// one carried inline, whose payload no store holds yet.
 pub(crate) async fn hold_launch_performing(
     engines: &super::ProcessEngineRegistry,
     scope: &crate::ExecutionScope,
-    enclosing: Option<&super::EnclosingProcess>,
     choice: &super::ProcessStartChoice,
     kind: &str,
     payload: &serde_json::Value,
-    performed: &super::PerformedEffects,
+    inspection: &lash_execution_contracts::process::linking::LinkInspection,
+    packages: Option<&lash_core_store::tool_surface::RecordedPackages>,
 ) -> Result<super::EngineLaunch, HoldEnvError> {
     engines
         .check_settings(kind, payload, choice.engine_settings.as_ref())
         .map_err(|error| settings_error(kind, error))?;
     let selection = match &choice.env {
-        super::ProcessEnvChoice::Restrict => {
-            let Some(enclosing) = enclosing else {
-                return Err(HoldEnvError::Refused(ProcessEnvRefusal::Policy {
-                    reason: "a start outside a process has no environment to restrict".into(),
-                }));
-            };
-            if performed.keys().eq(enclosing.env.effects().keys()) {
-                ProcessEnvSelection::Published(enclosing.env_ref.clone())
-            } else {
-                // A new env names no retired component: the child leaves
-                // out what its sealed parent still names (FIG-6296).
-                ProcessEnvSelection::New(
-                    engines.components().without_retired(
-                        enclosing
-                            .env
-                            .restrict(performed.keys())
-                            .map_err(HoldEnvError::Refused)?,
-                    ),
-                )
-            }
-        }
-        super::ProcessEnvChoice::Published(env_ref) => {
-            ProcessEnvSelection::Published(env_ref.clone())
+        super::ProcessEnvChoice::Published(reference) => {
+            ProcessEnvSelection::Published(reference.clone())
         }
         super::ProcessEnvChoice::New(env) => ProcessEnvSelection::New(env.clone()),
     };
-    let ports = || {
-        engines.env_ports().ok_or_else(|| {
-            HoldEnvError::Fault(PluginError::Session(
-                "a process start requires the runtime's artifact stores".into(),
-            ))
-        })
-    };
-    let (env, held) = match &selection {
-        ProcessEnvSelection::New(env) => (env.clone(), None),
-        ProcessEnvSelection::Published(env_ref) => {
-            let ports = ports()?;
-            let claim = crate::session::execution_claim_of(scope).map_err(HoldEnvError::Fault)?;
-            let held = hold_process_env(&ports, &claim, &selection).await?;
-            let env = lash_execution_contracts::process::load_process_env(ports.store, env_ref)
+    let ports = engines.env_ports().ok_or_else(|| {
+        HoldEnvError::Fault(PluginError::Session(
+            "a process start requires artifact stores".into(),
+        ))
+    })?;
+    let env = match &selection {
+        ProcessEnvSelection::New(env) => env.clone(),
+        ProcessEnvSelection::Published(reference) => {
+            lash_execution_contracts::process::load_process_env(ports.store, reference)
                 .await
-                .map_err(|error| HoldEnvError::Fault(error.into()))?;
-            (env, Some(held))
+                .map_err(|error| HoldEnvError::Fault(error.into()))?
         }
     };
-    let linked = engines
-        .link_package_namespaces(kind, payload, env.clone())
-        .await
-        .map_err(HoldEnvError::Fault)?;
-    let (selection, held) = if linked == env {
-        (selection, held)
-    } else {
-        (ProcessEnvSelection::New(linked.clone()), None)
+    let (env, selection) = match packages {
+        Some(packages) if env.packages() != packages => {
+            let env = env.with_packages(packages.clone());
+            (env.clone(), ProcessEnvSelection::New(env))
+        }
+        _ => (env, selection),
     };
-    engines
-        .check_links(
-            kind,
-            payload,
-            &std::sync::Arc::new(linked),
-            performed,
-            &choice.fits,
+    let requirements = engines
+        .check_links_with_seeds(
+            &std::sync::Arc::new(env.clone()),
+            inspection,
+            &choice.initial_resolutions,
         )
-        .await
+        .map_err(port_error)?;
+    let composition = engines
+        .components()
+        .compose(&env, None)
         .map_err(HoldEnvError::Refused)?;
-    let env_ref = match held {
-        Some(env_ref) => env_ref,
-        None => {
-            let ports = ports()?;
-            let claim = crate::session::execution_claim_of(scope).map_err(HoldEnvError::Fault)?;
-            hold_process_env(&ports, &claim, &selection).await?
-        }
-    };
+    super::super::actor::resolutions::validate_seeds(
+        inspection,
+        env.execution(),
+        &choice.initial_resolutions,
+        |grant, requested, definition, route, registry| {
+            composition
+                .composition
+                .validate_resolved_route(grant, requested, definition, route, registry)
+        },
+    )
+    .map_err(port_error)?;
+    // The selected immutable environment must already contain all base debt.
+    // Seeds contribute target debt in the execution registration transaction.
+    if requirements != env.execution().requirements {
+        return Err(port_error(
+            lash_execution_contracts::process::linking::EnginePortError::Refused(
+                lash_execution_contracts::process::linking::AdmissionRefusal::InvalidDocument {
+                    message: "process environment omits known claim requirements".into(),
+                },
+            ),
+        ));
+    }
+    let claim = crate::session::execution_claim_of(scope).map_err(HoldEnvError::Fault)?;
+    let env_ref = hold_process_env(&ports, &claim, &selection).await?;
     Ok(lash_execution_contracts::process::EngineLaunch::new(
         env_ref,
         choice.engine_settings.clone(),
-    ))
+    )
+    .with_initial_resolutions(choice.initial_resolutions.clone()))
+}
+
+fn port_error(error: lash_execution_contracts::process::linking::EnginePortError) -> HoldEnvError {
+    match error {
+        error @ lash_execution_contracts::process::linking::EnginePortError::Refused(_) => {
+            HoldEnvError::Admission(error)
+        }
+        error => HoldEnvError::Fault(PluginError::Session(error.to_string())),
+    }
 }
 
 /// An engine that refuses the stated settings refuses the start; an engine

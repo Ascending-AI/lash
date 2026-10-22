@@ -50,6 +50,7 @@ impl Candidates for crate::executor::CodeModeExecutionState {
 
 /// A session actor claimed on a SQLite memory durable store.
 pub(crate) struct DurableHost {
+    pub(crate) documents: lash_vm_runtime::KernelDocuments,
     backend: lash_execution_contracts::backend::Backend,
     actor: ActorKey,
     admitted: lash_core::AdmittedScope,
@@ -107,7 +108,26 @@ impl DurableHost {
             .expect("create the law's session actor");
         let lease = register(&backend, 0).await;
         let context = claim(&backend, &lease, &actor, &admitted, &probe).await;
+        // Deployment setup precedes the cell's work/traffic measurement.
+        let release = lash_vm_releases::helper_release().expect("the fixture's helper release");
+        let content_claim = lash_core::ReferrerClaim::guarded(lash_core::ReferrerGuard::Journal(
+            admitted
+                .scope()
+                .journal_identity()
+                .expect("the fixture's execution journal"),
+        ));
+        let documents = lash_vm_runtime::KernelDocuments::new(
+            backend.module_artifacts(),
+            backend.package_store(),
+        );
+        documents
+            .hold_helper_release(&content_claim, &release.content, &release.labels)
+            .await
+            .expect("hold the fixture's deployment code");
+        super::packages::deploy_helpers(&backend, &content_claim).await;
+        super::packages::deploy_services(&backend, &content_claim).await;
         Self {
+            documents,
             backend,
             actor,
             admitted,
@@ -168,7 +188,7 @@ impl DurableHost {
                     admission: lash_core_store::store::RunAdmissionRecord::Turn {
                         took: lash_core_store::store::AdmittedTurnRows::Inputs {
                             ids: lash_core_store::store::AdmittedInputIds::one(
-                                lash_core::InputId::from("rlm-cell-law"),
+                                lash_vocabulary::identity::InputId::from("rlm-cell-law"),
                             ),
                         },
                         trace: None,
@@ -267,13 +287,45 @@ impl DurableHost {
 }
 
 async fn register(backend: &lash_execution_contracts::backend::Backend, index: usize) -> NodeLease {
+    let release = lash_vm_releases::helper_release().expect("the fixture's helper release");
+    let mut capabilities = lash_vocabulary::claims::NodeCapabilities::default();
+    for document in release.content.documents.values() {
+        capabilities
+            .machine
+            .kernels
+            .extend(&document.requires.kernels);
+        capabilities
+            .machine
+            .natives
+            .extend(&document.requires.natives);
+    }
+    capabilities.machine.natives.extend(
+        release
+            .functions
+            .iter()
+            .filter(|(_, function)| function.states_native())
+            .map(|(id, _)| *id),
+    );
+    let tools = lash_core::testing::test_tools_provider();
+    capabilities
+        .callbacks
+        .insert(lash_vocabulary::claims::CallbackRequirement {
+            registry: lash_vocabulary::claims::RegistryKind::Session,
+            callback: tools.callback_identity(),
+        });
+    capabilities
+        .providers
+        .insert(lash_vocabulary::ProviderName {
+            owner: tools.owner().into(),
+            key: tools.key().into(),
+        });
     backend
         .durable()
         .register_node(&NodeSpec {
             node: NodeId::new(format!("rlm-cell-law-{index}")),
             decodes: vec![FormatSet::new(FORMATS)],
             serves: Vec::new(),
-            capabilities: Default::default(),
+            capabilities,
             ttl_millis: 600_000,
         })
         .await
@@ -294,8 +346,21 @@ async fn claim(
         .expect("claim the law's session actor")
         .into_iter()
         .find(|claimed| &claimed.actor == actor)
-        .map(|claimed| claimed.epoch)
-        .expect("the law's session actor is claimable");
+        .map(|claimed| claimed.epoch);
+    let Some(epoch) = epoch else {
+        let required = backend
+            .durable()
+            .actor_requirements(None, 16)
+            .await
+            .expect("requirements");
+        let missing = required
+            .into_iter()
+            .filter(|(owner, _)| owner == actor)
+            .flat_map(|(_, required)| required)
+            .filter(|required| !lease.serves.contains(required))
+            .collect::<Vec<_>>();
+        panic!("the law's session actor is not claimable; unserved: {missing:?}");
+    };
     lash_core::ActorContext::new(
         backend.clone(),
         actor.clone(),

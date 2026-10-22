@@ -4,7 +4,7 @@
 
 pub use lash_core_store::session_read_view::SessionReadView;
 
-use crate::SessionId;
+use lash_vocabulary::identity::SessionId;
 use std::sync::Arc;
 
 use lash_execution_contracts::plugin_error::PluginError;

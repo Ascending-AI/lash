@@ -10,7 +10,7 @@ pub const NATIVE_EXECUTE_TOOL_NAME: &str = "execute_code";
     reason = "this module declares the tool or payload schema and admission checks its invariant"
 )]
 pub(super) fn tool_spec(dialect: &SessionDialect) -> LlmToolSpec {
-    let definition = lash_core::ToolDefinition::raw(
+    let definition = lash_vocabulary::tool_contract::ToolDefinition::raw(
         "rlm:execute_code",
         "rlm.execute_code",
         format!(

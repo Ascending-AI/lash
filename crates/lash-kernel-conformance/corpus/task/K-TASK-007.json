@@ -3,7 +3,7 @@
   "cases": [
     {
       "name": "joining ended task continues before queued ready task",
-      "document": "kernel 1\nnumbers by_spelling\nfn queued() { do yield print \"queued\" } fn value() { return 1 }\nmain {\nlet waiting = spawn call queued() let done = spawn call value() do join done print \"parent\" do join waiting\n}\n",
+      "document": "kernel 1\nnumbers by_spelling\ndefinition \"function queued() -> Any\\nkernel 1\\nmetering statements\\nbody {\\n  do yield\\n  print \\\"queued\\\"\\n}\\n\"\ndefinition \"function value() -> Any\\nkernel 1\\nmetering statements\\nbody {\\n  return 1\\n}\\n\"\nmain {\n  let waiting = spawn invoke queued()\n  let done = spawn invoke value()\n  do join(done)\n  print \"parent\"\n  do join(waiting)\n}\n",
       "expected": {
         "prints": [
           {

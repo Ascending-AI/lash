@@ -12,7 +12,7 @@ impl ToolProvider for LiveYieldingTools {
         &self,
         _config: &crate::plugin::OwnerConfigView,
     ) -> std::result::Result<
-        Vec<crate::ToolManifest>,
+        Vec<lash_vocabulary::tool_contract::ToolManifest>,
         lash_execution_contracts::plugin_error::PluginError,
     > {
         Ok(manifests(vec![named_beta_tool("live_tool")]))
@@ -22,7 +22,7 @@ impl ToolProvider for LiveYieldingTools {
         &self,
         name: &str,
         _config: &crate::plugin::OwnerConfigView,
-    ) -> Option<Arc<crate::ToolContract>> {
+    ) -> Option<Arc<lash_vocabulary::tool_contract::ToolContract>> {
         (name == "tools.live_tool").then(|| Arc::new(named_beta_tool("live_tool").contract()))
     }
 

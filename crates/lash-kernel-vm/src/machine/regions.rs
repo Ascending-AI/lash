@@ -35,6 +35,7 @@
 
 use lash_kernel_doc::arena::ArenaHandle;
 use lash_kernel_doc::{TaskId, Value};
+
 use lash_kernel_exec::Weight;
 use lash_kernel_state::paged::TableCursor;
 
@@ -312,6 +313,7 @@ impl KernelMachine {
         let slice_end = self.slice_end;
         let mut guests = RegionGuests {
             ground: super::islands::Ground {
+                link: self.active_link,
                 exe,
                 tape,
                 recorder,

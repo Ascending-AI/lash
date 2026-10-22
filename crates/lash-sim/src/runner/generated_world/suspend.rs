@@ -70,7 +70,9 @@ impl FinishedSuspend {
     ) -> Result<crate::content_oracle::SessionContent, FixedScriptRunnerError> {
         let durable = self
             .core
-            .session(lash_core::SessionId::fixture(self.session.clone()))
+            .session(lash_vocabulary::identity::SessionId::fixture(
+                self.session.clone(),
+            ))
             .durable()
             .await
             .map_err(|error| FixedScriptRunnerError::Runtime(error.to_string()))?;
@@ -183,7 +185,7 @@ impl GeneratedRuntimeWorld {
         let accepted = session
             .durable()
             .send(lash::TurnInput::text(prompt))
-            .id(lash_core::TurnId::fixture(format!(
+            .id(lash_vocabulary::identity::TurnId::fixture(format!(
                 "{session_alias}:suspend-turn"
             )))
             .await
@@ -456,8 +458,8 @@ impl SuspendToolProvider {
         clippy::expect_used,
         reason = "this module declares the tool or payload schema and admission checks its invariant"
     )]
-    fn definition(&self) -> lash_core::ToolDefinition {
-        lash_core::ToolDefinition::raw(
+    fn definition(&self) -> lash_vocabulary::tool_contract::ToolDefinition {
+        lash_vocabulary::tool_contract::ToolDefinition::raw(
             format!("tool:{}", self.tool_name),
             self.tool_name.clone(),
             "Await an externally-resolved completion.",
@@ -471,8 +473,8 @@ impl SuspendToolProvider {
         .expect("valid declared tool schemas")
         .with_execution(std::time::Duration::from_secs(120))
         .with_declaration(
-            lash_core::ToolDeclaration::deferring(),
-            Some(lash_core::ParkBound::Within(
+            lash_vocabulary::tool_declaration::ToolDeclaration::deferring(),
+            Some(lash_vocabulary::tool_contract::ParkBound::Within(
                 std::time::Duration::from_secs(120),
             )),
         )
@@ -486,7 +488,7 @@ impl lash_core::ToolProvider for SuspendToolProvider {
         &self,
         _config: &lash_core::OwnerConfigView,
     ) -> std::result::Result<
-        Vec<lash_core::ToolManifest>,
+        Vec<lash_vocabulary::tool_contract::ToolManifest>,
         lash_execution_contracts::plugin_error::PluginError,
     > {
         Ok(vec![self.definition().manifest()])
@@ -496,7 +498,7 @@ impl lash_core::ToolProvider for SuspendToolProvider {
         &self,
         name: &str,
         _config: &lash_core::OwnerConfigView,
-    ) -> Option<Arc<lash_core::ToolContract>> {
+    ) -> Option<Arc<lash_vocabulary::tool_contract::ToolContract>> {
         (name == self.tool_name).then(|| Arc::new(self.definition().contract()))
     }
 

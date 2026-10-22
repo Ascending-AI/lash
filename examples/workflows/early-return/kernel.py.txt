@@ -1,25 +1,13 @@
 kernel 1
 numbers by_spelling
-effect corpus.echo(input?: Json) -> Json contract "52910906e3f939a5ce2e34bd105cd37184ead8ac272080fcbff759b3b6db6560"
-use kind = @3e2a9836b16b3ade4f7fcc2d56d1fb203dffed4bd5d7f4bf800df213c8c8c5f7
-use list.len = @70d92c79f9c69cfe8cda0752cf30f5f0db0499a1bbffeeed9e2abddad9cf302b
-use lt = @a9e0784f1de47d5d04963535be1cd88bdd1a23bf1313aad8ef0f3af874d5e9d0
-use py.reply = @9069f1a97a82e155fe11114065351d42262bd0be81a4a8c41f522dfbb431d5d5
-use record.contains = @c5ee063554dd9a59526868c163b1a3282db896327967a522d00fcde29c91c25c
-use record.keys = @3048431a57b64b680843cd96770d99536bab12b83c3c7788856614e555b4985c
-use same = @1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578
-entry demo(value: Int) -> Any
-
-fn demo(value) {
-  if lt(value, 0) {
-    return "negative"
-  }
-  do invoke py.reply(perform corpus.echo(value) as Json)
-  return "done"
-}
-
+import 0 operation corpus.echo(input?: Json) -> Json
+import 1 code py.h_n5_reply(value: Any) -> Any direct
+native @3374b97252e165c3889c839da71c79d7b5f5fb292271dcf61fcea73a89676de1
+export demo "{\"kind\":\"function\",\"value\":{\"function\":\"6bbb3063126b288d39ec8c989982edb90832df2e0aa15c0ad0f967899071bcd9\",\"signature\":{\"params\":[{\"name\":\"value\",\"ty\":\"int\"}],\"result\":\"text\"},\"convention\":{\"kind\":\"direct\"},\"asynchronous\":true,\"rest\":false}}"
+definition "function lt(arg0: Any, arg1: Any) -> Bool\nkernel 1\nerrors \"arity\", \"type_error\"\ncharge sum(1, product(sum(deep(arg0), deep(arg1)), sum(deep(arg0), deep(arg1))), deep(result))\nnative\n"
+definition "function local.function(value: Any) -> Any\nkernel 1\nmetering statements\nimport 0 operation corpus.echo(input?: Json) -> Json\nimport 1 code py.h_n5_reply(value: Any) -> Any direct\nuse lt = @3374b97252e165c3889c839da71c79d7b5f5fb292271dcf61fcea73a89676de1\nbody {\n  if lt(value, 0) {\n    return \"negative\"\n  }\n  do invoke import 1(perform 0(value) as Json)\n  return \"done\"\n}\n"
 main {
-  let demo = &demo
+  let demo = &local.function
 }
 
-unit Function(Name("demo")): statements=4 scopes=3 sites=7
+unit Library(FunctionId(6bbb3063126b288d39ec8c989982edb90832df2e0aa15c0ad0f967899071bcd9)): statements=4 scopes=3 sites=7

@@ -1,7 +1,9 @@
 //! Expressions: every one lowers to an operand, after the statements that
 //! compute it.
 
-use lash_kernel_doc::{Expr, Literal, Member, Name, Place, RecordEntry, Rhs, Stmt};
+use lash_kernel_doc::{Expr, Literal, Member, Place, RecordEntry, Rhs, Stmt};
+
+use lash_vocabulary::Name;
 
 use super::calls::Key;
 use super::patterns::Mode;
@@ -738,7 +740,7 @@ impl Lowerer<'_> {
 
     /// The text of a float, which has no `toString` of its own to run.
     fn float_text(&mut self, value: Operand) -> Lowering<Operand> {
-        self.invoke("ts.number.to_string", &[value], Ty::Text)
+        self.invoke("ts.number.format_value", &[value], Ty::Text)
     }
 
     /// ToString of a value: a float's is spelled directly.

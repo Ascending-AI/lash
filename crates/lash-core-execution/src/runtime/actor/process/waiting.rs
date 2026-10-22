@@ -6,13 +6,13 @@
 //! cancel ends was cut short, never resumed (FIG-6821).
 use super::driver::{Blocked, Driver};
 use super::effects::append_event as append;
-use crate::ProcessId;
 use crate::runtime::actor::round::{MemberState, RunFold};
 use lash_durable::ActorTx;
 use lash_execution_contracts::process::ProcessRecord;
 use lash_execution_contracts::process::StepRequest;
 use lash_execution_contracts::process::WaitKind;
 use lash_execution_contracts::process::WaitState;
+use lash_vocabulary::identity::ProcessId;
 
 /// Why a transition ends the waits it ends.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -47,20 +47,27 @@ impl Ending {
 }
 
 /// What the engine itself waits for, beside its steps.
-fn engine_blocker(driver: &Driver) -> Option<(WaitKind, Option<lash_protocol_types::EffectId>)> {
+fn engine_blocker(
+    driver: &Driver,
+) -> Option<(WaitKind, Option<lash_vocabulary::sites::EffectLocation>)> {
     match driver.blocked.as_ref()? {
-        Blocked::External { name, site, .. } => {
-            Some((WaitKind::Key { name: name.clone() }, site.clone()))
-        }
+        Blocked::External { name, site, .. } => Some((
+            WaitKind::Key { name: name.clone() },
+            site.clone()
+                .map(lash_vocabulary::sites::EffectLocation::authored),
+        )),
         Blocked::Process { process, site, .. } => Some((
             WaitKind::Process {
                 process_id: process.clone(),
             },
-            site.clone(),
+            site.clone()
+                .map(lash_vocabulary::sites::EffectLocation::authored),
         )),
-        Blocked::Sleep { until, site } => {
-            Some((WaitKind::Sleep { until_ms: *until }, site.clone()))
-        }
+        Blocked::Sleep { until, site } => Some((
+            WaitKind::Sleep { until_ms: *until },
+            site.clone()
+                .map(lash_vocabulary::sites::EffectLocation::authored),
+        )),
         Blocked::Idle => None,
     }
 }
@@ -75,11 +82,14 @@ pub(super) fn project(
     fold: &RunFold,
     since_ms: i64,
 ) {
-    let mut blockers: Vec<(WaitKind, Option<lash_protocol_types::EffectId>)> = fold
+    let mut blockers: Vec<(WaitKind, Option<lash_vocabulary::sites::EffectLocation>)> = fold
         .rounds()
         .flat_map(|round| round.members())
         .filter(|member| matches!(member.state(), MemberState::Waiting { .. }))
         .filter_map(|member| {
+            let MemberState::Waiting { source, .. } = member.state() else {
+                return None;
+            };
             let step = driver.steps.values().find(|step| {
                 step.call == *member.call() && matches!(step.request, StepRequest::Tool { .. })
             })?;
@@ -87,8 +97,9 @@ pub(super) fn project(
                 WaitKind::Call {
                     call_id: member.call().clone(),
                     tool_id: member.draft().tool().clone(),
+                    resume_at_ms: source.named().timer.as_ref().map(|timer| timer.deadline_ms),
                 },
-                step.request.site().cloned(),
+                step.request.location().cloned(),
             ))
         })
         .collect();

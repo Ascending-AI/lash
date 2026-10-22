@@ -1,6 +1,7 @@
 //! K-BND-001/003: amplifying natives reserve against the real S7 census.
 use crate::testsupport::{Bench, decode, exhausted, heap};
 use lash_kernel_doc::{Datum, FunctionRegistry, Integer, NativeError, Value, WorkCounter};
+
 use num_bigint::BigInt;
 
 fn int(value: i64) -> Datum {

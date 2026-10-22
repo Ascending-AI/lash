@@ -10,7 +10,7 @@ pub(crate) enum AttemptCompletionSupport {
     /// The key of the completion wait the call's round pinned for a
     /// declared deferrer.
     Available(lash_execution_contracts::waits::PinnedKey),
-    /// The tool's admitted [`ToolDeclaration`](crate::ToolDeclaration) does not
+    /// The tool's admitted [`ToolDeclaration`](lash_vocabulary::tool_declaration::ToolDeclaration) does not
     /// declare `may_defer`, so no key was reserved for it.
     NotDeclared,
     /// The call runs where no completion wait is pinned for it: outside a

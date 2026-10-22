@@ -135,6 +135,26 @@ impl PluginSpec {
         self
     }
 
+    pub fn with_package_provider(
+        mut self,
+        key: super::ToolProviderKey,
+        provider: Arc<dyn super::packages::PackageProvider>,
+    ) -> Self {
+        let result = self.registrations.package_provider(key, provider);
+        self.admit(result);
+        self
+    }
+
+    pub fn with_deferred_package_provider(
+        mut self,
+        key: super::ToolProviderKey,
+        provider: Arc<dyn super::packages::DeferredPackageProvider>,
+    ) -> Self {
+        let result = self.registrations.deferred_package_provider(key, provider);
+        self.admit(result);
+        self
+    }
+
     pub fn with_tool_provider(
         mut self,
         key: super::ToolProviderKey,
@@ -625,7 +645,7 @@ pub struct PluginSessionContext {
     pub trace: Option<lash_trace::DurableTraceScope>,
     /// Who the plugin session is built for: a session, or a process runtime
     /// built from its captured execution environment.
-    pub owner: crate::RuntimeOwner,
+    pub owner: lash_vocabulary::identity::RuntimeOwner,
     /// The session's recorded plugin configuration at this build (FIG-4379):
     /// what it was created with or last patched to, or a process's captured
     /// configuration. It is the value at build time only: a hook reads the
@@ -663,7 +683,7 @@ pub struct SessionReadyContext {
     pub tracing: crate::trace::TraceRuntime,
     pub trace: Option<lash_trace::DurableTraceScope>,
     pub state: super::PluginStateView,
-    pub owner: crate::RuntimeOwner,
+    pub owner: lash_vocabulary::identity::RuntimeOwner,
     pub host: PluginHost,
 }
 
@@ -677,7 +697,8 @@ impl SessionReadyContext {
     }
 }
 
-pub use lash_core_ids::{FormatVersion, PluginId};
+pub use lash_core_ids::PluginId;
+pub use lash_vocabulary::providers::FormatVersion;
 
 /// What a plugin declares about itself before any session is built
 /// (FIG-4732): its id, namespace formats, and readable stream-state formats.
@@ -857,7 +878,7 @@ pub trait PluginFactory: PluginMetadata + Send + Sync {
     /// The engine records this result before any capability is constructed.
     fn initialize_state(
         &self,
-        _owner: &crate::RuntimeOwner,
+        _owner: &lash_vocabulary::identity::RuntimeOwner,
         _config: &super::PluginConfig,
     ) -> Result<std::collections::BTreeMap<String, serde_json::Value>, PluginError> {
         Ok(std::collections::BTreeMap::new())

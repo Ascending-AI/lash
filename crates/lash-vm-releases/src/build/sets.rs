@@ -58,39 +58,6 @@ pub fn kernel_names(registry: &FunctionRegistry) -> Result<Vec<&str>, String> {
     Ok(names)
 }
 
-/// Checks the installed sets against the build's actual registration, including
-/// generated dispatchers, and keeps display data out of function definitions.
-pub fn validate(
-    registry: &FunctionRegistry,
-    packages: &[&lash_kernel_package::Package],
-) -> Result<(), String> {
-    let mut expected = BTreeSet::new();
-    let mut add = |name: &str| {
-        if expected.insert(name.to_owned()) {
-            Ok(())
-        } else {
-            Err(format!("helper sets share `{name}`"))
-        }
-    };
-    for package in packages {
-        for at in 0..package.code().len() {
-            add(package.code().name(at))?;
-        }
-    }
-    let actual: BTreeSet<_> = registry
-        .iter()
-        .map(|(_, f)| f.definition().name.to_string())
-        .collect();
-    if expected != actual {
-        return Err(format!(
-            "closed helper sets differ from registry: missing {:?}, extra {:?}",
-            actual.difference(&expected),
-            expected.difference(&actual)
-        ));
-    }
-    Ok(())
-}
-
 /// The kernel families are recorded from its registry, alongside the closed enum.
 pub fn kernel_source(registry: &FunctionRegistry) -> Result<String, String> {
     let names = kernel_names(registry)?;

@@ -1,7 +1,7 @@
 //! Shared identity and storage encoding of a process lifetime scope.
 
-use crate::SessionId;
 use crate::effect_opener::EffectOpener;
+use lash_vocabulary::identity::SessionId;
 use serde::{Deserialize, Serialize};
 
 /// A scope a process may live until.
@@ -74,7 +74,10 @@ pub enum ScopeStorageError {
 impl ScopeId {
     /// The scope of one turn run.
     #[must_use]
-    pub fn turn(session_id: impl Into<SessionId>, turn_id: impl Into<crate::TurnId>) -> Self {
+    pub fn turn(
+        session_id: impl Into<SessionId>,
+        turn_id: impl Into<lash_vocabulary::identity::TurnId>,
+    ) -> Self {
         Self::Opener(EffectOpener::turn(session_id, turn_id))
     }
 
@@ -90,7 +93,7 @@ impl ScopeId {
 
     /// The scope of one process.
     #[must_use]
-    pub fn process(process_id: crate::ProcessId) -> Self {
+    pub fn process(process_id: lash_vocabulary::identity::ProcessId) -> Self {
         Self::Opener(EffectOpener::process(process_id))
     }
 

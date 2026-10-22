@@ -5,7 +5,7 @@ use super::*;
 impl DurableReads for SqliteDurableStore {
     async fn model_call_pins(
         &self,
-        session: &lash_protocol_types::SessionId,
+        session: &lash_vocabulary::identity::SessionId,
         owner: &str,
     ) -> Result<Vec<lash_durable::domain::ModelCallPinRow>, DurableError> {
         let (session, owner) = (session.clone(), owner.to_owned());
@@ -16,7 +16,7 @@ impl DurableReads for SqliteDurableStore {
 
     async fn model_calls(
         &self,
-        session: &lash_protocol_types::SessionId,
+        session: &lash_vocabulary::identity::SessionId,
         owner: &str,
     ) -> Result<Vec<lash_core_store::model_calls::ModelCallRecord>, DurableError> {
         let (session, owner) = (session.clone(), owner.to_owned());
@@ -27,7 +27,7 @@ impl DurableReads for SqliteDurableStore {
 
     async fn turn(
         &self,
-        session: &lash_protocol_types::SessionId,
+        session: &lash_vocabulary::identity::SessionId,
     ) -> Result<Option<TurnRow>, DurableError> {
         let session = session.clone();
         self.read(move |tx| turns::turn(tx, &session)).await
@@ -35,8 +35,8 @@ impl DurableReads for SqliteDurableStore {
 
     async fn turn_end(
         &self,
-        session: &lash_protocol_types::SessionId,
-        run: &lash_protocol_types::TurnId,
+        session: &lash_vocabulary::identity::SessionId,
+        run: &lash_vocabulary::identity::TurnId,
     ) -> Result<Option<lash_durable::domain::TurnEnd>, DurableError> {
         let (session, run) = (session.clone(), run.clone());
         self.query(move |tx| turns::turn_end(tx, &session, &run))
@@ -45,8 +45,8 @@ impl DurableReads for SqliteDurableStore {
 
     async fn turn_namespaces(
         &self,
-        session: &lash_protocol_types::SessionId,
-        run: &lash_protocol_types::TurnId,
+        session: &lash_vocabulary::identity::SessionId,
+        run: &lash_vocabulary::identity::TurnId,
     ) -> Result<Vec<lash_durable::domain::TurnNamespace>, DurableError> {
         let (session, run) = (session.clone(), run.clone());
         let limits = self.graph_reads.owner();
@@ -83,7 +83,7 @@ impl DurableReads for SqliteDurableStore {
         let policy = self.graph_reads.owner();
         let requested = limits.kernel_data;
         let configured = policy.kernel_data;
-        let kernel_data = lash_core_store::checkpoint_graph::KernelDataLimits::new(
+        let kernel_data = lash_vocabulary::data_limits::KernelDataLimits::new(
             requested.document_depth().min(configured.document_depth()),
             requested
                 .document_json_depth()
@@ -114,8 +114,8 @@ impl DurableReads for SqliteDurableStore {
 
     async fn cell_roots(
         &self,
-        session: &lash_protocol_types::SessionId,
-        run: &lash_protocol_types::TurnId,
+        session: &lash_vocabulary::identity::SessionId,
+        run: &lash_vocabulary::identity::TurnId,
     ) -> Result<Vec<ExecRootRow>, DurableError> {
         let prefix = ExecKey::turn_cells(session, run);
         self.query(move |tx| snapshots::under(tx, &prefix)).await
@@ -123,8 +123,8 @@ impl DurableReads for SqliteDurableStore {
 
     async fn cell_roots_within(
         &self,
-        session: &lash_protocol_types::SessionId,
-        run: &lash_protocol_types::TurnId,
+        session: &lash_vocabulary::identity::SessionId,
+        run: &lash_vocabulary::identity::TurnId,
         max_rows: usize,
     ) -> Result<Vec<ExecRootRow>, DurableError> {
         let prefix = ExecKey::turn_cells(session, run);
@@ -157,7 +157,7 @@ impl DurableReads for SqliteDurableStore {
 
     async fn process(
         &self,
-        process: &lash_protocol_types::ProcessId,
+        process: &lash_vocabulary::identity::ProcessId,
     ) -> Result<Option<ProcessActorRow>, DurableError> {
         processes::process(self, process).await
     }
@@ -166,7 +166,7 @@ impl DurableReads for SqliteDurableStore {
         &self,
         scope: &ScopeKey,
         limit: usize,
-    ) -> Result<Vec<lash_protocol_types::ProcessId>, DurableError> {
+    ) -> Result<Vec<lash_vocabulary::identity::ProcessId>, DurableError> {
         let scope = scope.clone();
         self.read(move |tx| processes::live_until_descendants(tx, &scope, limit))
             .await
@@ -175,9 +175,9 @@ impl DurableReads for SqliteDurableStore {
     async fn until_children(
         &self,
         scope: &ScopeKey,
-        after: Option<&lash_protocol_types::ProcessId>,
+        after: Option<&lash_vocabulary::identity::ProcessId>,
         limit: usize,
-    ) -> Result<Vec<lash_protocol_types::ProcessId>, DurableError> {
+    ) -> Result<Vec<lash_vocabulary::identity::ProcessId>, DurableError> {
         let scope = scope.clone();
         let after = after.cloned();
         self.read(move |tx| processes::until_children(tx, &scope, after.as_ref(), limit))
@@ -186,7 +186,7 @@ impl DurableReads for SqliteDurableStore {
 
     async fn session_close(
         &self,
-        session: &lash_protocol_types::SessionId,
+        session: &lash_vocabulary::identity::SessionId,
     ) -> Result<Option<SessionCloseRow>, DurableError> {
         let session = session.clone();
         self.query(move |tx| session_close::read(tx, &session))
@@ -195,7 +195,7 @@ impl DurableReads for SqliteDurableStore {
 
     async fn ending_scopes(
         &self,
-        session: &lash_protocol_types::SessionId,
+        session: &lash_vocabulary::identity::SessionId,
     ) -> Result<Vec<ScopeKey>, DurableError> {
         let session = session.clone();
         self.query(move |tx| session_close::ending_scopes(tx, &session))
@@ -204,7 +204,7 @@ impl DurableReads for SqliteDurableStore {
 
     async fn session_mailbox(
         &self,
-        session: &lash_protocol_types::SessionId,
+        session: &lash_vocabulary::identity::SessionId,
     ) -> Result<lash_durable::domain::SessionMailbox, DurableError> {
         let session = session.clone();
         self.read(move |tx| session_mail::read(tx, &session)).await

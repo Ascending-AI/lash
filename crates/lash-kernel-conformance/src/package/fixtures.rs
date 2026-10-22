@@ -1,63 +1,54 @@
-//! The installed packages shared by the conformance laws and loop audit.
+//! The helper Documents and native declarations shared by conformance and loop audit.
 #![allow(clippy::unwrap_used, reason = "fixture construction must succeed")]
 use lash_ext_helper_compiler::library::{Dialect, Library};
-use lash_kernel_doc::{FunctionRegistry, NativeCall, NativeError, NativeFunction, Value};
-use lash_kernel_package::HeldPackages;
+use lash_kernel_doc::{Document, FunctionRegistry, NumberPolicy};
 use std::sync::Arc;
 
-pub(crate) fn installed() -> (HeldPackages, FunctionRegistry) {
+pub(crate) fn installed() -> (Arc<Document>, FunctionRegistry) {
     let ts = Library::of(Dialect::TypeScript).unwrap();
     let py = Library::of(Dialect::Python).unwrap();
-    let mut packages = ts.packages;
-    packages.extend(
-        py.packages
-            .into_iter()
-            .filter(|p| p.path().to_string() == "python"),
-    );
-    let fixture = lash_kernel_package::testing::dataframe(&packages[0]).unwrap();
-    packages.push(fixture);
-    let held = HeldPackages::install(packages).unwrap();
-    let mut registry = FunctionRegistry::declarations();
-    held.register_into(&mut registry, &|id| {
-        ts.registry
-            .get(id)
-            .or_else(|| py.registry.get(id))
-            .and_then(|f| f.native().cloned())
-    })
-    .unwrap();
-    for package in held.artifacts().values() {
-        match package.path().to_string().as_str() {
-            "typescript" => {
-                lash_ext_ts_core::implement(&mut registry, package.code().ids().iter().copied())
-                    .unwrap()
-            }
-            "python" => {
-                lash_ext_py_core::implement(&mut registry, package.code().ids().iter().copied())
-                    .unwrap()
-            }
-            "dataframe" => {
-                registry
-                    .implement(
-                        package.function("dataframe.width").unwrap(),
-                        Arc::new(Width),
-                    )
-                    .unwrap();
-            }
-            _ => {}
-        }
+    let mut registry = ts.registry;
+    let mut pending: Vec<_> = py
+        .registry
+        .iter()
+        .filter(|(id, _)| registry.get(id).is_none())
+        .map(|(_, function)| {
+            (
+                function.definition().as_ref().clone(),
+                function.native().cloned(),
+            )
+        })
+        .collect();
+    while !pending.is_empty() {
+        let before = pending.len();
+        pending.retain(|(definition, native)| {
+            registry
+                .register(definition.clone(), native.clone())
+                .is_err()
+        });
+        assert!(
+            pending.len() < before,
+            "helper dependencies register in order"
+        );
     }
-    (held, registry)
-}
-
-struct Width;
-impl NativeFunction for Width {
-    fn call(&self, call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
-        let Some(value @ Value::List(_)) = call.args.get(0) else {
-            return Err(NativeError::Decline);
-        };
-        let Some(sequence) = call.args.sequence(value)? else {
-            return Err(NativeError::Decline);
-        };
-        Ok(Value::Int(i64::try_from(sequence.len()).unwrap()))
-    }
+    lash_ext_ts_core::implement(&mut registry, ts.helpers).unwrap();
+    lash_ext_py_core::implement(&mut registry, py.helpers).unwrap();
+    let mut document = Document::new(NumberPolicy::BySpelling, vec![]);
+    document.main = None;
+    document.functions = registry
+        .iter()
+        .map(|(id, function)| (*id, function.definition().as_ref().clone()))
+        .collect();
+    document.requires.natives = document
+        .functions
+        .iter()
+        .filter(|(_, definition)| {
+            matches!(
+                definition.implementation,
+                lash_kernel_doc::Implementation::Native { .. }
+            )
+        })
+        .map(|(id, _)| *id)
+        .collect();
+    (Arc::new(document), registry)
 }

@@ -2,22 +2,15 @@
   "rule": "K-ADM-007",
   "cases": [
     {
-      "name": "unused effect is refused",
-      "document": "kernel 1\nnumbers by_spelling\neffect echo(x: Int) -> Int contract \"1\"\nmain { finish null }\n",
+      "name": "a body import must agree with its document slot",
+      "document": "kernel 1\nnumbers by_spelling\nimport 0 operation host.echo(value: Int) -> Int\ndefinition \"function run() -> Any\\nkernel 1\\nmetering statements\\nimport 0 operation host.other(value: Int) -> Int\\nbody { return perform 0(1) as Int }\"\nmain { finish null }\n",
       "expected": {
         "end": "refused"
       }
     },
     {
-      "name": "unused library identity is refused",
-      "document": "kernel 1\nnumbers by_spelling\nuse eq = @b50ea78f1b8899c52026719706a58480a99f1d90dcd04a6954be8f2c23cd8954\nmain { finish null }\n",
-      "expected": {
-        "end": "refused"
-      }
-    },
-    {
-      "name": "definition name cannot be relabeled",
-      "document": "kernel 1\nnumbers by_spelling\nuse wrong = @b50ea78f1b8899c52026719706a58480a99f1d90dcd04a6954be8f2c23cd8954\nmain { finish wrong(1, 1) }\n",
+      "name": "a body import cannot omit its document declaration",
+      "document": "kernel 1\nnumbers by_spelling\ndefinition \"function run() -> Any\\nkernel 1\\nmetering statements\\nimport 0 operation host.echo(value: Int) -> Int\\nbody { return perform 0(1) as Int }\"\nmain { finish null }\n",
       "expected": {
         "end": "refused"
       }

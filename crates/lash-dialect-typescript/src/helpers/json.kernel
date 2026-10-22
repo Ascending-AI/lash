@@ -37,7 +37,7 @@ use ts.json.plain
 use ts.json.stringify
 use ts.json.stringify_generic
 use ts.keys
-use ts.number.to_string
+use ts.number.format_value
 use ts.object.own_keys
 use ts.pad
 use ts.receiver
@@ -158,7 +158,7 @@ body {
     }
     if same(k, "number") {
       let rendered = "null"
-      if num.is_finite(value) { set rendered = invoke ts.number.to_string(value) }
+      if num.is_finite(value) { set rendered = invoke ts.number.format_value(value) }
       set out[list.len(out)] = rendered
       return true
     }

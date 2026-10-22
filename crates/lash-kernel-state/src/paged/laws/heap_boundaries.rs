@@ -5,7 +5,7 @@
 type Leaves = Vec<Vec<(Vec<u8>, bool)>>;
 
 fn sealed_leaves(pages: &Pages, kind: PageKind) -> Leaves {
-    use lash_kernel_doc::graph_tokens::{TokenCodec, TokenReader};
+    use lash_vocabulary::tokens::{TokenCodec, TokenReader};
     let mut leaves = Vec::new();
     for leaf in pages.pages.values().filter(|p| p.kind == kind) {
         let mut input = TokenReader::new(&leaf.tokens);
@@ -104,7 +104,7 @@ fn plain(prefix: &[u8]) -> Vec<u8> {
 /// encoded rows to 8192 bytes, each counted from its own start.
 #[test]
 fn keyed_leaves_end_at_natural_rows_and_their_caps() {
-    use lash_kernel_doc::graph_tokens::{TokenCodec, TokenWriter};
+    use lash_vocabulary::tokens::{TokenCodec, TokenWriter};
     // The count cap: 129 rows with no natural key.
     let keys: Vec<_> = (0..129u16).map(|i| plain(&i.to_be_bytes())).collect();
     let (leaves, top) = seal_bools(&keys, false);
@@ -152,7 +152,7 @@ fn keyed_leaves_end_at_natural_rows_and_their_caps() {
 /// D-IMM: greedy UTF-8 chunks end at scalar boundaries at or below 4096 bytes.
 #[test]
 fn payload_leaf_boundaries_follow_the_frozen_4096_byte_rule() {
-    use lash_kernel_doc::graph_tokens::{TokenCodec, TokenReader};
+    use lash_vocabulary::tokens::{TokenCodec, TokenReader};
     for (len, chunks) in [
         (4095, vec![4095]),
         (4096, vec![4096]),

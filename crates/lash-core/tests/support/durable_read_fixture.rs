@@ -36,7 +36,8 @@
 // library code).
 #![allow(clippy::disallowed_methods)]
 
-use lash_protocol_types::{ProcessId, SessionId};
+use lash_vocabulary::identity::ProcessId;
+use lash_vocabulary::identity::SessionId;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
@@ -158,7 +159,9 @@ const INPUT_SOURCE_KEY: &str = "durable-read-input-source";
 
 fn fixture_effect_outcome() -> lash_execution_contracts::process::ProcessEffectOccurrence {
     lash_execution_contracts::process::ProcessEffectOccurrence::new(
-        lash_protocol_types::effect_identity_fixture("durable-read-tool-node", 1),
+        lash_vocabulary::sites::EffectLocation::authored(
+            lash_protocol_types::effect_identity_fixture("durable-read-tool-node", 1),
+        ),
         "tool:fixture",
         lash_execution_contracts::process::ProcessEffectOutcomeClass::Failure,
         Some(lash_core::FailureCode::provider("durable-read-fixture")),
@@ -1038,7 +1041,7 @@ fn fixture_plugin_state() -> PluginState {
         plugins: BTreeMap::from([(
             "durable-read-snapshot-plugin".to_string(),
             PluginNamespaceState {
-                format_version: lash_core::FormatVersion::ONE,
+                format_version: lash_vocabulary::providers::FormatVersion::ONE,
                 generation: 887,
                 encoding: Default::default(),
                 publication: Default::default(),
@@ -1099,7 +1102,10 @@ fn fixture_tool_output() -> lash_core::ToolCallOutput {
 
 fn fixture_process_env() -> ProcessEnv {
     const FIXTURE: lash_core::ProcessConfigKey<serde_json::Value> =
-        lash_core::ProcessConfigKey::new("durable-read", lash_core::FormatVersion::ONE);
+        lash_core::ProcessConfigKey::new(
+            "durable-read",
+            lash_vocabulary::providers::FormatVersion::ONE,
+        );
     ProcessEnv::builder(lash_core::MaxToolCalls::new(1024))
         .component(FIXTURE, &serde_json::json!({"max_chars": 120}))
         .build()
@@ -1135,8 +1141,9 @@ fn waiting_process_registration(env_ref: ProcessEnvRef) -> ProcessRegistration {
 fn fixture_wait_state() -> WaitState {
     WaitState {
         kind: WaitKind::Call {
+            resume_at_ms: None,
             call_id: lash_core::ToolCallId::fixture("durable-read-wait-call"),
-            tool_id: lash_core::ToolId::from("durable-read-wait-tool"),
+            tool_id: lash_vocabulary::tool_contract::ToolId::from("durable-read-wait-tool"),
         },
         since_ms: 123,
         site: None,

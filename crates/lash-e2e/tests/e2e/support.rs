@@ -213,8 +213,8 @@ pub async fn turn_facts(case: &Case, run: &str) -> Result<Value> {
     use lash::durable::domain::OwnerKey;
     let stores = case.open_store().await?;
     let durable = stores.durable_store();
-    let session = lash::SessionId::parse(session(case))?;
-    let turn = lash::TurnId::parse(run)?;
+    let session = lash_vocabulary::identity::SessionId::parse(session(case))?;
+    let turn = lash_vocabulary::identity::TurnId::parse(run)?;
     // Each fact's record is a content-addressed node: equal records name
     // the same node.
     let records = durable
@@ -357,8 +357,8 @@ pub async fn namespaces(case: &Case, run: &str) -> Result<Vec<Value>> {
     let rows = stores
         .durable_store()
         .turn_namespaces(
-            &lash::SessionId::parse(session(case))?,
-            &lash::TurnId::parse(run)?,
+            &lash_vocabulary::identity::SessionId::parse(session(case))?,
+            &lash_vocabulary::identity::TurnId::parse(run)?,
         )
         .await?;
     rows.into_iter()

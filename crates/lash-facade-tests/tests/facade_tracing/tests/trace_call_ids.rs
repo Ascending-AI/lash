@@ -13,12 +13,12 @@ const PROMPT: &str = "direct prompt";
 const DIRECT: &str = "direct_ask";
 const DIRECT_OPERATION: &str = "tools.direct_ask";
 
-fn direct_definition() -> lash_core::ToolDefinition {
-    lash_core::ToolDefinition::raw(
+fn direct_definition() -> lash_vocabulary::tool_contract::ToolDefinition {
+    lash_vocabulary::tool_contract::ToolDefinition::raw(
         format!("tool:{DIRECT}"),
         DIRECT_OPERATION,
         "Ask the model directly.",
-        lash_core::ToolDefinition::default_input_schema(),
+        lash_vocabulary::tool_contract::ToolDefinition::default_input_schema(),
         serde_json::json!({ "type": "object", "additionalProperties": true }),
     )
     .expect("valid declared tool schemas")
@@ -33,7 +33,10 @@ impl ToolProvider for DirectAsk {
     fn tool_manifests(
         &self,
         _config: &lash_core::OwnerConfigView,
-    ) -> std::result::Result<Vec<lash_core::ToolManifest>, lash::plugins::PluginError> {
+    ) -> std::result::Result<
+        Vec<lash_vocabulary::tool_contract::ToolManifest>,
+        lash::plugins::PluginError,
+    > {
         Ok(vec![direct_definition().manifest()])
     }
 
@@ -41,7 +44,7 @@ impl ToolProvider for DirectAsk {
         &self,
         name: &str,
         _config: &lash_core::OwnerConfigView,
-    ) -> Option<Arc<lash_core::ToolContract>> {
+    ) -> Option<Arc<lash_vocabulary::tool_contract::ToolContract>> {
         (name == DIRECT_OPERATION).then(|| Arc::new(direct_definition().contract()))
     }
 
@@ -136,12 +139,14 @@ async fn run(observe: bool) -> Result<(Vec<Seen>, Option<(Observed, LashCore)>)>
     };
     let core = builder.build(lash_facade_tests::runtime_lease_owner())?;
     let session = core
-        .session(lash::SessionId::parse(SESSION).expect("nonblank host identity"))
+        .session(
+            lash_vocabulary::identity::SessionId::parse(SESSION).expect("nonblank host identity"),
+        )
         .create(lash::SessionCreation::root(mock_session_spec()))
         .await?;
     let output = session
         .send(lash::TurnInput::text("ask directly"))
-        .id(lash::TurnId::parse("l26-turn").expect("nonblank host identity"))
+        .id(lash_vocabulary::identity::TurnId::parse("l26-turn").expect("nonblank host identity"))
         .output()
         .await?;
     assert!(output.is_success(), "{:?}", output.outcome);

@@ -5,7 +5,10 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use super::effect_summary::{ProcessEffectOccurrence, ProcessEffectOmissions};
-use super::model::{ProcessExternalRef, ProcessId, ProcessObserverBy, WaitState};
+use super::model::ProcessExternalRef;
+use super::model::ProcessObserverBy;
+use super::model::WaitState;
+use lash_vocabulary::identity::ProcessId;
 
 /// Who wrote an [`ProcessStatus::Abandoned`] terminal (ADR 0110).
 ///
@@ -214,7 +217,7 @@ impl ProcessEventKind {
 
     /// The JSON Schema of this kind's payload, for the kinds the runtime
     /// publishes one for: the effect summary.
-    pub fn payload_schema(self) -> Option<crate::JsonSchema> {
+    pub fn payload_schema(self) -> Option<lash_vocabulary::json_schema::JsonSchema> {
         match self {
             Self::EffectOutcome => Some(super::effect_summary::effect_outcome_payload_schema()),
             Self::EffectOmissions => Some(super::effect_summary::effect_omissions_payload_schema()),
@@ -256,12 +259,12 @@ pub enum ProcessLifecycleFact {
     CancelRequested(CancelRequest),
     /// A session began observing the process.
     ObserverAdded {
-        session: crate::SessionId,
+        session: lash_vocabulary::identity::SessionId,
         by: ProcessObserverBy,
     },
     /// A session stopped observing the process.
     ObserverRemoved {
-        session: crate::SessionId,
+        session: lash_vocabulary::identity::SessionId,
         by: ProcessObserverBy,
     },
     /// The process was bound to durable backend work.
@@ -511,7 +514,7 @@ struct WaitPayload {
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct ObserverPayload {
-    session: crate::SessionId,
+    session: lash_vocabulary::identity::SessionId,
     by: ProcessObserverBy,
 }
 
@@ -1286,7 +1289,7 @@ impl ProcessEventAppendRequest {
     /// process, session, and observer authority.
     pub fn observer_added(
         process_id: &ProcessId,
-        session: &crate::SessionId,
+        session: &lash_vocabulary::identity::SessionId,
         by: &ProcessObserverBy,
     ) -> Self {
         Self::new(ProcessLifecycleFact::ObserverAdded {
@@ -1303,7 +1306,7 @@ impl ProcessEventAppendRequest {
     /// process, session, and observer authority.
     pub fn observer_removed(
         process_id: &ProcessId,
-        session: &crate::SessionId,
+        session: &lash_vocabulary::identity::SessionId,
         by: &ProcessObserverBy,
     ) -> Self {
         Self::new(ProcessLifecycleFact::ObserverRemoved {

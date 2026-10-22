@@ -1,5 +1,5 @@
-use crate::ProcessId;
 use lash_protocol_types::CancelOrigin;
+use lash_vocabulary::identity::ProcessId;
 
 use crate::PluginError;
 

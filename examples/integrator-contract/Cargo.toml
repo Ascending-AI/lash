@@ -12,6 +12,7 @@ doctest = false
 workspace = true
 
 [dependencies]
+lash-vocabulary = { workspace = true }
 lash = { workspace = true, features = ["testing"] }
 
 [dev-dependencies]

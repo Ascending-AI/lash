@@ -8,11 +8,15 @@ use std::sync::Arc;
 use lash_kernel_doc::arena::ShortText;
 use lash_kernel_doc::heap::*;
 use lash_kernel_doc::{
-    Datum, Document, ErrorDatum, FunctionId, FunctionRegistry, Handle, Integer, NativeCall,
-    NativeError, NativeFunction, NewObject, NumberToken, PreparedNative, Site, Timestamp, Unit,
-    Value, parse_definition, parse_document,
+    Datum, Document, ErrorDatum, FunctionRegistry, Handle, Integer, NativeCall, NativeError,
+    NativeFunction, NewObject, NumberToken, PreparedNative, Value, parse_definition,
+    parse_document,
 };
+
 use lash_kernel_state::paged::*;
+use lash_vocabulary::names::FunctionId;
+use lash_vocabulary::sites::Site;
+use lash_vocabulary::sites::Unit;
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
@@ -319,13 +323,9 @@ pub(crate) fn library_with(native_twice: bool, probes: Option<Probes>) -> Librar
             ids.insert(name, id);
         }
     }
-    let mut header = String::from(
-        "kernel 1\neffect echo(x?: Any) -> Any contract \"1\"\neffect boom(x?: Any) -> Any contract \"1\"\n\
-         effect num(x: Text) -> Any contract \"1\"\n",
+    let header = String::from(
+        "kernel 1\nimport 0 operation host.echo(x?: Any) -> Any\nimport 1 operation host.boom(x?: Any) -> Any\nimport 2 operation host.num(x: Text) -> Any\n",
     );
-    for (name, id) in &ids {
-        header.push_str(&format!("use {name} = @{id}\n"));
-    }
     Library {
         registry: Arc::new(registry),
         ids,
@@ -333,30 +333,18 @@ pub(crate) fn library_with(native_twice: bool, probes: Option<Probes>) -> Librar
     }
 }
 
-/// The world outside the run: a clock, random bits, one projection, the
-/// effects a run binds as reads, and what the run printed and read.
+/// The world outside the run: one projection, the operations a run binds
+/// as reads, and what the run printed and read.
 #[derive(Default)]
 pub(crate) struct World {
     pub(crate) printed: Vec<Datum>,
     pub(crate) reads: Vec<Datum>,
     /// Each read-bound `perform`, with its arguments and its origin.
-    pub(crate) performed: Vec<(lash_kernel_doc::EffectName, Vec<Datum>, Site)>,
-    pub(crate) now: i64,
-    pub(crate) random: u64,
+    pub(crate) performed: Vec<(lash_vocabulary::OperationUse, Vec<Datum>, Site)>,
     pub(crate) cancel: bool,
 }
 
 impl Host for World {
-    fn clock(&mut self) -> Timestamp {
-        Timestamp {
-            nanoseconds: Integer::from(self.now),
-        }
-    }
-
-    fn random(&mut self) -> u64 {
-        self.random
-    }
-
     fn read(&mut self, handle: &Handle, request: &Datum) -> Result<Datum, ErrorDatum> {
         self.reads.push(request.clone());
         if handle.kind == "broken" {
@@ -375,17 +363,16 @@ impl Host for World {
     /// Answers a read-bound `perform` from the effects' table.
     fn perform(
         &mut self,
-        effect: &lash_kernel_doc::EffectName,
+        effect: &lash_vocabulary::OperationUse,
         args: &[Datum],
-        _site: &lash_kernel_doc::PositionLabel,
+        _site: &lash_vocabulary::sites::PositionLabel,
         origin: &Site,
     ) -> Result<Result<Datum, ErrorDatum>, crate::HostFault> {
         self.performed
-            .push((effect.clone(), args.to_vec(), origin.clone()));
-        Ok(match answer_effect(effect.as_str(), args) {
+            .push((*effect, args.to_vec(), origin.clone()));
+        Ok(match answer_effect(operation_name(effect.slot), args) {
             Outcome::Completed(datum) => Ok(datum),
             Outcome::Failed(error) => Err(error),
-            Outcome::Elapsed => unreachable!("an effect never elapses"),
         })
     }
 
@@ -407,6 +394,8 @@ pub(crate) struct Setup {
     pub(crate) start: CellStart,
     pub(crate) slice: u64,
     pub(crate) probes: Option<Probes>,
+    pub(crate) reads: bool,
+    pub(crate) cleanup: bool,
 }
 
 impl Default for Setup {
@@ -421,11 +410,13 @@ impl Default for Setup {
                 args: Vec::new(),
                 session: None,
                 owner: PageId([9; 32]),
-                modes: crate::EffectModes::recorded(),
+                modes: crate::EffectModes::new(),
                 host: Vec::new(),
             },
             slice: u64::MAX,
             probes: None,
+            reads: false,
+            cleanup: false,
         }
     }
 }
@@ -434,7 +425,7 @@ pub(crate) struct Embedder {
     pub(crate) machine: KernelMachine,
     pub(crate) world: World,
     pub(crate) library: Library,
-    document: Arc<Document>,
+    pub(crate) document: Arc<Document>,
     /// Every request the machine handed out, in order.
     pub(crate) requests: Vec<Request>,
     /// The requests handed out and not yet answered.
@@ -449,28 +440,24 @@ pub(crate) struct Embedder {
 pub(crate) fn wait_of(request: &Request) -> WaitId {
     match request {
         Request::Effect(effect) => effect.wait,
-        Request::Sleep(sleep) => sleep.wait,
     }
 }
 
 /// What a law calls a request by: an effect's first argument when it is a
-/// text, else the effect's name; `sleep` for a sleep.
+/// text, else the operation's name.
 pub(crate) fn label(request: &Request) -> String {
     match request {
         Request::Effect(effect) => match effect.args.first() {
             Some(Datum::Text(text)) => text.clone(),
-            _ => effect.effect.to_string(),
+            _ => operation_name(effect.use_.slot).into(),
         },
-        Request::Sleep(_) => "sleep".to_string(),
     }
 }
 
 /// The table effects are answered from.
 pub(crate) fn answer(request: &Request) -> Outcome {
-    let Request::Effect(effect) = request else {
-        return Outcome::Elapsed;
-    };
-    answer_effect(effect.effect.as_str(), &effect.args)
+    let Request::Effect(effect) = request;
+    answer_effect(operation_name(effect.use_.slot), &effect.args)
 }
 
 /// What `effect` answers `args` with: `echo` and the `dataframe`
@@ -520,19 +507,66 @@ impl Embedder {
     ) -> Result<Self, crate::StartError> {
         let library = library_with(setup.native_twice, setup.probes);
         let text = format!("numbers {}\n{}{text}", setup.numbers, library.header);
-        let document = parse_document(&text).unwrap_or_else(|error| panic!("{error}\n{text}"));
+        let mut document = document(&text, &library.registry);
+        if setup.cleanup {
+            let lash_kernel_doc::Export::Function(export) = document
+                .exports
+                .get_mut(&lash_vocabulary::Name::new("run"))
+                .unwrap()
+            else {
+                panic!("cleanup fixture exports run")
+            };
+            export.convention = lash_kernel_doc::StartConvention::PyDirect {
+                cleanup: lash_kernel_doc::FunctionTarget::Local(library.ids["body.clean"]),
+            };
+        }
         let document = Arc::new(document);
-        let program = Program {
-            closure: PageId([8; 32]),
-            document: Arc::clone(&document),
-            library: prepared
-                .unwrap_or_else(|| PreparedLibrary::new(Arc::clone(&library.registry))),
-        };
+        let program = crate::laws::embedder::program(
+            Arc::clone(&document),
+            prepared.unwrap_or_else(|| PreparedLibrary::new(Arc::clone(&library.registry))),
+        );
         let source = Source::default();
+        let mut start = setup.start;
+        if let Target::Entry(name) = &start.target
+            && let Some(lash_kernel_doc::Export::Function(export)) =
+                program.document.exports.get(name)
+        {
+            let definition = &program.document.functions[&export.function];
+            if definition
+                .signature
+                .params
+                .first()
+                .is_some_and(|p| p.name.as_str() == "self")
+            {
+                start.args.insert(
+                    0,
+                    Datum::Function(lash_vocabulary::CallableId {
+                        link: program.link,
+                        function: export.function,
+                    }),
+                );
+            }
+        }
+        if setup.reads {
+            start.modes = program
+                .document
+                .imports
+                .keys()
+                .map(|slot| {
+                    (
+                        lash_vocabulary::OperationUse {
+                            link: program.link,
+                            slot: *slot,
+                        },
+                        lash_vocabulary::package::OperationMode::Read,
+                    )
+                })
+                .collect();
+        }
         let machine = crate::KernelMachine::start_with_census(
             program,
             setup.bounds,
-            setup.start,
+            start,
             setup.layout,
             Box::new(source.clone()),
             census(),
@@ -556,11 +590,10 @@ impl Embedder {
     /// `pair.twice` runs natively or not.
     pub(crate) fn program(&self, native_twice: bool) -> (Program, Library) {
         let library = library_with(native_twice, self.probes);
-        let program = Program {
-            closure: PageId([8; 32]),
-            document: Arc::clone(&self.document),
-            library: PreparedLibrary::new(Arc::clone(&library.registry)),
-        };
+        let program = crate::laws::embedder::program(
+            Arc::clone(&self.document),
+            PreparedLibrary::new(Arc::clone(&library.registry)),
+        );
         (program, library)
     }
 
@@ -643,8 +676,8 @@ impl Embedder {
             })?
             .unwrap();
         let certificate = self.machine.accounting();
-        let root: CheckpointRoot = lash_kernel_doc::graph_tokens::decode_body(
-            &lash_kernel_doc::graph_tokens::encode_body(&sealed.root),
+        let root: CheckpointRoot = lash_vocabulary::tokens::decode_body(
+            &lash_vocabulary::tokens::encode_body(&sealed.root),
         )
         .unwrap();
         Ok((root, certificate))
@@ -752,7 +785,7 @@ pub(crate) fn main_site<const N: usize>(path: [u32; N]) -> Site {
 }
 
 pub(crate) fn function_site<const N: usize>(name: &str, path: [u32; N]) -> Site {
-    Site::new(Unit::Function(name.into()), path)
+    Site::new(function_unit(name), path)
 }
 
 use lash_kernel_state::kernel_internals::census_impl::Census;
@@ -806,4 +839,141 @@ pub(crate) fn start_machine(
         Box::new(Source::default()),
         census(),
     )
+}
+
+fn operation_name(slot: lash_vocabulary::ImportSlot) -> &'static str {
+    match slot.0 {
+        0 => "echo",
+        1 => "boom",
+        2 => "num",
+        3 => "dataframe.run",
+        _ => panic!("unknown law operation {slot:?}"),
+    }
+}
+/// Prepare a final Document and its Operation Uses as one linked instance.
+pub(crate) fn program(document: Arc<Document>, library: PreparedLibrary) -> Program {
+    use lash_vocabulary::{
+        ContractId, ImportKind, OperationRequirement,
+        package::{Fill, Link},
+    };
+    let fills = document
+        .imports
+        .iter()
+        .map(|(slot, import)| {
+            let ImportKind::Operation { signature } = &import.kind else {
+                panic!("law fixture needs an operation fill")
+            };
+            (
+                *slot,
+                Fill::Operation(OperationRequirement::new(
+                    signature.clone(),
+                    ContractId::new("1"),
+                )),
+            )
+        })
+        .collect();
+    let link = Link {
+        document: document.identity(),
+        fills,
+    };
+    Program::prepare(
+        link.identity(),
+        BTreeMap::from([(document.identity(), document)]),
+        &BTreeMap::from([(link.identity(), link)]),
+        PageId([8; 32]),
+        library,
+    )
+    .unwrap()
+}
+
+/// Build law Documents from final definition and main forms. Library definitions
+/// are local code in this Document; their native implementations stay in the registry.
+pub(crate) fn document(text: &str, registry: &FunctionRegistry) -> Document {
+    use lash_kernel_doc::{Export, FunctionExport, StartConvention};
+
+    let mut definitions: BTreeMap<_, _> = registry
+        .iter()
+        .map(|(id, registered)| (*id, (**registered.definition()).clone()))
+        .collect();
+    let mut pending = Vec::new();
+    let mut main = String::new();
+    for line in text.lines() {
+        if let Some(source) = line.trim().strip_prefix("definition ") {
+            pending.push(serde_json::from_str::<String>(source).unwrap());
+        } else {
+            main.push_str(line);
+            main.push('\n');
+        }
+    }
+    let imports = "import 0 operation host.echo(x?: Any) -> Any\nimport 1 operation host.boom(x?: Any) -> Any\nimport 2 operation host.num(x: Text) -> Any\n";
+    let mut authored = Vec::new();
+    while !pending.is_empty() {
+        let before = pending.len();
+        let uses: String = definitions
+            .iter()
+            .map(|(id, definition)| format!("use {} = @{id}\n", definition.name))
+            .collect();
+        pending.retain(|source| {
+            match lash_kernel_doc::parse_definition_with_locals(&format!(
+                "{source}\n{imports}{uses}"
+            )) {
+                Ok((definition, locals)) => {
+                    authored.push(definition.identity());
+                    definitions.extend(locals.into_iter().map(|local| (local.identity(), local)));
+                    definitions.insert(definition.identity(), definition);
+                    false
+                }
+                Err(_) => true,
+            }
+        });
+        assert!(
+            pending.len() < before,
+            "law definitions do not parse: {pending:?}\n{uses}"
+        );
+    }
+    let mut header = String::new();
+    for definition in definitions.values() {
+        header.push_str(&format!(
+            "definition {}\n",
+            serde_json::to_string(&lash_kernel_doc::print_definition(definition)).unwrap()
+        ));
+        if definition.has_native() {
+            header.push_str(&format!("native @{}\n", definition.identity()));
+        }
+    }
+    let mut document = parse_document(&format!("{header}{main}"))
+        .unwrap_or_else(|error| panic!("{error}\n{header}{main}"));
+    for id in authored {
+        let definition = &document.functions[&id];
+        document.exports.insert(
+            definition.name.as_str().into(),
+            Export::Function(FunctionExport {
+                function: id,
+                signature: definition.signature.clone(),
+                convention: StartConvention::Direct,
+                asynchronous: false,
+                rest: false,
+            }),
+        );
+    }
+    LAW_FUNCTIONS.with_borrow_mut(|held| {
+        *held = document
+            .functions
+            .iter()
+            .map(|(id, f)| (f.name.to_string(), *id))
+            .collect()
+    });
+    document
+}
+thread_local! {
+    static LAW_FUNCTIONS: RefCell<BTreeMap<String, FunctionId>> = const { RefCell::new(BTreeMap::new()) };
+}
+pub(crate) fn function_unit(name: &str) -> Unit {
+    LAW_FUNCTIONS.with_borrow(|held| Unit::Library(held[name]))
+}
+
+/// Quote interpolated kernel fragments inside a final definition's text literal.
+pub(crate) fn fragment(text: &str) -> String {
+    let quoted = serde_json::to_string(text).unwrap();
+    quoted[1..quoted.len() - 1].to_owned()
 }

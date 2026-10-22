@@ -1,10 +1,10 @@
 use super::*;
-use crate::SessionId;
 use crate::session_catalog::{SessionListFilter, SessionView};
 use crate::session_store_factory_types::{
     ForkSessionReceipt, ForkSessionRequest, RetainedRevision, Retention, SessionLookup,
     SessionStoreCreateRequest, Target,
 };
+use lash_vocabulary::identity::SessionId;
 use std::num::NonZeroU32;
 
 /// Every [`RuntimeStore`] operation, grouped by the segment trait that
@@ -74,7 +74,7 @@ macro_rules! runtime_store_operations {
                 [session] fn admit_session_state(&self, session_id: &SessionId) -> Result<SessionStateAdmission, StoreError>;
                 [session] fn load_session_head_meta(&self, session_id: &SessionId) -> Result<Option<SessionHeadMeta>, StoreError>;
                 [session] fn retain_admission_base(&self, session_id: &SessionId, base: &SessionHeadRef) -> Result<(), StoreError>;
-                [session] fn committed_turn_exists(&self, session_id: &SessionId, turn_id: &crate::TurnId) -> Result<bool, StoreError>;
+                [session] fn committed_turn_exists(&self, session_id: &SessionId, turn_id: &lash_vocabulary::identity::TurnId) -> Result<bool, StoreError>;
                 [carried commit] fn commit_runtime_state(&self, commit: RuntimeCommit) -> Result<RuntimeCommitReceipt, StoreError>;
                 [session] fn settle_observer_intents(&self, session_id: &SessionId, remaining: Vec<crate::SessionObserverIntent>) -> Result<(), StoreError>;
                 [session] fn load_session_meta(&self, session_id: &SessionId) -> Result<Option<SessionMeta>, StoreError>;
@@ -83,7 +83,7 @@ macro_rules! runtime_store_operations {
             SessionHistoryStore {
                 [session] fn load_session_window(&self, session_id: &SessionId, selector: WindowSelector) -> Result<Option<SessionWindowRead>, StoreError>;
                 [session] fn load_ancestors(&self, session_id: &SessionId, anchor: HistoryAnchor, budget: HistoryBudget) -> Result<HistoryPage, StoreError>;
-                [session] fn contains_active_ancestor(&self, session_id: &SessionId, node_id: &crate::NodeId) -> Result<bool, StoreError>;
+                [session] fn contains_active_ancestor(&self, session_id: &SessionId, node_id: &lash_vocabulary::identity::NodeId) -> Result<bool, StoreError>;
                 [session] fn load_failure_evidence_page(&self, session_id: &SessionId, after: Option<&FailureEvidenceCursor>, limit: NonZeroU32) -> Result<FailureEvidencePage, StoreError>;
                 [session] fn load_committed_turns(&self, session_id: &SessionId, after: Option<&CommittedTurnCursor>, limit: NonZeroU32) -> Result<CommittedTurnNodesPage, StoreError>;
             }
@@ -94,7 +94,7 @@ macro_rules! runtime_store_operations {
                 [session] fn list_pending_turn_inputs(&self, session_id: &SessionId) -> Result<Vec<crate::PendingTurnInputRead>, StoreError>;
                 [session] fn turn_input_submission_digest(&self, session_id: &SessionId, source_key: &str) -> Result<Option<String>, StoreError>;
                 [session] fn forsake_turn_input(&self, session_id: &SessionId, source_key: &str) -> Result<TurnInputForsaking, StoreError>;
-                [session] fn pending_turn_input(&self, session_id: &SessionId, input_id: &crate::InputId) -> Result<Option<crate::PendingTurnInputRead>, StoreError>;
+                [session] fn pending_turn_input(&self, session_id: &SessionId, input_id: &lash_vocabulary::identity::InputId) -> Result<Option<crate::PendingTurnInputRead>, StoreError>;
                 [session] fn list_turn_input_applications(&self, session_id: &SessionId) -> Result<Vec<crate::TurnInputApplication>, StoreError>;
                 [session] fn cancel_pending_turn_inputs(&self, session_id: &SessionId, targets: &[crate::PendingTurnInputCancelTarget]) -> Result<Vec<crate::PendingTurnInputCancelReceipt>, StoreError>;
                 [session] fn cancel_pending_turn_input_suffix(&self, session_id: &SessionId, anchor: &crate::PendingTurnInputCancelTarget) -> Result<crate::PendingTurnInputSuffixCancelOutcome, StoreError>;
@@ -122,14 +122,14 @@ macro_rules! runtime_store_operations {
             RunStore {
                 [session] fn unfinished_run(&self, session_id: &SessionId) -> Result<Option<UnfinishedRun>, StoreError>;
                 [carried request] fn admit_at_checkpoint(&self, request: &CheckpointAdmissionRequest) -> Result<CheckpointAdmission, StoreError>;
-                [session] fn run_terminal(&self, session_id: &SessionId, run: &crate::TurnId) -> Result<Option<RunTerminal>, StoreError>;
-                [session] fn end_refused_run(&self, session_id: &SessionId, run: &crate::TurnId, refusal: &crate::RuntimeError, at_ms: u64) -> Result<RunEndOutcome, StoreError>;
-                [session] fn end_command_run(&self, session_id: &SessionId, run: &crate::TurnId, at_ms: u64) -> Result<RunEndOutcome, StoreError>;
-                [session] fn run_of_input(&self, session_id: &SessionId, input: &crate::InputId) -> Result<Option<crate::TurnId>, StoreError>;
+                [session] fn run_terminal(&self, session_id: &SessionId, run: &lash_vocabulary::identity::TurnId) -> Result<Option<RunTerminal>, StoreError>;
+                [session] fn end_refused_run(&self, session_id: &SessionId, run: &lash_vocabulary::identity::TurnId, refusal: &crate::RuntimeError, at_ms: u64) -> Result<RunEndOutcome, StoreError>;
+                [session] fn end_command_run(&self, session_id: &SessionId, run: &lash_vocabulary::identity::TurnId, at_ms: u64) -> Result<RunEndOutcome, StoreError>;
+                [session] fn run_of_input(&self, session_id: &SessionId, input: &lash_vocabulary::identity::InputId) -> Result<Option<lash_vocabulary::identity::TurnId>, StoreError>;
                 [session] fn follow_facts(&self, session_id: &SessionId, subject: &FollowSubject) -> Result<FollowFacts, StoreError>;
-                [session] fn run_binding(&self, session_id: &SessionId, input: &crate::InputId) -> Result<Option<crate::TurnId>, StoreError>;
-                [session] fn bound_turn_scopes(&self, session_id: &SessionId, run: &crate::TurnId) -> Result<Vec<crate::TurnId>, StoreError>;
-                [session] fn bind_run_inputs(&self, session_id: &SessionId, run: &crate::TurnId, inputs: &[crate::InputId]) -> Result<(), StoreError>;
+                [session] fn run_binding(&self, session_id: &SessionId, input: &lash_vocabulary::identity::InputId) -> Result<Option<lash_vocabulary::identity::TurnId>, StoreError>;
+                [session] fn bound_turn_scopes(&self, session_id: &SessionId, run: &lash_vocabulary::identity::TurnId) -> Result<Vec<lash_vocabulary::identity::TurnId>, StoreError>;
+                [session] fn bind_run_inputs(&self, session_id: &SessionId, run: &lash_vocabulary::identity::TurnId, inputs: &[lash_vocabulary::identity::InputId]) -> Result<(), StoreError>;
             }
             StoreMaintenance {
                 [session] fn vacuum(&self, session_id: &SessionId) -> MaintenanceResult<VacuumReport>;

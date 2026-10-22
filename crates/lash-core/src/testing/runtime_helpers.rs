@@ -610,7 +610,7 @@ impl crate::ToolProvider for EmptyTools {
         &self,
         _config: &crate::OwnerConfigView,
     ) -> std::result::Result<
-        Vec<crate::ToolManifest>,
+        Vec<lash_vocabulary::tool_contract::ToolManifest>,
         lash_execution_contracts::plugin_error::PluginError,
     > {
         Ok(Vec::new())
@@ -620,7 +620,7 @@ impl crate::ToolProvider for EmptyTools {
         &self,
         _name: &str,
         _config: &crate::OwnerConfigView,
-    ) -> Option<Arc<crate::ToolContract>> {
+    ) -> Option<Arc<lash_vocabulary::tool_contract::ToolContract>> {
         None
     }
 
@@ -919,8 +919,8 @@ pub async fn runtime_with_plugins_and_tools_and_host_and_store(
 
 pub struct EchoTool;
 
-fn echo_tool_definition() -> crate::ToolDefinition {
-    crate::ToolDefinition::raw(
+fn echo_tool_definition() -> lash_vocabulary::tool_contract::ToolDefinition {
+    lash_vocabulary::tool_contract::ToolDefinition::raw(
         "tool:echo_tool",
         "tools.echo_tool",
         "Return a tool payload",
@@ -942,7 +942,7 @@ impl crate::ToolProvider for EchoTool {
         &self,
         _config: &crate::OwnerConfigView,
     ) -> std::result::Result<
-        Vec<crate::ToolManifest>,
+        Vec<lash_vocabulary::tool_contract::ToolManifest>,
         lash_execution_contracts::plugin_error::PluginError,
     > {
         Ok(vec![echo_tool_definition().manifest()])
@@ -952,7 +952,7 @@ impl crate::ToolProvider for EchoTool {
         &self,
         name: &str,
         _config: &crate::OwnerConfigView,
-    ) -> Option<Arc<crate::ToolContract>> {
+    ) -> Option<Arc<lash_vocabulary::tool_contract::ToolContract>> {
         (name == "tools.echo_tool").then(|| Arc::new(echo_tool_definition().contract()))
     }
 
@@ -984,7 +984,7 @@ impl crate::ToolProvider for TerminalControlTool {
         &self,
         _config: &crate::OwnerConfigView,
     ) -> std::result::Result<
-        Vec<crate::ToolManifest>,
+        Vec<lash_vocabulary::tool_contract::ToolManifest>,
         lash_execution_contracts::plugin_error::PluginError,
     > {
         Ok({
@@ -998,7 +998,7 @@ impl crate::ToolProvider for TerminalControlTool {
         &self,
         name: &str,
         _config: &crate::OwnerConfigView,
-    ) -> Option<Arc<crate::ToolContract>> {
+    ) -> Option<Arc<lash_vocabulary::tool_contract::ToolContract>> {
         name.strip_prefix("terminal.tool")
             .and_then(|value| value.parse::<usize>().ok())
             .filter(|index| *index < self.controls.len())
@@ -1025,27 +1025,31 @@ impl TerminalControlTool {
         }
     }
 
-    fn definition(&self, index: usize) -> crate::ToolDefinition {
+    fn definition(&self, index: usize) -> lash_vocabulary::tool_contract::ToolDefinition {
         let id = format!("tool:terminal_tool_{index}");
         let name = format!("terminal.tool{index}");
         let description = "Return a terminal control result";
-        let input = crate::ToolDefinition::default_input_schema();
+        let input = lash_vocabulary::tool_contract::ToolDefinition::default_input_schema();
         match &self.controls[index] {
-            crate::ToolControl::Turn { control } => crate::ToolDefinition::control(
-                id,
-                name,
-                description,
-                input,
-                match control.kind() {
-                    crate::TurnControlKind::Finish => {
-                        crate::TurnControls::finish(crate::JsonSchema::any())
-                    }
-                    crate::TurnControlKind::SwitchAgentFrame => {
-                        crate::TurnControls::switch_agent_frame()
-                    }
-                },
-            ),
-            _ => crate::ToolDefinition::raw(
+            crate::ToolControl::Turn { control } => {
+                lash_vocabulary::tool_contract::ToolDefinition::control(
+                    id,
+                    name,
+                    description,
+                    input,
+                    match control.kind() {
+                        lash_vocabulary::tool_declaration::TurnControlKind::Finish => {
+                            lash_vocabulary::tool_declaration::TurnControls::finish(
+                                lash_vocabulary::json_schema::JsonSchema::any(),
+                            )
+                        }
+                        lash_vocabulary::tool_declaration::TurnControlKind::SwitchAgentFrame => {
+                            lash_vocabulary::tool_declaration::TurnControls::switch_agent_frame()
+                        }
+                    },
+                )
+            }
+            _ => lash_vocabulary::tool_contract::ToolDefinition::raw(
                 id,
                 name,
                 description,
@@ -1075,7 +1079,7 @@ impl crate::ToolProvider for SlowTool {
         &self,
         _config: &crate::OwnerConfigView,
     ) -> std::result::Result<
-        Vec<crate::ToolManifest>,
+        Vec<lash_vocabulary::tool_contract::ToolManifest>,
         lash_execution_contracts::plugin_error::PluginError,
     > {
         Ok(vec![slow_tool_definition().manifest()])
@@ -1085,7 +1089,7 @@ impl crate::ToolProvider for SlowTool {
         &self,
         name: &str,
         _config: &crate::OwnerConfigView,
-    ) -> Option<Arc<crate::ToolContract>> {
+    ) -> Option<Arc<lash_vocabulary::tool_contract::ToolContract>> {
         (name == "tools.slow_tool").then(|| Arc::new(slow_tool_definition().contract()))
     }
 
@@ -1110,12 +1114,12 @@ impl crate::ToolProvider for SlowTool {
     }
 }
 
-fn slow_tool_definition() -> crate::ToolDefinition {
-    crate::ToolDefinition::raw(
+fn slow_tool_definition() -> lash_vocabulary::tool_contract::ToolDefinition {
+    lash_vocabulary::tool_contract::ToolDefinition::raw(
         "tool:slow_tool",
         "tools.slow_tool",
         "Sleep for a long time; respects cancellation.",
-        crate::ToolDefinition::default_input_schema(),
+        lash_vocabulary::tool_contract::ToolDefinition::default_input_schema(),
         serde_json::json!({ "type": "object", "additionalProperties": true }),
     )
     .expect("valid declared tool schemas")
@@ -1130,7 +1134,7 @@ impl crate::ToolProvider for MemoryProbeTool {
         &self,
         _config: &crate::OwnerConfigView,
     ) -> std::result::Result<
-        Vec<crate::ToolManifest>,
+        Vec<lash_vocabulary::tool_contract::ToolManifest>,
         lash_execution_contracts::plugin_error::PluginError,
     > {
         Ok(vec![memory_probe_tool_definition().manifest()])
@@ -1140,7 +1144,7 @@ impl crate::ToolProvider for MemoryProbeTool {
         &self,
         name: &str,
         _config: &crate::OwnerConfigView,
-    ) -> Option<Arc<crate::ToolContract>> {
+    ) -> Option<Arc<lash_vocabulary::tool_contract::ToolContract>> {
         (name == "tools.memory_probe").then(|| Arc::new(memory_probe_tool_definition().contract()))
     }
 
@@ -1149,12 +1153,12 @@ impl crate::ToolProvider for MemoryProbeTool {
     }
 }
 
-fn memory_probe_tool_definition() -> crate::ToolDefinition {
-    crate::ToolDefinition::raw(
+fn memory_probe_tool_definition() -> lash_vocabulary::tool_contract::ToolDefinition {
+    lash_vocabulary::tool_contract::ToolDefinition::raw(
         "tool:memory_probe",
         "tools.memory_probe",
         "probe",
-        crate::ToolDefinition::default_input_schema(),
+        lash_vocabulary::tool_contract::ToolDefinition::default_input_schema(),
         serde_json::json!({ "type": "string" }),
     )
     .expect("valid declared tool schemas")

@@ -2,8 +2,8 @@
 //! includes, so the example and its tests ship exactly the committed corpus.
 use crate::{Dialect, runtime::RunError};
 use lash::LashCore;
-use lash::workflow::document::{Captions, Document, FunctionRegistry, Name, SourceMap};
-use lash::workflow::{WorkflowDocument, WorkflowDocumentEntry, WorkflowEnvironment};
+use lash::workflow::WorkflowEnvironment;
+use lash::workflow::document::{Captions, Document, Name, SourceMap};
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -60,7 +60,7 @@ pub(crate) struct CatalogWorkflow {
     python: Option<ImportedTwin>,
 }
 pub(crate) struct ImportedTwin {
-    packages: lash::package::WorkflowPackages,
+    packages: crate::runtime::Namespace,
     pub(crate) document: Document,
     pub(crate) entry: Name,
     dialect: Dialect,
@@ -71,7 +71,7 @@ pub(crate) struct ImportedTwin {
 impl ImportedTwin {
     pub(crate) fn origin(&self) -> crate::Origin {
         crate::Origin::Imported {
-            packages: self.packages.clone(),
+            packages: Box::new(self.packages.clone()),
             dialect: self.dialect,
             text: self.source.into(),
             map: self.map.clone(),
@@ -85,11 +85,9 @@ pub(crate) struct Catalog {
 impl Catalog {
     pub(crate) async fn load(
         core: &LashCore,
-        environment: &WorkflowEnvironment,
+        pin: &lash::process::HostArtifactPin,
+        _environment: &WorkflowEnvironment,
     ) -> Result<Self, RunError> {
-        let packages =
-            lash::package::lash_packages().map_err(|error| RunError::Invalid(error.to_string()))?;
-        let package_view = packages.view();
         let cases: Vec<Case> = serde_json::from_str(workflow_corpus::CATALOG_JSON)?;
         let mut workflows = Vec::new();
         for case in cases {
@@ -128,7 +126,7 @@ impl Catalog {
                     twins.push(None);
                     continue;
                 }
-                let imported = crate::authoring_http::import(core, dialect, source).await;
+                let imported = crate::authoring_http::import(core, pin, dialect, source).await;
                 if let Some(code) = &case.refusal {
                     let error = imported.err().ok_or_else(|| {
                         RunError::Invalid(format!("{} must refuse {code}", case.name))
@@ -144,8 +142,14 @@ impl Catalog {
                     let (document, map, captions, packages) = imported.map_err(|error| {
                         RunError::Invalid(format!("{} ({dialect:?}): {:?}", case.name, error.body))
                     })?;
-                    let entries: Vec<_> =
-                        document.entries.keys().map(ToString::to_string).collect();
+                    let entries: Vec<_> = document
+                        .exports
+                        .iter()
+                        .filter(|(_, export)| {
+                            matches!(export, lash::workflow::document::Export::Function(_))
+                        })
+                        .map(|(name, _)| name.to_string())
+                        .collect();
                     if entries != case.entries {
                         return Err(RunError::Invalid(format!(
                             "{}: entry contract changed",
@@ -166,28 +170,32 @@ impl Catalog {
             let mut twins = twins.into_iter();
             let typescript = twins.next().flatten();
             let python = twins.next().flatten();
-            let size = |twin: &ImportedTwin| {
+            let size = async |twin: &ImportedTwin| {
                 entry_view(
+                    core,
+                    pin,
                     &twin.document,
                     &twin.entry,
-                    environment.functions(),
-                    &package_view,
+                    &twin.packages.request,
                 )
+                .await
                 .map(|view| LoweringSize {
                     statements: view.statements.len(),
                     scopes: view.scopes.len(),
                 })
                 .map_err(RunError::Invalid)
             };
-            let ts_size = typescript
-                .as_ref()
-                .map(size)
-                .transpose()?
-                .unwrap_or(LoweringSize {
+            let ts_size = match typescript.as_ref() {
+                Some(twin) => size(twin).await?,
+                None => LoweringSize {
                     statements: 0,
                     scopes: 0,
-                });
-            let py_size = python.as_ref().map(size).transpose()?;
+                },
+            };
+            let py_size = match python.as_ref() {
+                Some(twin) => Some(size(twin).await?),
+                None => None,
+            };
             workflows.push(CatalogWorkflow {
                 listing: WorkflowCatalogEntry {
                     id: case.name.clone(),
@@ -249,21 +257,44 @@ impl Catalog {
             .and_then(Result::ok)
     }
 }
-pub(crate) fn entry_view(
+pub(crate) async fn entry_view(
+    core: &LashCore,
+    pin: &lash::process::HostArtifactPin,
     document: &Document,
     entry: &Name,
-    functions: &FunctionRegistry,
-    packages: &lash::package::PackageView<'_>,
+    environment: &lash::workflow::WorkflowEnvironmentRequest,
 ) -> Result<lash::workflow::view::WorkflowView, String> {
-    let checked = WorkflowDocument::derive(
-        document.clone(),
-        WorkflowDocumentEntry::Entry {
-            function: entry.clone(),
-        },
-        functions,
-    )
-    .map_err(|error| error.to_string())?;
-    lash::workflow::view::derive(&checked, packages).map_err(|error| error.to_string())
+    let start = core
+        .host_artifacts()
+        .publish_workflow(
+            pin,
+            &lash::workflow::document::DocumentBytes::from(document.clone()),
+            &lash::package::StartSelector::Export(entry.clone()),
+            environment,
+            None,
+        )
+        .await
+        .map_err(|error| error.to_string())?;
+    let read = core
+        .host_artifacts()
+        .execution_document(&start)
+        .await
+        .map_err(|error| error.to_string())?;
+    let lash::workflow::WorkflowDocumentRead::Read(checked) = read else {
+        return Err(format!("{read:?}"));
+    };
+    let publications = environment
+        .snapshot
+        .advertisements
+        .iter()
+        .map(|accepted| accepted.publication.clone())
+        .collect::<Vec<_>>();
+    let context = core
+        .host_artifacts()
+        .workflow_view_context(&start, &publications)
+        .await
+        .map_err(|error| error.to_string())?;
+    lash::workflow::view::derive(&checked, &context).map_err(|error| error.to_string())
 }
 
 #[cfg(test)]
@@ -393,10 +424,11 @@ mod tests {
             .expect("the durable backend");
         let host = crate::workflow_core(backend).expect("workflow core");
         let core = host.core().clone();
-        let environment = crate::runtime::workflow_environment(&core)
+        let pin = lash::process::HostArtifactPin::mint();
+        let environment = crate::runtime::workflow_environment(&core, &pin)
             .await
             .expect("the workflow environment");
-        let catalog = Catalog::load(&core, &environment)
+        let catalog = Catalog::load(&core, &pin, &environment)
             .await
             .expect("the catalog loads");
         assert_eq!(
@@ -412,13 +444,20 @@ mod tests {
             let Some(workflow) = &example.typescript else {
                 continue;
             };
-            let unit = Unit::Function(workflow.entry.clone());
+            let unit = match &workflow.document.exports[&workflow.entry] {
+                lash::workflow::document::Export::Function(export) => {
+                    Unit::Library(export.function)
+                }
+                _ => panic!("function Export"),
+            };
             let view = entry_view(
+                &core,
+                &pin,
                 &workflow.document,
                 &workflow.entry,
-                environment.functions(),
-                &crate::test_packages(),
+                &workflow.packages.request,
             )
+            .await
             .expect("the example's view");
             let n = (workflow.document.site_ordinals().len()
                 + workflow.document.action_ordinals().len()

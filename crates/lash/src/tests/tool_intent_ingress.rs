@@ -1,7 +1,7 @@
 use super::*;
 use crate::tests::host::ingress::*;
 use lash_execution_contracts::process::ProcessRegistry;
-use lash_protocol_types::ProcessId;
+use lash_vocabulary::identity::ProcessId;
 
 /// FIG-3070: a start committed before its submission outcome is retained
 /// reports the store's coalescing verdict when ingress realizes it again.
@@ -81,7 +81,7 @@ async fn equivalent_recorded_start_has_the_same_identity_across_routes() -> Resu
     let payload = serde_json::json!({"program": "environment-sensitive"});
 
     let ingress = core.tool_intents(
-        crate::SessionId::parse(SESSION).expect("nonblank host identity"),
+        lash_vocabulary::identity::SessionId::parse(SESSION).expect("nonblank host identity"),
         lash_core::ExecutionScope::turn(SESSION, "host-ingress-route"),
     )?;
     let ingress_key = ingress
@@ -111,7 +111,7 @@ async fn equivalent_recorded_start_has_the_same_identity_across_routes() -> Resu
 
     let session = created_session(
         &core,
-        crate::SessionId::parse(SESSION).expect("nonblank host identity"),
+        lash_vocabulary::identity::SessionId::parse(SESSION).expect("nonblank host identity"),
     )
     .await
     .open()
@@ -188,7 +188,7 @@ fn engine_start_for(
 ) -> lash_execution_contracts::tool_intent::ToolIntent {
     lash_execution_contracts::tool_intent::ToolIntent::StartProcess(Box::new(
         lash_execution_contracts::tool_intent::StartProcessIntent {
-            owner: crate::RuntimeOwner::Session(session.clone()),
+            owner: lash_vocabulary::identity::RuntimeOwner::Session(session.clone()),
             declaration: lash_execution_contracts::testing::held_engine_declaration(
                 payload,
                 lash_execution_contracts::process::ProcessOriginator::host(),
@@ -205,7 +205,7 @@ fn cancel_for(
 ) -> lash_execution_contracts::tool_intent::ToolIntent {
     lash_execution_contracts::tool_intent::ToolIntent::CancelProcess(
         lash_execution_contracts::tool_intent::CancelProcessIntent {
-            owner: crate::RuntimeOwner::Session(session.clone()),
+            owner: lash_vocabulary::identity::RuntimeOwner::Session(session.clone()),
             process_id: process.clone(),
         },
     )
@@ -341,10 +341,12 @@ impl PayloadRetentionLaw {
             release,
             calls,
         } = self;
-        let session_id = crate::SessionId::parse(format!("intent-retention-{name}"))
-            .expect("nonblank host identity");
+        let session_id =
+            lash_vocabulary::identity::SessionId::parse(format!("intent-retention-{name}"))
+                .expect("nonblank host identity");
         let run = |label: &str| {
-            crate::TurnId::parse(format!("{name}-{label}")).expect("nonblank host identity")
+            lash_vocabulary::identity::TurnId::parse(format!("{name}-{label}"))
+                .expect("nonblank host identity")
         };
         let session = created_session(core, session_id.clone())
             .await
@@ -474,19 +476,19 @@ impl PayloadRetentionLaw {
             (
                 &start_key,
                 &started,
-                lash_core::ToolIntentKind::StartProcess,
+                lash_vocabulary::ToolIntentKind::StartProcess,
                 "the executed start",
             ),
             (
                 &cancel_key,
                 &cancelled,
-                lash_core::ToolIntentKind::CancelProcess,
+                lash_vocabulary::ToolIntentKind::CancelProcess,
                 "the executed cancel",
             ),
             (
                 &refused_key,
                 &refused,
-                lash_core::ToolIntentKind::CancelProcess,
+                lash_vocabulary::ToolIntentKind::CancelProcess,
                 "the refusal",
             ),
         ] {
@@ -546,7 +548,7 @@ impl PayloadRetentionLaw {
                 .await,
             crate::tools::ToolIntentIngressOutcome::Refused {
                 refusal: crate::tools::ToolIntentIngressRefusal::DuplicateIdentity {
-                    kind: lash_core::ToolIntentKind::CancelProcess,
+                    kind: lash_vocabulary::ToolIntentKind::CancelProcess,
                 },
             },
             "{name}: a changed cancel still refuses"
@@ -560,8 +562,8 @@ impl PayloadRetentionLaw {
                 .await,
             crate::tools::ToolIntentIngressOutcome::Refused {
                 refusal: crate::tools::ToolIntentIngressRefusal::IdentityBoundToDifferentIntent {
-                    recorded_kind: lash_core::ToolIntentKind::CancelProcess,
-                    submitted_kind: lash_core::ToolIntentKind::StartProcess,
+                    recorded_kind: lash_vocabulary::ToolIntentKind::CancelProcess,
+                    submitted_kind: lash_vocabulary::ToolIntentKind::StartProcess,
                 },
             },
             "{name}: a kind mismatch still refuses"

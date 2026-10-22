@@ -21,7 +21,7 @@ mod executor;
 /// park and end commits.
 #[doc(hidden)]
 pub mod host_graph {
-    pub use crate::executor::envelope::{CellEnvelope, EffectTable, RecordedEffect};
+    pub use crate::executor::envelope::{CellEnvelope, EffectTable};
     pub use crate::executor::host_graph::*;
 }
 mod feedback;
@@ -90,10 +90,15 @@ pub use feedback::{
 /// The schema shapes a [`DialectPrompts`] and a tool presenter spell: the
 /// shared reading of a tool's JSON Schemas, also constructed directly by
 /// runtime-value inference.
-pub use lash_tool_shape::{
-    ExtraKeys, ObjectShape, ProcessParamShape, ProcessShape, SchemaShape, ShapeConstraints,
-    ShapeField, ShapeKind, ShapeRow,
-};
+pub use lash_vocabulary::tool_shape::ExtraKeys;
+pub use lash_vocabulary::tool_shape::ObjectShape;
+pub use lash_vocabulary::tool_shape::ProcessParamShape;
+pub use lash_vocabulary::tool_shape::ProcessShape;
+pub use lash_vocabulary::tool_shape::SchemaShape;
+pub use lash_vocabulary::tool_shape::ShapeConstraints;
+pub use lash_vocabulary::tool_shape::ShapeField;
+pub use lash_vocabulary::tool_shape::ShapeKind;
+pub use lash_vocabulary::tool_shape::ShapeRow;
 /// The tool presenters a [`CellDialect`] ships with, and their building
 /// blocks for a host presenter that spells the same way.
 pub mod tool_presenters {
@@ -101,13 +106,12 @@ pub mod tool_presenters {
     pub use lash_tool_presenter_typescript as typescript;
 }
 pub use plugin::{
-    CellPackages, Charge, ChargeLimiter, ExecutionBounds, InstructionBound, LimitDecision,
-    MemoryBound, MemoryLimiter, MemoryMeter, PackageGate, RLM_PROTOCOL_PLUGIN_ID, RLM_RUN_OPTIONS,
-    RlmChannel, RlmConfigOwner, RlmConfigRefusal, RlmCreateConfig, RlmDiscovery,
-    RlmPresentationConfig, RlmProtocolPluginConfig, RlmProtocolPluginConfigBuilder,
-    RlmProtocolPluginFactory, RlmRecordedBehaviour, RlmRecordedConfig, RlmRenderRefusal,
-    RlmRunOptions, RlmSessionConfigDecodeError, SetRlmRender, UnsetBound, UnsetChannel,
-    rlm_session_config,
+    Charge, ChargeLimiter, ExecutionBounds, InstructionBound, LimitDecision, MemoryBound,
+    MemoryLimiter, MemoryMeter, RLM_PROTOCOL_PLUGIN_ID, RLM_RUN_OPTIONS, RlmChannel,
+    RlmConfigOwner, RlmConfigRefusal, RlmCreateConfig, RlmDiscovery, RlmPresentationConfig,
+    RlmProtocolPluginConfig, RlmProtocolPluginConfigBuilder, RlmProtocolPluginFactory,
+    RlmRecordedBehaviour, RlmRecordedConfig, RlmRenderRefusal, RlmRunOptions,
+    RlmSessionConfigDecodeError, SetRlmRender, UnsetBound, UnsetChannel, rlm_session_config,
 };
 pub use projection::{
     CodeModeProjectedBindings, ProjectedBindingError, rlm_session_projection_extension,

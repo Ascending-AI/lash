@@ -3,15 +3,15 @@
   "cases": [
     {
       "name": "a read the host cannot answer stops the run at its statement",
-      "document": "kernel 1\nnumbers by_spelling\neffect echo(x: Int) -> Int contract \"1\"\nmain { print 1 let x = perform echo(1) as Int print x finish x }\n",
+      "document": "kernel 1\nnumbers by_spelling\nimport 0 operation host.echo(x: Int) -> Int\nmain {\n  print 1\n  let x = perform 0(1) as Int\n  print x\n  finish x\n}\n",
       "environment": {
         "reads": [
-          "echo"
+          "host.echo"
         ],
         "host": [
           {
             "perform": {
-              "effect": "echo",
+              "effect": "host.echo",
               "args": [
                 {
                   "int": "1"

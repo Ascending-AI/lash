@@ -11,9 +11,10 @@ pub(crate) const FINISH_OPERATION: &str = "control.finish";
 
 /// The default finish's id.
 #[expect(clippy::expect_used, reason = "a fixed canonical operation")]
-pub(crate) fn finish_tool_id() -> lash_core::ToolId {
+pub(crate) fn finish_tool_id() -> lash_vocabulary::tool_contract::ToolId {
     lash_core::finish_tool_id(
-        &lash_core::IntoOperation::into_operation(FINISH_OPERATION).expect("a canonical operation"),
+        &lash_vocabulary::tool_contract::IntoOperation::into_operation(FINISH_OPERATION)
+            .expect("a canonical operation"),
     )
 }
 
@@ -34,7 +35,7 @@ pub(crate) fn finish_tool_provider(
     let definition = lash_core::finish_tool(
         FINISH_OPERATION,
         "End the turn with this call's arguments, whole, as its answer. Call it on its own once every other call has returned; it returns nothing. A prose reply does not end this turn.",
-        lash_core::JsonSchema::admit(serde_json::json!({ "type": "object" }))
+        lash_vocabulary::json_schema::JsonSchema::admit(serde_json::json!({ "type": "object" }))
             .expect("a fixed object schema is admitted"),
     )
     .expect("a canonical operation");

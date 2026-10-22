@@ -1,6 +1,7 @@
 language: TypeScript
 exceptions: none
-main/0 [41..150] "async function demo() {\n  /** Pause briefly */\n  await sleep(5);\n  /** Say it is awake */\n  return \"awake\";\n}"
-fn demo/0 [90..105] "await sleep(5);"
-fn demo/0/0/0 [90..105] "await sleep(5);"
-fn demo/1 [133..148] "return \"awake\";"
+main/0 [41..167] "async function demo(): Promise<string> {\n  /** Pause briefly */\n  await sleep(5);\n  /** Say it is awake */\n  return \"awake\";\n}"
+function 20f5d52debaf67ff53653f1b9def3c8d80f9025de3e1ca22b06a609ba5eac5c6/0 [107..122] "await sleep(5);"
+function 20f5d52debaf67ff53653f1b9def3c8d80f9025de3e1ca22b06a609ba5eac5c6/0/0/0 [107..122] "await sleep(5);"
+function 20f5d52debaf67ff53653f1b9def3c8d80f9025de3e1ca22b06a609ba5eac5c6/0/0/0/0 [107..122] "await sleep(5);"
+function 20f5d52debaf67ff53653f1b9def3c8d80f9025de3e1ca22b06a609ba5eac5c6/1 [150..165] "return \"awake\";"

@@ -98,7 +98,7 @@ async fn assert_stopped(
 /// Draft reconciliation reads the retained terminal, without addressing a run.
 async fn withdrawal_tombstone(
     session: &lash::DurableSession,
-    input: &lash::InputId,
+    input: &lash_vocabulary::identity::InputId,
 ) -> lash_core::PendingTurnInput {
     let mut receipts = session
         .cancel_pending_turn_inputs([lash_core::PendingTurnInputCancelTarget::input_id(
@@ -126,7 +126,7 @@ async fn withdraw_while_queued_vs_cancel_while_running(tier: Tier) {
             .await
             .expect("send first");
         model.started.notified().await;
-        let id = lash::TurnId::try_from("queued-run".to_owned()).expect("a host id");
+        let id = lash_vocabulary::identity::TurnId::try_from("queued-run".to_owned()).expect("a host id");
         let queued = session
             .send(lash::TurnInput::text(QUEUED))
             .id(id.clone())
@@ -138,7 +138,7 @@ async fn withdraw_while_queued_vs_cancel_while_running(tier: Tier) {
             "the queue is unadmitted"
         );
         let receipt = session
-            .run(lash::RunId::parse(id.as_str()).unwrap())
+            .run(lash_vocabulary::identity::RunId::parse(id.as_str()).unwrap())
             .cancel()
             .await
             .expect("cancel the queued run");
@@ -276,7 +276,8 @@ async fn a_coalescing_drain_admits_the_queued_inputs_as_one_run(tier: Tier) {
         model.started.notified().await;
         let mut queued = Vec::new();
         for (index, text) in COALESCED.iter().enumerate() {
-            let id = lash::TurnId::try_from(format!("coalesced-{index}")).expect("a host id");
+            let id = lash_vocabulary::identity::TurnId::try_from(format!("coalesced-{index}"))
+                .expect("a host id");
             queued.push(
                 session
                     .send(lash::TurnInput::text(*text))
@@ -288,7 +289,7 @@ async fn a_coalescing_drain_admits_the_queued_inputs_as_one_run(tier: Tier) {
         model.release.notify_one();
         running.output().await.expect("the busy run answers");
         let head = queued[0].id().expect("the host named the run").clone();
-        let head_run = lash::RunId::parse(head.as_str()).unwrap();
+        let head_run = lash_vocabulary::identity::RunId::parse(head.as_str()).unwrap();
         for handle in queued {
             let input = handle.input_id().clone();
             let output = handle
@@ -362,7 +363,10 @@ async fn coalesced_inputs_commit_distinct_user_rows(tier: Tier) {
     };
     let producer = build(false);
     let session = producer
-        .session(lash::SessionId::try_from("coalesced-input-rows".to_owned()).unwrap())
+        .session(
+            lash_vocabulary::identity::SessionId::try_from("coalesced-input-rows".to_owned())
+                .unwrap(),
+        )
         .create(lash::SessionCreation::root(served::spec(8)))
         .await
         .expect("create the session");
@@ -403,7 +407,10 @@ async fn coalesced_inputs_commit_distinct_user_rows(tier: Tier) {
             }
             run = Some(this_run);
         }
-        assert_eq!(run.as_ref().map(lash::RunId::as_str), Some(run_id.as_str()));
+        assert_eq!(
+            run.as_ref().map(lash_vocabulary::identity::RunId::as_str),
+            Some(run_id.as_str())
+        );
         assert_input_rows(&session, &expected, &run_id).await;
         serving.shutdown().await.expect("stop the serving node");
     })
@@ -441,8 +448,8 @@ fn user_text(entry: &lash::transcript::TranscriptEntry) -> String {
 /// same id in its row and application, and with no neighbouring input's text.
 async fn assert_input_rows(
     session: &lash::DurableSession,
-    expected: &[(lash::InputId, String)],
-    run: &lash::TurnId,
+    expected: &[(lash_vocabulary::identity::InputId, String)],
+    run: &lash_vocabulary::identity::TurnId,
 ) {
     let transcript = session.transcript().await.expect("read committed rows");
     let rows: Vec<_> = transcript
@@ -506,9 +513,9 @@ async fn assert_input_rows(
 /// Record a composed admission, then release its actor for the serving node.
 async fn admit_composed_inputs(
     backend: &lash::Backend,
-    session: &lash::SessionId,
-    run: &lash::TurnId,
-    inputs: Vec<lash::InputId>,
+    session: &lash_vocabulary::identity::SessionId,
+    run: &lash_vocabulary::identity::TurnId,
+    inputs: Vec<lash_vocabulary::identity::InputId>,
 ) {
     use lash_core_store::store::{AdmittedInputIds, AdmittedTurnRows, RunAdmissionRecord};
     use lash_durable::domain::{DomainWrite, SessionMailWrite, TurnWrite};
@@ -604,7 +611,7 @@ async fn host_input_ids_correlate_new_queued_and_steering_rows(tier: Tier) {
         .expect("open the facade");
     tokio::time::timeout(WATCHDOG, async {
         let ids = ["opening-send", "queued-send", "steering-send"]
-            .map(|id| lash::TurnId::try_from(id.to_owned()).unwrap());
+            .map(|id| lash_vocabulary::identity::TurnId::try_from(id.to_owned()).unwrap());
         let texts = ["opening input", "queued input", "steering input"];
         let expected: Vec<_> = ids
             .iter()
@@ -751,7 +758,7 @@ async fn sqlite_memory_cancelled_model_keeps_sealed_attempts() {
         ))
         .expect("core builds");
     let session = core
-        .session(lash::SessionId::parse("cancel-model-backoff").unwrap())
+        .session(lash_vocabulary::identity::SessionId::parse("cancel-model-backoff").unwrap())
         .create(lash::SessionCreation::root(served::spec(8)))
         .await
         .expect("session created");

@@ -8,6 +8,7 @@ use super::machine::{kernel_text, lower, run};
 /// Whether an action runs inside a native call's operands in `node`.
 fn action_in_call(node: lash_kernel_doc::Node<'_>, in_call: bool) -> bool {
     use lash_kernel_doc::{Expr, Node};
+
     if in_call && matches!(node, Node::Expr(Expr::Act(_))) {
         return true;
     }
@@ -44,9 +45,20 @@ fn fields_are_formatted_before_the_text_is_built() {
     let text = kernel_text(source);
     assert!(text.matches("text.concat(").count() >= 6, "{text}");
     assert!(!text.contains("text.join("), "{text}");
-    for function in lowered.document.functions.values() {
+    for function in lowered.document.functions.values().filter(|function| {
+        matches!(
+            function.implementation,
+            lash_kernel_doc::Implementation::Guest {
+                metering: lash_kernel_doc::Metering::Statements,
+                ..
+            }
+        )
+    }) {
         assert!(
-            !action_in_call(lash_kernel_doc::Node::Block(&function.body), false),
+            !action_in_call(
+                lash_kernel_doc::Node::Block(&function.body().unwrap().block),
+                false
+            ),
             "a field formats inside a concatenation:\n{text}"
         );
     }

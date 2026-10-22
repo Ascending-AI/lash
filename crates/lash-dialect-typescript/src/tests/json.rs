@@ -5,11 +5,13 @@
 //! same generated input, so the generic walk is the oracle for the result,
 //! the error and the prints, and the entries' charges isolate each call's.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
-use lash_kernel_doc::{Datum, ErrorDatum, Float, Handle, Integer, Name, Timestamp, parse_document};
+use lash_kernel_doc::{Datum, ErrorDatum, Float, Handle, Integer, Timestamp};
+
 use lash_kernel_vm::{Bounds, CellStart, End, Host, Machine, Program, RunError, Step, Target};
+use lash_vocabulary::Name;
 
 use super::machine;
 
@@ -28,12 +30,10 @@ const BOUNDS: Bounds = Bounds {
 /// makes what start arguments cannot carry: a shared value, cycles and
 /// closures.
 const ENTRIES: &str = r#"
-entry fast(v: Any, mode: Int, tail: List(Any)) -> Any
-entry walk(v: Any, mode: Int, tail: List(Any)) -> Any
-entry admits(v: Any, mode: Int, tail: List(Any)) -> Any
-entry draw(v: Any, mode: Int, tail: List(Any)) -> Any
-entry idle(v: Any, mode: Int, tail: List(Any)) -> Any
-fn build(v, mode) {
+function build(v: Any, mode: Any) -> Any
+kernel 1
+metering statements
+body {
   let shout = fn(holder, passed) { print "toJSON" return "shout" }
   if eq(mode, 1) { return [v, v] }
   if eq(mode, 2) { let r = {head: v} set r.self = r return r }
@@ -44,71 +44,116 @@ fn build(v, mode) {
   if eq(mode, 7) { return {a: v, b: [v, {c: v}]} }
   return v
 }
-fn fast(v, mode, tail) {
-  let x = call build(v, mode)
+function fast(v: Any, mode: Int, tail: List(Any)) -> Any
+kernel 1
+metering statements
+body {
+  let x = invoke build(v, mode)
   let args = list.concat([x], tail)
   let out = invoke ts.json.stringify(null, args)
   return out
 }
-fn walk(v, mode, tail) {
-  let x = call build(v, mode)
+function walk(v: Any, mode: Int, tail: List(Any)) -> Any
+kernel 1
+metering statements
+body {
+  let x = invoke build(v, mode)
   let args = list.concat([x], tail)
   let out = invoke ts.json.stringify_generic(null, args)
   return out
 }
-fn admits(v, mode, tail) {
-  let x = call build(v, mode)
+function admits(v: Any, mode: Int, tail: List(Any)) -> Any
+kernel 1
+metering statements
+body {
+  let x = invoke build(v, mode)
   let args = list.concat([x], tail)
   let out = invoke ts.json.plain(x)
   return out
 }
-fn draw(v, mode, tail) {
-  let x = call build(v, mode)
+function draw(v: Any, mode: Int, tail: List(Any)) -> Any
+kernel 1
+metering statements
+body {
+  let x = invoke build(v, mode)
   let args = list.concat([x], tail)
   let out = invoke ts.console.json(x)
   return out
 }
-fn idle(v, mode, tail) {
-  let x = call build(v, mode)
+function idle(v: Any, mode: Int, tail: List(Any)) -> Any
+kernel 1
+metering statements
+body {
+  let x = invoke build(v, mode)
   let args = list.concat([x], tail)
   let out = null
   return out
 }
-fn quick(x) { return x }
-main { }
+function quick(x: Any) -> Any
+kernel 1
+metering statements
+body { return x }
 "#;
 
-fn program() -> &'static Program {
-    static PROGRAM: std::sync::OnceLock<Program> = std::sync::OnceLock::new();
-    PROGRAM.get_or_init(|| {
-        let registry = machine::registry().as_ref().clone();
-        let registry = Arc::new(registry);
-        let names = [
-            "eq",
-            "list.concat",
-            "ts.json.stringify",
-            "ts.json.stringify_generic",
-            "ts.json.plain",
-            "ts.console.json",
-        ];
-        let mut text = String::from("kernel 1\nnumbers float\n");
-        for name in names {
-            let (id, _) = registry
-                .iter()
-                .find(|(_, function)| function.definition().name.as_str() == name)
-                .unwrap_or_else(|| panic!("{name} is registered"));
-            text.push_str(&format!("use {name} = @{id}\n"));
+fn program(
+    retained: &lash_kernel_package::LinkedContent,
+    roots: &BTreeSet<lash_vocabulary::LinkId>,
+    library: lash_kernel_vm::PreparedLibrary,
+) -> Program {
+    let names = [
+        "eq",
+        "list.concat",
+        "ts.json.stringify",
+        "ts.json.stringify_generic",
+        "ts.json.plain",
+        "ts.console.json",
+    ];
+    let mut text = names
+        .iter()
+        .map(|name| format!("use {name}\n"))
+        .collect::<String>();
+    text.push_str("use build\n");
+    text.push_str("use fast\n");
+    text.push_str("use walk\n");
+    text.push_str("use admits\n");
+    text.push_str("use draw\n");
+    text.push_str("use idle\n");
+    text.push_str("use quick\n");
+    text.push_str(ENTRIES);
+    let document = super::linked_inspection::definitions(
+        &text,
+        &["fast", "walk", "admits", "draw", "idle"],
+        super::library(),
+    );
+    let (mut content, root) = super::linked::content(&document);
+    let mut pending = roots.iter().copied().collect::<Vec<_>>();
+    let mut visited = BTreeSet::new();
+    while let Some(id) = pending.pop() {
+        if !visited.insert(id) {
+            continue;
         }
-        text.push_str(ENTRIES);
-        let mut document = parse_document(&text).unwrap_or_else(|error| panic!("{error}"));
-        document.manifest.functions =
-            lash_kernel_check::requirements(&document, registry.as_ref()).functions;
-        Program {
-            closure: super::pages::CLOSURE,
-            document: Arc::new(document),
-            library: lash_kernel_vm::PreparedLibrary::new(registry),
-        }
-    })
+        let link = &retained.links[&id];
+        content
+            .documents
+            .insert(link.document, retained.documents[&link.document].clone());
+        content.links.insert(id, link.clone());
+        pending.extend(link.fills.values().filter_map(|fill| match fill {
+            lash_vocabulary::package::Fill::Export { link, .. } => Some(*link),
+            _ => None,
+        }));
+    }
+    Program::prepare(
+        root,
+        content
+            .documents
+            .into_iter()
+            .map(|(id, document)| (id, Arc::new(document)))
+            .collect(),
+        &content.links,
+        super::pages::CLOSURE,
+        library,
+    )
+    .expect("JSON inputs retain their producing Links")
 }
 
 #[derive(Default)]
@@ -118,14 +163,14 @@ struct Console {
 }
 
 impl Host for Console {
-    fn clock(&mut self) -> Timestamp {
-        Timestamp {
-            nanoseconds: Integer::from(0),
-        }
-    }
-
-    fn random(&mut self) -> u64 {
-        0
+    fn perform(
+        &mut self,
+        use_: &lash_vocabulary::OperationUse,
+        _: &[Datum],
+        _: &lash_vocabulary::sites::PositionLabel,
+        _: &lash_vocabulary::sites::Site,
+    ) -> Result<Result<Datum, lash_kernel_doc::ErrorDatum>, lash_kernel_vm::HostFault> {
+        crate::tests::linked_reads::read(use_, 0)
     }
 
     fn read(&mut self, _handle: &Handle, _request: &Datum) -> Result<Datum, ErrorDatum> {
@@ -154,7 +199,7 @@ struct Ran {
     charged: u64,
 }
 
-fn run(entry: &str, case: &Case) -> Ran {
+fn run(program: &Program, entry: &str, case: &Case) -> Ran {
     let start = CellStart {
         target: Target::Entry(Name::new(entry)),
         args: vec![
@@ -167,7 +212,7 @@ fn run(entry: &str, case: &Case) -> Ran {
         modes: Default::default(),
         host: Vec::new(),
     };
-    let mut machine = super::pages::start(program().clone(), BOUNDS, start)
+    let mut machine = super::pages::start(program.clone(), BOUNDS, start)
         .unwrap_or_else(|error| panic!("{error}"));
     let mut console = Console::default();
     let step = machine
@@ -192,7 +237,7 @@ fn run(entry: &str, case: &Case) -> Ran {
 
 /// One input: a start value, how `build` shapes it and the arguments after
 /// the value (a replacer and a space).
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 struct Case {
     value: Datum,
     mode: u8,
@@ -424,25 +469,59 @@ fn edges() -> Vec<Datum> {
     ]
 }
 
+/// Retain the exact producing code only when a graph contains callables.
+fn callable_links(value: &Datum) -> BTreeSet<lash_vocabulary::LinkId> {
+    let mut links = BTreeSet::new();
+    let mut pending = vec![value];
+    while let Some(value) = pending.pop() {
+        match value {
+            Datum::Function(callable) => {
+                links.insert(callable.link);
+            }
+            Datum::List(values) | Datum::Tuple(values) | Datum::Set(values) => {
+                pending.extend(values)
+            }
+            Datum::Record(fields) => pending.extend(fields.iter().map(|(_, value)| value)),
+            Datum::Map(entries) => {
+                pending.extend(entries.iter().flat_map(|(key, value)| [key, value]))
+            }
+            Datum::Error(error) => pending.push(&error.data),
+            _ => {}
+        }
+    }
+    links
+}
+
 /// The inputs: generated plain graphs, graphs with traps, the edges, each
 /// shaped by every `build` mode, and some with a replacer or a space.
-fn cases() -> Vec<Case> {
+fn cases() -> Vec<(Case, Arc<Program>)> {
     let mut bits = Bits(0x5873_0000_0000_0001);
     let mut values = edges();
-    values.extend(smith_values());
+    let (generated, retained) = smith_values();
+    values.extend(generated);
     for round in 0..160 {
         let mut budget = 40;
         let odds = if round % 2 == 0 { 0 } else { 12 };
         values.push(value(&mut bits, 4, &mut budget, odds));
     }
+    let mut programs = BTreeMap::new();
+    let library = machine::prepared().clone();
     let mut cases = Vec::new();
     for value in values {
+        let roots = callable_links(&value);
+        let program = programs
+            .entry(roots.clone())
+            .or_insert_with(|| Arc::new(program(&retained, &roots, library.clone())))
+            .clone();
         for mode in 0..8 {
-            cases.push(Case {
-                value: value.clone(),
-                mode,
-                tail: Vec::new(),
-            });
+            cases.push((
+                Case {
+                    value: value.clone(),
+                    mode,
+                    tail: Vec::new(),
+                },
+                Arc::clone(&program),
+            ));
         }
         let tail = match bits.below(4) {
             0 => vec![Datum::Absent, Datum::Absent],
@@ -450,13 +529,25 @@ fn cases() -> Vec<Case> {
             2 => vec![Datum::Absent, float(2.0)],
             _ => vec![Datum::List(vec![text("id"), text("name")]), text("--")],
         };
-        cases.push(Case {
-            value,
-            mode: 0,
-            tail,
-        });
+        cases.push((
+            Case {
+                value,
+                mode: 0,
+                tail,
+            },
+            program,
+        ));
     }
-    cases
+    // Repeated prints may produce identical graphs, but their independently
+    // drawn tails can differ. Deduplicate only complete, exactly equal cases.
+    let mut unique = Vec::new();
+    for (case, program) in cases {
+        if !unique.iter().any(|(seen, _)| seen == &case) {
+            unique.push((case, program));
+        }
+    }
+    println!("JSON classifier distinct cases: {}", unique.len());
+    unique
 }
 
 /// The plain path writes what the generic walk writes, raises what it
@@ -490,16 +581,16 @@ fn plain_json_matches_the_generic_walk_and_costs_its_guard_and_one_path() {
     let mut admitted_costs: BTreeMap<(Vec<bool>, bool), u64> = BTreeMap::new();
     let mut refused_costs: BTreeMap<(Vec<bool>, bool), u64> = BTreeMap::new();
     let (mut admitted, mut refused) = (0, 0);
-    for case in cases() {
-        let fast = run("fast", &case);
-        let generic = run("walk", &case);
+    for (case, program) in cases() {
+        let fast = run(&program, "fast", &case);
+        let generic = run(&program, "walk", &case);
         assert_eq!(
             (&fast.end, &fast.printed),
             (&generic.end, &generic.printed),
             "{case:?}"
         );
-        let guard = run("admits", &case);
-        let none = run("idle", &case);
+        let guard = run(&program, "admits", &case);
+        let none = run(&program, "idle", &case);
         let replacer_or_space = case.tail.iter().any(|arg| *arg != Datum::Absent);
         let expected = !replacer_or_space && plain(&case);
         if !replacer_or_space {
@@ -512,7 +603,7 @@ fn plain_json_matches_the_generic_walk_and_costs_its_guard_and_one_path() {
         let guard_cost = guard.charged - none.charged;
         let (path, costs) = if expected {
             admitted += 1;
-            let render = run("draw", &case);
+            let render = run(&program, "draw", &case);
             assert_eq!(fast.end, render.end, "{case:?}");
             (render.charged - none.charged, &mut admitted_costs)
         } else {
@@ -543,12 +634,13 @@ fn plain_json_matches_the_generic_walk_and_costs_its_guard_and_one_path() {
 /// Use SC8's real program generator and collect the data it prints, including
 /// mutated lists/records, sets, maps and effect results, rather than replacing
 /// that grammar with a second random-value generator.
-fn smith_values() -> Vec<Datum> {
+fn smith_values() -> (Vec<Datum>, lash_kernel_package::LinkedContent) {
     use arbitrary::{Arbitrary, Unstructured};
     use lash_kernel_conformance::smith::Smith;
     use lash_kernel_vm::{Outcome, Request};
 
     let mut values = Vec::new();
+    let mut retained = lash_kernel_package::LinkedContent::default();
     for seed in 0..64u64 {
         let mut bits = Bits(seed + 1);
         let bytes: Vec<u8> = (0..512).map(|_| bits.next() as u8).collect();
@@ -568,11 +660,13 @@ fn smith_values() -> Vec<Datum> {
             modes: Default::default(),
             host: Vec::new(),
         };
-        let program = Program {
-            closure: super::pages::CLOSURE,
-            document: Arc::new(smith.document),
-            library: machine::prepared().clone(),
-        };
+        // Printed functions retain their original callable identities and captures.
+        // Keep the producing code alongside the values for the consumer's decoder.
+        let (content, _) = super::linked::content(&smith.document);
+        retained.documents.extend(content.documents);
+        retained.links.extend(content.links);
+        let program =
+            crate::tests::linked::program(Arc::new(smith.document), machine::prepared().clone());
         let mut machine =
             super::pages::with_source(program, BOUNDS, start, &session.source).unwrap();
         let mut console = Console::default();
@@ -581,9 +675,15 @@ fn smith_values() -> Vec<Datum> {
                 Step::Parked(park) => {
                     for request in park.requests {
                         let (wait, outcome) = match request {
-                            Request::Sleep(sleep) => (sleep.wait, Outcome::Elapsed),
                             Request::Effect(effect) => {
-                                (effect.wait, Outcome::Completed(effect.args[0].clone()))
+                                let answer = if super::linked::operation(&effect.use_).as_str()
+                                    == "typescript.sleep"
+                                {
+                                    Datum::Null
+                                } else {
+                                    effect.args.first().cloned().expect("host.echo's argument")
+                                };
+                                (effect.wait, Outcome::Completed(answer))
                             }
                         };
                         machine.deliver(wait, outcome).unwrap();
@@ -600,5 +700,5 @@ fn smith_values() -> Vec<Datum> {
         "SC8 classifier inputs: {} prints from 64 generated programs",
         values.len()
     );
-    values
+    (values, retained)
 }

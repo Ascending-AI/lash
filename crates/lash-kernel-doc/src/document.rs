@@ -1,17 +1,13 @@
 //! The workflow document: a kernel program and what it requires.
 
-use std::collections::{BTreeMap, BTreeSet};
-
 use schemars::JsonSchema;
 use serde::de::DeserializeOwned;
-use serde::{Deserialize, Serialize};
 
-use crate::ast::{Block, Function, Node, Site};
-use crate::graph_tokens::{encode_body, logical_digest};
-use crate::name::{DocumentId, EffectName, FunctionId, FunctionName, Name};
-use crate::number::NumberPolicy;
-use crate::requirement::OperationRequirement;
-use crate::types::Signature;
+use crate::ast::{Block, Node};
+
+use lash_vocabulary::names::DocumentId;
+use lash_vocabulary::sites::Site;
+use lash_vocabulary::tokens::{encode_body, logical_digest};
 
 /// The kernel version this crate's forms, values, evaluation order,
 /// nested-action positions, task scheduling, site derivation and canonical form are
@@ -25,71 +21,67 @@ pub const KERNEL_VERSION: u32 = 1;
 /// in it are two levels.
 pub const MAX_NESTING_DEPTH: usize = 64;
 
-/// A workflow document: `main`, the declared functions, the entries a host
-/// may start, the private bindings and the requirements manifest.
-///
-/// A document holds behaviour only. Where its nodes came from in authored
-/// source is an optional [`crate::SourceMap`], and what its steps are called
-/// is an optional [`crate::Captions`]; both are stored apart and keyed to
-/// the document's [`DocumentId`].
+use crate::NumberPolicy;
+use crate::function::FunctionDefinition;
+use crate::function_value::StartConvention;
+use lash_vocabulary::{claims::NodeRequirements, names::*, types::*};
+use serde::{Deserialize, Serialize};
+use std::collections::{BTreeMap, BTreeSet};
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Document {
-    pub manifest: Manifest,
-    /// The declared functions, by name.
-    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    pub functions: BTreeMap<Name, Function>,
-    /// The declared functions a host may start, each with the typed
-    /// signature and calling convention it is started under.
-    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    pub entries: BTreeMap<Name, Entry>,
-    /// The variables of `main` that are the program's own. Every other
-    /// variable `main` declares at its top level is a session binding.
-    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
-    pub private_bindings: BTreeSet<Name>,
-    pub main: Block,
-}
-
-/// A declared entry's host signature and synchronous calling convention.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct Entry {
-    pub signature: Signature,
-    pub convention: crate::StartConvention,
-}
-
-/// What a document needs from the environment that runs it. Admission
-/// refuses a document whose requirements the environment does not meet.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct Manifest {
-    /// The kernel version the document is written in.
-    pub kernel: u32,
-    /// Every operation the document performs, or a library body it reaches
-    /// performs, with what the code requires of it (`K-DOC-002`).
-    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    pub effects: BTreeMap<EffectName, OperationRequirement>,
-    /// Every library function the document reaches, directly or through
-    /// another function's body, by identity, with the name its definition
-    /// carries.
-    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    pub functions: BTreeMap<FunctionId, FunctionName>,
-    /// How an effect result's bare number decodes.
+    pub imports: BTreeMap<ImportSlot, Import>,
+    pub exports: BTreeMap<Name, Export>,
+    pub main: Option<Block>,
+    pub functions: BTreeMap<FunctionId, FunctionDefinition>,
+    pub requires: NodeRequirements,
     pub numbers: NumberPolicy,
+    pub private_bindings: BTreeSet<Name>,
 }
-
-impl Manifest {
-    /// A manifest for [`KERNEL_VERSION`] that requires nothing.
-    pub fn new(numbers: NumberPolicy) -> Self {
-        Self {
-            kernel: KERNEL_VERSION,
-            effects: BTreeMap::new(),
-            functions: BTreeMap::new(),
-            numbers,
-        }
-    }
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(
+    tag = "kind",
+    content = "value",
+    rename_all = "snake_case",
+    deny_unknown_fields
+)]
+pub enum Export {
+    Function(FunctionExport),
+    Type(TypeDef),
+    Error { kind: ErrorKind },
 }
-
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+/// Public call signature, settled result and defining convention. Startability is exactly function kind plus data_only.
+pub struct FunctionExport {
+    pub function: FunctionId,
+    pub signature: Signature,
+    pub convention: StartConvention,
+    pub asynchronous: bool,
+    pub rest: bool,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+/// A Brand paired with representation, executable checker and named members; validated together at admission.
+pub struct TypeDef {
+    pub brand: Brand,
+    pub representation: Type,
+    pub checker: FunctionId,
+    pub members: BTreeMap<Segment, TypeMember>,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(
+    tag = "kind",
+    content = "value",
+    rename_all = "snake_case",
+    deny_unknown_fields
+)]
+/// A static function, explicit-receiver method, or property in its owning TypeDef.
+pub enum TypeMember {
+    Static(FunctionExport),
+    Method(FunctionExport),
+    Property(FunctionExport),
+}
 /// The document's run-count ordinals by site: statement and block
 /// starts, then action issues, then while-condition tests.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -106,12 +98,29 @@ impl Document {
     /// A document with this `main` and nothing else.
     pub fn new(numbers: NumberPolicy, main: Block) -> Self {
         Self {
-            manifest: Manifest::new(numbers),
+            imports: BTreeMap::new(),
+            exports: BTreeMap::new(),
             functions: BTreeMap::new(),
-            entries: BTreeMap::new(),
+            main: Some(main),
+            requires: NodeRequirements {
+                kernels: BTreeSet::from([KERNEL_VERSION]),
+                ..NodeRequirements::default()
+            },
+            numbers,
             private_bindings: BTreeSet::new(),
-            main,
         }
+    }
+
+    /// Executable bodies and their stable semantic coordinates.
+    pub fn units(&self) -> impl Iterator<Item = (crate::Unit, &Block)> {
+        self.main
+            .iter()
+            .map(|body| (crate::Unit::Main, body))
+            .chain(self.functions.iter().filter_map(|(id, function)| {
+                function
+                    .body()
+                    .map(|body| (crate::Unit::Library(*id), &body.block))
+            }))
     }
 
     /// Every statement and block of this document's own units with the
@@ -180,11 +189,7 @@ impl Document {
     fn walk_sites(&self) -> (Vec<(Site, Node<'_>)>, Vec<Site>) {
         let mut nodes = Vec::new();
         let mut actions = Vec::new();
-        let units = std::iter::once((crate::Unit::Main, &self.main)).chain(
-            self.functions
-                .iter()
-                .map(|(name, function)| (crate::Unit::Function(name.clone()), &function.body)),
-        );
+        let units = self.units();
         let mut path = Vec::new();
         let mut pending = Vec::new();
         for (unit, body) in units {
@@ -236,12 +241,15 @@ impl Document {
     }
 
     pub fn from_json(text: &str) -> Result<Self, DecodeError> {
-        Self::from_json_with_limits(text, crate::KernelDataLimits::standard())
+        Self::from_json_with_limits(
+            text,
+            lash_vocabulary::data_limits::KernelDataLimits::standard(),
+        )
     }
     /// Read under the host's recursive JSON safety policy.
     pub fn from_json_with_limits(
         text: &str,
-        limits: crate::KernelDataLimits,
+        limits: lash_vocabulary::data_limits::KernelDataLimits,
     ) -> Result<Self, DecodeError> {
         crate::document_work::note(|work| work.json_decodes += 1);
         from_versioned_json_with_limits(text, limits)
@@ -282,7 +290,7 @@ pub(crate) fn to_json<T: Serialize>(value: &T) -> Result<String, EncodeError> {
 
 pub(crate) fn from_json_with_limits<T: DeserializeOwned>(
     text: &str,
-    limits: crate::KernelDataLimits,
+    limits: lash_vocabulary::data_limits::KernelDataLimits,
 ) -> Result<T, DecodeError> {
     let limit = limits.document_json_depth();
     let depth = json_depth(text);
@@ -340,25 +348,25 @@ fn json_depth(text: &str) -> usize {
 /// build cannot disguise an unsupported version as a form decoding fault.
 pub(crate) fn from_versioned_json_with_limits<T: DeserializeOwned>(
     text: &str,
-    limits: crate::KernelDataLimits,
+    limits: lash_vocabulary::data_limits::KernelDataLimits,
 ) -> Result<T, DecodeError> {
-    #[derive(Deserialize)]
-    struct Version {
-        kernel: u32,
-    }
     #[derive(Deserialize)]
     struct Header {
         #[serde(default)]
         kernel: Option<u32>,
         #[serde(default)]
-        manifest: Option<Version>,
+        requires: Option<lash_vocabulary::claims::NodeRequirements>,
     }
     let header: Header = from_json_with_limits(text, limits)?;
-    let kernel = header
-        .manifest
-        .map(|manifest| manifest.kernel)
-        .or(header.kernel);
-    if let Some(found) = kernel.filter(|kernel| crate::KernelVersion::of(*kernel).is_none()) {
+    let kernels = header
+        .requires
+        .map(|requires| requires.kernels)
+        .unwrap_or_default();
+    if let Some(found) = kernels
+        .into_iter()
+        .chain(header.kernel)
+        .find(|kernel| crate::KernelVersion::of(*kernel).is_none())
+    {
         return Err(DecodeError::Invalid {
             message: format!(
                 "unsupported kernel version {found}; newest supported is {}",
@@ -369,4 +377,140 @@ pub(crate) fn from_versioned_json_with_limits<T: DeserializeOwned>(
         });
     }
     from_json_with_limits(text, limits)
+}
+
+impl TypeMember {
+    pub fn function(&self) -> &FunctionExport {
+        match self {
+            Self::Static(f) | Self::Method(f) | Self::Property(f) => f,
+        }
+    }
+}
+impl Document {
+    pub fn function_names(&self) -> BTreeMap<FunctionId, FunctionName> {
+        self.functions
+            .iter()
+            .map(|(id, f)| (*id, f.name.clone()))
+            .collect()
+    }
+}
+
+impl Document {
+    /// Re-identify edited local definitions bottom-up, carrying references by identity.
+    /// Cross-document Imports are unchanged. Lexical recursion is not a content-hash cycle.
+    pub fn reidentify_functions(&mut self) -> Result<BTreeMap<FunctionId, FunctionId>, String> {
+        fn one(
+            id: FunctionId,
+            source: &BTreeMap<FunctionId, FunctionDefinition>,
+            visiting: &mut BTreeSet<FunctionId>,
+            done: &mut BTreeMap<FunctionId, FunctionId>,
+            out: &mut BTreeMap<FunctionId, FunctionDefinition>,
+        ) -> Result<(), String> {
+            if done.contains_key(&id) {
+                return Ok(());
+            }
+            if !visiting.insert(id) {
+                return Err(format!("cyclic local FunctionId references at {id}"));
+            }
+            let mut function = source
+                .get(&id)
+                .ok_or_else(|| format!("missing local function {id}"))?
+                .clone();
+            if let Some(body) = function.body_mut() {
+                let dependencies = crate::Node::Block(&body.block).functions_within();
+                for dependency in dependencies {
+                    one(dependency, source, visiting, done, out)?;
+                }
+                let _: Result<(), std::convert::Infallible> =
+                    crate::NodeMut::Block(&mut body.block).try_each_function_mut(
+                        crate::Site::new(crate::Unit::Library(id), []),
+                        &mut |_, reference| {
+                            if let Some(new) = done.get(reference) {
+                                *reference = *new;
+                            }
+                            Ok(())
+                        },
+                    );
+                body.functions = std::mem::take(&mut body.functions)
+                    .into_iter()
+                    .map(|(old, name)| (done.get(&old).copied().unwrap_or(old), name))
+                    .collect();
+            }
+            let new = function.identity();
+            out.insert(new, function);
+            done.insert(id, new);
+            visiting.remove(&id);
+            Ok(())
+        }
+        let mut done = BTreeMap::new();
+        let mut out = BTreeMap::new();
+        let mut visiting = BTreeSet::new();
+        for id in self.functions.keys() {
+            one(*id, &self.functions, &mut visiting, &mut done, &mut out)?;
+        }
+        if let Some(main) = &mut self.main {
+            let _: Result<(), std::convert::Infallible> = crate::NodeMut::Block(main)
+                .try_each_function_mut(crate::Site::new(crate::Unit::Main, []), &mut |_, id| {
+                    if let Some(new) = done.get(id) {
+                        *id = *new;
+                    }
+                    Ok(())
+                });
+        }
+        fn export(function: &mut FunctionExport, done: &BTreeMap<FunctionId, FunctionId>) {
+            if let Some(new) = done.get(&function.function) {
+                function.function = *new;
+            }
+            let targets = match &mut function.convention {
+                StartConvention::Direct => vec![],
+                StartConvention::TsDirect { await_fn } => vec![await_fn],
+                StartConvention::TsArgsList { await_fn, same_fn } => vec![await_fn, same_fn],
+                StartConvention::PyDirect { cleanup } => vec![cleanup],
+            };
+            for target in targets {
+                if let crate::FunctionTarget::Local(id) = target
+                    && let Some(new) = done.get(id)
+                {
+                    *id = *new;
+                }
+            }
+        }
+        for offered in self.exports.values_mut() {
+            match offered {
+                Export::Function(f) => export(f, &done),
+                Export::Type(ty) => {
+                    if let Some(new) = done.get(&ty.checker) {
+                        ty.checker = *new;
+                    }
+                    for member in ty.members.values_mut() {
+                        match member {
+                            TypeMember::Static(f)
+                            | TypeMember::Method(f)
+                            | TypeMember::Property(f) => export(f, &done),
+                        }
+                    }
+                }
+                Export::Error { .. } => {}
+            }
+        }
+        self.requires.natives = self
+            .requires
+            .natives
+            .iter()
+            .map(|id| done.get(id).copied().unwrap_or(*id))
+            .collect();
+        self.functions = out;
+        Ok(done)
+    }
+}
+impl Document {
+    /// The singleton kernel version; structural validation establishes this invariant.
+    pub fn kernel(&self) -> u32 {
+        self.requires
+            .kernels
+            .iter()
+            .next()
+            .copied()
+            .unwrap_or_else(|| unreachable!("validated Document has one kernel"))
+    }
 }

@@ -67,20 +67,26 @@ running and the dialect's repair. A bound the run passed is
 
 ## Tools are effects
 
-Each catalog tool is offered to a cell as a kernel effect under its
-operation: one canonical effect name (`inbox.send_item`) in every dialect and
-mode, which each dialect's source spells by its own rule (`inbox.sendItem` in
-TypeScript, `inbox.send_item` in Python), with a signature typed from the
-tool's schemas in the cell's manifest. The offered operations, deferred
-grants and unavailable notes included, are one map that the front end
-resolves dotted calls through; a binding shadows a package root lexically. A call path the source writes that no catalog tool answers goes
-to the host's deferred resolver once per cell; a granted tool is offered as
-an effect of that cell and recorded with it. A `perform` is admitted as the
-tool's own execution under the call identity the broker derives, and the
-cell is answered from the call's committed outcome alone. A tool's failure
-is the catchable error `tool_failed`; the session's `max_tool_calls`
-refusal is `tool_call_limit` and fails the cell whatever its program made
-of it.
+A document calls host operations through its Imports. Fulfilment records a
+fixed Operation Contract or a scoped deferred grant in an immutable Link;
+execution dispatches by the defining Link and Import slot. Routes are recorded
+per Operation Use, so equal names may keep distinct contracts.
+
+A declared Deferred Package resolves at the first executed use, after lowering.
+The execution owns a resolution table keyed by its stable execution identity,
+Link and Import slot. The owner-fenced first-writer commit records a validated
+Resolved, Refused or Unavailable outcome and any target claim debt before a
+target runs or a negative answer is delivered. Concurrent callers use that
+winner under distinct call identities. A valid resolution survives bad call
+arguments. Infrastructure faults leave the use unresolved and retry within the
+recorded resolver policy. Cold resume and adoption retain committed outcomes;
+a new execution resolves fresh. Dispatching operations still resolve once per
+invocation. This supersedes the eager gather/decide/offer rule of FIG-6074.
+
+A waited operation is admitted under the broker's call identity and answered
+from its committed outcome. Read operations are answered immediately without a
+durable invocation. A tool failure is catchable `tool_failed`; a session's
+`max_tool_calls` refusal is `tool_call_limit` and fails the cell.
 
 ## Durability
 

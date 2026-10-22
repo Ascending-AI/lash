@@ -179,7 +179,10 @@ pub(super) async fn run_once_process_list_stress(
                 let phase_before_memory = process_memory_sample();
                 for hash_index in 0..ENV_HASHES_PER_TURN {
                     const STRESS: lash_core::ProcessConfigKey<serde_json::Value> =
-                        lash_core::ProcessConfigKey::new("stress", lash_core::FormatVersion::ONE);
+                        lash_core::ProcessConfigKey::new(
+                            "stress",
+                            lash_vocabulary::providers::FormatVersion::ONE,
+                        );
                     let spec = lash_core::ProcessEnv::builder(lash_core::MaxToolCalls::new(1024))
                         .component(
                             STRESS,
@@ -543,7 +546,7 @@ pub(super) fn direct_llm_client_request(turn_index: usize) -> lash::direct::Dire
         ),
         lash::direct::DirectJsonSchema {
             name: "runtime_perf_direct_completion".to_string(),
-            schema: lash_protocol_types::SchemaContract::admit(serde_json::json!({
+            schema: lash_vocabulary::schema_contract::SchemaContract::admit(serde_json::json!({
                 "type": "object",
                 "additionalProperties": false,
                 "required": ["kind", "value", "error"],

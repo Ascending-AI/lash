@@ -3,7 +3,7 @@
   "cases": [
     {
       "name": "a delivered wait resumes its own task",
-      "document": "kernel 1\nnumbers by_spelling\neffect echo(x: Int) -> Int contract \"1\"\nmain { let x = perform echo(1) as Int finish x }\n",
+      "document": "kernel 1\nnumbers by_spelling\nimport 0 operation host.echo(x: Int) -> Int\nmain {\n  let x = perform 0(1) as Int\n  finish x\n}\n",
       "expected": {
         "end": {
           "finished": {
@@ -13,7 +13,7 @@
         "trace": [
           {
             "effect": {
-              "effect": "echo",
+              "effect": "host.echo",
               "args": [
                 {
                   "int": "1"
@@ -41,7 +41,7 @@
     },
     {
       "name": "an outcome for a withdrawn handed-out wait is dropped",
-      "document": "kernel 1\nnumbers by_spelling\neffect echo(x: Int) -> Int contract \"1\"\nfn slow() { try { do sleep 0 } catch e { return e.kind } }\nmain { let h = spawn call slow() let first = perform echo(1) as Int do cancel h let cancelled = join h let last = perform echo(2) as Int finish cancelled }\n",
+      "document": "kernel 1\nnumbers by_spelling\nimport 0 operation host.echo(x: Int) -> Int\nimport 1 operation typescript.sleep(milliseconds: Int) -> Null\ndefinition \"function slow() -> Any\\nkernel 1\\nmetering statements\\nimport 0 operation host.echo(x: Int) -> Int\\nimport 1 operation typescript.sleep(milliseconds: Int) -> Null\\nbody {\\n  try {\\n    do perform 1(0) as Null\\n  } catch e {\\n    return e.kind\\n  }\\n}\\n\"\nmain {\n  let h = spawn invoke slow()\n  let first = perform 0(1) as Int\n  do cancel(h)\n  let cancelled = join h\n  let last = perform 0(2) as Int\n  finish cancelled\n}\n",
       "environment": {
         "deliveries": [
           [
@@ -57,7 +57,9 @@
           [
             {
               "request": 0,
-              "outcome": "elapsed",
+              "outcome": {
+                "completed": "null"
+              },
               "dropped": true
             },
             {
@@ -80,13 +82,19 @@
         "parks": 2,
         "trace": [
           {
-            "sleep": {
-              "nanoseconds": 0
+            "effect": {
+              "effect": "typescript.sleep",
+              "args": [
+                {
+                  "int": "0"
+                }
+              ],
+              "result": "null"
             }
           },
           {
             "effect": {
-              "effect": "echo",
+              "effect": "host.echo",
               "args": [
                 {
                   "int": "1"
@@ -97,7 +105,7 @@
           },
           {
             "effect": {
-              "effect": "echo",
+              "effect": "host.echo",
               "args": [
                 {
                   "int": "2"

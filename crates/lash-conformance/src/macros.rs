@@ -936,6 +936,7 @@ macro_rules! artifact_referrer_tests {
         $crate::artifact_referrer_tests!(@catalogue $fixture; [
             (publication_racing_frame_end_is_fenced, "artifact-referrer-publication-race"),
             (host_pins_reclaim_and_fence, "artifact-referrer-host-pins"),
+            (process_env_carry_retains_exact_origin, "process-env-origin-retention"),
             (attachment_only_referrers_cannot_acquire_artifacts, "artifact-referrer-kind-refusal"),
             (captured_environments_are_shared_until_the_last_referrer_ends, "captured-environment-referrers"),
             (every_referrer_kind_has_one_canonical_id, "artifact-referrer-canonical-id"),

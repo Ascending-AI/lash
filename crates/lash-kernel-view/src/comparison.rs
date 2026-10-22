@@ -1,13 +1,15 @@
 //! A condition read as the comparison its package declares.
 //! The supplied package view owns each declaration; no dialect name appears here.
 
+use crate::ViewContext;
 use lash_helper_labels::Comparison;
 use lash_kernel_check::{
     ActNode, ActionNode, AtomNode, BindingKind, CalleeNode, ExprNode, Graph, MemberNode, NodeId,
     NodeKind, Reference, StmtNode,
 };
-use lash_kernel_doc::{FunctionDeclarations, FunctionId, Literal, Site};
-use lash_kernel_package::PackageView;
+use lash_kernel_doc::Literal;
+use lash_vocabulary::CallableId;
+use lash_vocabulary::sites::Site;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -95,23 +97,20 @@ pub enum ValueSource {
 /// What the condition of a control reads as, when it is a comparison.
 pub(crate) struct Comparisons<'a> {
     graph: &'a Graph,
-    functions: &'a FunctionDeclarations,
     bindings: &'a [BindingView],
-    packages: &'a PackageView<'a>,
+    context: &'a ViewContext,
 }
 
 impl<'a> Comparisons<'a> {
     pub(crate) fn new(
         graph: &'a Graph,
-        functions: &'a FunctionDeclarations,
         bindings: &'a [BindingView],
-        packages: &'a PackageView<'a>,
+        context: &'a ViewContext,
     ) -> Self {
         Self {
             graph,
-            functions,
             bindings,
-            packages,
+            context,
         }
     }
 
@@ -148,8 +147,8 @@ impl<'a> Comparisons<'a> {
 
     fn comparison(&self, id: NodeId) -> Option<ComparisonView> {
         let (function, args) = self.call(id)?;
-        let definition = self.functions.get(&function)?;
-        let comparison = self.packages.display_for_function(&function)?.comparison?;
+        let definition = self.context.function(&function)?;
+        let comparison = self.context.display(&function)?.comparison?;
         if args.len() != comparison.arity() || definition.signature.params.len() != args.len() {
             return None;
         }
@@ -188,22 +187,36 @@ impl<'a> Comparisons<'a> {
     /// The library function a node calls and its arguments: a native call,
     /// or a call of a library function's kernel code, nested in an
     /// expression or a statement's own action.
-    fn call(&self, id: NodeId) -> Option<(FunctionId, Vec<Operand<'a>>)> {
+    fn call(&self, id: NodeId) -> Option<(CallableId, Vec<Operand<'a>>)> {
         let graph: &'a Graph = self.graph;
-        match &graph.node(id).kind {
-            NodeKind::Expr(
-                ExprNode::Call { function, args }
-                | ExprNode::Act {
-                    kind: ActNode::Call(CalleeNode::Library(function)),
-                    args,
-                },
-            ) => Some((*function, args.iter().copied().map(Operand::Node).collect())),
-            NodeKind::Action(ActionNode::Call {
-                callee: CalleeNode::Library(function),
+        let (callee, args) = match &graph.node(id).kind {
+            NodeKind::Expr(ExprNode::Call { function, args }) => {
+                return Some((
+                    CallableId {
+                        link: self.context.reference.link,
+                        function: *function,
+                    },
+                    args.iter().copied().map(Operand::Node).collect(),
+                ));
+            }
+            NodeKind::Expr(ExprNode::Act {
+                kind: ActNode::Call(callee),
                 args,
-            }) => Some((*function, args.iter().map(Operand::Atom).collect())),
-            _ => None,
-        }
+            }) => (callee, args.iter().copied().map(Operand::Node).collect()),
+            NodeKind::Action(ActionNode::Call { callee, args }) => {
+                (callee, args.iter().map(Operand::Atom).collect())
+            }
+            _ => return None,
+        };
+        let function = match callee {
+            CalleeNode::Local(function) => CallableId {
+                link: self.context.reference.link,
+                function: *function,
+            },
+            CalleeNode::Import(slot) => self.context.resolve(self.context.reference.link, *slot)?,
+            CalleeNode::Value(_) => return None,
+        };
+        Some((function, args))
     }
 
     fn value(&self, operand: Operand<'_>) -> Option<ValueRef> {

@@ -2,8 +2,6 @@ use std::sync::Arc;
 
 #[derive(Clone)]
 pub struct ProtocolBuildInput {
-    /// The explicit package view this assembly projects its operations through.
-    pub packages: Arc<dyn lash_kernel_dialect::ExportView + Send + Sync>,
     pub tool_catalog: Arc<crate::ToolCatalog>,
     pub plugin_extensions: crate::PluginExtensions,
     /// The fleet's writer-version table, resolved from the `F` the session's

@@ -656,7 +656,7 @@ mod tests {
         req.output_spec = Some(LlmOutputSpec::JsonSchema(LlmJsonSchema {
             name: "rank_result".to_string(),
             strict: true,
-            schema: lash_protocol_types::SchemaContract::admit(json!({
+            schema: lash_vocabulary::schema_contract::SchemaContract::admit(json!({
                 "type": "object",
                 "required": ["ranked"],
                 "properties": {
@@ -690,7 +690,7 @@ mod tests {
         req.tools = Arc::new(vec![LlmToolSpec {
             name: "rank".to_string(),
             description: "Rank".to_string(),
-            input_schema: lash_protocol_types::SchemaContract::admit(json!({
+            input_schema: lash_vocabulary::schema_contract::SchemaContract::admit(json!({
                 "type": "object",
                 "properties": {
                     "ids": {
@@ -702,7 +702,7 @@ mod tests {
                 }
             }))
             .expect("valid declared schema"),
-            output_schema: lash_protocol_types::SchemaContract::admit(json!({}))
+            output_schema: lash_vocabulary::schema_contract::SchemaContract::admit(json!({}))
                 .expect("valid declared schema"),
         }]);
 

@@ -104,7 +104,7 @@ fn plugin_types_are_nameable() -> PluginHost {
             lash::plugins::PluginDeclaration::initial("facade"),
             spec,
         ))],
-        lash_core::ExecutionBudgets::recommended(),
+        lash::ExecutionBudgets::recommended(),
         lash::runtime::TraceRuntime::new(Arc::new(lash::runtime::SystemClock)),
     )
 }

@@ -3,7 +3,7 @@
   "cases": [
     {
       "name": "float text uses the canonical shortest round trip and threshold layout",
-      "document": "kernel 1\nnumbers by_spelling\nuse float.to_text = @957826df86783362d38a492b8f352cbb455383fc80c31ad8a47fa6fe2bec525c\nmain {  finish [float.to_text(nan), float.to_text(inf), float.to_text(-inf), float.to_text(0.0), float.to_text(-0.0), float.to_text(1.0), float.to_text(0.1), float.to_text(0.0001), float.to_text(9.999e-5), float.to_text(1000000000000000.0), float.to_text(1e16), float.to_text(1.5e300), float.to_text(5e-324)] }\n",
+      "document": "kernel 1\nnumbers by_spelling\nnative @f6644f1ee14ded1f172a3be500ee8f24df35cd7eede2391f93ee643d3d0c2fa3\ndefinition \"function float.to_text(arg0: Float) -> Text\\nkernel 1\\nerrors \\\"arity\\\", \\\"type_error\\\"\\ncharge sum(1, sum(deep(arg0)), deep(result))\\nnative\\n\"\nmain {\n  finish [float.to_text(nan), float.to_text(inf), float.to_text(-inf), float.to_text(0.0), float.to_text(-0.0), float.to_text(1.0), float.to_text(0.1), float.to_text(0.0001), float.to_text(9.999e-5), float.to_text(1000000000000000.0), float.to_text(1e16), float.to_text(1.5e300), float.to_text(5e-324)]\n}\n",
       "expected": {
         "prints": [],
         "trace": [],

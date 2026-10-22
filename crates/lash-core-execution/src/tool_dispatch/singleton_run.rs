@@ -3,22 +3,24 @@
 //! (V). [`super::call_run`] runs them in memory, in that order, inside the
 //! admitted execution whose records make the call durable.
 
+use lash_vocabulary::{DeclarationRefusal, ToolDeclaration};
 use std::sync::Arc;
 
-use lash_protocol_types::{ToolCallId, ToolIntentKind};
+use lash_protocol_types::ToolCallId;
+use lash_vocabulary::ToolIntentKind;
 use serde::{Deserialize, Serialize};
 
 use crate::EffectOpener;
-use crate::ProcessId;
 use crate::RuntimeEffectControllerError;
 use crate::StartKey;
 use crate::runtime::effect::{AttemptStream, AttemptStreamRecorder};
 use crate::runtime::process::{DeclaredStartObligation, DeclaredStartObligationRefusal};
 use crate::tool_run::{
     AdmissionRefusal, AdmittedBinding, AfterCheckVerdict, AttemptOrdinal, AttributedVerdict,
-    CallDecision, DeclarationRefusal, ExternalCancelPolicy, HookCause, ToolDeclaration,
+    CallDecision, ExternalCancelPolicy, HookCause,
 };
 use lash_execution_contracts::process::ProcessStartRegistration;
+use lash_vocabulary::identity::ProcessId;
 
 /// One tool call to run in its owning Run.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -56,7 +58,7 @@ pub struct SingletonPreparedRequest {
 /// isolated call.
 #[derive(Clone, Debug)]
 pub struct IsolatedBinding {
-    pub implementation: crate::store::plugin_writers::PluginCallbackIdentity,
+    pub implementation: lash_vocabulary::providers::PluginCallbackIdentity,
     pub engine_kind: String,
     pub obligation: Arc<DeclaredStartObligation>,
 }
@@ -104,7 +106,7 @@ pub enum SingletonCapture {
     },
     Interrupted,
     TimedOut {
-        cause: crate::tool_run::LimitCause,
+        cause: lash_vocabulary::LimitCause,
         evidence: Option<String>,
     },
     Cancelled {
@@ -224,7 +226,7 @@ pub enum SingletonBodyOutcome {
     },
     Interrupted,
     TimedOut {
-        cause: crate::tool_run::LimitCause,
+        cause: lash_vocabulary::LimitCause,
         evidence: Option<String>,
     },
     Cancelled {
@@ -303,8 +305,8 @@ pub trait SingletonToolHandlers: Send + Sync {
     }
 
     /// The execution policy the call is admitted under.
-    fn execution_policy(&self, _call: &SingletonToolCall) -> crate::tool_run::ExecutionPolicy {
-        crate::tool_run::ExecutionPolicy::Once
+    fn execution_policy(&self, _call: &SingletonToolCall) -> lash_vocabulary::ExecutionPolicy {
+        lash_vocabulary::ExecutionPolicy::Once
     }
 
     /// The capture of a before-check's cached success.

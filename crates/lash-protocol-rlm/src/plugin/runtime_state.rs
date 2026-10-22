@@ -53,6 +53,7 @@ impl RlmRuntimeState {
         history: Option<&lash_core::SessionReadView>,
         images: bool,
         pages: Option<&lash_core::plugin::SessionPages>,
+        packages: &lash_core_store::tool_surface::RecordedPackages,
     ) -> Result<crate::prompt_sections::RlmPromptFacts, SessionError> {
         let renderer = self.dialect.renderer();
         let recorded = lash_core::RecordedRender::require_available(recorded, renderer.0.id())
@@ -83,12 +84,8 @@ impl RlmRuntimeState {
             None => crate::projection::HistoryIndex::default(),
         };
         let provenance = index.provenance.clone();
-        // The gate is asked once per round: the prompt shows the packages
-        // of its answer, and the round's cell is written under it (P3).
-        let packages = self.dialect.round_packages().await?;
-        let package_surface = self.dialect.package_surface(&packages);
+        let package_surface = self.dialect.package_surface(packages).await?;
         let mut execution = self.execution.lock().await;
-        execution.shows_packages(packages);
         let (bound_variables, globals, inferred_names) = execution
             .prepare_bound_variables_prompt(&exclude, params.preview, provenance, pages)
             .await?
@@ -211,6 +208,10 @@ impl RlmRuntimeState {
         // the cell to finish instead of being told the state is busy, and a
         // cell cancelled mid-flight leaves the state where it was.
         let mut guard = self.execution.lock().await;
+        // Restore replaces the dialect session and model admission may replay
+        // without rendering its prompt. The recorded round is the authority
+        // for imports on every execution, including a cold restored cell.
+        guard.shows_packages(ctx.recorded_packages().clone());
         guard
             .execute(ctx, request, session_projected_bindings)
             .await
@@ -609,7 +610,7 @@ mod tests {
                         .build(),
                     state.clone(),
                 );
-                let session_id = lash_core::SessionId::from("mutation-session");
+                let session_id = lash_vocabulary::identity::SessionId::from("mutation-session");
                 let ctx = || {
                     lash_core::plugin::ProtocolSessionContext::new(
                         &session_id,
@@ -696,24 +697,27 @@ mod tests {
         let key: &'static str = Box::leak(
             format!("exec-code:{}", CELLS.fetch_add(1, Ordering::SeqCst)).into_boxed_str(),
         );
-        Box::pin(state.execute_code(
-            crate::testing::cell_context(
-                host,
-                "test-session",
-                "test-turn",
-                key,
-                Arc::new(crate::testing::NoTools),
+        Box::pin(
+            state.execute_code(
+                crate::testing::recorded_cell_context(
+                    host,
+                    "test-session",
+                    "test-turn",
+                    key,
+                    Arc::new(crate::testing::NoTools),
+                )
+                .await,
+                request,
             ),
-            request,
-        ))
+        )
         .await
     }
 
     /// The scope [`admitted_context`] claims.
     fn admitted_scope() -> lash_core::AdmittedScope {
         lash_core::AdmittedScope::turn(
-            lash_core::SessionId::from("runtime-state-session"),
-            lash_core::TurnId::from("runtime-state-turn"),
+            lash_vocabulary::identity::SessionId::from("runtime-state-session"),
+            lash_vocabulary::identity::TurnId::from("runtime-state-turn"),
         )
     }
 
@@ -746,41 +750,37 @@ mod tests {
     }
 
     #[async_trait::async_trait]
-    impl lash_core::ToolProvider for ParkingResolver {
-        fn tool_manifests(
+    impl lash_core::plugin::packages::DeferredPackageProvider for ParkingResolver {
+        fn validate_grant(
             &self,
-            _config: &lash_core::OwnerConfigView,
-        ) -> std::result::Result<
-            Vec<lash_core::ToolManifest>,
-            lash_execution_contracts::plugin_error::PluginError,
-        > {
-            Ok(Vec::new())
+            grant: &lash_vocabulary::DeferredGrant,
+            registry: lash_vocabulary::claims::RegistryKind,
+        ) -> Result<(), lash_execution_contracts::process::linking::AdmissionRefusal> {
+            if registry == lash_vocabulary::claims::RegistryKind::Session
+                && grant.provider.owner == "parking"
+                && grant.provider.key == "web"
+                && grant.path
+                    == lash_vocabulary::PackagePath::new(
+                        lash_vocabulary::Segment::new("web").unwrap(),
+                    )
+            {
+                Ok(())
+            } else {
+                Err(lash_execution_contracts::process::linking::AdmissionRefusal::ProviderNotHostable {
+                    provider: grant.provider.clone(), registry,
+                })
+            }
         }
-
-        fn resolve_contract(
-            &self,
-            _name: &str,
-            _config: &lash_core::OwnerConfigView,
-        ) -> Option<Arc<lash_core::ToolContract>> {
-            None
-        }
-
-        async fn execute(&self, _call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
-            lash_core::ToolOutcome::err_fmt(format_args!("the parking provider runs no tool"))
-                .into()
-        }
-    }
-
-    #[async_trait::async_trait]
-    impl lash_core::DeferredToolProvider for ParkingResolver {
         async fn resolve(
             &self,
             _cx: &lash_core::DeferredResolveContext<'_>,
-            paths: &[&str],
-        ) -> std::collections::BTreeMap<String, lash_core::DeferredOutcome> {
+            _grant: &lash_vocabulary::DeferredGrant,
+            _requested: &lash_vocabulary::QualifiedName,
+        ) -> Result<
+            lash_core::plugin::packages::DeferredAnswer,
+            lash_core::plugin::packages::ResolverFault,
+        > {
             self.entered.fetch_add(1, Ordering::SeqCst);
-            // A self-waking park: every poll re-reads the flag, so a release
-            // is never missed whichever waker happens to execute the future.
             std::future::poll_fn(|cx| {
                 if self.released.load(Ordering::SeqCst) {
                     Poll::Ready(())
@@ -790,15 +790,52 @@ mod tests {
                 }
             })
             .await;
-            paths
-                .iter()
-                .map(|path| {
-                    (
-                        (*path).to_string(),
-                        lash_core::DeferredOutcome::Unavailable { note: None },
-                    )
-                })
-                .collect()
+            Ok(lash_core::plugin::packages::DeferredAnswer::Unavailable { note: None })
+        }
+    }
+    #[async_trait::async_trait]
+    impl lash_core::plugin::packages::PackageProvider for ParkingResolver {
+        fn roots(&self) -> BTreeSet<lash_vocabulary::Segment> {
+            [lash_vocabulary::Segment::new("web").unwrap()].into()
+        }
+        fn advertise(
+            &self,
+            _config: &lash_core::OwnerConfigView,
+            context: &lash_vocabulary::PublicationContext,
+        ) -> Result<
+            Vec<lash_core::plugin::packages::PackageContribution>,
+            lash_execution_contracts::PluginError,
+        > {
+            use lash_vocabulary::*;
+            let advertisement = PackageAdvertisement::Deferred(Box::new(DeferredPackage {
+                path: PackagePath::new(Segment::new("web").unwrap()),
+                visibility: Visibility::Public,
+                provider: ProviderName {
+                    owner: "parking".into(),
+                    key: "web".into(),
+                },
+                config: ProviderConfig {
+                    component: None,
+                    format: providers::FormatVersion::ONE,
+                    value: serde_json::Value::Null,
+                    payload: None,
+                },
+                resolution_policy: Default::default(),
+            }));
+            let publication =
+                lash_core::plugin::packages::operation_publication(context, &advertisement)?;
+            Ok(vec![lash_core::plugin::packages::PackageContribution {
+                publication,
+                advertisement,
+                routes: vec![],
+            }])
+        }
+        async fn hold(
+            &self,
+            _claim: &lash_core::ReferrerClaim,
+            _advertisements: &[&lash_vocabulary::PackageAdvertisement],
+        ) -> Result<(), lash_execution_contracts::process::linking::EnginePortError> {
+            Ok(())
         }
     }
 
@@ -816,34 +853,38 @@ mod tests {
 
     /// A cell context under `cell_id`'s invocation, under the claimed
     /// context `handler` lends for [`admitted_scope`].
-    fn admitted_context(
+    async fn admitted_context(
         handler: &crate::testing::DurableHost,
         cell_id: &str,
         resolver: &Arc<ParkingResolver>,
     ) -> lash_core::RuntimeExecutionContext<'static> {
         let replay_key = format!("exec-code:{cell_id}");
         let (provider, catalog) = crate::testing::with_finish(Arc::new(crate::testing::NoTools));
-        lash_core::testing::code_execution_context_with_deferred_provider(
-            handler.ports(),
-            provider,
-            catalog,
-            lash_core::testing::exec_code_invocation(
-                "runtime-state-session",
-                "runtime-state-turn",
-                0,
-                0,
-                replay_key.clone(),
-                replay_key,
-            ),
-            (
-                lash_core::plugin::ToolProviderHandle::new(
-                    lash_core::RegistryKind::Session,
-                    "tests",
-                    lash_core::tool_provider_key!("parking"),
+        let mut factories = lash_core::testing::test_code_protocol_factories();
+        factories.push(Arc::new(lash_core::plugin::StaticPluginFactory::new(
+            lash_core::plugin::PluginDeclaration::initial("parking"),
+            lash_core::plugin::PluginSpec::new()
+                .with_package_provider(lash_core::tool_provider_key!("web"), resolver.clone())
+                .with_deferred_package_provider(
+                    lash_core::tool_provider_key!("web"),
+                    resolver.clone(),
                 ),
-                Arc::clone(resolver) as Arc<dyn lash_core::DeferredToolProvider>,
-            ),
+        )));
+        crate::testing::recorded_context(
+            lash_core::testing::TestExecutionContextBuilder::new(handler.ports())
+                .provider(provider)
+                .tool_catalog(catalog)
+                .plugin_factories(factories)
+                .runtime_parent_invocation(lash_core::testing::exec_code_invocation(
+                    "runtime-state-session",
+                    "runtime-state-turn",
+                    0,
+                    0,
+                    replay_key.clone(),
+                    replay_key,
+                )),
         )
+        .await
     }
 
     /// Shift `future` until it is parked inside the resolver, i.e. suspended in
@@ -1064,7 +1105,7 @@ mod tests {
                 let cancelled_handler = crate::testing::DurableHost::open(admitted_scope()).await;
                 {
                     let mut cancelled = Box::pin(state.execute_code(
-                        admitted_context(&cancelled_handler, "cancelled", &resolver),
+                        admitted_context(&cancelled_handler, "cancelled", &resolver).await,
                         cell(PARKING_CELL),
                     ));
                     poll_until_parked(&mut cancelled, &resolver).await;
@@ -1075,7 +1116,7 @@ mod tests {
                 let handler = crate::testing::DurableHost::open(admitted_scope()).await;
                 let next = state
                     .execute_code(
-                        admitted_context(&handler, "survivor", &resolver),
+                        admitted_context(&handler, "survivor", &resolver).await,
                         cell("let survivor = 1;\nawait control.finish(survivor);"),
                     )
                     .await
@@ -1098,7 +1139,7 @@ mod tests {
                 // One cell is running: parked mid-flight, holding the state.
                 let running_handler = crate::testing::DurableHost::open(admitted_scope()).await;
                 let mut running = Box::pin(state.execute_code(
-                    admitted_context(&running_handler, "running", &resolver),
+                    admitted_context(&running_handler, "running", &resolver).await,
                     cell(PARKING_CELL),
                 ));
                 poll_until_parked(&mut running, &resolver).await;
@@ -1106,10 +1147,10 @@ mod tests {
                 // A second cell arrives while the first is still running. It
                 // makes no progress whatsoever: it is queued behind the running
                 // cell rather than answered — with a result or with an error.
-                let waiting_handler = crate::testing::DurableHost::open(admitted_scope()).await;
+                let waiting_handler = &running_handler;
                 {
                     let mut waiting = Box::pin(state.execute_code(
-                        admitted_context(&waiting_handler, "waiting", &resolver),
+                        admitted_context(waiting_handler, "waiting", &resolver).await,
                         cell("let second_cell = 2;"),
                     ));
                     for _ in 0..16 {
@@ -1138,10 +1179,10 @@ mod tests {
                     .expect("settle the first returned cell");
 
                 // The waiting cell, redriven, now runs — on that same state.
-                let handler = crate::testing::DurableHost::open(admitted_scope()).await;
+                let handler = &running_handler;
                 let second = state
                     .execute_code(
-                        admitted_context(&handler, "waiting", &resolver),
+                        admitted_context(handler, "waiting", &resolver).await,
                         cell("let second_cell = 2;"),
                     )
                     .await
@@ -1152,10 +1193,10 @@ mod tests {
                     .await
                     .expect("settle the second returned cell");
 
-                let handler = crate::testing::DurableHost::open(admitted_scope()).await;
+                let handler = &running_handler;
                 let total = state
                     .execute_code(
-                        admitted_context(&handler, "total", &resolver),
+                        admitted_context(handler, "total", &resolver).await,
                         cell("await control.finish(second_cell);"),
                     )
                     .await
@@ -1210,7 +1251,7 @@ mod tests {
                     crate::testing::DurableHost::open(crate::testing::default_cell_scope()).await;
                 let render = crate::testing::recorded_test_render();
                 let prompt = state
-                    .prompt_facts(Some(&render), None, true, None)
+                    .prompt_facts(Some(&render), None, true, None, &Default::default())
                     .await
                     .expect("prompt facts")
                     .bound_variables;
@@ -1227,7 +1268,7 @@ mod tests {
                 .expect("execute code");
 
                 let prompt = state
-                    .prompt_facts(Some(&render), None, true, None)
+                    .prompt_facts(Some(&render), None, true, None, &Default::default())
                     .await
                     .expect("prompt facts")
                     .bound_variables;
@@ -1256,7 +1297,7 @@ mod tests {
                 .expect("execute code");
 
                 let prompt = state
-                    .prompt_facts(Some(&render), None, true, None)
+                    .prompt_facts(Some(&render), None, true, None, &Default::default())
                     .await
                     .expect("prompt facts")
                     .bound_variables;
@@ -1293,7 +1334,7 @@ mod tests {
                     .await
                     .expect("execute cell before late cancellation");
                 let rendered = state
-                    .prompt_facts(Some(&render), None, true, None)
+                    .prompt_facts(Some(&render), None, true, None, &Default::default())
                     .await
                     .expect("prompt facts")
                     .bound_variables;
@@ -1304,7 +1345,7 @@ mod tests {
                     .await
                     .expect("cancel second cell");
                 let rendered = state
-                    .prompt_facts(Some(&render), None, true, None)
+                    .prompt_facts(Some(&render), None, true, None, &Default::default())
                     .await
                     .expect("prompt facts")
                     .bound_variables;

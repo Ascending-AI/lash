@@ -166,12 +166,75 @@ fn decode_stored_edge(kind: &str, id: &str) -> Result<ArtifactReferrer, StoreErr
     })
 }
 
+/// Read and retain environment provenance inside the same writer transaction.
+fn retain_process_env_tx(
+    tx: &rusqlite::Connection,
+    env_ref: &str,
+    referrer: &ArtifactReferrer,
+) -> rusqlite::Result<()> {
+    fn read(
+        tx: &rusqlite::Connection,
+        namespace: &str,
+        reference: &str,
+    ) -> rusqlite::Result<Vec<u8>> {
+        let stored: Option<(String, Option<i64>)> = tx
+            .prepare_cached(artifact_sql().refs.select_body_ref.sql())?
+            .query_row(params![namespace, reference], |row| {
+                Ok((crate::codec::hash_column(row, 0)?, row.get(1)?))
+            })
+            .optional()?;
+        let Some((blob, encoding)) = stored else {
+            return Err(artifact_failure(ArtifactStoreError::ArtifactMissing {
+                artifact_ref: reference.into(),
+            }));
+        };
+        if encoding == Some(1) {
+            SqliteStore::module_node_conn(tx, &blob).map_err(sqlite_conversion_error)
+        } else {
+            SqliteStore::get_blob_conn(tx, &BlobRef(blob))
+                .map_err(sqlite_conversion_error)?
+                .ok_or_else(|| {
+                    artifact_failure(ArtifactStoreError::ArtifactMissing {
+                        artifact_ref: reference.into(),
+                    })
+                })
+        }
+    }
+    let bytes = read(tx, PROCESS_ENV_NAMESPACE, env_ref)?;
+    let mut pending = lash_durable::packages::process_env_roots(&bytes)
+        .map_err(|error| artifact_failure(error.into()))?;
+    let mut found = std::collections::BTreeSet::new();
+    while let Some(reference) = pending.pop() {
+        if !found.insert(reference.clone()) {
+            continue;
+        }
+        let bytes = read(tx, MODULE_ARTIFACT_NAMESPACE, &reference)?;
+        pending.extend(
+            lash_durable::packages::content_dependencies(&reference, &bytes)
+                .map_err(|error| artifact_failure(error.into()))?,
+        );
+    }
+    for reference in found {
+        crate::conn::cached_execute(
+            tx,
+            artifact_sql().edges.insert_edge.sql(),
+            params![
+                MODULE_ARTIFACT_NAMESPACE,
+                reference,
+                referrer.kind().as_str(),
+                referrer.canonical_id()
+            ],
+        )?;
+    }
+    Ok(())
+}
+
 /// Validate and retain a start's environment in the transaction admitting
 /// its process. The writer orders this acquisition against source cleanup.
 pub(crate) fn acquire_process_env_tx(
     tx: &rusqlite::Connection,
     env: &lash_core_store::process_identity::ProcessEnvRef,
-    process: &lash_protocol_types::ProcessId,
+    process: &lash_vocabulary::identity::ProcessId,
 ) -> Result<(), lash_execution_contracts::plugin_error::PluginError> {
     let referrer = ArtifactReferrer::ProcessRecord(process.clone());
     if artifact_fenced_tx(tx, &referrer).map_err(artifact_sqlite_error)? {
@@ -192,6 +255,7 @@ pub(crate) fn acquire_process_env_tx(
         }
         .into());
     }
+    retain_process_env_tx(tx, env.as_str(), &referrer).map_err(artifact_sqlite_error)?;
     crate::conn::cached_execute(
         tx,
         artifact_sql().edges.insert_edge.sql(),
@@ -297,6 +361,9 @@ impl SqliteStore {
                         artifact_ref,
                     }));
                 }
+                if namespace == PROCESS_ENV_NAMESPACE {
+                    retain_process_env_tx(tx, &artifact_ref, referrer)?;
+                }
                 crate::conn::cached_execute(
                     tx,
                     artifact_sql().edges.insert_edge.sql(),
@@ -338,6 +405,9 @@ impl SqliteStore {
             if let Some(cleanup) = claim.guard_cleanup() {
                 crate::obligation_ledger::arm_cleanup_tx(tx, &cleanup, now_ms)
                     .map_err(sqlite_conversion_error)?;
+            }
+            if namespace == PROCESS_ENV_NAMESPACE {
+                retain_process_env_tx(tx, &artifact_ref, referrer)?;
             }
             crate::conn::cached_execute(tx, artifact_sql().edges.insert_edge.sql(),
                 params![namespace, artifact_ref, referrer.kind().as_str(), referrer.canonical_id()])?;
@@ -432,6 +502,9 @@ impl SqliteStore {
                     artifact_ref: artifact_ref.clone(),
                     to: carry.to.clone(),
                 }));
+            }
+            if namespace == PROCESS_ENV_NAMESPACE {
+                retain_process_env_tx(tx, artifact_ref, &carry.to)?;
             }
             crate::conn::cached_execute(
                 tx,
@@ -693,6 +766,11 @@ impl lash_execution_contracts::module_artifacts::ModuleArtifactStore for SqliteS
         claim: &ReferrerClaim,
         module_ref: &str,
     ) -> Result<(), ArtifactStoreError> {
+        if lash_durable::packages::is_package_reference(module_ref) {
+            return lash_durable::packages::acquire_content(self, claim, module_ref)
+                .await
+                .map_err(Into::into);
+        }
         if !crate::namespace::is_valid_opaque_key(module_ref) {
             return Err(ArtifactStoreError::Encode(
                 "invalid module reference".into(),
@@ -724,8 +802,8 @@ impl lash_execution_contracts::module_artifacts::ModuleArtifactStore for SqliteS
                 }
                 Ok(held::HeldArtifact {
                     artifact_ref: artifact.module_ref().to_owned(),
-                    bytes: artifact.body().bytes().to_vec(),
-                    node: artifact.body().node_kind(),
+                    bytes: artifact.body().map(|body| body.bytes().to_vec()),
+                    node: artifact.body().and_then(|body| body.node_kind()),
                     verified: matches!(
                         artifact,
                         lash_execution_contracts::module_artifacts::ModuleArtifactHold::Publish { .. }
@@ -741,7 +819,10 @@ impl lash_execution_contracts::module_artifacts::ModuleArtifactStore for SqliteS
         &self,
         cleanup: &ResolvedArtifactCleanup,
     ) -> Result<(), ArtifactStoreError> {
-        self.end_artifact_referrer(MODULE_ARTIFACT_NAMESPACE, cleanup.clone())
+        let cleanup = lash_durable::packages::expand_package_cleanup(self, cleanup)
+            .await
+            .map_err(ArtifactStoreError::from)?;
+        self.end_artifact_referrer(MODULE_ARTIFACT_NAMESPACE, cleanup)
             .await
     }
 
@@ -983,6 +1064,159 @@ impl lash_execution_contracts::process::ProcessDefinitionStore for SqliteStore {
         )
         .await
         .map_err(Into::into)
+    }
+}
+
+#[async_trait::async_trait]
+impl lash_durable::packages::PackageStorage for SqliteStore {
+    async fn package_referrer_ended(
+        &self,
+        referrer: &ArtifactReferrer,
+    ) -> Result<bool, lash_durable::DurableError> {
+        let referrer = referrer.clone();
+        self.conn
+            .call(move |tx| {
+                let held = tx
+                    .prepare_cached(
+                        artifact_sql()
+                            .edges
+                            .select_referrer_edges_in_namespace
+                            .sql(),
+                    )?
+                    .query_row(
+                        params![
+                            MODULE_ARTIFACT_NAMESPACE,
+                            referrer.kind().as_str(),
+                            referrer.canonical_id()
+                        ],
+                        |_| Ok(()),
+                    )
+                    .optional()?
+                    .is_some();
+                Ok(!held && artifact_fenced_tx(tx, &referrer)?)
+            })
+            .await
+            .map_err(artifact_sqlite_error)
+            .map_err(Into::into)
+    }
+    async fn hold_package_record(
+        &self,
+        claim: &ReferrerClaim,
+        reference: &str,
+        bytes: Option<&[u8]>,
+        dependencies: &[String],
+    ) -> Result<(), lash_durable::DurableError> {
+        use lash_execution_contracts::module_artifacts::{
+            ModuleArtifactBody, ModuleArtifactHold, ModuleArtifactStore,
+        };
+        let mut holds: Vec<_> = dependencies
+            .iter()
+            .map(|reference| ModuleArtifactHold::Retain {
+                module_ref: reference,
+            })
+            .collect();
+        holds.push(match bytes {
+            Some(bytes) => ModuleArtifactHold::Publish {
+                module_ref: reference,
+                body: ModuleArtifactBody::Bytes(bytes),
+            },
+            None => ModuleArtifactHold::Retain {
+                module_ref: reference,
+            },
+        });
+        self.hold_module_artifacts(claim, &holds)
+            .await
+            .map_err(Into::into)
+    }
+    async fn put_package_labels(
+        &self,
+        claim: &ReferrerClaim,
+        reference: &str,
+        digest: &[u8; 32],
+        json: &str,
+    ) -> Result<(), lash_durable::DurableError> {
+        let claim = claim.clone();
+        let reference = reference.to_owned();
+        let digest = *digest;
+        let json = json.to_owned();
+        self.conn
+            .write(move |tx| {
+                let referrer = claim.referrer();
+                if artifact_fenced_tx(tx, &referrer)? {
+                    return Err(artifact_failure(ArtifactStoreError::ReferrerEnded {
+                        referrer,
+                    }));
+                }
+                let sql = lash_store_sql::durable::packages::PackageStatements::render(
+                    crate::schema_layout::MAIN,
+                );
+                let held = tx
+                    .prepare_cached(sql.labels_held.sql())?
+                    .query_row(
+                        params![
+                            MODULE_ARTIFACT_NAMESPACE,
+                            reference,
+                            referrer.kind().as_str(),
+                            referrer.canonical_id()
+                        ],
+                        |_| Ok(()),
+                    )
+                    .optional()?
+                    .is_some();
+                if !held {
+                    return Err(artifact_failure(ArtifactStoreError::ArtifactMissing {
+                        artifact_ref: reference,
+                    }));
+                }
+                tx.prepare_cached(sql.insert_labels.sql())?
+                    .execute(params![
+                        MODULE_ARTIFACT_NAMESPACE,
+                        reference,
+                        digest.as_slice(),
+                        json
+                    ])?;
+                Ok(())
+            })
+            .await
+            .map_err(artifact_sqlite_error)
+            .map_err(Into::into)
+    }
+    async fn package_labels(
+        &self,
+        reference: &str,
+    ) -> Result<Vec<String>, lash_durable::DurableError> {
+        let reference = reference.to_owned();
+        self.conn
+            .call(move |tx| {
+                let sql = lash_store_sql::durable::packages::PackageStatements::render(
+                    crate::schema_layout::MAIN,
+                );
+                tx.prepare_cached(sql.labels.sql())?
+                    .query_map(params![MODULE_ARTIFACT_NAMESPACE, reference], |row| {
+                        row.get(0)
+                    })?
+                    .collect::<rusqlite::Result<Vec<String>>>()
+            })
+            .await
+            .map_err(artifact_sqlite_error)
+            .map_err(Into::into)
+    }
+    async fn load_package_record(
+        &self,
+        reference: &str,
+    ) -> Result<Option<Vec<u8>>, lash_durable::DurableError> {
+        use lash_execution_contracts::module_artifacts::ModuleArtifactStore;
+        self.get_module_artifact(reference)
+            .await
+            .map_err(Into::into)
+    }
+    async fn end_package_records(
+        &self,
+        cleanup: &ResolvedArtifactCleanup,
+    ) -> Result<(), lash_durable::DurableError> {
+        self.end_artifact_referrer(MODULE_ARTIFACT_NAMESPACE, cleanup.clone())
+            .await
+            .map_err(Into::into)
     }
 }
 

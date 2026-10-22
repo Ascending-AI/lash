@@ -1,6 +1,7 @@
 //! Version admission and the shipped migration's document cases.
 
 use lash_kernel_doc::{Document, KernelVersion};
+
 use lash_kernel_vm::{KernelMachine, Machine, PreparedLibrary};
 
 use super::{Case, registry};
@@ -10,8 +11,10 @@ pub(super) fn check(rule: &str, case: &Case) {
     if rule == "K-VER-003" {
         // Unsupported versions win over malformed payloads: none of these
         // readers may enter the unsupported version's decoder.
-        let refusal =
-            Document::from_json(r#"{"manifest":{"kernel":4294967295},"main":false}"#).unwrap_err();
+        let refusal = Document::from_json(
+            r#"{"requires":{"natives":[],"kernels":[4294967295]},"main":false}"#,
+        )
+        .unwrap_err();
         assert!(refusal.to_string().contains("4294967295"));
         let refusal =
             lash_kernel_doc::FunctionDefinition::from_json(r#"{"kernel":4294967295,"name":false}"#)
@@ -36,17 +39,14 @@ pub(super) fn check(rule: &str, case: &Case) {
                 ),
                 Err(lash_kernel_vm::OpenError::KernelVersion { .. })
             ));
-            let encoded = lash_kernel_doc::graph_tokens::encode_body(
+            let encoded = lash_vocabulary::tokens::encode_body(
                 lash_kernel_vm::kernel_internals::sealed_root(&saved),
             );
-            let decoded = lash_kernel_doc::graph_tokens::decode_body::<
+            let decoded = lash_vocabulary::tokens::decode_body::<
                 lash_kernel_state::paged::CheckpointRoot,
             >(&encoded)
             .unwrap();
-            assert_eq!(
-                lash_kernel_doc::graph_tokens::encode_body(&decoded),
-                encoded
-            );
+            assert_eq!(lash_vocabulary::tokens::encode_body(&decoded), encoded);
             Ok(crate::pages::open::<KernelMachine>(
                 at.program.clone(),
                 at.bounds,

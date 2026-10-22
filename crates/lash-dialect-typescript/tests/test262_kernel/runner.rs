@@ -17,12 +17,19 @@ use std::sync::Arc;
 
 use lash_dialect_typescript::DiagnosticCode;
 use lash_kernel_dialect::{Environment, Lowered, NamedLibrary};
-use lash_kernel_doc::{Datum, ErrorDatum, FunctionRegistry, Handle, Integer, Name, Timestamp};
+use lash_kernel_doc::Datum;
+use lash_kernel_doc::ErrorDatum;
+use lash_kernel_doc::FunctionRegistry;
+use lash_kernel_doc::Handle;
 use lash_kernel_vm::{
-    Bounds, CellStart, End, Host, KernelMachine, Machine, PreparedLibrary, Program, RunError, Step,
-    Target,
+    Bounds, CellStart, End, Host, KernelMachine, Machine, PreparedLibrary, RunError, Step, Target,
 };
+use lash_vocabulary::names::Name;
 
+#[path = "../../src/tests/linked.rs"]
+mod linked;
+#[path = "../../src/tests/linked_reads.rs"]
+mod linked_reads;
 #[expect(
     dead_code,
     reason = "shared test page fixture includes session and reopen helpers"
@@ -150,14 +157,14 @@ struct TestHost {
 }
 
 impl Host for TestHost {
-    fn clock(&mut self) -> Timestamp {
-        Timestamp {
-            nanoseconds: Integer::from(0),
-        }
-    }
-
-    fn random(&mut self) -> u64 {
-        0
+    fn perform(
+        &mut self,
+        use_: &lash_vocabulary::OperationUse,
+        _: &[Datum],
+        _: &lash_vocabulary::sites::PositionLabel,
+        _: &lash_vocabulary::sites::Site,
+    ) -> Result<Result<Datum, ErrorDatum>, lash_kernel_vm::HostFault> {
+        linked_reads::read(use_, 0)
     }
 
     fn read(&mut self, _handle: &Handle, _request: &Datum) -> Result<Datum, ErrorDatum> {
@@ -179,15 +186,12 @@ impl Host for TestHost {
 
 impl<M: Machine> Executor for OnMachine<M> {
     fn run(&self, lowered: &Lowered) -> Result<Execution, String> {
-        let program = Program {
-            closure: pages::CLOSURE,
-            document: Arc::clone(lowered.document.shared()),
-            library: self.library.clone(),
-        };
+        let program = linked::program(Arc::clone(lowered.document.shared()), self.library.clone());
+        let modes = pages::modes(&program);
         let session = pages::Session::default();
         let start = CellStart {
             owner: pages::OWNER,
-            modes: lash_kernel_vm::EffectModes::recorded(),
+            modes,
             target: Target::Main,
             args: Vec::new(),
             session: None,
@@ -220,7 +224,8 @@ impl<M: Machine> Executor for OnMachine<M> {
                 Step::Slice => {}
                 Step::Parked(park) => match park.requests.as_slice() {
                     [lash_kernel_vm::Request::Effect(effect)]
-                        if effect.effect.as_str() == "host.finish" && finished_with.is_none() =>
+                        if linked::operation(&effect.use_).as_str() == "host.finish"
+                            && finished_with.is_none() =>
                     {
                         finished_with = Some(effect.args.first().cloned().unwrap_or(Datum::Null));
                         machine
@@ -241,25 +246,28 @@ impl<M: Machine> Executor for OnMachine<M> {
 
 /// The test host's turn-ending tool: a program ends with
 /// `await host.finish(value)`, as a model's cell ends with `control.finish`.
-fn finish_effect() -> BTreeMap<lash_kernel_doc::EffectName, lash_kernel_doc::Signature> {
+fn finish_effect() -> BTreeMap<lash_vocabulary::names::EffectName, lash_vocabulary::types::Signature>
+{
     BTreeMap::from([(
-        lash_kernel_doc::EffectName::new("host.finish").expect("a tool's name"),
-        lash_kernel_doc::Signature {
-            params: vec![lash_kernel_doc::Param {
+        lash_vocabulary::names::EffectName::new("host.finish").expect("a tool's name"),
+        lash_vocabulary::types::Signature {
+            params: vec![lash_vocabulary::types::Param {
                 name: Name::new("value"),
-                ty: lash_kernel_doc::Type::Any,
+                ty: lash_vocabulary::types::Type::Any,
                 optional: false,
             }],
-            result: lash_kernel_doc::Type::Any,
+            result: lash_vocabulary::types::Type::Any,
         },
     )])
 }
 
 /// [`finish_effect`]'s control: its call ends the program.
-fn finish_control()
--> &'static BTreeMap<lash_kernel_doc::EffectName, BTreeSet<lash_kernel_dialect::EffectControl>> {
+fn finish_control() -> &'static BTreeMap<
+    lash_vocabulary::names::EffectName,
+    BTreeSet<lash_kernel_dialect::EffectControl>,
+> {
     static CONTROLS: std::sync::OnceLock<
-        BTreeMap<lash_kernel_doc::EffectName, BTreeSet<lash_kernel_dialect::EffectControl>>,
+        BTreeMap<lash_vocabulary::names::EffectName, BTreeSet<lash_kernel_dialect::EffectControl>>,
     > = std::sync::OnceLock::new();
     CONTROLS.get_or_init(|| {
         finish_effect()
@@ -277,7 +285,12 @@ fn finish_control()
 /// The same real definitions the executor runs, indexed by name for lowering.
 fn library() -> &'static NamedLibrary {
     static LIBRARY: std::sync::OnceLock<NamedLibrary> = std::sync::OnceLock::new();
-    LIBRARY.get_or_init(|| NamedLibrary::from_registry(registry()).expect("unique library names"))
+    LIBRARY.get_or_init(|| {
+        let roots = lash_vm_releases::helper_release()
+            .expect("helper release")
+            .resolver_roots();
+        NamedLibrary::resolving(registry(), |id| roots.contains(id)).expect("unique exported names")
+    })
 }
 
 /// The JavaScript error class an uncaught value belongs to: the kernel's
@@ -359,12 +372,8 @@ fn judge(execution: Execution, meta: &Metadata) -> Observed {
 fn lower(source: &str) -> Result<Lowered, lash_dialect_typescript::Diagnostic> {
     let effects = finish_effect();
     let bindings = BTreeSet::new();
-    let environment_namespaces = lash_kernel_dialect::Namespaces::of_effects(
-        &effects,
-        &lash_kernel_doc::ContractId::new("1"),
-        finish_control(),
-    )
-    .expect("the test's effects are operations");
+    let environment_namespaces =
+        linked::namespaces(&effects, finish_control()).expect("the test's effects are operations");
     let environment = Environment::new(library(), &environment_namespaces);
     lash_dialect_typescript::lower(
         source,
@@ -520,77 +529,6 @@ pub(crate) fn report(
         writeln!(out, "{code}\t{count}").expect("write to a string");
     }
     out
-}
-
-/// The printer law for every vendored program the front end accepts.
-/// Equality of the resulting kernel program preserves every possible machine
-/// outcome, including bounds, host reads, effects and session mutation.
-pub(crate) fn printing_relowers(relative: &str) -> bool {
-    let path = data_path(relative);
-    let meta = metadata::read_metadata(&path).unwrap_or_else(|error| panic!("{relative}: {error}"));
-    // A Test262 program is the test body; the harness is supplied by the
-    // test host. Lower the bridged body against its declared harness bindings.
-    let source = super::ingest::test_script(
-        &path,
-        &meta,
-        meta.negative.is_none() && !meta.flags.contains(&TestFlag::Async),
-    );
-    let effects = finish_effect();
-    let bindings = [
-        "assert",
-        "__test262Assert",
-        "__test262SameValue",
-        "__test262Throws",
-        "__test262CompareArray",
-        "__test262ErrorThrower",
-        "Test262Error",
-        "$DONE",
-        "$DONOTEVALUATE",
-        "compareArray",
-        "verifyProperty",
-        "verifyEqualTo",
-        "verifyWritable",
-        "verifyNotWritable",
-        "verifyEnumerable",
-        "verifyNotEnumerable",
-        "verifyConfigurable",
-        "verifyNotConfigurable",
-    ]
-    .into_iter()
-    .map(Name::new)
-    .collect();
-    let environment_namespaces = lash_kernel_dialect::Namespaces::of_effects(
-        &effects,
-        &lash_kernel_doc::ContractId::new("1"),
-        finish_control(),
-    )
-    .expect("the test's effects are operations");
-    let environment = Environment::new(library(), &environment_namespaces);
-    let Ok(original) = lash_dialect_typescript::lower(
-        &source,
-        &environment,
-        lash_kernel_dialect::Mode::Cell(lash_kernel_dialect::CellEnvironment {
-            bindings: &bindings,
-            functions: &std::collections::BTreeMap::new(),
-        }),
-    ) else {
-        return false;
-    };
-    let printed =
-        lash_dialect_typescript::print_kernel(&original.document, None, Default::default())
-            .expect("an admitted document prints");
-    let re_lowered = lash_dialect_typescript::read_kernel(
-        &printed.source,
-        &original.document,
-        Default::default(),
-    )
-    .unwrap_or_else(|error| panic!("{relative}: {error}\n{printed:?}"));
-    assert_eq!(
-        original.document.canonical_bytes(),
-        re_lowered.0.canonical_bytes(),
-        "{relative}"
-    );
-    true
 }
 
 /// String positions count UTF-16 units, while codePointAt combines a pair.

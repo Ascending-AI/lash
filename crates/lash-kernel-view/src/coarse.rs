@@ -6,12 +6,14 @@ use lash_kernel_check::{
     EdgeKind, ExprNode, Graph, MemberNode, NodeKind, PlaceNode, Reference, StmtNode, Target,
 };
 use lash_kernel_doc::{
-    Document, Expr, FunctionDeclarations, Site, SourceMap, SourceMapRefusal, Span, Stmt,
+    Document, Expr, FunctionDeclarations, SourceMap, SourceMapRefusal, Span, Stmt,
 };
+
+use lash_vocabulary::sites::Site;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::comparison::{ComparisonView, Comparisons};
+use crate::comparison::ComparisonView;
 use crate::{ScopeKind, StatementView, WorkflowView};
 
 /// A lexical callable is projected once, independently of its invocations.
@@ -180,7 +182,10 @@ impl WorkflowView {
             .or_else(|| self.nodes.iter().find(|node| node.members.contains(site)))
     }
 
-    pub fn action_node(&self, site: &lash_kernel_doc::PositionLabel) -> Option<&WorkflowNode> {
+    pub fn action_node(
+        &self,
+        site: &lash_vocabulary::sites::PositionLabel,
+    ) -> Option<&WorkflowNode> {
         self.nodes
             .iter()
             .find(|node| node.kind == WorkflowNodeKind::Action && node.site == *site)
@@ -229,9 +234,9 @@ impl WorkflowView {
 pub(crate) fn project(
     document: &Document,
     graph: &Graph,
-    functions: &FunctionDeclarations,
+    _functions: &FunctionDeclarations,
     view: &mut WorkflowView,
-    packages: &lash_kernel_package::PackageView<'_>,
+    context: &crate::ViewContext,
 ) {
     let (source, ranges) = lash_kernel_doc::print_document_with_ranges(document);
     view.canonical_source = source.clone();
@@ -241,17 +246,18 @@ pub(crate) fn project(
         .filter(|scope| matches!(scope.kind, ScopeKind::Entry | ScopeKind::Closure))
         .map(|scope| CallableView {
             site: if scope.kind == ScopeKind::Closure {
-                Site::new(
-                    scope.block.unit.clone(),
-                    scope.block.path[..scope.block.path.len() - 1].to_vec(),
-                )
+                graph
+                    .node_at(&scope.block)
+                    .and_then(|node| node.parent)
+                    .map(|id| graph.node(id).site.clone())
+                    .unwrap_or_else(|| scope.block.clone())
             } else {
                 scope.block.clone()
             },
             block: scope.block.clone(),
         })
         .collect();
-    let comparisons = Comparisons::new(graph, functions, &view.dataflow.bindings, packages);
+    let comparisons = crate::comparison::Comparisons::new(graph, &view.dataflow.bindings, context);
     let mut projection = Projection {
         view,
         source: &source,

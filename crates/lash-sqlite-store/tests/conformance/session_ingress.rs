@@ -59,7 +59,7 @@ async fn admission_folds_the_producer_round_into_one_commit() {
         .await
         .expect("create the session");
     let session_id =
-        lash_protocol_types::SessionId::from(lash_conformance::SESSION_INGRESS_SESSION_ID);
+        lash_vocabulary::identity::SessionId::from(lash_conformance::SESSION_INGRESS_SESSION_ID);
     let batch = lash_core::PendingTurnInputBatch::new(
         session_id.clone(),
         vec![
@@ -90,7 +90,7 @@ async fn admission_folds_the_producer_round_into_one_commit() {
     };
     assert_eq!(rows.len(), 2, "the batch admitted both inputs");
     let reread = runtime
-        .load_session_head_meta(&lash_protocol_types::SessionId::from(
+        .load_session_head_meta(&lash_vocabulary::identity::SessionId::from(
             lash_conformance::SESSION_INGRESS_SESSION_ID,
         ))
         .await

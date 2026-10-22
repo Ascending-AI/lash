@@ -3,7 +3,7 @@
   "cases": [
     {
       "name": "ref is immutable identity and survives replacing its binding",
-      "document": "kernel 1\nnumbers by_spelling\nuse ref = @45d4961349c42b673de1c1e92b4122299b421191ead13812e4d5f978f1323c65\nuse same = @1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578\nuse deref = @12677ad7e3e9aab3865fdbd2799e5c17d9d207b757de5a56c60b6911444f3207\nuse eq = @b50ea78f1b8899c52026719706a58480a99f1d90dcd04a6954be8f2c23cd8954\nmain { let a = [] let r = ref(a) let b = deref(r) set a = [] finish [same(b, deref(r)), eq(r, ref(b)), eq(r, ref(a))] }\n",
+      "document": "kernel 1\nnumbers by_spelling\nnative @04100a3772ec564e8bdc38f90d5678f50f6395ae42c373d3239143cfaadfc478\nnative @048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544\nnative @1f19e940ec199769e419707cc9592a2fe52b58b70b37efec416fcd5d4a1855c1\nnative @3536009c2e2586efd0959aaef06b545981e14eba3cf77a4446fa3ce79edb6981\ndefinition \"function eq(arg0: Any, arg1: Any) -> Bool\\nkernel 1\\nerrors \\\"arity\\\"\\ncharge sum(1, product(sum(deep(arg0), deep(arg1)), sum(deep(arg0), deep(arg1))), deep(result))\\nnative\\n\"\ndefinition \"function same(arg0: Any, arg1: Any) -> Bool\\nkernel 1\\nerrors \\\"arity\\\"\\ncharge sum(1, sum(min(size(arg0), size(arg1)), nested(arg0), nested(arg1)), deep(result))\\nnative\\n\"\ndefinition \"function deref(r: Any) -> Any\\nkernel 1\\ncharge 1\\nnative\\n\"\ndefinition \"function ref(arg0: Any) -> Any\\nkernel 1\\nerrors \\\"arity\\\", \\\"type_error\\\"\\ncharge sum(1, sum(deep(arg0)), deep(result))\\nnative\\n\"\nmain {\n  let a = []\n  let r = ref(a)\n  let b = deref(r)\n  set a = []\n  finish [same(b, deref(r)), eq(r, ref(b)), eq(r, ref(a))]\n}\n",
       "expected": {
         "prints": [],
         "trace": [],

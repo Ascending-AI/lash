@@ -2,7 +2,7 @@
 //! is physical turn 0. This encoding has no inverse: host run ids may contain
 //! the same suffix, so admission records determine run membership.
 
-use crate::TurnId;
+use lash_vocabulary::identity::TurnId;
 
 /// The separator between a logical run's turn id and a later physical
 /// turn's index.

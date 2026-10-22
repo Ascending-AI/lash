@@ -11,7 +11,10 @@ impl ToolProvider for GrantBoundTools {
     fn tool_manifests(
         &self,
         _config: &lash_core::OwnerConfigView,
-    ) -> std::result::Result<Vec<lash_core::ToolManifest>, lash::plugins::PluginError> {
+    ) -> std::result::Result<
+        Vec<lash_vocabulary::tool_contract::ToolManifest>,
+        lash::plugins::PluginError,
+    > {
         Ok(Vec::new())
     }
 
@@ -19,7 +22,7 @@ impl ToolProvider for GrantBoundTools {
         &self,
         _name: &str,
         _config: &lash_core::OwnerConfigView,
-    ) -> Option<Arc<lash_core::ToolContract>> {
+    ) -> Option<Arc<lash_vocabulary::tool_contract::ToolContract>> {
         None
     }
 
@@ -37,8 +40,8 @@ impl ToolProvider for GrantBoundTools {
     }
 }
 
-fn grant_bound_tool_definition() -> lash_core::ToolDefinition {
-    lash_core::ToolDefinition::raw(
+fn grant_bound_tool_definition() -> lash_vocabulary::tool_contract::ToolDefinition {
+    lash_vocabulary::tool_contract::ToolDefinition::raw(
         "tool:grant_bound",
         "tools.grant_bound",
         "Executes only under a granted route.",
@@ -60,9 +63,9 @@ async fn testing_facade_run_tool_granted_honors_the_granted_source_binding() {
         provider.clone(),
         grant_bound_tool_definition(),
     )
-    .with_execution_binding(Some(lash_core::ExecutionBinding {
+    .with_execution_binding(Some(lash_vocabulary::providers::ExecutionBinding {
         codec: provider,
-        format: lash_core::FormatVersion::ONE,
+        format: lash_vocabulary::providers::FormatVersion::ONE,
         payload: serde_json::json!({ "route": "deferred" }),
     }));
     let args = serde_json::json!({});
@@ -98,33 +101,60 @@ async fn definition_args_checks_partial_and_complete_inputs_without_starting() {
     let core = explicit_ephemeral_facets(rlm_core_builder_over(backend))
         .build(lash_facade_tests::runtime_lease_owner())
         .expect("the core builds");
-    let document = lash::workflow::document::parse_document(
-        "kernel 1\nnumbers float\nentry handler(event: Text, count: Int) -> Text\n\n\
-         fn handler(event, count) {\n  return event\n}\n\nmain {\n  finish null\n}\n",
-    )
-    .unwrap();
+    let function = lash::workflow::document::parse_definition("function handler(event: Text, count: Int) -> Text\nkernel 1\nmetering statements\nbody { return event }").unwrap();
+    let mut document = lash::workflow::document::Document::new(
+        lash::workflow::document::NumberPolicy::Float,
+        Vec::new(),
+    );
+    document.main = None;
+    document.exports.insert(
+        lash::workflow::document::Name::new("handler"),
+        lash::workflow::document::Export::Function(lash::workflow::document::FunctionExport {
+            function: function.identity(),
+            signature: function.signature.clone(),
+            convention: lash::workflow::document::StartConvention::Direct,
+            asynchronous: false,
+            rest: false,
+        }),
+    );
+    document.functions.insert(function.identity(), function);
     let pin = lash::process::HostArtifactPin::mint();
-    let environment = lash_execution_contracts::testing::process_env_fixture();
-    let lash::workflow::WorkflowPublish::Published(publication) = core
+    let environment = lash::workflow::WorkflowEnvironmentRequest {
+        snapshot: Default::default(),
+        attachment: lash::package::Attachment {
+            packages: Default::default(),
+            members: Default::default(),
+            deferred: Default::default(),
+        },
+        context: lash::package::PublicationContext {
+            domain: lash::package::PublicationDomain(core.backend().binding_identity().to_string()),
+            scope: lash::package::PublicationScope::Host,
+            publisher: lash::package::PublisherInstance("facade-args-law".into()),
+            root: lash::package::Segment::new("handler").unwrap(),
+        },
+    };
+    let start = core
         .host_artifacts()
         .publish_workflow(
             &pin,
-            &lash::workflow::document::DocumentBytes::from(document.clone()),
-            &lash::workflow::document::Name::new("handler"),
+            &lash::workflow::document::DocumentBytes::from(document),
+            &lash::package::StartSelector::Export(lash::workflow::document::Name::new("handler")),
             &environment,
-            core.host_artifacts()
-                .cell_packages()
-                .await
-                .expect("the package gate answers")
-                .declare_all(),
             None,
         )
         .await
-        .unwrap()
-    else {
-        panic!("the document publishes");
-    };
-    let definition = publication.definition;
+        .unwrap();
+    let draft = lash::vm::definition_draft(&lash::process::KernelProcessDefinition {
+        code: lash::vm::KernelInlineRequest::Linked {
+            start: start.clone(),
+        },
+    })
+    .unwrap();
+    let definition = core
+        .host_artifacts()
+        .publish_definition(&pin, &draft)
+        .await
+        .unwrap();
     let checker = core.process_definitions();
     let partial = serde_json::json!({"event": "ready"})
         .as_object()
@@ -293,32 +323,60 @@ async fn a_saved_definition_start_read_fault_is_an_outer_store_error() {
     let core = explicit_ephemeral_facets(rlm_core_builder_over(backend))
         .build(lash_facade_tests::runtime_lease_owner())
         .unwrap();
-    let document = lash::workflow::document::parse_document(
-        "kernel 1\nnumbers float\nentry handler(event: Text) -> Text\n\n\
-         fn handler(event) {\n  return event\n}\n\nmain {\n  finish null\n}\n",
-    )
-    .unwrap();
+    let function = lash::workflow::document::parse_definition("function handler(event: Text) -> Text\nkernel 1\nmetering statements\nbody { return event }").unwrap();
+    let mut document = lash::workflow::document::Document::new(
+        lash::workflow::document::NumberPolicy::Float,
+        Vec::new(),
+    );
+    document.main = None;
+    document.exports.insert(
+        lash::workflow::document::Name::new("handler"),
+        lash::workflow::document::Export::Function(lash::workflow::document::FunctionExport {
+            function: function.identity(),
+            signature: function.signature.clone(),
+            convention: lash::workflow::document::StartConvention::Direct,
+            asynchronous: false,
+            rest: false,
+        }),
+    );
+    document.functions.insert(function.identity(), function);
     let pin = lash::process::HostArtifactPin::mint();
-    let environment = lash_execution_contracts::testing::process_env_fixture();
-    let lash::workflow::WorkflowPublish::Published(publication) = core
+    let environment = lash::workflow::WorkflowEnvironmentRequest {
+        snapshot: Default::default(),
+        attachment: lash::package::Attachment {
+            packages: Default::default(),
+            members: Default::default(),
+            deferred: Default::default(),
+        },
+        context: lash::package::PublicationContext {
+            domain: lash::package::PublicationDomain(core.backend().binding_identity().to_string()),
+            scope: lash::package::PublicationScope::Host,
+            publisher: lash::package::PublisherInstance("facade-args-law".into()),
+            root: lash::package::Segment::new("handler").unwrap(),
+        },
+    };
+    let start = core
         .host_artifacts()
         .publish_workflow(
             &pin,
-            &lash::workflow::document::DocumentBytes::from(document.clone()),
-            &lash::workflow::document::Name::new("handler"),
+            &lash::workflow::document::DocumentBytes::from(document),
+            &lash::package::StartSelector::Export(lash::workflow::document::Name::new("handler")),
             &environment,
-            core.host_artifacts()
-                .cell_packages()
-                .await
-                .expect("the package gate answers")
-                .declare_all(),
             None,
         )
         .await
-        .unwrap()
-    else {
-        panic!("the document publishes");
-    };
+        .unwrap();
+    let draft = lash::vm::definition_draft(&lash::process::KernelProcessDefinition {
+        code: lash::vm::KernelInlineRequest::Linked {
+            start: start.clone(),
+        },
+    })
+    .unwrap();
+    let definition = core
+        .host_artifacts()
+        .publish_definition(&pin, &draft)
+        .await
+        .unwrap();
     let read = lash_core::testing::Op::listed("get_module_artifact");
     script
         .on(read)
@@ -331,11 +389,7 @@ async fn a_saved_definition_start_read_fault_is_an_outer_store_error() {
         .clone();
     let error = core
         .process_definitions()
-        .check_args(
-            &publication.definition,
-            &args,
-            lash::process::ArgsMode::Complete,
-        )
+        .check_args(&definition, &args, lash::process::ArgsMode::Complete)
         .await
         .unwrap_err();
     assert!(
@@ -352,11 +406,11 @@ async fn a_saved_definition_start_read_fault_is_an_outer_store_error() {
     assert!(error.is_retryable());
     assert!(error.artifact_refusal().is_none());
     let draft = lash_execution_contracts::process::ProcessDefinitionDraft::from_store_bytes(
-        &publication.definition.id,
+        &definition.id,
         &core
             .backend()
             .definition_store()
-            .get_process_definition(&publication.definition.id)
+            .get_process_definition(&definition.id)
             .await
             .unwrap()
             .unwrap(),
@@ -370,12 +424,9 @@ async fn a_saved_definition_start_read_fault_is_an_outer_store_error() {
             .fail(|| lash_core::StoreError::Contended);
         let artifacts = core.host_artifacts();
         let error = match operation {
-            "read" => artifacts
-                .get_definition(&publication.definition.id)
-                .await
-                .unwrap_err(),
+            "read" => artifacts.get_definition(&definition.id).await.unwrap_err(),
             "pin" => artifacts
-                .pin_definition(&pin, &publication.definition.id)
+                .pin_definition(&pin, &definition.id)
                 .await
                 .unwrap_err(),
             "publish" => artifacts
@@ -383,13 +434,10 @@ async fn a_saved_definition_start_read_fault_is_an_outer_store_error() {
                 .await
                 .unwrap_err(),
             "graph" => artifacts
-                .definition_graph(&publication.definition.id)
+                .definition_graph(&definition.id)
                 .await
                 .unwrap_err(),
-            "execution_document" => artifacts
-                .execution_document(&publication.reference)
-                .await
-                .unwrap_err(),
+            "execution_document" => artifacts.execution_document(&start).await.unwrap_err(),
             _ => unreachable!(),
         };
         assert!(
@@ -438,7 +486,7 @@ async fn test_parks_are_typed_fenced_and_redrivable(
         .unwrap();
     let handle = session
         .send(TurnInput::text("resume the parked input"))
-        .id(lash::TurnId::parse("test-park-input").unwrap())
+        .id(lash_vocabulary::identity::TurnId::parse("test-park-input").unwrap())
         .await
         .unwrap();
     let session_actor = ActorKey::session(session_id.as_str()).unwrap();
@@ -581,7 +629,7 @@ async fn test_parks_are_typed_fenced_and_redrivable(
     assert!(matches!(
         lash::testing::park_process(
             &backend,
-            &lash::ProcessId::fixture("test-park-missing"),
+            &lash_vocabulary::identity::ProcessId::fixture("test-park-missing"),
             process_reason.clone()
         )
         .await,

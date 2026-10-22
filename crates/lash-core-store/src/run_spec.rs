@@ -615,9 +615,9 @@ pub struct RunSpec {
     /// the level it actually ran at; another run may choose another level.
     #[serde(
         default,
-        skip_serializing_if = "lash_kernel_doc::RunObservation::is_off"
+        skip_serializing_if = "lash_vocabulary::observation::RunObservation::is_off"
     )]
-    pub observe: lash_kernel_doc::RunObservation,
+    pub observe: lash_vocabulary::observation::RunObservation,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub definition: Option<DefinitionRef>,
     /// Immutable data the definition reads. Request ids and tracing stay

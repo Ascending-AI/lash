@@ -22,20 +22,20 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use lash_core::ProcessId;
 use lash_core_execution::runtime::process::steps::{
     RecordedProcessStep, StepFact, process_step_call,
 };
 use lash_core_store::tool_run::SettledOutput;
 use lash_durable::domain::pages::PageStore;
 use lash_durable::domain::{ExecKey, OwnerKey, RootOwner};
-use lash_kernel_doc::{Datum, ErrorDatum, Handle, Integer, Timestamp};
-use lash_kernel_vm::Target;
+use lash_kernel_doc::{Datum, ErrorDatum, Handle};
+
+use lash_protocol_types::engine_fault::{CheckpointRefusal, KernelRestoreRefusal, RunRefusal};
 use lash_vm_broker::ParentFault;
 use lash_vm_broker::kernel::{KernelFailure, MachineStep, Machines as _};
 use lash_vm_client::wire::OutcomeWire;
 use lash_vm_client::{FrameEpoch, InfrastructureOutcome, OwnerEpoch, RunHost, VmOwner};
-use lash_vm_protocol::{CheckpointRefusal, KernelRestoreRefusal, RunRefusal};
+use lash_vocabulary::identity::ProcessId;
 use serde::{Deserialize, Serialize};
 use tokio_util::sync::CancellationToken;
 
@@ -113,9 +113,10 @@ pub enum Unreplayable {
     Unobserved,
 }
 
-pub use lash_kernel_doc::{ReplayPath, TaskPath};
+pub use lash_vocabulary::observation::ReplayPath;
+pub use lash_vocabulary::observation::TaskPath;
 
-fn replay_path(path: lash_kernel_vm::ExecutionPath) -> ReplayPath {
+fn replay_path(path: lash_vocabulary::observation::ExecutionPath) -> ReplayPath {
     path.replay()
 }
 
@@ -129,20 +130,14 @@ pub struct ReplayFault(String);
 /// does not answer diverges the replay. A process binds no handle, so a
 /// projection read is unreachable; meeting one diverges it too.
 struct ReplayHost {
-    now_ms: Option<i64>,
-    random: std::sync::Mutex<std::collections::VecDeque<u64>>,
     effects: std::sync::Mutex<std::collections::VecDeque<super::state::EffectRead>>,
-    clock_read: AtomicBool,
     diverged: AtomicBool,
 }
 
 impl ReplayHost {
     fn of(reads: &HostReads) -> Self {
         Self {
-            now_ms: reads.now_ms,
             effects: std::sync::Mutex::new(reads.effects.iter().cloned().collect()),
-            random: std::sync::Mutex::new(reads.random.iter().copied().collect()),
-            clock_read: AtomicBool::new(false),
             diverged: AtomicBool::new(false),
         }
     }
@@ -154,46 +149,22 @@ impl ReplayHost {
 
     /// Whether the run read exactly what its tape recorded.
     fn consumed(&self) -> bool {
-        let draws = self
-            .random
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
         self.effects
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .is_empty()
-            && draws.is_empty()
-            && self.clock_read.load(Ordering::Relaxed) == self.now_ms.is_some()
             && !self.diverged.load(Ordering::Relaxed)
     }
 }
 
 #[async_trait::async_trait]
 impl RunHost for ReplayHost {
-    fn observe(&self) -> lash_kernel_vm::ObservationMode {
-        lash_kernel_vm::ObservationMode::Counts
+    fn observe(&self) -> lash_vocabulary::observation::RunObservation {
+        lash_vocabulary::observation::RunObservation::Counts
     }
 
     fn traces_path(&self) -> bool {
         true
-    }
-
-    async fn clock(&self) -> Result<Timestamp, ParentFault> {
-        let now_ms = self
-            .now_ms
-            .ok_or_else(|| self.diverge("the segment read a clock its tape lacks"))?;
-        self.clock_read.store(true, Ordering::Relaxed);
-        Ok(Timestamp {
-            nanoseconds: Integer::from(now_ms.saturating_mul(1_000_000)),
-        })
-    }
-
-    async fn random(&self) -> Result<u64, ParentFault> {
-        self.random
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .pop_front()
-            .ok_or_else(|| self.diverge("the segment drew more random bits than its tape holds"))
     }
 
     async fn read(
@@ -206,10 +177,10 @@ impl RunHost for ReplayHost {
 
     async fn perform(
         &self,
-        effect: &lash_kernel_doc::EffectName,
+        effect: &lash_vocabulary::names::OperationUse,
         args: &[Datum],
-        site: &lash_kernel_doc::PositionLabel,
-        origin: &lash_kernel_doc::Site,
+        site: &lash_vocabulary::sites::PositionLabel,
+        origin: &lash_vocabulary::sites::Site,
     ) -> Result<Result<Datum, ErrorDatum>, ParentFault> {
         let read = self
             .effects
@@ -217,10 +188,7 @@ impl RunHost for ReplayHost {
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .pop_front()
             .ok_or_else(|| self.diverge("the segment read beyond its operation tape"))?;
-        if read.effect != *effect
-            || read.args != args
-            || read.site != *site
-            || read.origin != *origin
+        if read.use_ != *effect || read.args != args || read.site != *site || read.origin != *origin
         {
             return Err(self.diverge("the segment's operation read differs from its tape"));
         }
@@ -237,7 +205,7 @@ impl RunHost for ReplayHost {
 struct Start_ {
     parked: Option<(ParkedPage, StepFact)>,
     admissions: Vec<Admission>,
-    deliver: Vec<(lash_protocol_types::WaitId, OutcomeWire)>,
+    deliver: Vec<(lash_vocabulary::sites::WaitId, OutcomeWire)>,
 }
 
 /// What the journal retains of a process, as a replay reads it.
@@ -261,7 +229,7 @@ impl Journal<'_> {
         }
     }
 
-    fn issued(&self, run: u64, wait: lash_protocol_types::WaitId) -> Option<&Issued> {
+    fn issued(&self, run: u64, wait: lash_vocabulary::sites::WaitId) -> Option<&Issued> {
         self.parked(run)?
             .1
             .iter()
@@ -272,12 +240,11 @@ impl Journal<'_> {
     /// from the record that holds it, and bound by its digest.
     fn delivered(
         &self,
-        wait: lash_protocol_types::WaitId,
+        wait: lash_vocabulary::sites::WaitId,
         source: &DeliverySource,
         digest: &str,
     ) -> Result<OutcomeWire, Unreplayable> {
         let candidates = match source {
-            DeliverySource::Elapsed => vec![OutcomeWire::Elapsed],
             DeliverySource::Refused { run } => match self.issued(*run, wait) {
                 Some(Issued::Refused { kind, message, .. }) => vec![refused(kind, message.clone())],
                 _ => return Err(Unreplayable::Pruned),
@@ -446,7 +413,9 @@ impl KernelProcessEngine {
             .and_then(|settings| {
                 serde_json::from_value::<KernelRecordedSettings>(settings.value().clone()).ok()
             })
-            .filter(|settings| settings.observe == lash_kernel_vm::ObservationMode::Counts);
+            .filter(|settings| {
+                settings.observe == lash_vocabulary::observation::RunObservation::Counts
+            });
         let mut answers = Vec::with_capacity(chosen.len());
         for segment in chosen {
             let answer = match &settings {
@@ -496,43 +465,88 @@ impl KernelProcessEngine {
         {
             return unreplayable(Unreplayable::KernelVersion);
         }
-        let document = match self.documents.get_shared(&recorded_start.document).await {
-            Ok(Some(document)) => document,
-            Ok(None) => return unreplayable(Unreplayable::Pruned),
-            Err(error) => return Err(ReplayFault(error.to_string())),
-        };
-        if document.manifest.kernel != writes {
-            return unreplayable(Unreplayable::KernelVersion);
-        }
         let Ok(mut input) = KernelProcessInput::from_payload(&request.payload) else {
             return unreplayable(Unreplayable::NoTape);
         };
-        input.document = recorded_start.document;
+        input.code = recorded_start.code.clone();
+        let loaded_execution = self
+            .load_execution(&input.code, &recorded_start.retained_code)
+            .await
+            .map_err(|error| ReplayFault(error.to_string()))?;
+        let content = loaded_execution.content;
+        let reach = loaded_execution.reach;
+        let (root_link, _) = input
+            .code
+            .linked()
+            .ok_or_else(|| ReplayFault("unrealized replay input".into()))?;
+        let root = content
+            .links
+            .get(&root_link)
+            .ok_or_else(|| ReplayFault("root Link is absent".into()))?;
+        let document = content
+            .documents
+            .get(&root.document)
+            .ok_or_else(|| ReplayFault("root Document is absent".into()))?
+            .clone();
         let Ok(args) = entry_args(&document, &input) else {
             return unreplayable(Unreplayable::NoTape);
         };
-        // A replay runs the code the run ran: the definitions its document
-        // was written against, the store's where the node lacks them.
-        let Ok(closure) = super::run::pinned_closure(self, &document)
-            .await
-            .map_err(|fault| ReplayFault(fault.0))?
-        else {
-            return unreplayable(Unreplayable::FunctionMissing);
-        };
+        let loaded = lash_vm_broker::kernel::loader::declare_reach(
+            &document,
+            &content
+                .documents
+                .iter()
+                .map(|(id, document)| (*id, Arc::new(document.clone())))
+                .collect(),
+            &reach.functions,
+            &reach.machine,
+            &self.functions,
+        )
+        .map_err(|error| ReplayFault(error.to_string()))?;
+        let closure = loaded.closure;
+        let mut program = lash_kernel_vm::Program::prepare(
+            root_link,
+            content
+                .documents
+                .iter()
+                .map(|(id, document)| (*id, Arc::new(document.clone())))
+                .collect(),
+            &content.links,
+            lash_kernel_doc::heap::PageId(closure.reference().0),
+            lash_kernel_vm::PreparedLibrary::with_charge(loaded.registry, settings.charge),
+        )
+        .map_err(|error| ReplayFault(error.to_string()))?;
         let host = Arc::new(ReplayHost::of(reads));
+        program.functions = closure.body().identities().collect();
         let machines = lash_vm_client::RemoteMachines::new(
             self.workers.clone(),
             VmOwner::new(format!("process:{}", request.process)),
             OwnerEpoch(0),
             FrameEpoch(0),
             Arc::clone(&host) as Arc<dyn RunHost>,
-            &document,
+            &lash_kernel_doc::IdentifiedDocument::new(document.clone()),
             &settings.dialect,
             lash_vm_client::RunStart {
-                target: Target::Entry(input.entry.clone()),
+                link: program.link,
+                instances: program.instances,
+                documents: program
+                    .documents
+                    .into_iter()
+                    .map(|(id, document)| {
+                        (
+                            id,
+                            lash_kernel_doc::IdentifiedDocument::from_shared(document),
+                        )
+                    })
+                    .collect(),
+                target: input.code.target().map_err(ReplayFault)?,
                 args,
                 session: None,
-                modes: lash_kernel_vm::EffectModes::reading(reads.read_effects.iter().cloned()),
+                modes: reads
+                    .read_effects
+                    .iter()
+                    .map(|use_| (*use_, lash_vocabulary::package::OperationMode::Read))
+                    .collect(),
                 host: Vec::new(),
                 save: None,
             },
@@ -623,14 +637,14 @@ impl KernelProcessEngine {
                     ..
                 },
             ) => {
-                let replayed: Vec<lash_protocol_types::WaitId> = park.withdrawn.clone();
-                let asked: Vec<(lash_protocol_types::WaitId, Admission)> = park
+                let replayed: Vec<lash_vocabulary::sites::WaitId> = park.withdrawn.clone();
+                let asked: Vec<(lash_vocabulary::sites::WaitId, Admission)> = park
                     .requests
                     .iter()
                     .map(admission_of)
                     .filter(|(wait, _)| !replayed.contains(wait))
                     .collect();
-                let recorded_asks: Vec<(lash_protocol_types::WaitId, Admission)> = issued
+                let recorded_asks: Vec<(lash_vocabulary::sites::WaitId, Admission)> = issued
                     .iter()
                     .map(|issued| (issued.wait(), issued.admission().clone()))
                     .collect();

@@ -629,7 +629,7 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
     let active_turns = ActiveTurns::persistent(data_dir.join("active-turns.json"))?;
     let deferred_tools =
         deferred_tools::WorkbenchDeferredTools::open(data_dir.join("deferred-tool-grants.db"))
-            .context("open workbench deferred-tool grants")?;
+            .context("open workbench deferred tool offers")?;
     let approvals = approvals::WorkbenchApprovals::open(data_dir.join("approvals.db"))
         .context("open workbench approval ledger")?;
     let host_triggers = host_triggers::HostTriggers::open(data_dir.join("host-triggers.db"))

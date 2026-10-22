@@ -12,9 +12,11 @@
 use std::sync::Arc;
 
 use lash_kernel_doc::arena::{ArenaHandle, Body};
-use lash_kernel_doc::{Float, Name, NativeError, NewObject, TaskId, Value};
+use lash_kernel_doc::{NativeError, NewObject, TaskId, Value};
+
 use lash_kernel_exec::charge::Crossed;
 use lash_kernel_exec::{LocalRef, Op, Reg, RegRange, RegionIx, StepEdge};
+use lash_vocabulary::names::Name;
 
 use super::ops::Flow;
 use super::{
@@ -554,21 +556,6 @@ impl KernelMachine {
     ) -> Eval<Option<Ran>> {
         let (task, exe, stream) = (running.task, running.exe, running.stream);
         let ran = match op {
-            Op::Clock { dst } => {
-                self.report_ran(host);
-                let now = host.clock();
-                let now = self.arena.borrow_mut().timestamp(now.nanoseconds);
-                self.put(at(dst), now);
-                return Ok(None);
-            }
-            Op::Random { dst } => {
-                // The top 53 of the 64 bits, times 2^-53 (`K-HOST-003`).
-                self.report_ran(host);
-                let bits = host.random() >> 11;
-                let value = Value::Float(Float::new(bits as f64 / (1u64 << 53) as f64));
-                self.put(at(dst), value);
-                return Ok(None);
-            }
             Op::HostRead { at: r } => {
                 let r = at(r);
                 self.host_read(host, exe, r, r + 1, r)?;
@@ -643,7 +630,7 @@ impl KernelMachine {
             Op::Continue => Ran::Depart(Completion::Continue),
             Op::Return { src } => {
                 let value = self.take(at(src));
-                if task == TaskId::MAIN && self.task(task)?.frames.len() == 1 {
+                if self.return_leaves_run(task)? {
                     // The run's result leaves the run (`K-EFF-002`): a value
                     // that cannot is refused here, where a `catch` sees it.
                     self.copy_out(&value)?;
@@ -802,17 +789,36 @@ impl KernelMachine {
         code: CodeId,
         cells: &[ArenaHandle],
     ) -> Eval<ArenaHandle> {
-        let at = code.0 as usize;
-        if self.storage.closure_sites.len() <= at {
-            self.storage.closure_sites.resize_with(at + 1, || None);
-        }
-        let site = self.storage.closure_sites[at].get_or_insert_with(|| {
-            let mut site = exe.code(code).site.clone();
-            site.path.pop();
-            Arc::new(site)
+        let lash_vocabulary::sites::Unit::Library(function) = exe.code(code).site.unit else {
+            return Err(fault("closure body has no stored FunctionId").into());
+        };
+        let link = self.current_link();
+        let identity = Arc::new(lash_kernel_doc::arena::ClosureIdentity {
+            capture_names: exe.code(code).capture_names.clone(),
+            callable: lash_vocabulary::names::CallableId { link, function },
+            site: lash_kernel_doc::linked_site::LinkedSite {
+                link,
+                site: exe
+                    .code(code)
+                    .created
+                    .clone()
+                    .unwrap_or_else(|| exe.code(code).site.clone()),
+            },
         });
-        let site = Arc::clone(site);
-        let closure = self.arena.borrow_mut().new_closure(site, cells.to_vec());
+        let closure = self
+            .arena
+            .borrow_mut()
+            .new_closure(identity, cells.to_vec());
+        self.arena
+            .borrow_mut()
+            .found_closure_code(
+                closure,
+                lash_kernel_doc::arena::LocalCode {
+                    executable: exe.local(),
+                    code: code.0,
+                },
+            )
+            .map_err(|error| fault(&error.to_string()))?;
         self.grown();
         Ok(closure)
     }
@@ -838,13 +844,13 @@ impl KernelMachine {
         let request = self.copy_out(&request)?;
         self.report_ran(host);
         let value = match host.read(&handle, &request) {
-            Ok(answer) => self.decode(exe, &answer, &lash_kernel_doc::Type::Any)?,
+            Ok(answer) => self.decode(exe, &answer, &lash_vocabulary::types::Type::Any)?,
             Err(error) => {
                 let datum = lash_kernel_doc::Datum::Error(Box::new(error));
                 return Err(Interrupt::raised(self.decode(
                     exe,
                     &datum,
-                    &lash_kernel_doc::Type::Any,
+                    &lash_vocabulary::types::Type::Any,
                 )?));
             }
         };

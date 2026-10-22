@@ -186,7 +186,7 @@ fn drain_area_witnesses() {
     let _: fn(
         std::sync::Arc<dyn lash::persistence::AttachmentStore>,
         std::sync::Arc<dyn lash::persistence::AttachmentReferrers>,
-        lash::RuntimeOwner,
+        lash_vocabulary::identity::RuntimeOwner,
         lash::persistence::AttachmentPolicy,
     ) -> lash::persistence::RuntimeAttachmentStore = lash::persistence::RuntimeAttachmentStore::new;
     // W0057: lash::persistence::RuntimeAttachmentStore::persistence [function]

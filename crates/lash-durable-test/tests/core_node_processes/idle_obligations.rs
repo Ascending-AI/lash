@@ -10,19 +10,20 @@ use super::*;
 /// tool's provider, and a process requires while a write is unsettled.
 fn write_token() -> String {
     let provider = WRITE_COMPONENT.tool_provider(lash::tool_provider_key!("tools"));
-    lash_core::ObligationToken::for_callback(provider.registry(), &provider.callback_identity())
-        .to_string()
+    lash_vocabulary::claims::ObligationToken::for_callback(
+        provider.registry(),
+        &provider.callback_identity(),
+    )
+    .to_string()
 }
 
 /// A write step named `step` on `x`.
 fn write_step(step: &str, x: i64) -> lash_execution_contracts::process::StepRequest {
     lash_execution_contracts::process::StepRequest::Tool {
         step: lash_execution_contracts::process::StepName(step.to_owned()),
-        effect: lash_core_execution::testing::effect_of(&write_definition()),
-        contract: write_definition().contract_id(),
+        use_: operations::use_for(&write_definition()),
         input: serde_json::json!({ "x": x }),
         site: None,
-        matched: None,
     }
 }
 
@@ -96,7 +97,7 @@ fn wall_millis() -> i64 {
 /// read by a probe node that serves `serves` and claims it once released.
 async fn claimed_requirements(
     backend: &lash::Backend,
-    process: &lash_core::ProcessId,
+    process: &lash_vocabulary::identity::ProcessId,
     serves: Vec<String>,
 ) -> Vec<String> {
     use lash_core::durable_port::{ActorKey, CommitLabel, NodeId, NodeSpec, Release};
@@ -147,7 +148,6 @@ async fn settling_one_of_two_writes_leaves_the_provider_required(tier: Tier) {
         vec![Arc::new(ScriptEngine {
             kind: TWO_WRITE_ENGINE,
             advance: two_write_engine_advance,
-            performs: writes,
         })],
         |backend| {
             lash::LashCore::standard_builder(backend.clone())
@@ -197,7 +197,10 @@ struct TypedWriteConfig {
 
 /// The typed write component's config key.
 const TYPED_WRITE_COMPONENT: lash_core::ProcessConfigKey<TypedWriteConfig> =
-    lash_core::ProcessConfigKey::new("core-node-typed-write", lash_core::FormatVersion::ONE);
+    lash_core::ProcessConfigKey::new(
+        "core-node-typed-write",
+        lash_vocabulary::providers::FormatVersion::ONE,
+    );
 
 /// A component that contributes the write tool over `world` and decodes a
 /// [`TypedWriteConfig`].
@@ -258,7 +261,6 @@ async fn a_typed_config_components_unsettled_step_is_served_after_release(tier: 
         vec![Arc::new(ScriptEngine {
             kind: TWO_WRITE_ENGINE,
             advance: two_write_engine_advance,
-            performs: writes,
         })],
         |backend| {
             lash::LashCore::standard_builder(backend.clone()).process_component(
@@ -276,10 +278,10 @@ async fn a_typed_config_components_unsettled_step_is_served_after_release(tier: 
                 label: "typed".to_owned(),
             },
         )
-        .link_tool(
+        .execution(operations::environment(
             TYPED_WRITE_COMPONENT.tool_provider(lash::tool_provider_key!("tools")),
-            &write_definition(),
-        )
+            &[write_definition()],
+        ))
         .build()
         .expect("the typed environment builds");
     let process = start_under(
@@ -297,7 +299,7 @@ async fn a_typed_config_components_unsettled_step_is_served_after_release(tier: 
     let serves = lash::testing::node_serves(&core);
     core.shutdown().await.expect("the node stops");
     let provider = TYPED_WRITE_COMPONENT.tool_provider(lash::tool_provider_key!("tools"));
-    let token = lash_core::ObligationToken::for_callback(
+    let token = lash_vocabulary::claims::ObligationToken::for_callback(
         provider.registry(),
         &provider.callback_identity(),
     )
@@ -317,20 +319,19 @@ on_every_tier!(a_typed_config_components_unsettled_step_is_served_after_release)
 async fn component_state_format_fences_old_nodes_on_sqlite_memory() {
     let world = Arc::new(World::default());
     let (stores, _keep) = stores(Tier::SqliteMemory).await;
-    let two = lash_core::FormatVersion::new(2).unwrap();
+    let two = lash_vocabulary::providers::FormatVersion::new(2).unwrap();
     let (backend, core) = node_over(
         Arc::clone(&stores),
         lash_core_execution::DurableSettings::default(),
         vec![Arc::new(ScriptEngine {
             kind: IDLE_ENGINE,
             advance: idle_engine_advance,
-            performs: writes,
         })],
         |backend| {
             lash::LashCore::standard_builder(backend.clone()).process_component(
                 Arc::new(FormatWrite {
                     world: Arc::clone(&world),
-                    native: lash_core::FormatVersion::ONE,
+                    native: lash_vocabulary::providers::FormatVersion::ONE,
                     conversions: Arc::new(AtomicUsize::new(0)),
                     seen: Arc::default(),
                 }),
@@ -364,7 +365,6 @@ async fn component_state_format_fences_old_nodes_on_sqlite_memory() {
         vec![Arc::new(ScriptEngine {
             kind: IDLE_ENGINE,
             advance: idle_engine_advance,
-            performs: writes,
         })],
         |backend| {
             lash::LashCore::standard_builder(backend.clone()).process_component(
@@ -423,8 +423,9 @@ async fn component_state_format_fences_old_nodes_on_sqlite_memory() {
     let requires = claimed_requirements(&backend, &process, serves).await;
     assert!(
         requires.contains(
-            &lash_core::ObligationToken::for_component(
-                &lash_core::ProcessComponentId::new(WRITE_COMPONENT.component()).unwrap(),
+            &lash_vocabulary::claims::ObligationToken::for_component(
+                &lash_vocabulary::providers::ProcessComponentId::new(WRITE_COMPONENT.component())
+                    .unwrap(),
                 two
             )
             .to_string()
@@ -435,7 +436,7 @@ async fn component_state_format_fences_old_nodes_on_sqlite_memory() {
 
 struct FormatWrite {
     world: Arc<World>,
-    native: lash_core::FormatVersion,
+    native: lash_vocabulary::providers::FormatVersion,
     conversions: Arc<AtomicUsize>,
     seen: Arc<Mutex<Vec<(serde_json::Value, serde_json::Value)>>>,
 }
@@ -449,7 +450,7 @@ impl lash::process::ProcessComponentFactory for FormatWrite {
         if self.native.get() == 2 {
             declaration
                 .readable_formats
-                .insert(0, lash_core::FormatVersion::ONE);
+                .insert(0, lash_vocabulary::providers::FormatVersion::ONE);
         }
         declaration
     }
@@ -465,11 +466,11 @@ impl lash::process::ProcessComponentFactory for FormatWrite {
     }
     fn migrate_format(
         &self,
-        from: lash_core::FormatVersion,
+        from: lash_vocabulary::providers::FormatVersion,
         namespace: lash::plugins::FormatNamespace,
         value: serde_json::Value,
     ) -> Result<serde_json::Value, lash::plugins::FormatRefusal> {
-        assert_eq!(from, lash_core::FormatVersion::ONE);
+        assert_eq!(from, lash_vocabulary::providers::FormatVersion::ONE);
         assert_eq!(self.native.get(), 2);
         match namespace {
             lash::plugins::FormatNamespace::State => {
@@ -553,7 +554,6 @@ async fn component_state_converts_at_a_cut_on_sqlite_memory() {
         vec![Arc::new(ScriptEngine {
             kind: IDLE_ENGINE,
             advance: idle_engine_advance,
-            performs: writes,
         })]
     };
     let build = |native| {
@@ -576,7 +576,7 @@ async fn component_state_converts_at_a_cut_on_sqlite_memory() {
         Arc::clone(&stores),
         lash_core_execution::DurableSettings::default(),
         engine(),
-        build(lash_core::FormatVersion::ONE),
+        build(lash_vocabulary::providers::FormatVersion::ONE),
     );
     let process = start_under(
         &first,
@@ -615,7 +615,7 @@ async fn component_state_converts_at_a_cut_on_sqlite_memory() {
             Arc::clone(&stores),
             lash_core_execution::DurableSettings::default(),
             engine(),
-            build(lash_core::FormatVersion::new(2).unwrap()),
+            build(lash_vocabulary::providers::FormatVersion::new(2).unwrap()),
         );
         tokio::time::timeout(Duration::from_secs(60), async {
             loop {
@@ -646,7 +646,10 @@ async fn component_state_converts_at_a_cut_on_sqlite_memory() {
     );
 }
 
-async fn wake_format_process(backend: &lash::Backend, process: &lash_core::ProcessId) {
+async fn wake_format_process(
+    backend: &lash::Backend,
+    process: &lash_vocabulary::identity::ProcessId,
+) {
     use lash_core::durable_port as durable;
     let mut tx = durable::MailTx::new();
     tx.wake(durable::ActorKey::process(process.as_str()).unwrap());

@@ -8,13 +8,13 @@ error[E0277]: the `lash::plugins::Process` registry does not install `lash::plug
    = note: the contribution table in the plugin `registries` module lists where each contribution may be installed
    = help: `lash::plugins::Process` implements trait `Admits<C>`:
              Admits<lash::plugins::registries::contribution::ConfigNamespace>
+             Admits<lash::plugins::registries::contribution::DeferredPackageProvider>
+             Admits<lash::plugins::registries::contribution::PackageProvider>
              Admits<lash::plugins::registries::contribution::PresentationPresenter>
              Admits<lash::plugins::registries::contribution::PresentationStep>
              Admits<lash::plugins::registries::contribution::PromptSection>
              Admits<lash::plugins::registries::contribution::StateReducer>
              Admits<lash::plugins::registries::contribution::ToolArgsCheck>
-             Admits<lash::plugins::registries::contribution::ToolArgsTransform>
-             Admits<lash::plugins::registries::contribution::ToolCatalog>
            and $N others
 note: required by a bound in `TurnRegistrations::<'_, T, R>::before`
   --> $WORKSPACE/crates/lash-core-execution/src/plugin/recipe.rs

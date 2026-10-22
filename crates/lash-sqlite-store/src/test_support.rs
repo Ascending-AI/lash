@@ -20,7 +20,7 @@ impl StoreTestSupport for SqliteStore {
 
     async fn corrupt_graph_row_for_testing(
         &self,
-        node_id: &lash_protocol_types::NodeId,
+        node_id: &lash_vocabulary::identity::NodeId,
         corruption: GraphRowCorruption,
     ) -> Result<(), StoreError> {
         self.windows.forget_all();
@@ -40,7 +40,7 @@ impl StoreTestSupport for SqliteStore {
                         sql.set_parent_for_testing.sql(),
                         params![
                             node_id.as_str(),
-                            parent.as_ref().map(lash_protocol_types::NodeId::as_str)
+                            parent.as_ref().map(lash_vocabulary::identity::NodeId::as_str)
                         ],
                     )?,
                     GraphRowCorruption::SetFramePointer(frame) => crate::conn::cached_execute(
@@ -107,7 +107,7 @@ impl StoreTestSupport for SqliteStore {
     async fn force_fork_lineage_for_testing(
         &self,
         session_id: &SessionId,
-        ancestor_node_id: &lash_protocol_types::NodeId,
+        ancestor_node_id: &lash_vocabulary::identity::NodeId,
     ) -> Result<(), StoreError> {
         self.windows.forget_all();
         let session_id = session_id.clone();

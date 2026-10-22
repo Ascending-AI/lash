@@ -12,6 +12,7 @@
 mod served;
 
 use lash_protocol_types::{llm::types::StreamBlockEvent, llm::types::StreamBlockKind};
+
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
@@ -188,8 +189,8 @@ async fn standard_runtime_text_part_reconciles_without_streaming_duplicate(tier:
 struct UndeclaredFinish;
 
 impl UndeclaredFinish {
-    fn definition() -> lash_core::ToolDefinition {
-        lash_core::ToolDefinition::raw(
+    fn definition() -> lash_vocabulary::tool_contract::ToolDefinition {
+        lash_vocabulary::tool_contract::ToolDefinition::raw(
             "tool:smuggle_finish",
             "tools.smuggle_finish",
             "Answers with a turn control it does not declare.",
@@ -207,7 +208,7 @@ impl lash_core::ToolProvider for UndeclaredFinish {
         &self,
         _config: &lash_core::OwnerConfigView,
     ) -> std::result::Result<
-        Vec<lash_core::ToolManifest>,
+        Vec<lash_vocabulary::tool_contract::ToolManifest>,
         lash_execution_contracts::plugin_error::PluginError,
     > {
         Ok(vec![Self::definition().manifest()])
@@ -217,7 +218,7 @@ impl lash_core::ToolProvider for UndeclaredFinish {
         &self,
         name: &str,
         _config: &lash_core::OwnerConfigView,
-    ) -> Option<Arc<lash_core::ToolContract>> {
+    ) -> Option<Arc<lash_vocabulary::tool_contract::ToolContract>> {
         (name == "tools.smuggle_finish").then(|| Arc::new(Self::definition().contract()))
     }
 
@@ -263,8 +264,8 @@ async fn a_tool_answering_an_undeclared_control_is_refused_and_the_turn_goes_on(
                 if matches!(
                     failure.cause.as_deref(),
                     Some(lash_core::ToolFailureCause::Declaration {
-                        refusal: lash_core::DeclarationRefusal::UndeclaredControl {
-                            control: lash_core::TurnControlKind::Finish,
+                        refusal: lash_vocabulary::tool_declaration::DeclarationRefusal::UndeclaredControl {
+                            control: lash_vocabulary::tool_declaration::TurnControlKind::Finish,
                         },
                     })
                 )
@@ -726,12 +727,12 @@ struct AttachmentResultTool {
     label: &'static str,
 }
 
-fn attachment_result_tool_definition() -> lash_core::ToolDefinition {
-    lash_core::ToolDefinition::raw(
+fn attachment_result_tool_definition() -> lash_vocabulary::tool_contract::ToolDefinition {
+    lash_vocabulary::tool_contract::ToolDefinition::raw(
         "tool:attachment_result",
         "tools.attachment_result",
         "Return one stored attachment.",
-        lash_core::ToolDefinition::default_input_schema(),
+        lash_vocabulary::tool_contract::ToolDefinition::default_input_schema(),
         serde_json::json!({ "type": "object", "additionalProperties": true }),
     )
     .expect("valid declared tool schemas")
@@ -744,7 +745,7 @@ impl lash_core::ToolProvider for AttachmentResultTool {
         &self,
         _config: &lash_core::OwnerConfigView,
     ) -> std::result::Result<
-        Vec<lash_core::ToolManifest>,
+        Vec<lash_vocabulary::tool_contract::ToolManifest>,
         lash_execution_contracts::plugin_error::PluginError,
     > {
         Ok(vec![attachment_result_tool_definition().manifest()])
@@ -754,7 +755,7 @@ impl lash_core::ToolProvider for AttachmentResultTool {
         &self,
         name: &str,
         _config: &lash_core::OwnerConfigView,
-    ) -> Option<Arc<lash_core::ToolContract>> {
+    ) -> Option<Arc<lash_vocabulary::tool_contract::ToolContract>> {
         (name == "tools.attachment_result")
             .then(|| Arc::new(attachment_result_tool_definition().contract()))
     }
@@ -903,10 +904,12 @@ fn attachment_spec() -> lash::SessionSpec {
     use lash_protocol_types::{
         llm::attachment_delivery::AttachmentPosition, llm::attachment_delivery::DeliveryForms,
     };
+
     use lash_protocol_types::{
         llm::capability::AttachmentAcceptanceRule, llm::capability::AttachmentAcceptor,
         llm::capability::AttachmentCapabilitySnapshot,
     };
+
     served::spec(8).attachment_acceptance(Arc::new(AttachmentCapabilitySnapshot {
         revision: "standard-turn-outcomes".to_owned(),
         acceptors: vec![AttachmentAcceptor {
@@ -1044,7 +1047,7 @@ async fn pdf_session_after_model_switch(check_first: bool, omission: Option<&'st
         ))
         .unwrap();
     let session = core
-        .session(lash::SessionId::try_from("pdf-session".to_owned()).unwrap())
+        .session(lash_vocabulary::identity::SessionId::try_from("pdf-session".to_owned()).unwrap())
         .create(lash::SessionCreation::root(attachment_spec()))
         .await
         .unwrap();
@@ -1204,12 +1207,12 @@ async fn accepted_tool_attachment_round_trips_without_degradation(tier: Tier) {
 /// embeds an attachment between two text fragments.
 struct ArrayAttachmentTool;
 
-fn array_attachment_tool_definition() -> lash_core::ToolDefinition {
-    lash_core::ToolDefinition::raw(
+fn array_attachment_tool_definition() -> lash_vocabulary::tool_contract::ToolDefinition {
+    lash_vocabulary::tool_contract::ToolDefinition::raw(
         "tool:array_attachment",
         "tools.array_attachment",
         "Return an array embedding one stored image.",
-        lash_core::ToolDefinition::default_input_schema(),
+        lash_vocabulary::tool_contract::ToolDefinition::default_input_schema(),
         serde_json::json!({ "type": "array" }),
     )
     .expect("valid declared tool schemas")
@@ -1222,7 +1225,7 @@ impl lash_core::ToolProvider for ArrayAttachmentTool {
         &self,
         _config: &lash_core::OwnerConfigView,
     ) -> std::result::Result<
-        Vec<lash_core::ToolManifest>,
+        Vec<lash_vocabulary::tool_contract::ToolManifest>,
         lash_execution_contracts::plugin_error::PluginError,
     > {
         Ok(vec![array_attachment_tool_definition().manifest()])
@@ -1232,7 +1235,7 @@ impl lash_core::ToolProvider for ArrayAttachmentTool {
         &self,
         name: &str,
         _config: &lash_core::OwnerConfigView,
-    ) -> Option<Arc<lash_core::ToolContract>> {
+    ) -> Option<Arc<lash_vocabulary::tool_contract::ToolContract>> {
         (name == "tools.array_attachment")
             .then(|| Arc::new(array_attachment_tool_definition().contract()))
     }
@@ -1460,7 +1463,7 @@ async fn an_immediate_cancel_before_an_accepted_finish_commits_publishes_no_fini
                                 .await
                                 .expect("the session's durable handle")
                                 .cancel(lash::CancelTarget::Run(
-                                    lash::RunId::parse(RUN).expect("a run id"),
+                                    lash_vocabulary::identity::RunId::parse(RUN).expect("a run id"),
                                 ))
                                 .mode(lash_core::TurnCancelMode::Immediate)
                                 .reason("the host stopped the finishing turn")
@@ -1514,7 +1517,7 @@ async fn an_immediate_cancel_before_an_accepted_finish_commits_publishes_no_fini
         served::WATCHDOG,
         session
             .send(lash::TurnInput::text("finish, then be cancelled"))
-            .id(lash::TurnId::parse(RUN).expect("a run id"))
+            .id(lash_vocabulary::identity::TurnId::parse(RUN).expect("a run id"))
             .output(),
     )
     .await

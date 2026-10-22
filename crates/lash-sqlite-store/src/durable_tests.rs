@@ -57,8 +57,8 @@ async fn single_statement_durable_reads_use_their_implicit_snapshots() {
 
     let set = SqliteStoreSet::memory().await.unwrap();
     let store = set.durable_store();
-    let session = lash_protocol_types::SessionId::fixture("metadata-read-work");
-    let run = lash_protocol_types::TurnId::fixture("metadata-read-run");
+    let session = lash_vocabulary::identity::SessionId::fixture("metadata-read-work");
+    let run = lash_vocabulary::identity::TurnId::fixture("metadata-read-run");
     let exec = ExecKey::Cell(
         session.clone(),
         run.clone(),
@@ -373,16 +373,7 @@ law!(
     a_node_claims_only_actors_whose_hard_requirements_it_meets,
     |store, _advance| { laws::a_node_claims_only_actors_whose_hard_requirements_it_meets(store) }
 );
-law!(
-    a_store_keeps_each_sets_first_surface_and_indexes_its_definitions,
-    |store, _advance| {
-        laws::a_store_keeps_each_sets_first_surface_and_indexes_its_definitions(store)
-    }
-);
-law!(
-    a_store_keeps_artifacts_and_sets_by_digest,
-    |store, _advance| { laws::a_store_keeps_artifacts_and_sets_by_digest(store) }
-);
+
 law!(
     a_newer_format_is_not_written_while_an_older_node_is_live,
     |store, _advance| { laws::a_newer_format_is_not_written_while_an_older_node_is_live(store) }
@@ -484,7 +475,7 @@ async fn a_lost_fence_in_a_write_batch_refuses_only_its_own_commit() {
     // but the actor fence still refuses first when this attempt is stale.
     stale.write(lash_durable::domain::DomainWrite::SessionCommit(
         lash_durable::domain::SessionCommitWrite {
-            session: lash_protocol_types::SessionId::parse("batch-lost").unwrap(),
+            session: lash_vocabulary::identity::SessionId::parse("batch-lost").unwrap(),
             expected_head: 0,
             commit_json: "malformed session commit".to_owned(),
             execution: None,
@@ -619,7 +610,7 @@ async fn sequential_calls_submit_only_new_fragments_across_settlement() {
 
     let (_root, set, _clock) = world(false).await;
     let store = set.durable_store();
-    let session = lash_protocol_types::SessionId::from("fragment-session");
+    let session = lash_vocabulary::identity::SessionId::from("fragment-session");
     let actor = ActorKey::session(session.as_str()).unwrap();
     let formats = FormatSet::new("fragment-index-formats");
     let mut create = MailTx::new();
@@ -681,7 +672,7 @@ async fn sequential_calls_submit_only_new_fragments_across_settlement() {
         let call = PromptCallKey {
             session: session.clone(),
             call: ModelCallId::Turn {
-                run: lash_protocol_types::TurnId::parse(format!("fragment-turn-{ordinal}"))
+                run: lash_vocabulary::identity::TurnId::parse(format!("fragment-turn-{ordinal}"))
                     .unwrap(),
                 ordinal: 1,
             },
@@ -827,7 +818,7 @@ async fn sequential_calls_submit_only_new_fragments_across_settlement() {
     let call = PromptCallKey {
         session: session.clone(),
         call: ModelCallId::Turn {
-            run: lash_protocol_types::TurnId::from("fragment-delete"),
+            run: lash_vocabulary::identity::TurnId::from("fragment-delete"),
             ordinal: 1,
         },
     };
@@ -874,7 +865,7 @@ async fn prompt_reclamation_reads_one_edge_batch_per_level() {
     let store = set.durable_store();
     let identity = lash_core_execution::testing::sql_work::owner_commit(&set).await;
     let actor = ActorKey::session("sql-work-owner").unwrap();
-    let session = lash_protocol_types::SessionId::from("sql-work-owner");
+    let session = lash_vocabulary::identity::SessionId::from("sql-work-owner");
     let mut texts: Vec<_> = (0..16)
         .map(|leaf| PromptText {
             hash: BlobRef::for_content(format!("leaf-{leaf}").as_bytes()).0,
@@ -914,7 +905,7 @@ async fn prompt_reclamation_reads_one_edge_batch_per_level() {
     let call = |run: &'static str| PromptCallKey {
         session: session.clone(),
         call: ModelCallId::Turn {
-            run: lash_protocol_types::TurnId::from(run),
+            run: lash_vocabulary::identity::TurnId::from(run),
             ordinal: 1,
         },
     };
@@ -944,7 +935,7 @@ async fn prompt_reclamation_reads_one_edge_batch_per_level() {
             .unwrap();
         tx.write(DomainWrite::Prompt(PromptWrite::Release {
             session: session.clone(),
-            run: Some(lash_protocol_types::TurnId::from(run)),
+            run: Some(lash_vocabulary::identity::TurnId::from(run)),
         }));
         let (answer, receipt) = lash_core_ids::operational_metrics::sql::collect(
             "prompt.release",
@@ -1020,9 +1011,9 @@ async fn prompt_text_reads_are_batched_in_request_order() {
     let mut tx = store.begin(&actor, Epoch(identity.epoch)).await.unwrap();
     tx.write(DomainWrite::Prompt(PromptWrite::Record {
         call: PromptCallKey {
-            session: lash_protocol_types::SessionId::from("sql-work-owner"),
+            session: lash_vocabulary::identity::SessionId::from("sql-work-owner"),
             call: ModelCallId::Turn {
-                run: lash_protocol_types::TurnId::from("batch-read"),
+                run: lash_vocabulary::identity::TurnId::from("batch-read"),
                 ordinal: 1,
             },
         },
@@ -1104,7 +1095,7 @@ mod lo_idle_writer_orders_direct_mutation_and_claim {
     use lash_core_store::session_state::RuntimeSessionState;
     use lash_core_store::store::{RuntimeCommit, SessionCatalogStore, SessionCommitStore};
     use lash_durable::{ActorKey, DurableStore, FormatSet, MailTx, NodeId, NodeSpec};
-    use lash_protocol_types::SessionId;
+    use lash_vocabulary::identity::SessionId;
 
     async fn run(file: bool) {
         let (_root, set, _clock) = world(file).await;
@@ -1243,7 +1234,7 @@ mod lo_idle_writer_orders_direct_mutation_and_claim {
         let mut spoofed = fresh.clone();
         spoofed.turn_commit.operation = lash_core_store::store::OperationId::turn(
             &session,
-            lash_protocol_types::TurnId::fixture("spoofed-owner"),
+            lash_vocabulary::identity::TurnId::fixture("spoofed-owner"),
             "commit",
         );
         assert!(spoofed.is_sessions_own_head_write());
@@ -1428,7 +1419,7 @@ mod lo_idle_writer_keeps_close_and_redrive_under_authority {
         ActorKey, CommitLabel, DurableReads, DurableStore, FormatSet, MailTx, NodeId, NodeSpec,
         Release,
     };
-    use lash_protocol_types::SessionId;
+    use lash_vocabulary::identity::SessionId;
 
     async fn run(file: bool) {
         let (_root, set, _clock) = world(file).await;
@@ -1686,3 +1677,38 @@ law!(
     lo_fence_preserves_a_composed_drafts_basis,
     |store, _advance| { laws::lo_fence_preserves_a_composed_drafts_basis(store) }
 );
+
+law!(
+    a_resolution_winner_and_its_claim_debt_commit_atomically,
+    |store, _advance| {
+        laws::a_resolution_winner_and_its_claim_debt_commit_atomically(store, store)
+    }
+);
+
+/// L-PIN exercises the production module-artifact retention adapter on SQLite.
+#[tokio::test]
+async fn a_publication_retains_its_complete_content_dag() {
+    use lash_core_store::artifact_referrer::{ArtifactReferrer, HostArtifactPin, ReferrerClaim};
+    use lash_execution_contracts::module_artifacts::ModuleArtifactStore;
+    let set = SqliteStoreSet::memory().await.expect("memory store");
+    let store = set.open_store().await.expect("module store");
+    let document = lash_vocabulary::names::DocumentId::from_bytes([72; 32]);
+    let claim = ReferrerClaim::unguarded(ArtifactReferrer::HostPin(HostArtifactPin::mint()))
+        .expect("configured root");
+    store
+        .publish_module_artifact(
+            &claim,
+            &document.to_string(),
+            b"document with embedded function bodies",
+        )
+        .await
+        .expect("document");
+    laws::a_publication_retains_its_complete_content_dag(
+        store.as_ref(),
+        store.as_ref(),
+        document,
+        claim,
+    )
+    .await
+    .expect("L-PIN");
+}

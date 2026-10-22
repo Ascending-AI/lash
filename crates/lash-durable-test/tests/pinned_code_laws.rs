@@ -2,13 +2,11 @@
 //! a node resumes, starts and replays work without the package
 //! registrations that built it.
 //!
-//! Two builds share one SQLite store. Build A holds release 1 of the host
-//! package `slow`, whose helper `slow.wait` sleeps twice and answers its
-//! argument and 1; build B holds release 2 of the same line, whose helper
-//! answers its argument and 2, and none of release 1's registrations.
-//! Both builds install their packages and serve: B claims A's work
-//! because B's capabilities meet the work's hard requirements, whatever
-//! set A linked it under (FIG-6993).
+//! Two builds share one SQLite store. Build A publishes the host package
+//! `slow`, whose helper sleeps twice and answers its argument and 1. Build B
+//! publishes different code under that same path, answering its argument and
+//! 2. B claims A's work because B meets its recorded capability requirements
+//! (FIG-6993); execution keeps the Link A retained.
 //!
 //! - A process A started performs `slow.wait`'s first sleep, whose result
 //!   A commits and delivers, and parks on its second; A stops; B resumes
@@ -26,118 +24,209 @@ mod sim;
 
 use std::sync::Arc;
 
-use lash::package::{HeldPackages, Package, PackageSet, PackageSources};
+use lash::package::*;
+use lash_core::plugin::packages::PublishPackage;
+#[path = "support/kernel_namespace.rs"]
+mod kernel_namespace;
 use lash_durable::{ActorKey, ActorState, DurableStore};
 use lash_durable_test::{Matrix, Script, SimClock, SimNodes, SimNodesConfig, Tripwire};
 use lash_execution_contracts::backend::StoreSet;
-use lash_kernel_doc::FunctionId;
 
 /// How many virtual-time steps a law takes before it gives up.
 const STEPS: usize = 200;
 
-/// Release `release` of `slow`: its helper sleeps twice, then answers its
-/// argument and `step`.
-fn slow(release: &str, step: i64) -> Package {
-    Package::build(
-        "slow",
-        release,
-        &PackageSources {
-            kernel: &format!(
-                "function slow.wait(n: Int) -> Any\nkernel 1\ncharge 3\nbody {{\n  do sleep 1000\n  do sleep 1000\n  return [n, {step}]\n}}\n"
-            ),
-            surface: "async function wait(n: Int) -> Any = slow.wait\n",
-            labels: r#"{"members": {"wait": "wait"}}"#,
-        },
-        &[],
-    )
-    .expect("slow builds")
+/// Each build authors its own code; the stored Link, not its package path,
+/// selects the helper used by an already-published process.
+fn slow(step: i64) -> lash_kernel_doc::Document {
+    let definition = lash_kernel_doc::parse_definition(&format!(
+        "function slow.wait(n: Int) -> Json\nkernel 1\nmetering statements\nimport 0 operation typescript.sleep(milliseconds: Int) -> Null\nbody {{ do perform 0(1000) as Null do perform 0(1000) as Null return [n, {step}] }}"
+    )).unwrap();
+    let mut document = lash_kernel_doc::parse_document(
+        "kernel 1\nnumbers float\nimport 0 operation typescript.sleep(milliseconds: Int) -> Null\nmain { finish null }"
+    ).unwrap();
+    document.main = None;
+    document.exports.insert(
+        Name::new("wait"),
+        lash_kernel_doc::Export::Function(lash_kernel_doc::FunctionExport {
+            function: definition.identity(),
+            signature: definition.signature.clone(),
+            convention: lash_kernel_doc::StartConvention::Direct,
+            asynchronous: false,
+            rest: false,
+        }),
+    );
+    document.functions.insert(definition.identity(), definition);
+    document
 }
 
-/// lash's own packages with `slow`, as the node's own set.
-fn held(slow: Package) -> Arc<HeldPackages> {
-    let shipped = lash_vm_runtime::lash_packages().expect("shipped packages");
-    let slow = Arc::new(slow);
-    let set = PackageSet::new(
-        shipped
-            .artifacts()
-            .values()
-            .map(AsRef::as_ref)
-            .chain([slow.as_ref()]),
-    )
-    .expect("a closed set");
-    Arc::new(
-        HeldPackages::new(shipped.artifacts().values().cloned().chain([slow]), set)
-            .expect("the node's packages"),
-    )
-}
+const SERVICES: lash::process::ProcessConfigKey<()> =
+    lash::process::ProcessConfigKey::new("pinned-code-services", lash::plugins::FormatVersion::ONE);
 
-/// A process document whose entry calls `wait`, release 1's helper.
-fn document(wait: FunctionId) -> lash_kernel_doc::Document {
-    lash::workflow::document::parse_document(&format!(
-        "kernel 1\nnumbers float\nuse slow.wait = @{wait}\nentry worker() -> Any\nfn worker() {{\n  let v = invoke slow.wait(5)\n  return v\n}}\nmain {{\n  finish null\n}}\n"
-    ))
-    .expect("the document parses")
+fn services() -> lash::process::StaticProcessComponent {
+    let provider = lash_vm_runtime::dialect_services::Services::new(
+        lash_vm_runtime::dialect_services::Dialect::TypeScript,
+        SERVICES.tool_provider(lash::tool_provider_key!("timer")),
+        std::time::Duration::from_secs(30),
+        Arc::new(|| 0),
+    )
+    .unwrap();
+    lash::plugins::StaticPluginFactory::new(
+        lash::plugins::PluginDeclaration::initial(SERVICES.component()),
+        lash::plugins::PluginSpec::new()
+            .with_tool_provider_registration(
+                lash::tool_provider_key!("timer"),
+                provider.registration(),
+            )
+            .with_package_provider(lash::tool_provider_key!("timer"), provider),
+    )
+    .as_component(SERVICES.format())
+    .unwrap()
 }
 
 /// One build's core over the shared store set.
-fn core(
-    stores: &Arc<dyn StoreSet>,
-    clock: &Arc<SimClock>,
-    packages: &Arc<HeldPackages>,
-    name: &str,
-) -> lash::LashCore {
+fn core(stores: &Arc<dyn StoreSet>, clock: &Arc<SimClock>, name: &str) -> lash::LashCore {
     let backend = served::configured_backend(Arc::clone(stores), sim::settings(), Vec::new());
-    lash::LashCore::rlm_builder(
-        backend.clone(),
-        served::rlm(&backend, sim::workers(clock)).with_packages(Arc::clone(packages)),
-    )
-    .serve_sessions(false)
-    .commit_budget(lash::CommitBudget::bounded(16 * 1024 * 1024, 4096))
-    .data_retention(lash::DataRetention::standard())
-    .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
-    .execution_budgets(lash::ExecutionBudgets::recommended())
-    .delta_coalescing(lash::DeltaCoalescing::recommended())
-    .build(lash::persistence::LeaseOwnerIdentity::opaque(
-        lash::persistence::LeaseOwnerId::new(format!("pinned-code-{name}")),
-        lash::persistence::LeaseIncarnationId::new(format!("pinned-code-{name}-boot")),
-    ))
-    .expect("the core builds")
+    let workers = sim::workers(clock);
+    let bounds = workers.config().run_bounds;
+    lash::LashCore::standard_builder(backend)
+        .plugin(Arc::new(lash::vm::KernelProcessPluginFactory::new(
+            workers,
+            "typescript",
+            bounds,
+        )))
+        .process_component(Arc::new(services()), SERVICES)
+        .serve_sessions(false)
+        .commit_budget(lash::CommitBudget::bounded(16 * 1024 * 1024, 4096))
+        .data_retention(lash::DataRetention::standard())
+        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
+        .execution_budgets(lash::ExecutionBudgets::recommended())
+        .delta_coalescing(lash::DeltaCoalescing::recommended())
+        .build(lash::persistence::LeaseOwnerIdentity::opaque(
+            lash::persistence::LeaseOwnerId::new(format!("pinned-code-{name}")),
+            lash::persistence::LeaseIncarnationId::new(format!("pinned-code-{name}-boot")),
+        ))
+        .expect("the core builds")
 }
 
-/// Publishes `document` under a host pin, with its declarations as
-/// `packages` holds them, and starts its entry `worker` on `core`.
-async fn start(
+/// Publish an explicit code Package, link the worker against that exact
+/// advertisement and retain its resulting execution environment.
+async fn publication(
     core: &lash::LashCore,
-    packages: &HeldPackages,
-    document: &lash_kernel_doc::Document,
-) -> lash_core::ProcessId {
-    let identity = lash_vm_runtime::KernelDocuments::new(core.backend().module_artifacts())
-        .publish(
-            &lash_core::ReferrerClaim::unguarded(lash_core::ArtifactReferrer::HostPin(
-                lash_core::HostArtifactPin::mint(),
-            ))
-            .expect("a host pin is unguarded"),
-            &lash_kernel_doc::IdentifiedDocument::new(document.clone()),
-            &lash::workflow::document::CheckedDeclarations::required(
-                document,
-                packages.functions().as_ref(),
-            )
-            .expect("the writer holds the document's helpers"),
+    helper: &lash_kernel_doc::Document,
+) -> (serde_json::Value, lash::process::ProcessEnv) {
+    let artifacts = core.host_artifacts();
+    let pin = lash_core::HostArtifactPin::mint();
+    let env = lash::process::ProcessEnv::builder(lash::MaxToolCalls::new(4))
+        .component(SERVICES, &())
+        .build()
+        .unwrap();
+    let (mut packages, mut environment) = kernel_namespace::namespace(core, &pin, &env).await;
+    let helper_start = artifacts
+        .publish_workflow(
+            &pin,
+            &helper.clone().into(),
+            &StartSelector::Export(Name::new("wait")),
+            &environment,
+            None,
         )
         .await
-        .expect("the document publishes");
+        .unwrap();
+    let package = Package {
+        path: PackagePath::parse("slow").unwrap(),
+        members: [(
+            Segment::new("wait").unwrap(),
+            Member {
+                visibility: Visibility::Public,
+                kind: MemberKind::Export {
+                    link: helper_start.link,
+                    export: ExportName {
+                        name: Name::new("wait"),
+                        member: None,
+                    },
+                },
+            },
+        )]
+        .into(),
+    };
+    let context = PublicationContext {
+        root: Segment::new("slow").unwrap(),
+        ..environment.context.clone()
+    };
+    let publisher = artifacts
+        .package_publisher(context.clone(), environment.snapshot.clone())
+        .unwrap();
+    let claim =
+        lash_core::ReferrerClaim::unguarded(lash_core::ArtifactReferrer::HostPin(pin.clone()))
+            .unwrap();
+    let documents = lash_vm_runtime::KernelDocuments::new(
+        core.backend().module_artifacts(),
+        core.backend().package_store(),
+    );
+    use lash_execution_contracts::process::linking::{ContentRef, Fulfilled, ReachSelector};
+    let link = documents
+        .load(&ContentRef::Link(helper_start.link))
+        .await
+        .unwrap()
+        .material
+        .downcast::<Link>()
+        .unwrap();
+    let inspection = documents
+        .inspect_link(helper_start.link, &ReachSelector::AllExports)
+        .await
+        .unwrap();
+    let publication = publisher
+        .publish(
+            &claim,
+            &context,
+            PublishPackage {
+                package: package.clone(),
+                code: vec![Fulfilled {
+                    content: link,
+                    inspection,
+                }],
+            },
+        )
+        .await
+        .unwrap();
+    packages
+        .snapshot
+        .advertisements
+        .push(AcceptedAdvertisement {
+            publication,
+            advertisement: PackageAdvertisement::Enumerated(package.clone()),
+        });
+    environment.snapshot = packages.snapshot.clone();
+    environment.attachment.packages.insert(package.path);
+    let document = lash_kernel_doc::parse_document(
+        "kernel 1\nnumbers float\nimport 0 code slow.wait(n: Int) -> Json direct\nmain { let v = invoke import 0(5) return v }"
+    ).unwrap();
+    let start = artifacts
+        .publish_workflow(
+            &pin,
+            &document.into(),
+            &StartSelector::Main,
+            &environment,
+            None,
+        )
+        .await
+        .unwrap();
+    let env = artifacts
+        .link_process_env(&env, &start, &packages, &Default::default())
+        .await
+        .unwrap();
     let payload = serde_json::to_value(lash_vm_runtime::KernelProcessInput {
-        declared_packages: packages.surface().selection(),
-        document: identity,
-        functions: document.manifest.functions.keys().copied().collect(),
-        entry: lash::workflow::document::Name::new("worker"),
-        packages: packages.digest(),
-        args: serde_json::Map::new(),
+        code: lash_vm_runtime::process::InlineRequest::Linked { start },
+        args: Default::default(),
     })
-    .expect("the input encodes");
-    let env = lash::process::ProcessEnv::builder(lash::MaxToolCalls::new(4))
-        .build()
-        .expect("the env builds");
+    .unwrap();
+    (payload, env)
+}
+
+async fn start(
+    core: &lash::LashCore,
+    helper: &lash_kernel_doc::Document,
+) -> lash_vocabulary::identity::ProcessId {
+    let (payload, env) = publication(core, helper).await;
     let env_ref = core
         .host_artifacts()
         .publish_process_env(&lash_core::HostArtifactPin::mint(), &env)
@@ -164,12 +253,15 @@ async fn start(
         .process_id
 }
 
-fn actor(process: &lash_core::ProcessId) -> ActorKey {
+fn actor(process: &lash_vocabulary::identity::ProcessId) -> ActorKey {
     ActorKey::process(process.as_str()).expect("a process actor key")
 }
 
 /// `process`'s terminal output, encoded, once it has one.
-async fn terminal(core: &lash::LashCore, process: &lash_core::ProcessId) -> Option<String> {
+async fn terminal(
+    core: &lash::LashCore,
+    process: &lash_vocabulary::identity::ProcessId,
+) -> Option<String> {
     core.backend()
         .process_registry()
         .get_process(process)
@@ -211,17 +303,13 @@ async fn a_build_without_the_writers_registrations_resumes_and_starts_its_pinned
     let stores = sim::memory(Arc::clone(&clock)).await;
     let database: Arc<dyn DurableStore> = Arc::new(stores.durable_store());
     let stores: Arc<dyn StoreSet> = Arc::new(stores);
-    let (r1, r2) = (slow("1.0.0", 1), slow("2.0.0", 2));
-    let wait = r1.function("slow.wait").expect("release 1's helper");
-    let (a, b) = (held(r1), held(r2));
+    let (a, b) = (slow(1), slow(2));
     assert!(
-        b.functions().get(&wait).is_none(),
-        "build B holds none of release 1's helper"
+        a.functions.keys().all(|id| !b.functions.contains_key(id)),
+        "build B authors none of release 1's helper"
     );
-    let (core_a, core_b) = (
-        core(&stores, &clock, &a, "a"),
-        core(&stores, &clock, &b, "b"),
-    );
+    let (core_a, core_b) = (core(&stores, &clock, "a"), core(&stores, &clock, "b"));
+    let _new_build_publication = publication(&core_b, &b).await;
     let activation = |core: &lash::LashCore| {
         lash::testing::node_activation(core, Arc::new(Tripwire::default()))
             .expect("the core's node activation")
@@ -243,11 +331,10 @@ async fn a_build_without_the_writers_registrations_resumes_and_starts_its_pinned
     nodes.decode_on("b", backend_b.formats().decodes());
     nodes.activate_on("b", activation_b);
     nodes.serve_on("b", lash::testing::node_serves(&core_b));
-    let document = document(wait);
 
     // A runs the process into release 1's helper, past its first sleep,
     // whose result A commits and delivers, to its second.
-    let parked = start(&core_a, &a, &document).await;
+    let parked = start(&core_a, &a).await;
     nodes.start("a");
     let due = || async {
         match nodes.database().actor(&actor(&parked)).await {
@@ -275,7 +362,7 @@ async fn a_build_without_the_writers_registrations_resumes_and_starts_its_pinned
 
     // A process published and started under release 1 that no node of A
     // runs.
-    let unstarted = start(&core_a, &a, &document).await;
+    let unstarted = start(&core_a, &a).await;
 
     nodes.start("b");
     for process in [&parked, &unstarted] {

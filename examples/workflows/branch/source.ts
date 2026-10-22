@@ -1,5 +1,5 @@
 /** Answer yes or no */
-export async function demo(flag: boolean) {
+export async function demo(flag: boolean): Promise<string> {
   /** Check whether the answer is yes */
   if (flag) {
     /** Send back a yes */

@@ -1,6 +1,9 @@
 //! Statements, and the statement runs the front end lowers one read to.
 
-use lash_kernel_doc::{self as k, Name, Site};
+use lash_kernel_doc::{self as k};
+
+use lash_vocabulary::Name;
+use lash_vocabulary::sites::Site;
 
 use super::lift::{Lift, Lifter, refuse};
 use super::source::{self, Arm, Body, Expr, StmtKind};
@@ -33,6 +36,19 @@ impl Lifter<'_> {
                 value,
                 order: k::AssignOrder::ValueFirst,
             } => self.assign(place, value)?,
+            // A discarded dynamic member write is the exact ts.set import
+            // call; retain the source's place-before-value evaluation order.
+            k::Stmt::Do {
+                value: k::Expr::Act(action),
+            } if matches!(&action.kind, k::ActKind::Call(k::Callee::Import(slot))
+                    if self.helper_import(slot, "ts.set"))
+                && action.args.len() == 3 =>
+            {
+                let target = self.expr(&action.args[0])?;
+                let index = self.expr(&action.args[1])?;
+                let value = self.expr(&action.args[2])?;
+                StmtKind::Assign(Expr::Index(Box::new(target), Box::new(index)), "=", value)
+            }
             k::Stmt::Do { value } => StmtKind::Expr(self.expr(value)?),
             k::Stmt::If {
                 condition,
@@ -154,15 +170,19 @@ impl Lifter<'_> {
         self.is(&via.open, "ts.for_of.open")
             && via
                 .next
-                .is_some_and(|next| self.is(&next, "ts.for_of.next"))
+                .as_ref()
+                .is_some_and(|next| self.is(next, "ts.for_of.next"))
             && via
                 .item
-                .is_some_and(|item| self.is(&item, "ts.for_of.item"))
+                .as_ref()
+                .is_some_and(|item| self.is(item, "ts.for_of.item"))
             && via.check.is_none()
     }
 
     pub(super) fn binding(&self, name: &Name) -> Lift<String> {
-        if source::identifier(name.as_str()) {
+        if let Some(original) = self.bindings.get(name) {
+            Ok(original.clone())
+        } else if source::identifier(name.as_str()) {
             Ok(name.as_str().to_owned())
         } else {
             refuse("a name TypeScript cannot spell")
@@ -290,7 +310,7 @@ impl Lifter<'_> {
     fn helper_read<'e>(&self, value: &'e k::Rhs, helper: &str) -> Option<&'e [k::Atom]> {
         match value {
             k::Rhs::Action(k::Action::Call {
-                callee: k::Callee::Library(id),
+                callee: k::Callee::Import(id),
                 args,
             }) if self.is(id, helper) => Some(args),
             _ => None,
@@ -465,7 +485,7 @@ impl Lifter<'_> {
         let helper = [atom_of(target), atom_of(index)];
         let computed = |value: Option<&k::Rhs>| {
             value
-                .and_then(|value| self.helper_read(value, "ts.get_computed"))
+                .and_then(|value| self.helper_read(value, "ts.get_numeric"))
                 .is_some_and(|args| helper.iter().map(Option::as_ref).eq(args.iter().map(Some)))
         };
         if !computed(Self::sets(out_of_bounds, name))
@@ -530,26 +550,17 @@ pub(super) fn act_of(action: &k::Action) -> k::ActExpr {
             args: atoms(args),
         },
         k::Action::Perform {
-            effect,
+            slot,
             args,
             result,
             then_yield,
         } => k::ActExpr {
             kind: k::ActKind::Perform {
-                effect: effect.clone(),
+                slot: *slot,
                 result: result.clone(),
                 then_yield: *then_yield,
             },
             args: atoms(args),
-        },
-        k::Action::Sleep {
-            duration,
-            then_yield,
-        } => k::ActExpr {
-            kind: k::ActKind::Sleep {
-                then_yield: *then_yield,
-            },
-            args: vec![expr_of(duration)],
         },
         k::Action::Join { task } => k::ActExpr {
             kind: k::ActKind::Join,
@@ -572,7 +583,7 @@ pub(super) fn act_of(action: &k::Action) -> k::ActExpr {
             args: vec![expr_of(task)],
         },
         k::Action::Await { policy, value } => k::ActExpr {
-            kind: k::ActKind::Await(*policy),
+            kind: k::ActKind::Await(policy.clone()),
             args: vec![expr_of(value)],
         },
     }

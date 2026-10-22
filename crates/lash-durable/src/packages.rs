@@ -1,123 +1,16 @@
-//! Package artifacts and sets as the store keeps them, and what each live
-//! node offers running code (FIG-6918, S1-F2, FIG-6993).
-//!
-//! An artifact is one build of a package, keyed by its digest, which its
-//! path is among the facts of; the store assigns it an ordinal on its
-//! package line when it is first installed, for listings. A set is one
-//! dependency-closed artifact per line, keyed by its digest, holding its
-//! members, the store's install sequence (the only key behind "newest
-//! first"), its surface snapshot and the execution requirements its code
-//! derives (FIG-6991). Both are immutable: the install that first writes a
-//! set writes them, and nothing deletes them. A node advertises its
-//! capabilities for as long as it is live; an actor's claim requirements
-//! name the natives, kernels, providers and codecs its outstanding work
-//! needs, and a node claims it to run it only when its capabilities serve
-//! each (FIG-6993). [`strand`] is what the strand report reads: the work
-//! no live node can run.
-
-use std::collections::{BTreeMap, BTreeSet};
-
-pub use lash_kernel_doc::{
-    ArtifactDigest, EffectName, ExecutionRequirements, FunctionId, NodeCapabilities,
-    PackageSetDigest,
-};
+//! Node capabilities and claim diagnostics. Package content uses immutable records.
 
 use crate::formats::FormatSet;
 use crate::{DurableError, StoreFailure, StoreFailureKind};
+pub use lash_vocabulary::claims::{ClaimRequirements, NodeCapabilities};
 
-/// One artifact a set names or an install writes: its package path, and
-/// its digest, which alone identifies it.
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct PackageArtifact {
-    /// The digest of the artifact's canonical facts, its path among them.
-    pub digest: ArtifactDigest,
-    /// The artifact's package path, canonically spelled.
-    pub path: String,
-}
-
-/// One live node, as the fleet gates read it (P1: one entry per node).
+/// One live node, as capability admission reads it (P1: one entry per node).
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct NodeCapability {
     /// The format sets the node decodes.
     pub decodes: Vec<FormatSet>,
-    /// What the node offers running code, its own package set among it.
+    /// Machine and registered execution capabilities offered by the node.
     pub capabilities: NodeCapabilities,
-}
-
-/// One artifact as a host installs it: its key, its header, so that a
-/// listing reads what each stored artifact is, and the identity of every
-/// definition it holds, helpers included, and the operations it declares
-/// internal, which the authority index records under its path (FIG-6991,
-/// Ruling 5).
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ArtifactInstall {
-    pub artifact: PackageArtifact,
-    /// The artifact's header, as JSON.
-    pub header: String,
-    pub definitions: BTreeSet<FunctionId>,
-    /// The operations it declares internal, by effect name: the index of
-    /// who may perform them records them under its path.
-    pub internal: BTreeSet<EffectName>,
-    /// Its release and display labels, as JSON: they are outside the artifact's
-    /// content identity, so the store appends each install's beside it.
-    pub labels: String,
-}
-
-impl ArtifactInstall {
-    /// The fixed-width index key for this install's label payload. Labels can
-    /// exceed a database's index-row bound; their bytes remain stored whole.
-    #[must_use]
-    pub fn labels_digest(&self) -> [u8; 32] {
-        *blake3::hash(self.labels.as_bytes()).as_bytes()
-    }
-}
-
-/// One set as a host installs it: its digest, its members, the bytes of
-/// its surface snapshot and what running its code requires.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct SetInstall {
-    pub digest: PackageSetDigest,
-    pub members: BTreeSet<PackageArtifact>,
-    pub surface: Vec<u8>,
-    pub requirements: ExecutionRequirements,
-}
-
-/// One stored artifact, without its bytes: what a listing reads.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct StoredArtifact {
-    pub artifact: PackageArtifact,
-    /// Its place on its package line, assigned by the store when it was
-    /// first installed, the first being 1.
-    pub ordinal: u32,
-}
-
-/// One stored set.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct StoredSet {
-    pub digest: PackageSetDigest,
-    pub members: BTreeSet<PackageArtifact>,
-    /// The store's install sequence: a later install is newer.
-    pub sequence: u64,
-    /// What running the set's code requires.
-    pub requirements: ExecutionRequirements,
-}
-
-/// Every artifact and set the store holds: artifacts by line and ordinal,
-/// sets by install sequence, oldest first.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct PackageCatalog {
-    pub artifacts: Vec<StoredArtifact>,
-    pub sets: Vec<StoredSet>,
-}
-
-/// A stored digest's text as the digest.
-///
-/// # Errors
-///
-/// The text is not a digest: the row is corrupt.
-pub fn parse_digest<T: std::str::FromStr>(text: &str) -> Result<T, DurableError> {
-    text.parse()
-        .map_err(|_| corrupt(format!("a stored digest `{text}`")))
 }
 
 fn corrupt(message: String) -> DurableError {
@@ -127,13 +20,6 @@ fn corrupt(message: String) -> DurableError {
     })
 }
 
-/// The stored spelling of a set's requirements: canonical JSON, each set
-/// sorted.
-#[must_use]
-pub fn encode_requirements(requirements: &ExecutionRequirements) -> String {
-    serde_json::to_string(requirements).unwrap_or_else(|_| unreachable!("string keys, no floats"))
-}
-
 /// The stored spelling of a node's capabilities: canonical JSON, each set
 /// sorted.
 #[must_use]
@@ -141,63 +27,8 @@ pub fn encode_capabilities(capabilities: &NodeCapabilities) -> String {
     serde_json::to_string(capabilities).unwrap_or_else(|_| unreachable!("string keys, no floats"))
 }
 
-fn decode_requirements(text: &str, set: &str) -> Result<ExecutionRequirements, DurableError> {
-    serde_json::from_str(text)
-        .map_err(|_| corrupt(format!("package set {set}'s requirements `{text}`")))
-}
-
 fn decode_capabilities(text: &str, node: &str) -> Result<NodeCapabilities, DurableError> {
     serde_json::from_str(text).map_err(|_| corrupt(format!("node {node}'s capabilities `{text}`")))
-}
-
-/// The catalog the listing rows spell: each artifact as `(digest, path,
-/// ordinal)`, and each set member as `(set, sequence, requirements,
-/// member, path)` by sequence. Both backends' reads.
-///
-/// # Errors
-///
-/// A row that does not decode: the store is corrupt.
-pub fn catalog_of(
-    artifacts: Vec<(String, String, i64)>,
-    members: Vec<(String, i64, String, String, String)>,
-) -> Result<PackageCatalog, DurableError> {
-    let artifacts = artifacts
-        .into_iter()
-        .map(|(digest, path, ordinal)| {
-            Ok(StoredArtifact {
-                artifact: PackageArtifact {
-                    digest: parse_digest(&digest)?,
-                    path,
-                },
-                ordinal: u32::try_from(ordinal)
-                    .map_err(|_| corrupt(format!("artifact {digest} has ordinal {ordinal}")))?,
-            })
-        })
-        .collect::<Result<Vec<_>, DurableError>>()?;
-    let mut sets: Vec<StoredSet> = Vec::new();
-    let mut at: BTreeMap<String, usize> = BTreeMap::new();
-    for (digest, sequence, requirements, artifact, path) in members {
-        let index = match at.get(&digest) {
-            Some(index) => *index,
-            None => {
-                sets.push(StoredSet {
-                    digest: parse_digest(&digest)?,
-                    members: BTreeSet::new(),
-                    sequence: u64::try_from(sequence).map_err(|_| {
-                        corrupt(format!("package set {digest} has sequence {sequence}"))
-                    })?,
-                    requirements: decode_requirements(&requirements, &digest)?,
-                });
-                at.insert(digest, sets.len() - 1);
-                sets.len() - 1
-            }
-        };
-        sets[index].members.insert(PackageArtifact {
-            digest: parse_digest(&artifact)?,
-            path,
-        });
-    }
-    Ok(PackageCatalog { artifacts, sets })
 }
 
 /// One row of the live-node listing: `(node, formats_json,
@@ -245,39 +76,672 @@ pub fn requirement_rows(
 
 /// What strands work whose claim requirements are `requires` while `live`
 /// are the live nodes (FIG-6993): `None` when some live node offers every
-/// hard requirement it names, else what the live node closest to running
-/// it lacks (fewest unmet), or the whole record when no node is live. Only
-/// the hard families are read: a registration token is a node's, not the
-/// code's.
+/// requirement it names, else what the live node closest to running
+/// it lacks (fewest unmet), or the whole record when no node is live.
+/// All six source requirement families participate.
 #[must_use]
-pub fn strand(requires: &[String], live: &[NodeCapability]) -> Option<ExecutionRequirements> {
-    let record = lash_core_store::obligations::ObligationToken::requirements_of(
+pub fn strand(requires: &[String], live: &[NodeCapability]) -> Option<ClaimRequirements> {
+    let record = lash_vocabulary::claims::ObligationToken::requirements_of(
         requires.iter().map(String::as_str),
     );
-    if record.is_empty() {
-        return None;
-    }
-    let size = |unmet: &ExecutionRequirements| {
-        unmet.natives.len() + unmet.kernels.len() + unmet.providers.len() + unmet.codecs.len()
-    };
+    record.tokens().next()?;
+    let size = |unmet: &ClaimRequirements| unmet.tokens().count();
     let closest = live
         .iter()
         .map(|node| record.unmet_by(&node.capabilities))
         .min_by_key(size);
     match closest {
-        Some(unmet) if unmet.is_empty() => None,
+        Some(unmet) if unmet.tokens().next().is_none() => None,
         Some(unmet) => Some(unmet),
         None => Some(record),
     }
 }
 
-/// The refusal of a set naming an artifact neither stored nor installed
-/// with it.
+pub use lash_core_store::packages::PackageRefusal;
+
+use lash_core_store::artifact_referrer::{ArtifactName, ReferrerClaim, ResolvedArtifactCleanup};
+pub use lash_core_store::packages::{LinkRecord, PackageRecord};
+pub use lash_vocabulary as vocabulary;
+use lash_vocabulary::package::{LinkId, PackageId, PublicationKey, PublicationRecord};
+
+/// Trusted package content storage. A successful hold retains the whole DAG
+/// under the existing module-artifact referrer, never a permanent catalog.
+#[async_trait::async_trait]
+pub trait PackageStore: Send + Sync {
+    async fn put_link(
+        &self,
+        claim: &ReferrerClaim,
+        record: &LinkRecord,
+        artifacts: &[ArtifactName],
+    ) -> Result<(), DurableError>;
+    async fn put_package(
+        &self,
+        claim: &ReferrerClaim,
+        record: &PackageRecord,
+    ) -> Result<(), DurableError>;
+    /// Append an independent JSON label sidecar. The claim must already hold
+    /// the Package; labels neither change its identity nor create roots.
+    async fn put_labels(
+        &self,
+        claim: &ReferrerClaim,
+        id: &PackageId,
+        json: &str,
+    ) -> Result<(), DurableError>;
+    /// Distinct literal sidecars in digest order, independent of publication order.
+    async fn labels(&self, id: &PackageId) -> Result<Vec<String>, DurableError>;
+    async fn publish(
+        &self,
+        claim: &ReferrerClaim,
+        record: &PublicationRecord,
+    ) -> Result<PublicationKey, DurableError>;
+    async fn link(&self, id: &LinkId) -> Result<Option<LinkRecord>, DurableError>;
+    async fn package(&self, id: &PackageId) -> Result<Option<PackageRecord>, DurableError>;
+    async fn publication(
+        &self,
+        key: &PublicationKey,
+    ) -> Result<Option<PublicationRecord>, DurableError>;
+    async fn acquire_publication(
+        &self,
+        claim: &ReferrerClaim,
+        key: &PublicationKey,
+    ) -> Result<(), DurableError>;
+    async fn end_package_referrer(
+        &self,
+        cleanup: &ResolvedArtifactCleanup,
+    ) -> Result<(), DurableError>;
+}
+
+/// version_surface = "coexist"
+/// version_guard(items(LINK_REF_PREFIX, link_reference, content_dependencies, is_package_reference))
+const LINK_REF_PREFIX: &str = "link:v1:";
+/// version_surface = "coexist"
+/// version_guard(items(PACKAGE_REF_PREFIX, package_reference, content_dependencies, is_package_reference))
+const PACKAGE_REF_PREFIX: &str = "package:v1:";
+/// version_surface = "coexist"
+/// version_guard(items(PUBLICATION_REF_PREFIX, publication_reference, content_dependencies, is_package_reference))
+const PUBLICATION_REF_PREFIX: &str = "publication:v1:";
+
+/// Backend primitive: every dependency must still exist when the root and
+/// complete closure are acquired in one transaction under the referrer fence.
+#[async_trait::async_trait]
+pub trait PackageStorage: Send + Sync {
+    async fn package_referrer_ended(
+        &self,
+        referrer: &lash_core_store::artifact_referrer::ArtifactReferrer,
+    ) -> Result<bool, DurableError>;
+    async fn hold_package_record(
+        &self,
+        claim: &ReferrerClaim,
+        reference: &str,
+        bytes: Option<&[u8]>,
+        dependencies: &[String],
+    ) -> Result<(), DurableError>;
+    async fn put_package_labels(
+        &self,
+        claim: &ReferrerClaim,
+        reference: &str,
+        digest: &[u8; 32],
+        json: &str,
+    ) -> Result<(), DurableError>;
+    async fn package_labels(&self, reference: &str) -> Result<Vec<String>, DurableError>;
+    async fn load_package_record(&self, reference: &str) -> Result<Option<Vec<u8>>, DurableError>;
+    async fn end_package_records(
+        &self,
+        cleanup: &ResolvedArtifactCleanup,
+    ) -> Result<(), DurableError>;
+}
+
+#[derive(serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct StoredLink {
+    record: LinkRecord,
+    artifacts: std::collections::BTreeSet<ArtifactName>,
+}
+
 #[must_use]
-pub fn unknown_member(set: &SetInstall, member: &PackageArtifact) -> DurableError {
-    DurableError::UnknownArtifact {
-        set: set.digest,
-        artifact: member.digest,
-        path: member.path.clone(),
+pub fn link_reference(id: &LinkId) -> String {
+    format!("{LINK_REF_PREFIX}{id}")
+}
+#[must_use]
+pub fn package_reference(id: &PackageId) -> String {
+    format!("{PACKAGE_REF_PREFIX}{id}")
+}
+#[must_use]
+pub fn publication_reference(key: &PublicationKey) -> String {
+    let bytes = lash_vocabulary::tokens::encode_body(key);
+    format!("{PUBLICATION_REF_PREFIX}{}", blake3::hash(&bytes).to_hex())
+}
+
+fn encode<T: serde::Serialize>(record: &T) -> Result<Vec<u8>, DurableError> {
+    serde_json::to_vec(record).map_err(|error| corrupt(format!("package record: {error}")))
+}
+fn decode<T: serde::de::DeserializeOwned>(bytes: &[u8]) -> Result<T, DurableError> {
+    serde_json::from_slice(bytes).map_err(|error| corrupt(format!("package record: {error}")))
+}
+fn module_reference(artifact: &ArtifactName) -> Result<String, DurableError> {
+    if artifact.store != lash_core_store::artifact_referrer::ArtifactStoreId::KernelDocument {
+        return Err(PackageRefusal::Identity(artifact.artifact_ref.clone()).into());
+    }
+    Ok(artifact.artifact_ref.clone())
+}
+
+/// Immediate immutable content dependencies. All storage owners use this parser.
+///
+/// # Errors
+/// A record is malformed or does not match its content identity.
+pub fn content_dependencies(reference: &str, bytes: &[u8]) -> Result<Vec<String>, DurableError> {
+    use lash_vocabulary::package::{Fill, MemberKind, PublishedContent};
+    let mut children = Vec::new();
+    if let Some(id) = reference.strip_prefix(LINK_REF_PREFIX) {
+        let stored: StoredLink = decode(bytes)?;
+        if stored.record.id.to_string() != id || stored.record.link.identity() != stored.record.id {
+            return Err(PackageRefusal::Identity(reference.to_owned()).into());
+        }
+        children.push(stored.record.link.document.to_string());
+        children.extend(
+            stored
+                .artifacts
+                .iter()
+                .map(module_reference)
+                .collect::<Result<Vec<_>, _>>()?,
+        );
+        children.extend(
+            stored
+                .record
+                .link
+                .fills
+                .values()
+                .filter_map(|fill| match fill {
+                    Fill::Export { link, .. } => Some(link_reference(link)),
+                    _ => None,
+                }),
+        );
+    } else if let Some(id) = reference.strip_prefix(PACKAGE_REF_PREFIX) {
+        let record: PackageRecord = decode(bytes)?;
+        if record.id.to_string() != id || record.package.identity() != record.id {
+            return Err(PackageRefusal::Identity(reference.to_owned()).into());
+        }
+        children.extend(
+            record
+                .package
+                .members
+                .values()
+                .filter_map(|member| match &member.kind {
+                    MemberKind::Export { link, .. } => Some(link_reference(link)),
+                    _ => None,
+                }),
+        );
+    } else if reference.starts_with(PUBLICATION_REF_PREFIX) {
+        let record: PublicationRecord = decode(bytes)?;
+        if publication_reference(&record.key()) != reference
+            || record.path.as_slice().first() != Some(&record.context.root)
+        {
+            return Err(PackageRefusal::Identity(reference.to_owned()).into());
+        }
+        if let PublishedContent::Package(id) = record.content {
+            children.push(package_reference(&id));
+        }
+        children.extend(record.code_links.iter().map(link_reference));
+        children.extend(
+            record
+                .imported_publications
+                .iter()
+                .map(publication_reference),
+        );
+    }
+    Ok(children)
+}
+
+/// Provenance retained atomically with an execution environment's own bytes.
+///
+/// # Errors
+/// The stored environment does not decode.
+pub fn process_env_roots(bytes: &[u8]) -> Result<Vec<String>, DurableError> {
+    let env = lash_core_store::process_env::ProcessEnv::from_store_bytes(bytes)
+        .map_err(|error| corrupt(format!("process environment: {error}")))?;
+    let execution = env.execution();
+    Ok(execution
+        .publications
+        .iter()
+        .map(|record| publication_reference(&record.key()))
+        .chain(execution.authored.iter().map(link_reference))
+        .chain(
+            env.packages()
+                .publications()
+                .iter()
+                .map(|record| publication_reference(&record.key())),
+        )
+        .collect::<std::collections::BTreeSet<_>>()
+        .into_iter()
+        .collect())
+}
+
+/// Read immutable records outside the writer, then reacquire all of their
+/// pointers in one transaction. A raced last-referrer cleanup yields Missing.
+async fn closure<S: PackageStorage + ?Sized>(
+    store: &S,
+    roots: Vec<String>,
+) -> Result<std::collections::BTreeSet<String>, DurableError> {
+    let mut found = std::collections::BTreeSet::new();
+    let mut active = std::collections::BTreeSet::new();
+    let mut pending: Vec<(String, bool)> = roots
+        .into_iter()
+        .map(|reference| (reference, false))
+        .collect();
+    while let Some((reference, leaving)) = pending.pop() {
+        if leaving {
+            active.remove(&reference);
+            found.insert(reference);
+            continue;
+        }
+        if found.contains(&reference) {
+            continue;
+        }
+        if !active.insert(reference.clone()) {
+            return Err(PackageRefusal::Cycle.into());
+        }
+        // Only package records describe further dependencies. A Document or
+        // definition is a terminal artifact: carry its identity to the atomic
+        // hold below, which checks presence under the same fence as acquiring
+        // the complete closure. Hydrating its body discovers no extra edges.
+        if !is_package_reference(&reference) {
+            active.remove(&reference);
+            found.insert(reference);
+            continue;
+        }
+        let bytes = store
+            .load_package_record(&reference)
+            .await?
+            .ok_or_else(|| PackageRefusal::Missing(reference.clone()))?;
+        let children = content_dependencies(&reference, &bytes)?;
+        pending.push((reference, true));
+        pending.extend(children.into_iter().map(|child| (child, false)));
+    }
+    Ok(found)
+}
+
+#[async_trait::async_trait]
+impl<S: PackageStorage + ?Sized> PackageStore for S {
+    async fn put_link(
+        &self,
+        claim: &ReferrerClaim,
+        record: &LinkRecord,
+        artifacts: &[ArtifactName],
+    ) -> Result<(), DurableError> {
+        if record.link.identity() != record.id {
+            return Err(PackageRefusal::Identity(link_reference(&record.id)).into());
+        }
+        let stored = StoredLink {
+            record: record.clone(),
+            artifacts: artifacts.iter().cloned().collect(),
+        };
+        let mut roots = vec![record.link.document.to_string()];
+        roots.extend(
+            artifacts
+                .iter()
+                .map(module_reference)
+                .collect::<Result<Vec<_>, _>>()?,
+        );
+        roots.extend(record.link.fills.values().filter_map(|fill| match fill {
+            lash_vocabulary::package::Fill::Export { link, .. } => Some(link_reference(link)),
+            _ => None,
+        }));
+        let dependencies: Vec<_> = closure(self, roots).await?.into_iter().collect();
+        self.hold_package_record(
+            claim,
+            &link_reference(&record.id),
+            Some(&encode(&stored)?),
+            &dependencies,
+        )
+        .await
+    }
+    async fn put_package(
+        &self,
+        claim: &ReferrerClaim,
+        record: &PackageRecord,
+    ) -> Result<(), DurableError> {
+        if record.package.identity() != record.id {
+            return Err(PackageRefusal::Identity(package_reference(&record.id)).into());
+        }
+        let roots = record
+            .package
+            .members
+            .values()
+            .filter_map(|member| match &member.kind {
+                lash_vocabulary::package::MemberKind::Export { link, .. } => {
+                    Some(link_reference(link))
+                }
+                _ => None,
+            })
+            .collect();
+        let dependencies: Vec<_> = closure(self, roots).await?.into_iter().collect();
+        self.hold_package_record(
+            claim,
+            &package_reference(&record.id),
+            Some(&encode(record)?),
+            &dependencies,
+        )
+        .await
+    }
+    async fn put_labels(
+        &self,
+        claim: &ReferrerClaim,
+        id: &PackageId,
+        json: &str,
+    ) -> Result<(), DurableError> {
+        serde_json::from_str::<serde_json::Value>(json)
+            .map_err(|error| PackageRefusal::Identity(format!("package labels: {error}")))?;
+        let digest = blake3::hash(json.as_bytes());
+        self.put_package_labels(claim, &package_reference(id), digest.as_bytes(), json)
+            .await
+    }
+    async fn labels(&self, id: &PackageId) -> Result<Vec<String>, DurableError> {
+        self.package_labels(&package_reference(id)).await
+    }
+    async fn publish(
+        &self,
+        claim: &ReferrerClaim,
+        record: &PublicationRecord,
+    ) -> Result<PublicationKey, DurableError> {
+        use lash_vocabulary::package::PublishedContent;
+        if record.path.as_slice().first() != Some(&record.context.root) {
+            return Err(PackageRefusal::Publication.into());
+        }
+        let mut roots: Vec<_> = record.code_links.iter().map(link_reference).collect();
+        match &record.content {
+            PublishedContent::Package(id) => {
+                let package = self
+                    .package(id)
+                    .await?
+                    .ok_or_else(|| PackageRefusal::Missing(package_reference(id)))?;
+                let links: std::collections::BTreeSet<_> = package
+                    .package
+                    .members
+                    .values()
+                    .filter_map(|member| match &member.kind {
+                        lash_vocabulary::package::MemberKind::Export { link, .. } => Some(*link),
+                        _ => None,
+                    })
+                    .collect();
+                if package.package.path != record.path || links != record.code_links {
+                    return Err(PackageRefusal::Publication.into());
+                }
+                roots.push(package_reference(id));
+            }
+            PublishedContent::Deferred(package) => {
+                if package.path != record.path || !record.code_links.is_empty() {
+                    return Err(PackageRefusal::Publication.into());
+                }
+            }
+        }
+        roots.extend(
+            record
+                .imported_publications
+                .iter()
+                .map(publication_reference),
+        );
+        let dependencies: Vec<_> = closure(self, roots).await?.into_iter().collect();
+        let key = record.key();
+        self.hold_package_record(
+            claim,
+            &publication_reference(&key),
+            Some(&encode(record)?),
+            &dependencies,
+        )
+        .await?;
+        Ok(key)
+    }
+    async fn link(&self, id: &LinkId) -> Result<Option<LinkRecord>, DurableError> {
+        let Some(bytes) = self.load_package_record(&link_reference(id)).await? else {
+            return Ok(None);
+        };
+        let stored: StoredLink = decode(&bytes)?;
+        if stored.record.id != *id || stored.record.link.identity() != *id {
+            return Err(PackageRefusal::Identity(link_reference(id)).into());
+        }
+        Ok(Some(stored.record))
+    }
+    async fn package(&self, id: &PackageId) -> Result<Option<PackageRecord>, DurableError> {
+        let Some(bytes) = self.load_package_record(&package_reference(id)).await? else {
+            return Ok(None);
+        };
+        let record: PackageRecord = decode(&bytes)?;
+        if record.id != *id || record.package.identity() != *id {
+            return Err(PackageRefusal::Identity(package_reference(id)).into());
+        }
+        Ok(Some(record))
+    }
+    async fn publication(
+        &self,
+        key: &PublicationKey,
+    ) -> Result<Option<PublicationRecord>, DurableError> {
+        let Some(bytes) = self
+            .load_package_record(&publication_reference(key))
+            .await?
+        else {
+            return Ok(None);
+        };
+        let record: PublicationRecord = decode(&bytes)?;
+        if record.key() != *key || record.path.as_slice().first() != Some(&record.context.root) {
+            return Err(PackageRefusal::Identity(publication_reference(key)).into());
+        }
+        Ok(Some(record))
+    }
+    async fn acquire_publication(
+        &self,
+        claim: &ReferrerClaim,
+        key: &PublicationKey,
+    ) -> Result<(), DurableError> {
+        let reference = publication_reference(key);
+        let dependencies: Vec<_> = closure(self, vec![reference.clone()])
+            .await?
+            .into_iter()
+            .collect();
+        self.hold_package_record(claim, &reference, None, &dependencies)
+            .await
+    }
+    async fn end_package_referrer(
+        &self,
+        cleanup: &ResolvedArtifactCleanup,
+    ) -> Result<(), DurableError> {
+        let expanded = expand_package_cleanup(self, cleanup).await?;
+        self.end_package_records(&expanded).await
+    }
+}
+
+/// Whether a module-store reference owns immutable package dependencies.
+#[must_use]
+pub fn is_package_reference(reference: &str) -> bool {
+    [LINK_REF_PREFIX, PACKAGE_REF_PREFIX, PUBLICATION_REF_PREFIX]
+        .iter()
+        .any(|prefix| reference.starts_with(prefix))
+}
+
+/// Acquire a content root and its immutable closure under one fenced claim.
+///
+/// # Errors
+/// A dependency was reclaimed, corrupted, or the referrer ended.
+pub async fn acquire_content<S: PackageStorage + ?Sized>(
+    store: &S,
+    claim: &ReferrerClaim,
+    reference: &str,
+) -> Result<(), DurableError> {
+    let dependencies: Vec<_> = closure(store, vec![reference.to_owned()])
+        .await?
+        .into_iter()
+        .collect();
+    store
+        .hold_package_record(claim, reference, None, &dependencies)
+        .await
+}
+
+/// Expand a carry of a package root into exact edges for its complete DAG.
+/// Generic module cleanup calls this too: a saved callable's Link must not
+/// survive without its defining Document and referenced Links.
+pub async fn expand_package_cleanup<S: PackageStorage + ?Sized>(
+    store: &S,
+    cleanup: &ResolvedArtifactCleanup,
+) -> Result<ResolvedArtifactCleanup, DurableError> {
+    if cleanup.carries.is_empty() {
+        return Ok(cleanup.clone());
+    }
+    if store.package_referrer_ended(&cleanup.referrer).await? {
+        return Ok(ResolvedArtifactCleanup {
+            referrer: cleanup.referrer.clone(),
+            carries: Vec::new(),
+        });
+    }
+    let mut expanded = cleanup.clone();
+    for carry in &cleanup.carries {
+        let reference = module_reference(&carry.artifact)?;
+        if !is_package_reference(&reference) {
+            continue;
+        }
+        for artifact_ref in closure(store, vec![reference]).await? {
+            let carry = lash_core_store::artifact_referrer::ArtifactCarry {
+                artifact: ArtifactName {
+                    store: carry.artifact.store.clone(),
+                    artifact_ref,
+                },
+                to: carry.to.clone(),
+            };
+            if !expanded.carries.contains(&carry) {
+                expanded.carries.push(carry);
+            }
+        }
+    }
+    Ok(expanded)
+}
+
+#[cfg(test)]
+mod work_laws {
+    use super::*;
+    use std::collections::BTreeMap;
+    use std::sync::Mutex;
+
+    #[derive(Default)]
+    struct CountedStorage {
+        records: Mutex<BTreeMap<String, Vec<u8>>>,
+        reads: Mutex<Vec<String>>,
+        holds: Mutex<Vec<String>>,
+    }
+
+    #[async_trait::async_trait]
+    impl PackageStorage for CountedStorage {
+        async fn package_referrer_ended(
+            &self,
+            _: &lash_core_store::artifact_referrer::ArtifactReferrer,
+        ) -> Result<bool, DurableError> {
+            Ok(false)
+        }
+        async fn hold_package_record(
+            &self,
+            _: &ReferrerClaim,
+            reference: &str,
+            _: Option<&[u8]>,
+            dependencies: &[String],
+        ) -> Result<(), DurableError> {
+            let records = self.records.lock().expect("work-law fixture");
+            for dependency in dependencies.iter().map(String::as_str).chain([reference]) {
+                if !records.contains_key(dependency) {
+                    return Err(PackageRefusal::Missing(dependency.into()).into());
+                }
+            }
+            *self.holds.lock().expect("work-law fixture") = dependencies.to_vec();
+            Ok(())
+        }
+        async fn put_package_labels(
+            &self,
+            _: &ReferrerClaim,
+            _: &str,
+            _: &[u8; 32],
+            _: &str,
+        ) -> Result<(), DurableError> {
+            unreachable!("retention does not publish labels")
+        }
+        async fn package_labels(&self, _: &str) -> Result<Vec<String>, DurableError> {
+            unreachable!("retention does not read labels")
+        }
+        async fn load_package_record(
+            &self,
+            reference: &str,
+        ) -> Result<Option<Vec<u8>>, DurableError> {
+            self.reads
+                .lock()
+                .expect("work-law fixture")
+                .push(reference.into());
+            Ok(self
+                .records
+                .lock()
+                .expect("work-law fixture")
+                .get(reference)
+                .cloned())
+        }
+        async fn end_package_records(
+            &self,
+            _: &ResolvedArtifactCleanup,
+        ) -> Result<(), DurableError> {
+            unreachable!("retention does not end a referrer")
+        }
+    }
+
+    /// FIG-7135: retaining code discovers dependencies from package records,
+    /// without hydrating terminal code bodies. Their presence is checked by
+    /// the same atomic hold that acquires their identities.
+    #[tokio::test]
+    async fn retaining_a_link_never_materializes_terminal_artifact_bodies() {
+        use lash_core_store::artifact_referrer::{ArtifactReferrer, HostArtifactPin};
+        let store = CountedStorage::default();
+        let document = lash_vocabulary::names::DocumentId::from_bytes([0x71; 32]);
+        let link = lash_vocabulary::package::Link {
+            document,
+            fills: BTreeMap::new(),
+        };
+        let reference = link_reference(&link.identity());
+        let stored = StoredLink {
+            record: LinkRecord {
+                id: link.identity(),
+                link,
+            },
+            artifacts: Default::default(),
+        };
+        store.records.lock().expect("work-law fixture").extend([
+            (
+                reference.clone(),
+                encode(&stored).expect("work-law fixture"),
+            ),
+            (document.to_string(), vec![0x71; 1 << 20]),
+        ]);
+        let claim = ReferrerClaim::unguarded(ArtifactReferrer::HostPin(HostArtifactPin::mint()))
+            .expect("work-law fixture");
+        for _ in 0..3 {
+            acquire_content(&store, &claim, &reference)
+                .await
+                .expect("work-law fixture");
+        }
+        assert_eq!(
+            *store.reads.lock().expect("work-law fixture"),
+            vec![reference.clone(); 3],
+            "retention must not read leaf payloads to discover that they have no dependencies"
+        );
+        assert!(
+            store
+                .holds
+                .lock()
+                .expect("work-law fixture")
+                .contains(&document.to_string())
+        );
+        // Cleanup between discovery and acquisition cannot turn an absent
+        // leaf into a successful hold: the transaction remains the oracle.
+        store
+            .records
+            .lock()
+            .expect("work-law fixture")
+            .remove(&document.to_string());
+        assert!(matches!(
+            acquire_content(&store, &claim, &reference).await,
+            Err(DurableError::Package(PackageRefusal::Missing(missing)))
+                if missing == document.to_string()
+        ));
     }
 }

@@ -1,38 +1,17 @@
-//! What a worker can run: the function registry it derives from its
-//! parent's one registration of packages, and the dialects it lowers and
-//! prints.
-//!
-//! A host names its dialects: there is no embedding it gets without
-//! choosing (FIG-5990). It configures a worker with natives and dialects
-//! only, `Embedder::new().native(id, native)?.dialect(typescript(tuning)?)?`,
-//! and binds that configuration once to the packages its parent holds,
-//! `.finish(&packages)` (FIG-6917, V1): a worker never lists packages of
-//! its own, so it cannot hold a package the parent lacks or miss one it
-//! holds. An embedding with no dialect is refused. Each dialect is a build
-//! feature of this crate (`dialect-typescript`, `dialect-python`), off by
-//! default: a host that enables one compiles none of the other's parser.
-//!
-//! A document names every function it uses by content identity and carries
-//! none of them (kernel spec §9 rule 2), so the registry is fixed before the
-//! first document arrives: every held artifact's code, lash's packages'
-//! natives and plans, and the host's natives, each by identity. lash's
-//! packages are made once, when `lash-vm-releases` is built; a worker
-//! opens its parent's merged image and binds its build's natives.
-//!
-//! Names resolve against one package set's functions: the set the parent's
-//! fleet gate chose for the cell (FIG-6993), from the node's registration
-//! or a stored surface. Definitions stay reachable by identity, so a
-//! document written under another set reads as written.
+//! A worker binds native implementations and explicitly selected dialects to
+//! its parent's immutable native library image. Resolver roots travel in that
+//! image; linked documents and Import slots travel with each execution.
 
 use std::collections::BTreeMap;
-#[cfg(test)]
-use std::collections::BTreeSet;
 use std::sync::{Arc, OnceLock};
 
 use lash_kernel_dialect::{Diagnostic, Dialect, Environment, Lowered, Mode, NamedLibrary};
-use lash_kernel_doc::{FunctionId, FunctionRegistry, NativeFunction};
-use lash_kernel_package::{HeldPackages, PackageInstall, PackageRefusal};
+use lash_kernel_doc::{FunctionRegistry, NativeFunction};
+
 use lash_kernel_vm::PreparedLibrary;
+use lash_protocol_types::engine_fault::WorkerLibraryRefusal;
+use lash_vm_client::packages::WorkerLibrary;
+use lash_vocabulary::names::FunctionId;
 
 /// Why a worker could not assemble what it runs. The worker refuses to
 /// start: it is a defect of the build or of the host's configuration,
@@ -44,7 +23,7 @@ pub enum EmbedError {
     /// The packages refused: a `Native`-only function with no native, a
     /// native for no held function, or an artifact the registry refused.
     #[error(transparent)]
-    Package(#[from] PackageRefusal),
+    Library(#[from] WorkerLibraryRefusal),
     #[error("the dialect `{dialect}` is installed twice")]
     DuplicateDialect { dialect: String },
     #[error("the dialect `{dialect}` could not be installed: {message}")]
@@ -68,7 +47,7 @@ pub struct Embedding {
     pub(crate) library: NamedLibrary,
     pub(crate) dialects: BTreeMap<String, Dialect>,
     /// The packages the parent registered.
-    held: HeldPackages,
+    held: WorkerLibrary,
     /// The stored definitions runs supplied, decoded and checked once.
     stored: lash_vm_broker::kernel::loader::Definitions,
     /// The libraries assembled for runs that reach a function the frame
@@ -84,7 +63,7 @@ impl Embedding {
     }
 
     /// The packages the embedding was bound to.
-    pub fn packages(&self) -> &HeldPackages {
+    pub fn library_image(&self) -> &WorkerLibrary {
         &self.held
     }
 
@@ -134,93 +113,6 @@ impl Embedding {
         let dialect = self.dialects.get(dialect)?;
         Some(dialect.front_end.lower(source, environment, mode))
     }
-
-    /// The names and surface a writer of `packages` resolves against: the
-    /// embedding's own set's, or a stored surface's, sent whole with the
-    /// definitions it names that the embedding does not hold (FIG-6991).
-    ///
-    /// # Errors
-    ///
-    /// [`EmbedError::Registry`] for a set that is neither the embedding's
-    /// nor sent, a stored surface naming a definition neither held nor sent,
-    /// or a surface or definition that does not read as what it claims to
-    /// be: each a defect of the parent, which sends what its worker lacks.
-    pub(crate) fn surface(
-        &self,
-        packages: &lash_vm_client::service::SurfaceRef,
-    ) -> Result<Surface<'_>, EmbedError> {
-        let refused = |message: String| EmbedError::Registry(message);
-        let Some(stored) = &packages.stored else {
-            if packages.digest != self.held.digest() {
-                return Err(refused(format!(
-                    "package set {} is neither this embedding's nor sent",
-                    packages.digest
-                )));
-            }
-            return Ok(Surface::Held {
-                library: &self.library,
-                view: self.held.view(),
-            });
-        };
-        let surface =
-            lash_kernel_package::SurfaceSnapshot::decode(packages.digest, &stored.surface)
-                .map_err(|refusal| refused(refusal.to_string()))?;
-        let mut library = lash_kernel_package::PackageView::new(&surface, &self.written)
-            .library(&self.written)
-            .map_err(|error| refused(error.to_string()))?;
-        let mut missing = surface.functions();
-        missing.retain(|function| self.written.get(function).is_none());
-        for image in &stored.definitions {
-            let definition: lash_kernel_doc::FunctionDefinition =
-                lash_kernel_doc::graph_tokens::decode_body(image)
-                    .map_err(|error| refused(error.to_string()))?;
-            if !missing.remove(&definition.identity()) {
-                return Err(refused(format!(
-                    "a stored definition {} the surface does not need was sent",
-                    definition.identity()
-                )));
-            }
-            library
-                .insert(definition)
-                .map_err(|error| refused(error.to_string()))?;
-        }
-        if !missing.is_empty() {
-            return Err(refused(format!(
-                "the stored surface {} names definitions neither held nor sent",
-                packages.digest
-            )));
-        }
-        Ok(Surface::Stored(Box::new(StoredNames { surface, library })))
-    }
-
-    /// The namespaces `operations` compose with the package surface
-    /// `surface`, under the roots its packages and this embedding's
-    /// installed dialects reserve: what a cell, a workflow import and
-    /// discovery all resolve through (P3).
-    ///
-    /// # Errors
-    ///
-    /// [`Namespaces::Refused`] naming both sides of a refused composition.
-    pub(crate) fn namespaces(
-        &self,
-        operations: lash_kernel_dialect::Operations,
-        surface: &Surface<'_>,
-    ) -> Result<lash_kernel_dialect::Namespaces, Namespaces> {
-        let view = surface.view(&self.written);
-        let reserves = |root: &str| {
-            self.dialects
-                .values()
-                .find_map(|package| package.front_end.reserves(root))
-        };
-        lash_kernel_dialect::Namespaces::build(
-            &lash_kernel_dialect::Reserving {
-                view: &view,
-                reserves: &reserves,
-            },
-            operations,
-        )
-        .map_err(Namespaces::Refused)
-    }
 }
 
 /// The library `document` runs on, and its execution closure, which
@@ -239,7 +131,7 @@ pub fn library_for(
     embedding: &Embedding,
     document: &lash_kernel_doc::Document,
     definitions: &[(FunctionId, &[u8])],
-    limits: lash_kernel_doc::KernelDataLimits,
+    limits: lash_vocabulary::data_limits::KernelDataLimits,
 ) -> Result<
     Result<
         (PreparedLibrary, lash_vm_broker::kernel::closure::Closure),
@@ -249,7 +141,7 @@ pub fn library_for(
 > {
     use lash_vm_broker::kernel::loader;
     let frame = embedding.prepared_library()?;
-    let stored = match definitions
+    let mut stored = match definitions
         .iter()
         .map(|(function, body)| {
             embedding
@@ -262,6 +154,13 @@ pub fn library_for(
         Ok(stored) => stored,
         Err(refusal) => return Ok(Err(refusal)),
     };
+    for (id, definition) in &document.functions {
+        if frame.registry().get(id).is_none() {
+            stored
+                .entry(*id)
+                .or_insert_with(|| Arc::new(definition.clone()));
+        }
+    }
     let assembled = match loader::assemble(document, frame.registry(), &stored) {
         Ok(assembled) => assembled,
         Err(refusal) => return Ok(Err(refusal)),
@@ -281,55 +180,12 @@ pub fn library_for(
     Ok(Ok((library, assembled.closure)))
 }
 
-/// Why an embedding composed no namespaces for a cell.
-#[derive(Debug)]
-pub(crate) enum Namespaces {
-    Refused(lash_kernel_dialect::NamespaceRefusal),
-}
-
-/// The names and surface one writer resolves against.
-pub(crate) enum Surface<'a> {
-    /// A set the embedding holds.
-    Held {
-        library: &'a NamedLibrary,
-        view: lash_kernel_package::PackageView<'a>,
-    },
-    /// A stored surface the embedding does not hold.
-    Stored(Box<StoredNames>),
-}
-
-/// A stored surface and its names: the held functions it names by
-/// identity, and those sent with it.
-pub(crate) struct StoredNames {
-    surface: lash_kernel_package::SurfaceSnapshot,
-    library: NamedLibrary,
-}
-
-impl Surface<'_> {
-    pub(crate) fn library(&self) -> &NamedLibrary {
-        match self {
-            Self::Held { library, .. } => library,
-            Self::Stored(stored) => &stored.library,
-        }
-    }
-
-    pub(crate) fn view<'b>(
-        &'b self,
-        catalog: &'b Arc<FunctionRegistry>,
-    ) -> lash_kernel_package::PackageView<'b> {
-        match self {
-            Self::Held { view, .. } => *view,
-            Self::Stored(stored) => lash_kernel_package::PackageView::new(&stored.surface, catalog),
-        }
-    }
-}
-
 /// A worker's configuration while it is assembled: the natives the host
 /// supplies and the dialects it installs. It holds no package: it is bound
 /// once to its parent's ([`Embedder::finish`]).
 #[derive(Default)]
 pub struct Embedder {
-    natives: PackageInstall,
+    natives: BTreeMap<FunctionId, Arc<dyn NativeFunction>>,
     dialects: BTreeMap<String, Dialect>,
 }
 
@@ -352,7 +208,7 @@ impl Embedder {
         function: FunctionId,
         native: Arc<dyn NativeFunction>,
     ) -> Result<Self, EmbedError> {
-        if self.natives.natives.insert(function, native).is_some() {
+        if self.natives.insert(function, native).is_some() {
             return Err(EmbedError::Registry(format!(
                 "a native for {function} is supplied twice"
             )));
@@ -381,54 +237,52 @@ impl Embedder {
     ///
     /// # Errors
     ///
-    /// [`EmbedError::NoDialect`]; [`PackageRefusal::NativeMissing`] for a
+    /// [`EmbedError::NoDialect`]; [`WorkerLibraryRefusal::NativeMissing`] for a
     /// `Native`-only function no native is supplied for, and
-    /// [`PackageRefusal::NativeUnused`] for a native of no held function
+    /// [`WorkerLibraryRefusal::NativeUnused`] for a native of no held function
     /// that states one; [`EmbedError::Registry`].
-    pub fn finish(self, packages: &HeldPackages) -> Result<Embedding, EmbedError> {
+    pub fn finish(self, library: &WorkerLibrary) -> Result<Embedding, EmbedError> {
         if self.dialects.is_empty() {
             return Err(EmbedError::NoDialect);
         }
-        let (image, index) = packages.frame_indexes()?;
+        let [image, index, positions, _] = library.indexes()?;
         let mut registry = FunctionRegistry::over_frame(image)
             .map_err(|error| EmbedError::Registry(error.to_string()))?;
         registry
             .bind_native_tables(
-                packages.frame_positions()?,
+                positions,
                 crate::native_tables::native_tables(),
-                &self.natives.natives,
+                &self.natives,
             )
             .map_err(|error| match error {
                 lash_kernel_doc::RegistryError::FrameNativeMissing { function, name } => {
-                    EmbedError::Package(PackageRefusal::NativeMissing { function, name })
+                    EmbedError::Library(WorkerLibraryRefusal::NativeMissing { function, name })
                 }
                 lash_kernel_doc::RegistryError::FrameNativeUnused { function } => {
-                    EmbedError::Package(PackageRefusal::NativeUnused { function })
+                    EmbedError::Library(WorkerLibraryRefusal::NativeUnused { function })
                 }
                 other => EmbedError::Registry(other.to_string()),
             })?;
         #[cfg(feature = "dialect-typescript")]
         registry
-            .bind_frame_plans(packages.frame_positions()?, lash_ext_ts_core::PLANS)
+            .bind_frame_plans(positions, lash_ext_ts_core::PLANS)
             .map_err(|error| EmbedError::Registry(error.to_string()))?;
         #[cfg(feature = "dialect-python")]
         registry
-            .bind_frame_plans(packages.frame_positions()?, lash_ext_py_core::PLANS)
-            .map_err(|error| EmbedError::Registry(error.to_string()))?;
-        let library = packages
-            .view()
-            .library(&registry)
+            .bind_frame_plans(positions, lash_ext_py_core::PLANS)
             .map_err(|error| EmbedError::Registry(error.to_string()))?;
         let registry = Arc::new(registry);
+        let names = NamedLibrary::resolving(&registry, |id| library.roots().contains(id))
+            .map_err(|error| EmbedError::Registry(error.to_string()))?;
         let prepared =
             PreparedLibrary::over_frame(registry.clone(), lash_kernel_vm::Charge::Exact, index)
                 .map_err(|error| EmbedError::Registry(error.to_string()))?;
         Ok(Embedding {
-            library,
+            library: names,
             written: registry,
             prepared: OnceLock::from(prepared),
             dialects: self.dialects,
-            held: packages.clone(),
+            held: library.clone(),
             stored: lash_vm_broker::kernel::loader::Definitions::default(),
             loaded: lash_vm_broker::kernel::loader::Libraries::new(16),
         })
@@ -543,12 +397,132 @@ mod typescript {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use lash_kernel_doc::FunctionDefinition;
     use lash_vm_client::WorkerTuning;
+    use std::collections::BTreeSet;
 
+    use lash_kernel_dialect::{
+        EffectControl, NamespaceKind, NamespaceMember, Namespaces, OperationSignature,
+    };
+    use lash_vocabulary::{
+        EffectName, OperationMode, QualifiedOperation, Signature, TurnControls, package::Visibility,
+    };
+    pub(crate) fn namespaces(
+        effects: &BTreeMap<EffectName, Signature>,
+        controls: &BTreeMap<EffectName, BTreeSet<EffectControl>>,
+    ) -> Result<Namespaces, lash_kernel_dialect::NamespaceRefusal> {
+        let mut packages = BTreeMap::new();
+        for (name, signature) in effects {
+            let operation = QualifiedOperation::from_effect(name).expect("fixture operation");
+            let flags = controls.get(name);
+            let mut accepted = TurnControls::none();
+            if flags.is_some_and(|flags| flags.contains(&EffectControl::Finish)) {
+                accepted = accepted.with_finish(lash_vocabulary::JsonSchema::any());
+            }
+            if flags.is_some_and(|flags| flags.contains(&EffectControl::SwitchAgentFrame)) {
+                accepted = accepted.with_switch_agent_frame();
+            }
+            packages
+                .entry(operation.package)
+                .or_insert_with(BTreeMap::new)
+                .insert(
+                    operation.name,
+                    NamespaceMember {
+                        visibility: Visibility::Public,
+                        kind: NamespaceKind::Operation(OperationSignature {
+                            signature: signature.clone(),
+                            controls: accepted,
+                            mode: OperationMode::Waited,
+                        }),
+                    },
+                );
+        }
+        Namespaces::new(packages, BTreeSet::new(), &|_| false)
+    }
     /// lash's own packages, as the parent holds them.
-    pub(crate) fn lash() -> Arc<HeldPackages> {
-        lash_vm_releases::lash_packages().expect("lash's packages")
+    pub(crate) fn lash() -> WorkerLibrary {
+        let release = lash_vm_releases::helper_release().expect("helper release");
+        WorkerLibrary::new(&release.functions, release.resolver_roots()).expect("native image")
+    }
+
+    /// Fulfil a law's authored document against the same immutable helper
+    /// release a worker holds, with each offered operation pinned by slot.
+    pub(crate) fn linked(
+        document: lash_kernel_doc::Document,
+        library: PreparedLibrary,
+    ) -> lash_kernel_vm::Program {
+        use lash_vocabulary::{Fill, ImportKind, MemberKind, OperationRequirement};
+        let release = lash_vm_releases::helper_release().expect("helper release");
+        let fills = document
+            .imports
+            .iter()
+            .map(|(slot, import)| {
+                let fill = match &import.kind {
+                    ImportKind::Operation { signature } => {
+                        Fill::Operation(OperationRequirement::new(
+                            signature.clone(),
+                            lash_vocabulary::ContractId::new("1"),
+                        ))
+                    }
+                    _ => {
+                        let package = release
+                            .content
+                            .packages
+                            .values()
+                            .find(|package| package.path == import.name.package)
+                            .expect("helper namespace");
+                        let member = &package.members[&import.name.member];
+                        let MemberKind::Export { link, export } = &member.kind else {
+                            panic!("code member");
+                        };
+                        let mut export = export.clone();
+                        if import.name.type_member.is_some() {
+                            export.member = import.name.type_member.clone();
+                        }
+                        Fill::Export {
+                            link: *link,
+                            export,
+                        }
+                    }
+                };
+                (*slot, fill)
+            })
+            .collect();
+        let root = lash_vocabulary::Link {
+            document: document.identity(),
+            fills,
+        };
+        let link = root.identity();
+        let mut links = release.content.links.clone();
+        links.insert(link, root);
+        let mut documents: BTreeMap<_, _> = release
+            .content
+            .documents
+            .iter()
+            .map(|(id, document)| (*id, Arc::new(document.clone())))
+            .collect();
+        documents.insert(document.identity(), Arc::new(document));
+        let stored = documents
+            .values()
+            .flat_map(|document| document.functions.iter())
+            .map(|(id, definition)| (*id, Arc::new(definition.clone())))
+            .collect();
+        let closure = lash_vm_broker::kernel::closure::derive(
+            documents
+                .values()
+                .flat_map(|document| document.functions.keys().chain(&document.requires.natives))
+                .copied(),
+            library.registry(),
+            &stored,
+        )
+        .expect("linked definitions");
+        lash_kernel_vm::Program::prepare(
+            link,
+            documents,
+            &links,
+            lash_kernel_doc::heap::PageId(closure.reference().0),
+            library,
+        )
+        .expect("linked law document")
     }
 
     /// A host that names TypeScript alone.
@@ -584,166 +558,24 @@ pub(crate) mod tests {
         ));
     }
 
-    /// PKG-IDENTITY: moving lash's libraries into packages changes no
-    /// definition bytes. Each package the build made holds exactly the
-    /// definitions its crates define (the kernel library, the extensions,
-    /// each dialect's helpers against the library it ships with), under the
-    /// same identities, so a worker holds exactly the functions it would
-    /// have defined itself, and defines none when it starts (FIG-5796).
-    #[test]
-    fn lash_packages_hold_exactly_what_their_crates_define() {
-        use lash_ext_helper_compiler::library::{Dialect as SourceDialect, Library};
-        let typescript =
-            Library::of(SourceDialect::TypeScript).expect("TypeScript source packages");
-        let python = Library::of(SourceDialect::Python).expect("Python source packages");
-        let packages = lash_vm_releases::built().expect("built packages");
-        let declared: BTreeSet<_> = typescript
-            .packages
-            .iter()
-            .chain(&python.packages)
-            .map(|package| package.path().to_string())
-            .collect();
-        let built: BTreeSet<_> = packages
-            .iter()
-            .map(|package| package.path().to_string())
-            .collect();
-        assert_eq!(
-            packages.len(),
-            declared.len(),
-            "each source package is shipped once"
-        );
-        assert_eq!(built, declared, "exactly the source packages are shipped");
-        for package in packages {
-            let source = if package.path().to_string() == "python" {
-                &python
-            } else {
-                &typescript
-            };
-            let declared = source
-                .packages
-                .iter()
-                .find(|declared| declared.path() == package.path())
-                .expect("source package");
-            assert_eq!(
-                package.code().len(),
-                declared.code().len(),
-                "{}: every source definition is shipped",
-                package.path()
-            );
-            for at in 0..package.code().len() {
-                let id = package.code().ids()[at];
-                let built = package.code().definition(at).expect("built definition");
-                let defined = source.registry.get(&id).unwrap_or_else(|| {
-                    panic!("{}: {} is defined by its crate", package.path(), built.name)
-                });
-                assert_eq!(
-                    built.as_ref(),
-                    defined.definition().as_ref(),
-                    "{}: {}",
-                    package.path(),
-                    built.name
-                );
-            }
-        }
-    }
-
-    /// PKG-PURE-BUILTIN: lash's six packages export no operations and no
-    /// body lists one.
-    #[test]
-    fn lash_packages_export_and_perform_no_operation() {
-        let packages = lash_vm_releases::built().expect("lash's packages");
-        assert_eq!(packages.len(), lash_vm_releases::PACKAGES.len());
-        for package in &packages {
-            assert!(
-                package
-                    .exports()
-                    .values()
-                    .all(|export| !matches!(export, lash_kernel_package::Export::Operation(_))),
-                "{} exports an operation",
-                package.path()
-            );
-            for at in 0..package.code().len() {
-                let definition = package.code().definition(at).expect("a definition decodes");
-                let Some(body) = definition.body() else {
-                    continue;
-                };
-                assert!(
-                    body.effects.is_empty(),
-                    "{} lists an operation",
-                    definition.name
-                );
-            }
-        }
-    }
-
-    /// A parent holds exactly the functions a worker of every dialect the
-    /// build holds does, without linking a dialect or an extension
-    /// (FIG-5812): the registry it reads from the packages it holds is that
-    /// embedding's, every function under the same identity and definition.
-    /// The parent assembles it once in a process:
-    /// every session it opens links against the same one (FIG-5759).
-    #[test]
-    fn a_parent_holds_exactly_the_functions_a_worker_holds() {
-        let packages = lash_vm_releases::lash_packages().expect("the parent's holdings");
-        let child = HeldPackages::from_frame(packages.frame()).expect("the child's frame");
-        for (key, package) in packages.artifacts() {
-            assert_eq!(
-                package.display(),
-                child
-                    .artifacts()
-                    .get(key)
-                    .expect("the same artifact")
-                    .display(),
-                "POOL-FRAME carries display facts intact, including comparisons and reply receivers"
-            );
-        }
-        let parent = lash_vm_releases::lash_packages()
-            .map(|packages| std::sync::Arc::clone(packages.functions()))
-            .expect("the parent's functions");
-        let again = lash_vm_releases::lash_packages()
-            .map(|packages| std::sync::Arc::clone(packages.functions()))
-            .expect("the parent's functions");
-        assert!(Arc::ptr_eq(&parent, &again), "assembled once in a process");
-        let embedding = every_dialect(&WorkerTuning::standard()).expect("an embedding of both");
-        let worker = embedding.registry().expect("every version's functions");
-        let definitions =
-            |registry: &FunctionRegistry| -> BTreeMap<FunctionId, FunctionDefinition> {
-                registry
-                    .iter()
-                    .map(|(function, _)| {
-                        let registered = registry
-                            .get(function)
-                            .expect("each held identity is indexed");
-                        (
-                            *function,
-                            FunctionDefinition::clone(registered.definition()),
-                        )
-                    })
-                    .collect()
-            };
-        let held = definitions(&parent);
-        assert!(
-            held == definitions(worker),
-            "the parent's functions differ from the worker's"
-        );
-    }
-
     /// The host flow cells under `examples/typescript-host-flows/` lower as a
     /// host lowers a cell, against a catalogue that offers their tools, so a
     /// retired spelling fails here instead of rotting in the example.
     #[test]
     fn the_typescript_host_flow_examples_lower_against_their_host_catalogue() {
-        use lash_kernel_doc::{EffectName, Name, Signature};
+        use lash_vocabulary::names::EffectName;
+        use lash_vocabulary::names::Name;
+        use lash_vocabulary::types::Signature;
         use std::collections::BTreeSet;
 
         let embedding = typescript_only(&WorkerTuning::standard()).expect("a TypeScript embedding");
         let tool = Signature {
-            params: vec![lash_kernel_doc::Param {
+            params: vec![lash_vocabulary::types::Param {
                 name: Name::new("input"),
-                ty: lash_kernel_doc::Type::Any,
+                ty: lash_vocabulary::types::Type::Any,
                 optional: false,
             }],
-            result: lash_kernel_doc::Type::Any,
+            result: lash_vocabulary::types::Type::Any,
         };
         let effects: BTreeMap<_, _> = [
             "web.fetch",
@@ -776,12 +608,8 @@ pub(crate) mod tests {
                     source,
                     &lash_kernel_dialect::Environment::new(
                         embedding.library(),
-                        &lash_kernel_dialect::Namespaces::of_effects(
-                            &effects,
-                            &lash_kernel_doc::ContractId::new("1"),
-                            &controls,
-                        )
-                        .expect("the test's effects are operations"),
+                        &namespaces(&effects, &controls)
+                            .expect("the test's effects are operations"),
                     ),
                     Mode::Cell(lash_kernel_dialect::CellEnvironment {
                         bindings: &bindings,
@@ -807,12 +635,8 @@ pub(crate) mod tests {
         let mut tuning = WorkerTuning::standard();
         tuning.typescript_source_bytes = source.len();
         let embedding = typescript_only(&tuning).unwrap();
-        let environment_namespaces = lash_kernel_dialect::Namespaces::of_effects(
-            &Default::default(),
-            &lash_kernel_doc::ContractId::new("1"),
-            &Default::default(),
-        )
-        .expect("the test's effects are operations");
+        let environment_namespaces = namespaces(&Default::default(), &Default::default())
+            .expect("the test's effects are operations");
         let environment = Environment::new(embedding.library(), &environment_namespaces);
         embedding
             .lower(
@@ -832,12 +656,8 @@ pub(crate) mod tests {
         let python_source = format!("#{}", "x".repeat(1 << 20));
         tuning.python_source_bytes = python_source.len();
         let embedding = crate::built_embedding(&tuning).unwrap();
-        let environment_namespaces = lash_kernel_dialect::Namespaces::of_effects(
-            &Default::default(),
-            &lash_kernel_doc::ContractId::new("1"),
-            &Default::default(),
-        )
-        .expect("the test's effects are operations");
+        let environment_namespaces = namespaces(&Default::default(), &Default::default())
+            .expect("the test's effects are operations");
         let environment = Environment::new(embedding.library(), &environment_namespaces);
         embedding
             .lower(

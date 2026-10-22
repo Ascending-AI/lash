@@ -25,9 +25,9 @@ use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::sync::{Arc, Mutex};
 
 use lash_kernel_doc::{
-    Document, FunctionDefinition, FunctionId, FunctionRegistry, KernelDataLimits, KernelVersion,
-    RegistryError,
+    Document, FunctionDefinition, FunctionRegistry, KernelVersion, RegistryError,
 };
+use lash_vocabulary::{KernelDataLimits, names::FunctionId};
 
 use super::closure::{Closure, ClosureRefusal};
 
@@ -85,7 +85,7 @@ pub enum LoadRefusal {
     )]
     InternalOperation {
         function: FunctionId,
-        operation: lash_kernel_doc::EffectName,
+        operation: lash_vocabulary::names::EffectName,
     },
     /// A definition did not encode as a graph node.
     #[error("the closure does not encode: {problem}")]
@@ -103,7 +103,7 @@ impl From<ClosureRefusal> for LoadRefusal {
     }
 }
 
-impl From<LoadRefusal> for lash_vm_protocol::KernelRestoreRefusal {
+impl From<LoadRefusal> for lash_protocol_types::engine_fault::KernelRestoreRefusal {
     fn from(refusal: LoadRefusal) -> Self {
         match refusal {
             LoadRefusal::NativeMissing { function } => Self::MissingNative {
@@ -137,7 +137,7 @@ pub fn decode(
     limits: KernelDataLimits,
 ) -> Result<FunctionDefinition, LoadRefusal> {
     let definition =
-        lash_kernel_doc::graph_tokens::decode_body_with_limits::<FunctionDefinition>(bytes, limits)
+        lash_vocabulary::tokens::decode_body_with_limits::<FunctionDefinition>(bytes, limits)
             .map_err(|error| LoadRefusal::Undecodable {
                 function,
                 problem: error.to_string(),
@@ -252,8 +252,8 @@ pub fn assemble(
     stored: &BTreeMap<FunctionId, Arc<FunctionDefinition>>,
 ) -> Result<Assembled, LoadRefusal> {
     let admitted = admit(
-        document.manifest.functions.keys().copied().collect(),
-        document.manifest.kernel,
+        document.functions.keys().copied().collect(),
+        document.kernel(),
         held,
         stored,
     )?;
@@ -409,17 +409,19 @@ fn register(
 pub fn requirements<'a>(
     closure: &Closure,
     kernel: u32,
-    links: impl IntoIterator<Item = &'a lash_core_store::tool_surface::OperationLink>,
-) -> lash_kernel_doc::ExecutionRequirements {
-    let mut requirements = lash_kernel_doc::ExecutionRequirements {
-        natives: closure
-            .body()
-            .functions()
-            .iter()
-            .filter(|member| member.native_only)
-            .map(|member| member.function)
-            .collect(),
-        kernels: BTreeSet::from([kernel]),
+    links: impl IntoIterator<Item = &'a lash_core_store::tool_surface::OperationRoute>,
+) -> lash_vocabulary::claims::ClaimRequirements {
+    let mut requirements = lash_vocabulary::claims::ClaimRequirements {
+        machine: lash_vocabulary::claims::NodeRequirements {
+            natives: closure
+                .body()
+                .functions()
+                .iter()
+                .filter(|member| member.native_only)
+                .map(|member| member.function)
+                .collect(),
+            kernels: BTreeSet::from([kernel]),
+        },
         ..Default::default()
     };
     for link in links {
@@ -452,7 +454,12 @@ fn dependency_order(
             None => stored
                 .get(function)
                 .and_then(|definition| definition.body())
-                .map(|body| body.functions.keys().copied().collect())
+                .map(|body| {
+                    lash_kernel_doc::Node::Block(&body.block)
+                        .functions_within()
+                        .into_iter()
+                        .collect()
+                })
                 .unwrap_or_default(),
         };
         callees.remove(function);
@@ -545,6 +552,50 @@ impl<L: Clone> Libraries<L> {
     }
 }
 
-#[cfg(test)]
-#[path = "loader_tests.rs"]
-mod tests;
+/// Assemble only selected reach while keeping every retained Document intact.
+/// The temporary loader input is never published or assigned a content identity.
+pub fn declare_reach(
+    root: &Document,
+    documents: &BTreeMap<lash_vocabulary::names::DocumentId, Arc<Document>>,
+    functions: &BTreeMap<lash_vocabulary::package::LinkId, std::collections::BTreeSet<FunctionId>>,
+    machine: &lash_vocabulary::claims::NodeRequirements,
+    held: &Arc<FunctionRegistry>,
+) -> Result<Assembled, LoadRefusal> {
+    let mut selected = root.clone();
+    selected.functions.clear();
+    selected.requires = machine.clone();
+    for function in functions.values().flatten() {
+        if let Some(definition) = documents
+            .values()
+            .find_map(|document| document.functions.get(function))
+        {
+            selected.functions.insert(*function, definition.clone());
+        } else if !machine.natives.contains(function) {
+            return Err(LoadRefusal::Missing {
+                function: *function,
+            });
+        }
+    }
+    let stored = selected
+        .functions
+        .iter()
+        .map(|(id, definition)| (*id, Arc::new(definition.clone())))
+        .collect();
+    let admitted = admit(
+        selected.functions.keys().copied().collect(),
+        selected.kernel(),
+        held,
+        &stored,
+    )?;
+    let registry = declare(
+        selected.functions.keys().copied(),
+        selected.kernel(),
+        held,
+        &stored,
+    )?;
+    Ok(Assembled {
+        registry: Arc::new(registry),
+        closure: admitted.closure,
+        held: false,
+    })
+}

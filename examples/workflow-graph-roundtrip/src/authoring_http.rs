@@ -33,15 +33,11 @@ pub(crate) async fn import_source(
     let current = state.current();
     check_version(request.version, current.version)?;
     let (document, map, captions, packages) = if let Some(format) = request.format {
-        let packages = match current.package_set.clone() {
+        let packages = match current.namespace.clone() {
             Some(packages) => packages,
-            None => state
-                .core
-                .host_artifacts()
-                .cell_packages()
+            None => runtime::namespace(&state.core, &state.namespace_pin)
                 .await
-                .map_err(|error| ErrorResponse::invalid("packages", error))?
-                .declare_all(),
+                .map_err(|error| ErrorResponse::invalid("namespace", error))?,
         };
         let read = state
             .core
@@ -50,9 +46,7 @@ pub(crate) async fn import_source(
                 &request.source,
                 format,
                 current.draft.document(),
-                &runtime::environment()
-                    .map_err(|error| ErrorResponse::invalid("environment", error))?,
-                packages.clone(),
+                &packages.request,
             )
             .await
             .map_err(|error| ErrorResponse::invalid("source_read", error))?;
@@ -73,9 +67,15 @@ pub(crate) async fn import_source(
             }
         }
     } else {
-        import(&state.core, request.dialect, &request.source).await?
+        import(
+            &state.core,
+            &state.namespace_pin,
+            request.dialect,
+            &request.source,
+        )
+        .await?
     };
-    if !document.entries.contains_key(&request.entry) {
+    if !document.exports.contains_key(&request.entry) {
         return Err(ErrorResponse::invalid(
             "entry",
             "Select an exported workflow function",
@@ -100,7 +100,7 @@ pub(crate) async fn import_source(
                 }
             } else {
                 Origin::Imported {
-                    packages,
+                    packages: Box::new(packages),
                     dialect: request.dialect,
                     text: request.source,
                     map,
@@ -121,32 +121,16 @@ pub(crate) async fn import_source(
 /// nothing. The captions are the ones the source spells.
 pub(crate) async fn import(
     core: &lash::LashCore,
+    pin: &lash::process::HostArtifactPin,
     dialect: Dialect,
     source: &str,
-) -> Result<
-    (
-        Document,
-        Option<SourceMap>,
-        Captions,
-        lash::package::WorkflowPackages,
-    ),
-    ErrorResponse,
-> {
-    let environment =
-        runtime::environment().map_err(|error| ErrorResponse::invalid("environment", error))?;
+) -> Result<(Document, Option<SourceMap>, Captions, runtime::Namespace), ErrorResponse> {
+    let namespace = runtime::namespace(core, pin)
+        .await
+        .map_err(|error| ErrorResponse::invalid("namespace", error))?;
     let imported = core
         .host_artifacts()
-        .import_workflow(
-            dialect.language(),
-            source,
-            &environment,
-            core.host_artifacts()
-                .cell_packages()
-                .await
-                .map_err(|error| ErrorResponse::invalid("packages", error))?
-                .declare_all(),
-            None,
-        )
+        .import_workflow(dialect.language(), source, &namespace.request, None)
         .await
         .map_err(|error| ErrorResponse::invalid("source_import", error))?;
     match imported {
@@ -154,7 +138,6 @@ pub(crate) async fn import(
             document,
             source_map,
             captions,
-            packages,
             ..
         } => Ok((
             document
@@ -162,7 +145,7 @@ pub(crate) async fn import(
                 .map_err(|error| ErrorResponse::invalid("document_bytes", error))?,
             Some(source_map),
             captions,
-            packages,
+            namespace,
         )),
         WorkflowImport::Refused(diagnostics) => Err(ErrorResponse::new(
             StatusCode::UNPROCESSABLE_ENTITY,
@@ -176,9 +159,6 @@ pub(crate) async fn import(
                 })
             }).collect::<Vec<_>>()}),
         )),
-        WorkflowImport::Admission(refusal) => {
-            Err(ErrorResponse::invalid("source_admission", refusal))
-        }
         other => Err(ErrorResponse::invalid(
             "source_unsupported",
             format!("{other:?}"),

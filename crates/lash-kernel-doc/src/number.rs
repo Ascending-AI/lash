@@ -11,7 +11,7 @@ use num_traits::ToPrimitive;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::name::string_schema;
+use lash_vocabulary::names::string_schema;
 
 /// An arbitrary-precision integer. Its stored form is its decimal spelling.
 ///

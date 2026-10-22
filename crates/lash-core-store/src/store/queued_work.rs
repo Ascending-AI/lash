@@ -52,7 +52,7 @@ impl PendingSessionWorkOrdering {
 #[derive(Clone, Debug)]
 pub struct TurnLaneCandidate {
     /// Durable batch identity, used to name a row in admission diagnostics.
-    pub batch_id: crate::BatchId,
+    pub batch_id: lash_vocabulary::identity::BatchId,
     pub enqueue_seq: u64,
     pub delivery_policy: DeliveryPolicy,
     pub authority: QueuedWorkAuthority,
@@ -102,7 +102,7 @@ pub fn select_leading_session_command(candidates: &[TurnLaneCandidate]) -> usize
 /// `nonce` disambiguates batches enqueued within the same millisecond;
 /// backends whose id uniqueness already comes from elsewhere pass `None`.
 pub fn derive_batch_id(
-    session_id: &crate::SessionId,
+    session_id: &lash_vocabulary::identity::SessionId,
     source_key: Option<&str>,
     now_epoch_ms: u64,
     nonce: Option<u64>,

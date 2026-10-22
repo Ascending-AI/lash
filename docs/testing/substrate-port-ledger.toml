@@ -22253,7 +22253,7 @@ laws = [
 ]
 disposition = "replaced-by:planned:L3S-TURN"
 status = "deleted"
-owed = "a run's stated tool grants are its tool authority alone, survive its crash and a cold reopen, and never become the sticky session access"
+owed = "a run's pinned Operation Routes survive its crash and a cold reopen, and never become the sticky session access"
 note = "deleted by L3s (FIG-5196): its setup needed the store run admission or the legacy final commit, both deleted; the domain law is re-proved on the session actor turn commit"
 
 [[row]]

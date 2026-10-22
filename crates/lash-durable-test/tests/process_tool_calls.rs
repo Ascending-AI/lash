@@ -36,7 +36,7 @@ struct Execution {
     /// Who the call ran for.
     owner: String,
     /// The process the call names as the one it runs inside.
-    enclosing: Option<lash_core::ProcessId>,
+    enclosing: Option<lash_vocabulary::identity::ProcessId>,
     /// The completion key a deferred probe parked on.
     completion_key: Option<String>,
 }
@@ -78,9 +78,9 @@ impl Witness {
     }
 }
 
-fn probe_definition(name: &str) -> lash_core::ToolDefinition {
+fn probe_definition(name: &str) -> lash_vocabulary::tool_contract::ToolDefinition {
     let object = serde_json::json!({ "type": "object", "additionalProperties": true });
-    let definition = lash_core::ToolDefinition::raw(
+    let definition = lash_vocabulary::tool_contract::ToolDefinition::raw(
         format!("tool:{name}"),
         format!("tools.{name}"),
         "Records its call and answers its label; a held call waits for the law.",
@@ -94,8 +94,8 @@ fn probe_definition(name: &str) -> lash_core::ToolDefinition {
     }
     definition
         .with_declaration(
-            lash_core::ToolDeclaration::deferring(),
-            Some(lash_core::ParkBound::Within(
+            lash_vocabulary::tool_declaration::ToolDeclaration::deferring(),
+            Some(lash_vocabulary::tool_contract::ParkBound::Within(
                 std::time::Duration::from_secs(120),
             )),
         )
@@ -113,7 +113,7 @@ impl lash_core::ToolProvider for Probe {
         &self,
         _config: &lash_core::OwnerConfigView,
     ) -> std::result::Result<
-        Vec<lash_core::ToolManifest>,
+        Vec<lash_vocabulary::tool_contract::ToolManifest>,
         lash_execution_contracts::plugin_error::PluginError,
     > {
         Ok({
@@ -128,7 +128,7 @@ impl lash_core::ToolProvider for Probe {
         &self,
         name: &str,
         _config: &lash_core::OwnerConfigView,
-    ) -> Option<Arc<lash_core::ToolContract>> {
+    ) -> Option<Arc<lash_vocabulary::tool_contract::ToolContract>> {
         let Some(("tools", name)) = name.split_once('.') else {
             return None;
         };
@@ -174,8 +174,10 @@ impl lash_core::ToolProvider for Probe {
 }
 
 /// The component that serves the probe to a process body.
-const PROBE_COMPONENT: lash_core::ProcessConfigKey<()> =
-    lash_core::ProcessConfigKey::new("process-probe", lash_core::FormatVersion::ONE);
+const PROBE_COMPONENT: lash_core::ProcessConfigKey<()> = lash_core::ProcessConfigKey::new(
+    "process-probe",
+    lash_vocabulary::providers::FormatVersion::ONE,
+);
 
 /// A core running RLM turns with the probe, its model the registered
 /// scripts. A process a cell starts runs under the turn's run with the
@@ -783,8 +785,8 @@ async fn a_store_fault_after_prepare_never_settles_a_step(tier: Tier) {
 
 /// The all-optional tool the omission law calls: no field is required, and
 /// one declares a default that an omitted input must not be given.
-fn search_definition() -> lash_core::ToolDefinition {
-    lash_core::ToolDefinition::raw(
+fn search_definition() -> lash_vocabulary::tool_contract::ToolDefinition {
+    lash_vocabulary::tool_contract::ToolDefinition::raw(
         "tool:workflows_search",
         "workflows.search",
         "Answers the input it was called with.",
@@ -818,7 +820,7 @@ impl lash_core::ToolProvider for Search {
         &self,
         _config: &lash_core::OwnerConfigView,
     ) -> std::result::Result<
-        Vec<lash_core::ToolManifest>,
+        Vec<lash_vocabulary::tool_contract::ToolManifest>,
         lash_execution_contracts::plugin_error::PluginError,
     > {
         Ok(vec![search_definition().manifest()])
@@ -828,7 +830,7 @@ impl lash_core::ToolProvider for Search {
         &self,
         name: &str,
         _config: &lash_core::OwnerConfigView,
-    ) -> Option<Arc<lash_core::ToolContract>> {
+    ) -> Option<Arc<lash_vocabulary::tool_contract::ToolContract>> {
         (name == "workflows.search").then(|| Arc::new(search_definition().contract()))
     }
 
@@ -856,8 +858,10 @@ impl lash_core::ToolProvider for Search {
 }
 
 /// The component that serves the search tool to a process body.
-const SEARCH_COMPONENT: lash_core::ProcessConfigKey<()> =
-    lash_core::ProcessConfigKey::new("workflows-search", lash_core::FormatVersion::ONE);
+const SEARCH_COMPONENT: lash_core::ProcessConfigKey<()> = lash_core::ProcessConfigKey::new(
+    "workflows-search",
+    lash_vocabulary::providers::FormatVersion::ONE,
+);
 
 /// A core running RLM turns in `dialect` with the search tool, in its cells
 /// and in the processes they start.

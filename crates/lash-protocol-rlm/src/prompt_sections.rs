@@ -78,7 +78,7 @@ pub(crate) fn history_binding(
     Ok(binding)
 }
 
-/// The heading the code of the cell's package set is listed under.
+/// The heading the Current Packages' code exports are listed under.
 pub(crate) const PACKAGES_TITLE: &str = "Packages";
 
 /// The session behaviour every section renders under, fixed when the
@@ -238,7 +238,7 @@ fn finalization(
         .filter(|tool| {
             tool.declaration()
                 .controls
-                .contains(lash_core::TurnControlKind::Finish)
+                .contains(lash_vocabulary::tool_declaration::TurnControlKind::Finish)
         })
         .map(|tool| behaviour.dialect.finish_call(tool))
         .collect::<Vec<_>>();

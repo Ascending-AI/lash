@@ -13,9 +13,9 @@ async fn process_cancel_withdraws_its_inputs_and_preserves_foreign_child_inputs(
     let services = runtime
         .runtime_session_services()
         .expect("session services");
-    let process_id = crate::ProcessId::fixture("input-owner");
-    let turn_id = crate::TurnId::from("owned-turn");
-    let session_id = crate::SessionId::from("linked-input-child");
+    let process_id = lash_vocabulary::identity::ProcessId::fixture("input-owner");
+    let turn_id = lash_vocabulary::identity::TurnId::from("owned-turn");
+    let session_id = lash_vocabulary::identity::SessionId::from("linked-input-child");
     let factory = backend.session_store_factory();
     let store = crate::testing::runtime_helpers::create_session_store(
         &factory,

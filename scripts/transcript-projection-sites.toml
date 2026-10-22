@@ -254,6 +254,4 @@ roles = ["Assistant", "Event", "Tool", "User"]
 
 "crates/lash-durable-test/tests/tool_batches.rs#batch_admission_and_identity_contract" = { reads = 1, outputs = 0, kind = "evidence-read", reason = "FIG-6518 reads the wrapper result status to verify disabled batch dispatch failed, independently of presenter wording." }
 
-"examples/dataframe/src/tests.rs#df_split" = { reads = 0, outputs = 1, kind = "output-read", reason = "DF-SPLIT compares the settled control.finish rows of the real wordcount samples with callback-bearing pipelines reopened on SQLite (FIG-7075)." }
-"examples/dataframe/src/tests.rs#separated_runs" = { reads = 0, outputs = 1, kind = "output-read", reason = "DF-SPLIT reads the settled rows and placement after a crash between two native expression runs (FIG-7075)." }
-"crates/lash-durable-test/tests/open_session_commands.rs#execute" = { reads = 0, outputs = 1, kind = "output-read", reason = "LO-FENCE reads the settled kernel-cell finish value after one typed revision-conflict retry (FIG-7118); the local tool executor is the scraper's enclosing function." }
+"crates/lash-durable-test/tests/open_session_commands.rs#execute" = { reads = 0, outputs = 1, kind = "output-read", reason = "The command law checks the settled typed finish value after explicit package authoring (FIG-7109)." }

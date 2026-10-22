@@ -24,9 +24,9 @@ use super::{
     Completion, Control, Cursor, Frame, Halt, KernelMachine, LibraryCall, SlotState, TryPhase,
 };
 use crate::compile::{Executable, Form, LibId, NestedKind, StmtId, Suffix};
+use lash_kernel_doc::Value;
 use lash_kernel_doc::arena::ArenaHandle;
 use lash_kernel_doc::heap::{HeapFault, PageValue};
-use lash_kernel_doc::{Site, Unit, Value};
 use lash_kernel_exec::ActIx;
 use lash_kernel_exec::coord::{
     self, ActionEntry, ActionKind, ActionPhase, Arrival, CleanupCoordinate, Departure,
@@ -40,6 +40,8 @@ use lash_kernel_state::paged::{
     FrameRecord, GuardRecord, HeaderRecord, IncomingRecord, IteratedRecord, LoopRecord, NameRef,
     PendingRecord, PhaseRecord, RoleRecord, SiteRef, TableCursor, TaskStateRecord,
 };
+use lash_vocabulary::sites::Site;
+use lash_vocabulary::sites::Unit;
 use std::sync::Arc;
 
 mod resident;
@@ -424,6 +426,18 @@ impl Frame {
     ) -> Result<bool, HeapFault> {
         let code = exe.code(self.code);
         let mut changed = !self.owned;
+        if stored.capture_names != code.capture_names {
+            stored.capture_names = code.capture_names.clone();
+            changed = true;
+        }
+        if stored.convention != self.convention {
+            stored.convention = self.convention.clone();
+            changed = true;
+        }
+        if stored.public_result != self.public_result {
+            stored.public_result = self.public_result.clone();
+            changed = true;
+        }
         // A fresh record takes every variable the frame binds; its own
         // row, only those assigned since.
         let mut edits = std::mem::take(&mut self.slots.edits);
@@ -892,7 +906,7 @@ impl Frames {
                         frame.project(stored, coordinates, &self.exe, &self.access, &mut arena)
                     })?;
             } else {
-                let mut record = FrameRecord::fresh(frame.statement.clone());
+                let mut record = FrameRecord::fresh(frame.link, frame.statement.clone());
                 frame.project(
                     &mut record,
                     coordinates,
@@ -922,7 +936,7 @@ impl Frames {
         for index in (0..self.len).rev() {
             let statement = match self.cache.iter().find(|(at, _)| *at == index) {
                 Some((_, frame)) => {
-                    if matches!(self.exe.code(frame.code).site.unit, Unit::Library(_)) {
+                    if !self.exe.code(frame.code).charged {
                         continue;
                     }
                     match frame.block_statement(&self.exe, true)? {
@@ -940,7 +954,7 @@ impl Frames {
                     .as_ref()
                     .clone(),
             };
-            if !matches!(statement.unit, Unit::Library(_)) {
+            if self.exe.authored_unit(&statement.unit) {
                 return Ok(Some(statement));
             }
         }
@@ -973,14 +987,15 @@ impl Frames {
             let code = match resident {
                 Some((_, frame)) => frame.code,
                 None => {
-                    let site = row(&self.rows, index, &self.access)?
-                        .statement
-                        .resolve(&self.access)?;
+                    let record = row(&self.rows, index, &self.access)?;
+                    let site = record.statement.resolve(&self.access)?;
                     (0..site.path.len())
                         .rev()
                         .find_map(|length| {
-                            self.exe
-                                .code_at(&Site::new(site.unit.clone(), &site.path[..length]))
+                            self.exe.code_at(
+                                &Site::new(site.unit.clone(), &site.path[..length]),
+                                &record.capture_names,
+                            )
                         })
                         .ok_or_else(|| malformed("a frame has no admitted code body"))?
                 }
@@ -1098,7 +1113,7 @@ impl Frames {
     /// resident frame's from its control, a cold one's from its row.
     pub(super) fn loop_coordinates(
         &self,
-    ) -> Result<Vec<lash_kernel_doc::kernel_internals::LoopIteration>, HeapFault> {
+    ) -> Result<Vec<lash_vocabulary::sites::LoopIteration>, HeapFault> {
         let mut loops = Vec::new();
         let mut resident = self.cache.iter().peekable();
         for index in 0..self.len {
@@ -1115,7 +1130,7 @@ impl Frames {
                     else {
                         return Err(malformed("a loop stands at another form"));
                     };
-                    loops.push(lash_kernel_doc::kernel_internals::LoopIteration {
+                    loops.push(lash_vocabulary::sites::LoopIteration {
                         site: site.clone(),
                         iteration: started.saturating_sub(1),
                     });
@@ -1125,7 +1140,7 @@ impl Frames {
             let frame = row(&self.rows, index, &self.access)?;
             for at in 0..frame.loops.len() {
                 let record = row(&frame.loops, at, &self.access)?;
-                loops.push(lash_kernel_doc::kernel_internals::LoopIteration {
+                loops.push(lash_vocabulary::sites::LoopIteration {
                     site: record.site.resolve(&self.access)?.as_ref().clone(),
                     iteration: record.started.saturating_sub(1),
                 });
@@ -1232,9 +1247,6 @@ fn action_kind(kind: &NestedKind) -> Option<ActionKind> {
         NestedKind::Perform { then_yield, .. } => ActionKind::Perform {
             then_yield: *then_yield,
         },
-        NestedKind::Sleep { then_yield } => ActionKind::Sleep {
-            then_yield: *then_yield,
-        },
         NestedKind::Spawn(_) => ActionKind::Spawn,
         NestedKind::Join => ActionKind::Join,
         NestedKind::JoinMany(_) => ActionKind::JoinMany,
@@ -1311,7 +1323,7 @@ fn continuation(
     // written inside it belongs to the closure's statement.
     let Some((act, nested)) = stream
         .nested_at
-        .get(&full)
+        .get(&(stmt, full))
         .map(|act| (*act, &stream.nested[act.ix()]))
         .filter(|(_, nested)| nested.depth as usize == depth)
     else {

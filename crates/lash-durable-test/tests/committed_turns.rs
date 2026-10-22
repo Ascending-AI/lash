@@ -156,12 +156,12 @@ impl StaticToolExecute for SwitchFrame {
 }
 
 fn switch_frame() -> Arc<dyn lash_core::ToolProvider> {
-    let definition = lash_core::ToolDefinition::control(
+    let definition = lash_vocabulary::tool_contract::ToolDefinition::control(
         SWITCH_TOOL,
         SWITCH_TOOL_OPERATION,
         "Switches the agent frame and hands the new frame a task.",
         serde_json::json!({ "type": "object", "additionalProperties": false, "properties": {} }),
-        lash_core::TurnControls::switch_agent_frame(),
+        lash_vocabulary::tool_declaration::TurnControls::switch_agent_frame(),
     )
     .expect("switch_frame's schemas")
     .with_execution(std::time::Duration::from_secs(120));
@@ -250,8 +250,8 @@ async fn a_cursor_reads_on_across_compaction_and_a_frame_switch(tier: Tier) {
     world.shutdown().await;
 }
 
-fn turn(id: &str) -> lash::TurnId {
-    lash::TurnId::try_from(id.to_owned()).expect("a host turn id")
+fn turn(id: &str) -> lash_vocabulary::identity::TurnId {
+    lash_vocabulary::identity::TurnId::try_from(id.to_owned()).expect("a host turn id")
 }
 
 async fn send(session: &lash::DurableSession, run: &str, text: &str) {
@@ -283,7 +283,8 @@ async fn a_forks_first_read_serves_only_its_own_turns(tier: Tier) {
         .await;
     send(&source, "source-one", "the source's first turn").await;
     send(&source, "source-two", "the source's second turn").await;
-    let fork_id = lash::SessionId::try_from("committed-turns-fork".to_owned()).unwrap();
+    let fork_id =
+        lash_vocabulary::identity::SessionId::try_from("committed-turns-fork".to_owned()).unwrap();
     world
         .core
         .fork_at(
@@ -359,7 +360,9 @@ async fn a_cursor_survives_a_process_restart(tier: Tier) {
             ))
             .expect("the core builds")
     };
-    let session_id = lash::SessionId::try_from("committed-turns-restart".to_owned()).unwrap();
+    let session_id =
+        lash_vocabulary::identity::SessionId::try_from("committed-turns-restart".to_owned())
+            .unwrap();
     let saved = {
         let backend = served::backend(Arc::clone(&stores));
         let core = build(&backend, "first-boot");
@@ -573,7 +576,7 @@ impl StaticToolExecute for Echo {
 }
 
 fn echo() -> Arc<dyn lash_core::ToolProvider> {
-    let definition = lash_core::ToolDefinition::raw(
+    let definition = lash_vocabulary::tool_contract::ToolDefinition::raw(
         ECHO_TOOL,
         ECHO_TOOL_OPERATION,
         "Answers every call.",
@@ -705,7 +708,8 @@ async fn rendered_live_and_after_recovery(
     };
     world.script(name, script);
     let session = world.session(name, served::spec(256)).await;
-    let session_id = lash::SessionId::try_from(name.to_owned()).expect("a session id");
+    let session_id =
+        lash_vocabulary::identity::SessionId::try_from(name.to_owned()).expect("a session id");
     let observed = world
         .core
         .session(session_id.clone())

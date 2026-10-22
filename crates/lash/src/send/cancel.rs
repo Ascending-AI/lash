@@ -4,12 +4,12 @@
 //! withdrawn while no run entered it, and otherwise cancelled at its running
 //! handler (FIG-5343).
 
-use lash_core::TurnId;
 use lash_core::facade_support::{
     OperationCancelOutcome, QueueWithdrawalObservation, TurnAddress, TurnCancelMode,
     TurnCancelOutcome, TurnCancelRequest, TurnCancelUndeliveredInputPolicy, TurnWorkDriver,
 };
-use lash_protocol_types::core_support::RunIdCoreSupport;
+use lash_vocabulary::identity::RunIdCoreSupport;
+use lash_vocabulary::identity::TurnId;
 
 use super::follow::Subject;
 use super::{CancelReceipt, SendParts};
@@ -98,11 +98,11 @@ async fn cancel_run(
             .map_err(EmbedError::Runtime)?;
         return Ok(match outcome {
             OperationCancelOutcome::Withdrawn => CancelReceipt::Withdrawn {
-                run: crate::RunId::from_turn_id(run.clone()),
+                run: lash_vocabulary::identity::RunId::from_turn_id(run.clone()),
                 input: None,
             },
             OperationCancelOutcome::Cancelled(receipt) => CancelReceipt::Cancelled {
-                run: crate::RunId::from_turn_id(run.clone()),
+                run: lash_vocabulary::identity::RunId::from_turn_id(run.clone()),
                 receipt: Box::new(receipt),
             },
             OperationCancelOutcome::UnknownOrRevoked => CancelReceipt::UnknownOrRevoked,
@@ -130,7 +130,7 @@ async fn cancel_run(
         .map_err(EmbedError::Runtime)?;
     Ok(match receipt.outcome {
         TurnCancelOutcome::Withdrawn { input } => CancelReceipt::Withdrawn {
-            run: crate::RunId::from_turn_id(run.clone()),
+            run: lash_vocabulary::identity::RunId::from_turn_id(run.clone()),
             input: Some(input),
         },
         TurnCancelOutcome::UnknownOrRevoked | TurnCancelOutcome::CompletionWonRace => {
@@ -140,7 +140,7 @@ async fn cancel_run(
         | TurnCancelOutcome::AlreadyRequested(_)
         | TurnCancelOutcome::Escalated(_)
         | TurnCancelOutcome::PolicyConflict { .. } => CancelReceipt::Cancelled {
-            run: crate::RunId::from_turn_id(run.clone()),
+            run: lash_vocabulary::identity::RunId::from_turn_id(run.clone()),
             receipt: Box::new(receipt),
         },
     })

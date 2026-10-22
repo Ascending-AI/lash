@@ -1,6 +1,7 @@
 use super::transport::execute_script;
 use super::*;
 use lash_protocol_types::{llm::types::StreamBlockEvent, llm::types::StreamBlockKind};
+
 use std::time::Duration;
 
 use lash_core::llm::transport::ProviderFailureKind;
@@ -715,14 +716,14 @@ fn request(stream_events: Option<LlmEventSender>) -> LlmRequest {
         tools: Arc::new(vec![LlmToolSpec {
             name: "lookup".to_string(),
             description: "Lookup".to_string(),
-            input_schema: lash_protocol_types::SchemaContract::admit(json!({
+            input_schema: lash_vocabulary::schema_contract::SchemaContract::admit(json!({
                 "type": "object",
                 "properties": {
                     "q": { "type": "string" }
                 }
             }))
             .expect("valid declared schema"),
-            output_schema: lash_protocol_types::SchemaContract::admit(json!({}))
+            output_schema: lash_vocabulary::schema_contract::SchemaContract::admit(json!({}))
                 .expect("valid declared schema"),
         }]),
         tool_choice: LlmToolChoice::Auto,

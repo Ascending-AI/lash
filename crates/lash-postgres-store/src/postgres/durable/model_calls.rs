@@ -138,7 +138,7 @@ pub(super) async fn apply(
 }
 pub(super) async fn delete_session(
     tx: &mut PgConnection,
-    session: &lash_protocol_types::SessionId,
+    session: &lash_vocabulary::identity::SessionId,
 ) -> Result<Vec<String>, sqlx::Error> {
     crate::observed_sql::query(SQL.delete_pins.sql())
         .bind(session.as_str())
@@ -153,7 +153,7 @@ pub(super) async fn delete_session(
 impl super::PostgresDurableStore {
     pub(super) async fn read_model_calls(
         &self,
-        session: &lash_protocol_types::SessionId,
+        session: &lash_vocabulary::identity::SessionId,
         owner: &str,
     ) -> Result<Vec<ModelCallRecord>, DurableError> {
         use lash_core_store::{checkpoint_graph::GraphDecoder, model_calls::ModelCallFact};
@@ -228,7 +228,7 @@ type StoredModelCallPin = (
 impl super::PostgresDurableStore {
     pub(super) async fn read_model_call_pins(
         &self,
-        session: &lash_protocol_types::SessionId,
+        session: &lash_vocabulary::identity::SessionId,
         owner: &str,
     ) -> Result<Vec<lash_durable::domain::ModelCallPinRow>, DurableError> {
         self.read(|tx| {

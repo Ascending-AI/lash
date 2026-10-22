@@ -1,26 +1,18 @@
 fn corpus_tool_signatures() -> anyhow::Result<
-    std::collections::BTreeMap<lash_kernel_doc::EffectName, lash_kernel_doc::Signature>,
+    std::collections::BTreeMap<
+        lash_vocabulary::names::EffectName,
+        lash_vocabulary::types::Signature,
+    >,
 > {
-    let mut boundary = lash::vm::HostBoundary::new();
-    for tool in workflow_corpus::tools()? {
-        boundary.offer_operation(
-            tool.manifest.operation.clone(),
-            lash::vm::offered_tool(
-                &tool.manifest,
-                &tool.contract,
-                lash::dialect::OfferedSource::Catalog {
-                    tool: tool.manifest.id.to_string(),
-                },
-            ),
-        )?;
-    }
-    Ok(boundary
-        .operations()
-        .iter()
-        .map(|(operation, offered)| {
+    Ok(workflow_corpus::tools()?
+        .into_iter()
+        .map(|definition| {
             (
-                operation.effect_name(),
-                offered.requirement.signature.clone(),
+                definition.operation().effect_name(),
+                lash_vocabulary::json_schema::tool_signature(
+                    &definition.contract.input_schema.canonical,
+                    &definition.contract.output_schema.canonical,
+                ),
             )
         })
         .collect())
@@ -81,6 +73,372 @@ fn every_print_reads_back_and_its_whole_prints_lower_to_their_documents() -> any
         }
         anyhow::ensure!(whole > 0, "no {language:?} corpus document lifted");
     }
+    Ok(())
+}
+
+/// FIG-7135: replacing a non-ASCII workflow argument through the canvas
+/// preserves the document's exact authored Python print/read identity.
+#[test]
+fn a_canvas_edited_non_ascii_python_document_reads_back_identically() -> anyhow::Result<()> {
+    use lash_kernel_doc::{Expr, Literal, Node};
+    use lash_kernel_edit::authoring::{DataValue, Operation, ValueTarget};
+
+    let embedding = lash_vm_worker::built_embedding(&Default::default())?;
+    let signatures = corpus_tool_signatures()?;
+    let namespaces = workflow_corpus::corpus_namespaces(&signatures, &Default::default())?;
+    let environment = lash_kernel_dialect::Environment::new(embedding.library(), &namespaces);
+    let lowered = lash_dialect_python::lower(
+        include_str!("../non-ascii/source.py"),
+        &environment,
+        lash_kernel_dialect::Mode::Module,
+    )?;
+    let document = &lowered.document;
+    let action = document
+        .action_ordinals()
+        .into_keys()
+        .find(|site| {
+            matches!(document.node(site), Some(Node::Expr(Expr::Act(action)))
+                if matches!(action.kind, lash_kernel_doc::ActKind::Perform { .. }))
+        })
+        .expect("the authored echo operation");
+    let base = document.identity();
+    let mut draft = lash_kernel_edit::Draft::open((**document).clone())?;
+    let applied = draft.apply(
+        &lash_kernel_edit::Transaction {
+            base,
+            edits: vec![Operation::SetValue {
+                base,
+                target: ValueTarget::ToolArgument {
+                    action,
+                    index: 0,
+                    path: vec![],
+                },
+                value: DataValue::Literal(Literal::Text("edited λ".into())),
+            }],
+        },
+        &lash_kernel_check::Environment::new(embedding.library()),
+    )?;
+    let captions = lowered
+        .captions
+        .rekey(&applied.correspondence, document, draft.document())
+        .expect("caption correspondence");
+    let printed = lash_dialect_python::print(
+        draft.document(),
+        Some(&captions.captions),
+        embedding.library(),
+        lash_kernel_dialect::PrintOptions {
+            source_map: true,
+            ..Default::default()
+        },
+    )?;
+    let (read, read_captions) = lash_dialect_python::read(
+        &printed.source,
+        draft.document(),
+        embedding.library(),
+        Default::default(),
+    )?;
+    assert_eq!(read.canonical_bytes(), draft.document().canonical_bytes());
+    assert_eq!(read_captions, captions.captions);
+    assert!(printed.source.contains("edited λ"));
+    printed
+        .source_map
+        .expect("requested map")
+        .validate(draft.document(), &printed.source)?;
+    Ok(())
+}
+
+/// FIG-7135: module main preserves top-level order and excludes nested
+/// declarations from the public entries in both authored printers.
+fn module_main_roundtrip(
+    source: &str,
+    language: lash_kernel_doc::SourceLanguage,
+) -> anyhow::Result<()> {
+    use lash_kernel_doc::SourceLanguage;
+    let embedding = lash_vm_worker::built_embedding(&Default::default())?;
+    let namespaces = Default::default();
+    let environment = lash_kernel_dialect::Environment::new(embedding.library(), &namespaces);
+    let lowered = match language {
+        SourceLanguage::TypeScript => {
+            lash_dialect_typescript::lower(source, &environment, lash_kernel_dialect::Mode::Module)?
+        }
+        SourceLanguage::Python => {
+            lash_dialect_python::lower(source, &environment, lash_kernel_dialect::Mode::Module)?
+        }
+    };
+    assert_eq!(
+        lowered
+            .document
+            .exports
+            .keys()
+            .map(|name| name.as_str())
+            .collect::<Vec<_>>(),
+        ["arrow", "declared"]
+    );
+    let options = lash_kernel_dialect::PrintOptions {
+        source_map: true,
+        ..Default::default()
+    };
+    let printed = match language {
+        SourceLanguage::TypeScript => lash_dialect_typescript::print(
+            &lowered.document,
+            Some(&lowered.captions),
+            embedding.library(),
+            options,
+        )?,
+        SourceLanguage::Python => lash_dialect_python::print(
+            &lowered.document,
+            Some(&lowered.captions),
+            embedding.library(),
+            options,
+        )?,
+    };
+    let (read, captions) = match language {
+        SourceLanguage::TypeScript => lash_dialect_typescript::read(
+            &printed.source,
+            &lowered.document,
+            embedding.library(),
+            Default::default(),
+        )?,
+        SourceLanguage::Python => lash_dialect_python::read(
+            &printed.source,
+            &lowered.document,
+            embedding.library(),
+            Default::default(),
+        )?,
+    };
+    assert_eq!(read.canonical_bytes(), lowered.document.canonical_bytes());
+    assert_eq!(captions, lowered.captions);
+    printed
+        .source_map
+        .ok_or_else(|| anyhow::anyhow!("requested map is absent"))?
+        .validate(&read, &printed.source)?;
+    let mut unspellable = read;
+    unspellable
+        .main
+        .as_mut()
+        .ok_or_else(|| anyhow::anyhow!("module main is absent"))?
+        .push(lash_kernel_doc::Stmt::Try(lash_kernel_doc::TryStmt {
+            body: vec![],
+            catch: None,
+            finally: None,
+        }));
+    let refused = match language {
+        SourceLanguage::TypeScript => {
+            lash_dialect_typescript::print(&unspellable, None, embedding.library(), options)
+        }
+        SourceLanguage::Python => {
+            lash_dialect_python::print(&unspellable, None, embedding.library(), options)
+        }
+    };
+    assert!(
+        matches!(refused, Err(lash_kernel_dialect::PrintError::Unprintable { site }) if site.unit == lash_vocabulary::sites::Unit::Main)
+    );
+    Ok(())
+}
+
+#[test]
+fn typescript_module_main_preserves_block_local_functions() -> anyhow::Result<()> {
+    module_main_roundtrip(
+        include_str!("../entry-boundary/source.ts"),
+        lash_kernel_doc::SourceLanguage::TypeScript,
+    )
+}
+
+#[test]
+fn python_module_main_preserves_block_local_functions() -> anyhow::Result<()> {
+    module_main_roundtrip(
+        include_str!("../entry-boundary/source.py"),
+        lash_kernel_doc::SourceLanguage::Python,
+    )
+}
+
+/// FIG-7135: a terminal operation is recovered from its typed import use,
+/// even with a neutral name; a control-looking ordinary operation stays ordinary.
+fn terminal_operation_roundtrip(language: lash_kernel_doc::SourceLanguage) -> anyhow::Result<()> {
+    use lash_kernel_dialect::{CellEnvironment, Mode};
+    use lash_kernel_doc::SourceLanguage;
+    use lash_vocabulary::{EffectName, Param, Signature, Type};
+
+    let embedding = lash_vm_worker::built_embedding(&Default::default())?;
+    let mut signatures = corpus_tool_signatures()?;
+    let signature = Signature {
+        params: vec![Param {
+            name: "input".into(),
+            ty: Type::Any,
+            optional: false,
+        }],
+        result: Type::Any,
+    };
+    signatures.insert(EffectName::new("corpus.stop")?, signature.clone());
+    signatures.insert(EffectName::new("control.finish")?, signature);
+    for control in [
+        lash_kernel_dialect::EffectControl::Finish,
+        lash_kernel_dialect::EffectControl::SwitchAgentFrame,
+    ] {
+        let controls = std::collections::BTreeMap::from([(
+            EffectName::new("corpus.stop")?,
+            std::collections::BTreeSet::from([control]),
+        )]);
+        let namespaces = workflow_corpus::corpus_namespaces(&signatures, &controls)?;
+        let environment = lash_kernel_dialect::Environment::new(embedding.library(), &namespaces);
+        let (source, lowered) = match language {
+            SourceLanguage::TypeScript => {
+                let source = "await control.finish(\"ordinary\");\nawait corpus.stop(\"done\");\nawait corpus.echo(\"unreachable\");\n";
+                (
+                    source,
+                    lash_dialect_typescript::lower(
+                        source,
+                        &environment,
+                        Mode::Cell(CellEnvironment::first()),
+                    )?,
+                )
+            }
+            SourceLanguage::Python => {
+                let source = "await control.finish(\"ordinary\")\nawait corpus.stop(\"done\")\nawait corpus.echo(\"unreachable\")\n";
+                (
+                    source,
+                    lash_dialect_python::lower(
+                        source,
+                        &environment,
+                        Mode::Cell(CellEnvironment::first()),
+                    )?,
+                )
+            }
+        };
+        let main = lowered
+            .document
+            .main
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("cell main is absent"))?;
+        assert!(matches!(main[1], lash_kernel_doc::Stmt::Finish { .. }));
+        assert!(!matches!(main[0], lash_kernel_doc::Stmt::Finish { .. }));
+        let options = lash_kernel_dialect::PrintOptions {
+            source_map: true,
+            ..Default::default()
+        };
+        let printed = match language {
+            SourceLanguage::TypeScript => lash_dialect_typescript::print(
+                &lowered.document,
+                Some(&lowered.captions),
+                embedding.library(),
+                options,
+            )?,
+            SourceLanguage::Python => lash_dialect_python::print(
+                &lowered.document,
+                Some(&lowered.captions),
+                embedding.library(),
+                options,
+            )?,
+        };
+        let (read, captions) = match language {
+            SourceLanguage::TypeScript => lash_dialect_typescript::read(
+                &printed.source,
+                &lowered.document,
+                embedding.library(),
+                Default::default(),
+            )?,
+            SourceLanguage::Python => lash_dialect_python::read(
+                &printed.source,
+                &lowered.document,
+                embedding.library(),
+                Default::default(),
+            )?,
+        };
+        assert_eq!(
+            read.canonical_bytes(),
+            lowered.document.canonical_bytes(),
+            "{source} -> {}",
+            printed.source
+        );
+        assert_eq!(captions, lowered.captions);
+        printed
+            .source_map
+            .ok_or_else(|| anyhow::anyhow!("requested map is absent"))?
+            .validate(&read, &printed.source)?;
+    }
+    Ok(())
+}
+
+#[test]
+fn typescript_terminal_operations_read_back_by_import_identity() -> anyhow::Result<()> {
+    terminal_operation_roundtrip(lash_kernel_doc::SourceLanguage::TypeScript)
+}
+
+#[test]
+fn python_terminal_operations_read_back_by_import_identity() -> anyhow::Result<()> {
+    terminal_operation_roundtrip(lash_kernel_doc::SourceLanguage::Python)
+}
+
+/// FIG-7135: an escaped closure keeps its captured list's read and later mutation.
+#[test]
+fn typescript_capturing_cell_prints_and_reads_identically() -> anyhow::Result<()> {
+    let embedding = lash_vm_worker::built_embedding(&Default::default())?;
+    let signatures = corpus_tool_signatures()?;
+    let namespaces = workflow_corpus::corpus_namespaces(&signatures, &Default::default())?;
+    let environment = lash_kernel_dialect::Environment::new(embedding.library(), &namespaces);
+    let lowered = lash_dialect_typescript::lower(
+        include_str!("../capturing-cell/source.ts"),
+        &environment,
+        lash_kernel_dialect::Mode::Cell(lash_kernel_dialect::CellEnvironment::first()),
+    )?;
+    let printed = lash_dialect_typescript::print(
+        &lowered.document,
+        Some(&lowered.captions),
+        embedding.library(),
+        lash_kernel_dialect::PrintOptions {
+            source_map: true,
+            ..Default::default()
+        },
+    )?;
+    let (read, captions) = lash_dialect_typescript::read(
+        &printed.source,
+        &lowered.document,
+        embedding.library(),
+        Default::default(),
+    )?;
+    assert_eq!(read.canonical_bytes(), lowered.document.canonical_bytes());
+    assert_eq!(captions, lowered.captions);
+    printed
+        .source_map
+        .ok_or_else(|| anyhow::anyhow!("requested map is absent"))?
+        .validate(&read, &printed.source)?;
+    Ok(())
+}
+
+/// FIG-7135: recover the typed operation input and indexed mutation in the
+/// capturing cell without changing its document, captions or mapped sites.
+#[test]
+fn python_capturing_cell_prints_and_reads_identically() -> anyhow::Result<()> {
+    let embedding = lash_vm_worker::built_embedding(&Default::default())?;
+    let signatures = corpus_tool_signatures()?;
+    let namespaces = workflow_corpus::corpus_namespaces(&signatures, &Default::default())?;
+    let environment = lash_kernel_dialect::Environment::new(embedding.library(), &namespaces);
+    let lowered = lash_dialect_python::lower(
+        include_str!("../capturing-cell/source.py"),
+        &environment,
+        lash_kernel_dialect::Mode::Cell(lash_kernel_dialect::CellEnvironment::first()),
+    )?;
+    let printed = lash_dialect_python::print(
+        &lowered.document,
+        Some(&lowered.captions),
+        embedding.library(),
+        lash_kernel_dialect::PrintOptions {
+            source_map: true,
+            ..Default::default()
+        },
+    )?;
+    let (read, captions) = lash_dialect_python::read(
+        &printed.source,
+        &lowered.document,
+        embedding.library(),
+        Default::default(),
+    )?;
+    assert_eq!(read.canonical_bytes(), lowered.document.canonical_bytes());
+    assert_eq!(captions, lowered.captions);
+    printed
+        .source_map
+        .ok_or_else(|| anyhow::anyhow!("requested map is absent"))?
+        .validate(&read, &printed.source)?;
     Ok(())
 }
 
@@ -246,28 +604,24 @@ fn every_python_corpus_case_has_one_body_per_source_loop_and_no_statement_inflat
     let mut effects = corpus_tool_signatures().expect("the shared corpus tool signatures");
     {
         effects.insert(
-            lash_kernel_doc::EffectName::new("control.finish").unwrap(),
-            lash_kernel_doc::Signature {
-                params: vec![lash_kernel_doc::Param {
-                    name: lash_kernel_doc::Name::new("input"),
-                    ty: lash_kernel_doc::Type::Any,
+            lash_vocabulary::names::EffectName::new("control.finish").unwrap(),
+            lash_vocabulary::types::Signature {
+                params: vec![lash_vocabulary::types::Param {
+                    name: lash_vocabulary::names::Name::new("input"),
+                    ty: lash_vocabulary::types::Type::Any,
                     optional: true,
                 }],
-                result: lash_kernel_doc::Type::Any,
+                result: lash_vocabulary::types::Type::Any,
             },
         );
     }
     let controls = std::collections::BTreeMap::from([(
-        lash_kernel_doc::EffectName::new("control.finish").unwrap(),
+        lash_vocabulary::names::EffectName::new("control.finish").unwrap(),
         std::collections::BTreeSet::from([lash_kernel_dialect::EffectControl::Finish]),
     )]);
     let embedding = lash_vm_worker::built_embedding(&Default::default()).unwrap();
-    let environment_namespaces = lash_kernel_dialect::Namespaces::of_effects(
-        &effects,
-        &lash_kernel_doc::ContractId::new("1"),
-        &controls,
-    )
-    .expect("the test's effects are operations");
+    let environment_namespaces = workflow_corpus::corpus_namespaces(&effects, &controls)
+        .expect("the test's effects are operations");
     let environment =
         lash_kernel_dialect::Environment::new(embedding.library(), &environment_namespaces);
     let mut failures = Vec::new();
@@ -293,17 +647,94 @@ fn every_python_corpus_case_has_one_body_per_source_loop_and_no_statement_inflat
         let mut loops = 0;
         let mut entry_cleanup = 0;
         let mut deferred_calls = 0;
+        let mut bound = std::collections::BTreeMap::new();
+        for (unit, body) in document.units() {
+            let mut nodes = vec![lash_kernel_doc::Node::Block(body)];
+            while let Some(node) = nodes.pop() {
+                use lash_kernel_doc::{Expr, Node, Rhs, Stmt};
+                let binding = match node {
+                    Node::Stmt(Stmt::Let {
+                        name,
+                        value: Rhs::Expr(Expr::Closure(closure)),
+                    }) => Some((name, closure.function)),
+                    Node::Expr(Expr::Let { name, value, .. }) => match &**value {
+                        Expr::Closure(closure) => Some((name, closure.function)),
+                        _ => None,
+                    },
+                    _ => None,
+                };
+                if let Some((name, function)) = binding {
+                    assert!(
+                        bound
+                            .insert((unit.clone(), name.clone()), function)
+                            .is_none(),
+                        "one closure binding per local identity"
+                    );
+                }
+                nodes.extend(node.children());
+            }
+        }
+        let target =
+            |unit: &lash_vocabulary::sites::Unit, value: &lash_kernel_doc::Expr| match value {
+                lash_kernel_doc::Expr::Closure(closure) => Some(closure.function),
+                lash_kernel_doc::Expr::Variable(name) => {
+                    bound.get(&(unit.clone(), name.clone())).copied()
+                }
+                _ => None,
+            };
+        let is_run = |action: &lash_kernel_doc::ActExpr| {
+            matches!(&action.kind,
+            lash_kernel_doc::ActKind::Spawn(lash_kernel_doc::Callee::Import(slot))
+                if document.imports[slot].name == lash_kernel_dialect::authoring::helper_name(&lash_vocabulary::FunctionName::new("py.task.run").unwrap()))
+        };
+        let mut deferred = std::collections::BTreeSet::new();
+        for (unit, body) in document.units() {
+            let mut nodes = vec![lash_kernel_doc::Node::Block(body)];
+            while let Some(node) = nodes.pop() {
+                if let lash_kernel_doc::Node::Expr(lash_kernel_doc::Expr::Act(action)) = node
+                    && is_run(action)
+                    && let [work] = action.args.as_slice()
+                    && let Some(function) = target(&unit, work)
+                    && document.functions[&function].signature.params.is_empty()
+                    && matches!(
+                        document.functions[&function]
+                            .body()
+                            .unwrap()
+                            .block
+                            .as_slice(),
+                        [lash_kernel_doc::Stmt::Return {
+                            value: lash_kernel_doc::Expr::Act(_)
+                        }]
+                    )
+                {
+                    deferred.insert(function);
+                }
+                nodes.extend(node.children());
+            }
+        }
         let mut pending = if cell {
-            vec![lash_kernel_doc::Node::Block(&document.main)]
+            vec![(
+                lash_vocabulary::sites::Unit::Main,
+                lash_kernel_doc::Node::Block(document.main.as_ref().unwrap()),
+            )]
         } else {
             document
-                .entries
-                .keys()
-                .map(|name| lash_kernel_doc::Node::Block(&document.functions[name].body))
+                .exports
+                .values()
+                .filter_map(|export| match export {
+                    lash_kernel_doc::Export::Function(function) => Some((
+                        lash_vocabulary::sites::Unit::Library(function.function),
+                        lash_kernel_doc::Node::Block(
+                            &document.functions[&function.function].body().unwrap().block,
+                        ),
+                    )),
+                    _ => None,
+                })
                 .collect()
         };
-        while let Some(node) = pending.pop() {
+        while let Some((unit, node)) = pending.pop() {
             use lash_kernel_doc::{ActKind, Callee, Expr, Node, Stmt};
+
             if let Node::Stmt(Stmt::Try(attempt)) = node
                 && attempt.catch.is_none()
                 && let Some(
@@ -313,34 +744,40 @@ fn every_python_corpus_case_has_one_body_per_source_loop_and_no_statement_inflat
                         },
                     ],
                 ) = attempt.finally.as_deref()
-                && let ActKind::Call(Callee::Library(function)) = &action.kind
-                && document
-                    .manifest
-                    .functions
-                    .get(function)
-                    .is_some_and(|name| name.as_str() == "tasks.cancel_all")
+                && let ActKind::Call(Callee::Import(function)) = &action.kind
+                && document.imports.get(function).is_some_and(|import| {
+                    import.name
+                        == lash_kernel_dialect::authoring::helper_name(
+                            &lash_vocabulary::FunctionName::new("tasks.cancel_all").unwrap(),
+                        )
+                })
             {
                 entry_cleanup += 2;
-                pending.push(Node::Block(&attempt.body));
+                pending.push((unit.clone(), Node::Block(&attempt.body)));
                 continue;
             }
             if let Node::Expr(Expr::Act(action)) = node
-                && let ActKind::Spawn(Callee::Library(function)) = &action.kind
-                && document
-                    .manifest
-                    .functions
-                    .get(function)
-                    .is_some_and(|name| name.as_str() == "py.task.run")
-                && let [Expr::Closure(closure)] = action.args.as_slice()
-                && closure.params.is_empty()
+                && is_run(action)
+                && let [work] = action.args.as_slice()
+                && let Some(function) = target(&unit, work)
+                && deferred.contains(&function)
                 && let [
                     Stmt::Return {
                         value: Expr::Act(call),
                     },
-                ] = closure.body.as_slice()
+                ] = document.functions[&function]
+                    .body()
+                    .unwrap()
+                    .block
+                    .as_slice()
             {
                 deferred_calls += 1;
-                pending.extend(call.args.iter().map(Node::Expr));
+                pending.extend(call.args.iter().map(|expr| {
+                    (
+                        lash_vocabulary::sites::Unit::Library(function),
+                        Node::Expr(expr),
+                    )
+                }));
                 continue;
             }
             statements += usize::from(matches!(node, lash_kernel_doc::Node::Stmt(_)));
@@ -350,7 +787,19 @@ fn every_python_corpus_case_has_one_body_per_source_loop_and_no_statement_inflat
                     lash_kernel_doc::Stmt::For { .. } | lash_kernel_doc::Stmt::While { .. }
                 )
             ));
-            pending.extend(node.children());
+            if let Node::Expr(lash_kernel_doc::Expr::Closure(closure)) = node
+                && !deferred.contains(&closure.function)
+            {
+                pending.push((
+                    lash_vocabulary::sites::Unit::Library(closure.function),
+                    Node::Block(&document.functions[&closure.function].body().unwrap().block),
+                ));
+            }
+            pending.extend(
+                node.children()
+                    .into_iter()
+                    .map(|child| (unit.clone(), child)),
+            );
         }
         println!(
             "{name}: author={} lowered={statements} source_loops={} lowered_loops={loops} entry_cleanup={entry_cleanup} deferred_calls={deferred_calls}",
@@ -395,6 +844,7 @@ fn every_python_corpus_case_has_one_body_per_source_loop_and_no_statement_inflat
 #[test]
 fn every_typescript_corpus_case_has_source_shaped_statements_and_one_body_per_loop() {
     use lash_kernel_doc::{Node, Stmt};
+
     let embedding = lash_vm_worker::built_embedding(&Default::default()).unwrap();
     let effects = [
         "control.finish",
@@ -408,29 +858,25 @@ fn every_typescript_corpus_case_has_source_shaped_statements_and_one_body_per_lo
     .into_iter()
     .map(|name| {
         (
-            lash_kernel_doc::EffectName::new(name).unwrap(),
-            lash_kernel_doc::Signature {
-                params: vec![lash_kernel_doc::Param {
+            lash_vocabulary::names::EffectName::new(name).unwrap(),
+            lash_vocabulary::types::Signature {
+                params: vec![lash_vocabulary::types::Param {
                     name: "input".into(),
-                    ty: lash_kernel_doc::Type::Any,
+                    ty: lash_vocabulary::types::Type::Any,
                     optional: false,
                 }],
-                result: lash_kernel_doc::Type::Any,
+                result: lash_vocabulary::types::Type::Any,
             },
         )
     })
     .chain(corpus_tool_signatures().expect("the shared corpus tool signatures"))
     .collect();
     let controls = std::collections::BTreeMap::from([(
-        lash_kernel_doc::EffectName::new("control.finish").unwrap(),
+        lash_vocabulary::names::EffectName::new("control.finish").unwrap(),
         std::collections::BTreeSet::from([lash_kernel_dialect::EffectControl::Finish]),
     )]);
-    let env_namespaces = lash_kernel_dialect::Namespaces::of_effects(
-        &effects,
-        &lash_kernel_doc::ContractId::new("1"),
-        &controls,
-    )
-    .expect("the test's effects are operations");
+    let env_namespaces = workflow_corpus::corpus_namespaces(&effects, &controls)
+        .expect("the test's effects are operations");
     let env = lash_kernel_dialect::Environment::new(embedding.library(), &env_namespaces);
     let mut failures = Vec::new();
     let sources = [
@@ -544,13 +990,21 @@ fn every_typescript_corpus_case_has_source_shaped_statements_and_one_body_per_lo
         )
         .unwrap();
         let mut pending: Vec<_> = if cell {
-            vec![Node::Block(&lowered.document.main)]
+            vec![Node::Block(lowered.document.main.as_ref().unwrap())]
         } else {
             lowered
                 .document
-                .entries
-                .keys()
-                .map(|name| Node::Block(&lowered.document.functions[name].body))
+                .exports
+                .values()
+                .filter_map(|export| match export {
+                    lash_kernel_doc::Export::Function(function) => Some(Node::Block(
+                        &lowered.document.functions[&function.function]
+                            .body()
+                            .unwrap()
+                            .block,
+                    )),
+                    _ => None,
+                })
                 .collect()
         };
         let (mut statements, mut loops) = (0, 0);
@@ -561,15 +1015,23 @@ fn every_typescript_corpus_case_has_source_shaped_statements_and_one_body_per_lo
                     Stmt::Return {
                         value: lash_kernel_doc::Expr::Act(action),
                     },
-                ] = closure.body.as_slice()
-                && let lash_kernel_doc::ActKind::Call(lash_kernel_doc::Callee::Library(function)) =
+                ] = lowered.document.functions[&closure.function]
+                    .body()
+                    .unwrap()
+                    .block
+                    .as_slice()
+                && let lash_kernel_doc::ActKind::Call(lash_kernel_doc::Callee::Import(function)) =
                     action.kind
                 && lowered
                     .document
-                    .manifest
-                    .functions
+                    .imports
                     .get(&function)
-                    .is_some_and(|name| name.as_str() == "ts.promise.start")
+                    .is_some_and(|import| {
+                        import.name
+                            == lash_kernel_dialect::authoring::helper_name(
+                                &lash_vocabulary::FunctionName::new("ts.promise.start").unwrap(),
+                            )
+                    })
                 && matches!(action.args.first(), Some(lash_kernel_doc::Expr::Closure(_)))
             {
                 adapters += 1;
@@ -581,6 +1043,14 @@ fn every_typescript_corpus_case_has_source_shaped_statements_and_one_body_per_lo
                 node,
                 Node::Stmt(Stmt::For { .. } | Stmt::While { .. })
             ));
+            if let Node::Expr(lash_kernel_doc::Expr::Closure(closure)) = node {
+                pending.push(Node::Block(
+                    &lowered.document.functions[&closure.function]
+                        .body()
+                        .unwrap()
+                        .block,
+                ));
+            }
             pending.extend(node.children());
         }
         // These are reviewed source counts and measured statement counts,

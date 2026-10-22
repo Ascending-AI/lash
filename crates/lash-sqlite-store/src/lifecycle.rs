@@ -18,7 +18,7 @@ use crate::location::DatabaseLocation;
 #[cfg(any(test, feature = "testing"))]
 use crate::location::validate_file_database_path;
 use lash_core_store::store::FleetFormatStore;
-use lash_protocol_types::SessionId;
+use lash_vocabulary::identity::SessionId;
 
 /// The `synchronous` mode of the stores this crate's test-only constructors
 /// open: fixtures never outlive their process, so the mode decides nothing.

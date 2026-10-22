@@ -1,6 +1,7 @@
 use lash_protocol_types::{
     llm::types::LlmResponse, llm::types::LlmTerminalReason, llm::types::ProviderFailureKind,
 };
+
 use lash_protocol_types::{session_model::FailureCode, session_model::TurnFailureCode};
 
 /// Adapter-owned retry classification for a transport failure.

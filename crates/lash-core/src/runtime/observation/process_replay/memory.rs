@@ -18,7 +18,7 @@ use super::{
     ProcessReplayStore, ProcessReplayStoreError, ProcessReplaySubscribeOutcome,
     ProcessReplaySubscription, ProcessSequence,
 };
-use crate::ProcessId;
+use lash_vocabulary::identity::ProcessId;
 
 /// What an [`InMemoryProcessReplayStore`] retains for process observers. The
 /// host states it; there is no default (D-DEFAULTS2).

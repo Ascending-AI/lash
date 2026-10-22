@@ -3,8 +3,10 @@
 
 use std::sync::{Arc, OnceLock};
 
-use lash_kernel_doc::{Datum, ErrorDatum, Float, Handle, Integer, Name, Timestamp, parse_document};
+use lash_kernel_doc::{Datum, ErrorDatum, Float, Handle, Integer};
+
 use lash_kernel_vm::{Bounds, CellStart, End, Host, Machine, Program, RunError, Step, Target};
+use lash_vocabulary::Name;
 
 use super::machine;
 
@@ -12,14 +14,6 @@ use super::machine;
 struct Console(Vec<Datum>);
 
 impl Host for Console {
-    fn clock(&mut self) -> Timestamp {
-        Timestamp {
-            nanoseconds: Integer::from(0),
-        }
-    }
-    fn random(&mut self) -> u64 {
-        0
-    }
     fn read(&mut self, _handle: &Handle, _request: &Datum) -> Result<Datum, ErrorDatum> {
         panic!("these laws read no projection")
     }
@@ -35,19 +29,11 @@ fn program() -> &'static Program {
     static PROGRAM: OnceLock<Program> = OnceLock::new();
     PROGRAM.get_or_init(|| {
         let methods = METHODS;
-        let registry = machine::registry();
-        let mut source = String::from("kernel 1\nnumbers float\n");
-        let names: Vec<String> = ["eq", "num.lt", "list.len"].into_iter().map(str::to_owned)
-            .chain(methods.iter().flat_map(|name| [name.to_string(), format!("{name}_generic")]))
-            .collect();
-        for name in &names {
-            let (id, _) = registry.iter().find(|(_, f)| f.definition().name.as_str() == name)
-                .unwrap_or_else(|| panic!("{name} is registered"));
-            source.push_str(&format!("use {name} = @{id}\n"));
-        }
-        source.push_str("entry fast(v: Any, args: List(Any), method: Int, mode: Int) -> Any\nentry walk(v: Any, args: List(Any), method: Int, mode: Int) -> Any\n");
+        let _registry = machine::registry();
+        let mut source = ["eq", "num.lt", "list.len", "error.new"].into_iter().map(|name| format!("use {name}\n")).collect::<String>();
+        for name in methods.iter().flat_map(|name| [name.to_string(), format!("{name}_generic")]) { source.push_str(&format!("use {name}\n")); }
         for entry in ["fast", "walk"] {
-            source.push_str(&format!("fn {entry}(v, args, method, mode) {{\n"));
+            source.push_str(&format!("function {entry}(v: Any, args: List(Any), method: Int, mode: Int) -> Any\nkernel 1\nmetering statements\nbody {{\n"));
             source.push_str(r#"
   if eq(mode, 1) { set v = {toString: fn(holder, passed) { print "receiver" return "a😀beta" }} }
   if eq(mode, 2) { set args[0] = {toString: fn(holder, passed) { print "needle" return "beta" }} }
@@ -66,13 +52,8 @@ fn program() -> &'static Program {
             }
             source.push_str("return null\n}\n");
         }
-        source.push_str("main {}\n");
-        // Coercion traps raise typed errors in guest code.
-        let (id, _) = registry.iter().find(|(_, f)| f.definition().name.as_str() == "error.new").unwrap();
-        source = source.replacen("numbers float\n", &format!("numbers float\nuse error.new = @{id}\n"), 1);
-        let mut document = parse_document(&source).unwrap_or_else(|error| panic!("{error}\n{source}"));
-        document.manifest.functions = lash_kernel_check::requirements(&document, registry.as_ref()).functions;
-        Program { closure: super::pages::CLOSURE, document: Arc::new(document), library: machine::prepared().clone() }
+        let document = super::linked_inspection::definitions(&source, &["fast", "walk"], super::library());
+        crate::tests::linked::program(Arc::new(document),machine::prepared().clone())
     })
 }
 

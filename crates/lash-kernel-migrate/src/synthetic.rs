@@ -14,7 +14,7 @@ use std::collections::BTreeMap;
 use lash_kernel_doc::{Document, FunctionCatalog, FunctionDefinition, KernelVersion};
 
 use crate::migration::{DocumentRefusal, Migration, Rewritten};
-use crate::rewrite::{redeclare, replace_functions, unchanged};
+use crate::rewrite::{redeclare, replace_functions};
 
 const FROM: KernelVersion = KernelVersion::One;
 const TO: KernelVersion = KernelVersion::SyntheticNext;
@@ -41,28 +41,46 @@ fn definition(written: &FunctionDefinition) -> Result<FunctionDefinition, Docume
 
 fn document(
     written: &Document,
-    functions: &dyn FunctionCatalog,
+    _functions: &dyn FunctionCatalog,
 ) -> Result<Rewritten, DocumentRefusal> {
-    if written.manifest.kernel != FROM.number() {
+    if written.kernel() != FROM.number() {
         return Err(DocumentRefusal::Version {
-            found: written.manifest.kernel,
+            found: written.kernel(),
             from: FROM.number(),
         });
     }
-    let catalog = functions;
-    let functions: BTreeMap<_, _> = redeclare(
+    let redeclared = redeclare(
         definition,
-        written.manifest.functions.keys().copied(),
-        functions,
-    )?
-    .into_iter()
-    .map(|redeclared| (redeclared.from, redeclared.to))
-    .collect();
+        written.functions.keys().copied(),
+        &written.functions,
+    )?;
+    let functions: BTreeMap<_, _> = redeclared.iter().map(|f| (f.from, f.to)).collect();
     let mut next = written.clone();
-    next.manifest.kernel = TO.number();
+    next.requires.kernels = [TO.number()].into();
     replace_functions(&mut next, &functions);
+    next.functions = redeclared
+        .into_iter()
+        .map(|f| (f.to, f.definition))
+        .collect();
+    next.requires.natives = written
+        .requires
+        .natives
+        .iter()
+        .map(|id| functions.get(id).copied().unwrap_or(*id))
+        .collect();
+    let mut survivors = Vec::new();
+    for (unit, body) in written.units() {
+        let to = match &unit {
+            lash_vocabulary::sites::Unit::Library(id) => {
+                lash_vocabulary::sites::Unit::Library(functions.get(id).copied().unwrap_or(*id))
+            }
+            _ => unit.clone(),
+        };
+        crate::rewrite::same_sites(unit, to, body, &mut survivors);
+    }
     let correspondence =
-        crate::rewrite::library_sites(unchanged(written, &next)?, &functions, catalog)?;
+        lash_kernel_doc::Correspondence::of(written.identity(), next.identity(), survivors)
+            .ok_or(DocumentRefusal::Correspondence)?;
     Ok(Rewritten {
         document: next,
         correspondence,

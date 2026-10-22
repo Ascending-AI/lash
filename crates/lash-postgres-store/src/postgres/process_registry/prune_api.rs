@@ -1,5 +1,5 @@
 use super::*;
-use lash_protocol_types::ProcessId;
+use lash_vocabulary::identity::ProcessId;
 
 fn watermark_change_seq(
     watermark: lash_execution_contracts::process::ProjectionWatermark,

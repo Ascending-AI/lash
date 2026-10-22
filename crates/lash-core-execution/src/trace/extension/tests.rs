@@ -15,8 +15,8 @@ use lash_trace::{
 };
 
 use super::*;
-use crate::store::plugin_writers::PluginCallbackIdentity;
 use crate::trace::{JournalFrontier, StepIssue, TraceRuntime};
+use lash_vocabulary::providers::PluginCallbackIdentity;
 
 /// A wall clock that moves one millisecond each time it is read, so every
 /// end is strictly after what it follows.
@@ -72,8 +72,8 @@ impl Fixture {
         );
         let scope = DurableTraceScope::admit(
             TraceScopeId::admission(TraceScopeOwner::Turn {
-                session_id: crate::SessionId::from("extension-laws"),
-                turn_id: crate::TurnId::from("extension-laws-turn"),
+                session_id: lash_vocabulary::identity::SessionId::from("extension-laws"),
+                turn_id: lash_vocabulary::identity::TurnId::from("extension-laws-turn"),
             }),
             producer.parent().as_ref(),
             TraceLinks::new(),
@@ -659,7 +659,7 @@ fn a_body_contribution_is_refused_with_its_exact_omission() {
 fn two_bodies_of_one_callback_keep_their_own_omission_sites() {
     let fixture = Fixture::new(TraceLimits::standard());
     let owner = crate::ExecutionOwner::SessionFrame {
-        session_id: crate::SessionId::from("extension-laws"),
+        session_id: lash_vocabulary::identity::SessionId::from("extension-laws"),
         agent_frame_id: crate::FrameNodeId::new("frame").unwrap(),
     };
     let address = |call: &str| crate::CallAddress {

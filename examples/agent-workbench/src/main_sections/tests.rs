@@ -1,5 +1,5 @@
 use super::*;
-use lash::TurnId;
+use lash_vocabulary::identity::TurnId;
 
 #[cfg(test)]
 #[path = "tests/support.rs"]

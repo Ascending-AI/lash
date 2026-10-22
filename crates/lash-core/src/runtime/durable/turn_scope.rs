@@ -44,10 +44,10 @@ use lash_execution_contracts::waits::WaitDeadline;
 
 use crate::ActorContext;
 use crate::CancelOrigin;
-use crate::ProcessId;
-use crate::SessionId;
-use crate::TurnId;
 use lash_execution_contracts::process::ProcessOutcome;
+use lash_vocabulary::identity::ProcessId;
+use lash_vocabulary::identity::SessionId;
+use lash_vocabulary::identity::TurnId;
 
 /// Mark the next batch of `scope`'s `Until` children for cancel on `tx`, the
 /// batch sized by the backend's `cascade_batch`. The one call into L6's
@@ -103,7 +103,7 @@ pub async fn end_turn_scope(
     super::phases::settle_model_calls(tx, session, run, None);
     mark_until_children(cx, tx, &scope).await?;
     waits::retire_scope(tx, &scope);
-    if let Ok(process) = crate::ProcessId::parse(run.as_str()) {
+    if let Ok(process) = lash_vocabulary::identity::ProcessId::parse(run.as_str()) {
         waits::resolve_child_session_waits(tx, &process)?;
     }
     process::close_scope(tx, &scope);

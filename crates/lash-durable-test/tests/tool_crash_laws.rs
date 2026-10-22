@@ -74,6 +74,9 @@
 #[path = "support/matrix.rs"]
 mod matrix;
 
+#[path = "support/operations.rs"]
+mod operations;
+
 use matrix::MatrixTestExt as _;
 
 #[path = "support/dialect.rs"]
@@ -104,8 +107,8 @@ use lash_execution_contracts::process::EngineEvent;
 use lash_execution_contracts::process::EngineState;
 use lash_execution_contracts::process::EngineStepKind;
 use lash_execution_contracts::process::ProcessInfraError;
-use lash_protocol_types::SessionId;
 use lash_protocol_types::sync::MutexExt as _;
+use lash_vocabulary::identity::SessionId;
 
 use dialect::Dialect;
 use served::Tier;
@@ -429,9 +432,9 @@ impl World {
     }
 }
 
-fn probe_definition() -> lash_core::ToolDefinition {
+fn probe_definition() -> lash_vocabulary::tool_contract::ToolDefinition {
     let object = serde_json::json!({ "type": "object", "additionalProperties": true });
-    lash_core::ToolDefinition::raw(
+    lash_vocabulary::tool_contract::ToolDefinition::raw(
         format!("tool:{PROBE}"),
         PROBE_OPERATION,
         "Records each body entry's call id and answers its label.",
@@ -443,7 +446,7 @@ fn probe_definition() -> lash_core::ToolDefinition {
     // A call a kill interrupted runs again at its ordinal, so every call
     // the turn makes is answered and the turn reaches the call past the
     // limit whatever was cut.
-    .with_execution_policy(lash_core::ExecutionPolicy::repeatable(
+    .with_execution_policy(lash_vocabulary::tool_contract::ExecutionPolicy::repeatable(
         std::num::NonZeroU32::new(3).expect("a nonzero attempt bound"),
         1,
         1,
@@ -460,7 +463,7 @@ impl lash_core::ToolProvider for Probe {
         &self,
         _config: &lash_core::OwnerConfigView,
     ) -> std::result::Result<
-        Vec<lash_core::ToolManifest>,
+        Vec<lash_vocabulary::tool_contract::ToolManifest>,
         lash_execution_contracts::plugin_error::PluginError,
     > {
         Ok(vec![probe_definition().manifest()])
@@ -470,7 +473,7 @@ impl lash_core::ToolProvider for Probe {
         &self,
         name: &str,
         _config: &lash_core::OwnerConfigView,
-    ) -> Option<Arc<lash_core::ToolContract>> {
+    ) -> Option<Arc<lash_vocabulary::tool_contract::ToolContract>> {
         (name == PROBE_OPERATION).then(|| Arc::new(probe_definition().contract()))
     }
 
@@ -502,21 +505,21 @@ fn submit_value_schema(retyped: bool) -> serde_json::Value {
 
 /// [`SUBMIT`]: a host finish tool whose value is its input's `answer`,
 /// typed by [`submit_value_schema`].
-fn submit_definition(retyped: bool) -> lash_core::ToolDefinition {
-    lash_core::ToolDefinition::control(
+fn submit_definition(retyped: bool) -> lash_vocabulary::tool_contract::ToolDefinition {
+    lash_vocabulary::tool_contract::ToolDefinition::control(
         format!("tool:{SUBMIT}"),
         SUBMIT_OPERATION,
         "Finishes the turn with its answer.",
         serde_json::json!({ "type": "object", "additionalProperties": true }),
-        lash_core::TurnControls::finish(
-            lash_core::JsonSchema::admit(submit_value_schema(retyped))
+        lash_vocabulary::tool_declaration::TurnControls::finish(
+            lash_vocabulary::json_schema::JsonSchema::admit(submit_value_schema(retyped))
                 .expect("submit's value schema"),
         ),
     )
     .expect("submit's schemas")
     .with_execution(std::time::Duration::from_secs(120))
     // A call a kill interrupted before its outcome runs again.
-    .with_execution_policy(lash_core::ExecutionPolicy::repeatable(
+    .with_execution_policy(lash_vocabulary::tool_contract::ExecutionPolicy::repeatable(
         std::num::NonZeroU32::new(3).expect("a nonzero attempt bound"),
         1,
         1,
@@ -528,7 +531,7 @@ struct Submit {
 }
 
 impl Submit {
-    fn definition(&self) -> lash_core::ToolDefinition {
+    fn definition(&self) -> lash_vocabulary::tool_contract::ToolDefinition {
         submit_definition(
             self.world
                 .submit_retyped
@@ -543,7 +546,7 @@ impl lash_core::ToolProvider for Submit {
         &self,
         _config: &lash_core::OwnerConfigView,
     ) -> std::result::Result<
-        Vec<lash_core::ToolManifest>,
+        Vec<lash_vocabulary::tool_contract::ToolManifest>,
         lash_execution_contracts::plugin_error::PluginError,
     > {
         Ok(vec![self.definition().manifest()])
@@ -553,7 +556,7 @@ impl lash_core::ToolProvider for Submit {
         &self,
         name: &str,
         _config: &lash_core::OwnerConfigView,
-    ) -> Option<Arc<lash_core::ToolContract>> {
+    ) -> Option<Arc<lash_vocabulary::tool_contract::ToolContract>> {
         (name == SUBMIT_OPERATION).then(|| Arc::new(self.definition().contract()))
     }
 
@@ -566,9 +569,9 @@ impl lash_core::ToolProvider for Submit {
     }
 }
 
-fn put_definition() -> lash_core::ToolDefinition {
+fn put_definition() -> lash_vocabulary::tool_contract::ToolDefinition {
     let object = serde_json::json!({ "type": "object", "additionalProperties": true });
-    lash_core::ToolDefinition::raw(
+    lash_vocabulary::tool_contract::ToolDefinition::raw(
         format!("tool:{PUT}"),
         PUT_OPERATION,
         "Puts two blobs and answers the first.",
@@ -579,7 +582,7 @@ fn put_definition() -> lash_core::ToolDefinition {
     .with_execution(std::time::Duration::from_secs(120))
     // A put a kill interrupted runs again at its ordinal and puts the same
     // bytes again.
-    .with_execution_policy(lash_core::ExecutionPolicy::repeatable(
+    .with_execution_policy(lash_vocabulary::tool_contract::ExecutionPolicy::repeatable(
         std::num::NonZeroU32::new(3).expect("a nonzero attempt bound"),
         1,
         1,
@@ -602,7 +605,7 @@ impl lash_core::ToolProvider for Puts {
         &self,
         _config: &lash_core::OwnerConfigView,
     ) -> std::result::Result<
-        Vec<lash_core::ToolManifest>,
+        Vec<lash_vocabulary::tool_contract::ToolManifest>,
         lash_execution_contracts::plugin_error::PluginError,
     > {
         Ok(vec![put_definition().manifest()])
@@ -612,7 +615,7 @@ impl lash_core::ToolProvider for Puts {
         &self,
         name: &str,
         _config: &lash_core::OwnerConfigView,
-    ) -> Option<Arc<lash_core::ToolContract>> {
+    ) -> Option<Arc<lash_vocabulary::tool_contract::ToolContract>> {
         (name == PUT_OPERATION).then(|| Arc::new(put_definition().contract()))
     }
 
@@ -658,9 +661,9 @@ impl lash_core::ToolProvider for Puts {
     }
 }
 
-fn state_definition(name: &str) -> lash_core::ToolDefinition {
+fn state_definition(name: &str) -> lash_vocabulary::tool_contract::ToolDefinition {
     let object = serde_json::json!({ "type": "object", "additionalProperties": true });
-    lash_core::ToolDefinition::raw(
+    lash_vocabulary::tool_contract::ToolDefinition::raw(
         format!("tool:{name}"),
         format!("tools.{name}"),
         "Sets the plugin's key to its entry's value.",
@@ -671,7 +674,7 @@ fn state_definition(name: &str) -> lash_core::ToolDefinition {
     .with_execution(std::time::Duration::from_secs(120))
     // A call a kill interrupted runs again at its ordinal and sets a value
     // of its own entry.
-    .with_execution_policy(lash_core::ExecutionPolicy::repeatable(
+    .with_execution_policy(lash_vocabulary::tool_contract::ExecutionPolicy::repeatable(
         std::num::NonZeroU32::new(3).expect("a nonzero attempt bound"),
         1,
         1,
@@ -682,6 +685,7 @@ fn state_definition(name: &str) -> lash_core::ToolDefinition {
 #[derive(Clone)]
 struct StatePlugin {
     world: Arc<World>,
+    code_operations: bool,
 }
 
 impl StatePlugin {
@@ -736,6 +740,20 @@ impl StatePlugin {
                     view: Some(view),
                 }))
             })?;
+        reg.package_provider_bound(lash::tool_provider_key!("operations"), |this, _| {
+            Ok(Arc::new(operations::Packages {
+                provider: lash_vocabulary::providers::ToolProviderHandle::new(
+                    lash_vocabulary::claims::RegistryKind::Session,
+                    STATE_PLUGIN,
+                    lash::tool_provider_key!("tools"),
+                ),
+                definitions: if this.code_operations {
+                    vec![state_definition(STATE_SET), state_definition(STATE_OBSERVE)]
+                } else {
+                    Vec::new()
+                },
+            }))
+        })?;
         Ok(())
     }
 }
@@ -747,7 +765,7 @@ struct StateComponent {
 }
 
 const STATE_COMPONENT: lash_core::ProcessConfigKey<()> =
-    lash_core::ProcessConfigKey::new(STATE_PLUGIN, lash_core::FormatVersion::ONE);
+    lash_core::ProcessConfigKey::new(STATE_PLUGIN, lash_vocabulary::providers::FormatVersion::ONE);
 
 impl lash_core::plugin::ProcessComponentFactory for StateComponent {
     fn declaration(&self) -> lash_core::plugin::ProcessComponentDeclaration {
@@ -814,7 +832,7 @@ impl lash_core::ToolProvider for StateTools {
         &self,
         _config: &lash_core::OwnerConfigView,
     ) -> std::result::Result<
-        Vec<lash_core::ToolManifest>,
+        Vec<lash_vocabulary::tool_contract::ToolManifest>,
         lash_execution_contracts::plugin_error::PluginError,
     > {
         Ok({
@@ -828,7 +846,7 @@ impl lash_core::ToolProvider for StateTools {
         &self,
         name: &str,
         _config: &lash_core::OwnerConfigView,
-    ) -> Option<Arc<lash_core::ToolContract>> {
+    ) -> Option<Arc<lash_vocabulary::tool_contract::ToolContract>> {
         let Some(("tools", name)) = name.split_once('.') else {
             return None;
         };
@@ -997,14 +1015,38 @@ impl Crash {
                         served::model(Arc::clone(&self.scripts)),
                         served::metadata(),
                     )
-                    .tools(
-                        lash::tool_provider_key!("probe"),
-                        Arc::new(Probe {
-                            world: Arc::clone(&self.world),
-                        }),
-                    )
+                    .plugin(Arc::new(lash::plugins::StaticPluginFactory::new(
+                        lash::plugins::PluginDeclaration::initial("probe"),
+                        lash::plugins::PluginSpec::new()
+                            .with_tool_provider(
+                                lash::tool_provider_key!("probe"),
+                                Arc::new(Probe {
+                                    world: Arc::clone(&self.world),
+                                }),
+                            )
+                            .with_package_provider(
+                                lash::tool_provider_key!("operations"),
+                                Arc::new(operations::Packages {
+                                    provider: lash_vocabulary::providers::ToolProviderHandle::new(
+                                        lash_vocabulary::claims::RegistryKind::Session,
+                                        "probe",
+                                        lash::tool_provider_key!("probe"),
+                                    ),
+                                    definitions: if self.turn.code()
+                                        && !matches!(
+                                            self.turn,
+                                            Turn::StateCell | Turn::StatePairCell
+                                        ) {
+                                        vec![probe_definition()]
+                                    } else {
+                                        Vec::new()
+                                    },
+                                }),
+                            ),
+                    )))
                     .plugin(Arc::new(StatePlugin {
                         world: Arc::clone(&self.world),
+                        code_operations: matches!(self.turn, Turn::StateCell | Turn::StatePairCell),
                     }))
                     .build(lash::persistence::LeaseOwnerIdentity::opaque(
                         lash::persistence::LeaseOwnerId::new("tool-crash-deployment"),
@@ -1705,11 +1747,9 @@ fn tool_step(
 ) -> lash_execution_contracts::process::StepRequest {
     lash_execution_contracts::process::StepRequest::Tool {
         step: lash_execution_contracts::process::StepName(step.to_owned()),
-        effect: lash_core_execution::testing::effect(&format!("tools.{tool}")),
-        contract: state_definition(tool).contract_id(),
+        use_: operations::use_for(&state_definition(tool)),
         input: serde_json::json!({ "label": label }),
         site: None,
-        matched: None,
     }
 }
 
@@ -1735,16 +1775,35 @@ impl lash_execution_contracts::process::ProcessEngine for StateEngine {
         lash_execution_contracts::process::ProcessTraceClass::Internal
     }
 
-    async fn performed_effects(
+    async fn inspect_link(
+        &self,
+        _link: lash_vocabulary::LinkId,
+        _selector: &lash_execution_contracts::process::linking::ReachSelector,
+    ) -> Result<
+        lash_execution_contracts::process::linking::LinkInspection,
+        lash_execution_contracts::process::linking::EnginePortError,
+    > {
+        Err(
+            lash_execution_contracts::process::linking::EnginePortError::Unsupported {
+                operation: "this scripted engine has no executable document".into(),
+            },
+        )
+    }
+    async fn inspect_start(
         &self,
         _payload: &serde_json::Value,
-    ) -> Result<lash_execution_contracts::process::PerformedEffects, lash_core::ProcessEnvRefusal>
-    {
-        // Its env links both tools; one-step runs perform the set alone.
-        Ok(lash_core_execution::testing::performs(&[
-            state_definition(STATE_SET),
-            state_definition(STATE_OBSERVE),
-        ]))
+    ) -> Result<
+        lash_execution_contracts::process::linking::LinkInspection,
+        lash_execution_contracts::process::linking::EnginePortError,
+    > {
+        Err(
+            lash_execution_contracts::process::linking::EnginePortError::Unsupported {
+                operation: "this scripted engine has no executable document".into(),
+            },
+        )
+    }
+    fn capabilities(&self) -> lash_vocabulary::claims::NodeRequirements {
+        Default::default()
     }
 
     async fn check_args(
@@ -1914,18 +1973,12 @@ impl lash_execution_contracts::process::ProcessEngine for StateEngine {
 /// The environment a host start states in these laws: the state
 /// component, its two tools linked.
 fn process_environment() -> lash_core::ProcessEnv {
-    [STATE_SET, STATE_OBSERVE]
-        .into_iter()
-        .fold(
-            lash_core::ProcessEnv::builder(lash_core::MaxToolCalls::new(16))
-                .component(STATE_COMPONENT, &()),
-            |builder, tool| {
-                builder.link_tool(
-                    STATE_COMPONENT.tool_provider(lash::tool_provider_key!("state")),
-                    &state_definition(tool),
-                )
-            },
-        )
+    lash_core::ProcessEnv::builder(lash_core::MaxToolCalls::new(16))
+        .component(STATE_COMPONENT, &())
+        .execution(operations::environment(
+            STATE_COMPONENT.tool_provider(lash::tool_provider_key!("state")),
+            &[state_definition(STATE_SET), state_definition(STATE_OBSERVE)],
+        ))
         .build()
         .expect("the process environment builds")
 }
@@ -1941,7 +1994,7 @@ struct ProcessCrash {
     tripwire: Arc<Tripwire>,
     backend: Mutex<Option<lash::Backend>>,
     core: Mutex<Option<lash::LashCore>>,
-    process: Mutex<Option<lash_core_execution::ProcessId>>,
+    process: Mutex<Option<lash_vocabulary::identity::ProcessId>>,
     keep: Mutex<Vec<Box<dyn std::any::Any + Send>>>,
 }
 
@@ -1996,11 +2049,11 @@ impl ProcessCrash {
             .clone()
     }
 
-    fn process(&self) -> Option<lash_core_execution::ProcessId> {
+    fn process(&self) -> Option<lash_vocabulary::identity::ProcessId> {
         self.process.lock_recover().clone()
     }
 
-    fn actor(process: &lash_core_execution::ProcessId) -> ActorKey {
+    fn actor(process: &lash_vocabulary::identity::ProcessId) -> ActorKey {
         ActorKey::process(process.as_str()).expect("a process actor key")
     }
 
@@ -2008,7 +2061,7 @@ impl ProcessCrash {
     /// [`STATE_OBSERVE`] step saw.
     async fn answer(
         &self,
-        process: &lash_core_execution::ProcessId,
+        process: &lash_vocabulary::identity::ProcessId,
     ) -> Result<(Option<String>, Option<String>), String> {
         let terminal = self
             .backend()
@@ -2063,9 +2116,16 @@ impl Scenario for ProcessCrash {
         let _ = self.world.nodes.set(Arc::downgrade(nodes));
         // The host is outside the deployment under test: its start is uncut.
         let core = self.core();
+        let pin = lash_core::HostArtifactPin::mint();
+        operations::retain(
+            core.backend(),
+            &pin,
+            &[state_definition(STATE_SET), state_definition(STATE_OBSERVE)],
+        )
+        .await;
         let env_ref = core
             .host_artifacts()
-            .publish_process_env(&lash_core::HostArtifactPin::mint(), &process_environment())
+            .publish_process_env(&pin, &process_environment())
             .await
             .map_err(|error| format!("publish the environment: {error}"))?;
         let request = lash_execution_contracts::process::ProcessStartRequest::engine(

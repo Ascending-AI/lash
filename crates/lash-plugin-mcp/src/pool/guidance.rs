@@ -23,7 +23,7 @@ pub(crate) struct PinnedGuidance {
 
 impl PinnedGuidance {
     /// The guidance `manifest` pins, if its server gave any.
-    pub(crate) fn of(manifest: &lash_core::ToolManifest) -> Option<Self> {
+    pub(crate) fn of(manifest: &lash_vocabulary::tool_contract::ToolManifest) -> Option<Self> {
         serde_json::from_value(manifest.bindings.get(MCP_GUIDANCE_KEY)?.clone()).ok()
     }
 }

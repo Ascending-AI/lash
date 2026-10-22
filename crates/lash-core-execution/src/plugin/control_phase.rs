@@ -1,6 +1,6 @@
 //! One host-owned aggregate deadline, carried with a phase's recorded outcome.
-use super::PluginCallbackIdentity;
 use lash_execution_contracts::plugin_error::PluginError;
+use lash_vocabulary::providers::PluginCallbackIdentity;
 use std::time::Duration;
 
 #[derive(Clone, serde::Serialize, serde::Deserialize)]

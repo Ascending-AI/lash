@@ -30,12 +30,13 @@ use lash_kernel_doc::heap::{LogicalBytes, NormalKey};
 use lash_kernel_doc::{
     Args, NativeCall, NativeError, NewObject, Nursery, Retry, TaskId, Value, WorkCounter,
 };
+
 use lash_kernel_state::arena::{Arena, Key};
 
 use super::exec::Call;
 use super::operation_entry::AdmittedBody;
 use super::{Eval, Halt, Interrupt, KernelMachine, Refusal, bound, fault, raise};
-use crate::compile::{Charge, Executable, Lib, LibId, LibRun, StmtId};
+use crate::compile::{Charge, Executable, Lib, LibId, LibRun};
 use crate::functions::MachineFunction;
 use crate::interface::Bound;
 use crate::observe::Event;
@@ -550,24 +551,42 @@ impl KernelMachine {
     /// kernel body, its native declining or absent, has that body's frame
     /// pushed, its arguments moved in, the caller's statement `awaiting`
     /// waiting in it, if any: `Step`.
+    pub(super) fn call_lib_linked(
+        &mut self,
+        task: TaskId,
+        exe: &Executable,
+        (lib, link): (LibId, lash_vocabulary::content_ids::LinkId),
+        invocation: super::exec::Invocation<'_>,
+    ) -> Status {
+        let caller = self.active_link;
+        self.active_link = link;
+        let result = self.call_lib(task, exe, lib, invocation);
+        self.active_link = caller;
+        result
+    }
+
     pub(super) fn call_lib(
         &mut self,
         task: TaskId,
         exe: &Executable,
         lib: LibId,
-        args: Reg,
-        count: usize,
-        awaiting: Option<StmtId>,
+        invocation: super::exec::Invocation<'_>,
     ) -> Status {
+        let super::exec::Invocation {
+            args,
+            count,
+            awaiting,
+            export,
+        } = invocation;
         let code = match self
             .answer(task, exe, lib, args, count, args)
             .map_err(|interrupt| interrupt.answering(exe.lib(lib)))?
         {
             Answer::Done => return Ok(Flow::Done),
             Answer::Body(code) => code,
-            Answer::Yielded => return self.stand_segments(task, exe, awaiting),
+            Answer::Yielded => return self.stand_segments(task, exe, awaiting, export),
         };
-        self.enter_body(task, exe, lib, code, args, awaiting)
+        self.enter_body(task, exe, lib, code, invocation)
     }
 
     /// Pushes the frame of library function `lib`'s kernel body `code`,
@@ -579,14 +598,22 @@ impl KernelMachine {
         exe: &Executable,
         lib: LibId,
         admitted: AdmittedBody,
-        args: Reg,
-        awaiting: Option<StmtId>,
+        invocation: super::exec::Invocation<'_>,
     ) -> Status {
+        let super::exec::Invocation {
+            args,
+            awaiting,
+            export,
+            ..
+        } = invocation;
         let function = exe.lib(lib);
         let AdmittedBody { code, entry } = admitted;
         // An argument the call leaves out is absent: the body binds every
         // parameter.
-        let call = Call::new(code, args, function.arity).of_library(lib);
+        let call = Call::new(code, args, function.arity)
+            .in_link(self.current_link())
+            .of_library(lib)
+            .with_boundary(export);
         self.push_operation_frame(task, exe, call.awaited_by(awaiting), entry)?;
         Ok(Flow::Step)
     }

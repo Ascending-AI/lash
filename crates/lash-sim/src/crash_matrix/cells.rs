@@ -21,20 +21,25 @@
 //! commits with `turn.commit`, even with that callback installed (FIG-6162).
 
 use lash_protocol_types::{llm::types::StreamBlockEvent, llm::types::StreamBlockKind};
+
 use std::sync::{Arc, Weak};
 use std::time::Duration;
 
 use lash::tools::{StaticToolExecute, StaticToolProvider};
+use lash_core::LlmOutputPart;
+use lash_core::ToolCall;
+use lash_core::ToolOutcome;
 use lash_core::facade_support::ProviderHandle;
 use lash_core::llm::types::{
     LlmRequest, LlmResponse, LlmRole, LlmStreamEvent, StreamBlockIdentity,
 };
 use lash_core::runtime::durable::session::TurnServices;
-use lash_core::{ExecutionPolicy, LlmOutputPart, ToolCall, ToolOutcome};
 use lash_durable::domain::{ExecKey, OwnerKey};
 use lash_durable_test::SimClock;
 use lash_execution_contracts::backend::Backend;
-use lash_protocol_types::{SessionId, TurnId};
+use lash_vocabulary::identity::SessionId;
+use lash_vocabulary::identity::TurnId;
+use lash_vocabulary::tool_contract::ExecutionPolicy;
 
 use super::cases::run_of;
 use super::services::{EXT_WRITE, FINAL, TurnScript, kill_owner, session_id};
@@ -447,7 +452,7 @@ fn cell_owner(world: &World, session: &SessionId) -> OwnerKey {
 }
 
 fn ext_write(world: Weak<World>) -> Result<Arc<dyn lash_core::ToolProvider>, String> {
-    let definition = lash_core::ToolDefinition::raw(
+    let definition = lash_vocabulary::tool_contract::ToolDefinition::raw(
         EXT_WRITE,
         format!("tools.{}", EXT_WRITE),
         "Writes x to the outside world, once.",

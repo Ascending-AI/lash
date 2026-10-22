@@ -102,7 +102,11 @@ pub fn server_segment(raw: &str) -> String {
 /// tool-name collision that still receives the pool's typed config refusal.
 /// Static server-segment collisions remain a configuration refusal.
 pub fn build_catalog_names(server_name: &str, names: &[&str]) -> BTreeMap<String, String> {
-    build_catalog_names_with_digest(server_name, names, lash_protocol_types::digest_tag)
+    build_catalog_names_with_digest(
+        server_name,
+        names,
+        lash_vocabulary::tool_contract::digest_tag,
+    )
 }
 
 pub(crate) fn build_catalog_names_with_digest(
@@ -195,7 +199,8 @@ mod tests {
         let names = build_catalog_names("directory", &["getUser", "get_user"]);
         assert_ne!(names["getUser"], names["get_user"]);
         for (raw, name) in &names {
-            let suffix = lash_protocol_types::digest_tag(&durable_tool_id("directory", raw));
+            let suffix =
+                lash_vocabulary::tool_contract::digest_tag(&durable_tool_id("directory", raw));
             assert_eq!(name, &format!("get_user_h{suffix}"));
         }
 
@@ -227,7 +232,7 @@ mod tests {
     fn generated_suffix_collision_hashes_the_bare_occupant_too() {
         let suffixed = format!(
             "search_docs_h{}",
-            lash_protocol_types::digest_tag(&durable_tool_id("docs", "search-docs"))
+            lash_vocabulary::tool_contract::digest_tag(&durable_tool_id("docs", "search-docs"))
         );
         let names = build_catalog_names("docs", &["search-docs", "search_docs", &suffixed]);
         assert_eq!(names.values().collect::<BTreeSet<_>>().len(), 3);

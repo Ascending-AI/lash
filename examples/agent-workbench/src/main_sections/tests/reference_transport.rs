@@ -37,14 +37,14 @@
 //!   row's provisional copy. Streamed partial text is never authoritative.
 
 use super::*;
-use lash::SessionId;
-use lash::TurnId;
 use lash::direct::{LlmStreamEvent, StreamBlockIdentity};
 use lash::provider::{
     GenerationRetryGuarantee, LlmRequest, ProviderFailureKind, ProviderOptions, ProviderReliability,
 };
 use lash::provider::{LlmTransportError, TransportRetryVerdict};
 use lash::{StreamBlockEvent, StreamBlockKind};
+use lash_vocabulary::identity::SessionId;
+use lash_vocabulary::identity::TurnId;
 
 use lash::TurnEvent;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};

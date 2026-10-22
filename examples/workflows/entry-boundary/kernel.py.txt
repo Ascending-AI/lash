@@ -1,27 +1,19 @@
 kernel 1
 numbers by_spelling
-entry arrow(value: Int) -> Any
-entry declared() -> Any
-
-fn arrow(value) {
-  return value
-}
-
-fn declared() {
-  return "top"
-}
-
+export arrow "{\"kind\":\"function\",\"value\":{\"function\":\"6b2a575e278e001576a333b79a1ce6a8c2aebd1a4322dd930f698b92bce1bbe5\",\"signature\":{\"params\":[{\"name\":\"value\",\"ty\":\"int\"}],\"result\":\"int\"},\"convention\":{\"kind\":\"direct\"},\"asynchronous\":true,\"rest\":false}}"
+export declared "{\"kind\":\"function\",\"value\":{\"function\":\"ee61f606f42ec4aef6e48959c3728d881bb6d9dba462f5ebd92fb83a91418523\",\"signature\":{\"result\":\"text\"},\"convention\":{\"kind\":\"direct\"},\"asynchronous\":true,\"rest\":false}}"
+definition "function local.function(value: Any) -> Any\nkernel 1\nmetering statements\nbody {\n  return value\n}\n"
+definition "function local.function() -> Any\nkernel 1\nmetering statements\nbody {\n  return \"block\"\n}\n"
+definition "function local.function() -> Any\nkernel 1\nmetering statements\nbody {\n  return \"top\"\n}\n"
 main {
   let local = absent
-  let arrow = &arrow
-  let declared = &declared
+  let arrow = &@6b2a575e278e001576a333b79a1ce6a8c2aebd1a4322dd930f698b92bce1bbe5
+  let declared = &@ee61f606f42ec4aef6e48959c3728d881bb6d9dba462f5ebd92fb83a91418523
   if true {
-    set local = fn() start() -> Any bare direct {
-      return "block"
-    }
+    set local = fn @9614c00f8da0e55a868fd514d3710b040c9516d8c9b0a7748ad0bfc34f279a63 presentation() -> Any bare direct
   }
 }
 
-unit Function(Name("arrow")): statements=1 scopes=1 sites=8
+unit Library(FunctionId(6b2a575e278e001576a333b79a1ce6a8c2aebd1a4322dd930f698b92bce1bbe5)): statements=1 scopes=1 sites=8
 
-unit Function(Name("declared")): statements=1 scopes=1 sites=8
+unit Library(FunctionId(ee61f606f42ec4aef6e48959c3728d881bb6d9dba462f5ebd92fb83a91418523)): statements=1 scopes=1 sites=8

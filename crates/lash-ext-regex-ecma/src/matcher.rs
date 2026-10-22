@@ -4,6 +4,7 @@
 use std::ops::{ControlFlow, Range};
 
 use lash_kernel_doc::{GuardExceeded, NativeError, WorkCounter};
+
 use lash_regress::{Match, MeteredMatches, Regex};
 
 /// One match, as ranges of the input's UTF-16 code units.

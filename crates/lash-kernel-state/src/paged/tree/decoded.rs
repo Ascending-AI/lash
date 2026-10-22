@@ -1,7 +1,8 @@
 //! Decoded cells retain bounded normal-form caches across repeated reads.
 use super::super::{NameRef, SiteRef};
 use super::*;
-use lash_kernel_doc::{Name, Site};
+use lash_vocabulary::names::Name;
+use lash_vocabulary::sites::Site;
 use std::any::{Any, TypeId};
 use std::rc::Rc;
 

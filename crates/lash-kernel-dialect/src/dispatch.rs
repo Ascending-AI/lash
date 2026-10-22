@@ -26,10 +26,14 @@
 //! leaves it out. A rest slot is one `List` slot that gathers every
 //! argument from its position on.
 
-use lash_kernel_doc::{Expr, FunctionId, Integer, Literal, Member as Place, Signature, Type};
+use lash_kernel_doc::{Expr, Integer, Literal, Member as Place};
 
-use crate::exports::{BRAND_FIELD, Export, ExportView, Member, TypeMember, ValueType};
-use crate::names::{PackagePath, Segment};
+use lash_vocabulary::{FunctionId, Signature, Type};
+
+use crate::exports::{
+    BRAND_FIELD, FunctionMember, NamespaceKind, NamespaceView, TypeMember, ValueType,
+};
+use lash_vocabulary::{PackagePath, Segment};
 
 /// The library function a front end reads a value's brand with: a text
 /// pair, or `absent` for a value of no package type.
@@ -83,9 +87,9 @@ impl Brand {
     }
 
     /// The value type this brand names among the view's exports.
-    pub fn value_type<'v>(&self, view: &'v dyn ExportView) -> Option<&'v ValueType> {
-        match view.exports(&self.package)?.get(&self.ty)? {
-            Export::Type(ty) => Some(ty),
+    pub fn value_type<'v>(&self, view: &'v dyn NamespaceView) -> Option<&'v ValueType> {
+        match &view.exports(&self.package)?.get(&self.ty)?.kind {
+            NamespaceKind::Type(ty) => Some(ty),
             _ => None,
         }
     }
@@ -101,14 +105,14 @@ pub struct Target<'v> {
 
 /// The value types of `view` whose values have `member`, in brand order:
 /// a method or a property. A static is the type's, never its values'.
-pub fn targets<'v>(view: &'v dyn ExportView, member: &Segment) -> Vec<Target<'v>> {
+pub fn targets<'v>(view: &'v dyn NamespaceView, member: &Segment) -> Vec<Target<'v>> {
     let mut targets = Vec::new();
     for package in view.paths() {
         let Some(exports) = view.exports(&package) else {
             continue;
         };
         for (name, export) in exports {
-            let Export::Type(ty) = export else {
+            let NamespaceKind::Type(ty) = &export.kind else {
                 continue;
             };
             match ty.members.get(member) {
@@ -131,14 +135,14 @@ pub fn targets<'v>(view: &'v dyn ExportView, member: &Segment) -> Vec<Target<'v>
 
 /// The packages of `view` that export a value type: a value whose brand
 /// names one of them is a package value.
-pub fn typed_packages(view: &dyn ExportView) -> Vec<PackagePath> {
+pub fn typed_packages(view: &dyn NamespaceView) -> Vec<PackagePath> {
     view.paths()
         .into_iter()
         .filter(|package| {
             view.exports(package).is_some_and(|exports| {
                 exports
                     .values()
-                    .any(|export| matches!(export, Export::Type(_)))
+                    .any(|export| matches!(export.kind, NamespaceKind::Type(_)))
             })
         })
         .collect()
@@ -314,7 +318,7 @@ pub enum KeywordRefusal {
 
 /// The fields of a slot that takes options: a record of declared fields,
 /// or such a record or `absent`. A package value's slot takes none.
-pub fn options_fields(ty: &Type) -> Option<&[lash_kernel_doc::RecordTypeField]> {
+pub fn options_fields(ty: &Type) -> Option<&[lash_vocabulary::RecordTypeField]> {
     match ty {
         Type::Record(record) if Brand::of_type(ty).is_none() && !record.fields.is_empty() => {
             Some(&record.fields)
@@ -340,7 +344,7 @@ pub fn options_fields(ty: &Type) -> Option<&[lash_kernel_doc::RecordTypeField]> 
 /// A keyword that names no options field, one that names a field of more
 /// than one options slot, naming each, or one given twice.
 pub fn keyword_slots(
-    member: &Member,
+    member: &FunctionMember,
     receiver: bool,
     name: &str,
     keywords: &[&str],
@@ -397,7 +401,7 @@ pub fn admits_absent(ty: &Type) -> bool {
 
 /// The slots a call's arguments fill, after the receiver, in signature
 /// order.
-pub fn slots(member: &Member, receiver: bool) -> Vec<Slot<'_>> {
+pub fn slots(member: &FunctionMember, receiver: bool) -> Vec<Slot<'_>> {
     member
         .signature
         .params
@@ -431,7 +435,7 @@ pub fn slots(member: &Member, receiver: bool) -> Vec<Slot<'_>> {
 /// More arguments than slots and no rest slot, or a left-out slot that
 /// does not admit `absent`.
 pub fn fill<T>(
-    member: &Member,
+    member: &FunctionMember,
     receiver: bool,
     name: &str,
     args: Vec<T>,
@@ -453,7 +457,7 @@ pub fn fill<T>(
 ///
 /// As [`fill`], and a slot given both by position and in `placed`.
 pub fn fill_placed<T>(
-    member: &Member,
+    member: &FunctionMember,
     receiver: bool,
     name: &str,
     args: Vec<T>,
@@ -500,15 +504,18 @@ pub fn fill_placed<T>(
 mod tests {
     use std::collections::BTreeMap;
 
-    use lash_kernel_doc::{FunctionName, Name, Param};
+    use lash_vocabulary::{FunctionName, Name, Param};
 
     use super::*;
 
     /// Exports held in memory, by package path.
-    struct HeldExports(BTreeMap<PackagePath, BTreeMap<Segment, Export>>);
+    struct HeldExports(BTreeMap<PackagePath, BTreeMap<Segment, crate::NamespaceMember>>);
 
-    impl ExportView for HeldExports {
-        fn exports(&self, path: &PackagePath) -> Option<&BTreeMap<Segment, Export>> {
+    impl NamespaceView for HeldExports {
+        fn exports(
+            &self,
+            path: &PackagePath,
+        ) -> Option<&BTreeMap<Segment, crate::NamespaceMember>> {
             self.0.get(path)
         }
 
@@ -517,9 +524,12 @@ mod tests {
         }
     }
 
-    fn member(name: &str, params: &[(&str, Type)], rest: bool) -> Member {
-        Member {
-            definition: FunctionName::new(name).expect("a qualified name"),
+    fn member(name: &str, params: &[(&str, Type)], rest: bool) -> FunctionMember {
+        FunctionMember {
+            name: crate::authoring::helper_name(
+                &FunctionName::new(name).expect("a qualified name"),
+            ),
+            convention: lash_vocabulary::Convention::Direct,
             signature: Signature {
                 params: params
                     .iter()
@@ -553,7 +563,7 @@ mod tests {
     #[test]
     fn slots_fill_by_the_canonical_convention() {
         let optional = Type::Union(vec![
-            Type::Record(lash_kernel_doc::RecordType {
+            Type::Record(lash_vocabulary::RecordType {
                 fields: Vec::new(),
                 rest: Some(Box::new(Type::Any)),
             }),
@@ -613,14 +623,15 @@ mod tests {
     /// are two targets, each its own type's, and a static is no value's.
     #[test]
     fn targets_are_keyed_by_type_and_member() {
-        let ty = |members: Vec<(&str, TypeMember)>| {
-            Export::Type(ValueType {
+        let ty = |members: Vec<(&str, TypeMember)>| crate::NamespaceMember {
+            visibility: lash_vocabulary::Visibility::Public,
+            kind: NamespaceKind::Type(ValueType {
                 representation: Type::Any,
                 members: members
                     .into_iter()
                     .map(|(name, member)| (segment(name), member))
                     .collect(),
-            })
+            }),
         };
         let quanta_sort = TypeMember::Method(member("df.data_quanta.sort", &[], true));
         let expr_sort = TypeMember::Method(member("df.expr.sort", &[], false));
@@ -639,7 +650,13 @@ mod tests {
                         TypeMember::Static(member("df.context.sort", &[], false)),
                     )]),
                 ),
-                (segment("error"), Export::Error),
+                (
+                    segment("error"),
+                    crate::NamespaceMember {
+                        visibility: lash_vocabulary::Visibility::Public,
+                        kind: NamespaceKind::Error,
+                    },
+                ),
             ]),
         )]));
         let found = targets(&view, &segment("sort"));
@@ -654,8 +671,8 @@ mod tests {
             typed_packages(&view),
             vec![PackagePath::parse("df").expect("canonical")]
         );
-        let brand = Type::Record(lash_kernel_doc::RecordType {
-            fields: vec![lash_kernel_doc::RecordTypeField {
+        let brand = Type::Record(lash_vocabulary::RecordType {
+            fields: vec![lash_vocabulary::RecordTypeField {
                 name: BRAND_FIELD.into(),
                 ty: Type::Tuple(vec![
                     Type::Enum(vec!["df".into()]),

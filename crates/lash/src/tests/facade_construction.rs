@@ -20,9 +20,11 @@ async fn facade_change_feeds_share_bounded_pages_and_typed_cutoffs() -> crate::R
     // Standing-fault pages retain the last item as their continuation; an
     // empty page retains the caller's cursor instead of restarting the feed.
     for label in ["fault-a", "fault-b"] {
-        core.session(crate::SessionId::parse(label).expect("nonblank host identity"))
-            .create(crate::SessionCreation::root(super::mock_session_spec()))
-            .await?;
+        core.session(
+            lash_vocabulary::identity::SessionId::parse(label).expect("nonblank host identity"),
+        )
+        .create(crate::SessionCreation::root(super::mock_session_spec()))
+        .await?;
         let record = crate::SessionFaultRecord::new(
             crate::SessionFaultOrigin::DriveAdmission,
             &crate::runtime::RuntimeError::new(
@@ -31,7 +33,11 @@ async fn facade_change_feeds_share_bounded_pages_and_typed_cutoffs() -> crate::R
             ),
         );
         core.store_factory
-            .record_session_fault(&crate::SessionId::parse(label).unwrap(), &record, 1)
+            .record_session_fault(
+                &lash_vocabulary::identity::SessionId::parse(label).unwrap(),
+                &record,
+                1,
+            )
             .await?;
     }
     let first = core.session_faults(None, limit).await?;
@@ -40,9 +46,11 @@ async fn facade_change_feeds_share_bounded_pages_and_typed_cutoffs() -> crate::R
     let second = core.session_faults(first.next.as_ref(), limit).await?;
     assert_eq!(second.changes.len(), 1);
     assert_eq!(second.next.as_ref().unwrap().as_str(), "fault-b");
-    let after = crate::SessionId::parse("last-fault").unwrap();
-    let faults: crate::ChangePage<crate::SessionFault, Option<crate::SessionId>> =
-        core.session_faults(Some(&after), limit).await?;
+    let after = lash_vocabulary::identity::SessionId::parse("last-fault").unwrap();
+    let faults: crate::ChangePage<
+        crate::SessionFault,
+        Option<lash_vocabulary::identity::SessionId>,
+    > = core.session_faults(Some(&after), limit).await?;
     assert!(faults.changes.is_empty());
     assert_eq!(faults.next, Some(after));
     assert_eq!(faults.retained_after, None);

@@ -1,6 +1,6 @@
 use super::*;
-use lash_protocol_types::SessionId;
-use lash_protocol_types::TurnId;
+use lash_vocabulary::identity::SessionId;
+use lash_vocabulary::identity::TurnId;
 
 pub(super) fn measure_runtime_perf_phase<T>(
     name: &str,
@@ -151,7 +151,8 @@ impl lash_core::plugin::PluginOperation for AssignCheckpointBinding {
     type Output = ();
     type Error = CheckpointAssignmentError;
     const ERROR_TYPE: &'static str = Self::NAME;
-    const ERROR_VERSION: lash_core::FormatVersion = lash_core::FormatVersion::ONE;
+    const ERROR_VERSION: lash_vocabulary::providers::FormatVersion =
+        lash_vocabulary::providers::FormatVersion::ONE;
     fn error_class(_: &CheckpointAssignmentError) -> lash_core::plugin::PluginFailureClass {
         lash_core::plugin::PluginFailureClass::Terminal
     }
@@ -194,7 +195,7 @@ impl CheckpointBindingFixture {
                     let invocation = lash_core::runtime::causal::turn_effect_invocation(
                         ctx.scoped_effect_controller.execution_scope(),
                         &session_id,
-                        &lash_core::TurnId::fixture(format!("checkpoint-{turn}")),
+                        &lash_vocabulary::identity::TurnId::fixture(format!("checkpoint-{turn}")),
                         turn,
                         0,
                         lash_core::sansio::EffectId(0),

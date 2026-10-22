@@ -57,8 +57,11 @@ use tokio_util::sync::CancellationToken;
 
 use super::session::{CellClose, CellToolCalls, TurnDrive, TurnError, TurnRow, UnfinishedPhase};
 use super::turn_cancel;
+use crate::ActorContext;
+use crate::Effect;
+use crate::Response;
 use crate::sansio::PendingToolCall;
-use crate::{ActorContext, Effect, EffectId, Response};
+use lash_sansio::EffectId;
 
 /// How a tool round left the turn.
 #[derive(Debug)]
@@ -396,8 +399,9 @@ pub(super) fn record_refused(
                 &opener,
                 &call,
                 round::MemberPin {
-                    tool: crate::ToolId::new(answer.tool_name.clone()),
-                    policy: crate::ExecutionPolicy::Once,
+                    admitted_at: tx.opened_at(),
+                    tool: lash_vocabulary::tool_contract::ToolId::new(answer.tool_name.clone()),
+                    policy: lash_vocabulary::tool_contract::ExecutionPolicy::Once,
                     limit: crate::ExecutionLimit {
                         expires_at: u64::try_from(tx.opened_at().0).unwrap_or(0),
                         max_slice: std::time::Duration::ZERO,

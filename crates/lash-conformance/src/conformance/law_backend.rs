@@ -129,6 +129,15 @@ impl StoreLawStores {
 }
 
 impl crate::StoreSet for StoreLawStores {
+    fn package_store(&self) -> Arc<dyn lash_core::durable_port::packages::PackageStore> {
+        Self::no_second_substrate("package store")
+    }
+    fn execution_resolutions(
+        &self,
+    ) -> Arc<dyn lash_core::durable_port::resolutions::ExecutionResolutions> {
+        Self::no_second_substrate("execution resolutions")
+    }
+
     fn durable_store(&self) -> Arc<dyn crate::DurableStore> {
         Self::no_second_substrate("durable store")
     }

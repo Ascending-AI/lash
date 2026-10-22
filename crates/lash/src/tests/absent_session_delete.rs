@@ -11,7 +11,9 @@
 //! outside a PostgreSQL gate, which selects them with `--include-ignored`.
 
 use super::*;
-use crate::{SessionId, TurnInput, TurnOutcome};
+use crate::TurnInput;
+use crate::TurnOutcome;
+use lash_vocabulary::identity::SessionId;
 
 /// The stores a law's deployment runs over, and what must outlive them.
 async fn stores(

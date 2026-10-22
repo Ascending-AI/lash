@@ -1,4 +1,5 @@
 //! Admit canvas targets before any private tree write.
+use lash_vocabulary::names::FunctionId;
 use std::collections::BTreeMap;
 
 use crate::apply::{Fault, Working, at, node};
@@ -9,9 +10,11 @@ use lash_kernel_check::{
     ActNode, ActionNode, AtomNode, CalleeNode, ExprNode, NodeKind, PlaceNode, Reference, StmtNode,
 };
 use lash_kernel_doc::{
-    ActExpr, ActKind, Action, Callee, Catch, Expr, FunctionCatalog, FunctionId, Literal, Node,
-    NodeMut, Place, Rhs, Site, Stmt, TryStmt,
+    ActExpr, ActKind, Action, Callee, Catch, Expr, FunctionCatalog, Literal, Node, NodeMut, Place,
+    Rhs, Stmt, TryStmt,
 };
+
+use lash_vocabulary::sites::Site;
 
 fn has_action(node: Node<'_>) -> bool {
     matches!(node, Node::Action(_) | Node::Expr(Expr::Act(_)))
@@ -53,10 +56,10 @@ fn pure_argument(
 ) -> bool {
     let forbidden = match node {
         Node::Action(Action::Call {
-            callee: Callee::Library(_),
+            callee: Callee::Local(_),
             ..
         }) => false,
-        Node::Expr(Expr::Act(act)) => !matches!(act.kind, ActKind::Call(Callee::Library(_))),
+        Node::Expr(Expr::Act(act)) => !matches!(act.kind, ActKind::Call(Callee::Local(_))),
         Node::Action(_) | Node::Expr(Expr::Closure(_)) => true,
         Node::Block(_) | Node::Stmt(_) | Node::Expr(_) => false,
     };
@@ -294,7 +297,7 @@ impl Working {
             }
             Operation::InsertStep {
                 at: position,
-                effect,
+                slot,
                 args,
                 result,
                 binding,
@@ -306,7 +309,7 @@ impl Working {
                 }
                 let act = ActExpr {
                     kind: ActKind::Perform {
-                        effect: effect.clone(),
+                        slot: *slot,
                         result: result.clone(),
                         then_yield: false,
                     },
@@ -326,7 +329,7 @@ impl Working {
                 };
                 self.edit(&Edit::InsertStatement {
                     at: position.clone(),
-                    statement,
+                    statement: Box::new(statement),
                 })?;
             }
             Operation::RemoveStep { action, .. } => {
@@ -663,7 +666,6 @@ fn references(kind: &NodeKind) -> Vec<&Reference> {
                     out.extend(callee(value));
                     args.iter().collect()
                 }
-                ActionNode::Sleep { duration } => vec![duration],
                 ActionNode::Join { task } | ActionNode::Cancel { task } => vec![task],
                 ActionNode::JoinMany { tasks, .. } => vec![tasks],
                 ActionNode::Await { value, .. } => vec![value],

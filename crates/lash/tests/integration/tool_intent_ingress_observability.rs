@@ -3,8 +3,8 @@
     reason = "test target: clippy's allow-unwrap-in-tests only exempts #[test] functions, and the setup helpers around them in this target are test code too"
 )]
 
-use lash_protocol_types::ProcessId;
-use lash_protocol_types::SessionId;
+use lash_vocabulary::identity::ProcessId;
+use lash_vocabulary::identity::SessionId;
 use std::sync::{Arc, Mutex};
 
 const SESSION: &str = "intent-ingress-observability-session";
@@ -66,7 +66,7 @@ async fn test_core() -> lash::Result<(lash::LashCore, ProcessId, ProcessId)> {
 
 fn cancel_intent_for(session_id: &SessionId, process: &ProcessId) -> lash::tools::ToolIntent {
     lash::tools::ToolIntent::CancelProcess(lash::tools::CancelProcessIntent {
-        owner: lash::RuntimeOwner::Session(session_id.clone()),
+        owner: lash_vocabulary::identity::RuntimeOwner::Session(session_id.clone()),
         process_id: process.clone(),
     })
 }
@@ -122,7 +122,8 @@ fn ingress_records_identity_and_every_decision_class() -> lash::Result<()> {
         runtime.block_on(async {
             let (core, process, other_process) = test_core().await?;
             let ingress = core.tool_intents(
-                lash::SessionId::parse(SESSION).expect("nonblank host identity"),
+                lash_vocabulary::identity::SessionId::parse(SESSION)
+                    .expect("nonblank host identity"),
                 lash::runtime::ExecutionScope::turn(SESSION, SCOPE),
             )?;
             let key = ingress

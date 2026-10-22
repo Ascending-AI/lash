@@ -12,6 +12,7 @@ use lash_core::facade_support::TurnOutcome;
 use lash_core::facade_support::{SessionGraphFacadeOps as _, SessionNodeProjection as _};
 use lash_core::plugin::StaticPluginFactory;
 use lash_protocol_types::{llm::types::StreamBlockEvent, llm::types::StreamBlockKind};
+
 use tokio::sync::oneshot;
 
 #[tokio::test]
@@ -72,7 +73,8 @@ pub(super) async fn interleaved_standard_parts_keep_order_through_store_history_
     .build(lash_facade_tests::runtime_lease_owner())?;
     let session = created_session(
         &core,
-        lash::SessionId::parse("interleaved-standard-order").expect("nonblank host identity"),
+        lash_vocabulary::identity::SessionId::parse("interleaved-standard-order")
+            .expect("nonblank host identity"),
     )
     .await
     .open()
@@ -218,7 +220,8 @@ pub(super) fn rlm_streamed_lash_vm_cell_uses_captured_body_when_final_text_is_ra
                 .build(lash_facade_tests::runtime_lease_owner())?;
         let session = created_session(
             &core,
-            lash::SessionId::parse("rlm-streamed-raw-final-cell").expect("nonblank host identity"),
+            lash_vocabulary::identity::SessionId::parse("rlm-streamed-raw-final-cell")
+                .expect("nonblank host identity"),
         )
         .await
         .open()
@@ -423,7 +426,8 @@ pub(super) fn rlm_accepted_cell_commits_the_usage_its_tail_reports() -> Result<(
         let core = rlm_abort_drain_core(provider, std::time::Duration::from_secs(60)).await?;
         let session = created_session(
             &core,
-            lash::SessionId::parse("rlm-tail-usage").expect("nonblank host identity"),
+            lash_vocabulary::identity::SessionId::parse("rlm-tail-usage")
+                .expect("nonblank host identity"),
         )
         .await
         .open()
@@ -513,7 +517,7 @@ pub(super) fn rlm_accepted_cell_without_tail_usage_is_unknown_never_zero() -> Re
             let core = rlm_abort_drain_core(provider, std::time::Duration::from_secs(2)).await?;
             let session = created_session(
                 &core,
-                lash::SessionId::parse(format!("rlm-tail-unknown-{case}"))
+                lash_vocabulary::identity::SessionId::parse(format!("rlm-tail-unknown-{case}"))
                     .expect("nonblank host identity"),
             )
             .await
@@ -710,7 +714,8 @@ pub(super) fn every_abandoned_attempt_reaches_the_provider_with_its_partial_rece
             let core = builder.build(lash_facade_tests::runtime_lease_owner())?;
             let session = created_session(
                 &core,
-                lash::SessionId::parse(format!("abandoned-provider-{case}")).expect("identity"),
+                lash_vocabulary::identity::SessionId::parse(format!("abandoned-provider-{case}"))
+                    .expect("identity"),
             )
             .await
             .open()
@@ -916,7 +921,8 @@ pub(super) fn returned_provider_attempts_settle_once_without_an_abandoned_termin
             .build(lash_facade_tests::runtime_lease_owner())?;
             let session = created_session(
                 &core,
-                lash::SessionId::parse(format!("returned-provider-{case}")).expect("identity"),
+                lash_vocabulary::identity::SessionId::parse(format!("returned-provider-{case}"))
+                    .expect("identity"),
             )
             .await
             .open()
@@ -1031,7 +1037,7 @@ pub(super) fn cancelling_a_tool_settles_its_nested_direct_provider_attempt() -> 
         .build(lash_facade_tests::runtime_lease_owner())?;
         let session = created_session(
             &core,
-            lash::SessionId::parse("cancel-nested-direct").expect("identity"),
+            lash_vocabulary::identity::SessionId::parse("cancel-nested-direct").expect("identity"),
         )
         .await
         .open()
@@ -1121,7 +1127,8 @@ pub(super) fn rlm_abort_drain_ignores_a_late_attempt_reset() -> Result<()> {
         let core = rlm_abort_drain_core(provider, std::time::Duration::from_secs(2)).await?;
         let session = created_session(
             &core,
-            lash::SessionId::parse("rlm-abort-reset").expect("nonblank host identity"),
+            lash_vocabulary::identity::SessionId::parse("rlm-abort-reset")
+                .expect("nonblank host identity"),
         )
         .await
         .open()
@@ -1159,7 +1166,8 @@ pub(super) fn rlm_turn_without_interruption_or_usage_preserves_absent_usage() ->
         let core = rlm_abort_drain_core(provider, std::time::Duration::from_secs(60)).await?;
         let session = created_session(
             &core,
-            lash::SessionId::parse("rlm-zero-usage").expect("nonblank host identity"),
+            lash_vocabulary::identity::SessionId::parse("rlm-zero-usage")
+                .expect("nonblank host identity"),
         )
         .await
         .open()
@@ -1217,7 +1225,8 @@ await control.finish("done");"#,
             .build(lash_facade_tests::runtime_lease_owner())?;
     let session = created_session(
         &core,
-        lash::SessionId::parse("rlm-live-tool-events").expect("nonblank host identity"),
+        lash_vocabulary::identity::SessionId::parse("rlm-live-tool-events")
+            .expect("nonblank host identity"),
     )
     .await
     .open()
@@ -1397,7 +1406,8 @@ await control.finish("recovered");"#,
                 .build(lash_facade_tests::runtime_lease_owner())?;
         let session = created_session(
             &core,
-            lash::SessionId::parse("rlm-recovered-tool-failure").expect("nonblank host identity"),
+            lash_vocabulary::identity::SessionId::parse("rlm-recovered-tool-failure")
+                .expect("nonblank host identity"),
         )
         .await
         .open()
@@ -1450,7 +1460,8 @@ await control.finish("done");"#,
             .build(lash_facade_tests::runtime_lease_owner())?;
     let session = created_session(
         &core,
-        lash::SessionId::parse("rlm-aggregate-tool-ids").expect("nonblank host identity"),
+        lash_vocabulary::identity::SessionId::parse("rlm-aggregate-tool-ids")
+            .expect("nonblank host identity"),
     )
     .await
     .open()
@@ -1549,7 +1560,8 @@ pub(super) fn rlm_native_provider_tool_call_repairs_and_the_next_cell_finishes()
                 .build(lash_facade_tests::runtime_lease_owner())?;
         let session = created_session(
             &core,
-            lash::SessionId::parse("rlm-native-tool-contract").expect("nonblank host identity"),
+            lash_vocabulary::identity::SessionId::parse("rlm-native-tool-contract")
+                .expect("nonblank host identity"),
         )
         .await
         .open()
@@ -1645,7 +1657,8 @@ pub(super) async fn rlm_pending_host_tool_completion_resumes_lash_vm_await_inner
             .build(lash_facade_tests::runtime_lease_owner())?;
     let session = created_session(
         &core,
-        lash::SessionId::parse("rlm-pending-host-tool").expect("nonblank host identity"),
+        lash_vocabulary::identity::SessionId::parse("rlm-pending-host-tool")
+            .expect("nonblank host identity"),
     )
     .await
     .open()
@@ -1723,8 +1736,10 @@ pub(super) async fn rlm_process_pending_host_tool_completion_resumes_process_awa
 -> Result<()> {
     let (key_tx, key_rx) = oneshot::channel();
     let events = Arc::new(RecordingEvents::default());
-    const APP_TOOLS: lash_core::ProcessConfigKey<()> =
-        lash_core::ProcessConfigKey::new("pending-app-tools", lash_core::FormatVersion::ONE);
+    const APP_TOOLS: lash_core::ProcessConfigKey<()> = lash_core::ProcessConfigKey::new(
+        "pending-app-tools",
+        lash_vocabulary::providers::FormatVersion::ONE,
+    );
     let tools: Arc<dyn lash_core::ToolProvider> = Arc::new(PendingAppTools::new(key_tx));
     let core = explicit_ephemeral_facets(rlm_core_builder_over(sqlite_memory_store_backend().await))
     .serve_test_llm_profile(queued_text_provider(vec![typescript_block(
@@ -1748,7 +1763,8 @@ await control.finish(result);"#,
     .build(lash_facade_tests::runtime_lease_owner())?;
     let session = created_session(
         &core,
-        lash::SessionId::parse("rlm-process-pending-host-tool").expect("nonblank host identity"),
+        lash_vocabulary::identity::SessionId::parse("rlm-process-pending-host-tool")
+            .expect("nonblank host identity"),
     )
     .await
     .open()
@@ -1837,7 +1853,8 @@ pub(super) async fn continue_as_observation_emits_frame_switch_then_commit_inner
             .build(lash_facade_tests::runtime_lease_owner())?;
     let session = created_session(
         &core,
-        lash::SessionId::parse("continue-as-observation").expect("nonblank host identity"),
+        lash_vocabulary::identity::SessionId::parse("continue-as-observation")
+            .expect("nonblank host identity"),
     )
     .await
     .open()

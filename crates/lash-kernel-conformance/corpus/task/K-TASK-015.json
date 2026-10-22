@@ -3,7 +3,7 @@
   "cases": [
     {
       "name": "race leaves losing members running until explicit join",
-      "document": "kernel 1\nnumbers by_spelling\neffect echo(value: Int) -> Int contract \"1\"\nfn slow() { try { do perform echo(1) as Int print \"slow\" } finally { print \"cleanup\" } } fn fast() { return 2 }\n\nmain {\nlet a = spawn call slow() let b = spawn call fast() let tasks = [a, b] let answer = join race tasks print answer do join a\n}\n",
+      "document": "kernel 1\nnumbers by_spelling\nimport 0 operation host.echo(value: Int) -> Int\ndefinition \"function slow() -> Any\\nkernel 1\\nmetering statements\\nimport 0 operation host.echo(value: Int) -> Int\\nbody {\\n  try {\\n    do perform 0(1) as Int\\n    print \\\"slow\\\"\\n  } finally {\\n    print \\\"cleanup\\\"\\n  }\\n}\\n\"\ndefinition \"function fast() -> Any\\nkernel 1\\nmetering statements\\nimport 0 operation host.echo(value: Int) -> Int\\nbody {\\n  return 2\\n}\\n\"\nmain {\n  let a = spawn invoke slow()\n  let b = spawn invoke fast()\n  let tasks = [a, b]\n  let answer = join race tasks\n  print answer\n  do join(a)\n}\n",
       "expected": {
         "prints": [
           {
@@ -22,7 +22,7 @@
         "trace": [
           {
             "effect": {
-              "effect": "echo",
+              "effect": "host.echo",
               "args": [
                 {
                   "int": "1"

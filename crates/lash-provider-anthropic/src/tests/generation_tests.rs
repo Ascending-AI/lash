@@ -69,9 +69,11 @@ fn parallel_tool_calls_rides_tool_choice_and_needs_tools() {
     req.tools = Arc::new(vec![LlmToolSpec {
         name: "lookup".to_string(),
         description: "Lookup".to_string(),
-        input_schema: lash_protocol_types::SchemaContract::admit(json!({ "type": "object" }))
-            .expect("valid declared schema"),
-        output_schema: lash_protocol_types::SchemaContract::admit(json!({}))
+        input_schema: lash_vocabulary::schema_contract::SchemaContract::admit(
+            json!({ "type": "object" }),
+        )
+        .expect("valid declared schema"),
+        output_schema: lash_vocabulary::schema_contract::SchemaContract::admit(json!({}))
             .expect("valid declared schema"),
     }]);
     let (body, receipt) = AnthropicProvider::new("key")

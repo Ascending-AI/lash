@@ -1,7 +1,8 @@
 use super::support::*;
 use lash_protocol_types::ReportedFailure;
-use lash_protocol_types::TurnId;
 use lash_protocol_types::{llm::types::StreamBlockEvent, llm::types::StreamBlockKind};
+
+use lash_vocabulary::identity::TurnId;
 
 // Focused RLM driver mechanics: malformed options, driver-state ownership, and checkpoint restore internals.
 
@@ -1923,7 +1924,6 @@ fn drive_rlm_to_second_llm_request(
 ) -> (LlmRequest, LlmRequest) {
     let preamble = lash_protocol_rlm::build_rlm_preamble(
         lash_core::ProtocolBuildInput {
-            packages: std::sync::Arc::new(lash_kernel_dialect::NoPackages),
             tool_catalog: Arc::new(lash_core::ToolCatalog::from_tool_definitions(Vec::new())),
             plugin_extensions: Default::default(),
             writer_formats: lash_core::build_newest_writer_formats(),
@@ -2002,7 +2002,6 @@ fn answer_one_cell(
 ) -> (TurnMachine, Vec<Effect>) {
     let preamble = lash_protocol_rlm::build_rlm_preamble(
         lash_core::ProtocolBuildInput {
-            packages: std::sync::Arc::new(lash_kernel_dialect::NoPackages),
             tool_catalog: Arc::new(lash_core::ToolCatalog::from_tool_definitions(Vec::new())),
             plugin_extensions: Default::default(),
             writer_formats: lash_core::build_newest_writer_formats(),

@@ -42,7 +42,7 @@
 /// The dependency version used by this backend's public signatures.
 pub use sqlx;
 
-use lash_protocol_types::SessionId;
+use lash_vocabulary::identity::SessionId;
 #[path = "postgres/keys.rs"]
 mod keys;
 mod namespace;
@@ -117,8 +117,9 @@ pub(crate) const POSTGRES_BACKEND: &str = "postgres";
 /// minted id, so any other spelling is corrupt stored data.
 pub(crate) fn stored_process_id(
     value: &str,
-) -> Result<lash_protocol_types::ProcessId, lash_execution_contracts::plugin_error::PluginError> {
-    lash_protocol_types::ProcessId::parse(value).map_err(|error| {
+) -> Result<lash_vocabulary::identity::ProcessId, lash_execution_contracts::plugin_error::PluginError>
+{
+    lash_vocabulary::identity::ProcessId::parse(value).map_err(|error| {
         lash_execution_contracts::plugin_error::PluginError::Session(format!(
             "corrupt stored process id: {error}"
         ))

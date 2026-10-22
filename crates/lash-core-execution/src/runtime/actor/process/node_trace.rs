@@ -42,7 +42,7 @@ pub(super) fn step_trace_scope(
     };
     tracing.filter(|tracing| tracing.is_observed())?;
     let process = record.trace.as_ref()?.as_parent()?;
-    let parent = match node_site(record, step, site.as_deref()) {
+    let parent = match node_site(record, step, site.as_deref().map(|site| &site.at)) {
         Some(at) => process.container(&SpanKey::Node { at }),
         None => process,
     };
@@ -62,14 +62,14 @@ pub(super) fn step_trace_scope(
 fn node_site<'a>(
     record: &ProcessRecord,
     step: &InFlight,
-    site: Option<&'a lash_protocol_types::EffectId>,
-) -> Option<&'a lash_protocol_types::EffectId> {
+    site: Option<&'a lash_vocabulary::sites::EffectId>,
+) -> Option<&'a lash_vocabulary::sites::EffectId> {
     site.filter(|_| record.trace_nodes && !step.resolves)
 }
 
 /// One node span a commit closes.
 struct NodeClose {
-    at: lash_protocol_types::EffectId,
+    at: lash_vocabulary::sites::EffectId,
     started_at_ms: u64,
     status: TraceDomainStatus,
 }
@@ -165,7 +165,7 @@ fn node_of(
     let StepRequest::Tool { site, .. } = &step.request else {
         return None;
     };
-    let at = node_site(record, step, site.as_deref())?;
+    let at = node_site(record, step, site.as_deref().map(|site| &site.at))?;
     let member = fold
         .round(RunSeq(step.run))?
         .members()
@@ -208,7 +208,7 @@ pub(super) struct StepToolSpans {
 
 /// What the tool span of one step call names.
 pub(super) struct StepCall {
-    pub(super) process: crate::ProcessId,
+    pub(super) process: lash_vocabulary::identity::ProcessId,
     pub(super) request: StepRequest,
     /// The tool's name, as the step's catalog lists it.
     pub(super) tool: String,
@@ -223,7 +223,7 @@ impl StepToolSpans {
         round: &RoundView,
         admitted_here: &BTreeSet<AdmittedId>,
         settled_here: &BTreeSet<AdmittedId>,
-        step: impl Fn(&ToolCallId, &crate::ToolId) -> Option<StepCall>,
+        step: impl Fn(&ToolCallId, &lash_vocabulary::tool_contract::ToolId) -> Option<StepCall>,
     ) {
         let Some(tracing) = tracing.filter(|tracing| tracing.is_observed()) else {
             return;
@@ -255,7 +255,7 @@ impl StepToolSpans {
             let context = TraceContext::default()
                 .for_process(step.process.clone())
                 .for_call(call.clone());
-            let issuing_node = site.as_ref().map(|at| at.position().to_string());
+            let issuing_node = site.as_ref().map(|site| site.origin.position().to_string());
             let standing = tracing
                 .unreplayed(Some(scope.clone()))
                 .selected(TraceSpanKind::Tool, &context.ids());

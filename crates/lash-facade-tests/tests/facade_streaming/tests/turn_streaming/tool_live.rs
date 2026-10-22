@@ -11,14 +11,17 @@ impl ToolProvider for ProgressTools {
     fn tool_manifests(
         &self,
         _: &lash_core::OwnerConfigView,
-    ) -> std::result::Result<Vec<lash_core::ToolManifest>, lash::plugins::PluginError> {
+    ) -> std::result::Result<
+        Vec<lash_vocabulary::tool_contract::ToolManifest>,
+        lash::plugins::PluginError,
+    > {
         Ok(vec![app_tool_definition().manifest()])
     }
     fn resolve_contract(
         &self,
         name: &str,
         _: &lash_core::OwnerConfigView,
-    ) -> Option<Arc<lash_core::ToolContract>> {
+    ) -> Option<Arc<lash_vocabulary::tool_contract::ToolContract>> {
         (name == "tools.app_lookup").then(|| Arc::new(app_tool_definition().contract()))
     }
     async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
@@ -172,7 +175,7 @@ async fn a_host_executed_tool_publishes_progress_without_any_durable_tool_live_f
 async fn tool_live_flood_never_trims_uncommitted_text_or_process_node_history() {
     use lash_core::{LiveReplayStore, ProcessReplayStore};
     let session = SessionId::from("window-isolation");
-    let process = lash_core::ProcessId::fixture("window-process");
+    let process = lash_vocabulary::identity::ProcessId::fixture("window-process");
     let mut session_retention =
         lash_core::facade_support::InMemoryLiveReplayStoreConfig::standard();
     session_retention.max_events_per_session = 1;
@@ -294,14 +297,17 @@ impl ToolProvider for LongTool {
     fn tool_manifests(
         &self,
         _: &lash_core::OwnerConfigView,
-    ) -> std::result::Result<Vec<lash_core::ToolManifest>, lash::plugins::PluginError> {
+    ) -> std::result::Result<
+        Vec<lash_vocabulary::tool_contract::ToolManifest>,
+        lash::plugins::PluginError,
+    > {
         Ok(vec![app_tool_definition().manifest()])
     }
     fn resolve_contract(
         &self,
         name: &str,
         _: &lash_core::OwnerConfigView,
-    ) -> Option<Arc<lash_core::ToolContract>> {
+    ) -> Option<Arc<lash_vocabulary::tool_contract::ToolContract>> {
         (name == "tools.app_lookup").then(|| Arc::new(app_tool_definition().contract()))
     }
     async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
@@ -520,14 +526,17 @@ impl ToolProvider for TimedLiveTool {
     fn tool_manifests(
         &self,
         _: &lash_core::OwnerConfigView,
-    ) -> std::result::Result<Vec<lash_core::ToolManifest>, lash::plugins::PluginError> {
+    ) -> std::result::Result<
+        Vec<lash_vocabulary::tool_contract::ToolManifest>,
+        lash::plugins::PluginError,
+    > {
         Ok(vec![app_tool_definition().manifest()])
     }
     fn resolve_contract(
         &self,
         name: &str,
         _: &lash_core::OwnerConfigView,
-    ) -> Option<Arc<lash_core::ToolContract>> {
+    ) -> Option<Arc<lash_vocabulary::tool_contract::ToolContract>> {
         (name == "tools.app_lookup").then(|| Arc::new(app_tool_definition().contract()))
     }
     async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {

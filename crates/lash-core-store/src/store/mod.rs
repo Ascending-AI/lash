@@ -1,8 +1,8 @@
 //! The runtime's settled-session persistence contract and shared store types.
 
-use crate::SessionId;
-use crate::TurnId;
 use crate::facade_support::SessionGraphFacadeOps;
+use lash_vocabulary::identity::SessionId;
+use lash_vocabulary::identity::TurnId;
 pub mod artifact_cleanup;
 pub mod attachment_referrers;
 pub mod catalog;
@@ -252,7 +252,7 @@ impl GraphAppend {
         }
     }
 
-    pub fn leaf_node_id(&self) -> Option<&crate::NodeId> {
+    pub fn leaf_node_id(&self) -> Option<&lash_vocabulary::identity::NodeId> {
         self.nodes().last().map(|node| &node.node_id)
     }
 }
@@ -361,9 +361,12 @@ impl RuntimeCommit {
         let completed = &self.turn_commit;
         for (ordinal, node) in self.graph.nodes().iter().enumerate() {
             let expected = match &node.payload {
-                crate::SessionNodePayload::FrameOpen { frame_key, .. } => crate::NodeId::from(
-                    crate::session_graph::frame_node_id(&self.session_id, frame_key.as_str()),
-                ),
+                crate::SessionNodePayload::FrameOpen { frame_key, .. } => {
+                    lash_vocabulary::identity::NodeId::from(crate::session_graph::frame_node_id(
+                        &self.session_id,
+                        frame_key.as_str(),
+                    ))
+                }
                 _ => {
                     derive_history_node_id(&self.session_id, &completed.operation, ordinal as u64)?
                 }
@@ -433,7 +436,7 @@ impl RuntimeCommit {
         operation: OperationId,
         commit_budget: CommitBudget,
         fleet_format: FleetFormat,
-    ) -> Result<(Self, Vec<crate::NodeId>), StoreError> {
+    ) -> Result<(Self, Vec<lash_vocabulary::identity::NodeId>), StoreError> {
         let mut graph = state.pending_graph_commit();
         let mapping = graph.derive_node_ids(&state.session_id, &operation)?;
         state
@@ -501,7 +504,16 @@ impl RuntimeCommit {
     pub fn with_operation(
         mut self,
         operation: OperationId,
-    ) -> Result<(Self, Vec<(crate::NodeId, crate::NodeId)>), StoreError> {
+    ) -> Result<
+        (
+            Self,
+            Vec<(
+                lash_vocabulary::identity::NodeId,
+                lash_vocabulary::identity::NodeId,
+            )>,
+        ),
+        StoreError,
+    > {
         let session_id = self.session_id.clone();
         let node_id_mapping = self.graph.derive_node_ids(&session_id, &operation)?;
         self.turn_commit = RuntimeTurnCommitStamp::new(operation);
@@ -575,7 +587,10 @@ pub fn append_request_commit_for_testing(
 )]
 fn remap_optional_node_id(
     node_id: &mut Option<crate::FrameNodeId>,
-    mapping: &[(crate::NodeId, crate::NodeId)],
+    mapping: &[(
+        lash_vocabulary::identity::NodeId,
+        lash_vocabulary::identity::NodeId,
+    )],
 ) {
     let Some(current) = node_id.as_mut() else {
         return;
@@ -776,10 +791,14 @@ pub trait SessionCommitStore: Send + Sync {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum TurnInputForsaking {
     /// An input is filed under the key: it answers, and nothing was written.
-    Held { input_id: crate::InputId },
+    Held {
+        input_id: lash_vocabulary::identity::InputId,
+    },
     /// The key's tombstone stands, written now or by an earlier forsake: no
     /// input is ever admitted under it.
-    Forsaken { input_id: crate::InputId },
+    Forsaken {
+        input_id: lash_vocabulary::identity::InputId,
+    },
 }
 
 /// What [`TurnInputStore::admit_pending_turn_inputs`] committed (FIG-3975).
@@ -951,7 +970,7 @@ pub trait TurnInputStore: Send + Sync {
     async fn pending_turn_input(
         &self,
         session_id: &SessionId,
-        input_id: &crate::InputId,
+        input_id: &lash_vocabulary::identity::InputId,
     ) -> Result<Option<crate::PendingTurnInputRead>, StoreError>;
 
     /// Read canonical input applications from durable turn-commit records.

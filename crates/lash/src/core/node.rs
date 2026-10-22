@@ -27,6 +27,8 @@
 
 use std::sync::{Arc, Mutex};
 
+use lash_core::ExecutionBudgets;
+use lash_core::LiveReplayStore;
 use lash_core::durable_port::DurableError;
 use lash_core::durable_port::DurableProbe;
 use lash_core::durable_port::runner::{Activation, Drain, Stopped};
@@ -35,7 +37,7 @@ use lash_core::runtime::durable::ProcessActivation;
 use lash_core::runtime::durable::node::{NodeServe, serve};
 use lash_core::runtime::durable::services::{RuntimeTurnServices, SessionRuntimes};
 use lash_core::runtime::durable::session::{SessionActivation, TurnError, TurnServices};
-use lash_core::{ExecutionBudgets, LiveReplayStore, SessionId};
+use lash_vocabulary::identity::SessionId;
 use tokio::sync::watch;
 use tokio_util::sync::CancellationToken;
 
@@ -411,12 +413,19 @@ mod tests {
         );
         let workers = crate::vm::WorkerService::default();
         let bounds = workers.config().run_bounds;
-        let core = LashCore::standard_builder(lash_conformance::backend_over(stores))
-            .plugin(Arc::new(crate::vm::KernelProcessPluginFactory::new(
-                workers,
-                crate::vm::TYPESCRIPT_DIALECT,
-                bounds,
-            )))
+        let backend = lash_conformance::backend_over(stores);
+        let kernel = Arc::new(crate::vm::KernelProcessPluginFactory::new(
+            workers,
+            crate::vm::TYPESCRIPT_DIALECT,
+            bounds,
+        ));
+        let documents = kernel.documents(backend.module_artifacts(), backend.package_store());
+        let core = LashCore::standard_builder(backend)
+            .process_component(
+                Arc::new(crate::vm::KernelServicesComponent::new(documents)),
+                crate::vm::KERNEL_SERVICES_CONFIG,
+            )
+            .plugin(kernel)
             .commit_budget(crate::CommitBudget::bounded(1024 * 1024, 512))
             .data_retention(crate::DataRetention::standard())
             .queued_work_batching(crate::QueuedWorkBatchingConfig::new(1))
@@ -426,47 +435,80 @@ mod tests {
             .unwrap();
         let artifacts = core.host_artifacts();
         let pin = crate::process::HostArtifactPin::mint();
-        let environment = crate::process::ProcessEnv::builder(crate::MaxToolCalls::new(16))
+        let base = crate::process::ProcessEnv::builder(crate::MaxToolCalls::new(16))
+            .component(crate::vm::KERNEL_SERVICES_CONFIG, &())
             .build()
             .unwrap();
-        let env_ref = artifacts
-            .publish_process_env(&pin, &environment)
+        let context = lash_vocabulary::PublicationContext {
+            domain: lash_vocabulary::PublicationDomain(
+                core.backend().binding_identity().to_string(),
+            ),
+            scope: lash_vocabulary::PublicationScope::Host,
+            publisher: lash_vocabulary::PublisherInstance("node-clock-law".into()),
+            root: lash_vocabulary::Segment::new("workflow").unwrap(),
+        };
+        let packages = artifacts
+            .process_namespace(&pin, &base, context.clone())
             .await
             .unwrap();
-        let document = crate::workflow::document::parse_document(
-            r#"kernel 1
-numbers float
-entry nap() -> Any
-fn nap() {
-  do sleep 600000
-  return null
-}
-main {
-  finish null
-}
-"#,
+        let environment = crate::vm::WorkflowEnvironmentRequest {
+            snapshot: packages.snapshot.clone(),
+            context,
+            attachment: lash_vocabulary::Attachment {
+                packages: [lash_vocabulary::PackagePath::parse("typescript").unwrap()].into(),
+                members: Default::default(),
+                deferred: Default::default(),
+            },
+        };
+        let definition = lash_kernel_doc::parse_definition(
+            "function nap() -> Null\nkernel 1\nmetering statements\nimport 0 operation typescript.sleep(milliseconds: Int) -> Null\nbody { do perform 0(600000) as Null return null }",
         )
         .unwrap();
-        let crate::workflow::WorkflowPublish::Published(publication) = artifacts
+        let name = lash_vocabulary::Name::new("nap");
+        let mut document =
+            lash_kernel_doc::Document::new(lash_kernel_doc::NumberPolicy::Float, Vec::new());
+        document.main = None;
+        document.imports = definition.body().unwrap().imports.clone();
+        document.exports.insert(
+            name.clone(),
+            lash_kernel_doc::Export::Function(lash_kernel_doc::FunctionExport {
+                function: definition.identity(),
+                signature: definition.signature.clone(),
+                convention: lash_kernel_doc::StartConvention::Direct,
+                asynchronous: false,
+                rest: false,
+            }),
+        );
+        document.functions.insert(definition.identity(), definition);
+        let linked = artifacts
             .publish_workflow(
                 &pin,
-                &crate::workflow::document::DocumentBytes::from(document),
-                &crate::workflow::document::Name::new("nap"),
+                &document.into(),
+                &lash_vocabulary::StartSelector::Export(name),
                 &environment,
-                artifacts.cell_packages().await.unwrap().declare_all(),
                 None,
             )
             .await
-            .unwrap()
-        else {
-            panic!("the workflow publishes")
-        };
+            .unwrap();
+        let process_env = artifacts
+            .link_process_env(&base, &linked, &packages, &Default::default())
+            .await
+            .unwrap();
+        let env_ref = artifacts
+            .publish_process_env(&pin, &process_env)
+            .await
+            .unwrap();
+        let draft = crate::vm::definition_draft(&crate::process::KernelProcessDefinition {
+            code: crate::vm::KernelInlineRequest::Linked { start: linked },
+        })
+        .unwrap();
+        let publication = artifacts.publish_definition(&pin, &draft).await.unwrap();
         let start = || async {
             core.processes()
                 .start(
                     crate::process::ProcessStartRequest::definition(
-                        publication.definition.id.clone(),
-                        Some(publication.definition.signature.clone()),
+                        publication.id.clone(),
+                        Some(publication.signature.clone()),
                         serde_json::Map::new(),
                         crate::process::EngineLaunch::new(
                             env_ref.clone(),

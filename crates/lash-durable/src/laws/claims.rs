@@ -293,8 +293,9 @@ pub async fn a_retired_owner_claims_only_its_registry_callbacks(
 ) -> LawOutcome {
     use super::{TTL_MILLIS, formats};
     use crate::{NodeId, NodeSpec};
-    use lash_core_store::obligations::{ObligationToken, RegistryKind};
-    use lash_core_store::store::plugin_writers::PluginCallbackIdentity;
+    use lash_vocabulary::claims::ObligationToken;
+    use lash_vocabulary::claims::RegistryKind;
+    use lash_vocabulary::providers::PluginCallbackIdentity;
     let callback = |kind, owner: &str| {
         ObligationToken::for_callback(kind, &PluginCallbackIdentity::tool_provider(owner, "tools"))
             .into_string()

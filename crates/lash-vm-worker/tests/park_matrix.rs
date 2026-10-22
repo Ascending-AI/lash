@@ -53,15 +53,13 @@ use lash_durable::{
 };
 use lash_durable_test::{Matrix, Scenario, SimClock, SimNodes, SimNodesConfig};
 use lash_execution_contracts::backend::Backend;
-use lash_kernel_doc::graph_tokens::encode_body;
 use lash_kernel_doc::heap::PageId;
 use lash_kernel_doc::{
-    Datum, EffectId, ErrorDatum, FunctionRegistry, Handle, Integer, Name, NumberPolicy,
-    NumberToken, Site, Timestamp, Unit, parse_document,
+    Datum, ErrorDatum, FunctionRegistry, Handle, Integer, NumberPolicy, NumberToken, parse_document,
 };
 use lash_kernel_state::paged::{PageBody, PageKind, PageSource as _, SessionRoot};
 use lash_kernel_vm::{Bounds, EffectRequest, End, Host, Outcome, Program, Request, Target};
-use lash_protocol_types::{SessionId, ToolCallId, ToolId, TurnId};
+use lash_protocol_types::ToolCallId;
 use lash_vm_broker::kernel::graph::{
     ArgumentProjection, Disposition, EffectMembership, FrozenRequest, Projections,
 };
@@ -75,6 +73,14 @@ use lash_vm_broker::{
     CodeCallIdentities, Driven, DurableSnapshotStore, MemberDraft, OperationId, ParentFault,
 };
 use lash_vm_client::RunStart;
+use lash_vocabulary::ToolId;
+use lash_vocabulary::identity::SessionId;
+use lash_vocabulary::identity::TurnId;
+
+use lash_vocabulary::sites::EffectId;
+use lash_vocabulary::sites::Site;
+use lash_vocabulary::sites::Unit;
+use lash_vocabulary::tokens::encode_body;
 use tokio_util::sync::CancellationToken;
 
 #[path = "support/park_store.rs"]
@@ -85,6 +91,7 @@ const FORMATS: &str = "park-law-v1";
 const SESSION: &str = "park-law";
 const CREATE: CommitLabel = CommitLabel::new("law.create");
 const DONE: CommitLabel = CommitLabel::new("law.done");
+const REGISTER: CommitLabel = CommitLabel::new("execution.register");
 const WORKERS: u64 = 3;
 
 fn actor() -> ActorKey {
@@ -108,7 +115,24 @@ fn identities() -> CodeCallIdentities {
 
 /// The matrix's subject is kernel code, including typed decoding at each
 /// perform and guest handling of an interrupted Once execution.
+fn worker_definition() -> lash_kernel_doc::FunctionDefinition {
+    lash_kernel_doc::parse_definition(
+        r#"function worker(index: Any) -> Any
+kernel 1
+metering statements
+import 0 operation tools.work(index: Int) -> Any
+body {
+  try {
+    let reply = perform 0(index) as Record{token: Int, n: Union(Int, List(Float))}
+    return reply
+  } catch e { return {error: e, n: null} }
+}
+"#,
+    )
+    .expect("the linked park fixture is valid")
+}
 fn program(numbers: NumberPolicy) -> Program {
+    let worker = worker_definition();
     let numbers = match numbers {
         NumberPolicy::Float => "float",
         NumberPolicy::BySpelling => "by_spelling",
@@ -116,14 +140,9 @@ fn program(numbers: NumberPolicy) -> Program {
     let text = format!(
         r#"kernel 1
 numbers {numbers}
-effect tools.work(index: Int) -> Any contract "1"
-effect tools.sum(values: List(Any)) -> Any contract "1"
-fn worker(index) {{
-  try {{
-    let reply = perform tools.work(index) as Record{{token: Int, n: Union(Int, List(Float))}}
-    return reply
-  }} catch e {{ return {{error: e, n: null}} }}
-}}
+import 0 operation tools.work(index: Int) -> Any
+import 1 operation tools.sum(values: List(Any)) -> Any
+definition {}
 main {{
   let hs = []
   for index in [0, 1, 2] {{
@@ -134,18 +153,75 @@ main {{
   let values = [results[0].n, results[1].n, results[2].n]
   let sum = null
   try {{
-    set sum = perform tools.sum(values) as Record{{token: Int, n: Any}}
+    set sum = perform 1(values) as Record{{token: Int, n: Any}}
   }} catch e {{ set sum = e }}
   return [results[0], results[1], results[2], sum]
 }}
-"#
+"#,
+        serde_json::to_string(&lash_kernel_doc::print_definition(&worker))
+            .expect("the linked park fixture is valid")
     );
-    // The in-process machines pin the closure they derive from the
-    // document over this registry.
-    Program {
-        closure: PageId([0; 32]),
-        document: Arc::new(parse_document(&text).expect("a valid kernel fan-out document")),
-        library: lash_kernel_vm::PreparedLibrary::new(Arc::new(FunctionRegistry::new())),
+    let document = Arc::new(parse_document(&text).expect("the linked park fixture is valid"));
+    let package = operation_package(&document);
+    let advertisement = lash_vocabulary::PackageAdvertisement::Enumerated(package);
+    let context = publication_context();
+    let content = lash_kernel_package::LinkedContent {
+        documents: [(document.identity(), document.as_ref().clone())].into(),
+        ..Default::default()
+    };
+    let link = lash_kernel_package::Namespace {
+        advertisements: vec![(&context, &advertisement)],
+    }
+    .fulfil(&content, document.identity(), &context, None, None)
+    .expect("the park fixture's published operations fulfil its imports");
+    let id = link.identity();
+    Program::prepare(
+        id,
+        BTreeMap::from([(document.identity(), document)]),
+        &BTreeMap::from([(id, link)]),
+        PageId([0; 32]),
+        lash_kernel_vm::PreparedLibrary::new(Arc::new(FunctionRegistry::new())),
+    )
+    .expect("the linked park fixture is valid")
+}
+
+fn publication_context() -> lash_vocabulary::PublicationContext {
+    lash_vocabulary::PublicationContext {
+        domain: lash_vocabulary::PublicationDomain("park-law".into()),
+        scope: lash_vocabulary::PublicationScope::Host,
+        publisher: lash_vocabulary::PublisherInstance("park-law-tools".into()),
+        root: lash_vocabulary::Segment::new("tools").expect("a valid root"),
+    }
+}
+
+fn operation_package(document: &lash_kernel_doc::Document) -> lash_vocabulary::Package {
+    let members = document
+        .imports
+        .values()
+        .map(|import| {
+            let lash_vocabulary::ImportKind::Operation { signature } = &import.kind else {
+                unreachable!()
+            };
+            (
+                import.name.member.clone(),
+                lash_vocabulary::Member {
+                    visibility: lash_vocabulary::Visibility::Public,
+                    kind: lash_vocabulary::MemberKind::Operation(lash_vocabulary::OperationOffer {
+                        requirement: lash_vocabulary::OperationRequirement::new(
+                            signature.clone(),
+                            lash_vocabulary::ContractId::new("1"),
+                        ),
+                        mode: lash_vocabulary::OperationMode::Waited,
+                        intents: Default::default(),
+                        controls: Default::default(),
+                    }),
+                },
+            )
+        })
+        .collect();
+    lash_vocabulary::Package {
+        path: lash_vocabulary::PackagePath::parse("tools").expect("a valid package path"),
+        members,
     }
 }
 
@@ -162,12 +238,24 @@ fn bounds() -> Bounds {
     }
 }
 
-fn start() -> RunStart {
+fn start(program: &Program) -> RunStart {
     RunStart {
+        link: program.link,
+        instances: program.instances.clone(),
+        documents: program
+            .documents
+            .iter()
+            .map(|(id, document)| {
+                (
+                    *id,
+                    lash_kernel_doc::IdentifiedDocument::from_shared(Arc::clone(document)),
+                )
+            })
+            .collect(),
         target: Target::Main,
         args: Vec::new(),
         session: None,
-        modes: lash_kernel_vm::EffectModes::recorded(),
+        modes: Default::default(),
         host: Vec::new(),
         save: None,
     }
@@ -192,21 +280,21 @@ fn page_plan() -> PagePlan {
 /// The identity of worker `index`'s `perform`: the task the `index`th run
 /// of `main`'s spawn started, at the one `perform` of its function.
 fn worker_identity(index: u64) -> EffectId {
-    lash_kernel_doc::testkit::effect(
-        lash_kernel_doc::testkit::spawned_task(
-            lash_kernel_doc::testkit::root_task(),
+    lash_vocabulary::sites::testkit::effect(
+        lash_vocabulary::sites::testkit::spawned_task(
+            lash_vocabulary::sites::testkit::root_task(),
             Site::new(Unit::Main, [1, 1, 0, 0]),
             index,
         ),
-        Site::new(Unit::Function(Name::new("worker")), [0, 0, 0, 0]),
+        Site::new(Unit::Library(worker_definition().identity()), [0, 0, 0, 0]),
         0,
         Vec::new(),
     )
 }
 
 fn sum_identity() -> EffectId {
-    lash_kernel_doc::testkit::effect(
-        lash_kernel_doc::testkit::root_task(),
+    lash_vocabulary::sites::testkit::effect(
+        lash_vocabulary::sites::testkit::root_task(),
         Site::new(Unit::Main, [5, 0, 0, 0]),
         0,
         Vec::new(),
@@ -278,16 +366,6 @@ async fn admitted_in_root(database: &dyn DurableStore, operation: OperationId) -
 struct NoReads;
 
 impl Host for NoReads {
-    fn clock(&mut self) -> Timestamp {
-        Timestamp {
-            nanoseconds: Integer::from(0),
-        }
-    }
-
-    fn random(&mut self) -> u64 {
-        0
-    }
-
     fn read(&mut self, _: &Handle, _: &Datum) -> Result<Datum, ErrorDatum> {
         Ok(Datum::Null)
     }
@@ -344,9 +422,11 @@ impl Shared {
             .expect("clock")
             .clone()
             .expect("the database opened first");
-        Ok(InProcess::new(program.clone(), bounds(), start(), NoReads)
-            .map_err(|error| error.to_string())?
-            .with_hold(Arc::new(move || Box::new(clock.hold()))))
+        Ok(
+            InProcess::new(program.clone(), bounds(), start(program), NoReads)
+                .map_err(|error| error.to_string())?
+                .with_hold(Arc::new(move || Box::new(clock.hold()))),
+        )
     }
 
     fn violation(&self, violation: String) {
@@ -527,6 +607,55 @@ struct ParkActivation {
 }
 
 impl ParkActivation {
+    /// Publish the fixture's operations and register this exact cell under
+    /// its claiming actor before the broker can admit or end its work.
+    async fn register(&self, cx: &ActorContext) -> Result<(), DurableError> {
+        use lash_core_store::artifact_referrer::{ReferrerClaim, ReferrerGuard};
+        let claim = ReferrerClaim::guarded(ReferrerGuard::Journal(
+            cx.execution_scope()
+                .journal_identity()
+                .expect("a valid scope"),
+        ));
+        let package = operation_package(&self.program.document);
+        let packages = cx.backend().package_store();
+        packages
+            .put_package(
+                &claim,
+                &lash_core_store::packages::PackageRecord {
+                    id: package.identity(),
+                    package: package.clone(),
+                },
+            )
+            .await?;
+        packages
+            .publish(
+                &claim,
+                &lash_vocabulary::PublicationRecord {
+                    context: publication_context(),
+                    path: package.path.clone(),
+                    content: lash_vocabulary::PublishedContent::Package(package.identity()),
+                    code_links: Default::default(),
+                    imported_publications: Vec::new(),
+                },
+            )
+            .await?;
+        let ExecKey::Cell(session, turn, cell) = exec() else {
+            unreachable!("the law runs a cell")
+        };
+        let mut tx = cx.begin().await?;
+        tx.register_execution(lash_durable::resolutions::ExecutionRegistration {
+            execution: lash_durable::resolutions::ExecutionId::cell(&session, &turn, cell.as_str()),
+            uses: Default::default(),
+            referrer: claim.referrer(),
+            requirements: lash_vocabulary::claims::ClaimRequirements {
+                machine: self.program.document.requires.clone(),
+                ..Default::default()
+            },
+        });
+        cx.commit(tx, REGISTER).await?;
+        Ok(())
+    }
+
     fn stop(&self, why: &dyn std::fmt::Display) {
         self.shared
             .stops
@@ -546,9 +675,13 @@ impl Activation for ParkActivation {
     /// What the law's nodes run: lash's own packages, whose natives and
     /// kernel versions a parked run's hard record names (FIG-6993).
     async fn capabilities(&self) -> Result<lash_durable::NodeCapabilities, DurableError> {
-        Ok(lash_kernel_package::node_capabilities(
-            &lash_vm_releases::lash_packages().expect("lash's packages"),
-        ))
+        Ok(lash_vocabulary::claims::NodeCapabilities {
+            machine: lash_vocabulary::claims::NodeRequirements {
+                kernels: [lash_kernel_doc::KERNEL_VERSION].into(),
+                ..Default::default()
+            },
+            ..Default::default()
+        })
     }
 
     async fn activate(&self, owned: Owned) -> Exit {
@@ -570,7 +703,7 @@ impl Activation for ParkActivation {
                 PolicyView::new(["work", "sum"].map(|tool| {
                     (
                         ToolId::new(format!("tool:{tool}")),
-                        lash_protocol_types::ExecutionPolicy::Once,
+                        lash_vocabulary::ExecutionPolicy::Once,
                     )
                 })),
             )
@@ -595,6 +728,13 @@ impl Activation for ParkActivation {
             pages: &plan,
         };
         for _ in 0..8 {
+            if let Err(error) = self.register(&cx).await {
+                self.stop(&error);
+                if lost(&owned).await {
+                    return Exit::Released;
+                }
+                continue;
+            }
             if let Drive::TwoOrders = self.drive
                 && let Err(why) =
                     Box::pin(two_orders(&self.shared, &broker, &host, &self.program)).await
@@ -875,9 +1015,7 @@ async fn admissions(
     let identities = identities();
     let mut admit = Vec::new();
     for (index, request) in requests.into_iter().enumerate() {
-        let Request::Effect(request) = request else {
-            return Err("the run sleeps nowhere".into());
-        };
+        let Request::Effect(request) = request;
         let call = identities.child_call_id(park, index as u64);
         let draft = host
             .admit(&request, call, 0, 0)
@@ -887,7 +1025,7 @@ async fn admissions(
         admit.push(EffectAdmission {
             identity: request.identity,
             wait: request.wait,
-            effect: Some(request.effect),
+            effect: Some(request.use_),
             admit: AdmitAs::Execution(Box::new(draft)),
         });
     }
@@ -1041,23 +1179,21 @@ impl KernelEffects for LawHost {
             .map_err(|error| ParentFault(error.to_string()))?;
         let args = datum_to_json(&Datum::List(request.args.clone()))
             .map_err(|refusal| ParentFault(refusal.to_string()))?;
-        let text = format!(r#"{{"effect":"{}","args":{args}}}"#, request.effect);
+        let effect = operation_name(request.use_);
+        let text = format!(r#"{{"effect":"{effect}","args":{args}}}"#);
         self.shared.admissions.lock().expect("admissions").push((
             request.identity.clone(),
             call.clone(),
             text.clone(),
         ));
-        let tool = ToolId::new(format!(
-            "tool:{}",
-            request.effect.as_str().trim_start_matches("tools.")
-        ));
+        let tool = ToolId::new(format!("tool:{}", effect.trim_start_matches("tools.")));
         let args = ArgumentProjection::project(&LawArgs, &request.args).map_err(ParentFault)?;
         let frozen = FrozenRequest::tool(
             lash_core_execution::tool_dispatch::CellCall {
                 id: call.clone(),
                 tool_id: tool.clone(),
                 args,
-                contract: lash_kernel_doc::ContractId::new("1"),
+                contract: lash_vocabulary::operations::ContractId::new("1"),
                 execution_grant: None,
                 issuing_language_node_id: None,
             },
@@ -1066,12 +1202,13 @@ impl KernelEffects for LawHost {
         )
         .map_err(|refusal| ParentFault(refusal.to_string()))?;
         MemberDraft::new(
+            now,
             call,
             tool,
             frozen,
             identities().opener(),
             (
-                lash_protocol_types::ExecutionPolicy::Once,
+                lash_vocabulary::ExecutionPolicy::Once,
                 lash_protocol_types::ExecutionLimit::starting_at(
                     u64::try_from(now.0).expect("a time after the epoch"),
                     Duration::from_secs(3600),
@@ -1113,14 +1250,14 @@ impl KernelEffects for LawHost {
 /// A host part of the law's cell: one text.
 struct LawHostPart(&'static str);
 
-impl lash_core_store::checkpoint_graph::TokenCodec for LawHostPart {
-    fn encode(&self, out: &mut lash_core_store::checkpoint_graph::TokenWriter) {
+impl lash_vocabulary::tokens::TokenCodec for LawHostPart {
+    fn encode(&self, out: &mut lash_vocabulary::tokens::TokenWriter) {
         out.text(self.0);
     }
 
     fn decode(
-        _input: &mut lash_core_store::checkpoint_graph::TokenReader<'_>,
-    ) -> Result<Self, lash_core_store::checkpoint_graph::TokenError> {
+        _input: &mut lash_vocabulary::tokens::TokenReader<'_>,
+    ) -> Result<Self, lash_vocabulary::tokens::TokenError> {
         unreachable!("the law never reads its host parts back")
     }
 }
@@ -1146,6 +1283,7 @@ async fn a_kernel_run_of_three_tasks_resumes_from_its_parks_at_every_cut(tier: T
     // commits on its own, the second park saves the state that consumed
     // them and admits the sum, and the end commits last.
     report.assert_baseline_labels(&[
+        REGISTER,
         CommitLabel::CELL_SNAPSHOT_ADMIT,
         CommitLabel::ROUND_OUTCOME,
         CommitLabel::ROUND_OUTCOME,
@@ -1289,4 +1427,10 @@ mod postgres {
         )
         .await;
     }
+}
+
+fn operation_name(use_: lash_vocabulary::OperationUse) -> String {
+    program(NumberPolicy::BySpelling).document.imports[&use_.slot]
+        .name
+        .to_string()
 }

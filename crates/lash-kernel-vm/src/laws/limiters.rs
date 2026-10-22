@@ -145,7 +145,7 @@ fn builds(chunk: &str) -> String {
     set i = num.add(i, 1)
   }}
   print i
-  do perform echo("park") as Any
+  do perform 0("park") as Any
   let j = 0
   while num.lt(j, 60) {{
     set s = text.concat(s, "{chunk}")
@@ -250,13 +250,13 @@ fn a_grown_memory_limit_runs_as_a_run_started_with_it() {
 
 /// Parks first, then passes the charge limit it is given, then parks again.
 const CUT: &str = r#"main {
-  do perform echo("first") as Any
+  do perform 0("first") as Any
   let i = 0
   while num.lt(i, 40) {
     set i = num.add(i, 1)
   }
   print i
-  do perform echo("second") as Any
+  do perform 0("second") as Any
   return i
 }"#;
 

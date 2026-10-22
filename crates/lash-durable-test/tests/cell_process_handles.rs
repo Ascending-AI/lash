@@ -30,9 +30,9 @@ use served::{Tier, World};
 /// The tool a cell hands a process id to.
 const INSPECT: &str = "inspect";
 
-fn inspect_definition() -> lash_core::ToolDefinition {
+fn inspect_definition() -> lash_vocabulary::tool_contract::ToolDefinition {
     let object = serde_json::json!({ "type": "object", "additionalProperties": true });
-    lash_core::ToolDefinition::raw(
+    lash_vocabulary::tool_contract::ToolDefinition::raw(
         format!("tool:status_tool/{INSPECT}"),
         format!("status_tool.{}", INSPECT),
         "Inspects the process the call names by id.",
@@ -55,7 +55,7 @@ impl lash_core::ToolProvider for Inspector {
         &self,
         _config: &lash_core::OwnerConfigView,
     ) -> std::result::Result<
-        Vec<lash_core::ToolManifest>,
+        Vec<lash_vocabulary::tool_contract::ToolManifest>,
         lash_execution_contracts::plugin_error::PluginError,
     > {
         Ok(vec![inspect_definition().manifest()])
@@ -65,7 +65,7 @@ impl lash_core::ToolProvider for Inspector {
         &self,
         name: &str,
         _config: &lash_core::OwnerConfigView,
-    ) -> Option<Arc<lash_core::ToolContract>> {
+    ) -> Option<Arc<lash_vocabulary::tool_contract::ToolContract>> {
         (name == format!("status_tool.{INSPECT}"))
             .then(|| Arc::new(inspect_definition().contract()))
     }
@@ -92,7 +92,7 @@ async fn world(tier: Tier, inspector: &Arc<Inspector>) -> Option<World> {
         .plugin(Arc::new(
             lash::process_controls::SessionProcessAdminPluginFactory::new(
                 lash_execution_contracts::process::lifetime::detached,
-                lash_core::runtime::env_policy::policy::from_run(|_| Ok(Vec::new())),
+                lash::process::env::policy::from_run(|_| Ok(Vec::new())),
             ),
         ))
         .tools(lash::tool_provider_key!("tools"), inspector)
@@ -215,7 +215,7 @@ const SLEEP_MS: u64 = 5_000;
 /// The session provider `owner` declares as `tools`.
 fn session_provider(owner: &str) -> lash::plugins::ToolProviderHandle {
     lash::plugins::ToolProviderHandle::new(
-        lash::plugins::RegistryKind::Session,
+        lash_vocabulary::claims::RegistryKind::Session,
         owner,
         lash::tool_provider_key!("tools"),
     )
@@ -223,8 +223,8 @@ fn session_provider(owner: &str) -> lash::plugins::ToolProviderHandle {
 
 /// `inbox.send_item`, which no provider advertises: the cell's deferred
 /// provider resolves it, as `id`.
-fn send_item(id: &str) -> lash_core::ToolDefinition {
-    lash_core::ToolDefinition::raw(
+fn send_item(id: &str) -> lash_vocabulary::tool_contract::ToolDefinition {
+    lash_vocabulary::tool_contract::ToolDefinition::raw(
         id,
         "inbox.send_item",
         "Sends one item.",
@@ -293,7 +293,7 @@ impl lash_core::ToolProvider for InboxTools {
         &self,
         _config: &lash_core::OwnerConfigView,
     ) -> std::result::Result<
-        Vec<lash_core::ToolManifest>,
+        Vec<lash_vocabulary::tool_contract::ToolManifest>,
         lash_execution_contracts::plugin_error::PluginError,
     > {
         Ok(Vec::new())
@@ -303,7 +303,7 @@ impl lash_core::ToolProvider for InboxTools {
         &self,
         _name: &str,
         _config: &lash_core::OwnerConfigView,
-    ) -> Option<Arc<lash_core::ToolContract>> {
+    ) -> Option<Arc<lash_vocabulary::tool_contract::ToolContract>> {
         None
     }
 
@@ -339,7 +339,7 @@ impl lash_core::ToolProvider for Resolver {
         &self,
         _config: &lash_core::OwnerConfigView,
     ) -> std::result::Result<
-        Vec<lash_core::ToolManifest>,
+        Vec<lash_vocabulary::tool_contract::ToolManifest>,
         lash_execution_contracts::plugin_error::PluginError,
     > {
         Ok(Vec::new())
@@ -349,7 +349,7 @@ impl lash_core::ToolProvider for Resolver {
         &self,
         _name: &str,
         _config: &lash_core::OwnerConfigView,
-    ) -> Option<Arc<lash_core::ToolContract>> {
+    ) -> Option<Arc<lash_vocabulary::tool_contract::ToolContract>> {
         None
     }
 
@@ -415,7 +415,7 @@ fn inbox_core(backend: &lash::Backend, inbox: &Arc<Inbox>) -> lash::LashCoreBuil
     const ONE: &[lash::plugins::FormatVersion] = &[lash::plugins::FormatVersion::ONE];
     const TWO: &[lash::plugins::FormatVersion] = &[FORMAT_TWO];
     let mapped = Arc::clone(inbox);
-    let policy = lash_core::runtime::env_policy::policy::from_run(move |_| {
+    let policy = lash::process::env::policy::from_run(move |_| {
         let mut entries = vec![
             lash::process::ProcessComponentEntry::new(INBOX, &(), [])?,
             lash::process::ProcessComponentEntry::new(
@@ -462,11 +462,9 @@ fn inbox_core(backend: &lash::Backend, inbox: &Arc<Inbox>) -> lash::LashCoreBuil
     .process_component(
         Arc::new(lash::process_controls::ProcessControlsComponent::new(
             lash_execution_contracts::process::lifetime::detached,
-            lash_core::runtime::env_policy::policy::restrict_or(
-                lash_core::runtime::env_policy::policy::refuse(
-                    "a process starts only inside a process here",
-                ),
-            ),
+            lash::process::env::policy::restrict_or(lash::process::env::policy::refuse(
+                "a process starts only inside a process here",
+            )),
         )),
         lash::process_controls::PROCESS_CONTROLS_CONFIG,
     )
@@ -516,8 +514,10 @@ async fn started_process_captures_committed_deferred_binding(tier: Tier) {
             )
         });
     assert_eq!(finish["sent"], serde_json::json!("first"));
-    let process = lash_core::ProcessId::parse(finish["process"].as_str().expect("a process id"))
-        .expect("the handle names a process");
+    let process = lash_vocabulary::identity::ProcessId::parse(
+        finish["process"].as_str().expect("a process id"),
+    )
+    .expect("the handle names a process");
 
     inbox.node.store(2, Ordering::SeqCst);
     let rebuilt = Arc::clone(&inbox);

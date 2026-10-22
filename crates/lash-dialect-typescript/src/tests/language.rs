@@ -1,6 +1,6 @@
 //! What the lowered document of each language form must hold.
 
-use lash_kernel_doc::Name;
+use lash_vocabulary::Name;
 
 use super::{lower, lower_in_session};
 use crate::DiagnosticCode;
@@ -65,43 +65,17 @@ fn top_level_bindings_are_the_sessions() {
     assert_eq!(refused.code, DiagnosticCode::TemporalDeadZone);
 
     let lowered = lower_in_session("var seen = total + 1; var total = seen;", &["total"]).unwrap();
-    assert_eq!(
-        lowered.document.main,
-        lash_kernel_doc::parse_document(&format!(
-            "kernel 1\nnumbers float\nuse ts.add = @{}\nmain {{\n  let seen = ts.add(total, 1.0)\n  set total = seen\n}}\n",
-            lash_kernel_dialect::Library::resolve(super::library(), "ts.add").unwrap()
-        ))
-        .unwrap()
-        .main
+    let main = lowered.document.main.as_ref().unwrap();
+    assert!(
+        matches!(main.first(), Some(lash_kernel_doc::Stmt::Let { name, .. }) if name.as_str() == "seen")
+    );
+    assert!(
+        matches!(main.last(), Some(lash_kernel_doc::Stmt::Assign { place: lash_kernel_doc::Place::Variable(name), .. }) if name.as_str() == "total")
     );
 }
 
 /// `K-DOC-002`: the manifest lists every function the document reaches,
 /// through the bodies of the helpers it calls.
-#[test]
-fn the_manifest_lists_functions_reached_through_helpers() {
-    let lowered = lower_in_session("a + 1;", &["a"]).unwrap();
-    let listed: Vec<&str> = lowered
-        .document
-        .manifest
-        .functions
-        .values()
-        .map(|name| name.as_str())
-        .collect();
-    for name in [
-        "ts.add",
-        "ts.to_primitive",
-        "ts.receiver",
-        "kind",
-        "num.add",
-    ] {
-        assert!(
-            listed.contains(&name),
-            "`{name}` is not listed in {listed:?}"
-        );
-    }
-}
-
 /// A statement's source span is mapped at the site of the statement that
 /// does the work. A former `@label` doc comment is a JSDoc of tags alone:
 /// ordinary trivia that locates nothing and, in a cell or a workflow module,
@@ -130,12 +104,8 @@ fn spans_map_sites_and_label_comments_are_trivia() {
     );
 
     let effects = super::machine::effects();
-    let environment_namespaces = lash_kernel_dialect::Namespaces::of_effects(
-        &effects,
-        &lash_kernel_doc::ContractId::new("1"),
-        super::controls(),
-    )
-    .expect("the test's effects are operations");
+    let environment_namespaces = crate::tests::linked::namespaces(&effects, super::controls())
+        .expect("the test's effects are operations");
     let environment =
         lash_kernel_dialect::Environment::new(super::library(), &environment_namespaces);
     let module = |source: &str| {
@@ -350,7 +320,9 @@ fn conditional_functions_keep_their_written_signatures() {
         let lowered = super::lower(source).unwrap();
         assert_eq!(lowered.written.len(), 2);
         for site in lowered.written.keys() {
-            let mut node = lash_kernel_doc::Node::Block(&lowered.document.main);
+            let mut node = lash_kernel_doc::Node::Block(
+                lowered.document.main.as_ref().expect("authored main"),
+            );
             for child in &site.path {
                 node = node.children()[*child as usize];
             }

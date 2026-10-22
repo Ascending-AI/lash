@@ -73,7 +73,7 @@ async fn admitted_input_tx(
     tx: &mut sqlx::PgConnection,
     session_id: &SessionId,
     run: &TurnId,
-    input_id: &lash_protocol_types::InputId,
+    input_id: &lash_vocabulary::identity::InputId,
 ) -> Result<lash_core_store::turn_input_vocabulary::PendingTurnInput, StoreError> {
     let row = crate::observed_sql::query(
         crate::turn_ingress::turn_ingress_sql()
@@ -104,7 +104,7 @@ async fn admitted_batch_tx(
     tx: &mut sqlx::PgConnection,
     session_id: &SessionId,
     run: &TurnId,
-    batch_id: &lash_protocol_types::BatchId,
+    batch_id: &lash_vocabulary::identity::BatchId,
 ) -> Result<(), StoreError> {
     let sql = crate::turn_ingress::turn_ingress_sql();
     let observed: Option<Option<String>> =
@@ -122,7 +122,9 @@ async fn admitted_batch_tx(
     )
 }
 
-fn input_row(input_id: &lash_protocol_types::InputId) -> lash_core_store::store::IngressRowId {
+fn input_row(
+    input_id: &lash_vocabulary::identity::InputId,
+) -> lash_core_store::store::IngressRowId {
     lash_core_store::store::IngressRowId::Input(input_id.clone())
 }
 
@@ -170,7 +172,7 @@ pub(crate) async fn ingress_refusal_tx(
 pub(crate) async fn command_refusal_tx(
     tx: &mut sqlx::PgConnection,
     session_id: &SessionId,
-    batch_id: &lash_protocol_types::BatchId,
+    batch_id: &lash_vocabulary::identity::BatchId,
 ) -> StoreError {
     let sql = crate::turn_ingress::turn_ingress_sql();
     let observed: Result<Option<Option<String>>, _> =

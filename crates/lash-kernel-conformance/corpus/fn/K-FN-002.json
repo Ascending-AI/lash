@@ -3,7 +3,7 @@
   "cases": [
     {
       "name": "declared function cannot read main variables",
-      "document": "kernel 1\nnumbers by_spelling\nfn closed() { return x }\nmain {\nlet x = 1 let answer = call closed() finish answer\n}\n",
+      "document": "kernel 1\nnumbers by_spelling\ndefinition \"function closed() -> Any\\nkernel 1\\nmetering statements\\nbody {\\n  return x\\n}\\n\"\nmain {\n  let x = 1\n  let answer = invoke closed()\n  finish answer\n}\n",
       "expected": {
         "prints": [],
         "end": "refused",

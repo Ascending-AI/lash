@@ -10,8 +10,8 @@ use lash::workflow::ProcessWorkflowWaitKind;
 use lash::workflow::document::SourceLanguage;
 
 /// `nap(minutes)` sleeps the duration its argument computes.
-const TYPESCRIPT: &str = "export async function nap(minutes: number) {\n  await sleep(minutes * 60000);\n  return \"woke\";\n}\n";
-const PYTHON: &str = "import asyncio\n\n\nasync def nap(minutes):\n    await asyncio.sleep(minutes * 60)\n    return \"woke\"\n";
+const TYPESCRIPT: &str = "export async function nap(minutes: number): Promise<string> {\n  await sleep(minutes * 60000);\n  return \"woke\";\n}\n";
+const PYTHON: &str = "import asyncio\n\n\nasync def nap(minutes: float) -> str:\n    await asyncio.sleep(minutes * 60)\n    return \"woke\"\n";
 
 const DIALECTS: [(SourceLanguage, &str); 2] = [
     (SourceLanguage::TypeScript, TYPESCRIPT),
@@ -28,7 +28,7 @@ const RESUME_AT: i64 = PARKED_AT as i64 + MINUTES * 60_000;
 /// observation snapshot.
 async fn sleep_state(
     core: &lash::LashCore,
-    process: &lash_core::ProcessId,
+    process: &lash_vocabulary::identity::ProcessId,
 ) -> ProcessWorkflowSiteState {
     let snapshot = core
         .processes()
@@ -57,9 +57,7 @@ async fn sleep_state(
 /// sleep.
 async fn parked_naps(
     core: &lash::LashCore,
-    files: &Files,
-) -> Vec<(SourceLanguage, lash_core::ProcessId)> {
-    files.clock.set(PARKED_AT);
+) -> Vec<(SourceLanguage, lash_vocabulary::identity::ProcessId)> {
     let mut parked = Vec::new();
     for (language, source) in DIALECTS {
         let module = Module::import(core, language, source).await;
@@ -74,7 +72,7 @@ async fn parked_naps(
 
 fn waiting_until(resume_at_ms: i64) -> ProcessWorkflowSiteState {
     ProcessWorkflowSiteState::Waiting {
-        kind: ProcessWorkflowWaitKind::Sleep,
+        kind: ProcessWorkflowWaitKind::Effect,
         resume_at_ms: Some(resume_at_ms),
     }
 }
@@ -84,8 +82,9 @@ fn waiting_until(resume_at_ms: i64) -> ProcessWorkflowSiteState {
 #[tokio::test]
 async fn a_sleep_with_a_computed_duration_reports_when_it_resumes() {
     let files = Files::new();
+    files.clock.set(PARKED_AT);
     let core = core_over(files.open().await, "resume-at").await;
-    for (language, process) in parked_naps(&core, &files).await {
+    for (language, process) in Box::pin(parked_naps(&core)).await {
         assert_eq!(
             sleep_state(&core, &process).await,
             waiting_until(RESUME_AT),
@@ -100,8 +99,9 @@ async fn a_sleep_with_a_computed_duration_reports_when_it_resumes() {
 #[tokio::test]
 async fn a_sleeps_resume_instant_survives_a_reload_from_the_store() {
     let files = Files::new();
+    files.clock.set(PARKED_AT);
     let core = core_over(files.open().await, "resume-at-first").await;
-    let parked = parked_naps(&core, &files).await;
+    let parked = Box::pin(parked_naps(&core)).await;
     core.shutdown().await.expect("shutdown");
     let core = core_over(files.open().await, "resume-at-second").await;
     for (language, process) in parked {

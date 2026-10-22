@@ -11,8 +11,6 @@ mod adapter;
 mod builtins;
 mod captions;
 mod diagnostics;
-mod generated_operators;
-mod intrinsics;
 mod lower;
 mod package;
 mod printer;
@@ -26,15 +24,13 @@ mod tests;
 pub use adapter::{MAX_SOURCE_BYTES, MAX_SOURCE_NESTING_DEPTH, ParserStack, SourceLimits};
 pub use builtins::{Receiver, Row};
 pub use diagnostics::{CodeClassification, Diagnostic, DiagnosticCode, DiagnosticKind};
-pub use intrinsics::read_kernel;
 pub use lash_kernel_dialect::{
     CaptionSupport, GeneratedSourceLimits, PrintError, PrintOptions, PrintedSource, SourceFormat,
 };
 pub use package::{builtin_names, define_helpers};
-pub use printer::print_kernel;
 pub use readable::{print, read};
 
-/// The captions the dialect spells: every kind, as a JSDoc block before the
+/// The captions the dialect spells: a JSDoc block before the
 /// statement, function, `else`/`catch`/`finally` keyword, parameter or
 /// property of an inline object type it names. A workflow module's front
 /// end, the reader of exported source and the printer spell them alike; a
@@ -85,8 +81,7 @@ pub fn function_values() -> lash_kernel_doc::FunctionRepresentation {
 /// `main`. Exported source printed from a document is read back with
 /// [`read`] against that document instead. A module runs no effect and
 /// lowers to an unchecked document; a host must admit it before use.
-/// Unlike a cell, a module accepts the printer's reserved kernel surface,
-/// including `finish`.
+/// Printed source follows the same ordinary authored grammar.
 pub fn lower(
     source: &str,
     environment: &Environment<'_>,
@@ -104,7 +99,7 @@ pub fn lower_with_limits(
 ) -> Result<Lowered, Diagnostic> {
     match mode {
         Mode::Cell(cell) => {
-            lower::check_binding_names(cell.bindings.iter().map(lash_kernel_doc::Name::as_str))?;
+            lower::check_binding_names(cell.bindings.iter().map(lash_vocabulary::Name::as_str))?;
             let program = adapter::parse_with_limits(source, limits)?;
             lower::lower(&program, source, environment, mode)
         }
@@ -158,7 +153,7 @@ impl Parser {
         environment: &Environment<'_>,
         cell: lash_kernel_dialect::CellEnvironment<'_>,
     ) -> Result<std::collections::BTreeSet<String>, Diagnostic> {
-        lower::check_binding_names(cell.bindings.iter().map(lash_kernel_doc::Name::as_str))?;
+        lower::check_binding_names(cell.bindings.iter().map(lash_vocabulary::Name::as_str))?;
         let program = self.parser.parse(source)?;
         lower::tool_calls(&program, cell.bindings)
             .into_iter()
@@ -177,7 +172,7 @@ impl Parser {
         let Mode::Cell(cell) = mode else {
             return lower_with_limits(source, environment, mode, self.parser.limits());
         };
-        lower::check_binding_names(cell.bindings.iter().map(lash_kernel_doc::Name::as_str))?;
+        lower::check_binding_names(cell.bindings.iter().map(lash_vocabulary::Name::as_str))?;
         let program = self.parser.parse(source)?;
         lower::lower(&program, source, environment, mode)
     }
@@ -234,7 +229,8 @@ impl FrontEnd for TypeScript {
 /// operation. A path that spells an operation in another dialect's spelling
 /// is refused with the spelling a cell writes.
 fn candidate(path: &str, environment: &Environment<'_>) -> Result<Option<String>, Diagnostic> {
-    use lash_kernel_dialect::{Segment, SpellKind, Spelling};
+    use lash_kernel_dialect::{SpellKind, Spelling};
+    use lash_vocabulary::Segment;
     let segments = path.split('.').collect::<Vec<_>>();
     let Some((name, package)) = segments.split_last() else {
         return Ok(None);

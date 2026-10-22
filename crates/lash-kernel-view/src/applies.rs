@@ -22,7 +22,13 @@ use lash_kernel_check::{
     ActNode, ActionNode, AtomNode, BindingId, CalleeNode, ExprNode, Graph, MemberNode, NodeId,
     NodeKind, PlaceNode, Reference, StmtNode,
 };
-use lash_kernel_doc::{FunctionDeclarations, FunctionId, Literal, Name, Site, Unit};
+use lash_kernel_doc::Literal;
+
+use crate::ViewContext;
+use lash_vocabulary::names::Name;
+use lash_vocabulary::sites::Site;
+use lash_vocabulary::sites::Unit;
+use lash_vocabulary::{CallableId, LinkId};
 
 use crate::Derived;
 
@@ -131,7 +137,7 @@ struct Summary {
 
 /// The facts shared by every action of one document view.
 pub(crate) struct Links {
-    library: BTreeMap<FunctionId, Summary>,
+    library: BTreeMap<CallableId, Summary>,
 }
 
 impl Links {
@@ -144,10 +150,16 @@ impl Links {
     pub(crate) fn applies(
         &mut self,
         graph: &Graph,
-        functions: &FunctionDeclarations,
         action: Derived<'_>,
+        context: &ViewContext,
     ) -> Vec<Site> {
-        let mut analysis = Analysis::new(graph, functions, &mut self.library);
+        let mut analysis = Analysis::new(
+            graph,
+            &mut self.library,
+            context,
+            context.reference.link,
+            false,
+        );
         let applied = analysis.action(action, &mut BTreeSet::new());
         analysis
             .expand(applied, &mut BTreeSet::new())
@@ -171,63 +183,77 @@ enum Seen {
 }
 
 struct Analysis<'a> {
+    context: &'a ViewContext,
+    link: LinkId,
+    summarizing: bool,
     graph: &'a Graph,
-    functions: &'a FunctionDeclarations,
-    library: &'a mut BTreeMap<FunctionId, Summary>,
+    library: &'a mut BTreeMap<CallableId, Summary>,
     inputs: BTreeMap<BindingId, usize>,
 }
 
 impl<'a> Analysis<'a> {
     fn new(
         graph: &'a Graph,
-        functions: &'a FunctionDeclarations,
-        library: &'a mut BTreeMap<FunctionId, Summary>,
+        library: &'a mut BTreeMap<CallableId, Summary>,
+        context: &'a ViewContext,
+        link: LinkId,
+        summarizing: bool,
     ) -> Self {
         Self {
             graph,
-            functions,
             library,
+            context,
+            link,
+            summarizing,
             inputs: BTreeMap::new(),
         }
     }
 
-    fn summary(&mut self, function: &FunctionId) -> Summary {
+    fn summary(&mut self, function: &CallableId) -> Summary {
         if let Some(summary) = self.library.get(function) {
             return summary.clone();
         }
-        // The holder has already checked these declarations and their bodies.
+        // Insert before traversing so a recursive import edge terminates.
+        self.library.insert(*function, Summary::default());
         let summary = self
-            .functions
-            .get(function)
-            .and_then(|definition| {
+            .context
+            .document(function.link)
+            .and_then(|document| {
+                let definition = document.functions.get(&function.function)?;
                 definition.body()?;
-                lash_kernel_check::derive_definition(definition, self.functions).ok()
-            })
-            .map(|graph| {
-                let mut analysis = Analysis::new(&graph, self.functions, self.library);
-                if let Some(unit) = graph.units().first() {
-                    analysis.inputs.extend(
-                        unit.params
-                            .iter()
-                            .enumerate()
-                            .map(|(index, binding)| (*binding, index)),
-                    );
-                    let mut seen = BTreeSet::new();
-                    let applied = analysis.body_applies(unit.body, &mut seen);
-                    let returned = analysis.returns(unit.body, &mut seen);
-                    Summary {
-                        applied: analysis.expand(applied, &mut seen),
-                        returned: analysis.expand(returned, &mut seen),
-                    }
-                } else {
-                    Summary::default()
-                }
+                let graph =
+                    lash_kernel_check::derive_definition(definition, &document.functions).ok()?;
+                let unit = graph.units().first()?;
+                let mut analysis =
+                    Analysis::new(&graph, self.library, self.context, function.link, true);
+                analysis.inputs.extend(
+                    unit.params
+                        .iter()
+                        .enumerate()
+                        .map(|(index, binding)| (*binding, index)),
+                );
+                let mut seen = BTreeSet::new();
+                let applied = analysis.body_applies(unit.body, &mut seen);
+                let returned = analysis.returns(unit.body, &mut seen);
+                Some(Summary {
+                    applied: analysis.expand(applied, &mut seen),
+                    returned: analysis.expand(returned, &mut seen),
+                })
             })
             .unwrap_or_default();
         self.library.insert(*function, summary.clone());
         summary
     }
-
+    fn target(&self, callee: &CalleeNode) -> Option<CallableId> {
+        match callee {
+            CalleeNode::Local(function) => Some(CallableId {
+                link: self.link,
+                function: *function,
+            }),
+            CalleeNode::Import(slot) => self.context.resolve(self.link, *slot),
+            CalleeNode::Value(_) => None,
+        }
+    }
     fn atom(&mut self, atom: &AtomNode, seen: &mut BTreeSet<Seen>) -> Value {
         match atom {
             AtomNode::Variable(reference) => self.reference(reference, seen),
@@ -271,11 +297,8 @@ impl<'a> Analysis<'a> {
     fn callee(&mut self, callee: &CalleeNode, seen: &mut BTreeSet<Seen>) -> Value {
         match callee {
             CalleeNode::Value(reference) => self.reference(reference, seen),
-            CalleeNode::Declared(name) => Value::origin(Origin::Callable(Site::new(
-                Unit::Function(name.clone()),
-                Vec::new(),
-            ))),
-            CalleeNode::Library(_) => Value::default(),
+            CalleeNode::Import(_) => Value::default(),
+            CalleeNode::Local(_) => Value::default(),
         }
     }
 
@@ -283,25 +306,22 @@ impl<'a> Analysis<'a> {
         let Some((callee, args)) = call(action) else {
             return Value::default();
         };
-        match callee {
-            CalleeNode::Library(function) => {
-                let applied = self.summary(function).applied;
-                let args = self.arguments(args, &applied, seen);
-                applied.substitute(&args)
-            }
-            CalleeNode::Value(_) => self.callee(callee, seen),
-            CalleeNode::Declared(_) => Value::default(),
+        if let Some(function) = self.target(callee) {
+            let applied = self.summary(&function).applied;
+            let args = self.arguments(args, &applied, seen);
+            applied.substitute(&args)
+        } else {
+            self.callee(callee, seen)
         }
     }
-
     fn result(
         &mut self,
         callee: &CalleeNode,
         args: Arguments<'_>,
         seen: &mut BTreeSet<Seen>,
     ) -> Value {
-        if let CalleeNode::Library(function) = callee {
-            let returned = self.summary(function).returned;
+        if let Some(function) = self.target(callee) {
+            let returned = self.summary(&function).returned;
             let args = self.arguments(args, &returned, seen);
             return returned.substitute(&args);
         }
@@ -476,7 +496,7 @@ impl<'a> Analysis<'a> {
                 self.value(target, seen).member(&key)
             }
             NodeKind::Expr(ExprNode::Call { function, args }) => self.result(
-                &CalleeNode::Library(*function),
+                &CalleeNode::Local(*function),
                 Arguments::Expressions(args),
                 seen,
             ),
@@ -524,7 +544,12 @@ impl<'a> Analysis<'a> {
                 result.union(self.action(action, seen));
             }
             if let NodeKind::Expr(ExprNode::Call { function, args }) = kind {
-                let applied = self.summary(function).applied;
+                let applied = self
+                    .summary(&CallableId {
+                        link: self.link,
+                        function: *function,
+                    })
+                    .applied;
                 let args = self.arguments(Arguments::Expressions(args), &applied, seen);
                 result.union(applied.substitute(&args));
             }
@@ -551,7 +576,7 @@ impl<'a> Analysis<'a> {
         for (path, origins) in value.0 {
             for origin in origins {
                 let mut value = if let Origin::Callable(site) = &origin
-                    && matches!(site.unit, Unit::Library(_))
+                    && self.summarizing
                 {
                     if seen.insert(Seen::Body(site.clone())) {
                         let value = self
@@ -587,7 +612,7 @@ fn derived(kind: &NodeKind) -> Option<Derived<'_>> {
 fn literal_value(literal: &Literal) -> Value {
     match literal {
         Literal::Function(name) => Value::origin(Origin::Callable(Site::new(
-            Unit::Function(name.clone()),
+            Unit::Library(*name),
             Vec::new(),
         ))),
         _ => Value::default(),

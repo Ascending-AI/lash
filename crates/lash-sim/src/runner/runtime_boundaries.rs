@@ -12,14 +12,23 @@
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 
+use lash_core::AdmittedScope;
+use lash_core::EffectAddress;
+use lash_core::ExecResponse;
+use lash_core::ExecutionScope;
+use lash_core::PreparedToolCall;
+use lash_core::RuntimeEffectCommand;
+use lash_core::RuntimeEffectEnvelope;
+use lash_core::RuntimeEffectKind;
+use lash_core::RuntimeEffectLocalExecutor;
+use lash_core::RuntimeEffectOutcome;
+use lash_core::ToolAttemptLaunch;
+use lash_core::ToolCallOutput;
+use lash_core::ToolCallRecord;
 use lash_core::runtime::RuntimeAttribution;
-use lash_core::{
-    AdmittedScope, EffectAddress, ExecResponse, ExecutionScope, PreparedToolCall,
-    RuntimeEffectCommand, RuntimeEffectEnvelope, RuntimeEffectKind, RuntimeEffectLocalExecutor,
-    RuntimeEffectOutcome, ToolAttemptLaunch, ToolCallOutput, ToolCallRecord, ToolId,
-};
 use lash_core_execution::ActorContext;
-use lash_protocol_types::SessionId;
+use lash_vocabulary::identity::SessionId;
+use lash_vocabulary::tool_contract::ToolId;
 
 use super::*;
 use crate::trace::value_digest;
@@ -42,7 +51,10 @@ const DURABLE_EFFECT_BOUND: std::time::Duration = std::time::Duration::from_secs
 fn boundary_effect_scope(event: &BoundaryEvent) -> ExecutionScope {
     ExecutionScope::turn(
         SessionId::fixture(event.actor_alias.clone()),
-        lash_core::TurnId::fixture(format!("{EFFECT_SCOPE_ID}:{}", event.boundary_id)),
+        lash_vocabulary::identity::TurnId::fixture(format!(
+            "{EFFECT_SCOPE_ID}:{}",
+            event.boundary_id
+        )),
     )
 }
 
@@ -375,7 +387,8 @@ impl RuntimeBoundaryHarness {
         self.durable_engines
             .insert(durable_key.clone(), engine.clone());
         let session_id = SessionId::fixture(event.actor_alias.clone());
-        let turn_id = lash_core::TurnId::fixture(format!("{EFFECT_SCOPE_ID}:{durable_key}"));
+        let turn_id =
+            lash_vocabulary::identity::TurnId::fixture(format!("{EFFECT_SCOPE_ID}:{durable_key}"));
 
         // The first node: its turn's body runs once, and its next model call
         // stops the turn where the node is cut.
@@ -580,8 +593,8 @@ impl OpaqueEffectTool {
         clippy::expect_used,
         reason = "this module declares the tool or payload schema and admission checks its invariant"
     )]
-    fn definition() -> lash_core::ToolDefinition {
-        lash_core::ToolDefinition::raw(
+    fn definition() -> lash_vocabulary::tool_contract::ToolDefinition {
+        lash_vocabulary::tool_contract::ToolDefinition::raw(
             format!("tool:{OPAQUE_EFFECT_TOOL}"),
             OPAQUE_EFFECT_TOOL_OPERATION,
             "Run an opaque durable effect.",
@@ -599,7 +612,7 @@ impl lash_core::ToolProvider for OpaqueEffectTool {
         &self,
         _config: &lash_core::OwnerConfigView,
     ) -> std::result::Result<
-        Vec<lash_core::ToolManifest>,
+        Vec<lash_vocabulary::tool_contract::ToolManifest>,
         lash_execution_contracts::plugin_error::PluginError,
     > {
         Ok(vec![Self::definition().manifest()])
@@ -609,7 +622,7 @@ impl lash_core::ToolProvider for OpaqueEffectTool {
         &self,
         name: &str,
         _config: &lash_core::OwnerConfigView,
-    ) -> Option<Arc<lash_core::ToolContract>> {
+    ) -> Option<Arc<lash_vocabulary::tool_contract::ToolContract>> {
         (name == OPAQUE_EFFECT_TOOL_OPERATION).then(|| Arc::new(Self::definition().contract()))
     }
 

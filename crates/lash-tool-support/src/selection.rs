@@ -5,7 +5,8 @@
 //! config namespace, under the field `tools`, and filters what it advertises
 //! by it under the run's config. Lash core never reads the field.
 
-use lash_core::{OwnerConfigView, ToolId};
+use lash_core::OwnerConfigView;
+use lash_vocabulary::tool_contract::ToolId;
 use serde::{Deserialize, Serialize};
 
 /// The tools a provider offers, by tool id: only the named ones, or all

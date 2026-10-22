@@ -37,8 +37,7 @@
         "tests/plugin_certification.rs"
       ],
       "processes_evidence": [
-        "tests/processes_evidence.rs",
-        "tests/processes_evidence/link_laws.rs"
+        "tests/processes_evidence.rs"
       ],
       "processes_evidence_b": [
         "tests/processes_evidence_b.rs"
@@ -61,7 +60,6 @@
         "tests/workflow_laws/coarse.rs",
         "tests/workflow_laws/crossing.rs",
         "tests/workflow_laws/documents.rs",
-        "tests/workflow_laws/entry_comparison.rs",
         "tests/workflow_laws/failures.rs",
         "tests/workflow_laws/generated_source.rs",
         "tests/workflow_laws/inline_starts.rs",
@@ -69,8 +67,13 @@
         "tests/workflow_laws/packages.rs",
         "tests/workflow_laws/returned_lists.rs",
         "tests/workflow_laws/sleep_resume_at.rs",
+        "tests/workflow_laws/support.rs"
+      ],
+      "workflow_view_laws": [
+        "tests/workflow_laws/entry_comparison.rs",
         "tests/workflow_laws/value_names.rs",
-        "tests/workflow_laws/view_links.rs"
+        "tests/workflow_laws/view_links.rs",
+        "tests/workflow_view_laws.rs"
       ]
     },
     "test_data": {
@@ -313,13 +316,6 @@
         "tests/support/served.rs",
         "tests/support/sim.rs"
       ],
-      "cell_declaration_crash_laws": [
-        "tests/cell_declaration_crash_laws.rs",
-        "tests/support/dialect.rs",
-        "tests/support/matrix.rs",
-        "tests/support/served.rs",
-        "tests/support/sim.rs"
-      ],
       "cell_dialect_releases": [
         "tests/cell_dialect_releases.rs",
         "tests/support/served.rs",
@@ -381,7 +377,9 @@
         "tests/core_node_processes/process_endstates.rs",
         "tests/core_node_processes/read_tools.rs",
         "tests/core_node_processes/session_and_isolated_envs.rs",
-        "tests/support/kernel_process.rs"
+        "tests/support/kernel_namespace.rs",
+        "tests/support/kernel_process.rs",
+        "tests/support/operations.rs"
       ],
       "declared_start": [
         "tests/declared_start.rs",
@@ -407,6 +405,7 @@
         "tests/drain_by_release.rs",
         "tests/support/dialect.rs",
         "tests/support/matrix.rs",
+        "tests/support/scripted_steps.rs",
         "tests/support/sim.rs"
       ],
       "first_party_tools": [
@@ -431,7 +430,10 @@
       ],
       "kernel_step_crash_laws": [
         "tests/kernel_step_crash_laws.rs",
+        "tests/kernel_step_crash_laws/carried_callback.rs",
         "tests/kernel_step_crash_laws/paged_carry.rs",
+        "tests/support/kernel_namespace.rs",
+        "tests/support/kernel_process.rs",
         "tests/support/matrix.rs",
         "tests/support/served.rs",
         "tests/support/sim.rs"
@@ -471,6 +473,7 @@
       ],
       "pinned_code_laws": [
         "tests/pinned_code_laws.rs",
+        "tests/support/kernel_namespace.rs",
         "tests/support/served.rs",
         "tests/support/sim.rs"
       ],
@@ -490,20 +493,25 @@
       ],
       "process_actor_laws": [
         "tests/process_actor_laws.rs",
+        "tests/support/scripted_steps.rs",
         "tests/support/sim.rs"
       ],
       "process_crash_proof": [
         "tests/process_crash_proof.rs",
         "tests/support/matrix.rs",
+        "tests/support/scripted_steps.rs",
         "tests/support/sim.rs"
       ],
       "process_lifecycle_events": [
         "tests/process_lifecycle_events.rs",
+        "tests/support/operations.rs",
         "tests/support/sim.rs"
       ],
       "process_ran_laws": [
         "tests/process_ran_laws.rs",
         "tests/support/dialect.rs",
+        "tests/support/kernel_namespace.rs",
+        "tests/support/kernel_process.rs",
         "tests/support/matrix.rs",
         "tests/support/served.rs",
         "tests/support/sim.rs"
@@ -511,12 +519,16 @@
       "process_step_crash_proof": [
         "tests/process_step_crash_proof.rs",
         "tests/support/matrix.rs",
+        "tests/support/operations.rs",
         "tests/support/sim.rs"
       ],
       "process_tool_call_crash_laws": [
         "tests/process_tool_call_crash_laws.rs",
         "tests/support/dialect.rs",
+        "tests/support/kernel_namespace.rs",
+        "tests/support/kernel_process.rs",
         "tests/support/matrix.rs",
+        "tests/support/operations.rs",
         "tests/support/served.rs",
         "tests/support/sim.rs"
       ],
@@ -527,6 +539,7 @@
       ],
       "recorded_behaviour_laws": [
         "tests/recorded_behaviour_laws.rs",
+        "tests/support/kernel_namespace.rs",
         "tests/support/kernel_process.rs",
         "tests/support/served.rs",
         "tests/support/sim.rs"
@@ -579,6 +592,7 @@
       "tool_crash_laws": [
         "tests/support/dialect.rs",
         "tests/support/matrix.rs",
+        "tests/support/operations.rs",
         "tests/support/served.rs",
         "tests/support/sim.rs",
         "tests/support/telemetry.rs",
@@ -730,6 +744,7 @@
     "unit_test_sources": [
       "src/cell.rs",
       "src/lib.rs",
+      "src/namespace.rs",
       "src/printed.rs",
       "src/readable.rs"
     ],
@@ -1002,7 +1017,6 @@
     },
     "test_includes": {},
     "test_input_fallbacks": {},
-    "unit_test_includes": [],
     "unit_test_sources": [
       "src/append_vec.rs",
       "src/append_vec_tests.rs",
@@ -1016,15 +1030,13 @@
       "src/derived.rs",
       "src/durable_serde.rs",
       "src/effect_identity.rs",
+      "src/engine_fault.rs",
       "src/execution_budgets.rs",
       "src/execution_budgets/tests.rs",
-      "src/execution_node_kind.rs",
       "src/frame_key.rs",
       "src/future.rs",
       "src/handle.rs",
-      "src/identity.rs",
       "src/json_decode.rs",
-      "src/json_schema.rs",
       "src/lib.rs",
       "src/llm/attachment_delivery.rs",
       "src/llm/attempt_control.rs",
@@ -1057,13 +1069,6 @@
       "src/result_fit.rs",
       "src/retained_output.rs",
       "src/run_aggregate.rs",
-      "src/schema_contract.rs",
-      "src/schema_contract/omission_null.rs",
-      "src/schema_contract/omission_null_tests.rs",
-      "src/schema_contract/ref_inline.rs",
-      "src/schema_contract/ref_inline_tests.rs",
-      "src/schema_contract/tests.rs",
-      "src/schema_contract/typed_output.rs",
       "src/session.rs",
       "src/session_model/failure.rs",
       "src/session_model/message.rs",
@@ -1077,9 +1082,6 @@
       "src/sync.rs",
       "src/tool_call_id.rs",
       "src/tool_catalog.rs",
-      "src/tool_contract.rs",
-      "src/tool_contract/schema_validation.rs",
-      "src/tool_declaration.rs",
       "src/tool_intents.rs",
       "src/tool_output.rs",
       "src/tool_output/attachment_adoption.rs",
@@ -1091,7 +1093,8 @@
       "src/value_shape.rs",
       "src/worker_limit.rs",
       "src/workflow_site.rs"
-    ]
+    ],
+    "unit_test_includes": []
   },
   "crates/lash-execution-contracts": {
     "library_test_sources": [
@@ -1109,25 +1112,18 @@
     ]
   },
   "crates/lash-kernel-package": {
-    "compile_data": [
-      "labels/date.json",
-      "labels/kernel.json",
-      "labels/python.json",
-      "labels/regex.json",
-      "labels/typescript.json",
-      "labels/url.json",
-      "src/testing/dataframe.kernel",
-      "src/testing/dataframe.labels.json",
-      "src/testing/dataframe.surface"
-    ]
+    "compile_data": []
   },
   "examples/dataframe": {
     "compile_data": [
-      "dataframe.kernel",
-      "dataframe.surface",
-      "dataframe.labels.json",
-      "wordcount.ts",
-      "wordcount.py"
+      "df.ts",
+      "cell.ts",
+      "nightly.ts"
+    ]
+  },
+  "crates/lash-vm-releases": {
+    "compile_data": [
+      "labels/*.json"
     ]
   }
 }

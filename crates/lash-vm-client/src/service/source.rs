@@ -5,9 +5,10 @@
 use lash_kernel_dialect::{GeneratedSourceLimits, PrintOptions, PrintedSource, SourceFormat};
 use lash_kernel_doc::{Captions, Document, IdentifiedDocument};
 
+use lash_protocol_types::engine_fault::{PayloadKind, SequenceFault};
+
 use super::{DialectRefusal, Request, Response, Service, runtime_ops::ServiceRuntimeOps as _};
 use crate::PoolError;
-use lash_vm_protocol::{PayloadKind, SequenceFault};
 
 /// A pure source operation's typed refusal or worker failure. Decoding a
 /// document does not admit it; admission remains a separate host operation.
@@ -69,18 +70,14 @@ impl Service {
         &self,
         language: lash_kernel_doc::SourceLanguage,
         source: &str,
-        operations: &lash_kernel_dialect::Operations,
-        packages: super::SurfaceRef,
-        declared_packages: lash_kernel_package::PackageSelection,
+        namespaces: &lash_kernel_dialect::Namespaces,
         limits: Option<lash_kernel_dialect::workflow::WorkflowSourceLimits>,
     ) -> Result<(Document, lash_kernel_doc::SourceMap, Captions), SourceServiceError> {
         let response = self
             .request_accounted(Request::ImportWorkflow {
                 language,
                 source: source.to_owned(),
-                operations: operations.clone(),
-                packages,
-                declared_packages,
+                namespaces: namespaces.clone(),
                 limits,
             })
             .await?;
@@ -164,11 +161,34 @@ impl Service {
 
 fn refused(response: Response) -> SourceServiceError {
     match response {
+        Response::Unprintable { site } => {
+            SourceServiceError::Print(lash_kernel_dialect::PrintError::Unprintable { site })
+        }
         Response::DialectRefused(refusal) => SourceServiceError::Dialect(refusal),
         Response::UndeclaredMembers { members } => {
             SourceServiceError::UndeclaredMembers { members }
         }
         Response::UnknownDialect { dialect } => SourceServiceError::UnknownDialect { dialect },
         _ => PoolError::breach(SequenceFault::UnexpectedServiceResponse).into(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// FIG-7109: source-service errors retain the worker's typed code site.
+    #[test]
+    fn unprintable_worker_sites_reach_the_source_service_error() {
+        let site = lash_vocabulary::sites::Site::new(lash_vocabulary::sites::Unit::Main, vec![2]);
+        let wire = rmp_serde::to_vec_named(&Response::Unprintable { site: site.clone() }).unwrap();
+        let response = rmp_serde::from_slice(&wire).unwrap();
+        let error = refused(response);
+        assert!(
+            matches!(error,
+            SourceServiceError::Print(lash_kernel_dialect::PrintError::Unprintable { site: actual })
+                if actual == site),
+            "host must retain the typed site"
+        );
     }
 }

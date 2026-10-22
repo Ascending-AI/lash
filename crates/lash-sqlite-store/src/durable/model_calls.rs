@@ -74,7 +74,7 @@ pub(super) fn apply(
 
 pub(super) fn delete_session(
     tx: &Connection,
-    session: &lash_protocol_types::SessionId,
+    session: &lash_vocabulary::identity::SessionId,
 ) -> rusqlite::Result<Vec<String>> {
     tx.prepare_cached(SQL.delete_pins.sql())?
         .execute([session.as_str()])?;
@@ -85,7 +85,7 @@ pub(super) fn delete_session(
 
 pub(super) fn read(
     tx: &Connection,
-    session: &lash_protocol_types::SessionId,
+    session: &lash_vocabulary::identity::SessionId,
     owner: &str,
     limits: DecodeLimits,
 ) -> Answer<Vec<ModelCallRecord>> {
@@ -179,7 +179,7 @@ pub(super) fn apply_pin(
 }
 pub(super) fn pins(
     tx: &Connection,
-    session: &lash_protocol_types::SessionId,
+    session: &lash_vocabulary::identity::SessionId,
     owner: &str,
 ) -> Answer<Vec<lash_durable::domain::ModelCallPinRow>> {
     let rows = tx

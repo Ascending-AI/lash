@@ -22,7 +22,7 @@ fn record(subject: TraceRuntimeSubject, occurrence: u64) -> TraceRecord {
     let payload = if occurrence == 0 {
         TraceLanguageExecutionPayload::ExecutionStarted {
             subject: subject.clone(),
-            observation: lash_kernel_doc::RunObservation::Off,
+            observation: lash_vocabulary::observation::RunObservation::Off,
         }
     } else {
         TraceLanguageExecutionPayload::Node {
@@ -39,10 +39,12 @@ fn record(subject: TraceRuntimeSubject, occurrence: u64) -> TraceRecord {
                 event_key: format!("{subject:?}:{occurrence}"),
                 identity: TraceLanguageExecutionIdentity {
                     scope: TraceRuntimeScope::none(),
-                    document: lash_trace::WorkflowDocumentRef {
-                        document: lash_kernel_doc::DocumentId::from_bytes([7; 32]),
-                        entry: lash_trace::WorkflowDocumentEntry::Main,
-                    },
+                    document: lash_trace::TraceExecutionCode::Start(
+                        lash_vocabulary::names::LinkedStart {
+                            link: lash_vocabulary::content_ids::LinkId::from_bytes([7; 32]),
+                            selector: lash_vocabulary::names::StartSelector::Main,
+                        },
+                    ),
                     entry_name: "main".into(),
                     engine_execution_id: None,
                     generation: None,
@@ -161,6 +163,10 @@ async fn a_process_cancelled_while_blocked_has_a_committed_cancelled_graph() {
     }
     let step = lash_trace::StepBodyStarted {
         process_id: process.clone(),
+        origin: (lash_protocol_types::effect_identity_fixture("stepped", 1))
+            .position()
+            .site()
+            .clone(),
         at: lash_protocol_types::effect_identity_fixture("stepped", 1),
         call_id: lash_protocol_types::ToolCallId::fixture("stepped"),
         attempt: 1,
@@ -218,7 +224,7 @@ async fn a_process_cancelled_while_blocked_has_a_committed_cancelled_graph() {
         .expect("the step's site");
     assert!(matches!(
         stepped.state.occurrence,
-        WorkflowOverlayOccurrence::Running { occurrence, .. } if occurrence == lash_kernel_doc::testkit::visit(1)
+        WorkflowOverlayOccurrence::Running { occurrence, .. } if occurrence == lash_vocabulary::sites::testkit::visit(1)
     ));
     assert_eq!(
         stepped.state.call.as_ref().map(|call| &call.call_id),
@@ -329,7 +335,7 @@ async fn language_ingress_overflow_resnapshots_every_session_and_continues() {
                     &session.session_id(),
                     revision,
                     vec![LiveReplayEventDraft::new(
-                        None::<lash_core::TurnId>,
+                        None::<lash_vocabulary::identity::TurnId>,
                         SessionObservationEventPayload::ResidentChanged,
                     )],
                 )
@@ -481,8 +487,9 @@ impl Dispatch {
         let wait = lash_execution_contracts::process::WaitState {
             since_ms: 0,
             kind: lash_execution_contracts::process::WaitKind::Call {
+                resume_at_ms: None,
                 call_id: lash_core::ToolCallId::fixture("dispatched"),
-                tool_id: lash_core::ToolId::from("dispatched"),
+                tool_id: lash_vocabulary::tool_contract::ToolId::from("dispatched"),
             },
             site: None,
         };
@@ -718,8 +725,9 @@ async fn an_oversized_committed_fact_invalidates_only_its_own_process() {
         let wait = lash_execution_contracts::process::WaitState {
             since_ms: 0,
             kind: lash_execution_contracts::process::WaitKind::Call {
+                resume_at_ms: None,
                 call_id: lash_core::ToolCallId::fixture("oversized"),
-                tool_id: lash_core::ToolId::from("x".repeat(2 * LIMIT)),
+                tool_id: lash_vocabulary::tool_contract::ToolId::from("x".repeat(2 * LIMIT)),
             },
             site: None,
         };

@@ -31,6 +31,7 @@
 
 use lash_kernel_doc::scalar::{self, Pair, ScalarOp};
 use lash_kernel_doc::{Float, Value};
+
 use lash_kernel_exec::Weight;
 
 use super::super::expr::{Expr, Kind};

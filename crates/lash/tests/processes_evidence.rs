@@ -31,8 +31,10 @@ fn processes_area_witnesses() {
         let _ = &value.observed_processes;
     });
     // W0012: lash::SessionCreateRequest::with_observed_processes [function]
-    let _: fn(lash::SessionCreateRequest, Vec<lash::ProcessId>) -> lash::SessionCreateRequest =
-        lash::SessionCreateRequest::with_observed_processes;
+    let _: fn(
+        lash::SessionCreateRequest,
+        Vec<lash_vocabulary::identity::ProcessId>,
+    ) -> lash::SessionCreateRequest = lash::SessionCreateRequest::with_observed_processes;
     // W0013: lash::durability::DurableProcessWorker [struct]
     type_witness::<lash::durability::DurableProcessWorker>();
     // W0014: lash::durability::DurableProcessWorker::config [function]
@@ -348,8 +350,8 @@ fn processes_area_witnesses() {
     let _ = lash::process::ProcessEnv::from_store_bytes;
     // W0197: lash::process::ProcessEnv::components [function]
     let _ = lash::process::ProcessEnv::components;
-    // W0198: lash::process::ProcessEnv::effects [function]
-    let _ = lash::process::ProcessEnv::effects;
+    // W0198: lash::process::ProcessEnv::execution [function]
+    let _ = lash::process::ProcessEnv::execution;
     // W0199: lash::process::ProcessEnv::to_store_bytes [function]
     let _ = lash::process::ProcessEnv::to_store_bytes;
     // W0200: lash::persistence::ProcessHandleView::new [function]
@@ -548,12 +550,12 @@ fn processes_area_witnesses() {
     // W0283: lash::process::ProcessStartOptions::with_initial_observer [function]
     let _ = lash::process::ProcessStartOptions::with_initial_observer(
         todo!(),
-        lash::SessionId::from("x"),
+        lash_vocabulary::identity::SessionId::from("x"),
     );
     // W0284: lash::process::ProcessStartOptions::with_initial_observers [function]
     let _ = lash::process::ProcessStartOptions::with_initial_observers(
         todo!(),
-        std::iter::empty::<lash::SessionId>(),
+        std::iter::empty::<lash_vocabulary::identity::SessionId>(),
     );
     // W0285: lash::process::ProcessStartOptions::with_spawn_provenance [function]
     let _ = lash::process::ProcessStartOptions::with_spawn_provenance;
@@ -589,7 +591,7 @@ fn processes_area_witnesses() {
     // W0305: lash::process::ProcessStartRequest::with_observers [function]
     let _ = lash::process::ProcessStartRequest::with_observers(
         todo!(),
-        std::iter::empty::<lash::SessionId>(),
+        std::iter::empty::<lash_vocabulary::identity::SessionId>(),
     );
     // W0307: lash::process::ProcessStatus::Abandoned [variant]
     variant_witness(|value: &lash::process::ProcessStatus| {
@@ -856,7 +858,10 @@ mod named_component_laws {
                 id,
                 reg,
                 move |ctx, _state| {
-                    if matches!(ctx.owner, lash_core::RuntimeOwner::Process(_)) {
+                    if matches!(
+                        ctx.owner,
+                        lash_vocabulary::identity::RuntimeOwner::Process(_)
+                    ) {
                         self.0.process_plugin_builds.fetch_add(1, Ordering::SeqCst);
                     }
                     Ok(Arc::new(Inert(Arc::clone(&self.0))))
@@ -882,54 +887,17 @@ mod named_component_laws {
             cx: &lash::process::ProcessEnvCx<'_>,
         ) -> Result<lash::process::ProcessStartChoice, lash::process::ProcessEnvPolicyError>
         {
-            let stated = self.0.lock_recover().clone();
-            let env = match stated {
-                Stated::Authority => {
-                    let policy = lash::process::env::policy::from_run(|_| {
-                        Ok(vec![ProcessComponentEntry::new(A, &(), [])?])
-                    });
-                    let choice = policy.choose(cx).await?;
-                    let lash::process::ProcessEnvChoice::New(recorded) = choice.env else {
-                        panic!("from_run chooses new")
-                    };
-                    // The host explicitly narrows its from_run choice to a and b.
-                    let mut builder = ProcessEnv::builder(recorded.max_tool_calls())
-                        .attachments(Arc::clone(recorded.attachments()))
-                        .effects(recorded.effects().clone());
-                    if let Some(model) = recorded.model() {
-                        builder = builder.model(model.clone());
-                    }
-                    for entry in recorded.components() {
-                        builder = builder.entry(entry.clone());
-                    }
-                    for (slot, capability) in recorded.capabilities() {
-                        builder = builder.capability(slot.clone(), capability.clone());
-                    }
-                    builder
-                        .build()
-                        .map_err(lash::process::ProcessEnvPolicyError::Refused)?
-                }
-                Stated::Named(keys) => {
-                    let (Some(run), Some(surface)) = (cx.run, cx.surface) else {
-                        return Err(lash::process::ProcessEnvPolicyError::Fault(
-                            "no recorded run".into(),
-                        ));
-                    };
-                    let entries = keys
-                        .iter()
-                        .map(|key| ProcessComponentEntry::new(*key, &(), []))
-                        .collect::<Result<Vec<_>, _>>()
-                        .map_err(lash::process::ProcessEnvPolicyError::Refused)?;
-                    cx.capture(run, surface, entries)
-                        .await
-                        .map_err(lash::process::ProcessEnvPolicyError::Refused)?
-                }
+            let keys = match self.0.lock_recover().clone() {
+                Stated::Authority => vec![A],
+                Stated::Named(keys) => keys,
             };
-            Ok(lash::process::ProcessStartChoice {
-                fits: Default::default(),
-                env: lash::process::ProcessEnvChoice::New(env),
-                engine_settings: cx.engine_defaults()?,
+            lash::process::env::policy::from_run(move |_| {
+                keys.iter()
+                    .map(|key| ProcessComponentEntry::new(*key, &(), []))
+                    .collect()
             })
+            .choose(cx)
+            .await
         }
     }
 
@@ -1077,7 +1045,10 @@ mod named_component_laws {
             self.cells.lock_recover().push_back(code.to_owned());
             let session = self
                 .core
-                .session(lash::SessionId::try_from(name.to_owned()).expect("a session id"))
+                .session(
+                    lash_vocabulary::identity::SessionId::try_from(name.to_owned())
+                        .expect("a session id"),
+                )
                 .create(lash::SessionCreation::root(lash::SessionSpec::new(
                     MODEL,
                     lash::TurnBudget::Unbounded,
@@ -1248,7 +1219,7 @@ mod named_component_laws {
     impl lash::persistence::ProcessAuthorityReads for CountingAuthority {
         async fn process_authority(
             &self,
-            id: &lash::ProcessId,
+            id: &lash_vocabulary::identity::ProcessId,
         ) -> Result<
             Option<(lash::persistence::ProcessRecord, Option<Vec<u8>>)>,
             lash::persistence::StoreError,
@@ -1294,7 +1265,7 @@ mod named_component_laws {
     // The host guide's check, compiled with this owning test target.
     async fn may_address_process(
         processes: &lash::process::Processes,
-        id: &lash::ProcessId,
+        id: &lash_vocabulary::identity::ProcessId,
         offered: &lash::plugins::ToolCatalog,
     ) -> lash::Result<bool> {
         Ok(match processes.environment(id).await? {
@@ -1376,11 +1347,16 @@ mod named_component_laws {
         assert_eq!(Some(env_ref), record.env_ref());
         assert_eq!(engine_settings.as_ref(), record.engine_settings());
         assert_eq!(
-            env.effects()
-                .iter()
-                .map(|(effect, link)| (effect.to_string(), link.tool.to_string()))
+            env.execution()
+                .uses
+                .values()
+                .filter_map(|binding| match binding {
+                    lash_core_store::tool_surface::UseBinding::Fixed(fixed) =>
+                        Some(fixed.route.tool.to_string()),
+                    _ => None,
+                })
                 .collect::<Vec<_>>(),
-            [(format!("tools.{A_TOOL}"), format!("tool:{A_TOOL}"))],
+            [format!("tool:{A_TOOL}")],
             "the env links exactly the effect the process performs"
         );
         let before = reads.calls.load(Ordering::SeqCst);
@@ -1456,7 +1432,7 @@ mod named_component_laws {
         assert_eq!(
             lash::process::authority::tools_excess(env, &offered),
             [lash::process::authority::ExcessLink {
-                effect: format!("tools.{A_TOOL}"),
+                operation: *env.execution().uses.keys().next().unwrap(),
                 tool: lash::tools::ToolId::from(format!("tool:{A_TOOL}")),
             }]
             .into_iter()
@@ -1513,7 +1489,9 @@ mod named_component_laws {
             world
                 .core
                 .processes()
-                .environment(&lash::ProcessId::fixture("authority-unknown"))
+                .environment(&lash_vocabulary::identity::ProcessId::fixture(
+                    "authority-unknown"
+                ))
                 .await
                 .unwrap(),
             None
@@ -1616,20 +1594,75 @@ mod named_component_laws {
     fn linked_effects_obey_the_offered_tool_identity() {
         use lash::plugins::ToolCatalog;
         use lash::process::authority::{ExcessLink, tools_excess, tools_within};
+        let definition = a_definition("a");
+        let provider = A.tool_provider(lash::tool_provider_key!("tools"));
+        let mut document = lash::workflow::document::Document::new(
+            lash::workflow::document::NumberPolicy::BySpelling,
+            Vec::new(),
+        );
+        document.main = None;
+        let signature = lash_vocabulary::json_schema::tool_signature(
+            &definition.contract.input_schema.canonical,
+            &definition.contract.output_schema.canonical,
+        );
+        document.imports.insert(
+            lash::package::ImportSlot(0),
+            lash::package::Import {
+                name: lash::package::QualifiedName {
+                    package: definition.manifest.operation.package.clone(),
+                    member: definition.manifest.operation.name.clone(),
+                    type_member: None,
+                },
+                kind: lash::package::ImportKind::Operation {
+                    signature: signature.clone(),
+                },
+            },
+        );
+        let requirement =
+            lash_vocabulary::OperationRequirement::new(signature, definition.contract_id());
+        let link = lash::package::Link {
+            document: document.identity(),
+            fills: [(
+                lash::package::ImportSlot(0),
+                lash::package::Fill::Operation(requirement.clone()),
+            )]
+            .into(),
+        };
+        let use_ = lash::package::OperationUse {
+            link: link.identity(),
+            slot: lash::package::ImportSlot(0),
+        };
+        let route = lash::tools::OperationRoute::advertised(provider, &definition, None);
+        let mut execution = lash_core_store::tool_surface::ExecutionEnvironment::empty(
+            lash_vocabulary::claims::RegistryKind::Process,
+        );
+        route.require(&mut execution.requirements);
+        execution.roots.insert(link.identity());
+        execution.uses.insert(
+            use_,
+            lash_core_store::tool_surface::UseBinding::Fixed(
+                lash_core_store::tool_surface::RoutedOperation {
+                    requirement: requirement.clone(),
+                    route,
+                    offer: lash::package::OperationOffer {
+                        requirement,
+                        mode: lash::package::OperationMode::Waited,
+                        intents: Default::default(),
+                        controls: Default::default(),
+                    },
+                },
+            ),
+        );
         let env = ProcessEnv::builder(lash::MaxToolCalls::new(2))
             .component(A, &())
-            .link_tool(
-                A.tool_provider(lash::tool_provider_key!("tools")),
-                &a_definition("a"),
-            )
+            .execution(execution)
             .build()
             .unwrap();
         let excess: std::collections::BTreeSet<_> = [ExcessLink {
-            effect: "tools.a".to_owned(),
-            tool: lash::tools::ToolId::from("tool:a"),
+            operation: use_,
+            tool: definition.manifest.id,
         }]
-        .into_iter()
-        .collect();
+        .into();
 
         let offered =
             ToolCatalog::from_tool_definitions(vec![a_definition("a"), a_definition("b")]);
@@ -1669,7 +1702,7 @@ mod named_component_laws {
             &env,
             &ToolCatalog::from_tool_definitions(Vec::new())
         ));
-        let session = lash::SessionId::try_from("granted-session").unwrap();
+        let session = lash_vocabulary::identity::SessionId::try_from("granted-session").unwrap();
         let capability = lash::CapabilityRef {
             binding: lash::BindingId::new("binding:one"),
             contract: lash::ContractRef::new("integration", 1),
@@ -1717,11 +1750,3 @@ mod named_component_laws {
         );
     }
 }
-
-#[cfg(feature = "codemode")]
-#[path = "processes_evidence/link_laws.rs"]
-#[allow(
-    clippy::expect_used,
-    reason = "a law's setup failing is the law failing"
-)]
-mod link_laws;

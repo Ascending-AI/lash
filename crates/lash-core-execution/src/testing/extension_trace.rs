@@ -1,8 +1,8 @@
 //! A bound extension capability for a test that calls a plugin callback
 //! directly, outside the runtime that would bind it.
 
-use crate::store::plugin_writers::PluginCallbackIdentity;
 use crate::trace::{BodyTrace, ExtensionTrace, TraceRuntime};
+use lash_vocabulary::providers::PluginCallbackIdentity;
 use std::sync::{Arc, Mutex};
 
 /// The capability of one run of a registered callback under a fresh,
@@ -52,8 +52,8 @@ fn turn_scope(runtime: &TraceRuntime) -> lash_trace::DurableTraceScope {
     );
     lash_trace::DurableTraceScope::admit(
         lash_trace::TraceScopeId::admission(lash_trace::TraceScopeOwner::Turn {
-            session_id: crate::SessionId::from("extension-test"),
-            turn_id: crate::TurnId::from("extension-test-turn"),
+            session_id: lash_vocabulary::identity::SessionId::from("extension-test"),
+            turn_id: lash_vocabulary::identity::TurnId::from("extension-test-turn"),
         }),
         producer.parent().as_ref(),
         lash_trace::TraceLinks::new(),

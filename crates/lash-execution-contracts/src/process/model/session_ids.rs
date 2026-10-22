@@ -1,4 +1,5 @@
-use super::{ProcessId, SessionId};
+use lash_vocabulary::identity::ProcessId;
+use lash_vocabulary::identity::SessionId;
 
 /// The child session a `ProcessInput::SessionTurn` process runs its turn in
 /// when its create request names none: derived from the minted process id, so
@@ -12,8 +13,8 @@ pub fn process_child_session_id(process_id: &ProcessId) -> SessionId {
 /// named by the process id, so the child run names the process whose own
 /// run executes it. The process executes that run inline, in its own
 /// execution; it never runs as a run of its own (FIG-4378).
-pub fn process_session_turn_id(process_id: &ProcessId) -> crate::TurnId {
-    crate::TurnId::from(process_id)
+pub fn process_session_turn_id(process_id: &ProcessId) -> lash_vocabulary::identity::TurnId {
+    lash_vocabulary::identity::TurnId::from(process_id)
 }
 
 /// The session a session-turn process starts: the stated id, or its stable child id.

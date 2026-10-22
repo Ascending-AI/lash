@@ -11,7 +11,7 @@
 //! and its [`NodeId`] is the envelope's digest under the blob hash domain
 //! (`BlobRef::for_content`), so a node's lowercase hex id is its SQL key. The
 //! body is a stream of the canonical tokens of
-//! [`lash_kernel_doc::graph_tokens`], where a child reference is the slot of
+//! [`lash_vocabulary::tokens`], where a child reference is the slot of
 //! the child in the sorted child table. Every declared child is referenced,
 //! and nothing else is: a node's child table is exactly its storage edges.
 //!
@@ -32,7 +32,7 @@
 //! - [`bodies`]: the typed bodies of the generic kinds this crate owns.
 //!
 //! Typed bodies of kernel, host, cell and turn kinds are encoded by their
-//! owning crates with [`lash_kernel_doc::graph_tokens::TokenCodec`] and
+//! owning crates with [`lash_vocabulary::tokens::TokenCodec`] and
 //! staged here through [`GraphStaging::encode`].
 //!
 //! There is no format version field, no fallback reader and no second
@@ -60,11 +60,6 @@ pub use commit::{
 pub use decode::{BlobEncoding, GraphDecoder, NodeSource, StoredNode, closure};
 pub use encode::{GraphStaging, TypedBody, encode_node};
 pub use lash_checkpoint_encoder::GraphRefusal as EncodingRefusal;
-pub use lash_kernel_doc::KernelDataLimits;
-pub use lash_kernel_doc::graph_tokens::{
-    CanonicalFault, ChildRef, CodecVariant, DecodeDimension, TokenCodec, TokenError, TokenReader,
-    TokenWriter,
-};
 pub use node::{
     ChildTable, EncodedNode, INDEX_FANOUT, INLINE_TOKEN_MAX, LEAF_PAYLOAD_MAX, MAGIC,
     MAX_NODE_BYTES, MAX_ROOT_BYTES, NodeEnvelope, NodeId, check_envelope, parse_envelope,

@@ -5,6 +5,7 @@
 // (the workspace clippy ban targets production library code).
 #![allow(clippy::disallowed_methods)]
 
+use lash_vocabulary::tokens::TokenWriter;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -172,16 +173,7 @@ law!(
     a_node_claims_only_actors_whose_hard_requirements_it_meets,
     |store, _advance| { laws::a_node_claims_only_actors_whose_hard_requirements_it_meets(store) }
 );
-law!(
-    a_store_keeps_each_sets_first_surface_and_indexes_its_definitions,
-    |store, _advance| {
-        laws::a_store_keeps_each_sets_first_surface_and_indexes_its_definitions(store)
-    }
-);
-law!(
-    a_store_keeps_artifacts_and_sets_by_digest,
-    |store, _advance| { laws::a_store_keeps_artifacts_and_sets_by_digest(store) }
-);
+
 law!(
     a_newer_format_is_not_written_while_an_older_node_is_live,
     |store, _advance| { laws::a_newer_format_is_not_written_while_an_older_node_is_live(store) }
@@ -260,7 +252,7 @@ async fn lo_fence_path(explicit: bool) {
 
 fn lo_fence_staged_hash() -> Vec<u8> {
     use lash_core_store::checkpoint_graph::{
-        EncodeBudget, ExplicitLimit, GraphStaging, NodeKind, TokenWriter, TypedBody,
+        EncodeBudget, ExplicitLimit, GraphStaging, NodeKind, TypedBody,
     };
     let mut out = TokenWriter::new();
     out.text("lo-fence-stale");
@@ -290,7 +282,7 @@ async fn lo_idle_writer_when_configured() {
     use lash_core_store::session_state::RuntimeSessionState;
     use lash_core_store::store::{RuntimeCommit, SessionCatalogStore, SessionCommitStore};
     use lash_durable::{ActorKey, DurableStore, FormatSet, MailTx, NodeId, NodeSpec};
-    use lash_protocol_types::SessionId;
+    use lash_vocabulary::identity::SessionId;
 
     let database = IsolatedDatabase::create(&crate::testing::required_database_url()).await;
     let storage = crate::testing::connect(database.url()).await.unwrap();
@@ -429,7 +421,7 @@ async fn lo_idle_writer_when_configured() {
     let mut spoofed = fresh.clone();
     spoofed.turn_commit.operation = lash_core_store::store::OperationId::turn(
         &session,
-        lash_protocol_types::TurnId::fixture("spoofed-owner"),
+        lash_vocabulary::identity::TurnId::fixture("spoofed-owner"),
         "commit",
     );
     assert!(spoofed.is_sessions_own_head_write());
@@ -604,7 +596,7 @@ async fn lo_idle_writer_close_and_redrive_when_configured() {
         ActorKey, CommitLabel, DurableReads, DurableStore, FormatSet, MailTx, NodeId, NodeSpec,
         Release,
     };
-    use lash_protocol_types::SessionId;
+    use lash_vocabulary::identity::SessionId;
 
     let database = IsolatedDatabase::create(&crate::testing::required_database_url()).await;
     let storage = crate::testing::connect(database.url()).await.unwrap();
@@ -847,4 +839,40 @@ async fn lo_idle_writer_close_and_redrive_when_configured() {
         durable.actor(&actor).await.unwrap().unwrap().revision,
         revision
     );
+}
+
+law!(
+    a_resolution_winner_and_its_claim_debt_commit_atomically,
+    |store, _advance| {
+        laws::a_resolution_winner_and_its_claim_debt_commit_atomically(store, store)
+    }
+);
+
+/// L-PIN exercises the PostgreSQL module-artifact retention adapter.
+#[tokio::test]
+async fn a_publication_retains_its_complete_content_dag_when_configured() {
+    use lash_core_store::artifact_referrer::{ArtifactReferrer, HostArtifactPin, ReferrerClaim};
+    use lash_execution_contracts::module_artifacts::ModuleArtifactStore;
+    let Some(url) = crate::postgres_test_support::database_url() else {
+        return;
+    };
+    let database = IsolatedDatabase::create(&url).await;
+    let storage = crate::testing::connect(database.url())
+        .await
+        .expect("store");
+    let store = storage.lash_vm_artifact_store();
+    let document = lash_vocabulary::names::DocumentId::from_bytes([72; 32]);
+    let claim = ReferrerClaim::unguarded(ArtifactReferrer::HostPin(HostArtifactPin::mint()))
+        .expect("configured root");
+    store
+        .publish_module_artifact(
+            &claim,
+            &document.to_string(),
+            b"document with embedded function bodies",
+        )
+        .await
+        .expect("document");
+    laws::a_publication_retains_its_complete_content_dag(&store, &store, document, claim)
+        .await
+        .expect("L-PIN");
 }

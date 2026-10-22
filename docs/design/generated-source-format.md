@@ -40,7 +40,7 @@ kernel form; the readable pair's kernel-form regions use the same spelling.
 
 `print_kernel(document, PrintOptions { source_map, limits }) -> PrintedSource`
 performs naming and structural rendering only. It does not compile, compare,
-resolve libraries, admit, execute, or select a package set. `PrintedSource`
+resolve Imports, admit, execute, or sample Current. `PrintedSource`
 holds `source`, `SourceFormat` and an optional `SourceMap`; maps default off.
 
 `read_kernel(source, base, GeneratedSourceLimits) -> Document` reads exported source
@@ -208,7 +208,7 @@ a spelling has an exact inverse. See [host packages](../host-packages.md).
 `::read_exported(source, base, format, limits)` run the same operations in the
 worker crash domain. The read request carries the base Document's JSON; the
 response is a Document with the captions its source spells, without a
-library, package-set choice or admission.
+library, Current snapshot or admission.
 The installed dialect package owns a `read` function pointer alongside its
 authored front end and printer. The worker wire-v1 snapshots change in place
 before the 1.0 cut; no stored shape changes.

@@ -1,614 +1,436 @@
-//! The operations a document is offered, and the one namespace tree its
-//! dotted names resolve through (§2.3).
-//!
-//! Every operation a host offers a cell or a workflow (a catalog tool, a
-//! deferred grant, an unavailable note) is one entry of [`Operations`]. A
-//! front end resolves a written dotted path once, through
-//! [`Namespaces::resolve`], after its own lexical bindings and globals: a
-//! package path walked segment by segment, each segment unspelled by the
-//! dialect's [`Spelling`]. Nothing here reads a dialect.
-
+//! One runtime projection of the accepted package advertisement. A missing
+//! member of an enumerated package never falls through to a deferred provider.
+use crate::{NamespaceKind, NamespaceMember, NamespaceView, SpellKind, Spelling};
+use lash_vocabulary::{
+    names::{PackagePath, QualifiedOperation, Segment},
+    package::Visibility,
+};
+pub use lash_vocabulary::{operation_keys, operation_text};
+use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
-use lash_kernel_doc::{EffectName, OperationRequirement};
-use serde::{Deserialize, Serialize};
-
-use crate::{
-    EffectControl, Export, ExportView, PackagePath, QualifiedOperation, Segment, SpellKind,
-    Spelling, TypeMember,
-};
-
-/// What a cell or workflow is offered under one operation.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct Offered {
-    /// What a perform of it states: its signature and contract.
-    pub requirement: OperationRequirement,
-    /// The turn-ending controls its result may be; empty for most.
-    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
-    pub controls: BTreeSet<EffectControl>,
-    /// Whether the host performs it as a read.
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    pub read: bool,
-    /// The declaring package's visibility, projected from this cell's view.
-    #[serde(skip)]
-    pub visibility: crate::Visibility,
-    pub source: OfferedSource,
-}
-
-impl Offered {
-    /// An operation the catalog tool `tool` serves under `requirement`, the
-    /// tool's signature and the contract it serves: no controls, not a read.
-    #[must_use]
-    pub fn tool(tool: impl Into<String>, requirement: OperationRequirement) -> Self {
-        Self {
-            requirement,
-            controls: BTreeSet::new(),
-            read: false,
-            source: OfferedSource::Catalog { tool: tool.into() },
-            visibility: crate::Visibility::Public,
-        }
-    }
-
-    /// This operation, whose result may be one of `controls`.
-    #[must_use]
-    pub fn with_controls(mut self, controls: BTreeSet<EffectControl>) -> Self {
-        self.controls = controls;
-        self
-    }
-}
-
-/// Where an offered operation comes from.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case", deny_unknown_fields)]
-pub enum OfferedSource {
-    /// A tool of the run's catalog, by its tool id.
-    Catalog { tool: String },
-    /// A tool the run's deferred provider granted this cell, by its tool id.
-    Deferred { tool: String },
-    /// A path the deferred provider answered with a note: a call raises it.
-    Unavailable { note: String },
-}
-
-/// The operations offered, one entry per operation (P1).
-pub type Operations = BTreeMap<QualifiedOperation, Offered>;
-
-/// A [`QualifiedOperation`] serialized as its effect name
-/// (`inbox.send_item`), for a field: `#[serde(with = "operation_text")]`.
-pub mod operation_text {
-    use serde::{Deserialize, Deserializer, Serializer};
-
-    use crate::QualifiedOperation;
-
-    /// # Errors
-    ///
-    /// The serializer's.
-    pub fn serialize<S: Serializer>(
-        operation: &QualifiedOperation,
-        serializer: S,
-    ) -> Result<S::Ok, S::Error> {
-        serializer.serialize_str(operation.effect_name().as_str())
-    }
-
-    /// # Errors
-    ///
-    /// A text that is no canonical operation.
-    pub fn deserialize<'de, D: Deserializer<'de>>(
-        deserializer: D,
-    ) -> Result<QualifiedOperation, D::Error> {
-        parse(&String::deserialize(deserializer)?).map_err(serde::de::Error::custom)
-    }
-
-    /// The operation `text` names.
-    ///
-    /// # Errors
-    ///
-    /// Why `text` is no canonical operation.
-    pub fn parse(text: &str) -> Result<QualifiedOperation, String> {
-        let effect = lash_kernel_doc::EffectName::new(text).map_err(|error| error.to_string())?;
-        QualifiedOperation::from_effect(&effect).map_err(|error| error.to_string())
-    }
-}
-
-/// A map keyed by [`QualifiedOperation`], serialized with each key as its
-/// effect name, for a field: `#[serde(with = "operation_keys")]`.
-pub mod operation_keys {
-    use std::collections::BTreeMap;
-
-    use serde::{Deserialize, Deserializer, Serialize, Serializer};
-
-    use crate::QualifiedOperation;
-
-    /// # Errors
-    ///
-    /// The serializer's.
-    pub fn serialize<V: Serialize, S: Serializer>(
-        map: &BTreeMap<QualifiedOperation, V>,
-        serializer: S,
-    ) -> Result<S::Ok, S::Error> {
-        serializer.collect_map(
-            map.iter()
-                .map(|(operation, value)| (operation.effect_name().to_string(), value)),
-        )
-    }
-
-    /// # Errors
-    ///
-    /// A key that is no canonical operation.
-    pub fn deserialize<'de, V: Deserialize<'de>, D: Deserializer<'de>>(
-        deserializer: D,
-    ) -> Result<BTreeMap<QualifiedOperation, V>, D::Error> {
-        BTreeMap::<String, V>::deserialize(deserializer)?
-            .into_iter()
-            .map(|(key, value)| {
-                super::operation_text::parse(&key)
-                    .map(|operation| (operation, value))
-                    .map_err(serde::de::Error::custom)
-            })
-            .collect()
-    }
-}
-
-/// `operation` as a dialect's source names it: its package path, then its
-/// name, each in the dialect's spelling. The one path renderer lowering
-/// repairs, printers and prompts share.
-#[must_use]
 pub fn spell_operation(spelling: Spelling, operation: &QualifiedOperation) -> String {
-    let mut path = String::new();
-    for segment in operation.package.iter() {
-        path.push_str(&spelling.spell(SpellKind::PathSegment, segment));
-        path.push('.');
-    }
-    path.push_str(&spelling.spell(SpellKind::Member, &operation.name));
-    path
+    operation
+        .package
+        .iter()
+        .map(|segment| spelling.spell(SpellKind::PathSegment, segment))
+        .chain(std::iter::once(
+            spelling.spell(SpellKind::Member, &operation.name),
+        ))
+        .collect::<Vec<_>>()
+        .join(".")
 }
 
-/// Why a namespace tree could not be composed: each names both sides.
-#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-#[non_exhaustive]
+#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 pub enum NamespaceRefusal {
-    /// A package path is another package's export.
-    #[error("the package path `{path}` is the export `{export}` of `{package}`")]
-    PathIsExport {
-        path: String,
-        package: String,
-        export: String,
+    #[error("the package export `{name:?}` in Link {link} is not loaded")]
+    MissingExport {
+        link: lash_vocabulary::LinkId,
+        name: lash_vocabulary::ExportName,
     },
-    /// An offered operation at a segment a code package exports as
-    /// something other than an operation: the tool would shadow the code.
-    #[error("the operation `{operation}` is the code export `{export}` of `{package}`")]
-    OperationIsExport {
-        operation: String,
-        package: String,
-        export: String,
-    },
-    /// An offered operation a package declares, offered under another
-    /// contract than the package's.
-    #[error(
-        "the operation `{operation}` is offered under contract `{offered}`, and `{package}` declares `{declared}`"
-    )]
-    OperationContractDiffers {
-        operation: String,
-        package: String,
-        offered: String,
-        declared: String,
-    },
-    /// An offered effect name that is no canonical operation.
-    #[error("`{effect}` is not an operation: {message}")]
-    NotAnOperation { effect: String, message: String },
-    /// An offered operation cannot add a member to an installed package.
-    #[error("no such member `{operation}` is declared by installed package `{package}`")]
-    UndeclaredOperation { operation: String, package: String },
-    /// A package root no package may take.
-    #[error("the package path `{path}` takes the root `{root}`, which is {by}")]
-    ReservedRoot {
-        path: String,
-        root: String,
-        by: String,
-    },
+    #[error("the package path `{path}` conflicts with `{other}`")]
+    PathConflict { path: String, other: String },
+    #[error("the package path `{path}` takes reserved root `{root}`")]
+    ReservedRoot { path: String, root: String },
 }
 
-/// What a written dotted path names.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Resolution<'a> {
-    /// An offered operation: a call of it is a `perform`.
     Operation {
-        operation: &'a QualifiedOperation,
-        offered: &'a Offered,
+        operation: QualifiedOperation,
+        offered: &'a crate::OperationSignature,
     },
-    /// A code export, or a member of an exported type.
     Export {
         package: &'a PackagePath,
         segment: &'a Segment,
-        export: &'a Export,
-        member: Option<(&'a Segment, &'a TypeMember)>,
+        export: &'a NamespaceKind,
+        member: Option<(&'a Segment, &'a crate::TypeMember)>,
     },
-    /// A package path or a prefix of one: a namespace, never a value.
+    Deferred {
+        operation: QualifiedOperation,
+    },
     Namespace,
-    /// Unknown here.
     Unknown,
 }
-
-/// A written path that names an offered operation in another dialect's
-/// spelling, with the spelling this dialect writes.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Misspelled {
     pub operation: QualifiedOperation,
     pub repair: String,
 }
 
-/// The namespace tree of one environment: the offered operations and the
-/// code exports of the packages it is composed from.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Namespaces {
-    operations: Operations,
-    code: BTreeMap<PackagePath, BTreeMap<Segment, Export>>,
-    /// Every package path and each of its prefixes.
-    nodes: BTreeSet<Vec<Segment>>,
+    packages: BTreeMap<PackagePath, BTreeMap<Segment, NamespaceMember>>,
+    deferred: BTreeSet<PackagePath>,
 }
+impl Namespaces {
+    /// Project the accepted package members from their linked declarations.
+    /// The resolver reads held content only; it performs no publication or fulfilment.
+    pub fn project<'a>(
+        packages: impl IntoIterator<Item = &'a lash_vocabulary::Package>,
+        deferred: BTreeSet<PackagePath>,
+        export: &dyn Fn(
+            lash_vocabulary::LinkId,
+            &lash_vocabulary::ExportName,
+        ) -> Option<lash_kernel_doc::Export>,
+        reserves: &dyn Fn(&str) -> bool,
+    ) -> Result<Self, NamespaceRefusal> {
+        use lash_vocabulary::{MemberKind, QualifiedName};
+        fn function(
+            name: QualifiedName,
+            f: lash_kernel_doc::FunctionExport,
+        ) -> crate::FunctionMember {
+            crate::FunctionMember {
+                name,
+                signature: f.signature,
+                convention: f.convention.semantic(),
+                asynchronous: f.asynchronous,
+                rest: f.rest,
+            }
+        }
+        let mut projected = BTreeMap::new();
+        for package in packages {
+            let mut members = BTreeMap::new();
+            for (segment, member) in &package.members {
+                let name = QualifiedName {
+                    package: package.path.clone(),
+                    member: segment.clone(),
+                    type_member: None,
+                };
+                let kind = match &member.kind {
+                    MemberKind::Operation(offer) => NamespaceKind::Operation(offer.clone().into()),
+                    MemberKind::Export {
+                        link,
+                        export: exported,
+                    } => {
+                        match export(*link, exported).ok_or_else(|| {
+                            NamespaceRefusal::MissingExport {
+                                link: *link,
+                                name: exported.clone(),
+                            }
+                        })? {
+                            lash_kernel_doc::Export::Function(f) => {
+                                NamespaceKind::Function(function(name, f))
+                            }
+                            lash_kernel_doc::Export::Error { .. } => NamespaceKind::Error,
+                            lash_kernel_doc::Export::Type(ty) => {
+                                NamespaceKind::Type(crate::ValueType {
+                                    representation: ty.representation,
+                                    members: ty
+                                        .members
+                                        .into_iter()
+                                        .map(|(segment, member)| {
+                                            let mut name = name.clone();
+                                            name.type_member = Some(segment.clone());
+                                            let member = match member {
+                                                lash_kernel_doc::TypeMember::Static(f) => {
+                                                    crate::TypeMember::Static(function(name, f))
+                                                }
+                                                lash_kernel_doc::TypeMember::Method(f) => {
+                                                    crate::TypeMember::Method(function(name, f))
+                                                }
+                                                lash_kernel_doc::TypeMember::Property(f) => {
+                                                    crate::TypeMember::Property(function(name, f))
+                                                }
+                                            };
+                                            (segment, member)
+                                        })
+                                        .collect(),
+                                })
+                            }
+                        }
+                    }
+                };
+                members.insert(
+                    segment.clone(),
+                    NamespaceMember {
+                        visibility: member.visibility,
+                        kind,
+                    },
+                );
+            }
+            if projected.insert(package.path.clone(), members).is_some() {
+                let path = dotted(&package.path);
+                return Err(NamespaceRefusal::PathConflict {
+                    path: path.clone(),
+                    other: path,
+                });
+            }
+        }
+        Self::new(projected, deferred, reserves)
+    }
 
-/// The spelling kind an export is written in.
-fn spelled_as(export: &Export) -> SpellKind {
-    match export {
-        Export::Type(_) | Export::Error => SpellKind::TypeName,
-        Export::Operation(_) | Export::Function(_) => SpellKind::Member,
+    /// The runtime supplies one projection of each accepted package. All kinds
+    /// share the same member map. Deferred paths contain no enumerated members.
+    pub fn new(
+        packages: BTreeMap<PackagePath, BTreeMap<Segment, NamespaceMember>>,
+        deferred: BTreeSet<PackagePath>,
+        reserves: &dyn Fn(&str) -> bool,
+    ) -> Result<Self, NamespaceRefusal> {
+        let paths: Vec<_> = packages.keys().chain(deferred.iter()).collect();
+        for (at, path) in paths.iter().enumerate() {
+            let root = &path.as_slice()[0];
+            if reserves(root.as_str()) {
+                return Err(NamespaceRefusal::ReservedRoot {
+                    path: dotted(path),
+                    root: root.to_string(),
+                });
+            }
+            for other in paths.iter().skip(at + 1) {
+                let overlaps = path == other
+                    || ((deferred.contains(*path) || deferred.contains(*other))
+                        && (other.as_slice().starts_with(path.as_slice())
+                            || path.as_slice().starts_with(other.as_slice())));
+                if overlaps {
+                    return Err(conflict(path, other));
+                }
+            }
+            for (owner, members) in &packages {
+                if let Some(tail) = path.as_slice().strip_prefix(owner.as_slice())
+                    && let Some(first) = tail.first()
+                    && members.contains_key(first)
+                {
+                    return Err(conflict(path, owner));
+                }
+            }
+        }
+        Ok(Self { packages, deferred })
+    }
+
+    pub fn packages(&self) -> &BTreeMap<PackagePath, BTreeMap<Segment, NamespaceMember>> {
+        &self.packages
+    }
+
+    pub fn operations(
+        &self,
+    ) -> impl Iterator<Item = (QualifiedOperation, &crate::OperationSignature)> {
+        self.packages.iter().flat_map(|(package, members)| {
+            members
+                .iter()
+                .filter_map(move |(name, member)| match &member.kind {
+                    NamespaceKind::Operation(offer) if member.visibility == Visibility::Public => {
+                        Some((
+                            QualifiedOperation {
+                                package: package.clone(),
+                                name: name.clone(),
+                            },
+                            offer,
+                        ))
+                    }
+                    _ => None,
+                })
+        })
+    }
+    pub fn operation(
+        &self,
+        effect: &lash_vocabulary::EffectName,
+    ) -> Option<(QualifiedOperation, &crate::OperationSignature)> {
+        let operation = QualifiedOperation::from_effect(effect).ok()?;
+        let member = self
+            .packages
+            .get(&operation.package)?
+            .get(&operation.name)?;
+        match &member.kind {
+            NamespaceKind::Operation(offer) if member.visibility == Visibility::Public => {
+                Some((operation, offer))
+            }
+            _ => None,
+        }
+    }
+    pub fn controls(
+        &self,
+        effect: &lash_vocabulary::EffectName,
+    ) -> Option<BTreeSet<crate::EffectControl>> {
+        let (_, offer) = self.operation(effect)?;
+        let controls = controls(&offer.controls);
+        (!controls.is_empty()).then_some(controls)
+    }
+    pub fn resolve(&self, written: &[&str], spelling: Spelling) -> Resolution<'_> {
+        for (package, members) in &self.packages {
+            if written.len() < package.len()
+                || !package
+                    .iter()
+                    .zip(written)
+                    .all(|(a, b)| spelling.spell(SpellKind::PathSegment, a) == *b)
+            {
+                continue;
+            }
+            let tail = &written[package.len()..];
+            let Some((word, rest)) = tail.split_first() else {
+                return Resolution::Namespace;
+            };
+            for (segment, member) in members {
+                if member.visibility != Visibility::Public {
+                    continue;
+                }
+                let kind = match &member.kind {
+                    NamespaceKind::Type(_) | NamespaceKind::Error => SpellKind::TypeName,
+                    _ => SpellKind::Member,
+                };
+                if spelling.spell(kind, segment) != *word {
+                    continue;
+                }
+                if let NamespaceKind::Operation(offered) = &member.kind {
+                    return if rest.is_empty() {
+                        Resolution::Operation {
+                            operation: QualifiedOperation {
+                                package: package.clone(),
+                                name: segment.clone(),
+                            },
+                            offered,
+                        }
+                    } else {
+                        Resolution::Unknown
+                    };
+                }
+                let nested = match (&member.kind, rest) {
+                    (_, []) => None,
+                    (NamespaceKind::Type(ty), [word]) => match ty
+                        .members
+                        .iter()
+                        .find(|(name, _)| spelling.spell(SpellKind::Member, name) == *word)
+                    {
+                        Some(member) => Some(member),
+                        None => return Resolution::Unknown,
+                    },
+                    _ => return Resolution::Unknown,
+                };
+                return Resolution::Export {
+                    package,
+                    segment,
+                    export: &member.kind,
+                    member: nested,
+                };
+            }
+            return Resolution::Unknown;
+        }
+        for package in &self.deferred {
+            if written.len() == package.len() + 1
+                && package
+                    .iter()
+                    .zip(written)
+                    .all(|(a, b)| spelling.spell(SpellKind::PathSegment, a) == *b)
+                && let Some(name) = spelling.unspell(SpellKind::Member, written[package.len()])
+            {
+                return Resolution::Deferred {
+                    operation: QualifiedOperation {
+                        package: package.clone(),
+                        name,
+                    },
+                };
+            }
+        }
+        if self
+            .packages
+            .keys()
+            .chain(self.deferred.iter())
+            .any(|package| {
+                written.len() <= package.len()
+                    && package
+                        .iter()
+                        .zip(written)
+                        .all(|(a, b)| spelling.spell(SpellKind::PathSegment, a) == *b)
+            })
+        {
+            Resolution::Namespace
+        } else {
+            Resolution::Unknown
+        }
+    }
+    pub fn misspelled(&self, written: &[&str], spelling: Spelling) -> Option<Misspelled> {
+        if matches!(
+            self.resolve(written, spelling),
+            Resolution::Operation { .. } | Resolution::Deferred { .. }
+        ) {
+            return None;
+        }
+        [Spelling::TypeScript, Spelling::Python]
+            .into_iter()
+            .find_map(|other| match self.resolve(written, other) {
+                Resolution::Operation { operation, .. } | Resolution::Deferred { operation } => {
+                    Some(Misspelled {
+                        repair: spell_operation(spelling, &operation),
+                        operation,
+                    })
+                }
+                _ => None,
+            })
+    }
+    pub fn is_root(&self, root: &str) -> bool {
+        self.packages
+            .keys()
+            .chain(self.deferred.iter())
+            .any(|path| path.as_slice()[0].as_str() == root)
     }
 }
-
-fn dotted<'a>(segments: impl IntoIterator<Item = &'a Segment>) -> String {
-    segments
-        .into_iter()
+impl NamespaceView for Namespaces {
+    fn exports(&self, path: &PackagePath) -> Option<&BTreeMap<Segment, NamespaceMember>> {
+        self.packages.get(path)
+    }
+    fn paths(&self) -> Vec<PackagePath> {
+        self.packages.keys().cloned().collect()
+    }
+}
+fn dotted(path: &PackagePath) -> String {
+    path.iter()
         .map(Segment::as_str)
         .collect::<Vec<_>>()
         .join(".")
 }
-
-impl Namespaces {
-    /// The tree of `view`'s code packages and `operations`.
-    ///
-    /// # Errors
-    ///
-    /// [`NamespaceRefusal`]: an offered operation at a code export that is
-    /// no operation, or at an operation export under another contract than
-    /// the package declares, a package path equal to another package's export, or
-    /// a root that is reserved (`lash`, a dialect global, a
-    /// printer-generated name, a root of lash's own packages).
-    pub fn build(
-        view: &dyn ExportView,
-        mut operations: Operations,
-    ) -> Result<Self, NamespaceRefusal> {
-        let mut code = BTreeMap::new();
-        for path in view.paths() {
-            if let Some(exports) = view.exports(&path) {
-                code.insert(path, exports.clone());
-            }
-        }
-        let packages = code
-            .keys()
-            .cloned()
-            .chain(operations.keys().map(|operation| operation.package.clone()))
-            .collect::<BTreeSet<_>>();
-        // What each node exports, by segment: its code exports and its
-        // operations, named for a refusal.
-        let mut exports = BTreeMap::<Vec<Segment>, BTreeMap<Segment, String>>::new();
-        for (path, members) in &code {
-            for segment in members.keys() {
-                exports.entry(path.as_slice().to_vec()).or_default().insert(
-                    segment.clone(),
-                    format!("{}.{segment}", dotted(path.iter())),
-                );
-            }
-        }
-        for operation in operations.keys() {
-            exports
-                .entry(operation.package.as_slice().to_vec())
-                .or_default()
-                .insert(operation.name.clone(), operation.effect_name().to_string());
-        }
-        let mut nodes = BTreeSet::new();
-        for package in &packages {
-            let segments = package.as_slice();
-            let root = segments[0].as_str();
-            let reserved = (root == "lash")
-                .then(|| "lash's own namespace".to_owned())
-                .or_else(|| view.reserves(root));
-            if let Some(by) = reserved {
-                return Err(NamespaceRefusal::ReservedRoot {
-                    path: dotted(segments),
-                    root: root.to_owned(),
-                    by,
-                });
-            }
-            for end in 1..=segments.len() {
-                let (parent, segment) = (&segments[..end - 1], &segments[end - 1]);
-                if let Some(export) = exports.get(parent).and_then(|node| node.get(segment)) {
-                    return Err(NamespaceRefusal::PathIsExport {
-                        path: dotted(segments),
-                        package: dotted(parent),
-                        export: export.clone(),
-                    });
-                }
-                nodes.insert(segments[..end].to_vec());
-            }
-        }
-        // One path, one owner. An offered operation at a segment a code
-        // package exports as anything but an operation would shadow the
-        // code, so it is refused naming both. One the package declares is
-        // performed under the package's declared requirement, the one its
-        // own bodies state: a runner serves it under that contract
-        // (PKG-RUNNER), so a direct perform and a member body's state one
-        // requirement.
-        for (operation, offered) in &mut operations {
-            let mut path = operation.package.as_slice().to_vec();
-            path.push(operation.name.clone());
-            let class = crate::classify_package_path(view, &path);
-            offered.visibility = if class == crate::PackagePathClass::Internal {
-                crate::Visibility::Internal
-            } else {
-                crate::Visibility::Public
-            };
-            let Some(export) = code
-                .get(&operation.package)
-                .and_then(|members| members.get(&operation.name))
-            else {
-                if class != crate::PackagePathClass::Outside {
-                    return Err(NamespaceRefusal::UndeclaredOperation {
-                        operation: operation.effect_name().to_string(),
-                        package: path[0].as_str().to_owned(),
-                    });
-                }
-                continue;
-            };
-            let package = dotted(operation.package.iter());
-            let Export::Operation(declared) = export else {
-                return Err(NamespaceRefusal::OperationIsExport {
-                    operation: operation.effect_name().to_string(),
-                    export: format!("{package}.{}", operation.name),
-                    package,
-                });
-            };
-            if offered.requirement.contract != declared.requirement.contract {
-                return Err(NamespaceRefusal::OperationContractDiffers {
-                    operation: operation.effect_name().to_string(),
-                    package,
-                    offered: offered.requirement.contract.to_string(),
-                    declared: declared.requirement.contract.to_string(),
-                });
-            }
-            offered.requirement.clone_from(&declared.requirement);
-        }
-        Ok(Self {
-            operations,
-            code,
-            nodes,
-        })
-    }
-
-    /// The tree of `operations` alone, with no code package.
-    ///
-    /// # Errors
-    ///
-    /// As [`Self::build`].
-    pub fn of_operations(operations: Operations) -> Result<Self, NamespaceRefusal> {
-        Self::build(&crate::NoPackages, operations)
-    }
-
-    /// The tree of the operations `signatures` names, each served under
-    /// `contract` by the catalog tool of its effect name, and those of
-    /// `controls` declaring theirs: what an embedder that types and serves
-    /// its effects itself, with no tool catalog, lowers against.
-    ///
-    /// # Errors
-    ///
-    /// As [`Self::of_requirements`].
-    pub fn of_effects(
-        signatures: &BTreeMap<EffectName, lash_kernel_doc::Signature>,
-        contract: &lash_kernel_doc::ContractId,
-        controls: &BTreeMap<EffectName, BTreeSet<EffectControl>>,
-    ) -> Result<Self, NamespaceRefusal> {
-        let requirements = signatures
-            .iter()
-            .map(|(effect, signature)| {
-                (
-                    effect.clone(),
-                    OperationRequirement::new(signature.clone(), contract.clone()),
-                )
-            })
-            .collect();
-        Self::of_requirements(&requirements, controls)
-    }
-
-    /// The tree of the operations `requirements` names, each offered under
-    /// its requirement by the catalog tool of its effect name, and those of
-    /// `controls` declaring theirs: what a document is read back against
-    /// its own manifest.
-    ///
-    /// # Errors
-    ///
-    /// [`NamespaceRefusal::NotAnOperation`] for an effect name that is no
-    /// canonical operation; otherwise as [`Self::build`].
-    pub fn of_requirements(
-        requirements: &BTreeMap<EffectName, OperationRequirement>,
-        controls: &BTreeMap<EffectName, BTreeSet<EffectControl>>,
-    ) -> Result<Self, NamespaceRefusal> {
-        let mut operations = Operations::new();
-        for (effect, requirement) in requirements {
-            let operation = QualifiedOperation::from_effect(effect).map_err(|error| {
-                NamespaceRefusal::NotAnOperation {
-                    effect: effect.to_string(),
-                    message: error.to_string(),
-                }
-            })?;
-            let offered = Offered::tool(effect.as_str(), requirement.clone())
-                .with_controls(controls.get(effect).cloned().unwrap_or_default());
-            operations.insert(operation, offered);
-        }
-        Self::of_operations(operations)
-    }
-
-    /// The offered operations.
-    #[must_use]
-    pub fn operations(&self) -> &Operations {
-        &self.operations
-    }
-
-    /// Each offered operation's effect name with its signature: what the
-    /// checker admits a document against.
-    #[must_use]
-    pub fn signatures(&self) -> BTreeMap<EffectName, lash_kernel_doc::Signature> {
-        self.operations
-            .iter()
-            .map(|(operation, offered)| {
-                (
-                    operation.effect_name(),
-                    offered.requirement.signature.clone(),
-                )
-            })
-            .collect()
-    }
-
-    /// The operation offered under `effect`.
-    #[must_use]
-    pub fn operation(&self, effect: &EffectName) -> Option<(&QualifiedOperation, &Offered)> {
-        let operation = QualifiedOperation::from_effect(effect).ok()?;
-        self.operations.get_key_value(&operation)
-    }
-
-    /// The turn controls `effect` declares; empty for an effect that
-    /// declares none or is not offered.
-    #[must_use]
-    pub fn controls(&self, effect: &EffectName) -> Option<&BTreeSet<EffectControl>> {
-        self.operation(effect)
-            .map(|(_, offered)| &offered.controls)
-            .filter(|controls| !controls.is_empty())
-    }
-
-    /// What `written`, a dotted path in `spelling`, names.
-    #[must_use]
-    pub fn resolve(&self, written: &[&str], spelling: Spelling) -> Resolution<'_> {
-        if let Some(resolved) = self.resolve_operation(written, spelling) {
-            return resolved;
-        }
-        // Only the package path is spelled as path segments: an export
-        // or a member after it is spelled by its own kind (`DataQuanta`).
-        let segments = written
-            .iter()
-            .map(|segment| spelling.unspell(SpellKind::PathSegment, segment))
-            .collect::<Vec<_>>();
-        for end in 1..written.len() {
-            let Some(package) = segments[..end].iter().cloned().collect::<Option<Vec<_>>>() else {
-                break;
-            };
-            let Ok(path) = PackagePath::try_from(package) else {
-                continue;
-            };
-            let Some(exports) = self.code.get(&path) else {
-                continue;
-            };
-            let (package, _) = self
-                .code
-                .get_key_value(&path)
-                .unwrap_or_else(|| unreachable!("the path was just found"));
-            let rest = &written[end..];
-            // An export is written in its own kind's spelling only: a
-            // function as a member, a type or an error as a type name.
-            let found = [SpellKind::Member, SpellKind::TypeName]
-                .into_iter()
-                .filter_map(|kind| Some((kind, spelling.unspell(kind, rest[0])?)))
-                .filter_map(|(kind, segment)| Some((kind, exports.get_key_value(&segment)?)))
-                .find_map(|(kind, found)| (spelled_as(found.1) == kind).then_some(found));
-            let Some((segment, export)) = found else {
-                continue;
-            };
-            let member = match (export, rest.get(1)) {
-                (_, None) => None,
-                (Export::Type(value_type), Some(member)) if rest.len() == 2 => {
-                    let Some(found) = spelling
-                        .unspell(SpellKind::Member, member)
-                        .and_then(|member| value_type.members.get_key_value(&member))
-                    else {
-                        return Resolution::Unknown;
-                    };
-                    Some(found)
-                }
-                _ => return Resolution::Unknown,
-            };
-            return Resolution::Export {
-                package,
-                segment,
-                export,
-                member,
-            };
-        }
-        match segments.into_iter().collect::<Option<Vec<_>>>() {
-            Some(package) if self.nodes.contains(&package) => Resolution::Namespace,
-            _ => Resolution::Unknown,
-        }
-    }
-
-    fn resolve_operation(&self, written: &[&str], spelling: Spelling) -> Option<Resolution<'_>> {
-        let (name, package) = written.split_last()?;
-        let package = package
-            .iter()
-            .map(|segment| spelling.unspell(SpellKind::PathSegment, segment))
-            .collect::<Option<Vec<_>>>()?;
-        let package = PackagePath::try_from(package).ok()?;
-        let name = spelling.unspell(SpellKind::Member, name)?;
-        let (operation, offered) = self
-            .operations
-            .get_key_value(&QualifiedOperation { package, name })?;
-        Some(Resolution::Operation { operation, offered })
-    }
-
-    /// The offered operation `written` names in another dialect's spelling
-    /// of its last segment, and how `spelling` writes it: TypeScript's
-    /// `inbox.send_item` is `inbox.sendItem`, Python's `inbox.sendItem` is
-    /// `inbox.send_item`. `None` when `written` names no offered operation
-    /// so, or names one as `spelling` writes it.
-    #[must_use]
-    pub fn misspelled(&self, written: &[&str], spelling: Spelling) -> Option<Misspelled> {
-        if matches!(
-            self.resolve_operation(written, spelling),
-            Some(Resolution::Operation { .. })
-        ) {
-            return None;
-        }
-        let (name, package) = written.split_last()?;
-        let package = package
-            .iter()
-            .map(|segment| Segment::new(*segment).ok())
-            .collect::<Option<Vec<_>>>()?;
-        let package = PackagePath::try_from(package).ok()?;
-        [Spelling::TypeScript, Spelling::Python]
-            .into_iter()
-            .filter_map(|other| other.unspell(SpellKind::Member, name))
-            .map(|name| QualifiedOperation {
-                package: package.clone(),
-                name,
-            })
-            .find(|operation| self.operations.contains_key(operation))
-            .map(|operation| Misspelled {
-                repair: spell_operation(spelling, &operation),
-                operation,
-            })
-    }
-
-    /// Whether `root` is the first segment of a package path.
-    #[must_use]
-    pub fn is_root(&self, root: &str) -> bool {
-        Segment::new(root).is_ok_and(|root| self.nodes.contains(std::slice::from_ref(&root)))
+fn conflict(path: &PackagePath, other: &PackagePath) -> NamespaceRefusal {
+    NamespaceRefusal::PathConflict {
+        path: dotted(path),
+        other: dotted(other),
     }
 }
-
-/// The code packages the tree is composed from, as member dispatch reads
-/// them: a front end selects a value's member among these.
-impl ExportView for Namespaces {
-    fn exports(&self, path: &PackagePath) -> Option<&BTreeMap<Segment, Export>> {
-        self.code.get(path)
+pub fn controls(value: &lash_vocabulary::TurnControls) -> BTreeSet<crate::EffectControl> {
+    let mut controls = BTreeSet::new();
+    if value.contains(lash_vocabulary::TurnControlKind::Finish) {
+        controls.insert(crate::EffectControl::Finish);
     }
+    if value.contains(lash_vocabulary::TurnControlKind::SwitchAgentFrame) {
+        controls.insert(crate::EffectControl::SwitchAgentFrame);
+    }
+    controls
+}
 
-    fn paths(&self) -> Vec<PackagePath> {
-        self.code.keys().cloned().collect()
+/// Deferred calls pack their arguments into one JSON list. Resolution narrows
+/// that payload at first use; no provider is invoked while lowering.
+pub fn deferred_signature() -> lash_vocabulary::types::Signature {
+    use lash_vocabulary::{
+        names::Name,
+        types::{Param, Signature, Type},
+    };
+    Signature {
+        params: vec![Param {
+            name: Name::new("args"),
+            ty: Type::Json,
+            optional: false,
+        }],
+        result: Type::Json,
+    }
+}
+pub fn service_name(dialect: &str, member: &str) -> lash_vocabulary::names::QualifiedName {
+    lash_vocabulary::names::QualifiedName {
+        package: PackagePath::new(
+            Segment::new(dialect).unwrap_or_else(|error| panic!("dialect package: {error}")),
+        ),
+        member: Segment::new(member).unwrap_or_else(|error| panic!("service member: {error}")),
+        type_member: None,
+    }
+}
+pub fn sleep_signature() -> lash_vocabulary::types::Signature {
+    use lash_vocabulary::{
+        names::Name,
+        types::{Param, Signature, Type},
+    };
+    Signature {
+        params: vec![Param {
+            name: Name::new("milliseconds"),
+            ty: Type::Int,
+            optional: false,
+        }],
+        result: Type::Null,
     }
 }

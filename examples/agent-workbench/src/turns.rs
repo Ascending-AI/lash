@@ -16,8 +16,10 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use futures_util::{FutureExt as _, StreamExt as _};
+use lash::TurnInput;
 use lash::sync::MutexExt;
-use lash::{SessionId, TurnId, TurnInput};
+use lash_vocabulary::identity::SessionId;
+use lash_vocabulary::identity::TurnId;
 use serde_json::json;
 
 use crate::{

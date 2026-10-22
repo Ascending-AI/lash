@@ -144,6 +144,11 @@ pub use lash_core_execution::trace;
 pub mod facade_support {
     pub use crate::runtime::effect::scope_status;
     pub use crate::runtime::{DurableSessionOps, EMPTY_HEAD_REVISION, QueueWithdrawalObservation};
+    pub use lash_core_execution::runtime::actor::resolutions::{
+        CommittedUse, FirstUse, ResolutionError, ResolutionValidator, registration,
+        start_requirements,
+    };
+    pub use lash_core_execution::runtime::actor::route_selection::select_routes;
 
     pub use lash_core_execution::runtime::process::steps::{
         RecordedProcessStep, process_step_call, read_process_steps, read_process_tool_call,
@@ -412,23 +417,16 @@ pub mod facade_support {
     pub use lash_protocol_types::ErrorEnvelope;
     pub use lash_protocol_types::MessageSequence;
     pub use lash_protocol_types::ModelToolReturnPart;
-    pub use lash_protocol_types::ProviderSchemaCapabilities;
     pub use lash_protocol_types::ReportedFailure;
-    pub use lash_protocol_types::ResolvedSchema;
     pub use lash_protocol_types::RetryProgress;
-    pub use lash_protocol_types::SchemaPurpose;
-    pub use lash_protocol_types::SchemaResolutionError;
-    pub use lash_protocol_types::SchemaResolutionRequest;
     pub use lash_protocol_types::SessionStreamEvent;
     pub use lash_protocol_types::StreamMessageKind;
-    pub use lash_protocol_types::ToolCatalogBuildError;
     pub use lash_protocol_types::TurnFinish;
     pub use lash_protocol_types::TurnOutcome;
     pub use lash_protocol_types::append_assistant_text_part;
     pub use lash_protocol_types::build_tool_catalog;
     pub use lash_protocol_types::normalized_response_parts;
     pub use lash_protocol_types::reasoning_part;
-    pub use lash_protocol_types::resolve_schema;
     pub use lash_protocol_types::shared_parts;
     pub use lash_protocol_types::visible_response_text_from_parts;
     pub use lash_protocol_types::{ModelToolOutcome, ModelToolReturn};
@@ -441,6 +439,13 @@ pub mod facade_support {
     pub use lash_trace::TraceRuntimeSubject;
     pub use lash_trace::TraceSink;
     pub use lash_trace::TraceSinkError;
+    pub use lash_vocabulary::ToolCatalogBuildError;
+    pub use lash_vocabulary::schema_contract::ProviderSchemaCapabilities;
+    pub use lash_vocabulary::schema_contract::ResolvedSchema;
+    pub use lash_vocabulary::schema_contract::SchemaPurpose;
+    pub use lash_vocabulary::schema_contract::SchemaResolutionError;
+    pub use lash_vocabulary::schema_contract::SchemaResolutionRequest;
+    pub use lash_vocabulary::schema_contract::resolve_schema;
     /// The schemars crate first-party config owners derive their schemas
     /// through (`#[schemars(crate = "lash_core::facade_support::schemars")]`).
     pub use schemars;
@@ -476,28 +481,27 @@ pub use attachments::{
 };
 pub use lash_core_execution::DeferredMatch;
 pub use lash_core_execution::DeferredOutcome;
-pub use lash_core_execution::DeferredResolutionPolicy;
 pub use lash_core_execution::DeferredResolveContext;
 pub use lash_core_execution::DeferredToolProvider;
 pub use lash_core_execution::DeferredToolProviderRegistration;
-pub use lash_core_execution::EffectName;
-pub use lash_core_execution::ExecutionBinding;
-pub use lash_core_execution::ExecutionBindingUnreadable;
 pub use lash_core_execution::Judgement;
-pub use lash_core_execution::LinkSource;
 /// The run spec a frame switch's follow-on runs under (FIG-6021).
 pub use lash_core_execution::NextRun;
-pub use lash_core_execution::ObligationToken;
+pub use lash_core_execution::RouteSource;
 pub use lash_core_execution::turn_stop_from_tool_control;
 pub use lash_core_execution::{
     DispatchGrant, DispatchGrantRefusal, DispatchRefusal, DispatchTarget, DispatchTransform,
     TransformRefusal,
 };
+pub use lash_vocabulary::claims::ObligationToken;
+pub use lash_vocabulary::names::EffectName;
+pub use lash_vocabulary::providers::DeferredResolutionPolicy;
+pub use lash_vocabulary::providers::ExecutionBinding;
+pub use lash_vocabulary::providers::ExecutionBindingUnreadable;
 
-pub use lash_core_execution::OperationLink;
+pub use lash_core_execution::OperationRoute;
 pub use lash_core_execution::ProviderKey;
 pub use lash_core_execution::RecordedSurface;
-pub use lash_core_execution::RegistryKind;
 pub use lash_core_execution::SurfaceCollision;
 pub use lash_core_execution::SurfaceDuplicateTool;
 pub use lash_core_execution::SurfaceEntry;
@@ -507,36 +511,88 @@ pub use lash_core_execution::ToolSurfaceDrift;
 pub use lash_core_execution::ToolSurfaceDriftKind;
 pub use lash_core_execution::judge;
 pub use lash_core_execution::operation_contract_changed;
-/// What pins an operation's meaning: the id a tool serves and code requires.
-pub use lash_kernel_doc::ContractId;
+pub use lash_protocol_types::AttachmentCreateMeta;
+pub use lash_protocol_types::AttachmentId;
+pub use lash_protocol_types::AttachmentRef;
+pub use lash_protocol_types::AttachmentTypeMetadata;
+pub use lash_protocol_types::BindingChanges;
+pub use lash_protocol_types::CallResultSummary;
+pub use lash_protocol_types::CancelOrigin;
+pub use lash_protocol_types::CancelRequest;
+pub use lash_protocol_types::CellControl;
+pub use lash_protocol_types::CellDefect;
+pub use lash_protocol_types::CellFailure;
+pub use lash_protocol_types::CellFailureKind;
+pub use lash_protocol_types::CellFailureRepair;
+pub use lash_protocol_types::CellOutcome;
+pub use lash_protocol_types::CellPrint;
+pub use lash_protocol_types::CellRecord;
+pub use lash_protocol_types::CheckpointKind;
+pub use lash_protocol_types::CompletionCandidate;
+pub use lash_protocol_types::CompletionDisposition;
+pub use lash_protocol_types::DecidedCompletion;
+pub use lash_protocol_types::DegradedBinding;
+pub use lash_protocol_types::ExecCodeFailure;
+pub use lash_protocol_types::ExecCodeFailureReason;
+pub use lash_protocol_types::ExecResponse;
+pub use lash_protocol_types::ExecutedCall;
+pub use lash_protocol_types::ExecutedCallOutcome;
+pub use lash_protocol_types::ExecutionBudgets;
+pub use lash_protocol_types::ExecutionBudgetsConfig;
+pub use lash_protocol_types::ExecutionBudgetsError;
+pub use lash_protocol_types::ExecutionLimit;
+pub use lash_protocol_types::FrameKey;
+pub use lash_protocol_types::FrameKeyError;
+pub use lash_protocol_types::InternalPartKind;
+pub use lash_protocol_types::LlmCallError;
+pub use lash_protocol_types::LlmUsage;
+pub use lash_protocol_types::MediaType;
+pub use lash_protocol_types::Message;
+pub use lash_protocol_types::MessageOrigin;
+pub use lash_protocol_types::MessageRole;
+pub use lash_protocol_types::OutputRetentionPolicy;
+pub use lash_protocol_types::OutputValue;
+pub use lash_protocol_types::Part;
+pub use lash_protocol_types::PartKind;
+pub use lash_protocol_types::PluginMessage;
+pub use lash_protocol_types::PluginRuntimeEvent;
+pub use lash_protocol_types::ProviderAttemptLimits;
+pub use lash_protocol_types::RetainedOutput;
+pub use lash_protocol_types::RetainedValue;
+pub use lash_protocol_types::SessionAppendNode;
+pub use lash_protocol_types::TerminationMode;
+pub use lash_protocol_types::TextProjectionMetadata;
+pub use lash_protocol_types::TokenUsageOverflow;
+pub use lash_protocol_types::ToolCallOutcome;
+pub use lash_protocol_types::ToolCallOutput;
+pub use lash_protocol_types::ToolCallRecord;
+pub use lash_protocol_types::ToolCancellation;
+pub use lash_protocol_types::ToolCatalog;
+pub use lash_protocol_types::ToolCatalogEntry;
+pub use lash_protocol_types::ToolCheckConflict;
+pub use lash_protocol_types::ToolCheckPhase;
+pub use lash_protocol_types::ToolCheckReply;
+pub use lash_protocol_types::ToolCheckVerdictKind;
+pub use lash_protocol_types::ToolControl;
+pub use lash_protocol_types::ToolFailure;
+pub use lash_protocol_types::ToolFailureCause;
+pub use lash_protocol_types::ToolFailureClass;
+pub use lash_protocol_types::ToolFailureSource;
+pub use lash_protocol_types::ToolIntentIdentity;
+pub use lash_protocol_types::ToolValue;
+pub use lash_protocol_types::ToolView;
+pub use lash_protocol_types::ToolViewBlock;
+pub use lash_protocol_types::ToolViewMeta;
+pub use lash_protocol_types::TurnControl;
+pub use lash_protocol_types::TurnOutputSource;
+pub use lash_protocol_types::TurnReply;
+pub use lash_protocol_types::ValueShape;
+pub use lash_protocol_types::ValueShapeLimits;
 pub use lash_protocol_types::llm::attachment_delivery::ProviderFileScope;
-pub use lash_protocol_types::{
-    AttachmentCreateMeta, AttachmentId, AttachmentRef, AttachmentTypeMetadata, Backoff, BatchId,
-    BindingChanges, BoundedRetry, CallResultSummary, CancelOrigin, CancelRequest, CellControl,
-    CellDefect, CellFailure, CellFailureKind, CellFailureRepair, CellOutcome, CellPrint,
-    CellRecord, CheckpointKind, CompletionCandidate, CompletionDisposition, ContractSource,
-    DecidedCompletion, DeclarationRefusal, DegradedBinding, ExecCodeFailure, ExecCodeFailureReason,
-    ExecResponse, ExecutedCall, ExecutedCallOutcome, ExecutionBudgets, ExecutionBudgetsConfig,
-    ExecutionBudgetsError, ExecutionLimit, ExecutionPolicy, FinishDeclaration, FrameKey,
-    FrameKeyError, HostTag, InputId, InternalPartKind, IntoOperation, JsonSchema, LimitCause,
-    LlmCallError, LlmUsage, MediaType, Message, MessageOrigin, MessageRole, NodeId, OutcomeShape,
-    OutputRetentionPolicy, OutputValue, ParkBound, Part, PartKind, PluginMessage,
-    PluginRuntimeEvent, ProjectionMode, ProviderAttemptLimits, QualifiedOperation,
-    RegistrationRefused, RetainedOutput, RetainedValue, RunId, SchemaAdmissionError,
-    SchemaContract, SchemaDialect, SchemaProjectionOverride, SchemaProjectionPolicy,
-    SessionAppendNode, TerminationMode, TextProjectionMetadata, TokenUsageOverflow,
-    ToolArgumentProjectionPolicy, ToolBound, ToolBounds, ToolCallOutcome, ToolCallOutput,
-    ToolCallRecord, ToolCancellation, ToolCatalog, ToolCatalogBuildError, ToolCatalogEntry,
-    ToolCheckConflict, ToolCheckPhase, ToolCheckReply, ToolCheckVerdictKind, ToolContract,
-    ToolControl, ToolDeclaration, ToolDefinition, ToolDiscovery, ToolDraft, ToolFailure,
-    ToolFailureCause, ToolFailureClass, ToolFailureSource, ToolId, ToolIntentIdentity,
-    ToolIntentKind, ToolManifest, ToolOutputContract, ToolValue, ToolView, ToolViewBlock,
-    ToolViewMeta, TurnControl, TurnControlKind, TurnControls, TurnId, TurnOutputSource, TurnReply,
-    ValueMismatch, ValueShape, ValueShapeLimits, standard_name,
-};
 pub(crate) use lash_protocol_types::{
     BaseRenderCache, messages_are_prompt_resume_safe, visible_response_parts,
 };
+
 pub use lash_protocol_types::{
     llm::types::AttemptOutcome, llm::types::AttemptRecord, llm::types::AttemptUsageOutcome,
     llm::types::ChargeSafetyDecision, llm::types::ChargeSafetyDenialReason,
@@ -556,6 +612,51 @@ pub use lash_protocol_types::{
 };
 pub use lash_sansio::CheckpointDelivery;
 pub(crate) use lash_sansio::build_turn;
+pub use lash_vocabulary::ToolCatalogBuildError;
+pub use lash_vocabulary::ToolIntentKind;
+pub use lash_vocabulary::claims::RegistryKind;
+pub use lash_vocabulary::identity::BatchId;
+pub use lash_vocabulary::identity::InputId;
+pub use lash_vocabulary::identity::NodeId;
+pub use lash_vocabulary::identity::RunId;
+pub use lash_vocabulary::identity::TurnId;
+pub use lash_vocabulary::json_schema::JsonSchema;
+pub use lash_vocabulary::json_schema::SchemaAdmissionError;
+pub use lash_vocabulary::json_schema::ValueMismatch;
+pub use lash_vocabulary::names::QualifiedOperation;
+/// What pins an operation's meaning: the id a tool serves and code requires.
+pub use lash_vocabulary::operations::ContractId;
+pub use lash_vocabulary::schema_contract::ProjectionMode;
+pub use lash_vocabulary::schema_contract::SchemaContract;
+pub use lash_vocabulary::schema_contract::SchemaDialect;
+pub use lash_vocabulary::schema_contract::SchemaProjectionOverride;
+pub use lash_vocabulary::schema_contract::SchemaProjectionPolicy;
+pub use lash_vocabulary::tool_contract::Backoff;
+pub use lash_vocabulary::tool_contract::BoundedRetry;
+pub use lash_vocabulary::tool_contract::ContractSource;
+pub use lash_vocabulary::tool_contract::ExecutionPolicy;
+pub use lash_vocabulary::tool_contract::HostTag;
+pub use lash_vocabulary::tool_contract::IntoOperation;
+pub use lash_vocabulary::tool_contract::LimitCause;
+pub use lash_vocabulary::tool_contract::ParkBound;
+pub use lash_vocabulary::tool_contract::RegistrationRefused;
+pub use lash_vocabulary::tool_contract::ToolArgumentProjectionPolicy;
+pub use lash_vocabulary::tool_contract::ToolBound;
+pub use lash_vocabulary::tool_contract::ToolBounds;
+pub use lash_vocabulary::tool_contract::ToolContract;
+pub use lash_vocabulary::tool_contract::ToolDefinition;
+pub use lash_vocabulary::tool_contract::ToolDiscovery;
+pub use lash_vocabulary::tool_contract::ToolDraft;
+pub use lash_vocabulary::tool_contract::ToolId;
+pub use lash_vocabulary::tool_contract::ToolManifest;
+pub use lash_vocabulary::tool_contract::ToolOutputContract;
+pub use lash_vocabulary::tool_contract::standard_name;
+pub use lash_vocabulary::tool_declaration::DeclarationRefusal;
+pub use lash_vocabulary::tool_declaration::FinishDeclaration;
+pub use lash_vocabulary::tool_declaration::OutcomeShape;
+pub use lash_vocabulary::tool_declaration::ToolDeclaration;
+pub use lash_vocabulary::tool_declaration::TurnControlKind;
+pub use lash_vocabulary::tool_declaration::TurnControls;
 pub use protocol_build::ProtocolBuildInput;
 pub use tool_provider::{ToolAttachmentClient, ToolDirectCompletionClient, ToolSessionLlmProfile};
 pub use tool_registry::ToolRegistry;
@@ -576,8 +677,8 @@ pub use lash_core_execution::ReferrerClaim;
 pub use lash_core_execution::ReferrerGuard;
 pub use lash_core_execution::ReferrerStore;
 pub use lash_core_execution::ResolvedArtifactCleanup;
-pub use lash_core_execution::RuntimeOwner;
 pub use lash_core_execution::UploadReferrerId;
+pub use lash_vocabulary::identity::RuntimeOwner;
 
 pub use lash_core_execution::DurableConfig;
 pub use lash_core_execution::DurableSettings;
@@ -803,10 +904,10 @@ pub use runtime::PendingTurnInputSuffixCancelOutcome;
 
 pub use runtime::ProcessCommand;
 
+pub use lash_vocabulary::providers::ProcessComponentId;
+pub use lash_vocabulary::providers::ProcessComponentIdError;
 pub use runtime::ProcessComponentConfig;
 pub use runtime::ProcessComponentEntry;
-pub use runtime::ProcessComponentId;
-pub use runtime::ProcessComponentIdError;
 pub use runtime::ProcessConfigKey;
 
 pub use runtime::ProcessDefinitionId;
@@ -828,7 +929,7 @@ pub use runtime::ProcessEnvRef;
 pub use runtime::ProcessEnvRefusal;
 pub use runtime::ProcessEnvSelection;
 
-pub use runtime::ProcessId;
+pub use lash_vocabulary::identity::ProcessId;
 pub use runtime::ProcessIdMint;
 
 pub use runtime::ProcessLimits;
@@ -910,6 +1011,7 @@ pub use runtime::{OwnerRevisionConflict, RuntimeErrorCause};
 
 pub use runtime::ScopeId;
 
+pub use lash_vocabulary::identity::SessionId;
 pub use runtime::ScopeStorageError;
 pub use runtime::SegmentProgress;
 pub use runtime::ServedOnly;
@@ -921,7 +1023,6 @@ pub use runtime::SessionCursorError;
 pub use runtime::SessionDeleteContext;
 pub use runtime::SessionDeleteExecution;
 pub use runtime::SessionEntry;
-pub use runtime::SessionId;
 pub use runtime::SessionListFilter;
 pub use runtime::SessionObservationEvent;
 pub use runtime::SessionObservationEventPayload;
@@ -988,22 +1089,47 @@ pub(crate) use runtime::QueuedWorkBatchDraft;
 pub(crate) use runtime::QueuedWorkCompletion;
 pub(crate) use runtime::QueuedWorkEnqueueOutcome;
 
+pub use lash_vocabulary::observation::RunObservation;
 /// Process observation: the snapshot, cursor, stream events and bounded
 /// live replay of one process (D-PROCOBS).
-pub use runtime::{
-    InMemoryProcessReplayStore, InMemoryProcessReplayStoreConfig, LanguageExecutionObservation,
-    ParsedProcessObservationCursor, ProcessDocumentIdentity, ProcessEffectCoverage,
-    ProcessEffectEvidence, ProcessEffectGapReason, ProcessObservation, ProcessObservationCursor,
-    ProcessObservationCursorError, ProcessObservationEnd, ProcessObservationEvent,
-    ProcessObservationEventPayload, ProcessObservationGapCause, ProcessObservationIdentity,
-    ProcessObservationReplacement, ProcessReadView, ProcessReplayEventDraft,
-    ProcessReplayGapReason, ProcessReplayOutcome, ProcessReplayPublishLimits, ProcessReplayStore,
-    ProcessReplayStoreError, ProcessReplaySubscribeOutcome, ProcessReplaySubscription,
-    ProcessSequence, ProcessWorkflowFoldError, ProcessWorkflowLiveCoverage,
-    ProcessWorkflowObservation, ProcessWorkflowOverlay, ProcessWorkflowOverlayAccumulator,
-    ProcessWorkflowRan, ProcessWorkflowSite, ProcessWorkflowSiteState, ProcessWorkflowWaitKind,
-    RetainedProcessView, StepBodyStartedObservation, commits_bridge,
-};
+pub use runtime::InMemoryProcessReplayStore;
+pub use runtime::InMemoryProcessReplayStoreConfig;
+pub use runtime::LanguageExecutionObservation;
+pub use runtime::ParsedProcessObservationCursor;
+pub use runtime::ProcessDocumentIdentity;
+pub use runtime::ProcessEffectCoverage;
+pub use runtime::ProcessEffectEvidence;
+pub use runtime::ProcessEffectGapReason;
+pub use runtime::ProcessObservation;
+pub use runtime::ProcessObservationCursor;
+pub use runtime::ProcessObservationCursorError;
+pub use runtime::ProcessObservationEnd;
+pub use runtime::ProcessObservationEvent;
+pub use runtime::ProcessObservationEventPayload;
+pub use runtime::ProcessObservationGapCause;
+pub use runtime::ProcessObservationIdentity;
+pub use runtime::ProcessObservationReplacement;
+pub use runtime::ProcessReadView;
+pub use runtime::ProcessReplayEventDraft;
+pub use runtime::ProcessReplayGapReason;
+pub use runtime::ProcessReplayOutcome;
+pub use runtime::ProcessReplayPublishLimits;
+pub use runtime::ProcessReplayStore;
+pub use runtime::ProcessReplayStoreError;
+pub use runtime::ProcessReplaySubscribeOutcome;
+pub use runtime::ProcessReplaySubscription;
+pub use runtime::ProcessSequence;
+pub use runtime::ProcessWorkflowFoldError;
+pub use runtime::ProcessWorkflowLiveCoverage;
+pub use runtime::ProcessWorkflowOverlay;
+pub use runtime::ProcessWorkflowOverlayAccumulator;
+pub use runtime::ProcessWorkflowRan;
+pub use runtime::ProcessWorkflowSite;
+pub use runtime::ProcessWorkflowSiteState;
+pub use runtime::ProcessWorkflowWaitKind;
+pub use runtime::RetainedProcessView;
+pub use runtime::StepBodyStartedObservation;
+pub use runtime::commits_bridge;
 
 pub(crate) use session_model::plugin_runtime_protocol_event;
 
@@ -1107,6 +1233,8 @@ pub use lash_core_execution::tool_live::{
 pub use lash_core_execution::tool_live;
 
 /// Common statement counts supplied to the workflow coverage helper.
-pub use lash_kernel_doc::RanCounts;
+pub use lash_vocabulary::observation::RanCounts;
 
 pub use lash_core_store::model_calls;
+
+pub use lash_core_execution::LinkedExecution;

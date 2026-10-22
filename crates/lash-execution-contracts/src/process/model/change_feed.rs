@@ -2,7 +2,9 @@
 
 use serde::{Deserialize, Serialize};
 
-use super::{ProcessId, ProcessRecord, RetiredProcessStatus};
+use super::ProcessRecord;
+use super::RetiredProcessStatus;
+use lash_vocabulary::identity::ProcessId;
 
 /// Opaque position in a store's Process Change Feed.
 ///

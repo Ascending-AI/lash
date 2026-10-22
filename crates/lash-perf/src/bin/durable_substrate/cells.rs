@@ -9,20 +9,24 @@
 //! padding is a new text at each await.
 
 use lash_protocol_types::{llm::types::StreamBlockEvent, llm::types::StreamBlockKind};
+
 use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Result;
 use lash::tools::{StaticToolExecute, StaticToolProvider};
+use lash_core::LlmOutputPart;
+use lash_core::ToolCall;
+use lash_core::ToolOutcome;
 use lash_core::facade_support::ProviderHandle;
 use lash_core::llm::types::{
     LlmRequest, LlmResponse, LlmRole, LlmStreamEvent, StreamBlockIdentity,
 };
 use lash_core::runtime::durable::session::TurnServices;
-use lash_core::{ExecutionPolicy, LlmOutputPart, ToolCall, ToolOutcome};
 use lash_execution_contracts::backend::Backend;
-use lash_protocol_types::SessionId;
+use lash_vocabulary::identity::SessionId;
+use lash_vocabulary::tool_contract::ExecutionPolicy;
 
 use crate::recorder::Recorder;
 use crate::turn::{ANSWER, Scripts, session_of_admission};
@@ -199,7 +203,7 @@ impl StaticToolExecute for Echo {
 }
 
 fn echo() -> Result<Arc<dyn lash_core::ToolProvider>> {
-    let definition = lash_core::ToolDefinition::raw(
+    let definition = lash_vocabulary::tool_contract::ToolDefinition::raw(
         CELL_TOOL,
         CELL_TOOL_OPERATION,
         "Answers its arguments.",

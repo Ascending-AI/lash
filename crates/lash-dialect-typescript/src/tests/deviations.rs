@@ -204,6 +204,21 @@ const ROWS: &[Row] = &[
         answer: || text("1"),
     },
     Row {
+        code: "TS_TYPED_NUMERIC_KEY",
+        ecmascript: "`value[key]` converts any key to a property key.",
+        dialect: "A computed record read with `key` declared `number` raises `function_argument` for a key that is not a number.",
+        raises: "function_argument",
+        program: |declared| {
+            program(
+                declared,
+                &[("key", "number")],
+                "const value = {now: 7}; return value[key];",
+                "'now' as any",
+            )
+        },
+        answer: || number(7.0),
+    },
+    Row {
         code: "TS_TYPED_ARRAY_ELEMENT",
         ecmascript: "`xs[i]` reads the property `i` of whatever `xs` is.",
         dialect: "With `xs` declared an array and `i` a `number`, a value that is not an array raises `type_error`.",
@@ -297,6 +312,7 @@ rows! {
     boolean_not_raises_on_a_mistyped_operand => "TS_TYPED_BOOLEAN_NOT",
     boolean_condition_raises_on_a_mistyped_test => "TS_TYPED_BOOLEAN_CONDITION",
     boolean_method_raises_on_a_value_that_is_not_a_boolean => "TS_TYPED_BOOLEAN_METHOD",
+    numeric_key_raises_on_a_value_that_is_not_a_number => "TS_TYPED_NUMERIC_KEY",
     array_element_raises_on_a_value_that_is_not_an_array => "TS_TYPED_ARRAY_ELEMENT",
     array_index_out_of_range_raises => "TS_TYPED_ARRAY_INDEX_RANGE",
     array_length_raises_on_a_value_that_is_not_an_array => "TS_TYPED_ARRAY_LENGTH",

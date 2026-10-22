@@ -3,7 +3,7 @@
   "cases": [
     {
       "name": "task error is data until each join observes it",
-      "document": "kernel 1\nnumbers by_spelling\nfn bad() { throw 7 }\nmain {\nlet h = spawn call bad() print \"alive\" try { do join h } catch e { print e } try { do join h } catch e { print e }\n}\n",
+      "document": "kernel 1\nnumbers by_spelling\ndefinition \"function bad() -> Any\\nkernel 1\\nmetering statements\\nbody {\\n  throw 7\\n}\\n\"\nmain {\n  let h = spawn invoke bad()\n  print \"alive\"\n  try {\n    do join(h)\n  } catch e {\n    print e\n  }\n  try {\n    do join(h)\n  } catch e {\n    print e\n  }\n}\n",
       "expected": {
         "prints": [
           {

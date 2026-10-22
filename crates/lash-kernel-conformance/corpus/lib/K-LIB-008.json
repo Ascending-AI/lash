@@ -1,7 +1,7 @@
 {
   "cases": [
     {
-      "document": "kernel 1\nnumbers by_spelling\nuse regex.ecma.test = @48a67e0d6bb904b469d7dd7ad18c595e9d73e913ed7050885772bcc8963838f9\nmain { let r = {\"__lash_brand\": (\"regex.ecma\", \"reg_exp\"), \"__lash_built\": b\"5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a\", \"pattern\": \"(a+)+b\", \"flags\": \"\", \"lastIndex\": 0} try { print regex.ecma.test(r, \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\") } catch e { print \"caught\" } finally { print \"cleanup\" } finish null }\n",
+      "document": "kernel 1\nnumbers by_spelling\nnative @cf005ca47e1ae49c5042bbe6f9201e51a816793e25a41057e44b4671c6a3be18\ndefinition \"function regex.ecma.test(regex: Record{__lash_brand: Tuple(Enum(\\\"regex.ecma\\\"), Enum(\\\"reg_exp\\\")), __lash_built: Bytes, pattern: Text, flags: Text, lastIndex: Int}, input: Text) -> Record{matched: Bool, lastIndex: Int}\\nkernel 1\\nerrors \\\"regex.syntax\\\"\\ncharge sum(100, product(8, deep(regex)), size(input), deep(result))\\nguard \\\"one step of the backtracking matcher, or one UTF-16 code unit of text written to the result\\\" sum(1000000, product(64, size(input)))\\nnative\\n\"\nmain {\n  let r = {__lash_brand: (\"regex.ecma\", \"reg_exp\"), __lash_built: b\"5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a\", pattern: \"(a+)+b\", flags: \"\", lastIndex: 0}\n  try {\n    print regex.ecma.test(r, \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\")\n  } catch e {\n    print \"caught\"\n  } finally {\n    print \"cleanup\"\n  }\n  finish null\n}\n",
       "environment": {
         "bounds": {
           "charge": 2000000
@@ -11,7 +11,7 @@
         "end": {
           "bound": {
             "limit": 1002624,
-            "name": "guard:48a67e0d6bb904b469d7dd7ad18c595e9d73e913ed7050885772bcc8963838f9"
+            "name": "guard:cf005ca47e1ae49c5042bbe6f9201e51a816793e25a41057e44b4671c6a3be18"
           }
         },
         "prints": [],
@@ -20,7 +20,7 @@
       "name": "regex guard ends at its stated input formula and skips guest cleanup"
     },
     {
-      "document": "kernel 1\nnumbers by_spelling\nuse regex.ecma.test = @48a67e0d6bb904b469d7dd7ad18c595e9d73e913ed7050885772bcc8963838f9\nuse eq = @b50ea78f1b8899c52026719706a58480a99f1d90dcd04a6954be8f2c23cd8954\nmain { let r = {\"__lash_brand\": (\"regex.ecma\", \"reg_exp\"), \"__lash_built\": b\"5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a\", \"pattern\": \"a\", \"flags\": \"g\", \"lastIndex\": 0} let a = regex.ecma.test(r, \"ab\") let b = regex.ecma.test(r, \"ab\") finish [eq(a, b), r.lastIndex] }\n",
+      "document": "kernel 1\nnumbers by_spelling\nnative @04100a3772ec564e8bdc38f90d5678f50f6395ae42c373d3239143cfaadfc478\nnative @cf005ca47e1ae49c5042bbe6f9201e51a816793e25a41057e44b4671c6a3be18\ndefinition \"function eq(arg0: Any, arg1: Any) -> Bool\\nkernel 1\\nerrors \\\"arity\\\"\\ncharge sum(1, product(sum(deep(arg0), deep(arg1)), sum(deep(arg0), deep(arg1))), deep(result))\\nnative\\n\"\ndefinition \"function regex.ecma.test(regex: Record{__lash_brand: Tuple(Enum(\\\"regex.ecma\\\"), Enum(\\\"reg_exp\\\")), __lash_built: Bytes, pattern: Text, flags: Text, lastIndex: Int}, input: Text) -> Record{matched: Bool, lastIndex: Int}\\nkernel 1\\nerrors \\\"regex.syntax\\\"\\ncharge sum(100, product(8, deep(regex)), size(input), deep(result))\\nguard \\\"one step of the backtracking matcher, or one UTF-16 code unit of text written to the result\\\" sum(1000000, product(64, size(input)))\\nnative\\n\"\nmain {\n  let r = {__lash_brand: (\"regex.ecma\", \"reg_exp\"), __lash_built: b\"5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a\", pattern: \"a\", flags: \"g\", lastIndex: 0}\n  let a = regex.ecma.test(r, \"ab\")\n  let b = regex.ecma.test(r, \"ab\")\n  finish [eq(a, b), r.lastIndex]\n}\n",
       "expected": {
         "end": {
           "finished": {
@@ -40,7 +40,7 @@
       "name": "same regex arguments stay deterministic with a warm pattern cache"
     },
     {
-      "document": "kernel 1\nnumbers by_spelling\nuse regex.ecma.test = @48a67e0d6bb904b469d7dd7ad18c595e9d73e913ed7050885772bcc8963838f9\nmain { let r = {\"__lash_brand\": (\"regex.ecma\", \"reg_exp\"), \"__lash_built\": b\"5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a\", \"pattern\": \"(a+)+b\", \"flags\": \"\", \"lastIndex\": 0} try { print regex.ecma.test(r, \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\") } catch e { print \"caught\" } finally { print \"cleanup\" } finish null }\n",
+      "document": "kernel 1\nnumbers by_spelling\nnative @cf005ca47e1ae49c5042bbe6f9201e51a816793e25a41057e44b4671c6a3be18\ndefinition \"function regex.ecma.test(regex: Record{__lash_brand: Tuple(Enum(\\\"regex.ecma\\\"), Enum(\\\"reg_exp\\\")), __lash_built: Bytes, pattern: Text, flags: Text, lastIndex: Int}, input: Text) -> Record{matched: Bool, lastIndex: Int}\\nkernel 1\\nerrors \\\"regex.syntax\\\"\\ncharge sum(100, product(8, deep(regex)), size(input), deep(result))\\nguard \\\"one step of the backtracking matcher, or one UTF-16 code unit of text written to the result\\\" sum(1000000, product(64, size(input)))\\nnative\\n\"\nmain {\n  let r = {__lash_brand: (\"regex.ecma\", \"reg_exp\"), __lash_built: b\"5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a\", pattern: \"(a+)+b\", flags: \"\", lastIndex: 0}\n  try {\n    print regex.ecma.test(r, \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\")\n  } catch e {\n    print \"caught\"\n  } finally {\n    print \"cleanup\"\n  }\n  finish null\n}\n",
       "environment": {
         "bounds": {
           "charge": 2000000
@@ -50,7 +50,7 @@
         "end": {
           "bound": {
             "limit": 1002624,
-            "name": "guard:48a67e0d6bb904b469d7dd7ad18c595e9d73e913ed7050885772bcc8963838f9"
+            "name": "guard:cf005ca47e1ae49c5042bbe6f9201e51a816793e25a41057e44b4671c6a3be18"
           }
         },
         "prints": [],

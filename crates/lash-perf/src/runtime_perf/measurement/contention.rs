@@ -1,5 +1,5 @@
 use super::*;
-use lash_protocol_types::SessionId;
+use lash_vocabulary::identity::SessionId;
 
 #[derive(Clone, Copy)]
 enum WriterContentionOperation {

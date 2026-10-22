@@ -1,16 +1,18 @@
-use lash_vm_protocol::{
+use lash_protocol_types::engine_fault::{
     CodecRefusal, Detail, InfrastructureOutcome, PayloadKind, PoolFault, ProtocolBreach,
-    RunRefusal, SupervisorEvidence, WorkerLimit,
+    RunRefusal, SupervisorEvidence,
 };
+use lash_protocol_types::worker_limit::WorkerLimit;
+
 use thiserror::Error;
 
 #[derive(Clone, Debug, PartialEq, Eq, Error)]
 pub enum PoolError {
     /// The worker cannot implement the parent's package frame.
     #[error(transparent)]
-    Package(lash_kernel_package::PackageRefusal),
+    Library(lash_protocol_types::engine_fault::WorkerLibraryRefusal),
     #[error(transparent)]
-    ProtocolVersion(#[from] lash_vm_protocol::ProtocolVersionRefusal),
+    ProtocolVersion(#[from] lash_protocol_types::engine_fault::ProtocolVersionRefusal),
     #[error(transparent)]
     Infrastructure(#[from] InfrastructureOutcome),
     #[error("the worker queue refuses {bytes} bytes at its item or byte bound")]
@@ -31,7 +33,7 @@ pub enum PoolError {
     /// ([`crate::WorkerCgroup`]).
     #[error("{refusal}")]
     Cgroup {
-        refusal: lash_vm_protocol::CgroupRefusal,
+        refusal: lash_protocol_types::engine_fault::CgroupRefusal,
     },
 }
 
@@ -74,7 +76,7 @@ impl PoolError {
             | Self::RestartStorm
             | Self::RetryLimitExceeded { .. }
             | Self::Cgroup { .. }
-            | Self::Package(_) => true,
+            | Self::Library(_) => true,
             Self::ProtocolVersion(_)
             | Self::InvalidConfiguration
             | Self::UnsupportedPlatform
@@ -100,15 +102,7 @@ impl PoolError {
     /// a transport read, a refused checkout and a worker's own refusal share.
     pub fn into_outcome(self) -> InfrastructureOutcome {
         let fault = match self {
-            Self::Package(refusal) => match rmp_serde::to_vec_named(&refusal) {
-                Ok(refusal) => PoolFault::Package { refusal },
-                Err(error) => {
-                    return ProtocolBreach::Machine {
-                        detail: Detail::new(error),
-                    }
-                    .into();
-                }
-            },
+            Self::Library(refusal) => PoolFault::Library { refusal },
             Self::Infrastructure(outcome) => return outcome,
             Self::ProtocolVersion(refusal) => return ProtocolBreach::Version { refusal }.into(),
             // The attempt budget counts the host's losses: its verdict.
@@ -129,7 +123,7 @@ impl PoolError {
         };
         ProtocolBreach::Pool { fault }.into()
     }
-    pub(crate) fn cgroup(refusal: lash_vm_protocol::CgroupRefusal) -> Self {
+    pub(crate) fn cgroup(refusal: lash_protocol_types::engine_fault::CgroupRefusal) -> Self {
         Self::Cgroup { refusal }
     }
     pub fn eof() -> Self {
@@ -154,12 +148,14 @@ impl PoolError {
     /// Classify failures of the configured executable at the shared spawn seam.
     pub(crate) fn spawn(error: std::io::Error, executable: &std::path::Path) -> Self {
         let fault = match error.kind() {
-            std::io::ErrorKind::NotFound => lash_vm_protocol::WorkerDeploymentFault::NotFound,
+            std::io::ErrorKind::NotFound => {
+                lash_protocol_types::engine_fault::WorkerDeploymentFault::NotFound
+            }
             std::io::ErrorKind::PermissionDenied => {
-                lash_vm_protocol::WorkerDeploymentFault::NotExecutable
+                lash_protocol_types::engine_fault::WorkerDeploymentFault::NotExecutable
             }
             _ if error.raw_os_error() == Some(libc::ENOEXEC) => {
-                lash_vm_protocol::WorkerDeploymentFault::NotExecutable
+                lash_protocol_types::engine_fault::WorkerDeploymentFault::NotExecutable
             }
             _ => return Self::io(error),
         };
@@ -209,7 +205,10 @@ mod tests {
                 evidence: SupervisorEvidence::Signalled { signal: 9 },
             },
             InfrastructureOutcome::WorkerUnresponsive { silent_ms: 10 },
-            ProtocolBreach::from(lash_vm_protocol::SequenceFault::UnexpectedServiceResponse).into(),
+            ProtocolBreach::from(
+                lash_protocol_types::engine_fault::SequenceFault::UnexpectedServiceResponse,
+            )
+            .into(),
             InfrastructureOutcome::WorkerLimitExceeded {
                 limit: WorkerLimit::Attempts { bound: 3 },
             },
@@ -230,7 +229,7 @@ mod tests {
             WorkerLimit::EffectValue { size: 2, bound: 1 },
             WorkerLimit::VmState { size: 2, bound: 1 },
             WorkerLimit::Frame {
-                kind: lash_vm_protocol::WorkerFrameKind::Ended,
+                kind: lash_protocol_types::worker_limit::WorkerFrameKind::Ended,
                 size: 2,
                 bound: 1,
             },

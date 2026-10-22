@@ -1,322 +1,299 @@
-//! A session cell's end (SAVE-IN-DATA, SAVE-KEY, K-SES-002): every closure
-//! a carried binding reaches, as its value, inside data, or inside data a
-//! capture reaches, is saved once, keyed by its object, and every slot that
-//! held it holds a reference to its saved function, `Function(name)`. A
-//! closure only a capture holds, as its whole value, is a helper made again
-//! in each function that reads it, as lowering makes one.
-//!
-//! A closure a binding holds as its own value is saved under the first
-//! binding name that holds it; any other is saved under a generated name,
-//! [`Name::saved`], which no source can declare. The slots are replaced
-//! where they are, so every object the bindings share stays shared, and
-//! two bindings that held one closure hold one saved function.
-
+//! Save data-held closures once by identity, preserving their defining Link.
+use super::{HeldAt, Left, NotSaved, SaveError, SavedFunction, Saving, Token};
+use lash_kernel_doc::heap::{Element, EntityId, HeapFault, Identity, PageReader, PageValue};
+use lash_kernel_doc::snapshot::{
+    closure_held, freeze_token, gather, members, reach, token_closure,
+};
+use lash_kernel_state::kernel_internals::PagedHeap;
+use lash_kernel_state::paged::{ObjectKind, SemanticHeap};
+use lash_vocabulary::Name;
 use std::collections::{BTreeMap, BTreeSet};
 use std::ops::ControlFlow;
-
-use lash_kernel_doc::heap::{Element, EntityId, HeapFault, Identity, PageReader, PageValue};
-use lash_kernel_doc::snapshot::{CodeReads, SnapshotHeap as _, closure_at};
-use lash_kernel_doc::snapshot::{closure_held, freeze_token, members, reach, token_closure};
-use lash_kernel_doc::{Action, Callee, Expr, Name, Rhs, Stmt, Unit};
-use lash_kernel_state::kernel_internals::{CARD, PagedHeap, StoredCards};
-use lash_kernel_state::paged::{FieldName, HeapWriteError, ObjectKind, SemanticHeap};
-
-use super::{
-    HeldAt, Left, NotSaved, SaveError, SavedFunction, Saving, Token, function_reference,
-    save_closure,
-};
-
-/// What a cell's end saves.
+struct LinkedCatalog<'a> {
+    document: &'a lash_kernel_doc::Document,
+    documents: &'a BTreeMap<lash_vocabulary::LinkId, lash_kernel_doc::Document>,
+    base: &'a dyn lash_kernel_doc::FunctionCatalog,
+}
+impl lash_kernel_doc::FunctionCatalog for LinkedCatalog<'_> {
+    fn definition(
+        &self,
+        function: &lash_vocabulary::FunctionId,
+    ) -> Option<&lash_kernel_doc::FunctionDefinition> {
+        self.document
+            .functions
+            .get(function)
+            .or_else(|| {
+                self.documents
+                    .values()
+                    .find_map(|document| document.functions.get(function))
+            })
+            .or_else(|| self.base.definition(function))
+    }
+    fn registered(
+        &self,
+        function: &lash_vocabulary::FunctionId,
+    ) -> Option<&lash_kernel_doc::RegisteredFunction> {
+        self.base.registered(function)
+    }
+}
 #[derive(Debug, Default)]
 pub struct Saved {
-    /// Each saved function once, by the name it is declared under.
     pub functions: BTreeMap<Name, SavedFunction>,
-    /// The value each binding the carry dropped for a closure is bound to
-    /// instead: its own, each closure in it a reference to its saved
-    /// function.
     pub bindings: BTreeMap<Name, PageValue>,
-    /// Why each other binding the carry dropped is not carried.
     pub refused: BTreeMap<Name, NotSaved>,
 }
-
-/// Saves every closure the bindings `left.not_carried` reach, each once,
-/// and binds each of those bindings to its value with every closure in it
-/// a reference to its saved function. `held` names the functions the
-/// session already holds: what a saved function may still use, and the
-/// generated names already taken.
-///
-/// # Errors
-///
-/// The heap's faults.
 pub fn save(
     heap: &mut PagedHeap,
     left: Left<'_>,
     held: &BTreeSet<Name>,
 ) -> Result<Saved, HeapFault> {
-    let tag = left.values.tag();
-    let mut named: BTreeMap<EntityId, Name> = BTreeMap::new();
-    for (name, value) in left.bindings {
-        if let Some(id) = closure_held(heap, value, tag)? {
-            named.entry(id).or_insert_with(|| name.clone());
-        }
-    }
-    let roots: Vec<&Name> = left
+    let catalog = LinkedCatalog {
+        document: left.document,
+        documents: left.documents,
+        base: left.catalog,
+    };
+    let left = Left {
+        catalog: &catalog,
+        ..left
+    };
+    let roots = left
         .not_carried
         .iter()
-        .filter(|name| left.bindings.contains_key(*name))
-        .collect();
-    let found = reach(
-        &mut Saving {
+        .filter_map(|name| {
+            left.bindings
+                .get(name)
+                .map(|value| (name.to_string(), value.clone()))
+        })
+        .collect::<Vec<_>>();
+    let root_names = roots
+        .iter()
+        .map(|(name, _)| Name::new(name))
+        .collect::<Vec<_>>();
+    let mut found = reach(heap, roots)?;
+    let mut walked = found.iter().map(|f| f.closure).collect::<BTreeSet<_>>();
+    // Captures are graph edges too. Discover every environment before the
+    // first freeze, including a callback held only by another closure.
+    let mut at = 0;
+    while at < found.len() {
+        let current = found[at].clone();
+        at += 1;
+        let callable = heap.closure(current.closure)?.callable;
+        let definition = left
+            .catalog
+            .definition(&callable.function)
+            .or_else(|| left.document.functions.get(&callable.function))
+            .or_else(|| {
+                left.documents
+                    .get(&callable.link)
+                    .and_then(|d| d.functions.get(&callable.function))
+            })
+            .ok_or_else(|| HeapFault::Malformed("saved closure definition is not loaded".into()))?;
+        let Some(body) = definition.body() else {
+            continue;
+        };
+        let params = definition
+            .signature
+            .params
+            .iter()
+            .map(|p| p.name.clone())
+            .collect::<Vec<_>>();
+        let reads = lash_kernel_doc::snapshot::CodeReads::of(&params, &body.block, left.catalog);
+        let site = heap.closure(current.closure)?.site.resolve(heap.pages())?;
+        let mut saving = Saving {
             heap: &mut *heap,
             left: &left,
-        },
-        left.document,
-        tag,
-        roots
-            .iter()
-            .map(|name| (name.to_string(), left.bindings[*name].clone()))
-            .collect(),
-        &named,
-    )?;
+        };
+        for name in reads.free {
+            use lash_kernel_doc::snapshot::SnapshotHeap as _;
+            let value = saving.closure_capture(current.closure, &name)?;
+            let value = match value {
+                Some(v) => Some(v),
+                None => saving.unit_binding(&site.unit, &name)?,
+            };
+            if let Some(value) = value {
+                for mut capture in reach(
+                    saving.heap,
+                    vec![(format!("{}.captures.{}", current.path, name), value)],
+                )? {
+                    if walked.insert(capture.closure) {
+                        capture.root = current.root;
+                        found.push(capture);
+                    }
+                }
+            }
+        }
+    }
+    // Membership is fixed before any capture freezes: mutual references
+    // and traversal order cannot decide which environments are admitted.
+    let candidates = found
+        .iter()
+        .map(|found| found.closure)
+        .collect::<BTreeSet<_>>();
+    let mut named = BTreeSet::<EntityId>::new();
+    let mut names = BTreeMap::<EntityId, Name>::new();
+    for (name, value) in left.bindings {
+        if let Some(id) = closure_held(heap, value, left.values.tag())? {
+            names.entry(id).or_insert_with(|| name.clone());
+        }
+    }
     let first = held
         .iter()
         .filter_map(Name::saved_index)
         .max()
-        .map_or(0, |n| n + 1);
-    let mut places = BTreeMap::new();
+        .map_or(0, |index| index + 1);
+    let mut saved = Saved::default();
+    let mut refusals = BTreeMap::new();
     for (next, found) in (first..).zip(found) {
-        named.insert(found.closure, Name::saved(next));
-        places.insert(
-            found.closure,
-            HeldAt {
-                binding: roots[found.root].clone(),
-                path: found.path,
-            },
-        );
-    }
-
-    let owners = helper_owners(heap, &left, &named)?;
-    let mut functions: BTreeMap<EntityId, SavedFunction> = BTreeMap::new();
-    let mut refusals: BTreeMap<EntityId, NotSaved> = BTreeMap::new();
-    for (&id, name) in &named {
-        match save_one(heap, &left, name, id, &named, &owners) {
-            Ok(mut function) => {
-                function.held = places.get(&id).cloned();
-                functions.insert(id, function);
+        let name = names
+            .entry(found.closure)
+            .or_insert_with(|| Name::saved(next))
+            .clone();
+        let result = (|| -> Result<SavedFunction, SaveError> {
+            let callable = heap.closure(found.closure)?.callable;
+            let defining = if callable.link == left.link {
+                Some(left.document)
+            } else {
+                left.documents.get(&callable.link)
+            };
+            if defining.is_none_or(|document| document.main.is_none()) {
+                return Err(SaveError::Refused(NotSaved::MadeByLibrary));
+            }
+            let gathered = gather(
+                &mut Saving {
+                    heap: &mut *heap,
+                    left: &left,
+                },
+                left.catalog,
+                found.closure,
+                &candidates,
+            )?;
+            let callable = gathered.callable;
+            let document = if callable.link == left.link {
+                left.document.clone()
+            } else {
+                left.documents
+                    .get(&callable.link)
+                    .ok_or_else(|| super::unreadable("the defining linked document is not loaded"))?
+                    .clone()
+            };
+            super::check_controls(&left, callable, &document)?;
+            let mut function = SavedFunction {
+                name: name.clone(),
+                link: callable.link,
+                callable,
+                environment: found.closure,
+                document: lash_kernel_doc::IdentifiedDocument::new(document),
+                captures: gathered.captures,
+                closure: left.closure,
+                references: gathered.references,
+                written: left.written.get(&gathered.site).cloned(),
+                token: None,
+                held: Some(HeldAt {
+                    binding: root_names[found.root].clone(),
+                    path: found.path.clone(),
+                }),
+            };
+            if let Some(value @ PageValue::Tuple(tuple)) = left.bindings.get(&name)
+                && let Some((id, at)) = token_closure(heap, value, left.values.tag())?
+                && id == found.closure
+            {
+                let values = members(heap, tuple)?;
+                function.token = Some(Token::frozen(freeze_token(
+                    &mut Saving {
+                        heap: &mut *heap,
+                        left: &left,
+                    },
+                    &values,
+                    at,
+                    left.values.tag().unwrap_or_default(),
+                    &candidates,
+                )?));
+            }
+            Ok(function)
+        })();
+        match result {
+            Ok(function) => {
+                named.insert(found.closure);
+                saved.functions.insert(name, function);
             }
             Err(SaveError::Refused(why)) => {
-                refusals.insert(id, why);
+                refusals.insert(found.closure, why.clone());
+                saved.refused.insert(name, why);
             }
             Err(SaveError::Heap(fault)) => return Err(fault),
         }
     }
-    // A function that uses one neither saved here nor still held is not
-    // saved, to a fixed point.
-    let ids: BTreeMap<&Name, EntityId> = named.iter().map(|(id, name)| (name, *id)).collect();
+    // A refused capture invalidates every owner that reaches it. Iterate
+    // by environment identity until no successful row names a missing row.
     loop {
-        let mut missing = None;
-        'functions: for (id, function) in &functions {
-            for needed in function.needs() {
-                let saved = ids
-                    .get(&needed)
-                    .is_some_and(|id| functions.contains_key(id));
-                if !saved && !still_held(heap, &left, held, &needed)? {
-                    missing = Some((*id, needed));
-                    break 'functions;
-                }
-            }
-        }
-        let Some((id, needed)) = missing else {
+        let available = saved
+            .functions
+            .values()
+            .map(|f| f.environment)
+            .collect::<BTreeSet<_>>();
+        let refused = saved
+            .functions
+            .iter()
+            .filter_map(|(name, function)| {
+                function
+                    .references
+                    .iter()
+                    .find(|id| !available.contains(id))
+                    .map(|id| (name.clone(), *id))
+            })
+            .collect::<Vec<_>>();
+        if refused.is_empty() {
             break;
-        };
-        functions.remove(&id);
-        let function = ids
-            .get(&needed)
-            .and_then(|id| places.get(id))
-            .map_or(needed.clone(), HeldAt::label);
-        refusals.insert(id, NotSaved::Needs { function });
+        }
+        for (name, needed) in refused {
+            if let Some(function) = saved.functions.remove(&name) {
+                named.remove(&function.environment);
+            }
+            saved.refused.insert(
+                name,
+                NotSaved::Needs {
+                    function: names
+                        .get(&needed)
+                        .cloned()
+                        .unwrap_or_else(|| Name::new(format!("{needed:?}"))),
+                },
+            );
+        }
     }
-
-    let mut saved = Saved::default();
-    let mut carried = Vec::new();
-    let mut reached = BTreeSet::new();
     for name in left.not_carried {
         let Some(value) = left.bindings.get(name) else {
             saved.refused.insert(name.clone(), NotSaved::Task);
             continue;
         };
-        match holds(heap, value, &named)? {
+        match holds(heap, value, &named, &refusals)? {
+            Holds::Refused(why) => {
+                saved.refused.insert(name.clone(), why);
+            }
             Holds::Task => {
                 saved.refused.insert(name.clone(), NotSaved::Task);
             }
             Holds::Keyed => {
                 saved.refused.insert(name.clone(), NotSaved::Keyed);
             }
-            Holds::Closures(closures) => {
-                if let Some(why) = closures.iter().find_map(|id| refusals.get(id)) {
-                    saved.refused.insert(name.clone(), why.clone());
-                } else {
-                    reached.extend(closures);
-                    carried.push(name);
-                }
+            Holds::Closures => {
+                saved.bindings.insert(name.clone(), value.clone());
             }
         }
     }
-    let mut replaced = BTreeSet::new();
-    for name in carried {
-        let value = &left.bindings[name];
-        let referred = refer(heap, value, &named, &mut replaced)
-            .map_err(write_fault)?
-            .unwrap_or_else(|| value.clone());
-        saved.bindings.insert(name.clone(), referred);
-    }
-    // The functions the carried bindings reach and every one they use.
-    let mut pending: Vec<EntityId> = reached.into_iter().collect();
-    while let Some(id) = pending.pop() {
-        let Some(function) = functions.remove(&id) else {
-            continue;
-        };
-        pending.extend(function.needs().iter().filter_map(|n| ids.get(n).copied()));
-        saved.functions.insert(function.name.clone(), function);
-    }
     Ok(saved)
 }
-
-/// The named functions that forward to each helper (FIG-6137): a named
-/// closure whose body only calls the closure one capture holds and returns
-/// what it answers owns that closure, so a function that makes the same
-/// helper in its own body uses the owner, and mutually recursive functions
-/// whose calls go through such private bodies stay one bundle.
-fn helper_owners(
-    heap: &mut PagedHeap,
-    left: &Left<'_>,
-    named: &BTreeMap<EntityId, Name>,
-) -> Result<BTreeMap<EntityId, BTreeSet<Name>>, HeapFault> {
-    let tag = left.values.tag();
-    let mut owners: BTreeMap<EntityId, BTreeSet<Name>> = BTreeMap::new();
-    for (id, owner) in named {
-        let mut saving = Saving {
-            heap: &mut *heap,
-            left,
-        };
-        let site = saving.closure_site(*id)?;
-        let Some(closure) = closure_at(left.document, &site) else {
-            continue;
-        };
-        let [
-            ..,
-            Stmt::Let {
-                name: result,
-                value:
-                    Rhs::Action(Action::Call {
-                        callee: Callee::Value(callee),
-                        ..
-                    }),
-            },
-            Stmt::Return {
-                value: Expr::Variable(returned),
-            },
-        ] = closure.body.as_slice()
-        else {
-            continue;
-        };
-        let reads = CodeReads::of(&closure.params, &closure.body);
-        if result != returned
-            || !reads.effects.is_empty()
-            || !reads.declared.is_empty()
-            || reads.free.len() != 1
-            || !reads.free.contains(callee)
-        {
-            continue;
-        }
-        let value = match saving.closure_capture(*id, callee)? {
-            Some(value) => Some(value),
-            None if site.unit == Unit::Main => saving.unit_binding(&Unit::Main, callee)?,
-            None => None,
-        };
-        if let Some(value) = value
-            && let Some(helper) = closure_held(saving.heap, &value, tag)?
-            && !named.contains_key(&helper)
-        {
-            owners.entry(helper).or_default().insert(owner.clone());
-        }
-    }
-    Ok(owners)
-}
-
-/// The closure `id` saved under `name`, with the token its binding holds it
-/// in frozen when a binding of that name does.
-fn save_one(
-    heap: &mut PagedHeap,
-    left: &Left<'_>,
-    name: &Name,
-    id: EntityId,
-    named: &BTreeMap<EntityId, Name>,
-    owners: &BTreeMap<EntityId, BTreeSet<Name>>,
-) -> Result<SavedFunction, SaveError> {
-    let mut function = save_closure(heap, left, name, id, named, owners)?;
-    let tag = left.values.tag();
-    if let Some(value @ PageValue::Tuple(tuple)) = left.bindings.get(name)
-        && let Some((held, at)) = token_closure(heap, value, tag)?
-        && held == id
-    {
-        let values = members(heap, tuple)?;
-        let mut saving = Saving {
-            heap: &mut *heap,
-            left,
-        };
-        function.token = Some(Token::frozen(freeze_token(
-            &mut saving,
-            &values,
-            at,
-            tag.unwrap_or_default(),
-            named,
-        )?));
-    }
-    Ok(function)
-}
-
-/// Whether the session still holds the function `needed` from an earlier
-/// cell: one of a generated name, or one whose binding still holds it.
-fn still_held(
-    heap: &PagedHeap,
-    left: &Left<'_>,
-    held: &BTreeSet<Name>,
-    needed: &Name,
-) -> Result<bool, HeapFault> {
-    if !held.contains(needed) {
-        return Ok(false);
-    }
-    if needed.saved_index().is_some() {
-        return Ok(true);
-    }
-    Ok(left
-        .bindings
-        .get(needed)
-        .map(|value| function_reference(heap, value, left.values))
-        .transpose()?
-        .flatten()
-        .as_ref()
-        == Some(needed))
-}
-
-/// What a binding's value holds that decides whether it is carried.
 enum Holds {
-    /// A task, or a task's handle.
+    Refused(NotSaved),
     Task,
-    /// A closure where no reference can stand for it: as a key or a set
-    /// member, behind a ref, or in an error's data.
     Keyed,
-    /// These closures, each in a slot a reference can take.
-    Closures(BTreeSet<EntityId>),
+    Closures,
 }
-
 fn holds(
     heap: &PagedHeap,
     value: &PageValue,
-    named: &BTreeMap<EntityId, Name>,
+    named: &BTreeSet<EntityId>,
+    refusals: &BTreeMap<EntityId, NotSaved>,
 ) -> Result<Holds, HeapFault> {
-    let mut closures = BTreeSet::new();
     let mut keyed = false;
     let mut objects = BTreeSet::new();
     // Each value, and whether a reference cannot stand where it is.
@@ -324,10 +301,11 @@ fn holds(
     while let Some((value, fixed)) = pending.pop() {
         match &value {
             PageValue::Task(_) | PageValue::Ref(Identity::Task(_)) => return Ok(Holds::Task),
-            PageValue::Closure(id) if fixed || !named.contains_key(id) => keyed = true,
-            PageValue::Closure(id) => {
-                closures.insert(*id);
+            PageValue::Closure(id) if refusals.contains_key(id) => {
+                return Ok(Holds::Refused(refusals[id].clone()));
             }
+            PageValue::Closure(id) if fixed || !named.contains(id) => keyed = true,
+            PageValue::Closure(_) => {}
             PageValue::Ref(Identity::Object(id)) => {
                 if heap.kind(*id)? == Some(ObjectKind::Closure) {
                     keyed = true;
@@ -362,140 +340,5 @@ fn holds(
             _ => {}
         }
     }
-    Ok(if keyed {
-        Holds::Keyed
-    } else {
-        Holds::Closures(closures)
-    })
-}
-
-/// `value` with each closure in it a reference to its saved function:
-/// replaced where an object holds it, and answered when `value` itself is
-/// one or a tuple holding one. `replaced` are the objects already done.
-fn refer(
-    heap: &mut PagedHeap,
-    value: &PageValue,
-    named: &BTreeMap<EntityId, Name>,
-    replaced: &mut BTreeSet<EntityId>,
-) -> Result<Option<PageValue>, HeapWriteError> {
-    Ok(match value {
-        PageValue::Closure(id) => {
-            let name = named.get(id).ok_or_else(|| {
-                HeapFault::Malformed("a carried closure is saved under no name".into())
-            })?;
-            Some(PageValue::Function(heap.text(name.as_str())?))
-        }
-        PageValue::Tuple(tuple) => {
-            let mut values = members(heap, tuple)?;
-            let mut changed = false;
-            for value in &mut values {
-                if let Some(referred) = refer(heap, value, named, replaced)? {
-                    *value = referred;
-                    changed = true;
-                }
-            }
-            if changed {
-                Some(PageValue::Tuple(heap.tuple(values)?))
-            } else {
-                None
-            }
-        }
-        PageValue::List(id) => {
-            if replaced.insert(*id) {
-                refer_items(heap, *id, named, replaced)?;
-            }
-            None
-        }
-        PageValue::Map(id) | PageValue::Record(id) => {
-            if replaced.insert(*id) {
-                refer_entries(
-                    heap,
-                    *id,
-                    matches!(value, PageValue::Record(_)),
-                    named,
-                    replaced,
-                )?;
-            }
-            None
-        }
-        _ => None,
-    })
-}
-
-/// Replaces the closures the list `list` holds, rewriting each card of its
-/// rows that changed.
-fn refer_items(
-    heap: &mut PagedHeap,
-    list: EntityId,
-    named: &BTreeMap<EntityId, Name>,
-    replaced: &mut BTreeSet<EntityId>,
-) -> Result<(), HeapWriteError> {
-    let mut items = Vec::new();
-    heap.visit(list, &mut |element| {
-        if let Element::Item(item) = element {
-            items.push(item.clone());
-        }
-        ControlFlow::Continue(())
-    })?;
-    let mut cards = BTreeSet::new();
-    for (at, item) in items.iter_mut().enumerate() {
-        if let Some(referred) = refer(heap, item, named, replaced)? {
-            *item = referred;
-            cards.insert(at as u64 / CARD);
-        }
-    }
-    if cards.is_empty() {
-        return Ok(());
-    }
-    let len = items.len() as u64;
-    let cards = cards
-        .into_iter()
-        .map(|card| {
-            let start = (card * CARD) as usize;
-            let end = ((card + 1) * CARD).min(len) as usize;
-            (card, items[start..end].to_vec())
-        })
-        .collect();
-    heap.store_cards(list, StoredCards::List { len, cards })
-}
-
-/// Replaces the closures a map or a record holds as values; a key keeps
-/// its spelling and position.
-fn refer_entries(
-    heap: &mut PagedHeap,
-    object: EntityId,
-    record: bool,
-    named: &BTreeMap<EntityId, Name>,
-    replaced: &mut BTreeSet<EntityId>,
-) -> Result<(), HeapWriteError> {
-    let mut entries = Vec::new();
-    heap.visit(object, &mut |element| {
-        match element {
-            Element::Entry { key, value } => entries.push((key.clone(), value.clone())),
-            Element::Field { name, value } => {
-                entries.push((PageValue::Text(name.clone()), value.clone()));
-            }
-            Element::Item(_) => {}
-        }
-        ControlFlow::Continue(())
-    })?;
-    for (key, value) in entries {
-        let Some(referred) = refer(heap, &value, named, replaced)? else {
-            continue;
-        };
-        match (&key, record) {
-            (PageValue::Text(field), true) => {
-                heap.record_write(object, FieldName::Text(field), referred)?;
-            }
-            _ => heap.map_write(object, key, referred)?,
-        }
-    }
-    Ok(())
-}
-
-fn write_fault(error: HeapWriteError) -> HeapFault {
-    match error {
-        HeapWriteError::Fault(fault) => fault,
-        other => HeapFault::Malformed(format!("a carried binding's reference: {other}")),
-    }
+    Ok(if keyed { Holds::Keyed } else { Holds::Closures })
 }

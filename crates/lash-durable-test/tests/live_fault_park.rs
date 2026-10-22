@@ -451,14 +451,14 @@ const FLAKY_OPERATION: &str = "tools.flaky";
 /// A tool definition bound as `tools.<name>`.
 fn probe_definition(
     name: &str,
-    policy: lash_core::ExecutionPolicy,
+    policy: lash_vocabulary::tool_contract::ExecutionPolicy,
     output: serde_json::Value,
-) -> lash_core::ToolDefinition {
-    lash_core::ToolDefinition::raw(
+) -> lash_vocabulary::tool_contract::ToolDefinition {
+    lash_vocabulary::tool_contract::ToolDefinition::raw(
         format!("tool:{name}"),
         format!("tools.{name}"),
         "A park law's probe.",
-        lash_core::ToolDefinition::default_input_schema(),
+        lash_vocabulary::tool_contract::ToolDefinition::default_input_schema(),
         output,
     )
     .expect("the probe's schemas")
@@ -474,10 +474,10 @@ struct Holding {
     entered: tokio::sync::Notify,
 }
 
-fn hold_definition() -> lash_core::ToolDefinition {
+fn hold_definition() -> lash_vocabulary::tool_contract::ToolDefinition {
     probe_definition(
         HOLD,
-        lash_core::ExecutionPolicy::default(),
+        lash_vocabulary::tool_contract::ExecutionPolicy::default(),
         serde_json::json!({ "type": "string" }),
     )
 }
@@ -488,7 +488,7 @@ impl lash_core::ToolProvider for Holding {
         &self,
         _config: &lash_core::OwnerConfigView,
     ) -> std::result::Result<
-        Vec<lash_core::ToolManifest>,
+        Vec<lash_vocabulary::tool_contract::ToolManifest>,
         lash_execution_contracts::plugin_error::PluginError,
     > {
         Ok(vec![hold_definition().manifest()])
@@ -498,7 +498,7 @@ impl lash_core::ToolProvider for Holding {
         &self,
         name: &str,
         _config: &lash_core::OwnerConfigView,
-    ) -> Option<Arc<lash_core::ToolContract>> {
+    ) -> Option<Arc<lash_vocabulary::tool_contract::ToolContract>> {
         (name == HOLD_OPERATION).then(|| Arc::new(hold_definition().contract()))
     }
 
@@ -519,10 +519,10 @@ struct Flaky {
     answered: AtomicBool,
 }
 
-fn flaky_definition() -> lash_core::ToolDefinition {
+fn flaky_definition() -> lash_vocabulary::tool_contract::ToolDefinition {
     probe_definition(
         FLAKY,
-        lash_core::ExecutionPolicy::repeatable(
+        lash_vocabulary::tool_contract::ExecutionPolicy::repeatable(
             std::num::NonZeroU32::new(2).expect("a nonzero attempt bound"),
             0,
             0,
@@ -537,7 +537,7 @@ impl lash_core::ToolProvider for Flaky {
         &self,
         _config: &lash_core::OwnerConfigView,
     ) -> std::result::Result<
-        Vec<lash_core::ToolManifest>,
+        Vec<lash_vocabulary::tool_contract::ToolManifest>,
         lash_execution_contracts::plugin_error::PluginError,
     > {
         Ok(vec![flaky_definition().manifest()])
@@ -547,7 +547,7 @@ impl lash_core::ToolProvider for Flaky {
         &self,
         name: &str,
         _config: &lash_core::OwnerConfigView,
-    ) -> Option<Arc<lash_core::ToolContract>> {
+    ) -> Option<Arc<lash_vocabulary::tool_contract::ToolContract>> {
         (name == FLAKY_OPERATION).then(|| Arc::new(flaky_definition().contract()))
     }
 
@@ -567,14 +567,14 @@ impl lash_core::ToolProvider for Flaky {
     }
 }
 
-fn session_id(name: &str) -> lash::SessionId {
-    lash::SessionId::try_from(name.to_owned()).expect("a session id")
+fn session_id(name: &str) -> lash_vocabulary::identity::SessionId {
+    lash_vocabulary::identity::SessionId::try_from(name.to_owned()).expect("a session id")
 }
 
 /// The node that served `name`'s open turn is gone: the turn is open in its
 /// tools phase with no turn deadline and no end, and no boot owns the
 /// session. Park it as FIG-6289's ordinal miss did, and answer its run.
-async fn wedge(world: &World, name: &str) -> lash::RunId {
+async fn wedge(world: &World, name: &str) -> lash_vocabulary::identity::RunId {
     let durable = Arc::clone(world.backend.durable());
     let session = session_id(name);
     lash::testing::park_session(
@@ -614,12 +614,17 @@ async fn wedge(world: &World, name: &str) -> lash::RunId {
         None,
         "{name}: the wedged run has no end"
     );
-    lash::RunId::parse(row.run.as_str()).expect("the persisted logical run id parses")
+    lash_vocabulary::identity::RunId::parse(row.run.as_str())
+        .expect("the persisted logical run id parses")
 }
 
 /// The output of `name`'s run `run` once it settles on the serving node, or
 /// a panic if it stays parked.
-async fn settled(world: &World, name: &str, run: &lash::RunId) -> lash::TurnOutput {
+async fn settled(
+    world: &World,
+    name: &str,
+    run: &lash_vocabulary::identity::RunId,
+) -> lash::TurnOutput {
     let session = world
         .core
         .session(session_id(name))

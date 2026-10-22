@@ -1,5 +1,5 @@
 use super::*;
-use lash_protocol_types::ProcessId;
+use lash_vocabulary::identity::ProcessId;
 
 /// The survey half of the prune: the same predicate the prune's final
 /// transaction re-evaluates, read without deleting.

@@ -144,7 +144,7 @@ impl lash_core_store::store::TurnInputStore for PostgresStore {
     async fn pending_turn_input(
         &self,
         session_id: &SessionId,
-        input_id: &lash_protocol_types::InputId,
+        input_id: &lash_vocabulary::identity::InputId,
     ) -> Result<Option<lash_core_store::turn_input_vocabulary::PendingTurnInputRead>, StoreError>
     {
         // One point read by primary key; the list's lifecycle filter is
@@ -227,7 +227,7 @@ impl lash_core_store::store::TurnInputStore for PostgresStore {
             if let Some(row) =
                 load_pending_turn_input_row_by_target_tx(&mut tx, session_id, target, false).await?
             {
-                covered.insert(lash_protocol_types::InputId::parse(row.input_id)?);
+                covered.insert(lash_vocabulary::identity::InputId::parse(row.input_id)?);
             }
         }
         lock_cancel_rows_in_queue_order(&mut tx, session_id, CancelLockScope::Targets(&covered))
@@ -411,7 +411,7 @@ async fn forsake_turn_input_tx(
             .map_err(store_sqlx_error)?;
     if let Some((input_id, _)) = held {
         return Ok(TurnInputForsaking::Held {
-            input_id: lash_protocol_types::InputId::parse(input_id)?,
+            input_id: lash_vocabulary::identity::InputId::parse(input_id)?,
         });
     }
     ensure_session_not_closing_tx(tx, session_id).await?;
@@ -656,7 +656,7 @@ async fn admit_run_spec_tx(
 async fn check_unsourced_steering_run_spec_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     draft: &lash_core_store::turn_input_vocabulary::PendingTurnInputDraft,
-    turn_id: &lash_protocol_types::TurnId,
+    turn_id: &lash_vocabulary::identity::TurnId,
     spec: &lash_core_store::store_backend_support::RunSpecAdmission,
 ) -> Result<(), StoreError> {
     if let Some(unfinished) =
@@ -685,7 +685,7 @@ async fn check_unsourced_steering_run_spec_tx(
 async fn turn_address_evidence_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     session_id: &SessionId,
-    turn_id: &lash_protocol_types::TurnId,
+    turn_id: &lash_vocabulary::identity::TurnId,
 ) -> Result<lash_core_store::store_backend_support::TurnAddressEvidence, StoreError> {
     let ended: bool = crate::observed_sql::query_scalar(
         crate::turn_ingress::turn_ingress_sql()

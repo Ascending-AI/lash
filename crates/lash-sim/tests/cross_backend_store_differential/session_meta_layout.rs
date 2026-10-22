@@ -1,7 +1,7 @@
 use super::*;
-use lash_protocol_types::ProcessId;
-use lash_protocol_types::SessionId;
-use lash_protocol_types::TurnId;
+use lash_vocabulary::identity::ProcessId;
+use lash_vocabulary::identity::SessionId;
+use lash_vocabulary::identity::TurnId;
 use sqlx::Row as _;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -262,7 +262,7 @@ fn session_meta_layout_cases() -> Vec<SessionMetaLayoutCase> {
                 session_id: SessionId::from("layout-fork-history-literal"),
                 relation: SessionRelation::Fork {
                     source_session_id: SessionId::from("layout-source-history-literal"),
-                    source_node_id: Some(lash_core::NodeId::from(
+                    source_node_id: Some(lash_vocabulary::identity::NodeId::from(
                         "layout-source-node-history-literal",
                     )),
                 },
@@ -288,7 +288,7 @@ fn session_meta_layout_cases() -> Vec<SessionMetaLayoutCase> {
                 session_id: SessionId::from("layout-fork-selected-literal"),
                 relation: SessionRelation::Fork {
                     source_session_id: SessionId::from("layout-source-selected-literal"),
-                    source_node_id: Some(lash_core::NodeId::from(
+                    source_node_id: Some(lash_vocabulary::identity::NodeId::from(
                         "layout-source-node-selected-literal",
                     )),
                 },

@@ -4,6 +4,7 @@ use lash_protocol_types::AttachmentRef;
 use lash_protocol_types::{
     llm::attachment_delivery::AttachmentPosition, llm::attachment_delivery::Delivery,
 };
+
 use lash_protocol_types::{
     llm::types::AttachmentSlot, llm::types::GenerationReceipt, llm::types::LiveRequestBody,
     llm::types::LlmRequest, llm::types::LoweredItem, llm::types::ProviderRouteIdentity,
@@ -11,6 +12,7 @@ use lash_protocol_types::{
     llm::types::SegmentContext, llm::types::SegmentContextKey, llm::types::SegmentKey,
     llm::types::SlotCodec, llm::types::TemplateJson, llm::types::TransientJson,
 };
+
 use lash_transport_failure::{LlmTransportError, TransportRetryVerdict};
 use serde_json::{Value, json};
 

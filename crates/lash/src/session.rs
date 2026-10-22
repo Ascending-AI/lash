@@ -1,6 +1,6 @@
 use lash_core::ActorContext;
-use lash_protocol_types::SessionId;
-use lash_protocol_types::TurnId;
+use lash_vocabulary::identity::SessionId;
+use lash_vocabulary::identity::TurnId;
 
 use crate::durable_session::DurableSession;
 pub use crate::observation_feed::SessionObservationStream;
@@ -893,13 +893,16 @@ impl LashSession {
     /// [`id`](crate::SendBuilder::id), before sending or observing acceptance.
     /// Correlate every committed user row by `provenance.input_id`, including
     /// steering inputs that share another send's run. This performs no read.
-    pub fn input_id(&self, id: &crate::TurnId) -> crate::InputId {
+    pub fn input_id(
+        &self,
+        id: &lash_vocabulary::identity::TurnId,
+    ) -> lash_vocabulary::identity::InputId {
         lash_core::PendingTurnInputDraft::keyed_input_id(&self.session_id(), id.as_str())
     }
 
     /// Re-attach to an input accepted earlier: after a restart, or from
     /// another handle. Never commits anything.
-    pub fn attach(&self, input_id: lash_core::InputId) -> crate::SendHandle {
+    pub fn attach(&self, input_id: lash_vocabulary::identity::InputId) -> crate::SendHandle {
         crate::send::attach(crate::send::SendTarget::Live(self.clone()), input_id)
     }
 
@@ -958,7 +961,7 @@ impl LashSession {
 
     /// Re-await a logical run: after a park verb, or by the host id a send
     /// named.
-    pub fn run(&self, run: crate::RunId) -> crate::RunHandle {
+    pub fn run(&self, run: lash_vocabulary::identity::RunId) -> crate::RunHandle {
         crate::send::run(crate::send::SendTarget::Live(self.clone()), run)
     }
 
@@ -1055,7 +1058,7 @@ impl LashSession {
     ///
     /// ```ignore
     /// let pending = session.durable().pending_turn_inputs().await?;
-    /// let id = lash::TurnId::parse("draft-1")?;
+    /// let id = lash_vocabulary::identity::TurnId::parse("draft-1")?;
     /// session.durable().send(input).id(id).await?;
     /// ```
     pub fn durable(&self) -> DurableSession {

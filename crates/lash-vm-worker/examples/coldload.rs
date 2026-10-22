@@ -14,10 +14,12 @@ use std::sync::Arc;
 
 type Outcome<T> = Result<T, Box<dyn std::error::Error>>;
 use lash_kernel_doc::heap::{HeapFault, PageGrant, PageId, PageRef};
-use lash_kernel_doc::{FunctionId, FunctionName, parse_document};
-use lash_kernel_package::{HeldPackages, Package, PackageSources};
+use lash_kernel_doc::parse_document;
+use lash_vocabulary::names::FunctionId;
+
 use lash_kernel_state::paged::{PageAnswer, PageBody, PageSource};
 use lash_kernel_vm::Machine as _;
+use lash_vm_client::packages::WorkerLibrary;
 
 /// How many functions the run's closure holds beside lash's own.
 const CHAIN: usize = 30;
@@ -81,41 +83,26 @@ impl Drop for Counter {
 
 /// Release `step` of package `w`: `w.f0` .. `w.f{CHAIN - 1}`, each calling
 /// the one before it.
-fn chain(lash: &[Package], step: i64) -> Outcome<Package> {
-    let mut kernel: String = (0..CHAIN - 1).map(|at| format!("use w.f{at}\n")).collect();
-    kernel.push_str(&format!(
-        "\nfunction w.f0(n: Int) -> Any\nkernel 1\ncharge 1\nbody {{\n  let out = [n, {step}]\n  return out\n}}\n"
-    ));
-    for at in 1..CHAIN {
-        kernel.push_str(&format!(
-            "\nfunction w.f{at}(n: Int) -> Any\nkernel 1\ncharge 1\nbody {{\n  let v = invoke w.f{}(n)\n  return v\n}}\n",
-            at - 1
-        ));
+fn chain(step: i64) -> Outcome<(lash_kernel_doc::FunctionRegistry, FunctionId)> {
+    let mut registry = lash_vm_releases::helper_release()?.functions.clone();
+    let mut top = None;
+    for at in 0..CHAIN {
+        let body = match top {
+            None => format!("let out = [n, {step}] return out"),
+            Some(id) => format!("let v = invoke @{id}(n) return v"),
+        };
+        let uses = top.map_or_else(String::new, |id| format!("use w.f{} = @{id}\n", at - 1));
+        let definition = lash_kernel_doc::parse_definition(&format!(
+            "{uses}function w.f{at}(n: Int) -> Any\nkernel 1\ncharge 1\nbody {{ {body} }}\n"
+        ))?;
+        top = Some(registry.register(definition, None)?);
     }
-    let top = CHAIN - 1;
-    Ok(Package::build(
-        "w",
-        &format!("{step}.0.0"),
-        &PackageSources {
-            kernel: &kernel,
-            surface: &format!("function top(n: Int) -> Any = w.f{top}\n"),
-            labels: r#"{"members": {"top": "top"}}"#,
-        },
-        &lash.iter().collect::<Vec<_>>(),
-    )?)
+    Ok((registry, top.ok_or("empty chain")?))
 }
 
 struct World;
 
 impl lash_kernel_vm::Host for World {
-    fn clock(&mut self) -> lash_kernel_doc::Timestamp {
-        lash_kernel_doc::Timestamp {
-            nanoseconds: 0.into(),
-        }
-    }
-    fn random(&mut self) -> u64 {
-        0
-    }
     fn read(
         &mut self,
         _: &lash_kernel_doc::Handle,
@@ -187,52 +174,54 @@ const BOUNDS: lash_kernel_vm::Bounds = lash_kernel_vm::Bounds {
 )]
 fn main() -> Outcome<()> {
     let mode = std::env::args().nth(1).ok_or("mode: loader or registry")?;
-    let lash = lash_vm_releases::built()?;
-    let (w1, w2) = (chain(&lash, 1)?, chain(&lash, 2)?);
-    let top = w1
-        .function(&format!("w.f{}", CHAIN - 1))
-        .ok_or("the chain's top")?;
-    let install = |w: &Package| HeldPackages::install(lash.iter().cloned().chain([w.clone()]));
-    let writer = install(&w1)?;
+    let (writer, top) = chain(1)?;
+    let (reader, _) = chain(2)?;
     let node = match mode.as_str() {
-        "loader" => install(&w2)?,
-        "registry" => writer.clone(),
+        "loader" => &reader,
+        "registry" => &writer,
         other => return Err(format!("unknown mode `{other}`").into()),
     };
+    let roots = lash_vm_releases::helper_release()?.resolver_roots();
+    let image = WorkerLibrary::new(node, roots)?;
     let embedding = lash_vm_worker::Embedder::new()
         .dialect(lash_vm_worker::typescript(
             &lash_vm_client::WorkerTuning::standard(),
         )?)?
-        .finish(&node)?;
-
-    let closure =
-        lash_vm_broker::kernel::closure::derive([top], writer.functions(), &BTreeMap::new())?;
-    let mut document = parse_document(&format!(
-        "kernel 1\nnumbers float\nuse w.f{} = @{top}\nmain {{\n  let a = invoke w.f{}(5)\n  return a\n}}\n",
-        CHAIN - 1,
-        CHAIN - 1
-    ))?;
+        .finish(&image)?;
+    let closure = lash_vm_broker::kernel::closure::derive([top], &writer, &BTreeMap::new())?;
+    let mut text = String::from("kernel 1\nnumbers float\n");
     for function in closure.body().identities() {
-        let name = writer
-            .functions()
-            .name_of(&function)
-            .ok_or("a held function")?;
-        document
-            .manifest
-            .functions
-            .insert(function, FunctionName::new(name)?);
+        let definition = writer
+            .get(&function)
+            .ok_or("a declared function")?
+            .definition();
+        text.push_str(&format!(
+            "definition {}\n",
+            serde_json::to_string(&lash_kernel_doc::print_definition(definition))?
+        ));
+        if definition.has_native() {
+            text.push_str(&format!("native @{function}\n"));
+        }
     }
-    let document = Arc::new(document);
+    text.push_str(&format!("main {{ let a = invoke @{top}(5) return a }}\n"));
+    let document = Arc::new(parse_document(&text)?);
     let stored: Vec<(FunctionId, Vec<u8>)> = closure
         .body()
         .identities()
-        .filter(|function| node.functions().get(function).is_none())
-        .filter_map(|function| {
-            let definition = writer.functions().get(&function)?;
-            Some((
+        .filter(|function| node.get(function).is_none())
+        .map(|function| {
+            (
                 function,
-                lash_kernel_doc::graph_tokens::encode_body(definition.definition().as_ref()),
-            ))
+                lash_vocabulary::tokens::encode_body(
+                    writer
+                        .get(&function)
+                        .unwrap_or_else(|| {
+                            panic!("the cold-load writer lacks definition {function}")
+                        })
+                        .definition()
+                        .as_ref(),
+                ),
+            )
         })
         .collect();
     let definitions: Vec<(FunctionId, &[u8])> = stored
@@ -246,14 +235,21 @@ fn main() -> Outcome<()> {
             &embedding,
             &document,
             &definitions,
-            lash_kernel_doc::KernelDataLimits::standard(),
+            lash_vocabulary::KernelDataLimits::standard(),
         )?
         .map_err(|refusal| refusal.to_string())?;
-        let program = lash_kernel_vm::Program {
-            closure: PageId(closure.reference().0),
-            document: Arc::clone(&document),
-            library,
+        let link = lash_vocabulary::Link {
+            document: document.identity(),
+            fills: BTreeMap::new(),
         };
+        let id = link.identity();
+        let program = lash_kernel_vm::Program::prepare(
+            id,
+            BTreeMap::from([(document.identity(), document.clone())]),
+            &BTreeMap::from([(id, link)]),
+            PageId(closure.reference().0),
+            library,
+        )?;
         let start = lash_kernel_vm::CellStart {
             owner: PageId([9; 32]),
             target: lash_kernel_vm::Target::Main,

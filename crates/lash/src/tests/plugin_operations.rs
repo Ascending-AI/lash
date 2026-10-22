@@ -9,7 +9,8 @@ impl PluginOperation for Query {
     type Output = String;
     type Error = String;
     const ERROR_TYPE: &'static str = Self::NAME;
-    const ERROR_VERSION: lash_core::FormatVersion = lash_core::FormatVersion::ONE;
+    const ERROR_VERSION: lash_vocabulary::providers::FormatVersion =
+        lash_vocabulary::providers::FormatVersion::ONE;
     fn error_class(_: &Self::Error) -> lash_protocol_types::PluginFailureClass {
         lash_protocol_types::PluginFailureClass::Terminal
     }
@@ -41,7 +42,8 @@ async fn a_plugin_query_on_a_reopened_served_session_answers_from_its_published_
         spec,
     )))
     .build(crate::tests::host::runtime_lease_owner())?;
-    let id = crate::SessionId::parse("query-after-served-turn").expect("nonblank host identity");
+    let id = lash_vocabulary::identity::SessionId::parse("query-after-served-turn")
+        .expect("nonblank host identity");
     created_session(&core, id.clone())
         .await
         .durable()

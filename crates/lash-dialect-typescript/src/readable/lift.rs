@@ -6,7 +6,10 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use lash_kernel_doc::{self as k, Caption, CaptionTarget, FieldPath, FieldRoot, Name, Site, Unit};
+use lash_kernel_doc::{self as k, Caption, CaptionTarget, FieldPath, FieldRoot};
+
+use lash_vocabulary::Name;
+use lash_vocabulary::sites::{Site, Unit};
 
 use super::source::{self, Item, Param, Property, Stmt, Type};
 
@@ -20,65 +23,88 @@ pub(super) fn refuse<T>(why: impl Into<String>) -> Lift<T> {
 /// What a document lifts to: each declared function on its own, and
 /// `main` as the order of the module's entries or as a cell's statements.
 pub(super) struct Lifted {
-    pub(super) functions: BTreeMap<Name, Lift<Item>>,
+    pub(super) functions: BTreeMap<Name, (lash_vocabulary::FunctionId, Lift<Item>)>,
     pub(super) main: Lift<Main>,
 }
 
 pub(super) enum Main {
-    /// A module: its entries, in the order `main` binds them.
-    Module(Vec<Name>),
+    /// A module: declarations interleaved with its executable statements.
+    Module(Vec<ModulePart>),
     /// A cell: `main`'s statements.
     Cell(Vec<Stmt>),
 }
 
-pub(super) fn document(document: &k::Document, captions: Option<&k::Captions>) -> Lifted {
-    let functions = document
-        .functions
-        .iter()
-        .map(|(name, function)| {
-            let mut lifter = Lifter::new(document, captions, Unit::Function(name.clone()));
-            (name.clone(), lifter.item(name, function))
-        })
-        .collect();
-    Lifted {
-        functions,
-        main: main(document, captions),
-    }
+pub(super) enum ModulePart {
+    Export(Name),
+    Statements(Vec<Stmt>),
 }
 
-fn main(document: &k::Document, captions: Option<&k::Captions>) -> Lift<Main> {
-    if document.entries.is_empty() {
-        if !document.functions.is_empty() {
-            return refuse("a cell declares no function");
-        }
-        let mut lifter = Lifter::new(document, captions, Unit::Main);
-        let statements = lifter.block(&document.main, &Site::new(Unit::Main, Vec::new()))?;
-        return Ok(Main::Cell(statements));
-    }
-    let mut order = Vec::new();
-    for statement in &document.main {
-        let k::Stmt::Let {
-            name,
-            value: k::Rhs::Expr(k::Expr::Literal(k::Literal::Function(function))),
-        } = statement
-        else {
-            return refuse("a module's main only binds its entries");
-        };
-        if name != function || !document.entries.contains_key(name) || order.contains(name) {
-            return refuse("a module's main binds each entry once, by its name");
-        }
-        order.push(name.clone());
-    }
-    if order.len() != document.functions.len() || order.len() != document.entries.len() {
-        return refuse("every declared function is an entry main binds");
-    }
-    let site = Site::new(Unit::Main, Vec::new());
-    if (0..document.main.len()).any(|index| {
-        captions.is_some_and(|captions| captions.at(&site.child(index as u32)).is_some())
-    }) {
-        return refuse("main's statements carry no caption");
-    }
-    Ok(Main::Module(order))
+pub(super) fn document(
+    document: &k::Document,
+    captions: Option<&k::Captions>,
+    library: &dyn lash_kernel_dialect::Library,
+) -> Lifted {
+    let functions = document
+        .exports
+        .iter()
+        .filter_map(|(name, export)| match export {
+            k::Export::Function(export) => Some((
+                name.clone(),
+                (
+                    export.function,
+                    document
+                        .functions
+                        .get(&export.function)
+                        .ok_or_else(|| "missing exported function".to_owned())
+                        .and_then(|function| {
+                            Lifter::new(document, captions, Unit::Library(export.function), library)
+                                .item(name, function, export)
+                        }),
+                ),
+            )),
+            _ => None,
+        })
+        .collect::<BTreeMap<_, _>>();
+    let main = if document.exports.is_empty() {
+        let mut lifter = Lifter::new(document, captions, Unit::Main, library);
+        let block = document.main.as_deref().unwrap_or_default();
+        lifter
+            .block(block, &Site::new(Unit::Main, Vec::new()))
+            .map(Main::Cell)
+    } else {
+        module_main(document, captions, library).map(Main::Module)
+    };
+    Lifted { functions, main }
+}
+
+fn module_main(
+    document: &k::Document,
+    captions: Option<&k::Captions>,
+    library: &dyn lash_kernel_dialect::Library,
+) -> Lift<Vec<ModulePart>> {
+    let parts = lash_kernel_dialect::regions::module_parts(document)
+        .ok_or_else(|| "module exports do not match their Main bindings".to_owned())?;
+    let main = document.main.as_deref().unwrap_or_default();
+    let mut lifter = Lifter::new(document, captions, Unit::Main, library);
+    parts
+        .into_iter()
+        .filter_map(|part| {
+            use lash_kernel_dialect::regions::ModulePart as Part;
+            match part {
+                Part::Export(name) => Some(Ok(ModulePart::Export(name))),
+                Part::Statements(range) => Some(
+                    lifter
+                        .block_at(
+                            &main[range.clone()],
+                            &Site::new(Unit::Main, Vec::new()),
+                            range.start,
+                        )
+                        .map(ModulePart::Statements),
+                ),
+                Part::Implicit => None,
+            }
+        })
+        .collect()
 }
 
 /// What [`Lifter::enter`] set aside.
@@ -94,6 +120,7 @@ struct Pending {
 
 pub(super) struct Lifter<'a> {
     pub(super) document: &'a k::Document,
+    library: &'a dyn lash_kernel_dialect::Library,
     captions: Option<&'a k::Captions>,
     /// The temporaries lifted and not yet read, in the order they were
     /// bound: the order the source evaluated them.
@@ -102,38 +129,107 @@ pub(super) struct Lifter<'a> {
     taken_captions: Vec<Caption>,
     /// The names some statement of the unit assigns.
     assigned: BTreeSet<Name>,
+    /// Original names retained in lowered function tokens, keyed by binding identity.
+    pub(super) bindings: BTreeMap<Name, String>,
 }
 
 impl<'a> Lifter<'a> {
-    fn new(document: &'a k::Document, captions: Option<&'a k::Captions>, unit: Unit) -> Self {
+    fn new(
+        document: &'a k::Document,
+        captions: Option<&'a k::Captions>,
+        unit: Unit,
+        library: &'a dyn lash_kernel_dialect::Library,
+    ) -> Self {
         let mut assigned = BTreeSet::new();
         let body = match &unit {
-            Unit::Function(name) => document.functions.get(name).map(|f| f.body.as_slice()),
-            _ => Some(document.main.as_slice()),
+            Unit::Library(id) => document
+                .functions
+                .get(id)
+                .and_then(|f| f.body())
+                .map(|body| body.block.as_slice()),
+            _ => document.main.as_deref(),
         };
         if let Some(body) = body {
             assigned_in(body, &mut assigned);
         }
+        let mut bindings = BTreeMap::new();
+        if let Some(body) = body {
+            let mut pending = vec![k::Node::Block(body)];
+            while let Some(node) = pending.pop() {
+                let binding = match node {
+                    k::Node::Stmt(k::Stmt::Let {
+                        name,
+                        value: k::Rhs::Expr(value),
+                    })
+                    | k::Node::Stmt(k::Stmt::Assign {
+                        place: k::Place::Variable(name),
+                        value: k::Rhs::Expr(value),
+                        ..
+                    }) => Some((name, value)),
+                    _ => None,
+                };
+                if let Some((name, k::Expr::Tuple(parts))) = binding
+                    && let [
+                        k::Expr::Literal(k::Literal::Text(tag)),
+                        _,
+                        k::Expr::Literal(k::Literal::Text(original)),
+                        _,
+                        k::Expr::Closure(_),
+                        _,
+                    ] = parts.as_slice()
+                    && tag == "ts.function"
+                    && source::identifier(original)
+                    && name.as_str().strip_prefix(original).is_some_and(|suffix| {
+                        suffix.strip_prefix('_').is_some_and(|number| {
+                            !number.is_empty() && number.bytes().all(|b| b.is_ascii_digit())
+                        })
+                    })
+                {
+                    bindings.insert(name.clone(), original.clone());
+                }
+                pending.extend(node.children());
+            }
+        }
         Self {
             document,
+            library,
             captions,
             pending: Vec::new(),
             taken_captions: Vec::new(),
             assigned,
+            bindings,
         }
     }
 
-    /// The name of library function `id`, as the manifest lists it.
-    pub(super) fn library(&self, id: &k::FunctionId) -> Option<&str> {
-        self.document
-            .manifest
-            .functions
-            .get(id)
-            .map(k::FunctionName::as_str)
+    pub(super) fn library<R: Reference>(&self, id: &R) -> Option<String> {
+        id.name(self.document, self.library)
+    }
+    pub(super) fn is<R: Reference>(&self, id: &R, name: &str) -> bool {
+        let Ok(name) = lash_vocabulary::FunctionName::new(name) else {
+            return false;
+        };
+        let qualified = lash_kernel_dialect::authoring::helper_name(&name);
+        self.library(id)
+            .is_some_and(|found| found == name.as_str() || found == qualified.to_string())
     }
 
-    pub(super) fn is(&self, id: &k::FunctionId, name: &str) -> bool {
-        self.library(id) == Some(name)
+    /// Match the import contract authored for the library's selected helper.
+    /// Display labels do not establish a helper's identity or convention.
+    pub(super) fn helper_import(&self, slot: &lash_vocabulary::ImportSlot, name: &str) -> bool {
+        let Some(identity) = self.library.resolve(name) else {
+            return false;
+        };
+        let Some(header) = self.library.header(&identity) else {
+            return false;
+        };
+        !header.has_native()
+            && self.document.imports.get(slot).is_some_and(|import| {
+                import.name == lash_kernel_dialect::authoring::helper_name(&header.name)
+                    && matches!(&import.kind,
+                        lash_vocabulary::ImportKind::Code { signature, convention }
+                            if *signature == header.signature
+                                && *convention == lash_vocabulary::Convention::Direct)
+            })
     }
 
     fn caption(&self, target: impl Into<CaptionTarget>) -> Option<Caption> {
@@ -164,32 +260,31 @@ impl<'a> Lifter<'a> {
         Some(pending.value)
     }
 
-    fn item(&mut self, name: &Name, function: &k::Function) -> Lift<Item> {
-        let Some(entry) = self.document.entries.get(name) else {
-            return refuse("a declared function that is no entry");
-        };
-        if !matches!(entry.convention, k::StartConvention::TsDirect { await_fn }
-            if self.is(&await_fn, "ts.await"))
+    fn item(
+        &mut self,
+        name: &Name,
+        function: &k::FunctionDefinition,
+        entry: &k::FunctionExport,
+    ) -> Lift<Item> {
+        if !matches!(&entry.convention, k::StartConvention::TsDirect { await_fn }
+            if self.is(await_fn, "ts.await"))
         {
             return refuse("an entry the dialect starts directly");
-        }
-        if function.start.is_some() {
-            return refuse("an entry has no start adapter");
         }
         if !source::identifier(name.as_str()) {
             return refuse("an entry name TypeScript cannot spell");
         }
-        if entry.signature.params.len() != function.params.len()
+        if entry.signature.params.len() != function.signature.params.len()
             || entry
                 .signature
                 .params
                 .iter()
-                .zip(&function.params)
+                .zip(function.signature.params.iter().map(|param| &param.name))
                 .any(|(param, name)| param.name != *name)
         {
             return refuse("an entry's parameters are its signature's");
         }
-        let mut params = Vec::with_capacity(function.params.len());
+        let mut params = Vec::with_capacity(function.signature.params.len());
         for param in &entry.signature.params {
             if !source::identifier(param.name.as_str()) {
                 return refuse("a parameter name TypeScript cannot spell");
@@ -212,8 +307,11 @@ impl<'a> Lifter<'a> {
             &FieldRoot::Result,
             &mut Vec::new(),
         )?;
-        let site = Site::new(Unit::Function(name.clone()), Vec::new());
-        let mut statements: &[k::Stmt] = &function.body;
+        let site = Site::new(Unit::Library(entry.function), Vec::new());
+        let mut statements: &[k::Stmt] = &function
+            .body()
+            .ok_or_else(|| "native export has no authored body".to_owned())?
+            .block;
         // The implicit end of an async function returns undefined.
         if let [rest @ .., k::Stmt::ReturnVia { value, policy }] = statements
             && matches!(value, k::Expr::Literal(k::Literal::Absent))
@@ -226,6 +324,7 @@ impl<'a> Lifter<'a> {
         }
         let body = self.block(statements, &site)?;
         Ok(Item {
+            is_async: entry.asynchronous,
             caption: self.caption(site),
             name: name.as_str().to_owned(),
             params,
@@ -239,12 +338,12 @@ impl<'a> Lifter<'a> {
     fn annotation(
         &self,
         function: &Name,
-        ty: &k::Type,
+        ty: &lash_vocabulary::Type,
         root: &FieldRoot,
         path: &mut Vec<String>,
     ) -> Lift<Option<Type>> {
         Ok(match ty {
-            k::Type::Any => None,
+            lash_vocabulary::Type::Any => None,
             _ => Some(self.ts_type(function, ty, root, path)?),
         })
     }
@@ -252,27 +351,38 @@ impl<'a> Lifter<'a> {
     fn ts_type(
         &self,
         function: &Name,
-        ty: &k::Type,
+        ty: &lash_vocabulary::Type,
         root: &FieldRoot,
         path: &mut Vec<String>,
     ) -> Lift<Type> {
         Ok(match ty {
-            k::Type::Any => Type::Word("unknown"),
-            k::Type::Text => Type::Word("string"),
-            k::Type::Number => Type::Word("number"),
-            k::Type::Bool => Type::Word("boolean"),
-            k::Type::Null => Type::Word("null"),
-            k::Type::List(item) => Type::Array(Box::new(self.ts_type(function, item, root, path)?)),
-            k::Type::Union(members) => {
+            lash_vocabulary::Type::Any => Type::Word("unknown"),
+            lash_vocabulary::Type::Text => Type::Word("string"),
+            lash_vocabulary::Type::Number => Type::Word("number"),
+            lash_vocabulary::Type::Bool => Type::Word("boolean"),
+            lash_vocabulary::Type::Null => Type::Word("null"),
+            lash_vocabulary::Type::List(item) => {
+                Type::Array(Box::new(self.ts_type(function, item, root, path)?))
+            }
+            lash_vocabulary::Type::Union(members) => {
                 let mut written = Vec::new();
                 let mut index = 0;
                 while index < members.len() {
                     match &members[index..] {
-                        [k::Type::Null, k::Type::Absent, ..] => {
+                        [
+                            lash_vocabulary::Type::Null,
+                            lash_vocabulary::Type::Absent,
+                            ..,
+                        ] => {
                             written.push(Type::Word("undefined"));
                             index += 2;
                         }
-                        [k::Type::Any | k::Type::Absent | k::Type::Union(_), ..] => {
+                        [
+                            lash_vocabulary::Type::Any
+                            | lash_vocabulary::Type::Absent
+                            | lash_vocabulary::Type::Union(_),
+                            ..,
+                        ] => {
                             return refuse("a union member no annotation writes");
                         }
                         [member, ..] => {
@@ -284,7 +394,7 @@ impl<'a> Lifter<'a> {
                 }
                 Type::Union(written)
             }
-            k::Type::Record(record) if record.rest.is_none() => {
+            lash_vocabulary::Type::Record(record) if record.rest.is_none() => {
                 let mut properties = Vec::with_capacity(record.fields.len());
                 for field in &record.fields {
                     path.push(field.name.clone());
@@ -340,6 +450,7 @@ impl<'a> Lifter<'a> {
         let outer = self.pending.len();
         let mut out = Vec::new();
         let mut index = 0;
+        let mut predeclared = BTreeSet::new();
         while index < block.len() {
             let here = site.child((first + index) as u32);
             let caption = self
@@ -383,7 +494,32 @@ impl<'a> Lifter<'a> {
                 index += 1;
                 continue;
             }
+            // The TDZ cell is emitted before a closure captures a declaration
+            // that appears later. Its source is that later declaration.
+            if let k::Stmt::Let {
+                name,
+                value: k::Rhs::Expr(k::Expr::Tuple(items)),
+            } = &block[index]
+                && items.is_empty()
+                && self.reassigned(name.as_str())
+            {
+                predeclared.insert(name.clone());
+                index += 1;
+                continue;
+            }
             let kind = self.statement(&block[index], &here)?;
+            let kind = match (&block[index], kind) {
+                (
+                    k::Stmt::Assign {
+                        place: k::Place::Variable(name),
+                        ..
+                    },
+                    source::StmtKind::Assign(_, "=", value),
+                ) if predeclared.remove(name) => {
+                    source::StmtKind::Let(self.binding(name)?, Some(value))
+                }
+                (_, kind) => kind,
+            };
             // A temporary's caption names the statement that reads it.
             let mut caption = caption;
             for pending in std::mem::take(&mut self.taken_captions) {
@@ -444,6 +580,49 @@ fn assigned_in(block: &[k::Stmt], out: &mut BTreeSet<Name>) {
                 }
             }
             _ => {}
+        }
+    }
+}
+
+pub(super) trait Reference {
+    fn name(
+        &self,
+        document: &k::Document,
+        library: &dyn lash_kernel_dialect::Library,
+    ) -> Option<String>;
+}
+impl Reference for lash_vocabulary::FunctionId {
+    fn name(
+        &self,
+        document: &k::Document,
+        _library: &dyn lash_kernel_dialect::Library,
+    ) -> Option<String> {
+        Some(document.functions.get(self)?.name.to_string())
+    }
+}
+impl Reference for lash_vocabulary::ImportSlot {
+    fn name(
+        &self,
+        document: &k::Document,
+        library: &dyn lash_kernel_dialect::Library,
+    ) -> Option<String> {
+        let name = &document.imports.get(self)?.name;
+        Some(
+            library
+                .imported(name)
+                .map_or_else(|| name.to_string(), |source| source.to_string()),
+        )
+    }
+}
+impl Reference for k::FunctionTarget {
+    fn name(
+        &self,
+        document: &k::Document,
+        library: &dyn lash_kernel_dialect::Library,
+    ) -> Option<String> {
+        match self {
+            Self::Local(id) => id.name(document, library),
+            Self::Import(slot) => slot.name(document, library),
         }
     }
 }

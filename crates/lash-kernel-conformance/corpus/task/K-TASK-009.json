@@ -3,7 +3,7 @@
   "cases": [
     {
       "name": "joining twice returns the same object",
-      "document": "kernel 1\nnumbers by_spelling\nfn value() { return [1] }\nmain {\nlet h = spawn call value() let a = join h let b = join h set a[0] = 2 finish b\n}\n",
+      "document": "kernel 1\nnumbers by_spelling\ndefinition \"function value() -> Any\\nkernel 1\\nmetering statements\\nbody {\\n  return [1]\\n}\\n\"\nmain {\n  let h = spawn invoke value()\n  let a = join h\n  let b = join h\n  set a[0] = 2\n  finish b\n}\n",
       "expected": {
         "prints": [],
         "end": {

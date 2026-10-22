@@ -1,7 +1,7 @@
 use crate::AttachmentRef;
-use crate::ProcessId;
-use crate::SessionId;
 pub use lash_core_store::effect_identity::*;
+use lash_vocabulary::identity::ProcessId;
+use lash_vocabulary::identity::SessionId;
 use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
@@ -409,7 +409,7 @@ pub enum RuntimeEffectCommand {
         /// The recorded presenter and steps, resolved before any callback runs.
         plan: Box<super::PresentationBinding>,
         call_id: crate::ToolCallId,
-        tool_id: crate::ToolId,
+        tool_id: lash_vocabulary::tool_contract::ToolId,
         tool_name: String,
         render: Option<crate::RecordedRender>,
         args: serde_json::Value,
@@ -449,7 +449,7 @@ pub enum RuntimeEffectCommand {
     /// the head, and a repeated compaction records a base of its own. The
     /// envelope names only the session: the base is the step's outcome.
     RecordCompactionBase {
-        session: crate::SessionId,
+        session: lash_vocabulary::identity::SessionId,
     },
     /// Resolve a config transaction once, before anything publishes
     /// (FIG-4379): the base revision it resolved against and either the
@@ -459,7 +459,7 @@ pub enum RuntimeEffectCommand {
     /// envelope names only the session and the transaction id: the
     /// resolution is the step's outcome.
     ResolveConfigTransaction {
-        session: crate::SessionId,
+        session: lash_vocabulary::identity::SessionId,
         transaction: String,
     },
     /// Read the session's leading open command run for a command run to
@@ -471,7 +471,7 @@ pub enum RuntimeEffectCommand {
     /// commits that landed, even after those commits settled the lane. The
     /// envelope names only the session: the run is the step's outcome.
     ReadSessionCommandRun {
-        session: crate::SessionId,
+        session: lash_vocabulary::identity::SessionId,
     },
     /// Close a logical run's scope after its terminal evidence (FIG-3600
     /// S7, FIG-3607 item 7). Recorded under the run's scope at
@@ -479,7 +479,7 @@ pub enum RuntimeEffectCommand {
     /// so a crash between the run's terminal commit and its close re-runs
     /// the close; the session is the scope's.
     CloseRunScope {
-        run: crate::TurnId,
+        run: lash_vocabulary::identity::TurnId,
     },
     Checkpoint {
         checkpoint: CheckpointKind,
@@ -600,7 +600,7 @@ pub enum ProcessCommand {
         selection: ProcessListSelection,
     },
     ValidateVisible {
-        owner: crate::RuntimeOwner,
+        owner: lash_vocabulary::identity::RuntimeOwner,
         process_ids: Vec<ProcessId>,
     },
     Transfer {
@@ -649,7 +649,7 @@ enum ProcessCommandDecode {
         selection: ProcessListSelection,
     },
     ValidateVisible {
-        owner: crate::RuntimeOwner,
+        owner: lash_vocabulary::identity::RuntimeOwner,
         process_ids: Vec<ProcessId>,
     },
     Transfer {

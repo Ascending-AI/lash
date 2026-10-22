@@ -20,11 +20,11 @@ pub use crate::plugin::{
 
 pub use crate::session::{RuntimeExecutionTracing, Session};
 
-use crate::ProcessId;
 use lash_execution_contracts::plugin_error::PluginError;
 use lash_execution_contracts::process::ObservedWorkItem;
 use lash_execution_contracts::process::ProcessRecord;
 use lash_execution_contracts::process::ProcessWorkObserver;
+use lash_vocabulary::identity::ProcessId;
 
 /// `ProcessWorkObserver::work_item_from_record`: the bounded record/event-tail
 /// retry the observation laws shift with a record read before a concurrent
@@ -164,7 +164,7 @@ pub fn record_started_process(
 
 pub async fn await_process_with_cancellation(
     context: &crate::RuntimeExecutionContext<'_>,
-    process_id: &crate::ProcessId,
+    process_id: &lash_vocabulary::identity::ProcessId,
     parent_invocation: Option<crate::RuntimeInvocation>,
     cancellation: Option<tokio_util::sync::CancellationToken>,
 ) -> Result<lash_execution_contracts::process::ProcessAwaitOutput, PluginError> {
@@ -249,7 +249,7 @@ pub async fn complete_tool_output(
                 call_id: call_id.clone(),
                 provider_call_id: None,
             },
-            crate::ToolId::new(tool),
+            lash_vocabulary::tool_contract::ToolId::new(tool),
             None,
             crate::tool_dispatch::ToolDispatchOutcome {
                 record: crate::ToolCallRecord {
@@ -285,7 +285,7 @@ pub fn prompt_catalog(
         let mut recipe = crate::plugin::PluginRegistrar::new(id);
         register(&mut recipe)?;
         entries.extend(recipe.descriptors(id));
-        let owner = crate::RuntimeOwner::Session("prompt-fixture".into());
+        let owner = lash_vocabulary::identity::RuntimeOwner::Session("prompt-fixture".into());
         let state = crate::plugin::PluginStateView::bind(&owner, id, std::sync::Arc::default());
         let mut reg = crate::plugin::BoundRegistrar::new(id.into());
         reg.contributions = contributions;
@@ -297,7 +297,7 @@ pub fn prompt_catalog(
         crate::plugin::prompt::PromptCatalogSnapshot::from_inventory(
             &crate::plugin::InstalledInventory {
                 scope: crate::plugin::InventoryScope::Deployment(
-                    crate::plugin::RegistryKind::Session,
+                    lash_vocabulary::claims::RegistryKind::Session,
                 ),
                 readiness: vec![crate::plugin::ContributionReadiness::NotValidated; entries.len()],
                 entries,
@@ -312,7 +312,7 @@ pub fn prompt_catalog(
 pub fn prompt_catalog_from_recipes(
     recipes: &[crate::plugin::PluginRecipe],
 ) -> Result<crate::plugin::prompt::PromptCatalog, PluginError> {
-    let owner = crate::RuntimeOwner::Session("prompt-recipe-fixture".into());
+    let owner = lash_vocabulary::identity::RuntimeOwner::Session("prompt-recipe-fixture".into());
     let context = crate::plugin::PluginSessionContext {
         bindings: std::sync::Arc::new(crate::plugin::ServiceBindings::default()),
         owner: owner.clone(),
@@ -344,7 +344,7 @@ pub fn prompt_catalog_from_recipes(
         crate::plugin::prompt::PromptCatalogSnapshot::from_inventory(
             &crate::plugin::InstalledInventory {
                 scope: crate::plugin::InventoryScope::Deployment(
-                    crate::plugin::RegistryKind::Session,
+                    lash_vocabulary::claims::RegistryKind::Session,
                 ),
                 readiness: vec![crate::plugin::ContributionReadiness::NotValidated; entries.len()],
                 entries,

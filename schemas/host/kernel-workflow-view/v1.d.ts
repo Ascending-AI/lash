@@ -51,15 +51,8 @@ export type ActKind = ({
   "call": Callee;
 } | {
   "perform": {
-    "effect": QualifiedName;
     "result": Type;
-    /**
-     * As [`Action::Perform`]'s.
-     */
-    "then_yield"?: boolean;
-  };
-} | {
-  "sleep": {
+    "slot": ImportSlot;
     /**
      * As [`Action::Perform`]'s.
      */
@@ -70,7 +63,7 @@ export type ActKind = ({
 } | "join" | {
   "join_many": JoinMode;
 } | "yield" | "cancel" | {
-  "await": FunctionId;
+  "await": FunctionTarget;
 });
 
 /**
@@ -86,19 +79,11 @@ export type Action = ({
 } | {
   "perform": {
     "args": Array<Atom>;
-    "effect": QualifiedName;
     "result": Type;
+    "slot": ImportSlot;
     /**
      * Whether the task takes one more turn of the ready queue once
      * the outcome is in, before it continues (`K-TASK-005`).
-     */
-    "then_yield"?: boolean;
-  };
-} | {
-  "sleep": {
-    "duration": Atom;
-    /**
-     * As [`Action::Perform`]'s.
      */
     "then_yield"?: boolean;
   };
@@ -122,7 +107,7 @@ export type Action = ({
   };
 } | {
   "await": {
-    "policy": FunctionId;
+    "policy": FunctionTarget;
     "value": Atom;
   };
 });
@@ -211,7 +196,7 @@ export type ActionView = {
    * library bodies and statically known declared callees. Derived from the
    * checker's effect derivation, in canonical order with duplicates removed.
    */
-  "performs": Array<QualifiedName>;
+  "performs": Array<OperationUse>;
   /**
    * A `perform`'s declared result, else the checker's facet.
    */
@@ -336,6 +321,17 @@ export type BindingView = {
 export type Bytes = string;
 
 /**
+ * How a function a closure makes is started from outside its run: the
+ * signature it is started under, how the dialect holds the function as a
+ * value, and how the entry calls it.
+ */
+export type CallablePresentation = {
+  "convention": StartConvention;
+  "representation": FunctionRepresentation;
+  "signature": Signature;
+};
+
+/**
  * A lexical callable is projected once, independently of its invocations.
  */
 export type CallableView = {
@@ -347,11 +343,11 @@ export type CallableView = {
  * What a call or a `spawn` runs.
  */
 export type Callee = ({
-  "declared": Name;
+  "local": FunctionId;
+} | {
+  "import": ImportSlot;
 } | {
   "value": Name;
-} | {
-  "library": FunctionId;
 });
 
 /**
@@ -361,19 +357,25 @@ export type Callee = ({
  */
 export type CalleeView = ({
   "library": {
-    "id": FunctionId;
     /**
-     * Every installed surface member backed by this identity in the
-     * cell's package set. A private definition has no members.
+     * Every visible Export backed by this identity in the retained
+     * Packages. A private definition has no Exports.
      */
-    "member": Array<PackageMemberView>;
-    "name": QualifiedName;
+    "exports": Array<ExportName>;
+    "id": FunctionId;
+    "link": LinkId;
+    "name": FunctionName;
     [key: string]: unknown;
   };
 } | {
-  "declared": Name;
+  "import": ImportSlot;
 } | {
-  "effect": QualifiedName;
+  "timer": {
+    "use_": OperationUse;
+    [key: string]: unknown;
+  };
+} | {
+  "effect": OperationUse;
 });
 
 export type Catch = {
@@ -389,15 +391,11 @@ export type Catch = {
  * that defines it (`K-CLO-001`); which ones is derived, never written.
  */
 export type Closure = {
-  "body": Array<Stmt>;
-  "params"?: Array<Name>;
   /**
-   * How a value this closure makes is started when it crosses to a tool
-   * as a [`crate::FunctionValue`] (`K-CLO-004`); `None` for one that
-   * cannot be started. Executable behaviour: it is part of the
-   * document's identity.
+   * The anonymous body's own identity, local to the defining Document.
    */
-  "start"?: (StartAdapter | null);
+  "function": FunctionId;
+  "presentation"?: (CallablePresentation | null);
 };
 
 /**
@@ -579,6 +577,14 @@ export type ExecutionSiteView = {
 };
 
 /**
+ * A document Export, optionally a member of its TypeDef. Type members are not start selectors.
+ */
+export type ExportName = {
+  "member"?: (Segment | null);
+  "name": Name;
+};
+
+/**
  * An expression, evaluated within one statement. Only an [`Expr::Act`]
  * in it may pause the task (`K-EVAL-008`).
  */
@@ -617,7 +623,7 @@ export type Expr = ({
     "args": Array<Expr>;
     "function": FunctionId;
   };
-} | "clock" | "random" | {
+} | {
   "read": ProjectionRead;
 } | {
   "act": ActExpr;
@@ -670,6 +676,8 @@ export type FlowTarget = (("leave" | "end") | {
 
 export type FunctionId = string;
 
+export type FunctionName = string;
+
 /**
  * How a dialect holds a function as a value.
  */
@@ -680,7 +688,23 @@ export type FunctionRepresentation = ("bare" | {
   };
 });
 
+/**
+ * A convention helper local to this document or named by an explicit Import slot.
+ */
+export type FunctionTarget = ({
+  "kind": "local";
+  "value": FunctionId;
+} | {
+  "kind": "import";
+  "value": ImportSlot;
+});
+
 export type HeaderRole = ("condition" | "iterable");
+
+/**
+ * A stable document-local Import coordinate. Names are diagnostic, never dispatch keys.
+ */
+export type ImportSlot = number;
 
 export type Integer = string;
 
@@ -703,6 +727,8 @@ export type LineRange = {
   "last": number;
 };
 
+export type LinkId = string;
+
 export type Literal = (("null" | "absent") | {
   "bool": boolean;
 } | {
@@ -714,7 +740,7 @@ export type Literal = (("null" | "absent") | {
 } | {
   "bytes": Bytes;
 } | {
-  "function": Name;
+  "function": FunctionId;
 });
 
 export type MapEntry = {
@@ -742,8 +768,6 @@ export type Member = ({
   };
 });
 
-export type MemberPath = string;
-
 /**
  * A variable, parameter or declared-function name.
  *
@@ -766,15 +790,12 @@ export type NodeCoverage = {
 };
 
 /**
- * One installed name of a library definition. Package and member stay paired:
- * one definition may implement several members, including across packages.
+ * One operation Import in one immutable Link. All dispatch, modes and pins use this identity.
  */
-export type PackageMemberView = {
-  "member": MemberPath;
-  "package": PackagePath;
+export type OperationUse = {
+  "link": LinkId;
+  "slot": ImportSlot;
 };
-
-export type PackagePath = string;
 
 export type Param = {
   "name": Name;
@@ -814,25 +835,23 @@ export type Protocol = {
    * the items it may still give, after each step; gives that budget
    * anew.
    */
-  "check"?: (FunctionId | null);
+  "check"?: (FunctionTarget | null);
   /**
    * Takes what was walked and an item of it to the value bound.
    */
-  "item"?: (FunctionId | null);
+  "item"?: (FunctionTarget | null);
   /**
    * Steps a driver: an empty tuple when it is exhausted, else a tuple of
    * one item.
    */
-  "next"?: (FunctionId | null);
+  "next"?: (FunctionTarget | null);
   /**
    * Takes the iterated value to what the loop walks: a list, a tuple, a
    * map, a set or a text, which the loop's own cursor walks, or any
    * other value, a driver that `next` steps.
    */
-  "open": FunctionId;
+  "open": FunctionTarget;
 };
-
-export type QualifiedName = string;
 
 /**
  * A failed readable lens does not invalidate canonical membership or ranges.
@@ -960,6 +979,8 @@ export type ScopeView = {
   "statement"?: (Site | null);
 };
 
+export type Segment = string;
+
 /**
  * What a function, an effect or an entry takes and returns.
  */
@@ -983,35 +1004,25 @@ export type Site = {
 /**
  * What an action does.
  */
-export type SiteKind = (("call" | "perform" | "sleep" | "join" | "join_many" | "yield" | "spawn" | "cancel") | "await");
+export type SiteKind = (("call" | "perform" | "join" | "join_many" | "yield" | "spawn" | "cancel") | "sleep" | "await");
 
-/**
- * How a function a closure makes is started from outside its run: the
- * signature it is started under, how the dialect holds the function as a
- * value, and how the entry calls it.
- */
-export type StartAdapter = {
-  "convention": StartConvention;
-  "representation": FunctionRepresentation;
-  "signature": Signature;
-};
-
-/**
- * How a host starts an entry. A start adapter uses the same convention
- * when it extracts a function value from a dialect callable.
- */
-export type StartConvention = ("direct" | {
-  "ts_direct": {
-    "await_fn": FunctionId;
+export type StartConvention = ({
+  "kind": "direct";
+} | {
+  "kind": "ts_direct";
+  "value": {
+    "await_fn": FunctionTarget;
   };
 } | {
-  "ts_args_list": {
-    "await_fn": FunctionId;
-    "same_fn": FunctionId;
+  "kind": "ts_args_list";
+  "value": {
+    "await_fn": FunctionTarget;
+    "same_fn": FunctionTarget;
   };
 } | {
-  "py_direct": {
-    "cleanup": FunctionId;
+  "kind": "py_direct";
+  "value": {
+    "cleanup": FunctionTarget;
   };
 });
 
@@ -1110,7 +1121,7 @@ export type Stmt = (("break" | "continue") | {
   };
 } | {
   "return_via": {
-    "policy": FunctionId;
+    "policy": FunctionTarget;
     "value": Expr;
   };
 } | {

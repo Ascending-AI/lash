@@ -14,8 +14,12 @@ use lash_rlm_types::RlmCreateExtras;
 use super::testing::{Call, RlmSections, compose, compose_rlm};
 use super::*;
 
-fn tool(name: &str, operation: &str, description: &str) -> lash_core::ToolDefinition {
-    lash_core::ToolDefinition::raw(
+fn tool(
+    name: &str,
+    operation: &str,
+    description: &str,
+) -> lash_vocabulary::tool_contract::ToolDefinition {
+    lash_vocabulary::tool_contract::ToolDefinition::raw(
         format!("tool:{name}"),
         operation,
         description,

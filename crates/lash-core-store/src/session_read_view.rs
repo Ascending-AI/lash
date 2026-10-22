@@ -1,7 +1,10 @@
 //! Read projection of a session's durable graph.
 
+use crate::RuntimeSessionState;
+use crate::SessionPolicy;
+use crate::SessionSnapshot;
 use crate::facade_support::SessionGraphFacadeOps;
-use crate::{RuntimeSessionState, SessionId, SessionPolicy, SessionSnapshot};
+use lash_vocabulary::identity::SessionId;
 use std::sync::Arc;
 use std::sync::OnceLock;
 
@@ -169,7 +172,7 @@ impl SessionReadView {
         }
     }
 
-    pub fn session_id(&self) -> &crate::SessionId {
+    pub fn session_id(&self) -> &lash_vocabulary::identity::SessionId {
         &self.0.meta.session_id
     }
 
@@ -408,7 +411,9 @@ pub enum SessionReadGraph {
     clippy::expect_used,
     reason = "the initial frame material is a non-empty literal"
 )]
-pub(crate) fn initial_frame_node_id(session_id: &crate::SessionId) -> crate::FrameNodeId {
+pub(crate) fn initial_frame_node_id(
+    session_id: &lash_vocabulary::identity::SessionId,
+) -> crate::FrameNodeId {
     let frame_key = crate::FrameKey::from_caller_material("initial-frame")
         .expect("the initial frame material is non-empty");
     crate::session_graph::frame_node_id(session_id, frame_key.as_str())

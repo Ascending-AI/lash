@@ -68,7 +68,7 @@ pub(crate) fn call_shape(parameters: &ast::Parameters, is_async: bool) -> CallSh
             .args
             .iter()
             .map(|param| CallParam {
-                name: lash_kernel_doc::Name::new(param.parameter.name.id.as_str()),
+                name: lash_vocabulary::names::Name::new(param.parameter.name.id.as_str()),
                 has_default: param.default.is_some(),
             })
             .collect(),

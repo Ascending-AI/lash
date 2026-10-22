@@ -16,6 +16,7 @@
 use lash_kernel_doc::arena::ArenaHandle;
 use lash_kernel_doc::plan::{Cursor as PlanCursor, PlanContext, PlanExit, Test};
 use lash_kernel_doc::{NativeError, Retry, TaskId, Value};
+
 use lash_kernel_exec::{Reg as KirReg, RegRange};
 
 use super::loops::Cursor;
@@ -49,6 +50,7 @@ pub(super) struct Walk {
 /// walks its loop (`super::plan_regions`): the closure in its variable,
 /// the code and cells that closure calls, and its island.
 pub(super) struct Steady {
+    pub(super) link: lash_vocabulary::LinkId,
     pub(super) closure: ArenaHandle,
     pub(super) code: crate::compile::CodeId,
     pub(super) cells: Vec<ArenaHandle>,

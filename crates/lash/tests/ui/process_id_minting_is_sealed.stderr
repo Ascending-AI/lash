@@ -16,7 +16,7 @@ error[E0624]: associated function `from_minted` is private
 4 |     let _ = lash::ProcessId::from_minted(0x0192_0000_0000_7000_8000_0000_0000_0001);
   |                              ^^^^^^^^^^^ private associated function
   |
- ::: $WORKSPACE/crates/lash-protocol-types/src/identity.rs
+ ::: $WORKSPACE/crates/lash-vocabulary/src/identity.rs
   |
   |     pub(crate) fn from_minted(uuid_v7: u128) -> Self {
   |     ------------------------------------------------ private associated function defined here

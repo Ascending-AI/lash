@@ -20,10 +20,12 @@
 
 use lash_kernel_dialect::dispatch::{self, Adapt, Brand, Filled, Selection, Target};
 use lash_kernel_dialect::{
-    Export, ExportView, Member, PackagePath, Resolution, Segment, SpellKind, Spelling, TypeMember,
+    FunctionMember, NamespaceKind, NamespaceView, Resolution, SpellKind, Spelling, TypeMember,
     ValueType,
 };
 use lash_kernel_doc::{ActKind, Callee, Expr, Literal, Place, Rhs, Stmt};
+
+use lash_vocabulary::{PackagePath, Segment};
 
 use super::calls::Key;
 use super::{Lowerer, Lowering, Operand, Ty};
@@ -37,7 +39,10 @@ pub(super) enum PackageRef<'a> {
     /// A package, or a prefix of package paths: a namespace.
     Namespace(String),
     /// A package function, or a static of a value type.
-    Callable { member: &'a Member, spelled: String },
+    Callable {
+        member: &'a FunctionMember,
+        spelled: String,
+    },
     /// A value type.
     Type { spelled: String },
     /// An error, by its kernel kind: the error's canonical path.
@@ -56,9 +61,21 @@ impl<'a> Lowerer<'a> {
     /// and that a package path starts with. A computed key that is a string
     /// literal is a segment as written: the qualified escape,
     /// `dataframe["delete"]`.
-    fn package_segments<'e>(&self, expr: &'e ast::Expr) -> Option<Vec<&'e str>> {
+    fn package_segments<'e>(&'e self, expr: &'e ast::Expr) -> Option<Vec<&'e str>> {
         let (root, path) = super::calls::path_segments(expr)?;
-        (!self.is_bound(root) && self.namespaces.is_root(root)).then_some(path)
+        if self.is_bound(root) {
+            return None;
+        }
+        if let Some(prefix) = self.imported.get(root) {
+            return Some(
+                prefix
+                    .iter()
+                    .map(String::as_str)
+                    .chain(path.iter().skip(1).copied())
+                    .collect(),
+            );
+        }
+        self.namespaces.is_root(root).then_some(path)
     }
 
     /// What `expr` names among the packages in view: `None` when it is no
@@ -74,39 +91,67 @@ impl<'a> Lowerer<'a> {
         };
         let spelled = path.join(".");
         let found = match self.namespaces.resolve(&path, SPELLING) {
-            Resolution::Operation { .. } => return Ok(None),
+            Resolution::Operation { .. } | Resolution::Deferred { .. } => return Ok(None),
             Resolution::Namespace => PackageRef::Namespace(spelled),
             Resolution::Export {
                 package,
                 segment,
                 export,
                 member,
-            } => match (export, member) {
-                (Export::Function(member), None) => PackageRef::Callable { member, spelled },
-                (Export::Type(_), None) => PackageRef::Type { spelled },
-                (Export::Error, None) => PackageRef::Error {
-                    kind: format!("{package}.{segment}"),
-                    spelled,
-                },
-                (Export::Operation(_), _) => {
-                    return Err(self.unknown_member(
-                        format!("`{spelled}` is an operation this session does not offer"),
-                        "call an operation the prompt lists".to_owned(),
-                    ));
+            } => {
+                let name = lash_vocabulary::QualifiedName {
+                    package: package.clone(),
+                    member: segment.clone(),
+                    type_member: None,
+                };
+                let brand = lash_vocabulary::Brand {
+                    package: package.clone(),
+                    name: segment.clone(),
+                };
+                match export {
+                    NamespaceKind::Type(_) => {
+                        self.imports.insert(lash_vocabulary::Import {
+                            name,
+                            kind: lash_vocabulary::ImportKind::Type { brand },
+                        });
+                    }
+                    NamespaceKind::Error => {
+                        self.imports.insert(lash_vocabulary::Import {
+                            name,
+                            kind: lash_vocabulary::ImportKind::Error { kind: brand },
+                        });
+                    }
+                    _ => {}
                 }
-                (_, Some((_, TypeMember::Static(member)))) => {
-                    PackageRef::Callable { member, spelled }
+                match (export, member) {
+                    (NamespaceKind::Function(member), None) => {
+                        PackageRef::Callable { member, spelled }
+                    }
+                    (NamespaceKind::Type(_), None) => PackageRef::Type { spelled },
+                    (NamespaceKind::Error, None) => PackageRef::Error {
+                        kind: format!("{package}.{segment}"),
+                        spelled,
+                    },
+                    (NamespaceKind::Operation(_), _) => {
+                        return Err(self.unknown_member(
+                            format!("`{spelled}` is an operation this session does not offer"),
+                            "call an operation the prompt lists".to_owned(),
+                        ));
+                    }
+                    (_, Some((_, TypeMember::Static(member)))) => {
+                        PackageRef::Callable { member, spelled }
+                    }
+                    (_, Some((_, TypeMember::Method(_) | TypeMember::Property(_)))) => {
+                        let (owner, name) = spelled.rsplit_once('.').unwrap_or((&spelled, ""));
+                        return Err(self.unknown_member(
+                            format!(
+                                "`{name}` is a member of `{owner}` values, not of `{owner}` itself"
+                            ),
+                            format!("call it on a value: `value.{name}(...)`"),
+                        ));
+                    }
                 }
-                (_, Some((_, TypeMember::Method(_) | TypeMember::Property(_)))) => {
-                    let (owner, name) = spelled.rsplit_once('.').unwrap_or((&spelled, ""));
-                    return Err(self.unknown_member(
-                        format!(
-                            "`{name}` is a member of `{owner}` values, not of `{owner}` itself"
-                        ),
-                        format!("call it on a value: `value.{name}(...)`"),
-                    ));
-                }
-            },
+            }
             Resolution::Unknown => return self.unknown_path(&path).map_or(Ok(None), Err),
         };
         Ok(Some(found))
@@ -127,7 +172,7 @@ impl<'a> Lowerer<'a> {
         })?;
         let written = rest[0];
         let export = exports.iter().find(|(segment, export)| {
-            let kind = export_kind(export);
+            let kind = export_kind(&export.kind);
             SPELLING.spell(kind, segment) == written || loosely(segment.as_str(), written)
         });
         let Some((segment, export)) = export else {
@@ -136,14 +181,29 @@ impl<'a> Lowerer<'a> {
                 format!("call one of the exports the prompt lists under `{package}`"),
             ));
         };
-        let owner = format!("{package}.{}", SPELLING.spell(export_kind(export), segment));
-        if SPELLING.spell(export_kind(export), segment) != written {
+        let owner = format!(
+            "{package}.{}",
+            SPELLING.spell(export_kind(&export.kind), segment)
+        );
+        if SPELLING.spell(export_kind(&export.kind), segment) != written {
+            if let Some(misspelled) = self.namespaces.misspelled(path, SPELLING) {
+                return Some(Diagnostic::with_repair(
+                    DiagnosticCode::OperationSpelling,
+                    format!(
+                        "`{}` names the operation `{}` in another dialect's spelling",
+                        path.join("."),
+                        misspelled.operation.effect_name()
+                    ),
+                    format!("write `{}`", misspelled.repair),
+                    self.span,
+                ));
+            }
             return Some(self.unknown_member(
                 format!("`{package}.{written}` is not how TypeScript spells a package member"),
                 format!("write `{owner}`"),
             ));
         }
-        let (Export::Type(ty), [_, member]) = (export, rest) else {
+        let (NamespaceKind::Type(ty), [_, member]) = (&export.kind, rest) else {
             return Some(self.unknown_member(
                 format!("`{owner}` has no member `{}`", rest[1..].join(".")),
                 format!("call `{owner}` itself"),
@@ -415,7 +475,7 @@ impl<'a> Lowerer<'a> {
         mut then: F,
     ) -> Lowering<Operand>
     where
-        F: FnMut(&mut Self, Option<&'a Member>, &Operand, &P) -> Lowering<Operand>,
+        F: FnMut(&mut Self, Option<&'a FunctionMember>, &Operand, &P) -> Lowering<Operand>,
     {
         let brand = self.invoke(
             dispatch::BRAND_OF,
@@ -503,7 +563,10 @@ impl<'a> Lowerer<'a> {
                 let list = this.arguments(args)?;
                 Ok(this.pin(list))
             },
-            |this: &mut Self, member: Option<&'a Member>, method: &Operand, list: &Operand| {
+            |this: &mut Self,
+             member: Option<&'a FunctionMember>,
+             method: &Operand,
+             list: &Operand| {
                 match member {
                     Some(member) => {
                         let slots = this.dynamic_slots(member, Some(object.clone()), list)?;
@@ -528,9 +591,11 @@ impl<'a> Lowerer<'a> {
             name,
             targets,
             |_| Ok(()),
-            |this: &mut Self, member: Option<&'a Member>, method: &Operand, (): &()| match member {
-                Some(member) => this.invoke_member(member, vec![object.clone()], true),
-                None => Ok(method.clone()),
+            |this: &mut Self, member: Option<&'a FunctionMember>, method: &Operand, (): &()| {
+                match member {
+                    Some(member) => this.invoke_member(member, vec![object.clone()], true),
+                    None => Ok(method.clone()),
+                }
             },
         )
     }
@@ -538,7 +603,11 @@ impl<'a> Lowerer<'a> {
     /// The function value of a code member: a TypeScript function whose
     /// closure invokes the member's identity with its slots filled from the
     /// call's arguments.
-    pub(super) fn member_value(&mut self, member: &'a Member, spelled: &str) -> Lowering<Operand> {
+    pub(super) fn member_value(
+        &mut self,
+        member: &'a FunctionMember,
+        spelled: &str,
+    ) -> Lowering<Operand> {
         let this = self.fresh("this");
         let supplied = self.fresh("args");
         let list = Operand::variable(supplied.clone(), Ty::Unknown);
@@ -589,7 +658,7 @@ impl<'a> Lowerer<'a> {
     fn call_member(
         &mut self,
         receiver: Option<Operand>,
-        member: &'a Member,
+        member: &'a FunctionMember,
         spelled: &str,
         args: &[ast::CallArg],
         awaited: bool,
@@ -655,7 +724,7 @@ impl<'a> Lowerer<'a> {
     /// `absent`, and a rest slot takes the list from its position on.
     fn dynamic_slots(
         &mut self,
-        member: &'a Member,
+        member: &'a FunctionMember,
         receiver: Option<Operand>,
         list: &Operand,
     ) -> Lowering<Vec<Operand>> {
@@ -720,7 +789,7 @@ impl<'a> Lowerer<'a> {
                     self.invoke("ts.callable", std::slice::from_ref(&value), Ty::Unknown)?
                         .expr()
                 };
-                let params: Vec<lash_kernel_doc::Name> =
+                let params: Vec<lash_vocabulary::Name> =
                     signature.params.iter().map(|_| self.fresh("arg")).collect();
                 let wrapped = |this: &mut Self| -> Lowering<Operand> {
                     let callable = this.let_expr(callable.clone(), Ty::Unknown);
@@ -743,7 +812,7 @@ impl<'a> Lowerer<'a> {
                     })?;
                     // The closure states the slot's signature, so that it
                     // may cross to a runner as the member's callback.
-                    let start = lash_kernel_doc::StartAdapter {
+                    let start = lash_kernel_doc::CallablePresentation {
                         signature: signature.clone(),
                         representation: lash_kernel_doc::FunctionRepresentation::Bare,
                         convention: lash_kernel_doc::StartConvention::Direct,
@@ -772,13 +841,22 @@ impl<'a> Lowerer<'a> {
     /// task makes the call, as an unawaited tool call does.
     fn invoke_member(
         &mut self,
-        member: &'a Member,
+        member: &'a FunctionMember,
         slots: Vec<Operand>,
         awaited: bool,
     ) -> Lowering<Operand> {
         let result = Ty::decoded(&member.signature.result);
         if awaited || !member.asynchronous {
-            return self.invoke(member.definition.as_str(), &slots, result);
+            let slot = self.imports.code(
+                member.name.clone(),
+                member.signature.clone(),
+                member.convention,
+            );
+            return Ok(self.action(
+                ActKind::Call(Callee::Import(slot)),
+                slots.iter().map(Operand::expr).collect(),
+                result,
+            ));
         }
         let this = self.fresh("this");
         let supplied = self.fresh("args");
@@ -788,7 +866,16 @@ impl<'a> Lowerer<'a> {
             let values: Vec<Operand> = (0..count)
                 .map(|index| lowerer.inline(Self::element(&list, index), Ty::Unknown))
                 .collect();
-            let value = lowerer.invoke(member.definition.as_str(), &values, Ty::Unknown)?;
+            let slot = lowerer.imports.code(
+                member.name.clone(),
+                member.signature.clone(),
+                member.convention,
+            );
+            let value = lowerer.action(
+                ActKind::Call(Callee::Import(slot)),
+                values.iter().map(Operand::expr).collect(),
+                Ty::Unknown,
+            );
             lowerer.emit(Stmt::Return {
                 value: value.expr(),
             });
@@ -882,10 +969,10 @@ fn integral(number: f64) -> Option<lash_kernel_doc::Integer> {
 }
 
 /// How TypeScript spells an export of this kind.
-fn export_kind(export: &Export) -> SpellKind {
+fn export_kind(export: &NamespaceKind) -> SpellKind {
     match export {
-        Export::Type(_) | Export::Error => SpellKind::TypeName,
-        Export::Operation(_) | Export::Function(_) => SpellKind::Member,
+        NamespaceKind::Type(_) | NamespaceKind::Error => SpellKind::TypeName,
+        NamespaceKind::Operation(_) | NamespaceKind::Function(_) => SpellKind::Member,
     }
 }
 

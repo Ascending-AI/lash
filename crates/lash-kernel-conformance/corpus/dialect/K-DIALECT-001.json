@@ -3,7 +3,7 @@
   "cases": [
     {
       "name": "printed mutation aliases and effect statements keep their order",
-      "document": "kernel 1\nnumbers by_spelling\neffect echo(value: Int) -> Int contract \"1\"\nmain {\n let xs = [1]\n let alias = xs\n print xs\n let first = perform echo(1) as Int\n set alias[0] = first\n print xs\n let second = perform echo(first) as Int\n finish (xs, second)\n}\n",
+      "document": "kernel 1\nnumbers by_spelling\nimport 0 operation host.echo(value: Int) -> Int\nmain {\n  let xs = [1]\n  let alias = xs\n  print xs\n  let first = perform 0(1) as Int\n  set alias[0] = first\n  print xs\n  let second = perform 0(first) as Int\n  finish (xs, second)\n}\n",
       "environment": {
         "deliveries": [
           [
@@ -64,7 +64,7 @@
         "trace": [
           {
             "effect": {
-              "effect": "echo",
+              "effect": "host.echo",
               "args": [
                 {
                   "int": "1"
@@ -75,7 +75,7 @@
           },
           {
             "effect": {
-              "effect": "echo",
+              "effect": "host.echo",
               "args": [
                 {
                   "int": "2"

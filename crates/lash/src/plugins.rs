@@ -11,7 +11,8 @@ pub use lash_core::plugin::{
     ProcessStartPort, ProcessTransferPort, ProcessValidateVisiblePort, RecordedToolCatalogPort,
     ServiceBindings, SessionCreatePort, SessionGraphAppendPort, TurnScopePort,
 };
-pub use lash_core_store::tool_run::{StateAuthority, StateCommandLimits};
+pub use lash_core_store::tool_run::StateCommandLimits;
+pub use lash_vocabulary::providers::StateAuthority;
 // The vocabulary this module's signatures name (the facade-completeness rule).
 pub use lash_core::ArtifactReferrerPorts;
 pub use lash_core::CommandJournalGuard;
@@ -53,22 +54,39 @@ pub use lash_execution_contracts::process::DefinitionAcquisition;
 pub use lash_execution_contracts::process::ProcessEnvLoadError;
 pub use lash_execution_contracts::process::ResolvedProcessDefinition;
 pub use lash_protocol_standard::BatchSugar;
-pub use lash_protocol_types::{
-    AttachmentMaterializationNotice, CompletionCandidate, CompletionDisposition, DecidedCompletion,
-    DegradedBinding, ModelToolOutcome, ModelToolReturn, SessionStreamEvent, StreamMessageKind,
-    ToolCatalogBuildError, ToolContractResolver,
-};
-pub use lash_sansio::{
-    CheckpointResumeAction, DriverAction, DriverContextView, EffectId as DriverEffectId,
-    ExpandedRow, ExpandedWrapper, ModelToolCalls, PendingWork, ProjectorContext, ResponseToolCalls,
-    ToolExpansionPlan, ToolWave, TurnMachineConfig, TurnProtocol, UndecodableDriverState,
-    UnitTurnProtocol, WriterFormats,
-};
+pub use lash_protocol_types::AttachmentMaterializationNotice;
+pub use lash_protocol_types::CompletionCandidate;
+pub use lash_protocol_types::CompletionDisposition;
+pub use lash_protocol_types::DecidedCompletion;
+pub use lash_protocol_types::DegradedBinding;
+pub use lash_protocol_types::ModelToolOutcome;
+pub use lash_protocol_types::ModelToolReturn;
+pub use lash_protocol_types::SessionStreamEvent;
+pub use lash_protocol_types::StreamMessageKind;
+pub use lash_protocol_types::ToolContractResolver;
+pub use lash_sansio::CheckpointResumeAction;
+pub use lash_sansio::DriverAction;
+pub use lash_sansio::DriverContextView;
+pub use lash_sansio::EffectId as DriverEffectId;
+pub use lash_sansio::ExpandedRow;
+pub use lash_sansio::ExpandedWrapper;
+pub use lash_sansio::ModelToolCalls;
+pub use lash_sansio::PendingWork;
+pub use lash_sansio::ProjectorContext;
+pub use lash_sansio::ResponseToolCalls;
+pub use lash_sansio::ToolExpansionPlan;
+pub use lash_sansio::ToolWave;
+pub use lash_sansio::TurnMachineConfig;
+pub use lash_sansio::TurnProtocol;
+pub use lash_sansio::UndecodableDriverState;
+pub use lash_sansio::UnitTurnProtocol;
+pub use lash_sansio::WriterFormats;
 /// The protocol-generic forms [`TurnDriverConfig`] and
 /// [`TurnDriverPreamble`] specialize to the host's turn protocol.
 pub use lash_sansio::{
     TurnDriverConfig as GenericTurnDriverConfig, TurnDriverPreamble as GenericTurnDriverPreamble,
 };
+pub use lash_vocabulary::ToolCatalogBuildError;
 
 /// A session's recorded plugin configuration and the owner contract that
 /// creates and changes it (FIG-4379): each installed plugin registers the
@@ -89,9 +107,6 @@ pub use lash_core::CreationConfigError;
 pub use lash_core::FrameNodeId;
 pub use lash_core::HostTurnProtocol;
 pub use lash_core::NoRunOptions;
-/// A claim token: what an actor's outstanding work requires and a
-/// node's installed registrations serve (S7).
-pub use lash_core::ObligationToken;
 pub use lash_core::OwnerChange;
 pub use lash_core::PluginConfig;
 pub use lash_core::PluginMessage;
@@ -105,7 +120,6 @@ pub use lash_core::ProtocolBuildInput;
 pub use lash_core::ProtocolDriverState;
 pub use lash_core::ProtocolTurnOptionsError;
 pub use lash_core::RecordedNamespaceCorrupt;
-pub use lash_core::RegistryKind;
 pub use lash_core::RenderFault;
 pub use lash_core::ToolCatalog;
 pub use lash_core::ToolCheckConflict;
@@ -357,6 +371,8 @@ pub use lash_core::{
     facade_support::ModelCallAddress, facade_support::PluginLifecycleEvent,
     facade_support::SessionConfigChangedContext, facade_support::SessionConfigField,
 };
+/// The committed wait identity and deadline of a pending operation.
+pub use lash_core_store::tool_run::run_event::CompletionTimer;
 pub use lash_core_store::tool_run::{Material, NamesMaterial, SettledOutput, SettledOutputRefusal};
 pub use lash_execution_contracts::config_error::ConfigRegistrationError;
 pub use lash_execution_contracts::declaration_error::PluginDeclarationError;
@@ -425,3 +441,14 @@ pub use lash_sansio::ContextProjector;
 /// Sans-I/O protocol handle accepted by [`TurnDriverConfig::chat`]; custom host drivers use
 /// [`HostTurnProtocol`] as its protocol parameter.
 pub use lash_sansio::ProtocolDriverHandle;
+/// A claim token: what an actor's outstanding work requires and a
+/// node's installed registrations serve (S7).
+pub use lash_vocabulary::claims::ObligationToken;
+pub use lash_vocabulary::claims::RegistryKind;
+
+// Types named by the plugin extension contracts.
+pub use lash_core::facade_support::{ResolutionError, ResolutionValidator};
+pub use lash_core::{EndedCell, LinkedExecution};
+pub use lash_execution_contracts::process::{
+    InlineCode, InlineRequest, MigrationError, SuccessionContext, UseCorrespondence,
+};

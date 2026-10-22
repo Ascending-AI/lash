@@ -1,5 +1,5 @@
-use crate::SessionId;
 use lash_execution_contracts::session_types::PluginOwned;
+use lash_vocabulary::identity::SessionId;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -77,7 +77,7 @@ pub struct PluginOperationSpec {
     pub input_schema: serde_json::Value,
     pub output_schema: serde_json::Value,
     pub error_type: String,
-    pub error_version: crate::FormatVersion,
+    pub error_version: lash_vocabulary::providers::FormatVersion,
     pub error_schema: serde_json::Value,
 }
 
@@ -96,7 +96,7 @@ pub struct PluginOperationDef {
     #[serde(default)]
     pub output_schema: serde_json::Value,
     pub error_type: String,
-    pub error_version: crate::FormatVersion,
+    pub error_version: lash_vocabulary::providers::FormatVersion,
     pub error_schema: serde_json::Value,
 }
 
@@ -135,7 +135,7 @@ pub trait PluginOperation: Send + Sync + 'static {
     type Output: Serialize + DeserializeOwned + JsonSchema + Send + 'static;
     type Error: Serialize + DeserializeOwned + JsonSchema + std::fmt::Display + Send + 'static;
     const ERROR_TYPE: &'static str;
-    const ERROR_VERSION: crate::FormatVersion;
+    const ERROR_VERSION: lash_vocabulary::providers::FormatVersion;
     fn error_class(error: &Self::Error) -> PluginFailureClass;
 
     /// Decode this operation's error, retaining unrecognized envelopes unchanged.
@@ -299,7 +299,7 @@ pub trait SessionReadService: crate::core_internal::RuntimeService + Send + Sync
     async fn committed_turn(
         &self,
         session_id: &SessionId,
-        turn_id: &crate::TurnId,
+        turn_id: &lash_vocabulary::identity::TurnId,
     ) -> Result<Option<lash_core_store::transcript::CommittedTurnWithCalls>, CommittedTurnReadError>;
 
     async fn snapshot_current(&self) -> Result<SessionSnapshot, PluginError>;

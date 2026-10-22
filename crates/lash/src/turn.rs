@@ -1,4 +1,4 @@
-use lash_protocol_types::TurnId;
+use lash_vocabulary::identity::TurnId;
 
 use crate::support::{
     Arc, ToolCallRecord, TurnActivity, TurnActivitySink, TurnOutcome, async_trait,

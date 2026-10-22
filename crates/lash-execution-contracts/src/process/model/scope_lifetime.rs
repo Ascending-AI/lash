@@ -21,8 +21,8 @@ use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 
-use super::SessionId;
 use crate::EffectOpener;
+use lash_vocabulary::identity::SessionId;
 
 pub use lash_core_store::scope_identity::{
     SCOPE_STORAGE_PAYLOAD_VERSION, ScopeId, ScopeStorageError,
@@ -222,7 +222,7 @@ impl ProcessLineage {
     /// standalone process has none.
     #[must_use]
     pub fn of_process(
-        process_id: &crate::ProcessId,
+        process_id: &lash_vocabulary::identity::ProcessId,
         ancestry: &Ancestry,
         session_capability: Option<&SessionId>,
         own_session: Option<&SessionId>,
@@ -295,7 +295,9 @@ pub enum StartCxError {
     NotAnOpener(#[from] crate::EffectOpenerError),
     /// A process scope ran without the lineage of the process it names.
     #[error("process scope `{process_id}` runs without its recorded lineage")]
-    MissingLineage { process_id: crate::ProcessId },
+    MissingLineage {
+        process_id: lash_vocabulary::identity::ProcessId,
+    },
 }
 
 impl StartCx {
@@ -465,7 +467,10 @@ mod tests {
     use super::*;
 
     fn turn_scope() -> ScopeId {
-        ScopeId::turn(SessionId::from("s"), crate::TurnId::from("t"))
+        ScopeId::turn(
+            SessionId::from("s"),
+            lash_vocabulary::identity::TurnId::from("t"),
+        )
     }
 
     fn process_scope() -> ScopeId {
@@ -476,10 +481,19 @@ mod tests {
     /// named like a turn's encoding does not alias it.
     #[test]
     fn scopes_that_render_alike_have_distinct_projections() {
-        let first = ScopeId::turn(SessionId::from("s/a"), crate::TurnId::from("c"));
-        let second = ScopeId::turn(SessionId::from("s"), crate::TurnId::from("a/c"));
+        let first = ScopeId::turn(
+            SessionId::from("s/a"),
+            lash_vocabulary::identity::TurnId::from("c"),
+        );
+        let second = ScopeId::turn(
+            SessionId::from("s"),
+            lash_vocabulary::identity::TurnId::from("a/c"),
+        );
         assert_ne!(first.storage_id(), second.storage_id());
-        let turn = ScopeId::turn(SessionId::from("s"), crate::TurnId::from("t"));
+        let turn = ScopeId::turn(
+            SessionId::from("s"),
+            lash_vocabulary::identity::TurnId::from("t"),
+        );
         let session = ScopeId::session(SessionId::fixture(turn.storage_id()));
         assert_ne!(turn.storage_id(), session.storage_id());
     }
@@ -525,7 +539,10 @@ mod tests {
     }
 
     fn turn_admitted() -> crate::AdmittedScope {
-        crate::AdmittedScope::turn(SessionId::from("s"), crate::TurnId::from("run"))
+        crate::AdmittedScope::turn(
+            SessionId::from("s"),
+            lash_vocabulary::identity::TurnId::from("run"),
+        )
     }
 
     /// A turn's context starts at its root, ends at its session, and holds
@@ -553,7 +570,10 @@ mod tests {
     }
 
     fn turn_scope_run() -> ScopeId {
-        ScopeId::turn(SessionId::from("s"), crate::TurnId::from("run"))
+        ScopeId::turn(
+            SessionId::from("s"),
+            lash_vocabulary::identity::TurnId::from("run"),
+        )
     }
 
     /// A process body's context is its lineage; a standalone process has no

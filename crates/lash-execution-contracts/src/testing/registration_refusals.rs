@@ -90,7 +90,9 @@ pub fn refused_process_registrations(rule: ProcessRegistrationRefusal) -> Vec<Pr
             // A root that claims a session its lifetime never looked up.
             let mut registration = accepted_process_registration();
             registration.lifetime = LifetimeDecision::Detached;
-            registration.session_capability = Some(crate::SessionId::from("a-different-session"));
+            registration.session_capability = Some(lash_vocabulary::identity::SessionId::from(
+                "a-different-session",
+            ));
             vec![registration]
         }
         ProcessRegistrationRefusal::EmptySessionTurnDefinitionKey => {

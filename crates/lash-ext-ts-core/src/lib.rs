@@ -27,11 +27,15 @@ mod conversions;
 
 use std::sync::Arc;
 
+use lash_kernel_doc::FunctionRegistry;
+use lash_kernel_doc::NativeCall;
+use lash_kernel_doc::NativeError;
+use lash_kernel_doc::NativeFunction;
+use lash_kernel_doc::PreparedNative;
+use lash_kernel_doc::RegistryError;
+use lash_kernel_doc::Value;
 use lash_kernel_doc::arena::ShortText;
-use lash_kernel_doc::{
-    FunctionId, FunctionRegistry, NativeCall, NativeError, NativeFunction, PreparedNative,
-    RegistryError, Value,
-};
+use lash_vocabulary::names::FunctionId;
 
 /// Why [`implement`] could not add the natives.
 #[derive(Debug, thiserror::Error)]
@@ -58,7 +62,7 @@ pub const OPERATIONS: [&str; 11] = [
     "ts.sub",
     "ts.to_number",
     "ts.to_boolean",
-    "ts.number.to_string",
+    "ts.number.format_value",
     "ts.lt",
     "ts.le",
     "ts.gt",
@@ -134,7 +138,7 @@ pub fn native(
         }),
         "ts.to_number" => Arc::new(ToNumber),
         "ts.to_boolean" => Arc::new(conversions::ToBoolean),
-        "ts.number.to_string" => Arc::new(conversions::NumberToString),
+        "ts.number.format_value" => Arc::new(conversions::NumberToString),
         "ts.lt" | "ts.le" | "ts.gt" | "ts.ge" => Arc::new(Relate {
             relation: match name {
                 "ts.lt" => Relation::Lt,

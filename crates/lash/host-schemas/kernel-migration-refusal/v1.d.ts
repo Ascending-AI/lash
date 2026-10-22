@@ -5,6 +5,10 @@
  * Why a kernel process is not carried to the next kernel version.
  */
 export type KernelMigrationRefusal = ({
+  "callable": CallableId;
+  "refused": "callable_origin_required";
+  [key: string]: unknown;
+} | {
   "document": DocumentId;
   "refused": "document_missing";
   [key: string]: unknown;
@@ -29,6 +33,14 @@ export type KernelMigrationRefusal = ({
   [key: string]: unknown;
 });
 
+/**
+ * A stored function under its defining Link. Calls and escaped captures retain this Link.
+ */
+export type CallableId = {
+  "function": FunctionId;
+  "link": LinkId;
+};
+
 export type DocumentId = string;
 
 /**
@@ -45,11 +57,11 @@ export type DocumentRefusal = ({
   [key: string]: unknown;
 } | {
   "function": FunctionId;
-  "name": QualifiedName;
+  "name": FunctionName;
   "reason": "function_retired";
   [key: string]: unknown;
 } | {
-  "operation": QualifiedName;
+  "operation": FunctionName;
   "reason": "operation_contract_changed";
   [key: string]: unknown;
 } | {
@@ -63,6 +75,10 @@ export type DocumentRefusal = ({
 });
 
 export type FunctionId = string;
+
+export type FunctionName = string;
+
+export type LinkId = string;
 
 /**
  * A variable, parameter or declared-function name.
@@ -99,8 +115,6 @@ export type ParkedRefusal = ({
   "reason": "state_not_carried";
   [key: string]: unknown;
 });
-
-export type QualifiedName = string;
 
 /**
  * A node's address: the code it belongs to and the chain of

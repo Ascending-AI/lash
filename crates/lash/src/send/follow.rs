@@ -37,22 +37,28 @@
 //! own observation that follows it, for at most the follow poll's ceiling
 //! (FIG-5793).
 
-use lash_protocol_types::core_support::RunIdCoreSupport;
+use lash_vocabulary::identity::RunIdCoreSupport;
 use std::collections::{HashSet, VecDeque};
 use std::sync::Arc;
 use std::time::Duration;
 
 use futures_util::{FutureExt as _, StreamExt};
+use lash_core::LiveReplayGapReason;
+use lash_core::LiveReplayOutcome;
+use lash_core::LiveReplaySubscribeOutcome;
+use lash_core::LiveReplaySubscription;
+use lash_core::SessionCursor;
+use lash_core::SessionObservationEvent;
+use lash_core::SessionObservationEventPayload;
+use lash_core::SessionRevision;
+use lash_core::TurnActivity;
+use lash_core::TurnEvent;
 use lash_core::facade_support::TurnOutcome;
 use lash_core::facade_support::{FollowRead, LiveReplayGap};
 use lash_core::runtime::TurnInputAcceptanceReceipt;
 use lash_core::store::PhysicalTurn;
-use lash_core::{
-    LiveReplayGapReason, LiveReplayOutcome, LiveReplaySubscribeOutcome, LiveReplaySubscription,
-    SessionCursor, SessionObservationEvent, SessionObservationEventPayload, SessionRevision,
-    TurnActivity, TurnEvent, TurnId,
-};
 use lash_durable::runner::KeyWatch;
+use lash_vocabulary::identity::TurnId;
 use tokio::sync::mpsc;
 
 use super::resolve::{self, Resolution};
@@ -435,7 +441,7 @@ pub(super) async fn follow(
                     drain(ctx, &mut adoption, &mut observation, tap).await;
                     return Ok(Followed::Answered(Box::new(
                         SendOutcome::OperationSettled {
-                            run: crate::RunId::from_turn_id(run),
+                            run: lash_vocabulary::identity::RunId::from_turn_id(run),
                             outcome,
                             gaps: observation.gaps,
                         },
@@ -462,7 +468,7 @@ pub(super) async fn follow(
                     adoption.adopt(run.clone(), tap).await;
                     drain(ctx, &mut adoption, &mut observation, tap).await;
                     return Ok(Followed::Answered(Box::new(SendOutcome::Refused {
-                        run: Some(crate::RunId::from_turn_id(run)),
+                        run: Some(lash_vocabulary::identity::RunId::from_turn_id(run)),
                         refusal: Box::new(refusal),
                         gaps: observation.gaps,
                     })));
@@ -473,7 +479,7 @@ pub(super) async fn follow(
                     return Ok(Followed::Answered(Box::new(SendOutcome::Parked {
                         parked: crate::ParkedTurn {
                             session_id: ctx.parts.session_id.clone(),
-                            run: crate::RunId::from_turn_id(run),
+                            run: lash_vocabulary::identity::RunId::from_turn_id(run),
                             reason,
                         },
                         gaps: observation.gaps,
@@ -732,7 +738,7 @@ async fn finish_settled(
         observation.report(gap, tap).await;
     }
     Ok(SendOutcome::Settled {
-        run: crate::RunId::from_turn_id(run),
+        run: lash_vocabulary::identity::RunId::from_turn_id(run),
         output: Box::new(TurnOutput {
             outcome,
             activities,
@@ -749,9 +755,9 @@ mod tests {
     /// activity payloads before it knows which run consumed its input.
     #[tokio::test]
     async fn unbound_adoption_shares_replay_payloads_until_the_run_is_known() {
-        let session = crate::SessionId::fixture("adoption-sharing");
+        let session = lash_vocabulary::identity::SessionId::fixture("adoption-sharing");
         let subject = Subject::Input(TurnInputAcceptanceReceipt {
-            input_id: crate::InputId::fixture("input"),
+            input_id: lash_vocabulary::identity::InputId::fixture("input"),
             session_id: session.clone(),
             source_key: None,
             ingress: lash_core::TurnInputIngress::next_turn(),

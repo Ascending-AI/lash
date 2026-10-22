@@ -14,7 +14,7 @@ impl<'run> RuntimeTurnDriver<'run> {
 
     /// The logical Run this physical turn belongs to: the admitted scope's
     /// root, or this turn when it is its own root.
-    pub(super) fn logical_run(&self) -> crate::TurnId {
+    pub(super) fn logical_run(&self) -> lash_vocabulary::identity::TurnId {
         self.scoped_effect_controller
             .execution_scope()
             .logical_run()

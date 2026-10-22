@@ -161,13 +161,13 @@ pub(crate) fn tool_intent_sql() -> &'static ToolIntentSql {
 /// already answer them as expired; this releases their bytes.
 pub(crate) fn release_settled_tool_intent_payloads(
     tx: &rusqlite::Connection,
-    session: Option<&lash_protocol_types::SessionId>,
+    session: Option<&lash_vocabulary::identity::SessionId>,
 ) -> rusqlite::Result<usize> {
     crate::conn::cached_execute(
         tx,
         tool_intent_sql().shared.release_settled_payloads.sql(),
         rusqlite::params![
-            session.map(lash_protocol_types::SessionId::as_str),
+            session.map(lash_vocabulary::identity::SessionId::as_str),
             i64::from(lash_store_sql::session::revisions::MATERIAL_RELEASE_BATCH),
         ],
     )

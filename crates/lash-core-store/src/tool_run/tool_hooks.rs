@@ -23,7 +23,7 @@ use serde::{Deserialize, Serialize};
 
 use super::material::MaterialRef;
 use super::run_event::AttemptOrdinal;
-use crate::store::plugin_writers::PluginCallbackIdentity;
+use lash_vocabulary::providers::PluginCallbackIdentity;
 
 /// The four tool hook phases, in execution order around one call.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]

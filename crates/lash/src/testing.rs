@@ -51,8 +51,8 @@ pub use lash_execution_contracts::testing::process_execution_env_fixture;
 /// [`TestExecutionPorts::over_host`]. There is no in-memory default.
 pub use lash_core::testing::{
     TestExecutionPorts, cancelled_code_execution_context, code_execution_context,
-    code_execution_context_for_process, code_execution_context_with_invocation,
-    code_execution_context_with_process_dependencies, code_execution_context_with_tool_catalog,
+    code_execution_context_with_invocation, code_execution_context_with_process_dependencies,
+    code_execution_context_with_tool_catalog,
     code_execution_context_with_tool_provider_and_catalog,
     code_execution_context_with_tool_provider_catalog_and_invocation,
     code_execution_context_with_tool_provider_catalog_scoped_effect_controller_and_invocation,
@@ -148,11 +148,17 @@ pub fn node_activation(
 pub fn node_serves(core: &crate::LashCore) -> Vec<String> {
     let mut serves = core.node_serves();
     serves.extend(
-        lash_core::ObligationToken::for_capabilities(&core.node_offers()).map(String::from),
+        lash_vocabulary::claims::ObligationToken::for_capabilities(&core.node_offers())
+            .map(String::from),
     );
     serves.sort();
     serves.dedup();
     serves
+}
+
+/// The exact capabilities the core's serving registrations advertise to the store.
+pub fn node_capabilities(core: &crate::LashCore) -> lash_core::durable_port::NodeCapabilities {
+    core.node_offers()
 }
 
 /// Decode a command's recorded outcome while explicitly settling fixture setup.

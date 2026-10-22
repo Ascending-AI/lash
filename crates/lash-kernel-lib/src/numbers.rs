@@ -8,9 +8,11 @@ use std::sync::Arc;
 use lash_kernel_doc::arena::ShortText;
 use lash_kernel_doc::{
     Args, Float, Formula, FunctionDefinition, FunctionRegistry, Guard, Implementation, Integer,
-    KERNEL_VERSION, Name, NativeCall, NativeError, NativeFunction, Nursery, Operand, Param,
-    PreparedNative, QualifiedName, RegistryError, Signature, Type, Value, ValueKind,
+    KERNEL_VERSION, NativeCall, NativeError, NativeFunction, Nursery, Operand, PreparedNative,
+    RegistryError, Value, ValueKind,
 };
+
+use lash_vocabulary::{FunctionName, Name, Param, Signature, Type};
 use num_bigint::BigInt;
 
 use crate::arithmetic::{self, Binary, Unary};
@@ -499,15 +501,14 @@ fn definition(
     }
     FunctionDefinition {
         kernel: KERNEL_VERSION,
-        name: QualifiedName::new(name.name()).expect("fixed catalogue name is valid"),
+        name: FunctionName::new(name.name()).expect("fixed catalogue name is valid"),
         signature: Signature {
             params: param_defs,
             result,
         },
         errors: errors.into_iter().collect(),
-        charge,
         guard,
-        implementation: Implementation::Native,
+        implementation: Implementation::Native { charge },
         native_version: lash_kernel_doc::FIRST_NATIVE_VERSION,
     }
 }

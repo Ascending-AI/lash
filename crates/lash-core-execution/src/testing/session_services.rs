@@ -6,8 +6,8 @@ impl crate::core_internal::RuntimeService for MockSessionManager {}
 impl crate::plugin::SessionReadService for MockSessionManager {
     async fn committed_turn(
         &self,
-        _session_id: &crate::SessionId,
-        _turn_id: &crate::TurnId,
+        _session_id: &lash_vocabulary::identity::SessionId,
+        _turn_id: &lash_vocabulary::identity::TurnId,
     ) -> Result<
         Option<lash_core_store::transcript::CommittedTurnWithCalls>,
         crate::plugin::CommittedTurnReadError,
@@ -65,7 +65,7 @@ impl crate::plugin::SessionLifecycleService for MockSessionManager {
 impl crate::plugin::SessionGraphService for MockSessionManager {
     async fn append_session_nodes(
         &self,
-        _session_id: &crate::SessionId,
+        _session_id: &lash_vocabulary::identity::SessionId,
         _request: crate::AppendSessionNodesRequest,
     ) -> Result<crate::SessionGraphAppendResult, lash_execution_contracts::plugin_error::PluginError>
     {

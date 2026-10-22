@@ -110,7 +110,7 @@ pub(in crate::runtime) fn committed_frame_transition(
     ended: Option<crate::FrameNodeId>,
     carries: SeedCarries,
     committing: &crate::ExecutionScope,
-    appended: &[crate::NodeId],
+    appended: &[lash_vocabulary::identity::NodeId],
 ) -> Result<Option<crate::store::FrameTransition>, StoreError> {
     let Some(successor) = state.current_frame_node_id.clone() else {
         return Ok(None);

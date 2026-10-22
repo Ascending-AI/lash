@@ -34,11 +34,11 @@ mod entry;
 
 use lash_kernel_doc::arena::{ArenaHandle, LocalCode};
 use lash_kernel_doc::heap::LogicalBytes;
-use lash_kernel_doc::{
-    Args, KernelDataLimits, NativeCall, Nursery, PreparedAnswer, TaskId, Value, WorkCounter,
-};
+use lash_kernel_doc::{Args, NativeCall, Nursery, PreparedAnswer, TaskId, Value, WorkCounter};
+
 use lash_kernel_exec::{ActIx, Weight};
 use lash_kernel_state::arena::Arena;
+use lash_vocabulary::data_limits::KernelDataLimits;
 
 use super::frames::Role;
 use super::session::Session;
@@ -120,6 +120,7 @@ pub(super) enum Stands {
 
 /// A virtual frame as the exit converts it.
 pub(super) struct Level {
+    link: lash_vocabulary::LinkId,
     code: CodeId,
     slots: Vec<SlotState>,
     /// Its control, outermost first.
@@ -148,6 +149,7 @@ pub(super) struct Exit {
 /// its captured values start.
 #[derive(Clone, Copy)]
 struct Callee<'e> {
+    link: lash_vocabulary::LinkId,
     plan: &'e IslandPlan,
     compiled: &'e Compiled,
     captured: u32,
@@ -157,6 +159,7 @@ struct Callee<'e> {
 /// ([`Scratch::open`]).
 #[derive(Clone, Copy)]
 struct Cached {
+    link: lash_vocabulary::LinkId,
     epoch: u32,
     handle: ArenaHandle,
     /// Index of the plan whose compiled form resolution admitted.
@@ -222,6 +225,7 @@ impl Scratch {
 
 /// One island entry: what it charges and counts, and its frames' bounds.
 struct Island<'a> {
+    link: lash_vocabulary::LinkId,
     exe: &'a Executable,
     stream: &'a Stream,
     /// The run's arena: a closure whose code a call finds keeps it there.
@@ -472,7 +476,13 @@ impl<'a> Island<'a> {
         let Some((result, units)) = charge else {
             return Err(self.at_operands(site.pc, site.reg, args));
         };
-        if !self.fits(units) {
+        if !self.fits(units)
+            || (site.imported
+                && !crate::compile::import_result_fits(
+                    &self.exe.lib(site.lib).header.signature.result,
+                    result,
+                ))
+        {
             return Err(self.at_operands(site.pc, site.reg, args));
         }
         if let Some(occurrence) = site.counted {
@@ -497,7 +507,13 @@ impl<'a> Island<'a> {
         value: Value,
         units: Option<u64>,
     ) -> Option<Answer> {
-        if !self.admits(site) {
+        if !self.admits(site)
+            || (site.imported
+                && !crate::compile::import_result_fits(
+                    &self.exe.lib(site.lib).header.signature.result,
+                    value,
+                ))
+        {
             return None;
         }
         let units = if self.charging { units? } else { 0 };
@@ -859,6 +875,7 @@ impl<'a> Island<'a> {
         let exe = self.exe;
         let island = exe.islands.plans.get(plan as usize)?;
         Some(Callee {
+            link: self.link,
             plan: island,
             compiled: island.compiled(exe)?,
             captured,
@@ -872,6 +889,7 @@ impl<'a> Island<'a> {
     fn cached_callee(&self, cached: Cached) -> Option<Callee<'a>> {
         let plan = &self.exe.islands.plans[cached.compiled as usize];
         Some(Callee {
+            link: cached.link,
             plan,
             compiled: plan.resolved()?,
             captured: cached.captured,
@@ -933,7 +951,8 @@ impl<'a> Island<'a> {
         let plan = self
             .exe
             .island_of(found_code(self.arena, self.exe, handle)?)?;
-        let (_, cells, _) = self.arena.closure(handle).ok()?;
+        let (identity, cells, _) = self.arena.closure(handle).ok()?;
+        let link = identity.callable.link;
         let captured = captured(
             self.exe,
             self.arena,
@@ -942,6 +961,7 @@ impl<'a> Island<'a> {
             cells,
         )?;
         Some(Cached {
+            link,
             epoch: self.scratch.epoch,
             handle,
             compiled: plan,
@@ -979,10 +999,18 @@ impl<'a> Island<'a> {
     /// left.
     #[inline(always)]
     fn enter(&mut self, callee: Callee<'a>, args: &[Value]) -> Answer {
+        let caller = std::mem::replace(&mut self.link, callee.link);
+        let ran = self.enter_linked(callee, args);
+        self.link = caller;
+        ran
+    }
+
+    fn enter_linked(&mut self, callee: Callee<'a>, args: &[Value]) -> Answer {
         let Callee {
             plan,
             compiled,
             captured,
+            ..
         } = callee;
         let mut slots: Slots = [None; MAX_SLOTS];
         compiled.layout.fill(
@@ -1039,6 +1067,7 @@ impl<'a> Island<'a> {
         let stands = exit.stands.take().unwrap_or(Stands::Boundary);
         exit.regs.clear();
         exit.levels.push(Level {
+            link: self.link,
             code: plan.code,
             slots,
             control,
@@ -1151,7 +1180,13 @@ fn found_code(arena: &mut Arena, exe: &Executable, handle: ArenaHandle) -> Optio
     let executable = exe.local();
     let found = match arena.closure(handle).ok()? {
         (_, _, Some(code)) if code.executable == executable => return Some(CodeId(code.code)),
-        (site, ..) => super::project::closure_code(exe, site).ok()?,
+        (identity, ..) => super::project::closure_code(
+            exe,
+            &identity.callable,
+            &identity.site.site,
+            &identity.capture_names,
+        )
+        .ok()?,
     };
     arena
         .found_closure_code(

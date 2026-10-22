@@ -21,22 +21,22 @@ enum Departure { Next, Return(Value), Break, Continue }
 
 /// Every plan, in function identity order.
 pub const PLANS: &[&p::HelperPlan] = &[
-    &LAW_HALT_PLAN,
     &LAW_FACTORY_PLAN,
-    &LAW_DECLINE_CALLER_PLAN,
-    &LAW_DECLINING_PLAN,
-    &LAW_BUDGET_PLAN,
     &LAW_HANDLERS_PLAN,
+    &LAW_DECLINE_CALLER_PLAN,
+    &LAW_BUDGET_PLAN,
+    &LAW_DECLINING_PLAN,
+    &LAW_HALT_PLAN,
 ];
 
 const LAW_HANDLERS_PLAN: p::HelperPlan = p::HelperPlan {
     name: "law.handlers",
-    function: p::function("d3f84d460bc7c5b3f120f0ecb05ee2abbf5b1abb263fec7019c4953e509eff70"),
+    function: p::function("0dc1b20e2f75f094b104f5d4583c94fb1c7f07d0ac835d76e01fc3c37d1b2930"),
     callees: &[
-        p::function("b50ea78f1b8899c52026719706a58480a99f1d90dcd04a6954be8f2c23cd8954"),
-        p::function("70d92c79f9c69cfe8cda0752cf30f5f0db0499a1bbffeeed9e2abddad9cf302b"),
-        p::function("94cb9716bc8ce4815dfcc5451d7f6d00901c7ed7aeba0d131da241a5f750d064"),
-        p::function("911f0bcde803695098852e1c76b7506de3978c961cfdbe375faa942a23b85211"),
+        p::function("04100a3772ec564e8bdc38f90d5678f50f6395ae42c373d3239143cfaadfc478"),
+        p::function("40590fcc56fe886746ecbc896b0342e86e0f5b80b06165b243b68224d4fea6d8"),
+        p::function("e5f5e7081794f244d696377835fa16cadf6f6c49d53e947fc928b49494989ca3"),
+        p::function("3c5fb29c062dc4bd5960f318c0e6c0396a8910e64ee49e8d207802dc1e82517a"),
     ],
     literals: &[
         p::PlanLiteral::Int("1"),
@@ -342,9 +342,9 @@ fn law_handlers(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::P
 
 const LAW_HALT_PLAN: p::HelperPlan = p::HelperPlan {
     name: "law.halt",
-    function: p::function("3d5facf15478113d0ce7b262ceaaa28805f023b0c4ba93badb9b38c87aef789c"),
+    function: p::function("f429f13ef8928f9dc992c9eab6a60da1ba937cb8d106b6e088dee20b7c3056f1"),
     callees: &[
-        p::function("94cb9716bc8ce4815dfcc5451d7f6d00901c7ed7aeba0d131da241a5f750d064"),
+        p::function("e5f5e7081794f244d696377835fa16cadf6f6c49d53e947fc928b49494989ca3"),
     ],
     literals: &[
         p::PlanLiteral::Bool(true),
@@ -452,9 +452,9 @@ fn law_halt(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::PlanE
 
 const LAW_FACTORY_PLAN: p::HelperPlan = p::HelperPlan {
     name: "law.factory",
-    function: p::function("5076a60c8c513cefd601b656e05bfe104c1f14e0b2b5ea7aea18cd2ee0caeb62"),
+    function: p::function("04aa95a266323754caffb0346dd48866692a56416d36426552c2da5b5c6eb098"),
     callees: &[
-        p::function("9cda7fce431cb6f247f593c290eba8aa75171a9f1fbcc628f4603c6fe7ab6343"),
+        p::function("94621ce821ee886636f7d33907340b7290c9e71c2137bd762b6c70bb464566f9"),
     ],
     literals: &[
         p::PlanLiteral::Int("1"),
@@ -503,9 +503,9 @@ fn law_factory(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::Pl
 
 const LAW_DECLINING_PLAN: p::HelperPlan = p::HelperPlan {
     name: "law.declining",
-    function: p::function("747ee514a086255e3d162e1c47db7ca19a624eb63259dde9f2f81fddfa8f399f"),
+    function: p::function("f2cf06ac8f397da1eaee75b166a8062410545db16e6271cee6282e690ed9f559"),
     callees: &[
-        p::function("70d92c79f9c69cfe8cda0752cf30f5f0db0499a1bbffeeed9e2abddad9cf302b"),
+        p::function("40590fcc56fe886746ecbc896b0342e86e0f5b80b06165b243b68224d4fea6d8"),
     ],
     literals: &[
         p::PlanLiteral::Int("1"),
@@ -554,9 +554,9 @@ fn law_declining_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &
 
 const LAW_DECLINE_CALLER_PLAN: p::HelperPlan = p::HelperPlan {
     name: "law.decline_caller",
-    function: p::function("6f83fd9557fd47d69b0dcf2a3b3499846713f0bc2bb387d406e870f657c323d8"),
+    function: p::function("2d2f134187007202bea338ae4d6d13e2b0c620b221d0fcdca84618af60a1d376"),
     callees: &[
-        p::function("747ee514a086255e3d162e1c47db7ca19a624eb63259dde9f2f81fddfa8f399f"),
+        p::function("f2cf06ac8f397da1eaee75b166a8062410545db16e6271cee6282e690ed9f559"),
     ],
     literals: &[],
     fields: &[],
@@ -589,11 +589,11 @@ fn law_decline_caller(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value
 
 const LAW_BUDGET_PLAN: p::HelperPlan = p::HelperPlan {
     name: "law.budget",
-    function: p::function("79f38a36df3dd835eee249488ab46716f34c88c63592176617fcbe38bb8822f7"),
+    function: p::function("5ff09e2df0930477a952dc8c563210ecdfca2f6ba50cc1d4c3af73da2f8a3acb"),
     callees: &[
-        p::function("34ca055d8b47010f1540ce16c398577f9b6a83e19896e062035424e4f5c8624e"),
-        p::function("7c6d468905b27d5fdbe3d53b27a771d4faecb304b06800d5276e9737b0d7a65d"),
-        p::function("9cda7fce431cb6f247f593c290eba8aa75171a9f1fbcc628f4603c6fe7ab6343"),
+        p::function("1c50cd669ab12c8c1448a422ad8da57414f9cecb204e2761bf3ed6de239dc2f0"),
+        p::function("441f22272281cd52922bb45a3a15263886a53bf171839ffa257ec0e0a9601fe8"),
+        p::function("94621ce821ee886636f7d33907340b7290c9e71c2137bd762b6c70bb464566f9"),
     ],
     literals: &[
         p::PlanLiteral::Float(0x0000000000000000),
@@ -611,7 +611,7 @@ const LAW_BUDGET_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: law_budget,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("34ca055d8b47010f1540ce16c398577f9b6a83e19896e062035424e4f5c8624e"), p::function("7c6d468905b27d5fdbe3d53b27a771d4faecb304b06800d5276e9737b0d7a65d"), p::function("9cda7fce431cb6f247f593c290eba8aa75171a9f1fbcc628f4603c6fe7ab6343"), ], heap: Some(p::HeapTemplate { entry: law_budget_heap, depth: 1, writes: false, element_write: false, callees: &[p::function("9cda7fce431cb6f247f593c290eba8aa75171a9f1fbcc628f4603c6fe7ab6343"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1c50cd669ab12c8c1448a422ad8da57414f9cecb204e2761bf3ed6de239dc2f0"), p::function("441f22272281cd52922bb45a3a15263886a53bf171839ffa257ec0e0a9601fe8"), p::function("94621ce821ee886636f7d33907340b7290c9e71c2137bd762b6c70bb464566f9"), ], heap: Some(p::HeapTemplate { entry: law_budget_heap, depth: 1, writes: false, element_write: false, callees: &[p::function("94621ce821ee886636f7d33907340b7290c9e71c2137bd762b6c70bb464566f9"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `law.budget`.

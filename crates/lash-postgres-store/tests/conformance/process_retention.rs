@@ -27,8 +27,9 @@ async fn assert_waiting_process_is_live_not_prunable(
     let wait = lash_execution_contracts::process::WaitState {
         since_ms: 1,
         kind: lash_execution_contracts::process::WaitKind::Call {
+            resume_at_ms: None,
             call_id: lash_protocol_types::ToolCallId::fixture("retention-call"),
-            tool_id: lash_protocol_types::tool_contract::ToolId::new("retention"),
+            tool_id: lash_vocabulary::tool_contract::ToolId::new("retention"),
         },
         site: None,
     };

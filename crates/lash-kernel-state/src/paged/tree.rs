@@ -2,10 +2,10 @@
 //! links retain their summaries and are not visited by sealing.
 use super::source::{INDEX_FANOUT, KEYED_LEAF_ROWS, PAGE_TARGET_BYTES};
 use super::{PageAnswer, PageBody, PageKind, PageSource, SealBudget};
-use lash_kernel_doc::graph_tokens::{
+use lash_kernel_doc::heap::{FamilyId, HeapFault, LogicalBytes, PageId, PageRef};
+use lash_vocabulary::tokens::{
     TokenCodec, TokenError, TokenReader, TokenWriter, decode_body, encode_body,
 };
-use lash_kernel_doc::heap::{FamilyId, HeapFault, LogicalBytes, PageId, PageRef};
 use std::borrow::Cow;
 use std::cell::RefCell;
 use std::collections::BTreeMap;
@@ -1528,5 +1528,11 @@ impl PageSource for SourcePort<'_> {
             Self::Owned(source) => source.seal(page),
             Self::Borrowed(source) => source.seal(page),
         }
+    }
+}
+
+impl Cell for lash_vocabulary::names::OperationUse {
+    fn cost(&self) -> u64 {
+        0
     }
 }

@@ -149,9 +149,11 @@ async fn a_working_state_is_adopted_whole_and_a_cancelled_cell_never_promotes_it
     );
     state.acknowledge_execution_state_capture().await;
 
+    let context = cell_context(&host, SESSION, TURN, "exec-code:1", Arc::new(NoTools));
+    state.shows_packages(crate::testing::packages::record(&context).await);
     let speculative = Box::pin(super::super::execute_cell(
         &mut state,
-        cell_context(&host, SESSION, TURN, "exec-code:1", Arc::new(NoTools)),
+        context,
         lash_core::ExecRequest {
             code: "kept.push(3);\nconst extra = twice(21);".to_owned(),
         },
@@ -181,7 +183,9 @@ async fn a_working_state_is_adopted_whole_and_a_cancelled_cell_never_promotes_it
         "the cancelled cell's captured heap is not the session's"
     );
     assert!(
-        !state.names().contains(&lash_kernel_doc::Name::new("extra")),
+        !state
+            .names()
+            .contains(&lash_vocabulary::names::Name::new("extra")),
         "the cancelled cell's binding is gone"
     );
     let read = cell(
@@ -431,12 +435,15 @@ async fn a_no_op_cell_writes_the_same_pages_and_bytes_whatever_the_binding_count
         key: &'static str,
         code: &str,
     ) -> lash_core::operational_metrics::sql::Receipt {
-        let ((), receipt) =
-            lash_core::operational_metrics::sql::collect("fig6418-l2", "sqlite", async {
+        let ((), receipt) = Box::pin(lash_core::operational_metrics::sql::collect(
+            "fig6418-l2",
+            "sqlite",
+            async {
                 cell(state, host, key, code).await;
                 commit_working(state, host).await;
-            })
-            .await;
+            },
+        ))
+        .await;
         receipt
     }
 
@@ -445,12 +452,12 @@ async fn a_no_op_cell_writes_the_same_pages_and_bytes_whatever_the_binding_count
 
     // The measurement is live: a cell that binds a value installs its
     // pages, and the window sees them.
-    let bound = measured(
+    let bound = Box::pin(measured(
         &mut small,
         &small_host,
         "exec-code:live",
         "const bound = 7;",
-    )
+    ))
     .await;
     assert!(
         bound.newly_installed_graph_bytes > 0,
@@ -460,19 +467,19 @@ async fn a_no_op_cell_writes_the_same_pages_and_bytes_whatever_the_binding_count
     let large_host = open_host().await;
     let mut large = session_with_bindings(&large_host, 50_000).await;
 
-    let small_noop = measured(
+    let small_noop = Box::pin(measured(
         &mut small,
         &small_host,
         "exec-code:noop",
         "await control.finish(1);",
-    )
+    ))
     .await;
-    let large_noop = measured(
+    let large_noop = Box::pin(measured(
         &mut large,
         &large_host,
         "exec-code:noop",
         "await control.finish(1);",
-    )
+    ))
     .await;
 
     // A no-op cell commits its descriptor and the pages it changed; neither

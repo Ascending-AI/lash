@@ -5,9 +5,13 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use lash_kernel_doc::graph_tokens::{
-    CanonicalFault, RefForm, TokenEvent, TokenReader, TokenWriter, check_ascending, encode_body,
-};
+use lash_vocabulary::tokens::RefForm;
+use lash_vocabulary::tokens::TokenEvent;
+use lash_vocabulary::tokens::TokenReader;
+use lash_vocabulary::tokens::TokenWriter;
+use lash_vocabulary::tokens::check_ascending;
+use lash_vocabulary::tokens::encode_body;
+use lash_vocabulary::tokens::{CanonicalFault, DecodeDimension};
 
 use super::bodies::{
     ExecRoot, ExecRootKind, ExecStatus, OpaqueLeaf, OpaquePayload, OwnerBinding, ProcessState,
@@ -105,11 +109,25 @@ fn exec_root(staging: &mut GraphStaging, identity: &str) -> (NodeId, ExecRoot) {
         host: None,
         envelope: None,
         owed: Vec::new(),
-        requirements: lash_kernel_doc::ExecutionRequirements {
-            natives: [lash_kernel_doc::FunctionId::from_bytes([1; 32])].into(),
-            kernels: [1].into(),
-            providers: ["host/tools".to_owned()].into(),
-            codecs: [("host/codec".to_owned(), 2)].into(),
+        requirements: lash_vocabulary::claims::ClaimRequirements {
+            machine: lash_vocabulary::claims::NodeRequirements {
+                natives: [lash_vocabulary::FunctionId::from_bytes([1; 32])].into(),
+                kernels: [1].into(),
+            },
+            providers: [lash_vocabulary::ProviderName {
+                owner: "host".into(),
+                key: "tools".into(),
+            }]
+            .into(),
+            codecs: [(
+                lash_vocabulary::ProviderName {
+                    owner: "host".into(),
+                    key: "codec".into(),
+                },
+                lash_vocabulary::providers::FormatVersion::new(2).unwrap(),
+            )]
+            .into(),
+            ..Default::default()
         },
     };
     (
@@ -918,15 +936,13 @@ fn node_ids_spell_their_blob_ref() {
 /// CHECKPOINT-READ-POLICY: graph readers carry the deployment's recursive token limit.
 #[test]
 fn checkpoint_read_policy_honors_the_configured_kernel_decode_depth() {
-    let value = lash_kernel_doc::FrozenDatum(lash_kernel_doc::Datum::Tuple(vec![
-        lash_kernel_doc::Datum::Tuple(vec![lash_kernel_doc::Datum::Null]),
-    ]));
+    let value = serde_json::json!([[null]]);
     let mut staged = staging();
     let body = encode_body(&value);
     let id = staged
         .encode(NodeKind::FROZEN_VALUE, TypedBody::logical(&body))
         .unwrap();
-    let policy = lash_kernel_doc::KernelDataLimits::new(64, 352, 1, 512, 128).unwrap();
+    let policy = lash_vocabulary::data_limits::KernelDataLimits::new(64, 352, 1, 512, 128).unwrap();
     let mut decoder = GraphDecoder::new(
         &staged,
         DecodeLimits {
@@ -935,7 +951,7 @@ fn checkpoint_read_policy_honors_the_configured_kernel_decode_depth() {
         },
     );
     assert!(matches!(
-        decoder.decode::<lash_kernel_doc::FrozenDatum>(id, NodeKind::FROZEN_VALUE),
+        decoder.decode::<serde_json::Value>(id, NodeKind::FROZEN_VALUE),
         Err(GraphRefusal::DecodeLimit {
             dimension: DecodeDimension::Depth,
             limit: 1,
@@ -948,16 +964,22 @@ fn checkpoint_read_policy_honors_the_configured_kernel_decode_depth() {
 #[test]
 fn a_deployment_graph_read_policy_refuses_its_configured_byte_budget() {
     let mut staged = staging();
-    let value = lash_kernel_doc::FrozenDatum(lash_kernel_doc::Datum::Text("payload".into()));
+    let value = serde_json::json!("payload");
     let body = encode_body(&value);
     let id = staged
         .encode(NodeKind::FROZEN_VALUE, TypedBody::logical(&body))
         .unwrap();
-    let policy =
-        GraphReadPolicy::new(1, 2, 3, 64, lash_kernel_doc::KernelDataLimits::standard()).unwrap();
+    let policy = GraphReadPolicy::new(
+        1,
+        2,
+        3,
+        64,
+        lash_vocabulary::data_limits::KernelDataLimits::standard(),
+    )
+    .unwrap();
     let mut decoder = GraphDecoder::new(&staged, policy.owner());
     assert!(matches!(
-        decoder.decode::<lash_kernel_doc::FrozenDatum>(id, NodeKind::FROZEN_VALUE),
+        decoder.decode::<serde_json::Value>(id, NodeKind::FROZEN_VALUE),
         Err(GraphRefusal::DecodeLimit { limit: 1, .. })
     ));
 }
@@ -1081,7 +1103,8 @@ fn repeated_captures_share_unchanged_graph_materialization() {
 /// than materializing another complete copy before the typed decoder runs.
 #[test]
 fn checked_unplaced_bodies_are_borrowed_by_typed_decoders() {
-    use lash_kernel_doc::graph_tokens::{TokenCodec, TokenError};
+    use lash_vocabulary::tokens::TokenCodec;
+    use lash_vocabulary::tokens::TokenError;
 
     struct ReadText {
         address: usize,
@@ -1119,55 +1142,4 @@ fn checked_unplaced_bodies_are_borrowed_by_typed_decoders() {
         );
         assert_eq!(decoder.read(), (1, nodes.get(&root).unwrap().len()));
     }
-}
-
-/// K-ID-001, K-ID-002: a document's or a definition's identity is the
-/// logical digest of the body its graph node holds, whether the node is
-/// inline, places a long text in a leaf or streams, and the encoder keys
-/// that node's encoding by the same digest: one identity per document.
-#[test]
-fn an_identity_is_the_logical_digest_of_its_graph_node() {
-    let header = "kernel 1\nnumbers float\n";
-    let long = "x".repeat(300);
-    let many = format!("print \"{}\"\n", "y".repeat(200)).repeat(400);
-    let documents = [
-        format!("{header}main {{ finish 7 }}"),
-        format!("{header}main {{ finish \"{long}\" }}"),
-        format!("{header}main {{\n{many}}}"),
-    ];
-    let mut shapes = BTreeSet::new();
-    for text in documents {
-        let document = lash_kernel_doc::parse_document(&text).unwrap();
-        let mut nodes = staging();
-        let id = nodes.encode_value(NodeKind::DOCUMENT, &document).unwrap();
-        shapes.insert((
-            nodes.nodes().len(),
-            nodes.get(&id).unwrap().children().unwrap().len(),
-        ));
-        let body = logical(&nodes, id, NodeKind::DOCUMENT).unwrap();
-        assert_eq!(body, document.canonical_bytes());
-        assert_eq!(
-            &TypedBody::logical(&body).digest(),
-            document.identity().as_bytes()
-        );
-        let again = nodes
-            .encode(NodeKind::DOCUMENT, TypedBody::logical(&body))
-            .unwrap();
-        assert_eq!(again, id);
-    }
-    // Inline, one leaf, and a stream: three node shapes.
-    assert_eq!(shapes.len(), 3, "{shapes:?}");
-    let definition = lash_kernel_doc::parse_definition(
-        "function probe.twice(x: Any) -> Any\nkernel 1\ncharge 1\nbody { return x }\n",
-    )
-    .unwrap();
-    let mut nodes = staging();
-    let id = nodes
-        .encode_value(NodeKind::HELPER_DEFINITION, &definition)
-        .unwrap();
-    let body = logical(&nodes, id, NodeKind::HELPER_DEFINITION).unwrap();
-    assert_eq!(
-        &TypedBody::logical(&body).digest(),
-        definition.identity().as_bytes()
-    );
 }

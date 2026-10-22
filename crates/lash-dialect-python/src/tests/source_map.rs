@@ -5,7 +5,15 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use lash_kernel_dialect::Lowered;
-use lash_kernel_doc::{Document, Expr, Literal, Node, Rhs, Site, Stmt, TryStmt, Unit};
+use lash_kernel_doc::Document;
+use lash_kernel_doc::Expr;
+use lash_kernel_doc::Literal;
+use lash_kernel_doc::Node;
+use lash_kernel_doc::Rhs;
+use lash_kernel_doc::Stmt;
+use lash_kernel_doc::TryStmt;
+use lash_vocabulary::sites::Site;
+use lash_vocabulary::sites::Unit;
 
 /// Every statement and action site of `document`'s code.
 fn code_sites(document: &Document) -> Vec<(Site, String)> {
@@ -21,17 +29,19 @@ fn code_sites(document: &Document) -> Vec<(Site, String)> {
         }
     }
     let mut out = Vec::new();
-    walk(
-        Node::Block(&document.main),
-        Site::new(Unit::Main, Vec::new()),
-        &mut out,
-    );
-    for (name, function) in &document.functions {
-        walk(
-            Node::Block(&function.body),
-            Site::new(Unit::Function(name.clone()), Vec::new()),
-            &mut out,
-        );
+    for (unit, block) in document.units() {
+        if let Unit::Library(id) = unit
+            && !matches!(
+                document.functions[&id].implementation,
+                lash_kernel_doc::Implementation::Guest {
+                    metering: lash_kernel_doc::Metering::Statements,
+                    ..
+                }
+            )
+        {
+            continue;
+        }
+        walk(Node::Block(block), Site::new(unit, Vec::new()), &mut out);
     }
     out
 }
@@ -46,7 +56,7 @@ fn unmapped(lowered: &Lowered) -> BTreeMap<String, &'static str> {
         .filter(|located| !located.ranges.is_empty())
         .map(|located| &located.site)
         .collect();
-    let main = &lowered.document.main;
+    let main = lowered.document.main.as_deref().unwrap_or_default();
     // The `try` that wraps a cell starting tasks, whose `finally` cancels
     // what is still running.
     let finalizer = match main.last() {
@@ -95,6 +105,7 @@ fn nested_actions_and_required_declarations_keep_source_ranges() {
         .document
         .main
         .iter()
+        .flatten()
         .filter_map(|stmt| match stmt {
             Stmt::Let {
                 name,

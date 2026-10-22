@@ -102,7 +102,7 @@ pub enum CandidateOwner {
     /// ([`SessionCommitWrite::execution`](super::SessionCommitWrite::execution)).
     /// The root is the candidate's own semantic root, the session
     /// descriptor; the manifest has no base (FIG-6418).
-    Session(lash_protocol_types::SessionId),
+    Session(lash_vocabulary::identity::SessionId),
 }
 
 /// A candidate published by the owner commit it travels with.

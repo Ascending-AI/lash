@@ -3,7 +3,9 @@ use lash_core_store::execution_limits::MAX_PROCESS_EFFECT_OCCURRENCES;
 
 fn occurrence(node: &str, occurrence: u64) -> ProcessEffectOccurrence {
     ProcessEffectOccurrence::new(
-        lash_protocol_types::effect_identity_fixture(node, occurrence),
+        lash_vocabulary::sites::EffectLocation::authored(
+            lash_protocol_types::effect_identity_fixture(node, occurrence),
+        ),
         "fixture.operation",
         ProcessEffectOutcomeClass::Success,
         None,
@@ -22,7 +24,9 @@ fn node_key(label: &str) -> String {
 #[test]
 fn the_append_payload_is_the_serde_encoding_and_round_trips() {
     let outcome = ProcessEffectOccurrence::new(
-        lash_protocol_types::effect_identity_fixture("node", 3),
+        lash_vocabulary::sites::EffectLocation::authored(
+            lash_protocol_types::effect_identity_fixture("node", 3),
+        ),
         "fixture.disable",
         ProcessEffectOutcomeClass::Failure,
         Some(lash_protocol_types::FailureCode::lash(
@@ -65,7 +69,9 @@ fn only_failed_effects_can_carry_failure_codes() {
         ] {
             let allowed = class == ProcessEffectOutcomeClass::Failure || code.is_none();
             let outcome = ProcessEffectOccurrence::new(
-                lash_protocol_types::effect_identity_fixture("node", 1),
+                lash_vocabulary::sites::EffectLocation::authored(
+                    lash_protocol_types::effect_identity_fixture("node", 1),
+                ),
                 "fixture.disable",
                 class,
                 code,
@@ -131,7 +137,7 @@ fn decode_refuses_other_versions_and_unknown_fields() {
         .unwrap()
         .at
         .visit(),
-        lash_protocol_types::workflow_testkit::visit(beyond)
+        lash_vocabulary::sites::testkit::visit(beyond)
     );
 }
 
@@ -198,7 +204,7 @@ fn the_fold_reads_the_written_bound_in_any_page_order() {
         .append_request("omissions"),
         ProcessEventAppendRequest::observer_added(
             &crate::process_id_for_test("fold"),
-            &crate::SessionId::from("observer"),
+            &lash_vocabulary::identity::SessionId::from("observer"),
             &crate::ProcessObserverBy::host("fold"),
         ),
     ];
@@ -222,8 +228,8 @@ fn the_fold_reads_the_written_bound_in_any_page_order() {
             .map(|outcome| outcome.at.visit())
             .collect::<Vec<_>>(),
         vec![
-            lash_protocol_types::workflow_testkit::visit(1),
-            lash_protocol_types::workflow_testkit::visit(2)
+            lash_vocabulary::sites::testkit::visit(1),
+            lash_vocabulary::sites::testkit::visit(2)
         ]
     );
     assert_eq!(

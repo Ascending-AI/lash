@@ -6,17 +6,18 @@
 //! same holds for definitions.
 
 mod lexer;
-mod parser;
+pub(crate) mod parser;
 mod printer;
 
 use crate::validate::StatementForm;
 
 pub use parser::{
-    parse_definition, parse_definition_with_limits, parse_document, parse_document_with_limits,
+    parse_definition, parse_definition_with_limits, parse_definition_with_locals,
+    parse_definition_with_locals_and_limits, parse_document, parse_document_with_limits,
     parse_signature,
 };
-pub(crate) use printer::requirement_text;
-pub use printer::{print_definition, print_document, print_document_with_ranges, print_type};
+
+pub use printer::{print_definition, print_document, print_document_with_ranges};
 
 /// A kernel text that is not a document or a definition, and where.
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
@@ -56,75 +57,4 @@ pub enum ParseErrorReason {
     TooDeep { limit: usize },
     #[error("{problem}")]
     Malformed { problem: String },
-}
-
-/// The words kernel text reserves. A name spelled like one is written
-/// between backticks.
-pub(crate) const KEYWORDS: &[&str] = &[
-    "absent",
-    "all",
-    "any",
-    "apply",
-    "as",
-    "await",
-    "body",
-    "break",
-    "by_spelling",
-    "call",
-    "cancel",
-    "catch",
-    "charge",
-    "clock",
-    "continue",
-    "do",
-    "effect",
-    "else",
-    "entry",
-    "errors",
-    "fail",
-    "false",
-    "finally",
-    "finish",
-    "float",
-    "fn",
-    "for",
-    "function",
-    "guard",
-    "metered",
-    "if",
-    "in",
-    "inf",
-    "invoke",
-    "join",
-    "kernel",
-    "let",
-    "main",
-    "map",
-    "nan",
-    "native",
-    "null",
-    "numbers",
-    "perform",
-    "print",
-    "private",
-    "race",
-    "random",
-    "read",
-    "remove",
-    "result",
-    "return",
-    "set",
-    "settled",
-    "sleep",
-    "spawn",
-    "throw",
-    "true",
-    "try",
-    "use",
-    "while",
-    "yield",
-];
-
-pub(crate) fn is_keyword(word: &str) -> bool {
-    KEYWORDS.binary_search(&word).is_ok()
 }

@@ -23,57 +23,14 @@
 use std::collections::BTreeMap;
 
 use lash_core::{CellDefect, CellFailure, CellFailureKind};
-use lash_kernel_doc::{Datum, Name, SourceMap, TaskLabel};
+use lash_kernel_doc::Datum;
+use lash_kernel_doc::SourceMap;
 use lash_kernel_vm::{Bound, BoundExceeded, RunError};
 use lash_vm_client::service::DialectRefusal;
+use lash_vocabulary::names::Name;
+use lash_vocabulary::sites::TaskLabel;
 
 use crate::dialect::DialectPrompts;
-
-/// Offer typed dialect facts to the session's pure feedback contributors.
-/// The original diagnosis remains intact; no contributor means no new text.
-pub(crate) fn contribute_repairs(
-    refusal: &mut DialectRefusal,
-    source: &str,
-    grant_calls: &BTreeMap<String, String>,
-    ctx: &lash_core::RuntimeExecutionContext<'_>,
-) -> Vec<lash_core::CellFailureRepair> {
-    // An unavailable provider contributes no names. Diagnostic discovery does
-    // not change whether this cell resolves, parks or receives a grant.
-    let deferred = ctx
-        .deferred_provider()
-        .ok()
-        .flatten()
-        .map(|(provider, resolver)| {
-            resolver.searchable_names(&lash_core::DeferredResolveContext::new(
-                provider,
-                ctx.owner(),
-                ctx.logical_run(),
-                ctx.run_capabilities(),
-                ctx.owner_config(),
-            ))
-        })
-        .unwrap_or_default();
-    let unknown_name = matches!(
-        refusal.code.as_str(),
-        "TS_UNKNOWN_BINDING" | "PY_UNKNOWN_NAME"
-    )
-    .then(|| refusal.span.and_then(|(start, end)| source.get(start..end)))
-    .flatten();
-    let diagnostic = lash_core::plugin::CellFailureDiagnostic {
-        code: &refusal.code,
-        span: refusal.span,
-        unknown_name,
-        grants: grant_calls,
-        deferred: &deferred,
-    };
-    let feedback = ctx.cell_failure_repairs(&diagnostic);
-    refusal.repairs.extend(
-        feedback
-            .iter()
-            .flat_map(|reply| reply.repairs.iter().cloned()),
-    );
-    feedback
-}
 
 /// The stable code of the refusal a model reads when a cell uses a binding
 /// an earlier cell left that was not carried (`K-SES-003`).
@@ -155,27 +112,35 @@ pub(crate) enum WorkerDeath {
 const SIGABRT: i32 = 6;
 
 impl WorkerDeath {
-    pub(crate) fn of(evidence: lash_vm_protocol::SupervisorEvidence) -> Self {
+    pub(crate) fn of(evidence: lash_protocol_types::engine_fault::SupervisorEvidence) -> Self {
         match evidence {
-            lash_vm_protocol::SupervisorEvidence::Signalled { signal: SIGABRT }
-            | lash_vm_protocol::SupervisorEvidence::ForbiddenSyscall => Self::OwnLimit,
-            lash_vm_protocol::SupervisorEvidence::Signalled { .. }
-            | lash_vm_protocol::SupervisorEvidence::Exited { .. }
-            | lash_vm_protocol::SupervisorEvidence::EndOfStream => Self::Lost,
+            lash_protocol_types::engine_fault::SupervisorEvidence::Signalled {
+                signal: SIGABRT,
+            }
+            | lash_protocol_types::engine_fault::SupervisorEvidence::ForbiddenSyscall => {
+                Self::OwnLimit
+            }
+            lash_protocol_types::engine_fault::SupervisorEvidence::Signalled { .. }
+            | lash_protocol_types::engine_fault::SupervisorEvidence::Exited { .. }
+            | lash_protocol_types::engine_fault::SupervisorEvidence::EndOfStream => Self::Lost,
         }
     }
 }
 
-fn death(evidence: lash_vm_protocol::SupervisorEvidence) -> String {
+fn death(evidence: lash_protocol_types::engine_fault::SupervisorEvidence) -> String {
     match evidence {
-        lash_vm_protocol::SupervisorEvidence::Signalled { signal } => {
+        lash_protocol_types::engine_fault::SupervisorEvidence::Signalled { signal } => {
             format!("killed by signal {signal}")
         }
-        lash_vm_protocol::SupervisorEvidence::Exited { code } => format!("exited with code {code}"),
-        lash_vm_protocol::SupervisorEvidence::ForbiddenSyscall => {
+        lash_protocol_types::engine_fault::SupervisorEvidence::Exited { code } => {
+            format!("exited with code {code}")
+        }
+        lash_protocol_types::engine_fault::SupervisorEvidence::ForbiddenSyscall => {
             "killed for a forbidden system call".to_owned()
         }
-        lash_vm_protocol::SupervisorEvidence::EndOfStream => "closed its connection".to_owned(),
+        lash_protocol_types::engine_fault::SupervisorEvidence::EndOfStream => {
+            "closed its connection".to_owned()
+        }
     }
 }
 
@@ -183,8 +148,12 @@ fn death(evidence: lash_vm_protocol::SupervisorEvidence) -> String {
 /// began computing the cell ([`WorkerDeath::OwnLimit`]): the same cell
 /// meets it again, so the death is the cell's end, recorded once, and the
 /// model repairs the cell from it (FIG-6786, FIG-6806).
-pub(crate) fn worker_died_failure(evidence: lash_vm_protocol::SupervisorEvidence) -> CellFailure {
-    let repair = if evidence == lash_vm_protocol::SupervisorEvidence::ForbiddenSyscall {
+pub(crate) fn worker_died_failure(
+    evidence: lash_protocol_types::engine_fault::SupervisorEvidence,
+) -> CellFailure {
+    let repair = if evidence
+        == lash_protocol_types::engine_fault::SupervisorEvidence::ForbiddenSyscall
+    {
         "The cell's run made a system call its worker's confinement forbids, and running it again meets it again. Do the step another way."
     } else {
         "The cell's run passed a limit of its worker, such as its memory ceiling, and running it again meets it again. Hold less data at once, or split the work across smaller cells."
@@ -204,7 +173,7 @@ pub(crate) fn worker_died_failure(evidence: lash_vm_protocol::SupervisorEvidence
 /// whether running the cell again is safe, given the tool calls of it that
 /// completed and took effect (FIG-6806).
 pub(crate) fn worker_lost_failure(
-    evidence: lash_vm_protocol::SupervisorEvidence,
+    evidence: lash_protocol_types::engine_fault::SupervisorEvidence,
     runs: u32,
     completed: &[lash_core::ExecutedCall],
 ) -> CellFailure {
@@ -252,16 +221,12 @@ pub(crate) enum CellObservation {
     },
     /// A value no `catch` took ended the cell.
     Uncaught(Datum),
-    /// A package value another release of its package built ended the
-    /// cell at its first member call: the message names both releases by
-    /// their labels (§2.4, C3).
-    StaleValue { message: String },
     /// The cell ended with tasks unfinished, or failed unobserved
     /// (`K-TASK-018`).
     TasksOutstanding {
         unfinished: Vec<TaskLabel>,
         unobserved: Vec<TaskLabel>,
-        sources: Vec<(TaskLabel, lash_kernel_doc::PositionLabel)>,
+        sources: Vec<(TaskLabel, lash_vocabulary::sites::PositionLabel)>,
     },
     /// No task is ready and none waits on anything the host can answer.
     Deadlock { waiting: Vec<TaskLabel> },
@@ -279,25 +244,7 @@ impl CellObservation {
     /// How a run's error ended the cell. An uncaught unbound-variable error
     /// that names a binding the session lost to `K-SES-003` is that rule's
     /// refusal.
-    /// A `package.stale_value` names the two artifacts it compares by the
-    /// release labels `held` holds for them, or one of `surfaces` does.
-    pub(crate) fn of_run_error(
-        error: RunError,
-        not_carried: &BTreeMap<Name, String>,
-        held: Option<&lash_kernel_package::HeldPackages>,
-        surfaces: &[&lash_kernel_package::SurfaceSnapshot],
-    ) -> Self {
-        if let RunError::Uncaught {
-            error: Datum::Error(error),
-            ..
-        } = &error
-            && let Some(held) = held
-            && let Some(stale) = lash_kernel_package::StaleValue::of(error)
-        {
-            return Self::StaleValue {
-                message: stale.message_with(held, surfaces),
-            };
-        }
+    pub(crate) fn of_run_error(error: RunError, not_carried: &BTreeMap<Name, String>) -> Self {
         match error {
             RunError::Uncaught { error: value, .. } => {
                 if let Datum::Error(error) = &value
@@ -334,7 +281,6 @@ impl CellObservation {
             Self::BindingNotCarried { .. } => SESSION_BINDING_NOT_CARRIED.to_owned(),
             Self::Uncaught(Datum::Error(error)) => error.kind.clone(),
             Self::Uncaught(_) => "uncaught".to_owned(),
-            Self::StaleValue { .. } => lash_kernel_package::STALE_VALUE.to_owned(),
             Self::TasksOutstanding { .. } => CELL_TASKS_OUTSTANDING.to_owned(),
             Self::Deadlock { .. } => CELL_DEADLOCK.to_owned(),
             Self::Bound(_) => CELL_BOUND_EXCEEDED.to_owned(),
@@ -354,7 +300,7 @@ impl CellObservation {
     ) -> CellFailure {
         let vocabulary = prompts.prompt_vocabulary();
         let place = |tasks: &[TaskLabel],
-                     sources: &[(TaskLabel, lash_kernel_doc::PositionLabel)]|
+                     sources: &[(TaskLabel, lash_vocabulary::sites::PositionLabel)]|
          -> String {
             tasks
                 .iter()
@@ -411,10 +357,6 @@ impl CellObservation {
             Self::Uncaught(value) => CellFailure::new(
                 CellFailureKind::Program,
                 format!("uncaught {}", datum_text(value)),
-            ),
-            Self::StaleValue { message } => CellFailure::new(
-                CellFailureKind::Program,
-                format!("uncaught {}: {message}", lash_kernel_package::STALE_VALUE),
             ),
             Self::TasksOutstanding {
                 unfinished,
@@ -528,7 +470,7 @@ fn line_column(source: &str, offset: usize) -> (usize, usize) {
 /// A task as a typed label: the site that spawned it and which run of
 /// that site it is.
 pub(crate) fn task_label(task: &TaskLabel) -> String {
-    lash_kernel_doc::ObservationReader::task_label(task)
+    lash_vocabulary::sites::ObservationReader::task_label(task)
 }
 
 /// Which task, for the model: the source line of the async code it runs
@@ -538,12 +480,14 @@ fn task_place(
     task: &TaskLabel,
     source: &str,
     map: Option<&SourceMap>,
-    body: Option<&lash_kernel_doc::PositionLabel>,
+    body: Option<&lash_vocabulary::sites::PositionLabel>,
 ) -> String {
-    if lash_kernel_doc::ObservationReader::task_is_root(task) {
+    if lash_vocabulary::sites::ObservationReader::task_is_root(task) {
         return "the program itself".to_owned();
     }
-    match map.and_then(|map| lash_kernel_doc::ObservationReader::task_source(task, map, body)) {
+    match map
+        .and_then(|map| lash_vocabulary::sites::ObservationReader::task_source(task, map, body))
+    {
         Some(start) => {
             let (line, _) = line_column(source, start);
             let text = source.lines().nth(line - 1).unwrap_or_default().trim();
@@ -607,9 +551,10 @@ mod tests {
 
     use lash_kernel_doc::heap::{HeapFault, PageGrant, PageId, PageRef};
     use lash_kernel_doc::{
-        ErrorDatum, FunctionRegistry, Handle, NativeCall, NativeError, NativeFunction, Timestamp,
-        Value, parse_definition, parse_document,
+        ErrorDatum, FunctionRegistry, Handle, NativeCall, NativeError, NativeFunction, Value,
+        parse_definition, parse_document,
     };
+
     use lash_kernel_state::paged::{PageAnswer, PageBody, PageSource};
     use lash_kernel_vm::{Bounds, CellStart, End, Host, KernelMachine, Machine, Program, Target};
 
@@ -624,8 +569,9 @@ mod tests {
             let observation = CellObservation::Bound(BoundExceeded {
                 bound: Bound::Memory,
                 limit: 67_108_864,
-                function: function
-                    .map(|name| lash_kernel_doc::FunctionName::new(name).expect("function name")),
+                function: function.map(|name| {
+                    lash_vocabulary::names::FunctionName::new(name).expect("function name")
+                }),
             });
             let failure =
                 observation.failure("", None, crate::plugin::RlmChannel::Cell, prompts.as_ref());
@@ -706,12 +652,6 @@ mod tests {
     }
 
     impl Host for World {
-        fn clock(&mut self) -> Timestamp {
-            panic!("no clock read")
-        }
-        fn random(&mut self) -> u64 {
-            panic!("no random read")
-        }
         fn read(&mut self, _: &Handle, _: &Datum) -> Result<Datum, ErrorDatum> {
             panic!("no projection read")
         }
@@ -739,11 +679,24 @@ mod tests {
             ))
             .expect("definition");
             let function = registry
-                .register(definition, Some(Arc::new(Guarded { memory })))
+                .register(definition.clone(), Some(Arc::new(Guarded { memory })))
                 .expect("registered");
-            let document = parse_document(&format!(
-            "kernel 1\nnumbers by_spelling\nuse work.spin = @{function}\nmain {{ return work.spin() }}",
-        )).expect("document");
+            let definition_text =
+                serde_json::to_string(&lash_kernel_doc::print_definition(&definition)).unwrap();
+            let document = parse_document(&format!("kernel 1\nnumbers by_spelling\ndefinition {definition_text}\nnative @{function}\nmain {{ return work.spin() }}")).unwrap();
+            let link = lash_vocabulary::Link {
+                document: document.identity(),
+                fills: Default::default(),
+            };
+            let link_id = link.identity();
+            let program = Program::prepare(
+                link_id,
+                [(document.identity(), Arc::new(document))].into(),
+                &[(link_id, link)].into(),
+                PageId([8; 32]),
+                lash_kernel_vm::PreparedLibrary::new(Arc::new(registry)),
+            )
+            .unwrap();
             let bounds = Bounds {
                 memory_meter: lash_kernel_vm::MemoryMeter::On,
                 charge: lash_kernel_vm::Charge::Exact,
@@ -755,11 +708,7 @@ mod tests {
                 join_members: 10,
             };
             let mut machine = KernelMachine::start(
-                Program {
-                    closure: PageId([8; 32]),
-                    document: Arc::new(document),
-                    library: lash_kernel_vm::PreparedLibrary::new(Arc::new(registry)),
-                },
+                program,
                 bounds,
                 CellStart {
                     owner: PageId([9; 32]),
@@ -794,7 +743,7 @@ mod tests {
             let End::Error(error) = end else {
                 panic!("bound error");
             };
-            let observation = CellObservation::of_run_error(error, &BTreeMap::new(), None, &[]);
+            let observation = CellObservation::of_run_error(error, &BTreeMap::new());
             let prompts = crate::CellDialect::typescript().prompts();
             let failure =
                 observation.failure("", None, crate::plugin::RlmChannel::Cell, prompts.as_ref());

@@ -3,14 +3,14 @@
   "cases": [
     {
       "name": "host reads never cause a park",
-      "document": "kernel 1\nnumbers by_spelling\n\nmain {\nprint clock print random finish clock\n}\n",
+      "document": "kernel 1\nnumbers by_spelling\nimport 0 operation typescript.clock() -> Timestamp\nimport 1 operation typescript.random() -> Bytes\nmain {\nprint perform 0() as Timestamp\nprint perform 1() as Bytes\nfinish perform 0() as Timestamp\n}\n",
       "expected": {
         "prints": [
           {
             "timestamp": "1"
           },
           {
-            "float": "0.5"
+            "bytes": "8000000000000000"
           }
         ],
         "end": {
@@ -24,14 +24,42 @@
       "environment": {
         "host": [
           {
-            "clock": "1"
+            "perform": {
+              "effect": "typescript.clock",
+              "args": [],
+              "answer": {
+                "Ok": {
+                  "timestamp": "1"
+                }
+              }
+            }
           },
           {
-            "random": 9223372036854775808
+            "perform": {
+              "effect": "typescript.random",
+              "args": [],
+              "answer": {
+                "Ok": {
+                  "bytes": "8000000000000000"
+                }
+              }
+            }
           },
           {
-            "clock": "2"
+            "perform": {
+              "effect": "typescript.clock",
+              "args": [],
+              "answer": {
+                "Ok": {
+                  "timestamp": "2"
+                }
+              }
+            }
           }
+        ],
+        "reads": [
+          "typescript.clock",
+          "typescript.random"
         ]
       }
     }

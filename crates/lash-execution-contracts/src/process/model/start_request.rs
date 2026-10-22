@@ -1,9 +1,14 @@
 use serde::{Deserialize, Serialize};
 
-use super::{
-    DeclaredInlineLaunch, DeclaredLaunch, EngineLaunch, LifetimeDecision, ProcessInput,
-    ProcessProvenance, ProcessStartRegistration, ProcessStartTarget, SessionId,
-};
+use super::DeclaredInlineLaunch;
+use super::DeclaredLaunch;
+use super::EngineLaunch;
+use super::LifetimeDecision;
+use super::ProcessInput;
+use super::ProcessProvenance;
+use super::ProcessStartRegistration;
+use super::ProcessStartTarget;
+use lash_vocabulary::identity::SessionId;
 
 /// A start request as a leaf tool attempt declares it: everything a process
 /// start needs except its key.
@@ -136,12 +141,11 @@ impl ProcessStartDeclaration {
         originator: super::ProcessOriginator,
         lifetime: impl Into<LifetimeDecision>,
     ) -> Self {
-        let (engine_kind, payload, packages, launch) = launch.into_parts();
+        let (engine_kind, request, launch) = launch.into_parts();
         Self::of_target(
             ProcessStartTarget::Inline {
                 engine_kind,
-                payload,
-                packages,
+                request: Box::new(request),
                 args,
                 launch,
             },
@@ -310,11 +314,9 @@ impl ProcessStartRequest {
         )
     }
 
-    /// A host's start of a function carried inline, `payload` being the
-    /// `engine_kind` engine's value of it (for the kernel engine, a function
-    /// value's `{"$lash_function": ..}` form), linked under the package set
-    /// `packages` (its producer's, recorded on the start: FIG-6993), with
-    /// `args`, under `launch`.
+    /// A host's start of a function carried inline. `request` contains the
+    /// `engine_kind` engine's function payload and its producer's retained
+    /// environment (recorded on the start: FIG-6993), with `args`, under `launch`.
     /// Realization checks and publishes the function under the start's
     /// referrer, then starts the definition it is; nothing is published
     /// before. An exact retry under the same host key answers the same
@@ -322,8 +324,7 @@ impl ProcessStartRequest {
     /// [`crate::PluginError::StartKeyConflict`].
     pub fn inline(
         engine_kind: impl Into<String>,
-        payload: serde_json::Value,
-        packages: lash_kernel_doc::PackageSetDigest,
+        request: crate::process::engine::InlineRequest,
         args: serde_json::Map<String, serde_json::Value>,
         launch: EngineLaunch,
         originator: super::ProcessOriginator,
@@ -332,8 +333,7 @@ impl ProcessStartRequest {
         Self::of_target(
             ProcessStartTarget::Inline {
                 engine_kind: engine_kind.into(),
-                payload,
-                packages,
+                request: Box::new(request),
                 args,
                 launch,
             },

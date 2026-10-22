@@ -322,7 +322,7 @@ pub fn trace_cell_failure(
     if content.captures(lash_trace::ContentCategory::CodeOutput) {
         return failure.clone();
     }
-    use lash_protocol_types::SchemaAdmissionError;
+    use lash_vocabulary::json_schema::SchemaAdmissionError;
     crate::CellFailure {
         kind: failure.kind,
         message: String::new(),

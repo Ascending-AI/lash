@@ -14,8 +14,9 @@ use lash_core::{
 };
 use lash_execution_contracts::process::ObservedProcessEvent;
 use lash_protocol_types::sync::MutexExt;
-use lash_protocol_types::{ProcessId, SessionId};
 use lash_trace::{LanguageExecutionObservation, TraceEvent, TraceRecord};
+use lash_vocabulary::identity::ProcessId;
+use lash_vocabulary::identity::SessionId;
 
 mod ingress;
 mod routing;

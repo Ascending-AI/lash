@@ -4,12 +4,18 @@
 
 use std::sync::Arc;
 
-use lash_kernel_doc::{
-    Datum, ErrorDatum, FunctionRegistry, Handle, Integer, Site, Timestamp, Unit, parse_document,
-};
+use lash_kernel_doc::Datum;
+use lash_kernel_doc::ErrorDatum;
+use lash_kernel_doc::FunctionRegistry;
+use lash_kernel_doc::Handle;
+use lash_kernel_doc::Integer;
+
+use lash_kernel_doc::parse_document;
 use lash_kernel_vm::{
     CellStart, End, Host, KernelMachine, Machine, PreparedLibrary, Program, Step, Target,
 };
+use lash_vocabulary::sites::Site;
+use lash_vocabulary::sites::Unit;
 
 use crate::{Case, CaseBounds, Shard};
 
@@ -20,6 +26,10 @@ include!("protocol_files.rs");
 
 pub(super) fn files() -> &'static [(&'static str, &'static str)] {
     CORPUS_FILES
+}
+
+pub(super) fn register_probes(registry: &mut FunctionRegistry) {
+    execution::register_probes(registry);
 }
 
 mod rule_cases {
@@ -51,16 +61,16 @@ fn main(path: &[u32]) -> Site {
 }
 
 fn program(case: &Case, registry: Arc<FunctionRegistry>) -> Program {
-    Program {
-        closure: crate::pages::CLOSURE,
-        document: Arc::new(parse_document(&case.document).expect("case document")),
-        library: PreparedLibrary::new(registry),
-    }
+    crate::machine::prepare_document(
+        &PreparedLibrary::new(registry),
+        Arc::new(parse_document(&case.document).expect("case document")),
+        None,
+    )
+    .expect("prepare protocol document")
 }
 
 fn start(program: Program, bounds: CaseBounds, session: &crate::pages::Session) -> KernelMachine {
     let mut admission = lash_kernel_check::Environment::new(program.library.registry().as_ref());
-    admission.effects = program.document.manifest.effects.clone();
     admission.bindings = session.names();
     lash_kernel_check::admit(&program.document, &admission).expect("admit protocol document");
     drop(admission);
@@ -86,12 +96,6 @@ struct World {
 }
 
 impl Host for World {
-    fn clock(&mut self) -> Timestamp {
-        panic!("unexpected clock")
-    }
-    fn random(&mut self) -> u64 {
-        panic!("unexpected random")
-    }
     fn read(&mut self, _: &Handle, _: &Datum) -> Result<Datum, ErrorDatum> {
         panic!("unexpected read")
     }

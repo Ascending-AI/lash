@@ -10,7 +10,7 @@ use std::time::{Duration, Instant};
 
 use lash_core::{LiveReplayEventDraft, SessionRevision};
 use lash_postgres_store::testing::{IsolatedDatabase, required_database_url};
-use lash_protocol_types::SessionId;
+use lash_vocabulary::identity::SessionId;
 use sqlx::Row as _;
 
 use super::{connect, fresh_schema, label, next_item, subscribed, text};
@@ -178,7 +178,7 @@ async fn streaming_runs_publish_to_deliver() {
                         &session,
                         SessionRevision::new(1),
                         vec![LiveReplayEventDraft::new(
-                            None::<lash_core::TurnId>,
+                            None::<lash_vocabulary::identity::TurnId>,
                             text(&format!("bench:{run}#{frame}"), &body),
                         )],
                     )

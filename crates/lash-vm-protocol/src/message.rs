@@ -20,84 +20,13 @@
 //! and arguments confer no authority. The parent admits every one against
 //! the execution it admitted, with its own grants and identities.
 
+use lash_protocol_types::engine_fault::{
+    ExecutionLease, FrameEpoch, HeaderRefusal, OwnerEpoch, TransportSequence,
+};
 use serde::{Deserialize, Serialize};
-use thiserror::Error;
 
 use crate::page::{PageCapability, PageExchangeId, PageReply, PageRequest, ReadPage, SealBatch};
 use crate::state::VmOwner;
-
-/// The lease one checkout of a worker runs under. The parent mints it and
-/// fences it when the worker is lost, so a late message under an old lease is
-/// refused rather than applied.
-#[derive(
-    Clone,
-    Copy,
-    Debug,
-    PartialEq,
-    Eq,
-    PartialOrd,
-    Ord,
-    Hash,
-    Serialize,
-    Deserialize,
-    schemars::JsonSchema,
-)]
-#[serde(transparent)]
-pub struct ExecutionLease(pub u64);
-
-/// The owner's epoch: advances when ownership of the session or durable
-/// process moves, so a message from a superseded owner is refused.
-#[derive(
-    Clone,
-    Copy,
-    Debug,
-    PartialEq,
-    Eq,
-    PartialOrd,
-    Ord,
-    Hash,
-    Serialize,
-    Deserialize,
-    schemars::JsonSchema,
-)]
-#[serde(transparent)]
-pub struct OwnerEpoch(pub u64);
-
-/// The context frame's epoch: advances when a frame opens (F5), which fences
-/// every response from the frame before it.
-#[derive(
-    Clone,
-    Copy,
-    Debug,
-    PartialEq,
-    Eq,
-    PartialOrd,
-    Ord,
-    Hash,
-    Serialize,
-    Deserialize,
-    schemars::JsonSchema,
-)]
-#[serde(transparent)]
-pub struct FrameEpoch(pub u64);
-
-/// The transport sequence: each direction numbers its messages from zero,
-/// one apart, so a dropped, duplicated or reordered message is refused.
-#[derive(
-    Clone,
-    Copy,
-    Debug,
-    PartialEq,
-    Eq,
-    PartialOrd,
-    Ord,
-    Hash,
-    Serialize,
-    Deserialize,
-    schemars::JsonSchema,
-)]
-#[serde(transparent)]
-pub struct TransportSequence(pub u64);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -106,34 +35,6 @@ pub struct MessageHeader {
     pub owner_epoch: OwnerEpoch,
     pub frame_epoch: FrameEpoch,
     pub sequence: TransportSequence,
-}
-
-/// Why a receiver refused a header.
-#[derive(
-    Clone, Copy, Debug, PartialEq, Eq, Error, Serialize, Deserialize, schemars::JsonSchema,
-)]
-#[serde(rename_all = "snake_case")]
-pub enum HeaderRefusal {
-    #[error("message runs under lease {found:?}, expected {expected:?}")]
-    StaleLease {
-        expected: ExecutionLease,
-        found: ExecutionLease,
-    },
-    #[error("message runs under owner epoch {found:?}, expected {expected:?}")]
-    StaleOwnerEpoch {
-        expected: OwnerEpoch,
-        found: OwnerEpoch,
-    },
-    #[error("message runs under frame epoch {found:?}, expected {expected:?}")]
-    StaleFrameEpoch {
-        expected: FrameEpoch,
-        found: FrameEpoch,
-    },
-    #[error("message has transport sequence {found:?}, expected {expected:?}")]
-    OutOfSequence {
-        expected: TransportSequence,
-        found: TransportSequence,
-    },
 }
 
 /// A receiver's view of one direction of a checkout: the lease and epochs it
@@ -300,8 +201,10 @@ pub struct RunBounds {
 impl RunBounds {
     /// The refusal of a run that asks for more of a bound than `ceiling`
     /// admits, naming the first such bound; `None` when every bound fits.
-    pub fn past(&self, ceiling: &Self) -> Option<crate::RunRefusal> {
-        use crate::RunBound::{CallDepth, Charge, JoinMembers, LiveTasks, Memory, RequestsPerPark};
+    pub fn past(&self, ceiling: &Self) -> Option<lash_protocol_types::engine_fault::RunRefusal> {
+        use lash_protocol_types::engine_fault::RunBound::{
+            CallDepth, Charge, JoinMembers, LiveTasks, Memory, RequestsPerPark,
+        };
         [
             (Charge, self.charge_limit, ceiling.charge_limit),
             (Memory, self.memory, ceiling.memory),
@@ -320,13 +223,13 @@ impl RunBounds {
         ]
         .into_iter()
         .find(|&(_, requested, ceiling)| requested > ceiling)
-        .map(
-            |(bound, requested, ceiling)| crate::RunRefusal::AboveCeiling {
+        .map(|(bound, requested, ceiling)| {
+            lash_protocol_types::engine_fault::RunRefusal::AboveCeiling {
                 bound,
                 requested,
                 ceiling,
-            },
-        )
+            }
+        })
     }
 }
 
@@ -366,19 +269,27 @@ pub struct Start {
     /// process recorded it at creation. A worker whose embedding lacks it
     /// refuses a run that saves functions, which it writes as the
     /// dialect's values, before it reads the document
-    /// ([`crate::RunRefusal::DialectNotInstalled`], FIG-5990); it runs any
+    /// ([`lash_protocol_types::engine_fault::RunRefusal::DialectNotInstalled`], FIG-5990); it runs any
     /// other, which needs no dialect (FIG-6985).
     pub dialect: String,
     /// The admitted document, as its canonical token body (`K-ID-003`),
     /// the body of its checkpoint graph node. The worker decodes, validates
     /// and compiles it: the parent never compiles model code.
     pub document: EncodedPayload,
+    /// The immutable root Link and the reached linked-instance table.
+    pub link: lash_vocabulary::content_ids::LinkId,
+    /// PreparedInstance rows in the runtime's bounded encoding.
+    pub instances: EncodedPayload,
+    /// Every reached document, including the root, keyed by content identity.
+    pub documents: Vec<StoredDocument>,
     /// The stored definition of each library function the document reaches
     /// that the parent's node does not hold, read from the store
     /// (FIG-6985): the worker admits each, checked, into the library this
     /// run alone executes. Empty when the node holds every one.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub definitions: Vec<StoredDefinition>,
+    /// The selected executable reach; retained documents can contain unrelated code.
+    pub functions: std::collections::BTreeSet<lash_vocabulary::names::FunctionId>,
     pub from: StartFrom,
     pub bounds: RunBounds,
     /// The OwnerBinding node of the execution every checkpoint root of the
@@ -418,6 +329,14 @@ pub struct Start {
     pub charge_limiter: bool,
 }
 
+/// One reached document; the worker checks its content identity before execution.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct StoredDocument {
+    pub document: lash_vocabulary::names::DocumentId,
+    pub body: EncodedPayload,
+}
+
 /// A library function's definition as the store keeps it: the token body
 /// of its HelperDefinition node, under the identity the document names it
 /// by, which the worker checks the body against.
@@ -433,7 +352,7 @@ pub struct StoredDefinition {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Delivery {
-    pub wait: lash_protocol_types::WaitId,
+    pub wait: lash_vocabulary::sites::WaitId,
     pub outcome: EncodedPayload,
 }
 
@@ -448,8 +367,6 @@ pub struct HostReadId(pub u64);
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum HostReadKind {
-    Clock,
-    Random,
     /// A read through a projection handle: the payload names the handle and
     /// the request, and the answer is kernel data or a kernel error.
     Projection,
@@ -502,9 +419,9 @@ impl PoolStartParts {
     pub fn push(
         &mut self,
         part: PoolStart,
-    ) -> Result<Option<std::sync::Arc<[u8]>>, crate::CodecRefusal> {
-        let refused = |reason: &str| crate::CodecRefusal::Malformed {
-            reason: crate::Detail::new(reason),
+    ) -> Result<Option<std::sync::Arc<[u8]>>, lash_protocol_types::engine_fault::CodecRefusal> {
+        let refused = |reason: &str| lash_protocol_types::engine_fault::CodecRefusal::Malformed {
+            reason: lash_protocol_types::engine_fault::Detail::new(reason),
         };
         let (length, bytes) = self
             .holdings
@@ -571,7 +488,7 @@ pub enum ParentMessage {
     /// One committed outcome, for the wait the machine named: a delivery
     /// that does not fit one frame with the slice it precedes.
     Deliver {
-        wait: lash_protocol_types::WaitId,
+        wait: lash_vocabulary::sites::WaitId,
         outcome: EncodedPayload,
     },
     /// The answer to the worker's pending [`WorkerMessage::HostRead`].
@@ -602,7 +519,7 @@ pub enum WorkerMessage {
     /// The worker refuses the exchange or the run. How a worker ended is
     /// never its own to say.
     Refused {
-        refusal: crate::WorkerRefusal,
+        refusal: lash_protocol_types::engine_fault::WorkerRefusal,
     },
     /// A bounded phase, with cumulative process CPU usage. It does not grant
     /// extra time when repeated: the parent owns the absolute phase deadline.
@@ -614,7 +531,7 @@ pub enum WorkerMessage {
         work: Option<WorkerWork>,
     },
     LimitExceeded {
-        limit: crate::WorkerLimit,
+        limit: lash_protocol_types::worker_limit::WorkerLimit,
     },
     /// The handshake. The parent checks only the protocol version.
     Ready {
@@ -695,8 +612,8 @@ pub enum WorkerMessage {
 }
 
 impl WorkerMessage {
-    pub fn kind(&self) -> crate::WorkerFrameKind {
-        use crate::WorkerFrameKind;
+    pub fn kind(&self) -> lash_protocol_types::worker_limit::WorkerFrameKind {
+        use lash_protocol_types::worker_limit::WorkerFrameKind;
         match self {
             Self::Refused { .. } => WorkerFrameKind::Refused,
             Self::Progress { .. } => WorkerFrameKind::Progress,

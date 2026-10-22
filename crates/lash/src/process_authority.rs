@@ -2,11 +2,12 @@
 //! These helpers make observations. Hosts decide whether to refuse a tool,
 //! filter a list, or cancel a process; lash adds no enforcement.
 
-pub use crate::SessionId;
 pub use crate::plugins::ToolCatalog;
-use crate::process::{ProcessComponentId, ProcessEnv};
+use crate::process::ProcessEnv;
 pub use crate::tools::ToolId;
 pub use crate::{CapabilityRef, SlotId};
+pub use lash_vocabulary::identity::SessionId;
+use lash_vocabulary::providers::ProcessComponentId;
 use std::collections::{BTreeMap, BTreeSet};
 
 /// One linked effect whose tool `offered` does not offer as the process
@@ -14,7 +15,7 @@ use std::collections::{BTreeMap, BTreeSet};
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct ExcessLink {
     /// The effect path the process performs.
-    pub effect: String,
+    pub operation: lash_vocabulary::names::OperationUse,
     /// The tool the effect is linked to.
     pub tool: ToolId,
 }
@@ -25,8 +26,15 @@ pub struct ExcessLink {
 /// runs under is its code's, judged at each perform by the one judge
 /// ([`crate::tools::judge`]), so none makes a link excess.
 pub fn tools_excess(env: &ProcessEnv, offered: &ToolCatalog) -> BTreeSet<ExcessLink> {
-    env.effects()
+    env.execution()
+        .uses
         .iter()
+        .filter_map(|(use_, binding)| match binding {
+            lash_core_store::tool_surface::UseBinding::Fixed(operation) => {
+                Some((use_, &operation.route))
+            }
+            lash_core_store::tool_surface::UseBinding::Deferred(_) => None,
+        })
         .filter(|(_, link)| {
             !offered
                 .entries()
@@ -34,7 +42,7 @@ pub fn tools_excess(env: &ProcessEnv, offered: &ToolCatalog) -> BTreeSet<ExcessL
                 .any(|entry| entry.manifest.id == link.tool)
         })
         .map(|(effect, link)| ExcessLink {
-            effect: effect.to_string(),
+            operation: *effect,
             tool: link.tool.clone(),
         })
         .collect()

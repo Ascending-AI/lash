@@ -43,7 +43,7 @@ fn machine_config(max_turns: Option<usize>) -> TurnMachineConfig {
         no_progress_budget: lash_core::NoProgressBudget::bounded(12),
         attachment_acceptance: Default::default(),
         generation: lash_core::GenerationOptions::default(),
-        session_id: lash_core::SessionId::from("standard-driver-contract"),
+        session_id: lash_vocabulary::identity::SessionId::from("standard-driver-contract"),
         agent_frame_id: "standard-frame".to_string(),
         turn_id: TurnId::from("standard-driver-turn"),
         emit_llm_trace: false,
@@ -79,11 +79,13 @@ fn drain(machine: &mut TurnMachine) -> Vec<Effect> {
                     turn_controls: [
                         (
                             "finish".to_string(),
-                            lash_core::TurnControls::finish(lash_core::JsonSchema::any()),
+                            lash_vocabulary::tool_declaration::TurnControls::finish(
+                                lash_vocabulary::json_schema::JsonSchema::any(),
+                            ),
                         ),
                         (
                             "switch".to_string(),
-                            lash_core::TurnControls::switch_agent_frame(),
+                            lash_vocabulary::tool_declaration::TurnControls::switch_agent_frame(),
                         ),
                     ]
                     .into(),
@@ -299,7 +301,6 @@ fn the_preamble_offers_batch_only_when_enabled() {
             config: StandardProtocolConfig::default().batch(batch),
         }
         .build_preamble(ProtocolBuildInput {
-            packages: std::sync::Arc::new(lash_kernel_dialect::NoPackages),
             tool_catalog: Arc::new(catalog.clone()),
             plugin_extensions: Default::default(),
             writer_formats: lash_core::build_newest_writer_formats(),

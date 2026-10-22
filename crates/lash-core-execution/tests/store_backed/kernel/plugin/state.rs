@@ -2,7 +2,7 @@ mod tests {
     use crate::plugin::PluginSessionRequest;
     use std::sync::Arc;
 
-    use crate::SessionId;
+    use lash_vocabulary::identity::SessionId;
 
     /// A memory backend's catalog holding the session the test commits.
     async fn session_store(session_id: &str) -> Arc<dyn crate::RuntimeStore> {
@@ -236,7 +236,7 @@ mod tests {
         );
         let request = PluginTransitionRequest {
             id: PluginTransitionId(address("transition")),
-            owner: crate::RuntimeOwner::Session("state-limits".into()),
+            owner: lash_vocabulary::identity::RuntimeOwner::Session("state-limits".into()),
             base: PluginTransitionBase::Session {
                 head: crate::store::SessionHeadRef {
                     generation: 0,
@@ -248,7 +248,7 @@ mod tests {
             target: crate::store::plugin_writers::PluginAdmission::from_plugins(vec![
                 crate::store::plugin_writers::AdmittedPlugin {
                     plugin: "mock".into(),
-                    writer: crate::FormatVersion::ONE,
+                    writer: lash_vocabulary::providers::FormatVersion::ONE,
                 },
             ]),
         };

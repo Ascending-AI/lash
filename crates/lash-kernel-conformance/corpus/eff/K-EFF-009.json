@@ -3,7 +3,7 @@
   "cases": [
     {
       "name": "effect failure is raised at perform",
-      "document": "kernel 1\nnumbers by_spelling\neffect echo(value: Int) -> Int contract \"1\"\n\nmain {\ntry { do perform echo(1) as Int } catch e { finish (e.kind, e.data) }\n}\n",
+      "document": "kernel 1\nnumbers by_spelling\nimport 0 operation host.echo(value: Int) -> Int\nmain {\n  try {\n    do perform 0(1) as Int\n  } catch e {\n    finish (e.kind, e.data)\n  }\n}\n",
       "expected": {
         "prints": [],
         "end": {
@@ -28,7 +28,7 @@
         "trace": [
           {
             "effect": {
-              "effect": "echo",
+              "effect": "host.echo",
               "args": [
                 {
                   "int": "1"

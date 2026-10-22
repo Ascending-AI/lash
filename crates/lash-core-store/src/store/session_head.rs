@@ -13,7 +13,7 @@ pub struct SessionMeta {
     /// The process that runs this session as its own, recorded at creation
     /// (FIG-3607 R1): see [`SessionStoreCreateRequest::owning_process_id`](crate::SessionStoreCreateRequest::owning_process_id).
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub owning_process_id: Option<crate::ProcessId>,
+    pub owning_process_id: Option<lash_vocabulary::identity::ProcessId>,
 }
 
 impl SessionMeta {
@@ -133,7 +133,7 @@ pub struct SessionHeadMeta {
     /// Derived from the head leaf row when loading metadata.
     pub current_frame_node_id: Option<crate::FrameNodeId>,
     pub checkpoint_ref: Option<BlobRef>,
-    pub leaf_node_id: Option<crate::NodeId>,
+    pub leaf_node_id: Option<lash_vocabulary::identity::NodeId>,
 }
 
 impl SessionHeadMeta {
@@ -190,7 +190,7 @@ impl SessionHeadMeta {
         payload: SessionHeadPayload,
         head_revision: u64,
         checkpoint_ref: Option<BlobRef>,
-        leaf_node_id: Option<crate::NodeId>,
+        leaf_node_id: Option<lash_vocabulary::identity::NodeId>,
         current_frame_node_id: Option<crate::FrameNodeId>,
     ) -> Result<Self, StoreError> {
         payload.ensure_names(session_id)?;
@@ -247,7 +247,7 @@ impl crate::store::DurableRecord for SessionHeadPayload {
 pub struct SessionHeadRef {
     pub generation: u32,
     pub revision: u64,
-    pub leaf: Option<crate::NodeId>,
+    pub leaf: Option<lash_vocabulary::identity::NodeId>,
     pub checkpoint: Option<BlobRef>,
 }
 

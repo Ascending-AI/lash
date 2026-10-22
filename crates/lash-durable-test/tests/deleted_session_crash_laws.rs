@@ -33,6 +33,7 @@ mod sim;
 mod matrix;
 
 use lash_protocol_types::{llm::types::StreamBlockEvent, llm::types::StreamBlockKind};
+
 use matrix::MatrixTestExt as _;
 
 use std::sync::{Arc, Mutex, OnceLock, Weak};
@@ -53,7 +54,8 @@ use lash_execution_contracts::backend::BackendParts;
 use lash_execution_contracts::backend::StoreSet;
 use lash_execution_contracts::projection::NoProjectionProviders;
 use lash_protocol_types::sync::MutexExt as _;
-use lash_protocol_types::{SessionId, TurnId};
+use lash_vocabulary::identity::SessionId;
+use lash_vocabulary::identity::TurnId;
 
 use dialect::Dialect;
 

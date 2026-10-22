@@ -48,9 +48,11 @@ use lash_protocol_types::sync::MutexExt;
 
 use super::RuntimeStreamEvent;
 use super::observation_publisher::ObservationSource;
+use crate::TurnActivity;
+use crate::TurnActivityId;
 use crate::engine::{ObservationSink, ObservedEvent, ShiftObservation};
 use crate::session_model::SessionStreamEvent;
-use crate::{TurnActivity, TurnActivityId, TurnId};
+use lash_vocabulary::identity::TurnId;
 
 mod framing;
 pub(in crate::runtime) use framing::DeltaFraming;

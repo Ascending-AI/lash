@@ -1,4 +1,4 @@
-use lash_protocol_types::TurnId;
+use lash_vocabulary::identity::TurnId;
 use std::sync::Arc;
 
 use crate::rlm_support::RlmCompletion;

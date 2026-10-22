@@ -26,8 +26,7 @@ use std::collections::BTreeMap;
 use lash_core_execution::runtime::actor::round::graph::PinnedMember;
 use lash_core_execution::tool_dispatch::CellCall;
 use lash_core_store::checkpoint_graph::{
-    GraphDecoder, GraphRefusal, GraphStaging, NodeId, NodeKind, TokenCodec, TokenError,
-    TokenReader, TokenWriter,
+    GraphDecoder, GraphRefusal, GraphStaging, NodeId, NodeKind,
 };
 use lash_core_store::effect_opener::EffectOpener;
 use lash_core_store::tool_run::Material;
@@ -35,8 +34,13 @@ use lash_core_store::tool_run::{MaterialOwner, MaterialRef, MaterialRole};
 use lash_durable::DomainWrite;
 use lash_durable::domain::ExecKey;
 use lash_durable::domain::graph::{AdmissionMember, EffectAdmissionWrite, EffectKey};
-use lash_kernel_doc::graph_tokens::{check_ascending, encode_body};
-use lash_kernel_doc::{Datum, EffectId, EffectName, ErrorDatum};
+use lash_kernel_doc::{Datum, ErrorDatum};
+
+use lash_vocabulary::names::OperationUse;
+use lash_vocabulary::sites::EffectId;
+use lash_vocabulary::tokens::{
+    TokenCodec, TokenError, TokenReader, TokenWriter, check_ascending, encode_body,
+};
 
 use crate::snapshot::OperationId;
 
@@ -114,10 +118,7 @@ pub enum FrozenRequest {
         projection: String,
     },
     /// 1: a sleep of `duration`, over at `until_ms` on the store's clock.
-    Sleep {
-        duration: std::time::Duration,
-        until_ms: i64,
-    },
+
     /// 2: the parent refused the effect with `error`; nothing ran. The
     /// guest's arguments stay, for the wait a restore rebuilds.
     Refused { error: ErrorDatum, args: Vec<Datum> },
@@ -139,12 +140,6 @@ impl TokenCodec for StoredRequest {
                 call.encode_dispatch(out);
                 args.encode(out);
                 out.text(projection);
-            }
-            FrozenRequest::Sleep { duration, until_ms } => {
-                out.sum(1, 3);
-                out.unsigned(duration.as_secs());
-                out.unsigned(u64::from(duration.subsec_nanos()));
-                out.signed(*until_ms);
             }
             FrozenRequest::Refused { error, args } => {
                 out.sum(2, 2);
@@ -168,18 +163,7 @@ impl TokenCodec for StoredRequest {
                     projection: input.text()?.to_owned(),
                 }
             }
-            1 => {
-                TokenReader::expect_fields(fields, 3)?;
-                let seconds = input.unsigned()?;
-                let nanos = u32::try_from(input.unsigned()?)
-                    .ok()
-                    .filter(|nanos| *nanos < 1_000_000_000)
-                    .ok_or_else(|| invalid("a sleep's nanoseconds are below one second"))?;
-                FrozenRequest::Sleep {
-                    duration: std::time::Duration::new(seconds, nanos),
-                    until_ms: input.signed()?,
-                }
-            }
+
             2 => {
                 TokenReader::expect_fields(fields, 2)?;
                 FrozenRequest::Refused {
@@ -262,7 +246,7 @@ impl FrozenRequest {
     /// effect name.
     pub fn admitted(
         &self,
-        effect: Option<&EffectName>,
+        effect: Option<&OperationUse>,
     ) -> Result<lash_kernel_state::AdmittedRequest, GraphRefusal> {
         let effect = || {
             effect.cloned().ok_or_else(|| {
@@ -275,13 +259,10 @@ impl FrozenRequest {
         Ok(match self {
             Self::Tool { args, .. } | Self::Refused { args, .. } => {
                 lash_kernel_state::AdmittedRequest::Effect {
-                    effect: effect()?,
+                    use_: effect()?,
                     args: args.clone(),
                 }
             }
-            Self::Sleep { duration, .. } => lash_kernel_state::AdmittedRequest::Sleep {
-                duration: (*duration).into(),
-            },
         })
     }
 }
@@ -314,7 +295,6 @@ pub enum Disposition {
         pin: Box<PinnedMember>,
     },
     /// 1: as a sleep.
-    Sleep,
     /// 2: not at all.
     Refused,
 }
@@ -325,9 +305,9 @@ pub struct Admission {
     pub exec: ExecKey,
     pub effect: EffectId,
     /// The machine's number for the wait its outcome is delivered to.
-    pub wait: lash_protocol_types::WaitId,
+    pub wait: lash_vocabulary::sites::WaitId,
     /// The effect performed; none for a sleep.
-    pub effect_name: Option<EffectName>,
+    pub effect_name: Option<OperationUse>,
     /// Its FrozenRequest.
     pub request: NodeId,
     pub disposition: Disposition,
@@ -348,7 +328,6 @@ impl TokenCodec for Admission {
                 out.unsigned(operation.ordinal);
                 pin.encode(out);
             }
-            Disposition::Sleep => out.sum(1, 0),
             Disposition::Refused => out.sum(2, 0),
         }
     }
@@ -357,7 +336,7 @@ impl TokenCodec for Admission {
         input.expect_struct(6)?;
         let exec = ExecKey::parse(input.text()?).map_err(|error| invalid(error.to_string()))?;
         let effect = EffectId::decode(input)?;
-        let wait = lash_protocol_types::WaitId::decode(input)?;
+        let wait = lash_vocabulary::sites::WaitId::decode(input)?;
         let effect_name = Option::decode(input)?;
         let request = NodeId::decode(input)?;
         let (variant, fields) = input.sum()?;
@@ -372,10 +351,7 @@ impl TokenCodec for Admission {
                     pin: Box::new(PinnedMember::decode(input)?),
                 }
             }
-            1 => {
-                TokenReader::expect_fields(fields, 0)?;
-                Disposition::Sleep
-            }
+
             2 => {
                 TokenReader::expect_fields(fields, 0)?;
                 Disposition::Refused
@@ -422,7 +398,7 @@ impl Admission {
                 run: lash_durable::domain::RunSeq(operation.run),
                 member: operation.ordinal,
             }),
-            Disposition::Sleep | Disposition::Refused => None,
+            Disposition::Refused => None,
         };
         DomainWrite::EffectAdmission(EffectAdmissionWrite::Put {
             exec: self.exec.clone(),
@@ -454,8 +430,7 @@ impl Admission {
                 pin.call == call.id
                     && Material::new(pin.request.clone(), admission.request.to_hex()).is_ok()
             }
-            (Disposition::Sleep, FrozenRequest::Sleep { .. })
-            | (Disposition::Refused, FrozenRequest::Refused { .. }) => true,
+            (Disposition::Refused, FrozenRequest::Refused { .. }) => true,
             _ => false,
         };
         if !matches {
@@ -485,7 +460,7 @@ pub enum MemberStatus {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MemberEntry {
     pub effect: EffectId,
-    pub wait: lash_protocol_types::WaitId,
+    pub wait: lash_vocabulary::sites::WaitId,
     /// Its Admission.
     pub admission: NodeId,
     pub status: MemberStatus,
@@ -535,7 +510,7 @@ impl TokenCodec for EffectMembership {
         for _ in 0..count {
             input.expect_struct(4)?;
             let effect = EffectId::decode(input)?;
-            let wait = lash_protocol_types::WaitId::decode(input)?;
+            let wait = lash_vocabulary::sites::WaitId::decode(input)?;
             let admission = NodeId::decode(input)?;
             let (variant, fields) = input.sum()?;
             TokenReader::expect_fields(fields, 0)?;
@@ -621,7 +596,7 @@ impl EffectMembership {
             let mismatch = || GraphRefusal::AdmissionMismatch(Box::new(entry.effect.clone()));
             let issued = match &admission.admission.disposition {
                 Disposition::Execution { operation, .. } => operation.run < membership.next_park,
-                Disposition::Sleep | Disposition::Refused => entry.status == MemberStatus::Pending,
+                Disposition::Refused => entry.status == MemberStatus::Pending,
             };
             if &admission.admission.exec != exec
                 || admission.admission.effect != entry.effect
@@ -680,9 +655,9 @@ struct Admitted {
 #[derive(Clone, Debug, PartialEq)]
 pub struct FrozenAdmission {
     pub effect: EffectId,
-    pub wait: lash_protocol_types::WaitId,
+    pub wait: lash_vocabulary::sites::WaitId,
     /// The effect performed; none for a sleep.
-    pub effect_name: Option<EffectName>,
+    pub effect_name: Option<OperationUse>,
     pub request: FrozenRequest,
     /// The execution it was admitted as, with its pin; none for a sleep or
     /// a refusal.
@@ -785,7 +760,6 @@ impl AdmissionBook {
                 operation,
                 pin: Box::new(pin),
             },
-            (None, FrozenRequest::Sleep { .. }) => Disposition::Sleep,
             (None, FrozenRequest::Refused { .. }) => Disposition::Refused,
             _ => {
                 return Err(GraphRefusal::AdmissionMismatch(Box::new(frozen.effect)));
@@ -916,10 +890,10 @@ pub struct RootParts {
     pub envelope: Option<NodeId>,
     /// What the parked execution owes beyond its admitted calls (S7): its
     /// committed deferred matches' providers and codecs. Empty once ended.
-    pub owed: Vec<lash_core_store::store::plugin_writers::PluginCallbackIdentity>,
+    pub owed: Vec<lash_vocabulary::providers::PluginCallbackIdentity>,
     /// What running the execution requires of a node (FIG-6985). Empty
     /// once ended.
-    pub requirements: lash_kernel_doc::ExecutionRequirements,
+    pub requirements: lash_vocabulary::claims::ClaimRequirements,
 }
 
 /// The owner binding of `exec`.
@@ -1073,7 +1047,3 @@ impl CellEnd {
         Ok(end)
     }
 }
-
-#[cfg(test)]
-#[path = "graph_tests.rs"]
-mod tests;

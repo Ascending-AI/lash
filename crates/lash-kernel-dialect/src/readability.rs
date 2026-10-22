@@ -49,7 +49,7 @@ pub struct Dialect<'a> {
 pub struct Occurrence {
     pub dialect: String,
     pub case: &'static str,
-    pub site: k::Site,
+    pub site: lash_vocabulary::sites::Site,
     pub node_kind: &'static str,
     pub rule: String,
     pub reason: &'static str,
@@ -103,17 +103,21 @@ pub fn check(cases: &[Case], dialects: &[Dialect<'_>]) -> Report {
                     .as_ref()
                     .ok_or("printer omitted requested map")?;
                 let mut expected = std::collections::BTreeSet::new();
-                for (unit, root) in
-                    std::iter::once((k::Unit::Main, k::Node::Block(&case.document.main))).chain(
-                        case.document.functions.iter().map(|(name, function)| {
+                for (unit, root) in case
+                    .document
+                    .main
+                    .iter()
+                    .map(|main| (lash_vocabulary::sites::Unit::Main, k::Node::Block(main)))
+                    .chain(case.document.functions.iter().filter_map(|(id, function)| {
+                        function.body().map(|body| {
                             (
-                                k::Unit::Function(name.clone()),
-                                k::Node::Block(&function.body),
+                                lash_vocabulary::sites::Unit::Library(*id),
+                                k::Node::Block(&body.block),
                             )
-                        }),
-                    )
+                        })
+                    }))
                 {
-                    let mut stack = vec![(k::Site::new(unit, vec![]), root)];
+                    let mut stack = vec![(lash_vocabulary::sites::Site::new(unit, vec![]), root)];
                     while let Some((site, node)) = stack.pop() {
                         for (index, child) in node.children().into_iter().enumerate() {
                             stack.push((site.child(index as u32), child));
@@ -342,7 +346,6 @@ pub fn node_kind(node: k::Node<'_>) -> &'static str {
         k::Node::Action(action) => match action {
             k::Action::Call { .. } => "Call",
             k::Action::Perform { .. } => "Perform",
-            k::Action::Sleep { .. } => "Sleep",
             k::Action::Join { .. } => "Join",
             k::Action::JoinMany { .. } => "JoinMany",
             k::Action::Yield => "Yield",
@@ -361,8 +364,6 @@ pub fn node_kind(node: k::Node<'_>) -> &'static str {
             k::Expr::Member(_) => "Member",
             k::Expr::Closure(_) => "Closure",
             k::Expr::Call { .. } => "ExpressionCall",
-            k::Expr::Clock => "Clock",
-            k::Expr::Random => "Random",
             k::Expr::Read(_) => "Read",
             k::Expr::If { .. } => "IfExpression",
             k::Expr::Let { .. } => "LetExpression",
@@ -371,7 +372,6 @@ pub fn node_kind(node: k::Node<'_>) -> &'static str {
             k::Expr::Act(act) => match act.kind {
                 k::ActKind::Call(_) => "Call",
                 k::ActKind::Perform { .. } => "Perform",
-                k::ActKind::Sleep { .. } => "Sleep",
                 k::ActKind::Spawn(_) => "Spawn",
                 k::ActKind::Yield => "Yield",
                 k::ActKind::Cancel => "Cancel",
@@ -383,175 +383,16 @@ pub fn node_kind(node: k::Node<'_>) -> &'static str {
     }
 }
 
-/// A real agent cell (FIG-6272): a three-tool deep-research entry with typed
-/// tool signatures, as a host stored it. Every dialect must print it as
-/// plain source and read it back to the same identity.
-pub fn deep_research() -> Result<k::Document, Diagnostic> {
-    k::Document::from_json(DEEP_RESEARCH).map_err(|error| corpus_error(error.to_string()))
-}
-
-const DEEP_RESEARCH: &str = r#"{"manifest":{"kernel":1,"effects":{"display.show_message":{"signature":{"params":[{"name":"input","ty":{"record":{"fields":[{"name":"text","ty":"text"}]}}}],"result":"null"},"contract":"b8b14d96b9faaca52573ed3f2a692168fe4c295b1d71394e7a4a7ff218d56002"},"research.search":{"signature":{"params":[{"name":"input","ty":{"record":{"fields":[{"name":"max_sources","ty":"int"},{"name":"topic","ty":"text"}]}}}],"result":{"record":{"fields":[{"name":"sources","ty":{"list":{"record":{"fields":[{"name":"excerpt","ty":"text"},{"name":"id","ty":"text"},{"name":"title","ty":"text"},{"name":"url","ty":"text"}],"rest":"any"}}}},{"name":"topic","ty":"text"}],"rest":"any"}}},"contract":"08c059dc797d23b1808c3b834da5a0e41dc6ac6c81e0d7794348f3eccb667aeb"},"research.synthesize":{"signature":{"params":[{"name":"input","ty":{"record":{"fields":[{"name":"sources","ty":{"list":{"record":{"fields":[{"name":"excerpt","ty":"text"},{"name":"id","ty":"text"},{"name":"title","ty":"text"},{"name":"url","ty":"text"}]}}}},{"name":"topic","ty":"text"}]}}}],"result":{"record":{"fields":[{"name":"citations","ty":{"list":{"record":{"fields":[{"name":"source_id","ty":"text"},{"name":"url","ty":"text"}],"rest":"any"}}}},{"name":"source_count","ty":"int"},{"name":"summary","ty":"text"},{"name":"title","ty":"text"}],"rest":"any"}}},"contract":"c92c250d839c57067eec24e3938d5024e81ac24f98015e3db79ab3ecb12acef7"}},"numbers":"float"},"functions":{"deep_research":{"body":[{"let":{"name":"search_input","value":{"expr":{"record":[{"field":"topic","value":{"literal":{"text":"Reducing customer onboarding drop-off"}}},{"field":"max_sources","value":{"literal":{"int":"3"}}}]}}}},{"let":{"name":"evidence","value":{"action":{"perform":{"effect":"research.search","args":[{"variable":"search_input"}],"result":"any"}}}}},{"let":{"name":"synthesis_input","value":{"expr":{"record":[{"field":"topic","value":{"member":{"field":{"target":{"variable":"evidence"},"field":"topic"}}}},{"field":"sources","value":{"member":{"field":{"target":{"variable":"evidence"},"field":"sources"}}}}]}}}},{"let":{"name":"report","value":{"action":{"perform":{"effect":"research.synthesize","args":[{"variable":"synthesis_input"}],"result":"any"}}}}},{"let":{"name":"display_input","value":{"expr":{"record":[{"field":"text","value":{"member":{"field":{"target":{"variable":"report"},"field":"summary"}}}}]}}}},{"do":{"value":{"act":{"kind":{"perform":{"effect":"display.show_message","result":"any"}},"args":[{"variable":"display_input"}]}}}},{"return":{"value":{"variable":"report"}}}]}},"entries":{"deep_research":{"signature":{"result":"any"},"convention":"direct"}},"main":[{"finish":{"value":{"literal":"null"}}}]}"#;
-
-/// Realistic shapes shared by all dialects. Helper identities are
-/// deliberately foreign: decoding and readability require no installed library.
-pub fn corpus() -> Result<Vec<Case>, Diagnostic> {
-    let programs = [
-        (
-            "nested_actions",
-            r#"effect echo(input: Any) -> Any contract "1"
-fn worker(input) { return input }
-main {
- let f = fn(input) { return input }
- let answer = perform echo({text: "inline", values: [call worker({n: 1}), apply f([2])]}) as Any
- let typed = [perform echo({n: 3}) as Text then yield]
- let tasks = [spawn call worker({n: 4}), spawn apply f([5])]
- let waits = [sleep (call worker(0)), sleep 1 then yield, join(tasks[0]), join all tasks, join settled tasks, join race tasks, join any tasks]
- let field = perform echo({n: 6}) as Any
- finish [answer, typed, waits, field]
-}"#,
-        ),
-        (
-            "three_effect_workflow",
-            r#"effect research.search(input: Any) -> Any contract "1"
-effect research.synthesize(input: Any) -> Any contract "1"
-effect display.show_message(input: Any) -> Any contract "1"
-entry deep_research() -> Any
-fn deep_research() {
- let search_input = {topic: "Reducing customer onboarding drop-off", max_sources: 3}
- let evidence = perform research.search(search_input) as Any
- let synthesis_input = {topic: evidence.topic, sources: evidence.sources}
- let synthesis = perform research.synthesize(synthesis_input) as Any
- let message = {text: synthesis.summary}
- do perform display.show_message(message) as Any
- return synthesis
-}
-main { finish null }"#,
-        ),
-        (
-            "recursion_with_helpers",
-            r#"entry recurse(n: Any) -> Any
-fn recurse(n) {
- if n { let next = call recurse(false)
- return next } else { return n }
-}
-main { let answer = call recurse(true)
-finish answer }"#,
-        ),
-        (
-            "nested_control_flow",
-            r#"main {
- let ready = true
- while ready {
-  for item in [true, false] {
-   if item { continue } else { break }
-  }
-  set ready = false
- }
- finish ready
-}"#,
-        ),
-        (
-            "loops_over_records",
-            r#"entry collect() -> Any
-fn collect() {
- let rows = [{title: "first", active: true}, {title: "second", active: false}]
- for row in rows { if row.active { print row.title } }
- return rows
-}
-main { finish null }"#,
-        ),
-        (
-            "error_handling",
-            r#"main {
- try { throw "bad input" } catch error { print error } finally { print "done" }
- finish null
-}"#,
-        ),
-        (
-            "multiple_entries",
-            r#"entry first() -> Any
-entry second(input: Any) -> Any
-fn first() { return {title: "first"} }
-fn second(input) { return input.title }
-main { finish null }"#,
-        ),
-        (
-            "rlm_tool_cell",
-            r#"effect tools.lookup(query: Any) -> Any contract "1"
-main {
- let query = "find source"
- let answer = perform tools.lookup(query) as Any
- let records = [answer]
- for item in records { print item.title }
- finish answer
-}"#,
-        ),
-    ];
-    programs
-        .into_iter()
-        .map(|(name, program)| {
-            let mut document = k::parse_document(&format!("kernel 1\nnumbers float\n{program}\n"))
-                .map_err(|error| corpus_error(error.to_string()))?;
-            if name == "nested_actions" {
-                let k::Stmt::Let {
-                    value: k::Rhs::Expr(value),
-                    ..
-                } = &mut document.main[5]
-                else {
-                    return Err(corpus_error(
-                        "nested action fixture is missing its field target".into(),
-                    ));
-                };
-                *value = k::Expr::Member(Box::new(k::Member::Field {
-                    target: value.clone(),
-                    field: "n".into(),
-                }));
-            }
-            if name == "recursion_with_helpers" {
-                let id = k::FunctionId::from_bytes([23; 32]);
-                document.manifest.functions.insert(
-                    id,
-                    k::FunctionName::new("foreign.identity")
-                        .map_err(|error| corpus_error(error.to_string()))?,
-                );
-                document
-                    .functions
-                    .get_mut(&k::Name::new("recurse"))
-                    .ok_or_else(|| {
-                        corpus_error("recursion fixture is missing its declaration".into())
-                    })?
-                    .body
-                    .insert(
-                        0,
-                        k::Stmt::Let {
-                            name: "checked".into(),
-                            value: k::Rhs::Expr(k::Expr::Call {
-                                function: id,
-                                args: vec![k::Expr::Variable("n".into())],
-                            }),
-                        },
-                    );
-            }
-            Ok(Case { name, document })
-        })
-        .collect()
-}
-
-fn corpus_error(message: String) -> Diagnostic {
-    Diagnostic {
-        code: "GENERATED_READABILITY_CORPUS".into(),
-        message,
-        span: None,
-        kind: crate::DiagnosticKind::ProgramDefect,
-        repairs: vec![],
-    }
-}
-
-fn site_node<'a>(document: &'a k::Document, site: &k::Site) -> Option<k::Node<'a>> {
+fn site_node<'a>(
+    document: &'a k::Document,
+    site: &lash_vocabulary::sites::Site,
+) -> Option<k::Node<'a>> {
     let mut node = match &site.unit {
-        k::Unit::Main => k::Node::Block(&document.main),
-        k::Unit::Function(name) => k::Node::Block(&document.functions.get(name)?.body),
-        k::Unit::Library(_) => return None,
+        lash_vocabulary::sites::Unit::Main => k::Node::Block(document.main.as_ref()?),
+        lash_vocabulary::sites::Unit::Library(id) => {
+            k::Node::Block(&document.functions.get(id)?.body()?.block)
+        }
+        _ => return None,
     };
     for index in &site.path {
         node = *node.children().get(*index as usize)?;
@@ -590,7 +431,7 @@ mod tests {
         ) -> Result<crate::PrintedSource, PrintError> {
             let mut writer = SourceWriter::new(options);
             writer.write("main\n");
-            writer.begin_node(Some(&k::Unit::Main));
+            writer.begin_node(Some(&lash_vocabulary::sites::Unit::Main));
             writer.write("generic");
             writer.end_node();
             writer.finish(document, SourceFormat::TypeScriptV1)
@@ -609,7 +450,7 @@ mod tests {
         limits: GeneratedSourceLimits,
     ) -> Result<(k::Document, k::Captions), Diagnostic> {
         let (mut document, captions) = decode(source, base, limits)?;
-        document.manifest.numbers = k::NumberPolicy::BySpelling;
+        document.numbers = k::NumberPolicy::BySpelling;
         Ok((document, captions))
     }
     fn generic(_: k::Node<'_>, source: &str) -> Option<&'static str> {
@@ -689,7 +530,7 @@ mod tests {
             let mut writer = SourceWriter::new(options);
             writer.write(self.0);
             writer.write("\nmain\n");
-            writer.begin_node(Some(&k::Unit::Main));
+            writer.begin_node(Some(&lash_vocabulary::sites::Unit::Main));
             writer.write("generic");
             writer.end_node();
             writer.finish(document, SourceFormat::TypeScriptV1)

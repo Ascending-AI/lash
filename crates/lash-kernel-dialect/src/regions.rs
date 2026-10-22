@@ -1,35 +1,22 @@
 //! Readable export by region, shared by the dialects (FIG-6953).
 //!
-//! Each declared function of a document, and its `main`, is a region. A
-//! dialect lifts each region back to the source an author writes; a lift is
-//! kept only when reading the printed module back gives that region again.
-//! A module whose every region lifts is a plain workflow module: lowering it
-//! gives the document, with its identity, and needs no base. A region that
-//! does not lift prints in its dialect's kernel surface, opened by the
-//! dialect's kernel marker; such a module keeps the kernel layout, its
-//! `main` in kernel form, and reads back against its base: the lifted
-//! regions through the front end, the kernel-form ones through the exact
-//! reader, assembled here. Printing never gives source that reads as
-//! another document: when no mixture verifies, every region prints in
-//! kernel form.
+//! Authored source is returned only when lowering it reproduces the complete
+//! document and every spelled caption; unspellable targets are reported dropped. A refusal never exposes a private kernel codec.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::ops::Range;
 
-use lash_kernel_doc::{
-    self as k, FunctionCatalog, FunctionId, FunctionName, Name, SourceLanguage, SourceMap,
-};
+use lash_kernel_doc::{self as k, FunctionCatalog, SourceMap};
 
-use crate::{
-    EffectControl, Library, Lowered, NamespaceRefusal, Namespaces, PrintError, PrintOptions,
-    PrintedSource, QualifiedOperation, SourceFormat, require_through_bodies,
-};
+use lash_vocabulary::{FunctionId, FunctionName, Name};
+
+use crate::{NamespaceRefusal, Namespaces, PrintError, PrintOptions, PrintedSource, SourceFormat};
 
 /// The functions a document lists: those it calls and those their bodies
 /// reach (`K-DOC-002`).
 pub fn reachable(
     used: BTreeMap<FunctionId, FunctionName>,
-    library: &dyn Library,
+    library: &dyn crate::Library,
 ) -> BTreeMap<FunctionId, FunctionName> {
     let mut listed = BTreeMap::new();
     let mut pending: Vec<(FunctionId, FunctionName)> = used.into_iter().collect();
@@ -59,53 +46,102 @@ pub fn reachable(
     listed
 }
 
-/// The operations `document` performs, by the paths source calls them
-/// through: what lifted source of the document resolves against. A
-/// control is one a `finish` of the document performs.
-///
-/// # Errors
-///
-/// When the document's operations compose no namespace.
+/// Reconstruct source-name metadata from signature-only Imports. This never
+/// fulfils a Link or queries providers; source reading keeps the base's slots.
 pub fn namespaces(document: &k::Document) -> Result<Namespaces, NamespaceRefusal> {
-    let requirements = document
-        .manifest
-        .effects
-        .iter()
-        .filter(|(effect, _)| QualifiedOperation::from_effect(effect).is_ok())
-        .map(|(effect, requirement)| (effect.clone(), requirement.clone()))
-        .collect::<BTreeMap<_, _>>();
-    let controls = finished(document)
-        .into_iter()
-        .filter(|effect| requirements.contains_key(effect))
-        .map(|effect| (effect, BTreeSet::from([EffectControl::Finish])))
-        .collect();
-    Namespaces::of_requirements(&requirements, &controls)
+    use lash_vocabulary::{ImportKind, package::Visibility};
+    let mut packages = BTreeMap::<
+        lash_vocabulary::PackagePath,
+        BTreeMap<lash_vocabulary::Segment, crate::NamespaceMember>,
+    >::new();
+    let terminal = terminal_operations(document);
+    for (slot, import) in &document.imports {
+        let name = &import.name;
+        let kind = match &import.kind {
+            ImportKind::Operation { signature } => {
+                crate::NamespaceKind::Operation(crate::OperationSignature {
+                    signature: signature.clone(),
+                    // Both host control kinds lower to this same terminal
+                    // wrapper. Reconstruct its lowering fact, not the host's
+                    // declaration (which is outside the document).
+                    controls: if terminal.contains(slot) {
+                        lash_vocabulary::TurnControls::finish(lash_vocabulary::JsonSchema::any())
+                    } else {
+                        lash_vocabulary::TurnControls::none()
+                    },
+                    mode: lash_vocabulary::OperationMode::Waited,
+                })
+            }
+            ImportKind::Code {
+                signature,
+                convention,
+            } => crate::NamespaceKind::Function(crate::FunctionMember {
+                name: name.clone(),
+                signature: signature.clone(),
+                convention: *convention,
+                asynchronous: false,
+                rest: false,
+            }),
+            ImportKind::Type { .. } => crate::NamespaceKind::Type(crate::ValueType {
+                representation: lash_vocabulary::Type::Any,
+                members: BTreeMap::new(),
+            }),
+            ImportKind::Error { .. } => crate::NamespaceKind::Error,
+        };
+        packages.entry(name.package.clone()).or_default().insert(
+            name.member.clone(),
+            crate::NamespaceMember {
+                visibility: Visibility::Public,
+                kind,
+            },
+        );
+    }
+    Namespaces::new(packages, BTreeSet::new(), &|_| false)
 }
 
-/// The effects a `finish` statement of `document` performs.
-fn finished(document: &k::Document) -> BTreeSet<k::EffectName> {
-    let mut effects = BTreeSet::new();
-    let mut pending: Vec<k::Node<'_>> = std::iter::once(&document.main)
-        .chain(document.functions.values().map(|function| &function.body))
-        .map(|block| k::Node::Block(block))
-        .collect();
-    let mut within = Vec::new();
-    while let Some(node) = pending.pop() {
-        if let k::Node::Stmt(k::Stmt::Finish { value }) = node {
-            within.push(k::Node::Expr(value));
-            continue;
-        }
-        pending.extend(node.children());
+/// The exact terminal-call shape authored lowering emits, keyed by the
+/// owning unit's import contract and projected onto matching root imports.
+/// A local slot or display name alone never supplies a control fact.
+fn terminal_operations(document: &k::Document) -> BTreeSet<lash_vocabulary::ImportSlot> {
+    let mut terminal = BTreeSet::new();
+    let mut roots = BTreeMap::<_, Vec<_>>::new();
+    for (slot, import) in &document.imports {
+        roots.entry(&import.name).or_default().push((*slot, import));
     }
-    while let Some(node) = within.pop() {
-        if let k::Node::Expr(k::Expr::Act(act)) = node
-            && let k::ActKind::Perform { effect, .. } = &act.kind
-        {
-            effects.insert(effect.clone());
+    for (unit, block) in document.units() {
+        let imports = match unit {
+            lash_vocabulary::sites::Unit::Main | lash_vocabulary::sites::Unit::Function(_) => {
+                &document.imports
+            }
+            lash_vocabulary::sites::Unit::Library(function) => {
+                let Some(body) = document.functions.get(&function).and_then(|f| f.body()) else {
+                    continue;
+                };
+                &body.imports
+            }
+        };
+        let mut pending = vec![k::Node::Block(block)];
+        while let Some(node) = pending.pop() {
+            if let k::Node::Stmt(k::Stmt::Finish {
+                value: k::Expr::Let { value, body, .. },
+            }) = node
+                && matches!(&**body, k::Expr::Literal(k::Literal::Null))
+                && let k::Expr::Act(action) = &**value
+                && let k::ActKind::Perform { slot, .. } = action.kind
+                && let Some(import) = imports.get(&slot)
+            {
+                terminal.extend(
+                    roots
+                        .get(&import.name)
+                        .into_iter()
+                        .flatten()
+                        .filter_map(|(root, candidate)| (*candidate == import).then_some(*root)),
+                );
+            }
+            pending.extend(node.children());
         }
-        within.extend(node.children());
     }
-    effects
+    terminal
 }
 
 /// A printed module, read back.
@@ -123,209 +159,6 @@ impl RegionRead {
         self.document.canonical_bytes() == document.canonical_bytes()
             && self.captions.entries() == captions.entries()
     }
-
-    /// Whether the declared function `name` read back as it is in
-    /// `document`, with its signature and captions.
-    pub fn region_matches(
-        &self,
-        name: &Name,
-        document: &k::Document,
-        captions: &k::Captions,
-    ) -> bool {
-        let of = |captions: &k::Captions| {
-            captions
-                .entries()
-                .iter()
-                .filter(|entry| unit(&entry.target) == Some(name))
-                .cloned()
-                .collect::<Vec<_>>()
-        };
-        self.document.functions.get(name) == document.functions.get(name)
-            && self.document.entries.get(name) == document.entries.get(name)
-            && of(&self.captions) == of(captions)
-    }
-}
-
-/// The declared function a caption belongs to.
-fn unit(target: &k::CaptionTarget) -> Option<&Name> {
-    match target {
-        k::CaptionTarget::Site(k::Site {
-            unit: k::Unit::Function(function),
-            ..
-        }) => Some(function),
-        other => other.function(),
-    }
-}
-
-/// `source` with the kernel-form `spans` blanked, every byte but a newline
-/// a space, so the lifted rest keeps its offsets and lines; and the words
-/// the spans spell, which the front end's fresh names keep clear of.
-///
-/// # Errors
-///
-/// When a span splits a character.
-pub fn blank(source: &str, spans: &[Range<usize>]) -> Result<(String, Vec<String>), String> {
-    let mut blanked = source.as_bytes().to_vec();
-    let mut beside = Vec::new();
-    for span in spans {
-        let text = source
-            .get(span.clone())
-            .ok_or_else(|| "a region splits a character".to_owned())?;
-        beside.extend(
-            text.split(|c: char| !(c.is_alphanumeric() || c == '_' || c == '$'))
-                .filter(|word| !word.is_empty())
-                .map(str::to_owned),
-        );
-        for byte in &mut blanked[span.clone()] {
-            if *byte != b'\n' {
-                *byte = b' ';
-            }
-        }
-    }
-    let blanked = String::from_utf8(blanked).map_err(|_| "a region splits a character")?;
-    Ok((blanked, beside))
-}
-
-/// The document of a mixed module: the lifted functions as the front end
-/// lowered them, and the kernel-form regions and `main` (`kernel`, as the
-/// exact reader read them against `base`, which also gives their
-/// signatures). The manifest lists what the code reaches.
-///
-/// # Errors
-///
-/// When a caption read names no site of the assembled document.
-pub fn assemble(
-    base: &k::Document,
-    mut kernel: k::Document,
-    kernel_captions: Vec<k::CaptionEntry>,
-    lowered: Option<Lowered>,
-    library: &dyn Library,
-) -> Result<RegionRead, k::CaptionsRefusal> {
-    // Kernel source spells no start adapter: the kernel-form units take
-    // theirs from the base.
-    let mut units = base.clone();
-    units
-        .functions
-        .retain(|name, _| kernel.functions.contains_key(name));
-    k::carry_start_adapters(&units, &mut kernel);
-    let Some(lowered) = lowered else {
-        let captions = k::Captions::new(&kernel, kernel_captions)?;
-        return Ok(RegionRead {
-            document: kernel,
-            captions,
-            map: None,
-        });
-    };
-    let mut document = lowered.document.document().clone();
-    let lifted: BTreeSet<Name> = document.functions.keys().cloned().collect();
-    let mut reached = BTreeSet::new();
-    let mut performed = BTreeSet::new();
-    let mut nodes: Vec<k::Node<'_>> = vec![k::Node::Block(&kernel.main)];
-    for (name, function) in &kernel.functions {
-        nodes.push(k::Node::Block(&function.body));
-        if let Some(entry) = base.entries.get(name) {
-            reached.extend(entry.convention.functions().into_iter().copied());
-        }
-    }
-    while let Some(node) = nodes.pop() {
-        references(node, &mut reached, &mut performed);
-        nodes.extend(node.children());
-    }
-    for (name, function) in &kernel.functions {
-        if let Some(entry) = base.entries.get(name) {
-            document.entries.insert(name.clone(), entry.clone());
-        }
-        document.functions.insert(name.clone(), function.clone());
-    }
-    document.main = kernel.main.clone();
-    document.private_bindings = base.private_bindings.clone();
-    let mut used: BTreeMap<_, _> = std::mem::take(&mut document.manifest.functions);
-    for id in reached {
-        if let Some(name) = base.manifest.functions.get(&id) {
-            used.entry(id).or_insert_with(|| name.clone());
-        }
-    }
-    document.manifest.functions = reachable(used, library);
-    for effect in performed {
-        if let Some(requirement) = base.manifest.effects.get(&effect) {
-            document
-                .manifest
-                .effects
-                .entry(effect)
-                .or_insert_with(|| requirement.clone());
-        }
-    }
-    require_through_bodies(&mut document.manifest, library);
-    let mut entries: Vec<_> = lowered
-        .captions
-        .entries()
-        .iter()
-        .filter(|entry| unit(&entry.target).is_some_and(|name| lifted.contains(name)))
-        .cloned()
-        .collect();
-    entries.extend(kernel_captions);
-    let captions = k::Captions::new(&document, entries)?;
-    Ok(RegionRead {
-        document,
-        captions,
-        map: lowered.source_map,
-    })
-}
-
-/// The library functions and effects `node` names itself.
-fn references(
-    node: k::Node<'_>,
-    functions: &mut BTreeSet<FunctionId>,
-    effects: &mut BTreeSet<k::EffectName>,
-) {
-    let callee = |callee: &k::Callee, functions: &mut BTreeSet<FunctionId>| {
-        if let k::Callee::Library(id) = callee {
-            functions.insert(*id);
-        }
-    };
-    match node {
-        k::Node::Stmt(k::Stmt::ReturnVia { policy, .. }) => {
-            functions.insert(*policy);
-        }
-        k::Node::Stmt(k::Stmt::For { via: Some(via), .. }) => {
-            functions.extend(
-                [Some(via.open), via.next, via.item, via.check]
-                    .into_iter()
-                    .flatten(),
-            );
-        }
-        k::Node::Action(action) => match action {
-            k::Action::Call { callee: c, .. } | k::Action::Spawn { callee: c, .. } => {
-                callee(c, functions);
-            }
-            k::Action::Perform { effect, .. } => {
-                effects.insert(effect.clone());
-            }
-            k::Action::Await { policy, .. } => {
-                functions.insert(*policy);
-            }
-            _ => {}
-        },
-        k::Node::Expr(k::Expr::Call { function, .. }) => {
-            functions.insert(*function);
-        }
-        k::Node::Expr(k::Expr::Closure(closure)) => {
-            if let Some(start) = &closure.start {
-                functions.extend(start.functions().into_iter().copied());
-            }
-        }
-        k::Node::Expr(k::Expr::Act(act)) => match &act.kind {
-            k::ActKind::Call(c) | k::ActKind::Spawn(c) => callee(c, functions),
-            k::ActKind::Perform { effect, .. } => {
-                effects.insert(effect.clone());
-            }
-            k::ActKind::Await(policy) => {
-                functions.insert(*policy);
-            }
-            _ => {}
-        },
-        _ => {}
-    }
 }
 
 /// A module of lifted regions only, with where each lifted function is in
@@ -340,94 +173,68 @@ pub trait Regions {
     /// The source language and format printed.
     fn format(&self) -> SourceFormat;
 
-    /// The module of `functions` and the lifted `main`, when `main` lifted.
-    fn whole(&self, functions: &BTreeSet<Name>) -> Option<Whole>;
-
-    /// The kernel layout with `lifted` as written and every other region,
-    /// and `main`, in kernel form; and where each lifted function is in it.
+    /// The module of `functions` and the lifted `main`.
     ///
     /// # Errors
-    ///
-    /// As the dialect's kernel printer.
-    fn kernel(
-        &self,
-        lifted: &BTreeSet<Name>,
-    ) -> Result<(PrintedSource, BTreeMap<Name, Range<usize>>), PrintError>;
+    /// A typed refusal at an unspellable body, or a source limit.
+    fn whole(&self, functions: &BTreeSet<Name>) -> Result<Whole, PrintError>;
 
     /// `source` read back against the printed document. A refusal gives
     /// the offset it points at, if any.
     ///
     /// # Errors
     ///
-    /// The front end's or the exact reader's refusal.
+    /// The front end's refusal.
     fn read(&self, source: &str) -> Result<RegionRead, Option<usize>>;
 }
 
-/// Prints `document` with every region in `lifted` that reads back as
-/// itself as authored source, and the others in kernel form: the whole
-/// lifted module when it reads back as `document`, else the kernel layout
-/// with the lifted regions that verify, else every region in kernel form.
+/// Print a whole authored module only when reading it reproduces the document
+/// and every spelled caption exactly. Report unspellable targets as dropped.
 ///
 /// # Errors
-///
-/// As the dialect's kernel printer, or a source map that does not fit.
+/// Refuses unrepresentable documents, unequal lowering identities and source
+/// exceeding the configured limits.
 pub fn print_verified(
     document: &k::Document,
     captions: Option<&k::Captions>,
     options: PrintOptions,
-    mut lifted: BTreeSet<Name>,
+    lifted: BTreeSet<Name>,
     regions: &dyn Regions,
 ) -> Result<PrintedSource, PrintError> {
     let empty = k::Captions::empty(document.identity());
     let captions = captions.unwrap_or(&empty);
-    let language = regions.format().language();
-    if lifted.len() == document.functions.len()
-        && let Some(whole) = regions.whole(&lifted)
-        && whole.source.len() <= options.limits.max_bytes
+    crate::imperative::check_captions(document, captions, options.limits)?;
+    let whole = regions.whole(&lifted)?;
+    if whole.source.len() > options.limits.max_bytes {
+        return Err(PrintError::Bytes {
+            limit: options.limits.max_bytes,
+        });
+    }
+    let unprintable = || PrintError::Unprintable {
+        site: lash_vocabulary::sites::Site::new(lash_vocabulary::sites::Unit::Main, Vec::new()),
+    };
+    let read = regions.read(&whole.source).map_err(|_| unprintable())?;
+    if read.document.canonical_bytes() != document.canonical_bytes()
+        || read
+            .captions
+            .entries()
+            .iter()
+            .any(|entry| captions.get(&entry.target) != Some(&entry.caption))
     {
-        match regions.read(&whole.source) {
-            Ok(read) if read.matches(document, captions) => {
-                return whole_printed(document, whole.source, read.map, regions.format(), options);
-            }
-            Ok(read) => lifted.retain(|name| read.region_matches(name, document, captions)),
-            Err(at) => {
-                let failed = at.and_then(|at| located(at, &whole.functions));
-                lifted.retain(|name| Some(name) != failed.as_ref());
-            }
-        }
+        return Err(unprintable());
     }
-    loop {
-        if lifted.is_empty() {
-            return regions.kernel(&lifted).map(|(printed, _)| printed);
-        }
-        let (printed, written) = regions.kernel(&lifted)?;
-        match regions.read(&printed.source) {
-            Ok(read) if read.matches(document, captions) => {
-                return merge_maps(document, printed, read.map, &written, language);
-            }
-            Ok(read) => {
-                let before = lifted.len();
-                lifted.retain(|name| read.region_matches(name, document, captions));
-                if lifted.len() == before {
-                    lifted.clear();
-                }
-            }
-            Err(at) => match at.and_then(|at| located(at, &written)) {
-                Some(name) => {
-                    lifted.remove(&name);
-                }
-                None => lifted.clear(),
-            },
-        }
-    }
-}
-
-/// The lifted function at `offset`.
-fn located(offset: usize, written: &BTreeMap<Name, Range<usize>>) -> Option<Name> {
-    written
+    // A retained library body or synthetic binding has no authored syntax.
+    // Compare every caption that was spelled exactly, and report each input
+    // target absent from the source rather than silently losing its sidecar.
+    let dropped = captions
+        .entries()
         .iter()
-        .find(|(_, range)| range.contains(&offset))
-        .map(|(name, _)| name.clone())
+        .filter(|entry| read.captions.get(&entry.target).is_none())
+        .map(|entry| entry.target.clone())
+        .collect();
+    let mut printed = whole_printed(document, whole.source, read.map, regions.format(), options)?;
+    printed.dropped = dropped;
+    Ok(printed)
 }
 
 /// The printed source of a module whose every region lifted.
@@ -455,29 +262,54 @@ fn whole_printed(
     })
 }
 
-/// The kernel printer's map of the kernel-form regions, joined with the
-/// front end's of the lifted ones.
-fn merge_maps(
-    document: &k::Document,
-    mut printed: PrintedSource,
-    lowered: Option<SourceMap>,
-    written: &BTreeMap<Name, Range<usize>>,
-    language: SourceLanguage,
-) -> Result<PrintedSource, PrintError> {
-    let Some(kernel) = printed.source_map.take() else {
-        return Ok(printed);
-    };
-    let lowered = lowered.map(|map| map.sites).unwrap_or_default();
-    let lifted = |site: &k::Site| matches!(&site.unit, k::Unit::Function(name) if written.contains_key(name));
-    let mut sites: Vec<_> = kernel
-        .sites
-        .into_iter()
-        .filter(|site| !lifted(&site.site))
-        .collect();
-    sites.extend(lowered.into_iter().filter(|site| lifted(&site.site)));
-    printed.source_map = Some(
-        SourceMap::new(document, &printed.source, language, sites)
-            .map_err(|refused| PrintError::Invalid(refused.to_string()))?,
-    );
-    Ok(printed)
+/// Authored module parts in their Main statement order. Export bindings
+/// supply declarations; other runs retain their original statement indices.
+pub enum ModulePart {
+    Export(Name),
+    Statements(Range<usize>),
+    /// A scope predeclaration restored by lowering the later export binding.
+    Implicit,
+}
+
+/// Project module declarations and executable work from the same Main body.
+/// Every Export must have exactly one matching binding; nested declarations
+/// remain within their containing statement run.
+pub fn module_parts(document: &k::Document) -> Option<Vec<ModulePart>> {
+    let mut parts = Vec::new();
+    let mut seen = BTreeSet::new();
+    let main = document.main.as_deref().unwrap_or_default();
+    let mut first = 0;
+    for (index, statement) in main.iter().enumerate() {
+        let part = match statement {
+            k::Stmt::Let {
+                name,
+                value: k::Rhs::Expr(k::Expr::Literal(k::Literal::Function(id))),
+            }
+            | k::Stmt::Assign {
+                place: k::Place::Variable(name),
+                value: k::Rhs::Expr(k::Expr::Literal(k::Literal::Function(id))),
+                ..
+            } if matches!(document.exports.get(name), Some(k::Export::Function(f)) if f.function == *id) =>
+            {
+                if !seen.insert(name.clone()) {
+                    return None;
+                }
+                ModulePart::Export(name.clone())
+            }
+            k::Stmt::Let {
+                name,
+                value: k::Rhs::Expr(k::Expr::Literal(k::Literal::Absent)),
+            } if document.exports.contains_key(name) => ModulePart::Implicit,
+            _ => continue,
+        };
+        if first < index {
+            parts.push(ModulePart::Statements(first..index));
+        }
+        parts.push(part);
+        first = index + 1;
+    }
+    if first < main.len() {
+        parts.push(ModulePart::Statements(first..main.len()));
+    }
+    (seen.len() == document.exports.len()).then_some(parts)
 }

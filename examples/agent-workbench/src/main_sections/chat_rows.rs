@@ -1,10 +1,10 @@
 use super::*;
-use lash::SessionId;
 use lash::transcript::{
     CellControl, CellOutcome, CellRecord, EntryId, EntryProvenance, SuppressionReason,
     ToolResultBlock, TranscriptBlock, TranscriptEntry, TranscriptItem, TranscriptMessage,
     TranscriptRole,
 };
+use lash_vocabulary::identity::SessionId;
 
 /// How the workbench lays out one committed transcript entry. Lash hands the
 /// workbench typed history; this row is the workbench's own presentation of

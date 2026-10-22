@@ -1,6 +1,7 @@
 //! Request-local omission preserves history and attachment occurrence order.
 use lash_protocol_types::llm::attachment_delivery::AttachmentPosition;
 use lash_protocol_types::{AttachmentMaterializationNotice, AttachmentRef};
+
 use std::sync::Arc;
 
 /// Replace each attachment the target cannot accept with the mode's text.

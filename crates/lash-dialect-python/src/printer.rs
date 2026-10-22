@@ -1,160 +1,97 @@
 //! Exported Python: plain source whose environment stays in the base
-//! document; paired inverses live in generated.rs.
+//! document. Lowering inverses are verified by the readable export path.
 use crate::generated_scope::BindingScope;
 mod authored;
 mod names;
 mod readable;
 mod signature;
+mod task;
 use lash_kernel_dialect::{
     NamePlan, PrintError, PrintOptions, PrintedSource, SourceFormat, SourceWriter,
     check_document_depth,
 };
 use lash_kernel_doc as k;
+use lash_vocabulary::Name;
 pub(crate) use names::{attribute_identifier, identifier, legal_identifier};
 use std::collections::{BTreeMap, BTreeSet};
 use std::ops::Range;
 
-/// Render plain Python without compiling or resolving dependencies, every
-/// region in the kernel surface. The
-/// manifest, entries, private bindings, helper identities and name renames
-/// are not written: [`crate::read_kernel`] takes them from the base document.
-/// Each caption is spelled as `#:` lines directly above what it captions,
-/// an `else`, `except` or `finally` clause for an arm, the `def` for a
-/// function, a parameter written on its own line, and a field of a
-/// `TypedDict`. A function whose parameters or whose types' fields carry
-/// captions takes one parameter a line, and each parameter or result with a
-/// captioned field is annotated with its type, written from the entry's
-/// signature, each record a `TypedDict` above every function.
-/// [`PrintedSource::dropped`] lists an entry's parameter and field captions
-/// when its function takes other parameters than its signature names, and a
-/// field's below a record with a field no class body can name.
-pub fn print_kernel(
-    document: &k::Document,
-    captions: Option<&k::Captions>,
-    options: PrintOptions,
-) -> Result<PrintedSource, PrintError> {
-    print_regions(document, captions, options, &Regions::default()).map(|(printed, _)| printed)
-}
-
-/// What a module prints of each region (`crate::readable`): the declared
-/// functions written as authored source, the rest in kernel form, opened by
-/// the kernel marker when `marked`. A module written as authored source
-/// throughout lists its entries in the order `main` binds them, and writes
-/// no `main`.
-#[derive(Default)]
+/// Authored exports and the ordered parts of their Main body.
 pub(crate) struct Regions {
-    pub(crate) authored: BTreeSet<k::Name>,
-    pub(crate) marked: bool,
-    pub(crate) whole: Option<Vec<k::Name>>,
+    pub(crate) authored: BTreeSet<Name>,
+    pub(crate) whole: Vec<lash_kernel_dialect::regions::ModulePart>,
 }
-
-/// The directive that opens a region printed in kernel form among authored
-/// ones. The kernel printer never writes a bare text statement: it spells a
-/// text evaluated for effect as a generic suite, so no kernel body opens
-/// with this.
-pub(crate) const KERNEL_MARKER: &str = "use kernel";
-
-/// [`print_kernel`], with the functions `regions` names written as authored
-/// source; also gives where each of those was written.
 pub(crate) fn print_regions(
     document: &k::Document,
+    library: &dyn lash_kernel_dialect::Library,
     captions: Option<&k::Captions>,
     options: PrintOptions,
     regions: &Regions,
-) -> Result<(PrintedSource, BTreeMap<k::Name, Range<usize>>), PrintError> {
+) -> Result<(PrintedSource, BTreeMap<Name, Range<usize>>), PrintError> {
     check_document_depth(document, options.limits)?;
-    if k::KernelVersion::of(document.manifest.kernel).is_none() {
-        return Err(PrintError::Invalid("unsupported kernel version".into()));
-    }
     let plan = NamePlan::new(document, legal_identifier);
+    let operators = crate::generated_operators::Operators::new(document, library);
     let inline = InlinePlan::new(document);
     let mut r = Renderer {
         out: SourceWriter::with_captions(options, document, captions)?,
         plan: &plan,
         inline: &inline,
+        document,
         indent: 0,
         scope: Default::default(),
         main: false,
-        operators: crate::generated_operators::Operators::new(&document.manifest.functions),
-        captions: captions.is_some_and(|captions| !captions.is_empty()),
-        authored: false,
-        marker: false,
+        operators,
+        captions: captions.is_some_and(|c| !c.is_empty()),
+        authored: true,
         sync: BTreeSet::new(),
+        substitutions: BTreeMap::new(),
+        comprehensions: BTreeMap::new(),
+        expression_depth: 0,
+        max_depth: options.limits.max_depth.min(k::MAX_NESTING_DEPTH),
     };
-    let sleeps = regions.authored.iter().any(|name| {
-        document
-            .functions
-            .get(name)
-            .is_some_and(|function| sleeps(k::Node::Block(&function.body)))
-    });
-    if sleeps {
-        r.out.write("import asyncio\n\n");
+    let asyncio = ["py.task.run", "py.gather", "py.sleep"]
+        .iter()
+        .any(|helper| r.operators.uses(helper));
+    let time = r.operators.uses("py.time");
+    if asyncio {
+        r.out.write("import asyncio\n");
+    }
+    if time {
+        r.out.write("import time\n");
+    }
+    if asyncio || time {
+        r.out.write("\n");
     }
     let signatures = r.typed_dicts(document, &regions.authored);
-    let order: Vec<&k::Name> = match &regions.whole {
-        Some(order) => order.iter().collect(),
-        None => document.functions.keys().collect(),
-    };
     let mut written = BTreeMap::new();
-    for (index, name) in order.into_iter().enumerate() {
-        let Some(function) = document.functions.get(name) else {
-            continue;
-        };
-        r.authored = regions.authored.contains(name);
-        if index > 0 && regions.whole.is_some() {
-            r.out.write("\n");
-        }
-        let start = r.out.len();
-        if r.captions {
-            r.caption_of(k::Site::new(k::Unit::Function(name.clone()), Vec::new()));
-        }
-        let asynchronous = if r.authored {
-            // Every top-level `async def` is an entry, and only those are.
-            document.entries.contains_key(name)
-        } else {
-            awaits(&function.body)
-        };
-        r.out
-            .write(if asynchronous { "async def " } else { "def " });
-        r.name(name);
-        r.signature(&signatures, name, function);
-        r.out.write(":\n");
-        let unit = r
-            .out
-            .tracks_sites()
-            .then(|| k::Unit::Function(name.clone()));
-        r.scope = BindingScope::new(&function.params);
-        r.marker = regions.marked && !r.authored;
-        r.root_block(&function.body, unit.as_ref());
-        if r.authored {
-            written.insert(name.clone(), start..r.out.len());
+    let main = document.main.as_deref().unwrap_or_default();
+    r.out.begin_node(Some(&lash_vocabulary::sites::Unit::Main));
+    let body_start = r.out.len();
+    for part in &regions.whole {
+        use lash_kernel_dialect::regions::ModulePart;
+        match part {
+            ModulePart::Export(name) => {
+                if r.out.len() > body_start {
+                    r.out.write("\n");
+                }
+                r.out.begin_node(None); // the Main binding
+                let range = r.export_function(name, &signatures)?;
+                r.implicit(); // its function literal
+                r.out.end_node();
+                written.insert(name.clone(), range);
+                r.scope.bind(name, Some(true));
+            }
+            ModulePart::Statements(range) => {
+                r.main = true;
+                r.authored_statement_range(main, range.clone());
+            }
+            ModulePart::Implicit => r.implicit(),
         }
     }
-    r.authored = false;
-    r.scope = Default::default();
-    if regions.whole.is_none() {
-        r.main = true;
-        r.out.write(if awaits(&document.main) {
-            "async def main():\n"
-        } else {
-            "def main():\n"
-        });
-        let tracks = r.out.tracks_sites();
-        r.marker = regions.marked;
-        r.root_block(&document.main, tracks.then_some(&k::Unit::Main));
-    }
+    r.out.end_node();
     r.out
         .finish(document, SourceFormat::PythonV1)
         .map(|printed| (printed, written))
-}
-
-/// Whether `node` sleeps, outside the functions it makes.
-fn sleeps(node: k::Node<'_>) -> bool {
-    match node {
-        k::Node::Expr(k::Expr::Act(act)) if matches!(act.kind, k::ActKind::Sleep { .. }) => true,
-        k::Node::Action(k::Action::Sleep { .. }) => true,
-        _ => node.children().into_iter().any(sleeps),
-    }
 }
 
 struct Renderer<'a> {
@@ -169,13 +106,63 @@ struct Renderer<'a> {
     captions: bool,
     /// Whether the region being written is authored source.
     authored: bool,
-    /// Whether the next root block opens with the kernel marker.
-    marker: bool,
+    /// The document owning stored function bodies and import slots.
+    document: &'a k::Document,
     /// The local functions an authored region writes as plain `def`s,
     /// whose calls take no `await`.
-    sync: BTreeSet<k::Name>,
+    sync: BTreeSet<Name>,
+    substitutions: BTreeMap<Name, k::Expr>,
+    comprehensions: BTreeMap<Name, authored::Comprehension>,
+    expression_depth: usize,
+    max_depth: usize,
 }
 impl Renderer<'_> {
+    fn export_function(
+        &mut self,
+        name: &Name,
+        signatures: &signature::Signatures,
+    ) -> Result<Range<usize>, PrintError> {
+        let Some(k::Export::Function(export)) = self.document.exports.get(name) else {
+            return Err(PrintError::Invalid(
+                "a non-function export has no Python declaration".into(),
+            ));
+        };
+        let definition = self
+            .document
+            .functions
+            .get(&export.function)
+            .ok_or_else(|| PrintError::Invalid("missing exported function".into()))?;
+        let body = definition
+            .body()
+            .ok_or_else(|| PrintError::Invalid("native export has no Python body".into()))?;
+        let params = definition
+            .signature
+            .params
+            .iter()
+            .map(|p| p.name.clone())
+            .collect::<Vec<_>>();
+        let start = self.out.len();
+        let unit = lash_vocabulary::sites::Unit::Library(export.function);
+        self.caption_of(lash_vocabulary::sites::Site::new(unit.clone(), Vec::new()));
+        if !export.asynchronous {
+            self.sync.insert(name.clone());
+        }
+        self.out.write(if export.asynchronous {
+            "async def "
+        } else {
+            "def "
+        });
+        self.name(name);
+        self.signature(signatures, name, &params);
+        self.out.write(":\n");
+        let scope = std::mem::replace(&mut self.scope, BindingScope::new(&params));
+        let main = std::mem::replace(&mut self.main, false);
+        self.root_block(&body.block, Some(&unit));
+        self.main = main;
+        self.scope = scope;
+        Ok(start..self.out.len())
+    }
+
     /// The caption of the node the writer opens next, taken to be spelled.
     fn next_caption(&mut self) -> Option<k::Caption> {
         let site = self.captions.then(|| self.out.next_site(None)).flatten()?;
@@ -187,7 +174,7 @@ impl Renderer<'_> {
             self.spell(&caption);
         }
     }
-    fn caption_of(&mut self, site: k::Site) {
+    fn caption_of(&mut self, site: lash_vocabulary::sites::Site) {
         if let Some(caption) = self.out.take_caption(site) {
             self.spell(&caption);
         }
@@ -204,7 +191,7 @@ impl Renderer<'_> {
             self.out.write("\n");
         }
     }
-    fn parameters(&mut self, names: &[k::Name]) {
+    fn parameters(&mut self, names: &[Name]) {
         self.out.write("(");
         for (i, name) in names.iter().enumerate() {
             if i > 0 {
@@ -214,26 +201,19 @@ impl Renderer<'_> {
         }
         self.out.write(")");
     }
-    fn root_block(&mut self, block: &k::Block, root: Option<&k::Unit>) {
+    fn root_block(&mut self, block: &k::Block, root: Option<&lash_vocabulary::sites::Unit>) {
+        let sync = self.sync.clone();
         self.out.begin_node(root);
         self.indent += 1;
-        if std::mem::take(&mut self.marker) {
-            self.padding();
-            self.out.write(&format!("\"{KERNEL_MARKER}\"\n"));
-        }
         if block.is_empty() {
             self.empty();
         }
-        for stmt in block {
-            self.node(k::Node::Stmt(stmt), None);
-        }
+        self.authored_statements(block);
         self.indent -= 1;
         self.out.end_node();
+        self.sync = sync;
     }
-    fn metadata(&mut self, value: &impl serde::Serialize) {
-        self.out.metadata(value, SourceFormat::PythonV1);
-    }
-    fn name(&mut self, n: &k::Name) {
+    fn name(&mut self, n: &Name) {
         // Authored source spells the document's names; only the kernel
         // surface reserves some for its own syntax.
         if self.authored && attribute_identifier(n.as_str()) {
@@ -242,18 +222,13 @@ impl Renderer<'_> {
             self.out.write(&self.plan.names[n]);
         }
     }
-    fn helper(&mut self, id: &k::FunctionId) {
-        self.out.write(&self.plan.helpers[id]);
-    }
-    fn names(&mut self, names: &[k::Name]) {
-        self.out.write("[");
-        for (i, n) in names.iter().enumerate() {
-            if i > 0 {
-                self.out.write(", ");
-            }
-            self.name(n);
-        }
-        self.out.write("]");
+    fn helper(&mut self, id: &impl crate::generated_operators::Reference) {
+        let Some(name) = self.operators.name(id) else {
+            self.out
+                .refuse(PrintError::Invalid("missing callable source name".into()));
+            return;
+        };
+        self.out.write(&name);
     }
     fn padding(&mut self) {
         for _ in 0..self.indent {
@@ -268,7 +243,7 @@ impl Renderer<'_> {
         self.padding();
         self.out.write("pass\n");
     }
-    fn node(&mut self, node: k::Node<'_>, root: Option<&k::Unit>) {
+    fn node(&mut self, node: k::Node<'_>, root: Option<&lash_vocabulary::sites::Unit>) {
         if matches!(node, k::Node::Stmt(_) | k::Node::Block(_)) {
             self.caption_next();
         }
@@ -295,297 +270,27 @@ impl Renderer<'_> {
         }
         self.out.end_node();
     }
-    fn expr(&mut self, expr: &k::Expr) {
-        self.node(k::Node::Expr(expr), None);
-    }
-    fn block(&mut self, block: &k::Block) {
-        self.node(k::Node::Block(block), None);
-    }
-    fn rhs(&mut self, rhs: &k::Rhs) {
-        match rhs {
-            k::Rhs::Expr(e) => self.expr(e),
-            k::Rhs::Action(a) => self.node(k::Node::Action(a), None),
-        }
-    }
     // Members have no Site of their own. Their expression children stay in kernel order.
-    fn member_header(&mut self, prefix: &str, member: &k::Member) {
-        self.out.write("with k.");
-        self.out.write(prefix);
-        match member {
-            k::Member::Field { field, .. } => {
-                self.out.write("field(");
-                self.out.json(field);
-            }
-            k::Member::Index { .. } => self.out.write("index("),
-        }
-        self.suite();
-        match member {
-            k::Member::Field { target, .. } => self.expr(target),
-            k::Member::Index { target, index } => {
-                self.expr(target);
-                self.expr(index);
-            }
-        }
-    }
     fn statement(&mut self, stmt: &k::Stmt) {
         self.render_statement(stmt);
         self.scope.types.statement(stmt, self.operators.functions());
     }
     fn render_statement(&mut self, stmt: &k::Stmt) {
-        if matches!(stmt, k::Stmt::For { metered, .. } | k::Stmt::While { metered, .. } if *metered != 0)
-        {
+        if !self.readable_statement(stmt) {
             self.out.refuse(PrintError::Invalid(
-                "a metered library loop requires kernel text".into(),
+                "statement has no authored Python spelling".into(),
             ));
-            return;
         }
-        if self.readable_statement(stmt) {
-            return;
-        }
-        match stmt {
-            k::Stmt::Break | k::Stmt::Continue => {
-                self.out.refuse(PrintError::Invalid(
-                    "unhandled readable leaf statement".into(),
-                ));
-                return;
-            }
-            k::Stmt::Let { name, value } => {
-                self.out.write("with k.let(");
-                self.name(name);
-                self.scope.bind(name, Some(true));
-                self.suite();
-                self.rhs(value);
-            }
-            // The front end writes Python's own order, the right-hand side
-            // first, so its source has no spelling for another.
-            k::Stmt::Assign {
-                order: k::AssignOrder::PlaceFirst,
-                ..
-            } => {
-                self.out.refuse(PrintError::Invalid(
-                    "a place-first assignment has no generated Python spelling".into(),
-                ));
-                return;
-            }
-            k::Stmt::Assign { place, value, .. } => {
-                match place {
-                    k::Place::Variable(n) => {
-                        self.out.write("with k.assign(");
-                        self.name(n);
-                        self.scope.bind(n, Some(false));
-                        self.suite();
-                    }
-                    k::Place::Member(m) => self.member_header("assign_", m),
-                }
-                self.rhs(value);
-            }
-            k::Stmt::Remove { member } => self.member_header("remove_", member),
-            k::Stmt::Do { value } => {
-                self.out.write("with k.do(");
-                self.suite();
-                self.expr(value);
-            }
-            k::Stmt::If {
-                condition,
-                then_block,
-                else_block,
-            } => {
-                self.out.write("with k.if_(");
-                self.suite();
-                self.expr(condition);
-                self.block(then_block);
-                self.block(else_block);
-            }
-            k::Stmt::For {
-                binding,
-                iterable,
-                via,
-                body,
-                else_block,
-                ..
-            } => {
-                self.out.write("with k.for_(");
-                self.name(binding);
-                self.scope.introduce(binding);
-                // A protocol's hooks follow the binding, `None` for one it
-                // omits.
-                if let Some(via) = via {
-                    for hook in [Some(via.open), via.next, via.item, via.check] {
-                        self.out.write(", ");
-                        match hook {
-                            Some(id) => self.helper(&id),
-                            None => self.out.write("None"),
-                        }
-                    }
-                }
-                self.suite();
-                self.expr(iterable);
-                self.block(body);
-                if !else_block.is_empty() {
-                    self.block(else_block);
-                }
-            }
-            k::Stmt::While {
-                condition,
-                body,
-                else_block,
-                ..
-            } => {
-                self.out.write("with k.while_(");
-                self.suite();
-                self.expr(condition);
-                self.block(body);
-                if !else_block.is_empty() {
-                    self.block(else_block);
-                }
-            }
-            k::Stmt::ReturnVia { value, policy } => {
-                self.out.write("with k.return_via(");
-                self.helper(policy);
-                self.suite();
-                self.expr(value);
-            }
-            k::Stmt::Return { value }
-            | k::Stmt::Throw { value }
-            | k::Stmt::Print { value }
-            | k::Stmt::Finish { value }
-            | k::Stmt::Fail { value } => {
-                self.out.write(match stmt {
-                    k::Stmt::Return { .. } => "with k.return_(",
-                    k::Stmt::Throw { .. } => "with k.throw(",
-                    k::Stmt::Print { .. } => "with k.print(",
-                    k::Stmt::Finish { .. } => "with k.finish(",
-                    _ => "with k.fail(",
-                });
-                self.suite();
-                self.expr(value);
-            }
-            k::Stmt::Try(scope) => {
-                self.out.write("with k.try_(");
-                if let Some(catch) = &scope.catch {
-                    self.name(&catch.binding);
-                    self.scope.introduce(&catch.binding);
-                } else {
-                    self.out.write("None");
-                }
-                self.out.write(if scope.finally.is_some() {
-                    ", True"
-                } else {
-                    ", False"
-                });
-                self.suite();
-                self.block(&scope.body);
-                if let Some(catch) = &scope.catch {
-                    self.block(&catch.body);
-                }
-                if let Some(finally) = &scope.finally {
-                    self.block(finally);
-                }
-            }
-        }
-        self.indent -= 1;
     }
     fn expression(&mut self, expr: &k::Expr) {
-        if self.inline.contains(expr) {
-            self.inline_body(expr);
-            self.out.write("\n");
-            return;
-        }
-        match expr {
-            k::Expr::Literal(_) | k::Expr::Variable(_) | k::Expr::Clock | k::Expr::Random => {
-                self.out.refuse(PrintError::Invalid(
-                    "unhandled inline leaf expression".into(),
-                ));
-                return;
-            }
-            k::Expr::Member(m) => self.member_header("", m),
-            k::Expr::Tuple(items) | k::Expr::List(items) | k::Expr::Set(items) => {
-                self.out.write(match expr {
-                    k::Expr::Tuple(_) => "with k.tuple(",
-                    k::Expr::List(_) => "with k.list(",
-                    _ => "with k.set(",
-                });
-                self.suite();
-                if items.is_empty() {
-                    self.empty();
-                }
-                for item in items {
-                    self.expr(item);
-                }
-            }
-            k::Expr::Map(items) => {
-                self.out.write("with k.map(");
-                self.suite();
-                if items.is_empty() {
-                    self.empty();
-                }
-                for item in items {
-                    self.expr(&item.key);
-                    self.expr(&item.value);
-                }
-            }
-            k::Expr::Record(items) => {
-                self.out.write("with k.record(");
-                self.out
-                    .json(&items.iter().map(|i| &i.field).collect::<Vec<_>>());
-                self.suite();
-                if items.is_empty() {
-                    self.empty();
-                }
-                for item in items {
-                    self.expr(&item.value);
-                }
-            }
-            k::Expr::Closure(c) => {
-                self.out.write("with k.closure(");
-                self.names(&c.params);
-                self.suite();
-                let parent = std::mem::replace(&mut self.scope, BindingScope::new(&c.params));
-                let outer_main = self.main;
-                self.main = false;
-                self.block(&c.body);
-                self.main = outer_main;
-                self.scope = parent;
-            }
-            k::Expr::Call { function, args } => {
-                self.out.write("with k.invoke(");
-                self.helper(function);
-                self.suite();
-                if args.is_empty() {
-                    self.empty();
-                }
-                for arg in args {
-                    self.expr(arg);
-                }
-            }
-            k::Expr::If { cond, then, r#else } => {
-                self.out.write("with k.choose(");
-                self.suite();
-                self.expr(cond);
-                self.expr(then);
-                self.expr(r#else);
-            }
-            k::Expr::Let { name, value, body } => {
-                self.out.write("with k.bind(");
-                self.out.json(name.as_str());
-                self.suite();
-                self.expr(value);
-                self.expr(body);
-            }
-            k::Expr::Read(read) => {
-                self.out.write("with k.read(");
-                self.suite();
-                self.expr(&read.handle);
-                self.expr(&read.request);
-            }
-            k::Expr::Act(act) => self.nested_action_suite(act),
-        }
-        self.indent -= 1;
+        self.inline_body(expr);
     }
     fn literal(&mut self, literal: &k::Literal) {
         match literal {
             k::Literal::Null => self.out.write("None"),
-            k::Literal::Absent => self.out.write("k.absent"),
+            k::Literal::Absent => self.out.refuse(PrintError::Invalid(
+                "an absent value has no authored Python spelling".into(),
+            )),
             k::Literal::Bool(b) => self.out.write(if *b { "True" } else { "False" }),
             k::Literal::Text(s) => self.out.json(s),
             k::Literal::Int(n) => {
@@ -602,10 +307,7 @@ impl Renderer<'_> {
                 self.out.json(&b.to_hex());
                 self.out.write(")");
             }
-            k::Literal::Function(n) => {
-                self.out.write("declared.");
-                self.name(n);
-            }
+            k::Literal::Function(id) => self.helper(id),
         }
     }
     fn atom(&mut self, atom: &k::Atom) {
@@ -614,29 +316,16 @@ impl Renderer<'_> {
             k::Atom::Variable(n) => self.name(n),
         }
     }
-    fn atoms(&mut self, atoms: &[k::Atom]) {
-        self.out.write("[");
-        for (i, atom) in atoms.iter().enumerate() {
-            if i > 0 {
-                self.out.write(", ");
-            }
-            self.atom(atom);
-        }
-        self.out.write("]");
-    }
     fn callee(&mut self, callee: &k::Callee) {
         match callee {
-            k::Callee::Declared(name) => {
-                self.out.write("declared.");
-                self.name(name);
-            }
+            k::Callee::Local(id) => self.helper(id),
+            k::Callee::Import(slot) => self.helper(slot),
             k::Callee::Value(name) => self.name(name),
-            k::Callee::Library(id) => self.helper(id),
         }
     }
     pub(super) fn authored_call(
         &mut self,
-        id: &k::FunctionId,
+        id: &impl crate::generated_operators::Reference,
         args: &[k::Expr],
         mapped: bool,
     ) -> bool {
@@ -647,6 +336,12 @@ impl Renderer<'_> {
                 self.out.write("(");
                 self.authored_args(args, mapped);
                 self.out.write(")");
+            }
+            Some(Authored::Index) => {
+                self.authored_arg(&args[0], mapped);
+                self.out.write("[");
+                self.authored_arg(&args[1], mapped);
+                self.out.write("]");
             }
             Some(Authored::Slice) => {
                 self.authored_arg(&args[0], mapped);
@@ -711,143 +406,35 @@ impl Renderer<'_> {
         }
     }
     fn action(&mut self, action: &k::Action) {
-        match action {
-            k::Action::Call { callee, args } => {
-                if let k::Callee::Library(id) = callee
-                    && self.authored_call(
-                        id,
-                        &args
-                            .iter()
-                            .map(|arg| match arg {
-                                k::Atom::Variable(name) => k::Expr::Variable(name.clone()),
-                                k::Atom::Literal(value) => k::Expr::Literal(value.clone()),
-                            })
-                            .collect::<Vec<_>>(),
-                        false,
-                    )
-                {
-                    return;
-                }
-                let sync = self.authored
-                    && matches!(callee, k::Callee::Value(name) if self.sync.contains(name));
-                if !sync {
-                    self.out.write("await ");
-                }
-                match callee {
-                    k::Callee::Library(id) => self.helper(id),
-                    k::Callee::Declared(n) => {
-                        self.out.write("declared.");
-                        self.name(n);
-                    }
-                    k::Callee::Value(n) => self.name(n),
-                }
-                self.out.write("(");
-                self.call_atoms(args);
-            }
-            k::Action::Perform {
-                effect,
-                args,
-                result,
-                then_yield,
-            } => {
-                self.out.write("await ");
-                self.operation_path(effect.as_str());
-                self.out.write("(");
-                self.call_atoms(args);
-                // Authored lowering performs as `any`, or as the operation
-                // declares; only another result is spelled.
-                if *result != k::Type::Any && !self.authored {
-                    if !args.is_empty() {
-                        self.out.write(", ");
-                    }
-                    self.out.write("result=");
-                    self.metadata(result);
-                }
-                // Python's `await` takes no turn of its own; a wait that
-                // takes one more once its outcome is in says so.
-                if *then_yield {
-                    if !args.is_empty() || (*result != k::Type::Any && !self.authored) {
-                        self.out.write(", ");
-                    }
-                    self.out.write("then_yield=True");
-                }
-            }
-            // Python's own `await`: by the `py.await` the base holds.
-            k::Action::Await {
-                policy,
-                value: value @ k::Atom::Variable(_),
-            } if self.operators.unique("py.await") == Some(*policy) => {
-                self.out.write("await ");
-                self.atom(value);
-                return;
-            }
-            k::Action::Await { policy, value } => {
-                self.out.write("await_by(");
-                self.helper(policy);
-                self.out.write(", ");
-                self.atom(value);
-            }
-            k::Action::Spawn { callee, args } => {
-                self.out.write("spawn(");
-                self.callee(callee);
-                self.out.write(", ");
-                self.atoms(args);
-            }
-            k::Action::Sleep {
-                duration,
-                then_yield,
-            } => {
-                self.out.write("await sleep(");
-                self.atom(duration);
-                if *then_yield {
-                    self.out.write(", then_yield=True");
-                }
-            }
-            k::Action::Join { task } => {
-                self.out.write("await join(");
-                self.atom(task);
-            }
-            k::Action::Cancel { task } => {
-                self.out.write("k.cancel(");
-                self.atom(task);
-            }
-            k::Action::JoinMany { mode, tasks } => {
-                self.out.write(match mode {
-                    k::JoinMode::All => "await join_all(",
-                    k::JoinMode::AllSettled => "await join_all_settled(",
-                    k::JoinMode::Race => "await join_race(",
-                    k::JoinMode::Any => "await join_any(",
-                });
-                self.atom(tasks);
-            }
-            k::Action::Yield => self.out.write("k.yield_("),
-        }
-        self.out.write(")");
-    }
-    fn call_atoms(&mut self, atoms: &[k::Atom]) {
-        for (i, atom) in atoms.iter().enumerate() {
-            if i > 0 {
-                self.out.write(", ");
-            }
-            self.atom(atom);
-        }
+        let k::Expr::Act(act) = k::Expr::from(action.clone()) else {
+            unreachable!("action expression");
+        };
+        self.nested_action(&act, false);
     }
 }
 
 /// Memoize the applicability predicate in one postorder pass. This is naming/
 /// rendering work even with maps off; it creates no Sites or source tree.
-struct InlinePlan(std::collections::HashSet<*const k::Expr>);
+struct InlinePlan {
+    expressions: std::collections::HashSet<*const k::Expr>,
+}
 impl InlinePlan {
     fn new(document: &k::Document) -> Self {
-        let mut plan = Self(Default::default());
-        plan.collect(k::Node::Block(&document.main));
+        let mut plan = Self {
+            expressions: Default::default(),
+        };
+        if let Some(main) = &document.main {
+            plan.collect(k::Node::Block(main));
+        }
         for f in document.functions.values() {
-            plan.collect(k::Node::Block(&f.body));
+            if let Some(body) = f.body() {
+                plan.collect(k::Node::Block(&body.block));
+            }
         }
         plan
     }
     fn contains(&self, expr: &k::Expr) -> bool {
-        self.0.contains(&(expr as *const _))
+        self.expressions.contains(&(expr as *const _))
     }
     fn collect(&mut self, node: k::Node<'_>) {
         for child in node.children() {
@@ -855,9 +442,7 @@ impl InlinePlan {
         }
         if let k::Node::Expr(expr) = node {
             let eligible = match expr {
-                k::Expr::Literal(_) | k::Expr::Variable(_) | k::Expr::Clock | k::Expr::Random => {
-                    true
-                }
+                k::Expr::Literal(_) | k::Expr::Variable(_) => true,
                 k::Expr::Member(member) => match member.as_ref() {
                     k::Member::Field { target, .. } => self.contains(target),
                     k::Member::Index { target, index } => {
@@ -873,44 +458,16 @@ impl InlinePlan {
                     .iter()
                     .all(|e| self.contains(&e.key) && self.contains(&e.value)),
                 k::Expr::Record(items) => items.iter().all(|e| self.contains(&e.value)),
+                k::Expr::If { cond, then, r#else } => {
+                    self.contains(cond) && self.contains(then) && self.contains(r#else)
+                }
+                k::Expr::Let { value, body, .. } => self.contains(value) && self.contains(body),
+                k::Expr::Closure(_) => true,
                 _ => false,
             };
             if eligible {
-                self.0.insert(expr as *const _);
+                self.expressions.insert(expr as *const _);
             }
         }
     }
-}
-
-/// Only native calls emit await. A bound closure has its own function context.
-fn awaits(body: &k::Block) -> bool {
-    fn node(node: k::Node<'_>) -> bool {
-        match node {
-            k::Node::Expr(k::Expr::Act(act)) if !matches!(act.kind, k::ActKind::Spawn(_)) => true,
-            k::Node::Action(
-                k::Action::Call { .. }
-                | k::Action::Perform { .. }
-                | k::Action::Await { .. }
-                | k::Action::Sleep { .. }
-                | k::Action::Join { .. }
-                | k::Action::JoinMany { .. },
-            ) => true,
-            k::Node::Stmt(
-                k::Stmt::Let {
-                    value: k::Rhs::Expr(k::Expr::Closure(_)),
-                    ..
-                }
-                | k::Stmt::Assign {
-                    place: k::Place::Variable(_),
-                    value: k::Rhs::Expr(k::Expr::Closure(_)),
-                    ..
-                },
-            ) => false,
-            _ => node.children().into_iter().any(node_awaits),
-        }
-    }
-    fn node_awaits(value: k::Node<'_>) -> bool {
-        node(value)
-    }
-    body.iter().any(|stmt| node(k::Node::Stmt(stmt)))
 }

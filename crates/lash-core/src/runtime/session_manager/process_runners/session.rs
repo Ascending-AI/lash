@@ -13,7 +13,7 @@ impl RuntimeSessionServices {
     /// error another pass may not meet.
     pub(in crate::runtime) async fn mail_process_session_turn(
         &self,
-        process_id: &lash_protocol_types::ProcessId,
+        process_id: &lash_vocabulary::identity::ProcessId,
         create_request: lash_execution_contracts::session_types::SessionCreateRequest,
         turn_input: lash_core_store::turn_input_vocabulary::TurnInput,
         parent: Option<lash_trace::TraceParent>,
@@ -64,7 +64,7 @@ impl RuntimeSessionServices {
     /// the child's session actor honours.
     pub(in crate::runtime) async fn cancel_process_session_turn(
         &self,
-        process_id: &lash_protocol_types::ProcessId,
+        process_id: &lash_vocabulary::identity::ProcessId,
         create_request: lash_execution_contracts::session_types::SessionCreateRequest,
         requester: Option<String>,
     ) -> Result<
@@ -116,7 +116,7 @@ impl RuntimeSessionServices {
     /// projected onto what `result` asks for.
     pub(in crate::runtime) async fn process_session_turn_outcome(
         &self,
-        process_id: &lash_protocol_types::ProcessId,
+        process_id: &lash_vocabulary::identity::ProcessId,
         create_request: lash_execution_contracts::session_types::SessionCreateRequest,
         result: &lash_execution_contracts::process::SessionTurnOutcome,
     ) -> Result<
@@ -139,7 +139,7 @@ impl RuntimeSessionServices {
 
     async fn child_turn_outcome(
         &self,
-        process_id: &lash_protocol_types::ProcessId,
+        process_id: &lash_vocabulary::identity::ProcessId,
         create_request: lash_execution_contracts::session_types::SessionCreateRequest,
         result: &lash_execution_contracts::process::SessionTurnOutcome,
     ) -> Result<
@@ -206,7 +206,7 @@ impl RuntimeSessionServices {
     /// is filled from the starter's environment (ADR 0134).
     fn child_create_request(
         &self,
-        process_id: &lash_protocol_types::ProcessId,
+        process_id: &lash_vocabulary::identity::ProcessId,
         create_request: lash_execution_contracts::session_types::SessionCreateRequest,
     ) -> lash_execution_contracts::session_types::SessionCreateRequest {
         let session =
@@ -244,7 +244,7 @@ impl RuntimeSessionServices {
     async fn child_run_terminal(
         &self,
         session_id: &SessionId,
-        turn_id: &lash_protocol_types::TurnId,
+        turn_id: &lash_vocabulary::identity::TurnId,
     ) -> Result<
         Option<crate::store::RunTerminalCause>,
         lash_execution_contracts::plugin_error::PluginError,
@@ -458,9 +458,9 @@ fn process_turn_failure_raw(
 /// every [`lash_execution_contracts::process::SessionTurnOutcome`]. A finished child answers its committed
 /// outcome and identity under `Turn`, and its final value under `FinalValue`.
 fn output_from_process_turn(
-    process_id: &lash_protocol_types::ProcessId,
+    process_id: &lash_vocabulary::identity::ProcessId,
     child_session_id: &SessionId,
-    turn_id: &lash_protocol_types::TurnId,
+    turn_id: &lash_vocabulary::identity::TurnId,
     outcome: lash_protocol_types::session_model::TurnOutcome,
     result: &lash_execution_contracts::process::SessionTurnOutcome,
     limits: lash_core_store::execution_limits::DiagnosticLimits,
@@ -567,7 +567,7 @@ fn final_value_of_turn(
 /// the child to repair it.
 fn checked_final_value(
     value: serde_json::Value,
-    schema: Option<&lash_protocol_types::schema_contract::JsonSchema>,
+    schema: Option<&lash_vocabulary::schema_contract::JsonSchema>,
 ) -> Result<serde_json::Value, Box<lash_protocol_types::tool_output::ToolFailure>> {
     let Some(schema) = schema else {
         return Ok(value);

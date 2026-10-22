@@ -3,7 +3,7 @@
   "cases": [
     {
       "name": "spawn runs child before parent continuation",
-      "document": "kernel 1\nnumbers by_spelling\nfn value() { print \"child\" return 1 }\nmain {\nlet h = spawn call value() print \"parent\" do join h\n}\n",
+      "document": "kernel 1\nnumbers by_spelling\ndefinition \"function value() -> Any\\nkernel 1\\nmetering statements\\nbody {\\n  print \\\"child\\\"\\n  return 1\\n}\\n\"\nmain {\n  let h = spawn invoke value()\n  print \"parent\"\n  do join(h)\n}\n",
       "expected": {
         "prints": [
           {

@@ -11,13 +11,17 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use lash::tools::{StaticToolExecute, StaticToolProvider};
+use lash_core::LlmOutputPart;
+use lash_core::ToolCall;
+use lash_core::ToolOutcome;
 use lash_core::facade_support::ProviderHandle;
 use lash_core::llm::types::{
     LlmRequest, LlmResponse, LlmRole, LlmStreamEvent, StreamBlockIdentity,
 };
-use lash_core::{ExecutionPolicy, LlmOutputPart, ToolCall, ToolOutcome};
 use lash_protocol_types::sync::MutexExt as _;
 use lash_protocol_types::{llm::types::StreamBlockEvent, llm::types::StreamBlockKind};
+
+use lash_vocabulary::tool_contract::ExecutionPolicy;
 
 use super::script::{Protocol, Reply, ScriptedTurn};
 
@@ -332,8 +336,8 @@ fn definition(
     description: &str,
     properties: serde_json::Value,
     open: bool,
-) -> anyhow::Result<lash_core::ToolDefinition> {
-    Ok(lash_core::ToolDefinition::raw(
+) -> anyhow::Result<lash_vocabulary::tool_contract::ToolDefinition> {
+    Ok(lash_vocabulary::tool_contract::ToolDefinition::raw(
         name,
         format!("tools.{name}"),
         description,

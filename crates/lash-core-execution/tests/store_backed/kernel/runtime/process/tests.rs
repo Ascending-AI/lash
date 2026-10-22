@@ -4,7 +4,6 @@ use lash_execution_contracts::{
 };
 use std::sync::Arc;
 
-use crate::SessionId;
 use lash_execution_contracts::backend::StoreSet as _;
 use lash_execution_contracts::process::Lifetime;
 use lash_execution_contracts::process::ProcessAwaitOutput;
@@ -15,6 +14,7 @@ use lash_execution_contracts::process::ProcessProvenance;
 use lash_execution_contracts::process::ProcessRegistration;
 use lash_execution_contracts::process::ProcessRegistry;
 use lash_execution_contracts::process::ProjectionWatermark;
+use lash_vocabulary::identity::SessionId;
 
 use crate::support::sqlite_memory_process_store_set;
 

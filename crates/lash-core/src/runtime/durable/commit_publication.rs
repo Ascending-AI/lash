@@ -32,10 +32,14 @@ pub use super::publication_window::{PublicationMark, PublicationMarks, Publicati
 use lash_core_store::transcript::{SessionTranscript, TranscriptDecoders};
 use lash_protocol_types::sync::MutexExt as _;
 
-use crate::{
-    FrameNodeId, LashRuntime, LiveReplayEventDraft, LiveReplayStore, SessionId,
-    SessionObservationEventPayload, SessionRevision, TurnId,
-};
+use crate::FrameNodeId;
+use crate::LashRuntime;
+use crate::LiveReplayEventDraft;
+use crate::LiveReplayStore;
+use crate::SessionObservationEventPayload;
+use crate::SessionRevision;
+use lash_vocabulary::identity::SessionId;
+use lash_vocabulary::identity::TurnId;
 
 /// The durable heads this node published, per session, and the commits it
 /// is still publishing.

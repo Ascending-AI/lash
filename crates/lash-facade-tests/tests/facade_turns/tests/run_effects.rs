@@ -6,12 +6,12 @@
 use super::*;
 use lash_core::facade_support::TurnOutcome;
 
-fn echo_definition() -> lash_core::ToolDefinition {
-    lash_core::ToolDefinition::raw(
+fn echo_definition() -> lash_vocabulary::tool_contract::ToolDefinition {
+    lash_vocabulary::tool_contract::ToolDefinition::raw(
         "tool:echo_tool",
         "tools.echo_tool",
         "Echo the value.",
-        lash_core::ToolDefinition::default_input_schema(),
+        lash_vocabulary::tool_contract::ToolDefinition::default_input_schema(),
         serde_json::json!({ "type": "object", "additionalProperties": true }),
     )
     .expect("valid declared tool schemas")
@@ -25,7 +25,10 @@ impl ToolProvider for EchoTool {
     fn tool_manifests(
         &self,
         _config: &lash_core::OwnerConfigView,
-    ) -> std::result::Result<Vec<lash_core::ToolManifest>, lash::plugins::PluginError> {
+    ) -> std::result::Result<
+        Vec<lash_vocabulary::tool_contract::ToolManifest>,
+        lash::plugins::PluginError,
+    > {
         Ok(vec![echo_definition().manifest()])
     }
 
@@ -33,7 +36,7 @@ impl ToolProvider for EchoTool {
         &self,
         name: &str,
         _config: &lash_core::OwnerConfigView,
-    ) -> Option<Arc<lash_core::ToolContract>> {
+    ) -> Option<Arc<lash_vocabulary::tool_contract::ToolContract>> {
         (name == "tools.echo_tool").then(|| Arc::new(echo_definition().contract()))
     }
 
@@ -99,7 +102,8 @@ async fn admitted_plugin_abort_commits_and_settles_input() -> Result<()> {
     .build(lash_facade_tests::runtime_lease_owner())?;
     let session = created_session(
         &core,
-        lash::SessionId::parse("admitted-plugin-abort").expect("nonblank host identity"),
+        lash_vocabulary::identity::SessionId::parse("admitted-plugin-abort")
+            .expect("nonblank host identity"),
     )
     .await
     .open()
@@ -129,12 +133,12 @@ async fn admitted_plugin_abort_commits_and_settles_input() -> Result<()> {
     Ok(())
 }
 
-fn attachment_put_definition() -> lash_core::ToolDefinition {
-    lash_core::ToolDefinition::raw(
+fn attachment_put_definition() -> lash_vocabulary::tool_contract::ToolDefinition {
+    lash_vocabulary::tool_contract::ToolDefinition::raw(
         "tool:attachment_put",
         "tools.attachment_put",
         "Write an attachment through the active runtime facade.",
-        lash_core::ToolDefinition::default_input_schema(),
+        lash_vocabulary::tool_contract::ToolDefinition::default_input_schema(),
         serde_json::json!({ "type": "object", "additionalProperties": true }),
     )
     .expect("valid declared tool schemas")
@@ -149,7 +153,10 @@ impl ToolProvider for AttachmentPutTool {
     fn tool_manifests(
         &self,
         _config: &lash_core::OwnerConfigView,
-    ) -> std::result::Result<Vec<lash_core::ToolManifest>, lash::plugins::PluginError> {
+    ) -> std::result::Result<
+        Vec<lash_vocabulary::tool_contract::ToolManifest>,
+        lash::plugins::PluginError,
+    > {
         Ok(vec![attachment_put_definition().manifest()])
     }
 
@@ -157,7 +164,7 @@ impl ToolProvider for AttachmentPutTool {
         &self,
         name: &str,
         _config: &lash_core::OwnerConfigView,
-    ) -> Option<Arc<lash_core::ToolContract>> {
+    ) -> Option<Arc<lash_vocabulary::tool_contract::ToolContract>> {
         (name == "tools.attachment_put").then(|| Arc::new(attachment_put_definition().contract()))
     }
 
@@ -203,7 +210,8 @@ async fn stream_turn_tool_put_is_bound_to_the_turn_id() -> Result<()> {
         .build(lash_facade_tests::runtime_lease_owner())?;
     let session = created_session(
         &core,
-        lash::SessionId::parse("attachment-owner").expect("nonblank host identity"),
+        lash_vocabulary::identity::SessionId::parse("attachment-owner")
+            .expect("nonblank host identity"),
     )
     .await
     .open()
@@ -223,7 +231,7 @@ async fn stream_turn_tool_put_is_bound_to_the_turn_id() -> Result<()> {
         .expect("read the attachment's referrers");
     assert!(
         referrers.contains(&lash_core::ArtifactReferrer::Session(
-            lash_core::SessionId::from("attachment-owner")
+            lash_vocabulary::identity::SessionId::from("attachment-owner")
         )),
         "the commit acquired the session's edge: {referrers:?}"
     );

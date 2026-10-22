@@ -13,7 +13,9 @@
 //! an embedder installs each plan beside the helper its build registered
 //! ([`implement`]).
 
-use lash_kernel_doc::{FunctionId, FunctionRegistry, RegistryError};
+use lash_kernel_doc::FunctionRegistry;
+use lash_kernel_doc::RegistryError;
+use lash_vocabulary::names::FunctionId;
 
 #[rustfmt::skip]
 #[path = "generated/plans.rs"]

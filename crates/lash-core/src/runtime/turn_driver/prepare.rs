@@ -8,7 +8,7 @@
 //! again for an admitted call, and everything here is repeat-safe until the
 //! call is admitted.
 
-use lash_protocol_types::core_support::RunIdCoreSupport;
+use lash_vocabulary::identity::RunIdCoreSupport;
 use std::sync::Arc;
 
 use lash_protocol_types::{llm::types::LlmEventSender, llm::types::RecordedRequestTemplate};
@@ -91,7 +91,7 @@ impl RuntimeTurnDriver<'static> {
             ),
         )
         .with_turn(
-            crate::RunId::from_turn_id(self.logical_run()),
+            lash_vocabulary::identity::RunId::from_turn_id(self.logical_run()),
             self.turn_id.clone(),
         );
         match self.lower_call(&request).await? {

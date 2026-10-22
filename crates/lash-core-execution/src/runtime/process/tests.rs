@@ -37,7 +37,7 @@ fn process_event_old_system_time_json_is_rejected() {
         &record,
         ProcessEventAppendRequest::observer_added(
             &record.id,
-            &crate::SessionId::from("observer"),
+            &lash_vocabulary::identity::SessionId::from("observer"),
             &ProcessObserverBy::host("old-time-shape"),
         ),
         1,
@@ -69,8 +69,9 @@ fn replayed_waiting_non_tail_does_not_repair_terminal_projection() {
     );
     let wait = WaitState {
         kind: WaitKind::Call {
+            resume_at_ms: None,
             call_id: crate::ToolCallId::fixture("wait-call"),
-            tool_id: crate::ToolId::from("wait-tool"),
+            tool_id: lash_vocabulary::tool_contract::ToolId::from("wait-tool"),
         },
         since_ms: 42,
         site: None,
@@ -141,7 +142,7 @@ fn replayed_waiting_non_tail_does_not_repair_terminal_projection() {
 fn observed(process: &ProcessId, session: &str) -> ProcessEventAppendRequest {
     ProcessEventAppendRequest::observer_added(
         process,
-        &crate::SessionId::fixture(session),
+        &lash_vocabulary::identity::SessionId::fixture(session),
         &ProcessObserverBy::host("tests"),
     )
 }
@@ -241,7 +242,9 @@ fn replayed_generic_non_tail_does_not_rewind_projection_timestamp() {
 /// a session error that merely quotes the message is not a fence.
 #[test]
 fn an_ended_referrer_classifies_by_its_typed_cause_not_its_message() {
-    let referrer = crate::ArtifactReferrer::ProcessRecord(crate::ProcessId::fixture("ended"));
+    let referrer = crate::ArtifactReferrer::ProcessRecord(
+        lash_vocabulary::identity::ProcessId::fixture("ended"),
+    );
     let ended: lash_execution_contracts::plugin_error::PluginError =
         lash_execution_contracts::module_artifacts::ArtifactStoreError::ReferrerEnded {
             referrer: referrer.clone(),

@@ -15,7 +15,7 @@ use serde_json::Value;
 
 use crate::checkpoint_graph::NodeId;
 use crate::store::{FleetFormat, SESSION_HEAD_META_SCHEMA_VERSION, SessionHeadPayload, StoreError};
-use lash_protocol_types::SessionId;
+use lash_vocabulary::identity::SessionId;
 
 const BUDGET_BYTES: usize = 32 << 20;
 const MAX_ENTRIES: usize = 128;

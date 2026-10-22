@@ -3,7 +3,7 @@
   "cases": [
     {
       "name": "live task bound includes main and spawn",
-      "document": "kernel 1\nnumbers by_spelling\nfn pending() { do sleep 0 }\nmain {\nlet h = spawn call pending() finish 1\n}\n",
+      "document": "kernel 1\nnumbers by_spelling\nimport 0 operation typescript.sleep(milliseconds: Int) -> Null\ndefinition \"function pending() -> Any\\nkernel 1\\nmetering statements\\nimport 0 operation typescript.sleep(milliseconds: Int) -> Null\\nbody {\\n  do perform 0(0) as Null\\n}\\n\"\nmain {\n  let h = spawn invoke pending()\n  finish 1\n}\n",
       "expected": {
         "prints": [],
         "end": {

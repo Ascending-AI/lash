@@ -4,6 +4,7 @@ use lash_kernel_doc::heap::*;
 use lash_kernel_doc::{
     Datum, ErrorDatum, Integer, NativeError, NativeFunction, Retry, Value, WorkCounter,
 };
+
 pub(crate) use lash_kernel_state::arena::Bench;
 use lash_kernel_state::paged::*;
 use std::cell::RefCell;
@@ -127,14 +128,6 @@ pub(crate) struct World {
     pub(crate) prints: Vec<Datum>,
 }
 impl lash_kernel_vm::Host for World {
-    fn clock(&mut self) -> lash_kernel_doc::Timestamp {
-        lash_kernel_doc::Timestamp {
-            nanoseconds: 0.into(),
-        }
-    }
-    fn random(&mut self) -> u64 {
-        0
-    }
     fn read(&mut self, _: &lash_kernel_doc::Handle, _: &Datum) -> Result<Datum, ErrorDatum> {
         unreachable!("self-contained corpus read")
     }
@@ -144,4 +137,126 @@ impl lash_kernel_vm::Host for World {
     fn cancel_requested(&mut self) -> bool {
         false
     }
+}
+
+/// Final Documents used by library laws; definitions are explicit local code.
+pub(crate) fn document(
+    text: &str,
+    registry: &lash_kernel_doc::FunctionRegistry,
+) -> lash_kernel_doc::Document {
+    let mut definitions: BTreeMap<_, _> = registry
+        .iter()
+        .map(|(id, f)| (*id, (**f.definition()).clone()))
+        .collect();
+    let mut pending = Vec::new();
+    let mut main = String::new();
+    for line in text.lines() {
+        if let Some(source) = line.trim().strip_prefix("definition ") {
+            pending.push(serde_json::from_str::<String>(source).unwrap());
+        } else {
+            main.push_str(line);
+            main.push('\n');
+        }
+    }
+    while !pending.is_empty() {
+        let before = pending.len();
+        let uses: String = definitions
+            .iter()
+            .map(|(id, f)| format!("use {} = @{id}\n", f.name))
+            .collect();
+        pending.retain(|source| {
+            match lash_kernel_doc::parse_definition_with_locals(&format!("{source}\n{uses}")) {
+                Ok((definition, locals)) => {
+                    definitions.extend(locals.into_iter().map(|f| (f.identity(), f)));
+                    definitions.insert(definition.identity(), definition);
+                    false
+                }
+                Err(_) => true,
+            }
+        });
+        assert!(
+            pending.len() < before,
+            "invalid final law definitions: {pending:?}"
+        );
+    }
+    let imports_text = main
+        .lines()
+        .filter(|line| line.trim_start().starts_with("import "))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let declared = lash_kernel_doc::parse_document(&imports_text)
+        .unwrap()
+        .imports;
+    let mut body_imports = BTreeMap::new();
+    for definition in definitions.values() {
+        if let Some(body) = definition.body() {
+            for (slot, import) in &body.imports {
+                if let Some(existing) = body_imports.insert(*slot, import.clone()) {
+                    assert_eq!(existing, *import);
+                }
+            }
+        }
+    }
+    let mut missing =
+        lash_kernel_doc::Document::new(lash_kernel_doc::NumberPolicy::BySpelling, vec![]);
+    missing.main = None;
+    missing.imports = body_imports
+        .into_iter()
+        .filter(|(slot, import)| match declared.get(slot) {
+            Some(existing) => {
+                assert_eq!(existing, import);
+                false
+            }
+            None => true,
+        })
+        .collect();
+    let mut header = lash_kernel_doc::print_document(&missing);
+    for f in definitions.values() {
+        header.push_str(&format!(
+            "definition {}\n",
+            serde_json::to_string(&lash_kernel_doc::print_definition(f)).unwrap()
+        ));
+        if f.has_native() {
+            header.push_str(&format!("native @{}\n", f.identity()));
+        }
+    }
+    lash_kernel_doc::parse_document(&format!("{header}{main}")).unwrap()
+}
+/// Bind each operation Import once, by slot, before the machine starts.
+pub(crate) fn program(
+    document: std::sync::Arc<lash_kernel_doc::Document>,
+    library: lash_kernel_vm::PreparedLibrary,
+) -> lash_kernel_vm::Program {
+    use lash_vocabulary::{
+        ContractId, ImportKind, OperationRequirement,
+        package::{Fill, Link},
+    };
+    let fills = document
+        .imports
+        .iter()
+        .map(|(slot, import)| {
+            let ImportKind::Operation { signature } = &import.kind else {
+                panic!("library law operation Import");
+            };
+            (
+                *slot,
+                Fill::Operation(OperationRequirement::new(
+                    signature.clone(),
+                    ContractId::new("1"),
+                )),
+            )
+        })
+        .collect();
+    let link = Link {
+        document: document.identity(),
+        fills,
+    };
+    lash_kernel_vm::Program::prepare(
+        link.identity(),
+        BTreeMap::from([(document.identity(), document)]),
+        &BTreeMap::from([(link.identity(), link)]),
+        PageId([8; 32]),
+        library,
+    )
+    .unwrap()
 }

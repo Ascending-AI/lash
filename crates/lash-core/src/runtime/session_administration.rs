@@ -4,8 +4,8 @@ use std::sync::Arc;
 use super::AdmittedScope;
 use super::ProcessWorkWiring;
 use super::RuntimeError;
-use crate::SessionId;
 use lash_execution_contracts::deployment::DeploymentStore;
+use lash_vocabulary::identity::SessionId;
 
 /// Lifecycle services selected together for session administration.
 ///

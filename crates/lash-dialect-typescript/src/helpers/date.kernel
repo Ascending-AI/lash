@@ -1,3 +1,4 @@
+operation typescript.clock() -> Timestamp
 # JavaScript date behavior, expressed in kernel code.
 use ts.callable
 use date.ecma.format
@@ -66,7 +67,7 @@ use ts.date.toISOString
 use ts.date.toJSON
 use ts.date.toString
 use ts.date.toUTCString
-use ts.date.utc
+use ts.date.from_parts
 use ts.date.valueOf
 use ts.pad
 use ts.get
@@ -83,7 +84,7 @@ body {
   return num.add(num.sub(num.add(num.mul(365.0, num.sub(year, 1970.0)), num.floor(num.div(num.sub(year, 1969.0), 4.0))), num.floor(num.div(num.sub(year, 1901.0), 100.0))), num.floor(num.div(num.sub(year, 1601.0), 400.0)))
 }
 
-function ts.date.utc(args: List(Any)) -> Number
+function ts.date.from_parts(args: List(Any)) -> Number
 kernel 1
 errors "type_error", "RangeError"
 charge sum(8, deep(args), deep(result))
@@ -123,14 +124,14 @@ errors "type_error", "RangeError"
 charge sum(8, deep(args), deep(result))
 body {
   let time = absent
-  if eq(list.len(args), 0) { set time = date.ecma.milliseconds(clock) } else {
+  if eq(list.len(args), 0) { set time = date.ecma.milliseconds(perform typescript.clock() as Timestamp) } else {
     if eq(list.len(args), 1) {
       let value = args[0]
       if same(kind(value), "timestamp") { return value }
       if same(kind(value), "record") { if same(value.__lash_brand, ("date.ecma", "invalid_date")) { return date.ecma.timestamp(nan) } }
       let value = invoke ts.to_primitive(value, "default")
       if same(kind(value), "text") { set time = date.ecma.parse(value) } else { set time = invoke ts.to_number(value) }
-    } else { set time = invoke ts.date.utc(args) }
+    } else { set time = invoke ts.date.from_parts(args) }
   }
   let date = date.ecma.timestamp(num.to_float(time))
   return date
@@ -163,7 +164,7 @@ kernel 1
 errors "type_error", "RangeError"
 charge sum(8, deep(result))
 body {
-  return date.ecma.format(clock, "string")
+  return date.ecma.format(perform typescript.clock() as Timestamp, "string")
 }
 
 function ts.date.now(this: Any, args: List(Any)) -> Any
@@ -171,7 +172,7 @@ kernel 1
 errors "type_error", "RangeError"
 charge sum(8, deep(result))
 body {
-  return date.ecma.milliseconds(clock)
+  return date.ecma.milliseconds(perform typescript.clock() as Timestamp)
 }
 
 function ts.date.parse(this: Any, args: List(Any)) -> Any
@@ -190,7 +191,7 @@ kernel 1
 errors "type_error", "RangeError"
 charge sum(8, deep(args), deep(result))
 body {
-  let output = invoke ts.date.utc(args)
+  let output = invoke ts.date.from_parts(args)
   return output
 }
 

@@ -3,6 +3,7 @@ use crate::numeric::{Numeric, number_cmp, scalar_cmp};
 use crate::raised;
 use lash_kernel_doc::arena::ArenaHandle;
 use lash_kernel_doc::{Args, NativeError, Nursery, Value};
+
 use std::cmp::Ordering;
 
 fn numeric(value: &Value) -> bool {
@@ -20,13 +21,13 @@ pub(crate) fn scalar_equal(a: &Value, b: &Value) -> Option<bool> {
         }
         (V::Null, V::Null) | (V::Absent, V::Absent) => true,
         (V::Bool(a), V::Bool(b)) => a == b,
-        (V::Text(a), V::Text(b)) | (V::Function(a), V::Function(b)) => a == b,
+        (V::Text(a), V::Text(b)) => a == b,
+        (V::Function(a), V::Function(b)) if a == b => true,
+        (V::Function(_), V::Function(_)) => return None,
         // A short text or name is never equal to a long one, nor a word
         // integer to a big one.
         (V::Text(_), V::LongText(_))
         | (V::LongText(_), V::Text(_))
-        | (V::Function(_), V::LongFunction(_))
-        | (V::LongFunction(_), V::Function(_))
         | (V::Int(_), V::BigInt(_))
         | (V::BigInt(_), V::Int(_)) => false,
         (V::Timestamp(a), V::Timestamp(b)) => a == b,

@@ -4,9 +4,9 @@ use super::directory::{Body, Entry, ObjectHead, Ordinal, ordinal_key};
 use super::tree::{Access, Cell, SealWork, Tree};
 use super::*;
 use lash_kernel_doc::Integer;
-use lash_kernel_doc::graph_tokens::{TokenCodec, TokenWriter};
 use lash_kernel_doc::heap::*;
 use lash_kernel_doc::heap_values::{integral_float, key_digest};
+use lash_vocabulary::tokens::{TokenCodec, TokenWriter};
 use std::cell::RefCell;
 use std::ops::Range;
 use std::rc::Rc;
@@ -27,7 +27,7 @@ thread_local! {
 
 pub struct PagedHeap {
     pub(super) access: Access<'static>,
-    pub(super) limits: lash_kernel_doc::KernelDataLimits,
+    pub(super) limits: lash_vocabulary::data_limits::KernelDataLimits,
     pub(super) directory: Tree<ObjectHead>,
     pub(super) families: Tree<FamilyRecord>,
     next_ordinal: u64,
@@ -44,6 +44,7 @@ pub struct PagedHeap {
     pub(super) census: Option<Box<dyn AllocationCensus>>,
     /// The execution roots, installed only through publication.
     pub(super) session: Tree<BindingRecord>,
+    pub(super) saved: Tree<FunctionRecord>,
     pub(super) session_slots: super::session::SessionSlots,
     pub(super) tasks: Tree<super::directory::execution::TaskRecord>,
     pub(super) joins: Tree<ListJoinRecord>,
@@ -63,7 +64,7 @@ pub fn header_root(page: PageRef, answer: &PageAnswer) -> Result<HeapRoot, HeapF
     if answer.kind != PageKind::KEYED_LEAF {
         return Err(corrupt("expected heap header".into()));
     }
-    let mut input = lash_kernel_doc::graph_tokens::TokenReader::new(&answer.tokens);
+    let mut input = lash_vocabulary::tokens::TokenReader::new(&answer.tokens);
     let (variant, fields) = input.sum().map_err(|e| corrupt(e.to_string()))?;
     if variant != 0 || fields != 1 {
         return Err(corrupt("superseded heap header".into()));
@@ -114,7 +115,7 @@ impl PagedHeap {
         let families = Tree::of_keyed(&root.families);
         Ok(Self {
             access,
-            limits: lash_kernel_doc::KernelDataLimits::standard(),
+            limits: lash_vocabulary::data_limits::KernelDataLimits::standard(),
             directory,
             families,
             next_ordinal: root.next_ordinal,
@@ -128,6 +129,7 @@ impl PagedHeap {
             family_base: RefCell::new(None),
             census: None,
             session: Tree::new(false),
+            saved: Tree::new(false),
             session_slots: Default::default(),
             tasks: Tree::new(false),
             joins: Tree::new(false),
@@ -135,7 +137,7 @@ impl PagedHeap {
             working: Default::default(),
         })
     }
-    pub fn set_data_limits(&mut self, limits: lash_kernel_doc::KernelDataLimits) {
+    pub fn set_data_limits(&mut self, limits: lash_vocabulary::data_limits::KernelDataLimits) {
         self.limits = limits;
     }
     /// Select the unaccounted heap at run entry. No census is installed.
@@ -234,6 +236,32 @@ impl PagedHeap {
             population: self.population,
             collection_entities: self.collection_entities,
         })
+    }
+    /// Materializes a saved closure's missing Main binding in its own environment.
+    /// Existing lexical captures retain their original shared cell.
+    pub fn bind_closure_capture(
+        &mut self,
+        closure: EntityId,
+        name: &lash_vocabulary::names::Name,
+        value: PageValue,
+    ) -> Result<EntityId, HeapWriteError> {
+        self.required(closure, ObjectKind::Closure)?;
+        let key = super::metadata::metadata_key(name);
+        let captures = self.closure(closure)?.captures;
+        if let Some((_, cell)) = captures.get(&key, &self.access)? {
+            return Ok(cell);
+        }
+        let name = NameRef::new(name, &self.access)?;
+        let cell = self.allocate_object(ObjectInit::Variable(value))?;
+        self.change_head(closure, true, 0, |heap| {
+            heap.edit_working(closure, |head, access| {
+                let Body::Closure { captures, .. } = &mut head.body else {
+                    return Err(HeapFault::Malformed("expected a closure".into()));
+                };
+                captures.write(key, (name, cell), access)
+            })
+        })?;
+        Ok(cell)
     }
     /// The entity's current head, copied.
     pub(super) fn head(&self, entity: EntityId) -> Result<Option<ObjectHead>, HeapFault> {
@@ -381,7 +409,11 @@ impl PagedHeap {
                     .collect(),
             )?,
             ObjectInit::Variable(value) => Body::Variable(value),
-            ObjectInit::Closure { site, captures } => {
+            ObjectInit::Closure {
+                callable,
+                site,
+                captures,
+            } => {
                 let mut rows = Tree::new(false);
                 for (name, id) in captures {
                     let key = name.key(&self.access)?;
@@ -393,6 +425,7 @@ impl PagedHeap {
                     rows.write(key, (name, id), &self.access)?;
                 }
                 Body::Closure {
+                    callable,
                     site,
                     captures: rows,
                 }
@@ -444,12 +477,6 @@ impl PagedHeap {
     }
     pub fn canonical(&self, value: PageValue) -> Result<PageValue, HeapWriteError> {
         Ok(match value {
-            PageValue::Function(t) => {
-                let PageValue::Text(t) = self.canonical(PageValue::Text(t))? else {
-                    unreachable!()
-                };
-                PageValue::Function(t)
-            }
             PageValue::Text(t) => match &t.body {
                 Payload::Resident(s) if s.len() as u64 > IMMUTABLE_INLINE_MAX => {
                     PageValue::Text(self.text(s)?)
@@ -511,7 +538,7 @@ impl SemanticHeap for PagedHeap {
     fn fresh(source: Box<dyn PageSource>, epoch: EditEpoch) -> Self {
         Self {
             access: Access::new(source),
-            limits: lash_kernel_doc::KernelDataLimits::standard(),
+            limits: lash_vocabulary::data_limits::KernelDataLimits::standard(),
             directory: Tree::new(false),
             families: Tree::new(false),
             next_ordinal: 0,
@@ -528,6 +555,7 @@ impl SemanticHeap for PagedHeap {
             family_base: RefCell::new(None),
             census: None,
             session: Tree::new(false),
+            saved: Tree::new(false),
             session_slots: Default::default(),
             tasks: Tree::new(false),
             joins: Tree::new(false),
@@ -542,7 +570,7 @@ impl SemanticHeap for PagedHeap {
     ) -> Result<Self, HeapFault> {
         Ok(Self {
             access: Access::new(source),
-            limits: lash_kernel_doc::KernelDataLimits::standard(),
+            limits: lash_vocabulary::data_limits::KernelDataLimits::standard(),
             directory: Tree::of_keyed(&root.directory),
             families: Tree::of_keyed(&root.families),
             next_ordinal: root.next_ordinal,
@@ -556,6 +584,7 @@ impl SemanticHeap for PagedHeap {
             family_base: RefCell::new(None),
             census: None,
             session: Tree::new(false),
+            saved: Tree::new(false),
             session_slots: Default::default(),
             tasks: Tree::new(false),
             joins: Tree::new(false),
@@ -589,7 +618,15 @@ impl SemanticHeap for PagedHeap {
     }
     fn closure(&self, closure: EntityId) -> Result<ClosureView, HeapFault> {
         match self.head(closure)?.map(|h| h.body) {
-            Some(Body::Closure { site, captures }) => Ok(ClosureView { site, captures }),
+            Some(Body::Closure {
+                callable,
+                site,
+                captures,
+            }) => Ok(ClosureView {
+                callable,
+                site,
+                captures,
+            }),
             _ => Err(HeapFault::Malformed("expected a closure".into())),
         }
     }
@@ -1078,7 +1115,7 @@ impl PagedHeap {
                 }
                 PageValue::Function(n) => {
                     out.sum(8, 1);
-                    out.text(&heap.copy_text(n)?);
+                    n.encode(out);
                 }
                 PageValue::Tuple(t) => {
                     out.sum(9, 1);
@@ -1098,7 +1135,7 @@ impl PagedHeap {
         }
         let function = matches!(value, PageValue::Function(_));
         let cache = match value {
-            PageValue::Text(text) | PageValue::Function(text) => Some(&text.normal),
+            PageValue::Text(text) => Some(&text.normal),
             PageValue::Bytes(bytes) => Some(&bytes.normal),
             PageValue::Tuple(tuple) => Some(&tuple.normal),
             PageValue::Int(IntRef::Paged { normal, .. }) => Some(normal),

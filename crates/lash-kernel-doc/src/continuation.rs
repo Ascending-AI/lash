@@ -18,10 +18,18 @@
 //! and the value of a `let` expression is held by its binding, so neither
 //! is a role inside the branches or the body.
 
-use crate::ast::{
-    ActKind, AssignOrder, Block, Callee, Expr, Member, Node, Place, Site, Stmt, Unit,
-};
+use crate::ast::ActKind;
+use crate::ast::AssignOrder;
+use crate::ast::Block;
+use crate::ast::Callee;
+use crate::ast::Expr;
+use crate::ast::Member;
+use crate::ast::Node;
+use crate::ast::Place;
+use crate::ast::Stmt;
 use crate::document::Document;
+use lash_vocabulary::sites::Site;
+use lash_vocabulary::sites::Unit;
 
 /// Why [`live_roles`] gives no answer.
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
@@ -44,13 +52,16 @@ pub enum LiveRolesError {
 /// statement already holds when the action is reached.
 pub fn live_roles(document: &Document, site: &Site) -> Result<Vec<Site>, LiveRolesError> {
     let body = match &site.unit {
-        Unit::Main => &document.main,
-        Unit::Function(name) => document
-            .functions
-            .get(name)
-            .map(|function| &function.body)
-            .ok_or(LiveRolesError::NoSuchNode)?,
-        Unit::Library(_) => return Err(LiveRolesError::LibraryUnit),
+        Unit::Main => document.main.as_ref().ok_or(LiveRolesError::NoSuchNode)?,
+        Unit::Library(id) => {
+            &document
+                .functions
+                .get(id)
+                .and_then(crate::FunctionDefinition::body)
+                .ok_or(LiveRolesError::NoSuchNode)?
+                .block
+        }
+        Unit::Function(_) => return Err(LiveRolesError::NoSuchNode),
     };
     live_roles_in(body, site)
 }

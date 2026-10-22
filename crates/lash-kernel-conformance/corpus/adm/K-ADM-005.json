@@ -3,28 +3,28 @@
   "cases": [
     {
       "name": "disjoint argument main { do perform echo(\"wrong\") as Int }",
-      "document": "kernel 1\nnumbers by_spelling\neffect echo(x: Int) -> Int contract \"1\"\nmain { do perform echo(\"wrong\") as Int }\n",
+      "document": "kernel 1\nnumbers by_spelling\nimport 0 operation host.echo(x: Int) -> Int\nmain {\n  do perform 0(\"wrong\") as Int\n}\n",
       "expected": {
         "end": "refused"
       }
     },
     {
       "name": "disjoint argument main { let x = \"wrong\" do perform echo(x) as Int }",
-      "document": "kernel 1\nnumbers by_spelling\neffect echo(x: Int) -> Int contract \"1\"\nmain { let x = \"wrong\" do perform echo(x) as Int }\n",
+      "document": "kernel 1\nnumbers by_spelling\nimport 0 operation host.echo(x: Int) -> Int\nmain {\n  let x = \"wrong\"\n  do perform 0(x) as Int\n}\n",
       "expected": {
         "end": "refused"
       }
     },
     {
       "name": "disjoint argument main { let x = [] do perform echo(x) as Int }",
-      "document": "kernel 1\nnumbers by_spelling\neffect echo(x: Int) -> Int contract \"1\"\nmain { let x = [] do perform echo(x) as Int }\n",
+      "document": "kernel 1\nnumbers by_spelling\nimport 0 operation host.echo(x: Int) -> Int\nmain {\n  let x = []\n  do perform 0(x) as Int\n}\n",
       "expected": {
         "end": "refused"
       }
     },
     {
       "name": "an argument that might fit is admitted",
-      "document": "kernel 1\nnumbers by_spelling\neffect echo(x: Int) -> Int contract \"1\"\nfn f(x) { let y = perform echo(x) as Int return y } main { let x = call f(1) finish x }\n",
+      "document": "kernel 1\nnumbers by_spelling\nimport 0 operation host.echo(x: Int) -> Int\ndefinition \"function f(x: Any) -> Any\\nkernel 1\\nmetering statements\\nimport 0 operation host.echo(x: Int) -> Int\\nbody {\\n  let y = perform 0(x) as Int\\n  return y\\n}\\n\"\nmain {\n  let x = invoke f(1)\n  finish x\n}\n",
       "expected": {
         "end": {
           "finished": {
@@ -34,7 +34,7 @@
         "trace": [
           {
             "effect": {
-              "effect": "echo",
+              "effect": "host.echo",
               "args": [
                 {
                   "int": "1"

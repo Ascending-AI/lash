@@ -55,6 +55,7 @@ pub enum ObjectInit {
     Set(Vec<PageValue>),
     Record(Vec<(TextRef, PageValue)>),
     Closure {
+        callable: lash_vocabulary::names::CallableId,
         /// The site of the closure expression: a semantic coordinate, never
         /// a compiled code index.
         site: SiteRef,
@@ -66,6 +67,7 @@ pub enum ObjectInit {
 /// A closure as the machine reads it.
 #[derive(Clone)]
 pub struct ClosureView {
+    pub callable: lash_vocabulary::names::CallableId,
     pub site: SiteRef,
     pub captures: super::tree::Tree<(NameRef, EntityId)>,
 }

@@ -16,7 +16,9 @@ use std::time::{Duration, Instant};
 
 use lash_core_ids::clock::{Clock, SystemClock};
 use lash_core_store::checkpoint_graph::{CommitId, NodeId, NodeKind};
-use lash_protocol_types::{ProcessId, SessionId, TurnId};
+use lash_vocabulary::identity::ProcessId;
+use lash_vocabulary::identity::SessionId;
+use lash_vocabulary::identity::TurnId;
 use tokio::sync::watch;
 
 use super::super::node_wakes::{LawNode, serve_node_on};
@@ -763,52 +765,6 @@ impl DurableStore for Retiring {
         self.inner.actor_requirements(after, limit).await
     }
 
-    async fn install_packages(
-        &self,
-        artifacts: &[crate::packages::ArtifactInstall],
-        sets: &[crate::packages::SetInstall],
-    ) -> Result<(), DurableError> {
-        self.inner.install_packages(artifacts, sets).await
-    }
-
-    async fn package_catalog(&self) -> Result<crate::PackageCatalog, DurableError> {
-        self.inner.package_catalog().await
-    }
-
-    async fn package_surface(
-        &self,
-        digest: &crate::PackageSetDigest,
-    ) -> Result<Option<Vec<u8>>, DurableError> {
-        self.inner.package_surface(digest).await
-    }
-
-    async fn package_paths(
-        &self,
-        functions: &[crate::packages::FunctionId],
-    ) -> Result<
-        std::collections::BTreeMap<crate::packages::FunctionId, std::collections::BTreeSet<String>>,
-        DurableError,
-    > {
-        self.inner.package_paths(functions).await
-    }
-
-    async fn internal_operations(
-        &self,
-        operations: &[crate::packages::EffectName],
-    ) -> Result<
-        std::collections::BTreeMap<crate::packages::EffectName, std::collections::BTreeSet<String>>,
-        DurableError,
-    > {
-        self.inner.internal_operations(operations).await
-    }
-
-    async fn package_labels(
-        &self,
-        artifacts: &[crate::ArtifactDigest],
-    ) -> Result<std::collections::BTreeMap<crate::ArtifactDigest, Vec<String>>, DurableError> {
-        self.inner.package_labels(artifacts).await
-    }
-
     async fn owned(&self, node: &NodeLease) -> Result<Vec<Claimed>, DurableError> {
         self.inner.owned(node).await
     }
@@ -867,7 +823,7 @@ impl DurableStore for Retiring {
 impl DurableReads for Retiring {
     async fn model_call_pins(
         &self,
-        session: &lash_protocol_types::SessionId,
+        session: &lash_vocabulary::identity::SessionId,
         owner: &str,
     ) -> Result<Vec<crate::domain::ModelCallPinRow>, DurableError> {
         self.inner.model_call_pins(session, owner).await
@@ -875,7 +831,7 @@ impl DurableReads for Retiring {
 
     async fn model_calls(
         &self,
-        session: &lash_protocol_types::SessionId,
+        session: &lash_vocabulary::identity::SessionId,
         owner: &str,
     ) -> Result<Vec<lash_core_store::model_calls::ModelCallRecord>, DurableError> {
         self.inner.model_calls(session, owner).await
@@ -940,8 +896,8 @@ impl DurableReads for Retiring {
     }
     async fn cell_roots_within(
         &self,
-        session: &lash_protocol_types::SessionId,
-        run: &lash_protocol_types::TurnId,
+        session: &lash_vocabulary::identity::SessionId,
+        run: &lash_vocabulary::identity::TurnId,
         max_rows: usize,
     ) -> Result<Vec<crate::domain::ExecRootRow>, DurableError> {
         self.inner.cell_roots_within(session, run, max_rows).await

@@ -198,7 +198,7 @@ async fn dispatcher(args: &Args, fleet: &Fleet, meter: &Meter) -> Outcome {
     let mut feeds = Vec::new();
     let mut processes = Vec::new();
     for n in 0..args.callers {
-        let process = start(&node.core, &published, &format!("dispatcher-{n}")).await?;
+        let process = Box::pin(start(&node.core, &published, &format!("dispatcher-{n}"))).await?;
         feeds.push(observe(node, &process, meter, "process.feed.next").await?);
         processes.push(process);
     }
@@ -253,7 +253,7 @@ async fn feeds(args: &Args, fleet: &Fleet, meter: &Meter) -> Outcome {
     // collector in this OS process leaves the field absent.
     let witness = lash_core::perf_witness::Collector::install().ok();
     let window = Instant::now();
-    let process = start(&node.core, &published, "feeds").await?;
+    let process = Box::pin(start(&node.core, &published, "feeds")).await?;
     let mut open = Vec::new();
     for _ in 0..args.callers {
         open.push(observe(node, &process, meter, "process.feed.next").await?);
@@ -318,7 +318,7 @@ async fn burst(args: &Args, fleet: &Fleet, meter: &Meter) -> Outcome {
     let observer = fleet.nodes.last().context("a node")?;
     let chatty = publish(&node.core, &commit_document(args.operations)).await?;
     let quiet = publish(&node.core, QUIET_DOCUMENT).await?;
-    let quiet = start(&node.core, &quiet, "burst-quiet").await?;
+    let quiet = Box::pin(start(&node.core, &quiet, "burst-quiet")).await?;
     let quiet_feed = observe(observer, &quiet, meter, "process.feed.quiet.next").await?;
     // The quiet feed is attached before the burst starts.
     tokio::time::timeout(super::SETTLE, async {
@@ -332,7 +332,7 @@ async fn burst(args: &Args, fleet: &Fleet, meter: &Meter) -> Outcome {
     let mut feeds = Vec::new();
     let mut processes = Vec::new();
     for n in 0..args.callers {
-        let process = start(&node.core, &chatty, &format!("burst-{n}")).await?;
+        let process = Box::pin(start(&node.core, &chatty, &format!("burst-{n}"))).await?;
         feeds.push(observe(node, &process, meter, "process.feed.next").await?);
         processes.push(process);
     }
@@ -389,7 +389,7 @@ async fn convergence(args: &Args, fleet: &Fleet, meter: &Meter) -> Outcome {
     let node = &fleet.nodes[0];
     let published = publish(&node.core, &commit_document(args.operations)).await?;
     let window = Instant::now();
-    let process = start(&node.core, &published, "convergence").await?;
+    let process = Box::pin(start(&node.core, &published, "convergence")).await?;
     let mut open = Vec::new();
     for node in &fleet.nodes {
         open.push(observe(node, &process, meter, "process.feed.next").await?);
@@ -442,12 +442,12 @@ async fn append_facts(
     meter: &Meter,
 ) -> Result<(lash::ProcessId, lash_core::ProcessObservation)> {
     use lash_core::ToolCallId;
-    use lash_core::ToolId;
     use lash_execution_contracts::process::ProcessCompletionAuthority;
     use lash_execution_contracts::process::ProcessEventAppendRequest;
     use lash_execution_contracts::process::ProcessRegistration;
     use lash_execution_contracts::process::WaitKind;
     use lash_execution_contracts::process::WaitState;
+    use lash_vocabulary::tool_contract::ToolId;
     lash_execution_contracts::testing::process_execution_env_fixture(
         node.stores.process_env_store().as_ref(),
     )
@@ -467,6 +467,7 @@ async fn append_facts(
         let wait = WaitState {
             since_ms: n as i64,
             kind: WaitKind::Call {
+                resume_at_ms: None,
                 call_id: ToolCallId::fixture(&format!("reconcile-{n}")),
                 tool_id: ToolId::from("reconcile-workload"),
             },
@@ -509,7 +510,7 @@ async fn reconcile(args: &Args, fleet: &Fleet, meter: &Meter) -> Outcome {
         append_facts(node, args.operations, stale, meter).await?
     } else {
         let published = publish(&node.core, &commit_document(args.operations)).await?;
-        let process = start(&node.core, &published, "reconcile").await?;
+        let process = Box::pin(start(&node.core, &published, "reconcile")).await?;
         let observed = stalled.core.processes().observe(&process);
         let snapshot = within("process snapshot", observed.snapshot()).await??;
         settled(&node.core, &process).await?;
@@ -571,7 +572,8 @@ async fn roster(args: &Args, fleet: &Fleet, meter: &Meter) -> Outcome {
         futures_util::future::try_join_all((started..started + wave).map(|n| {
             let published = &published;
             async move {
-                let process = start(&node.core, published, &format!("roster-{n}")).await?;
+                let process =
+                    Box::pin(start(&node.core, published, &format!("roster-{n}"))).await?;
                 settled(&node.core, &process).await
             }
         }))

@@ -15,6 +15,9 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
+use lash::ObligationKind;
+use lash::StoreBindingId;
+use lash::StoreSet;
 use lash::durable::domain::{
     ExecKey, ExecRootRow, HydratedGraph, OwnerKey, ProcessActorRow, RootOwner, RunFacts, ScopeKey,
     SessionCloseRow, TurnEnd, TurnRow, WaitId, WaitRow,
@@ -31,7 +34,9 @@ use lash::persistence::{
     ToolMaterialStore, TurnPreludeStore,
 };
 use lash::runtime::Clock;
-use lash::{ObligationKind, ProcessId, SessionId, StoreBindingId, StoreSet, TurnId};
+use lash_vocabulary::identity::ProcessId;
+use lash_vocabulary::identity::SessionId;
+use lash_vocabulary::identity::TurnId;
 use tokio::sync::Notify;
 
 use crate::events::{Event, report};
@@ -206,59 +211,6 @@ impl DurableStore for RecordedStore {
         limit: usize,
     ) -> Result<Vec<(lash::durable::ActorKey, Vec<String>)>, DurableError> {
         self.inner.actor_requirements(after, limit).await
-    }
-
-    async fn install_packages(
-        &self,
-        artifacts: &[lash::durable::packages::ArtifactInstall],
-        sets: &[lash::durable::packages::SetInstall],
-    ) -> Result<(), DurableError> {
-        self.inner.install_packages(artifacts, sets).await
-    }
-
-    async fn package_catalog(&self) -> Result<lash::durable::PackageCatalog, DurableError> {
-        self.inner.package_catalog().await
-    }
-
-    async fn package_surface(
-        &self,
-        digest: &lash::durable::PackageSetDigest,
-    ) -> Result<Option<Vec<u8>>, DurableError> {
-        self.inner.package_surface(digest).await
-    }
-
-    async fn package_paths(
-        &self,
-        functions: &[lash::durable::packages::FunctionId],
-    ) -> Result<
-        std::collections::BTreeMap<
-            lash::durable::packages::FunctionId,
-            std::collections::BTreeSet<String>,
-        >,
-        DurableError,
-    > {
-        self.inner.package_paths(functions).await
-    }
-
-    async fn internal_operations(
-        &self,
-        operations: &[lash::durable::packages::EffectName],
-    ) -> Result<
-        std::collections::BTreeMap<
-            lash::durable::packages::EffectName,
-            std::collections::BTreeSet<String>,
-        >,
-        DurableError,
-    > {
-        self.inner.internal_operations(operations).await
-    }
-
-    async fn package_labels(
-        &self,
-        artifacts: &[lash::durable::ArtifactDigest],
-    ) -> Result<std::collections::BTreeMap<lash::durable::ArtifactDigest, Vec<String>>, DurableError>
-    {
-        self.inner.package_labels(artifacts).await
     }
 
     async fn owned(&self, node: &NodeLease) -> Result<Vec<Claimed>, DurableError> {
@@ -621,6 +573,13 @@ impl RecordedStores {
 }
 
 impl StoreSet for RecordedStores {
+    fn package_store(&self) -> Arc<dyn lash::package::PackageStore> {
+        self.inner.package_store()
+    }
+    fn execution_resolutions(&self) -> Arc<dyn lash::package::ExecutionResolutions> {
+        self.inner.execution_resolutions()
+    }
+
     fn durable_store(&self) -> Arc<dyn DurableStore> {
         Arc::clone(&self.store) as _
     }

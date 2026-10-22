@@ -1,8 +1,8 @@
-use crate::SessionId;
 use crate::store::{RuntimeStore, StoreError};
 use crate::{SessionObservedProcessOutcome, SessionObservedProcessReceipt, SessionObserverIntent};
 use lash_execution_contracts::process::ProcessObserverBy;
 use lash_execution_contracts::process::ProcessRegistry;
+use lash_vocabulary::identity::SessionId;
 
 /// Source of the relation whose process-observer intents must be settled.
 pub enum SessionObserverIntentSource<'a> {

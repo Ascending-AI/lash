@@ -69,7 +69,7 @@ pub(crate) use generator::peel_loop;
 mod claim_facts;
 mod graph;
 mod head_commit;
-mod packages;
+pub(crate) mod packages;
 pub(crate) use graph::{
     AUDIT_PAGE, GraphClosure, audit_page, graph_closure, graph_counts, install_staged, peel,
 };
@@ -247,7 +247,7 @@ type Tx = GuardedTx<'static>;
 /// delete's to peel.
 pub(crate) async fn retire_session_rows(
     tx: &mut PgConnection,
-    session: &lash_protocol_types::SessionId,
+    session: &lash_vocabulary::identity::SessionId,
 ) -> Result<Vec<String>, sqlx::Error> {
     use lash_durable::domain::{ExecKey, OwnerKey, ScopeKey};
 
@@ -267,7 +267,7 @@ pub(crate) async fn retire_session_rows(
 /// nodes they held: the prune's to peel.
 pub(crate) async fn retire_process_rows(
     tx: &mut PgConnection,
-    process: &lash_protocol_types::ProcessId,
+    process: &lash_vocabulary::identity::ProcessId,
 ) -> Result<Vec<String>, sqlx::Error> {
     let mut facts = run_records::delete_owner(
         &mut *tx,
@@ -277,7 +277,7 @@ pub(crate) async fn retire_process_rows(
     facts.extend(
         model_calls::delete_session(
             tx,
-            &lash_protocol_types::SessionId::prefixed("process:", process.as_str()),
+            &lash_vocabulary::identity::SessionId::prefixed("process:", process.as_str()),
         )
         .await?,
     );
@@ -740,7 +740,7 @@ pub(crate) async fn wake_within(
 /// Guard and advance a fresh direct session mutation under its actor lock.
 pub(crate) async fn bump_unclaimed_session(
     tx: &mut PgConnection,
-    session: &lash_protocol_types::SessionId,
+    session: &lash_vocabulary::identity::SessionId,
     at_ms: u64,
 ) -> Result<(), StoreError> {
     use lash_core_store::store::{HeadOwnershipFacts, require_unclaimed_actor};
@@ -782,7 +782,7 @@ pub(crate) async fn bump_unclaimed_session(
 /// 0132 §12), creating it ready first when the session has none yet.
 pub(crate) async fn wake_session_within(
     tx: &mut PgConnection,
-    session: &lash_protocol_types::SessionId,
+    session: &lash_vocabulary::identity::SessionId,
     control: bool,
     now: DurableInstant,
 ) -> Result<Woken, DurableError> {
@@ -807,7 +807,7 @@ pub(crate) async fn wake_session_within(
 /// session itself.
 pub(crate) async fn wake_session_tx(
     tx: &mut PgConnection,
-    session: &lash_protocol_types::SessionId,
+    session: &lash_vocabulary::identity::SessionId,
     control: bool,
     at_ms: u64,
 ) -> Result<Option<Woken>, StoreError> {
@@ -834,6 +834,14 @@ async fn apply_domain(
     write: &DomainWrite,
 ) -> Result<(), DurableError> {
     match write {
+        DomainWrite::AdoptExecution(record) => packages::adopt(tx, committing.actor, record).await,
+        DomainWrite::SeedResolution(record) => packages::seed(tx, committing.actor, record).await,
+        DomainWrite::EndExecution(execution) => {
+            packages::end_execution(tx, committing.actor, execution).await
+        }
+        DomainWrite::RegisterExecution(write) => {
+            packages::register(tx, committing.actor, write).await
+        }
         DomainWrite::Turn(write) => turns::apply(tx, committing, write).await,
         DomainWrite::SessionCommit(write) => {
             turns::apply_session_commit(tx, committing, write).await
@@ -1294,92 +1302,6 @@ impl DurableStore for PostgresDurableStore {
         .await
     }
 
-    async fn install_packages(
-        &self,
-        artifacts: &[lash_durable::packages::ArtifactInstall],
-        sets: &[lash_durable::packages::SetInstall],
-    ) -> Result<(), DurableError> {
-        self.within(CommitCapacity::Work, async {
-            crate::observed_sql::measure(&self.observer, CommitLabel::PACKAGES_INSTALL, 0, async {
-                let (mut tx, _now) = self.open(CommitLabel::PACKAGES_INSTALL).await?;
-                let outcome = packages::install(&mut tx, artifacts, sets).await;
-                finish(tx, outcome).await
-            })
-            .await
-        })
-        .await
-    }
-
-    async fn package_catalog(&self) -> Result<lash_durable::PackageCatalog, DurableError> {
-        self.within(CommitCapacity::Work, async {
-            let mut connection = self.pools.work.acquire().await.map_err(sqlx_failure)?;
-            packages::catalog(&mut connection).await
-        })
-        .await
-    }
-
-    async fn package_surface(
-        &self,
-        digest: &lash_durable::PackageSetDigest,
-    ) -> Result<Option<Vec<u8>>, DurableError> {
-        self.within(CommitCapacity::Work, async {
-            let mut connection = self.pools.work.acquire().await.map_err(sqlx_failure)?;
-            packages::surface(&mut connection, &digest.to_string()).await
-        })
-        .await
-    }
-
-    async fn package_paths(
-        &self,
-        functions: &[lash_durable::packages::FunctionId],
-    ) -> Result<
-        std::collections::BTreeMap<
-            lash_durable::packages::FunctionId,
-            std::collections::BTreeSet<String>,
-        >,
-        DurableError,
-    > {
-        self.within(CommitCapacity::Work, async {
-            let mut connection = self.pools.work.acquire().await.map_err(sqlx_failure)?;
-            packages::paths(&mut connection, packages::Index::Definitions, functions).await
-        })
-        .await
-    }
-
-    async fn package_labels(
-        &self,
-        artifacts: &[lash_durable::ArtifactDigest],
-    ) -> Result<std::collections::BTreeMap<lash_durable::ArtifactDigest, Vec<String>>, DurableError>
-    {
-        self.within(CommitCapacity::Work, async {
-            let mut connection = self.pools.work.acquire().await.map_err(sqlx_failure)?;
-            packages::labels(&mut connection, artifacts).await
-        })
-        .await
-    }
-
-    async fn internal_operations(
-        &self,
-        operations: &[lash_durable::packages::EffectName],
-    ) -> Result<
-        std::collections::BTreeMap<
-            lash_durable::packages::EffectName,
-            std::collections::BTreeSet<String>,
-        >,
-        DurableError,
-    > {
-        self.within(CommitCapacity::Work, async {
-            let mut connection = self.pools.work.acquire().await.map_err(sqlx_failure)?;
-            packages::paths(
-                &mut connection,
-                packages::Index::InternalOperations,
-                operations,
-            )
-            .await
-        })
-        .await
-    }
-
     async fn begin(&self, actor: &ActorKey, epoch: Epoch) -> Result<ActorTx, DurableError> {
         let session = match actor.kind() {
             lash_durable::ActorKind::Session => Some(actor.id()),
@@ -1414,9 +1336,9 @@ impl DurableStore for PostgresDurableStore {
         }
         let turn_cancel = match (session, get::<Option<String>>(first, 10)?) {
             (Some(session), Some(run)) => {
-                let session = lash_protocol_types::SessionId::try_from(session.to_owned())
+                let session = lash_vocabulary::identity::SessionId::try_from(session.to_owned())
                     .map_err(|_| corrupt("session id", session))?;
-                let run = lash_protocol_types::TurnId::try_from(run.clone())
+                let run = lash_vocabulary::identity::TurnId::try_from(run.clone())
                     .map_err(|_| corrupt("turn id", &run))?;
                 let stored = (
                     get(first, 11)?,

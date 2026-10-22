@@ -27,6 +27,7 @@ synthetic-next = ["lash-kernel-doc/synthetic-next"]
 workspace = true
 
 [dependencies]
+lash-vocabulary = { workspace = true }
 foldhash = { workspace = true }
 lash-kernel-doc = { workspace = true }
 schemars = { workspace = true, features = ["derive"] }

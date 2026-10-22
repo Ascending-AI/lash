@@ -8,7 +8,12 @@
 
 use std::sync::Arc;
 
-use crate::{ToolCall, ToolContract, ToolDefinition, ToolManifest, ToolOutcome, ToolProvider};
+use crate::ToolCall;
+use crate::ToolOutcome;
+use crate::ToolProvider;
+use lash_vocabulary::tool_contract::ToolContract;
+use lash_vocabulary::tool_contract::ToolDefinition;
+use lash_vocabulary::tool_contract::ToolManifest;
 
 /// The operation of the fixture's echo tool. A Standard-mode model calls it
 /// `tools__fixture_echo`.

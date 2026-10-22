@@ -239,11 +239,11 @@ fn tool(name: &str) -> LlmToolSpec {
     LlmToolSpec {
         name: name.to_string(),
         description: name.to_string(),
-        input_schema: lash_protocol_types::SchemaContract::admit(
+        input_schema: lash_vocabulary::schema_contract::SchemaContract::admit(
             json!({ "type": "object", "properties": {} }),
         )
         .expect("valid declared schema"),
-        output_schema: lash_protocol_types::SchemaContract::admit(json!({}))
+        output_schema: lash_vocabulary::schema_contract::SchemaContract::admit(json!({}))
             .expect("valid declared schema"),
     }
 }

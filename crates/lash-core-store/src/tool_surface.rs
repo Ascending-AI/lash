@@ -5,31 +5,35 @@
 //! that match:
 //!
 //! - a session run records the [`RecordedSurface`] its model calls are
-//!   admitted under, each tool with its [`OperationLink`] and its whole
+//!   admitted under, each tool with its [`OperationRoute`] and its whole
 //!   definition as the model was shown it;
 //! - a process env links each effect its document performs to a tool by
-//!   one [`OperationLink`];
+//!   one [`OperationRoute`];
 //! - a call path no surface or link matches is resolved once by the
 //!   surface's deferred provider, and the [`DeferredMatch`] it records, an
-//!   [`OperationLink`] retaining the matched definition, is never resolved
+//!   [`OperationRoute`] retaining the matched definition, is never resolved
 //!   again.
 //!
 //! Every pinned call is judged by one [`judge`]: the live tool's contract id
 //! must equal the pinned one, and nothing else about the live tool is
 //! compared (OP-LINK-ONE).
 
-use std::collections::BTreeMap;
+use lash_vocabulary::package::PublicationRecord;
+use lash_vocabulary::{
+    claims::*, names::OperationUse, operations::OperationRequirement, package::*,
+};
+use std::collections::{BTreeMap, BTreeSet};
 
-use lash_core_ids::FormatVersion;
 use serde::{Deserialize, Serialize};
 
-use crate::{ToolDefinition, ToolId};
-use lash_protocol_types::QualifiedOperation;
+use lash_vocabulary::names::QualifiedOperation;
+use lash_vocabulary::tool_contract::ToolDefinition;
+use lash_vocabulary::tool_contract::ToolId;
 
 /// The static, author-declared key a tool provider is registered under: the
 /// identity of its owning plugin or process component and the key it
 /// declared. A provider's existence never depends on config.
-pub type ProviderKey = crate::plugin_registrations::ToolProviderHandle;
+pub type ProviderKey = lash_vocabulary::providers::ToolProviderHandle;
 
 /// A refused change to a session's registered tool providers or the surface
 /// they advertise.
@@ -46,7 +50,7 @@ pub enum ReconfigureError {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SurfaceEntry {
-    pub link: OperationLink,
+    pub link: OperationRoute,
     pub definition: ToolDefinition,
 }
 
@@ -59,7 +63,7 @@ impl SurfaceEntry {
         payload: Option<ExecutionBinding>,
     ) -> Self {
         Self {
-            link: OperationLink::advertised(provider, &definition, payload),
+            link: OperationRoute::advertised(provider, &definition, payload),
             definition,
         }
     }
@@ -83,10 +87,11 @@ impl SurfaceEntry {
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RecordedSurface {
+    packages: Box<RecordedPackages>,
     #[serde(
         default,
         skip_serializing_if = "BTreeMap::is_empty",
-        with = "lash_protocol_types::operation_keys"
+        with = "lash_vocabulary::operation_keys"
     )]
     tools: BTreeMap<QualifiedOperation, SurfaceEntry>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -175,7 +180,22 @@ impl RecordedSurface {
             ids.insert(entry.tool().clone(), entry.provider().clone());
             tools.insert(operation, entry);
         }
-        Ok(Self { tools, deferred })
+        Ok(Self {
+            tools,
+            deferred,
+            packages: Box::default(),
+        })
+    }
+
+    /// The accepted package namespace and routes captured in this round's write.
+    pub fn packages(&self) -> &RecordedPackages {
+        &self.packages
+    }
+
+    #[must_use]
+    pub fn with_packages(mut self, packages: RecordedPackages) -> Self {
+        self.packages = Box::new(packages);
+        self
     }
 
     /// The offered tools, by operation.
@@ -189,7 +209,7 @@ impl RecordedSurface {
     }
 
     /// The entry a Standard-mode model calls as `name`, its derived
-    /// model-facing name ([`lash_protocol_types::ToolManifest::standard_name`]).
+    /// model-facing name ([`lash_vocabulary::tool_contract::ToolManifest::standard_name`]).
     pub fn entry_named(&self, name: &str) -> Option<&SurfaceEntry> {
         self.tools
             .values()
@@ -217,37 +237,15 @@ impl RecordedSurface {
     }
 }
 
-/// The host's execution and retry contract for a dispatch grant's
-/// discovery, recorded with the grant in the process environment before its
-/// first resolution. Resolution and the matched tool have independent
-/// bounds. As with ordinary tool bounds,
-/// there is no runtime-selected ceiling; enclosing deadlines still clip it.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct DeferredResolutionPolicy {
-    pub execution: std::time::Duration,
-    pub execution_policy: lash_protocol_types::ExecutionPolicy,
-}
-
-impl Default for DeferredResolutionPolicy {
-    /// Sixty seconds, with three repeatable attempts and exponential backoff
-    /// from 100 ms up to 1,000 ms.
-    fn default() -> Self {
-        Self {
-            execution: std::time::Duration::from_secs(60),
-            execution_policy: lash_protocol_types::ExecutionPolicy::repeatable(
-                std::num::NonZeroU32::MIN.saturating_add(2),
-                100,
-                1_000,
-            ),
-        }
-    }
-}
-
 /// Where a linked operation's tool comes from.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
-pub enum LinkSource {
+#[serde(
+    tag = "kind",
+    content = "value",
+    rename_all = "snake_case",
+    deny_unknown_fields
+)]
+pub enum RouteSource {
     /// The link's provider advertises the tool.
     Advertised,
     /// A committed deferred match: the tool is served from this retained
@@ -269,22 +267,22 @@ pub enum LinkSource {
 /// or for a model round its recorded definition's ([`judge`]).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct OperationLink {
+pub struct OperationRoute {
     pub tool: ToolId,
     pub provider: ProviderKey,
     /// The execution policy captured from the runner's manifest at link
     /// time: the only policy a call through this link is admitted under.
-    pub policy: lash_protocol_types::ExecutionPolicy,
+    pub policy: lash_vocabulary::tool_contract::ExecutionPolicy,
     #[serde(default, skip_serializing_if = "is_default_projection")]
-    pub projection: lash_protocol_types::ToolArgumentProjectionPolicy,
+    pub projection: lash_vocabulary::tool_contract::ToolArgumentProjectionPolicy,
     /// The runner's codec payload, read back from the call's context and
     /// never compared.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub payload: Option<ExecutionBinding>,
-    pub source: LinkSource,
+    pub source: RouteSource,
 }
 
-impl OperationLink {
+impl OperationRoute {
     /// The link of `definition`, which `provider` advertises, with the codec
     /// `payload` the provider states for it.
     pub fn advertised(
@@ -298,7 +296,7 @@ impl OperationLink {
             policy: definition.manifest.execution_policy,
             projection: definition.manifest.argument_projection.clone(),
             payload,
-            source: LinkSource::Advertised,
+            source: RouteSource::Advertised,
         }
     }
 
@@ -315,7 +313,7 @@ impl OperationLink {
             policy: definition.manifest.execution_policy,
             projection: definition.manifest.argument_projection.clone(),
             payload,
-            source: LinkSource::Resolved {
+            source: RouteSource::Resolved {
                 definition: Box::new(definition),
             },
         }
@@ -339,25 +337,25 @@ impl OperationLink {
             policy: policy.execution_policy,
             projection: definition.manifest.argument_projection.clone(),
             payload: None,
-            source: LinkSource::Dispatch {
+            source: RouteSource::Dispatch {
                 definition: Box::new(definition),
             },
         }
     }
 
     /// The definition a committed deferred match retains, for a
-    /// [`LinkSource::Resolved`] link.
+    /// [`RouteSource::Resolved`] link.
     pub fn resolution(&self) -> Option<&ToolDefinition> {
         match &self.source {
-            LinkSource::Resolved { definition } => Some(definition),
-            LinkSource::Advertised | LinkSource::Dispatch { .. } => None,
+            RouteSource::Resolved { definition } => Some(definition),
+            RouteSource::Advertised | RouteSource::Dispatch { .. } => None,
         }
     }
 
-    /// Whether this link is a dispatch grant ([`LinkSource::Dispatch`]):
+    /// Whether this link is a dispatch grant ([`RouteSource::Dispatch`]):
     /// its call is a resolution, never a body of its own.
     pub fn dispatches(&self) -> bool {
-        matches!(self.source, LinkSource::Dispatch { .. })
+        matches!(self.source, RouteSource::Dispatch { .. })
     }
 
     /// The definition a call through this link runs as: `served`, what the
@@ -366,10 +364,10 @@ impl OperationLink {
     /// projection rather than the served manifest's (C1).
     pub fn admitted(&self, served: Option<&ToolDefinition>) -> Option<ToolDefinition> {
         let mut definition = match &self.source {
-            LinkSource::Resolved { definition } | LinkSource::Dispatch { definition } => {
+            RouteSource::Resolved { definition } | RouteSource::Dispatch { definition } => {
                 (**definition).clone()
             }
-            LinkSource::Advertised => served?.clone(),
+            RouteSource::Advertised => served?.clone(),
         };
         definition.manifest.execution_policy = self.policy;
         definition.manifest.argument_projection = self.projection.clone();
@@ -380,12 +378,26 @@ impl OperationLink {
     /// (FIG-6985): its provider, by key, in `requirements.providers`, and
     /// the codec its payload is read by, with the payload's format
     /// version, in `requirements.codecs`.
-    pub fn require(&self, requirements: &mut lash_kernel_doc::ExecutionRequirements) {
-        requirements.providers.insert(provider_key(&self.provider));
+    pub fn require(&self, requirements: &mut ClaimRequirements) {
+        requirements
+            .providers
+            .insert(logical_provider(&self.provider));
+        requirements.callbacks.insert(CallbackRequirement {
+            registry: self.provider.registry(),
+            callback: if self.policy == lash_vocabulary::ExecutionPolicy::Read {
+                self.provider.reads_identity()
+            } else {
+                self.provider.callback_identity()
+            },
+        });
         if let Some(payload) = &self.payload {
             requirements
                 .codecs
-                .insert((provider_key(&payload.codec), payload.format.get()));
+                .insert((logical_provider(&payload.codec), payload.format));
+            requirements.callbacks.insert(CallbackRequirement {
+                registry: payload.codec.registry(),
+                callback: payload.codec.callback_identity(),
+            });
         }
     }
 
@@ -393,7 +405,7 @@ impl OperationLink {
     /// its payload's codec when it carries one.
     pub fn callbacks(
         &self,
-    ) -> impl Iterator<Item = crate::store::plugin_writers::PluginCallbackIdentity> + '_ {
+    ) -> impl Iterator<Item = lash_vocabulary::providers::PluginCallbackIdentity> + '_ {
         std::iter::once(self.provider.callback_identity()).chain(
             self.payload
                 .iter()
@@ -402,7 +414,9 @@ impl OperationLink {
     }
 }
 
-fn is_default_projection(projection: &lash_protocol_types::ToolArgumentProjectionPolicy) -> bool {
+fn is_default_projection(
+    projection: &lash_vocabulary::tool_contract::ToolArgumentProjectionPolicy,
+) -> bool {
     projection.is_materialize_projected_values()
 }
 
@@ -415,8 +429,8 @@ pub enum Judgement {
     Missing,
     /// The runner serves the linked tool under another contract.
     ContractChanged {
-        pinned: lash_kernel_doc::ContractId,
-        live: lash_kernel_doc::ContractId,
+        pinned: lash_vocabulary::operations::ContractId,
+        live: lash_vocabulary::operations::ContractId,
     },
 }
 
@@ -427,8 +441,8 @@ pub enum Judgement {
 /// The live contract id must equal the pinned one; nothing else about the
 /// live tool is compared.
 pub fn judge(
-    pinned: &lash_kernel_doc::ContractId,
-    link: &OperationLink,
+    pinned: &lash_vocabulary::operations::ContractId,
+    link: &OperationRoute,
     live: Option<&ToolDefinition>,
 ) -> Judgement {
     let Some(served) = link
@@ -446,55 +460,6 @@ pub fn judge(
             live,
         }
     }
-}
-
-/// A host-owned routing payload a resolved deferred match carries to its
-/// provider: the provider whose declared formats read it, the format it is
-/// written in and the payload. Readability is checked before the binding is
-/// installed or a call is prepared, never by the provider's reader first.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct ExecutionBinding {
-    pub codec: ProviderKey,
-    pub format: FormatVersion,
-    pub payload: serde_json::Value,
-}
-
-impl ExecutionBinding {
-    /// Whether a codec that reads `readable` reads this binding: checked
-    /// before the binding is installed or a call prepared (S8), so an
-    /// unreadable binding never reaches the provider's reader.
-    ///
-    /// # Errors
-    ///
-    /// [`ExecutionBindingUnreadable`] naming the codec, the format and what
-    /// it reads.
-    pub fn check_readable(
-        &self,
-        readable: &[FormatVersion],
-    ) -> Result<(), ExecutionBindingUnreadable> {
-        if readable.contains(&self.format) {
-            Ok(())
-        } else {
-            Err(ExecutionBindingUnreadable {
-                codec: self.codec.clone(),
-                format: self.format,
-                readable: readable.to_vec(),
-            })
-        }
-    }
-}
-
-/// A recorded execution binding its codec cannot read on this node.
-#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error, Serialize, Deserialize)]
-#[error(
-    "execution binding of provider `{codec}` is in format {format}, which this node's provider \
-     does not read (it reads {readable:?})"
-)]
-pub struct ExecutionBindingUnreadable {
-    pub codec: ProviderKey,
-    pub format: FormatVersion,
-    pub readable: Vec<FormatVersion>,
 }
 
 /// The one recorded resolution of a call path no surface or link offers.
@@ -516,8 +481,8 @@ pub struct DeferredMatch {
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum DeferredOutcome {
     /// The path resolved to a tool its provider executes: a
-    /// [`LinkSource::Resolved`] link.
-    Resolved { link: OperationLink },
+    /// [`RouteSource::Resolved`] link.
+    Resolved { link: OperationRoute },
     /// The resolver refused the path.
     Refused { reason: String },
     /// No tool is available for the path, with an optional host note.
@@ -536,14 +501,14 @@ impl DeferredOutcome {
         payload: Option<ExecutionBinding>,
     ) -> Self {
         Self::Resolved {
-            link: OperationLink::resolved(provider, definition, payload),
+            link: OperationRoute::resolved(provider, definition, payload),
         }
     }
 }
 
 impl DeferredMatch {
     /// The resolved tool's link, when the path resolved.
-    pub fn resolved(&self) -> Option<&OperationLink> {
+    pub fn resolved(&self) -> Option<&OperationRoute> {
         match &self.outcome {
             DeferredOutcome::Resolved { link } => Some(link),
             DeferredOutcome::Refused { .. } | DeferredOutcome::Unavailable { .. } => None,
@@ -552,7 +517,7 @@ impl DeferredMatch {
 
     /// The resolved tool's retained definition, when the path resolved.
     pub fn definition(&self) -> Option<&ToolDefinition> {
-        self.resolved().and_then(OperationLink::resolution)
+        self.resolved().and_then(OperationRoute::resolution)
     }
 }
 
@@ -561,4 +526,136 @@ impl DeferredMatch {
 #[must_use]
 pub fn provider_key(provider: &ProviderKey) -> String {
     format!("{}/{}", provider.owner(), provider.key())
+}
+
+use lash_vocabulary::providers::{DeferredResolutionPolicy, ExecutionBinding};
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+/// A fixed Link requirement, accepted offer metadata and selected serving route.
+pub struct RoutedOperation {
+    pub requirement: OperationRequirement,
+    pub offer: OperationOffer,
+    pub route: OperationRoute,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(
+    tag = "kind",
+    content = "value",
+    rename_all = "snake_case",
+    deny_unknown_fields
+)]
+/// A fixed route or unresolved scoped grant. Unresolved deferred uses are Waited in this baseline.
+pub enum UseBinding {
+    Fixed(RoutedOperation),
+    Deferred(DeferredGrant),
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+/// Immutable accepted publications, roots, per-use routes and base claim debt. Resolution rows stay outside its hash.
+pub struct ExecutionEnvironment {
+    /// Defining callables owed to live values after an owner-carried upgrade.
+    pub retained_code: BTreeSet<lash_vocabulary::CallableId>,
+    pub publications: Vec<PublicationRecord>,
+    pub roots: BTreeSet<LinkId>,
+    /// Cell roots admitted by this source execution; never supplied by a guest.
+    pub authored: BTreeSet<LinkId>,
+    #[serde(with = "lash_vocabulary::ordered_pairs")]
+    pub uses: BTreeMap<OperationUse, UseBinding>,
+    pub registry: RegistryKind,
+    pub requirements: ClaimRequirements,
+}
+
+/// Logical provider identity used by execution claims; callback debt also records its registry.
+pub fn logical_provider(provider: &ProviderKey) -> ProviderName {
+    ProviderName {
+        owner: provider.owner().into(),
+        key: provider.key().into(),
+    }
+}
+
+impl ExecutionEnvironment {
+    /// Empty reach for an engine with no operation imports.
+    pub fn empty(registry: RegistryKind) -> Self {
+        Self {
+            retained_code: BTreeSet::new(),
+            publications: Vec::new(),
+            roots: BTreeSet::new(),
+            authored: BTreeSet::new(),
+            uses: BTreeMap::new(),
+            registry,
+            requirements: ClaimRequirements::default(),
+        }
+    }
+
+    /// The mode is recorded per use. Deferred targets remain waited throughout execution.
+    pub fn mode(&self, use_: &OperationUse) -> Option<OperationMode> {
+        self.uses.get(use_).map(|binding| match binding {
+            UseBinding::Fixed(operation) => operation.offer.mode,
+            UseBinding::Deferred(_) => OperationMode::Waited,
+        })
+    }
+
+    pub fn fixed(&self, use_: &OperationUse) -> Option<&RoutedOperation> {
+        match self.uses.get(use_)? {
+            UseBinding::Fixed(operation) => Some(operation),
+            UseBinding::Deferred(_) => None,
+        }
+    }
+}
+
+impl RoutedOperation {
+    /// Check the fixed pin and accepted metadata without consulting a live advertisement.
+    pub fn validate(&self) -> Result<(), String> {
+        if self.requirement.contract != self.offer.requirement.contract {
+            return Err("fixed requirement and accepted offer contracts disagree".into());
+        }
+        if (self.offer.mode == OperationMode::Read)
+            != (self.route.policy == lash_vocabulary::ExecutionPolicy::Read)
+        {
+            return Err("fixed offer mode and route policy disagree".into());
+        }
+        match lash_vocabulary::type_relations::serves(
+            &self.offer.requirement.signature,
+            &self.requirement.signature,
+        ) {
+            Some(mismatch) => Err(format!(
+                "fixed offer does not serve requirement: {mismatch:?}"
+            )),
+            None => Ok(()),
+        }
+    }
+}
+
+use lash_vocabulary::package::NamespaceSnapshot;
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+/// One qualified operation's definition/route candidate. Selection also keys by contract, provider and tool ID.
+pub struct AdvertisedRoute {
+    pub operation: QualifiedOperation,
+    pub definition: ToolDefinition,
+    pub route: OperationRoute,
+}
+
+/// A coherent node-local advertisement. It is recorded with the model surface,
+/// but its operations never populate model tools.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RecordedPackages {
+    /// Trusted consumer identity, never inferred from an advertised publisher.
+    pub consumer: Option<lash_vocabulary::package::PublicationContext>,
+    pub snapshot: NamespaceSnapshot,
+    pub routes: Vec<AdvertisedRoute>,
+}
+
+impl RecordedPackages {
+    /// Exact accepted provenance, projected from its sole recorded owner.
+    pub fn publications(&self) -> Vec<lash_vocabulary::package::PublicationRecord> {
+        self.snapshot
+            .advertisements
+            .iter()
+            .map(|accepted| accepted.publication.clone())
+            .collect()
+    }
 }

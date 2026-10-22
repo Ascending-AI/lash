@@ -2,41 +2,74 @@
 //! SQLite supplies action issues independently of statement starts.
 
 use super::*;
-use lash::workflow::document::{AssignOrder, FunctionRegistry, Site, parse_document};
+use lash::workflow::document::{AssignOrder, Site, parse_document};
 use lash::workflow::view::{
     self, ActionObservation, ActionState, FlowKind, FlowTarget, ReadableLens, ReadableRefusal,
     WorkflowNodeKind as Kind,
 };
 use std::collections::BTreeSet;
 
-fn checked(text: &str, entry: &str) -> lash::workflow::WorkflowDocument {
-    lash::workflow::WorkflowDocument::derive(
-        parse_document(text).unwrap(),
-        WorkflowDocumentEntry::Entry {
-            function: Name::new(entry),
+fn checked(text: &str, _entry: &str) -> lash::workflow::WorkflowDocument {
+    let document = parse_document(text).unwrap();
+    let link = fixture_link(&document);
+    lash::workflow::WorkflowDocument::entered(
+        document,
+        lash::package::LinkedStart {
+            link: link.identity(),
+            selector: lash::package::StartSelector::Main,
         },
-        &FunctionRegistry::default(),
     )
     .unwrap()
 }
+fn fixture_link(document: &Document) -> lash::package::Link {
+    let fills = document
+        .imports
+        .iter()
+        .map(|(slot, import)| {
+            let lash::package::ImportKind::Operation { signature } = &import.kind else {
+                panic!("operation fixture")
+            };
+            (
+                *slot,
+                lash::package::Fill::Operation(lash_vocabulary::OperationRequirement::new(
+                    signature.clone(),
+                    lash_vocabulary::ContractId::new("1"),
+                )),
+            )
+        })
+        .collect();
+    lash::package::Link {
+        document: document.identity(),
+        fills,
+    }
+}
+fn context(holder: &lash::workflow::WorkflowDocument) -> view::ViewContext {
+    let document = holder.document().clone();
+    let link = fixture_link(&document);
+    let mut content = lash_kernel_package::LinkedContent::default();
+    content.documents.insert(document.identity(), document);
+    content.links.insert(link.identity(), link.clone());
+    view::ViewContext::new(holder.reference().clone(), content, Default::default()).unwrap()
+}
 fn project(text: &str) -> view::WorkflowView {
-    view::derive(&checked(text, "flow"), &super::test_packages()).unwrap()
+    let holder = checked(text, "flow");
+    view::derive(&holder, &context(&holder)).unwrap()
 }
-fn site(path: &[u32]) -> Site {
-    Site::new(Unit::Function(Name::new("flow")), path)
+fn site(view: &view::WorkflowView, path: &[u32]) -> Site {
+    Site::new(view.statements[0].site.unit.clone(), path)
 }
-const HEADER: &str = "kernel 1\nnumbers float\nentry flow() -> Any\n";
+const HEADER: &str = "kernel 1\nnumbers float\ndefinition \"function answer() -> Int\\nkernel 1\\nmetering statements\\nbody {return 7}\"\ndefinition \"function worker() -> Int\\nkernel 1\\nmetering statements\\nbody {return 1}\"\ndefinition \"function child() -> Int\\nkernel 1\\nmetering statements\\nbody {return 9}\"\ndefinition \"function pair(a: Any,b: Any) -> Any\\nkernel 1\\nmetering statements\\nbody {return b}\"\ndefinition \"function recursive(self: Any,flag: Bool) -> Int\\nkernel 1\\nmetering statements\\nbody {if flag {do apply self(self,false)} return 1}\"\n";
 
 /// COARSE-PARTITION: maximal runs, pure controls, empty arms, shadowed names
 /// and lexical closures have one canonical carrier for every statement.
 #[test]
 fn coarse_partition() {
     let view = project(&format!(
-        "{HEADER} fn flow() {{
+        "{HEADER} main {{
       let x = 1 if true {{ let x = 2 }} else {{}}
       let work = fn() {{ do yield return 1 }}
       do yield let after = 3 return after
-    }} main {{ finish null }}"
+    }}"
     ));
     let members: Vec<_> = view
         .nodes
@@ -57,7 +90,7 @@ fn coarse_partition() {
     let entry: Vec<_> = view
         .nodes
         .iter()
-        .filter(|node| node.block == site(&[]))
+        .filter(|node| node.block == site(&view, &[]))
         .collect();
     assert_eq!(
         entry.iter().map(|node| node.kind).collect::<Vec<_>>(),
@@ -83,10 +116,10 @@ fn coarse_partition() {
     assert_ne!(shadowed[0].id, shadowed[1].id);
     assert_ne!(shadowed[0].block, shadowed[1].block);
     let writes_view = project(&format!(
-        "{HEADER} fn flow() {{
+        "{HEADER} main {{
         let removed = {{ field: 1 }} let assigned = 0 do yield
         remove removed.field set assigned = 1 set assigned = 2 return [removed, assigned]
-    }} main {{ finish null }}"
+    }}"
     ));
     let identities: BTreeSet<_> = writes_view
         .dataflow
@@ -98,7 +131,7 @@ fn coarse_partition() {
     let code = writes_view
         .nodes
         .iter()
-        .find(|node| node.members.contains(&site(&[3])))
+        .find(|node| node.members.contains(&site(&view, &[3])))
         .unwrap();
     assert_eq!(
         code.writes.iter().copied().collect::<BTreeSet<_>>(),
@@ -124,23 +157,29 @@ fn coarse_partition() {
 fn coarse_eval() {
     let mut document = parse_document(&format!(
         "{HEADER}
-      effect one() -> Any contract \"1\" effect two() -> Any contract \"1\" effect send(x: Any) -> Any contract \"1\"
-      effect test() -> Bool contract \"1\" effect items() -> Any contract \"1\" effect target() -> Any contract \"1\"
-      effect index() -> Any contract \"1\" effect value() -> Any contract \"1\"
-      fn flow() {{
-        let x = perform send([perform one() as Any, perform two() as Any]) as Any
-        let y = if(true, perform one() as Any, perform two() as Any)
-        if perform test() as Bool {{}} else {{}}
-        for item in perform items() as Any {{ do yield }}
+      import 0 operation fixture.one() -> Any import 1 operation fixture.two() -> Any import 2 operation fixture.send(x: Any) -> Any
+      import 3 operation fixture.test() -> Bool import 4 operation fixture.items() -> Any import 5 operation fixture.target() -> Any
+      import 6 operation fixture.index() -> Any import 7 operation fixture.value() -> Any
+      main {{
+        let x = perform 2([perform 0() as Any, perform 1() as Any]) as Any
+        let y = if(true, perform 0() as Any, perform 1() as Any)
+        if perform 3() as Bool {{}} else {{}}
+        for item in perform 4() as Any {{ do yield }}
         set x[0] = null
-        return perform one() as Any
-      }} main {{ finish null }}"
+        return perform 0() as Any
+      }}"
     ))
     .unwrap();
     let action = |name| {
         Expr::Act(Box::new(lash::workflow::document::ActExpr {
             kind: lash::workflow::document::ActKind::Perform {
-                effect: lash::workflow::document::EffectName::new(name).unwrap(),
+                slot: document
+                    .imports
+                    .iter()
+                    .find(|(_, import)| import.name.member.as_str() == name)
+                    .unwrap()
+                    .0
+                    .to_owned(),
                 result: lash::workflow::document::Type::Any,
                 then_yield: false,
             },
@@ -149,7 +188,7 @@ fn coarse_eval() {
     };
     // K-EVAL-003: a value-first assignment issues its right-hand side
     // before its place's target and index; a place-first one after them.
-    let pure_place = match &document.functions[&Name::new("flow")].body[4] {
+    let pure_place = match &document.main.as_ref().unwrap()[4] {
         Stmt::Assign { place, .. } => place.clone(),
         _ => unreachable!(),
     };
@@ -158,27 +197,16 @@ fn coarse_eval() {
         index: action("index"),
     });
     let value = || lash::workflow::document::Action::Perform {
-        effect: lash::workflow::document::EffectName::new("value").unwrap(),
+        slot: lash::package::ImportSlot(7),
         args: Vec::new(),
         result: lash::workflow::document::Type::Any,
         then_yield: false,
     };
     let issued = |assignment: Stmt| {
         let mut candidate = document.clone();
-        candidate
-            .functions
-            .get_mut(&Name::new("flow"))
-            .unwrap()
-            .body[4] = assignment;
-        let holder = lash::workflow::WorkflowDocument::derive(
-            candidate,
-            WorkflowDocumentEntry::Entry {
-                function: Name::new("flow"),
-            },
-            &FunctionRegistry::default(),
-        )
-        .unwrap();
-        let view = view::derive(&holder, &super::test_packages()).unwrap();
+        candidate.main.as_mut().unwrap()[4] = assignment;
+        let holder = checked(&lash_kernel_doc::print_document(&candidate), "flow");
+        let view = view::derive(&holder, &context(&holder)).unwrap();
         let assignment = view
             .statements
             .iter()
@@ -190,7 +218,9 @@ fn coarse_eval() {
             .map(|site| {
                 let action = view.dataflow.actions.iter().find(|a| a.site == *site);
                 match &action.unwrap().callee {
-                    Some(view::CalleeView::Effect(name)) => name.as_str().to_owned(),
+                    Some(view::CalleeView::Effect(name)) => {
+                        document.imports[&name.slot].name.member.as_str().to_owned()
+                    }
                     other => format!("{other:?}"),
                 }
             })
@@ -212,26 +242,18 @@ fn coarse_eval() {
         }),
         ["target", "index", "value"]
     );
-    document.functions.get_mut(&Name::new("flow")).unwrap().body[4] = Stmt::Assign {
+    document.main.as_mut().unwrap()[4] = Stmt::Assign {
         place: pure_place,
         value: Rhs::Action(value()),
         order: AssignOrder::ValueFirst,
     };
     for name in ["target", "index"] {
         document
-            .manifest
-            .effects
-            .remove(&lash::workflow::document::EffectName::new(name).unwrap());
+            .imports
+            .retain(|_, import| import.name.member.as_str() != name);
     }
-    let holder = lash::workflow::WorkflowDocument::derive(
-        document,
-        WorkflowDocumentEntry::Entry {
-            function: Name::new("flow"),
-        },
-        &FunctionRegistry::default(),
-    )
-    .unwrap();
-    let view = view::derive(&holder, &super::test_packages()).unwrap();
+    let holder = checked(&lash_kernel_doc::print_document(&document), "flow");
+    let view = view::derive(&holder, &context(&holder)).unwrap();
     let names = |statement: usize| {
         view.statements[statement]
             .actions
@@ -244,7 +266,9 @@ fn coarse_eval() {
                     .find(|action| action.site == *site)
                     .unwrap();
                 match &action.callee {
-                    Some(view::CalleeView::Effect(name)) => name.as_str(),
+                    Some(view::CalleeView::Effect(name)) => {
+                        document.imports[&name.slot].name.member.as_str()
+                    }
                     _ => "task",
                 }
             })
@@ -258,7 +282,7 @@ fn coarse_eval() {
     let lazy: Vec<_> = view
         .nodes
         .iter()
-        .filter(|node| node.statement == site(&[1]) && node.kind == Kind::Action)
+        .filter(|node| node.statement == site(&view, &[1]) && node.kind == Kind::Action)
         .collect();
     assert_eq!(lazy.len(), 2);
     assert_eq!(lazy[0].lazy[0].arm, 1);
@@ -266,7 +290,7 @@ fn coarse_eval() {
     let control = view
         .nodes
         .iter()
-        .find(|node| node.site == site(&[2]))
+        .find(|node| node.site == site(&view, &[2]))
         .unwrap();
     assert_eq!(control.kind, Kind::Control);
     assert_eq!(control.header.as_ref().unwrap().actions.len(), 1);
@@ -294,15 +318,22 @@ fn coarse_eval() {
         })
         .collect();
     let effect = |name| {
-        Some(view::CalleeView::Effect(
-            lash::workflow::document::EffectName::new(name).unwrap(),
-        ))
+        Some(view::CalleeView::Effect(lash::package::OperationUse {
+            link: holder.reference().link,
+            slot: document
+                .imports
+                .iter()
+                .find(|(_, import)| import.name.member.as_str() == name)
+                .unwrap()
+                .0
+                .to_owned(),
+        }))
     };
     assert_eq!(ordered, [effect("value")]);
     assert!(
         view.nodes
             .iter()
-            .any(|node| node.departures == [site(&[5])] && node.kind == Kind::Action)
+            .any(|node| node.departures == [site(&view, &[5])] && node.kind == Kind::Action)
     );
 }
 
@@ -311,32 +342,67 @@ fn coarse_eval() {
 #[test]
 fn coarse_call() {
     let text = format!(
-        "{HEADER} fn recursive(flag) {{ if flag {{ do call recursive(false) }} return 1 }}
-      fn flow() {{ let callback = fn() {{ do yield return 1 }}
-        let x = call recursive(true) let y = apply callback() return y }} main {{ finish null }}"
+        "{HEADER}
+      main {{ let callback = fn() {{ do yield return 1 }}
+        let x = call recursive(&recursive,true) let y = apply callback() return y }}"
     );
     let view = project(&text);
     assert_eq!(view.dataflow.actions.len(), 3);
     assert_eq!(view.callables.len(), 2);
-    assert!(
+    assert_eq!(
         view.nodes
             .iter()
-            .all(|node| node.site.unit == site(&[]).unit)
+            .map(|node| node.site.unit.clone())
+            .collect::<BTreeSet<_>>(),
+        view.callables
+            .iter()
+            .map(|callable| callable.block.unit.clone())
+            .collect::<BTreeSet<_>>(),
+        "each lifted lexical body has its own callable Unit",
     );
     let called = view
         .dataflow
         .actions
         .iter()
-        .find(|action| action.site == site(&[1, 0]))
+        .find(|action| action.site == site(&view, &[1, 0]))
         .unwrap();
     assert_eq!(
         called.callee,
-        Some(view::CalleeView::Declared(Name::new("recursive")))
+        Some(view::CalleeView::Library {
+            id: checked(&text, "flow")
+                .document()
+                .functions
+                .iter()
+                .find(|(_, f)| f.name.as_str() == "recursive")
+                .unwrap()
+                .0
+                .to_owned(),
+            link: view
+                .dataflow
+                .actions
+                .iter()
+                .find_map(|a| match a.callee {
+                    Some(view::CalleeView::Library { link, .. }) => Some(link),
+                    _ => None,
+                })
+                .unwrap(),
+            name: lash::workflow::document::FunctionName::new("recursive").unwrap(),
+            exports: Vec::new()
+        })
     );
     let callee = view::derive_callable(
         &checked(&text, "flow"),
-        &Unit::Function(Name::new("recursive")),
-        &super::test_packages(),
+        &Unit::Library(
+            checked(&text, "flow")
+                .document()
+                .functions
+                .iter()
+                .find(|(_, f)| f.name.as_str() == "recursive")
+                .unwrap()
+                .0
+                .to_owned(),
+        ),
+        &context(&checked(&text, "flow")),
     )
     .unwrap();
     assert_eq!(
@@ -354,11 +420,11 @@ fn coarse_call() {
 #[test]
 fn coarse_departure() {
     let view = project(&format!(
-        "{HEADER} fn flow() {{
+        "{HEADER} main {{
       for x in [1] {{ try {{ if true {{ continue }} else {{ break }} }} finally {{ do yield }} }}
       try {{ throw {{kind: \"x\"}} }} catch error {{ return 1 }} finally {{ do yield }}
       finish 2 fail \"failed\" return 3 do yield
-    }} main {{ finish null }}"
+    }}"
     ));
     for kind in [
         FlowKind::Break,
@@ -373,7 +439,7 @@ fn coarse_departure() {
         !view
             .nodes
             .iter()
-            .find(|node| node.site == site(&[1]))
+            .find(|node| node.site == site(&view, &[1]))
             .unwrap()
             .falls_through,
         "a try whose body and catch depart cannot fall through after finally"
@@ -381,27 +447,31 @@ fn coarse_departure() {
     let returned = view
         .flow
         .iter()
-        .find(|edge| edge.from == site(&[1, 1, 0]) && edge.kind == FlowKind::Return)
+        .find(|edge| edge.from == site(&view, &[1, 1, 0]) && edge.kind == FlowKind::Return)
         .unwrap();
     assert!(
-        matches!(&returned.to, FlowTarget::Site(destination) if *destination == site(&[1, 2, 0]))
+        matches!(&returned.to, FlowTarget::Site(destination) if *destination == site(&view, &[1, 2, 0]))
     );
-    assert!(view.flow.iter().any(|edge| edge.from == site(&[1, 2])
-        && edge.kind == FlowKind::Return
-        && edge.to == FlowTarget::Leave));
+    assert!(
+        view.flow
+            .iter()
+            .any(|edge| edge.from == site(&view, &[1, 2])
+                && edge.kind == FlowKind::Return
+                && edge.to == FlowTarget::Leave)
+    );
     let code = view
         .nodes
         .iter()
-        .find(|node| node.members.contains(&site(&[2])))
+        .find(|node| node.members.contains(&site(&view, &[2])))
         .unwrap();
     assert_eq!(code.kind, Kind::Code);
     assert!(!code.falls_through);
-    assert!(code.departures.contains(&site(&[2])));
+    assert!(code.departures.contains(&site(&view, &[2])));
     assert!(
         !view
             .flow
             .iter()
-            .any(|edge| edge.from == site(&[2]) && edge.kind == FlowKind::Next)
+            .any(|edge| edge.from == site(&view, &[2]) && edge.kind == FlowKind::Next)
     );
 }
 
@@ -409,13 +479,19 @@ fn coarse_departure() {
 /// binding ids/scopes remain distinct and ranges cannot be used after reimport.
 #[test]
 fn coarse_spans() {
-    let document = checked(
-        &format!(
-            "{HEADER} fn flow() {{ let x = 1 if true {{ let x = 2 }} return x }} main {{ finish null }}"
-        ),
-        "flow",
-    );
-    let mut view = view::derive(&document, &super::test_packages()).unwrap();
+    let definition=lash_kernel_doc::parse_definition("function flow() -> Int\nkernel 1\nmetering statements\nbody {let x = 1 if true {let x = 2} return x}").unwrap();
+    let mut source = super::function_document(definition, "flow");
+    source.main = None;
+    let link = fixture_link(&source);
+    let document = lash::workflow::WorkflowDocument::entered(
+        source,
+        lash::package::LinkedStart {
+            link: link.identity(),
+            selector: lash::package::StartSelector::Export(Name::new("flow")),
+        },
+    )
+    .unwrap();
+    let mut view = view::derive(&document, &context(&document)).unwrap();
     let original = view.nodes.clone();
     view.readable = ReadableLens::Refused {
         name: "typescript".into(),
@@ -436,38 +512,39 @@ fn coarse_spans() {
     assert_ne!(shadowed[0].id, shadowed[1].id);
     assert!(view.nodes[0].bindings.contains(&shadowed[0].id));
     assert!(view.nodes[0].bindings.contains(&shadowed[1].id));
-    let embedding = lash_vm_worker::built_embedding(&Default::default()).expect("embedding");
-    let printed = lash::typescript::print(
+    // A readable projection may use a host-owned map independent of a dialect printer.
+    let source = "function flow() { let x = 1; if (true) { let x = 2; } return x; }";
+    let map = lash::workflow::document::SourceMap::new(
         document.document(),
-        None,
-        embedding.library(),
-        lash::dialect::PrintOptions {
-            source_map: true,
-            ..Default::default()
-        },
+        source,
+        lash::workflow::document::SourceLanguage::TypeScript,
+        document
+            .document()
+            .ordinal_nodes()
+            .into_iter()
+            .map(|(site, _)| lash::workflow::document::SourceSite {
+                site,
+                ranges: vec![lash::workflow::document::Span {
+                    start: 0,
+                    end: source.len(),
+                }],
+                implicit: None,
+            })
+            .collect(),
     )
     .unwrap();
-    let map = printed.source_map.unwrap();
     view.readable_ranges(
         document.document(),
         "generated_typescript".into(),
-        &printed.source,
+        source,
         &map,
     )
     .unwrap();
     assert!(view.nodes.iter().all(|node| !node.readable.is_empty()));
-    let changed = checked(
-        &format!("{HEADER} fn flow() {{ let x = 99 return x }} main {{ finish null }}"),
-        "flow",
-    );
+    let changed = checked(&format!("{HEADER} main {{ let x = 99 return x }}"), "flow");
     assert_ne!(view.document, changed.identity());
     assert_eq!(
-        view.readable_ranges(
-            changed.document(),
-            "typescript".into(),
-            &printed.source,
-            &map
-        ),
+        view.readable_ranges(changed.document(), "typescript".into(), source, &map),
         Err(lash::workflow::document::SourceMapRefusal::Document)
     );
 }
@@ -476,42 +553,56 @@ async fn launch(
     core: &lash::LashCore,
     text: &str,
     key: &str,
-) -> (lash::ProcessId, lash::workflow::WorkflowDocument) {
+) -> (
+    lash_vocabulary::identity::ProcessId,
+    lash::workflow::WorkflowDocument,
+    view::ViewContext,
+) {
     let document = parse_document(text).unwrap();
     let artifacts = core.host_artifacts();
     let pin = lash::process::HostArtifactPin::mint();
-    let env = linking(&environment(false), &[]);
-    let publication = published(
-        artifacts
-            .publish_workflow(
-                &pin,
-                &lash::workflow::document::DocumentBytes::from(document.clone()),
-                &Name::new("flow"),
-                &env,
-                artifacts
-                    .cell_packages()
-                    .await
-                    .expect("the package gate answers")
-                    .declare_all(),
-                None,
-            )
-            .await
-            .unwrap(),
-    );
+    let env = environment(false);
+    let (packages, namespace) = namespace(core, &pin, &env).await;
+    let linked = artifacts
+        .publish_workflow(
+            &pin,
+            &document.clone().into(),
+            &lash::package::StartSelector::Main,
+            &namespace,
+            None,
+        )
+        .await
+        .unwrap();
+    let env = artifacts
+        .link_process_env(&env, &linked, &packages, &Default::default())
+        .await
+        .unwrap();
     let env_ref = artifacts.publish_process_env(&pin, &env).await.unwrap();
+    let draft = lash::vm::definition_draft(&lash::process::KernelProcessDefinition {
+        code: lash::vm::KernelInlineRequest::Linked {
+            start: linked.clone(),
+        },
+    })
+    .unwrap();
+    let definition = artifacts.publish_definition(&pin, &draft).await.unwrap();
     let settings = core
         .processes()
         .kernel_engine_defaults()
         .unwrap()
-        .observing(lash::process::ObservationMode::Counts)
+        .observing(lash_vocabulary::observation::RunObservation::Counts)
         .into_engine_settings();
-    let document = super::publication_document(core, &publication).await;
+    let lash::workflow::WorkflowDocumentRead::Read(document) =
+        artifacts.execution_document(&linked).await.unwrap()
+    else {
+        panic!("retained Main")
+    };
+    let document = *document;
     let process = core
         .processes()
         .start(
             lash::process::ProcessStartRequest::definition(
-                publication.definition.id,
-                Some(publication.definition.signature),
+                definition.id,
+                Some(definition.signature),
                 serde_json::Map::new(),
                 lash::process::EngineLaunch::new(env_ref, Some(settings)),
                 lash::process::ProcessOriginator::host(),
@@ -523,9 +614,16 @@ async fn launch(
         .await
         .unwrap()
         .process_id;
-    (process, document)
+    let context = artifacts
+        .workflow_view_context(&linked, &env.execution().publications)
+        .await
+        .unwrap();
+    (process, document, context)
 }
-async fn counts(core: &lash::LashCore, process: &lash::ProcessId) -> view::RanCounts {
+async fn counts(
+    core: &lash::LashCore,
+    process: &lash_vocabulary::identity::ProcessId,
+) -> view::RanCounts {
     let snapshot = core.processes().observe(process).snapshot().await.unwrap();
     let lash::process::ProcessReadView::Retained(read) = snapshot.read_view else {
         panic!("retained");
@@ -538,25 +636,25 @@ async fn counts(core: &lash::LashCore, process: &lash::ProcessId) -> view::RanCo
 #[tokio::test]
 async fn coarse_counts() {
     let core = core().await;
-    let (process, document) = launch(
+    let (process, document, context) = Box::pin(launch(
         &core,
         &format!(
             "{HEADER}
-      fn answer() {{ return 7 }} fn worker() {{ return 1 }}
-      fn flow() {{
+
+      main {{
         let answer = if(true, call answer(), call answer())
         let initial = 0 let keep = true while keep {{ set keep = false do yield }}
         if false {{ do yield }} else {{}}
         let task = spawn call worker() let joined = join task do cancel task
         let tasks = [task] let every = join all tasks
         return answer
-      }} main {{ finish null }}"
+      }}"
         ),
         "coarse-counts",
-    )
+    ))
     .await;
     assert_eq!(finished(&core, &process).await, serde_json::json!(7));
-    let view = view::derive(&document, &super::test_packages()).unwrap();
+    let view = view::derive(&document, &context).unwrap();
     let counts = counts(&core, &process).await;
     let coverage = view.coverage(&counts);
     let runs = |site: &Site| {
@@ -666,22 +764,22 @@ async fn coarse_counts() {
 async fn coarse_resume() {
     let files = Files::new();
     let first = core_over(files.open().await, "coarse-first").await;
-    let (process, document) = launch(
+    let (process, document, context) = Box::pin(launch(
         &first,
         &format!(
             "{HEADER}
-      fn child() {{ return 9 }} fn pair(a, b) {{ return b }}
-      fn flow() {{
-        let worker = fn() {{ let out = call pair(sleep 5, call child()) return out }}
+      import 0 operation typescript.sleep(milliseconds: Int) -> Null
+      main {{
+        let worker = fn() {{ let out = call pair(perform 0(5) as Null, call child()) return out }}
         let first = spawn apply worker() let second = spawn apply worker()
         let tasks = [first, second] let results = join all tasks return results
-      }} main {{ finish null }}"
+      }}"
         ),
         "coarse-resume",
-    )
+    ))
     .await;
     let due = timer_park_after(&first, &process, 0).await;
-    let view = view::derive(&document, &super::test_packages()).unwrap();
+    let view = view::derive(&document, &context).unwrap();
     let actions = &view
         .statements
         .iter()

@@ -21,9 +21,10 @@ use lash_durable::domain::{
     TurnCancelRequest, TurnEnd, TurnNamespace, TurnRow, TurnWrite, UnfinishedPhase,
 };
 use lash_durable::{ActorKey, DurableError, DurableInstant, Epoch, Woken};
-use lash_protocol_types::{SessionId, TurnId};
 use lash_store_sql::Dialect;
 use lash_store_sql::durable::turns::TurnStatements;
+use lash_vocabulary::identity::SessionId;
+use lash_vocabulary::identity::TurnId;
 use sqlx::{PgConnection, Row};
 
 use super::steps::{self, Collect, Entry, Shape, Step, Ty, Value};
@@ -625,7 +626,10 @@ pub(super) async fn apply(
             }
             let program = terminal_steps(session, run, &cause, *head_revision, *transcript)?;
             match steps::run(tx, &program, &commit.steps()).await? {
-                None => Ok(()),
+                None => {
+                    super::packages::end_actor_executions(tx, commit.actor).await?;
+                    Ok(())
+                }
                 Some(refused) if std::ptr::eq(program[refused.index].entry, &END_RUN) => {
                     refuse(DomainRefusal::TurnNotOpen {
                         session: session.clone(),

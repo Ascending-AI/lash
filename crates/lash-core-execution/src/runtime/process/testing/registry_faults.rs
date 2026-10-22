@@ -563,7 +563,7 @@ impl lash_execution_contracts::process::ProcessEventLog for ProcessRegistryFault
     // `event_page_after`: a by-id read sees the same fault.
     async fn event_by_replay_key(
         &self,
-        process_id: &crate::ProcessId,
+        process_id: &lash_vocabulary::identity::ProcessId,
         replay_key: &str,
         through_sequence: u64,
     ) -> Result<
@@ -580,7 +580,7 @@ impl lash_execution_contracts::process::ProcessEventLog for ProcessRegistryFault
 
     async fn event_page_after(
         &self,
-        process_id: &crate::ProcessId,
+        process_id: &lash_vocabulary::identity::ProcessId,
         after_sequence: u64,
         limit: std::num::NonZeroUsize,
         mode: lash_execution_contracts::process::ProcessEventQueryMode,
@@ -656,7 +656,7 @@ impl lash_execution_contracts::process::ProcessLifecycle for ProcessRegistryFaul
 
     async fn request_process_cancel(
         &self,
-        process_id: &crate::ProcessId,
+        process_id: &lash_vocabulary::identity::ProcessId,
         origin: crate::CancelOrigin,
         requester: String,
         attribution: Option<crate::RuntimeReplayAttribution>,
@@ -676,7 +676,7 @@ impl lash_execution_contracts::process::ProcessLifecycle for ProcessRegistryFaul
 
     async fn request_process_cancel_reporting_realization(
         &self,
-        process_id: &crate::ProcessId,
+        process_id: &lash_vocabulary::identity::ProcessId,
         origin: crate::CancelOrigin,
         requester: String,
         attribution: Option<crate::RuntimeReplayAttribution>,
@@ -718,7 +718,7 @@ impl lash_execution_contracts::process::ProcessRetention for ProcessRegistryFaul
 
     async fn release_process_events(
         &self,
-        process_id: &crate::ProcessId,
+        process_id: &lash_vocabulary::identity::ProcessId,
         through: u64,
     ) -> Result<
         lash_execution_contracts::process::ProcessEventRelease,

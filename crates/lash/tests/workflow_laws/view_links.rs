@@ -2,8 +2,9 @@
 //! says which actions reach outside the document's code, for a TypeScript
 //! and a Python workflow, read with no engine.
 use lash::workflow::document::{self as k, Site};
-use lash::workflow::view::{ActionRole, ActionView, CalleeView, SiteKind, WorkflowView, derive};
-use lash::workflow::{WorkflowDocument, WorkflowDocumentEntry};
+use lash::workflow::view::{
+    ActionRole, ActionView, CalleeView, SiteKind, WorkflowView, derive_callable,
+};
 use std::collections::BTreeMap;
 
 fn echo() -> BTreeMap<k::EffectName, k::Signature> {
@@ -24,14 +25,8 @@ fn echo() -> BTreeMap<k::EffectName, k::Signature> {
 /// failure messages.
 fn views() -> [(&'static str, WorkflowView); 2] {
     let embedding = lash_vm_worker::built_embedding(&Default::default()).expect("embedding");
-    let registry = embedding.registry().expect("registry");
     let effects = echo();
-    let environment_namespaces = lash::dialect::Namespaces::of_effects(
-        &effects,
-        &lash::workflow::document::ContractId::new("1"),
-        &Default::default(),
-    )
-    .expect("the test's effects are operations");
+    let environment_namespaces = super::namespaces(effects);
     let environment = lash::dialect::Environment::new(embedding.library(), &environment_namespaces);
     let typescript = lash::typescript::lower(
         "export async function flow(count: number) {
@@ -55,25 +50,18 @@ fn views() -> [(&'static str, WorkflowView); 2] {
     .expect("lower Python")
     .document
     .into_document();
-    let functions = registry.export_declarations();
-    let view = |document, entry| {
-        derive(
-            &WorkflowDocument::derive(document, entry, &functions).expect("link"),
-            &super::test_packages(),
-        )
-        .expect("view")
-    };
+    let unit = super::export_unit(&typescript, "flow");
+    let (typescript, ts_context) = super::holder(typescript);
+    let (python, py_context) = super::holder(python);
     [
         (
             "TypeScript",
-            view(
-                typescript,
-                WorkflowDocumentEntry::Entry {
-                    function: k::Name::new("flow"),
-                },
-            ),
+            derive_callable(&typescript, &unit, &ts_context).expect("view"),
         ),
-        ("Python", view(python, WorkflowDocumentEntry::Main)),
+        (
+            "Python",
+            derive_callable(&python, &k::Unit::Main, &py_context).expect("view"),
+        ),
     ]
 }
 

@@ -14,7 +14,8 @@ async fn turn_stream_finish_returns_committed_assistant_prose() -> Result<()> {
     .build(lash_facade_tests::runtime_lease_owner())?;
     let session = created_session(
         &core,
-        lash::SessionId::parse("turn-stream-last-group").expect("nonblank host identity"),
+        lash_vocabulary::identity::SessionId::parse("turn-stream-last-group")
+            .expect("nonblank host identity"),
     )
     .await
     .open()
@@ -43,7 +44,8 @@ async fn retry_status_streams_as_semantic_turn_event() -> Result<()> {
     .build(lash_facade_tests::runtime_lease_owner())?;
     let session = created_session(
         &core,
-        lash::SessionId::parse("retry-status").expect("nonblank host identity"),
+        lash_vocabulary::identity::SessionId::parse("retry-status")
+            .expect("nonblank host identity"),
     )
     .await
     .open()
@@ -115,7 +117,8 @@ async fn queued_input_acceptance_streams_semantic_ack_with_id() -> Result<()> {
     .build(lash_facade_tests::runtime_lease_owner())?;
     let session = created_session(
         &core,
-        lash::SessionId::parse("queued-input").expect("nonblank host identity"),
+        lash_vocabulary::identity::SessionId::parse("queued-input")
+            .expect("nonblank host identity"),
     )
     .await
     .open()
@@ -126,7 +129,10 @@ async fn queued_input_acceptance_streams_semantic_ack_with_id() -> Result<()> {
     let turn = tokio::spawn(async move {
         turn_session
             .send(TurnInput::text("hello"))
-            .id(lash::TurnId::parse("queued-input-turn").expect("nonblank host identity"))
+            .id(
+                lash_vocabulary::identity::TurnId::parse("queued-input-turn")
+                    .expect("nonblank host identity"),
+            )
             .output_into(turn_events.as_ref())
             .await
     });
@@ -152,7 +158,10 @@ async fn queued_input_acceptance_streams_semantic_ack_with_id() -> Result<()> {
     // named by its source key, acknowledges it at its start and answers it.
     let next = RecordingEvents::default();
     let follow_up = session
-        .attach_id(lash::TurnId::parse("injection:queue-1").expect("the injected input's run"))
+        .attach_id(
+            lash_vocabulary::identity::TurnId::parse("injection:queue-1")
+                .expect("the injected input's run"),
+        )
         .output_into(&next)
         .await?;
     assert!(matches!(
@@ -272,7 +281,8 @@ async fn next_turn_notification_during_a_live_turn_has_bounded_hydrations() -> R
     .build(lash_facade_tests::runtime_lease_owner())?;
     let session = created_session(
         &core,
-        lash::SessionId::parse("queued-work-live-lease").expect("nonblank host identity"),
+        lash_vocabulary::identity::SessionId::parse("queued-work-live-lease")
+            .expect("nonblank host identity"),
     )
     .await
     .open()
@@ -285,13 +295,19 @@ async fn next_turn_notification_during_a_live_turn_has_bounded_hydrations() -> R
     entered.await;
     let baseline_builds = builds.load(Ordering::SeqCst);
 
-    core.session(lash::SessionId::parse("queued-work-live-lease").expect("nonblank host identity"))
-        .durable()
-        .await?
-        .send(TurnInput::text("queued while foreground owns the lease"))
-        .ingress(lash_core::TurnInputIngress::NextTurn)
-        .id(lash::TurnId::parse("queued-during-live-turn").expect("nonblank host identity"))
-        .await?;
+    core.session(
+        lash_vocabulary::identity::SessionId::parse("queued-work-live-lease")
+            .expect("nonblank host identity"),
+    )
+    .durable()
+    .await?
+    .send(TurnInput::text("queued while foreground owns the lease"))
+    .ingress(lash_core::TurnInputIngress::NextTurn)
+    .id(
+        lash_vocabulary::identity::TurnId::parse("queued-during-live-turn")
+            .expect("nonblank host identity"),
+    )
+    .await?;
     wait_for_stable_build_count(&builds).await;
 
     let hydrations = builds
@@ -356,7 +372,7 @@ async fn assert_session_turn_cancel_disposition(
     let request_id = format!("{session_id}:cancel");
     let cancel = session
         .cancel(lash::CancelTarget::Run(
-            lash::RunId::parse((turn_id.clone()).as_str()).unwrap(),
+            lash_vocabulary::identity::RunId::parse((turn_id.clone()).as_str()).unwrap(),
         ))
         .request_id(request_id.clone())
         .origin("test-host")
@@ -385,7 +401,7 @@ async fn assert_session_turn_cancel_disposition(
     ));
     let terminal = session
         .durable()
-        .run_terminal(&lash::RunId::parse(turn_id.as_str()).unwrap())
+        .run_terminal(&lash_vocabulary::identity::RunId::parse(turn_id.as_str()).unwrap())
         .await?
         .expect("cancel terminal");
     let lash::persistence::RunTerminalCause::Cancelled { input_outcome, .. } = terminal.cause
@@ -478,7 +494,8 @@ async fn active_steer_after_last_call_defers_to_next_turn_first_call() -> Result
     .build(lash_facade_tests::runtime_lease_owner())?;
     let session = created_session(
         &core,
-        lash::SessionId::parse("active-steer-interrupt-cancel").expect("nonblank host identity"),
+        lash_vocabulary::identity::SessionId::parse("active-steer-interrupt-cancel")
+            .expect("nonblank host identity"),
     )
     .await
     .open()
@@ -486,7 +503,8 @@ async fn active_steer_after_last_call_defers_to_next_turn_first_call() -> Result
     let active_turn_id = "active-steer-interrupt-turn";
     let primary = session
         .send(TurnInput::text("primary hangs"))
-        .id(lash::TurnId::parse(active_turn_id).expect("nonblank host identity"))
+        .id(lash_vocabulary::identity::TurnId::parse(active_turn_id)
+            .expect("nonblank host identity"))
         .await?;
     let turn = tokio::spawn(async move { primary.outcome().await });
 
@@ -496,7 +514,8 @@ async fn active_steer_after_last_call_defers_to_next_turn_first_call() -> Result
         .expect("provider started signal");
     let active = session
         .send(TurnInput::text("deferred active steer"))
-        .id(lash::TurnId::parse("active-steer").expect("nonblank host identity"))
+        .id(lash_vocabulary::identity::TurnId::parse("active-steer")
+            .expect("nonblank host identity"))
         .ingress(lash_core::TurnInputIngress::active_turn(
             active_turn_id,
             lash_core::TurnInputCheckpointBoundary::AfterWork,
@@ -504,7 +523,8 @@ async fn active_steer_after_last_call_defers_to_next_turn_first_call() -> Result
         .await?;
     let queued = session
         .send(TurnInput::text("cancelled next turn"))
-        .id(lash::TurnId::parse("cancelled-next").expect("nonblank host identity"))
+        .id(lash_vocabulary::identity::TurnId::parse("cancelled-next")
+            .expect("nonblank host identity"))
         .await?;
     let cancelled = queued.cancel().await?;
     assert!(
@@ -514,7 +534,8 @@ async fn active_steer_after_last_call_defers_to_next_turn_first_call() -> Result
 
     let stopped = session
         .cancel(lash::CancelTarget::Run(
-            lash::RunId::parse((TurnId::from(active_turn_id)).as_str()).unwrap(),
+            lash_vocabulary::identity::RunId::parse((TurnId::from(active_turn_id)).as_str())
+                .unwrap(),
         ))
         .undelivered(lash_core::facade_support::TurnCancelUndeliveredInputPolicy::Defer)
         .await?;
@@ -627,7 +648,8 @@ async fn accepted_active_steer_interrupt_is_not_requeued() -> Result<()> {
     .build(lash_facade_tests::runtime_lease_owner())?;
     let session = created_session(
         &core,
-        lash::SessionId::parse("accepted-active-steer-interrupt").expect("nonblank host identity"),
+        lash_vocabulary::identity::SessionId::parse("accepted-active-steer-interrupt")
+            .expect("nonblank host identity"),
     )
     .await
     .open()
@@ -635,7 +657,8 @@ async fn accepted_active_steer_interrupt_is_not_requeued() -> Result<()> {
     let active_turn_id = "accepted-active-steer-turn";
     let primary = session
         .send(TurnInput::text("primary waits for active steer"))
-        .id(lash::TurnId::parse(active_turn_id).expect("nonblank host identity"))
+        .id(lash_vocabulary::identity::TurnId::parse(active_turn_id)
+            .expect("nonblank host identity"))
         .await?;
     let mut turn = tokio::spawn(async move { primary.outcome().await });
 
@@ -649,7 +672,10 @@ async fn accepted_active_steer_interrupt_is_not_requeued() -> Result<()> {
     }
     let active = session
         .send(TurnInput::text("accepted active steer"))
-        .id(lash::TurnId::parse("accepted-active-steer").expect("nonblank host identity"))
+        .id(
+            lash_vocabulary::identity::TurnId::parse("accepted-active-steer")
+                .expect("nonblank host identity"),
+        )
         .ingress(lash_core::TurnInputIngress::active_turn(
             active_turn_id,
             lash_core::TurnInputCheckpointBoundary::AfterWork,
@@ -667,7 +693,8 @@ async fn accepted_active_steer_interrupt_is_not_requeued() -> Result<()> {
 
     let stopped = session
         .cancel(lash::CancelTarget::Run(
-            lash::RunId::parse((TurnId::from(active_turn_id)).as_str()).unwrap(),
+            lash_vocabulary::identity::RunId::parse((TurnId::from(active_turn_id)).as_str())
+                .unwrap(),
         ))
         .await?;
     assert!(matches!(stopped, lash::CancelReceipt::Cancelled { .. }));
@@ -771,7 +798,8 @@ async fn checkpoint_admitted_steer_cancel_reaches_its_run() -> Result<()> {
     let session_id = SessionId::from("checkpoint-admitted-steer-cancel");
     let session = created_session(
         &core,
-        lash::SessionId::parse("checkpoint-admitted-steer-cancel").expect("nonblank host identity"),
+        lash_vocabulary::identity::SessionId::parse("checkpoint-admitted-steer-cancel")
+            .expect("nonblank host identity"),
     )
     .await
     .open()
@@ -779,7 +807,8 @@ async fn checkpoint_admitted_steer_cancel_reaches_its_run() -> Result<()> {
     let active_turn_id = "checkpoint-admitted-steer-turn";
     let primary = session
         .send(TurnInput::text("primary waits for active steer"))
-        .id(lash::TurnId::parse(active_turn_id).expect("nonblank host identity"))
+        .id(lash_vocabulary::identity::TurnId::parse(active_turn_id)
+            .expect("nonblank host identity"))
         .await?;
     let turn = tokio::spawn(async move { primary.outcome().await });
 
@@ -792,7 +821,10 @@ async fn checkpoint_admitted_steer_cancel_reaches_its_run() -> Result<()> {
     .await;
     let active = session
         .send(TurnInput::text("cancelled active steer"))
-        .id(lash::TurnId::parse("checkpoint-admitted-steer").expect("nonblank host identity"))
+        .id(
+            lash_vocabulary::identity::TurnId::parse("checkpoint-admitted-steer")
+                .expect("nonblank host identity"),
+        )
         .ingress(lash_core::TurnInputIngress::active_turn(
             active_turn_id,
             lash_core::TurnInputCheckpointBoundary::AfterWork,
@@ -839,7 +871,8 @@ async fn turn_event_fanout_streams_to_collector_and_live_sink() -> Result<()> {
     .build(lash_facade_tests::runtime_lease_owner())?;
     let session = created_session(
         &core,
-        lash::SessionId::parse("fanout-tool-events").expect("nonblank host identity"),
+        lash_vocabulary::identity::SessionId::parse("fanout-tool-events")
+            .expect("nonblank host identity"),
     )
     .await
     .open()

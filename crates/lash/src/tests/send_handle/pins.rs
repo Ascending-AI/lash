@@ -18,7 +18,7 @@ use lash_core::Target;
 /// a later commit. The source's state is read through that same fork rule.
 #[derive(Clone, Debug, PartialEq)]
 struct Published {
-    leaf: Option<lash_core::NodeId>,
+    leaf: Option<lash_vocabulary::identity::NodeId>,
     checkpoint: Option<serde_json::Value>,
     config: lash_core::PersistedSessionConfig,
 }
@@ -156,7 +156,7 @@ async fn a_send_pinned_at_acceptance_keeps_its_turn_through_collection() -> Resu
     let fixture = fixture(1).await?;
     let session = created_session(
         &fixture.core,
-        crate::SessionId::parse("pin-at-send").expect("nonblank host identity"),
+        lash_vocabulary::identity::SessionId::parse("pin-at-send").expect("nonblank host identity"),
     )
     .await
     .open()
@@ -245,7 +245,7 @@ async fn current_turn_pins_the_running_turn_out_of_band() -> Result<()> {
     let fixture = fixture(1).await?;
     let session = created_session(
         &fixture.core,
-        crate::SessionId::parse("pin-running").expect("nonblank host identity"),
+        lash_vocabulary::identity::SessionId::parse("pin-running").expect("nonblank host identity"),
     )
     .await
     .open()
@@ -256,17 +256,17 @@ async fn current_turn_pins_the_running_turn_out_of_band() -> Result<()> {
 
     let running = session
         .send(TurnInput::text(HELD))
-        .id(crate::TurnId::parse("held-run").expect("nonblank host identity"))
+        .id(lash_vocabulary::identity::TurnId::parse("held-run").expect("nonblank host identity"))
         .await?;
     provider_called(&fixture, 2).await;
     let turn = session
         .current_turn()
         .await?
         .expect("the held turn is the unfinished run");
-    assert_eq!(turn, lash_core::TurnId::from("held-run"));
+    assert_eq!(turn, lash_vocabulary::identity::TurnId::from("held-run"));
     assert_eq!(
         running.run().await?,
-        Some(crate::RunId::parse(turn.as_str()).unwrap())
+        Some(lash_vocabulary::identity::RunId::parse(turn.as_str()).unwrap())
     );
     let target = Target::Turn(turn);
     session.pin(target.clone()).await?;
@@ -316,7 +316,7 @@ async fn a_merged_inputs_pin_resolves_to_the_run_that_applied_it() -> Result<()>
     let fixture = composing_fixture().await?;
     let session = created_session(
         &fixture.core,
-        crate::SessionId::parse("pin-merged").expect("nonblank host identity"),
+        lash_vocabulary::identity::SessionId::parse("pin-merged").expect("nonblank host identity"),
     )
     .await
     .open()
@@ -324,16 +324,16 @@ async fn a_merged_inputs_pin_resolves_to_the_run_that_applied_it() -> Result<()>
 
     let running = session
         .send(TurnInput::text(HELD))
-        .id(crate::TurnId::parse("held-run").expect("nonblank host identity"))
+        .id(lash_vocabulary::identity::TurnId::parse("held-run").expect("nonblank host identity"))
         .await?;
     provider_called(&fixture, 1).await;
     let second = session
         .send(TurnInput::text("second"))
-        .id(crate::TurnId::parse("second-run").expect("nonblank host identity"))
+        .id(lash_vocabulary::identity::TurnId::parse("second-run").expect("nonblank host identity"))
         .await?;
     let third = session
         .send(TurnInput::text("third"))
-        .id(crate::TurnId::parse("third-run").expect("nonblank host identity"))
+        .id(lash_vocabulary::identity::TurnId::parse("third-run").expect("nonblank host identity"))
         .await?;
     assert_eq!(third.run().await?, None, "no run has taken the input yet");
     third.pin().await?;
@@ -344,7 +344,7 @@ async fn a_merged_inputs_pin_resolves_to_the_run_that_applied_it() -> Result<()>
     second.output().await?;
     assert_eq!(
         session.attach(third_input.clone()).run().await?,
-        Some(crate::RunId::parse("second-run").unwrap()),
+        Some(lash_vocabulary::identity::RunId::parse("second-run").unwrap()),
         "the merged input is bound to the run that applied it"
     );
     let merged = published(&fixture, "pin-merged").await?;
@@ -364,7 +364,7 @@ async fn a_merged_inputs_pin_resolves_to_the_run_that_applied_it() -> Result<()>
         .store_factory
         .resolve_target(
             &SessionId::from("pin-merged"),
-            &Target::Turn(lash_core::TurnId::from("second-run")),
+            &Target::Turn(lash_vocabulary::identity::TurnId::from("second-run")),
         )
         .await?;
     assert_eq!(
@@ -383,7 +383,7 @@ async fn an_empty_session_forks_before_and_after_a_config_command() -> Result<()
     let fixture = fixture(1).await?;
     let session = created_session(
         &fixture.core,
-        crate::SessionId::parse("fork-empty").expect("nonblank host identity"),
+        lash_vocabulary::identity::SessionId::parse("fork-empty").expect("nonblank host identity"),
     )
     .await
     .open()
@@ -467,7 +467,10 @@ async fn an_empty_session_forks_before_and_after_a_config_command() -> Result<()
     // Both forks are ordinary sessions: each runs its own first turn.
     let branch = fixture
         .core
-        .session(crate::SessionId::parse("fork-empty-configured").expect("nonblank host identity"))
+        .session(
+            lash_vocabulary::identity::SessionId::parse("fork-empty-configured")
+                .expect("nonblank host identity"),
+        )
         .open()
         .await?;
     assert_eq!(
@@ -488,25 +491,28 @@ async fn a_withdrawn_or_waiting_input_refuses_typed() -> Result<()> {
     let fixture = fixture(1).await?;
     let session = created_session(
         &fixture.core,
-        crate::SessionId::parse("fork-refused").expect("nonblank host identity"),
+        lash_vocabulary::identity::SessionId::parse("fork-refused")
+            .expect("nonblank host identity"),
     )
     .await
     .open()
     .await?;
     let running = session
         .send(TurnInput::text(HELD))
-        .id(crate::TurnId::parse("held-run").expect("nonblank host identity"))
+        .id(lash_vocabulary::identity::TurnId::parse("held-run").expect("nonblank host identity"))
         .await?;
     provider_called(&fixture, 1).await;
     let waiting = session
         .send(TurnInput::text("waits"))
-        .id(crate::TurnId::parse("waiting-run").expect("nonblank host identity"))
+        .id(lash_vocabulary::identity::TurnId::parse("waiting-run")
+            .expect("nonblank host identity"))
         .pin()
         .await?;
     let waiting_target = Target::Input(waiting.input_id().clone());
     let withdrawn = session
         .send(TurnInput::text("withdraw me"))
-        .id(crate::TurnId::parse("withdrawn-run").expect("nonblank host identity"))
+        .id(lash_vocabulary::identity::TurnId::parse("withdrawn-run")
+            .expect("nonblank host identity"))
         .pin()
         .await?;
     let withdrawn_target = Target::Input(withdrawn.input_id().clone());
@@ -599,7 +605,9 @@ async fn a_held_turn_pinned_both_ways_forks_after_collection(
     let held_run = format!("{prefix}-held");
     let running = session
         .send(TurnInput::text(HELD))
-        .id(lash_core::TurnId::fixture(held_run.as_str()))
+        .id(lash_vocabulary::identity::TurnId::fixture(
+            held_run.as_str(),
+        ))
         .pin()
         .await?;
     reaches(&calls, 2, "the held turn's model call starts").await;
@@ -607,7 +615,10 @@ async fn a_held_turn_pinned_both_ways_forks_after_collection(
         .current_turn()
         .await?
         .expect("the held turn is the unfinished run");
-    assert_eq!(turn, lash_core::TurnId::fixture(held_run.as_str()));
+    assert_eq!(
+        turn,
+        lash_vocabulary::identity::TurnId::fixture(held_run.as_str())
+    );
     let by_turn = Target::Turn(turn);
     let by_input = Target::Input(running.input_id().clone());
     session.pin(by_turn.clone()).await?;

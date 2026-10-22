@@ -1,3 +1,9 @@
+operation typescript.random() -> Bytes
+use bytes.at
+use add
+use mul
+use lt
+use int.div
 # JavaScript math behavior, expressed in kernel code.
 use eq
 use int.rem_floor
@@ -515,9 +521,18 @@ let value = invoke ts.to_number(builtin_arg_34)
 function ts.math.random(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError"
-charge sum(8, deep(result))
+charge sum(512, deep(result))
 body {
-  return random
+  let bits = perform typescript.random() as Bytes
+  let top = 0
+  set top = add(mul(top, 256), bytes.at(bits, 0))
+  set top = add(mul(top, 256), bytes.at(bits, 1))
+  set top = add(mul(top, 256), bytes.at(bits, 2))
+  set top = add(mul(top, 256), bytes.at(bits, 3))
+  set top = add(mul(top, 256), bytes.at(bits, 4))
+  set top = add(mul(top, 256), bytes.at(bits, 5))
+  set top = add(mul(top, 32), int.div_floor(bytes.at(bits, 6), 8))
+  return num.div(num.to_float(top), 9007199254740992.0)
 }
 
 function ts.math.E() -> Any

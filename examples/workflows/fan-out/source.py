@@ -1,7 +1,7 @@
 import asyncio
 
 #: Echo two values at once
-async def demo():
+async def demo() -> list[str]:
     #: Describe how to echo one value
     async def work(value: str):
         return await corpus.echo(value)

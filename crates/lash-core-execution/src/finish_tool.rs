@@ -20,15 +20,22 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 
-use crate::{
-    ExecutionPolicy, JsonSchema, ToolCall, ToolContract, ToolDefinition, ToolManifest, ToolOutcome,
-    ToolProvider, TurnControls,
-};
+use crate::ToolCall;
+use crate::ToolOutcome;
+use crate::ToolProvider;
+use lash_vocabulary::json_schema::JsonSchema;
+use lash_vocabulary::tool_contract::ExecutionPolicy;
+use lash_vocabulary::tool_contract::ToolContract;
+use lash_vocabulary::tool_contract::ToolDefinition;
+use lash_vocabulary::tool_contract::ToolManifest;
+use lash_vocabulary::tool_declaration::TurnControls;
 
 /// The id [`finish_tool`] gives the tool performed as `operation`.
 #[must_use]
-pub fn finish_tool_id(operation: &crate::QualifiedOperation) -> crate::ToolId {
-    crate::ToolId::from(format!("tool:{}", operation.effect_name()))
+pub fn finish_tool_id(
+    operation: &lash_vocabulary::names::QualifiedOperation,
+) -> lash_vocabulary::tool_contract::ToolId {
+    lash_vocabulary::tool_contract::ToolId::from(format!("tool:{}", operation.effect_name()))
 }
 
 /// A finish tool performed as `operation`: its call ends the turn with its
@@ -40,19 +47,19 @@ pub fn finish_tool_id(operation: &crate::QualifiedOperation) -> crate::ToolId {
 ///
 /// # Errors
 ///
-/// [`crate::ToolCatalogBuildError`] for an operation that is not canonical.
+/// [`lash_vocabulary::ToolCatalogBuildError`] for an operation that is not canonical.
 #[expect(
     clippy::expect_used,
     reason = "an admitted schema is an admitted input schema"
 )]
 pub fn finish_tool(
-    operation: impl crate::IntoOperation,
+    operation: impl lash_vocabulary::tool_contract::IntoOperation,
     description: impl Into<String>,
     value_schema: JsonSchema,
-) -> Result<ToolDefinition, crate::ToolCatalogBuildError> {
+) -> Result<ToolDefinition, lash_vocabulary::ToolCatalogBuildError> {
     let operation = operation.into_operation().map_err(|message| {
-        crate::ToolCatalogBuildError::InvalidOperation {
-            tool_id: crate::ToolId::from("tool:finish"),
+        lash_vocabulary::ToolCatalogBuildError::InvalidOperation {
+            tool_id: lash_vocabulary::tool_contract::ToolId::from("tool:finish"),
             message,
         }
     })?;
@@ -64,7 +71,7 @@ pub fn finish_tool(
         TurnControls::finish(value_schema),
     );
     let draft = match draft {
-        Err(crate::ToolCatalogBuildError::UnusableSchema { .. }) | Ok(_) => {
+        Err(lash_vocabulary::ToolCatalogBuildError::UnusableSchema { .. }) | Ok(_) => {
             draft.expect("an admitted schema is an admitted input schema")
         }
         Err(refused) => return Err(refused),
@@ -141,7 +148,7 @@ impl ToolProvider for FinishToolProvider {
 #[must_use]
 pub fn suppress_default_finish(
     ctx: &crate::plugin::ToolCatalogContext,
-    default: &crate::ToolId,
+    default: &lash_vocabulary::tool_contract::ToolId,
 ) -> crate::plugin::ToolCatalogContribution {
     let Some(default_tool) = ctx.tools.iter().find(|tool| &tool.id == default) else {
         return crate::plugin::ToolCatalogContribution::default();
@@ -151,7 +158,7 @@ pub fn suppress_default_finish(
             && tool
                 .declaration()
                 .controls
-                .contains(crate::TurnControlKind::Finish)
+                .contains(lash_vocabulary::tool_declaration::TurnControlKind::Finish)
     });
     if host_finish {
         crate::plugin::ToolCatalogContribution::remove_tools([default_tool.operation.clone()])

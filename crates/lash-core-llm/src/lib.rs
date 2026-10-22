@@ -37,7 +37,9 @@ pub(crate) use lash_protocol_types::{
     llm::types::NonNegativeFiniteF64, llm::types::ProviderFailureKind,
     llm::types::ProviderReplayDrop,
 };
+
 pub(crate) use lash_protocol_types::{session_model::FailureCode, session_model::TurnFailureKind};
+
 pub(crate) use session_model::ChargeSafetyPolicy;
 
 // Names the moved modules reach for only from their own test suites.
@@ -50,5 +52,6 @@ pub(crate) use lash_protocol_types::{
     llm::types::GenerationOptions, llm::types::LlmCallId, llm::types::LlmRequestScope,
     llm::types::ProtocolPosition, llm::types::ProviderReplayDropReason,
 };
+
 #[cfg(test)]
 pub(crate) use provider::LlmProfileCapability;

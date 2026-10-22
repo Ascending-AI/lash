@@ -22,9 +22,7 @@
 //! registration; and the adoption of what was staged once the row committed
 //! ([`StartStaging::adopt`]).
 
-#[path = "start_namespace.rs"]
-mod namespace;
-
+use crate::PluginError;
 use lash_execution_contracts::process::StagedRegistration;
 use std::collections::BTreeSet;
 use std::sync::Arc;
@@ -315,6 +313,8 @@ pub async fn stage_store_local_start(
             ),
         ));
     }
+    let execution = registration.execution.clone();
+    let initial_resolutions = registration.initial_resolutions.clone();
     let (registration, observers, process_id, _, prepared_at_ms) = registration.into_commit();
     // The registrar refuses a start whose starter or lifetime scope closed
     // (FIG-3607 R11) when its rows commit, and with it the commit of its
@@ -341,6 +341,8 @@ pub async fn stage_store_local_start(
         }
     }
     let staged = StagedRegistration {
+        execution,
+        initial_resolutions,
         registration,
         observers,
         process_id,
@@ -556,7 +558,7 @@ async fn stage<'a>(
     observers: &[SessionId],
 ) -> Result<PreparedProcessStart<'a>, RuntimeEffectControllerError> {
     let mut submitted_env_ref = registration.input.launch().map(|launch| launch.env.clone());
-    let mut env = stage_env(stores, &claim, submitted_env_ref.clone()).await?;
+    let env = stage_env(stores, &claim, submitted_env_ref.clone()).await?;
     mark(stores.phases, Phase::Environment);
     let (definition, mut registration) = resolve_start_target(
         stores,
@@ -576,7 +578,7 @@ async fn stage<'a>(
         registration.trace_class == lash_execution_contracts::process::ProcessTraceClass::Workflow;
     check_sealed_settings(stores, &registration)?;
     mark(stores.phases, Phase::Admit);
-    let loaded = namespace::link(stores, &claim, &mut registration, &mut env).await?;
+    let loaded = load_staged_env(stores, env.as_ref()).await?;
     submitted_env_ref = env
         .as_ref()
         .map(|env| env.env_ref.clone())
@@ -591,18 +593,33 @@ async fn stage<'a>(
                 .collect()
         })
         .unwrap_or_default();
-    // A start of published code is claimable only by a node that runs its
-    // natives and kernels (FIG-6993): its record joins the claim
-    // requirements before any node can claim it.
-    if let ProcessInput::Engine { kind, payload, .. } = registration.input.as_ref()
-        && let Some(provider) = stores.engines.document_provider(kind)
-        && let Some(record) = provider.start_requirements(payload).await?
-    {
-        registration
-            .requires
-            .extend(crate::ObligationToken::for_requirements(&record).map(String::from));
-        registration.requires.sort();
-        registration.requires.dedup();
+    let inspection = inspect_start(stores.engines, registration.input.as_ref()).await?;
+    let mut execution_requirements = loaded
+        .as_ref()
+        .map(|env| env.execution().requirements.clone())
+        .unwrap_or_default();
+    if let Some(inspection) = &inspection {
+        let env =
+            loaded.as_ref().ok_or_else(|| {
+                package_start_error(
+            lash_execution_contracts::process::linking::EnginePortError::Refused(
+                lash_execution_contracts::process::linking::AdmissionRefusal::InvalidDocument {
+                    message: "a linked engine start requires an execution environment".into(),
+                }))
+            })?;
+        execution_requirements.extend(
+            &stores
+                .engines
+                .check_links_with_seeds(
+                    &Arc::new(env.clone()),
+                    inspection,
+                    registration
+                        .input
+                        .launch()
+                        .map_or(&[], |launch| launch.initial_resolutions.as_slice()),
+                )
+                .map_err(package_start_error)?,
+        );
     }
     let engine = stage_engine(
         stores,
@@ -614,15 +631,48 @@ async fn stage<'a>(
     .await?;
     mark(stores.phases, Phase::Artifacts);
     // The engine's artifacts are held: its effects are read from them.
-    link_start(stores, loaded.as_ref(), &registration).await?;
+
     mark(stores.phases, Phase::LinkCheck);
     Box::pin(stage_input(stores, start_key, registration.input.as_ref())).await?;
     mark(stores.phases, Phase::Input);
     let submitted_input = Arc::clone(&registration.input);
-    let prepared = stores
+    let mut prepared = stores
         .registry
         .prepare_process_registration(registration, observers)
         .await?;
+    if let Some(inspection) = inspection {
+        let execution = lash_core_store::resolutions::ExecutionId::process(prepared.process_id());
+        let seeds = submitted_input
+            .launch()
+            .into_iter()
+            .flat_map(|launch| &launch.initial_resolutions)
+            .map(|seed| {
+                let requested = match inspection.operations.get(&seed.use_) {
+                    Some(lash_execution_contracts::process::linking::OperationNeed::Deferred {
+                        name,
+                        ..
+                    }) => name.clone(),
+                    _ => unreachable!("initial pins were validated against selected reach"),
+                };
+                lash_core_store::resolutions::ResolutionRecord {
+                    key: lash_core_store::resolutions::ResolutionKey {
+                        execution: execution.clone(),
+                        use_: seed.use_,
+                    },
+                    requested,
+                    entry: seed.entry.clone(),
+                }
+            })
+            .collect();
+        let membership = crate::runtime::actor::resolutions::registration(
+            execution,
+            &inspection,
+            ArtifactReferrer::ProcessRecord(prepared.process_id().clone()),
+            execution_requirements,
+            lash_vocabulary::claims::RegistryKind::Process,
+        );
+        prepared = prepared.with_execution(membership, seeds);
+    }
     mark(stores.phases, Phase::Prepare);
     Ok(PreparedProcessStart {
         staging: StartStaging {
@@ -926,6 +976,7 @@ async fn acquire_env(
     .await;
     let acquired = match held {
         Ok(_) => Ok(()),
+        Err(HoldEnvError::Admission(error)) => Err(error.into()),
         Err(HoldEnvError::Fault(error)) => Err(error),
         Err(HoldEnvError::Refused(refusal)) => {
             return Err(
@@ -980,40 +1031,37 @@ async fn load_staged_env(
     Ok(Some(loaded))
 }
 
-/// The link check of an engine start (P1): its env links exactly the
-/// effects its engine says the payload performs, each fitting, and this
-/// node's components serve each link with its retained surface. Repeat-safe:
-/// a redrive under the same key checks the same pair.
-async fn link_start(
-    stores: &ProcessStartStores<'_>,
-    env: Option<&ProcessEnv>,
-    registration: &ProcessRegistration,
-) -> Result<(), RuntimeEffectControllerError> {
-    let (ProcessInput::Engine { kind, payload, .. }, Some(env)) =
-        (registration.input.as_ref(), env)
-    else {
-        return Ok(());
+fn package_start_error(
+    error: lash_execution_contracts::process::linking::EnginePortError,
+) -> RuntimeEffectControllerError {
+    lash_execution_contracts::plugin_error::PluginError::Package(Box::new(error)).into()
+}
+
+pub(crate) async fn inspect_start(
+    engines: &ProcessEngineRegistry,
+    input: &ProcessInput,
+) -> Result<
+    Option<lash_execution_contracts::process::linking::LinkInspection>,
+    RuntimeEffectControllerError,
+> {
+    let ProcessInput::Engine { kind, payload, .. } = input else {
+        return Ok(None);
     };
-    let refused = |refusal| {
-        lash_execution_contracts::plugin_error::PluginError::ProcessEnvRefused { refusal }
+    let Some(provider) = engines.document_provider(kind) else {
+        return Ok(None);
     };
-    let performed = stores
-        .engines
-        .performed_effects(kind, payload)
-        .await
-        .map_err(refused)?;
-    stores
-        .engines
-        .check_links(
-            kind,
-            payload,
-            &Arc::new(env.clone()),
-            &performed,
-            &std::collections::BTreeMap::new(),
-        )
-        .await
-        .map_err(refused)?;
-    Ok(())
+    match provider.document_ref(payload).await? {
+        lash_execution_contracts::process::ProcessDocumentRefRead::Named { .. } => engines
+            .inspect_code(kind, payload)
+            .await
+            .map(Some)
+            .map_err(package_start_error),
+        lash_execution_contracts::process::ProcessDocumentRefRead::ArtifactMissing { artifact } => {
+            Err(package_start_error(
+                lash_execution_contracts::process::linking::EnginePortError::Missing { artifact },
+            ))
+        }
+    }
 }
 
 /// The engine of an engine start checks the settings its starter sealed,
@@ -1139,21 +1187,12 @@ async fn resolve_start_target<'a>(
         }
         ProcessStartTarget::Inline {
             engine_kind,
-            payload,
-            packages,
+            request,
             args,
             launch,
         } => {
-            let (staged, resolved) = stage_inline(
-                stores,
-                start_key,
-                claim,
-                unfenced,
-                engine_kind,
-                payload,
-                *packages,
-            )
-            .await?;
+            let (staged, resolved) =
+                stage_inline(stores, start_key, claim, unfenced, engine_kind, request).await?;
             let registration =
                 definition_registration(stores, &registration, &resolved, args, launch).await?;
             Ok((
@@ -1208,8 +1247,7 @@ async fn stage_inline(
     claim: &ReferrerClaim,
     unfenced: bool,
     engine_kind: &str,
-    payload: &serde_json::Value,
-    packages: lash_kernel_doc::PackageSetDigest,
+    request: &lash_execution_contracts::process::InlineRequest,
 ) -> Result<(bool, super::ResolvedProcessDefinition), RuntimeEffectControllerError> {
     let engines = stores.engines;
     let starts = engines.inline_starts(engine_kind)?;
@@ -1221,7 +1259,7 @@ async fn stage_inline(
         draft: inline.draft,
     };
     if let Some(retained) = stores.registry.get_process_by_start_key(start_key).await? {
-        let inline = starts.inspect(payload, packages).await?;
+        let inline = starts.inspect(request).await.map_err(PluginError::from)?;
         // Another function under a key that fences content is the
         // registrar's conflict, decided before anything of it is staged:
         // its closure is held by nothing, and is not acquired here.
@@ -1238,10 +1276,10 @@ async fn stage_inline(
         return Ok((false, resolved(inline)));
     }
     let inline = if unfenced {
-        match starts.realize(claim, payload, packages).await {
+        match starts.realize(claim, request).await {
             Ok(inline) => Some(inline),
-            Err(error) if super::artifact_referrer_ended(&error) == Some(&claim.referrer()) => None,
-            Err(error) => return Err(error.into()),
+            Err(lash_execution_contracts::process::linking::EnginePortError::Fenced) => None,
+            Err(error) => return Err(PluginError::from(error).into()),
         }
     } else {
         None
@@ -1260,7 +1298,7 @@ async fn stage_inline(
     // `Start(key)` ended before this attempt held the closure: an earlier
     // attempt settled the key. Only a definition something else holds is
     // started.
-    let inline = starts.inspect(payload, packages).await?;
+    let inline = starts.inspect(request).await.map_err(PluginError::from)?;
     let id = inline.draft.id();
     if definition_ports(stores, &id)?
         .read_definition(engines, &id)

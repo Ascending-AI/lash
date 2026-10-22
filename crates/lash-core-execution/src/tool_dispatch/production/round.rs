@@ -45,18 +45,19 @@ pub(super) struct ParkedCall {
     launch: Option<super::super::LaunchReceipt>,
     /// The declaration the call was admitted under: what its resolution
     /// settles against, whatever the session's catalog has become since.
-    declaration: crate::ToolDeclaration,
+    declaration: lash_vocabulary::tool_declaration::ToolDeclaration,
     /// The output schema of the contract the call was prepared under, which
     /// its resolution's success value settles against.
-    output_schema: crate::JsonSchema,
+    output_schema: lash_vocabulary::json_schema::JsonSchema,
 }
 
 impl ParkedCall {
     /// The process whose terminal resolves the call, when the runtime owns
     /// one.
-    fn awaited_process(&self) -> Option<&crate::ProcessId> {
+    fn awaited_process(&self) -> Option<&lash_vocabulary::identity::ProcessId> {
         match self.completion.resolved_by.as_ref()? {
             crate::PendingResolver::ProcessTerminal { process_id } => Some(process_id),
+            crate::PendingResolver::Timer { .. } => None,
             crate::PendingResolver::DeclaredStart(_) => self
                 .launch
                 .as_ref()
@@ -131,6 +132,10 @@ fn parked_output(
         output: SettledOutput::Waiting(source),
         store_local: Vec::new(),
         terminal: parked.awaited_process().cloned(),
+        timer: match parked.completion.resolved_by.as_ref() {
+            Some(crate::PendingResolver::Timer { deadline, .. }) => Some(*deadline),
+            _ => None,
+        },
         capacity: None,
         candidate: None,
     }
@@ -263,6 +268,12 @@ impl ProductionToolHandlers<'_> {
                         MemberEnd::Final(self.refused_isolated_call(call, &refusal)),
                         Vec::new(),
                     ));
+                }
+                Err(crate::HoldEnvError::Admission(error)) => {
+                    return Err(crate::RuntimeEffectControllerError::from(
+                        crate::PluginError::from(error),
+                    )
+                    .into());
                 }
                 Err(crate::HoldEnvError::Fault(error)) => {
                     return Err(crate::RuntimeEffectControllerError::from(error).into());
@@ -465,6 +476,7 @@ pub(super) fn member_body(
                     context.clone().with_cancellation_token(token.clone()),
                 )
                 .with_completion_key(key.clone())
+                .with_admitted_at(execution.draft().admitted_at())
                 .with_admitted_declaration(execution.draft().declaration().cloned())
                 .with_stops(closing.clone(), stop.clone());
                 handlers.model_call_owner = Some(lash_durable::domain::ModelCallOwner {
@@ -594,7 +606,7 @@ pub(super) async fn present_resolved(
     context: &RuntimeExecutionContext<'static>,
     owner: &crate::EffectOpener,
     call: &crate::sansio::PendingToolCall,
-    tool: &crate::ToolId,
+    tool: &lash_vocabulary::tool_contract::ToolId,
     binding: Option<&crate::tool_run::AdmittedBinding>,
     output: SettledOutput,
 ) -> SettledOutput {
@@ -750,9 +762,9 @@ pub(super) fn completed_answer(
 /// presented under.
 pub(super) fn member_pin(
     context: &RuntimeExecutionContext<'_>,
-    manifest: Option<&crate::ToolManifest>,
-    tool: crate::ToolId,
-    granted: Option<&crate::plugin::ToolProviderHandle>,
+    manifest: Option<&lash_vocabulary::tool_contract::ToolManifest>,
+    tool: lash_vocabulary::tool_contract::ToolId,
+    granted: Option<&lash_vocabulary::providers::ToolProviderHandle>,
     now_ms: u64,
 ) -> MemberPin {
     if let Some(manifest) = manifest {
@@ -767,6 +779,7 @@ pub(super) fn member_pin(
     }
     let control = context.dispatch().execution_budgets.tool_check_phase();
     MemberPin {
+        admitted_at: lash_durable::DurableInstant(i64::try_from(now_ms).unwrap_or(i64::MAX)),
         tool,
         policy: ExecutionPolicy::Once,
         limit: lash_protocol_types::ExecutionLimit::starting_at(now_ms, control, control),
@@ -887,7 +900,7 @@ impl RoundTools for ProductionRoundTools {
             .find(|tool| tool.manifest.tool() == call.tool_name)
             .map(|tool| tool.manifest.clone());
         let tool = manifest.as_ref().map_or_else(
-            || crate::ToolId::new(call.tool_name.clone()),
+            || lash_vocabulary::tool_contract::ToolId::new(call.tool_name.clone()),
             |manifest| manifest.id.clone(),
         );
         member_pin(&self.context, manifest.as_ref(), tool, None, now_ms)

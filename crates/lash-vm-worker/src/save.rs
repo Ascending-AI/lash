@@ -8,15 +8,16 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use lash_kernel_dialect::{EffectControl, Left, NotSaved};
 use lash_kernel_doc::heap::HeapFault;
-use lash_kernel_doc::{EffectName, Site};
 use lash_kernel_vm::{CellSave, CellSaveContext, SaveCell, SavedCell};
 use lash_vm_client::service::LowerFunction;
+
+use lash_vocabulary::sites::Site;
 
 /// How a cell of one dialect saves its functions.
 pub(crate) struct DialectSave {
     /// The dialect's function values; none keeps no function.
     pub(crate) values: Option<lash_kernel_doc::FunctionRepresentation>,
-    pub(crate) controls: BTreeMap<EffectName, BTreeSet<EffectControl>>,
+    pub(crate) controls: BTreeMap<lash_vocabulary::names::OperationUse, BTreeSet<EffectControl>>,
     /// What the cell's source wrote of each function its document makes,
     /// by the site of its closure.
     pub(crate) written: BTreeMap<Site, lash_kernel_dialect::Written>,
@@ -41,6 +42,8 @@ impl CellSave for DialectSave {
         };
         let saved = saving.save(
             Left {
+                link: cell.link,
+                documents: cell.documents,
                 document: cell.document,
                 bindings: cell.bindings,
                 not_carried: cell.dropped,

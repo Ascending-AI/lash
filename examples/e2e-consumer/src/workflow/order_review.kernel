@@ -1,23 +1,9 @@
+function order_review(order: Json) -> Json
 kernel 1
-numbers float
-effect review.request(input: Any) -> Any contract "1"
-effect ledger.record(input: Any) -> Any contract "1"
-effect processes.start(input: Any) -> Any contract "1"
-effect processes.await(input: Any) -> Any contract "1"
-use num.gt = @{num.gt}
-use eq = @{eq}
-use text.concat = @{text.concat}
-use list.push = @{list.push}
-entry audit(summary: Any) -> Any
-entry order_review(order: Any) -> Any
-
-fn audit(summary) {
-  let note = {entry: text.concat("audit:", summary.status)}
-  do perform ledger.record(note) as Any
-  return summary
-}
-
-fn order_review(order) {
+metering statements
+@{imports}
+use audit = @{audit}
+body {
   let approved = []
   let skipped = []
   let status = "open"
@@ -25,36 +11,32 @@ fn order_review(order) {
     for group in order.groups {
       for line in group.lines {
         let sku = line.sku
-        let item = text.concat(text.concat(group.name, "/"), sku)
-        if num.gt(line.qty, 2) {
+        let item = invoke import 6(invoke import 6(group.name, "/"), sku)
+        if invoke import 4(line.qty, 2) {
           let request = {item: item}
-          let decision = perform review.request(request) as Any
-          if eq(decision.approved, false) {
+          let decision = perform 0(request) as Any
+          if invoke import 5(decision.approved, false) {
             throw {code: "REJECTED", sku: sku}
           }
-          do invoke list.push(approved, item)
+          do invoke import 7(approved, item)
         } else {
-          do invoke list.push(skipped, sku)
+          do invoke import 7(skipped, sku)
         }
         let note = {entry: item}
-        do perform ledger.record(note) as Any
+        do perform 1(note) as Any
       }
     }
     set status = "reviewed"
   } catch error {
     set status = "rejected"
     let rejected = {entry: "rejected"}
-    do perform ledger.record(rejected) as Any
+    do perform 1(rejected) as Any
   }
   let summary = {status: status}
   let args = {summary: summary}
   let start = {definition: &audit, args: args}
-  let audit_run = perform processes.start(start) as Any
+  let audit_run = perform 2(start) as Any
   let wait = {handle: audit_run}
-  let audited = perform processes.await(wait) as Any
+  let audited = perform 3(wait) as Any
   return {status: status, approved: approved, skipped: skipped, audited: audited}
-}
-
-main {
-  finish null
 }

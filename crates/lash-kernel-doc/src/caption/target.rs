@@ -11,7 +11,11 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use super::{Caption, CaptionKind};
-use crate::{Document, Name, Signature, Site, Type, Unit};
+use crate::Document;
+use lash_vocabulary::names::Name;
+use lash_vocabulary::sites::Site;
+use lash_vocabulary::types::Signature;
+use lash_vocabulary::types::Type;
 
 /// What one caption names. Captions order by target: sites first, then
 /// parameters, then fields.
@@ -131,19 +135,20 @@ impl CaptionTarget {
         match self {
             Self::Site(site) => CaptionKind::of(document, site),
             Self::Param(param) => {
-                let declared = document.functions.get(&param.function)?;
-                let named = match document.entries.get(&param.function) {
-                    Some(entry) => entry
-                        .signature
-                        .params
-                        .iter()
-                        .any(|signature| signature.name == param.param),
-                    None => declared.params.contains(&param.param),
+                let crate::Export::Function(export) = document.exports.get(&param.function)? else {
+                    return None;
                 };
+                let named = export
+                    .signature
+                    .params
+                    .iter()
+                    .any(|p| p.name == param.param);
                 named.then_some(CaptionKind::Param)
             }
             Self::Field(field) => {
-                let entry = document.entries.get(&field.function)?;
+                let crate::Export::Function(entry) = document.exports.get(&field.function)? else {
+                    return None;
+                };
                 field
                     .path
                     .resolve(&entry.signature)
@@ -169,28 +174,6 @@ impl CaptionTarget {
             Self::Param(param) => Some(&param.function),
             Self::Field(field) => Some(&field.function),
         }
-    }
-
-    /// This target in the document `site`, the successor of its function's
-    /// body, belongs to: the same parameter or field of that function.
-    pub(super) fn of_function(&self, site: &Site) -> Option<Self> {
-        let Unit::Function(function) = &site.unit else {
-            return None;
-        };
-        if !site.path.is_empty() {
-            return None;
-        }
-        Some(match self {
-            Self::Site(_) => return None,
-            Self::Param(param) => Self::Param(ParamTarget {
-                function: function.clone(),
-                param: param.param.clone(),
-            }),
-            Self::Field(field) => Self::Field(FieldTarget {
-                function: function.clone(),
-                path: field.path.clone(),
-            }),
-        })
     }
 }
 
@@ -393,16 +376,16 @@ impl<'de> Deserialize<'de> for CaptionEntry {
     }
 }
 
-impl crate::graph_tokens::TokenCodec for CaptionEntry {
-    fn encode(&self, out: &mut crate::graph_tokens::TokenWriter) {
+impl lash_vocabulary::tokens::TokenCodec for CaptionEntry {
+    fn encode(&self, out: &mut lash_vocabulary::tokens::TokenWriter) {
         out.seq(2);
         self.target.encode(out);
         self.caption.encode(out);
     }
 
     fn decode(
-        input: &mut crate::graph_tokens::TokenReader<'_>,
-    ) -> Result<Self, crate::graph_tokens::TokenError> {
+        input: &mut lash_vocabulary::tokens::TokenReader<'_>,
+    ) -> Result<Self, lash_vocabulary::tokens::TokenError> {
         input.expect_struct(2)?;
         Ok(Self {
             target: CaptionTarget::decode(input)?,
@@ -412,8 +395,8 @@ impl crate::graph_tokens::TokenCodec for CaptionEntry {
 }
 
 // CaptionTarget: Site = 0, Param = 1, Field = 2. FieldRoot: Param = 0, Result = 1.
-impl crate::graph_tokens::TokenCodec for CaptionTarget {
-    fn encode(&self, out: &mut crate::graph_tokens::TokenWriter) {
+impl lash_vocabulary::tokens::TokenCodec for CaptionTarget {
+    fn encode(&self, out: &mut lash_vocabulary::tokens::TokenWriter) {
         match self {
             Self::Site(site) => {
                 out.sum(0, 1);
@@ -431,9 +414,10 @@ impl crate::graph_tokens::TokenCodec for CaptionTarget {
     }
 
     fn decode(
-        input: &mut crate::graph_tokens::TokenReader<'_>,
-    ) -> Result<Self, crate::graph_tokens::TokenError> {
-        use crate::graph_tokens::{TokenError, TokenReader};
+        input: &mut lash_vocabulary::tokens::TokenReader<'_>,
+    ) -> Result<Self, lash_vocabulary::tokens::TokenError> {
+        use lash_vocabulary::tokens::TokenError;
+        use lash_vocabulary::tokens::TokenReader;
         let (variant, fields) = input.sum()?;
         TokenReader::expect_fields(fields, 1)?;
         Ok(match variant {
@@ -445,15 +429,15 @@ impl crate::graph_tokens::TokenCodec for CaptionTarget {
     }
 }
 
-impl crate::graph_tokens::TokenCodec for ParamTarget {
-    fn encode(&self, out: &mut crate::graph_tokens::TokenWriter) {
+impl lash_vocabulary::tokens::TokenCodec for ParamTarget {
+    fn encode(&self, out: &mut lash_vocabulary::tokens::TokenWriter) {
         out.seq(2);
         self.function.encode(out);
         self.param.encode(out);
     }
     fn decode(
-        input: &mut crate::graph_tokens::TokenReader<'_>,
-    ) -> Result<Self, crate::graph_tokens::TokenError> {
+        input: &mut lash_vocabulary::tokens::TokenReader<'_>,
+    ) -> Result<Self, lash_vocabulary::tokens::TokenError> {
         input.expect_struct(2)?;
         Ok(Self {
             function: Name::decode(input)?,
@@ -462,15 +446,15 @@ impl crate::graph_tokens::TokenCodec for ParamTarget {
     }
 }
 
-impl crate::graph_tokens::TokenCodec for FieldTarget {
-    fn encode(&self, out: &mut crate::graph_tokens::TokenWriter) {
+impl lash_vocabulary::tokens::TokenCodec for FieldTarget {
+    fn encode(&self, out: &mut lash_vocabulary::tokens::TokenWriter) {
         out.seq(2);
         self.function.encode(out);
         self.path.encode(out);
     }
     fn decode(
-        input: &mut crate::graph_tokens::TokenReader<'_>,
-    ) -> Result<Self, crate::graph_tokens::TokenError> {
+        input: &mut lash_vocabulary::tokens::TokenReader<'_>,
+    ) -> Result<Self, lash_vocabulary::tokens::TokenError> {
         input.expect_struct(2)?;
         Ok(Self {
             function: Name::decode(input)?,
@@ -479,15 +463,15 @@ impl crate::graph_tokens::TokenCodec for FieldTarget {
     }
 }
 
-impl crate::graph_tokens::TokenCodec for FieldPath {
-    fn encode(&self, out: &mut crate::graph_tokens::TokenWriter) {
+impl lash_vocabulary::tokens::TokenCodec for FieldPath {
+    fn encode(&self, out: &mut lash_vocabulary::tokens::TokenWriter) {
         out.seq(2);
         self.root.encode(out);
         self.fields.encode(out);
     }
     fn decode(
-        input: &mut crate::graph_tokens::TokenReader<'_>,
-    ) -> Result<Self, crate::graph_tokens::TokenError> {
+        input: &mut lash_vocabulary::tokens::TokenReader<'_>,
+    ) -> Result<Self, lash_vocabulary::tokens::TokenError> {
         input.expect_struct(2)?;
         Ok(Self {
             root: FieldRoot::decode(input)?,
@@ -496,8 +480,8 @@ impl crate::graph_tokens::TokenCodec for FieldPath {
     }
 }
 
-impl crate::graph_tokens::TokenCodec for FieldRoot {
-    fn encode(&self, out: &mut crate::graph_tokens::TokenWriter) {
+impl lash_vocabulary::tokens::TokenCodec for FieldRoot {
+    fn encode(&self, out: &mut lash_vocabulary::tokens::TokenWriter) {
         match self {
             Self::Param(name) => {
                 out.sum(0, 1);
@@ -507,9 +491,10 @@ impl crate::graph_tokens::TokenCodec for FieldRoot {
         }
     }
     fn decode(
-        input: &mut crate::graph_tokens::TokenReader<'_>,
-    ) -> Result<Self, crate::graph_tokens::TokenError> {
-        use crate::graph_tokens::{TokenError, TokenReader};
+        input: &mut lash_vocabulary::tokens::TokenReader<'_>,
+    ) -> Result<Self, lash_vocabulary::tokens::TokenError> {
+        use lash_vocabulary::tokens::TokenError;
+        use lash_vocabulary::tokens::TokenReader;
         let (variant, fields) = input.sum()?;
         Ok(match variant {
             0 => {

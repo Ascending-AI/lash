@@ -61,14 +61,18 @@ pub mod kernel_internals {
         CARD, StoredCards, StoredHead, StoredObject, pages as stored_pages, reads as page_reads,
     };
 }
-use lash_kernel_doc::EffectId;
-use lash_kernel_doc::graph_tokens::{TokenCodec, TokenError, TokenReader, TokenWriter};
-use lash_kernel_doc::{Datum, EffectName};
+use lash_kernel_doc::Datum;
+use lash_vocabulary::names::OperationUse;
+use lash_vocabulary::sites::EffectId;
+use lash_vocabulary::tokens::TokenCodec;
+use lash_vocabulary::tokens::TokenError;
+use lash_vocabulary::tokens::TokenReader;
+use lash_vocabulary::tokens::TokenWriter;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
-pub use lash_kernel_doc::WaitId;
+pub use lash_vocabulary::sites::WaitId;
 /// A sleep's length.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -97,11 +101,8 @@ impl Pause {
 #[derive(Clone, Debug, PartialEq)]
 pub enum AdmittedRequest {
     Effect {
-        effect: EffectName,
+        use_: OperationUse,
         args: Vec<Datum>,
-    },
-    Sleep {
-        duration: Pause,
     },
 }
 
@@ -115,10 +116,10 @@ pub struct AdmittedWait {
 
 impl AdmittedWait {
     pub fn encode(&self) -> Vec<u8> {
-        lash_kernel_doc::graph_tokens::encode_body(self)
+        lash_vocabulary::tokens::encode_body(self)
     }
     pub fn decode(bytes: &[u8]) -> Result<Self, TokenError> {
-        lash_kernel_doc::graph_tokens::decode_body(bytes)
+        lash_vocabulary::tokens::decode_body(bytes)
     }
 }
 
@@ -164,14 +165,10 @@ impl TokenCodec for Pause {
 impl TokenCodec for AdmittedRequest {
     fn encode(&self, out: &mut TokenWriter) {
         match self {
-            Self::Effect { effect, args } => {
+            Self::Effect { use_, args } => {
                 out.sum(0, 2);
-                effect.encode(out);
+                use_.encode(out);
                 args.encode(out);
-            }
-            Self::Sleep { duration } => {
-                out.sum(1, 1);
-                duration.encode(out);
             }
         }
     }
@@ -180,16 +177,13 @@ impl TokenCodec for AdmittedRequest {
         Ok(
             match variant(input, |variant| match variant {
                 0 => Some(2),
-                1 => Some(1),
                 _ => None,
             })? {
                 0 => Self::Effect {
-                    effect: EffectName::decode(input)?,
+                    use_: OperationUse::decode(input)?,
                     args: Vec::decode(input)?,
                 },
-                _ => Self::Sleep {
-                    duration: Pause::decode(input)?,
-                },
+                _ => unreachable!(),
             },
         )
     }
@@ -218,10 +212,9 @@ pub mod testkit {
     pub fn checkpoint_with_kernel(
         bytes: &[u8],
         kernel: u32,
-    ) -> Result<Vec<u8>, lash_kernel_doc::graph_tokens::TokenError> {
-        let mut root: crate::paged::CheckpointRoot =
-            lash_kernel_doc::graph_tokens::decode_body(bytes)?;
+    ) -> Result<Vec<u8>, lash_vocabulary::tokens::TokenError> {
+        let mut root: crate::paged::CheckpointRoot = lash_vocabulary::tokens::decode_body(bytes)?;
         root.kernel = kernel;
-        Ok(lash_kernel_doc::graph_tokens::encode_body(&root))
+        Ok(lash_vocabulary::tokens::encode_body(&root))
     }
 }

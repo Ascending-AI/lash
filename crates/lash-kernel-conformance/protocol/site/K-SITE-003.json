@@ -3,13 +3,13 @@
   "cases": [
     {
       "name": "saved and effect loop coordinates are loop statements",
-      "document": "kernel 1\nnumbers by_spelling\neffect echo(n: Int) -> Int contract \"1\"\nmain { for n in [1] { do perform echo(n) as Int } finish null }\n",
+      "document": "kernel 1\nnumbers by_spelling\nimport 0 operation host.echo(n: Int) -> Int\nmain {\n  for n in [1] {\n    do perform 0(n) as Int\n  }\n  finish null\n}\n",
       "expected": {
         "prints": [],
         "trace": [
           {
             "effect": {
-              "effect": "echo",
+              "effect": "host.echo",
               "args": [
                 {
                   "int": "1"

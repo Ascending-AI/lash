@@ -3,6 +3,7 @@
 use std::collections::BTreeMap;
 
 use lash_protocol_types::{llm::types::AttemptRecord, llm::types::LlmUsage};
+
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -453,7 +454,7 @@ impl From<Value> for TraceToolArgs {
 pub enum TraceToolName {
     Name(String),
     Identity {
-        tool_id: lash_protocol_types::ToolId,
+        tool_id: lash_vocabulary::tool_contract::ToolId,
     },
 }
 

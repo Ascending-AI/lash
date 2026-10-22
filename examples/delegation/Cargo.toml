@@ -13,6 +13,7 @@ doctest = false
 workspace = true
 
 [dependencies]
+lash-vocabulary = { workspace = true }
 lash = { workspace = true, features = ["rlm", "dialect-typescript"] }
 serde = { workspace = true }
 serde_json = { workspace = true }

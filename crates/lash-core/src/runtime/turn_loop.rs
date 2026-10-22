@@ -1,10 +1,10 @@
 use super::logical_turn::LogicalTurnAdmissions;
 use super::*;
 use crate::ActorContext;
-use crate::SessionId;
-use crate::TurnId;
 use crate::facade_support::RuntimeSessionStateFacadeOps;
 use context_pressure::ContextPressureStep;
+use lash_vocabulary::identity::SessionId;
+use lash_vocabulary::identity::TurnId;
 
 mod context_pressure;
 mod durable;
@@ -51,7 +51,7 @@ pub(in crate::runtime) fn emit_turn_started(
     observer: &TurnObserver,
     cursor: &mut crate::engine::ObservationCursor,
     turn_id: &TurnId,
-    run_id: &crate::RunId,
+    run_id: &lash_vocabulary::identity::RunId,
 ) {
     cursor.observe(
         &observer.for_turn(turn_id),
@@ -172,6 +172,7 @@ pub(in crate::runtime) async fn publish_observation(
                     use lash_protocol_types::{
                         llm::types::StreamBlockEvent, llm::types::StreamBlockKind,
                     };
+
                     let delta = matches!(
                         &activity.event,
                         crate::TurnEvent::StreamBlock(StreamBlockEvent::Delta {

@@ -2,7 +2,9 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::OnceLock;
 
 use lash_kernel_dialect::{CellEnvironment, Environment, Lowered, Mode, NamedLibrary};
-use lash_kernel_doc::{EffectName, Signature, parse_document, print_document, validate_document};
+use lash_kernel_doc::{parse_document, print_document, validate_document};
+
+use lash_vocabulary::{EffectName, Signature};
 
 use crate::Diagnostic;
 
@@ -12,7 +14,6 @@ mod async_fn;
 mod builtin_values;
 mod controls;
 mod deviations;
-mod generated_source;
 mod guarded_text;
 mod hoisting;
 mod hot_helpers;
@@ -23,43 +24,45 @@ mod module;
 mod naming;
 mod operands;
 mod package;
-mod package_members;
 mod pages;
 mod positional;
-mod printer;
-mod printer_corpus;
 mod process;
 mod protocol_loops;
-mod readable_print;
-mod readable_source;
 mod remaining_builtins;
 mod source_map;
 mod text_building;
 mod trim;
 mod typed;
 
-/// The kernel surface alone, as the shared readability harness prints it.
-impl lash_kernel_dialect::readability::SurfacePrinter for crate::TypeScript {
-    fn print(
-        &self,
-        document: &lash_kernel_doc::Document,
-        captions: Option<&lash_kernel_doc::Captions>,
-        options: lash_kernel_dialect::PrintOptions,
-    ) -> Result<lash_kernel_dialect::PrintedSource, lash_kernel_dialect::PrintError> {
-        crate::print_kernel(document, captions, options)
-    }
-}
-
 /// Dependencies and the building-artifact function for independent helper definitions.
 pub(crate) fn kernel_registry() -> lash_kernel_doc::FunctionRegistry {
     static BASE: OnceLock<lash_kernel_doc::FunctionRegistry> = OnceLock::new();
     BASE.get_or_init(|| {
-        lash_ext_helper_compiler::library::Library::of(
+        let mut base = lash_ext_helper_compiler::library::Library::of(
             lash_ext_helper_compiler::library::Dialect::TypeScript,
         )
         .expect("source packages")
         .base_registry()
-        .expect("package dependencies")
+        .expect("package dependencies");
+        let implementations = machine::registry();
+        let natives = base
+            .iter()
+            .filter_map(|(id, registered)| {
+                if registered.native().is_some() {
+                    return None;
+                }
+                implementations
+                    .get(id)?
+                    .native()
+                    .cloned()
+                    .map(|native| (*id, native))
+            })
+            .collect::<Vec<_>>();
+        for (id, native) in natives {
+            base.implement(id, native)
+                .expect("the dependency declares its native");
+        }
+        base
     })
     .clone()
 }
@@ -68,7 +71,11 @@ pub(crate) fn kernel_registry() -> lash_kernel_doc::FunctionRegistry {
 pub(crate) fn library() -> &'static NamedLibrary {
     static LIBRARY: OnceLock<NamedLibrary> = OnceLock::new();
     LIBRARY.get_or_init(|| {
-        NamedLibrary::from_registry(machine::registry()).expect("unique library names")
+        let roots = lash_vm_releases::helper_release()
+            .expect("helper release")
+            .resolver_roots();
+        NamedLibrary::resolving(machine::registry(), |id| roots.contains(id))
+            .expect("unique exported names")
     })
 }
 
@@ -110,12 +117,8 @@ fn lower_against(
     effects: &BTreeMap<EffectName, Signature>,
 ) -> Result<Lowered, Diagnostic> {
     let bindings: BTreeSet<_> = bindings.iter().map(|name| (*name).into()).collect();
-    let environment_namespaces = lash_kernel_dialect::Namespaces::of_effects(
-        effects,
-        &lash_kernel_doc::ContractId::new("1"),
-        controls(),
-    )
-    .expect("the test's effects are operations");
+    let environment_namespaces = crate::tests::linked::namespaces(effects, controls())
+        .expect("the test's effects are operations");
     let environment = Environment::new(library(), &environment_namespaces);
     let lowered = crate::lower(
         source,
@@ -144,8 +147,8 @@ fn lower_against(
     Ok(lowered)
 }
 
-/// The body of `main` in kernel text, one statement per line, without the
-/// header that lists library functions.
+/// Main and authored function definitions in final kernel text, excluding
+/// native reference bodies and the document's import declarations.
 pub(crate) fn main_text(source: &str) -> String {
     main_of(lower(source))
 }
@@ -160,27 +163,37 @@ fn main_of(lowered: Result<Lowered, Diagnostic>) -> String {
         Ok(lowered) => lowered,
         Err(diagnostic) => panic!("{diagnostic}"),
     };
-    let text = print_document(&lowered.document);
-    let start = text.find("main {").expect("a document has a main");
-    text[start..]
-        .lines()
-        .skip(1)
-        .take_while(|line| *line != "}")
-        .map(|line| line.strip_prefix("  ").unwrap_or(line))
-        .collect::<Vec<_>>()
-        .join("\n")
+    // Authored bodies are identity-keyed definitions alongside optional main.
+    // Keep inspecting those source statements rather than native reference bodies.
+    let mut bodies = Vec::new();
+    if lowered.document.main.is_some() {
+        let text = print_document(&lowered.document);
+        bodies.push(text[text.find("main {").expect("main")..].to_owned());
+    }
+    for (id, definition) in &lowered.document.functions {
+        if lash_kernel_doc::FunctionCatalog::header(library(), id).is_none()
+            && matches!(
+                definition.implementation,
+                lash_kernel_doc::Implementation::Guest {
+                    metering: lash_kernel_doc::Metering::Statements,
+                    ..
+                }
+            )
+        {
+            let text = lash_kernel_doc::print_definition(definition);
+            bodies.push(text);
+        }
+    }
+    bodies.join("\n")
 }
 
 /// SOURCE-ADMISSION-POLICY: source byte limits are deployment choices, independently of nesting safety.
 #[test]
 fn a_host_source_policy_allows_a_larger_typescript_cell() {
     let source = format!("//{}", "x".repeat(crate::MAX_SOURCE_BYTES));
-    let environment_namespaces = lash_kernel_dialect::Namespaces::of_effects(
-        &Default::default(),
-        &lash_kernel_doc::ContractId::new("1"),
-        &Default::default(),
-    )
-    .expect("the test's effects are operations");
+    let environment_namespaces =
+        crate::tests::linked::namespaces(&Default::default(), &Default::default())
+            .expect("the test's effects are operations");
     let environment = Environment::new(library(), &environment_namespaces);
     let cell = Mode::Cell(CellEnvironment::first());
     assert!(crate::lower(&source, &environment, cell).is_err());
@@ -198,4 +211,48 @@ fn a_host_source_policy_allows_a_larger_typescript_cell() {
     let diagnostic =
         crate::lower_with_limits("const x = ((1));", &environment, cell, limits).unwrap_err();
     assert!(diagnostic.message.contains("1-level"), "{diagnostic}");
+}
+
+mod linked;
+mod linked_inspection;
+mod linked_reads;
+
+/// FIG-7135: preparing independent cells shares immutable helper source;
+/// the number of release graph snapshots cannot grow with the cell count.
+#[test]
+fn cell_preparation_shares_the_helper_release_without_copying_its_graph() {
+    use std::sync::Arc;
+
+    let library = machine::prepared().clone();
+    linked::HELPER_SNAPSHOTS.with(|copies| copies.set(0));
+    // A root may be the helper document itself. Retiring that root must
+    // restore the publication's existing membership by identity.
+    let release = lash_vm_releases::helper_release().unwrap();
+    let helper = release.content.documents.values().next().unwrap().clone();
+    drop(linked::program(Arc::new(helper), library.clone()));
+    let programs: Vec<_> = [
+        "'first'.trim()",
+        "'second'.slice(1)",
+        "'third'.includes('h')",
+    ]
+    .into_iter()
+    .map(|source| {
+        linked::program(
+            Arc::clone(lower(source).unwrap().document.shared()),
+            library.clone(),
+        )
+    })
+    .collect();
+    for (id, document) in &programs[0].documents {
+        if *id != programs[0].document.identity() {
+            for program in &programs[1..] {
+                assert!(Arc::ptr_eq(document, &program.documents[id]));
+            }
+        }
+    }
+    assert!(programs.windows(2).all(|pair| pair[0].link != pair[1].link));
+    assert!(
+        linked::HELPER_SNAPSHOTS.with(|copies| copies.get()) <= 1,
+        "cell preparation must share one published helper graph"
+    );
 }

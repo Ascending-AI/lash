@@ -42,7 +42,7 @@ impl LlmStreamRecord {
     pub fn derivation_callbacks(
         &self,
         succeeded: bool,
-    ) -> Vec<crate::plugin::PluginCallbackIdentity> {
+    ) -> Vec<lash_vocabulary::providers::PluginCallbackIdentity> {
         let plan = if succeeded {
             &self.response_plan.callbacks[..]
         } else {
@@ -71,9 +71,9 @@ impl LlmStreamRecord {
 #[serde(deny_unknown_fields)]
 pub struct AssistantStreamCapsule {
     /// The stream callbacks, in recorded order.
-    pub stream_callbacks: Vec<crate::plugin::PluginCallbackIdentity>,
+    pub stream_callbacks: Vec<lash_vocabulary::providers::PluginCallbackIdentity>,
     /// The stream-finished callbacks, in recorded order.
-    pub finished_callbacks: Vec<crate::plugin::PluginCallbackIdentity>,
+    pub finished_callbacks: Vec<lash_vocabulary::providers::PluginCallbackIdentity>,
     /// The visible chunks the stream callbacks were handed, raw.
     pub chunks: Vec<String>,
     /// How the stream finished.
@@ -84,8 +84,8 @@ impl AssistantStreamCapsule {
     /// The capsule of a call that streams under `stream_callbacks` and
     /// `finished_callbacks`, before its first chunk.
     pub fn new(
-        stream_callbacks: Vec<crate::plugin::PluginCallbackIdentity>,
-        finished_callbacks: Vec<crate::plugin::PluginCallbackIdentity>,
+        stream_callbacks: Vec<lash_vocabulary::providers::PluginCallbackIdentity>,
+        finished_callbacks: Vec<lash_vocabulary::providers::PluginCallbackIdentity>,
     ) -> Self {
         Self {
             stream_callbacks,
@@ -103,8 +103,8 @@ impl AssistantStreamCapsule {
     pub fn finishing(
         &self,
     ) -> (
-        &[crate::plugin::PluginCallbackIdentity],
-        &[crate::plugin::PluginCallbackIdentity],
+        &[lash_vocabulary::providers::PluginCallbackIdentity],
+        &[lash_vocabulary::providers::PluginCallbackIdentity],
     ) {
         if self.finished_callbacks.is_empty() {
             return (&[], &[]);
@@ -137,7 +137,7 @@ impl AssistantStreamCapsule {
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AssistantResponsePlan {
-    pub callbacks: Vec<crate::plugin::PluginCallbackIdentity>,
+    pub callbacks: Vec<lash_vocabulary::providers::PluginCallbackIdentity>,
 }
 
 /// The stream end state for one recorded response callback.
@@ -149,7 +149,7 @@ pub struct AssistantResponsePlan {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AssistantStreamHookState {
-    pub callback: crate::plugin::PluginCallbackIdentity,
-    pub format: crate::plugin::FormatVersion,
+    pub callback: lash_vocabulary::providers::PluginCallbackIdentity,
+    pub format: lash_vocabulary::providers::FormatVersion,
     pub state: serde_json::Value,
 }

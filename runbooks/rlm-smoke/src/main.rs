@@ -1,4 +1,4 @@
-use lash::SessionId;
+use lash_vocabulary::identity::SessionId;
 use std::collections::BTreeSet;
 use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;

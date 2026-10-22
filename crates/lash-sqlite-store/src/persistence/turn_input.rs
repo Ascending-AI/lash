@@ -184,7 +184,7 @@ impl lash_core_store::store::TurnInputStore for SqliteStore {
     async fn pending_turn_input(
         &self,
         session_id: &SessionId,
-        input_id: &lash_protocol_types::InputId,
+        input_id: &lash_vocabulary::identity::InputId,
     ) -> Result<Option<lash_core_store::turn_input_vocabulary::PendingTurnInputRead>, StoreError>
     {
         let session_id = session_id.clone();
@@ -660,7 +660,7 @@ fn forsake_turn_input_conn(
         .map_err(sqlite_error)?;
     if let Some(input_id) = held {
         return Ok(TurnInputForsaking::Held {
-            input_id: lash_protocol_types::InputId::parse(input_id)?,
+            input_id: lash_vocabulary::identity::InputId::parse(input_id)?,
         });
     }
     ensure_session_not_closing_conn(tx, session_id)?;
@@ -685,7 +685,7 @@ fn forsake_turn_input_conn(
 fn turn_address_evidence_conn(
     tx: &Connection,
     session_id: &SessionId,
-    turn_id: &lash_protocol_types::TurnId,
+    turn_id: &lash_vocabulary::identity::TurnId,
 ) -> Result<lash_core_store::store_backend_support::TurnAddressEvidence, StoreError> {
     let ended: bool = tx
         .query_row(
@@ -808,7 +808,7 @@ fn admit_run_spec_conn(
 fn check_unsourced_steering_run_spec_conn(
     tx: &Connection,
     draft: &lash_core_store::turn_input_vocabulary::PendingTurnInputDraft,
-    turn_id: &lash_protocol_types::TurnId,
+    turn_id: &lash_vocabulary::identity::TurnId,
     spec: &lash_core_store::store_backend_support::RunSpecAdmission,
 ) -> Result<(), StoreError> {
     if let Some(unfinished) = crate::session_runs::unfinished_run_conn(tx, &draft.session_id)?

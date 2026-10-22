@@ -31,15 +31,19 @@
 //! (`K-EFF-012`). Requests, identities, origins, values and charge are the
 //! body's, since what issues, names and consumes them is the frame.
 
+use lash_vocabulary::package::OperationMode;
 use std::sync::Arc;
 
 use lash_kernel_doc::arena::ArenaHandle;
 use lash_kernel_doc::plan::PlanExit;
-use lash_kernel_doc::{Datum, EffectName, Site, TaskId, Type, Value};
+use lash_kernel_doc::{Datum, TaskId, Value};
+
 use lash_kernel_state::paged::PhaseRecord;
+use lash_vocabulary::sites::Site;
+use lash_vocabulary::types::Type;
 
 use super::actions::Target;
-use super::exec::{Call, ResultOrigin};
+use super::exec::{Call, ExportBoundary, ResultOrigin};
 use super::frames::Role;
 use super::islands::{Ran, SteadyIsland};
 use super::loops::Header;
@@ -52,7 +56,7 @@ use crate::compile::segments::{Segment, SiteControl};
 use crate::compile::{
     ActionKind, CodeId, Executable, Form, LibId, LibRun, NestedKind, PreparedPlan,
 };
-use crate::interface::{EffectMode, Host};
+use crate::interface::Host;
 use crate::observe::Event;
 
 /// What the body's frame keeps of a plan's call's arguments.
@@ -67,6 +71,7 @@ pub(super) enum Kept {
 /// A plan standing at one of its callback sites while the site's callee
 /// is offered the call.
 pub(super) struct Standing {
+    link: lash_vocabulary::LinkId,
     plan: Arc<PreparedPlan>,
     lib: LibId,
     site: u32,
@@ -82,11 +87,13 @@ pub(super) struct Standing {
 /// What the innermost site calls once the frames stand.
 pub(super) enum Callee {
     Body {
+        link: lash_vocabulary::LinkId,
         lib: LibId,
         admitted: AdmittedBody,
         args: Reg,
     },
     Code {
+        link: lash_vocabulary::LinkId,
         code: CodeId,
         captures: Vec<ArenaHandle>,
         args: Reg,
@@ -105,7 +112,7 @@ pub(super) enum Callee {
 pub(super) struct Read {
     /// The task whose frame stands in it: a spawn may stand a child's.
     task: TaskId,
-    effect: EffectName,
+    effect: lash_vocabulary::names::OperationUse,
     result: Type,
     site: Site,
     args: Vec<Datum>,
@@ -132,6 +139,7 @@ impl<const SHARED: bool> PlanRun<'_, SHARED> {
     fn stand(&mut self, site: u32) {
         let kept = std::mem::replace(&mut self.kept, Kept::Window { keep: false });
         self.machine.segments.standing.push(Standing {
+            link: self.machine.current_link(),
             plan: Arc::clone(self.owner),
             lib: self.lib,
             site,
@@ -166,15 +174,29 @@ impl<const SHARED: bool> PlanRun<'_, SHARED> {
         at: Reg,
         count: usize,
     ) -> Result<(), PlanExit> {
+        self.offer_in_link(site, lib, self.machine.current_link(), at, count)
+    }
+    fn offer_in_link(
+        &mut self,
+        site: u32,
+        lib: LibId,
+        link: lash_vocabulary::LinkId,
+        at: Reg,
+        count: usize,
+    ) -> Result<(), PlanExit> {
         self.stand(site);
+        let caller = self.machine.active_link;
+        self.machine.active_link = link;
         let answered = self
             .machine
             .answer(self.task, self.exe, lib, at, count, at)
             .map_err(|interrupt| interrupt.answering(self.exe.lib(lib)));
+        self.machine.active_link = caller;
         match answered {
             Ok(Answer::Done) => self.sit(),
             Ok(Answer::Body(admitted)) => {
                 self.machine.segments.callee = Some(Callee::Body {
+                    link,
                     lib,
                     admitted,
                     args: at,
@@ -195,28 +217,32 @@ impl<const SHARED: bool> PlanRun<'_, SHARED> {
         let callee = self.machine.take(at);
         let target = self.machine.target(self.exe, callee);
         match self.check(target)? {
-            Target::Library(lib) => {
-                self.offer(site, lib, at + 1, count)?;
+            Target::Export(..) => Err(self
+                .exit(super::fault("a resident callback cannot be an import descriptor").into())),
+            Target::Library(lib, link) => {
+                self.offer_in_link(site, lib, link, at + 1, count)?;
                 let value = self.machine.take(at + 1);
                 self.machine.put(at, value);
                 Ok(())
             }
-            Target::Code(code, captures) => {
-                let ran = self.machine.callback_island(
-                    &mut self.gate,
-                    self.task,
-                    self.exe,
-                    (code, &captures),
-                    at + 1,
-                    count,
-                );
+            Target::Code(code, captures, link) => {
+                let ran = self.machine.in_link(link, |machine| {
+                    machine.callback_island(
+                        &mut self.gate,
+                        self.task,
+                        self.exe,
+                        (code, &captures),
+                        at + 1,
+                        count,
+                    )
+                });
                 match self.check(ran)? {
                     Some(Ran::Returned(value)) => {
                         self.machine.spent_captures(captures);
                         self.returned(at, value);
                         Ok(())
                     }
-                    ran => Err(self.stand_callee(site, code, captures, (at, count), ran)),
+                    ran => Err(self.stand_callee(site, code, link, captures, (at, count), ran)),
                 }
             }
         }
@@ -235,20 +261,24 @@ impl<const SHARED: bool> PlanRun<'_, SHARED> {
         let (stream, stmt, _) = self.exe.statement(segment_site.stmt);
         let effect = match segment_site.act {
             Some(act) => match &stream.nested[act.ix()].kind {
-                NestedKind::Perform { effect, .. } => Some(effect.clone()),
+                NestedKind::Perform { slot, .. } => Some(*slot),
                 _ => None,
             },
             None => match &stmt.form {
                 Form::Action(action) => match &action.kind {
-                    ActionKind::Perform { effect, .. } => Some(effect.clone()),
+                    ActionKind::Perform { slot, .. } => Some(*slot),
                     _ => None,
                 },
                 _ => None,
             },
         };
-        let Some(effect) = effect else {
+        let Some(slot) = effect else {
             return self.held(Err(fault("a segment perform site has no effect")));
         };
+        let effect = self
+            .machine
+            .operation_in_link(self.machine.current_link(), slot);
+        let effect = self.check(effect.map_err(Interrupt::from))?;
         // A statement's own `perform` reads its arguments as atoms, each a
         // boundary charge of 1 (`K-CHG-002`, `K-CHG-007`); a nested one's
         // are its statement's operands, covered by the formula.
@@ -320,13 +350,13 @@ impl<const SHARED: bool> PlanRun<'_, SHARED> {
                 Some(Steady {
                     island: Some(island),
                     cells,
+                    link,
                     ..
                 }),
                 Some(gate),
-            ) if values.len() <= island.arity => {
-                self.machine
-                    .steady_entry(gate, self.task, self.exe, (island, cells), values)
-            }
+            ) if values.len() <= island.arity => self.machine.in_link(*link, |machine| {
+                machine.steady_entry(gate, self.task, self.exe, (island, cells), values)
+            }),
             _ => Ok(None),
         }
     }
@@ -351,7 +381,14 @@ impl<const SHARED: bool> PlanRun<'_, SHARED> {
                 let Some(steady) = self.steady.take() else {
                     return Err(self.lost("a steady site applied no callback"));
                 };
-                Err(self.stand_callee(site, steady.code, steady.cells, (at, count), ran))
+                Err(self.stand_callee(
+                    site,
+                    steady.code,
+                    steady.link,
+                    steady.cells,
+                    (at, count),
+                    ran,
+                ))
             }
         }
     }
@@ -363,17 +400,18 @@ impl<const SHARED: bool> PlanRun<'_, SHARED> {
     #[inline(never)]
     fn resolve_steady(&mut self, closure: ArenaHandle, callee: Value) -> Result<Steady, PlanExit> {
         let target = self.machine.target(self.exe, callee);
-        let Target::Code(code, cells) = self.check(target)? else {
+        let Target::Code(code, cells, link) = self.check(target)? else {
             return Err(self.lost("a closure resolved to no code"));
         };
-        let island = self
-            .machine
-            .callback_plan(&mut self.gate, self.task, self.exe, code);
+        let island = self.machine.in_link(link, |machine| {
+            machine.callback_plan(&mut self.gate, self.task, self.exe, code)
+        });
         let island = self.check(island)?.and_then(|plan| {
             let gate = self.gate.as_ref()?;
             SteadyIsland::of(gate, self.exe, plan, cells.len())
         });
         Ok(Steady {
+            link,
             closure,
             code,
             cells,
@@ -395,6 +433,7 @@ impl<const SHARED: bool> PlanRun<'_, SHARED> {
         &mut self,
         site: u32,
         code: CodeId,
+        link: lash_vocabulary::LinkId,
         captures: Vec<ArenaHandle>,
         (at, count): (Reg, usize),
         ran: Option<Ran>,
@@ -405,6 +444,7 @@ impl<const SHARED: bool> PlanRun<'_, SHARED> {
                 Callee::Island(levels)
             }
             _ => Callee::Code {
+                link,
                 code,
                 captures,
                 args: at + 1,
@@ -451,6 +491,7 @@ impl KernelMachine {
         task: TaskId,
         exe: &Executable,
         awaiting: Option<crate::compile::StmtId>,
+        export: Option<ExportBoundary<'_>>,
     ) -> Status {
         let standing = std::mem::take(&mut self.segments.standing);
         let callee = self
@@ -463,7 +504,7 @@ impl KernelMachine {
         };
         let charging = std::mem::replace(&mut self.charging, false);
         let paced = std::mem::replace(&mut self.paced, false);
-        let stood = self.stand_all(task, exe, standing, callee, awaiting);
+        let stood = self.stand_all(task, exe, standing, callee, awaiting, export);
         (self.charging, self.paced) = (charging, paced);
         // What the plans' registers held is the frames' now.
         self.regs.release(release);
@@ -478,24 +519,49 @@ impl KernelMachine {
         standing: Vec<Standing>,
         callee: Callee,
         mut awaiting: Option<crate::compile::StmtId>,
+        mut export: Option<ExportBoundary<'_>>,
     ) -> Status {
         for standing in standing {
             let stmt = self.stand_frame(task, exe, standing, awaiting)?;
+            // The first standing frame is the imported helper's own body.
+            // Install its contract before entering any nested callback frame.
+            if let Some(export) = export.take() {
+                let frame = self.frame(task)?;
+                frame.convention = Some(export.convention.clone());
+                frame.public_result = Some(export.result.clone());
+            }
             awaiting = Some(stmt);
         }
         match callee {
             Callee::Body {
+                link,
                 lib,
                 admitted,
                 args,
-            } => self.enter_body(task, exe, lib, admitted, args, awaiting),
+            } => {
+                let caller = self.active_link;
+                self.active_link = link;
+                let result = self.enter_body(
+                    task,
+                    exe,
+                    lib,
+                    admitted,
+                    super::exec::Invocation::new(args, exe.lib(lib).arity)
+                        .awaited_by(awaiting)
+                        .with_boundary(None),
+                );
+                self.active_link = caller;
+                result
+            }
             Callee::Code {
+                link,
                 code,
                 captures,
                 args,
                 count,
             } => {
                 let call = Call::new(code, args, count)
+                    .in_link(link)
                     .sharing(&captures)
                     .awaited_by(awaiting);
                 let pushed = self.push_frame(task, exe, call);
@@ -520,7 +586,8 @@ impl KernelMachine {
                 else {
                     return Err(fault("a segment performed at no `perform`").into());
                 };
-                if self.effect_mode(&effect)? == EffectMode::Read {
+                let effect = self.operation(task, effect)?;
+                if self.effect_mode(&effect)? == OperationMode::Read {
                     self.segments.read = Some(Read {
                         task,
                         effect,
@@ -576,6 +643,7 @@ impl KernelMachine {
         awaiting: Option<crate::compile::StmtId>,
     ) -> Result<crate::compile::StmtId, Interrupt> {
         let Standing {
+            link,
             plan,
             lib,
             site,
@@ -595,6 +663,7 @@ impl KernelMachine {
         };
         let code = exe.code(code_id);
         let mut frame = self.fresh_frame(exe, code_id)?;
+        frame.link = link;
         frame.slots.fresh(code.slots_by_at.len());
         for (index, at) in segment.params.iter().enumerate() {
             let value = self.regs[args + index];
@@ -931,7 +1000,12 @@ impl KernelMachine {
         self.plans -= 1;
         (self.charging, self.paced) = (charging, paced);
         if matches!(outcome, Err(PlanExit::Yield)) && halt.is_none() {
-            self.stand_segments(task, exe, None)?;
+            let boundary = frame
+                .convention
+                .as_ref()
+                .zip(frame.public_result.as_ref())
+                .map(|(convention, result)| ExportBoundary { convention, result });
+            self.stand_segments(task, exe, None, boundary)?;
             return Ok(None);
         }
         self.regs.release(args);

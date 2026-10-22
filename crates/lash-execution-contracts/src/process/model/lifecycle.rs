@@ -1,12 +1,24 @@
 //! The durable process record and its closed lifecycle projection.
 use super::super::events::ProcessTerminal;
 use super::super::validation::prepare_process_registration;
-use super::{
-    Ancestry, EngineLaunch, EngineSettings, LifetimeDecision, ProcessEnvRef, ProcessExternalRef,
-    ProcessId, ProcessIdentity, ProcessInput, ProcessLineage, ProcessOutcome, ProcessProvenance,
-    ProcessRegistration, ProcessStatus, SessionId, StartKey, process_session_id,
-};
+use super::Ancestry;
+use super::EngineLaunch;
+use super::EngineSettings;
+use super::LifetimeDecision;
+use super::ProcessEnvRef;
+use super::ProcessExternalRef;
+use super::ProcessIdentity;
+use super::ProcessInput;
+use super::ProcessLineage;
+use super::ProcessOutcome;
+use super::ProcessProvenance;
+use super::ProcessRegistration;
+use super::ProcessStatus;
+use super::StartKey;
+use super::process_session_id;
 use lash_protocol_types::CancelRequest;
+use lash_vocabulary::identity::ProcessId;
+use lash_vocabulary::identity::SessionId;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
@@ -20,7 +32,7 @@ pub struct WaitState {
     pub since_ms: i64,
     /// The node that blocked, and which occurrence of it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub site: Option<lash_protocol_types::EffectId>,
+    pub site: Option<lash_vocabulary::sites::EffectLocation>,
 }
 
 /// Why a process wait has no workflow coordinate.
@@ -33,9 +45,10 @@ pub enum WaitSiteUnavailable {
 impl WaitState {
     /// Workflow waits name their task's occurrence. A document-free engine
     /// may wait without one; callers receive a typed explanation for that case.
-    pub fn execution_site(&self) -> Result<&lash_protocol_types::EffectId, WaitSiteUnavailable> {
+    pub fn execution_site(&self) -> Result<&lash_vocabulary::sites::EffectId, WaitSiteUnavailable> {
         self.site
             .as_ref()
+            .map(|site| &site.at)
             .ok_or(WaitSiteUnavailable::EngineDidNotNameSite)
     }
 }
@@ -46,7 +59,11 @@ pub enum WaitKind {
     /// A deferring tool call, identified without its bearer completion key.
     Call {
         call_id: crate::ToolCallId,
-        tool_id: crate::ToolId,
+        tool_id: lash_vocabulary::tool_contract::ToolId,
+        /// The absolute deadline of an ordinary timer resolving this call.
+        /// This is independent of its tool-completion timeout.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        resume_at_ms: Option<i64>,
     },
     /// A key the process's engine pinned and awaits, identified by the name
     /// the engine gave it, without its bearer key.
@@ -311,8 +328,9 @@ impl ProcessLifecycleState {
             ProcessStatus::Waiting => Self::Waiting {
                 waits: ProcessWaits::new(WaitState {
                     kind: WaitKind::Call {
+                        resume_at_ms: None,
                         call_id: crate::ToolCallId::fixture("fixture"),
-                        tool_id: crate::ToolId::from("fixture"),
+                        tool_id: lash_vocabulary::tool_contract::ToolId::from("fixture"),
                     },
                     since_ms: 0,
                     site: None,

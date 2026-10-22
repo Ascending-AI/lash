@@ -5,9 +5,11 @@
 use lash_kernel_doc::arena::{ArenaHandle, Body};
 use lash_kernel_doc::heap::LogicalBytes;
 use lash_kernel_doc::{
-    Args, Bytes, Datum, ErrorDatum, KernelDataLimits, Name, NativeCall, NativeError,
-    NativeFunction, NewObject, Nursery, Reservation, Retry, Timestamp, Value, WorkCounter,
+    Args, Bytes, Datum, ErrorDatum, NativeCall, NativeError, NativeFunction, NewObject, Nursery,
+    Reservation, Retry, Timestamp, Value, WorkCounter,
 };
+
+use lash_vocabulary::data_limits::KernelDataLimits;
 
 use super::Arena;
 
@@ -96,7 +98,7 @@ impl Bench {
             Datum::Text(value) => self.arena.text(value),
             Datum::Bytes(value) => self.arena.bytes(value.as_slice()),
             Datum::Timestamp(value) => self.arena.timestamp(value.nanoseconds.clone()),
-            Datum::Function(name) => self.arena.function(name.as_str()),
+            Datum::Function(name) => self.arena.function(*name),
             Datum::Handle(handle) => self.arena.host_handle(handle.clone()),
             Datum::Tuple(members) => {
                 let members = self.all(members)?;
@@ -287,9 +289,7 @@ impl Bench {
                     .ok_or(NativeError::Malformed("a timestamp names another body"))?,
             }),
             Value::Text(_) | Value::LongText(_) => Datum::Text(semantics.text(value)?.to_owned()),
-            Value::Function(_) | Value::LongFunction(_) => {
-                Datum::Function(Name::new(semantics.text(value)?))
-            }
+            Value::Function(handle) => Datum::Function(self.arena.callable(*handle)?),
             Value::Bytes(bytes) => Datum::Bytes(Bytes::new(semantics.bytes(*bytes)?.to_vec())),
             Value::Handle(handle) => match self.arena.body(*handle)? {
                 Body::Handle(handle) => Datum::Handle(handle.clone()),

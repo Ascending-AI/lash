@@ -84,7 +84,7 @@ pub struct UndeliveredConfigChange {
     /// The observers the change is owed to, in delivery order: every
     /// session config-change observer installed when it committed, then
     /// every one the change it superseded was still owed.
-    pub observers: Vec<crate::store::plugin_writers::PluginCallbackIdentity>,
+    pub observers: Vec<lash_vocabulary::providers::PluginCallbackIdentity>,
 }
 
 impl PersistedSessionConfig {

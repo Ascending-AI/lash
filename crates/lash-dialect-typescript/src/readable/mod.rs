@@ -1,16 +1,8 @@
 //! Readable export: a document printed as the TypeScript a model would
 //! write, verified region by region.
 //!
-//! Each declared function, and `main`, is a region. A region is lifted
-//! back to authored source (`lift`), and the lift is kept only when reading
-//! the printed module back gives that region again. A document whose every
-//! region lifts prints as a plain workflow module: lowering it gives the
-//! document, with its identity, and needs no base. A region that does not
-//! lift prints in the reserved kernel surface, opened by the kernel marker
-//! ([`crate::printer::KERNEL_MARKER`]); such a module keeps the kernel
-//! layout, its `main` in kernel form, and reads back against its base
-//! (`mixed`). Printing never gives source that reads as another document:
-//! when no mixture verifies, every region prints in kernel form.
+//! Every printed module must lower to the complete original document and
+//! captions. If authored source cannot express it, printing refuses.
 
 mod closures;
 mod expressions;
@@ -26,22 +18,17 @@ use lash_kernel_dialect::{
     Environment, GeneratedSourceLimits, Library, PrintError, PrintOptions, PrintedSource, Printer,
     SourceFormat, check_document_depth, regions,
 };
-use lash_kernel_doc::{self as k, Name};
+use lash_kernel_doc::{self as k};
+
+use lash_vocabulary::Name;
 
 use crate::Diagnostic;
-use crate::printer::{Regions, print_regions};
 
-/// Prints `document` as authored TypeScript wherever a region lifts and
-/// reads back as itself, and in the reserved kernel surface elsewhere.
-/// `library` is the one the document's dialect helpers resolve in: lifted
-/// source is checked by lowering it against `library` and the operations
-/// the document performs. Captions are spelled as JSDoc blocks before what
-/// they name; [`PrintedSource::dropped`] lists only an entry's parameter
-/// and field captions a kernel-form region cannot spell.
+/// Print authored TypeScript after checking its full lowering identity.
 ///
 /// # Errors
-///
-/// As [`crate::print_kernel`].
+/// Refuses a document that has no faithful authored representation or exceeds
+/// the configured source limits.
 pub fn print(
     document: &k::Document,
     captions: Option<&k::Captions>,
@@ -49,25 +36,29 @@ pub fn print(
     options: PrintOptions,
 ) -> Result<PrintedSource, PrintError> {
     check_document_depth(document, options.limits)?;
-    let Ok(namespaces) = regions::namespaces(document) else {
-        let kernel = Regions {
-            lifted: BTreeMap::new(),
-            marked: true,
-        };
-        return print_regions(document, captions, options, &kernel).map(|(printed, _)| printed);
-    };
-    let lifted = lift::document(document, captions);
+    let namespaces =
+        regions::namespaces(document).map_err(|error| PrintError::Invalid(error.to_string()))?;
+    let lifted = lift::document(document, captions, library);
     let printing = Printing {
         document,
-        captions,
         options,
         environment: Environment::new(library, &namespaces),
         items: lifted
             .functions
             .into_iter()
-            .filter_map(|(name, item)| item.ok().map(|item| (name, item)))
-            .collect(),
-        main: lifted.main.ok(),
+            .map(|(name, (function, item))| {
+                item.map(|item| (name, item))
+                    .map_err(|_| PrintError::Unprintable {
+                        site: lash_vocabulary::sites::Site::new(
+                            lash_vocabulary::sites::Unit::Library(function),
+                            Vec::new(),
+                        ),
+                    })
+            })
+            .collect::<Result<_, _>>()?,
+        main: Some(lifted.main.map_err(|_| PrintError::Unprintable {
+            site: lash_vocabulary::sites::Site::new(lash_vocabulary::sites::Unit::Main, Vec::new()),
+        })?),
     };
     let verified = printing.items.keys().cloned().collect();
     regions::print_verified(document, captions, options, verified, &printing)
@@ -76,7 +67,6 @@ pub fn print(
 /// One document's lifts, printed and read for [`regions::print_verified`].
 struct Printing<'a> {
     document: &'a k::Document,
-    captions: Option<&'a k::Captions>,
     options: PrintOptions,
     environment: Environment<'a>,
     items: BTreeMap<Name, source::Item>,
@@ -88,53 +78,39 @@ impl regions::Regions for Printing<'_> {
         SourceFormat::TypeScriptV1
     }
 
-    fn whole(&self, functions: &BTreeSet<Name>) -> Option<regions::Whole> {
+    fn whole(&self, functions: &BTreeSet<Name>) -> Result<regions::Whole, PrintError> {
         let mut writer = source::Writer::default();
         let mut written = BTreeMap::new();
-        match self.main.as_ref()? {
-            lift::Main::Module(order) => {
-                for (index, name) in order.iter().enumerate() {
+        let unprintable = || PrintError::Unprintable {
+            site: lash_vocabulary::sites::Site::new(lash_vocabulary::sites::Unit::Main, Vec::new()),
+        };
+        match self.main.as_ref().ok_or_else(unprintable)? {
+            lift::Main::Module(parts) => {
+                for (index, part) in parts.iter().enumerate() {
                     if index > 0 {
                         writer.out.push('\n');
                     }
-                    if let Some(item) = self.items.get(name).filter(|_| functions.contains(name)) {
-                        let start = writer.out.len();
-                        writer.item(item);
-                        written.insert(name.clone(), start..writer.out.len());
+                    match part {
+                        lift::ModulePart::Export(name) => {
+                            let item = self
+                                .items
+                                .get(name)
+                                .filter(|_| functions.contains(name))
+                                .ok_or_else(unprintable)?;
+                            let start = writer.out.len();
+                            writer.item(item);
+                            written.insert(name.clone(), start..writer.out.len());
+                        }
+                        lift::ModulePart::Statements(statements) => writer.top_level(statements),
                     }
                 }
             }
             lift::Main::Cell(statements) => writer.top_level(statements),
         }
-        Some(regions::Whole {
+        Ok(regions::Whole {
             source: writer.out,
             functions: written,
         })
-    }
-
-    fn kernel(
-        &self,
-        lifted: &BTreeSet<Name>,
-    ) -> Result<(PrintedSource, BTreeMap<Name, std::ops::Range<usize>>), PrintError> {
-        let lifted = self
-            .items
-            .iter()
-            .filter(|(name, _)| lifted.contains(*name))
-            .map(|(name, item)| {
-                let mut writer = source::Writer::default();
-                writer.item(item);
-                (name.clone(), writer.out.trim_end().to_owned())
-            })
-            .collect();
-        print_regions(
-            self.document,
-            self.captions,
-            self.options,
-            &Regions {
-                lifted,
-                marked: true,
-            },
-        )
     }
 
     fn read(&self, source: &str) -> Result<regions::RegionRead, Option<usize>> {
@@ -148,17 +124,10 @@ impl regions::Regions for Printing<'_> {
     }
 }
 
-/// Reads TypeScript printed by [`print`] back against `base`, the document
-/// it was printed from, edited or not. Source with no kernel-form region is
-/// a workflow module (a cell when `base` has no entries) and lowers against
-/// `library` and the operations `base` performs: what it declares is what
-/// the document holds. Each kernel-form region reads as
-/// [`crate::read_kernel`] does, its environment the base's.
+/// Read ordinary TypeScript using the base document's declared signatures.
 ///
 /// # Errors
-///
-/// The front end's diagnostic for lifted source, or the kernel reader's
-/// for a kernel-form region.
+/// The front end's diagnostic for invalid or unsupported authored source.
 pub fn read(
     source: &str,
     base: &k::Document,

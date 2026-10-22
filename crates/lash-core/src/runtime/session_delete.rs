@@ -16,11 +16,12 @@
 //! creatable. A created session whose first work was never sent has no
 //! actor yet: its close request creates the actor with its mail.
 
+use crate::SessionDeleteContext;
 use crate::runtime::durable::session_close::{
     SessionCloseRequested, request_first_session_close, request_session_close,
 };
-use crate::{SessionDeleteContext, SessionId};
 use lash_durable::DurableError;
+use lash_vocabulary::identity::SessionId;
 
 /// What [`delete_session`] did.
 #[derive(Clone, Debug, PartialEq, Eq)]

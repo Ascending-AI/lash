@@ -3,7 +3,7 @@
   "cases": [
     {
       "name": "tasks share heap and run serially",
-      "document": "kernel 1\nnumbers by_spelling\nfn change(xs) { set xs[0] = 2 }\nmain {\nlet xs = [1] let h = spawn call change(xs) print xs let answer = join h finish xs\n}\n",
+      "document": "kernel 1\nnumbers by_spelling\ndefinition \"function change(xs: Any) -> Any\\nkernel 1\\nmetering statements\\nbody {\\n  set xs[0] = 2\\n}\\n\"\nmain {\n  let xs = [1]\n  let h = spawn invoke change(xs)\n  print xs\n  let answer = join h\n  finish xs\n}\n",
       "expected": {
         "prints": [
           {

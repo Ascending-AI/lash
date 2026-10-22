@@ -311,7 +311,7 @@ async fn pending_invalidation_is_cut_at_model_total_and_seals_the_rejection() {
     assert_eq!(
         attempt.retry_decision,
         Some(RetryDecision::Declined(RetryDeclineCause::TimedOut {
-            limit: lash_protocol_types::LimitCause::ExecutionTotal
+            limit: lash_vocabulary::tool_contract::LimitCause::ExecutionTotal
         }))
     );
 }
@@ -437,6 +437,7 @@ async fn canonical_call_recovers_the_admitted_slots_without_a_second_backend_rea
     use lash_protocol_types::{
         llm::attachment_delivery::DeliveryForms, llm::attachment_delivery::ProviderFileScope,
     };
+
     let reference = inline_reference(b"abc");
     let scope = ProviderFileScope {
         provider: "slots".into(),

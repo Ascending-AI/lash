@@ -14,11 +14,22 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use lash_core_store::checkpoint_graph::{
-    CommitId, DecodeLimits, EncodeBudget, EncodedNode, ExplicitLimit, GraphCommitBudget,
-    GraphRefusal, GraphStaging, NodeId, NodeKind, RootSource, TokenWriter, TypedBody,
-};
-use lash_protocol_types::{SessionId, ToolCallId, TurnId};
+use lash_core_store::checkpoint_graph::CommitId;
+use lash_core_store::checkpoint_graph::DecodeLimits;
+use lash_core_store::checkpoint_graph::EncodeBudget;
+use lash_core_store::checkpoint_graph::EncodedNode;
+use lash_core_store::checkpoint_graph::ExplicitLimit;
+use lash_core_store::checkpoint_graph::GraphCommitBudget;
+use lash_core_store::checkpoint_graph::GraphRefusal;
+use lash_core_store::checkpoint_graph::GraphStaging;
+use lash_core_store::checkpoint_graph::NodeId;
+use lash_core_store::checkpoint_graph::NodeKind;
+use lash_core_store::checkpoint_graph::RootSource;
+use lash_core_store::checkpoint_graph::TypedBody;
+use lash_protocol_types::ToolCallId;
+use lash_vocabulary::identity::SessionId;
+use lash_vocabulary::identity::TurnId;
+use lash_vocabulary::tokens::TokenWriter;
 
 use super::{LABEL, LawBroken, LawOutcome, create, ensure, node, session};
 use crate::domain::graph::{
@@ -574,7 +585,7 @@ pub async fn every_root_source_retains_its_graph_and_shared_leaves_outlive_one_o
         admission: lash_core_store::store::RunAdmissionRecord::Turn {
             took: lash_core_store::store::AdmittedTurnRows::Inputs {
                 ids: lash_core_store::store::AdmittedInputIds::one(
-                    lash_protocol_types::InputId::from("graph-roots-batch"),
+                    lash_vocabulary::identity::InputId::from("graph-roots-batch"),
                 ),
             },
             trace: None,
@@ -1202,6 +1213,7 @@ pub async fn turn_and_owned_model_calls_survive_an_idempotent_outcome_commit(
     use crate::domain::{ModelCallId, ModelCallWrite, PromptCallKey};
     use lash_core_store::model_calls::{ModelCallEnd, ModelCallFact};
     use lash_protocol_types::{llm::types::LlmCallId, llm::types::LlmCallRecord};
+
     let owner = owned(tier, "model-call-keys").await?;
     let run = turn("call-key-run");
     let mut nodes = staging();

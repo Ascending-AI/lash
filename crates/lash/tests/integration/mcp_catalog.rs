@@ -27,7 +27,7 @@ async fn turn_prompt(
     use lash_core::testing::prompt::{PromptCutParts, compose};
     let cut = lash_core::testing::prompt::cut(PromptCutParts {
         call: PromptCall {
-            session_id: lash::SessionId::from("advertised-surface"),
+            session_id: lash_vocabulary::identity::SessionId::from("advertised-surface"),
             frame: None,
             run: None,
             turn: None,
@@ -170,7 +170,7 @@ async fn recorded_tool_surface_is_preserved_when_advertised_tools_change() {
         serde_json::from_slice(&recorded_bytes).expect("restore the recorded catalog");
     assert!(restored.has_callable_tool(&lookup));
     assert!(!restored.has_callable_tool(&search));
-    let recorded_definition = lash_core::ToolDefinition {
+    let recorded_definition = lash_vocabulary::tool_contract::ToolDefinition {
         manifest: restored
             .entries()
             .iter()
@@ -190,13 +190,13 @@ async fn recorded_tool_surface_is_preserved_when_advertised_tools_change() {
         .entries()
         .iter()
         .find(|entry| entry.manifest.id == recorded_definition.manifest.id)
-        .map(|entry| lash_core::ToolDefinition {
+        .map(|entry| lash_vocabulary::tool_contract::ToolDefinition {
             manifest: entry.manifest.clone(),
             contract: (*entry.contract).clone(),
         });
-    let link = lash_core::OperationLink::advertised(
+    let link = lash_core::OperationRoute::advertised(
         lash::plugins::ToolProviderHandle::new(
-            lash::plugins::RegistryKind::Session,
+            lash_vocabulary::claims::RegistryKind::Session,
             "mcp",
             lash::tool_provider_key!("tools"),
         ),
@@ -667,7 +667,10 @@ async fn turn_witness(store: Store, failure_law: bool) {
     .await
     .expect("valid refresh publication");
     let reopened = core
-        .session(lash::SessionId::parse("catalog-storm").expect("nonblank host identity"))
+        .session(
+            lash_vocabulary::identity::SessionId::parse("catalog-storm")
+                .expect("nonblank host identity"),
+        )
         .open()
         .await
         .expect("reopen committed session");

@@ -1,7 +1,7 @@
 use super::*;
 use crate::session_model::SessionStreamEvent;
-use lash_protocol_types::RunId;
 use lash_protocol_types::sync::MutexExt;
+use lash_vocabulary::identity::RunId;
 use std::collections::HashMap;
 use std::fmt;
 use std::sync::Arc;
@@ -473,12 +473,12 @@ pub async fn admit_session_state_generation(
 pub enum ToolIntentActivityOutcome {
     Executed {
         intent_index: u32,
-        kind: crate::ToolIntentKind,
+        kind: lash_vocabulary::ToolIntentKind,
         realized: ToolIntentRealizedRef,
     },
     Refused {
         intent_index: u32,
-        kind: crate::ToolIntentKind,
+        kind: lash_vocabulary::ToolIntentKind,
         refusal: lash_execution_contracts::tool_intent_outcome::ToolIntentRefusalReason,
     },
     BatchRefused {
@@ -495,11 +495,11 @@ pub enum ToolIntentActivityOutcome {
     deny_unknown_fields
 )]
 pub enum ToolIntentRealizedRef {
-    Process(crate::ProcessId),
+    Process(lash_vocabulary::identity::ProcessId),
     /// The signature is the definition admission's new outcome, alongside its id.
     Definition(lash_execution_contracts::process::ProcessDefinition),
     Cancel {
-        process_id: crate::ProcessId,
+        process_id: lash_vocabulary::identity::ProcessId,
         status: lash_execution_contracts::process::ProcessStatus,
     },
 }

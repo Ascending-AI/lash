@@ -18,7 +18,9 @@ pub enum PluginOperationInvokeError {
     /// and the head records none (FIG-5139, FIG-5344). Publish one with a
     /// session command, e.g. a tool-catalog refresh, then retry the query.
     #[error("no plugin view of session `{session_id}` is published")]
-    NotPublished { session_id: crate::SessionId },
+    NotPublished {
+        session_id: lash_vocabulary::identity::SessionId,
+    },
     #[error("plugin operation failed: {0}")]
     Failed(Box<PluginOperationFailure>),
     #[error(transparent)]
@@ -83,7 +85,6 @@ impl PluginOperationInvokeError {
 
 #[derive(Clone)]
 pub struct RuntimeServices {
-    pub packages: Arc<dyn lash_kernel_dialect::ExportView + Send + Sync>,
     pub tool_live: Arc<crate::ToolLive>,
     pub plugins: Arc<PluginSession>,
 
@@ -120,8 +121,8 @@ impl crate::core_internal::RuntimeService for NoopSessionManager {}
 impl SessionReadService for NoopSessionManager {
     async fn committed_turn(
         &self,
-        _session_id: &crate::SessionId,
-        _turn_id: &crate::TurnId,
+        _session_id: &lash_vocabulary::identity::SessionId,
+        _turn_id: &lash_vocabulary::identity::TurnId,
     ) -> Result<
         Option<lash_core_store::transcript::CommittedTurnWithCalls>,
         crate::plugin::CommittedTurnReadError,
@@ -145,7 +146,7 @@ impl SessionReadService for NoopSessionManager {
     }
     async fn snapshot_session(
         &self,
-        _session_id: &crate::SessionId,
+        _session_id: &lash_vocabulary::identity::SessionId,
     ) -> Result<crate::SessionSnapshot, lash_execution_contracts::plugin_error::PluginError> {
         Err(
             lash_execution_contracts::plugin_error::PluginError::Session(
@@ -155,7 +156,7 @@ impl SessionReadService for NoopSessionManager {
     }
     async fn tool_catalog(
         &self,
-        _session_id: &crate::SessionId,
+        _session_id: &lash_vocabulary::identity::SessionId,
     ) -> Result<Vec<serde_json::Value>, lash_execution_contracts::plugin_error::PluginError> {
         Err(
             lash_execution_contracts::plugin_error::PluginError::Session(
@@ -169,7 +170,7 @@ impl SessionReadService for NoopSessionManager {
 impl ProcessReadService for NoopSessionManager {
     async fn list_visible(
         &self,
-        _session_id: &crate::SessionId,
+        _session_id: &lash_vocabulary::identity::SessionId,
         _mode: lash_execution_contracts::process::ProcessListMode,
         _scope: crate::ProcessOpScope<'_>,
     ) -> Result<
@@ -188,8 +189,8 @@ impl ProcessReadService for NoopSessionManager {
 impl SessionStateService for NoopSessionManager {
     async fn turn_scope(
         &self,
-        _session_id: &crate::SessionId,
-        _turn_id: &crate::TurnId,
+        _session_id: &lash_vocabulary::identity::SessionId,
+        _turn_id: &lash_vocabulary::identity::TurnId,
     ) -> Result<crate::ExecutionScope, lash_execution_contracts::plugin_error::PluginError> {
         Err(
             lash_execution_contracts::plugin_error::PluginError::Session(
@@ -220,7 +221,7 @@ impl SessionLifecycleService for NoopSessionManager {
 impl SessionGraphService for NoopSessionManager {
     async fn append_session_nodes(
         &self,
-        _session_id: &crate::SessionId,
+        _session_id: &lash_vocabulary::identity::SessionId,
         _request: crate::AppendSessionNodesRequest,
     ) -> Result<crate::SessionGraphAppendResult, lash_execution_contracts::plugin_error::PluginError>
     {
@@ -241,7 +242,6 @@ impl RuntimeServices {
         process_env_store: Arc<dyn lash_execution_contracts::process::ProcessEnvStore>,
     ) -> Self {
         Self {
-            packages: Arc::new(lash_kernel_dialect::NoPackages),
             tool_live: Arc::new(crate::ToolLive::default()),
             plugins,
 
@@ -251,14 +251,6 @@ impl RuntimeServices {
             store: None,
             attachment_referrers_store: None,
         }
-    }
-
-    pub fn with_packages(
-        mut self,
-        packages: Arc<dyn lash_kernel_dialect::ExportView + Send + Sync>,
-    ) -> Self {
-        self.packages = packages;
-        self
     }
 
     pub fn with_clock(mut self, clock: Arc<dyn crate::Clock>) -> Self {
@@ -295,7 +287,6 @@ impl PersistentRuntimeServices {
         process_env_store: Arc<dyn lash_execution_contracts::process::ProcessEnvStore>,
     ) -> Self {
         Self(RuntimeServices {
-            packages: Arc::new(lash_kernel_dialect::NoPackages),
             tool_live: Arc::new(crate::ToolLive::default()),
             plugins,
 

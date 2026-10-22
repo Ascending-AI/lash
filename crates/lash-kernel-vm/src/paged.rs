@@ -11,10 +11,13 @@
 
 use lash_kernel_doc::heap::PageValue;
 use lash_kernel_doc::heap::{HeapFault, PageRef};
-use lash_kernel_doc::{Datum, DocumentId, Invalid, Name};
+use lash_kernel_doc::{Datum, Invalid};
+
 use lash_kernel_state::paged::{
     Checkpoint, CheckpointRoot, FunctionRecord, PageSource, SealBudget, SessionRoot,
 };
+use lash_vocabulary::names::DocumentId;
+use lash_vocabulary::names::Name;
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::interface::{
@@ -78,6 +81,8 @@ pub trait CellSave {
 
 /// A cell's end as its saving reads it.
 pub struct SaveCell<'a> {
+    pub link: lash_vocabulary::content_ids::LinkId,
+    pub documents: &'a BTreeMap<lash_vocabulary::content_ids::LinkId, lash_kernel_doc::Document>,
     pub document: &'a lash_kernel_doc::Document,
     /// The execution closure the cell's code calls into.
     pub closure: PageRef,
@@ -161,7 +166,7 @@ pub enum MachineError {
 pub enum OpenError {
     #[error("the registry has no function {function}, which the checkpoint pins")]
     MissingFunction {
-        function: lash_kernel_doc::FunctionId,
+        function: lash_vocabulary::names::FunctionId,
     },
     #[error("the document is not admitted: {0}")]
     NotAdmitted(#[from] Invalid),

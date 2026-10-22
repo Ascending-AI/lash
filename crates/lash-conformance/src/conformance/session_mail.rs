@@ -26,7 +26,6 @@ use lash_core::AdmittedScope;
 use lash_core::DeliveryPolicy;
 use lash_core::PendingTurnInputDraft;
 use lash_core::PendingTurnInputReadStatus;
-use lash_core::SessionId;
 use lash_core::TurnInput;
 use lash_core::TurnInputIngress;
 use lash_core::durable_port::domain::SESSION_ACTOR_FORMATS;
@@ -39,6 +38,7 @@ use lash_core::runtime::durable::session_mail::{
 };
 use lash_execution_contracts::backend::Backend;
 use lash_execution_contracts::backend::StoreSet;
+use lash_vocabulary::identity::SessionId;
 
 /// Arms and disarms a cut of the producer transactions on the store under
 /// test: while armed, the transaction fails at the session actor's wake, the

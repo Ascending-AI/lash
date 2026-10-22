@@ -11,12 +11,12 @@ pub use transition::{
 
 use crate::ToolProvider;
 use lash_core_store::session_policy::SessionPolicy;
-use lash_protocol_types::ToolManifest;
+use lash_vocabulary::tool_contract::ToolManifest;
 
-pub use lash_core_store::store::plugin_writers::{
-    PluginCallbackIdentity, RecordedCallbackUnavailable, StreamStateFormatRefusal,
-    declared_tool_provider,
-};
+pub use lash_core_store::store::plugin_writers::RecordedCallbackUnavailable;
+pub use lash_core_store::store::plugin_writers::StreamStateFormatRefusal;
+pub use lash_vocabulary::providers::PluginCallbackIdentity;
+pub use lash_vocabulary::providers::declared_tool_provider;
 
 pub use lash_core_store::plugin_state::{FormatNamespace, FormatRefusal, PluginConfigNamespace};
 
@@ -41,7 +41,7 @@ pub(crate) use execution_state::proposal_failure_message;
 pub use execution_views::{ExecutionFacts, OwnerConfigView, RecordedCallFacts};
 mod attachment_omission;
 pub mod config;
-pub use lash_core_store::plugin_registrations::ToolProviderHandle;
+pub use lash_vocabulary::providers::ToolProviderHandle;
 
 pub(crate) mod history;
 mod hook_key;
@@ -109,7 +109,7 @@ pub use history::{
     ContextPressureDecision, ContextPressureHook, DecidedContextPressure, PluginTraceEmitter,
     SessionReadView,
 };
-pub use hook_key::{HookKey, ToolProviderKey, ToolProviderKeyError};
+pub use hook_key::HookKey;
 pub(crate) use hooks::owner_trace_context;
 pub use hooks::require_session_owner;
 pub use hooks::{
@@ -124,6 +124,8 @@ pub use hooks::{
     ToolPresentationPresenter, ToolPresentationStep, ToolResultProjectionContext, TurnFinalized,
     TurnHookContext, TurnHookReport, TurnResultHookContext,
 };
+pub use lash_vocabulary::providers::ToolProviderKey;
+pub use lash_vocabulary::providers::ToolProviderKeyError;
 pub use protocol::{
     AssistantProseProjectorPlugin, CellCallReferences, CheckpointComponentKey,
     CodeExecutionOutcome, CodeExecutorPlugin, ExecutionCandidate, ExecutionGraphCapture,
@@ -138,18 +140,37 @@ pub use lash_core_store::obligations::RetirementRefusal;
 pub use registries::RetiredSessionPlugins;
 mod service_bindings;
 pub use config_observers::{ConfigChangeDelivery, RetiredConfigObservers, is_lifecycle_observer};
-pub use recipe::{
-    CallbackSlot, ContextRegistrations, ContributionDescriptor, ContributionDetails,
-    ContributionKey, ContributionKind, ContributionReadiness, ExecutionRegistrations,
-    InstalledInventory, InventoryScope,
-    OperationRecipeRegistrations as PluginOperationRegistrations, OutputRegistrations,
-    PluginRecipe, PluginRecipeFactory, PluginRegistrar, PreflightIssue, ProcessRecipe,
-    ProtocolRegistrations, RegistryKind, RequiredPort, Requirements, ServiceKind,
-    SessionRegistrations, ToolCallRegistrations, ToolCatalogRegistrations, ToolRegistrations,
-    ToolResultRegistrations, TraceScopeOf, TurnRegistrations,
-};
+pub use lash_vocabulary::claims::RegistryKind;
+pub use lash_vocabulary::providers::CallbackSlot;
+pub use lash_vocabulary::providers::FormatVersion;
+pub use lash_vocabulary::providers::TraceScopeOf;
+pub use recipe::ContextRegistrations;
+pub use recipe::ContributionDescriptor;
+pub use recipe::ContributionDetails;
+pub use recipe::ContributionKey;
+pub use recipe::ContributionKind;
+pub use recipe::ContributionReadiness;
+pub use recipe::ExecutionRegistrations;
+pub use recipe::InstalledInventory;
+pub use recipe::InventoryScope;
+pub use recipe::OperationRecipeRegistrations as PluginOperationRegistrations;
+pub use recipe::OutputRegistrations;
+pub use recipe::PluginRecipe;
+pub use recipe::PluginRecipeFactory;
+pub use recipe::PluginRegistrar;
+pub use recipe::PreflightIssue;
+pub use recipe::ProcessRecipe;
+pub use recipe::ProtocolRegistrations;
+pub use recipe::RequiredPort;
+pub use recipe::Requirements;
+pub use recipe::ServiceKind;
+pub use recipe::SessionRegistrations;
+pub use recipe::ToolCallRegistrations;
+pub use recipe::ToolCatalogRegistrations;
+pub use recipe::ToolRegistrations;
+pub use recipe::ToolResultRegistrations;
+pub use recipe::TurnRegistrations;
 pub(crate) use registrar::{BoundRegistrar, PluginContributions, RegisteredHook};
-pub use registry::FormatVersion;
 pub use registry::PluginComposition;
 pub use registry::PluginDeclaration;
 pub use registry::PluginExecutionTrace;
@@ -272,13 +293,13 @@ pub(crate) fn builtin_plugin_factories() -> Vec<Arc<dyn PluginFactory>> {
 mod tests {
     use crate::ToolOutcome;
     use lash_execution_contracts::ToolIntentCommandFailure;
-    use lash_protocol_types::SessionId;
+    use lash_vocabulary::identity::SessionId;
     use schemars::JsonSchema;
     use serde::{Deserialize, Serialize};
     use serde_json::json;
 
     use super::*;
-    use lash_protocol_types::ToolDefinition;
+    use lash_vocabulary::tool_contract::ToolDefinition;
 
     struct MockToolProvider;
 
@@ -448,7 +469,8 @@ mod tests {
         type Output = TypedEchoOutput;
         type Error = String;
         const ERROR_TYPE: &'static str = Self::NAME;
-        const ERROR_VERSION: crate::FormatVersion = crate::FormatVersion::ONE;
+        const ERROR_VERSION: lash_vocabulary::providers::FormatVersion =
+            lash_vocabulary::providers::FormatVersion::ONE;
         fn error_class(_: &Self::Error) -> lash_protocol_types::PluginFailureClass {
             lash_protocol_types::PluginFailureClass::Terminal
         }
@@ -477,7 +499,7 @@ mod tests {
             &self,
             name: &str,
             _config: &crate::OwnerConfigView,
-        ) -> Option<Arc<crate::ToolContract>> {
+        ) -> Option<Arc<lash_vocabulary::tool_contract::ToolContract>> {
             self.tool_definitions()
                 .into_iter()
                 .find(|tool| tool.manifest.tool() == name)
@@ -580,7 +602,7 @@ mod tests {
                     input_schema: json!({}),
                     output_schema: json!({}),
                     error_type: "test.operation".into(),
-                    error_version: crate::FormatVersion::ONE,
+                    error_version: lash_vocabulary::providers::FormatVersion::ONE,
                     error_schema: json!({"type": "object"}),
                 },
                 move |this, _state| {
@@ -659,8 +681,11 @@ Ok(move |ctx: crate::plugin::PluginQueryContext, args: <TypedEchoOp as crate::pl
             .find(|def| def.name == "mock.typed_echo")
             .expect("typed operation declaration");
         assert_eq!(def.error_type, "mock.typed_echo");
-        assert_eq!(def.error_version, crate::FormatVersion::ONE);
-        let schema = lash_protocol_types::JsonSchema::admit(def.error_schema)
+        assert_eq!(
+            def.error_version,
+            lash_vocabulary::providers::FormatVersion::ONE
+        );
+        let schema = lash_vocabulary::json_schema::JsonSchema::admit(def.error_schema)
             .expect("admitted error schema");
         assert_eq!(schema.validate(&json!("declared error")), Ok(()));
         for invalid in [json!(7), json!({"message": "declared error"})] {
@@ -725,7 +750,8 @@ Ok(move |ctx: crate::plugin::PluginQueryContext, args: <TypedEchoOp as crate::pl
             type Output = TypedEchoOutput;
             type Error = String;
             const ERROR_TYPE: &'static str = Self::NAME;
-            const ERROR_VERSION: crate::FormatVersion = crate::FormatVersion::ONE;
+            const ERROR_VERSION: lash_vocabulary::providers::FormatVersion =
+                lash_vocabulary::providers::FormatVersion::ONE;
             fn error_class(_: &Self::Error) -> lash_protocol_types::PluginFailureClass {
                 lash_protocol_types::PluginFailureClass::Terminal
             }
@@ -829,7 +855,7 @@ Ok(move |ctx: crate::plugin::PluginTaskContext, args: <EchoTaskOp as crate::plug
             input_schema: json!({}),
             output_schema: json!({}),
             error_type: "test.operation".into(),
-            error_version: crate::FormatVersion::ONE,
+            error_version: lash_vocabulary::providers::FormatVersion::ONE,
             error_schema: json!({"type": "object"}),
         }
     }
@@ -960,3 +986,5 @@ Ok(move |ctx: crate::plugin::PluginTaskContext, args: <EchoTaskOp as crate::plug
 
 mod inventory_reader;
 pub use inventory_reader::{MaterializedInventoryReader, WeakMaterializedInventoryReader};
+
+pub mod packages;

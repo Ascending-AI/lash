@@ -1,9 +1,17 @@
 //! FIG-6373 / Design 1: checked source coordinates and injective rekeying.
-use crate::graph_tokens::{decode_body, encode_body};
-use crate::{
-    Correspondence, Document, Site, SourceLanguage, SourceMap, SourceMapRefusal, SourceSite, Span,
-    Survivor, Unit, parse_document,
-};
+use crate::Correspondence;
+use crate::Document;
+use crate::SourceLanguage;
+use crate::SourceMap;
+use crate::SourceMapRefusal;
+use crate::SourceSite;
+use crate::Span;
+use crate::Survivor;
+use crate::parse_document;
+use lash_vocabulary::sites::Site;
+use lash_vocabulary::sites::Unit;
+use lash_vocabulary::tokens::decode_body;
+use lash_vocabulary::tokens::encode_body;
 
 fn document() -> Document {
     parse_document("kernel 1\nnumbers float\nmain { print 1 print 2 }").unwrap()

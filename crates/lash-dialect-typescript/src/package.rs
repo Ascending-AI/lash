@@ -53,7 +53,8 @@ pub(crate) fn define_helpers_from(
         definitions.extend(define_functions(&source, library)?);
     }
     definitions.extend(define_functions(&builtin_name(table), library)?);
-    definitions.extend(define_functions(&computed_reader(table), library)?);
+    definitions.extend(define_functions(&computed_reader(table, false), library)?);
+    definitions.extend(define_functions(&computed_reader(table, true), library)?);
     Ok(definitions)
 }
 
@@ -197,15 +198,21 @@ fn builtin_name(table: &'static builtins::Table) -> String {
 /// is coerced once, preserving its observable conversion. The name is
 /// found among the rows by halving them in name order with
 /// `text.compare`, so a read costs the logarithm of the rows, not their
-/// count.
-fn computed_reader(table: &'static builtins::Table) -> String {
+/// count. Numeric keys use only rows whose names may be number
+/// spellings; the Number parameter refuses a mistyped key before dispatch.
+fn computed_reader(table: &'static builtins::Table, numeric: bool) -> String {
     let fallback = "ts.read";
     let mut source = format!(
         "use bool.not\nuse same\nuse kind\nuse num.lt\nuse text.compare\nuse record.contains\nuse ts.builtin_name\nuse ts.to_property_key\nuse ts.require_object_coercible\nuse {fallback}\n"
     );
     source.push_str("use num.le\nuse num.to_float\nuse list.len\nuse text.utf16_len\nuse ts.number_index\nuse ts.get\n");
     // Calling a member reads its value before applying it.
-    let rows = row_names(table);
+    let mut rows = row_names(table);
+    if numeric {
+        // Use the same key domain as plain-record alias analysis. It includes
+        // exact kernel integers, NaN and infinities, and may retain extra rows.
+        rows.retain(|(name, _)| crate::types::numeric_name(name));
+    }
     for (_, function) in &rows {
         source.push_str(&format!("use {function}\n"));
     }
@@ -216,10 +223,14 @@ fn computed_reader(table: &'static builtins::Table) -> String {
             (*name, outcome)
         })
         .collect();
-    let params = "this: Any, key: Any";
+    let (function, params) = if numeric {
+        ("ts.get_numeric", "this: Any, key: Number")
+    } else {
+        ("ts.get_computed", "this: Any, key: Any")
+    };
     let own = "return own";
     source.push_str(&format!(
-        "function ts.get_computed({params}) -> Any\nkernel 1\ncharge 4\nbody {{\n"
+        "function {function}({params}) -> Any\nkernel 1\ncharge 4\nbody {{\n"
     ));
     // A plain object's own field is what every row and reader gives for
     // its name, so a text key naming one needs neither coercion nor rows.

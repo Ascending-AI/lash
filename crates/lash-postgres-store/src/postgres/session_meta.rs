@@ -1,8 +1,8 @@
 use crate::session_sql::session_sql;
 use crate::*;
-use lash_protocol_types::ProcessId;
-use lash_protocol_types::SessionId;
-use lash_protocol_types::TurnId;
+use lash_vocabulary::identity::ProcessId;
+use lash_vocabulary::identity::SessionId;
+use lash_vocabulary::identity::TurnId;
 
 use lash_core_store::store_backend_support::CausalColumns;
 use lash_core_store::store_backend_support::SessionMetaCodec;
@@ -26,7 +26,7 @@ pub(crate) fn stored_relation_from_row(row: &PgRow) -> Result<StoredRelation, St
                 .transpose()?,
             turn_id: row
                 .get::<Option<String>, _>("caused_by_turn_id")
-                .map(lash_protocol_types::TurnId::parse)
+                .map(lash_vocabulary::identity::TurnId::parse)
                 .transpose()?,
             effect_id: row.get("caused_by_effect_id"),
             call_id: row.get("caused_by_call_id"),

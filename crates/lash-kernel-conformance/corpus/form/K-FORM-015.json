@@ -3,7 +3,7 @@
   "cases": [
     {
       "name": "return ends function and fallthrough returns null",
-      "document": "kernel 1\nnumbers by_spelling\nfn value() { return 7 print 8 } fn empty() {}\nmain {\nlet n = call value() let empty = call empty() finish (n, empty)\n}\n",
+      "document": "kernel 1\nnumbers by_spelling\ndefinition \"function value() -> Any\\nkernel 1\\nmetering statements\\nbody {\\n  return 7\\n  print 8\\n}\\n\"\ndefinition \"function empty() -> Any\\nkernel 1\\nmetering statements\\nbody {}\\n\"\nmain {\n  let n = invoke value()\n  let empty = invoke empty()\n  finish (n, empty)\n}\n",
       "expected": {
         "prints": [],
         "end": {

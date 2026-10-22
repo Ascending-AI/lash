@@ -2,11 +2,20 @@
 //! Only the test oracle encodes the removed copy; production stores references.
 
 use lash_core_execution::runtime::actor::round::{TranscriptEntry, TurnTranscript};
-use lash_core_store::checkpoint_graph::{
-    DecodeLimits, EncodeBudget, ExplicitLimit, GraphDecoder, GraphRefusal, GraphStaging, NodeId,
-    NodeKind, TokenCodec, TokenError, TokenReader, TokenWriter, closure,
-};
+use lash_core_store::checkpoint_graph::DecodeLimits;
+use lash_core_store::checkpoint_graph::EncodeBudget;
+use lash_core_store::checkpoint_graph::ExplicitLimit;
+use lash_core_store::checkpoint_graph::GraphDecoder;
+use lash_core_store::checkpoint_graph::GraphRefusal;
+use lash_core_store::checkpoint_graph::GraphStaging;
+use lash_core_store::checkpoint_graph::NodeId;
+use lash_core_store::checkpoint_graph::NodeKind;
+use lash_core_store::checkpoint_graph::closure;
 use lash_durable::domain::HydratedGraph;
+use lash_vocabulary::tokens::TokenCodec;
+use lash_vocabulary::tokens::TokenError;
+use lash_vocabulary::tokens::TokenReader;
+use lash_vocabulary::tokens::TokenWriter;
 
 struct PreviousReport {
     entries: Vec<(NodeId, NodeId, serde_json::Value)>,
@@ -79,8 +88,8 @@ impl TokenCodec for PreviousOutcome<'_> {
 /// transcript.
 pub async fn turn_transcript(
     reads: &dyn lash_durable::DurableReads,
-    session: &crate::SessionId,
-    run: &crate::TurnId,
+    session: &lash_vocabulary::identity::SessionId,
+    run: &lash_vocabulary::identity::TurnId,
 ) -> Result<HydratedGraph, lash_durable::DurableError> {
     reads
         .hydrate(

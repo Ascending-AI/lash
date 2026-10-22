@@ -3,8 +3,8 @@
 use super::host_commands::unsettled_command_error;
 use super::{AdminContext, AdminMutation, SessionCommandAdmin};
 use crate::support::{EmbedError, LashRuntime, Result, SessionError};
-use lash_protocol_types::SessionId;
-use lash_protocol_types::core_support::RunIdCoreSupport;
+use lash_vocabulary::identity::RunIdCoreSupport;
+use lash_vocabulary::identity::SessionId;
 
 /// A task's decoded operation failure or a facade refusal. The complete
 /// failure envelope retains classification, provenance and unknown data.
@@ -102,7 +102,7 @@ impl PluginOperations {
         };
         Ok(crate::send::run(
             self.context.target.clone(),
-            crate::RunId::from_turn_id(operation.run_id()),
+            lash_vocabulary::identity::RunId::from_turn_id(operation.run_id()),
         ))
     }
 

@@ -1,6 +1,7 @@
 use super::*;
+use lash_core::RuntimeSessionState;
 use lash_core::plugin::PluginSessionRequest;
-use lash_core::{RuntimeSessionState, SessionId};
+use lash_vocabulary::identity::SessionId;
 
 async fn assert_runtime_assembly_refuses_without_writes(
     backend: lash_execution_contracts::backend::Backend,

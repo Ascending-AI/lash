@@ -1,6 +1,7 @@
 use crate::session_identity::SessionRelation;
 pub use crate::session_identity::{SessionCreationHead, SessionStoreCreateRequest};
-use crate::{NodeId, SessionId};
+use lash_vocabulary::identity::NodeId;
+use lash_vocabulary::identity::SessionId;
 
 /// What a host names to pin or to fork from: an accepted input, a turn or a
 /// head revision.
@@ -14,9 +15,9 @@ use crate::{NodeId, SessionId};
 #[serde(tag = "kind", content = "id", rename_all = "snake_case")]
 pub enum Target {
     /// The root that applies this accepted input.
-    Input(crate::InputId),
+    Input(lash_vocabulary::identity::InputId),
     /// This logical root.
-    Turn(crate::TurnId),
+    Turn(lash_vocabulary::identity::TurnId),
     /// This head revision of the session.
     Revision(u64),
 }
@@ -54,8 +55,8 @@ impl Target {
             message,
         };
         match kind {
-            "input" => Ok(Self::Input(crate::InputId::parse(id)?)),
-            "turn" => Ok(Self::Turn(crate::TurnId::parse(id)?)),
+            "input" => Ok(Self::Input(lash_vocabulary::identity::InputId::parse(id)?)),
+            "turn" => Ok(Self::Turn(lash_vocabulary::identity::TurnId::parse(id)?)),
             "revision" => id
                 .parse()
                 .map(Self::Revision)

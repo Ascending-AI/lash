@@ -177,7 +177,12 @@ fn requests_of(served: &Served, id: &str) -> Vec<LlmRequest> {
     served
         .lock_recover()
         .iter()
-        .filter(|request| request.session_id().map(lash::SessionId::as_str) == Some(id))
+        .filter(|request| {
+            request
+                .session_id()
+                .map(lash_vocabulary::identity::SessionId::as_str)
+                == Some(id)
+        })
         .cloned()
         .collect()
 }
@@ -197,7 +202,7 @@ fn assert_intro(request: &LlmRequest, expected: &str, how: &str) {
 
 /// Create `id` under the plan placing `key`.
 async fn create_placing(core: &LashCore, id: &str, key: &str) -> Result<()> {
-    core.session(lash::SessionId::parse(id).expect("nonblank host identity"))
+    core.session(lash_vocabulary::identity::SessionId::parse(id).expect("nonblank host identity"))
         .create(lash::SessionCreation::root(mock_session_spec()).with_prompt_plan(placing(key)))
         .await?;
     Ok(())
@@ -205,7 +210,7 @@ async fn create_placing(core: &LashCore, id: &str, key: &str) -> Result<()> {
 
 /// Send `id` `text` through its durable session and wait for its answer.
 async fn run(core: &LashCore, id: &str, text: &str) -> Result<()> {
-    core.session(lash::SessionId::parse(id).expect("nonblank host identity"))
+    core.session(lash_vocabulary::identity::SessionId::parse(id).expect("nonblank host identity"))
         .durable()
         .await?
         .send(lash::TurnInput::text(text))
@@ -240,7 +245,7 @@ async fn a_session_created_under_defaults_a_reopens_under_a(
     )?;
     run(&redeployed, ID, "on the engine's open after the restart").await?;
     redeployed
-        .session(lash::SessionId::parse(ID).expect("nonblank host identity"))
+        .session(lash_vocabulary::identity::SessionId::parse(ID).expect("nonblank host identity"))
         .open()
         .await?
         .send(lash::TurnInput::text("on a host open after the restart"))
@@ -308,7 +313,7 @@ async fn a_prompt_command_reaches_the_next_run_and_not_the_running_one(
     )?;
     create_placing(&core, ID, "defaults-a").await?;
     let session = core
-        .session(lash::SessionId::parse(ID).expect("nonblank host identity"))
+        .session(lash_vocabulary::identity::SessionId::parse(ID).expect("nonblank host identity"))
         .open()
         .await?;
 
@@ -427,7 +432,7 @@ async fn a_run_options_prompt_is_refused(
     )?;
     create_placing(&core, ID, "defaults-a").await?;
     let session = core
-        .session(lash::SessionId::parse(ID).expect("nonblank host identity"))
+        .session(lash_vocabulary::identity::SessionId::parse(ID).expect("nonblank host identity"))
         .open()
         .await?;
     let revision = session.admin().config().revision().await?;
@@ -506,11 +511,11 @@ async fn an_rlm_run_options_prompt_is_refused() -> Result<()> {
     let core = explicit_ephemeral_facets(LashCore::rlm_builder(backend, factory))
         .serve_test_llm_profile(scripted_provider(&served, &script), mock_llm_profile_spec())
         .build(lash_facade_tests::runtime_lease_owner())?;
-    core.session(lash::SessionId::parse(ID).expect("nonblank host identity"))
+    core.session(lash_vocabulary::identity::SessionId::parse(ID).expect("nonblank host identity"))
         .create(lash::SessionCreation::root(mock_session_spec()))
         .await?;
     let session = core
-        .session(lash::SessionId::parse(ID).expect("nonblank host identity"))
+        .session(lash_vocabulary::identity::SessionId::parse(ID).expect("nonblank host identity"))
         .open()
         .await?;
     let refused = session

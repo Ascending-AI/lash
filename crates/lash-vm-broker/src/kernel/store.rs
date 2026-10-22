@@ -68,10 +68,14 @@ use lash_core_store::tool_run::SettledOutput;
 use lash_durable::domain::graph::{HydratedGraph, RootOwner};
 use lash_durable::domain::pages::{CandidateOwner, CandidatePublication};
 use lash_durable::domain::{ExecKey, RunFactWrite, RunSeq, SnapshotRev};
-use lash_durable::{CommitLabel, DomainWrite, DurableError, DurableInstant};
-use lash_kernel_doc::{Datum, DocumentId, EffectId, EffectName, ErrorDatum, KERNEL_VERSION};
+use lash_durable::{CommitLabel, DomainWrite, DurableError};
+use lash_kernel_doc::{Datum, ErrorDatum, KERNEL_VERSION};
+
 use lash_kernel_state::paged::CheckpointHeader;
 use lash_kernel_vm::{End, Outcome, WaitId};
+use lash_vocabulary::names::DocumentId;
+use lash_vocabulary::names::OperationUse;
+use lash_vocabulary::sites::EffectId;
 use tokio_util::sync::CancellationToken;
 
 use super::closure::Closure;
@@ -110,10 +114,7 @@ pub enum AdmitAs {
     /// As this execution.
     Execution(Box<MemberDraft>),
     /// As a sleep of `duration` that is over at `until`.
-    Sleep {
-        duration: std::time::Duration,
-        until: DurableInstant,
-    },
+
     /// Not at all: the parent refuses it, and it is answered with `error`.
     /// The guest's arguments stay with its admission.
     Refused { error: ErrorDatum, args: Vec<Datum> },
@@ -125,7 +126,7 @@ pub struct EffectAdmission {
     pub identity: EffectId,
     pub wait: WaitId,
     /// The effect performed; none for a sleep.
-    pub effect: Option<EffectName>,
+    pub effect: Option<OperationUse>,
     pub admit: AdmitAs,
 }
 
@@ -133,7 +134,7 @@ pub struct EffectAdmission {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AdmittedCall {
     pub effect: EffectId,
-    pub operation: EffectName,
+    pub operation: OperationUse,
     pub call: lash_protocol_types::ToolCallId,
     /// Its Admission.
     pub admission: NodeId,
@@ -149,11 +150,11 @@ pub struct HostParts {
     pub envelope: Option<NodeId>,
     /// The callbacks the host's state owes beyond its admitted calls (S7):
     /// a cell's committed deferred matches' providers and codecs.
-    pub owed: Vec<lash_core_store::store::plugin_writers::PluginCallbackIdentity>,
+    pub owed: Vec<lash_vocabulary::providers::PluginCallbackIdentity>,
     /// What the host's static operation links require of a node: their
     /// providers and codecs (FIG-6985). A parked root's requirements
     /// record holds them beside what its code requires.
-    pub links: lash_kernel_doc::ExecutionRequirements,
+    pub links: lash_vocabulary::claims::ClaimRequirements,
 }
 
 /// A park's sealed checkpoint root: its page, staged in the activation's
@@ -320,13 +321,12 @@ pub fn outcome_of(output: &SettledOutput) -> Option<Outcome> {
 /// arguments alone: a resume reads the same records again.
 pub type OutcomeOf<'a> = &'a (dyn Fn(&AdmittedEffect, &SettledOutput) -> Option<Outcome> + Sync);
 
-/// Every wait `ledger` stands on that `folded` and `now` settle, in
+/// Every wait `ledger` stands on that `folded` settles, in
 /// identity order.
 fn settled_in(
     ledger: &EffectLedger,
     exec: &ExecKey,
     folded: &RunFold,
-    now: DurableInstant,
     outcome: OutcomeOf<'_>,
 ) -> Vec<Settled> {
     ledger
@@ -338,8 +338,9 @@ fn settled_in(
                     let mut result = outcome(admitted, output)?;
                     if matches!(output, SettledOutput::Interrupted)
                         && let Outcome::Failed(error) = &mut result
+                        && error.kind == EFFECT_INTERRUPTED
                     {
-                        let name = entry.effect.as_ref().map_or("effect", EffectName::as_str);
+                        let name = entry.effect.as_ref().map(ToString::to_string).unwrap_or_else(|| "operation".into());
                         error.message = format!(
                             "effect `{name}` at {identity} started and never settled; outside work may already have happened, so check outside state before calling again",
                         );
@@ -352,9 +353,6 @@ fn settled_in(
                     }
                     result
                 },
-                Standing::Sleeping { until_ms } => {
-                    (now.0 >= *until_ms).then_some(Outcome::Elapsed)?
-                }
                 Standing::Refused(error) => Outcome::Failed(error.clone()),
             };
             Some(Settled {
@@ -406,7 +404,7 @@ fn ledger_of(
                 operation: *operation,
                 call: pin.call.clone(),
             }),
-            Disposition::Sleep | Disposition::Refused => None,
+            Disposition::Refused => None,
         };
         let standing = match (entry.status, execution, &admitted.request) {
             (MemberStatus::Released, Some(execution), _) => {
@@ -414,11 +412,6 @@ fn ledger_of(
                 continue;
             }
             (MemberStatus::Pending, Some(execution), _) => Standing::Admitted(execution),
-            (MemberStatus::Pending, None, FrozenRequest::Sleep { until_ms, .. }) => {
-                Standing::Sleeping {
-                    until_ms: *until_ms,
-                }
-            }
             (MemberStatus::Pending, None, FrozenRequest::Refused { error, .. }) => {
                 Standing::Refused(error.clone())
             }
@@ -432,7 +425,7 @@ fn ledger_of(
             entry.effect.clone(),
             PendingEffect {
                 wait: entry.wait,
-                effect: admitted.admission.effect_name.clone(),
+                effect: admitted.admission.effect_name,
                 standing,
             },
         );
@@ -629,14 +622,13 @@ impl DurableSnapshotStore {
         struct Requested {
             identity: EffectId,
             wait: WaitId,
-            effect: Option<EffectName>,
+            effect: Option<OperationUse>,
             standing: Option<Standing>,
             request: Option<FrozenRequest>,
         }
         let mut drafts = Vec::new();
         let mut executions = Vec::new();
         let mut requested = Vec::with_capacity(admit.len());
-        let mut timers = Vec::new();
         for admission in admit {
             let EffectAdmission {
                 identity,
@@ -650,16 +642,6 @@ impl DurableSnapshotStore {
                     executions.push((requested.len(), request));
                     drafts.push(draft);
                     (None, None)
-                }
-                AdmitAs::Sleep { duration, until } => {
-                    timers.push(until);
-                    (
-                        Some(Standing::Sleeping { until_ms: until.0 }),
-                        Some(FrozenRequest::Sleep {
-                            duration,
-                            until_ms: until.0,
-                        }),
-                    )
                 }
                 AdmitAs::Refused { error, args } => (
                     Some(Standing::Refused(error.clone())),
@@ -675,7 +657,19 @@ impl DurableSnapshotStore {
             });
         }
         let expected = self.revision().await?;
-        let mut tx = self.cx.begin().await.map_err(QuietPointRefusal::from)?;
+        let mut tx = self.cx.begin().await.map_err(refused)?;
+        if matches!(phase, SavePhase::Ended { .. }) {
+            let execution = match &self.exec {
+                ExecKey::Cell(session, turn, cell) => {
+                    lash_core_store::resolutions::ExecutionId::cell(session, turn, cell.as_str())
+                }
+                ExecKey::Process(process) => {
+                    lash_core_store::resolutions::ExecutionId::process(process)
+                }
+            };
+            tx.end_execution(execution);
+        }
+
         // The response the turn held commits first, as `model.done` would
         // have, in this transaction: unless the turn stops at once.
         if let Some(response) = response {
@@ -690,18 +684,7 @@ impl DurableSnapshotStore {
         // A sleep is a timer wait of the run's scope, pinned with the park
         // that admits it: the owner that holds only sleeps releases until
         // the earliest, and the scope's end revokes them.
-        if !timers.is_empty() {
-            let scope = waits::wait_scope(&self.cx).map_err(refused)?;
-            for deadline in timers {
-                waits::pin(
-                    &mut tx,
-                    lash_execution_contracts::waits::WaitSpec {
-                        scope: scope.clone(),
-                        purpose: waits::WaitPurpose::Timer { deadline },
-                    },
-                );
-            }
-        }
+
         let mut staging = staging();
         let mut book = self
             .book
@@ -737,7 +720,7 @@ impl DurableSnapshotStore {
                         FrozenAdmission {
                             effect: entry.identity.clone(),
                             wait: entry.wait,
-                            effect_name: entry.effect.clone(),
+                            effect_name: entry.effect,
                             request,
                             execution: Some((operation, pin)),
                         },
@@ -748,7 +731,7 @@ impl DurableSnapshotStore {
                 if let Some(operation) = &entry.effect {
                     calls.push(AdmittedCall {
                         effect: entry.identity.clone(),
-                        operation: operation.clone(),
+                        operation: *operation,
                         call: call.clone(),
                         admission: node,
                     });
@@ -773,7 +756,7 @@ impl DurableSnapshotStore {
                         FrozenAdmission {
                             effect: entry.identity.clone(),
                             wait: entry.wait,
-                            effect_name: entry.effect.clone(),
+                            effect_name: entry.effect,
                             request,
                             execution: None,
                         },
@@ -827,20 +810,16 @@ impl DurableSnapshotStore {
             .map_err(refused)?;
         // The candidate the commit publishes: the park's checkpoint root, or
         // the session descriptor an end hands the turn.
-        let mut requirements = lash_kernel_doc::ExecutionRequirements::default();
+        let mut requirements = lash_vocabulary::claims::ClaimRequirements::default();
         let (status, state, format, membership, candidate) = match phase {
             SavePhase::Parked { state, closure, .. } => {
                 // What running the parked execution requires: its code's
                 // natives and kernel version, and its links' providers and
                 // codecs (FIG-6985). An ended one requires nothing.
-                requirements =
-                    super::loader::requirements(closure, state.header.kernel, std::iter::empty());
-                requirements
-                    .providers
-                    .extend(parts.links.providers.iter().cloned());
-                requirements
-                    .codecs
-                    .extend(parts.links.codecs.iter().cloned());
+                requirements.machine =
+                    super::loader::requirements(closure, state.header.kernel, std::iter::empty())
+                        .machine;
+                requirements.extend(&parts.links);
                 let membership = book.membership(&ledger).map_err(refused)?;
                 for write in book.retire_unnamed(&self.exec, &membership) {
                     tx.write(write);
@@ -1229,7 +1208,7 @@ impl DurableSnapshotStore {
             .pending()
             .filter_map(|(identity, entry)| match &entry.standing {
                 Standing::Admitted(admitted) => Some((identity.clone(), admitted.clone())),
-                Standing::Sleeping { .. } | Standing::Refused(_) => None,
+                Standing::Refused(_) => None,
             });
         pending
             .filter_map(|(identity, admitted)| Some((admitted, book.request(&identity)?.clone())))
@@ -1264,8 +1243,7 @@ impl DurableSnapshotStore {
         outcome: OutcomeOf<'_>,
     ) -> Result<Vec<Settled>, QuietPointRefusal> {
         let folded = self.members.lock().await.fold().await.map_err(refused)?;
-        let now = self.cx.durable_now().await.map_err(refused)?;
-        Ok(settled_in(ledger, &self.exec, &folded, now, outcome))
+        Ok(settled_in(ledger, &self.exec, &folded, outcome))
     }
 
     /// Run the run's open executions until at least one wait `ledger`
@@ -1308,14 +1286,12 @@ impl DurableSnapshotStore {
             .members
             .lock()
             .await
-            .drive_by(cancel, quiet, &mut |_, folded, now| {
-                let settled = settled_in(ledger, exec, folded, now, outcome);
+            .drive_by(cancel, quiet, &mut |_, folded, _| {
+                let settled = settled_in(ledger, exec, folded, outcome);
                 if !settled.is_empty() || (cancel.is_cancelled() && !ledger.awaits_execution()) {
                     Decide::Answer(settled)
                 } else {
-                    Decide::Wait {
-                        until: ledger.next_wake(),
-                    }
+                    Decide::Wait { until: None }
                 }
             })
             .await
@@ -1330,21 +1306,12 @@ impl DurableSnapshotStore {
                         .pending()
                         .filter_map(|(_, entry)| match &entry.standing {
                             Standing::Admitted(admitted) => Some(admitted.call.clone()),
-                            Standing::Sleeping { .. } | Standing::Refused(_) => None,
+                            Standing::Refused(_) => None,
                         })
                         .collect(),
                 }
                 .into(),
             })?;
-        // A sleep that is over settles its timer row, so the owner's next
-        // release is not due at a deadline already answered.
-        if let Driven::Answered(settled) = &driven
-            && settled
-                .iter()
-                .any(|settled| settled.outcome == Outcome::Elapsed)
-        {
-            waits::settle_due(&self.cx).await.map_err(refused)?;
-        }
         Ok(driven)
     }
 }

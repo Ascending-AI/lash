@@ -1,4 +1,7 @@
-use crate::{EffectAddress, ProcessId, SessionId, TurnId};
+use crate::EffectAddress;
+use lash_vocabulary::identity::ProcessId;
+use lash_vocabulary::identity::SessionId;
+use lash_vocabulary::identity::TurnId;
 use serde::{Deserialize, Serialize};
 
 /// Stable semantic reference to the runtime fact that caused another fact.

@@ -60,7 +60,7 @@ pub(super) fn execution(session: &SessionId, name: &str) -> ArtifactReferrer {
     ArtifactReferrer::Execution(
         ExecutionScope::turn(
             session.clone(),
-            lash_core::TurnId::fixture(name.to_string()),
+            lash_vocabulary::identity::TurnId::fixture(name.to_string()),
         )
         .journal_identity()
         .unwrap(),

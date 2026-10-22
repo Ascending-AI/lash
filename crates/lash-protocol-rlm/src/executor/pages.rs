@@ -110,7 +110,7 @@ pub(crate) enum PageAccessError {
     #[error("the session stages pages, and its host named no staging directory")]
     NoStaging,
     #[error("the run's pages are not readable: {0}")]
-    Run(lash_vm_protocol::page::PageRefusal),
+    Run(lash_protocol_types::engine_fault::PageRefusal),
     #[error(transparent)]
     Staging(#[from] StageFault),
 }
@@ -222,7 +222,13 @@ impl SessionPageAccess {
     /// needed; none when the session holds nothing in the store.
     pub(crate) async fn lease(&mut self) -> Result<Option<RootLease>, PageAccessError> {
         let Some(handle) = self.handle.clone() else {
-            return Ok(None);
+            // Before a session capture is committed, a parked cell may
+            // already have published pages its carry still reaches. The
+            // held activation owns their lease until that capture settles.
+            return match self.runs.back() {
+                Some(run) => Ok(run.pages.lock().await.lease().cloned()),
+                None => Ok(None),
+            };
         };
         if let Some((lease, renewed)) = &self.lease {
             if renewed.elapsed() < LEASE_TTL / 3 {

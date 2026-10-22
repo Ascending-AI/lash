@@ -6,8 +6,11 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use lash_kernel_doc::{Expr, FunctionId, Node, Stmt};
-use lash_kernel_package::PackageView;
+use lash_kernel_doc::Document;
+use lash_kernel_doc::Expr;
+use lash_kernel_doc::Node;
+use lash_kernel_doc::Stmt;
+use lash_vocabulary::names::FunctionId;
 
 use crate::HarnessError;
 
@@ -20,47 +23,41 @@ pub type LoopBounds = BTreeMap<FunctionId, String>;
 /// an explicit, content-pinned size-bound argument. Closure bodies are
 /// ordinary charged code, outside the library's synchronous extent.
 /// Returns the number of audited loops. Unused evidence is refused too.
-pub fn audit_metering(view: &PackageView<'_>, bounds: &LoopBounds) -> Result<usize, HarnessError> {
+pub fn audit_metering(document: &Document, bounds: &LoopBounds) -> Result<usize, HarnessError> {
     let mut used = BTreeSet::new();
     let mut loops = 0;
     let mut missing = Vec::new();
-    for package in view.packages() {
-        for function in package.ids() {
-            let definition = view
-                .catalog()
-                .get(&function)
-                .ok_or_else(|| HarnessError(format!("@{function} is not in the catalog")))?
-                .definition();
-            let Some(body) = definition.body() else {
+    for (function, definition) in &document.functions {
+        let function = *function;
+        let Some(body) = definition.body() else {
+            continue;
+        };
+        let mut pending = vec![(vec![], Node::Block(&body.block))];
+        while let Some((path, node)) = pending.pop() {
+            if matches!(node, Node::Expr(Expr::Closure(_))) {
                 continue;
-            };
-            let mut pending = vec![(vec![], Node::Block(&body.block))];
-            while let Some((path, node)) = pending.pop() {
-                if matches!(node, Node::Expr(Expr::Closure(_))) {
-                    continue;
-                }
-                if let Node::Stmt(Stmt::For { metered, .. } | Stmt::While { metered, .. }) = node {
-                    loops += 1;
-                    if *metered == 0 {
-                        match bounds.get(&function) {
-                            Some(reason) if !reason.trim().is_empty() => { used.insert(function); }
-                            _ => missing.push(format!("CONF-METER {} {} @{function} at {path:?}: unmetered loop lacks reviewed argument/result-size bound evidence; declare metered N or supply its size-bound proof", package.path(), definition.name)),
-                        }
-                    }
-                }
-                pending.extend(
-                    node.children()
-                        .into_iter()
-                        .enumerate()
-                        .map(|(index, node)| {
-                            let mut child = path.clone();
-                            child.push(u32::try_from(index).unwrap_or_else(|_| {
-                                unreachable!("a validated body has fewer than u32::MAX children")
-                            }));
-                            (child, node)
-                        }),
-                );
             }
+            if let Node::Stmt(Stmt::For { metered, .. } | Stmt::While { metered, .. }) = node {
+                loops += 1;
+                if *metered == 0 {
+                    match bounds.get(&function) {
+                            Some(reason) if !reason.trim().is_empty() => { used.insert(function); }
+                            _ => missing.push(format!("CONF-METER {} {} @{function} at {path:?}: unmetered loop lacks reviewed argument/result-size bound evidence; declare metered N or supply its size-bound proof", document.identity(), definition.name)),
+                        }
+                }
+            }
+            pending.extend(
+                node.children()
+                    .into_iter()
+                    .enumerate()
+                    .map(|(index, node)| {
+                        let mut child = path.clone();
+                        child.push(u32::try_from(index).unwrap_or_else(|_| {
+                            unreachable!("a validated body has fewer than u32::MAX children")
+                        }));
+                        (child, node)
+                    }),
+            );
         }
     }
     for function in bounds.keys().filter(|function| !used.contains(function)) {

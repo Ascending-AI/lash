@@ -418,7 +418,9 @@ async fn run_provider_turn_task(
     let prompt = format!("Run generated provider turn {}.", event.boundary_id);
     let accepted = session
         .send(lash::TurnInput::text(prompt))
-        .id(lash_core::TurnId::fixture(event.boundary_id.clone()))
+        .id(lash_vocabulary::identity::TurnId::fixture(
+            event.boundary_id.clone(),
+        ))
         .await;
     // Once this turn's input is accepted, the run that drains the session
     // takes it with every input the hold kept pending.

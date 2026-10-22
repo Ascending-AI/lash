@@ -33,6 +33,7 @@ dependencies = [
  "dotenvy",
  "futures-util",
  "lash-internal-provider-fixtures",
+ "lash-internal-vocabulary",
  "lash-rmcp",
  "lash-runtime",
  "percent-encoding",
@@ -902,9 +903,7 @@ name = "dataframe"
 version = "0.0.0-dev"
 dependencies = [
  "lash-runtime",
- "serde",
  "serde_json",
- "thiserror 2.0.18",
  "tokio",
 ]
 
@@ -912,6 +911,7 @@ dependencies = [
 name = "delegation"
 version = "0.0.0-dev"
 dependencies = [
+ "lash-internal-vocabulary",
  "lash-runtime",
  "serde",
  "serde_json",
@@ -1054,6 +1054,7 @@ dependencies = [
  "axum",
  "chrono",
  "futures-util",
+ "lash-internal-vocabulary",
  "lash-runtime",
  "opentelemetry_sdk",
  "reqwest",
@@ -1882,6 +1883,7 @@ name = "integrator-contract"
 version = "0.0.0-dev"
 dependencies = [
  "lash-internal-conformance",
+ "lash-internal-vocabulary",
  "lash-runtime",
  "tokio",
 ]
@@ -2077,6 +2079,7 @@ dependencies = [
 name = "kernel-embedder"
 version = "0.0.0-dev"
 dependencies = [
+ "lash-internal-vocabulary",
  "lash-kernel-check",
  "lash-kernel-doc",
  "lash-kernel-state",
@@ -2096,6 +2099,7 @@ dependencies = [
  "lash-ext-url-whatwg",
  "lash-internal-vm-releases",
  "lash-internal-vm-worker",
+ "lash-internal-vocabulary",
  "lash-kernel-check",
  "lash-kernel-conformance",
  "lash-kernel-dialect",
@@ -2125,8 +2129,10 @@ dependencies = [
  "lash-ext-regex-ecma",
  "lash-ext-ts-core",
  "lash-ext-url-whatwg",
+ "lash-internal-vm-client",
  "lash-internal-vm-releases",
  "lash-internal-vm-worker",
+ "lash-internal-vocabulary",
  "lash-kernel-check",
  "lash-kernel-conformance",
  "lash-kernel-dialect",
@@ -2156,6 +2162,7 @@ dependencies = [
  "axum",
  "futures-util",
  "lash-internal-postgres-store",
+ "lash-internal-vocabulary",
  "lash-runtime",
  "libc",
  "reqwest",
@@ -2169,6 +2176,7 @@ dependencies = [
 name = "lash-ext-date-ecma"
 version = "0.0.0-dev"
 dependencies = [
+ "lash-internal-vocabulary",
  "lash-kernel-doc",
  "lash-kernel-state",
  "num-traits",
@@ -2183,10 +2191,12 @@ dependencies = [
  "lash-ext-date-ecma",
  "lash-ext-regex-ecma",
  "lash-ext-url-whatwg",
+ "lash-internal-vocabulary",
  "lash-kernel-dialect",
  "lash-kernel-doc",
  "lash-kernel-lib",
  "lash-kernel-package",
+ "lash-kernel-state",
  "lash-kernel-vm",
 ]
 
@@ -2195,6 +2205,7 @@ name = "lash-ext-py-core"
 version = "0.0.0-dev"
 dependencies = [
  "lash-ext-helper-compiler",
+ "lash-internal-vocabulary",
  "lash-kernel-doc",
  "thiserror 2.0.18",
 ]
@@ -2203,6 +2214,7 @@ dependencies = [
 name = "lash-ext-regex-ecma"
 version = "0.0.0-dev"
 dependencies = [
+ "lash-internal-vocabulary",
  "lash-kernel-doc",
  "lash-kernel-state",
  "lash-regress",
@@ -2215,6 +2227,7 @@ name = "lash-ext-ts-core"
 version = "0.0.0-dev"
 dependencies = [
  "lash-ext-helper-compiler",
+ "lash-internal-vocabulary",
  "lash-kernel-doc",
  "thiserror 2.0.18",
 ]
@@ -2223,6 +2236,7 @@ dependencies = [
 name = "lash-ext-url-whatwg"
 version = "0.0.0-dev"
 dependencies = [
+ "lash-internal-vocabulary",
  "lash-kernel-doc",
  "lash-kernel-state",
  "url",
@@ -2237,6 +2251,7 @@ dependencies = [
  "lash-internal-durable",
  "lash-internal-execution-contracts",
  "lash-internal-postgres-store",
+ "lash-internal-vocabulary",
  "lash-runtime",
  "serde",
  "serde_json",
@@ -2259,7 +2274,7 @@ name = "lash-internal-checkpoint-encoder"
 version = "0.0.0-dev"
 dependencies = [
  "blake3",
- "lash-kernel-doc",
+ "lash-internal-vocabulary",
  "schemars",
  "serde",
  "thiserror 2.0.18",
@@ -2276,10 +2291,12 @@ dependencies = [
  "lash-internal-core",
  "lash-internal-core-store",
  "lash-internal-core-worker",
+ "lash-internal-durable",
  "lash-internal-execution-contracts",
  "lash-internal-protocol-types",
  "lash-internal-sqlite-store",
  "lash-internal-transport-failure",
+ "lash-internal-vocabulary",
  "lash-kernel-doc",
  "pretty_assertions",
  "proptest",
@@ -2313,9 +2330,7 @@ dependencies = [
  "lash-internal-sqlite-store",
  "lash-internal-trace",
  "lash-internal-transport-failure",
- "lash-kernel-dialect",
- "lash-kernel-doc",
- "lash-kernel-migrate",
+ "lash-internal-vocabulary",
  "libc",
  "rmp-serde",
  "schemars",
@@ -2336,6 +2351,7 @@ version = "0.0.0-dev"
 dependencies = [
  "lash-internal-core-store",
  "lash-internal-protocol-types",
+ "lash-internal-vocabulary",
  "serde",
  "serde_json",
 ]
@@ -2360,8 +2376,7 @@ dependencies = [
  "lash-internal-sqlite-store",
  "lash-internal-trace",
  "lash-internal-transport-failure",
- "lash-kernel-dialect",
- "lash-kernel-doc",
+ "lash-internal-vocabulary",
  "rmp-serde",
  "schemars",
  "serde",
@@ -2385,6 +2400,7 @@ dependencies = [
  "lash-internal-checkpoint-encoder",
  "lash-internal-protocol-types",
  "lash-internal-trace",
+ "lash-internal-vocabulary",
  "rustix",
  "schemars",
  "serde",
@@ -2408,6 +2424,7 @@ dependencies = [
  "lash-internal-protocol-types",
  "lash-internal-trace",
  "lash-internal-transport-failure",
+ "lash-internal-vocabulary",
  "schemars",
  "serde",
  "serde_json",
@@ -2421,6 +2438,7 @@ name = "lash-internal-core-store"
 version = "0.0.0-dev"
 dependencies = [
  "async-trait",
+ "blake3",
  "lash-internal-checkpoint-encoder",
  "lash-internal-core",
  "lash-internal-core-ids",
@@ -2429,8 +2447,7 @@ dependencies = [
  "lash-internal-render",
  "lash-internal-sqlite-store",
  "lash-internal-trace",
- "lash-internal-vm-protocol",
- "lash-kernel-doc",
+ "lash-internal-vocabulary",
  "rmp-serde",
  "schemars",
  "serde",
@@ -2453,6 +2470,7 @@ dependencies = [
  "lash-internal-execution-contracts",
  "lash-internal-protocol-types",
  "lash-internal-trace",
+ "lash-internal-vocabulary",
  "serde_json",
  "tokio-util",
  "tracing",
@@ -2470,7 +2488,8 @@ dependencies = [
  "lash-internal-core-store",
  "lash-internal-protocol-types",
  "lash-internal-trace",
- "lash-kernel-doc",
+ "lash-internal-vocabulary",
+ "serde",
  "serde_json",
  "thiserror 2.0.18",
  "tokio",
@@ -2502,8 +2521,10 @@ dependencies = [
  "lash-internal-vm-broker",
  "lash-internal-vm-client",
  "lash-internal-vm-runtime",
+ "lash-internal-vocabulary",
  "lash-kernel-doc",
  "lash-kernel-migrate",
+ "lash-kernel-package",
  "lash-kernel-state",
  "lash-kernel-vm",
  "lash-runtime",
@@ -2528,11 +2549,7 @@ dependencies = [
  "lash-internal-durable",
  "lash-internal-protocol-types",
  "lash-internal-trace",
- "lash-kernel-check",
- "lash-kernel-dialect",
- "lash-kernel-doc",
- "lash-kernel-migrate",
- "lash-kernel-package",
+ "lash-internal-vocabulary",
  "rmp-serde",
  "schemars",
  "serde",
@@ -2572,6 +2589,7 @@ dependencies = [
  "lash-internal-vm-client",
  "lash-internal-vm-runtime",
  "lash-internal-vm-worker",
+ "lash-internal-vocabulary",
  "lash-runtime",
  "opentelemetry_sdk",
  "rusqlite",
@@ -2606,6 +2624,7 @@ dependencies = [
  "lash-internal-execution-contracts",
  "lash-internal-protocol-types",
  "lash-internal-tool-support",
+ "lash-internal-vocabulary",
  "serde_json",
  "tokio",
 ]
@@ -2642,11 +2661,13 @@ dependencies = [
  "http",
  "jsonschema",
  "lash-internal-core",
+ "lash-internal-core-store",
  "lash-internal-execution-contracts",
  "lash-internal-protocol-types",
  "lash-internal-sqlite-store",
  "lash-internal-tool-support",
  "lash-internal-vm-runtime",
+ "lash-internal-vocabulary",
  "lash-rmcp",
  "lash-runtime",
  "libc",
@@ -2666,9 +2687,11 @@ version = "0.0.0-dev"
 dependencies = [
  "async-trait",
  "lash-internal-core",
+ "lash-internal-core-store",
  "lash-internal-execution-contracts",
  "lash-internal-protocol-types",
  "lash-internal-tool-support",
+ "lash-internal-vocabulary",
  "lash-runtime",
  "serde_json",
  "tokio",
@@ -2683,6 +2706,7 @@ dependencies = [
  "lash-internal-execution-contracts",
  "lash-internal-protocol-types",
  "lash-internal-sansio",
+ "lash-internal-vocabulary",
  "lash-runtime",
  "serde",
  "serde_json",
@@ -2708,6 +2732,7 @@ dependencies = [
  "lash-internal-sqlite-store",
  "lash-internal-store-sql",
  "lash-internal-trace",
+ "lash-internal-vocabulary",
  "lash-kernel-doc",
  "lash-runtime",
  "rmp-serde",
@@ -2736,6 +2761,7 @@ dependencies = [
  "lash-internal-postgres-store",
  "lash-internal-protocol-types",
  "lash-internal-sqlite-store",
+ "lash-internal-vocabulary",
  "lash-runtime",
  "rusqlite",
  "serde",
@@ -2767,12 +2793,15 @@ dependencies = [
  "lash-internal-tool-presenter-standard",
  "lash-internal-tool-presenter-typescript",
  "lash-internal-tool-shape",
+ "lash-internal-tool-support",
  "lash-internal-trace",
  "lash-internal-vm-broker",
  "lash-internal-vm-client",
  "lash-internal-vm-protocol",
+ "lash-internal-vm-releases",
  "lash-internal-vm-runtime",
  "lash-internal-vm-worker",
+ "lash-internal-vocabulary",
  "lash-kernel-check",
  "lash-kernel-dialect",
  "lash-kernel-doc",
@@ -2804,7 +2833,7 @@ dependencies = [
  "lash-internal-tool-presenter-api",
  "lash-internal-tool-presenter-standard",
  "lash-internal-tool-support",
- "lash-kernel-dialect",
+ "lash-internal-vocabulary",
  "lash-runtime",
  "mutants",
  "serde",
@@ -2819,9 +2848,7 @@ version = "0.0.0-dev"
 dependencies = [
  "blake3",
  "jsonschema",
- "lash-kernel-check",
- "lash-kernel-dialect",
- "lash-kernel-doc",
+ "lash-internal-vocabulary",
  "proptest",
  "schemars",
  "serde",
@@ -2840,6 +2867,7 @@ dependencies = [
  "lash-internal-protocol-types",
  "lash-internal-provider-anthropic",
  "lash-internal-transport-failure",
+ "lash-internal-vocabulary",
  "reqwest",
  "serde_json",
  "tokio",
@@ -2858,6 +2886,7 @@ dependencies = [
  "lash-internal-provider-google",
  "lash-internal-provider-openai",
  "lash-internal-transport-failure",
+ "lash-internal-vocabulary",
  "serde",
  "serde_json",
  "tokio",
@@ -2877,6 +2906,7 @@ dependencies = [
  "lash-internal-protocol-types",
  "lash-internal-provider-google",
  "lash-internal-transport-failure",
+ "lash-internal-vocabulary",
  "lash-runtime",
  "reqwest",
  "serde_json",
@@ -2899,6 +2929,7 @@ dependencies = [
  "lash-internal-provider-openai",
  "lash-internal-tool-support",
  "lash-internal-transport-failure",
+ "lash-internal-vocabulary",
  "lash-runtime",
  "reqwest",
  "serde",
@@ -2924,6 +2955,7 @@ dependencies = [
  "lash-internal-render",
  "lash-internal-sansio",
  "lash-internal-tool-shape",
+ "lash-internal-vocabulary",
  "lash-kernel-doc",
  "schemars",
  "serde",
@@ -2951,6 +2983,7 @@ name = "lash-internal-sansio"
 version = "0.0.0-dev"
 dependencies = [
  "lash-internal-protocol-types",
+ "lash-internal-vocabulary",
  "serde",
  "serde_json",
 ]
@@ -2971,6 +3004,7 @@ dependencies = [
  "lash-internal-protocol-types",
  "lash-internal-sqlite-store",
  "lash-internal-store-sql",
+ "lash-internal-vocabulary",
  "lash-kernel-doc",
  "lash-runtime",
  "rmp-serde",
@@ -2995,6 +3029,7 @@ version = "0.0.0-dev"
 dependencies = [
  "lash-internal-protocol-types",
  "lash-internal-tool-shape",
+ "lash-internal-vocabulary",
  "serde",
  "serde_json",
  "thiserror 2.0.18",
@@ -3007,6 +3042,7 @@ dependencies = [
  "lash-internal-protocol-types",
  "lash-internal-tool-presenter-api",
  "lash-internal-tool-shape",
+ "lash-internal-vocabulary",
  "serde",
  "serde_json",
 ]
@@ -3018,6 +3054,7 @@ dependencies = [
  "lash-internal-protocol-types",
  "lash-internal-tool-presenter-api",
  "lash-internal-tool-shape",
+ "lash-internal-vocabulary",
  "serde",
  "serde_json",
 ]
@@ -3029,6 +3066,7 @@ dependencies = [
  "lash-internal-protocol-types",
  "lash-internal-tool-presenter-api",
  "lash-internal-tool-shape",
+ "lash-internal-vocabulary",
  "serde",
  "serde_json",
 ]
@@ -3037,6 +3075,7 @@ dependencies = [
 name = "lash-internal-tool-shape"
 version = "0.0.0-dev"
 dependencies = [
+ "lash-internal-vocabulary",
  "serde",
  "serde_json",
 ]
@@ -3047,7 +3086,9 @@ version = "0.0.0-dev"
 dependencies = [
  "async-trait",
  "lash-internal-core",
+ "lash-internal-core-store",
  "lash-internal-execution-contracts",
+ "lash-internal-vocabulary",
  "lash-runtime",
  "serde",
  "serde_json",
@@ -3061,8 +3102,7 @@ dependencies = [
  "chrono",
  "jsonschema",
  "lash-internal-protocol-types",
- "lash-kernel-check",
- "lash-kernel-doc",
+ "lash-internal-vocabulary",
  "opentelemetry",
  "opentelemetry_sdk",
  "schemars",
@@ -3099,6 +3139,7 @@ dependencies = [
  "lash-internal-protocol-types",
  "lash-internal-vm-protocol",
  "lash-internal-vm-releases",
+ "lash-internal-vocabulary",
  "lash-kernel-doc",
  "lash-kernel-package",
  "lash-kernel-state",
@@ -3117,9 +3158,11 @@ dependencies = [
  "async-trait",
  "lash-internal-core-execution",
  "lash-internal-core-store",
+ "lash-internal-protocol-types",
  "lash-internal-vm-broker",
  "lash-internal-vm-protocol",
  "lash-internal-vm-releases",
+ "lash-internal-vocabulary",
  "lash-kernel-dialect",
  "lash-kernel-doc",
  "lash-kernel-package",
@@ -3140,6 +3183,7 @@ name = "lash-internal-vm-protocol"
 version = "0.0.0-dev"
 dependencies = [
  "lash-internal-protocol-types",
+ "lash-internal-vocabulary",
  "rmp-serde",
  "schemars",
  "serde",
@@ -3159,6 +3203,7 @@ dependencies = [
  "lash-ext-regex-ecma",
  "lash-ext-ts-core",
  "lash-ext-url-whatwg",
+ "lash-internal-vocabulary",
  "lash-kernel-dialect",
  "lash-kernel-doc",
  "lash-kernel-lib",
@@ -3175,6 +3220,7 @@ version = "0.0.0-dev"
 dependencies = [
  "async-trait",
  "base64 0.23.1",
+ "fastrand",
  "lash-internal-core",
  "lash-internal-core-execution",
  "lash-internal-core-ids",
@@ -3187,6 +3233,7 @@ dependencies = [
  "lash-internal-vm-client",
  "lash-internal-vm-protocol",
  "lash-internal-vm-releases",
+ "lash-internal-vocabulary",
  "lash-kernel-check",
  "lash-kernel-dialect",
  "lash-kernel-doc",
@@ -3230,6 +3277,7 @@ dependencies = [
  "lash-internal-vm-protocol",
  "lash-internal-vm-releases",
  "lash-internal-vm-worker",
+ "lash-internal-vocabulary",
  "lash-kernel-check",
  "lash-kernel-dialect",
  "lash-kernel-doc",
@@ -3251,10 +3299,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "lash-internal-vocabulary"
+version = "0.0.0-dev"
+dependencies = [
+ "blake3",
+ "jsonschema",
+ "proptest",
+ "schemars",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "lash-kernel-check"
 version = "0.0.0-dev"
 dependencies = [
  "lash-internal-tool-shape",
+ "lash-internal-vocabulary",
  "lash-kernel-doc",
  "schemars",
  "serde",
@@ -3276,6 +3338,8 @@ dependencies = [
  "lash-ext-regex-ecma",
  "lash-ext-ts-core",
  "lash-ext-url-whatwg",
+ "lash-internal-vm-releases",
+ "lash-internal-vocabulary",
  "lash-kernel-check",
  "lash-kernel-dialect",
  "lash-kernel-doc",
@@ -3295,6 +3359,7 @@ dependencies = [
 name = "lash-kernel-dialect"
 version = "0.0.0-dev"
 dependencies = [
+ "lash-internal-vocabulary",
  "lash-kernel-doc",
  "lash-kernel-state",
  "schemars",
@@ -3308,6 +3373,7 @@ name = "lash-kernel-doc"
 version = "0.0.0-dev"
 dependencies = [
  "blake3",
+ "lash-internal-vocabulary",
  "libc",
  "num-bigint",
  "num-traits",
@@ -3322,11 +3388,10 @@ dependencies = [
 name = "lash-kernel-edit"
 version = "0.0.0-dev"
 dependencies = [
+ "lash-internal-vocabulary",
  "lash-kernel-check",
  "lash-kernel-doc",
  "lash-kernel-package",
- "lash-kernel-state",
- "lash-kernel-vm",
  "schemars",
  "serde",
  "serde_json",
@@ -3337,6 +3402,7 @@ dependencies = [
 name = "lash-kernel-exec"
 version = "0.0.0-dev"
 dependencies = [
+ "lash-internal-vocabulary",
  "thiserror 2.0.18",
 ]
 
@@ -3344,6 +3410,7 @@ dependencies = [
 name = "lash-kernel-lib"
 version = "0.0.0-dev"
 dependencies = [
+ "lash-internal-vocabulary",
  "lash-kernel-doc",
  "lash-kernel-state",
  "lash-kernel-vm",
@@ -3358,12 +3425,14 @@ dependencies = [
 name = "lash-kernel-migrate"
 version = "0.0.0-dev"
 dependencies = [
+ "lash-internal-vocabulary",
  "lash-kernel-check",
  "lash-kernel-dialect",
  "lash-kernel-doc",
  "lash-kernel-state",
  "schemars",
  "serde",
+ "serde_json",
  "thiserror 2.0.18",
 ]
 
@@ -3371,15 +3440,10 @@ dependencies = [
 name = "lash-kernel-package"
 version = "0.0.0-dev"
 dependencies = [
- "blake3",
  "lash-helper-labels",
- "lash-kernel-dialect",
+ "lash-internal-vocabulary",
+ "lash-kernel-check",
  "lash-kernel-doc",
- "lash-kernel-lib",
- "lash-kernel-migrate",
- "lash-kernel-state",
- "lash-kernel-vm",
- "rmp-serde",
  "serde",
  "serde_json",
  "thiserror 2.0.18",
@@ -3390,6 +3454,7 @@ name = "lash-kernel-state"
 version = "0.0.0-dev"
 dependencies = [
  "foldhash 0.2.0",
+ "lash-internal-vocabulary",
  "lash-kernel-doc",
  "schemars",
  "serde",
@@ -3401,15 +3466,10 @@ dependencies = [
 name = "lash-kernel-view"
 version = "0.0.0-dev"
 dependencies = [
- "lash-dialect-python",
- "lash-dialect-typescript",
  "lash-helper-labels",
- "lash-internal-vm-releases",
- "lash-internal-vm-worker",
+ "lash-internal-vocabulary",
  "lash-kernel-check",
- "lash-kernel-dialect",
  "lash-kernel-doc",
- "lash-kernel-edit",
  "lash-kernel-package",
  "schemars",
  "serde",
@@ -3421,6 +3481,8 @@ dependencies = [
 name = "lash-kernel-vm"
 version = "0.0.0-dev"
 dependencies = [
+ "lash-internal-vocabulary",
+ "lash-kernel-check",
  "lash-kernel-dialect",
  "lash-kernel-doc",
  "lash-kernel-exec",
@@ -3429,6 +3491,8 @@ dependencies = [
  "lash-kernel-state",
  "num-bigint",
  "num-traits",
+ "schemars",
+ "serde",
  "serde_json",
  "thiserror 2.0.18",
 ]
@@ -3471,6 +3535,7 @@ dependencies = [
  "lash-internal-vm-releases",
  "lash-internal-vm-runtime",
  "lash-internal-vm-worker",
+ "lash-internal-vocabulary",
  "lash-kernel-check",
  "lash-kernel-dialect",
  "lash-kernel-doc",
@@ -3587,6 +3652,7 @@ dependencies = [
  "lash-internal-vm-releases",
  "lash-internal-vm-runtime",
  "lash-internal-vm-worker",
+ "lash-internal-vocabulary",
  "lash-kernel-check",
  "lash-kernel-dialect",
  "lash-kernel-doc",
@@ -3642,6 +3708,7 @@ dependencies = [
  "lash-internal-transport-failure",
  "lash-internal-vm-client",
  "lash-internal-vm-runtime",
+ "lash-internal-vocabulary",
  "lash-runtime",
  "rmp-serde",
  "rusqlite",
@@ -3785,6 +3852,7 @@ name = "mcp-events"
 version = "0.0.0-dev"
 dependencies = [
  "blake3",
+ "lash-internal-vocabulary",
  "lash-runtime",
  "rusqlite",
  "serde",
@@ -4795,6 +4863,7 @@ dependencies = [
  "anyhow",
  "async-trait",
  "clap",
+ "lash-internal-vocabulary",
  "lash-runtime",
  "serde",
  "serde_json",
@@ -6153,6 +6222,7 @@ dependencies = [
  "clap",
  "dotenvy",
  "futures-util",
+ "lash-internal-vocabulary",
  "lash-runtime",
  "reqwest",
  "serde",
@@ -6968,10 +7038,12 @@ dependencies = [
  "lash-dialect-python",
  "lash-dialect-typescript",
  "lash-internal-vm-worker",
+ "lash-internal-vocabulary",
  "lash-kernel-check",
  "lash-kernel-dialect",
  "lash-kernel-doc",
  "lash-kernel-edit",
+ "lash-kernel-package",
  "lash-kernel-state",
  "lash-kernel-view",
  "lash-kernel-vm",
@@ -6989,6 +7061,7 @@ dependencies = [
  "anyhow",
  "axum",
  "chrono",
+ "lash-kernel-package",
  "lash-runtime",
  "reqwest",
  "serde",

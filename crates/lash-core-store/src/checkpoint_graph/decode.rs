@@ -14,14 +14,20 @@
 use std::borrow::Cow;
 use std::collections::BTreeMap;
 
-use lash_kernel_doc::graph_tokens::{
-    CanonicalFault, DecodeDimension, RefForm, TokenCodec, TokenEvent, TokenReader, TokenWriter,
-};
+use lash_vocabulary::tokens::CanonicalFault;
+use lash_vocabulary::tokens::DecodeDimension;
+use lash_vocabulary::tokens::RefForm;
+use lash_vocabulary::tokens::TokenCodec;
+use lash_vocabulary::tokens::TokenEvent;
+use lash_vocabulary::tokens::TokenReader;
+use lash_vocabulary::tokens::TokenWriter;
 
 use super::commit::{EncodeBudget, ExplicitLimit};
-use super::encode::{GraphStaging, TypedBody, to_physical, token_len};
+use super::encode::{
+    GraphStaging, LogicalScan, Placement, TypedBody, inline_envelope_len, token_len,
+};
 use super::node::{
-    EncodedNode, INDEX_FANOUT, INLINE_TOKEN_MAX, NodeEnvelope, NodeId, check_envelope, envelope_len,
+    EncodedNode, INDEX_FANOUT, INLINE_TOKEN_MAX, NodeEnvelope, NodeId, check_envelope,
 };
 use super::refusal::{DecodeLimits, GraphRefusal};
 use super::registry::{BodyShape, NodeKind};
@@ -121,6 +127,36 @@ impl Family {
             NodeKind::BYTES_LEAF => Some((Self::Bytes, true)),
             NodeKind::BYTES_INDEX => Some((Self::Bytes, false)),
             _ => None,
+        }
+    }
+}
+
+// Keep a prepared expansion shared until the typed decoder finishes. Bodies
+// without slots still borrow their checked source; streamed and unplaced
+// bodies own their receiving decoder's materialization.
+enum LogicalBody<'a> {
+    Borrowed(&'a [u8]),
+    Prepared(std::sync::Arc<[u8]>),
+    Owned(Vec<u8>),
+}
+
+impl LogicalBody<'_> {
+    fn into_owned(self) -> Vec<u8> {
+        match self {
+            Self::Borrowed(bytes) => bytes.to_vec(),
+            Self::Prepared(bytes) => bytes.to_vec(),
+            Self::Owned(bytes) => bytes,
+        }
+    }
+}
+
+impl std::ops::Deref for LogicalBody<'_> {
+    type Target = [u8];
+    fn deref(&self) -> &[u8] {
+        match self {
+            Self::Borrowed(bytes) => bytes,
+            Self::Prepared(bytes) => bytes,
+            Self::Owned(bytes) => bytes,
         }
     }
 }
@@ -266,14 +302,15 @@ impl<'s> GraphDecoder<'s> {
         id: NodeId,
         expected: NodeKind,
     ) -> Result<Vec<u8>, GraphRefusal> {
-        self.materialized_body(id, expected).map(Cow::into_owned)
+        self.materialized_body(id, expected)
+            .map(LogicalBody::into_owned)
     }
 
     fn materialized_body(
         &mut self,
         id: NodeId,
         expected: NodeKind,
-    ) -> Result<Cow<'s, [u8]>, GraphRefusal> {
+    ) -> Result<LogicalBody<'s>, GraphRefusal> {
         let envelope = self.envelope(id)?;
         if envelope.kind != expected {
             return Err(GraphRefusal::KindMismatch {
@@ -319,17 +356,14 @@ impl<'s> GraphDecoder<'s> {
                         .get(slot)
                         .ok_or(non_canonical(id, CanonicalFault::ChildSlotOutOfRange(slot)))?;
                     let placed = self.stream(id, stream, expected)?;
-                    let (children, physical) = to_physical(&placed, expected)?;
-                    if envelope_len(expected, children.len(), physical.len() + 3) as u64
-                        <= spec.bound.bytes()
-                    {
+                    if inline_envelope_len(&placed, expected)? <= spec.bound.bytes() {
                         return Err(non_canonical(id, CanonicalFault::InvalidBodyForm));
                     }
-                    Cow::Owned(placed)
+                    LogicalBody::Owned(placed)
                 };
                 let logical = match self.unplace(id, &placed)? {
                     Cow::Borrowed(_) => placed,
-                    Cow::Owned(logical) => Cow::Owned(logical),
+                    Cow::Owned(logical) => LogicalBody::Owned(logical),
                 };
                 let mut check = verifier();
                 if check.encode(expected, TypedBody::logical(&logical))? != id {
@@ -579,22 +613,54 @@ impl<'s> GraphDecoder<'s> {
         }
     }
 
+    /// Plain tokens between references carry no graph work. Locate the
+    /// first failing original event under the receiving limit after prior
+    /// substitutions, before any later child read or placement refusal.
+    fn unplaced_prefix_limit(
+        &self,
+        scan: &LogicalScan,
+        end: usize,
+        out: Option<&TokenWriter>,
+        copied: usize,
+    ) -> Result<(), GraphRefusal> {
+        let source_limit = out.map_or(self.limits.logical_bytes, |writer| {
+            self.limits
+                .logical_bytes
+                .saturating_sub(writer.len() as u64)
+                .saturating_add(copied as u64)
+        });
+        if let Some(at) = scan.first_event_past(source_limit).filter(|at| *at <= end) {
+            let actual = out.map_or(at, |writer| writer.len() + at - copied);
+            self.limit(
+                DecodeDimension::LogicalBytes,
+                actual as u64,
+                self.limits.logical_bytes,
+            )?;
+        }
+        Ok(())
+    }
+
     /// Puts every placed value of `placed` back inline, refusing an inline
     /// value over the bound and a placed one under it.
     fn unplace<'p>(&mut self, id: NodeId, placed: &'p [u8]) -> Result<Cow<'p, [u8]>, GraphRefusal> {
-        let refuse = |error| GraphRefusal::from_token(error, Some(id), None);
-        let mut reader = TokenReader::new(placed);
+        let scan = LogicalScan::scan(placed, NodeKind(0)).map_err(|error| match error {
+            lash_checkpoint_encoder::GraphRefusal::NonCanonical { reason, .. } => {
+                non_canonical(id, reason)
+            }
+            other => GraphRefusal::from(other),
+        })?;
         let mut out: Option<TokenWriter> = None;
-        while !reader.is_empty() {
-            let start = reader.position();
-            match reader.next_event().map_err(refuse)? {
-                TokenEvent::Text(text) if token_len(text.len()) > INLINE_TOKEN_MAX => {
+        let mut copied = 0;
+        for step in scan.placement_changes() {
+            #[cfg(test)]
+            UNPLACE_STEPS.with(|count| count.set(count.get() + 1));
+            let start = step.start;
+            self.unplaced_prefix_limit(&scan, start, out.as_ref(), copied)?;
+            match step.placement {
+                Placement::Oversized => {
                     return Err(non_canonical(id, CanonicalFault::InvalidPlacement));
                 }
-                TokenEvent::Bytes(bytes) if token_len(bytes.len()) > INLINE_TOKEN_MAX => {
-                    return Err(non_canonical(id, CanonicalFault::InvalidPlacement));
-                }
-                TokenEvent::Child(child) => {
+                Placement::Child(child) => {
                     let child = NodeId::from(child);
                     let stored = self
                         .source
@@ -604,47 +670,39 @@ impl<'s> GraphDecoder<'s> {
                         BlobEncoding::Graph => Some(self.envelope(child)?.kind),
                         BlobEncoding::Opaque => None,
                     };
-                    match kind.and_then(Family::of) {
-                        Some((family, _)) => {
-                            let value = self.placed(child, family)?;
-                            if token_len(value.len()) <= INLINE_TOKEN_MAX {
-                                return Err(non_canonical(id, CanonicalFault::InvalidPlacement));
-                            }
-                            let writer = out.get_or_insert_with(|| {
-                                let capacity = placed.len() - (reader.position() - start)
-                                    + token_len(value.len()) as usize;
-                                let mut writer = TokenWriter::with_capacity(capacity);
-                                writer.raw(&placed[..start]);
-                                writer
-                            });
-                            match family {
-                                Family::Text => writer.text(
-                                    std::str::from_utf8(&value)
-                                        .map_err(|_| GraphRefusal::InvalidUtf8)?,
-                                ),
-                                Family::Bytes => writer.bytes(&value),
-                            }
+                    if let Some((family, _)) = kind.and_then(Family::of) {
+                        let value = self.placed(child, family)?;
+                        if token_len(value.len()) <= INLINE_TOKEN_MAX {
+                            return Err(non_canonical(id, CanonicalFault::InvalidPlacement));
                         }
-                        None => {
-                            if let Some(writer) = &mut out {
-                                writer.raw(&placed[start..reader.position()]);
-                            }
+                        let writer = out.get_or_insert_with(|| {
+                            let capacity =
+                                placed.len() - (step.end - start) + token_len(value.len()) as usize;
+                            TokenWriter::with_capacity(capacity)
+                        });
+                        writer.raw(&placed[copied..start]);
+                        match family {
+                            Family::Text => writer.text(
+                                std::str::from_utf8(&value)
+                                    .map_err(|_| GraphRefusal::InvalidUtf8)?,
+                            ),
+                            Family::Bytes => writer.bytes(&value),
                         }
-                    }
-                }
-                _ => {
-                    if let Some(writer) = &mut out {
-                        writer.raw(&placed[start..reader.position()]);
+                        copied = step.end;
                     }
                 }
             }
             self.limit(
                 DecodeDimension::LogicalBytes,
-                out.as_ref().map_or(reader.position(), TokenWriter::len) as u64,
+                out.as_ref()
+                    .map_or(step.end, |writer| writer.len() + step.end - copied)
+                    as u64,
                 self.limits.logical_bytes,
             )?;
         }
-        Ok(out.map_or(Cow::Borrowed(placed), |writer| {
+        self.unplaced_prefix_limit(&scan, placed.len(), out.as_ref(), copied)?;
+        Ok(out.map_or(Cow::Borrowed(placed), |mut writer| {
+            writer.raw(&placed[copied..]);
             Cow::Owned(writer.into_bytes())
         }))
     }
@@ -655,30 +713,14 @@ fn to_logical<'b>(
     envelope: &NodeEnvelope<'_>,
     body: &'b [u8],
     id: NodeId,
-) -> Result<Cow<'b, [u8]>, GraphRefusal> {
-    let refuse = |error| GraphRefusal::from_token(error, Some(id), Some(envelope.kind.0));
-    let mut reader = TokenReader::with_form(body, RefForm::Physical);
+) -> Result<LogicalBody<'b>, GraphRefusal> {
+    // Envelope admission has already checked every token, even for a body
+    // without child slots. Such bodies can continue borrowing the source.
     if envelope.children.is_empty() {
-        while !reader.is_empty() {
-            reader.next_event().map_err(refuse)?;
-        }
-        return Ok(Cow::Borrowed(body));
+        return Ok(LogicalBody::Borrowed(body));
     }
-    let mut out = TokenWriter::with_capacity(body.len() + 32 * envelope.children.len());
-    while !reader.is_empty() {
-        let start = reader.position();
-        match reader.next_event().map_err(refuse)? {
-            TokenEvent::Slot(slot) => {
-                let child = envelope
-                    .children
-                    .get(slot)
-                    .ok_or(non_canonical(id, CanonicalFault::ChildSlotOutOfRange(slot)))?;
-                out.child(child.child_ref());
-            }
-            _ => out.raw(&body[start..reader.position()]),
-        }
-    }
-    Ok(Cow::Owned(out.into_bytes()))
+    let skip = envelope.body.len() - body.len();
+    Ok(LogicalBody::Prepared(envelope.logical_tokens(skip, id)?))
 }
 
 fn leaf_payload<'s>(
@@ -694,4 +736,204 @@ fn leaf_payload<'s>(
     };
     reader.finish().map_err(refuse)?;
     Ok(payload)
+}
+
+#[cfg(test)]
+thread_local! {
+    static UNPLACE_STEPS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+
+#[cfg(test)]
+mod preparation_tests {
+    use super::super::node::write_envelope;
+    use super::*;
+
+    /// FIG-7135: only referenced children require per-event unplacement;
+    /// arbitrarily long plain token spans use their prepared boundaries.
+    #[test]
+    fn unplacement_visits_references_without_walking_plain_tokens() {
+        let child = NodeId([0xb2; 32]);
+        struct Opaque {
+            child: NodeId,
+            reads: std::cell::Cell<usize>,
+        }
+        impl NodeSource for Opaque {
+            fn fetch(&self, id: &NodeId) -> Option<StoredNode<'_>> {
+                self.reads.set(self.reads.get() + 1);
+                (*id == self.child).then_some(StoredNode {
+                    encoding: BlobEncoding::Opaque,
+                    bytes: &[0],
+                })
+            }
+        }
+        let source = Opaque {
+            child,
+            reads: std::cell::Cell::new(0),
+        };
+        let mut tokens = TokenWriter::new();
+        tokens.seq(10_002);
+        for n in 0..10_000 {
+            tokens.unsigned(n);
+        }
+        tokens.child(child.child_ref());
+        tokens.bool(true);
+        let placed = tokens.into_bytes();
+        UNPLACE_STEPS.with(|count| count.set(0));
+        for _ in 0..12 {
+            let mut decoder = GraphDecoder::new(&source, DecodeLimits::within_total(1 << 20));
+            assert_eq!(
+                &*decoder.unplace(NodeId([0xb3; 32]), &placed).unwrap(),
+                placed
+            );
+        }
+        assert_eq!(source.reads.get(), 12, "every current child is still read");
+        assert_eq!(
+            UNPLACE_STEPS.with(std::cell::Cell::get),
+            12,
+            "plain spans must not become per-token unplacement work"
+        );
+    }
+
+    /// FIG-7135: unplacement consumes ordered prepared token facts, rather
+    /// than parsing the same checked logical content for every cold read.
+    #[test]
+    fn unplacement_token_scans_do_not_grow_with_read_count() {
+        let mut tokens = TokenWriter::new();
+        tokens.seq(3);
+        tokens.text("FIG-7135 unplacement scan work");
+        tokens.unsigned(7341);
+        tokens.bool(true);
+        let placed = tokens.into_bytes();
+        let nodes = BTreeMap::<NodeId, EncodedNode>::new();
+        let id = NodeId([0xa9; 32]);
+        let limits = DecodeLimits::within_total(1 << 20);
+        let before = super::super::encode::logical_scan_events();
+        for _ in 0..12 {
+            let mut decoder = GraphDecoder::new(&nodes, limits);
+            assert_eq!(&*decoder.unplace(id, &placed.clone()).unwrap(), placed);
+        }
+        let scanned = super::super::encode::logical_scan_events() - before;
+        assert_eq!(
+            scanned, 4,
+            "one parse of the four-token content across twelve reads"
+        );
+    }
+
+    /// Prepared unplacement retains event order, but no child existence or
+    /// caller-specific admission. A prefix refusal precedes a missing child;
+    /// at the child event its read precedes that event's byte-limit check.
+    #[test]
+    fn prepared_unplacement_keeps_child_reads_and_limit_failure_order() {
+        let id = NodeId([0xa7; 32]);
+        let child = NodeId([0xa8; 32]);
+        let mut tokens = TokenWriter::new();
+        tokens.seq(2);
+        tokens.text("FIG-7135 prepared unplacement order");
+        let prefix_end = tokens.len() as u64;
+        tokens.child(child.child_ref());
+        let placed = tokens.into_bytes();
+        let limits = DecodeLimits::within_total(1 << 20);
+        let opaque = BTreeMap::from([(
+            child,
+            EncodedNode {
+                id: child,
+                bytes: [0x00].into(),
+            },
+        )]);
+        struct OpaqueSource(BTreeMap<NodeId, EncodedNode>);
+        impl NodeSource for OpaqueSource {
+            fn fetch(&self, id: &NodeId) -> Option<StoredNode<'_>> {
+                self.0.get(id).map(|node| StoredNode {
+                    encoding: BlobEncoding::Opaque,
+                    bytes: &node.bytes,
+                })
+            }
+        }
+        // Warm the plan with the referenced opaque child present.
+        assert_eq!(
+            &*GraphDecoder::new(&OpaqueSource(opaque), limits)
+                .unplace(id, &placed)
+                .unwrap(),
+            placed
+        );
+        let missing = BTreeMap::<NodeId, EncodedNode>::new();
+        assert_eq!(
+            GraphDecoder::new(&missing, limits).unplace(id, &placed),
+            Err(GraphRefusal::MissingNode(child))
+        );
+        assert_eq!(
+            GraphDecoder::new(
+                &missing,
+                DecodeLimits {
+                    logical_bytes: prefix_end - 1,
+                    ..limits
+                }
+            )
+            .unplace(id, &placed),
+            Err(GraphRefusal::DecodeLimit {
+                dimension: DecodeDimension::LogicalBytes,
+                actual: prefix_end,
+                limit: prefix_end - 1
+            })
+        );
+        assert_eq!(
+            GraphDecoder::new(
+                &missing,
+                DecodeLimits {
+                    logical_bytes: prefix_end,
+                    ..limits
+                }
+            )
+            .unplace(id, &placed),
+            Err(GraphRefusal::MissingNode(child))
+        );
+    }
+
+    /// A physical body's pure expansion is shared across cold readers;
+    /// acquiring it never memoizes the receiving reader's admission.
+    #[test]
+    fn physical_expansion_is_shared_without_memoizing_read_admission() {
+        let child = NodeId([0x37; 32]);
+        let bytes = write_envelope(NodeKind::TEXT_INDEX, &[child.0], &[0x0b, 0]);
+        let id = NodeId::of_envelope(&bytes);
+        let nodes = BTreeMap::from([(
+            id,
+            EncodedNode {
+                id,
+                bytes: bytes.into(),
+            },
+        )]);
+        let limits = DecodeLimits::within_total(1 << 20);
+        let mut first = GraphDecoder::new(&nodes, limits);
+        let first_envelope = first.envelope(id).unwrap();
+        let first_body = to_logical(&first_envelope, first_envelope.body, id).unwrap();
+        let mut second = GraphDecoder::new(&nodes, limits);
+        let second_envelope = second.envelope(id).unwrap();
+        let second_body = to_logical(&second_envelope, second_envelope.body, id).unwrap();
+        assert_eq!(&*first_body, &*second_body);
+        assert_eq!(first.read(), second.read());
+        assert!(matches!(
+            GraphDecoder::new(&nodes, DecodeLimits { nodes: 0, ..limits }).envelope(id),
+            Err(GraphRefusal::DecodeLimit {
+                dimension: DecodeDimension::Nodes,
+                ..
+            })
+        ));
+        assert_eq!(
+            GraphDecoder::new(&BTreeMap::<NodeId, EncodedNode>::new(), limits).envelope(id),
+            Err(GraphRefusal::MissingNode(id))
+        );
+        let mut changed = nodes.clone();
+        changed.get_mut(&id).unwrap().bytes =
+            write_envelope(NodeKind::TEXT_INDEX, &[[0x38; 32]], &[0x0b, 0]).into();
+        assert_eq!(
+            GraphDecoder::new(&changed, limits).envelope(id),
+            Err(GraphRefusal::HashMismatch(id))
+        );
+        assert_eq!(
+            first_body.as_ptr(),
+            second_body.as_ptr(),
+            "the same physical body was expanded twice"
+        );
+    }
 }

@@ -18,10 +18,12 @@ pub mod state_graph;
 mod step_admission;
 mod step_bodies;
 mod succession;
+mod succession_debt;
+pub(crate) use succession_debt::merge as merge_successor_debt;
 mod terminal;
 mod waiting;
 
-pub(crate) use driver::in_flight_effects;
+pub(crate) use succession::validate_pins as validate_successor_pins;
 
 pub use activation::ProcessActivation;
 pub use carry::stored_engine_state;
@@ -74,7 +76,7 @@ pub async fn end_scope(
     reads: &dyn DurableReads,
     tx: &mut ActorTx,
     scope: &ScopeKey,
-    after: Option<&crate::ProcessId>,
+    after: Option<&lash_vocabulary::identity::ProcessId>,
     batch: usize,
     origin: crate::CancelOrigin,
     requester: &str,

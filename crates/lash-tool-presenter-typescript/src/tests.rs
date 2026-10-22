@@ -1,5 +1,5 @@
 use super::*;
-use lash_protocol_types::ToolDefinition;
+use lash_vocabulary::tool_contract::ToolDefinition;
 use serde_json::json;
 
 #[test]
@@ -39,7 +39,7 @@ fn recursive_filter_has_one_named_body_and_a_recursive_array() {
     assert!(text.contains("and: Array<Filter>"), "{text}");
     assert!(!text.contains("unknown"), "{text}");
 }
-fn definition(name: &str, input: Value) -> lash_protocol_types::ToolDefinition {
+fn definition(name: &str, input: Value) -> lash_vocabulary::tool_contract::ToolDefinition {
     ToolDefinition::raw(
         name,
         format!("host.{name}"),
@@ -51,7 +51,7 @@ fn definition(name: &str, input: Value) -> lash_protocol_types::ToolDefinition {
     .with_execution(std::time::Duration::from_secs(120))
 }
 
-fn document(tool: &lash_protocol_types::ToolDefinition) -> String {
+fn document(tool: &lash_vocabulary::tool_contract::ToolDefinition) -> String {
     let contract = tool.contract();
     TypescriptToolPresenter
         .tool_doc(
@@ -485,9 +485,9 @@ fn presentation_limits_keep_a_note_instead_of_refusing_a_valid_tool() {
     for _ in 0..10 {
         schema = json!({"type":"array", "items":schema});
     }
-    let doc = lash_tool_shape::SchemaDocument::import(
+    let doc = lash_vocabulary::tool_shape::SchemaDocument::import(
         &schema,
-        lash_tool_shape::ImportLimits {
+        lash_vocabulary::tool_shape::ImportLimits {
             max_depth: 2,
             max_nodes: 2,
         },

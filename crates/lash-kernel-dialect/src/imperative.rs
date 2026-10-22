@@ -1,8 +1,11 @@
 //! Bounded final-text writing and optional Site collection for generated codecs.
 use std::collections::BTreeMap;
 
-use lash_kernel_doc::{Caption, CaptionTarget, Captions, Document, Node, Site, Unit};
+use lash_kernel_doc::{Caption, CaptionTarget, Captions, Document, Node};
+
 use lash_kernel_doc::{SourceLanguage, SourceMap, SourceSite, Span};
+
+use lash_vocabulary::sites::{Site, Unit};
 
 /// Generated source is a separate, disposable format from stored documents.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -69,6 +72,9 @@ pub enum PrintError {
     Depth { limit: usize },
     #[error("cannot encode generated source: {0}")]
     Encode(#[from] lash_kernel_doc::EncodeError),
+    /// Authored syntax cannot represent this callable or main region.
+    #[error("no authored source representation at {site}")]
+    Unprintable { site: Site },
     #[error("invalid generated source: {0}")]
     Invalid(String),
 }
@@ -78,6 +84,7 @@ impl From<PrintError> for crate::Diagnostic {
             code: match &error {
                 PrintError::Bytes { .. } => "GENERATED_SOURCE_BYTES",
                 PrintError::Depth { .. } => "GENERATED_SOURCE_DEPTH",
+                PrintError::Unprintable { .. } => "GENERATED_SOURCE_UNPRINTABLE",
                 PrintError::Encode(_) | PrintError::Invalid(_) => "GENERATED_SOURCE_INVALID",
             }
             .into(),
@@ -96,14 +103,19 @@ pub fn check_document_depth(
     limits: GeneratedSourceLimits,
 ) -> Result<(), PrintError> {
     let limit = limits.max_depth.min(64);
-    for effect in document.manifest.effects.keys() {
-        check_leaf_size(effect.as_str().len(), limits.max_bytes)?;
+    for import in document.imports.values() {
+        check_leaf_size(
+            import.name.package.to_string().len() + import.name.member.as_str().len(),
+            limits.max_bytes,
+        )?;
     }
-    for label in document.manifest.functions.values() {
-        check_leaf_size(label.as_str().len(), limits.max_bytes)?;
-    }
-    let roots = std::iter::once(Node::Block(&document.main))
-        .chain(document.functions.values().map(|f| Node::Block(&f.body)));
+    let roots = document.main.iter().map(|block| Node::Block(block)).chain(
+        document
+            .functions
+            .values()
+            .filter_map(|function| function.body())
+            .map(|body| Node::Block(&body.block)),
+    );
     for root in roots {
         let mut stack = vec![(root, 0usize)];
         while let Some((node, depth)) = stack.pop() {
@@ -123,14 +135,15 @@ pub fn check_document_depth(
             stack.extend(node.children().into_iter().map(|child| (child, depth + 1)));
         }
     }
-    for signature in document
-        .manifest
-        .effects
-        .values()
-        .map(|requirement| &requirement.signature)
-        .chain(document.entries.values().map(|entry| &entry.signature))
-    {
-        check_signature(signature, limit)?;
+    for import in document.imports.values() {
+        if let lash_vocabulary::ImportKind::Code { signature, .. }
+        | lash_vocabulary::ImportKind::Operation { signature } = &import.kind
+        {
+            check_signature(signature, limit)?;
+        }
+    }
+    for function in document.functions.values() {
+        check_signature(&function.signature, limit)?;
     }
     // Count actual encoded input bytes before names or source buffers are allocated.
     // Depth has already been checked, so this serializer is stack bounded.
@@ -195,6 +208,7 @@ fn check_literal_size(literal: &lash_kernel_doc::Literal, limit: usize) -> Resul
 }
 fn check_action_leaves(action: &lash_kernel_doc::Action, limit: usize) -> Result<(), PrintError> {
     use lash_kernel_doc::{Action, Atom};
+
     let check = |atom: &Atom| {
         if let Atom::Literal(literal) = atom {
             check_literal_size(literal, limit)
@@ -208,13 +222,11 @@ fn check_action_leaves(action: &lash_kernel_doc::Action, limit: usize) -> Result
                 check(atom)?;
             }
         }
-        Action::Perform { effect, args, .. } => {
-            check_leaf_size(effect.as_str().len(), limit)?;
+        Action::Perform { args, .. } => {
             for atom in args {
                 check(atom)?;
             }
         }
-        Action::Sleep { duration, .. } => check(duration)?,
         Action::Await { value, .. } => check(value)?,
         Action::Join { task } | Action::Cancel { task } => check(task)?,
         Action::JoinMany { tasks, .. } => check(tasks)?,
@@ -222,15 +234,15 @@ fn check_action_leaves(action: &lash_kernel_doc::Action, limit: usize) -> Result
     }
     Ok(())
 }
-fn check_signature(signature: &lash_kernel_doc::Signature, limit: usize) -> Result<(), PrintError> {
+fn check_signature(signature: &lash_vocabulary::Signature, limit: usize) -> Result<(), PrintError> {
     check_type(&signature.result, limit)?;
     for param in &signature.params {
         check_type(&param.ty, limit)?;
     }
     Ok(())
 }
-fn check_type(ty: &lash_kernel_doc::Type, limit: usize) -> Result<(), PrintError> {
-    use lash_kernel_doc::Type;
+fn check_type(ty: &lash_vocabulary::Type, limit: usize) -> Result<(), PrintError> {
+    use lash_vocabulary::Type;
     let mut stack = vec![(ty, 1usize)];
     while let Some((ty, depth)) = stack.pop() {
         if depth > limit {
@@ -551,6 +563,7 @@ mod tests {
     #[test]
     fn untaken_captions_are_dropped_and_caption_bytes_are_budgeted() {
         use lash_kernel_doc::{Caption, CaptionEntry, Captions};
+
         let document = lash_kernel_doc::parse_document(
             "kernel 1\nnumbers float\nmain { if true { print 1 } else { print 2 } return null }\n",
         )

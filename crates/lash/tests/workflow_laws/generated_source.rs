@@ -1,7 +1,7 @@
 //! Host integration of the independent exact-source operations (FIG-6205).
-use lash::dialect::{GeneratedSourceLimits, PrintOptions, PrintedSource, SourceFormat};
-use lash::workflow::document::{self as k, Document, Node, Site, Unit};
-use lash::workflow::{WorkflowAdmissionRefusal, WorkflowDocument, WorkflowDocumentEntry};
+use lash::dialect::{PrintOptions, PrintedSource, SourceFormat};
+use lash::workflow::WorkflowDocument;
+use lash::workflow::document::{self as k, Document, Node, Site};
 
 fn local(
     document: &WorkflowDocument,
@@ -54,17 +54,8 @@ fn sites(document: &Document) -> Vec<Site> {
         }
     }
     let mut out = Vec::new();
-    walk(
-        Node::Block(&document.main),
-        Site::new(Unit::Main, vec![]),
-        &mut out,
-    );
-    for (name, function) in &document.functions {
-        walk(
-            Node::Block(&function.body),
-            Site::new(Unit::Function(name.clone()), vec![]),
-            &mut out,
-        );
+    for (unit, block) in document.units() {
+        walk(Node::Block(block), Site::new(unit, vec![]), &mut out);
     }
     out.sort();
     out
@@ -76,13 +67,8 @@ fn sites(document: &Document) -> Vec<Site> {
 #[tokio::test]
 async fn both_dialects_and_transports_preserve_exact_documents_and_optional_maps() {
     let embedding = lash_vm_worker::built_embedding(&Default::default()).expect("embedding");
-    let registry = embedding.registry().expect("registry");
-    let environment_namespaces = lash::dialect::Namespaces::of_effects(
-        &Default::default(),
-        &lash::workflow::document::ContractId::new("1"),
-        &Default::default(),
-    )
-    .expect("the test's effects are operations");
+    let environment_namespaces =
+        lash::dialect::Namespaces::new(Default::default(), Default::default(), &|_| false).unwrap();
     let environment = lash::dialect::Environment::new(embedding.library(), &environment_namespaces);
     let ts = lash::typescript::lower(
         "const answer = [1, 2].map(x => x + 1);",
@@ -100,10 +86,10 @@ async fn both_dialects_and_transports_preserve_exact_documents_and_optional_maps
     .expect("Python origin")
     .document
     .into_document();
-    let mut host = k::parse_document(super::GUARDED).expect("host tree");
+    let mut host = k::parse_document("kernel 1\nnumbers float\nmain { let out = \"start\" try { set out = \"operator\" } catch e { set out = \"caught\" } return out }").expect("host tree");
     host.private_bindings.insert(k::Name::new("日本語"));
     // Exceed the ordinary cell cap. This is a whole-workflow operation.
-    host.main.insert(
+    host.main.as_mut().unwrap().insert(
         0,
         k::Stmt::Let {
             name: k::Name::new("日本語"),
@@ -112,10 +98,16 @@ async fn both_dialects_and_transports_preserve_exact_documents_and_optional_maps
     );
     let service = lash::vm::WorkerService::default();
     for document in [ts, py, host] {
-        let view = WorkflowDocument::derive(
+        let link = lash::package::Link {
+            document: document.identity(),
+            fills: Default::default(),
+        };
+        let view = WorkflowDocument::entered(
             document.clone(),
-            WorkflowDocumentEntry::Main,
-            registry.as_ref(),
+            lash::package::LinkedStart {
+                link: link.identity(),
+                selector: lash::package::StartSelector::Main,
+            },
         )
         .expect("derive");
         for format in [SourceFormat::TypeScriptV1, SourceFormat::PythonV1] {
@@ -173,161 +165,4 @@ async fn both_dialects_and_transports_preserve_exact_documents_and_optional_maps
             }
         }
     }
-}
-
-/// Reading preserves unavailable dependency identities. Both dialects refuse
-/// missing and mismatched requirements at normal admission.
-#[tokio::test]
-async fn exported_reading_preserves_dependency_identities_for_admission() {
-    let embedding = lash_vm_worker::built_embedding(&Default::default()).expect("embedding");
-    let registry = embedding.registry().expect("registry");
-    let mut document = k::parse_document("kernel 1\nnumbers float\nmain { finish null }\n")
-        .expect("host document");
-    let unavailable = k::FunctionId::from_bytes([0x57; 32]);
-    document.manifest.functions.insert(
-        unavailable,
-        k::FunctionName::new("missing.helper").expect("qualified name"),
-    );
-    let mismatched = k::parse_document("kernel 1\nnumbers float\neffect remote.answer() -> Int contract \"1\"\nmain { let got = perform remote.answer() as Int finish got }\n").expect("mismatched dependency document");
-    let mut checker = lash::workflow::graph::Environment::new(registry.as_ref());
-    checker.effects.insert(
-        k::EffectName::new("remote.answer").expect("effect name"),
-        lash::workflow::document::OperationRequirement::new(
-            k::Signature {
-                params: vec![],
-                result: k::Type::Text,
-            },
-            lash::workflow::document::ContractId::new("1"),
-        ),
-    );
-    let service = lash::vm::WorkerService::default();
-    for (document, expected_code) in [
-        (document, "missing_function"),
-        (mismatched, "effect_signature"),
-    ] {
-        for format in [SourceFormat::TypeScriptV1, SourceFormat::PythonV1] {
-            let printed = service
-                .print(&document, None, format, Default::default())
-                .await
-                .expect("print needs no helpers");
-            exact(
-                &document,
-                &decode(&printed.source, &document, format, embedding.library()),
-            );
-            let decoded = service
-                .read_exported(
-                    &printed.source,
-                    &document,
-                    format,
-                    GeneratedSourceLimits::default(),
-                )
-                .await
-                .expect("decoding needs no helpers")
-                .0;
-            exact(&document, &decoded);
-            let refusal = WorkflowDocument::admit(decoded, WorkflowDocumentEntry::Main, &checker)
-                .expect_err("dependency mismatch refuses admission");
-            assert!(
-                matches!(refusal, WorkflowAdmissionRefusal::Document(ref refusal) if refusal.errors.iter().any(|error| error.reason.code() == expected_code))
-            );
-        }
-    }
-}
-
-/// FIG-6340: entry publication and main admission retain the same typed
-/// output-signature difference rather than reducing it to an effect name.
-#[test]
-fn an_entry_signature_refusal_retains_the_same_output_difference_as_main() {
-    use lash::workflow::graph::{Environment, RefusalReason, SignatureSide};
-    let document = k::parse_document(
-        "kernel 1\nnumbers float\neffect notify() -> Record{message: Text} contract \"1\"\nentry worker() -> Any\nfn worker() { let sent = perform notify() as Any return sent }\nmain { finish null }\n",
-    ).expect("document");
-    let functions = k::FunctionRegistry::default();
-    let mut environment = Environment::new(&functions);
-    environment.effects.insert(
-        k::EffectName::new("notify").expect("effect"),
-        lash::workflow::document::OperationRequirement::new(
-            k::Signature {
-                params: vec![],
-                result: k::Type::Any,
-            },
-            lash::workflow::document::ContractId::new("1"),
-        ),
-    );
-    for entry in [
-        WorkflowDocumentEntry::Main,
-        WorkflowDocumentEntry::Entry {
-            function: k::Name::new("worker"),
-        },
-    ] {
-        let refusal = WorkflowDocument::admit(document.clone(), entry, &environment)
-            .expect_err("open output refuses the declared object");
-        let WorkflowAdmissionRefusal::Document(refusal) = refusal else {
-            panic!("signature refusal")
-        };
-        let reason = refusal
-            .errors
-            .iter()
-            .find(|error| error.reason.code() == "effect_signature")
-            .expect("signature mismatch");
-        let RefusalReason::EffectSignature { mismatch, .. } = &reason.reason else {
-            unreachable!()
-        };
-        assert_eq!(mismatch.side, SignatureSide::Output);
-        assert_eq!(mismatch.path, "/output");
-        assert_eq!(mismatch.provided, k::Type::Any);
-        assert!(matches!(&mismatch.expected, k::Type::Record(record) if record.rest.is_none()));
-        let message = reason.to_string();
-        assert!(
-            message.contains("/output")
-                && message.contains("closed object")
-                && message.contains("open/unconstrained"),
-            "{message}"
-        );
-    }
-}
-
-/// FIG-6361: only code the entry executes must link. A passed function
-/// remains a template; calling or spawning it makes its faults relevant.
-#[test]
-fn a_definition_links_its_executed_closure_without_main_or_passed_templates() {
-    let document = k::parse_document(
-        r#"kernel 1
-numbers float
-effect count() -> Int contract "1"
-entry worker() -> Any
-entry broken() -> Any
-fn broken() { return missing }
-fn worker() { return &broken }
-main { let count = perform count() as Text finish count }
-"#,
-    )
-    .expect("document");
-    let functions = k::FunctionRegistry::default();
-    let entry = WorkflowDocumentEntry::Entry {
-        function: k::Name::new("worker"),
-    };
-    WorkflowDocument::derive(document.clone(), entry.clone(), &functions)
-        .expect("main and the passed template are not executed by worker");
-    WorkflowDocument::admit(
-        document.clone(),
-        entry.clone(),
-        &lash::workflow::graph::Environment::new(&functions),
-    )
-    .expect("entry admission uses the same closure");
-    for action in ["call broken()", "spawn call broken()"] {
-        let mut called = document.clone();
-        called.functions.get_mut(&k::Name::new("worker")).expect("worker").body =
-            k::parse_document(&format!("kernel 1\nnumbers float\nfn broken() {{ return null }}\nmain {{ let got = {action} finish got }}"))
-                .expect("action document").main;
-        let refusal = WorkflowDocument::derive(called, entry.clone(), &functions)
-            .expect_err("an executed function must link");
-        assert!(
-            refusal
-                .to_string()
-                .contains("variable `missing` is not bound here"),
-            "the called template's scope fault is retained for {action}: {refusal}"
-        );
-    }
-    assert!(WorkflowDocument::derive(document, WorkflowDocumentEntry::Main, &functions).is_err());
 }

@@ -5,6 +5,7 @@
     reason = "the crash laws list the staging directory a test owns"
 )]
 
+use lash_protocol_types::engine_fault::PageRefusal;
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -15,7 +16,7 @@ use lash_core_store::checkpoint_graph::stage::{
     ManifestEntry, StageFault, StageLeaseId, StageSpool,
 };
 use lash_core_store::checkpoint_graph::{
-    CommitId, EncodedNode, GraphRefusal, MAX_NODE_BYTES, NodeId, NodeKind, TokenWriter,
+    CommitId, EncodedNode, GraphRefusal, MAX_NODE_BYTES, NodeId, NodeKind,
 };
 use lash_durable::domain::ExecKey;
 use lash_durable::domain::graph::RootOwner;
@@ -23,8 +24,10 @@ use lash_durable::domain::pages::{LeaseFence, RootLease, RootLeaseId, StoredPage
 use lash_durable::{ActorKey, DurableError, DurableInstant, Epoch};
 use lash_kernel_doc::heap::{HeapFault, HostResource, PageGrant, PageId, PageRef};
 use lash_kernel_state::paged::{PageBody, PageKind, PageSource};
-use lash_vm_protocol::page::{PageCapability, PageEnvelope, PageRefusal, PageReply, PageRequest};
-use lash_vm_protocol::{InfrastructureOutcome, ProtocolBounds};
+use lash_protocol_types::engine_fault::InfrastructureOutcome;
+use lash_vm_protocol::ProtocolBounds;
+use lash_vm_protocol::page::{PageCapability, PageEnvelope, PageReply, PageRequest};
+use lash_vocabulary::tokens::TokenWriter;
 
 use lash_core_execution::runtime::SystemClock;
 
@@ -104,9 +107,9 @@ impl CommittedPages for Arc<Committed> {
 fn lease(root: NodeId) -> RootLease {
     RootLease {
         id: RootLeaseId(7),
-        owner: RootOwner::Exec(ExecKey::Process(lash_protocol_types::ProcessId::fixture(
-            "pages",
-        ))),
+        owner: RootOwner::Exec(ExecKey::Process(
+            lash_vocabulary::identity::ProcessId::fixture("pages"),
+        )),
         root,
         fence: LeaseFence::Actor {
             actor: ActorKey::process("pages").expect("actor"),
@@ -1373,4 +1376,33 @@ fn spool_bytes_exclude_an_overlapping_runtime() {
         2 * own_page.bytes.len() as u64,
         "only the measured runtime's two activations wrote these bytes"
     );
+}
+
+/// D-GRANT: publishing the first root preserves capabilities already issued
+/// by the same activation; it acquires storage protection, not a new identity.
+#[test]
+fn acquiring_the_first_root_lease_preserves_issued_capabilities() {
+    let dir = tempfile::tempdir().expect("dir");
+    let root = SpoolRoot::open(dir.path(), 1 << 20).expect("root");
+    let store = Arc::new(Committed::default());
+    let base = page("base", &[]);
+    let mut pages = ActivationPages::new(
+        store,
+        None,
+        Duration::from_secs(20),
+        CapabilityKey::fresh(),
+        3,
+        Box::new(root.spool(StageLeaseId(11)).expect("spool")),
+        Arc::new(SystemClock),
+        Duration::from_secs(60),
+        PageLimits::within(ProtocolBounds::standard().decode),
+    );
+    let capability = pages.issue(base.id);
+    pages.lease_on(lease(base.id));
+    assert_eq!(pages.verify(&capability), Ok(base.id));
+    let mut forged = capability;
+    forged.mac = [0; 32];
+    assert_eq!(pages.verify(&forged), Err(PageRefusal::Unauthorized));
+    pages.end();
+    assert_eq!(pages.verify(&capability), Err(PageRefusal::Unauthorized));
 }

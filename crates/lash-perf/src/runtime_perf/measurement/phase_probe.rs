@@ -1,5 +1,5 @@
 use super::*;
-use lash_protocol_types::TurnId;
+use lash_vocabulary::identity::TurnId;
 
 #[derive(Clone, Copy)]
 struct PhaseStart {

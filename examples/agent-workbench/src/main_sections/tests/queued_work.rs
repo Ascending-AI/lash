@@ -2,7 +2,7 @@
 //! individual batches.
 
 use super::*;
-use lash::SessionId;
+use lash_vocabulary::identity::SessionId;
 
 /// A context compaction queued for `session_id` under `source_key`, each its
 /// own batch. It applies only at a turn boundary, so it stays pending while

@@ -205,7 +205,8 @@ async fn run_on_the_redeploying_core(
     let (stores, keep) = served::stores(tier).await?;
     let backend = served::backend(stores);
     let requests = Arc::new(Requests::default());
-    let session_id = lash::SessionId::try_from(session.to_owned()).expect("a session id");
+    let session_id =
+        lash_vocabulary::identity::SessionId::try_from(session.to_owned()).expect("a session id");
 
     let first = creating.core(&backend, &requests);
     let recorded = first
@@ -299,15 +300,20 @@ async fn an_rlm_run_executes_under_its_recorded_behaviour(tier: Tier) {
 /// far past the redeploying bound and far inside the recorded one, then its
 /// answer. Published under a host pin; answers the start payload of its
 /// `looper` entry.
-async fn looping_process_payload(backend: &lash::Backend) -> serde_json::Value {
+async fn looping_process(core: &lash::LashCore) -> (serde_json::Value, lash::process::ProcessEnv) {
     let tens = "[0, 1, 2, 3, 4, 5, 6, 7, 8, 9]";
     let text = format!(
-        "kernel 1\nnumbers float\nentry looper() -> Any\n\nfn looper() {{\n  let last = 0\n  \
+        "kernel 1\nnumbers float\nmain {{\n  let last = 0\n  \
          for a in {tens} {{\n    for b in {tens} {{\n      for c in {tens} {{\n        \
          for d in [0, 1, 2, 3, 4] {{\n          set last = d\n        }}\n      }}\n    }}\n  }}\n  \
-         return \"ran {LOOP_ITERATIONS}\"\n}}\n\nmain {{\n  finish null\n}}\n"
+         return \"ran {LOOP_ITERATIONS}\"\n}}\n"
     );
-    kernel_process::payload(backend, &text, "looper").await
+    kernel_process::publish(
+        core,
+        &text,
+        &lash_execution_contracts::testing::process_env_with_limit(16),
+    )
+    .await
 }
 
 /// A host starts a kernel process on the creating deployment under an
@@ -321,20 +327,19 @@ async fn a_host_started_process_runs_under_the_behaviour_its_creation_recorded(t
     };
     let backend = served::backend(stores);
     let requests = Arc::new(Requests::default());
-    let payload = looping_process_payload(&backend).await;
 
     let first = Deployment::RlmCreating.core(&backend, &requests);
-    let _ = first.session(lash::SessionId::try_from("host-process-anchor".to_owned()).unwrap());
+    let (payload, env) = looping_process(&first).await;
+    let _ = first.session(
+        lash_vocabulary::identity::SessionId::try_from("host-process-anchor".to_owned()).unwrap(),
+    );
     first
         .drain()
         .await
         .expect("the creating deployment's node drains");
     let env_ref = first
         .host_artifacts()
-        .publish_process_env(
-            &lash_core::HostArtifactPin::mint(),
-            &lash_execution_contracts::testing::process_env_with_limit(16),
-        )
+        .publish_process_env(&lash_core::HostArtifactPin::mint(), &env)
         .await
         .expect("the environment is published");
     // The host states the creating deployment's kernel settings.
@@ -374,7 +379,9 @@ async fn a_host_started_process_runs_under_the_behaviour_its_creation_recorded(t
     );
 
     let second = Deployment::RlmRedeploying.core(&backend, &requests);
-    let _ = second.session(lash::SessionId::try_from("host-process-anchor".to_owned()).unwrap());
+    let _ = second.session(
+        lash_vocabulary::identity::SessionId::try_from("host-process-anchor".to_owned()).unwrap(),
+    );
     let output = tokio::time::timeout(WATCHDOG, second.processes().await_output(&started))
         .await
         .expect("deadlock watchdog: the redeploying node never ran the process")

@@ -74,7 +74,7 @@ pub struct AppendSessionNodesRequest {
     /// re-parenting onto the leaf it just read, so it never surfaces here as a
     /// conflict a caller could use as a concurrency signal.
     #[serde(default)]
-    pub requires_ancestor_node_id: Option<crate::NodeId>,
+    pub requires_ancestor_node_id: Option<lash_vocabulary::identity::NodeId>,
 }
 
 /// The result of applying an append. A service returns this inside
@@ -93,8 +93,8 @@ pub enum AppendSessionNodesOutcome {
     /// owner applied the append, which is not necessarily
     /// [`AppendSessionNodesRequest::requires_ancestor_node_id`]; see that field.
     Appended {
-        node_ids: Vec<crate::NodeId>,
-        leaf_node_id: Option<crate::NodeId>,
+        node_ids: Vec<lash_vocabulary::identity::NodeId>,
+        leaf_node_id: Option<lash_vocabulary::identity::NodeId>,
     },
     /// Nothing was written: the branch the caller read from has been abandoned.
     /// [`AppendSessionNodesRequest::requires_ancestor_node_id`] named a node
@@ -109,7 +109,7 @@ pub enum AppendSessionNodesOutcome {
     StaleBranch {
         /// Echo of the request's `requires_ancestor_node_id`, so a caller with
         /// several derivations in flight can tell which one lost its base.
-        required_node_id: crate::NodeId,
+        required_node_id: lash_vocabulary::identity::NodeId,
     },
 }
 

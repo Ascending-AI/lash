@@ -136,7 +136,7 @@ fn admitted_input_conn(
     tx: &Connection,
     session_id: &SessionId,
     run: &TurnId,
-    input_id: &lash_protocol_types::InputId,
+    input_id: &lash_vocabulary::identity::InputId,
 ) -> Result<PendingTurnInputRow, StoreError> {
     let row = tx
         .query_row(
@@ -163,7 +163,7 @@ fn admitted_batch_conn(
     tx: &Connection,
     session_id: &SessionId,
     run: &TurnId,
-    batch_id: &lash_protocol_types::BatchId,
+    batch_id: &lash_vocabulary::identity::BatchId,
 ) -> Result<QueuedWorkBatch, StoreError> {
     let row = tx
         .query_row(
@@ -194,7 +194,7 @@ fn settle_admitted_input_conn(
     tx: &Connection,
     session_id: &SessionId,
     run: &TurnId,
-    input_id: &lash_protocol_types::InputId,
+    input_id: &lash_vocabulary::identity::InputId,
     state: lash_core_store::turn_input_vocabulary::TurnInputStateKind,
     now: u64,
 ) -> Result<(), StoreError> {
@@ -221,7 +221,7 @@ fn release_admitted_input_conn(
     tx: &Connection,
     session_id: &SessionId,
     run: &TurnId,
-    input_id: &lash_protocol_types::InputId,
+    input_id: &lash_vocabulary::identity::InputId,
 ) -> Result<(), StoreError> {
     let released = crate::conn::cached_execute(
         tx,
@@ -240,7 +240,7 @@ fn release_admitted_batch_conn(
     tx: &Connection,
     session_id: &SessionId,
     run: &TurnId,
-    batch_id: &lash_protocol_types::BatchId,
+    batch_id: &lash_vocabulary::identity::BatchId,
 ) -> Result<(), StoreError> {
     let released = crate::conn::cached_execute(
         tx,
@@ -259,7 +259,9 @@ fn release_admitted_batch_conn(
     )
 }
 
-fn input_row(input_id: &lash_protocol_types::InputId) -> lash_core_store::store::IngressRowId {
+fn input_row(
+    input_id: &lash_vocabulary::identity::InputId,
+) -> lash_core_store::store::IngressRowId {
     lash_core_store::store::IngressRowId::Input(input_id.clone())
 }
 

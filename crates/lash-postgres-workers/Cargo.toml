@@ -23,6 +23,7 @@ test = false
 workspace = true
 
 [dependencies]
+lash-vocabulary = { workspace = true }
 lash-execution-contracts = { workspace = true }
 async-trait = { workspace = true }
 lash = { workspace = true, features = ["rlm", "testing", "dialect-typescript"] }

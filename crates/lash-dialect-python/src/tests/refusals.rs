@@ -28,10 +28,6 @@ const REFUSED: &[(&str, Code)] = &[
         Code::MatchUnsupported,
     ),
     ("@wrap\ndef f():\n    pass\n", Code::DecoratorUnsupported),
-    ("import os\n", Code::ImportUnsupported),
-    ("from asyncio import gather\n", Code::ImportUnsupported),
-    ("import re\n", Code::RegexUnsupported),
-    ("from re import match\n", Code::RegexUnsupported),
     ("def f(*args):\n    pass\n", Code::StarUnsupported),
     ("def f(a, *, b):\n    pass\n", Code::StarUnsupported),
     ("first, *rest = [1, 2]\n", Code::StarUnsupported),
@@ -144,12 +140,8 @@ fn a_missing_helper_is_named() {
     let library = lash_kernel_dialect::NamedLibrary::new();
     let effects = std::collections::BTreeMap::new();
     let bindings = std::collections::BTreeSet::new();
-    let environment_namespaces = lash_kernel_dialect::Namespaces::of_effects(
-        &effects,
-        &lash_kernel_doc::ContractId::new("1"),
-        &Default::default(),
-    )
-    .expect("the test's effects are operations");
+    let environment_namespaces = crate::tests::linked::namespaces(&effects, &Default::default())
+        .expect("the test's effects are operations");
     let environment = lash_kernel_dialect::Environment::new(&library, &environment_namespaces);
     let diagnostic = crate::lower(
         "print(1)\n",
@@ -170,10 +162,7 @@ fn a_missing_helper_is_named() {
 #[test]
 fn every_advertised_repair_form_lowers() {
     use Code::*;
-    let base = lash_kernel_doc::Document::new(lash_kernel_doc::NumberPolicy::BySpelling, vec![]);
-    let printed = crate::print_kernel(&base, None, Default::default()).unwrap();
     let examples = [
-        (PrintedSourceNeedsBase, printed.source.as_str()),
         (
             SavedFunctionUnusable,
             "def invoice(total):\n    return total\ninvoice(42)",
@@ -285,12 +274,7 @@ fn every_advertised_repair_form_lowers() {
         }
     }
     for (code, source) in examples {
-        let accepted = match code {
-            PrintedSourceNeedsBase => {
-                crate::read_kernel(source, &base, Default::default()).map(|_| ())
-            }
-            _ => machine::lower(source).map(|_| ()),
-        };
+        let accepted = machine::lower(source).map(|_| ());
         accepted.unwrap_or_else(|error| {
             panic!(
                 "{} suggests an unaccepted idiom: {error}\n{source}",
@@ -463,12 +447,9 @@ fn every_advertised_repair_form_lowers() {
 #[test]
 fn a_host_source_policy_allows_a_larger_python_cell() {
     let source = format!("#{}", "x".repeat(crate::MAX_SOURCE_BYTES));
-    let environment_namespaces = lash_kernel_dialect::Namespaces::of_effects(
-        &Default::default(),
-        &lash_kernel_doc::ContractId::new("1"),
-        &Default::default(),
-    )
-    .expect("the test's effects are operations");
+    let environment_namespaces =
+        crate::tests::linked::namespaces(&Default::default(), &Default::default())
+            .expect("the test's effects are operations");
     let environment =
         lash_kernel_dialect::Environment::new(machine::library(), &environment_namespaces);
     let cell = lash_kernel_dialect::Mode::Cell(lash_kernel_dialect::CellEnvironment::first());

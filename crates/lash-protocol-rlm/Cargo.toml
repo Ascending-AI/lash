@@ -30,6 +30,8 @@ synthetic-next = ["lash-kernel-package/synthetic-next", "lash-core/synthetic-nex
 workspace = true
 
 [dependencies]
+lash-vm-releases = { workspace = true }
+lash-vocabulary = { workspace = true }
 lash-kernel-check = { workspace = true }
 lash-execution-contracts = { workspace = true }
 lash-vm-client = { workspace = true }
@@ -56,6 +58,7 @@ lash-tool-presenter-api = { workspace = true }
 lash-tool-presenter-python = { workspace = true }
 lash-tool-presenter-typescript = { workspace = true }
 lash-tool-shape = { workspace = true }
+lash-tool-support = { workspace = true }
 async-trait = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
@@ -65,7 +68,7 @@ tracing = { workspace = true }
 
 [dev-dependencies]
 lash-llm-transport = { workspace = true }
-# The `dataframe` fixture the package-set laws install (FIG-6926).
+# The `dataframe` fixture the Package laws publish (FIG-6926).
 lash-kernel-package = { workspace = true, features = ["testing"] }
 lash-vm-client = { workspace = true, features = ["testing"] }
 # A testing client is paired with a testing worker, which the runtime links.

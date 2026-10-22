@@ -18,7 +18,7 @@ async fn serve() -> (String, lash::LashCore) {
         .expect("the durable backend");
     let host = workflow_graph_roundtrip::workflow_core(backend).expect("workflow core");
     let core = host.core().clone();
-    let state = AppState::new(host).await.expect("workflow state");
+    let state = Box::pin(AppState::new(host)).await.expect("workflow state");
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
         .await
         .expect("a local port");
@@ -83,7 +83,7 @@ async fn run(client: &reqwest::Client, base: &str, inputs: Value) -> Vec<RunEven
 
 #[tokio::test]
 async fn each_edit_response_maps_its_immediate_base() {
-    let (base, _) = serve().await;
+    let (base, _) = Box::pin(serve()).await;
     let client = reqwest::Client::new();
     let mut previous = answer(
         client
@@ -117,7 +117,7 @@ async fn each_edit_response_maps_its_immediate_base() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn imported_parameterized_entries_can_run_with_named_inputs() {
-    let (base, _) = serve().await;
+    let (base, _) = Box::pin(serve()).await;
     let client = reqwest::Client::new();
     let before = answer(
         client
@@ -132,7 +132,7 @@ async fn imported_parameterized_entries_can_run_with_named_inputs() {
             .post(format!("{base}/workflow/source"))
             .json(&json!({
                 "version": before["version"], "entry": "echo",
-                "source": "export async function echo(message: string) { return message; }"
+                "source": "export async function echo(message: string): Promise<string> { return message; }"
             }))
             .send()
             .await
@@ -165,7 +165,7 @@ async fn imported_parameterized_entries_can_run_with_named_inputs() {
 /// CANVAS-CLOSED: neither endpoint accepts the retired tree writes or passthrough.
 #[tokio::test]
 async fn canvas_closed_http() {
-    let (base, _) = serve().await;
+    let (base, _) = Box::pin(serve()).await;
     let client = reqwest::Client::new();
     let opened = answer(client.get(format!("{base}/workflow")).send().await.unwrap()).await;
     for path in ["edits", "plan"] {
@@ -201,17 +201,17 @@ async fn canvas_closed_http() {
 /// map/source; printed reads preserve identity and authoring edits drop the map.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn authored_source_is_read_from_its_published_map() {
-    let (base, core) = serve().await;
+    let (base, core) = Box::pin(serve()).await;
     let client = reqwest::Client::new();
     for (dialect, source, format) in [
         (
             "typescript",
-            "export async function demo() { return await corpus.echo(\"日本 🦀\"); }",
+            "export async function demo(): Promise<string> { return await corpus.echo(\"日本 🦀\"); }",
             "type_script_v1",
         ),
         (
             "python",
-            "async def demo():\n    return await corpus.echo(\"日本 🦀\")\n",
+            "async def demo() -> str:\n    return await corpus.echo(\"日本 🦀\")\n",
             "python_v1",
         ),
     ] {
@@ -313,7 +313,7 @@ async fn authored_source_is_read_from_its_published_map() {
 /// of the same document; the printed source spells them and reads them back.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn captions_follow_import_edit_rename_and_printed_read() {
-    let (base, _) = serve().await;
+    let (base, _) = Box::pin(serve()).await;
     let client = reqwest::Client::new();
     let post = |path: &str, body: Value| {
         client
@@ -448,7 +448,7 @@ async fn captions_follow_import_edit_rename_and_printed_read() {
 /// catalog, twins keep their own results, and drawing consumes stored declarations.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn corpus_catalog_imports_both_dialects_and_draws_the_stored_read() {
-    let (base, core) = serve().await;
+    let (base, core) = Box::pin(serve()).await;
     let client = reqwest::Client::new();
     let catalog = answer(
         client
@@ -576,9 +576,41 @@ async fn corpus_catalog_imports_both_dialects_and_draws_the_stored_read() {
                         else {
                             panic!("stored definition");
                         };
+                        let reference = stored.document.reference();
+                        let documents = lash::vm::KernelDocuments::new(
+                            core.backend().module_artifacts(),
+                            core.backend().package_store(),
+                        );
+                        let mut content = documents.load_linked(reference.link).await.unwrap();
+                        let store = core.backend().package_store();
+                        let mut labels = Vec::new();
+                        // This fixture's host installs this release. Fetch its pinned
+                        // Package bytes and independent sidecars through the store.
+                        for id in lash::vm::helper_release().unwrap().content.packages.keys() {
+                            if let Some(record) = store.package(id).await.unwrap() {
+                                content.packages.insert(*id, record.package);
+                                labels.extend(
+                                    store
+                                        .labels(id)
+                                        .await
+                                        .unwrap()
+                                        .into_iter()
+                                        .map(|json| (*id, json)),
+                                );
+                            }
+                        }
+                        let mut context = lash::workflow::view::ViewContext::new(
+                            reference.clone(),
+                            content,
+                            Default::default(),
+                        )
+                        .unwrap()
+                        .with_timer_operations(lash::vm::TIMER_OPERATIONS.iter().cloned());
+                        for (id, json) in labels {
+                            context.add_labels(id, &json).unwrap();
+                        }
                         let mut expected =
-                            lash::workflow::view::derive(&stored.document, &test_packages())
-                                .unwrap();
+                            lash::workflow::view::derive(&stored.document, &context).unwrap();
                         let map = serde_json::from_value(opened["sourceMap"].clone()).unwrap();
                         expected
                             .readable_ranges(
@@ -613,10 +645,4 @@ async fn corpus_catalog_imports_both_dialects_and_draws_the_stored_read() {
     println!(
         "EXAMPLE-CORPUS observed {modules} module entries, {refusals} refused imports, {cells} cell witnesses"
     );
-}
-
-fn test_packages() -> lash::package::PackageView<'static> {
-    static HELD: std::sync::LazyLock<std::sync::Arc<lash::package::HeldPackages>> =
-        std::sync::LazyLock::new(|| lash::package::lash_packages().expect("the test packages"));
-    HELD.view()
 }

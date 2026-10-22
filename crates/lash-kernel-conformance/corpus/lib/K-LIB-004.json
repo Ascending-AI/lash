@@ -3,7 +3,7 @@
   "cases": [
     {
       "name": "an effect in a callback remains an ordinary action",
-      "document": "kernel 1\nnumbers by_spelling\neffect echo(x: Int) -> Int contract \"1\"\nmain { let callback = fn() { let x = perform echo(1) as Int return x } let x = apply callback() finish x }\n",
+      "document": "kernel 1\nnumbers by_spelling\nimport 0 operation host.echo(x: Int) -> Int\ndefinition \"function kernel.anonymous() -> Any\\nkernel 1\\nmetering statements\\nimport 0 operation host.echo(x: Int) -> Int\\nbody {\\n  let x = perform 0(1) as Int\\n  return x\\n}\\n\"\nmain {\n  let callback = fn kernel.anonymous \n  let x = apply callback()\n  finish x\n}\n",
       "expected": {
         "end": {
           "finished": {
@@ -13,7 +13,7 @@
         "trace": [
           {
             "effect": {
-              "effect": "echo",
+              "effect": "host.echo",
               "args": [
                 {
                   "int": "1"

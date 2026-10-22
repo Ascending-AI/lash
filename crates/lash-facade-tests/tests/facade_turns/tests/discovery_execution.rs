@@ -13,8 +13,8 @@ struct DiscoveryTools {
     calls: Arc<StdMutex<Vec<String>>>,
 }
 
-fn definition(name: &str) -> lash_core::ToolDefinition {
-    let mut tool = lash_core::ToolDefinition::raw(
+fn definition(name: &str) -> lash_vocabulary::tool_contract::ToolDefinition {
+    let mut tool = lash_vocabulary::tool_contract::ToolDefinition::raw(
         format!("tool:{name}"),
         format!("tools.{name}"),
         format!("Read {name}."),
@@ -32,7 +32,10 @@ impl ToolProvider for DiscoveryTools {
     fn tool_manifests(
         &self,
         _config: &lash_core::OwnerConfigView,
-    ) -> std::result::Result<Vec<lash_core::ToolManifest>, lash::plugins::PluginError> {
+    ) -> std::result::Result<
+        Vec<lash_vocabulary::tool_contract::ToolManifest>,
+        lash::plugins::PluginError,
+    > {
         Ok({
             ["search", "hidden"]
                 .map(|name| definition(name).manifest())
@@ -43,7 +46,7 @@ impl ToolProvider for DiscoveryTools {
         &self,
         name: &str,
         _config: &lash_core::OwnerConfigView,
-    ) -> Option<Arc<lash_core::ToolContract>> {
+    ) -> Option<Arc<lash_vocabulary::tool_contract::ToolContract>> {
         let Some(("tools", name)) = name.split_once('.') else {
             return None;
         };
@@ -142,7 +145,7 @@ async fn discovery_hidden_tool_executes_through_rlm_and_standard_batch_but_not_n
             LashCore::standard_builder(backend).protocol_plugin(Arc::new(
                 lash_protocol_standard::StandardProtocolPluginFactory::with_config(
                     lash_protocol_standard::StandardProtocolConfig {
-                        discovery: Some(lash_core::ToolDiscovery {
+                        discovery: Some(lash_vocabulary::tool_contract::ToolDiscovery {
                             operation: "tools.search".into(),
                         }),
                         ..lash_protocol_standard::StandardProtocolConfig::default()
@@ -161,7 +164,7 @@ async fn discovery_hidden_tool_executes_through_rlm_and_standard_batch_but_not_n
             .build(lash_facade_tests::runtime_lease_owner())?;
         let session = created_session(
             &core,
-            lash_core::SessionId::fixture(format!("discovery-{mode}")),
+            lash_vocabulary::identity::SessionId::fixture(format!("discovery-{mode}")),
         )
         .await
         .open()

@@ -31,11 +31,24 @@ pub struct EngineLaunch {
     pub env: ProcessEnvRef,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub settings: Option<EngineSettings>,
+    /// Explicit host pins, validated atomically with start publication.
+    pub initial_resolutions: Vec<lash_core_store::resolutions::ResolutionSeed>,
 }
 
 impl EngineLaunch {
     pub fn new(env: ProcessEnvRef, settings: Option<EngineSettings>) -> Self {
-        Self { env, settings }
+        Self {
+            env,
+            settings,
+            initial_resolutions: Vec::new(),
+        }
+    }
+    pub fn with_initial_resolutions(
+        mut self,
+        seeds: Vec<lash_core_store::resolutions::ResolutionSeed>,
+    ) -> Self {
+        self.initial_resolutions = seeds;
+        self
     }
 }
 
@@ -87,8 +100,7 @@ impl DeclaredDefinitionLaunch {
 #[derive(Clone, Debug, PartialEq)]
 pub struct DeclaredInlineLaunch {
     engine_kind: String,
-    payload: serde_json::Value,
-    packages: lash_kernel_doc::PackageSetDigest,
+    request: crate::process::engine::InlineRequest,
     launch: DeclaredLaunch,
 }
 
@@ -98,15 +110,10 @@ impl DeclaredInlineLaunch {
         &self.engine_kind
     }
 
-    /// The function, as its engine's payload.
-    pub fn payload(&self) -> &serde_json::Value {
-        &self.payload
-    }
-
-    /// The package set the function is linked under: its starter's,
+    /// The inline payload and retained environment supplied by its starter,
     /// recorded when the start was declared (FIG-6993).
-    pub fn packages(&self) -> lash_kernel_doc::PackageSetDigest {
-        self.packages
+    pub fn request(&self) -> &crate::process::engine::InlineRequest {
+        &self.request
     }
 
     pub fn launch(&self) -> &EngineLaunch {
@@ -115,18 +122,8 @@ impl DeclaredInlineLaunch {
 
     pub(crate) fn into_parts(
         self,
-    ) -> (
-        String,
-        serde_json::Value,
-        lash_kernel_doc::PackageSetDigest,
-        EngineLaunch,
-    ) {
-        (
-            self.engine_kind,
-            self.payload,
-            self.packages,
-            self.launch.into_launch(),
-        )
+    ) -> (String, crate::process::engine::InlineRequest, EngineLaunch) {
+        (self.engine_kind, self.request, self.launch.into_launch())
     }
 }
 
@@ -149,14 +146,12 @@ pub fn held_definition_launch(
 #[doc(hidden)]
 pub fn held_inline_launch(
     engine_kind: String,
-    payload: serde_json::Value,
-    packages: lash_kernel_doc::PackageSetDigest,
+    request: crate::process::engine::InlineRequest,
     launch: DeclaredLaunch,
 ) -> DeclaredInlineLaunch {
     DeclaredInlineLaunch {
         engine_kind,
-        payload,
-        packages,
+        request,
         launch,
     }
 }

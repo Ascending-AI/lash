@@ -146,6 +146,7 @@ impl KernelMachine {
         for handle in cold {
             self.warm_whole(handle)?;
         }
+        self.heap.set_saved_functions(&self.functions);
         let access = self.heap.pages().clone();
         let mut holdings = Holdings {
             arena: &self.arena,

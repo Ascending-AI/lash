@@ -12,6 +12,11 @@ use crate::measurements::{
     ExecutionClass, ExecutionReceipt, Measurements, PoolMeasurements, SharedMeasurements,
 };
 use crate::{PoolConfig, PoolError};
+use lash_protocol_types::engine_fault::{
+    Detail, Exchange, ExecutionLease, FrameEpoch, InfrastructureOutcome, OwnerEpoch,
+    ProtocolBreach, SequenceFault,
+};
+use lash_protocol_types::worker_limit::WorkerLimit;
 use lash_vm_protocol::page::{PageCapability, PageExchangeId, PageReply, PageRequest, SealBatch};
 use lash_vm_protocol::*;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -65,7 +70,7 @@ impl WorkerPool {
         if let Some(cgroup) = &config.cgroup {
             cgroup.probe().map_err(PoolError::cgroup)?;
         }
-        let held = config.held_packages().map_err(|error| {
+        let held = config.worker_library().map_err(|error| {
             PoolError::breach(ProtocolBreach::Machine {
                 detail: Detail::new(error),
             })
@@ -825,7 +830,7 @@ impl Checkout {
     /// had been withdrawn.
     pub fn deliver(
         &mut self,
-        wait: lash_kernel_doc::WaitId,
+        wait: lash_vocabulary::sites::WaitId,
         outcome: EncodedPayload,
     ) -> Result<(), PoolError> {
         if self.pending.is_some() || !self.started {

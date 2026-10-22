@@ -42,10 +42,15 @@ use std::sync::LazyLock;
 
 use futures_util::TryStreamExt;
 
-use lash_core_store::checkpoint_graph::{
-    BlobEncoding, DecodeDimension, DecodeLimits, GraphRefusal, InstalledGraphMeasurement, NodeId,
-    NodeSource, StoredNode, check_envelope, node::is_semantic,
-};
+use lash_core_store::checkpoint_graph::BlobEncoding;
+use lash_core_store::checkpoint_graph::DecodeLimits;
+use lash_core_store::checkpoint_graph::GraphRefusal;
+use lash_core_store::checkpoint_graph::InstalledGraphMeasurement;
+use lash_core_store::checkpoint_graph::NodeId;
+use lash_core_store::checkpoint_graph::NodeSource;
+use lash_core_store::checkpoint_graph::StoredNode;
+use lash_core_store::checkpoint_graph::check_envelope;
+use lash_core_store::checkpoint_graph::node::is_semantic;
 use lash_durable::domain::DomainRefusal;
 use lash_durable::domain::graph::{EffectAdmissionWrite, HydratedGraph, HydratedNode, RootOwner};
 use lash_durable::domain::graph_commit::{
@@ -56,6 +61,7 @@ use lash_durable::{
 };
 use lash_store_sql::durable::graph::GraphStatements;
 use lash_store_sql::{Dialect, Rendered};
+use lash_vocabulary::tokens::DecodeDimension;
 use sqlx::PgConnection;
 
 use super::steps::{self, Entry, Shape, Step, Ty, Value};
@@ -1187,7 +1193,7 @@ impl PostgresDurableStore {
         let policy = self.pools.graph_reads.owner();
         let requested = limits.kernel_data;
         let configured = policy.kernel_data;
-        let kernel_data = lash_core_store::checkpoint_graph::KernelDataLimits::new(
+        let kernel_data = lash_vocabulary::data_limits::KernelDataLimits::new(
             requested.document_depth().min(configured.document_depth()),
             requested
                 .document_json_depth()

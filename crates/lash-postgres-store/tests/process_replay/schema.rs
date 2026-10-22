@@ -187,7 +187,7 @@ async fn a_host_provisioned_schema_serves_verify_only_under_a_role_without_ddl_p
             .await
             .expect("a host-provisioned schema connects verify-only"),
     );
-    let process = lash_core::ProcessId::fixture("provisioned");
+    let process = lash_vocabulary::identity::ProcessId::fixture("provisioned");
     let before = store
         .earliest_cursor(&process, lash_core::ProcessSequence::new(1))
         .await

@@ -128,6 +128,30 @@ impl HostArtifacts {
         }
     }
 
+    /// Bind a publisher to this host's registered kernel runtime and accepted namespace.
+    /// The supplied context fixes its ownership domain before any publication.
+    #[cfg(feature = "codemode")]
+    pub fn package_publisher(
+        &self,
+        context: lash_vocabulary::package::PublicationContext,
+        snapshot: lash_vocabulary::package::NamespaceSnapshot,
+    ) -> Result<crate::packages::ScopedPackagePublisher> {
+        let runtime = self
+            .engines
+            .document_provider(lash_vm_runtime::LASH_VM_ENGINE_KIND)
+            .ok_or_else(|| {
+                lash_execution_contracts::PluginError::Registration(
+                    "package publication requires a registered kernel document provider".into(),
+                )
+            })?;
+        Ok(crate::packages::ScopedPackagePublisher::new(
+            context,
+            snapshot,
+            runtime,
+            self.core.backend().package_store(),
+        ))
+    }
+
     /// Observe the tools the serving build's components serve for `env`'s
     /// effect links. Admits the environment and builds only its named components with
     /// `process: None`. This is an observation of the serving build, not the
@@ -164,6 +188,9 @@ impl HostArtifacts {
                     .into()
             }
             lash_core::HoldEnvError::Fault(error) => error.into(),
+            lash_core::HoldEnvError::Admission(error) => {
+                lash_execution_contracts::PluginError::Package(Box::new(error)).into()
+            }
         })
     }
 
@@ -226,60 +253,161 @@ impl HostArtifacts {
             .map(|resolved| resolved.definition))
     }
 
-    pub(crate) async fn resolved_definition(
+    /// Advertise the chosen process components under this host's trusted
+    /// domain, retaining their publications under the caller's existing pin.
+    /// This is explicit authoring configuration; it does not expose model tools.
+    #[cfg(feature = "codemode")]
+    pub async fn process_namespace(
         &self,
-        id: &ProcessDefinitionId,
-    ) -> Result<Option<lash_execution_contracts::process::ResolvedProcessDefinition>> {
-        Ok(self
-            .definition_ports
-            .read_definition(&self.engines, id)
-            .await?)
+        pin: &HostArtifactPin,
+        env: &ProcessEnv,
+        consumer: lash_vocabulary::package::PublicationContext,
+    ) -> Result<lash_core_store::tool_surface::RecordedPackages> {
+        use lash_vocabulary::package::*;
+        let domain = PublicationDomain(self.core.backend().binding_identity().to_string());
+        if consumer.domain != domain || consumer.scope != PublicationScope::Host {
+            return Err(lash_execution_contracts::PluginError::Package(Box::new(
+                lash_execution_contracts::process::linking::EnginePortError::Refused(
+                    lash_execution_contracts::process::linking::AdmissionRefusal::NotOwner {
+                        path: lash_vocabulary::names::Vec1::new(consumer.root),
+                    },
+                ),
+            ))
+            .into());
+        }
+        let composition = self
+            .engines
+            .components()
+            .compose(env, None)
+            .map_err(
+                |refusal| lash_execution_contracts::PluginError::ProcessEnvRefused { refusal },
+            )?;
+        let configured = &self.core.env.core.control.packages;
+        let mut packages = composition.composition.advertise_packages(
+            &lash_core::OwnerConfigView::components(Arc::new(env.clone())),
+            configured,
+            &domain,
+            PublicationScope::Host,
+        )?;
+        packages.consumer = Some(consumer);
+        let claim = claim(pin)?;
+        let store = self.core.backend().package_store();
+        let mut held = std::collections::BTreeSet::new();
+        for accepted in &packages.snapshot.advertisements {
+            if configured.snapshot.advertisements.contains(accepted) {
+                store
+                    .acquire_publication(&claim, &accepted.publication.key())
+                    .await
+                    .map_err(lash_execution_contracts::plugin_error::registry_error)?;
+            } else {
+                if held.insert(accepted.publication.context.publisher.clone()) {
+                    let advertisements: Vec<_> = packages
+                        .snapshot
+                        .advertisements
+                        .iter()
+                        .filter(|candidate| {
+                            candidate.publication.context.publisher
+                                == accepted.publication.context.publisher
+                                && !configured.snapshot.advertisements.contains(candidate)
+                        })
+                        .collect();
+                    composition
+                        .composition
+                        .hold_packages(&claim, &advertisements)
+                        .await
+                        .map_err(|error| {
+                            lash_execution_contracts::PluginError::Package(Box::new(error))
+                        })?;
+                }
+                if let PackageAdvertisement::Enumerated(package) = &accepted.advertisement {
+                    store
+                        .put_package(
+                            &claim,
+                            &lash_core_store::packages::PackageRecord {
+                                id: package.identity(),
+                                package: package.clone(),
+                            },
+                        )
+                        .await
+                        .map_err(lash_execution_contracts::plugin_error::registry_error)?;
+                }
+                store
+                    .publish(&claim, &accepted.publication)
+                    .await
+                    .map_err(lash_execution_contracts::plugin_error::registry_error)?;
+            }
+        }
+        Ok(packages)
     }
 
-    /// What a workflow document is edited and admitted against for
-    /// processes that run under `environment`: the effects their tool
-    /// catalogue offers, in the kernel's type grammar, and the library
-    /// functions the workers hold. `None` when no engine of this core
-    /// reads workflow documents. The package surface follows [`Self::cell_packages`],
-    /// including durable installation before serving starts. Keep that handle
-    /// through import and publication to preserve the chosen snapshot.
+    /// Select routes for one retained Link from an explicitly prepared
+    /// namespace. Ambiguous providers require a selection keyed by OperationUse.
+    #[cfg(feature = "codemode")]
+    pub async fn link_process_env(
+        &self,
+        base: &ProcessEnv,
+        start: &lash_vocabulary::names::LinkedStart,
+        packages: &lash_core_store::tool_surface::RecordedPackages,
+        selected: &std::collections::BTreeMap<
+            lash_vocabulary::names::OperationUse,
+            (
+                lash_vocabulary::providers::ToolProviderHandle,
+                lash_vocabulary::ToolId,
+            ),
+        >,
+    ) -> Result<ProcessEnv> {
+        let inspection = self
+            .engines
+            .inspect_link(lash_vm_runtime::LASH_VM_ENGINE_KIND, start)
+            .await
+            .map_err(|error| lash_execution_contracts::PluginError::Package(Box::new(error)))?;
+        let composition = self
+            .engines
+            .components()
+            .compose(base, None)
+            .map_err(
+                |refusal| lash_execution_contracts::PluginError::ProcessEnvRefused { refusal },
+            )?;
+        let mut execution = composition
+            .composition
+            .execution_environment(
+                &inspection,
+                packages,
+                packages.publications(),
+                lash_vocabulary::claims::RegistryKind::Process,
+                selected,
+            )
+            .map_err(|error| lash_execution_contracts::PluginError::Package(Box::new(error)))?;
+        execution.authored.insert(start.link);
+        let mut builder =
+            ProcessEnv::builder(base.max_tool_calls()).attachments(Arc::clone(base.attachments()));
+        if let Some(model) = base.model() {
+            builder = builder.model(model.clone());
+        }
+        for entry in base.components() {
+            builder = builder.entry(entry.clone());
+        }
+        for (slot, value) in base.capabilities() {
+            builder = builder.capability(slot.clone(), value.clone());
+        }
+        let env = builder
+            .packages(packages.clone())
+            .execution(execution)
+            .build()
+            .map_err(
+                |refusal| lash_execution_contracts::PluginError::ProcessEnvRefused { refusal },
+            )?;
+        self.engines
+            .check_links(&Arc::new(env.clone()), &inspection)
+            .map_err(|error| lash_execution_contracts::PluginError::Package(Box::new(error)))?;
+        Ok(env)
+    }
+
+    /// Runtime authoring projection of the explicit accepted namespace.
     #[cfg(feature = "codemode")]
     pub async fn workflow_environment(
         &self,
-        environment: &ProcessEnv,
-    ) -> Result<Option<crate::workflow::WorkflowEnvironment>> {
-        if self
-            .engines
-            .document_provider(lash_vm_runtime::LASH_VM_ENGINE_KIND)
-            .is_none()
-        {
-            return Ok(None);
-        }
-        self.workflow_environment_from_catalog(self.core.process_tool_catalog(environment)?)
-            .await
-    }
-
-    #[cfg(feature = "codemode")]
-    async fn workflow_environment_from_catalog(
-        &self,
-        tool_catalog: Arc<lash_core::ToolCatalog>,
-    ) -> Result<Option<crate::workflow::WorkflowEnvironment>> {
-        if self
-            .engines
-            .document_provider(lash_vm_runtime::LASH_VM_ENGINE_KIND)
-            .is_none()
-        {
-            return Ok(None);
-        }
-        self.workflow_environment_for_packages(tool_catalog, self.cell_packages().await?)
-            .await
-    }
-
-    #[cfg(feature = "codemode")]
-    async fn workflow_environment_for_packages(
-        &self,
-        tool_catalog: Arc<lash_core::ToolCatalog>,
-        packages: lash_execution_contracts::CellPackages,
+        request: &lash_vm_runtime::WorkflowEnvironmentRequest,
     ) -> Result<Option<crate::workflow::WorkflowEnvironment>> {
         let Some(provider) = self
             .engines
@@ -287,312 +415,232 @@ impl HostArtifacts {
         else {
             return Ok(None);
         };
-        let request = lash_vm_runtime::WorkflowEnvironmentRequest {
-            tool_catalog,
-            packages,
-        };
         let answer = provider
             .environment(lash_execution_contracts::process::ProcessDocument::new(
-                request,
+                request.clone(),
             ))
             .await?;
         Ok(answer.downcast().ok())
     }
 
-    /// The single fleet-gate answer for authoring and publishing a workflow.
-    /// With no serving nodes, installs and answers this host's complete set
-    /// without granting a serving lease. Otherwise chooses a live surface
-    /// compatible with the writer and every serving node, or refuses typed.
-    /// Reuse this handle through import and publication; those operations
-    /// keep its snapshot and the host's exact declaration.
+    /// Inspect a captured callable without publishing or taking a lasting hold.
     #[cfg(feature = "codemode")]
-    pub async fn cell_packages(&self) -> Result<lash_execution_contracts::CellPackages> {
-        if let Some(hold) = self.core.backend.packages() {
-            use lash_execution_contracts::PackageGate as _;
-            return crate::packages::FleetPackages::new(self.core.backend.clone(), hold.clone())
-                .writable()
-                .await
-                .map_err(|error| lash_execution_contracts::PluginError::from(error).into());
+    pub async fn inspect_callable(
+        &self,
+        function: &crate::workflow::document::FunctionValue,
+        environment: &lash_vm_runtime::WorkflowEnvironmentRequest,
+        origin: &lash_vocabulary::package::CallableOrigin,
+    ) -> Result<ProcessDefinition> {
+        let request = lash_vm_runtime::process::InlineRequest::Callable {
+            link: function.callable.link,
+            function: Box::new(function.clone()),
+            origin: origin.clone(),
         }
-        self.producer_packages()
-    }
-
-    /// The kernel engine's producer set: what a start with no parent cell
-    /// is linked under.
-    #[cfg(feature = "codemode")]
-    fn producer_packages(&self) -> Result<lash_execution_contracts::CellPackages> {
-        let provider = self
+        .into_request(
+            environment.snapshot.clone(),
+            environment.context.clone(),
+            environment.attachment.clone(),
+        )
+        .map_err(|error| lash_execution_contracts::PluginError::Package(Box::new(error)))?;
+        let inspected = self
             .engines
-            .document_provider(lash_vm_runtime::LASH_VM_ENGINE_KIND)
-            .ok_or_else(|| {
-                lash_execution_contracts::PluginError::Registration(
-                    "this core has no package producer".into(),
-                )
-            })?;
-        Ok(provider.initial_packages()?)
+            .inline_starts(lash_vm_runtime::LASH_VM_ENGINE_KIND)?
+            .inspect(&request)
+            .await
+            .map_err(|error| lash_execution_contracts::PluginError::Package(Box::new(error)))?;
+        Ok(ProcessDefinition::new(
+            inspected.draft.id(),
+            inspected.signature,
+        ))
     }
 
-    /// Every dialect lowers a module under one workflow contract
-    /// ([`crate::dialect::workflow`]): each top-level async function, by
-    /// declaration or by `const` (TypeScript) or `async def` (Python), is an
-    /// entry; an entry captures nothing of the module, its signature is what
-    /// its annotations mean in its dialect, and the contract's refusals
-    /// carry the same codes in every dialect. Source printed from a document
-    /// is read back with [`Self::import_exported_workflow`] instead.
-    ///
-    /// The answer carries the document, its source map, the source and the
-    /// captions it spelled, for [`Self::publish_workflow`] to keep together; the opaque bytes retain
-    /// every entry, available through an explicit typed read for editing.
-    /// `packages` carries the host's required package/operation declaration.
-    /// Code reaching outside it is refused with `UndeclaredMembers`; no
-    /// attachment is selected implicitly. Select an entry when publishing. Without `limits` the dialect's standard source policy
-    /// applies.
-    ///
-    /// The host supplies no dialect internals and links no parser: the
-    /// worker lowers the source. This reads the tool catalogue and worker
-    /// function registry, runs no effect and publishes nothing.
+    /// Retain the whole captured callable under the caller's existing pin and
+    /// publish its process descriptor. Captures keep their original Links.
+    #[cfg(feature = "codemode")]
+    pub async fn publish_callable(
+        &self,
+        pin: &HostArtifactPin,
+        function: &crate::workflow::document::FunctionValue,
+        environment: &lash_vm_runtime::WorkflowEnvironmentRequest,
+        origin: &lash_vocabulary::package::CallableOrigin,
+    ) -> Result<ProcessDefinition> {
+        let request = lash_vm_runtime::process::InlineRequest::Callable {
+            link: function.callable.link,
+            function: Box::new(function.clone()),
+            origin: origin.clone(),
+        }
+        .into_request(
+            environment.snapshot.clone(),
+            environment.context.clone(),
+            environment.attachment.clone(),
+        )
+        .map_err(|error| lash_execution_contracts::PluginError::Package(Box::new(error)))?;
+        let starts = self
+            .engines
+            .inline_starts(lash_vm_runtime::LASH_VM_ENGINE_KIND)?;
+        starts
+            .inspect(&request)
+            .await
+            .map_err(|error| lash_execution_contracts::PluginError::Package(Box::new(error)))?;
+        let claim = claim(pin)?;
+        for key in &origin.publications {
+            self.core
+                .backend()
+                .package_store()
+                .acquire_publication(&claim, key)
+                .await
+                .map_err(lash_execution_contracts::plugin_error::registry_error)?;
+        }
+        for link in &origin.authored {
+            self.documents()
+                .hold(
+                    &claim,
+                    &lash_execution_contracts::process::linking::ContentRef::Link(*link),
+                )
+                .await
+                .map_err(|error| lash_execution_contracts::PluginError::Package(Box::new(error)))?;
+        }
+        let realized = self
+            .engines
+            .inline_starts(lash_vm_runtime::LASH_VM_ENGINE_KIND)?
+            .realize(&claim, &request)
+            .await
+            .map_err(|error| lash_execution_contracts::PluginError::Package(Box::new(error)))?;
+        self.publish_definition(pin, &realized.draft).await
+    }
+
+    /// Lower an unlinked workflow against explicit visible packages. Publication
+    /// fulfils every Import and retains the resulting Link before exposing it.
     #[cfg(feature = "codemode")]
     pub async fn import_workflow(
         &self,
         language: crate::workflow::document::SourceLanguage,
         source: &str,
-        environment: &ProcessEnv,
-        packages: lash_execution_contracts::WorkflowPackages,
+        environment: &lash_vm_runtime::WorkflowEnvironmentRequest,
         limits: Option<crate::dialect::workflow::WorkflowSourceLimits>,
     ) -> Result<crate::workflow::WorkflowImport> {
-        let checked = match self
-            .import_context(environment, packages.packages().clone())
-            .await?
-        {
-            Ok(context) => context,
-            Err(refused) => return Ok(refused),
+        let Some(checked) = self.workflow_environment(environment).await? else {
+            return Ok(crate::workflow::WorkflowImport::Unsupported(
+                crate::workflow::WorkflowImportUnsupported::EngineUnavailable,
+            ));
         };
         crate::workflow::import::import(
             checked.worker_service(),
             language,
             source,
-            packages,
-            checked.operations(),
-            &checked.checker(),
+            checked.namespaces(),
+            environment.clone(),
             limits,
         )
         .await
     }
 
-    /// Read source exported from `base` (a host's edit of it, or the
-    /// printed text unchanged) and admit the result against the same process
-    /// environment as [`Self::publish_workflow`]. The source carries only
-    /// code; the manifest, entries, private bindings, helper identities and
-    /// name renames are the base document's, so an unchanged source reads
-    /// back as `base` itself, with its identity. A construct the reader has
-    /// no exact inverse for is a typed refusal naming it. The admitted
-    /// document is answered as [`WorkflowImport::Read`](crate::workflow::WorkflowImport::Read).
-    ///
-    /// This reads the tool catalogue, runs no effect and publishes nothing.
     #[cfg(feature = "codemode")]
     pub async fn import_exported_workflow(
         &self,
         source: &str,
         format: crate::dialect::SourceFormat,
         base: &crate::workflow::document::Document,
-        environment: &ProcessEnv,
-        packages: lash_execution_contracts::WorkflowPackages,
+        environment: &lash_vm_runtime::WorkflowEnvironmentRequest,
     ) -> Result<crate::workflow::WorkflowImport> {
-        let checked = match self
-            .import_context(environment, packages.packages().clone())
-            .await?
-        {
-            Ok(context) => context,
-            Err(refused) => return Ok(refused),
+        let Some(checked) = self.workflow_environment(environment).await? else {
+            return Ok(crate::workflow::WorkflowImport::Unsupported(
+                crate::workflow::WorkflowImportUnsupported::EngineUnavailable,
+            ));
         };
-        let (document, captions) = match checked
+        match checked
             .worker_service()
             .read_exported(source, base, format, Default::default())
             .await
         {
-            Ok(read) => read,
-            Err(error) => return crate::workflow::import::source_refusal(error),
-        };
-        Ok(crate::workflow::import::admit_read(
-            document,
-            captions,
-            &checked.checker(),
-            &packages,
-        ))
+            Ok((document, captions)) => Ok(crate::workflow::WorkflowImport::Read {
+                document: crate::workflow::document::DocumentBytes::from(document),
+                captions,
+            }),
+            Err(error) => crate::workflow::import::source_refusal(error),
+        }
     }
 
-    /// What importing a workflow source admits against: the process tool
-    /// catalogue, its host boundary and the checked environment, or the
-    /// answer that refuses the import before any source is read.
-    #[cfg(feature = "codemode")]
-    async fn import_context(
-        &self,
-        environment: &ProcessEnv,
-        packages: lash_execution_contracts::CellPackages,
-    ) -> Result<
-        std::result::Result<crate::workflow::WorkflowEnvironment, crate::workflow::WorkflowImport>,
-    > {
-        use crate::workflow::{
-            WorkflowAdmissionRefusal, WorkflowImport, WorkflowImportUnsupported,
-        };
-        if self
-            .engines
-            .document_provider(lash_vm_runtime::LASH_VM_ENGINE_KIND)
-            .is_none()
-        {
-            return Ok(Err(WorkflowImport::Unsupported(
-                WorkflowImportUnsupported::EngineUnavailable,
-            )));
-        }
-        let catalog = self.core.process_tool_catalog(environment)?;
-        if let Err(error) = lash_vm_runtime::HostBoundary::of_catalog(&catalog) {
-            return Ok(Err(WorkflowImport::Admission(
-                WorkflowAdmissionRefusal::Boundary {
-                    message: error.to_string(),
-                },
-            )));
-        }
-        let Some(checked) = self
-            .workflow_environment_for_packages(Arc::clone(&catalog), packages)
-            .await?
-        else {
-            return Ok(Err(WorkflowImport::Unsupported(
-                WorkflowImportUnsupported::EngineUnavailable,
-            )));
-        };
-        Ok(Ok(checked))
-    }
-
-    /// Validate opaque `document` bytes, admit their entry `entry`, and hold them
-    /// under `pin`: the document, the declaration of every library function
-    /// it lists, and the descriptor of the selected entry. Other functions
-    /// cross inline when passed to tools; they have no stored descriptors.
-    ///
-    /// The definition records `packages.declared()` as written; its code
-    /// and operations link only against that declaration. Unused attachments
-    /// remain attached and code outside it is refused with `UndeclaredMembers`.
-    /// The checker admits the document against `environment`, the
-    /// environment a process of the definition would run under. No source
-    /// is printed or parsed, no editor is needed, and nothing the document
-    /// states about itself is taken as true: its view, its types and its
-    /// effect sets are derived again.
-    ///
-    /// With `source`, the host's source map of the document and the source
-    /// it maps are checked against the document and held under `pin` beside
-    /// it; the answer carries the map's id, which the host keeps beside the
-    /// definition id and reads back with [`Self::read_source_map`]. Lash keeps
-    /// no association of its own between a definition and a map.
-    ///
-    /// Equal content publishes to the same id and changes nothing, so an
-    /// unchanged document is the definition it was read from. A refused
-    /// document or map publishes nothing. A released pin is refused.
-    /// Processes already started keep the document they were admitted
-    /// under.
+    /// Publish one Main or data-only function Export under its immutable Link.
+    /// The explicit attachment includes any permitted deferred paths.
     #[cfg(feature = "codemode")]
     pub async fn publish_workflow(
         &self,
         pin: &HostArtifactPin,
         document: &crate::workflow::document::DocumentBytes,
-        entry: &crate::workflow::document::Name,
-        environment: &ProcessEnv,
-        packages: lash_execution_contracts::WorkflowPackages,
+        selector: &lash_vocabulary::names::StartSelector,
+        environment: &lash_vm_runtime::WorkflowEnvironmentRequest,
         source: Option<(&crate::workflow::document::SourceMap, &str)>,
-    ) -> Result<crate::workflow::WorkflowPublish> {
-        use crate::workflow::{WorkflowPublication, WorkflowPublish};
-        let unsupported = || WorkflowPublish::Unsupported {
-            engine_kind: lash_vm_runtime::LASH_VM_ENGINE_KIND.into(),
-        };
-        let Some(provider) = self
-            .engines
-            .document_provider(lash_vm_runtime::LASH_VM_ENGINE_KIND)
-        else {
-            return Ok(unsupported());
-        };
-        let typed = match document.decode(lash_kernel_doc::KernelDataLimits::standard()) {
-            Ok(document) => document,
-            Err(refusal) => {
-                return Ok(WorkflowPublish::Refused(
-                    crate::workflow::WorkflowAdmissionRefusal::Bytes(refusal),
-                ));
-            }
-        };
-        if let Some((map, text)) = source
-            && let Err(refusal) = map.validate_identified(&typed, text)
-        {
-            return Ok(WorkflowPublish::SourceMapRefused(refusal));
+    ) -> Result<lash_vocabulary::names::LinkedStart> {
+        let typed = document.decode(lash_vocabulary::KernelDataLimits::standard())?;
+        if let Some((map, text)) = source {
+            map.validate_identified(&typed, text)?;
         }
+        let request = lash_vm_runtime::WorkflowPublishRequest {
+            document: document.clone(),
+            selector: selector.clone(),
+            environment: environment.clone(),
+        };
         let claim = claim(pin)?;
-        let request = lash_vm_runtime::WorkflowAdmissionRequest {
-            packages,
-            document: typed,
-            entry: entry.clone(),
-            tool_catalog: self.core.process_tool_catalog(environment)?,
-        };
-        let outcome = provider
-            .admit(
-                &claim,
-                lash_execution_contracts::process::ProcessDocument::new(request),
-            )
-            .await?;
-        let Ok(outcome) = outcome.downcast::<lash_vm_runtime::WorkflowAdmissionOutcome>() else {
-            return Ok(unsupported());
-        };
-        let admitted = match outcome {
-            lash_vm_runtime::WorkflowAdmissionOutcome::Admitted(admitted) => *admitted,
-            lash_vm_runtime::WorkflowAdmissionOutcome::Refused(refusal) => {
-                return Ok(WorkflowPublish::Refused(refusal));
-            }
-        };
-        // The document and its declarations are held under the pin from
-        // here; the map and its source join them before the descriptor
-        // does, so no answer names a map whose source is not held.
-        let source_map = match source {
-            Some((map, text)) => Some(
-                self.documents()
-                    .publish_source_map(&claim, admitted.document.document(), map, text)
-                    .await
-                    .map_err(lash_execution_contracts::plugin_error::PluginError::from)?,
-            ),
-            None => None,
-        };
-        // The entry's descriptor joins them, checked by the engine against
-        // the stored document.
-        let definition = self
-            .definition_ports
-            .publish_definition(&self.engines, &claim, &admitted.draft)
-            .await?;
-        Ok(WorkflowPublish::Published(Box::new(WorkflowPublication {
-            definition,
-            reference: admitted.document.reference().clone(),
-            source_map,
-        })))
+        let start = self
+            .documents()
+            .publish(&claim, &request)
+            .await
+            .map_err(|error| lash_execution_contracts::PluginError::Package(Box::new(error)))?;
+        if let Some((map, text)) = source {
+            self.documents()
+                .publish_source_map(&claim, &typed, map, text)
+                .await
+                .map_err(lash_execution_contracts::PluginError::from)?;
+        }
+        Ok(start)
     }
 
-    /// Start a held function value with explicit arguments, idempotency key
-    /// and launch. Nothing is published until the start is realized. The
-    /// start is linked under this core's producer set, read now and
-    /// recorded on it (FIG-6993). An exact retry returns the same process;
-    /// changed code, captures, set, arguments or launch under the key
-    /// refuse with `StartKeyConflict`.
+    /// Start retained linked code using a host-owned pin for the explicit
+    /// environment. Normal staging validates and holds the selected reach.
+    #[cfg(feature = "codemode")]
+    pub async fn start_linked(
+        &self,
+        pin: &HostArtifactPin,
+        request: lash_core::plugin::packages::StartLinked,
+        start_key: impl AsRef<[u8]>,
+        environment: &lash_vm_runtime::WorkflowEnvironmentRequest,
+    ) -> Result<lash_execution_contracts::process::ProcessStartReceipt> {
+        let env = self.publish_process_env(pin, &request.env).await?;
+        let launch = lash_execution_contracts::process::EngineLaunch::new(env, request.settings)
+            .with_initial_resolutions(request.initial_resolutions);
+        self.start_function(
+            lash_execution_contracts::process::InlineRequest {
+                code: lash_execution_contracts::process::InlineCode::Linked {
+                    start: request.start,
+                },
+                snapshot: environment.snapshot.clone(),
+                context: environment.context.clone(),
+                attachment: environment.attachment.clone(),
+            },
+            request.args,
+            start_key,
+            launch,
+        )
+        .await
+    }
+
+    /// Start an admitted linked callable or freshly fulfil an uploaded document.
+    /// The request's explicit namespace/attachment is pinned before first claim.
     #[cfg(feature = "codemode")]
     pub async fn start_function(
         &self,
-        value: &crate::workflow::document::FunctionValue,
+        request: lash_execution_contracts::process::InlineRequest,
         args: serde_json::Map<String, serde_json::Value>,
         start_key: impl AsRef<[u8]>,
         launch: lash_execution_contracts::process::EngineLaunch,
     ) -> Result<lash_execution_contracts::process::ProcessStartReceipt> {
-        let payload = value.transport_json().map_err(|error| {
-            lash_execution_contracts::plugin_error::PluginError::Invoke(error.to_string())
-        })?;
-        let packages = self.producer_packages()?.digest();
         self.core
             .processes()
             .start(
                 lash_execution_contracts::process::ProcessStartRequest::inline(
                     lash_vm_runtime::LASH_VM_ENGINE_KIND,
-                    payload,
-                    packages,
+                    request,
                     args,
                     launch,
                     lash_execution_contracts::process::ProcessOriginator::host(),
@@ -633,7 +681,10 @@ impl HostArtifacts {
     /// The store of kernel documents behind this core's module port.
     #[cfg(feature = "codemode")]
     fn documents(&self) -> lash_vm_runtime::KernelDocuments {
-        lash_vm_runtime::KernelDocuments::new(self.core.backend().module_artifacts())
+        lash_vm_runtime::KernelDocuments::new(
+            self.core.backend().module_artifacts(),
+            self.core.backend().package_store(),
+        )
     }
 
     /// Read the definition `id` names as its workflow: its identity and
@@ -675,6 +726,84 @@ impl HostArtifacts {
         Ok(read)
     }
 
+    /// Read display facts from the packages retained by this execution's recorded provenance.
+    /// The Link graph selects callees; labels remain independent sidecars.
+    #[cfg(all(feature = "codemode", feature = "workflow-view"))]
+    pub async fn workflow_view_context(
+        &self,
+        reference: &lash_vocabulary::LinkedStart,
+        publications: &[lash_vocabulary::package::PublicationRecord],
+    ) -> Result<crate::workflow::view::ViewContext> {
+        use lash_vocabulary::package::PublishedContent;
+        let documents = self.documents();
+        let store = self.core.backend().package_store();
+        let mut content = documents
+            .load_linked(reference.link)
+            .await
+            .map_err(|error| lash_execution_contracts::PluginError::Package(Box::new(error)))?;
+        let mut pending = publications
+            .iter()
+            .map(lash_vocabulary::package::PublicationRecord::key)
+            .collect::<Vec<_>>();
+        let mut seen = std::collections::BTreeSet::new();
+        let mut labels = Vec::new();
+        while let Some(key) = pending.pop() {
+            if !seen.insert(key.clone()) {
+                continue;
+            }
+            let record = store
+                .publication(&key)
+                .await
+                .map_err(lash_execution_contracts::plugin_error::registry_error)?
+                .ok_or_else(|| {
+                    lash_execution_contracts::PluginError::Invoke(
+                        "the retained display publication is missing".into(),
+                    )
+                })?;
+            pending.extend(record.imported_publications);
+            for root in record.code_links {
+                if !content.links.contains_key(&root) {
+                    let retained = documents.load_linked(root).await.map_err(|error| {
+                        lash_execution_contracts::PluginError::Package(Box::new(error))
+                    })?;
+                    content.documents.extend(retained.documents);
+                    content.links.extend(retained.links);
+                }
+            }
+            if let PublishedContent::Package(id) = record.content {
+                let package = store
+                    .package(&id)
+                    .await
+                    .map_err(lash_execution_contracts::plugin_error::registry_error)?
+                    .ok_or_else(|| {
+                        lash_execution_contracts::PluginError::Invoke(
+                            "the retained display Package is missing".into(),
+                        )
+                    })?;
+                content.packages.insert(id, package.package);
+                labels.extend(
+                    store
+                        .labels(&id)
+                        .await
+                        .map_err(lash_execution_contracts::plugin_error::registry_error)?
+                        .into_iter()
+                        .map(|json| (id, json)),
+                );
+            }
+        }
+        let mut context =
+            crate::workflow::view::ViewContext::new(reference.clone(), content, Default::default())
+                .map_err(|error| {
+                    lash_execution_contracts::PluginError::Invoke(error.to_string())
+                })?;
+        for (id, json) in labels {
+            context.add_labels(id, &json).map_err(|error| {
+                lash_execution_contracts::PluginError::Invoke(error.to_string())
+            })?;
+        }
+        Ok(context.with_timer_operations(lash_vm_runtime::TIMER_OPERATIONS.iter().cloned()))
+    }
+
     /// Read the workflow document `reference` names, with the entry it
     /// selects: what an execution that named it runs, a session cell's main
     /// body as much as a process's definition. An execution's start and a
@@ -683,7 +812,7 @@ impl HostArtifacts {
     #[cfg(feature = "codemode")]
     pub async fn execution_document(
         &self,
-        reference: &crate::workflow::WorkflowDocumentRef,
+        reference: &lash_vocabulary::names::LinkedStart,
     ) -> Result<crate::workflow::WorkflowDocumentRead> {
         use crate::workflow::{WorkflowDocumentRead, WorkflowUnavailable};
         let Some(provider) = self
@@ -694,7 +823,7 @@ impl HostArtifacts {
         };
         Ok(match provider.execution_document(reference).await? {
             lash_execution_contracts::process::ProcessExecutionDocumentRead::Read(document) => {
-                match document.downcast::<crate::workflow::ExecutionDocument>() {
+                match document.downcast::<crate::workflow::WorkflowDocument>() {
                     Ok(document) => WorkflowDocumentRead::Read(Box::new(document)),
                     Err(_) => WorkflowDocumentRead::Unsupported,
                 }

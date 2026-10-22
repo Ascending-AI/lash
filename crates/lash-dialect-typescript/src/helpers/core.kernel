@@ -1,3 +1,6 @@
+use num.floor
+use num.is_finite
+use float.to_int
 use brand.built
 use brand.of
 # The TypeScript dialect's own operations (tier 2): what JavaScript means by
@@ -77,7 +80,7 @@ use ts.identity
 use ts.is_primitive
 use ts.is_nullish
 use ts.to_boolean
-use ts.number.to_string
+use ts.number.format_value
 use ts.number.parse
 use ts.primitive_to_string
 use ts.primitive_to_number
@@ -322,11 +325,11 @@ body {
     return value
   }
   if same(k, "float") {
-    let spelled = invoke ts.number.to_string(value)
+    let spelled = invoke ts.number.format_value(value)
     return spelled
   }
   if same(k, "integer") {
-    let spelled = invoke ts.number.to_string(value)
+    let spelled = invoke ts.number.format_value(value)
     return spelled
   }
   if same(k, "absent") {
@@ -487,22 +490,22 @@ body {
   if same(kind(value), "text") { return value }
   # ToPrimitive leaves a number as it is: its text needs no closure.
   if same(kind(value), "float") {
-    let spelled = invoke ts.number.to_string(value)
+    let spelled = invoke ts.number.format_value(value)
     return spelled
   }
   if same(kind(value), "integer") {
-    let spelled = invoke ts.number.to_string(value)
+    let spelled = invoke ts.number.format_value(value)
     return spelled
   }
   let dynamic = fn(value) {
     let k = kind(value)
     # ToPrimitive leaves a number as it is.
     if same(k, "float") {
-      let spelled = invoke ts.number.to_string(value)
+      let spelled = invoke ts.number.format_value(value)
       return spelled
     }
     if same(k, "integer") {
-      let spelled = invoke ts.number.to_string(value)
+      let spelled = invoke ts.number.format_value(value)
       return spelled
     }
     let primitive = invoke ts.to_primitive(value, "string")
@@ -1085,7 +1088,7 @@ body {
       if num.is_nan(numeric) { break }
       let length = num.min(num.floor(numeric), 9007199254740991.0)
       if num.le(length, index) { break }
-      let key = invoke ts.number.to_string(index)
+      let key = invoke ts.number.format_value(index)
       set items[list.len(items)] = target.properties[key]
       set index = num.add(index, 1.0)
     }
@@ -1181,7 +1184,7 @@ body {
     if num.is_finite(position) {} else { return -1.0 }
     if eq(num.floor(position), position) {} else { return -1.0 }
     if num.lt(position, 0) { return -1.0 }
-    let canonical = invoke ts.number.to_string(position)
+    let canonical = invoke ts.number.format_value(position)
     if same(canonical, name) {} else { return -1.0 }
     if num.lt(position, length) { return num.to_float(position) }
     return -1.0
@@ -1619,7 +1622,7 @@ body {
     let position = 0.0
     let length = text.utf16_len(target)
     while num.lt(position, length) {
-      let key = invoke ts.number.to_string(position)
+      let key = invoke ts.number.format_value(position)
       set keys[list.len(keys)] = key
       set position = num.add(position, 1)
     }
@@ -1649,7 +1652,7 @@ body {
       } else { set other[list.len(other)] = key }
     }
     for index in numeric {
-      let key = invoke ts.number.to_string(index)
+      let key = invoke ts.number.format_value(index)
       set keys[list.len(keys)] = key
     }
     for key in other { set keys[list.len(keys)] = key }
@@ -1659,7 +1662,7 @@ body {
     let position = 0.0
     while num.lt(position, list.len(target)) {
       if same(target[position], ()) {} else {
-        let key = invoke ts.number.to_string(position)
+        let key = invoke ts.number.format_value(position)
         set keys[list.len(keys)] = key
       }
       set position = num.add(position, 1)
@@ -1790,10 +1793,27 @@ body {
   let properties = {length: num.to_float(list.len(items))}
   let index = 0
   for value in items {
-    let key = invoke ts.number.to_string(index)
+    let key = invoke ts.number.format_value(index)
     set properties[key] = value
     set index = num.add(index, 1)
   }
   let built = brand.built()
   return {__lash_brand: ("typescript", "arguments"), __lash_built: built, properties: properties, hidden: set{"length"}}
+}
+
+# The ordinary sleep operation takes durable whole milliseconds. The old
+# timer boundary discarded sub-millisecond precision after validating it.
+function ts.sleep_duration(milliseconds: Any) -> Int
+kernel 1
+charge 1024
+body {
+  let number = milliseconds
+  if bool.not(eq(kind(number), "integer")) {
+    if bool.not(eq(kind(number), "float")) { throw error.new("type_error", "sleep takes a number of milliseconds") }
+  }
+  set number = num.to_float(number)
+  if num.lt(number, 0.0) { throw error.new("number_range", "`sleep` takes a duration that is finite and not negative") }
+  if bool.not(num.is_finite(number)) { throw error.new("number_range", "`sleep` takes a duration that is finite and not negative") }
+  if num.le(9223372036854775807.0, number) { return 9223372036854775807 }
+  return float.to_int(num.floor(number))
 }

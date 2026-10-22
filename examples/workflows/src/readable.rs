@@ -2,7 +2,12 @@
 //! carry both the content id and the display name/label a host joins.
 use super::*;
 
-pub(super) fn source_map(lowered: &Lowered, source: &str, allowed: &[String]) -> Result<String> {
+pub(super) fn source_map(
+    lowered: &Lowered,
+    library: &dyn lash_kernel_dialect::Library,
+    source: &str,
+    allowed: &[String],
+) -> Result<String> {
     let document = &lowered.document;
     let map = lowered
         .source_map
@@ -42,7 +47,7 @@ pub(super) fn source_map(lowered: &Lowered, source: &str, allowed: &[String]) ->
         }
         text.push('\n');
     }
-    for site in code_sites(document)
+    for site in code_sites(document, library)
         .into_iter()
         .filter(|site| !mapped.contains(site))
     {
@@ -55,7 +60,7 @@ pub(super) fn source_map(lowered: &Lowered, source: &str, allowed: &[String]) ->
             })) if site.unit == Unit::Main && site.path.len() == 1 => {
                 "absent-binding initialization"
             }
-            _ if task_finalizer(document, &site) => "task finalizer",
+            _ if task_finalizer(document, library, &site) => "task finalizer",
             _ => anyhow::bail!(
                 "SM-COVER: unexplained unmapped site {site}: {:?}",
                 document.node(&site)
@@ -70,11 +75,18 @@ pub(super) fn source_map(lowered: &Lowered, source: &str, allowed: &[String]) ->
     Ok(text)
 }
 
-fn task_finalizer(document: &Document, site: &Site) -> bool {
+fn task_finalizer(
+    document: &Document,
+    library: &dyn lash_kernel_dialect::Library,
+    site: &Site,
+) -> bool {
     // An entry declares its cleanup in its start convention; only a cell's
     // root wraps it.
     let body = match &site.unit {
-        Unit::Main => &document.main,
+        Unit::Main => match document.main.as_ref() {
+            Some(body) => body,
+            None => return false,
+        },
         _ => return false,
     };
     let Some(last) = body
@@ -102,22 +114,28 @@ fn task_finalizer(document: &Document, site: &Site) -> bool {
     else {
         return false;
     };
-    let k::ActKind::Call(k::Callee::Library(id)) = &action.kind else {
-        return false;
-    };
-    action.args.is_empty()
-        && document
-            .manifest
+    let is_cleanup = match &action.kind {
+        k::ActKind::Call(k::Callee::Local(id)) => document
             .functions
             .get(id)
-            .is_some_and(|name| name.as_str() == "tasks.cancel_all")
+            .is_some_and(|function| function.name.as_str() == "tasks.cancel_all"),
+        k::ActKind::Call(k::Callee::Import(slot)) => {
+            document.imports.get(slot).is_some_and(|import| {
+                library
+                    .imported(&import.name)
+                    .is_some_and(|name| name.as_str() == "tasks.cancel_all")
+            })
+        }
+        _ => false,
+    };
+    action.args.is_empty()
+        && is_cleanup
         && (site.path == [last] || site.path.starts_with(&[last, 1]))
 }
 
 pub(super) fn view(
     checked: &WorkflowDocument,
     view: &lash_kernel_view::WorkflowView,
-    packages: &lash::package::PackageView<'_>,
 ) -> Result<String> {
     use lash_kernel_view::CalleeView;
     let mut text = format!("unit {:?}\n", checked.entry_unit());
@@ -145,11 +163,9 @@ pub(super) fn view(
             write!(text, " applies={callable}")?;
         }
         match &action.callee {
-            Some(CalleeView::Library { id, name, .. }) => writeln!(
-                text,
-                " library id={id} name={name} label={:?}",
-                packages.title(id, name)
-            )?,
+            Some(CalleeView::Library {
+                id, name, exports, ..
+            }) => writeln!(text, " library id={id} name={name} exports={exports:?}")?,
             other => writeln!(text, " {other:?}")?,
         }
     }

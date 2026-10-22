@@ -26,7 +26,7 @@ mod tests {
     }
 
     fn received_tool_args(
-        policy: lash_core::ToolArgumentProjectionPolicy,
+        policy: lash_vocabulary::tool_contract::ToolArgumentProjectionPolicy,
         args: serde_json::Value,
     ) -> serde_json::Value {
         crate::projection::normalize_tool_args_for_projection(args, &policy)
@@ -35,14 +35,14 @@ mod tests {
 
     fn materializing_args(args: serde_json::Value) -> serde_json::Value {
         received_tool_args(
-            lash_core::ToolArgumentProjectionPolicy::MaterializeProjectedValues,
+            lash_vocabulary::tool_contract::ToolArgumentProjectionPolicy::MaterializeProjectedValues,
             args,
         )
     }
 
     fn seed_preserving_args(args: serde_json::Value) -> serde_json::Value {
         received_tool_args(
-            lash_core::ToolArgumentProjectionPolicy::preserve_projected_refs_in_field("seed"),
+            lash_vocabulary::tool_contract::ToolArgumentProjectionPolicy::preserve_projected_refs_in_field("seed"),
             args,
         )
     }
@@ -160,7 +160,7 @@ mod tests {
             }
         });
         let policy =
-            lash_core::ToolArgumentProjectionPolicy::preserve_projected_refs_in_field("seed");
+            lash_vocabulary::tool_contract::ToolArgumentProjectionPolicy::preserve_projected_refs_in_field("seed");
 
         for tool_name in ["continue_as", "renamed_control_tool", "arbitrary_tool_name"] {
             let input = lash_core::plugin::ToolArgsTransformInput {

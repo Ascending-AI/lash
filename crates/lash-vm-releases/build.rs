@@ -18,8 +18,26 @@ mod sets;
 
 use std::collections::BTreeSet;
 
-use lash_kernel_doc::{FunctionDefinition, FunctionId, FunctionRegistry};
-use lash_kernel_package::{Package, PackagePath, Root};
+use lash_kernel_doc::{Document, Export, FunctionExport, StartConvention};
+
+use lash_kernel_doc::{FunctionDefinition, FunctionRegistry};
+
+use lash_vocabulary::{claims::NodeRequirements, names::*};
+use std::collections::BTreeMap;
+
+struct ReleaseUnit {
+    path: String,
+    definitions: Vec<FunctionDefinition>,
+    roots: BTreeSet<FunctionId>,
+}
+impl ReleaseUnit {
+    fn ids(&self) -> Vec<FunctionId> {
+        self.definitions
+            .iter()
+            .map(FunctionDefinition::identity)
+            .collect()
+    }
+}
 
 type BuildError = Box<dyn std::error::Error>;
 
@@ -33,6 +51,8 @@ fn main() -> Result<(), BuildError> {
         library::define_kernel(registry)
     })?;
     write_package(&out, &kernel, &[])?;
+    let mut release_definitions = kernel.definitions.clone();
+    let mut release_roots = kernel.roots.clone();
     std::fs::write(
         out.join("kernel_helpers.rs"),
         sets::kernel_source(&registry_of(&[&kernel])?)?,
@@ -65,7 +85,10 @@ fn main() -> Result<(), BuildError> {
             write_package(&out, package, &[&kernel])?;
         }
         write_package(&out, &typescript, &requires)?;
-        dialect(&[&kernel, &regex, &date, &url, &typescript])?;
+        for unit in [&regex, &date, &url, &typescript] {
+            release_definitions.extend(unit.definitions.clone());
+            release_roots.extend(&unit.roots);
+        }
     }
     #[cfg(feature = "dialect-python")]
     {
@@ -73,8 +96,10 @@ fn main() -> Result<(), BuildError> {
             Ok(lash_dialect_python::define_helpers(library)?)
         })?;
         write_package(&out, &python, &[&kernel])?;
-        dialect(&[&kernel, &python])?;
+        release_definitions.extend(python.definitions.clone());
+        release_roots.extend(&python.roots);
     }
+    write_helper_document(&out, release_definitions, release_roots)?;
     println!("cargo:rerun-if-changed=build.rs");
     println!("cargo:rerun-if-changed=src");
     Ok(())
@@ -86,58 +111,61 @@ fn main() -> Result<(), BuildError> {
 fn package(
     path: &str,
     root: Option<&str>,
-    requires: &[&Package],
+    requires: &[&ReleaseUnit],
     define: &mut dyn FnMut(&mut FunctionRegistry) -> Result<(), String>,
-) -> Result<Package, BuildError> {
-    let mut registered = |registry: &mut FunctionRegistry| {
-        let before: BTreeSet<FunctionId> = registry.iter().map(|(function, _)| *function).collect();
-        define(registry)?;
-        Ok(defined_since(registry, &before))
-    };
-    let roots: Vec<Root> = match root {
-        Some(root) => vec![Root::new(root)],
-        None => {
-            let mut probe = registry_of(requires)?;
-            registered(&mut probe)?
-                .iter()
-                .map(|definition| {
-                    let name = definition.name.as_str();
-                    Root::new(name.split('.').next().unwrap_or(name))
-                })
-                .collect()
+) -> Result<ReleaseUnit, BuildError> {
+    let mut registry = registry_of(requires)?;
+    let before: BTreeSet<_> = registry.iter().map(|(id, _)| *id).collect();
+    define(&mut registry)?;
+    let definitions = defined_since(&registry, &before);
+    if let Some(root) = root {
+        for definition in &definitions {
+            if !definition.name.as_str().starts_with(&format!("{root}.")) {
+                return Err(format!("helper {} is outside {root}", definition.name).into());
+            }
         }
-    };
-    Ok(Package::lash(
-        PackagePath::parse(path)?,
-        library::RELEASE,
-        roots,
-        requires,
-        registered,
-    )?)
+    }
+    Ok(ReleaseUnit {
+        path: path.to_owned(),
+        roots: definitions
+            .iter()
+            .map(FunctionDefinition::identity)
+            .collect(),
+        definitions,
+    })
 }
 
-/// A dialect's helpers as a package: defined against the names of every
-/// function `requires` holds.
 #[cfg(any(feature = "dialect-typescript", feature = "dialect-python"))]
 fn helpers(
     path: &str,
-    root: &str,
-    requires: &[&Package],
+    _root: &str,
+    requires: &[&ReleaseUnit],
     define: impl Fn(
         &mut lash_kernel_dialect::NamedLibrary,
     ) -> Result<Vec<FunctionDefinition>, BuildError>,
-) -> Result<Package, BuildError> {
-    Ok(Package::lash(
-        PackagePath::parse(path)?,
-        library::RELEASE,
-        [Root::new(root)],
-        requires,
-        |registry| {
-            let mut library = lash_kernel_dialect::NamedLibrary::from_registry(registry)
-                .map_err(|error| error.to_string())?;
-            define(&mut library).map_err(|error| error.to_string())
-        },
-    )?)
+) -> Result<ReleaseUnit, BuildError> {
+    let registry = registry_of(requires)?;
+    let roots: BTreeSet<_> = requires
+        .iter()
+        .flat_map(|unit| unit.roots.iter().copied())
+        .collect();
+    let mut library =
+        lash_kernel_dialect::NamedLibrary::resolving(&registry, |id| roots.contains(id))?;
+    let definitions = define(&mut library)?;
+    let roots = library
+        .iter()
+        .map(|(_, id)| id)
+        .filter(|id| {
+            definitions
+                .iter()
+                .any(|definition| definition.identity() == *id)
+        })
+        .collect();
+    Ok(ReleaseUnit {
+        path: path.to_owned(),
+        definitions,
+        roots,
+    })
 }
 
 /// The functions `registry` holds that `before` did not, each after the
@@ -181,15 +209,19 @@ fn in_call_order(
 }
 
 /// A declarations registry holding the code of every package of `packages`.
-fn registry_of(packages: &[&Package]) -> Result<FunctionRegistry, BuildError> {
+fn registry_of(packages: &[&ReleaseUnit]) -> Result<FunctionRegistry, BuildError> {
     let mut registry = FunctionRegistry::declarations();
     for package in packages {
-        package.code().register_into(&mut registry, &|_| None)?;
+        for definition in &package.definitions {
+            if registry.get(&definition.identity()).is_none() {
+                registry.register(definition.clone(), None)?;
+            }
+        }
     }
     Ok(registry)
 }
 
-/// Writes `package` as its header and the release image of its code,
+/// Writes the release image of `package` code,
 /// validated against `requires`, the packages it requires.
 #[expect(
     clippy::disallowed_methods,
@@ -197,43 +229,28 @@ fn registry_of(packages: &[&Package]) -> Result<FunctionRegistry, BuildError> {
 )]
 fn write_package(
     out: &std::path::Path,
-    package: &Package,
-    requires: &[&Package],
+    package: &ReleaseUnit,
+    requires: &[&ReleaseUnit],
 ) -> Result<(), BuildError> {
-    let stem = package.path().to_string().replace('.', "_");
+    let stem = package.path.to_string().replace('.', "_");
     let mut checked = registry_of(requires)?;
-    let mut definitions = Vec::with_capacity(package.code().len());
-    for at in 0..package.code().len() {
-        definitions.push(FunctionDefinition::clone(
-            package.code().definition(at)?.as_ref(),
-        ));
-    }
-    let validated = checked.validate_functions(definitions)?;
-    std::fs::write(
-        out.join(format!("{stem}.package.json")),
-        serde_json::to_vec(&package.header())?,
-    )?;
+    let validated = checked.validate_functions(package.definitions.clone())?;
     std::fs::write(
         out.join(format!("{stem}.bin")),
-        validated.to_image(&lash_kernel_vm::body_census),
+        validated.to_image(&|definition| lash_kernel_vm::body_census(definition, &checked)),
     )?;
     // Native membership is derived from the source owner's installer once,
     // at build time. Workers consume sorted constructor tables, never harvest
     // a second registry to discover this membership.
     for dependency in requires {
         library::implement(
-            &dependency.path().to_string(),
+            &dependency.path.to_string(),
             &mut checked,
-            dependency.code().ids(),
+            &dependency.ids(),
         )?;
     }
-    library::implement(
-        &package.path().to_string(),
-        &mut checked,
-        package.code().ids(),
-    )?;
+    library::implement(&package.path.to_string(), &mut checked, &package.ids())?;
     let mut rows: Vec<_> = package
-        .code()
         .ids()
         .iter()
         .filter_map(|function| {
@@ -247,7 +264,7 @@ fn write_package(
     let mut source = String::from("&[\n");
     for (function, name) in rows {
         source.push_str(&format!(
-            "(lash_kernel_doc::FunctionId::from_bytes({:?}), {:?}),\n",
+            "(lash_vocabulary::names::FunctionId::from_bytes({:?}), {:?}),\n",
             function.as_bytes(),
             name
         ));
@@ -257,11 +274,129 @@ fn write_package(
     Ok(())
 }
 
-/// Checks a dialect's helper names over `packages`, the packages it ships
-/// with.
-#[cfg(any(feature = "dialect-typescript", feature = "dialect-python"))]
-fn dialect(packages: &[&Package]) -> Result<(), BuildError> {
-    let registry = registry_of(packages)?;
-    sets::validate(&registry, packages)?;
+/// Helpers share one self-contained Document. Pure natives remain declarations
+/// in that document; package Imports never dispatch by a global helper name.
+#[expect(clippy::disallowed_methods, reason = "build-generated helper document")]
+fn write_helper_document(
+    out: &std::path::Path,
+    definitions: Vec<FunctionDefinition>,
+    roots: BTreeSet<FunctionId>,
+) -> Result<(), BuildError> {
+    let mut functions = BTreeMap::new();
+    let mut exports = BTreeMap::new();
+    let mut requires = NodeRequirements::default();
+    let mut imports = BTreeMap::new();
+    let mut packages: BTreeMap<PackagePath, BTreeMap<Segment, ExportName>> = BTreeMap::new();
+    for definition in definitions {
+        let function = definition.identity();
+        if matches!(
+            definition.implementation,
+            lash_kernel_doc::Implementation::Native { .. }
+        ) {
+            requires.natives.insert(function);
+        }
+        requires.kernels.insert(definition.kernel);
+        if let Some(body) = definition.body() {
+            for (slot, import) in &body.imports {
+                if imports
+                    .insert(*slot, import.clone())
+                    .is_some_and(|prior| prior != *import)
+                {
+                    return Err(format!("helper Import slot collision at {slot:?}").into());
+                }
+            }
+        }
+        if roots.contains(&function) {
+            let name = Name::new(definition.name.as_str());
+            let public = lash_kernel_dialect::authoring::helper_name(&definition.name);
+            if packages
+                .entry(public.package)
+                .or_default()
+                .insert(
+                    public.member,
+                    ExportName {
+                        name: name.clone(),
+                        member: None,
+                    },
+                )
+                .is_some()
+            {
+                return Err(
+                    format!("canonical helper name collision for {}", definition.name).into(),
+                );
+            }
+            if exports
+                .insert(
+                    name,
+                    Export::Function(FunctionExport {
+                        function,
+                        signature: definition.signature.clone(),
+                        convention: StartConvention::Direct,
+                        asynchronous: false,
+                        rest: false,
+                    }),
+                )
+                .is_some()
+            {
+                return Err(format!("duplicate helper export {}", definition.name).into());
+            }
+        }
+        functions.insert(function, definition);
+    }
+    let document = Document {
+        imports,
+        exports,
+        main: None,
+        functions,
+        requires,
+        numbers: lash_kernel_doc::NumberPolicy::BySpelling,
+        private_bindings: BTreeSet::new(),
+    };
+    let mut labels = BTreeMap::<PackagePath, serde_json::Value>::new();
+    for source in [
+        include_str!("labels/kernel.json"),
+        include_str!("labels/typescript.json"),
+        include_str!("labels/python.json"),
+        include_str!("labels/regex.json"),
+        include_str!("labels/date.json"),
+        include_str!("labels/url.json"),
+    ] {
+        let source: serde_json::Value = serde_json::from_str(source)?;
+        for (name, display) in source["definitions"].as_object().into_iter().flatten() {
+            if let Some((id, definition)) = document
+                .functions
+                .iter()
+                .find(|(_, definition)| definition.name.as_str() == name)
+            {
+                let public = lash_kernel_dialect::authoring::helper_name(&definition.name);
+                let key = if roots.contains(id) {
+                    "members"
+                } else {
+                    "definitions"
+                };
+                let name = if roots.contains(id) {
+                    public.member.to_string()
+                } else {
+                    name.clone()
+                };
+                labels
+                    .entry(public.package)
+                    .or_insert_with(|| serde_json::json!({"members":{}, "definitions":{}}))[key]
+                    [name] = display.clone();
+            }
+        }
+    }
+    std::fs::write(
+        out.join("helpers.labels.json"),
+        serde_json::to_vec(&labels)?,
+    )?;
+    std::fs::write(
+        out.join("helpers.document.json"),
+        serde_json::to_vec(&document)?,
+    )?;
+    std::fs::write(
+        out.join("helpers.packages.json"),
+        serde_json::to_vec(&packages)?,
+    )?;
     Ok(())
 }

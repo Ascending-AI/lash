@@ -4,7 +4,9 @@ use std::sync::{Arc, Mutex, OnceLock};
 
 use crate::llm::types::LlmToolSpec;
 use crate::sync::MutexExt;
-use crate::{ToolContract, ToolDefinition, ToolManifest};
+use lash_vocabulary::tool_contract::ToolContract;
+use lash_vocabulary::tool_contract::ToolDefinition;
+use lash_vocabulary::tool_contract::ToolManifest;
 
 pub type ToolContractResolver =
     Arc<dyn Fn(&ToolManifest) -> Option<Arc<ToolContract>> + Send + Sync + 'static>;
@@ -27,7 +29,7 @@ pub struct ToolCatalogBuildInput {
 pub struct ToolCatalogContribution {
     /// The operations of the tools to remove from the catalog
     /// (non-membership).
-    pub remove: Vec<crate::QualifiedOperation>,
+    pub remove: Vec<lash_vocabulary::names::QualifiedOperation>,
 }
 
 impl ToolCatalogContribution {
@@ -35,7 +37,9 @@ impl ToolCatalogContribution {
         self.remove.is_empty()
     }
 
-    pub fn remove_tools(tools: impl IntoIterator<Item = crate::QualifiedOperation>) -> Self {
+    pub fn remove_tools(
+        tools: impl IntoIterator<Item = lash_vocabulary::names::QualifiedOperation>,
+    ) -> Self {
         Self {
             remove: tools.into_iter().collect(),
         }
@@ -115,15 +119,6 @@ impl ToolCatalog {
         &self.0.tools
     }
 
-    /// Public operations of this explicit package view. Standard assembly and
-    /// discovery use this catalog; code-mode execution keeps the full catalog.
-    pub fn public_operations(&self, view: &dyn lash_kernel_dialect::ExportView) -> Self {
-        self.filtered(|entry| {
-            lash_kernel_dialect::operation_visibility(view, &entry.manifest.operation)
-                == lash_kernel_dialect::Visibility::Public
-        })
-    }
-
     /// Prompt-only projection. The original catalogue retains execution authority.
     pub fn inline_tools(&self) -> Self {
         self.filtered(|entry| entry.manifest.inline)
@@ -172,7 +167,7 @@ impl ToolCatalog {
 
     pub fn from_tools(
         tools: Vec<ToolManifest>,
-        contracts: BTreeMap<crate::ToolId, Arc<ToolContract>>,
+        contracts: BTreeMap<lash_vocabulary::tool_contract::ToolId, Arc<ToolContract>>,
     ) -> Result<Self, ToolCatalogBuildError> {
         let resolver_contracts = Arc::new(contracts);
         build_tool_catalog(ToolCatalogBuildInput {
@@ -202,12 +197,18 @@ impl ToolCatalog {
 
     /// Membership test: a tool is in the catalog (callable) or it does not
     /// exist to the model.
-    pub fn has_callable_tool(&self, operation: &crate::QualifiedOperation) -> bool {
+    pub fn has_callable_tool(
+        &self,
+        operation: &lash_vocabulary::names::QualifiedOperation,
+    ) -> bool {
         self.entry(operation).is_some()
     }
 
     /// The member performed as `operation`.
-    pub fn entry(&self, operation: &crate::QualifiedOperation) -> Option<&ToolCatalogEntry> {
+    pub fn entry(
+        &self,
+        operation: &lash_vocabulary::names::QualifiedOperation,
+    ) -> Option<&ToolCatalogEntry> {
         self.entries()
             .iter()
             .find(|entry| entry.manifest.operation == *operation)
@@ -250,83 +251,6 @@ impl ToolCatalog {
     }
 }
 
-#[derive(
-    Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
-)]
-pub enum ToolCatalogBuildError {
-    /// A tool's operation is no canonical operation.
-    InvalidOperation {
-        tool_id: crate::ToolId,
-        message: String,
-    },
-    UnusableSchema {
-        tool_id: crate::ToolId,
-        operation: String,
-        purpose: crate::SchemaPurpose,
-        source: crate::SchemaAdmissionError,
-    },
-    MissingContract {
-        tool_id: crate::ToolId,
-        operation: String,
-    },
-    DuplicateId {
-        tool_id: crate::ToolId,
-    },
-    /// Two tools are performed as one operation.
-    DuplicateOperation {
-        operation: String,
-        first_tool: crate::ToolId,
-        second_tool: crate::ToolId,
-    },
-    /// A member is refused against the deployment it registers in.
-    RegistrationRefused {
-        refusal: crate::RegistrationRefused,
-    },
-}
-
-impl std::fmt::Display for ToolCatalogBuildError {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::InvalidOperation { tool_id, message } => {
-                write!(formatter, "tool `{tool_id}` names no operation: {message}")
-            }
-            Self::UnusableSchema {
-                tool_id,
-                operation,
-                purpose,
-                source,
-            } => {
-                write!(
-                    formatter,
-                    "tool `{operation}` ({tool_id}) has unusable {purpose:?} schema: {source}"
-                )
-            }
-            Self::MissingContract { tool_id, operation } => {
-                write!(
-                    formatter,
-                    "resident tool `{operation}` ({tool_id}) has no contract"
-                )
-            }
-            Self::DuplicateId { tool_id } => {
-                write!(formatter, "resident catalog repeats tool id `{tool_id}`")
-            }
-            Self::DuplicateOperation {
-                operation,
-                first_tool,
-                second_tool,
-            } => {
-                write!(
-                    formatter,
-                    "tools `{first_tool}` and `{second_tool}` are both performed as `{operation}`; one operation names one tool"
-                )
-            }
-            Self::RegistrationRefused { refusal } => write!(formatter, "{refusal}"),
-        }
-    }
-}
-
-impl std::error::Error for ToolCatalogBuildError {}
-
 pub fn build_tool_catalog(
     input: ToolCatalogBuildInput,
 ) -> Result<ToolCatalog, ToolCatalogBuildError> {
@@ -353,7 +277,7 @@ pub fn build_tool_catalog(
             && !input.isolation_engines.contains(engine)
         {
             return Err(ToolCatalogBuildError::RegistrationRefused {
-                refusal: crate::RegistrationRefused::UnregisteredIsolationEngine {
+                refusal: lash_vocabulary::tool_contract::RegistrationRefused::UnregisteredIsolationEngine {
                     tool: manifest.tool(),
                     engine: engine.to_owned(),
                 },
@@ -375,9 +299,10 @@ pub fn build_tool_catalog(
             // one has no output for a contract to state beside it.
             if !manifest.declaration().controls.is_empty() && !contract.states_no_output() {
                 return Err(ToolCatalogBuildError::RegistrationRefused {
-                    refusal: crate::RegistrationRefused::ControlDeclaresOutput {
-                        tool: manifest.tool(),
-                    },
+                    refusal:
+                        lash_vocabulary::tool_contract::RegistrationRefused::ControlDeclaresOutput {
+                            tool: manifest.tool(),
+                        },
                 });
             }
             Ok(ToolCatalogEntry { manifest, contract })
@@ -393,13 +318,15 @@ fn apply_contribution(tools: &mut Vec<ToolManifest>, contribution: ToolCatalogCo
     tools.retain(|tool| !contribution.remove.contains(&tool.operation));
 }
 
+use lash_vocabulary::ToolCatalogBuildError;
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
-    fn op(name: &str) -> crate::QualifiedOperation {
-        use crate::IntoOperation as _;
+    fn op(name: &str) -> lash_vocabulary::names::QualifiedOperation {
+        use lash_vocabulary::tool_contract::IntoOperation as _;
         format!("tools.{name}")
             .into_operation()
             .expect("a canonical operation")
@@ -452,7 +379,8 @@ mod tests {
         ] {
             let encoded = serde_json::json!({ "canonical": schema });
             assert!(
-                serde_json::from_value::<crate::SchemaContract>(encoded).is_err(),
+                serde_json::from_value::<lash_vocabulary::schema_contract::SchemaContract>(encoded)
+                    .is_err(),
                 "schema defect entered as a contract: {schema}"
             );
         }
@@ -466,7 +394,7 @@ mod tests {
             "default": {"$ref": "https://example.invalid/default"},
             "enum": [{"$ref": "https://example.invalid/value"}]
         });
-        let admitted = crate::JsonSchema::admit(literal_reference.clone())
+        let admitted = lash_vocabulary::json_schema::JsonSchema::admit(literal_reference.clone())
             .expect("reference keys inside literal data are not schema references");
         assert_eq!(admitted.as_value(), &literal_reference);
         assert!(
@@ -487,12 +415,12 @@ mod tests {
         assert!(matches!(
             error,
             ToolCatalogBuildError::UnusableSchema {
-                purpose: crate::SchemaPurpose::ToolInput,
-                source: crate::SchemaAdmissionError::Compilation { .. },
+                purpose: lash_vocabulary::schema_contract::SchemaPurpose::ToolInput,
+                source: lash_vocabulary::json_schema::SchemaAdmissionError::Compilation { .. },
                 ..
             }
         ));
-        let schema = crate::JsonSchema::admit(
+        let schema = lash_vocabulary::json_schema::JsonSchema::admit(
             serde_json::json!({"type": "object", "properties": {"count": {"type": "integer"}}}),
         )
         .unwrap();
@@ -507,15 +435,16 @@ mod tests {
             Err(mismatch)
         );
         assert_eq!(
-            serde_json::to_value(crate::SchemaContract::default()).unwrap(),
+            serde_json::to_value(lash_vocabulary::schema_contract::SchemaContract::default())
+                .unwrap(),
             serde_json::json!({"canonical": {}})
         );
         assert_eq!(
-            crate::JsonSchema::admit(serde_json::json!(true)).unwrap(),
-            crate::JsonSchema::any()
+            lash_vocabulary::json_schema::JsonSchema::admit(serde_json::json!(true)).unwrap(),
+            lash_vocabulary::json_schema::JsonSchema::any()
         );
         assert!(
-            crate::JsonSchema::admit(serde_json::json!(false))
+            lash_vocabulary::json_schema::JsonSchema::admit(serde_json::json!(false))
                 .unwrap()
                 .validate(&serde_json::json!(null))
                 .is_err()
@@ -685,13 +614,13 @@ mod tests {
         .standard_name();
         assert_eq!(named.len(), 64, "{named}");
         let (_, suffix) = named.rsplit_once("_h").expect("a digest suffix");
-        assert_eq!(suffix, crate::digest_tag(&long));
+        assert_eq!(suffix, lash_vocabulary::tool_contract::digest_tag(&long));
         assert!(!named.contains("___"), "{named}");
     }
 
     fn refused(
-        result: Result<ToolDefinition, crate::RegistrationRefused>,
-    ) -> crate::RegistrationRefused {
+        result: Result<ToolDefinition, lash_vocabulary::tool_contract::RegistrationRefused>,
+    ) -> lash_vocabulary::tool_contract::RegistrationRefused {
         result.expect_err("the tool was defined")
     }
 
@@ -703,18 +632,21 @@ mod tests {
     #[test]
     fn a_tool_missing_a_host_set_bound_cannot_be_defined() {
         assert_eq!(
-            refused(tool("approve").with_declaration(crate::ToolDeclaration::deferring(), None)),
-            crate::RegistrationRefused::MissingBound {
+            refused(tool("approve").with_declaration(
+                lash_vocabulary::tool_declaration::ToolDeclaration::deferring(),
+                None
+            )),
+            lash_vocabulary::tool_contract::RegistrationRefused::MissingBound {
                 tool: "tools.approve".into(),
-                bound: crate::ToolBound::Park,
+                bound: lash_vocabulary::tool_contract::ToolBound::Park,
             }
         );
         assert_eq!(
             refused(tool("read").with_declaration(
-                crate::ToolDeclaration::default(),
-                Some(crate::ParkBound::UntilScopeEnd)
+                lash_vocabulary::tool_declaration::ToolDeclaration::default(),
+                Some(lash_vocabulary::tool_contract::ParkBound::UntilScopeEnd)
             )),
-            crate::RegistrationRefused::ParkWithoutDeferral {
+            lash_vocabulary::tool_contract::RegistrationRefused::ParkWithoutDeferral {
                 tool: "tools.read".into(),
             }
         );
@@ -722,8 +654,8 @@ mod tests {
             let mut manifest = serde_json::to_value(
                 tool("approve")
                     .with_declaration(
-                        crate::ToolDeclaration::deferring(),
-                        Some(crate::ParkBound::UntilScopeEnd),
+                        lash_vocabulary::tool_declaration::ToolDeclaration::deferring(),
+                        Some(lash_vocabulary::tool_contract::ParkBound::UntilScopeEnd),
                     )
                     .expect("a deferring tool with a park bound")
                     .manifest(),
@@ -746,8 +678,8 @@ mod tests {
         let hour = std::time::Duration::from_secs(60 * 60);
         let approve = tool("approve")
             .with_declaration(
-                crate::ToolDeclaration::deferring(),
-                Some(crate::ParkBound::Within(hour)),
+                lash_vocabulary::tool_declaration::ToolDeclaration::deferring(),
+                Some(lash_vocabulary::tool_contract::ParkBound::Within(hour)),
             )
             .expect("a deferring tool with a park bound");
         let decoded: ToolManifest = serde_json::from_value(
@@ -757,14 +689,14 @@ mod tests {
         let execution = std::time::Duration::from_secs(30);
         assert_eq!(
             decoded.bounds(),
-            crate::ToolBounds {
+            lash_vocabulary::tool_contract::ToolBounds {
                 execution,
-                park: Some(crate::ParkBound::Within(hour)),
+                park: Some(lash_vocabulary::tool_contract::ParkBound::Within(hour)),
             }
         );
         assert_eq!(
             tool("read").manifest.bounds(),
-            crate::ToolBounds {
+            lash_vocabulary::tool_contract::ToolBounds {
                 execution,
                 park: None,
             }
@@ -775,31 +707,32 @@ mod tests {
     /// stored manifest holding one does not decode.
     #[test]
     fn a_tool_with_an_invalid_declaration_cannot_be_defined() {
-        let unordered = crate::ToolDeclaration {
+        let unordered = lash_vocabulary::tool_declaration::ToolDeclaration {
             intents: vec![
-                crate::ToolIntentKind::CancelProcess,
-                crate::ToolIntentKind::StartProcess,
+                lash_vocabulary::ToolIntentKind::CancelProcess,
+                lash_vocabulary::ToolIntentKind::StartProcess,
             ],
-            ..crate::ToolDeclaration::default()
+            ..lash_vocabulary::tool_declaration::ToolDeclaration::default()
         };
         assert_eq!(
             refused(tool("spawn").with_declaration(unordered.clone(), None)),
-            crate::RegistrationRefused::Declaration {
+            lash_vocabulary::tool_contract::RegistrationRefused::Declaration {
                 tool: "tools.spawn".into(),
-                cause: crate::DeclarationRefusal::IntentOrder,
+                cause: lash_vocabulary::tool_declaration::DeclarationRefusal::IntentOrder,
             }
         );
         let deferring = tool("spawn")
             .with_declaration(
-                crate::ToolDeclaration::deferring(),
-                Some(crate::ParkBound::UntilScopeEnd),
+                lash_vocabulary::tool_declaration::ToolDeclaration::deferring(),
+                Some(lash_vocabulary::tool_contract::ParkBound::UntilScopeEnd),
             )
             .expect("a deferring tool with a park bound");
         assert_eq!(
             refused(deferring.isolated_in("sandbox")),
-            crate::RegistrationRefused::Declaration {
+            lash_vocabulary::tool_contract::RegistrationRefused::Declaration {
                 tool: "tools.spawn".into(),
-                cause: crate::DeclarationRefusal::IsolatedInlineCapability,
+                cause:
+                    lash_vocabulary::tool_declaration::DeclarationRefusal::IsolatedInlineCapability,
             }
         );
         let mut stored =
@@ -817,13 +750,13 @@ mod tests {
     /// and enters a catalog only where that engine is registered.
     #[test]
     fn an_isolated_tool_registers_only_where_its_engine_is_registered() {
-        let isolated = crate::ToolDeclaration {
+        let isolated = lash_vocabulary::tool_declaration::ToolDeclaration {
             isolated: true,
-            ..crate::ToolDeclaration::default()
+            ..lash_vocabulary::tool_declaration::ToolDeclaration::default()
         };
         assert_eq!(
             refused(tool("run").with_declaration(isolated, None)),
-            crate::RegistrationRefused::IsolatedWithoutEngine {
+            lash_vocabulary::tool_contract::RegistrationRefused::IsolatedWithoutEngine {
                 tool: "tools.run".into()
             }
         );
@@ -841,7 +774,7 @@ mod tests {
             assert_eq!(
                 register(engines).expect_err("the isolated tool was registered"),
                 ToolCatalogBuildError::RegistrationRefused {
-                    refusal: crate::RegistrationRefused::UnregisteredIsolationEngine {
+                    refusal: lash_vocabulary::tool_contract::RegistrationRefused::UnregisteredIsolationEngine {
                         tool: "tools.run".into(),
                         engine: "sandbox".into(),
                     },

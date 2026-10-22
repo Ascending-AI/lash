@@ -28,7 +28,9 @@ pub(super) fn session_turn_start_of(
 ) -> lash_execution_contracts::process::ProcessStartRequest {
     lash_execution_contracts::process::ProcessStartRequest::session_turn(
         "keys-session-turn-start",
-        create_request.with_session_id(lash_core::SessionId::fixture(format!("{key}-child"))),
+        create_request.with_session_id(lash_vocabulary::identity::SessionId::fixture(format!(
+            "{key}-child"
+        ))),
         TurnInput::text(text),
         lash_execution_contracts::process::SessionTurnOutcome::Turn,
         lash_execution_contracts::process::ProcessOriginator::host(),
@@ -51,7 +53,7 @@ pub(super) async fn start_on(
 /// The create request the start retained under `process_id` recorded.
 pub(super) async fn recorded_create_request(
     double: &Double,
-    process_id: &lash::ProcessId,
+    process_id: &lash_vocabulary::identity::ProcessId,
 ) -> lash_execution_contracts::session_types::SessionCreateRequest {
     let record = double
         .backend()
@@ -237,7 +239,8 @@ pub(super) async fn a_session_turn_start_retried_after_the_host_changed_what_it_
     });
     moved
         .session(
-            lash::SessionId::parse("keys-start-other-session").expect("nonblank host identity"),
+            lash_vocabulary::identity::SessionId::parse("keys-start-other-session")
+                .expect("nonblank host identity"),
         )
         .create(lash::SessionCreation::root(changed.clone()))
         .await

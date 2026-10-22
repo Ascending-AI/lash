@@ -23,21 +23,23 @@
 //! whose `output` carries the result's images in order.
 
 use lash_protocol_types::{llm::types::StreamBlockEvent, llm::types::StreamBlockKind};
+
 use serde_json::{Value, json};
 use std::collections::HashMap;
 
 use crate::schema::{classify_openai_error, sse_error_event_retry_verdict};
+use lash_core::TurnFailureCode;
 use lash_core::facade_support::ModelToolReturnPart;
+use lash_core::facade_support::ProviderSchemaCapabilities;
+use lash_core::facade_support::SchemaPurpose;
+use lash_core::facade_support::SchemaResolutionError;
+use lash_core::facade_support::SchemaResolutionRequest;
+use lash_core::facade_support::resolve_schema;
 use lash_core::llm::transport::ProviderFailureKind;
 use lash_core::llm::types::{
     ExecutionEvidence, LlmContentBlock, LlmMessage, LlmOutputPart, LlmRequest, LlmResponse,
     LlmRole, LlmStreamEvent, LlmToolChoice, LlmUsage, ProviderReasoningReplay, ProviderReplayMeta,
     ResponsePhase, ResponseTextMeta, StreamBlockIdentity, tool_call_input_replay_string,
-};
-use lash_core::{
-    SchemaContract, TurnFailureCode, facade_support::ProviderSchemaCapabilities,
-    facade_support::SchemaPurpose, facade_support::SchemaResolutionError,
-    facade_support::SchemaResolutionRequest, facade_support::resolve_schema,
 };
 use lash_llm_transport::tool_result_text;
 use lash_llm_transport::{
@@ -46,6 +48,7 @@ use lash_llm_transport::{
     openai_usage_from_response_value as usage_from_response_value, terminal_reason_from_parts,
 };
 use lash_transport_failure::{LlmTransportError, TransportRetryVerdict};
+use lash_vocabulary::schema_contract::SchemaContract;
 
 mod input;
 pub use input::build_responses_input;
@@ -142,7 +145,7 @@ pub fn build_tools_with_capabilities(
                 "name": tool.name,
                 "description": tool.description,
                 "parameters": resolved.schema,
-                "strict": resolved.dialect == lash_protocol_types::SchemaDialect::OpenaiStrictToolParameters,
+                "strict": resolved.dialect == lash_vocabulary::schema_contract::SchemaDialect::OpenaiStrictToolParameters,
             }))
         })
         .collect()

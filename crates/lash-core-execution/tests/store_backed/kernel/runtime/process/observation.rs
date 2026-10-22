@@ -5,8 +5,6 @@ mod tests {
 
     use serde_json::json;
 
-    use crate::ProcessId;
-    use crate::SessionId;
     use crate::ToolFailureClass;
     use crate::runtime::process::ProcessRegistryFaults;
     use lash_execution_contracts::process::ObservedWorkItemState;
@@ -18,6 +16,8 @@ mod tests {
     use lash_execution_contracts::process::ProcessRegistry;
     use lash_execution_contracts::process::ProcessWorkObserver;
     use lash_execution_contracts::process::SessionScope;
+    use lash_vocabulary::identity::ProcessId;
+    use lash_vocabulary::identity::SessionId;
 
     async fn memory_registry() -> Arc<dyn ProcessRegistry> {
         crate::support::sqlite_memory_process_store_set()
@@ -293,8 +293,9 @@ mod tests {
             .id;
         let wait = lash_execution_contracts::process::WaitState {
             kind: lash_execution_contracts::process::WaitKind::Call {
+                resume_at_ms: None,
                 call_id: crate::ToolCallId::fixture("observation-law"),
-                tool_id: crate::ToolId::from("observation_law"),
+                tool_id: lash_vocabulary::tool_contract::ToolId::from("observation_law"),
             },
             since_ms: 3,
             site: None,

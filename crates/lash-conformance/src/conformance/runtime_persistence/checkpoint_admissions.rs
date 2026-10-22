@@ -484,8 +484,8 @@ pub(super) fn sample_session_node(
         |_| id.to_string(),
     );
     SessionNodeRecord {
-        node_id: lash_core::NodeId::fixture(node_id),
-        parent_node_id: parent.map(lash_core::NodeId::fixture),
+        node_id: lash_vocabulary::identity::NodeId::fixture(node_id),
+        parent_node_id: parent.map(lash_vocabulary::identity::NodeId::fixture),
         timestamp: "1970-01-01T00:00:00.000000000Z"
             .parse()
             .expect("canonical node timestamp"),

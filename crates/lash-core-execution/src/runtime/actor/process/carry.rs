@@ -19,11 +19,11 @@ use lash_durable::{
 
 use super::activation::{Pass, ProcessActivation};
 use super::driver::Driver;
-use crate::ProcessId;
 use lash_execution_contracts::park::ProcessParkReason;
 use lash_execution_contracts::process::EngineState;
 use lash_execution_contracts::process::EngineStateFormat;
 use lash_execution_contracts::process::ProcessEngine;
+use lash_vocabulary::identity::ProcessId;
 
 /// What the claim-time step did with the pass's transaction.
 pub(super) enum Carry {
@@ -51,7 +51,7 @@ impl ProcessActivation {
         engine: &dyn ProcessEngine,
         state: &EngineState,
         root: Option<&ExecRootRow>,
-        environment: std::collections::BTreeSet<crate::ObligationToken>,
+        environment: std::collections::BTreeSet<lash_vocabulary::claims::ObligationToken>,
         fold: &crate::runtime::actor::round::RunFold,
     ) -> Result<Carry, DurableError> {
         let written = state.format.clone();
@@ -106,19 +106,18 @@ impl ProcessActivation {
             // Not at a point its engine carries it from: it goes on as
             // written, and is asked again at its next pass.
             Ok(None) => return Ok(Carry::AsWritten(Box::new(tx))),
-            Err(refusal) if refusal.fatal => ProcessParkReason::MigrationRefused {
-                kind: written.kind,
-                version: written.version,
-                refusal: refusal.refusal,
-                message: refusal.message,
-            },
-            Err(refusal) => {
+            Err(lash_execution_contracts::process::MigrationError::Refused(refusal)) => {
+                ProcessParkReason::MigrationRefused {
+                    kind: written.kind,
+                    version: written.version,
+                    message: refusal.message.clone(),
+                    refusal,
+                }
+            }
+            Err(lash_execution_contracts::process::MigrationError::Unavailable { message }) => {
                 return Err(DurableError::Store(StoreFailure {
                     kind: StoreFailureKind::Unavailable,
-                    message: format!(
-                        "carrying a process's engine state forward: {}",
-                        refusal.message
-                    ),
+                    message: format!("carrying a process's engine state forward: {}", message),
                 }));
             }
         };

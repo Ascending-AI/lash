@@ -15,7 +15,7 @@ use lash_execution_contracts::process::ProcessEventHistoryRetention;
 use lash_execution_contracts::process::ProcessEventQueryMode;
 use lash_execution_contracts::process::ProcessEventReadOutcome;
 use lash_execution_contracts::process::ProcessRegistry;
-use lash_protocol_types::ProcessId;
+use lash_vocabulary::identity::ProcessId;
 use serde::{Deserialize, Serialize};
 
 /// Where a durable event read continues: after `after_sequence` of the

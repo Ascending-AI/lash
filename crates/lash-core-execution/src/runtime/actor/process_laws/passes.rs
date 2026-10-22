@@ -1,18 +1,24 @@
 use super::*;
 
 use crate::testing::DurableCommitHook;
+use lash_core_store::checkpoint_graph::CommitId;
+use lash_core_store::checkpoint_graph::DecodeLimits;
+use lash_core_store::checkpoint_graph::EncodeBudget;
+use lash_core_store::checkpoint_graph::EncodedNode;
+use lash_core_store::checkpoint_graph::ExplicitLimit;
+use lash_core_store::checkpoint_graph::GraphStaging;
+use lash_core_store::checkpoint_graph::NodeId;
+use lash_core_store::checkpoint_graph::NodeKind;
+use lash_core_store::checkpoint_graph::TypedBody;
 use lash_core_store::checkpoint_graph::node::VerifiedNode;
 use lash_core_store::checkpoint_graph::stage::{
     CandidateManifest, EdgeLog, ManifestEntry, ManifestSummary, MemoryEdgeLog, StageFault,
     node_range,
 };
-use lash_core_store::checkpoint_graph::{
-    CommitId, DecodeLimits, EncodeBudget, EncodedNode, ExplicitLimit, GraphStaging, NodeId,
-    NodeKind, TokenWriter, TypedBody,
-};
 use lash_durable::domain::{OwnerKey, RunFactKind, RunFactWrite};
 use lash_durable::{CommitLabel, DomainWrite};
 use lash_execution_contracts::process::{StepCandidate, StepManifest, StepPublication};
+use lash_vocabulary::tokens::TokenWriter;
 
 /// How many outcomes `tx` records.
 fn outcomes(tx: &lash_durable::ActorTx) -> usize {
@@ -286,6 +292,102 @@ pub async fn a_once_process_body_survives_one_revision_conflict(backend: &Backen
     .await;
     serving.stop().await;
     result
+}
+
+/// PROCESS-TERMINAL-DEBT: a terminal accepts an unlinked process and retires
+/// both the registration and materialized claim debt of a linked process.
+///
+/// # Errors
+///
+/// The first rule broken.
+pub async fn a_process_terminal_retires_its_optional_execution_debt(
+    backend: &Backend,
+) -> LawOutcome {
+    use lash_core_store::artifact_referrer::ArtifactReferrer;
+    use lash_durable::resolutions::{ClaimRequirements, ExecutionId, ExecutionRegistration};
+    use lash_vocabulary::package::ProviderName;
+
+    let backend = law_backend(backend)?;
+    for linked in [false, true] {
+        let process = root(
+            &backend,
+            json!({ "tag": tag("terminal-debt"), "act": "complete" }),
+        )
+        .await?;
+        let key = actor(&process)?;
+        let store = backend.durable();
+        let formats = store
+            .actor(&key)
+            .await?
+            .ok_or_else(|| LawBroken("the process has no actor".into()))?
+            .formats;
+        let node = store
+            .register_node(&NodeSpec {
+                node: lash_durable::NodeId::new(format!("terminal-debt-{linked}")),
+                decodes: vec![formats],
+                serves: Vec::new(),
+                capabilities: Default::default(),
+                ttl_millis: TTL_MILLIS,
+            })
+            .await?;
+        let claimed = store.claim(&node, 1).await?;
+        let [claim] = claimed.as_slice() else {
+            return Err(LawBroken(format!("one process is claimable: {claimed:?}")));
+        };
+        ensure!(claim.actor == key, "claimed another process");
+        let resolutions = backend.stores().execution_resolutions();
+        if linked {
+            let mut tx = store.begin(&key, claim.epoch).await?;
+            let requirements = ClaimRequirements {
+                providers: [ProviderName {
+                    owner: "terminal-law".into(),
+                    key: "target".into(),
+                }]
+                .into(),
+                ..Default::default()
+            };
+            tx.register_execution(ExecutionRegistration {
+                execution: ExecutionId::process(&process),
+                uses: Default::default(),
+                referrer: ArtifactReferrer::ProcessRecord(process.clone()),
+                requirements: requirements.clone(),
+            });
+            store
+                .commit(tx, CommitLabel::new("law.terminal.register"))
+                .await?;
+            ensure!(
+                resolutions.requirements(&key).await? == requirements,
+                "registration lost its debt"
+            );
+        }
+        let mut tx = store.begin(&key, claim.epoch).await?;
+        let outcome = ProcessOutcome::from_tool_output(ToolCallOutput::success(json!({})));
+        super::super::process::record_terminal(&mut tx, &process, &outcome)?;
+        store.commit(tx, CommitLabel::PROCESS_TERMINAL).await?;
+        ensure!(
+            terminal(&backend, &process).await?.is_some(),
+            "the terminal did not commit"
+        );
+        ensure!(
+            resolutions.requirements(&key).await? == ClaimRequirements::default(),
+            "terminal retained execution debt"
+        );
+        ensure!(
+            store
+                .actor_requirements(None, 8)
+                .await?
+                .iter()
+                .all(|(actor, debt)| actor != &key || debt.is_empty()),
+            "terminal retained materialized claim debt"
+        );
+        let mut cascade = store.begin(&key, claim.epoch).await?;
+        cascade.give_up(lash_durable::Release::Terminal);
+        store
+            .commit(cascade, CommitLabel::new("law.terminal.cascade"))
+            .await?;
+        store.release_node(&node).await?;
+    }
+    Ok(())
 }
 
 /// The CheckpointRoot page a `law_paged` step of call `call` publishes:

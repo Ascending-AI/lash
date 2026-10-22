@@ -69,7 +69,9 @@ pub(super) enum CommandCommit {
     Withdrawn,
     /// The store refused an append whose required ancestor is not on the
     /// active path. Nothing was written.
-    AncestorNotActive { required_node_id: crate::NodeId },
+    AncestorNotActive {
+        required_node_id: lash_vocabulary::identity::NodeId,
+    },
     /// The store terminally refused the applying commit: nothing of the
     /// command committed, and it settled failed with the typed refusal,
     /// so the lane never waits on it.
@@ -89,7 +91,7 @@ impl LashRuntime {
     /// from: `completion` names exactly its batch.
     fn sole_command_batch(
         completion: &crate::QueuedWorkCompletion,
-    ) -> Result<crate::BatchId, RuntimeError> {
+    ) -> Result<lash_vocabulary::identity::BatchId, RuntimeError> {
         match completion.batch_ids.as_slice() {
             [batch_id] => Ok(batch_id.clone()),
             batch_ids => Err(RuntimeError::new(
@@ -320,7 +322,7 @@ impl LashRuntime {
         &mut self,
         name: &str,
         args: serde_json::Value,
-        batch_id: &crate::BatchId,
+        batch_id: &lash_vocabulary::identity::BatchId,
         task: Option<&crate::ActorContext>,
         parent: Option<lash_trace::TraceParent>,
     ) -> Result<
@@ -414,7 +416,7 @@ impl LashRuntime {
         plugin_id: String,
         outcome: crate::plugin::PluginOperationOutcome<serde_json::Value>,
         draft: super::turn_commit_draft::TurnGraphAppendDraft,
-        batch_id: &crate::BatchId,
+        batch_id: &lash_vocabulary::identity::BatchId,
         parent: Option<lash_trace::TraceParent>,
     ) -> Result<crate::runtime::PluginOperationCommandOutcome, PluginOperationInvokeError> {
         let crate::plugin::PluginOperationOutcome {
@@ -578,7 +580,10 @@ impl LashRuntime {
 
     /// The operation a host command's commit is identified by: the command's
     /// own session operation, named by its batch.
-    fn command_operation(&self, batch_id: &crate::BatchId) -> crate::OperationId {
+    fn command_operation(
+        &self,
+        batch_id: &lash_vocabulary::identity::BatchId,
+    ) -> crate::OperationId {
         crate::OperationId::new(
             self.state.session_operation_scope(batch_id),
             "session-command",
@@ -614,7 +619,7 @@ impl LashRuntime {
         switch: Option<CommandFrameSwitch>,
         outcome: impl FnOnce(
             &crate::RuntimeSessionState,
-            &[crate::NodeId],
+            &[lash_vocabulary::identity::NodeId],
         ) -> crate::runtime::SessionCommandOutcome,
     ) -> Result<CommandCommit, RuntimeError> {
         Box::pin(self.commit_host_command_ending(
@@ -643,7 +648,7 @@ impl LashRuntime {
         ),
         outcome: impl FnOnce(
             &crate::RuntimeSessionState,
-            &[crate::NodeId],
+            &[lash_vocabulary::identity::NodeId],
         ) -> crate::runtime::SessionCommandOutcome,
     ) -> Result<CommandCommit, RuntimeError> {
         let (switch, ending) = ending;
@@ -697,7 +702,7 @@ impl LashRuntime {
         ),
         outcome: impl FnOnce(
             &crate::RuntimeSessionState,
-            &[crate::NodeId],
+            &[lash_vocabulary::identity::NodeId],
         ) -> crate::runtime::SessionCommandOutcome,
     ) -> Result<Result<CommandCommit, RuntimeError>, RuntimeError> {
         let (switch, ending) = ending;

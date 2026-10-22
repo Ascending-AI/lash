@@ -39,17 +39,23 @@
 //! `a_result_the_heap_has_no_room_for_is_refused_at_its_reservation` in
 //! `lash-ext-regex-ecma`.
 
-use lash_kernel_doc::{EffectId, TaskLabel};
-use std::collections::BTreeSet;
+use lash_vocabulary::sites::EffectId;
+use lash_vocabulary::sites::TaskLabel;
+use lash_vocabulary::{
+    content_ids::LinkId,
+    names::{CallableId, DocumentId, ErrorKind, ExportName, FunctionId, ImportSlot, OperationUse},
+    package::OperationMode,
+};
+use std::collections::BTreeMap;
 use std::sync::Arc;
-use std::time::Duration;
 
 use crate::PreparedLibrary;
-use lash_kernel_doc::{
-    Datum, Document, EffectName, ErrorDatum, FunctionId, FunctionName, Handle, Invalid, Name,
-    Timestamp, Type,
-};
+use lash_kernel_doc::{Datum, Document, ErrorDatum, Handle, Invalid};
+
 pub use lash_kernel_state::paged::{Charge, MemoryMeter};
+use lash_vocabulary::names::FunctionName;
+use lash_vocabulary::names::Name;
+use lash_vocabulary::types::Type;
 
 /// What a machine runs: an admitted document and the library functions the
 /// embedder registered, prepared once for every program that uses them.
@@ -64,6 +70,258 @@ pub struct Program {
     pub closure: lash_kernel_doc::heap::PageId,
     pub document: Arc<Document>,
     pub library: PreparedLibrary,
+    /// The root instance of this execution.
+    pub link: LinkId,
+    /// Reached instances, loaded before the first instruction.
+    pub instances: BTreeMap<LinkId, PreparedInstance>,
+    pub documents: BTreeMap<DocumentId, Arc<Document>>,
+    /// Executable functions selected from the retained documents by the admitting host.
+    pub functions: std::collections::BTreeSet<FunctionId>,
+}
+
+impl Program {
+    /// Prepare received immutable content without encoding its documents
+    /// again to recover their identities. This supplies identity facts only;
+    /// link validation and the machine's structural admission still apply.
+    pub fn prepare_identified(
+        link: LinkId,
+        documents: BTreeMap<DocumentId, lash_kernel_doc::IdentifiedDocument>,
+        links: &BTreeMap<LinkId, lash_vocabulary::package::Link>,
+        closure: lash_kernel_doc::heap::PageId,
+        library: PreparedLibrary,
+    ) -> Result<Self, StartError> {
+        for document in documents.values() {
+            library.note_identified_document(document);
+        }
+        Self::prepare(
+            link,
+            documents
+                .into_iter()
+                .map(|(id, document)| (id, Arc::clone(document.shared())))
+                .collect(),
+            links,
+            closure,
+            library,
+        )
+    }
+
+    /// Projects admitted Link fills once, without linking any caller against live packages.
+    pub fn prepare(
+        link: LinkId,
+        documents: BTreeMap<DocumentId, Arc<Document>>,
+        links: &BTreeMap<LinkId, lash_vocabulary::package::Link>,
+        closure: lash_kernel_doc::heap::PageId,
+        library: PreparedLibrary,
+    ) -> Result<Self, StartError> {
+        use lash_vocabulary::{names::ImportKind, package::Fill};
+        let invalid = |problem: &str| StartError::Linked {
+            problem: problem.into(),
+        };
+        let mut instances = BTreeMap::new();
+        for (id, instance) in links {
+            if *id != instance.identity() {
+                return Err(invalid("Link bytes differ from their identity"));
+            }
+            let document = documents
+                .get(&instance.document)
+                .ok_or_else(|| invalid("Link document is not loaded"))?;
+            if !document.imports.keys().eq(instance.fills.keys()) {
+                return Err(invalid("Link fills differ from declared Imports"));
+            }
+            let mut slots = BTreeMap::new();
+            for (slot, fill) in &instance.fills {
+                let import = &document.imports[slot];
+                let prepared = match (&import.kind, fill) {
+                    (ImportKind::Operation { .. }, Fill::Operation(_) | Fill::Deferred { .. }) => {
+                        PreparedSlot::Operation(OperationUse {
+                            link: *id,
+                            slot: *slot,
+                        })
+                    }
+                    (_, Fill::Export { link, export }) => {
+                        let target = links
+                            .get(link)
+                            .and_then(|target| documents.get(&target.document))
+                            .ok_or_else(|| invalid("Export Link document is not loaded"))?;
+                        let exported = target
+                            .exports
+                            .get(&export.name)
+                            .ok_or_else(|| invalid("Export is not declared"))?;
+                        match (&import.kind, exported, &export.member) {
+                            (
+                                ImportKind::Code { .. },
+                                lash_kernel_doc::Export::Function(function),
+                                None,
+                            ) => PreparedSlot::Function {
+                                callable: CallableId {
+                                    link: *link,
+                                    function: function.function,
+                                },
+                                export: export.clone(),
+                            },
+                            (
+                                ImportKind::Code { .. },
+                                lash_kernel_doc::Export::Type(ty),
+                                Some(member),
+                            ) => {
+                                let function = match ty
+                                    .members
+                                    .get(member)
+                                    .ok_or_else(|| invalid("Type member is not declared"))?
+                                {
+                                    lash_kernel_doc::TypeMember::Static(function)
+                                    | lash_kernel_doc::TypeMember::Method(function)
+                                    | lash_kernel_doc::TypeMember::Property(function) => function,
+                                };
+                                PreparedSlot::Function {
+                                    callable: CallableId {
+                                        link: *link,
+                                        function: function.function,
+                                    },
+                                    export: export.clone(),
+                                }
+                            }
+                            (
+                                ImportKind::Type { brand },
+                                lash_kernel_doc::Export::Type(ty),
+                                None,
+                            ) if *brand == ty.brand => PreparedSlot::Type {
+                                link: *link,
+                                export: export.clone(),
+                            },
+                            (
+                                ImportKind::Error { kind },
+                                lash_kernel_doc::Export::Error { kind: found },
+                                None,
+                            ) if kind == found => PreparedSlot::Error(kind.clone()),
+                            _ => return Err(invalid("Export does not serve the Import kind")),
+                        }
+                    }
+                    _ => return Err(invalid("Fill does not serve the Import kind")),
+                };
+                slots.insert(*slot, prepared);
+            }
+            instances.insert(
+                *id,
+                PreparedInstance {
+                    link: *id,
+                    document: instance.document,
+                    slots,
+                },
+            );
+        }
+        let root = instances
+            .get(&link)
+            .and_then(|instance| documents.get(&instance.document))
+            .cloned()
+            .ok_or_else(|| invalid("root Link is not loaded"))?;
+        let functions = documents
+            .values()
+            .flat_map(|document| document.functions.keys().copied())
+            .collect();
+        let program = Self {
+            functions,
+            link,
+            documents,
+            instances,
+            document: root,
+            closure,
+            library,
+        };
+        program.validate_links()?;
+        Ok(program)
+    }
+
+    /// Checks the complete instance table before any guest instruction executes.
+    pub(crate) fn validate_links(&self) -> Result<(), StartError> {
+        let invalid = |problem: &str| StartError::Linked {
+            problem: problem.into(),
+        };
+        let root = self
+            .instances
+            .get(&self.link)
+            .ok_or_else(|| invalid("root Link is not loaded"))?;
+        if root.document != self.library.document_identity(&self.document) {
+            return Err(invalid("root Link names another document"));
+        }
+        for (link, instance) in &self.instances {
+            if *link != instance.link {
+                return Err(invalid("instance key differs from its Link"));
+            }
+            let document = self
+                .documents
+                .get(&instance.document)
+                .ok_or_else(|| invalid("instance document is not loaded"))?;
+            if self.library.document_identity(document) != instance.document {
+                return Err(invalid("document bytes differ from their identity"));
+            }
+            if !document.imports.keys().eq(instance.slots.keys()) {
+                return Err(invalid("instance slots differ from declared Imports"));
+            }
+            for (slot, prepared) in &instance.slots {
+                let import = &document.imports[slot];
+                match (&import.kind, prepared) {
+                    (
+                        lash_vocabulary::names::ImportKind::Operation { .. },
+                        PreparedSlot::Operation(use_),
+                    ) if use_.link == *link && use_.slot == *slot => {}
+                    (
+                        lash_vocabulary::names::ImportKind::Code { .. },
+                        PreparedSlot::Function { callable, export },
+                    ) => {
+                        let target = self
+                            .instances
+                            .get(&callable.link)
+                            .and_then(|i| self.documents.get(&i.document))
+                            .ok_or_else(|| invalid("code target Link is not loaded"))?;
+                        if !target.functions.contains_key(&callable.function) {
+                            return Err(invalid("code target definition is not loaded"));
+                        }
+                        let descriptor = match (target.exports.get(&export.name), &export.member) {
+                            (Some(lash_kernel_doc::Export::Function(function)), None) => function,
+                            (Some(lash_kernel_doc::Export::Type(ty)), Some(member)) => {
+                                match ty.members.get(member) {
+                                    Some(
+                                        lash_kernel_doc::TypeMember::Static(function)
+                                        | lash_kernel_doc::TypeMember::Method(function)
+                                        | lash_kernel_doc::TypeMember::Property(function),
+                                    ) => function,
+                                    _ => return Err(invalid("code target Type member is absent")),
+                                }
+                            }
+                            _ => return Err(invalid("code target Export is absent")),
+                        };
+                        if descriptor.function != callable.function {
+                            return Err(invalid("code target differs from its Export"));
+                        }
+                        if let lash_vocabulary::ImportKind::Code {
+                            signature,
+                            convention,
+                        } = &import.kind
+                            && (descriptor.convention.semantic() != *convention
+                                || lash_vocabulary::type_relations::serves(
+                                    &descriptor.signature,
+                                    signature,
+                                )
+                                .is_some())
+                        {
+                            return Err(invalid("code Export does not serve its Import"));
+                        }
+                    }
+                    (
+                        lash_vocabulary::names::ImportKind::Type { .. },
+                        PreparedSlot::Type { link, .. },
+                    ) if self.instances.contains_key(link) => {}
+                    (
+                        lash_vocabulary::names::ImportKind::Error { kind },
+                        PreparedSlot::Error(found),
+                    ) if kind == found => {}
+                    _ => return Err(invalid("prepared slot does not match its Import kind")),
+                }
+            }
+        }
+        Ok(())
+    }
 }
 
 /// The execution bounds and charge policy the embedder states (`K-BND-001`). Passing a bound ends
@@ -184,64 +442,24 @@ pub struct Meters {
 }
 
 /// What a new run executes.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
+#[serde(
+    tag = "kind",
+    content = "value",
+    rename_all = "snake_case",
+    deny_unknown_fields
+)]
 pub enum Target {
     /// The document's `main`, as a session cell.
     Main,
     /// One of the document's entries, by name.
     Entry(Name),
+    /// A retained callable with its captured initial environment.
+    Callable(Box<lash_kernel_doc::FunctionValue>),
 }
 
-/// How a run's `perform` of one effect runs (`K-EFF-012`).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum EffectMode {
-    /// The `perform` waits: the embedder admits its request at the next
-    /// park and delivers its committed outcome (`K-EFF-001`).
-    Recorded,
-    /// The `perform` is answered by the host at once, inside its statement,
-    /// through [`Host::perform`]: no wait, no request, no turn given up.
-    Read,
-}
-
-/// The mode each effect of a run is performed in, bound once when the run
-/// starts and saved with its state: no later resume can change it
-/// (`K-EFF-012`). Every effect it does not name as a read is recorded.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct EffectModes {
-    reads: BTreeSet<EffectName>,
-}
-
-impl EffectModes {
-    /// Every effect recorded.
-    #[must_use]
-    pub fn recorded() -> Self {
-        Self::default()
-    }
-
-    /// `reads` performed as reads, every other effect recorded.
-    #[must_use]
-    pub fn reading(reads: impl IntoIterator<Item = EffectName>) -> Self {
-        Self {
-            reads: reads.into_iter().collect(),
-        }
-    }
-
-    /// The mode `effect` is performed in.
-    #[must_use]
-    pub fn mode(&self, effect: &EffectName) -> EffectMode {
-        if self.reads.contains(effect) {
-            EffectMode::Read
-        } else {
-            EffectMode::Recorded
-        }
-    }
-
-    /// The effects performed as reads, in name order.
-    #[must_use]
-    pub fn reads(&self) -> &BTreeSet<EffectName> {
-        &self.reads
-    }
-}
+/// Modes pinned per operation use. An absent (including unresolved deferred) use waits.
+pub type EffectModes = BTreeMap<OperationUse, OperationMode>;
 
 /// The host's own failure to answer a read-bound `perform`: nothing about
 /// the guest, which raises nothing. The run stops with
@@ -286,10 +504,6 @@ pub struct MachineOptions {
 /// running task's turn, and none is saved, so a read in a stretch that was
 /// not saved is drawn again after a crash (`K-HOST-001`).
 pub trait Host {
-    /// The embedder's clock.
-    fn clock(&mut self) -> Timestamp;
-    /// Sixty-four uniformly random bits (`K-HOST-003`).
-    fn random(&mut self) -> u64;
     /// Reads through a projection handle. The answer is kernel data; an
     /// error is raised in the guest at the read.
     fn read(&mut self, handle: &Handle, request: &Datum) -> Result<Datum, ErrorDatum>;
@@ -302,14 +516,14 @@ pub trait Host {
     /// binds no read is never asked.
     fn perform(
         &mut self,
-        effect: &EffectName,
+        use_: &OperationUse,
         args: &[Datum],
-        site: &lash_kernel_doc::PositionLabel,
-        origin: &lash_kernel_doc::Site,
+        site: &lash_vocabulary::sites::PositionLabel,
+        origin: &lash_vocabulary::sites::Site,
     ) -> Result<Result<Datum, ErrorDatum>, HostFault> {
         let _ = (args, site, origin);
         Err(HostFault::new(format!(
-            "this host performs no read, and the run binds `{effect}` as one"
+            "this host performs no read, and the run binds `{use_:?}` as one"
         )))
     }
     /// Whether the host takes [`Host::enter_site`]. A host that does not
@@ -319,7 +533,7 @@ pub trait Host {
     }
     /// Passive entry into a document action. Library implementation sites
     /// are private; the document's call remains visible while they compute.
-    fn enter_site(&mut self, _at: &EffectId) {}
+    fn enter_site(&mut self, _at: &lash_vocabulary::sites::EffectLocation) {}
     /// The passive semantic observer, when the host accepts live deltas.
     /// Reading this port never consumes counts unless an observer is present.
     fn observer(&mut self) -> Option<&mut dyn RunObserver> {
@@ -338,14 +552,13 @@ pub use lash_kernel_state::WaitId;
 #[derive(Clone, Debug, PartialEq)]
 pub enum Request {
     Effect(EffectRequest),
-    Sleep(SleepRequest),
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct EffectRequest {
     pub wait: WaitId,
     pub identity: EffectId,
-    pub effect: EffectName,
+    pub use_: OperationUse,
     /// The arguments, copied out of the run (`K-EFF-002`).
     pub args: Vec<Datum>,
     /// The type the `perform` decodes its result by.
@@ -354,14 +567,7 @@ pub struct EffectRequest {
     /// (ORIGIN): its own statement in document code, the document
     /// statement that entered a library body. Derived when the request is
     /// reported, and no part of its identity.
-    pub origin: lash_kernel_doc::Site,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct SleepRequest {
-    pub wait: WaitId,
-    pub identity: EffectId,
-    pub duration: Duration,
+    pub origin: lash_vocabulary::sites::Site,
 }
 
 /// How a wait ended.
@@ -372,8 +578,6 @@ pub enum Outcome {
     Completed(Datum),
     /// The effect failed. The error is raised at the `perform`.
     Failed(ErrorDatum),
-    /// The sleep is over.
-    Elapsed,
 }
 
 /// What a delivery did.
@@ -457,7 +661,7 @@ pub enum RunError {
         /// it unwinds into, and one a `finally` held names its `try`
         /// statement. `None` when a run-root cleanup held it, or no
         /// document statement was left to name it.
-        site: Option<lash_kernel_doc::Site>,
+        site: Option<lash_vocabulary::sites::Site>,
     },
     /// The run reached its end with tasks that were unfinished, or that
     /// ended in an error no `join` observed.
@@ -468,7 +672,7 @@ pub enum RunError {
         /// The outermost document body still running in each unfinished task.
         /// Derived from semantic frames, separate from the actual spawn identity.
         /// An embedder resolves these sites through its validated source map.
-        sources: Vec<(TaskLabel, lash_kernel_doc::PositionLabel)>,
+        sources: Vec<(TaskLabel, lash_vocabulary::sites::PositionLabel)>,
     },
     /// No task is ready and none waits on anything the embedder can
     /// answer.
@@ -491,6 +695,8 @@ fn uncaught_text(error: &Datum) -> String {
 #[derive(Clone, Debug, PartialEq, thiserror::Error)]
 #[non_exhaustive]
 pub enum StartError {
+    #[error("linked program is invalid: {problem}")]
+    Linked { problem: String },
     #[error("the document is not admitted: {0}")]
     NotAdmitted(#[from] Invalid),
     #[error("the registry has no function {function}, which the manifest lists")]
@@ -506,8 +712,8 @@ pub enum StartError {
     Bindings { problem: String },
     /// The run binds as a read an effect its document's manifest does not
     /// declare.
-    #[error("the run binds `{effect}` as a read, and the manifest declares no such effect")]
-    UndeclaredRead { effect: EffectName },
+    #[error("the run binds `{use_:?}` as a read, and its Link declares no such operation")]
+    UndeclaredRead { use_: OperationUse },
     /// The session's saved memory accounting is inconsistent.
     #[error("the accounting certificate is malformed: {problem}")]
     Accounting { problem: String },
@@ -518,3 +724,33 @@ pub enum StartError {
 pub use crate::paged::{
     CellSave, CellStart, Finished, Machine, MachineError, OpenError, SaveCell, SavedCell, SealError,
 };
+
+/// A slot resolved under its owning Link. Code/type lookup never calls the host.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(
+    tag = "kind",
+    content = "value",
+    rename_all = "snake_case",
+    deny_unknown_fields
+)]
+pub enum PreparedSlot {
+    Operation(OperationUse),
+    Function {
+        callable: CallableId,
+        export: ExportName,
+    },
+    Type {
+        link: LinkId,
+        export: ExportName,
+    },
+    Error(ErrorKind),
+}
+
+/// One loaded Link's document and slot table. Compiled bytes may be shared.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PreparedInstance {
+    pub link: LinkId,
+    pub document: DocumentId,
+    pub slots: BTreeMap<ImportSlot, PreparedSlot>,
+}

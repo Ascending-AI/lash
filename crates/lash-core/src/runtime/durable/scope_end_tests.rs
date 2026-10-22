@@ -37,13 +37,13 @@ use super::session_close::{
 use super::turn_scope::{await_turn_children, continue_scope_ends, end_turn_scope};
 use crate::ActorContext;
 use crate::AdmittedScope;
-use crate::ProcessId;
 use crate::ScopeId;
-use crate::SessionId;
-use crate::TurnId;
 use crate::store::{ObligationKey, ObligationKind, ObligationState, SessionLookup};
 use lash_execution_contracts::backend::Backend;
 use lash_execution_contracts::backend::StoreSet;
+use lash_vocabulary::identity::ProcessId;
+use lash_vocabulary::identity::SessionId;
+use lash_vocabulary::identity::TurnId;
 
 /// The format set the laws' session actors are written in.
 const SESSION_FORMATS: &str = "law-session";
@@ -92,7 +92,7 @@ impl CutStore {
 impl DurableReads for CutStore {
     async fn model_call_pins(
         &self,
-        session: &lash_protocol_types::SessionId,
+        session: &lash_vocabulary::identity::SessionId,
         owner: &str,
     ) -> Result<Vec<lash_durable::domain::ModelCallPinRow>, DurableError> {
         self.inner.model_call_pins(session, owner).await
@@ -100,7 +100,7 @@ impl DurableReads for CutStore {
 
     async fn model_calls(
         &self,
-        session: &lash_protocol_types::SessionId,
+        session: &lash_vocabulary::identity::SessionId,
         owner: &str,
     ) -> Result<Vec<lash_core_store::model_calls::ModelCallRecord>, DurableError> {
         self.inner.model_calls(session, owner).await
@@ -155,15 +155,15 @@ impl DurableReads for CutStore {
 
     async fn cell_roots(
         &self,
-        session: &lash_protocol_types::SessionId,
-        run: &lash_protocol_types::TurnId,
+        session: &lash_vocabulary::identity::SessionId,
+        run: &lash_vocabulary::identity::TurnId,
     ) -> Result<Vec<ExecRootRow>, DurableError> {
         self.inner.cell_roots(session, run).await
     }
     async fn cell_roots_within(
         &self,
-        session: &lash_protocol_types::SessionId,
-        run: &lash_protocol_types::TurnId,
+        session: &lash_vocabulary::identity::SessionId,
+        run: &lash_vocabulary::identity::TurnId,
         max_rows: usize,
     ) -> Result<Vec<lash_durable::domain::ExecRootRow>, DurableError> {
         self.inner.cell_roots_within(session, run, max_rows).await
@@ -299,59 +299,6 @@ impl DurableStore for CutStore {
         limit: usize,
     ) -> Result<Vec<(lash_durable::ActorKey, Vec<String>)>, DurableError> {
         self.inner.actor_requirements(after, limit).await
-    }
-
-    async fn install_packages(
-        &self,
-        artifacts: &[lash_durable::packages::ArtifactInstall],
-        sets: &[lash_durable::packages::SetInstall],
-    ) -> Result<(), DurableError> {
-        self.inner.install_packages(artifacts, sets).await
-    }
-
-    async fn package_catalog(&self) -> Result<lash_durable::PackageCatalog, DurableError> {
-        self.inner.package_catalog().await
-    }
-
-    async fn package_surface(
-        &self,
-        digest: &lash_durable::PackageSetDigest,
-    ) -> Result<Option<Vec<u8>>, DurableError> {
-        self.inner.package_surface(digest).await
-    }
-
-    async fn package_paths(
-        &self,
-        functions: &[lash_durable::packages::FunctionId],
-    ) -> Result<
-        std::collections::BTreeMap<
-            lash_durable::packages::FunctionId,
-            std::collections::BTreeSet<String>,
-        >,
-        DurableError,
-    > {
-        self.inner.package_paths(functions).await
-    }
-
-    async fn internal_operations(
-        &self,
-        operations: &[lash_durable::packages::EffectName],
-    ) -> Result<
-        std::collections::BTreeMap<
-            lash_durable::packages::EffectName,
-            std::collections::BTreeSet<String>,
-        >,
-        DurableError,
-    > {
-        self.inner.internal_operations(operations).await
-    }
-
-    async fn package_labels(
-        &self,
-        artifacts: &[lash_durable::ArtifactDigest],
-    ) -> Result<std::collections::BTreeMap<lash_durable::ArtifactDigest, Vec<String>>, DurableError>
-    {
-        self.inner.package_labels(artifacts).await
     }
 
     async fn owned(&self, node: &NodeLease) -> Result<Vec<Claimed>, DurableError> {
@@ -1284,11 +1231,39 @@ impl lash_execution_contracts::process::ProcessEngine for LawEngine {
         lash_execution_contracts::process::ProcessTraceClass::Internal
     }
 
-    async fn performed_effects(
+    async fn inspect_link(
+        &self,
+        link: lash_vocabulary::LinkId,
+        selector: &lash_execution_contracts::process::linking::ReachSelector,
+    ) -> Result<
+        lash_execution_contracts::process::linking::LinkInspection,
+        lash_execution_contracts::process::linking::EnginePortError,
+    > {
+        Ok(lash_execution_contracts::process::linking::LinkInspection {
+            link,
+            document: lash_vocabulary::DocumentId::from_bytes([0; 32]),
+            selector: selector.clone(),
+            operations: Default::default(),
+            machine: Default::default(),
+            artifacts: Vec::new(),
+            signature: None,
+        })
+    }
+    async fn inspect_start(
         &self,
         _payload: &serde_json::Value,
-    ) -> Result<lash_execution_contracts::process::PerformedEffects, crate::ProcessEnvRefusal> {
-        Ok(lash_execution_contracts::process::PerformedEffects::new())
+    ) -> Result<
+        lash_execution_contracts::process::linking::LinkInspection,
+        lash_execution_contracts::process::linking::EnginePortError,
+    > {
+        Err(
+            lash_execution_contracts::process::linking::EnginePortError::Unsupported {
+                operation: "generic fixture has no linked code".into(),
+            },
+        )
+    }
+    fn capabilities(&self) -> lash_vocabulary::claims::NodeRequirements {
+        Default::default()
     }
 
     async fn check_args(
@@ -1420,13 +1395,10 @@ impl lash_execution_contracts::process::ProcessEngine for LawEngine {
             ) => Ok((
                 state,
                 lash_execution_contracts::process::EngineAction::Steps {
-                    steps: vec![lash_execution_contracts::process::StepRequest::Tool {
+                    steps: vec![lash_execution_contracts::process::StepRequest::Engine {
                         step: lash_execution_contracts::process::StepName("forever".into()),
-                        effect: lash_core_execution::testing::effect(HANGING_TOOL),
-                        contract: crate::ContractId::new("fixture"),
+                        kind: lash_execution_contracts::process::EngineStepKind::new(HANGING_TOOL),
                         input: serde_json::Value::Null,
-                        site: None,
-                        matched: None,
                     }],
                     wake: None,
                 },
@@ -1525,12 +1497,13 @@ impl ProcessSteps for HangingSteps {
         _runtime: &Arc<lash_core_execution::runtime::process::StepRuntime>,
         _process: &lash_execution_contracts::process::ProcessRecord,
         _step: &lash_execution_contracts::process::StepRequest,
+        _target: Option<&lash_core_execution::runtime::process::steps::InvocationTarget>,
         now_ms: u64,
     ) -> Result<StepAdmission, StepRefusal> {
         let long = Duration::from_secs(60);
         Ok(StepAdmission::new(
             lash_core_execution::testing::step_tool(_step, "law"),
-            lash_protocol_types::ExecutionPolicy::Once,
+            lash_vocabulary::tool_contract::ExecutionPolicy::Once,
             lash_protocol_types::ExecutionLimit::starting_at(now_ms, long, long),
             None,
         ))

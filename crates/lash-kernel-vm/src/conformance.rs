@@ -8,11 +8,11 @@
 use std::collections::BTreeMap;
 use std::ops::ControlFlow;
 
-use lash_kernel_doc::graph_tokens::{TokenCodec, encode_body};
 use lash_kernel_doc::heap::*;
 use lash_kernel_state::kernel_internals::PagedHeap;
 use lash_kernel_state::kernel_internals::tree::{Cell, Tree};
 use lash_kernel_state::paged::*;
+use lash_vocabulary::tokens::{TokenCodec, encode_body};
 
 /// A semantic checkpoint, independent of its storage layout.
 #[derive(Clone, Debug, Eq)]
@@ -65,6 +65,7 @@ pub fn checkpoint(
     };
     reader.put(&root.kernel);
     reader.put(&root.document);
+    reader.put(&root.link);
     reader.put(&root.closure);
     reader.put(&root.owner);
     reader.put(&root.target);
@@ -93,10 +94,13 @@ pub fn checkpoint(
     reader.plain(&Tree::<lash_kernel_doc::TaskId>::of_sequence(&root.ready))?;
     reader.plain(&Tree::<u64>::of_sequence(&root.unreported))?;
     reader.plain(&Tree::<u64>::of_keyed(&root.withdrawn))?;
-    reader.tree(&Tree::<NameRef>::of_keyed(&root.reads), |r, name| {
-        r.put(&name.resolve(r.heap.pages())?);
-        Ok(())
-    })?;
+    reader.tree(
+        &Tree::<lash_vocabulary::OperationUse>::of_keyed(&root.reads),
+        |r, use_| {
+            r.put(use_);
+            Ok(())
+        },
+    )?;
     reader.tree(&Tree::<WaitRecord>::of_keyed(&root.waits), |r, wait| {
         r.put(&wait.task);
         r.put(&wait.kind);
@@ -119,7 +123,6 @@ pub fn checkpoint(
                     r.put(&4u64);
                     r.frozen(v)?;
                 }
-                CommittedOutcomeRecord::Elapsed => r.put(&5u64),
             },
         }
         Ok(())
@@ -195,6 +198,10 @@ pub fn checkpoint(
                     .map_err(|e| HeapFault::Malformed(e.to_string()))?,
             );
             frame_index += 1;
+            r.put(&frame.link);
+            r.put(&frame.capture_names);
+            r.put(&frame.convention);
+            r.put(&frame.public_result);
             r.put(site.as_ref());
             r.bindings(&frame.bindings)?;
             r.plain(&frame.loops)?;
@@ -284,8 +291,10 @@ impl Reader {
     }
     fn functions(&mut self, tree: &Tree<FunctionRecord>) -> Result<(), HeapFault> {
         self.tree(tree, |r, f| {
+            r.put(&f.callable);
             r.put(&f.name.resolve(r.heap.pages())?);
             r.value(&f.meta)?;
+            r.entity(f.environment)?;
             r.put(&f.closure.id);
             r.put(&(f.captures.len() as u64));
             for (name, value) in &f.captures {
@@ -351,26 +360,21 @@ impl Reader {
             | PageValue::Ref(Identity::Object(id)) => {
                 self.entity(*id)?;
             }
+            PageValue::Function(callable) => self.put(callable.as_ref()),
             PageValue::Int(IntRef::Inline(integer)) => {
                 self.put(&integer.is_negative());
                 self.graph
                     .push(lash_kernel_doc::heap_values::integer_digits(integer));
             }
-            PageValue::Text(_)
-            | PageValue::Function(_)
-            | PageValue::Bytes(_)
-            | PageValue::Int(IntRef::Paged { .. }) => {
+            PageValue::Text(_) | PageValue::Bytes(_) | PageValue::Int(IntRef::Paged { .. }) => {
                 let mut bytes = Vec::new();
                 let len = match value {
-                    PageValue::Text(t) | PageValue::Function(t) => t.summary.utf8_bytes,
+                    PageValue::Text(t) => t.summary.utf8_bytes,
                     PageValue::Bytes(b) => b.len,
                     PageValue::Int(IntRef::Paged { summary, .. }) => summary.bits.div_ceil(8),
                     _ => unreachable!(),
                 };
-                let payload = match value {
-                    PageValue::Function(t) => PageValue::Text(t.clone()),
-                    _ => value.clone(),
-                };
+                let payload = value.clone();
                 self.heap.payload_visit(&payload, 0..len, &mut |chunk| {
                     bytes.extend_from_slice(match chunk {
                         Chunk::Text(t) => t.as_bytes(),
@@ -421,6 +425,7 @@ impl Reader {
             ObjectKind::Variable => self.value(&self.heap.variable_get(id)?)?,
             ObjectKind::Closure => {
                 let closure = self.heap.closure(id)?;
+                self.put(&closure.callable);
                 self.put(closure.site.resolve(self.heap.pages())?.as_ref());
                 self.tree(&closure.captures, |r, (name, cell)| {
                     r.put(&name.resolve(r.heap.pages())?);

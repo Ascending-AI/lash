@@ -11,7 +11,7 @@
 //! reading counters.
 
 use crate::conformance::DeploymentViewExt as _;
-use lash_protocol_types::SessionId;
+use lash_vocabulary::identity::SessionId;
 use std::sync::Arc;
 
 use super::session_store_factory::session_store_request;

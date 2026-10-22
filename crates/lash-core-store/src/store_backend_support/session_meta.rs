@@ -1,9 +1,9 @@
-use crate::ProcessId;
-use crate::SessionId;
-use crate::TurnId;
 use crate::{
     CausalRef, SessionLineage, SessionMeta, SessionObserverIntent, SessionRelation, StoreError,
 };
+use lash_vocabulary::identity::ProcessId;
+use lash_vocabulary::identity::SessionId;
+use lash_vocabulary::identity::TurnId;
 
 const RECORD_KIND: &str = "SessionMeta relation";
 
@@ -353,7 +353,7 @@ impl SessionMetaCodec {
                         .required(stored.source_session_id, "source_session_id")?,
                     source_node_id: stored
                         .source_node_id
-                        .map(crate::NodeId::parse)
+                        .map(lash_vocabulary::identity::NodeId::parse)
                         .transpose()?,
                 }
             }

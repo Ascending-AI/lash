@@ -4,6 +4,7 @@ use lash_core::facade_support::{ModelToolReturnPart, SchemaResolutionRequest, re
 use lash_core::llm::types::{ExecutionEvidenceMergeError, LlmMessage};
 use lash_llm_transport::tool_result_text;
 use lash_protocol_types::{llm::types::StreamBlockEvent, llm::types::StreamBlockKind};
+
 use std::borrow::Cow;
 
 const PROVIDER: &str = "OpenAI-compatible";
@@ -327,7 +328,7 @@ impl OpenAiCompatibleProvider {
                         "name": tool.name,
                         "description": tool.description,
                         "parameters": resolved.schema,
-                        "strict": resolved.dialect == lash_protocol_types::SchemaDialect::OpenaiStrictToolParameters,
+                        "strict": resolved.dialect == lash_vocabulary::schema_contract::SchemaDialect::OpenaiStrictToolParameters,
                     },
                 }))
             })

@@ -40,17 +40,21 @@
 
 use std::sync::Arc;
 
-use lash_core::{
-    ProcessId, ProcessObservationCursor, ProcessObservationEvent, ProcessReplayEventDraft,
-    ProcessReplayStore, ProcessReplayStoreError, ProcessReplaySubscribeOutcome,
-    ProcessReplaySubscription, ProcessSequence,
-};
+use lash_core::ProcessObservationCursor;
+use lash_core::ProcessObservationEvent;
+use lash_core::ProcessReplayEventDraft;
+use lash_core::ProcessReplayStore;
+use lash_core::ProcessReplayStoreError;
+use lash_core::ProcessReplaySubscribeOutcome;
+use lash_core::ProcessReplaySubscription;
+use lash_core::ProcessSequence;
 use lash_postgres_store::host::{
     ConnectionRole, PostgresHostConfig, ProcessReplayDataPolicy, ReplaySchemaMode, RetryPolicy,
 };
 use lash_postgres_store::{
     PostgresConnectionFactory, PostgresEndpoints, PostgresHostConfigError, TransactionPrelude,
 };
+use lash_vocabulary::identity::ProcessId;
 use tokio::sync::{Semaphore, mpsc, oneshot};
 use tokio::task::JoinHandle;
 

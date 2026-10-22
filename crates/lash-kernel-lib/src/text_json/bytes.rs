@@ -1,7 +1,9 @@
 use super::Selection;
 use std::borrow::Cow;
 
-use lash_kernel_doc::{Args, BytesView, NativeCall, NativeError, Type, Value};
+use lash_kernel_doc::{Args, BytesView, NativeCall, NativeError, Value};
+
+use lash_vocabulary::Type;
 
 use super::text::position;
 use super::{
@@ -10,6 +12,14 @@ use super::{
 };
 pub(super) fn functions(selection: &Selection<'_>) -> Vec<Function> {
     vec![
+        definition(
+            selection,
+            "bytes.at",
+            &[("bytes", Type::Bytes), ("index", Type::Int)],
+            Type::Int,
+            &["index"],
+            at,
+        ),
         definition(
             selection,
             "bytes.from_octets",
@@ -122,4 +132,26 @@ fn decode(call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
     let text = std::str::from_utf8(&bytes)
         .map_err(|_| raise("invalid_utf8", "bytes are not well-formed UTF-8"))?;
     Ok(call.new.text(text))
+}
+
+/// A pure byte read. The default deep-size charge bounds traversal across
+/// resident chunks as well as materializing cold input.
+fn at(call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
+    let bytes = bytes_view(&call.args, 0)?;
+    let index = integer_value(&call.args, 1)?
+        .word()
+        .and_then(|word| u64::try_from(word).ok())
+        .ok_or_else(|| raise("index", "byte index is outside the byte string"))?;
+    if index >= bytes.len() {
+        return Err(raise("index", "byte index is outside the byte string"));
+    }
+    let mut remaining = index;
+    for chunk in bytes.chunks() {
+        let chunk = chunk?;
+        if remaining < chunk.len() as u64 {
+            return Ok(Value::Int(i64::from(chunk[remaining as usize])));
+        }
+        remaining -= chunk.len() as u64;
+    }
+    Err(raise("index", "byte index is outside the byte string"))
 }

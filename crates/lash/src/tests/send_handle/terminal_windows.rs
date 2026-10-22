@@ -10,7 +10,7 @@ use lash_core::Target;
 /// One ended run: its id, the read of the window it ended on, and that
 /// window's checkpoint root.
 struct Ended {
-    run: crate::RunId,
+    run: lash_vocabulary::identity::RunId,
     window: serde_json::Value,
     checkpoint: String,
 }
@@ -65,7 +65,7 @@ async fn terminal_windows_follow_the_session_retention(
     let fixture = fixture_over(1, |_| backend).await?;
     let session = created_session(
         &fixture.core,
-        crate::SessionId::parse(session_name).expect("nonblank host identity"),
+        lash_vocabulary::identity::SessionId::parse(session_name).expect("nonblank host identity"),
     )
     .await
     .open()
@@ -86,7 +86,8 @@ async fn terminal_windows_follow_the_session_retention(
         if turn == 0 {
             session
                 .pin(Target::Turn(
-                    lash_core::TurnId::parse(run.as_str()).expect("a run id is a turn id"),
+                    lash_vocabulary::identity::TurnId::parse(run.as_str())
+                        .expect("a run id is a turn id"),
                 ))
                 .await?;
         }

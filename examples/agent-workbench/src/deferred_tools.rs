@@ -164,7 +164,7 @@ impl DeferredGrantStore {
 
 #[derive(Debug, thiserror::Error)]
 enum GrantStoreError {
-    #[error("deferred-tool grant database lock is poisoned")]
+    #[error("deferred-package database lock is poisoned")]
     Poisoned,
     #[error(transparent)]
     Sqlite(#[from] rusqlite::Error),

@@ -57,6 +57,7 @@ mod sim;
 mod matrix;
 
 use lash_protocol_types::{llm::types::StreamBlockEvent, llm::types::StreamBlockKind};
+
 use matrix::MatrixTestExt as _;
 
 use std::collections::BTreeMap;
@@ -64,11 +65,13 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use lash::tools::{StaticToolExecute, StaticToolProvider};
+use lash_core::LlmOutputPart;
+use lash_core::ToolCall;
+use lash_core::ToolCallId;
+use lash_core::ToolOutcome;
 use lash_core::facade_support::ProviderHandle;
 use lash_core::llm::types::{LlmRequest, LlmResponse, LlmStreamEvent, StreamBlockIdentity};
 use lash_core::runtime::durable::session::SessionActivation;
-use lash_core::{ExecutionPolicy, LlmOutputPart, ToolCall, ToolCallId, ToolOutcome};
-use lash_core_execution::ProcessId;
 use lash_core_execution::ToolCallOutput;
 use lash_core_execution::ToolCancellation;
 use lash_core_execution::runtime::actor::process::ProcessActivation;
@@ -101,8 +104,10 @@ use lash_execution_contracts::process::ProcessRecord;
 use lash_execution_contracts::process::ProcessRegistration;
 use lash_execution_contracts::process::StepRequest;
 use lash_execution_contracts::projection::NoProjectionProviders;
-use lash_protocol_types::SessionId;
 use lash_protocol_types::sync::MutexExt as _;
+use lash_vocabulary::identity::ProcessId;
+use lash_vocabulary::identity::SessionId;
+use lash_vocabulary::tool_contract::ExecutionPolicy;
 use serde_json::{Value, json};
 
 use dialect::Dialect;
@@ -236,7 +241,7 @@ struct ExternalWorld {
     redeployed: std::sync::atomic::AtomicBool,
     /// The format of the execution binding the resolver's grant carries:
     /// none when it carries none.
-    binding: Mutex<Option<lash_core::FormatVersion>>,
+    binding: Mutex<Option<lash_vocabulary::providers::FormatVersion>>,
     /// How many `ext_slow` bodies were told of their call's cancel.
     cancelled: std::sync::atomic::AtomicUsize,
 }
@@ -296,7 +301,11 @@ impl StaticToolExecute for ExtTools {
     }
 }
 
-fn definition(name: &str, policy: ExecutionPolicy, output: Value) -> lash_core::ToolDefinition {
+fn definition(
+    name: &str,
+    policy: ExecutionPolicy,
+    output: Value,
+) -> lash_vocabulary::tool_contract::ToolDefinition {
     definition_at(name, &format!("tools.{name}"), policy, output)
 }
 
@@ -306,8 +315,8 @@ fn definition_at(
     operation: &str,
     policy: ExecutionPolicy,
     output: Value,
-) -> lash_core::ToolDefinition {
-    lash_core::ToolDefinition::raw(
+) -> lash_vocabulary::tool_contract::ToolDefinition {
+    lash_vocabulary::tool_contract::ToolDefinition::raw(
         name,
         operation,
         "A host call the cell restore laws watch.",
@@ -325,7 +334,7 @@ fn definition_at(
 
 /// The definition the resolver grants for `tools.ext_granted`, or the one
 /// a redeployed catalog binds there.
-fn granted(name: &str) -> lash_core::ToolDefinition {
+fn granted(name: &str) -> lash_vocabulary::tool_contract::ToolDefinition {
     definition_at(
         name,
         &format!("tools.{GRANTED}"),
@@ -347,7 +356,7 @@ impl lash_core::ToolProvider for DeferredTools {
         &self,
         config: &lash_core::OwnerConfigView,
     ) -> std::result::Result<
-        Vec<lash_core::ToolManifest>,
+        Vec<lash_vocabulary::tool_contract::ToolManifest>,
         lash_execution_contracts::plugin_error::PluginError,
     > {
         Ok({
@@ -365,9 +374,9 @@ impl lash_core::ToolProvider for DeferredTools {
 
     fn resolve_manifest_by_id(
         &self,
-        id: &lash_core::ToolId,
+        id: &lash_vocabulary::tool_contract::ToolId,
         config: &lash_core::OwnerConfigView,
-    ) -> Option<lash_core::ToolManifest> {
+    ) -> Option<lash_vocabulary::tool_contract::ToolManifest> {
         [GRANTED, AMBIENT]
             .into_iter()
             .map(granted)
@@ -380,7 +389,7 @@ impl lash_core::ToolProvider for DeferredTools {
         &self,
         name: &str,
         config: &lash_core::OwnerConfigView,
-    ) -> Option<Arc<lash_core::ToolContract>> {
+    ) -> Option<Arc<lash_vocabulary::tool_contract::ToolContract>> {
         if name == format!("tools.{GRANTED}") {
             return Some(Arc::new(granted(GRANTED).contract()));
         }
@@ -389,12 +398,12 @@ impl lash_core::ToolProvider for DeferredTools {
 
     /// It reads its bindings in formats 1 and 2: a grant in format 1 is an
     /// older format it still reads.
-    fn readable_binding_formats(&self) -> &'static [lash_core::FormatVersion] {
-        const READS: [lash_core::FormatVersion; 2] = [
-            lash_core::FormatVersion::ONE,
-            match lash_core::FormatVersion::new(2) {
+    fn readable_binding_formats(&self) -> &'static [lash_vocabulary::providers::FormatVersion] {
+        const READS: [lash_vocabulary::providers::FormatVersion; 2] = [
+            lash_vocabulary::providers::FormatVersion::ONE,
+            match lash_vocabulary::providers::FormatVersion::new(2) {
                 Some(format) => format,
-                None => lash_core::FormatVersion::ONE,
+                None => lash_vocabulary::providers::FormatVersion::ONE,
             },
         ];
         &READS
@@ -422,7 +431,7 @@ struct GrantingResolver {
 /// the run its send opened.
 #[derive(Default)]
 struct CancelTarget {
-    turn: Mutex<Option<(Backend, lash::TurnId)>>,
+    turn: Mutex<Option<(Backend, lash_vocabulary::identity::TurnId)>>,
 }
 
 impl CancelTarget {
@@ -455,7 +464,7 @@ impl lash_core::ToolProvider for GrantingResolver {
         &self,
         _config: &lash_core::OwnerConfigView,
     ) -> std::result::Result<
-        Vec<lash_core::ToolManifest>,
+        Vec<lash_vocabulary::tool_contract::ToolManifest>,
         lash_execution_contracts::plugin_error::PluginError,
     > {
         Ok(Vec::new())
@@ -465,7 +474,7 @@ impl lash_core::ToolProvider for GrantingResolver {
         &self,
         _name: &str,
         _config: &lash_core::OwnerConfigView,
-    ) -> Option<Arc<lash_core::ToolContract>> {
+    ) -> Option<Arc<lash_vocabulary::tool_contract::ToolContract>> {
         None
     }
 
@@ -494,7 +503,7 @@ impl lash::tools::DeferredToolProvider for GrantingResolver {
             .redeployed
             .load(std::sync::atomic::Ordering::SeqCst);
         let codec = lash::plugins::ToolProviderHandle::new(
-            lash::plugins::RegistryKind::Session,
+            lash_vocabulary::claims::RegistryKind::Session,
             "tools",
             lash::tool_provider_key!("tools"),
         );
@@ -629,12 +638,39 @@ impl ProcessEngine for SleepEngine {
         lash_execution_contracts::process::ProcessTraceClass::Internal
     }
 
-    async fn performed_effects(
+    async fn inspect_link(
+        &self,
+        link: lash_vocabulary::LinkId,
+        selector: &lash_execution_contracts::process::linking::ReachSelector,
+    ) -> Result<
+        lash_execution_contracts::process::linking::LinkInspection,
+        lash_execution_contracts::process::linking::EnginePortError,
+    > {
+        Ok(lash_execution_contracts::process::linking::LinkInspection {
+            link,
+            document: lash_vocabulary::DocumentId::from_bytes([0; 32]),
+            selector: selector.clone(),
+            operations: Default::default(),
+            machine: Default::default(),
+            artifacts: Vec::new(),
+            signature: None,
+        })
+    }
+    async fn inspect_start(
         &self,
         _payload: &serde_json::Value,
-    ) -> Result<lash_execution_contracts::process::PerformedEffects, lash_core::ProcessEnvRefusal>
-    {
-        Ok(lash_execution_contracts::process::PerformedEffects::new())
+    ) -> Result<
+        lash_execution_contracts::process::linking::LinkInspection,
+        lash_execution_contracts::process::linking::EnginePortError,
+    > {
+        Err(
+            lash_execution_contracts::process::linking::EnginePortError::Unsupported {
+                operation: "generic fixture has no linked code".into(),
+            },
+        )
+    }
+    fn capabilities(&self) -> lash_vocabulary::claims::NodeRequirements {
+        Default::default()
     }
 
     async fn check_args(
@@ -793,6 +829,7 @@ impl ProcessSteps for NoSteps {
         _runtime: &Arc<lash_core_execution::runtime::process::StepRuntime>,
         _process: &ProcessRecord,
         step: &StepRequest,
+        _target: Option<&lash_core_execution::runtime::process::steps::InvocationTarget>,
         _now_ms: u64,
     ) -> Result<StepAdmission, StepRefusal> {
         Err(StepRefusal::UnknownTool {
@@ -840,7 +877,7 @@ struct CellTurn {
     core: Mutex<Option<lash::LashCore>>,
     keep: Mutex<Vec<Box<dyn std::any::Any + Send>>>,
     /// The run the host's send opened.
-    run: Mutex<Option<lash::TurnId>>,
+    run: Mutex<Option<lash_vocabulary::identity::TurnId>>,
     /// Whether the run is held to [`Self::ends_once_laws`].
     ends_once: bool,
     /// The turn a [`Cell::CancelledBeforeSave`] resolution cancels.
@@ -944,7 +981,7 @@ impl CellTurn {
                     .plugin(Arc::new(
                         lash::process_controls::SessionProcessAdminPluginFactory::new(
                             lash_execution_contracts::process::lifetime::session_or_starter,
-                            lash_core::runtime::env_policy::policy::from_run(|_| Ok(Vec::new())),
+                            lash::process::env::policy::from_run(|_| Ok(Vec::new())),
                         ),
                     ))
                     .build(lash::persistence::LeaseOwnerIdentity::opaque(
@@ -1379,6 +1416,18 @@ impl Scenario for CellTurn {
             Cell::CancelledBeforeSave => self.cancelled_before_save_laws(nodes).await,
             Cell::LongStretch => self.held_past_its_slice_laws(nodes).await,
         };
+        match self
+            .backend()
+            .stores()
+            .execution_resolutions()
+            .requirements(&actor())
+            .await
+        {
+            Ok(requirements) if requirements.is_empty() => {}
+            other => violations.push(format!(
+                "a terminal turn retains cell execution claim debt: {other:?}"
+            )),
+        }
         if self.ends_once {
             violations.extend(self.ends_once_laws(nodes).await);
         }
@@ -1658,7 +1707,7 @@ async fn sleep_across_a_crash(dialect: Dialect, postgres_url: Option<String>) {
 async fn deferred_grant_across_a_crash(dialect: Dialect, postgres_url: Option<String>) {
     use std::sync::atomic::Ordering;
     let turn = CellTurn::new(Cell::Deferred, dialect, postgres_url);
-    *turn.world.binding.lock_recover() = Some(lash_core::FormatVersion::ONE);
+    *turn.world.binding.lock_recover() = Some(lash_vocabulary::providers::FormatVersion::ONE);
     let (clock, database, nodes) = simulated(&turn).await;
     turn.send().await.expect("the turn is sent");
     nodes.start("a");
@@ -1764,7 +1813,7 @@ async fn deferred_grant_across_a_crash(dialect: Dialect, postgres_url: Option<St
 /// to it is admitted, and the codec version its binding is in.
 async fn a_parked_cells_committed_match_is_required(dialect: Dialect) {
     let turn = CellTurn::new(Cell::Deferred, dialect, None);
-    *turn.world.binding.lock_recover() = Some(lash_core::FormatVersion::ONE);
+    *turn.world.binding.lock_recover() = Some(lash_vocabulary::providers::FormatVersion::ONE);
     let (clock, database, nodes) = simulated(&turn).await;
     let written = Arc::new(Mutex::new(None::<Vec<String>>));
     nodes.script().observe_commits({
@@ -1810,10 +1859,10 @@ async fn a_parked_cells_committed_match_is_required(dialect: Dialect) {
         granted_call, 1,
         "the granted call ran once before the sleep"
     );
-    let matched = lash_core::ObligationToken::for_callback(
-        lash_core::RegistryKind::Session,
+    let matched = lash_vocabulary::claims::ObligationToken::for_callback(
+        lash_vocabulary::claims::RegistryKind::Session,
         &lash::plugins::ToolProviderHandle::new(
-            lash::plugins::RegistryKind::Session,
+            lash_vocabulary::claims::RegistryKind::Session,
             "tools",
             lash::tool_provider_key!("tools"),
         )
@@ -1894,7 +1943,7 @@ async fn a_parked_cells_committed_match_is_required(dialect: Dialect) {
 /// reads, runs: [`deferred_grant_across_a_crash`].)
 async fn an_unreadable_binding_parks_before_its_provider_reads_it(dialect: Dialect) {
     let turn = CellTurn::new(Cell::Deferred, dialect, None);
-    *turn.world.binding.lock_recover() = lash_core::FormatVersion::new(3);
+    *turn.world.binding.lock_recover() = lash_vocabulary::providers::FormatVersion::new(3);
     let (clock, database, nodes) = simulated(&turn).await;
     turn.send().await.expect("the turn is sent");
     nodes.start("a");

@@ -72,10 +72,14 @@ use lash_durable_test::{
 use lash_execution_contracts::backend::Backend;
 use lash_execution_contracts::waits::ParkDeadline;
 use lash_execution_contracts::waits::WaitDeadline;
+use lash_protocol_types::ExecutionLimit;
+use lash_protocol_types::ToolCallId;
 use lash_protocol_types::sync::MutexExt as _;
-use lash_protocol_types::{
-    ExecutionLimit, ExecutionPolicy, LimitCause, SessionId, ToolCallId, ToolId, TurnId,
-};
+use lash_vocabulary::identity::SessionId;
+use lash_vocabulary::identity::TurnId;
+use lash_vocabulary::tool_contract::ExecutionPolicy;
+use lash_vocabulary::tool_contract::LimitCause;
+use lash_vocabulary::tool_contract::ToolId;
 use tokio_util::sync::CancellationToken;
 
 const FORMATS: &str = "l4";
@@ -110,6 +114,7 @@ fn call(name: &str) -> ToolCallId {
 struct ExternalWorld {
     writes: Mutex<BTreeMap<ToolCallId, Vec<u32>>>,
     keys: Mutex<BTreeMap<ToolCallId, Vec<String>>>,
+    timers: Mutex<BTreeMap<ToolCallId, Vec<i64>>>,
 }
 
 impl ExternalWorld {
@@ -215,6 +220,8 @@ enum Tool {
     /// A write that parks on its completion wait: it hands the wait's key
     /// to the outside world, which resolves it `after` milliseconds later.
     Defer { repeatable: bool },
+    /// Ordinary Pending operation; the lifecycle owns the durable timer.
+    Timer { after: i64 },
 }
 
 impl Tool {
@@ -224,6 +231,7 @@ impl Tool {
             Self::Flaky => "flaky",
             Self::Failing => "failing",
             Self::Quick => "quick",
+            Self::Timer { .. } => "timer",
             Self::Defer { repeatable: false } => "defer",
             Self::Defer { repeatable: true } => "defer-repeatable",
         })
@@ -231,7 +239,9 @@ impl Tool {
 
     fn policy(self) -> ExecutionPolicy {
         match self {
-            Self::Write { .. } | Self::Defer { repeatable: false } => ExecutionPolicy::Once,
+            Self::Write { .. } | Self::Defer { repeatable: false } | Self::Timer { .. } => {
+                ExecutionPolicy::Once
+            }
             Self::Flaky | Self::Failing | Self::Quick | Self::Defer { repeatable: true } => {
                 ExecutionPolicy::repeatable(NonZeroU32::new(3).unwrap(), 100, 1_000)
             }
@@ -240,7 +250,7 @@ impl Tool {
 
     /// Whether it may park.
     fn defers(self) -> bool {
-        matches!(self, Self::Defer { .. })
+        matches!(self, Self::Defer { .. } | Self::Timer { .. })
     }
 }
 
@@ -310,7 +320,9 @@ impl MemberBodies for Catalog {
                 }
                 world.write(&call, attempt);
                 let fails = match tool {
-                    Tool::Write { .. } | Tool::Quick | Tool::Defer { .. } => false,
+                    Tool::Write { .. } | Tool::Quick | Tool::Defer { .. } | Tool::Timer { .. } => {
+                        false
+                    }
                     Tool::Flaky => attempt == 1,
                     Tool::Failing => true,
                 };
@@ -341,24 +353,42 @@ impl Catalog {
             .draft()
             .pinned_wait()
             .expect("a member that may park has its completion wait pinned");
+        let timer = match self.tools[&call] {
+            Tool::Timer { after } => Some(lash_durable::DurableInstant(
+                execution.draft().admitted_at().0.saturating_add(after),
+            )),
+            _ => None,
+        };
         let key = waits::host_key(&pinned.wait()).expect("a tool completion wait has a host key");
         Box::new(move |_token| {
             Box::pin(async move {
                 world.write(&call, attempt);
                 world.hand_out(&call, key.as_str());
-                let answer = host_answer(&call);
-                tokio::spawn(async move {
-                    lash_core_ids::clock::Clock::sleep(
-                        &*clock,
-                        Duration::from_millis(RESOLVE_AFTER_MS),
-                    )
-                    .await;
-                    let _ =
-                        waits::resolve_host(&backend, key.as_str(), Resolution::Ok(answer)).await;
-                });
-                MemberOutcome::from(SettledOutput::Waiting(
-                    output("parked".to_owned()).parked(pinned.id.to_hex()),
-                ))
+                if let Some(deadline) = timer {
+                    world
+                        .timers
+                        .lock_recover()
+                        .entry(call.clone())
+                        .or_default()
+                        .push(deadline.0);
+                } else {
+                    let answer = host_answer(&call);
+                    tokio::spawn(async move {
+                        lash_core_ids::clock::Clock::sleep(
+                            &*clock,
+                            Duration::from_millis(RESOLVE_AFTER_MS),
+                        )
+                        .await;
+                        let _ = waits::resolve_host(&backend, key.as_str(), Resolution::Ok(answer))
+                            .await;
+                    });
+                }
+                MemberOutcome {
+                    timer,
+                    ..MemberOutcome::from(SettledOutput::Waiting(
+                        output("parked".to_owned()).parked(pinned.id.to_hex()),
+                    ))
+                }
             })
         })
     }
@@ -371,6 +401,7 @@ struct RoundOwner {
     limit_ms: u64,
     /// The turn's cancel, fired this long after the round starts running.
     cancel_after_ms: Option<u64>,
+    cancel_on_timeout: Option<CancellationToken>,
     bodies: Arc<Catalog>,
     tripwire: Arc<Tripwire>,
     presentations: Arc<Mutex<Vec<round::Presentation>>>,
@@ -411,6 +442,7 @@ impl RoundOwner {
                         Duration::from_millis(self.limit_ms),
                     );
                     ExecutionDraft::new(
+                        lash_durable::DurableInstant(i64::try_from(now).unwrap()),
                         member.call.clone(),
                         member.tool.id(),
                         material(member.call.as_str()),
@@ -442,18 +474,24 @@ impl RoundOwner {
                 .map_err(Pass::from)?;
             RoundRunner::admitted(cx, &admitted, self.policies(), bodies).unwrap()
         };
-        let runner = match self.cancel_after_ms {
-            Some(after) => {
-                let cancel = CancellationToken::new();
-                let fire = cancel.clone();
-                let clock = Arc::clone(cx.clock());
-                tokio::spawn(async move {
-                    clock.sleep(Duration::from_millis(after)).await;
-                    fire.cancel();
-                });
-                runner.cancelled_by(cancel)
+        let runner = if let Some(cancel) = &self.cancel_on_timeout {
+            runner.cancelled_by(cancel.clone())
+        } else {
+            match self.cancel_after_ms {
+                Some(after) => {
+                    let cancel = CancellationToken::new();
+                    let fire = cancel.clone();
+                    let clock = Arc::clone(cx.clock());
+                    let deadline = self.bodies.clock.logical_ms() + after;
+                    tokio::spawn(async move {
+                        clock.sleep(Duration::from_millis(after)).await;
+                        fire.cancel();
+                    });
+                    self.bodies.clock.wait_for_sleep(deadline).await;
+                    runner.cancelled_by(cancel)
+                }
+                None => runner,
             }
-            None => runner,
         };
         let end = match runner.run().await.map_err(Pass::from)? {
             RoundEnd::Settled(end) => end,
@@ -557,6 +595,7 @@ struct RoundScenario {
     members: Vec<Member>,
     limit_ms: u64,
     cancel_after_ms: Option<u64>,
+    cancel_on_timeout: CancellationToken,
     world: Arc<ExternalWorld>,
     tripwire: Arc<Tripwire>,
     backend: Mutex<Option<(Backend, Arc<SimClock>)>>,
@@ -574,6 +613,7 @@ impl RoundScenario {
             members,
             limit_ms: 60_000,
             cancel_after_ms: None,
+            cancel_on_timeout: CancellationToken::new(),
             world: Arc::default(),
             tripwire: Arc::default(),
             backend: Mutex::default(),
@@ -586,6 +626,14 @@ impl RoundScenario {
     fn limit_ms(mut self, limit_ms: u64) -> Self {
         self.limit_ms = limit_ms;
         self
+    }
+
+    fn cancels_on_timeout(&self) -> bool {
+        self.cancel_after_ms.is_some_and(|after| {
+            self.members.iter().any(|member| {
+                matches!(member.tool, Tool::Timer { after: timer } if u64::try_from(timer).ok() == Some(after))
+            })
+        })
     }
 }
 
@@ -618,6 +666,9 @@ impl Scenario for RoundScenario {
             members: self.members.clone(),
             limit_ms: self.limit_ms,
             cancel_after_ms: self.cancel_after_ms,
+            cancel_on_timeout: self
+                .cancels_on_timeout()
+                .then(|| self.cancel_on_timeout.clone()),
             bodies: Arc::new(Catalog {
                 world: Arc::clone(&self.world),
                 tools: self
@@ -634,6 +685,17 @@ impl Scenario for RoundScenario {
     }
 
     async fn start(&self, nodes: &Arc<SimNodes>) -> Result<(), String> {
+        // At an equal deadline, order cancellation at the timeout's actual
+        // store boundary. Two independent clock sleepers otherwise discover
+        // different cut censuses depending on which select arm Tokio polls.
+        if self.cancels_on_timeout() {
+            let cancel = self.cancel_on_timeout.clone();
+            nodes.script().observe_commits(Arc::new(move |label, _| {
+                if label == CommitLabel::WAIT_TIMEOUT {
+                    cancel.cancel();
+                }
+            }));
+        }
         let mut seed = MailTx::new();
         seed.create_actor(actor(), FormatSet::new(FORMATS));
         nodes
@@ -884,6 +946,31 @@ fn round_laws(
                     other => violations.push(format!(
                         "Pending: {call} settled {other:?} after writing {writes:?}"
                     )),
+                }
+            }
+            Tool::Timer { after } => {
+                if entries > 1 || writes.len() > 1 || view_member.starts().len() != 1 {
+                    violations.push(format!(
+                        "TIMER-COLD: {call} repeated a committed pending body"
+                    ));
+                }
+                let expected = view_member.draft().admitted_at().0.saturating_add(after);
+                if world
+                    .timers
+                    .lock_recover()
+                    .get(call)
+                    .is_some_and(|deadlines| deadlines.iter().any(|deadline| *deadline != expected))
+                {
+                    violations.push(format!(
+                        "TIMER-COLD: {call} refreshed its admitted deadline"
+                    ));
+                }
+                match outcome {
+                    SettledOutput::Completed(answer)
+                        if !writes.is_empty() && answer.payload() == "null" => {}
+                    SettledOutput::Interrupted => {}
+                    SettledOutput::Cancelled { .. } if cancelled => {}
+                    other => violations.push(format!("TIMER-COLD: {call} settled {other:?}")),
                 }
             }
             Tool::Quick => {
@@ -1305,6 +1392,7 @@ async fn settled_payload_reuse() {
     let drafts = (0..18)
         .map(|index| {
             ExecutionDraft::new(
+                tx.opened_at(),
                 call(&format!("branch-{index}")),
                 ToolId::new("fixture_large"),
                 material("request"),
@@ -1477,4 +1565,44 @@ async fn settled_payload_reuse() {
         records.fold(&policies, &waits).is_err(),
         "a conflicting node must be checked again"
     );
+}
+
+/// TIMER-COLD: an ordinary pending timer commits its wait with the park;
+/// every crash/drop cut recovers the same admission/deadline, and cancellation
+/// and timer settlement commit a single final outcome without reentering the body.
+#[tokio::test]
+async fn an_ordinary_pending_timer_recovers_its_original_deadline_across_every_cut() {
+    for cancel_after_ms in [None, Some(10), Some(20)] {
+        let settled: Arc<Mutex<Vec<SettledOutput>>> = Arc::default();
+        let shared = Arc::clone(&settled);
+        let report = matrix()
+            .run_test(move || {
+                let mut scenario = RoundScenario::new(vec![Member {
+                    call: call("ordinary-timer"),
+                    tool: Tool::Timer { after: 20 },
+                }]);
+                scenario.cancel_after_ms = cancel_after_ms;
+                scenario.settled = Arc::clone(&shared);
+                scenario
+            })
+            .await;
+        report.assert_held();
+        assert!(report.labels().contains(&CommitLabel::ROUND_OUTCOME));
+        let outcomes = settled.lock_recover();
+        if cancel_after_ms.is_none() {
+            assert!(
+                outcomes
+                    .iter()
+                    .any(|outcome| matches!(outcome, SettledOutput::Completed(_))),
+                "the durable timer never resolved on cold recovery"
+            );
+        } else {
+            assert!(
+                outcomes
+                    .iter()
+                    .any(|outcome| matches!(outcome, SettledOutput::Cancelled { .. })),
+                "cancellation never raced the durable timer"
+            );
+        }
+    }
 }

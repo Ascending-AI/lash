@@ -3,7 +3,7 @@
   "cases": [
     {
       "name": "map reads key before value and before next entry",
-      "document": "kernel 1\nnumbers by_spelling\n\nmain {\nfinish map{clock: clock, clock: clock}\n}\n",
+      "document": "kernel 1\nnumbers by_spelling\nimport 0 operation host.clock() -> Timestamp\nmain {\n  finish map{perform 0() as Timestamp: perform 0() as Timestamp, perform 0() as Timestamp: perform 0() as Timestamp}\n}\n",
       "expected": {
         "prints": [],
         "end": {
@@ -33,17 +33,52 @@
       "environment": {
         "host": [
           {
-            "clock": "1"
+            "perform": {
+              "effect": "host.clock",
+              "args": [],
+              "answer": {
+                "Ok": {
+                  "timestamp": "1"
+                }
+              }
+            }
           },
           {
-            "clock": "2"
+            "perform": {
+              "effect": "host.clock",
+              "args": [],
+              "answer": {
+                "Ok": {
+                  "timestamp": "2"
+                }
+              }
+            }
           },
           {
-            "clock": "3"
+            "perform": {
+              "effect": "host.clock",
+              "args": [],
+              "answer": {
+                "Ok": {
+                  "timestamp": "3"
+                }
+              }
+            }
           },
           {
-            "clock": "4"
+            "perform": {
+              "effect": "host.clock",
+              "args": [],
+              "answer": {
+                "Ok": {
+                  "timestamp": "4"
+                }
+              }
+            }
           }
+        ],
+        "reads": [
+          "host.clock"
         ]
       }
     }

@@ -4,6 +4,7 @@
 use std::cmp::Ordering;
 
 use lash_kernel_doc::{Args, Float, Integer, NativeError, Nursery, Value};
+
 use num_bigint::{BigInt, BigUint, Sign};
 use num_traits::{FromPrimitive, One, ToPrimitive, Zero};
 
@@ -248,6 +249,7 @@ pub(crate) fn number_cmp(
 #[cfg(test)]
 mod tests {
     use lash_kernel_doc::{Float, Integer};
+
     use num_bigint::BigInt;
     use num_traits::FromPrimitive;
 

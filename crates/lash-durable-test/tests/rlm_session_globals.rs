@@ -14,7 +14,7 @@
 //! lowers to the same generated slot), root rebinding, member assignment, a
 //! saved function with a frozen capture of a shadowed block binding called
 //! after its block ends and after a restart, a process handle,
-//! a projected host binding, a deferred tool binding's result, and a
+//! a projected host binding, a deferred operation binding's result, and a
 //! loop-carried global.
 //!
 //! Multi-turn reads preserve all prior nested records, on one worker and
@@ -49,7 +49,7 @@ fn builder(backend: &lash::Backend) -> lash::LashCoreBuilder {
     .plugin(Arc::new(
         lash::process_controls::SessionProcessAdminPluginFactory::new(
             lash_execution_contracts::process::lifetime::starter,
-            lash_core::runtime::env_policy::policy::from_run(|_| Ok(Vec::new())),
+            lash::process::env::policy::from_run(|_| Ok(Vec::new())),
         ),
     ))
     .tools(lash::tool_provider_key!("tools"), Arc::new(Fetch))
@@ -105,7 +105,10 @@ fn bound_names(request: &str) -> BTreeSet<String> {
 async fn session(world: &World) -> lash::DurableSession {
     world
         .core
-        .session(lash::SessionId::try_from(SESSION.to_owned()).expect("a session id"))
+        .session(
+            lash_vocabulary::identity::SessionId::try_from(SESSION.to_owned())
+                .expect("a session id"),
+        )
         .durable()
         .await
         .expect("the session is open on the serving node")
@@ -172,7 +175,10 @@ async fn session_globals_survive_cells_and_reload_and_private_slots_never_do(tie
     world.session(SESSION, served::spec(64)).await;
     let live = world
         .core
-        .session(lash::SessionId::try_from(SESSION.to_owned()).expect("a session id"))
+        .session(
+            lash_vocabulary::identity::SessionId::try_from(SESSION.to_owned())
+                .expect("a session id"),
+        )
         .open()
         .await
         .expect("the session opens");
@@ -314,7 +320,7 @@ async fn durable_execution_state(
 ) -> Option<lash_core::plugin::HydratedExecutionGraph> {
     let view = lash_core_execution::store::SessionStore::new(
         world.backend.stores().session_store_factory(),
-        lash::SessionId::try_from(SESSION.to_owned()).expect("a session id"),
+        lash_vocabulary::identity::SessionId::try_from(SESSION.to_owned()).expect("a session id"),
     )
     .expect("the session's store");
     lash_core_execution::store::load_session_window_state(
@@ -350,7 +356,10 @@ async fn rlm_message_append_keeps_the_committed_execution(tier: Tier) {
 
     let live = world
         .core
-        .session(lash::SessionId::try_from(SESSION.to_owned()).expect("a session id"))
+        .session(
+            lash_vocabulary::identity::SessionId::try_from(SESSION.to_owned())
+                .expect("a session id"),
+        )
         .open()
         .await
         .expect("the session opens");
@@ -444,7 +453,7 @@ fn page_builder(
     backend: &lash::Backend,
     workers: lash::vm::WorkerService,
 ) -> lash::LashCoreBuilder {
-    let definition = lash_core::ToolDefinition::raw(
+    let definition = lash_vocabulary::tool_contract::ToolDefinition::raw(
         RECORDS,
         RECORDS_OPERATION,
         "Answers the nested records of a turn.",
@@ -489,7 +498,10 @@ async fn page_turn(world: &World, turn: usize) {
     world.script(&name, vec![served::cell(&page_cell(turn))]);
     let session = world
         .core
-        .session(lash::SessionId::try_from(PAGES_SESSION.to_owned()).expect("a session id"))
+        .session(
+            lash_vocabulary::identity::SessionId::try_from(PAGES_SESSION.to_owned())
+                .expect("a session id"),
+        )
         .durable()
         .await
         .expect("the session is open on the serving node");

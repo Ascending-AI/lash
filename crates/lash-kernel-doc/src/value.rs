@@ -12,8 +12,11 @@ use std::sync::Arc;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::name::{Name, parse_hex, string_schema, write_hex};
 use crate::number::{Float, Integer, NumberToken};
+
+use lash_vocabulary::names::parse_hex;
+use lash_vocabulary::names::string_schema;
+use lash_vocabulary::names::write_hex;
 
 /// A task's handle within one run. `main` is task 0 and every `spawn` takes
 /// the next number (`K-TASK-002`).
@@ -154,7 +157,7 @@ pub enum Datum {
     Set(Vec<Datum>),
     Record(Vec<(String, Datum)>),
     Error(Box<ErrorDatum>),
-    Function(Name),
+    Function(lash_vocabulary::names::CallableId),
     Handle(Handle),
     /// A function a run handed to a tool, frozen as a self-contained
     /// document (`K-EFF-002`). It only leaves a run: it is immutable

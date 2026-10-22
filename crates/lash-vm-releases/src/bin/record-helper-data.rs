@@ -9,7 +9,7 @@
 
 use std::path::PathBuf;
 
-use lash_vm_releases::{BuiltPackage, PACKAGES, PYTHON, TYPESCRIPT, package};
+use lash_vm_releases::{BuiltPackage, PACKAGES, PYTHON, TYPESCRIPT, helper_release, package};
 
 #[path = "../helper_classes.rs"]
 mod helper_classes;

@@ -147,7 +147,7 @@ pub(super) struct LocalDirectEffectRunner {
     response: lash_protocol_types::llm::types::ResponseContext,
     deliveries: Arc<dyn lash_core_llm::provider::SlotDeliveries>,
     /// Who the call spends for (ADR 0127).
-    owner: crate::RuntimeOwner,
+    owner: lash_vocabulary::identity::RuntimeOwner,
     /// The request is the body's own work, so its records are made inside
     /// the body and a replay that serves the recorded completion makes none.
     tracing: crate::trace::TraceRuntime,
@@ -696,7 +696,7 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
         binding: crate::LlmProfileBinding,
         charge_safety: crate::ChargeSafetyPolicy,
         budgets: crate::ExecutionBudgets,
-        owner: crate::RuntimeOwner,
+        owner: lash_vocabulary::identity::RuntimeOwner,
         tracing: crate::trace::TraceRuntime,
         replay_trace: Option<super::RuntimeEffectReplayTrace>,
     ) -> Self {
@@ -762,7 +762,7 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
     /// Exposes structured replay-comparison evidence to effect-host and conformance implementors,
     /// returning `None` when the runtime has no configured trace sink.
     /// Marks this executor's effect as served only from the journal: it
-    /// belongs to a replayed command whose tool binding drifted, and running
+    /// belongs to a replayed command whose operation binding drifted, and running
     /// it live would reach the drifted tool (FIG-3587, FIG-3719).
     pub(crate) fn serving_only_from_journal(
         mut self,

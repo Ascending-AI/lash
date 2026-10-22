@@ -34,8 +34,8 @@ use std::sync::{Arc, Mutex as StdMutex};
 use futures_util::FutureExt as _;
 use futures_util::future::{BoxFuture, Shared as SharedFuture};
 use lash_core::{LiveReplayStoreError, SessionObservationEvent};
-use lash_protocol_types::SessionId;
 use lash_protocol_types::sync::MutexExt as _;
+use lash_vocabulary::identity::SessionId;
 
 use super::subscription::Read;
 

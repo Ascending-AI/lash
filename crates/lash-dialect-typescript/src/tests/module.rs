@@ -7,18 +7,14 @@ use std::collections::BTreeMap;
 
 use lash_kernel_dialect::workflow::ModuleRefusal;
 use lash_kernel_dialect::{Environment, Lowered, Mode};
-use lash_kernel_doc::{EffectName, Name, Param, RecordType, RecordTypeField, Signature, Type};
+use lash_vocabulary::{EffectName, Name, Param, RecordType, RecordTypeField, Signature, Type};
 
 use crate::DiagnosticCode;
 
 fn module(source: &str) -> Result<Lowered, crate::Diagnostic> {
     let effects = super::machine::effects();
-    let environment_namespaces = lash_kernel_dialect::Namespaces::of_effects(
-        &effects,
-        &lash_kernel_doc::ContractId::new("1"),
-        super::controls(),
-    )
-    .expect("the test's effects are operations");
+    let environment_namespaces = crate::tests::linked::namespaces(&effects, super::controls())
+        .expect("the test's effects are operations");
     let environment = Environment::new(super::library(), &environment_namespaces);
     let lowered = crate::lower(source, &environment, Mode::Module)?;
     lash_kernel_doc::validate_document(&lowered.document, super::library())
@@ -36,9 +32,12 @@ fn entries(source: &str) -> BTreeMap<Name, Signature> {
     module(source)
         .unwrap_or_else(|diagnostic| panic!("{diagnostic}\n{source}"))
         .document
-        .entries
+        .exports
         .iter()
-        .map(|(name, entry)| (name.clone(), entry.signature.clone()))
+        .filter_map(|(name, export)| match export {
+            lash_kernel_doc::Export::Function(f) => Some((name.clone(), f.signature.clone())),
+            _ => None,
+        })
         .collect()
 }
 
@@ -50,12 +49,8 @@ fn filtering_records_then_mapping_the_result_admits() {
         .get_mut(&EffectName::new("host.echo").unwrap())
         .unwrap()
         .result = Type::List(Box::new(Type::Any));
-    let environment_namespaces = lash_kernel_dialect::Namespaces::of_effects(
-        &effects,
-        &lash_kernel_doc::ContractId::new("1"),
-        super::controls(),
-    )
-    .expect("the test's effects are operations");
+    let environment_namespaces = crate::tests::linked::namespaces(&effects, super::controls())
+        .expect("the test's effects are operations");
     let environment = Environment::new(super::library(), &environment_namespaces);
     let lowered = crate::lower(
         r#"
@@ -154,11 +149,11 @@ export async function digest(
     );
 }
 
-/// Every top-level async function is an entry, exported or not, by
-/// declaration or by `const`, arrow or function expression. One declared
-/// inside a block, or bound by `let`, is ordinary code of the module.
+/// Top-level function declarations and const functions are Exports, whether
+/// synchronous or async. Block locals and mutable bindings stay ordinary code;
+/// the Export retains the source's async flag for its settled public ABI.
 #[test]
-fn top_level_async_declarations_are_the_entries_and_block_local_ones_are_not() {
+fn top_level_function_exports_keep_async_flags_and_exclude_block_locals() {
     let source = r#"
 export async function declared() { return 1; }
 async function unexported() { return 2; }
@@ -171,9 +166,27 @@ if (reassignable) {
 }
 function helper() { return 7; }
 "#;
+    let lowered = module(source).unwrap();
+    let functions = lowered
+        .document
+        .exports
+        .iter()
+        .filter_map(|(name, export)| match export {
+            lash_kernel_doc::Export::Function(function) => {
+                Some((name.clone(), function.asynchronous))
+            }
+            _ => None,
+        })
+        .collect::<BTreeMap<_, _>>();
     assert_eq!(
-        entries(source).into_keys().collect::<Vec<_>>(),
-        ["arrow", "declared", "expression", "unexported"].map(Name::new)
+        functions,
+        BTreeMap::from([
+            (Name::new("arrow"), true),
+            (Name::new("declared"), true),
+            (Name::new("expression"), true),
+            (Name::new("helper"), false),
+            (Name::new("unexported"), true),
+        ])
     );
 }
 
@@ -190,6 +203,16 @@ fn process_wrapping_is_not_an_entry_form() {
 /// The contract's refusals, under the codes every dialect shares.
 #[test]
 fn the_contract_refuses_under_the_shared_codes() {
+    // FIG-7135: a code-only module still has no host-startable entry.
+    for source in ["const value = 3;", ""] {
+        let diagnostic = module(source).expect_err("a module must declare an entry");
+        assert_eq!(diagnostic.code.as_str(), "WORKFLOW_EMPTY_MODULE");
+        assert_eq!(diagnostic.span, None);
+        assert_eq!(
+            diagnostic.kind,
+            lash_kernel_dialect::DiagnosticKind::Refusal
+        );
+    }
     for (source, expected) in [
         (
             "export async function a() { return 1; }\nexport async function a() { return 2; }",
@@ -198,10 +221,6 @@ fn the_contract_refuses_under_the_shared_codes() {
         (
             "const a = async () => 1;\nexport async function a() { return 2; }",
             ModuleRefusal::DuplicateEntry,
-        ),
-        (
-            "const limit = 3;\nfunction helper() { return 1; }",
-            ModuleRefusal::EmptyModule,
         ),
         (
             "const limit = 3;\nexport async function a() { return limit; }",
@@ -274,7 +293,8 @@ fn entry_conventions_bind_source_arguments_and_normalize_absent() {
         ),
     ] {
         let document = module(source).unwrap().document.into_document();
-        let entry = &document.entries[&lash_kernel_doc::Name::new("run")];
+        let entry =
+            super::linked_inspection::exported(&document, &lash_vocabulary::Name::new("run"));
         assert_eq!(
             matches!(
                 entry.convention,
@@ -287,7 +307,12 @@ fn entry_conventions_bind_source_arguments_and_normalize_absent() {
             lash_kernel_doc::StartConvention::TsDirect { .. }
         ) {
             assert_eq!(
-                document.functions[&lash_kernel_doc::Name::new("run")].params,
+                document.functions[&entry.function]
+                    .signature
+                    .params
+                    .iter()
+                    .map(|param| param.name.clone())
+                    .collect::<Vec<_>>(),
                 entry
                     .signature
                     .params
@@ -330,4 +355,144 @@ fn an_async_return_adopts_a_promise_as_an_entry_and_as_a_nested_call() {
     let recorded = super::machine::run(&format!("{source} console.log(await run());"), &[]);
     assert_eq!(recorded.end, "ok");
     assert_eq!(recorded.lines(), ["7"]);
+}
+
+fn selected_operations(source: &str, entry: &str) -> Vec<String> {
+    let lowered = module(source).expect("reach witness lowers");
+    let (content, root) = super::linked::content(&lowered.document);
+    let reach = content
+        .inspect(
+            root,
+            &lash_kernel_package::ReachSelection::Function(lash_vocabulary::ExportName {
+                name: Name::new(entry),
+                member: None,
+            }),
+        )
+        .expect("selected Link reach");
+    reach
+        .operations
+        .values()
+        .map(|need| match need {
+            lash_kernel_package::OperationNeed::Fixed { name, .. }
+            | lash_kernel_package::OperationNeed::Deferred { name, .. } => {
+                format!("{}.{}", name.package, name.member)
+            }
+        })
+        .collect()
+}
+
+/// FIG-7136: numeric indexing cannot manufacture built-in callable members.
+/// The retained Link DAG may hold services that this Export does not reach.
+#[test]
+fn a_pure_indexed_factorial_reaches_no_read_imports() {
+    for source in [
+        r#"
+export function factorial(n: number): number {
+  const values = [1];
+  for (let i = 1; i <= n; i++) { values[i] = values[i - 1] * i; }
+  return values[n];
+}
+"#,
+        r#"
+export function factorial(n: number): number {
+  const values = {0: 1};
+  for (let i = 1; i <= n; i++) { values[i] = values[i - 1] * i; }
+  return values[n];
+}
+"#,
+    ] {
+        let operations = selected_operations(source, "factorial");
+        assert!(
+            operations.is_empty(),
+            "pure factorial reaches {operations:?}"
+        );
+        let cell = format!(
+            "{} await control.finish(factorial(6));",
+            source.replace("export ", "")
+        );
+        assert_eq!(
+            super::machine::end(&cell),
+            super::machine::Ended::Finished(lash_kernel_doc::Datum::Float(
+                lash_kernel_doc::Float::new(720.0)
+            )),
+        );
+    }
+}
+
+/// FIG-7136: a key that may name a service member must keep its operation
+/// in the selected reach, even before the function is called.
+#[test]
+fn computed_service_members_keep_their_read_imports() {
+    // The receiver comes from the caller. Spelling Date or Math here would
+    // introduce their callable tokens and could conceal a missing member edge.
+    let operations = selected_operations(
+        "export function read(receiver: any, key: string): any { return receiver[key](); }",
+        "read",
+    );
+    for operation in ["typescript.clock", "typescript.random"] {
+        assert!(
+            operations.iter().any(|name| name == operation),
+            "computed member lost {operation}: {operations:?}"
+        );
+    }
+}
+
+/// FIG-7136 and readable-first source: a numeric record read keeps an ordinary
+/// TypeScript spelling that re-lowers to the same cell document.
+#[test]
+fn numeric_indexing_exports_as_ordinary_typescript() {
+    let lowered = super::lower("const values = {0: 7}; const key = 0; values[key];").unwrap();
+    crate::print(
+        &lowered.document,
+        None,
+        super::library(),
+        Default::default(),
+    )
+    .expect("numeric indexing has a verified authored-source representation");
+}
+
+/// FIG-7109: the sleep duration conversion belongs to lowering, not source.
+#[test]
+fn sleep_prints_its_authored_duration_and_preserves_the_document() {
+    for source in [
+        "export async function demo(): Promise<string> { await sleep(5); return 'awake'; }",
+        "export async function demo(delay: number): Promise<string> { await sleep(delay); return 'awake'; }",
+    ] {
+        let lowered = module(source).unwrap();
+        let printed = crate::print(
+            &lowered.document,
+            Some(&lowered.captions),
+            super::library(),
+            Default::default(),
+        )
+        .expect("sleep has an exact authored inverse");
+        let (read, captions) = crate::read(
+            &printed.source,
+            &lowered.document,
+            super::library(),
+            Default::default(),
+        )
+        .unwrap();
+        assert_eq!(read.canonical_bytes(), lowered.document.canonical_bytes());
+        assert_eq!(captions.entries(), lowered.captions.entries());
+    }
+}
+
+/// FIG-7109: a failed callable lift is a fact about its exact code region.
+#[test]
+fn an_unprintable_export_refuses_with_its_callable_site() {
+    use lash_kernel_doc::{Export, StartConvention};
+    use lash_vocabulary::sites::{Site, Unit};
+    let lowered = module("export function hidden(): number { return 1; }").unwrap();
+    let mut document = lowered.document.document().clone();
+    let Export::Function(export) = document.exports.get_mut(&Name::new("hidden")).unwrap() else {
+        panic!("function export");
+    };
+    export.convention = StartConvention::Direct;
+    let site = Site::new(Unit::Library(export.function), Vec::new());
+    assert_eq!(
+        crate::print(&document, None, super::library(), Default::default()),
+        Err(lash_kernel_dialect::PrintError::Unprintable { site }),
+        "the failed lift must survive instead of printing an empty module",
+    );
 }

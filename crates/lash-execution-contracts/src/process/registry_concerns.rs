@@ -16,16 +16,23 @@ use super::events::{
     ProcessAwaitOutput, ProcessCompletionAuthority, ProcessEvent, ProcessEventAppendRequest,
     ProcessEventPage, ProcessEventQueryMode, ProcessEventReadOutcome,
 };
-use super::model::{
-    PreparedProcessRegistration, ProcessChange, ProcessChangeCursor, ProcessExternalRef, ProcessId,
-    ProcessListFilter, ProcessObserverBy, ProcessRecord, ProcessRegistration,
-    ProcessRegistrationReceipt, ProcessSessionDeleteReport, SessionId,
-};
+use super::model::PreparedProcessRegistration;
+use super::model::ProcessChange;
+use super::model::ProcessChangeCursor;
+use super::model::ProcessExternalRef;
+use super::model::ProcessListFilter;
+use super::model::ProcessObserverBy;
+use super::model::ProcessRecord;
+use super::model::ProcessRegistration;
+use super::model::ProcessRegistrationReceipt;
+use super::model::ProcessSessionDeleteReport;
 use super::references::ProcessLiveReferenceView;
 use super::registry::{
     NonTerminalProcessPage, ParentEndPlan, ProcessPruneReport, ProcessRegistry,
     ProcessRegistryCursor, ProjectionWatermark,
 };
+use lash_vocabulary::identity::ProcessId;
+use lash_vocabulary::identity::SessionId;
 
 /// Point reads and scans over registered processes.
 ///
@@ -704,7 +711,7 @@ pub trait ProcessClockRebind: Send + Sync {
 ///     ProcessRegistryCursor, NonTerminalProcessPage, MAX_NON_TERMINAL_PROCESS_PAGE_SIZE,
 /// };
 /// use lash_execution_contracts::{ProcessLifecycle, ProcessObserverRegistry, ProcessQuery};
-/// use lash_protocol_types::SessionId;
+/// use lash_vocabulary::identity::SessionId;
 /// use std::num::NonZeroUsize;
 ///
 /// struct ObserverOnly;

@@ -15,8 +15,8 @@ const SEARCH_OPERATION: &str = "tools.search";
 
 /// `search`: a host tool whose result states a `diagnostics` record with a
 /// required `took`.
-fn search_definition() -> lash_core::ToolDefinition {
-    lash_core::ToolDefinition::raw(
+fn search_definition() -> lash_vocabulary::tool_contract::ToolDefinition {
+    lash_vocabulary::tool_contract::ToolDefinition::raw(
         format!("tool:{SEARCH}"),
         SEARCH_OPERATION,
         "Search the index.",
@@ -48,7 +48,10 @@ impl ToolProvider for SearchTool {
     fn tool_manifests(
         &self,
         _config: &lash_core::OwnerConfigView,
-    ) -> std::result::Result<Vec<lash_core::ToolManifest>, lash::plugins::PluginError> {
+    ) -> std::result::Result<
+        Vec<lash_vocabulary::tool_contract::ToolManifest>,
+        lash::plugins::PluginError,
+    > {
         Ok(vec![search_definition().manifest()])
     }
 
@@ -56,7 +59,7 @@ impl ToolProvider for SearchTool {
         &self,
         name: &str,
         _config: &lash_core::OwnerConfigView,
-    ) -> Option<Arc<lash_core::ToolContract>> {
+    ) -> Option<Arc<lash_vocabulary::tool_contract::ToolContract>> {
         (name == SEARCH_OPERATION).then(|| Arc::new(search_definition().contract()))
     }
 
@@ -134,7 +137,10 @@ async fn a_success_its_output_schema_refuses_settles_as_a_failure_naming_the_too
         panic!("the call fails: {output:?}");
     };
     let Some(lash_core::ToolFailureCause::Declaration {
-        refusal: lash_core::DeclarationRefusal::OutputValueMismatch { mismatch, .. },
+        refusal:
+            lash_vocabulary::tool_declaration::DeclarationRefusal::OutputValueMismatch {
+                mismatch, ..
+            },
     }) = failure.cause.as_deref()
     else {
         panic!("the failure is the typed output mismatch: {failure:?}");
@@ -255,7 +261,10 @@ async fn a_host_reads_the_schema_refusal_from_the_cells_committed_call() -> Resu
     assert!(failure.message.contains("/diagnostics"), "{failure:?}");
     assert!(failure.message.contains("took"), "{failure:?}");
     let Some(lash_core::ToolFailureCause::Declaration {
-        refusal: lash_core::DeclarationRefusal::OutputValueMismatch { mismatch, .. },
+        refusal:
+            lash_vocabulary::tool_declaration::DeclarationRefusal::OutputValueMismatch {
+                mismatch, ..
+            },
     }) = failure.cause.as_deref()
     else {
         panic!("the committed failure carries the typed output mismatch: {failure:?}");

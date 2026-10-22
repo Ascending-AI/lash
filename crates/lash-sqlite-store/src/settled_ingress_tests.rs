@@ -8,7 +8,7 @@ use lash_core_store::store::Retention;
 use lash_core_store::store::SessionCatalogStore as _;
 use lash_core_store::store::Target;
 use lash_core_store::store::TurnInputStore as _;
-use lash_protocol_types::SessionId;
+use lash_vocabulary::identity::SessionId;
 
 /// A body large enough that keeping it is a real cost.
 fn large(tag: &str) -> String {
@@ -230,8 +230,9 @@ async fn settled_ingress_bodies_follow_head_only_retention() {
         .await
         .expect("pin the input");
     let mut delivering = head_commit(&store, &session).await;
-    let mut settlement =
-        lash_core_store::store::IngressSettlement::new(lash_protocol_types::TurnId::from("run-1"));
+    let mut settlement = lash_core_store::store::IngressSettlement::new(
+        lash_vocabulary::identity::TurnId::from("run-1"),
+    );
     settlement.completed_inputs.push(
         lash_core_store::turn_input_vocabulary::TurnInputCompletion {
             session_id: session.clone(),
@@ -616,7 +617,7 @@ async fn retained_neighbor(store: &SqliteStore) {
         .expect("neighbor pin");
     let mut delivering = head_commit(store, &session).await;
     let mut settlement = lash_core_store::store::IngressSettlement::new(
-        lash_protocol_types::TurnId::from("other-run"),
+        lash_vocabulary::identity::TurnId::from("other-run"),
     );
     settlement.completed_inputs.push(
         lash_core_store::turn_input_vocabulary::TurnInputCompletion {

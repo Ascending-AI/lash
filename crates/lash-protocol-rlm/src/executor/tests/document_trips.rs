@@ -20,7 +20,10 @@ use crate::testing::{cell_context, run_cell};
 async fn a_cells_document_is_decoded_once_on_the_host_and_never_as_json() {
     let host = open_host().await;
     let tools = Arc::new(CellTools::default());
-    let services = typescript_services();
+    let services = super::super::CellServices {
+        documents: Some(host.documents.clone()),
+        ..typescript_services()
+    };
     let mut state = typescript_state();
     let _ = document_work::take();
 

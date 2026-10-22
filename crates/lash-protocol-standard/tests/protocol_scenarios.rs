@@ -1,6 +1,7 @@
 use lash_protocol_types::ReportedFailure;
-use lash_protocol_types::TurnId;
 use lash_protocol_types::{llm::types::StreamBlockEvent, llm::types::StreamBlockKind};
+
+use lash_vocabulary::identity::TurnId;
 use std::sync::Arc;
 
 use lash_core::sansio::{self, ChatContextProjector, ProtocolDriverHandle, Response};
@@ -353,7 +354,7 @@ struct StandardProtocolExpectations {
     error_contains: Vec<&'static str>,
     turn_outcome: Option<TurnOutcome>,
     model_requests_contain: Vec<&'static str>,
-    intent_kinds: Vec<lash_core::ToolIntentKind>,
+    intent_kinds: Vec<lash_vocabulary::ToolIntentKind>,
 }
 
 impl StandardProtocolExpectations {
@@ -517,7 +518,7 @@ fn standard_config() -> TurnMachineConfig {
         no_progress_budget: lash_core::NoProgressBudget::bounded(12),
         attachment_acceptance: Default::default(),
         generation: lash_core::GenerationOptions::default(),
-        session_id: lash_core::SessionId::from("standard-protocol-scenario"),
+        session_id: lash_vocabulary::identity::SessionId::from("standard-protocol-scenario"),
         agent_frame_id: "standard-frame".to_string(),
         turn_id: TurnId::from("standard-protocol-turn"),
         emit_llm_trace: false,

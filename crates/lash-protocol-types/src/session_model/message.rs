@@ -1,12 +1,12 @@
 use crate::AttachmentRef;
 use crate::ToolCallId;
-use crate::TurnId;
 use crate::append_vec::AppendVec;
 use crate::llm::types::{
     LlmContentBlock, LlmMessage, LlmRole, ProviderReasoningReplay, ProviderReplayMeta,
     ResponseTextMeta,
 };
 use crate::tool_output::ModelToolReturnPart;
+use lash_vocabulary::identity::TurnId;
 use std::borrow::Cow;
 use std::collections::HashSet;
 use std::sync::{Arc, OnceLock};
@@ -184,7 +184,7 @@ pub enum MessageOrigin {
         /// when the input arrived through queued ingress and absent when the
         /// turn was executed with its input in hand.
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        input_id: Option<crate::InputId>,
+        input_id: Option<lash_vocabulary::identity::InputId>,
     },
     /// A durable assistant output belonging to a turn. The source remains
     /// typed so hosts can suppress their live row without parsing ids while

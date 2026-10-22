@@ -335,6 +335,14 @@ async fn store_trait_surface_is_fully_gated() {
     for (source, trait_name) in [
         (OBLIGATION_SOURCE, "ObligationLedger"),
         (PAGE_STORE_SOURCE, "PageStore"),
+        (
+            include_str!("../../../lash-durable/src/packages.rs"),
+            "PackageStore",
+        ),
+        (
+            include_str!("../../../lash-durable/src/resolutions.rs"),
+            "ExecutionResolutions",
+        ),
     ] {
         for method in fallible_trait_methods(source, trait_name) {
             if harness_drives(&sources, &method) {

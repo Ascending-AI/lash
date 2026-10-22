@@ -1,6 +1,6 @@
 use super::*;
-use lash::SessionId;
-use lash::TurnId;
+use lash_vocabulary::identity::SessionId;
+use lash_vocabulary::identity::TurnId;
 
 // The in-process workbench (FIG-5316): the `AppState` the binary serves from,
 // built by the binary's own boot functions (`build_workbench_core`,
@@ -211,7 +211,7 @@ impl WorkbenchBuilder {
             mail_world: self.mail_world.clone(),
             child_spec: session_defaults.clone(),
             deferred_tools: deferred_tools::WorkbenchDeferredTools::in_memory()
-                .expect("open the deferred-tool grants"),
+                .expect("open the deferred tool offers"),
             approvals: approvals.clone(),
             host_triggers: host_triggers.clone(),
             mcp: Arc::new(mcp),

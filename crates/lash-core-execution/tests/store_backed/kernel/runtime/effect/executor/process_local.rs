@@ -93,7 +93,7 @@ mod tests {
             )
             .await
             .expect("terminal");
-        let session_id = crate::SessionId::from("observed-effects");
+        let session_id = lash_vocabulary::identity::SessionId::from("observed-effects");
         registry
             .add_observer(
                 &session_id,
@@ -732,7 +732,9 @@ mod tests {
         assert_ne!(first_ref, retry_ref, "the retry submits different content");
         let key = crate::StartKeyDerivation::LASH_START_PATHS.for_tool_intent(
             &lash_execution_contracts::tool_intent::derive_tool_intent_identity(
-                &crate::RuntimeOwner::Session(crate::SessionId::from("session")),
+                &lash_vocabulary::identity::RuntimeOwner::Session(
+                    lash_vocabulary::identity::SessionId::from("session"),
+                ),
                 "runtime",
                 &lash_core_execution::ToolCallId::fixture("crashed-start"),
                 0,

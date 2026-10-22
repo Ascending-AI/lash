@@ -22,7 +22,7 @@
 //! verifier checks what its formation derived against the ops themselves,
 //! never against this tree.
 
-use lash_kernel_doc::{Unit, Value};
+use lash_kernel_doc::Value;
 use lash_kernel_exec::{
     ActIx, FieldIx, FieldListIx, LocalRef, NameIx, Op, OpRange, Reg, RegRange, SiteIx,
 };
@@ -52,6 +52,7 @@ pub(crate) fn units(closes: &[Close]) -> u64 {
 /// A nested action's resume entry, as an invoke of it reads it.
 #[derive(Clone, Copy)]
 pub(crate) struct Invoke {
+    pub(crate) imported: bool,
     pub(crate) act: ActIx,
     pub(crate) occurrence: usize,
     /// It stands in a guest's code rather than a library body's.
@@ -551,9 +552,10 @@ impl<'s> Reader<'s> {
         let invoke = Invoke {
             act,
             occurrence: nested.occurrence,
-            guest: !matches!(nested.site.unit, Unit::Library(_)),
+            guest: nested.guest,
             call: matches!(nested.kind, NestedKind::Call(_)),
             operator: nested.operator,
+            imported: matches!(nested.kind, NestedKind::Call(NestedCallee::Import(..))),
         };
         if let Some(lib) = nested.kind.operator_lib() {
             return Some(Kind::Operator {
@@ -565,6 +567,7 @@ impl<'s> Reader<'s> {
         }
         let declared = match nested.kind {
             NestedKind::Call(NestedCallee::Read) if args.len >= 1 => None,
+            NestedKind::Call(NestedCallee::Import(..)) => return None,
             NestedKind::Call(NestedCallee::Declared(code)) => Some(code),
             _ => return None,
         };

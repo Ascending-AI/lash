@@ -1,16 +1,19 @@
 //! Copy-on-write coordinate carry. Unchanged data trees retain their roots;
 //! rewritten records are never published until the embedding owner commits.
 use crate::{ParkedRefusal, Rewritten};
-use lash_kernel_doc::graph_tokens::encode_body;
+use lash_kernel_doc::Correspondence;
 use lash_kernel_doc::heap::{HeapFault, PageId, PageRef};
-use lash_kernel_doc::kernel_internals::{EffectIdentity, TaskIdentity, effect_id, effect_parts};
-use lash_kernel_doc::{Correspondence, EffectId, Site};
+use lash_kernel_doc::kernel_internals::{effect_id, effect_parts};
+use lash_vocabulary::sites::{EffectIdentity, TaskIdentity};
+use lash_vocabulary::tokens::encode_body;
+
 use lash_kernel_state::kernel_internals::{
-    directory::{Body, ObjectHead},
     metadata::metadata_key,
     tree::{Access, Cell, SealWork, Tree},
 };
 use lash_kernel_state::paged::*;
+use lash_vocabulary::sites::EffectId;
+use lash_vocabulary::sites::Site;
 
 /// Infrastructure faults remain distinct from a semantic carry refusal.
 #[derive(Debug, thiserror::Error)]
@@ -44,7 +47,7 @@ fn task(c: &Correspondence, from: &TaskIdentity) -> Result<TaskIdentity, ParkedR
     }
     let mut to = TaskIdentity::Main;
     for (site, occurrence) in steps.into_iter().rev() {
-        to = TaskIdentity::Spawned(lash_kernel_doc::kernel_internals::SpawnIdentity {
+        to = TaskIdentity::Spawned(lash_vocabulary::sites::SpawnIdentity {
             parent: std::sync::Arc::new(to),
             site,
             occurrence,
@@ -63,7 +66,7 @@ pub fn carry_effect(c: &Correspondence, from: &EffectId) -> Result<EffectId, Par
             .loops
             .iter()
             .map(|held| {
-                Ok(lash_kernel_doc::kernel_internals::LoopIteration {
+                Ok(lash_vocabulary::sites::LoopIteration {
                     site: site(c, &held.site, "wait loop")?,
                     iteration: held.iteration,
                 })
@@ -74,6 +77,8 @@ pub fn carry_effect(c: &Correspondence, from: &EffectId) -> Result<EffectId, Par
 struct Carry<'a, 's> {
     access: Access<'s>,
     correspondence: &'a Correspondence,
+    predecessor: lash_vocabulary::LinkId,
+    successor: lash_vocabulary::LinkId,
 }
 impl Carry<'_, '_> {
     fn reference(&self, from: &SiteRef, held: &str) -> Result<SiteRef, CarryFault> {
@@ -129,6 +134,9 @@ impl Carry<'_, '_> {
         Ok(())
     }
     fn frame(&self, frame: &mut FrameRecord) -> Result<(), CarryFault> {
+        if frame.link != self.predecessor {
+            return Ok(());
+        }
         let old = frame.statement.resolve(&self.access)?;
         let new = site(self.correspondence, &old, "frame statement")?;
         if let Some(pending) = &mut frame.pending {
@@ -162,6 +170,7 @@ impl Carry<'_, '_> {
                 })?,
             }
         }
+        frame.link = self.successor;
         frame.statement = SiteRef::new(&new, &self.access)?;
         self.tree(&mut frame.bindings, |binding| {
             binding.declared = self.reference(&binding.declared, "variable declaration")?;
@@ -185,13 +194,14 @@ impl Carry<'_, '_> {
 /// Carries one authenticated foreign checkpoint. The caller must validate
 /// the resulting image against the successor's executable before publishing it.
 /// Closure selection belongs to the caller: a version carry supplies the
-/// exact pinned closure's redeclarations; only explicit adoption selects a set.
+/// exact pinned closure's redeclarations; adoption selects a successor Link.
 /// Values, entity ids, wait numbers, meters, limits and queue order are retained.
 pub fn carry_checkpoint(
     source: &mut dyn PageSource,
     checkpoint: &Checkpoint,
     rewritten: &Rewritten,
     closure: PageId,
+    successor: lash_vocabulary::LinkId,
     pinned: (u32, PageId),
 ) -> Result<(PageRef, Checkpoint), CarryFault> {
     let mut root = lash_kernel_state::kernel_internals::checkpoint_root(checkpoint).clone();
@@ -223,6 +233,8 @@ pub fn carry_checkpoint(
     let carry = Carry {
         access: Access::borrowed(source),
         correspondence: c,
+        predecessor: root.link,
+        successor,
     };
     let mut tasks = Tree::<TaskRecord>::of_keyed(&root.tasks);
     for rank in 0..tasks.len() {
@@ -271,42 +283,12 @@ pub fn carry_checkpoint(
         Ok(())
     })?;
     root.session = session.keyed_root()?;
-    let answer = carry.access.read(root.heap)?;
-    if answer.kind != PageKind::KEYED_LEAF {
-        return Err(state("not a heap root").into());
-    }
-    let mut heap = lash_kernel_state::kernel_internals::heap_impl::header_root(root.heap, &answer)?;
-    for tree in [&mut heap.directory, &mut heap.families] {
-        if let Some(page) = tree.page_mut() {
-            *page = *answer
-                .children
-                .iter()
-                .find(|child| child.id == page.id)
-                .ok_or_else(|| state("undeclared heap child"))?;
-        }
-    }
-    let mut directory = Tree::<ObjectHead>::of_keyed(&heap.directory);
-    carry.tree(&mut directory, |head| {
-        if let Body::Closure { site, .. } = &mut head.body {
-            *site = carry.reference(site, "closure")?;
-        }
-        Ok(())
-    })?;
-    heap.directory = directory.keyed_root()?;
-    let mut tokens = lash_kernel_doc::graph_tokens::TokenWriter::new();
-    tokens.sum(0, 1);
-    use lash_kernel_doc::graph_tokens::TokenCodec as _;
-    heap.encode(&mut tokens);
-    root.heap = carry.access.seal(
-        PageKind::KEYED_LEAF,
-        tokens.into_bytes(),
-        [heap.directory.page(), heap.families.page()]
-            .into_iter()
-            .flatten()
-            .collect(),
-    )?;
+    // Heap closures are function values, including unescaped locals. Their
+    // defining callable and creation site remain in the retained predecessor.
+    // Only active predecessor frames move to the successor executable.
+    root.link = successor;
     root.document = c.result;
-    root.kernel = rewritten.document.manifest.kernel;
+    root.kernel = rewritten.document.kernel();
     root.closure = closure;
     let children = [
         Some(root.heap),

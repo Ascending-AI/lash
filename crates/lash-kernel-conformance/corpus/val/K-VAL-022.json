@@ -3,7 +3,7 @@
   "cases": [
     {
       "name": "immutable equality compares contents",
-      "document": "kernel 1\nnumbers by_spelling\nuse eq = @b50ea78f1b8899c52026719706a58480a99f1d90dcd04a6954be8f2c23cd8954\nmain { let a = clock let b = clock let c = clock finish [eq(null, null), eq(absent, absent), eq(true, true), eq(true, false), eq(\"😀\", \"😀\"), eq(\"a\", \"b\"), eq(b\"00ff\", b\"00ff\"), eq(b\"00ff\", b\"00fe\"), eq(a, b), eq(a, c)] }\n",
+      "document": "kernel 1\nnumbers by_spelling\nimport 0 operation host.clock() -> Timestamp\nnative @04100a3772ec564e8bdc38f90d5678f50f6395ae42c373d3239143cfaadfc478\ndefinition \"function eq(arg0: Any, arg1: Any) -> Bool\\nkernel 1\\nerrors \\\"arity\\\"\\ncharge sum(1, product(sum(deep(arg0), deep(arg1)), sum(deep(arg0), deep(arg1))), deep(result))\\nnative\\n\"\nmain {\n  let a = perform 0() as Timestamp\n  let b = perform 0() as Timestamp\n  let c = perform 0() as Timestamp\n  finish [eq(null, null), eq(absent, absent), eq(true, true), eq(true, false), eq(\"😀\", \"😀\"), eq(\"a\", \"b\"), eq(b\"00ff\", b\"00ff\"), eq(b\"00ff\", b\"00fe\"), eq(a, b), eq(a, c)]\n}\n",
       "expected": {
         "prints": [],
         "trace": [],
@@ -47,14 +47,41 @@
       "environment": {
         "host": [
           {
-            "clock": "1"
+            "perform": {
+              "effect": "host.clock",
+              "args": [],
+              "answer": {
+                "Ok": {
+                  "timestamp": "1"
+                }
+              }
+            }
           },
           {
-            "clock": "1"
+            "perform": {
+              "effect": "host.clock",
+              "args": [],
+              "answer": {
+                "Ok": {
+                  "timestamp": "1"
+                }
+              }
+            }
           },
           {
-            "clock": "2"
+            "perform": {
+              "effect": "host.clock",
+              "args": [],
+              "answer": {
+                "Ok": {
+                  "timestamp": "2"
+                }
+              }
+            }
           }
+        ],
+        "reads": [
+          "host.clock"
         ]
       }
     }

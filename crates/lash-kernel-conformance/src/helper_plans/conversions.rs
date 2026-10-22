@@ -2,7 +2,10 @@
 //! completion charge, tape and bound stop, including every value kind.
 
 use super::*;
-use lash_kernel_doc::{Float, Name, PreparedNative, Value, parse_document};
+use lash_kernel_doc::Float;
+use lash_kernel_doc::PreparedNative;
+use lash_kernel_doc::Value;
+use lash_vocabulary::names::Name;
 use std::sync::Arc;
 
 fn observe<const L: u64>(program: &Program, charge_limit: u64) -> Observed {
@@ -16,31 +19,38 @@ fn observe<const L: u64>(program: &Program, charge_limit: u64) -> Observed {
         requests_per_park: 100,
         join_members: 100,
     };
+    let session = crate::pages::Session::seeded([
+        (
+            Name::new("handle"),
+            Datum::Handle(Handle {
+                kind: "conversion".into(),
+                id: "fixture".into(),
+            }),
+        ),
+        (
+            Name::new("instant"),
+            Datum::Timestamp(lash_kernel_doc::Timestamp {
+                nanoseconds: 0.into(),
+            }),
+        ),
+    ]);
     let mut machine = Plan::<L>::start(
         program.clone(),
         bounds,
         CellStart {
-            target: Target::Entry(Name::new("probe")),
-            args: vec![Datum::Handle(Handle {
-                kind: "conversion".into(),
-                id: "fixture".into(),
-            })],
-            session: None,
+            target: Target::Main,
+            args: Vec::new(),
+            session: session.root,
             owner: crate::pages::OWNER,
             modes: Default::default(),
             host: Vec::new(),
         },
-        Box::new(crate::pages::Source::default()),
+        Box::new(session.source),
     )
     .unwrap();
     let tape = lash_kernel_vm::ChargeTape::new();
     machine.record_charges(tape.clone());
-    let mut world = World {
-        bits: 0,
-        stride: 0,
-        nanoseconds: 0,
-        prints: Vec::new(),
-    };
+    let mut world = World::default();
     let end = loop {
         match machine.run(&mut world, u64::MAX).unwrap() {
             Step::Ended(end) => break end,
@@ -94,7 +104,7 @@ fn prepared_typescript_conversions_agree_with_their_general_paths() {
             .find(|(_, registered)| registered.name() == name)
             .unwrap()
     };
-    for name in ["ts.number.to_string", "ts.to_boolean"] {
+    for name in ["ts.number.format_value", "ts.to_boolean"] {
         let (_, registered) = function(name);
         assert!(
             registered
@@ -108,7 +118,7 @@ fn prepared_typescript_conversions_agree_with_their_general_paths() {
     // Longer spellings and object kinds are compared through their bodies below.
     for (name, values) in [
         (
-            "ts.number.to_string",
+            "ts.number.format_value",
             vec![
                 -0.0,
                 0.0,
@@ -154,56 +164,50 @@ fn prepared_typescript_conversions_agree_with_their_general_paths() {
             }
         }
     }
-    let (number, _) = function("ts.number.to_string");
+    let (number, _) = function("ts.number.format_value");
     let (boolean, _) = function("ts.to_boolean");
     let named = |name| *function(name).0;
     let sources = [
         format!(
             r#"
-use number = @{number}
-entry probe(handle: Any) -> Any
-fn probe(handle) {{
+main {{
   let values = [-0.0, 0.0, 1.0, -1.0, 12.0, -123.0, 99999999999999.0, -9999999999999.0, -99999999999999.0, nan, inf, -inf, 1e21, 1e20, 1e-7, 1e-6,
     9007199254740991.0, 9007199254740992.0, 9007199254740994.0,
     5e-324, -5e-324, 2.2250738585072014e-308, 1.7976931348623157e308,
     9007199254740993, -9223372036854775808, 18446744073709551616]
-  for value in values {{ let converted = invoke number(value) print converted }}
+  for value in values {{ let converted = invoke @{number}(value) print converted }}
   return null
 }}
-main {{ return null }}
 "#
         ),
         format!(
             r#"
-use boolean = @{boolean}
-use ref = @{reference}
-use error.new = @{error}
-entry probe(handle: Any) -> Any
-fn child() {{ return null }}
-fn probe(handle) {{
+definition "function child() -> Any\nkernel 1\nmetering statements\nbody {{ return null }}"
+main {{
   let spawned = spawn call child()
   let values = [null, absent, false, true, 0, 1, 18446744073709551616,
     -0.0, 0.0, nan, inf, -inf, 5e-324, "", "x", "a long text beyond inline storage",
-    b"", clock, (), [], map{{}}, set{{}}, {{}}, fn() {{ return null }},
-    error.new("fixture", "", null), spawned, &child, handle, ref(spawned), ref([])]
-  for value in values {{ let converted = invoke boolean(value) print converted }}
+    b"", instant, (), [], map{{}}, set{{}}, {{}}, fn() {{ return null }},
+    @{error}("fixture", "", null), spawned, &child, handle, @{reference}(spawned), @{reference}([])]
+  for value in values {{ let converted = invoke @{boolean}(value) print converted }}
   do join spawned
   return null
 }}
-main {{ return null }}
 "#,
             reference = named("ref"),
             error = named("error.new")
         ),
     ];
     for source in sources {
-        let program = Program {
-            closure: base.closure,
-            document: Arc::new(
-                parse_document(&format!("kernel 1\nnumbers by_spelling\n{source}")).unwrap(),
-            ),
-            library: base.library.clone(),
-        };
+        let program = crate::machine::prepare_document(
+            &(base.library.clone()),
+            Arc::new(crate::document_fixture::authored(
+                &format!("kernel 1\nnumbers by_spelling\n{source}"),
+                registry,
+            )),
+            None,
+        )
+        .expect("prepare linked law document");
         let reference = Program {
             library: prepare_with_layout(Arc::clone(registry), Layout(3)),
             ..program.clone()
@@ -295,23 +299,21 @@ fn composed_text_addition_agrees_with_its_body_and_charge() {
     let source = format!(
         r#"kernel 1
 numbers by_spelling
-use add = @{add}
-entry probe(handle: Any) -> Any
-fn probe(handle) {{
+main {{
   for number in [-0.0, 0.0, -17.0, 42.0, 9007199254740991.0, 9999999999999.0, 1.5, nan, inf, -inf] {{
-    let answer = invoke add("key_", number)
+    let answer = invoke @{add}("key_", number)
     print answer
   }}
   return null
 }}
-main {{ return null }}
 "#
     );
-    let program = Program {
-        closure: base.closure,
-        document: Arc::new(parse_document(&source).unwrap()),
-        library: base.library.clone(),
-    };
+    let program = crate::machine::prepare_document(
+        &(base.library.clone()),
+        Arc::new(crate::document_fixture::authored(&source, registry)),
+        None,
+    )
+    .expect("prepare linked law document");
     let reference = Program {
         library: prepare_with_layout(Arc::clone(registry), Layout(3)),
         ..program.clone()

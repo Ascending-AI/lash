@@ -103,6 +103,23 @@
       ],
       "type": "object"
     },
+    "CallableId": {
+      "additionalProperties": false,
+      "description": "A stored function under its defining Link. Calls and escaped captures retain this Link.",
+      "properties": {
+        "function": {
+          "$ref": "#/$defs/FunctionId"
+        },
+        "link": {
+          "$ref": "#/$defs/LinkId"
+        }
+      },
+      "required": [
+        "link",
+        "function"
+      ],
+      "type": "object"
+    },
     "CancelOrigin": {
       "description": "The runtime or actor decision that requested cancellation of a process\nor of a tool call's attempt. `RunClosing` is a call's owning tool Run\ndischarging its cancellation at Closing while the turn itself runs on.",
       "enum": [
@@ -255,7 +272,7 @@
               "type": "string"
             },
             "operation": {
-              "$ref": "#/$defs/QualifiedName"
+              "$ref": "#/$defs/FunctionName"
             },
             "unit": {
               "$ref": "#/$defs/Unit"
@@ -539,10 +556,6 @@
         "references"
       ],
       "type": "object"
-    },
-    "DocumentId": {
-      "pattern": "^[0-9a-f]{64}$",
-      "type": "string"
     },
     "Duration": {
       "properties": {
@@ -1004,6 +1017,10 @@
       "pattern": "^[0-9a-f]{64}$",
       "type": "string"
     },
+    "FunctionName": {
+      "pattern": "^[A-Za-z_][A-Za-z0-9_]*(\\.[A-Za-z_][A-Za-z0-9_]*)*$",
+      "type": "string"
+    },
     "GenerationOptionOutcome": {
       "description": "What became of one host-set generation setting on one request.\n\nA setting a host sets is sent, or the call is refused before any I/O with a\ntyped failure; nothing is silently dropped. The receipt therefore names only\nthe two deliberate non-send dispositions besides `Applied`: a cap reduced to\nthe model's capacity, and stop sequences a protocol owns. `Applied` means\nlash put the value on the wire, never that the provider complied.",
       "oneOf": [
@@ -1154,6 +1171,27 @@
         "wait_deadline"
       ],
       "type": "string"
+    },
+    "LinkId": {
+      "pattern": "^[0-9a-f]{64}$",
+      "type": "string"
+    },
+    "LinkedStart": {
+      "additionalProperties": false,
+      "description": "The immutable Link and selected start that determine process definition identity.",
+      "properties": {
+        "link": {
+          "$ref": "#/$defs/LinkId"
+        },
+        "selector": {
+          "$ref": "#/$defs/StartSelector"
+        }
+      },
+      "required": [
+        "link",
+        "selector"
+      ],
+      "type": "object"
     },
     "LlmOutputPart": {
       "oneOf": [
@@ -1669,10 +1707,6 @@
       ],
       "type": "object"
     },
-    "QualifiedName": {
-      "pattern": "^[A-Za-z_][A-Za-z0-9_]*(\\.[A-Za-z_][A-Za-z0-9_]*)*$",
-      "type": "string"
-    },
     "ResponsePhase": {
       "description": "Provider replay phase tag: the two-value vocabulary the kernel interprets\n(`\"commentary\"`/`\"final_answer\"` on the wire). An unknown spelling fails\ndecoding rather than silently meaning \"neither\".",
       "enum": [
@@ -2073,7 +2107,7 @@
           "type": "object"
         },
         {
-          "description": "A composition whose members no kernel type states, or whose meet\ngrows past the projection's bound\n([`lash_kernel_check::MAX_PROJECTED_TYPE_NODES`]), at the JSON\npointer `schema_path`: a value of the schema could not be typed.",
+          "description": "A composition whose members no kernel type states, or whose meet\ngrows past the projection's bound\n([`crate::schema::MAX_PROJECTED_TYPE_NODES`]), at the JSON\npointer `schema_path`: a value of the schema could not be typed.",
           "properties": {
             "kind": {
               "const": "unprojectable",
@@ -2141,6 +2175,41 @@
         }
       ]
     },
+    "StartSelector": {
+      "description": "Main requires a main block; Export names a top-level function and never runs main.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "main",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "export",
+              "type": "string"
+            },
+            "value": {
+              "$ref": "#/$defs/Name"
+            }
+          },
+          "required": [
+            "kind",
+            "value"
+          ],
+          "type": "object"
+        }
+      ]
+    },
     "StepBodyStarted": {
       "additionalProperties": false,
       "description": "The admitted body of a process step started: the step's actor committed\nits admission, bound it to a call, and is about to run it. A step that is\nrefused never produces one, and a retried body produces one more with the\nsame site, occurrence and call and the next attempt.\n\nIt names no language and no document: the process's own definition scopes\nthe site.",
@@ -2159,6 +2228,9 @@
           "description": "The call the admission bound the step to.",
           "type": "string"
         },
+        "origin": {
+          "$ref": "#/$defs/Site"
+        },
         "process_id": {
           "type": "string"
         }
@@ -2166,6 +2238,7 @@
       "required": [
         "process_id",
         "at",
+        "origin",
         "call_id",
         "attempt"
       ],
@@ -2452,6 +2525,7 @@
       "type": "string"
     },
     "ToolIntentIdentity": {
+      "description": "Generates the canonical tool-intent kind set from the vocabulary in\n[`crate::tool_intents`].",
       "properties": {
         "execution_scope_id": {
           "description": "The enclosing execution-scope id: a turn id for turn scope and a\nprocess id for process scope.",
@@ -3282,6 +3356,45 @@
       ],
       "type": "object"
     },
+    "TraceExecutionCode": {
+      "description": "Recorded code identity for diagnostics. Captures remain in kernel input.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "start",
+              "type": "string"
+            },
+            "value": {
+              "$ref": "#/$defs/LinkedStart"
+            }
+          },
+          "required": [
+            "kind",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "callable",
+              "type": "string"
+            },
+            "value": {
+              "$ref": "#/$defs/CallableId"
+            }
+          },
+          "required": [
+            "kind",
+            "value"
+          ],
+          "type": "object"
+        }
+      ]
+    },
     "TraceLanguageChildExecution": {
       "properties": {
         "attempt": {
@@ -3295,7 +3408,7 @@
         "document": {
           "anyOf": [
             {
-              "$ref": "#/$defs/WorkflowDocumentRef"
+              "$ref": "#/$defs/LinkedStart"
             },
             {
               "type": "null"
@@ -3498,7 +3611,7 @@
           "type": "integer"
         },
         "document": {
-          "$ref": "#/$defs/WorkflowDocumentRef"
+          "$ref": "#/$defs/TraceExecutionCode"
         },
         "engine_execution_id": {
           "type": [
@@ -6069,60 +6182,6 @@
           "type": "object"
         }
       ]
-    },
-    "WorkflowDocumentEntry": {
-      "description": "The entry of a [`WorkflowDocumentRef`].",
-      "oneOf": [
-        {
-          "description": "The document's `main`: a session cell.",
-          "properties": {
-            "kind": {
-              "const": "main",
-              "type": "string"
-            }
-          },
-          "required": [
-            "kind"
-          ],
-          "type": "object"
-        },
-        {
-          "description": "One entry of the document: a declared function a host may start,\nwhich is what a process runs.",
-          "properties": {
-            "function": {
-              "$ref": "#/$defs/Name"
-            },
-            "kind": {
-              "const": "entry",
-              "type": "string"
-            }
-          },
-          "required": [
-            "kind",
-            "function"
-          ],
-          "type": "object"
-        }
-      ]
-    },
-    "WorkflowDocumentRef": {
-      "additionalProperties": false,
-      "description": "Which workflow document an execution runs, and where it enters it. It\nnames the document; it is never the document. A host reads the document\nthe reference names through the facade's workflow inspection and may\ncache it under this value, which is immutable for a process: a running\ninstance keeps the document it was admitted under.",
-      "properties": {
-        "document": {
-          "$ref": "#/$defs/DocumentId",
-          "description": "The identity of the admitted kernel document: the hash of its\ncontent, kernel version and manifest included."
-        },
-        "entry": {
-          "$ref": "#/$defs/WorkflowDocumentEntry",
-          "description": "Where the execution enters the document."
-        }
-      },
-      "required": [
-        "document",
-        "entry"
-      ],
-      "type": "object"
     }
   },
   "$id": "https://lash.dev/schemas/trace-record/v37",

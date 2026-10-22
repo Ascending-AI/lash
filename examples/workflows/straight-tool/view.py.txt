@@ -1,7 +1,7 @@
-unit Function(Name("demo"))
-statement fn demo/0 ordinal=3 depth=0 block=fn demo Return { value: Act(ActExpr { kind: Call(Library(FunctionId(9069f1a97a82e155fe11114065351d42262bd0be81a4a8c41f522dfbb431d5d5))), args: [Act(ActExpr { kind: Perform { effect: QualifiedName("corpus.echo"), result: Json, then_yield: false }, args: [Literal(Text("hello"))] })] }) }
-scope fn demo ordinal=2 depth=0 Entry
-action fn demo/0/0 library id=9069f1a97a82e155fe11114065351d42262bd0be81a4a8c41f522dfbb431d5d5 name=py.reply label="Python reply"
-action fn demo/0/0/0 Some(Effect(QualifiedName("corpus.echo")))
-caption callable 0 block=fn demo "Say hello"
-caption node 1 site=fn demo/0 "Send a greeting and give back the reply"
+unit Library(FunctionId(94a7ec890d63e7e6b7d1706b69d0e7dd80fa408bd1eb08ff9f65d06fc35d2f39))
+statement function 94a7ec890d63e7e6b7d1706b69d0e7dd80fa408bd1eb08ff9f65d06fc35d2f39/0 ordinal=3 depth=0 block=function 94a7ec890d63e7e6b7d1706b69d0e7dd80fa408bd1eb08ff9f65d06fc35d2f39 Return { value: Act(ActExpr { kind: Call(Import(ImportSlot(1))), args: [Act(ActExpr { kind: Perform { slot: ImportSlot(0), result: Json, then_yield: false }, args: [Literal(Text("hello"))] })] }) }
+scope function 94a7ec890d63e7e6b7d1706b69d0e7dd80fa408bd1eb08ff9f65d06fc35d2f39 ordinal=2 depth=0 Entry
+action function 94a7ec890d63e7e6b7d1706b69d0e7dd80fa408bd1eb08ff9f65d06fc35d2f39/0/0 library id=373444e2d103ee313318775419afb68a65184593e7bdcae900957bfd4ec811aa name=py.reply exports=[]
+action function 94a7ec890d63e7e6b7d1706b69d0e7dd80fa408bd1eb08ff9f65d06fc35d2f39/0/0/0 Some(Effect(OperationUse { link: LinkId(d6c7d2f99a08), slot: ImportSlot(0) }))
+caption callable 0 block=function 94a7ec890d63e7e6b7d1706b69d0e7dd80fa408bd1eb08ff9f65d06fc35d2f39 "Say hello"
+caption node 1 site=function 94a7ec890d63e7e6b7d1706b69d0e7dd80fa408bd1eb08ff9f65d06fc35d2f39/0 "Send a greeting and give back the reply"

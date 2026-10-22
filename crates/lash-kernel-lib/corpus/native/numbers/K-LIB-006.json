@@ -3,7 +3,7 @@
   "cases": [
     {
       "name": "math.acos: K-LIB-006 edge",
-      "function": "5816fae9aea136d2e42e284c878f199e715a9a397df62f120daeb9a14a2e2a84",
+      "function": "3e6e55b5ce4e6671242451b6385968d30ea2232b18f35707e9336836e31e4a06",
       "args": [
         {
           "float": "2.0"
@@ -21,7 +21,7 @@
     },
     {
       "name": "math.acosh: K-LIB-006 edge",
-      "function": "a786bba549e93f8686cd03e054306a96ef1c9223213965aaf90c5c0991b75a33",
+      "function": "b2926d1fc229629553290a76fc27369cea768769b82ec883667ca2020df1bfbe",
       "args": [
         {
           "float": "0.0"
@@ -39,7 +39,7 @@
     },
     {
       "name": "math.asin: K-LIB-006 edge",
-      "function": "b2dc781abf0bc9362a991090069e72b3504d7bea0f35a21f7c62144857423493",
+      "function": "a40709cd422879f7332bb5a0ed6fb9360343ec5aa8457f3360e392d0fab5054f",
       "args": [
         {
           "float": "-2.0"
@@ -57,7 +57,7 @@
     },
     {
       "name": "math.asinh: K-LIB-006 edge",
-      "function": "3c8fd951c94929dfd46f91a0824b846550c399c40797ac48ca01b6e13c0eb6c1",
+      "function": "1ad39902c3ecde99d42d1069c75e5601d7f2279699e89b6f84c236f1f518d8f9",
       "args": [
         {
           "float": "-inf"
@@ -75,7 +75,7 @@
     },
     {
       "name": "math.atan: K-LIB-006 edge",
-      "function": "029cf6b958bccc224d4633350ba1ea4ba228714b9d35fbc0f5e65a617681df72",
+      "function": "8e8c54360b22161f426601354df650e2db770ee66c8e39319c132a34ff0fc63a",
       "args": [
         {
           "float": "-0.0"
@@ -93,7 +93,7 @@
     },
     {
       "name": "math.atan2: K-LIB-006 edge",
-      "function": "fdc6aea4b86867bcfe9a15fb5174cf3aded821dc55f296a319a4370f3f75b865",
+      "function": "966abcaa985cdbe4a8c965f7022ad5554cfe27b4f3d575bca9f2bf5c13ce5b9f",
       "args": [
         {
           "float": "-0.0"
@@ -114,7 +114,7 @@
     },
     {
       "name": "math.atanh: K-LIB-006 edge",
-      "function": "cb1355b144ff6c623b51a08eb8ac7e8f5ea85e9a321a06fbc3a055159c6af196",
+      "function": "4b6ff683a5d8453e5bb493d421dc6bb8dcd5a28c71597b61f74a057249d49a08",
       "args": [
         {
           "float": "-1.0"
@@ -132,7 +132,7 @@
     },
     {
       "name": "math.cbrt: K-LIB-006 edge",
-      "function": "94904af1987514b79d980e031ca8ac4af874dbc27bbd757594f7bd7f98060977",
+      "function": "2912a97f5e97d60ed69c6911d723604d2019a3b3eeaea0e3e35aa0a6e78db899",
       "args": [
         {
           "float": "-8.0"
@@ -150,7 +150,7 @@
     },
     {
       "name": "math.copysign: K-LIB-006 edge",
-      "function": "0836f63d7e0a40f4e884ae77add6699a4545377b7b43b9015ecf6b5dcc9f8a68",
+      "function": "f0803759a932c61c0760ea6810b38fc014c5e64db6fea7165a619de07bc06eac",
       "args": [
         {
           "float": "0.0"
@@ -171,7 +171,7 @@
     },
     {
       "name": "math.cos: K-LIB-006 edge",
-      "function": "6e9986d803f2da99d2bdb94bc35db387b71534a6c9c7de76143cc9675127e33e",
+      "function": "fbd1e2a61dd725215c382838d2d977963d875a74778c9cfae1d2b43e14a19f31",
       "args": [
         {
           "float": "inf"
@@ -189,7 +189,7 @@
     },
     {
       "name": "math.cosh: K-LIB-006 edge",
-      "function": "91dc00baa613460d2b4fc6a04c7e5b71babdfafdb989ab4729c5b332a5987913",
+      "function": "b7762ea244af559b01d2b2b508039eaf8c3dc83dfee4e9f3ca89dd6a77e4a27e",
       "args": [
         {
           "float": "-inf"
@@ -207,7 +207,7 @@
     },
     {
       "name": "math.erf: K-LIB-006 edge",
-      "function": "7c8d51a2e110d9ecbba8178a7708d00559a402bb019b5fed205fec8bd6606232",
+      "function": "61679cf9f7d15e32f726b67dab981d8927de3015a1818de68087f2a2676a7c03",
       "args": [
         {
           "float": "-inf"
@@ -225,7 +225,7 @@
     },
     {
       "name": "math.erfc: K-LIB-006 edge",
-      "function": "6f18a87c1ab0faad4d594e166475209b85d166ab722d516af92f51cf9a0c7039",
+      "function": "dd08a9c1f1b87ecd00e68f069c46bd80c389235c32ca45b3d5ef0445ebd1e064",
       "args": [
         {
           "float": "inf"
@@ -243,7 +243,7 @@
     },
     {
       "name": "math.exp: K-LIB-006 edge",
-      "function": "567c1b4d56ba6ff84c85cc7bd32fbffa22d6b4b8c3093f4e1a2f5de7c86084bf",
+      "function": "581f6663c4be7d54840f2482c3d444eeb8039056c1ba053201a1a3655cc998b2",
       "args": [
         {
           "float": "-inf"
@@ -261,7 +261,7 @@
     },
     {
       "name": "math.exp2: K-LIB-006 edge",
-      "function": "a854f2ea06502d052092bbb77c10d205be220086ffe994d37a0eb8ac2e23e257",
+      "function": "61dfa96512ad673e028683fc6fe2421b99ed787c383e0176cfa0a20b0145ceaa",
       "args": [
         {
           "float": "-1075.0"
@@ -279,7 +279,7 @@
     },
     {
       "name": "math.expm1: K-LIB-006 edge",
-      "function": "9feec48d3846cadcf959475719a24719c805f60a34c9766e0faec92e868110aa",
+      "function": "96ed61338fa0aaab6cc16143dbbc78b1409e3b00165392a698f55af248bf8248",
       "args": [
         {
           "float": "-0.0"
@@ -297,7 +297,7 @@
     },
     {
       "name": "math.fma: K-LIB-006 edge",
-      "function": "ed3bc75a68fa7ebfbba9d1cc46b11a2234d5816eeb0372477f1e62c1a0208a46",
+      "function": "74d30608333983c1fddf03beaacb1e74c4291c2cb006b4e756fb94e315bff49c",
       "args": [
         {
           "float": "1.0000000000000002"
@@ -321,7 +321,7 @@
     },
     {
       "name": "math.gamma: K-LIB-006 edge",
-      "function": "d3e09c0b853e607f6b5a199b87e07d81f4133b1927ed83cd7256c2671223429d",
+      "function": "b06434e9e03b6ae5762c479ed4a75dd8cbd137cb353e3724d89ef933661d80bb",
       "args": [
         {
           "float": "-1.0"
@@ -339,7 +339,7 @@
     },
     {
       "name": "math.hypot: K-LIB-006 edge",
-      "function": "725f31bffaa4eaec86e26c1d14be6e8f50fb6122b0d2c30dc895f643ee43c2fc",
+      "function": "5f642ca005dccd45aaf3cc1720926a5095167d932d854011dc858fdf6ae6f261",
       "args": [
         {
           "float": "nan"
@@ -360,7 +360,7 @@
     },
     {
       "name": "math.lgamma: K-LIB-006 edge",
-      "function": "da470fedce73890f957587745d1423861478ab6b72676a052d438b714d8df014",
+      "function": "b0cc156013d27ec7be05c01904bfd4a6449f0f8b480ef3b3f8a3c8e409b6fd77",
       "args": [
         {
           "float": "-1.0"
@@ -378,7 +378,7 @@
     },
     {
       "name": "math.log: K-LIB-006 edge",
-      "function": "31ba8e968bfe32f3d37cccac8c3276179e44934b55ea4e8bf98f337932bdc686",
+      "function": "fbd940516ff12d7da218f53b02368485c7fb557d81719ca29d8bbe48f74f42ea",
       "args": [
         {
           "float": "0.0"
@@ -396,7 +396,7 @@
     },
     {
       "name": "math.log10: K-LIB-006 edge",
-      "function": "eac6c2d57196d42ace64c7847f8de83677489054748ac86a5115490b23de5ec8",
+      "function": "69a0519dba8b129f7d32cac610cf246fe25e32513a7dcb90a9b2f66478c90d11",
       "args": [
         {
           "float": "-0.0"
@@ -414,7 +414,7 @@
     },
     {
       "name": "math.log1p: K-LIB-006 edge",
-      "function": "9f910859f5e05463065955004a21a340c91cc14dc7a824e2d49acf3da68ebb58",
+      "function": "8396747eb412a45bc22871e7047cce1f506465cef0a17434f1158e7ae8ec7517",
       "args": [
         {
           "float": "-0.0"
@@ -432,7 +432,7 @@
     },
     {
       "name": "math.log2: K-LIB-006 edge",
-      "function": "9d4534f37b7b141e62728f10b7f98bb0c5421d1ca6a17d540490f9e12af59c1a",
+      "function": "a2d468745d898d028ee58da694408284addc832cb79cb4877ad3b75851e4698f",
       "args": [
         {
           "float": "-1.0"
@@ -450,7 +450,7 @@
     },
     {
       "name": "math.nextafter: K-LIB-006 edge",
-      "function": "1ad30089ebd09697e325d6a5daa87dbda8d3875351bd746fafbf67869244d646",
+      "function": "454984a1fb7179de4348a3ed0cac7e27e6bd7c3902ef083c89fae67b0f48f54e",
       "args": [
         {
           "float": "0.0"
@@ -471,7 +471,7 @@
     },
     {
       "name": "math.pow: K-LIB-006 edge",
-      "function": "f1cb61a1f6f6e2001f4fb72fc5ad7a11cf5ffe6ffc7af829e584040ed4704d59",
+      "function": "879bb09bf1ea9cbb56b7b8d11d4f8be37de641ad95f4002d8cf3b99e32ff1fc1",
       "args": [
         {
           "float": "nan"
@@ -492,7 +492,7 @@
     },
     {
       "name": "math.remainder: K-LIB-006 edge",
-      "function": "af6a346204c873b9cc29b3794a1b1a8edb354328b1110e7eae1cc60b79a69a55",
+      "function": "cc7eee04a63aa87ca189b6bd5a2fcdaa588d4ae78b7e2e47834f648645e7b940",
       "args": [
         {
           "float": "7.0"
@@ -513,7 +513,7 @@
     },
     {
       "name": "math.sin: K-LIB-006 edge",
-      "function": "35587f11ab840a644e7fe0380b6d7524c38164da96de6433fcdb289c929f25d0",
+      "function": "978d8d15e0e017c94b2b07e6a6dc262bb8ce89a32469843a636163ef341a8ff5",
       "args": [
         {
           "float": "inf"
@@ -531,7 +531,7 @@
     },
     {
       "name": "math.sinh: K-LIB-006 edge",
-      "function": "b618e0492fb1a64db2a7a2059799e5d561110b1984d51bd201af2c219a204985",
+      "function": "99de5034fda06bb898be4d175c57cfd796ddbdafc816c232ee1e14e7bee772d4",
       "args": [
         {
           "float": "-inf"
@@ -549,7 +549,7 @@
     },
     {
       "name": "math.sqrt: K-LIB-006 edge",
-      "function": "c1b1d905b1aed00b7db610248ded059cf936b7e6905a957b8f21709448f92adf",
+      "function": "651345bc8efbe6a43958f11b44038d7c6011830811c6be035facbd97dbed3c28",
       "args": [
         {
           "float": "-0.0"
@@ -567,7 +567,7 @@
     },
     {
       "name": "math.tan: K-LIB-006 edge",
-      "function": "f23af18d602ecb0aa8b076e2d1b7075c7fa0fff8deb6dc5d603d68571540a43f",
+      "function": "e39442383c9e928842450db5274261fc6821f05aa96314c21784faa19c43543d",
       "args": [
         {
           "float": "inf"
@@ -585,7 +585,7 @@
     },
     {
       "name": "math.tanh: K-LIB-006 edge",
-      "function": "daf9b318bbd7f9cf13addf619c95bdad1133b9eb70c2cb2f2490d8aae1c90587",
+      "function": "1d054b000eb0d7e82d005cd01be371f92b12e86369d267163f833b35cd386260",
       "args": [
         {
           "float": "-inf"

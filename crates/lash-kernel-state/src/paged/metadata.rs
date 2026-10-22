@@ -3,13 +3,14 @@ use super::directory::ordinal_key;
 use super::payload::{build, visit};
 use super::tree::{Access, Cell, SealWork, Tree, grant};
 use super::{PageKind, SealBudget};
-use lash_kernel_doc::graph_tokens::{
-    TokenCodec, TokenError, TokenReader, TokenWriter, encode_body,
-};
 use lash_kernel_doc::heap::*;
 use lash_kernel_doc::heap_values::{key_digest, text_summary};
-use lash_kernel_doc::kernel_internals::{SpawnIdentity, TaskIdentity};
-use lash_kernel_doc::{FunctionId, Name, Site, Unit};
+use lash_vocabulary::names::FunctionId;
+use lash_vocabulary::names::Name;
+use lash_vocabulary::sites::Site;
+use lash_vocabulary::sites::Unit;
+use lash_vocabulary::sites::{SpawnIdentity, TaskIdentity};
+use lash_vocabulary::tokens::{TokenCodec, TokenError, TokenReader, TokenWriter, encode_body};
 use std::collections::BTreeSet;
 use std::ops::ControlFlow;
 use std::sync::{Arc, OnceLock};

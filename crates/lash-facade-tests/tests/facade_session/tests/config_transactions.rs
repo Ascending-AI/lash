@@ -6,7 +6,7 @@ use super::*;
 
 /// A session created on `core` and opened there.
 async fn opened(core: &LashCore, id: &str) -> Result<lash::LashSession> {
-    let id = lash::SessionId::parse(id).expect("nonblank host identity");
+    let id = lash_vocabulary::identity::SessionId::parse(id).expect("nonblank host identity");
     core.session(id.clone())
         .create(lash::SessionCreation::root(mock_session_spec()))
         .await?;
@@ -159,8 +159,8 @@ async fn a_resubmitted_transaction_reuses_its_receipt_and_refuses_changed_conten
 struct DataTool;
 
 #[cfg(feature = "rlm")]
-fn data_definition() -> lash_core::ToolDefinition {
-    lash_core::ToolDefinition::raw(
+fn data_definition() -> lash_vocabulary::tool_contract::ToolDefinition {
+    lash_vocabulary::tool_contract::ToolDefinition::raw(
         "tool:read-data",
         "report.read",
         "Read the report",
@@ -177,14 +177,17 @@ impl ToolProvider for DataTool {
     fn tool_manifests(
         &self,
         _config: &lash_core::OwnerConfigView,
-    ) -> std::result::Result<Vec<lash_core::ToolManifest>, lash::plugins::PluginError> {
+    ) -> std::result::Result<
+        Vec<lash_vocabulary::tool_contract::ToolManifest>,
+        lash::plugins::PluginError,
+    > {
         Ok(vec![data_definition().manifest()])
     }
     fn resolve_contract(
         &self,
         name: &str,
         _config: &lash_core::OwnerConfigView,
-    ) -> Option<Arc<lash_core::ToolContract>> {
+    ) -> Option<Arc<lash_vocabulary::tool_contract::ToolContract>> {
         (name == "report.read").then(|| Arc::new(data_definition().contract()))
     }
     async fn execute(&self, _call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
@@ -202,7 +205,7 @@ const DATA_TOOLS: &str = "data-tools";
 fn without_data() -> lash::tools::ToolSelectionConfig {
     lash::tools::ToolSelectionConfig {
         tools: Some(lash::tools::ToolSelection::AllExcept(vec![
-            lash_core::ToolId::from("tool:read-data"),
+            lash_vocabulary::tool_contract::ToolId::from("tool:read-data"),
         ])),
     }
 }
@@ -348,7 +351,10 @@ impl ToolProvider for ChangingDataTool {
     fn tool_manifests(
         &self,
         config: &lash_core::OwnerConfigView,
-    ) -> std::result::Result<Vec<lash_core::ToolManifest>, lash::plugins::PluginError> {
+    ) -> std::result::Result<
+        Vec<lash_vocabulary::tool_contract::ToolManifest>,
+        lash::plugins::PluginError,
+    > {
         Ok({
             if self.0.load(Ordering::SeqCst) {
                 DataTool.tool_manifests(config)?
@@ -361,7 +367,7 @@ impl ToolProvider for ChangingDataTool {
         &self,
         name: &str,
         config: &lash_core::OwnerConfigView,
-    ) -> Option<Arc<lash_core::ToolContract>> {
+    ) -> Option<Arc<lash_vocabulary::tool_contract::ToolContract>> {
         DataTool.resolve_contract(name, config)
     }
     async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {

@@ -3,13 +3,13 @@
   "cases": [
     {
       "name": "wrong kind",
-      "document": "kernel 1\nnumbers by_spelling\neffect source() -> Any contract \"1\"\nmain { try { let value = perform source() as Int print value } catch e { finish e.kind } finish null }\n",
+      "document": "kernel 1\nnumbers by_spelling\nimport 0 operation host.source() -> Any\nmain {\n  try {\n    let value = perform 0() as Int\n    print value\n  } catch e {\n    finish e.kind\n  }\n  finish null\n}\n",
       "expected": {
         "prints": [],
         "trace": [
           {
             "effect": {
-              "effect": "source",
+              "effect": "host.source",
               "args": [],
               "result": "int"
             }
@@ -39,13 +39,13 @@
     },
     {
       "name": "fractional integer",
-      "document": "kernel 1\nnumbers by_spelling\neffect source() -> Any contract \"1\"\nmain { try { let value = perform source() as Int print value } catch e { finish e.kind } finish null }\n",
+      "document": "kernel 1\nnumbers by_spelling\nimport 0 operation host.source() -> Any\nmain {\n  try {\n    let value = perform 0() as Int\n    print value\n  } catch e {\n    finish e.kind\n  }\n  finish null\n}\n",
       "expected": {
         "prints": [],
         "trace": [
           {
             "effect": {
-              "effect": "source",
+              "effect": "host.source",
               "args": [],
               "result": "int"
             }
@@ -75,13 +75,13 @@
     },
     {
       "name": "float overflow",
-      "document": "kernel 1\nnumbers by_spelling\neffect source() -> Any contract \"1\"\nmain { try { let value = perform source() as Float print value } catch e { finish e.kind } finish null }\n",
+      "document": "kernel 1\nnumbers by_spelling\nimport 0 operation host.source() -> Any\nmain {\n  try {\n    let value = perform 0() as Float\n    print value\n  } catch e {\n    finish e.kind\n  }\n  finish null\n}\n",
       "expected": {
         "prints": [],
         "trace": [
           {
             "effect": {
-              "effect": "source",
+              "effect": "host.source",
               "args": [],
               "result": "float"
             }
@@ -111,13 +111,13 @@
     },
     {
       "name": "missing required field",
-      "document": "kernel 1\nnumbers by_spelling\neffect source() -> Any contract \"1\"\nmain { try { let value = perform source() as Record{\"x\": Int} print value } catch e { finish e.kind } finish null }\n",
+      "document": "kernel 1\nnumbers by_spelling\nimport 0 operation host.source() -> Any\nmain {\n  try {\n    let value = perform 0() as Record{x: Int}\n    print value\n  } catch e {\n    finish e.kind\n  }\n  finish null\n}\n",
       "expected": {
         "prints": [],
         "trace": [
           {
             "effect": {
-              "effect": "source",
+              "effect": "host.source",
               "args": [],
               "result": {
                 "record": {
@@ -156,13 +156,13 @@
     },
     {
       "name": "first fitting Union(Int, Float)",
-      "document": "kernel 1\nnumbers by_spelling\neffect source() -> Any contract \"1\"\nmain { let value = perform source() as Union(Int, Float) finish value }\n",
+      "document": "kernel 1\nnumbers by_spelling\nimport 0 operation host.source() -> Any\nmain {\n  let value = perform 0() as Union(Int, Float)\n  finish value\n}\n",
       "expected": {
         "prints": [],
         "trace": [
           {
             "effect": {
-              "effect": "source",
+              "effect": "host.source",
               "args": [],
               "result": {
                 "union": [
@@ -197,13 +197,13 @@
     },
     {
       "name": "first fitting Union(Float, Int)",
-      "document": "kernel 1\nnumbers by_spelling\neffect source() -> Any contract \"1\"\nmain { let value = perform source() as Union(Float, Int) finish value }\n",
+      "document": "kernel 1\nnumbers by_spelling\nimport 0 operation host.source() -> Any\nmain {\n  let value = perform 0() as Union(Float, Int)\n  finish value\n}\n",
       "expected": {
         "prints": [],
         "trace": [
           {
             "effect": {
-              "effect": "source",
+              "effect": "host.source",
               "args": [],
               "result": {
                 "union": [
@@ -238,13 +238,13 @@
     },
     {
       "name": "Any array and object decode into a fresh list and record",
-      "document": "kernel 1\nnumbers by_spelling\neffect source() -> Any contract \"1\"\nmain { let value = perform source() as Any finish value }\n",
+      "document": "kernel 1\nnumbers by_spelling\nimport 0 operation host.source() -> Any\nmain {\n  let value = perform 0() as Any\n  finish value\n}\n",
       "expected": {
         "prints": [],
         "trace": [
           {
             "effect": {
-              "effect": "source",
+              "effect": "host.source",
               "args": [],
               "result": "any"
             }

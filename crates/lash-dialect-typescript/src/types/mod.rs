@@ -25,7 +25,7 @@
 
 use std::collections::BTreeMap;
 
-use lash_kernel_doc::Type;
+use lash_vocabulary::Type;
 
 use crate::adapter::{BinaryOp, TypeAnnotation, TypeShape, UnaryOp};
 
@@ -37,7 +37,7 @@ mod plain;
 pub(crate) use facts::Facts;
 pub(crate) use narrow::{Narrowing, narrow};
 pub(crate) use packages::{Gives, Packages};
-pub(crate) use plain::PlainRecord;
+pub(crate) use plain::{PlainRecord, numeric_name};
 
 /// The array methods whose result is a new kernel list whatever array they
 /// are called on: each returns a list it builds, from `[]` or by
@@ -268,7 +268,7 @@ pub(crate) enum Direct {
     /// `text.concat` over a text and a float's text, the float on the left
     /// when `float_left`. A primitive's ToPrimitive is itself and a float
     /// has no `toString` of its own to run, so `+` is the float's spelling
-    /// (`ts.number.to_string`) concatenated with the text.
+    /// (`ts.number.format_value`) concatenated with the text.
     ConcatFloat { float_left: bool },
 }
 

@@ -1,7 +1,10 @@
 //! Inventory-driven laws; lack of an exercised branch is never a pass.
 use super::*;
+use crate::plugins::CallbackSlot;
+use crate::plugins::InstalledInventory;
+use crate::plugins::PluginCallbackIdentity;
 use crate::plugins::diagnostics::*;
-use crate::plugins::{CallbackSlot, InstalledInventory, PluginCallbackIdentity, RegistryKind};
+use lash_vocabulary::claims::RegistryKind;
 
 /// The applicable durability or observation contracts for each callback.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -328,7 +331,7 @@ pub async fn certify_plugin_with(
             // A plugin declared stateless has every command refused, so none
             // of its callbacks can publish.
             if inventory.keeps_state(factory.id())
-                && (slot.state_authority() == crate::plugins::StateAuthority::Commands
+                && (slot.state_authority() == lash_vocabulary::providers::StateAuthority::Commands
                     || tool_body
                     || has_reducer)
             {
@@ -506,7 +509,8 @@ async fn unserved_law(
         }));
     };
     let token =
-        crate::plugins::ObligationToken::for_callback(RegistryKind::Session, callback).to_string();
+        lash_vocabulary::claims::ObligationToken::for_callback(RegistryKind::Session, callback)
+            .to_string();
     let writer = store
         .register_node(&NodeSpec {
             node: NodeId::new(format!("callback-writer-{ordinal}")),
@@ -552,7 +556,7 @@ async fn unserved_law(
         .plugin_diagnostics()
         .explain_claimability(
             Some(&snapshot),
-            &crate::SessionId::parse(actor.id())
+            &lash_vocabulary::identity::SessionId::parse(actor.id())
                 .map_err(|error| PluginHarnessError::Worker(error.to_string()))?,
         )
         .await?;

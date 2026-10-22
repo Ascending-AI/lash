@@ -25,7 +25,6 @@ use super::waits::WaitId;
 use super::waits::WaitPurpose;
 use crate::AdmittedScope;
 use crate::DurableSettings;
-use crate::ProcessId;
 use crate::Resolution;
 use lash_durable::domain::WaitKind;
 use lash_execution_contracts::backend::Backend;
@@ -35,6 +34,7 @@ use lash_execution_contracts::waits::RaceWinner;
 use lash_execution_contracts::waits::WaitDeadline;
 use lash_execution_contracts::waits::WaitRef;
 use lash_execution_contracts::waits::WaitSpec;
+use lash_vocabulary::identity::ProcessId;
 
 /// A broken law: what was expected, and what happened.
 #[derive(Debug)]
@@ -169,7 +169,7 @@ async fn pin(
     let purpose = match (kind, target) {
         (WaitKind::ToolCompletion, None) => WaitPurpose::ToolCompletion {
             call: crate::ToolCallId::fixture("wait-law"),
-            tool: crate::ToolId::new("wait_law"),
+            tool: lash_vocabulary::tool_contract::ToolId::new("wait_law"),
             deadline,
         },
         (WaitKind::EngineKey, None) => WaitPurpose::EngineKey {
@@ -849,8 +849,8 @@ pub async fn a_parked_call_is_listed_from_its_wait_row_alone(backend: &Backend) 
     let (wait, key) = pin(&cx, WaitKind::ToolCompletion, None, Some(LONG)).await?;
     let key = key_of(key)?;
     pin(&cx, WaitKind::EngineKey, None, None).await?;
-    let session =
-        crate::SessionId::parse("listed").map_err(|error| LawBroken(error.to_string()))?;
+    let session = lash_vocabulary::identity::SessionId::parse("listed")
+        .map_err(|error| LawBroken(error.to_string()))?;
     let listed = parked(backend, CallOwner::Session(session.clone())).await?;
     let [call] = listed.as_slice() else {
         return Err(LawBroken(format!(
@@ -862,7 +862,7 @@ pub async fn a_parked_call_is_listed_from_its_wait_row_alone(backend: &Backend) 
         call.key.as_str() == key
             && call.owner == CallOwner::Session(session)
             && call.call_id == crate::ToolCallId::fixture("wait-law")
-            && call.tool_id == crate::ToolId::new("wait_law")
+            && call.tool_id == lash_vocabulary::tool_contract::ToolId::new("wait_law")
             && call.deadline == row(backend, &wait).await?.purpose.deadline(),
         "the listed call is {} of tool {} due {:?}, not the pinned one",
         call.call_id,

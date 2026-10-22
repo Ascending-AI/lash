@@ -3,7 +3,7 @@
 //! proof states about them.
 
 use super::*;
-use lash_protocol_types::SessionId;
+use lash_vocabulary::identity::SessionId;
 
 /// One execution a contract core observed: what it did, and the workflow
 /// document it ran when lash still answers it.
@@ -17,7 +17,7 @@ pub(super) struct ContractGraph {
 struct ObservedExecution {
     overlay: lash::workflow::WorkflowExecutionOverlayAccumulator,
     identity: Option<lash::tracing::TraceLanguageExecutionIdentity>,
-    document: Option<lash::workflow::WorkflowDocumentRef>,
+    document: Option<lash::workflow::LinkedStart>,
 }
 
 /// The executions a contract core observes: one bounded overlay per
@@ -26,9 +26,8 @@ struct ObservedExecution {
 #[derive(Default)]
 pub(super) struct ContractGraphs {
     executions: std::sync::Mutex<BTreeMap<String, ObservedExecution>>,
-    documents: std::sync::Mutex<
-        BTreeMap<lash::workflow::WorkflowDocumentRef, lash::workflow::WorkflowDocument>,
-    >,
+    documents:
+        std::sync::Mutex<BTreeMap<lash::workflow::LinkedStart, lash::workflow::WorkflowDocument>>,
 }
 
 impl ContractGraphs {
@@ -56,7 +55,7 @@ impl ContractGraphs {
                 self.documents
                     .lock()
                     .unwrap_or_else(std::sync::PoisonError::into_inner)
-                    .insert(reference, read.document);
+                    .insert(reference, *read);
             }
         }
     }
@@ -134,7 +133,10 @@ impl lash::tracing::ProductObservationSink for ContractGraphs {
             if let lash::tracing::TraceLanguageExecutionPayload::ExecutionStarted { .. } =
                 &event.payload
             {
-                execution.document = Some(event.identity.document.clone());
+                execution.document = match &event.identity.document {
+                    lash::tracing::TraceExecutionCode::Start(start) => Some(start.clone()),
+                    lash::tracing::TraceExecutionCode::Callable(_) => None,
+                };
             }
         }
         // One execution per accumulator, so the fold cannot refuse the record.
@@ -147,7 +149,7 @@ impl lash::tracing::ProductObservationSink for ContractGraphs {
 fn contract_document_effect<'a>(
     document: &'a lash::workflow::WorkflowDocument,
     site: &lash::workflow::document::PositionLabel,
-) -> Option<&'a lash::workflow::document::EffectName> {
+) -> Option<&'a lash_vocabulary::names::QualifiedName> {
     use lash::workflow::graph::{ActNode, ActionNode, ExprNode, NodeKind};
 
     match &document
@@ -157,11 +159,15 @@ fn contract_document_effect<'a>(
         .find(|node| node.site == *site)?
         .kind
     {
-        NodeKind::Action(ActionNode::Perform { effect, .. })
+        NodeKind::Action(ActionNode::Perform { slot, .. })
         | NodeKind::Expr(ExprNode::Act {
-            kind: ActNode::Perform { effect, .. },
+            kind: ActNode::Perform { slot, .. },
             ..
-        }) => Some(effect),
+        }) => document
+            .document()
+            .imports
+            .get(slot)
+            .map(|import| &import.name),
         _ => None,
     }
 }
@@ -203,8 +209,11 @@ pub(super) fn agent_contract_graph_facts(
             }
         }
         if matches!(
-            identity.document.entry,
-            lash::workflow::WorkflowDocumentEntry::Entry { .. }
+            &identity.document,
+            lash::tracing::TraceExecutionCode::Start(lash::workflow::LinkedStart {
+                selector: lash::workflow::StartSelector::Export(_),
+                ..
+            })
         ) && matches!(
             graph.subject,
             lash::tracing::TraceRuntimeSubject::Process { .. }
@@ -237,7 +246,7 @@ pub(super) fn agent_contract_graph_facts(
                 identity.entry_name,
                 child.child.document.as_ref().map_or_else(
                     || "<unknown>".to_owned(),
-                    |document| document.document.to_string()
+                    |document| document.link.to_string()
                 )
             ));
         }

@@ -7,6 +7,7 @@ use lash_protocol_types::{
     llm::attachment_delivery::Delivery, llm::attachment_delivery::DeliveryContext,
     llm::attachment_delivery::DeliveryLimits, llm::attachment_delivery::ProviderAccepts,
 };
+
 use std::sync::Arc;
 
 /// The slots of one attempt that share one delivery: the same content as

@@ -8,11 +8,12 @@ pub use meter::{LoopBounds, audit_metering};
 use std::collections::BTreeSet;
 use std::sync::Arc;
 
-use lash_kernel_doc::{FunctionId, FunctionRegistry};
+use lash_kernel_doc::Document;
+use lash_kernel_doc::FunctionRegistry;
 use lash_kernel_exec::charge::Weight;
-use lash_kernel_package::PackageView;
 use lash_kernel_vm::kernel_internals::{Layout, prepare_with_layout};
 use lash_kernel_vm::{ChargeTape, KernelMachine, PreparedLibrary};
+use lash_vocabulary::names::FunctionId;
 
 use crate::machine::{Run, run_case_in};
 use crate::{Case, ExpectedEnd, HarnessError, Observations};
@@ -46,18 +47,18 @@ pub struct Witness {
     pub case: Case,
 }
 
-/// Both execution paths of a package set, prepared once and shared by its
-/// witnesses. The view fixes the set whose members the kit is checking.
-pub struct Kit<'a> {
-    view: PackageView<'a>,
+/// The native and body execution paths, prepared once and shared by their
+/// witnesses. The Document fixes the definitions the kit is checking.
+pub struct Kit {
+    document: Arc<Document>,
     installed: PreparedLibrary,
     bodies: PreparedLibrary,
 }
 
-impl<'a> Kit<'a> {
-    pub fn new(view: PackageView<'a>, registry: Arc<FunctionRegistry>) -> Self {
+impl Kit {
+    pub fn new(document: Arc<Document>, registry: Arc<FunctionRegistry>) -> Self {
         Self {
-            view,
+            document,
             installed: prepare_with_layout(Arc::clone(&registry), Layout(0)),
             bodies: prepare_with_layout(registry, Layout(3)),
         }
@@ -72,24 +73,16 @@ impl<'a> Kit<'a> {
             .filter(|w| matches!(w.law, Law::Native))
             .map(|w| w.function)
             .collect();
-        for package in self.view.packages() {
-            for function in package.ids() {
-                let Some(registered) = self.installed.registry().get(&function) else {
-                    return Err(HarnessError(format!(
-                        "{}: definition @{function} is not installed",
-                        package.path()
-                    )));
-                };
-                if registered.has_body()
-                    && registered.states_native()
-                    && !covered.contains(&function)
-                {
-                    return Err(HarnessError(format!(
-                        "CONF-NATIVE {} {} lacks a witness",
-                        package.path(),
-                        registered.name()
-                    )));
-                }
+        for function in self.document.functions.keys() {
+            let registered =
+                self.installed.registry().get(function).ok_or_else(|| {
+                    HarnessError(format!("definition @{function} is not installed"))
+                })?;
+            if registered.has_body() && registered.states_native() && !covered.contains(function) {
+                return Err(HarnessError(format!(
+                    "CONF-NATIVE {} lacks a witness",
+                    registered.name()
+                )));
             }
         }
         for witness in witnesses {
@@ -101,16 +94,12 @@ impl<'a> Kit<'a> {
     /// Compare one witness, naming its package, function, law and the first
     /// differing observation on failure. Admission failures are not evidence.
     pub fn check(&self, witness: &Witness) -> Result<(), HarnessError> {
-        let owner = self
-            .view
-            .packages()
-            .find(|package| package.ids().any(|function| function == witness.function))
-            .ok_or_else(|| {
-                HarnessError(format!(
-                    "{}: witness names a function outside the package view",
-                    witness.law.name()
-                ))
-            })?;
+        if !self.document.functions.contains_key(&witness.function) {
+            return Err(HarnessError(format!(
+                "{}: witness names a function outside the document",
+                witness.law.name()
+            )));
+        }
         let registered = self
             .installed
             .registry()
@@ -135,7 +124,7 @@ impl<'a> Kit<'a> {
         let label = format!(
             "{} {} {} / {}",
             witness.law.name(),
-            owner.path(),
+            self.document.identity(),
             registered.name(),
             witness.case.name
         );
@@ -146,7 +135,7 @@ impl<'a> Kit<'a> {
         }
         let document = lash_kernel_doc::parse_document(&witness.case.document)
             .map_err(|error| HarnessError(format!("{label}: {error}")))?;
-        if !document.manifest.functions.contains_key(&witness.function) {
+        if !document.functions.contains_key(&witness.function) {
             return Err(HarnessError(format!(
                 "{label}: witness does not declare its function"
             )));

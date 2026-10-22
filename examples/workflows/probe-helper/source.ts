@@ -1,5 +1,5 @@
 /** Summarize the inbox */
-export async function summarize_inbox() {
+export async function summarize_inbox(): Promise<string[]> {
   /** Describe how to summarize and show one email */
   async function announce(email) {
     const summary = await llm.query({

@@ -1,5 +1,22 @@
 {
   "$defs": {
+    "CallableId": {
+      "additionalProperties": false,
+      "description": "A stored function under its defining Link. Calls and escaped captures retain this Link.",
+      "properties": {
+        "function": {
+          "$ref": "#/$defs/FunctionId"
+        },
+        "link": {
+          "$ref": "#/$defs/LinkId"
+        }
+      },
+      "required": [
+        "link",
+        "function"
+      ],
+      "type": "object"
+    },
     "DocumentId": {
       "pattern": "^[0-9a-f]{64}$",
       "type": "string"
@@ -53,7 +70,7 @@
               "$ref": "#/$defs/FunctionId"
             },
             "name": {
-              "$ref": "#/$defs/QualifiedName"
+              "$ref": "#/$defs/FunctionName"
             },
             "reason": {
               "const": "function_retired",
@@ -71,7 +88,7 @@
           "description": "The rewrite performs `operation` under another requirement than the\ndocument did: adoption never moves code onto a changed operation\ncontract.",
           "properties": {
             "operation": {
-              "$ref": "#/$defs/QualifiedName"
+              "$ref": "#/$defs/FunctionName"
             },
             "reason": {
               "const": "operation_contract_changed",
@@ -119,6 +136,14 @@
       ]
     },
     "FunctionId": {
+      "pattern": "^[0-9a-f]{64}$",
+      "type": "string"
+    },
+    "FunctionName": {
+      "pattern": "^[A-Za-z_][A-Za-z0-9_]*(\\.[A-Za-z_][A-Za-z0-9_]*)*$",
+      "type": "string"
+    },
+    "LinkId": {
       "pattern": "^[0-9a-f]{64}$",
       "type": "string"
     },
@@ -228,10 +253,6 @@
         }
       ]
     },
-    "QualifiedName": {
-      "pattern": "^[A-Za-z_][A-Za-z0-9_]*(\\.[A-Za-z_][A-Za-z0-9_]*)*$",
-      "type": "string"
-    },
     "Site": {
       "additionalProperties": false,
       "description": "A node's address: the code it belongs to and the chain of\n[`Node::children`] indexes that reaches it from that code's body.\n\nA site is derived from the document and is never written by a host\n(`K-ID-004`). An empty chain addresses the body itself.",
@@ -294,6 +315,22 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "description": "Why a kernel process is not carried to the next kernel version.",
   "oneOf": [
+    {
+      "properties": {
+        "callable": {
+          "$ref": "#/$defs/CallableId"
+        },
+        "refused": {
+          "const": "callable_origin_required",
+          "type": "string"
+        }
+      },
+      "required": [
+        "refused",
+        "callable"
+      ],
+      "type": "object"
+    },
     {
       "properties": {
         "document": {

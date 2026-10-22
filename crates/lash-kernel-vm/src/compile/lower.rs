@@ -19,12 +19,13 @@
 //! its code is complete (`super::Placer`).
 
 use lash_kernel_doc as doc;
-use lash_kernel_doc::{FunctionId, Name};
 use lash_kernel_exec::charge::RegionEvent;
 use lash_kernel_exec::{
     ActIx, BlockIx, ChargeEvent, CodeIx, ConstIx, FieldIx, FieldListIx, LibIx, LocalRef, NameIx,
     Op, OpRange, Reg, RegRange, RegionIx, RegionTable, SiteIx, Weight,
 };
+use lash_vocabulary::names::FunctionId;
+use lash_vocabulary::names::Name;
 
 use super::{
     Action, ActionKind, Atom, Callee, CodeId, Compiler, Form, Local, Nested, NestedCallee,
@@ -365,13 +366,13 @@ impl Compiler<'_> {
             }
             doc::Stmt::ReturnVia { value, policy } => {
                 self.valued(&mut ops, value, |src| Op::ReturnVia { src });
-                match self.resolve.lib(policy) {
+                match self.hook(policy).ok() {
                     Some(policy) => Form::ReturnVia {
                         site: self.site(),
                         policy,
                     },
                     None => {
-                        let name = self.name(Name::new(policy.to_string()));
+                        let name = self.name(Name::new(format!("{policy:?}")));
                         ops.ops.pop();
                         ops.push(Op::Unbound { dst: Reg(0), name });
                         Form::Plain
@@ -438,14 +439,53 @@ impl Compiler<'_> {
 
     /// A loop protocol's hooks by their library ids, or the first hook the
     /// document cannot reach.
+    fn hook(&self, function: &doc::FunctionTarget) -> Result<super::LinkedHook, FunctionId> {
+        match function {
+            doc::FunctionTarget::Import(slot) => Ok(super::LinkedHook::Import(*slot, None)),
+            doc::FunctionTarget::Local(id) => self
+                .declared
+                .get(id)
+                .copied()
+                .map(super::LinkedHook::Code)
+                .or_else(|| self.resolve.lib(id).map(super::LinkedHook::Library))
+                .ok_or(*id),
+        }
+    }
     fn via(&self, via: &doc::Protocol) -> Result<Via, FunctionId> {
-        let lib = |function: &FunctionId| self.resolve.lib(function).ok_or(*function);
-        let hook = |function: &Option<FunctionId>| function.as_ref().map(lib).transpose();
+        use lash_vocabulary::Type;
+        // The cursor supplies these kinds before the public call boundary.
+        let hinted =
+            |target: &doc::FunctionTarget, kinds: &[Type], result: Type| {
+                let mut hook = self.hook(target)?;
+                if let super::LinkedHook::Import(slot, hint) = &mut hook {
+                    *hint =
+                        self.imports
+                            .get(&(self.unit.clone(), *slot))
+                            .copied()
+                            .filter(|id| {
+                                let signature = &self.resolve.library.lib(*id).header.signature;
+                                signature.params.len() == kinds.len()
+                                    && signature.params.iter().zip(kinds).all(|(param, kind)| {
+                                        param.ty == Type::Any || &param.ty == kind
+                                    })
+                                    && (signature.result == Type::Any || signature.result == result)
+                            });
+                }
+                Ok(hook)
+            };
         Ok(Via {
-            open: lib(&via.open)?,
-            next: hook(&via.next)?,
-            item: hook(&via.item)?,
-            check: hook(&via.check)?,
+            open: self.hook(&via.open)?,
+            next: via.next.as_ref().map(|f| self.hook(f)).transpose()?,
+            item: via
+                .item
+                .as_ref()
+                .map(|f| hinted(f, &[Type::Any, Type::Any], Type::Any))
+                .transpose()?,
+            check: via
+                .check
+                .as_ref()
+                .map(|f| hinted(f, &[Type::Any, Type::Int, Type::Int, Type::Bool], Type::Int))
+                .transpose()?,
         })
     }
 
@@ -519,27 +559,23 @@ impl Compiler<'_> {
                 args: self.atoms(args),
             },
             doc::Action::Perform {
-                effect,
+                slot,
                 args,
                 result,
                 then_yield,
             } => ActionKind::Perform {
-                effect: effect.clone(),
+                slot: *slot,
                 args: self.atoms(args),
                 result: result.clone(),
-                then_yield: *then_yield,
-            },
-            doc::Action::Sleep {
-                duration,
-                then_yield,
-            } => ActionKind::Sleep {
-                duration: self.atom(duration),
                 then_yield: *then_yield,
             },
             // An await is a call of its policy with the value
             // (`K-TASK-026`).
             doc::Action::Await { policy, value } => ActionKind::Call {
-                callee: self.callee(&doc::Callee::Library(*policy)),
+                callee: self.callee(&match policy {
+                    doc::FunctionTarget::Local(id) => doc::Callee::Local(*id),
+                    doc::FunctionTarget::Import(slot) => doc::Callee::Import(*slot),
+                }),
                 args: vec![self.atom(value)],
             },
             doc::Action::Join { task } => ActionKind::Join(self.atom(task)),
@@ -548,6 +584,7 @@ impl Compiler<'_> {
             doc::Action::Cancel { task } => ActionKind::Cancel(self.atom(task)),
         };
         Action {
+            guest: self.scopes.last().is_some_and(|scope| scope.charged),
             occurrence: usize::MAX,
             site: self.site(),
             kind,
@@ -556,17 +593,30 @@ impl Compiler<'_> {
 
     fn callee(&mut self, callee: &doc::Callee) -> Callee {
         match callee {
-            doc::Callee::Declared(name) => match self.declared.get(name) {
+            doc::Callee::Local(function) => match self.declared.get(function) {
                 Some(code) => Callee::Declared(*code),
-                // Validation refuses this; a variable of that name is what
-                // is left to mean.
-                None => Callee::Value(Var::Unbound(name.clone())),
+                None => match self.resolve.lib(function) {
+                    Some(lib) => Callee::Library(lib),
+                    None => Callee::Value(Var::Unbound(Name::new(function.to_string()))),
+                },
             },
+            doc::Callee::Import(slot) => Callee::Import(
+                *slot,
+                self.imports
+                    .get(&(self.unit.clone(), *slot))
+                    .copied()
+                    .filter(|id| {
+                        self.resolve
+                            .library
+                            .lib(*id)
+                            .header
+                            .signature
+                            .params
+                            .iter()
+                            .all(|param| param.ty == lash_vocabulary::Type::Any)
+                    }),
+            ),
             doc::Callee::Value(name) => Callee::Value(self.resolve(name)),
-            doc::Callee::Library(function) => match self.resolve.lib(function) {
-                Some(lib) => Callee::Library(lib),
-                None => Callee::Value(Var::Unbound(Name::new(function.to_string()))),
-            },
         }
     }
 
@@ -623,7 +673,7 @@ impl Compiler<'_> {
                 path.push(index);
                 NestedRole {
                     suffix: path[statement..].into(),
-                    site: doc::Site::new(self.unit.clone(), path),
+                    site: lash_vocabulary::sites::Site::new(self.unit.clone(), path),
                     reg,
                 }
             })
@@ -649,11 +699,11 @@ impl Compiler<'_> {
         };
         let act = ActIx(self.stream.nested.len() as u32);
         let op = Op::Nested { act, args };
-        self.stream.nested_at.insert(site.clone(), act);
         let operator = kind
             .operator_lib()
             .is_some_and(|lib| self.resolve.operator(lib, args.len as usize));
         self.stream.nested.push(Nested {
+            guest: self.scopes.last().is_some_and(|scope| scope.charged),
             occurrence: usize::MAX,
             site,
             suffix,
@@ -748,9 +798,35 @@ impl Compiler<'_> {
                 // A closure runs only where it is applied, in the body that
                 // made it or wherever it escapes to: wherever it runs, it is
                 // ordinary code, charged as it runs (`K-CHG-007`).
-                let code = self.child(0, |c| {
-                    c.code(&closure.params, &closure.body, false, true, false)
-                });
+                let definition = self
+                    .resolve
+                    .library
+                    .registry
+                    .get(&closure.function)
+                    .unwrap_or_else(|| unreachable!("admitted closure definition"))
+                    .definition();
+                let params: Vec<_> = definition
+                    .signature
+                    .params
+                    .iter()
+                    .map(|p| p.name.clone())
+                    .collect();
+                let body = &definition
+                    .body()
+                    .unwrap_or_else(|| unreachable!("closure body"))
+                    .block;
+                let enclosing_unit = std::mem::replace(
+                    &mut self.unit,
+                    lash_vocabulary::sites::Unit::Library(closure.function),
+                );
+                let enclosing_path = std::mem::take(&mut self.path);
+                let mut code = self.code(&params, body, false, true, false);
+                code.created = Some(lash_vocabulary::sites::Site::new(
+                    enclosing_unit.clone(),
+                    enclosing_path.clone(),
+                ));
+                self.unit = enclosing_unit;
+                self.path = enclosing_path;
                 let id = CodeId(self.base.codes + self.codes.len() as u32);
                 self.codes.push(Some(code));
                 ops.push(Op::Closure {
@@ -764,10 +840,11 @@ impl Compiler<'_> {
                 if *function == brand_built() && self.resolve.lib(function).is_some() =>
             {
                 let c = self.constant(match &self.unit {
-                    doc::Unit::Library(body) => {
+                    lash_vocabulary::sites::Unit::Library(body) => {
                         doc::Literal::Bytes(doc::Bytes::new(&body.as_bytes()[..]))
                     }
-                    doc::Unit::Main | doc::Unit::Function(_) => doc::Literal::Absent,
+                    lash_vocabulary::sites::Unit::Main
+                    | lash_vocabulary::sites::Unit::Function(_) => doc::Literal::Absent,
                 });
                 ops.push(Op::Const { dst, c });
             }
@@ -791,8 +868,7 @@ impl Compiler<'_> {
                     ops.push(Op::Unbound { dst, name });
                 }
             },
-            doc::Expr::Clock => ops.push(Op::Clock { dst }),
-            doc::Expr::Random => ops.push(Op::Random { dst }),
+
             doc::Expr::If { cond, then, r#else } => {
                 self.child(0, |c| c.expr(ops, cond, dst));
                 let test = ops.ops.len();
@@ -850,6 +926,7 @@ impl Compiler<'_> {
                 let mut runs = |callee: &doc::Callee| match self.callee(callee) {
                     Callee::Declared(code) => NestedCallee::Declared(code),
                     Callee::Library(lib) => NestedCallee::Library(lib),
+                    Callee::Import(slot, lib) => NestedCallee::Import(slot, lib),
                     Callee::Value(var) => {
                         read = Some(var);
                         NestedCallee::Read
@@ -858,15 +935,12 @@ impl Compiler<'_> {
                 let kind = match &act.kind {
                     doc::ActKind::Call(callee) => NestedKind::Call(runs(callee)),
                     doc::ActKind::Perform {
-                        effect,
+                        slot,
                         result,
                         then_yield,
                     } => NestedKind::Perform {
-                        effect: effect.clone(),
+                        slot: *slot,
                         result: result.clone(),
-                        then_yield: *then_yield,
-                    },
-                    doc::ActKind::Sleep { then_yield } => NestedKind::Sleep {
                         then_yield: *then_yield,
                     },
                     doc::ActKind::Spawn(callee) => NestedKind::Spawn(runs(callee)),
@@ -876,9 +950,10 @@ impl Compiler<'_> {
                     doc::ActKind::JoinMany(mode) => NestedKind::JoinMany(*mode),
                     // An await is a call of its policy with the value
                     // (`K-TASK-026`).
-                    doc::ActKind::Await(policy) => {
-                        NestedKind::Call(runs(&doc::Callee::Library(*policy)))
-                    }
+                    doc::ActKind::Await(policy) => NestedKind::Call(runs(&match policy {
+                        doc::FunctionTarget::Local(id) => doc::Callee::Local(*id),
+                        doc::FunctionTarget::Import(slot) => doc::Callee::Import(*slot),
+                    })),
                 };
                 self.nested(ops, kind, read, &act.args, dst);
             }

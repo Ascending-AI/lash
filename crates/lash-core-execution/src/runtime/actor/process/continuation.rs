@@ -25,8 +25,8 @@ use lash_execution_contracts::process::{EngineState, ProcessRecord};
 
 use super::activation::{corrupt, registry_failure};
 use super::driver::Driver;
-use crate::ProcessId;
 use crate::runtime::actor::round::PinnedWaits;
+use lash_vocabulary::identity::ProcessId;
 
 /// One activation's acknowledged process state. See the module
 /// documentation.

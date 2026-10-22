@@ -69,14 +69,15 @@ async fn three_step_tool_calls_survive_owner_loss_and_cold_reattachment() {
                 .expect("core")
             };
             let old = build("three-steps-old");
-            let id =
-                lash_protocol_types::SessionId::try_from("three-steps".to_owned()).expect("id");
+            let id = lash_vocabulary::identity::SessionId::try_from("three-steps".to_owned())
+                .expect("id");
             let session = old
                 .session(id.clone())
                 .create(crate::SessionCreation::root(mock_session_spec()))
                 .await
                 .expect("created");
-            let input = crate::TurnId::parse("three-step-input").expect("input id");
+            let input =
+                lash_vocabulary::identity::TurnId::parse("three-step-input").expect("input id");
             let handle = session
                 .send(crate::TurnInput::text("call six tools"))
                 .id(input.clone());
@@ -168,7 +169,7 @@ async fn three_step_tool_calls_survive_owner_loss_and_cold_reattachment() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn cancelling_a_queued_operation_answers_withdrawn_and_repeats_are_unknown() {
     let accounts = AccountCore::new().await;
-    let session_id = crate::SessionId::from("facade-operation-withdraw");
+    let session_id = lash_vocabulary::identity::SessionId::from("facade-operation-withdraw");
     let session = accounts
         .core
         .session(session_id.clone())
@@ -207,7 +208,8 @@ async fn cancelling_a_queued_operation_answers_withdrawn_and_repeats_are_unknown
         session_id,
         operation_id: batch.batch_id.to_string(),
     };
-    let handle = session.run(crate::RunId::parse(operation.run_id().as_str()).unwrap());
+    let handle =
+        session.run(lash_vocabulary::identity::RunId::parse(operation.run_id().as_str()).unwrap());
     let receipt = handle.cancel().await.expect("withdraw task");
     assert!(
         matches!(receipt, crate::CancelReceipt::Withdrawn { ref run, input: None } if run.as_str() == operation.run_id().as_str()),
@@ -231,7 +233,7 @@ async fn cancelling_a_queued_operation_answers_withdrawn_and_repeats_are_unknown
     };
     assert!(matches!(
         session
-            .run(crate::RunId::parse(missing.run_id().as_str()).unwrap())
+            .run(lash_vocabulary::identity::RunId::parse(missing.run_id().as_str()).unwrap())
             .cancel()
             .await
             .expect("missing task"),
@@ -249,7 +251,7 @@ async fn cancelling_a_settled_operation_answers_unknown_or_revoked() {
     use lash_core::durable_port::{ActorKey, CommitLabel, NodeId, NodeSpec};
     let backend = sqlite_memory_store_backend().await;
     let core = standard_core_over(backend.clone());
-    let session_id = crate::SessionId::from("facade-operation-settled");
+    let session_id = lash_vocabulary::identity::SessionId::from("facade-operation-settled");
     let session = core
         .session(session_id.clone())
         .create(crate::SessionCreation::root(mock_session_spec()))
@@ -343,7 +345,7 @@ async fn cancelling_a_settled_operation_answers_unknown_or_revoked() {
         .expect("terminal");
     assert!(matches!(
         session
-            .run(crate::RunId::parse(operation.run_id().as_str()).unwrap())
+            .run(lash_vocabulary::identity::RunId::parse(operation.run_id().as_str()).unwrap())
             .cancel()
             .await
             .expect("settled task cancel"),

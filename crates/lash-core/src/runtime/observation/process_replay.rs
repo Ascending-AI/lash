@@ -12,7 +12,7 @@
 //! Process and session replay share no store, window or budget: a process
 //! burst cannot evict a session's window, by construction.
 
-use crate::ProcessId;
+use lash_vocabulary::identity::ProcessId;
 use std::collections::VecDeque;
 use std::fmt;
 use std::num::NonZeroUsize;
@@ -237,7 +237,7 @@ pub struct RetainedProcessView {
 /// is still observed.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ProcessDocumentIdentity {
-    Available(lash_trace::WorkflowDocumentRef),
+    Available(lash_vocabulary::names::LinkedStart),
     /// Nothing retains an artifact the definition reads.
     ArtifactUnavailable {
         artifact: crate::ArtifactName,

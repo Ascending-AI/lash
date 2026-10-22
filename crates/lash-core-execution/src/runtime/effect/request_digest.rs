@@ -447,7 +447,9 @@ mod tests {
                     "process:provenance",
                 )
                 .expect("valid address"),
-                crate::RuntimeAttribution::for_session(crate::SessionId::from("session")),
+                crate::RuntimeAttribution::for_session(lash_vocabulary::identity::SessionId::from(
+                    "session",
+                )),
                 "process:provenance",
             ),
             RuntimeEffectCommand::Process {

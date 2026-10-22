@@ -183,7 +183,7 @@ impl SessionCommitStore for PostgresStore {
     async fn committed_turn_exists(
         &self,
         session_id: &SessionId,
-        turn_id: &lash_protocol_types::TurnId,
+        turn_id: &lash_vocabulary::identity::TurnId,
     ) -> Result<bool, StoreError> {
         let key = lash_core_store::store_backend_support::turn_commit_receipt_storage_key(
             session_id, turn_id,

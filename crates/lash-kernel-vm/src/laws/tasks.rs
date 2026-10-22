@@ -2,12 +2,10 @@
 //! scripted delivery order. Each asserts values, errors, effect identities
 //! and the order of side effects.
 
-const WAIT_0: lash_kernel_doc::WaitId = lash_kernel_doc::kernel_internals::wait_id(0);
-const WAIT_7: lash_kernel_doc::WaitId = lash_kernel_doc::kernel_internals::wait_id(7);
+const WAIT_0: lash_vocabulary::sites::WaitId = lash_kernel_doc::kernel_internals::wait_id(0);
+const WAIT_7: lash_vocabulary::sites::WaitId = lash_kernel_doc::kernel_internals::wait_id(7);
 
-use lash_kernel_doc::kernel_internals::{
-    EffectIdentity, LoopIteration, SpawnIdentity, TaskIdentity,
-};
+use lash_vocabulary::sites::{EffectIdentity, LoopIteration, SpawnIdentity, TaskIdentity};
 use std::sync::Arc;
 
 use lash_kernel_doc::Datum;
@@ -18,19 +16,19 @@ use crate::{
 };
 
 const WORKER: &str = r#"
-fn worker(tag) {
-  print ("start", tag)
-  let r = perform echo(tag) as Any
-  print ("end", tag)
-  return r
-}
+definition "function worker(tag: Any) -> Any\nkernel 1\nmetering statements\nbody { \n  print (\"start\", tag)\n  let r = perform 0(tag) as Any\n  print (\"end\", tag)\n  return r\n }"
+
 "#;
 
 fn pair(a: &str, b: &str) -> Datum {
     Datum::Tuple(vec![text(a), text(b)])
 }
 
-fn spawned(parent: TaskIdentity, site: lash_kernel_doc::Site, occurrence: u64) -> TaskIdentity {
+fn spawned(
+    parent: TaskIdentity,
+    site: lash_vocabulary::sites::Site,
+    occurrence: u64,
+) -> TaskIdentity {
     TaskIdentity::Spawned(SpawnIdentity {
         parent: Arc::new(parent),
         site,
@@ -43,7 +41,6 @@ fn identity(request: &Request) -> &EffectIdentity {
         Request::Effect(effect) => {
             lash_kernel_doc::kernel_internals::effect_parts(&effect.identity)
         }
-        Request::Sleep(sleep) => lash_kernel_doc::kernel_internals::effect_parts(&sleep.identity),
     }
 }
 
@@ -72,11 +69,8 @@ fn outstanding(end: End) -> (Vec<TaskIdentity>, Vec<TaskIdentity>) {
 #[test]
 fn tasks_share_the_heap_and_run_one_at_a_time() {
     let (end, _) = run(r#"
-fn adds(xs, tag) {
-  set xs[list.len(xs)] = tag
-  do yield
-  set xs[list.len(xs)] = tag
-}
+definition "function adds(xs: Any, tag: Any) -> Any\nkernel 1\nmetering statements\nbody { \n  set xs[list.len(xs)] = tag\n  do yield\n  set xs[list.len(xs)] = tag\n }"
+
 main {
   let xs = []
   let a = spawn call adds(xs, "a")
@@ -122,9 +116,7 @@ main {{
         ]
     );
     for (request, (wait, spawn)) in embedder.requests.iter().zip([(0, 1), (1, 3)]) {
-        let Request::Effect(effect) = request else {
-            panic!("a perform asks for an effect");
-        };
+        let Request::Effect(effect) = request;
         assert_eq!(
             effect.wait,
             lash_kernel_doc::kernel_internals::wait_id(wait)
@@ -185,13 +177,13 @@ main {{
 #[test]
 fn nothing_but_a_wait_pauses_a_task() {
     let (end, embedder) = run(r#"
-fn background() { do yield print "background" }
-fn one() { return 1 }
+definition "function background() -> Any\nkernel 1\nmetering statements\nbody {  do yield print \"background\"  }"
+
+definition "function one() -> Any\nkernel 1\nmetering statements\nbody {  return 1  }"
+
 main {
   let b = spawn call background()
   let x = call one()
-  let t = clock
-  let r = random
   print "printed"
   let q = spawn call one()
   do cancel q
@@ -211,14 +203,8 @@ main {
 #[test]
 fn yield_goes_to_the_back_of_the_ready_queue() {
     let (end, embedder) = run(r#"
-fn ping(tag) {
-  print (tag, 1)
-  do yield
-  print (tag, 2)
-  do yield
-  print (tag, 3)
-  return tag
-}
+definition "function ping(tag: Any) -> Any\nkernel 1\nmetering statements\nbody { \n  print (tag, 1)\n  do yield\n  print (tag, 2)\n  do yield\n  print (tag, 3)\n  return tag\n }"
+
 main {
   let a = spawn call ping("a")
   print "main 1"
@@ -256,8 +242,10 @@ main {
 #[test]
 fn join_on_an_ended_handle_continues_at_once() {
     let (end, embedder) = run(r#"
-fn quick() { return 1 }
-fn slow() { do yield print "slow" return 2 }
+definition "function quick() -> Any\nkernel 1\nmetering statements\nbody {  return 1  }"
+
+definition "function slow() -> Any\nkernel 1\nmetering statements\nbody {  do yield print \"slow\" return 2  }"
+
 main {
   let s = spawn call slow()
   let q = spawn call quick()
@@ -288,11 +276,16 @@ fn single_and_list_joiners_wake_in_join_start_order() {
         for outcome in ["return r", "throw r"] {
             let mut embedder = Embedder::new(&format!(
                 r#"
-fn target() {{ let r = perform echo("t") as Any {outcome} }}
-fn other() {{ do perform echo("other") as Any }}
-fn single(h, tag) {{ try {{ do join h }} catch e {{ }} print tag }}
-fn many(h, tag) {{ let hs = [h, h] try {{ do join {mode} hs }} catch e {{ }} print tag }}
-fn pending(h, other) {{ let hs = [h, other] do join settled hs print "pending" }}
+definition "function target() -> Any\nkernel 1\nmetering statements\nbody {{  let r = perform 0(\"t\") as Any {outcome_json}  }}"
+
+definition "function other() -> Any\nkernel 1\nmetering statements\nbody {{  do perform 0(\"other\") as Any  }}"
+
+definition "function single(h: Any, tag: Any) -> Any\nkernel 1\nmetering statements\nbody {{  try {{ do join h }} catch e {{ }} print tag  }}"
+
+definition "function many(h: Any, tag: Any) -> Any\nkernel 1\nmetering statements\nbody {{  let hs = [h, h] try {{ do join {mode_json} hs }} catch e {{ }} print tag  }}"
+
+definition "function pending(h: Any, other: Any) -> Any\nkernel 1\nmetering statements\nbody {{  let hs = [h, other] do join settled hs print \"pending\"  }}"
+
 main {{
   let t = spawn call target()
   let other = spawn call other()
@@ -304,7 +297,9 @@ main {{
   let rest = [p, m, a, n, b]
   do join all rest
   return "done"
-}}"#
+}}"#,
+                mode_json = crate::laws::embedder::fragment(mode),
+                outcome_json = crate::laws::embedder::fragment(outcome)
             ));
             assert_eq!(result(embedder.run_to_end(&["t", "other"])), text("done"));
             assert_eq!(
@@ -329,15 +324,14 @@ fn cancelled_joiners_rejoin_at_the_back_of_the_wake_queue() {
     for join in ["join h", "join all hs"] {
         let mut embedder = Embedder::new(&format!(
             r#"
-fn target() {{ do perform echo("t") as Any }}
-fn again(h) {{
-  let hs = [h, h]
-  try {{ do {join} }} catch e {{ print e.kind }}
-  do {join}
-  print "rejoined"
-}}
-fn single(h) {{ do join h print "single" }}
-fn many(h) {{ let hs = [h] do join all hs print "list" }}
+definition "function target() -> Any\nkernel 1\nmetering statements\nbody {{  do perform 0(\"t\") as Any  }}"
+
+definition "function again(h: Any) -> Any\nkernel 1\nmetering statements\nbody {{ \n  let hs = [h, h]\n  try {{ do {join_json} }} catch e {{ print e.kind }}\n  do {join_json}\n  print \"rejoined\"\n }}"
+
+definition "function single(h: Any) -> Any\nkernel 1\nmetering statements\nbody {{  do join h print \"single\"  }}"
+
+definition "function many(h: Any) -> Any\nkernel 1\nmetering statements\nbody {{  let hs = [h] do join all hs print \"list\"  }}"
+
 main {{
   let t = spawn call target()
   let a = spawn call again(t)
@@ -347,7 +341,8 @@ main {{
   let rest = [a, m, s]
   do join all rest
   return "done"
-}}"#
+}}"#,
+            join_json = crate::laws::embedder::fragment(join)
         ));
         assert_eq!(result(embedder.run_to_end(&["t"])), text("done"));
         assert_eq!(
@@ -368,8 +363,10 @@ main {{
 #[test]
 fn joining_a_handle_twice_gives_the_same_answer() {
     let (end, _) = run(r#"
-fn fine() { return [1] }
-fn broken() { throw {kind: "x"} }
+definition "function fine() -> Any\nkernel 1\nmetering statements\nbody {  return [1]  }"
+
+definition "function broken() -> Any\nkernel 1\nmetering statements\nbody {  throw {kind: \"x\"}  }"
+
 main {
   let h = spawn call fine()
   let a = join h
@@ -397,9 +394,12 @@ main {
 #[test]
 fn join_takes_task_handles_and_never_the_joiner_itself() {
     let (end, _) = run(r#"
-fn me(box) { do yield let h = box.h do join h }
-fn us(box) { do yield let hs = [box.h] do join all hs }
-fn one() { return 1 }
+definition "function me(box: Any) -> Any\nkernel 1\nmetering statements\nbody {  do yield let h = box.h do join h  }"
+
+definition "function us(box: Any) -> Any\nkernel 1\nmetering statements\nbody {  do yield let hs = [box.h] do join all hs  }"
+
+definition "function one() -> Any\nkernel 1\nmetering statements\nbody {  return 1  }"
+
 main {
   let kinds = []
   try { do join 1 } catch e { set kinds[0] = e.kind }
@@ -451,8 +451,10 @@ fn joined(mode: &str, order: &[&str], failing: &[&str]) -> Datum {
     let (a, b, c) = (callee("a"), callee("b"), callee("c"));
     let mut embedder = Embedder::new(&format!(
         r#"
-fn works(tag) {{ let r = perform echo(tag) as Any return r }}
-fn fails(tag) {{ do perform echo(tag) as Any throw tag }}
+definition "function works(tag: Any) -> Any\nkernel 1\nmetering statements\nbody {{  let r = perform 0(tag) as Any return r  }}"
+
+definition "function fails(tag: Any) -> Any\nkernel 1\nmetering statements\nbody {{  do perform 0(tag) as Any throw tag  }}"
+
 main {{
   let a = spawn call {a}("a")
   let b = spawn call {b}("b")
@@ -486,8 +488,10 @@ fn join_all_returns_every_result_or_raises_at_the_first_failure() {
     );
     // Decided when it starts: the first failed member in list order.
     let (end, _) = run(r#"
-fn now(v) { return v }
-fn bad(v) { throw v }
+definition "function now(v: Any) -> Any\nkernel 1\nmetering statements\nbody {  return v  }"
+
+definition "function bad(v: Any) -> Any\nkernel 1\nmetering statements\nbody {  throw v  }"
+
 main {
   let x = spawn call bad("x")
   let n = spawn call now(1)
@@ -528,8 +532,10 @@ fn join_race_follows_the_first_member_run_to_end() {
     assert_eq!(joined("race", &["c", "b", "a"], &["b"]), text("c"));
     assert_eq!(joined("race", &["b", "c", "a"], &["b"]), raised(text("b")));
     let (end, _) = run(r#"
-fn now(v) { return v }
-fn bad(v) { throw v }
+definition "function now(v: Any) -> Any\nkernel 1\nmetering statements\nbody {  return v  }"
+
+definition "function bad(v: Any) -> Any\nkernel 1\nmetering statements\nbody {  throw v  }"
+
 main {
   let x = spawn call bad("x")
   let n = spawn call now(1)
@@ -550,9 +556,12 @@ fn join_any_returns_the_first_success_or_every_error() {
     assert_eq!(joined("any", &["b", "c", "a"], &["b"]), text("c"));
     let mut embedder = Embedder::new(
         r#"
-fn fails(tag) { do perform echo(tag) as Any throw tag }
-fn now(v) { return v }
-fn bad(v) { throw v }
+definition "function fails(tag: Any) -> Any\nkernel 1\nmetering statements\nbody {  do perform 0(tag) as Any throw tag  }"
+
+definition "function now(v: Any) -> Any\nkernel 1\nmetering statements\nbody {  return v  }"
+
+definition "function bad(v: Any) -> Any\nkernel 1\nmetering statements\nbody {  throw v  }"
+
 main {
   let a = spawn call fails("a")
   let b = spawn call fails("b")
@@ -623,7 +632,7 @@ main {{
 /// it, or by membership of a list `join` that has returned.
 #[test]
 fn a_task_error_is_data_on_its_handle() {
-    const FAILS: &str = "fn fails(tag) { do perform echo(tag) as Any throw tag }\n";
+    const FAILS: &str = "definition \"function fails(tag: Any) -> Any\\nkernel 1\\nmetering statements\\nbody {  do perform 0(tag) as Any throw tag  }\"\n\n";
     // Never joined: the run's end names the task.
     let mut unobserved = Embedder::new(&format!(
         "{FAILS}{WORKER} main {{ do spawn call fails(\"f\") let w = spawn call worker(\"w\") let r = join w return r }}"
@@ -648,7 +657,7 @@ main {{
   let w = spawn call worker("w")
   let hs = [f, w]
   let first = join race hs
-  do perform echo("gate") as Any
+  do perform 0("gate") as Any
   return first
 }}"#
     ));
@@ -656,19 +665,8 @@ main {{
 }
 
 const CLEANS_UP: &str = r#"
-fn cleans_up() {
-  try {
-    do perform echo("slow") as Any
-    print "not reached"
-  } catch e {
-    print ("caught", e.kind)
-    do perform echo("cleanup") as Any
-    print "cleaned"
-    throw e
-  } finally {
-    print "finally"
-  }
-}
+definition "function cleans_up() -> Any\nkernel 1\nmetering statements\nbody { \n  try {\n    do perform 0(\"slow\") as Any\n    print \"not reached\"\n  } catch e {\n    print (\"caught\", e.kind)\n    do perform 0(\"cleanup\") as Any\n    print \"cleaned\"\n    throw e\n  } finally {\n    print \"finally\"\n  }\n }"
+
 "#;
 
 /// `K-TASK-017`: `cancel` raises `cancelled` at the target's wait; its
@@ -680,7 +678,7 @@ fn cancel_raises_at_the_wait_and_cleanup_runs_and_may_wait() {
         r#"{CLEANS_UP}
 main {{
   let h = spawn call cleans_up()
-  do perform echo("gate") as Any
+  do perform 0("gate") as Any
   do cancel h
   print "cancelled"
   let kind = null
@@ -718,18 +716,13 @@ fn cancel_reaches_a_ready_task_the_running_task_and_a_task_cleaning_up() {
     // Ready: `w`'s outcome is delivered, and `main` cancels it first.
     let mut ready = Embedder::new(
         r#"
-fn waits() {
-  try { do perform echo("w") as Any return "delivered" } catch e { return e.kind }
-}
-fn cancels_itself(box) {
-  do yield
-  let h = box.h
-  try { do cancel h } catch e { return e.kind }
-  return "not raised"
-}
+definition "function waits() -> Any\nkernel 1\nmetering statements\nbody { \n  try { do perform 0(\"w\") as Any return \"delivered\" } catch e { return e.kind }\n }"
+
+definition "function cancels_itself(box: Any) -> Any\nkernel 1\nmetering statements\nbody { \n  do yield\n  let h = box.h\n  try { do cancel h } catch e { return e.kind }\n  return \"not raised\"\n }"
+
 main {
   let w = spawn call waits()
-  do perform echo("gate") as Any
+  do perform 0("gate") as Any
   do cancel w
   let from_ready = join w
   let box = {h: null}
@@ -752,9 +745,9 @@ main {
         r#"{CLEANS_UP}
 main {{
   let h = spawn call cleans_up()
-  do perform echo("gate 1") as Any
+  do perform 0("gate 1") as Any
   do cancel h
-  do perform echo("gate 2") as Any
+  do perform 0("gate 2") as Any
   do cancel h
   let kind = null
   try {{ do join h }} catch e {{ set kind = e.kind }}
@@ -797,7 +790,8 @@ fn the_run_ends_with_its_tasks_accounted_for() {
     // A member of a join that returned is cancelled, with no cleanup.
     let (end, embedder) = run(&format!(
         r#"{CLEANS_UP}
-fn quick() {{ return 1 }}
+definition "function quick() -> Any\nkernel 1\nmetering statements\nbody {{  return 1  }}"
+
 main {{
   let slow = spawn call cleans_up()
   let q = spawn call quick()
@@ -811,7 +805,8 @@ main {{
 
     // `finish` and `fail` end the run from any task; no `finally` runs.
     let (end, embedder) = run(r#"
-fn ends() { try { finish "from a task" } finally { print "finally" } }
+definition "function ends() -> Any\nkernel 1\nmetering statements\nbody {  try { finish \"from a task\" } finally { print \"finally\" }  }"
+
 main { let h = spawn call ends() do join h }"#);
     assert_eq!(result(end), text("from a task"));
     assert_eq!(embedder.world.printed, []);
@@ -836,21 +831,10 @@ main { let h = spawn call ends() do join h }"#);
 fn tasks_and_effects_carry_their_identities() {
     let mut embedder = Embedder::new(
         r#"
-fn fetch(i) {
-  let out = []
-  for j in ["x", "y"] {
-    let key = (i, j)
-    let r = perform echo(key) as Any
-    set out[list.len(out)] = r
-  }
-  return out
-}
-fn worker(i) {
-  while true {
-    let rs = call fetch(i)
-    return rs
-  }
-}
+definition "function fetch(i: Any) -> Any\nkernel 1\nmetering statements\nbody { \n  let out = []\n  for j in [\"x\", \"y\"] {\n    let key = (i, j)\n    let r = perform 0(key) as Any\n    set out[list.len(out)] = r\n  }\n  return out\n }"
+
+definition "function worker(i: Any) -> Any\nkernel 1\nmetering statements\nbody { \n  while true {\n    let rs = call fetch(i)\n    return rs\n  }\n }"
+
 main {
   let hs = []
   for i in [10, 20] {
@@ -889,24 +873,6 @@ main {
         .collect();
     let identities: Vec<EffectIdentity> = embedder.requests.iter().map(identity).cloned().collect();
     assert_eq!(identities, expected);
-
-    // A task spawned by a spawned task names its whole line of spawners.
-    let mut nested = Embedder::new(
-        r#"
-fn leaf() { do sleep 5 }
-fn branch() { let l = spawn call leaf() do join l }
-main { let b = spawn call branch() do join b }"#,
-    );
-    nested.run_to_end(&[]);
-    let branch = spawned(TaskIdentity::Main, main_site([0, 0]), 0);
-    let Request::Sleep(sleep) = &nested.requests[0] else {
-        panic!("a sleep asks for a sleep");
-    };
-    assert_eq!(sleep.duration, std::time::Duration::from_millis(5));
-    assert_eq!(
-        lash_kernel_doc::kernel_internals::effect_parts(&sleep.identity).task,
-        spawned(branch, function_site("branch", [0, 0]), 0)
-    );
 }
 
 /// `K-TASK-021`: `tasks.unfinished()` gives the handles of every other
@@ -915,8 +881,10 @@ main { let b = spawn call branch() do join b }"#,
 fn tasks_unfinished_lists_the_other_live_tasks() {
     let mut embedder = Embedder::new(&format!(
         r#"{WORKER}
-fn quick() {{ return 1 }}
-fn counts() {{ do yield return list.len(tasks.unfinished()) }}
+definition "function quick() -> Any\nkernel 1\nmetering statements\nbody {{  return 1  }}"
+
+definition "function counts() -> Any\nkernel 1\nmetering statements\nbody {{  do yield return list.len(tasks.unfinished())  }}"
+
 main {{
   let a = spawn call worker("a")
   let q = spawn call quick()
@@ -943,70 +911,13 @@ main {{
     );
 }
 
-/// `probe.own()`: what `brand.built()` answers in its body and in a
-/// closure its body makes.
-fn own_probe(
-    registry: &mut lash_kernel_doc::FunctionRegistry,
-    _: &std::collections::BTreeMap<&'static str, lash_kernel_doc::FunctionId>,
-) -> Vec<(&'static str, lash_kernel_doc::FunctionId)> {
-    let definition = lash_kernel_doc::parse_definition(&format!(
-        "function probe.own() -> Any\nkernel 1\ncharge 4\nuse brand.built = @{}\n\
-         body {{ let own = brand.built() let inner = fn() {{ return brand.built() }} \
-         let closed = apply inner() return (own, closed) }}\n",
-        crate::functions::brand_built()
-    ))
-    .unwrap();
-    vec![("probe.own", registry.register(definition, None).unwrap())]
-}
-
-/// `K-LIB-010`: `brand.built()` answers the identity of the library body
-/// its call is written in, a closure's included, and absent in a
-/// document's own code; called through an action it raises `type_error`.
-#[test]
-fn brand_built_answers_the_body_it_is_written_in() {
-    let setup = || Setup {
-        probes: Some(own_probe),
-        ..Setup::default()
-    };
-    let uses = format!("use brand.built = @{}\n", crate::functions::brand_built());
-    let mut embedder = Embedder::with(
-        &format!(
-            "{uses}fn declared() {{ return brand.built() }}\n\
-             main {{ let made = invoke probe.own() let here = brand.built() let there = call declared() \
-             return (made, here, there) }}"
-        ),
-        setup(),
-    );
-    let own = Datum::Bytes(lash_kernel_doc::Bytes::new(
-        &embedder.library.ids["probe.own"].as_bytes()[..],
-    ));
-    assert_eq!(
-        result(embedder.run_to_end(&[])),
-        Datum::Tuple(vec![
-            Datum::Tuple(vec![own.clone(), own]),
-            Datum::Absent,
-            Datum::Absent,
-        ])
-    );
-    let mut invoked = Embedder::with(
-        &format!("{uses}main {{ let made = invoke brand.built() return made }}"),
-        setup(),
-    );
-    assert!(
-        matches!(
-            invoked.run_to_end(&[]),
-            End::Error(RunError::Uncaught { error: Datum::Error(error), .. }) if error.kind == "type_error"
-        ),
-        "an action's call of `brand.built` raises"
-    );
-}
-
-/// `K-TASK-023`: when no task is ready and none waits on an effect or a
-/// sleep, the run ends in a deadlock that names the waiting tasks.
+/// `K-TASK-023`: when no task is ready and none waits on an effect,
+/// the run ends in a deadlock that names the waiting tasks.
 #[test]
 fn tasks_that_only_wait_on_each_other_deadlock() {
     let (end, _) = run(r#"
-fn waits(box) { do yield let h = box.other do join h }
+definition "function waits(box: Any) -> Any\nkernel 1\nmetering statements\nbody {  do yield let h = box.other do join h  }"
+
 main {
   let box = {other: null}
   let a = spawn call waits(box)
@@ -1030,21 +941,18 @@ main {
 }
 
 /// `K-MACH-004`: an outcome for a wait never handed out, delivered twice
-/// or of the wrong kind is an error to the embedder and changes nothing.
+/// is an error to the embedder and changes nothing.
 #[test]
 fn deliver_refuses_what_no_wait_can_take() {
-    let mut embedder =
-        Embedder::new("main { let a = perform echo(\"a\") as Any do sleep 0 return a }");
+    let mut embedder = Embedder::new(
+        "main { let a = perform 0(\"a\") as Any do perform 0(\"second\") as Any return a }",
+    );
     let done = || Outcome::Completed(text("other"));
     assert_eq!(
         embedder.machine.deliver(WAIT_0, done()),
         Err(DeliverError::UnknownWait { wait: WAIT_0 })
     );
     embedder.run();
-    assert_eq!(
-        embedder.machine.deliver(WAIT_0, Outcome::Elapsed),
-        Err(DeliverError::WrongOutcome { wait: WAIT_0 })
-    );
     assert_eq!(
         embedder.machine.deliver(WAIT_7, done()),
         Err(DeliverError::UnknownWait { wait: WAIT_7 })
@@ -1054,15 +962,16 @@ fn deliver_refuses_what_no_wait_can_take() {
         embedder.machine.deliver(WAIT_0, done()),
         Err(DeliverError::AlreadyDelivered { wait: WAIT_0 })
     );
-    // A sleep of zero is still a wait (`K-EFF-010`).
+    // The later perform remains a distinct wait.
     assert_eq!(result(embedder.run_to_end(&[])), text("a"));
-    assert_eq!(embedder.asked(), ["a", "sleep"]);
+    assert_eq!(embedder.asked(), ["a", "second"]);
 
     // Spawn runs the worker to its wait before main prints. At that slice
     // the wait exists, but no park has handed it to the embedder yet.
     let mut early = Embedder::with(
         r#"
-fn worker() { let r = perform echo("w") as Any return r }
+definition "function worker() -> Any\nkernel 1\nmetering statements\nbody {  let r = perform 0(\"w\") as Any return r  }"
+
 main {
   let h = spawn call worker()
   print "requested"
@@ -1150,9 +1059,8 @@ main {{
     at_slice.world.cancel = true;
     assert_eq!(at_slice.run(), Step::Ended(End::Cancelled));
 
-    let mut at_park = Embedder::new(
-        "main { try { do perform echo(\"a\") as Any } finally { print \"cleanup\" } }",
-    );
+    let mut at_park =
+        Embedder::new("main { try { do perform 0(\"a\") as Any } finally { print \"cleanup\" } }");
     at_park.world.cancel = true;
     assert_eq!(at_park.run(), Step::Ended(End::Cancelled));
     assert_eq!(at_park.world.printed, []);
@@ -1165,8 +1073,10 @@ main {{
 fn a_cancelled_list_join_passes_its_members() {
     let mut embedder = Embedder::new(
         r#"
-fn waits() { do perform echo("w") as Any }
-fn joiner(h) { let hs = [h] do join all hs }
+definition "function waits() -> Any\nkernel 1\nmetering statements\nbody {  do perform 0(\"w\") as Any  }"
+
+definition "function joiner(h: Any) -> Any\nkernel 1\nmetering statements\nbody {  let hs = [h] do join all hs  }"
+
 main {
   let w = spawn call waits()
   let j = spawn call joiner(w)
@@ -1188,17 +1098,12 @@ main {
 #[test]
 fn a_retired_task_result_keeps_how_the_task_ended() {
     const GROW: &str = r#"
-fn grown() {
-  let t = "ab"
-  let i = 0
-  while num.lt(i, 18) {
-    set t = text.concat(t, t)
-    set i = num.add(i, 1)
-  }
-  return t
-}
-fn fails() { let t = call grown() throw [t] }
-fn quiet() { return null }
+definition "function grown() -> Any\nkernel 1\nmetering statements\nbody { \n  let t = \"ab\"\n  let i = 0\n  while num.lt(i, 18) {\n    set t = text.concat(t, t)\n    set i = num.add(i, 1)\n  }\n  return t\n }"
+
+definition "function fails() -> Any\nkernel 1\nmetering statements\nbody {  let t = call grown() throw [t]  }"
+
+definition "function quiet() -> Any\nkernel 1\nmetering statements\nbody {  return null  }"
+
 "#;
     let bounded = |main: &str| {
         let setup = Setup {

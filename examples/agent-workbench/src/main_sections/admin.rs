@@ -1,5 +1,5 @@
 use super::*;
-use lash::SessionId;
+use lash_vocabulary::identity::SessionId;
 
 // Operator-only maintenance surface: destructive, deployment-wide verbs that
 // no chat participant may reach and that nothing schedules.

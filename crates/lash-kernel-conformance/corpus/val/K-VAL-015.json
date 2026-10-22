@@ -3,12 +3,15 @@
   "cases": [
     {
       "name": "closed function references cross effect boundary",
-      "document": "kernel 1\nnumbers by_spelling\nfn value() { return 7 }\nmain {\nfinish &value\n}\n",
+      "document": "kernel 1\nnumbers by_spelling\ndefinition \"function value() -> Any\\nkernel 1\\nmetering statements\\nbody {\\n  return 7\\n}\\n\"\nmain {\n  finish &value\n}\n",
       "expected": {
         "prints": [],
         "end": {
           "finished": {
-            "function": "value"
+            "function": {
+              "link": "f689bd02f368886e04e70cb764293f506915c0e23f6aea9de4f0962541209f09",
+              "function": "06f43f6f32422a528ba4e22ae95f667e69c8457c68a542152b8fa92a327f0166"
+            }
           }
         },
         "trace": []

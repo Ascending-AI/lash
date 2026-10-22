@@ -26,9 +26,9 @@ const K_TOOL: &str = "settlement_k";
 const J_PROVIDER: &str = "settlement-j";
 const J_TOOL: &str = "settlement_j";
 
-fn definition(name: &str) -> lash_core::ToolDefinition {
+fn definition(name: &str) -> lash_vocabulary::tool_contract::ToolDefinition {
     let object = serde_json::json!({ "type": "object", "additionalProperties": true });
-    lash_core::ToolDefinition::raw(
+    lash_vocabulary::tool_contract::ToolDefinition::raw(
         format!("tool:{name}"),
         format!("tools.{name}"),
         "Answers once its completion wait resolves.",
@@ -38,8 +38,8 @@ fn definition(name: &str) -> lash_core::ToolDefinition {
     .expect("the tool's schemas")
     .with_execution(std::time::Duration::from_secs(120))
     .with_declaration(
-        lash_core::ToolDeclaration::deferring(),
-        Some(lash_core::ParkBound::Within(
+        lash_vocabulary::tool_declaration::ToolDeclaration::deferring(),
+        Some(lash_vocabulary::tool_contract::ParkBound::Within(
             std::time::Duration::from_secs(120),
         )),
     )
@@ -70,7 +70,7 @@ impl lash_core::ToolProvider for Deferring {
         &self,
         _config: &lash_core::OwnerConfigView,
     ) -> std::result::Result<
-        Vec<lash_core::ToolManifest>,
+        Vec<lash_vocabulary::tool_contract::ToolManifest>,
         lash_execution_contracts::plugin_error::PluginError,
     > {
         Ok(vec![definition(self.name).manifest()])
@@ -80,7 +80,7 @@ impl lash_core::ToolProvider for Deferring {
         &self,
         name: &str,
         _config: &lash_core::OwnerConfigView,
-    ) -> Option<Arc<lash_core::ToolContract>> {
+    ) -> Option<Arc<lash_vocabulary::tool_contract::ToolContract>> {
         (name == format!("tools.{}", self.name)).then(|| Arc::new(definition(self.name).contract()))
     }
 
@@ -98,8 +98,8 @@ impl lash_core::ToolProvider for Deferring {
 /// The token a session requires while a call to `owner`'s provider is
 /// unsettled.
 fn provider_token(owner: &str) -> String {
-    lash_core::ObligationToken::for_callback(
-        lash_core::RegistryKind::Session,
+    lash_vocabulary::claims::ObligationToken::for_callback(
+        lash_vocabulary::claims::RegistryKind::Session,
         &lash_core::plugin::ToolProviderHandle::new(
             lash_core::plugin::RegistryKind::Session,
             owner,
@@ -196,7 +196,7 @@ pub(super) async fn a_settled_call_leaves_its_provider_unrequired_on_a_later_cla
     let session = world.session(SESSION, served::spec(8)).await;
     let handle = session
         .send(lash::TurnInput::text(TURN))
-        .id(lash::TurnId::parse(RUN).expect("a turn id"))
+        .id(lash_vocabulary::identity::TurnId::parse(RUN).expect("a turn id"))
         .await
         .expect("the turn is accepted");
     tokio::time::timeout(WATCHDOG, k.parked.notified())

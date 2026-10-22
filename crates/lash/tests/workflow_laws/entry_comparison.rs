@@ -4,9 +4,9 @@
 //! a Python workflow read with no engine.
 use lash::workflow::document::{self as k};
 use lash::workflow::view::{
-    BindingKind, ComparisonView, ValueRef, ValueSource, WorkflowNodeKind, WorkflowView, derive,
+    BindingKind, ComparisonView, ValueRef, ValueSource, WorkflowNodeKind, WorkflowView,
+    derive_callable,
 };
-use lash::workflow::{WorkflowDocument, WorkflowDocumentEntry};
 use std::collections::BTreeMap;
 
 const TRIAGE: &str = r#"export async function triage(title: string, priority: string, notes?: string) {
@@ -29,7 +29,6 @@ enum Dialect {
 /// `inbox.send_item` tool.
 fn view(dialect: Dialect, source: &str, entry: &str) -> WorkflowView {
     let embedding = lash_vm_worker::built_embedding(&Default::default()).expect("embedding");
-    let registry = embedding.registry().expect("registry");
     let effects = BTreeMap::from([(
         k::EffectName::new("inbox.send_item").expect("a tool's name"),
         k::Signature {
@@ -41,12 +40,7 @@ fn view(dialect: Dialect, source: &str, entry: &str) -> WorkflowView {
             result: k::Type::Any,
         },
     )]);
-    let environment_namespaces = lash::dialect::Namespaces::of_effects(
-        &effects,
-        &lash::workflow::document::ContractId::new("1"),
-        &Default::default(),
-    )
-    .expect("the test's effects are operations");
+    let environment_namespaces = super::namespaces(effects);
     let environment = lash::dialect::Environment::new(embedding.library(), &environment_namespaces);
     let mode = lash::dialect::Mode::Module;
     let document = match dialect {
@@ -59,15 +53,9 @@ fn view(dialect: Dialect, source: &str, entry: &str) -> WorkflowView {
             .document
             .into_document(),
     };
-    let entry = WorkflowDocumentEntry::Entry {
-        function: k::Name::new(entry),
-    };
-    let functions = registry.export_declarations();
-    derive(
-        &WorkflowDocument::derive(document, entry, &functions).expect("link"),
-        &super::test_packages(),
-    )
-    .expect("view")
+    let unit = super::export_unit(&document, entry);
+    let (holder, context) = super::holder(document);
+    derive_callable(&holder, &unit, &context).expect("view")
 }
 
 fn binding(view: &WorkflowView, name: &str) -> usize {

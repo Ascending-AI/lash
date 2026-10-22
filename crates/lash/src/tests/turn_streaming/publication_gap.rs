@@ -111,7 +111,7 @@ fn commits_rows(event: &lash_core::SessionObservationEventPayload) -> bool {
 impl lash_core::LiveReplayStore for CommitPublicationStore {
     async fn publish(
         &self,
-        session: &lash_core::SessionId,
+        session: &lash_vocabulary::identity::SessionId,
         revision: lash_core::SessionRevision,
         events: Vec<lash_core::LiveReplayEventDraft>,
     ) -> std::result::Result<
@@ -155,13 +155,16 @@ impl lash_core::LiveReplayStore for CommitPublicationStore {
 
     fn current_cursor(
         &self,
-        session: &lash_core::SessionId,
+        session: &lash_vocabulary::identity::SessionId,
         revision: lash_core::SessionRevision,
     ) -> lash_core::SessionCursor {
         self.inner.current_cursor(session, revision)
     }
 
-    fn tail_cursor(&self, session_id: &lash_core::SessionId) -> lash_core::SessionCursor {
+    fn tail_cursor(
+        &self,
+        session_id: &lash_vocabulary::identity::SessionId,
+    ) -> lash_core::SessionCursor {
         self.inner.tail_cursor(session_id)
     }
 
@@ -171,14 +174,14 @@ impl lash_core::LiveReplayStore for CommitPublicationStore {
 
     async fn invalidate_session(
         &self,
-        session: &lash_core::SessionId,
+        session: &lash_vocabulary::identity::SessionId,
     ) -> std::result::Result<(), lash_core::LiveReplayStoreError> {
         self.inner.invalidate_session(session).await
     }
 
     async fn trim_session(
         &self,
-        session: &lash_core::SessionId,
+        session: &lash_vocabulary::identity::SessionId,
     ) -> std::result::Result<(), lash_core::LiveReplayStoreError> {
         self.inner.trim_session(session).await
     }
@@ -198,7 +201,8 @@ pub(super) async fn publication_failure_preserves_committed_turn_and_exposes_gap
     .build(crate::tests::host::runtime_lease_owner())?;
     let session = created_session(
         &core,
-        crate::SessionId::parse("publication-failure").expect("nonblank host identity"),
+        lash_vocabulary::identity::SessionId::parse("publication-failure")
+            .expect("nonblank host identity"),
     )
     .await
     .open()
@@ -259,7 +263,8 @@ pub(super) async fn a_reader_inside_a_commits_publication_window_replays_the_com
     .build(crate::tests::host::runtime_lease_owner())?;
     let session = created_session(
         &core,
-        crate::SessionId::parse("publication-window").expect("nonblank host identity"),
+        lash_vocabulary::identity::SessionId::parse("publication-window")
+            .expect("nonblank host identity"),
     )
     .await
     .open()
@@ -316,7 +321,7 @@ async fn two_commit_session(
     .build(crate::tests::host::runtime_lease_owner())?;
     let session = created_session(
         &core,
-        crate::SessionId::parse(name).expect("nonblank host identity"),
+        lash_vocabulary::identity::SessionId::parse(name).expect("nonblank host identity"),
     )
     .await
     .open()
@@ -409,7 +414,7 @@ struct FactPublicationStore {
 impl lash_core::ProcessReplayStore for FactPublicationStore {
     async fn publish(
         &self,
-        process_id: &lash_core::ProcessId,
+        process_id: &lash_vocabulary::identity::ProcessId,
         events: Vec<lash_core::ProcessReplayEventDraft>,
     ) -> std::result::Result<
         Vec<Arc<lash_core::ProcessObservationEvent>>,
@@ -452,7 +457,7 @@ impl lash_core::ProcessReplayStore for FactPublicationStore {
 
     async fn earliest_cursor(
         &self,
-        process_id: &lash_core::ProcessId,
+        process_id: &lash_vocabulary::identity::ProcessId,
         sequence: lash_core::ProcessSequence,
     ) -> std::result::Result<lash_core::ProcessObservationCursor, lash_core::ProcessReplayStoreError>
     {
@@ -461,7 +466,7 @@ impl lash_core::ProcessReplayStore for FactPublicationStore {
 
     async fn invalidate_process(
         &self,
-        process_id: &lash_core::ProcessId,
+        process_id: &lash_vocabulary::identity::ProcessId,
     ) -> std::result::Result<(), lash_core::ProcessReplayStoreError> {
         self.inner.invalidate_process(process_id).await
     }
@@ -547,8 +552,9 @@ async fn process_feed_across_two_publication_windows() -> Result<(Vec<Shown>, us
     let wait = lash_execution_contracts::process::WaitState {
         since_ms: 0,
         kind: lash_execution_contracts::process::WaitKind::Call {
+            resume_at_ms: None,
             call_id: lash_core::ToolCallId::fixture("two-windows-call"),
-            tool_id: lash_core::ToolId::from("two-windows-fixture"),
+            tool_id: lash_vocabulary::tool_contract::ToolId::from("two-windows-fixture"),
         },
         site: None,
     };

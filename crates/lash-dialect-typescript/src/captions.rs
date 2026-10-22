@@ -16,9 +16,11 @@ use std::collections::BTreeMap;
 use std::ops::Range;
 
 use lash_kernel_doc::{
-    Caption, CaptionEntry, CaptionKind, CaptionTarget, FieldPath, FieldRoot, FieldTarget, Name,
+    Caption, CaptionEntry, CaptionKind, CaptionTarget, FieldPath, FieldRoot, FieldTarget,
     ParamTarget,
 };
+
+use lash_vocabulary::Name;
 use swc_common::comments::{CommentKind, SingleThreadedComments};
 use swc_ecma_ast as swc;
 
@@ -56,7 +58,15 @@ Lines starting with `@` (JSDoc tags such as `@param`) are not caption text, `//`
 comments are ordinary comments, and a caption never contains `*/`.";
 
 /// Every kind a TypeScript source spells.
-pub(crate) const KINDS: &[CaptionKind] = &CaptionKind::ALL;
+pub(crate) const KINDS: &[CaptionKind] = &[
+    CaptionKind::Statement,
+    CaptionKind::ElseArm,
+    CaptionKind::CatchArm,
+    CaptionKind::FinallyArm,
+    CaptionKind::Function,
+    CaptionKind::Param,
+    CaptionKind::Field,
+];
 
 /// The fields of a written type that captions name, by path.
 pub(crate) type FieldCaptions = Vec<(Vec<String>, Caption)>;

@@ -3,7 +3,7 @@
   "cases": [
     {
       "name": "sleep zero is still a wait",
-      "document": "kernel 1\nnumbers by_spelling\n\nmain {\nprint \"before\" do sleep 0 print \"after\"\n}\n",
+      "document": "kernel 1\nnumbers by_spelling\nimport 0 operation typescript.sleep(milliseconds: Int) -> Null\nmain {\n  print \"before\"\n  do perform 0(0) as Null\n  print \"after\"\n}\n",
       "expected": {
         "prints": [
           {
@@ -18,8 +18,14 @@
         },
         "trace": [
           {
-            "sleep": {
-              "nanoseconds": 0
+            "effect": {
+              "effect": "typescript.sleep",
+              "args": [
+                {
+                  "int": "0"
+                }
+              ],
+              "result": "null"
             }
           }
         ],
@@ -30,7 +36,9 @@
           [
             {
               "request": 0,
-              "outcome": "elapsed"
+              "outcome": {
+                "completed": "null"
+              }
             }
           ]
         ]

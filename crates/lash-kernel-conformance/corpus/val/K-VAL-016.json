@@ -3,7 +3,7 @@
   "cases": [
     {
       "name": "handle kind and id are host data",
-      "document": "kernel 1\nnumbers by_spelling\neffect resource() -> Handle(\"table\") contract \"1\"\nmain {\nlet h = perform resource() as Handle(\"table\") finish h\n}\n",
+      "document": "kernel 1\nnumbers by_spelling\nimport 0 operation host.resource() -> Handle(\"table\")\nmain {\n  let h = perform 0() as Handle(\"table\")\n  finish h\n}\n",
       "expected": {
         "prints": [],
         "end": {
@@ -17,7 +17,7 @@
         "trace": [
           {
             "effect": {
-              "effect": "resource",
+              "effect": "host.resource",
               "args": [],
               "result": {
                 "handle": "table"

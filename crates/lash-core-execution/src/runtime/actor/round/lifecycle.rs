@@ -83,9 +83,11 @@ use std::pin::Pin;
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
-use lash_core_store::tool_run::{AvailableEvidence, CompletionSource, LimitCause};
+use lash_core_store::tool_run::AvailableEvidence;
+use lash_core_store::tool_run::CompletionSource;
 use lash_durable::domain::{AdmittedId, DomainRefusal, RunFacts, RunSeq};
 use lash_durable::{CommitLabel, DueSource, DurableError, DurableInstant};
+use lash_vocabulary::tool_contract::LimitCause;
 use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
 use tracing::Instrument as _;
@@ -119,6 +121,8 @@ pub struct MemberOutcome {
     /// For a park, the process whose terminal the call also awaits: its
     /// `process_terminal` wait is pinned with the park.
     pub terminal: Option<crate::ProcessId>,
+    /// Absolute deadline supplied by an ordinary operation; pinned with its park.
+    pub timer: Option<DurableInstant>,
     /// The host lacked capacity for the attempt
     /// ([`CapacityVerdict`]): honoured, nothing is recorded and the
     /// member runs again uncounted; refused, `output` is recorded.
@@ -134,6 +138,7 @@ impl From<SettledOutput> for MemberOutcome {
             output,
             store_local: Vec::new(),
             terminal: None,
+            timer: None,
             capacity: None,
             candidate: None,
         }
@@ -728,8 +733,16 @@ impl Lifecycle {
             // passed, settles its member now: a resumed owner never leaves
             // a resolution unread.
             if !parked.is_empty() {
+                let acknowledged = self.cx.acknowledged_commits();
                 let racing = self.check_terminals(&parked).await?;
-                if let Some(won) = waits::poll(&self.cx, &racing).await? {
+                let winner = waits::poll(&self.cx, &racing).await?;
+                if attempt.is_some() && self.cx.acknowledged_commits() != acknowledged {
+                    // Polling a due wait committed its winner. The process
+                    // pass's transaction and fold precede that write: reload
+                    // them before classifying or settling the member.
+                    return Ok(Act::Refused);
+                }
+                if let Some(won) = winner {
                     self.parked_ended(won, &parked).await;
                     parked.clear();
                 }
@@ -849,7 +862,7 @@ impl Lifecycle {
                 && self.running.is_empty()
                 && self.finished.values().all(|result| {
                     matches!(result,
-                    Ok(MemberOutcome { store_local, terminal: None, output, capacity: None, candidate: None })
+                    Ok(MemberOutcome { store_local, terminal: None, timer: None, output, capacity: None, candidate: None })
                         if store_local.is_empty() && !matches!(output, SettledOutput::Waiting(_)))
                 })
                 && folded.rounds().all(|view| {
@@ -1293,7 +1306,7 @@ impl Lifecycle {
         let pinned = execution.policy();
         let honours_capacity = matches!(
             pinned,
-            lash_protocol_types::ExecutionPolicy::Repeatable { .. }
+            lash_vocabulary::tool_contract::ExecutionPolicy::Repeatable { .. }
         ) && self
             .policies
             .permits_repeat(execution.draft().tool(), pinned);
@@ -1302,6 +1315,7 @@ impl Lifecycle {
             type Carried = (
                 Vec<StoreLocalEffect>,
                 Option<crate::ProcessId>,
+                Option<DurableInstant>,
                 Option<CapacityVerdict>,
                 Option<StepCandidate>,
             );
@@ -1313,6 +1327,7 @@ impl Lifecycle {
                     *slot.lock().unwrap_or_else(PoisonError::into_inner) = (
                         result.store_local,
                         result.terminal,
+                        result.timer,
                         result.capacity,
                         result.candidate,
                     );
@@ -1322,7 +1337,7 @@ impl Lifecycle {
             let result = run_bounded(&cx, &execution, tool_body, &cancel, stop_grace)
                 .await
                 .and_then(|output| {
-                    let (store_local, terminal, capacity, candidate) = std::mem::take(
+                    let (store_local, terminal, timer, capacity, candidate) = std::mem::take(
                         &mut *carried.lock().unwrap_or_else(PoisonError::into_inner),
                     );
                     match capacity {
@@ -1331,6 +1346,7 @@ impl Lifecycle {
                             output,
                             store_local,
                             terminal,
+                            timer,
                             capacity: None,
                             candidate,
                         }),
@@ -1357,11 +1373,12 @@ impl Lifecycle {
         result: Result<MemberOutcome, Stop>,
         now: DurableInstant,
     ) -> Result<(Recorded, Option<StepCandidate>, StagedRecord), RoundError> {
-        let (mut output, store_local, terminal, candidate) = match result {
+        let (mut output, store_local, terminal, timer, candidate) = match result {
             Ok(result) => (
                 result.output,
                 result.store_local,
                 result.terminal,
+                result.timer,
                 result.candidate,
             ),
             Err(Stop::Limit(cause)) => (
@@ -1372,14 +1389,15 @@ impl Lifecycle {
                 Vec::new(),
                 None,
                 None,
+                None,
             ),
             Err(Stop::Cancelled | Stop::Activation | Stop::Lapsed) => {
-                (cancelled_outcome(), Vec::new(), None, None)
+                (cancelled_outcome(), Vec::new(), None, None, None)
             }
             Err(Stop::Durable(error)) => return Err(error.into()),
             // Never held as finished: the lifecycle keeps an honoured
             // verdict's member aside, without an outcome.
-            Err(Stop::Capacity(_)) => (SettledOutput::Interrupted, Vec::new(), None, None),
+            Err(Stop::Capacity(_)) => (SettledOutput::Interrupted, Vec::new(), None, None, None),
         };
         // A park whose resolver awaits a process waits on its terminal too:
         // the wait is pinned with the park, under the park's own deadline.
@@ -1399,6 +1417,19 @@ impl Lifecycle {
                 },
             );
             source.await_terminal(wait.id().to_hex());
+        }
+        if let (SettledOutput::Waiting(source), Some(deadline)) = (&mut output, timer) {
+            let (wait, _) = waits::pin(
+                tx,
+                lash_execution_contracts::waits::WaitSpec {
+                    scope: waits::execution_wait_scope(&self.cx, &execution.id().owner)?,
+                    purpose: waits::WaitPurpose::Timer { deadline },
+                },
+            );
+            source.await_timer(lash_core_store::tool_run::CompletionTimer {
+                wait: wait.id().to_hex(),
+                deadline_ms: deadline.0,
+            });
         }
         if let Some(due) = self.retry_due(execution, &output, now) {
             let record = settle_retry(tx, execution, output, due)?;
@@ -1552,6 +1583,12 @@ fn source_waits(
         refs.push(WaitRef::new(
             WaitId::parse_hex(terminal).ok_or_else(undecodable)?,
             WaitKind::ProcessTerminal,
+        ));
+    }
+    if let Some(timer) = &source.timer {
+        refs.push(WaitRef::new(
+            WaitId::parse_hex(&timer.wait).ok_or_else(undecodable)?,
+            WaitKind::Timer,
         ));
     }
     Ok(refs)

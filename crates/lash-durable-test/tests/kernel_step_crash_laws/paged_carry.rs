@@ -1,8 +1,12 @@
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 //! K-VER-005, K-LIB-009 and ORIGIN against actual parked page records.
+use lash::package::*;
 use lash_core_store::checkpoint_graph::{EncodedNode, NodeId};
 use lash_kernel_doc::heap::{HeapFault, PageGrant, PageId, PageRef};
 use lash_kernel_doc::{Datum, Document, FunctionDefinition, FunctionRegistry};
+use lash_kernel_package::{LinkedContent, Namespace};
+use lash_vocabulary::OperationRequirement;
+
 use lash_kernel_state::paged::{PageAnswer, PageBody, PageSource};
 use lash_kernel_vm::{KernelMachine, Machine, Program, Step};
 use std::cell::RefCell;
@@ -40,12 +44,6 @@ impl PageSource for Pages {
 }
 struct Host;
 impl lash_kernel_vm::Host for Host {
-    fn clock(&mut self) -> lash_kernel_doc::Timestamp {
-        panic!("no clock")
-    }
-    fn random(&mut self) -> u64 {
-        panic!("no random")
-    }
     fn read(
         &mut self,
         _: &lash_kernel_doc::Handle,
@@ -81,71 +79,253 @@ impl lash_kernel_doc::NativeFunction for Extra {
         Ok(lash_kernel_doc::Value::Null)
     }
 }
-fn release_sources(next: bool) -> (String, Vec<FunctionDefinition>) {
-    let native = "function pkg.extra() -> Any\nkernel 1\ncharge 1\nnative\n";
-    let extra = lash_kernel_doc::parse_definition(native).unwrap();
+fn release(next: bool) -> Vec<FunctionDefinition> {
+    let extra = lash_kernel_doc::parse_definition(
+        "function pkg.extra() -> Any\nkernel 1\ncharge 1\nnative\n",
+    )
+    .unwrap();
     let called = if next {
         format!("use pkg.extra = @{}\n", extra.identity())
     } else {
         String::new()
     };
-    let suffix = if next { "let unused = pkg.extra()" } else { "" };
-    let fetch = format!(
-        "function pkg.fetch(x: Any) -> Any\nkernel 1\ncharge 1\neffect pkg.echo(x?: Any) -> Any contract \"1\"\n{called}body {{ let v = perform pkg.echo(x) as Any {suffix} return v }}\n"
-    );
-    let fetch_definition = lash_kernel_doc::parse_definition(&fetch).unwrap();
-    let start = format!(
-        "function pkg.start(x: Any) -> Any\nkernel 1\ncharge 1\nuse pkg.fetch = @{}\nbody {{ let h = spawn invoke pkg.fetch(x) return h }}\n",
-        fetch_definition.identity()
-    );
-    let start_definition = lash_kernel_doc::parse_definition(&start).unwrap();
-    let mut definitions = vec![fetch_definition, start_definition];
+    let suffix = if next {
+        "let unused = invoke pkg.extra()"
+    } else {
+        ""
+    };
+    let fetch = lash_kernel_doc::parse_definition(&format!(
+        "function pkg.fetch(x: Any) -> Any\nkernel 1\ncharge 1\nimport 0 operation pkg.echo(x: Any) -> Any\n{called}body {{ let v = perform 0(x) as Any {suffix} return v }}"
+    )).unwrap();
+    let start = lash_kernel_doc::parse_definition(&format!(
+        "function pkg.start(x: Any) -> Any\nkernel 1\ncharge 1\nuse pkg.fetch = @{}\nbody {{ let h = spawn invoke pkg.fetch(x) return h }}", fetch.identity()
+    )).unwrap();
+    let mut definitions = vec![fetch, start];
     if next {
         definitions.push(extra);
     }
-    (
-        format!("{}{fetch}{start}", if next { native } else { "" }),
-        definitions,
-    )
+    definitions
 }
-fn release(next: bool) -> Vec<FunctionDefinition> {
-    release_sources(next).1
-}
-fn document(definitions: &[FunctionDefinition]) -> Document {
-    let uses = definitions
+fn document(definitions: &[FunctionDefinition], next: bool) -> Document {
+    let written = definitions
         .iter()
-        .map(|definition| format!("use {} = @{}\n", definition.name, definition.identity()))
+        .map(|definition| {
+            format!(
+                "definition {}\n",
+                serde_json::to_string(&lash_kernel_doc::print_definition(definition)).unwrap()
+            )
+        })
         .collect::<String>();
+    // The successor authors a different local closure. The already-created
+    // value must still execute the predecessor's body and operation slot.
+    let added = if next { "let newly_authored = 99" } else { "" };
     lash_kernel_doc::parse_document(&format!(
-        "kernel 1\nnumbers float\neffect pkg.echo(x?: Any) -> Any contract \"1\"\n{uses}main {{ let captured = [7] let f = fn() {{ return captured[0] }} let h = invoke pkg.start(7) let v = join h let saved = apply f() return [v, saved] }}"
+        "kernel 1\nnumbers float\nprivate captured\nimport 0 operation pkg.echo(x: Any) -> Any\n{written}main {{ let captured = [7] let f = fn() {{ {added} let echoed = perform 0(captured[0]) as Any return echoed }} let h = invoke pkg.start(7) let v = join h let saved = apply f() let tail = perform 0(7) as Any return [v, saved] }}"
     )).unwrap()
 }
-fn registry(definitions: &[FunctionDefinition]) -> Arc<FunctionRegistry> {
-    let mut functions = FunctionRegistry::new();
-    for definition in definitions
-        .iter()
-        .filter(|d| d.has_native())
-        .chain(definitions.iter().filter(|d| !d.has_native()))
-    {
-        let native: Option<Arc<dyn lash_kernel_doc::NativeFunction>> = definition
-            .has_native()
+fn registry(
+    definitions: impl IntoIterator<Item = FunctionDefinition>,
+    declarations: bool,
+) -> Arc<FunctionRegistry> {
+    let mut functions = if declarations {
+        FunctionRegistry::declarations()
+    } else {
+        FunctionRegistry::new()
+    };
+    let mut remaining: BTreeMap<_, _> =
+        definitions.into_iter().map(|f| (f.identity(), f)).collect();
+    while !remaining.is_empty() {
+        let id = *remaining
+            .iter()
+            .find(|(_, f)| {
+                f.body()
+                    .is_none_or(|body| body.functions.keys().all(|id| functions.get(id).is_some()))
+            })
+            .expect("acyclic fixture definitions")
+            .0;
+        let definition = remaining.remove(&id).unwrap();
+        let native = (definition.has_native() && !declarations)
             .then(|| Arc::new(Extra) as Arc<dyn lash_kernel_doc::NativeFunction>);
-        functions.register(definition.clone(), native).unwrap();
+        functions.register(definition, native).unwrap();
     }
     Arc::new(functions)
 }
-fn program(document: Document, functions: Arc<FunctionRegistry>, closure: PageId) -> Program {
-    Program {
-        document: Arc::new(document),
-        library: lash_kernel_vm::PreparedLibrary::new(functions),
+fn program(
+    content: &LinkedContent,
+    root: LinkId,
+    functions: Arc<FunctionRegistry>,
+    closure: PageId,
+) -> Program {
+    Program::prepare(
+        root,
+        content
+            .documents
+            .iter()
+            .map(|(id, d)| (*id, Arc::new(d.clone())))
+            .collect(),
+        &content.links,
         closure,
+        lash_kernel_vm::PreparedLibrary::new(functions),
+    )
+    .unwrap()
+}
+fn rewritten(
+    before: &Document,
+    after: &Document,
+    a: &[FunctionDefinition],
+    b: &[FunctionDefinition],
+) -> lash_kernel_migrate::Rewritten {
+    use lash_kernel_doc::{Correspondence, Node, Survivor};
+    use lash_vocabulary::sites::{Site, Unit};
+    let mut functions: BTreeMap<_, _> = a
+        .iter()
+        .zip(b)
+        .map(|(a, b)| (a.identity(), b.identity()))
+        .collect();
+    let local = |document: &Document, definitions: &[FunctionDefinition]| {
+        *document
+            .functions
+            .keys()
+            .find(|id| !definitions.iter().any(|f| f.identity() == **id))
+            .unwrap()
+    };
+    functions.insert(local(before, a), local(after, b));
+    let mut entries = Vec::new();
+    for (unit, block) in before.units() {
+        let to = match &unit {
+            Unit::Library(id) => Unit::Library(*functions.get(id).unwrap()),
+            other => other.clone(),
+        };
+        let mut pending = vec![(vec![], Node::Block(block))];
+        while let Some((path, node)) = pending.pop() {
+            if let Node::Block(block) = node {
+                let mut end = path.clone();
+                end.push(block.len() as u32);
+                entries.push(Survivor::new(
+                    Site::new(unit.clone(), end.clone()),
+                    Site::new(to.clone(), end),
+                    false,
+                ));
+            }
+            for (i, child) in (0u32..).zip(node.children()) {
+                let mut path = path.clone();
+                path.push(i);
+                pending.push((path, child));
+            }
+            entries.push(Survivor::new(
+                Site::new(unit.clone(), path.clone()),
+                Site::new(to.clone(), path),
+                true,
+            ));
+        }
+    }
+    lash_kernel_migrate::Rewritten {
+        document: after.clone(),
+        correspondence: Correspondence::of(before.identity(), after.identity(), entries).unwrap(),
+        functions,
     }
 }
+async fn publish(
+    stores: &Arc<dyn lash_execution_contracts::backend::StoreSet>,
+    document: &Document,
+    contract: &str,
+) -> (LinkedContent, LinkId) {
+    let ImportKind::Operation { signature } = &document.imports[&ImportSlot(0)].kind else {
+        unreachable!()
+    };
+    let package = Package {
+        path: PackagePath::parse("pkg").unwrap(),
+        members: BTreeMap::from([(
+            Segment::new("echo").unwrap(),
+            Member {
+                visibility: Visibility::Public,
+                kind: MemberKind::Operation(OperationOffer {
+                    requirement: OperationRequirement::new(
+                        signature.clone(),
+                        lash_vocabulary::ContractId::new(contract),
+                    ),
+                    intents: Default::default(),
+                    controls: lash_vocabulary::TurnControls::none(),
+                    mode: lash::package::OperationMode::Waited,
+                }),
+            },
+        )]),
+    };
+    let context = PublicationContext {
+        domain: PublicationDomain("paged-carry".into()),
+        scope: PublicationScope::Host,
+        publisher: PublisherInstance("owner".into()),
+        root: Segment::new("pkg").unwrap(),
+    };
+    let advertisement = PackageAdvertisement::Enumerated(package.clone());
+    let mut content = LinkedContent::default();
+    let id = content.insert_document(document.clone()).unwrap();
+    let attachment = Attachment {
+        packages: [package.path.clone()].into(),
+        members: Default::default(),
+        deferred: Default::default(),
+    };
+    let link = Namespace {
+        advertisements: vec![(&context, &advertisement)],
+    }
+    .fulfil(&content, id, &context, None, Some(&attachment))
+    .unwrap();
+    let root = content.insert_link(link.clone()).unwrap();
+    let claim = lash_core::ReferrerClaim::unguarded(lash_core::ArtifactReferrer::HostPin(
+        lash_core::HostArtifactPin::mint(),
+    ))
+    .unwrap();
+    let documents =
+        lash_vm_runtime::KernelDocuments::new(stores.module_artifacts(), stores.package_store());
+    documents
+        .admit_document(
+            &claim,
+            &lash_kernel_doc::DocumentBytes::from(document.clone()),
+        )
+        .await
+        .unwrap();
+    stores
+        .package_store()
+        .put_link(
+            &claim,
+            &lash_core_store::packages::LinkRecord { id: root, link },
+            &[lash_core::ArtifactName {
+                store: lash_core::ArtifactStoreId::KernelDocument,
+                artifact_ref: id.to_string(),
+            }],
+        )
+        .await
+        .unwrap();
+    stores
+        .package_store()
+        .put_package(
+            &claim,
+            &lash_core_store::packages::PackageRecord {
+                id: package.identity(),
+                package: package.clone(),
+            },
+        )
+        .await
+        .unwrap();
+    stores
+        .package_store()
+        .publish(
+            &claim,
+            &PublicationRecord {
+                context,
+                path: package.path.clone(),
+                content: PublishedContent::Package(package.identity()),
+                code_links: Default::default(),
+                imported_publications: vec![],
+            },
+        )
+        .await
+        .unwrap();
+    (content, root)
+}
 fn park_with(
-    document: Document,
-    functions: Arc<FunctionRegistry>,
+    program: Program,
     pages: &Pages,
-    closure: PageId,
     owner: PageId,
 ) -> (
     KernelMachine,
@@ -153,14 +333,14 @@ fn park_with(
     lash_kernel_vm::EffectRequest,
 ) {
     let mut machine = KernelMachine::start(
-        program(document, functions, closure),
+        program,
         bounds(),
         lash_kernel_vm::CellStart {
             owner,
             target: lash_kernel_vm::Target::Main,
             args: Vec::new(),
             session: None,
-            modes: lash_kernel_vm::EffectModes::recorded(),
+            modes: Default::default(),
             host: Vec::new(),
         },
         Box::new(pages.clone()),
@@ -169,19 +349,44 @@ fn park_with(
     let Step::Parked(park) = machine.run(&mut Host, u64::MAX).unwrap() else {
         panic!("park")
     };
-    let lash_kernel_vm::Request::Effect(request) = park.requests[0].clone() else {
-        panic!("effect")
-    };
+    let lash_kernel_vm::Request::Effect(request) = park.requests[0].clone();
     let root = machine.checkpoint().unwrap();
     (machine, root, request)
 }
-fn finish(machine: &mut KernelMachine, wait: lash_kernel_vm::WaitId) -> Datum {
+fn finish(
+    machine: &mut KernelMachine,
+    wait: lash_vocabulary::sites::WaitId,
+    retained: LinkId,
+    root: LinkId,
+) -> Datum {
     machine
         .deliver(
             wait,
             lash_kernel_vm::Outcome::Completed(Datum::Int(7.into())),
         )
         .unwrap();
+    for link in [retained, root] {
+        let Step::Parked(park) = machine.run(&mut Host, u64::MAX).unwrap() else {
+            panic!("the next operation parks")
+        };
+        let [lash_kernel_vm::Request::Effect(request)] = park.requests.as_slice() else {
+            panic!("one operation")
+        };
+        assert_eq!(
+            request.use_,
+            lash_vocabulary::OperationUse {
+                link,
+                slot: ImportSlot(0)
+            },
+            "preexisting closures keep their defining Link; resumed frames use the successor"
+        );
+        machine
+            .deliver(
+                request.wait,
+                lash_kernel_vm::Outcome::Completed(Datum::Int(7.into())),
+            )
+            .unwrap();
+    }
     match machine.run(&mut Host, u64::MAX).unwrap() {
         Step::Ended(lash_kernel_vm::End::Finished(result)) => result.result,
         other => panic!("{other:?}"),
@@ -226,90 +431,64 @@ async fn atomic_carry(tier: super::served::Tier) {
     let exec = ExecKey::Process(process.clone());
     let owner = lash_vm_broker::kernel::graph::owner_binding_node(&exec).unwrap();
     let (a, b) = (release(false), release(true));
-    let held = |next| {
-        let source = release_sources(next).0;
-        lash::package::HeldPackages::install([lash::package::Package::build(
-            "pkg",
-            if next { "B" } else { "A" },
-            &lash::package::PackageSources {
-                kernel: &source,
-                surface: if next {
-                    "internal operation echo(x?: Any) -> Any contract \"1\"\n"
-                } else {
-                    "operation echo(x?: Any) -> Any contract \"1\"\n"
-                },
-                labels: "",
-            },
-            &[],
-        )
-        .unwrap()])
-        .unwrap()
-    };
-    let (held_a, held_b) = (held(false), held(true));
-    for held in [&held_a, &held_b] {
-        let (artifacts, sets) = lash::package::install_rows(held);
-        store.install_packages(&artifacts, &sets).await.unwrap();
-    }
-    let authority = lash_vm_runtime::StoredAuthority::new(stores.clone());
-    let declarations = b
-        .iter()
-        .map(|definition| (definition.identity(), Arc::new(definition.clone())))
-        .collect();
-    lash_vm_runtime::admit_internal(&authority, &declarations)
-        .await
-        .unwrap()
-        .unwrap();
-    // A same-named forged body has no B membership and cannot borrow B's authority.
-    let forged = lash_kernel_doc::parse_definition("function pkg.forged(x: Any) -> Any\nkernel 1\ncharge 1\neffect pkg.echo(x?: Any) -> Any contract \"1\"\nbody { let v = perform pkg.echo(x) as Any return v }\n").unwrap();
-    assert!(
-        lash_vm_runtime::admit_internal(
-            &authority,
-            &BTreeMap::from([(forged.identity(), Arc::new(forged))])
-        )
-        .await
-        .unwrap()
-        .is_err()
+    let (document_a, document_b) = (document(&a, false), document(&b, true));
+    let (mut content, link_a) = publish(&stores, &document_a, "A").await;
+    let (next_content, link_b) = publish(&stores, &document_b, "B").await;
+    let content_a = content.clone();
+    content.documents.extend(next_content.documents);
+    content.links.extend(next_content.links);
+    let a_registry = registry(document_a.functions.values().cloned(), false);
+    let b_registry = registry(
+        content
+            .documents
+            .values()
+            .flat_map(|d| d.functions.values().cloned()),
+        false,
     );
-    let (a_registry, b_registry) = (registry(&a), registry(&b));
     let closure_a = lash_vm_broker::kernel::closure::derive(
-        document(&a).manifest.functions.keys().copied(),
+        document_a.functions.keys().copied(),
         &a_registry,
         &BTreeMap::new(),
     )
     .unwrap();
     let closure_b = lash_vm_broker::kernel::closure::derive(
-        document(&b).manifest.functions.keys().copied(),
+        content
+            .documents
+            .values()
+            .flat_map(|d| d.functions.keys().copied()),
         &b_registry,
         &BTreeMap::new(),
     )
     .unwrap();
     let pages = Pages::default();
     let (mut original, checkpoint, request) = park_with(
-        document(&a),
-        a_registry,
+        program(
+            &content_a,
+            link_a,
+            a_registry,
+            PageId(closure_a.reference().0),
+        ),
         &pages,
-        PageId(closure_a.reference().0),
         PageId(owner.0),
     );
-    let engine_state = |page, document: &Document, packages, requirements| {
-        lash_execution_contracts::process::EngineState {
-            staged: Vec::new(),
-            format: lash_execution_contracts::process::EngineStateFormat {
-                kind: lash_vm_runtime::LASH_VM_ENGINE_KIND.into(),
-                version: 1,
+    let engine_state = |page, link, requirements| lash_execution_contracts::process::EngineState {
+        staged: Vec::new(),
+        format: lash_execution_contracts::process::EngineStateFormat {
+            kind: lash_vm_runtime::LASH_VM_ENGINE_KIND.into(),
+            version: 1,
+        },
+        bytes: serde_json::to_vec(&lash_vm_runtime::KernelProcessInput {
+            code: lash_vm_runtime::process::InlineRequest::Linked {
+                start: LinkedStart {
+                    link,
+                    selector: StartSelector::Main,
+                },
             },
-            bytes: serde_json::to_vec(&lash_vm_runtime::KernelProcessInput {
-                packages,
-                declared_packages: held_a.surface().selection(),
-                document: document.identity(),
-                functions: document.manifest.functions.keys().copied().collect(),
-                entry: lash_kernel_doc::Name::new("run"),
-                args: Default::default(),
-            })
-            .unwrap(),
-            pages: Some(page),
-            requirements,
-        }
+            args: Default::default(),
+        })
+        .unwrap(),
+        pages: Some(page),
+        requirements,
     };
     let requirements_a =
         lash_vm_broker::kernel::loader::requirements(&closure_a, 1, std::iter::empty());
@@ -321,12 +500,7 @@ async fn atomic_carry(tier: super::served::Tier) {
         &mut staging,
         &process,
         lash_vm_runtime::LASH_VM_ENGINE_KIND,
-        &engine_state(
-            NodeId(checkpoint.page.id.0),
-            &document(&a),
-            held_a.digest(),
-            requirements_a.clone(),
-        ),
+        &engine_state(NodeId(checkpoint.page.id.0), link_a, requirements_a.clone()),
         (None, None),
         CommitId::mint(),
     )
@@ -338,24 +512,14 @@ async fn atomic_carry(tier: super::served::Tier) {
         .await
         .unwrap();
     let old = store.exec_root(&exec).await.unwrap().unwrap();
-    let mut both = a.clone();
-    both.extend(b.clone());
-    let rewritten = lash_kernel_migrate::adopt(
-        &document(&a),
-        &lash_kernel_migrate::relink(&a, &b),
-        registry(&both).as_ref(),
-    )
-    .unwrap();
-    let mut declarations_only = FunctionRegistry::declarations();
-    for definition in b
-        .iter()
-        .filter(|d| d.has_native())
-        .chain(b.iter().filter(|d| !d.has_native()))
-    {
-        declarations_only
-            .register(definition.clone(), None)
-            .unwrap();
-    }
+    let rewritten = rewritten(&document_a, &document_b, &a, &b);
+    let declarations_only = registry(
+        content
+            .documents
+            .values()
+            .flat_map(|d| d.functions.values().cloned()),
+        true,
+    );
     let (page, fresh) = lash_vm_runtime::carry_parked_checkpoint(
         page_store.clone(),
         RootLeaseRequest {
@@ -367,8 +531,9 @@ async fn atomic_carry(tier: super::served::Tier) {
         NodeId(checkpoint.page.id.0),
         rewritten,
         program(
-            document(&b),
-            Arc::new(declarations_only),
+            &content,
+            link_b,
+            declarations_only,
             PageId(closure_b.reference().0),
         ),
         bounds(),
@@ -383,8 +548,8 @@ async fn atomic_carry(tier: super::served::Tier) {
     );
     let requirements_b =
         lash_vm_broker::kernel::loader::requirements(&closure_b, 1, std::iter::empty());
-    assert_eq!(requirements_b.natives, [b[2].identity()].into());
-    assert!(requirements_a.natives.is_empty());
+    assert_eq!(requirements_b.machine.natives, [b[2].identity()].into());
+    assert!(requirements_a.machine.natives.is_empty());
     let mut staging = GraphStaging::new(EncodeBudget::new(ExplicitLimit::new(u64::MAX)));
     for node in fresh.iter().chain(closure_b.nodes().values()) {
         staging.adopt(node.clone()).unwrap();
@@ -393,7 +558,7 @@ async fn atomic_carry(tier: super::served::Tier) {
         &mut staging,
         &process,
         lash_vm_runtime::LASH_VM_ENGINE_KIND,
-        &engine_state(page, &document(&b), held_b.digest(), requirements_b.clone()),
+        &engine_state(page, link_b, requirements_b.clone()),
         (Some(old.rev), Some(old.root)),
         CommitId::mint(),
     )
@@ -401,7 +566,7 @@ async fn atomic_carry(tier: super::served::Tier) {
     let mut tx = store.begin(&actor, claim.epoch).await.unwrap();
     tx.stage_all(staging).write(write);
     let tokens: Vec<String> =
-        lash_core_store::obligations::ObligationToken::for_requirements(&requirements_b)
+        lash_vocabulary::claims::ObligationToken::for_requirements(&requirements_b)
             .map(String::from)
             .collect();
     tx.set_requires(tokens);
@@ -430,8 +595,11 @@ async fn atomic_carry(tier: super::served::Tier) {
             node: lash_durable::NodeId::new("A-only"),
             decodes: vec![FormatSet::new("paged-carry-law")],
             serves: Vec::new(),
-            capabilities: lash_kernel_doc::NodeCapabilities {
-                kernels: [1].into(),
+            capabilities: NodeCapabilities {
+                machine: lash_vocabulary::claims::NodeRequirements {
+                    kernels: [1].into(),
+                    ..Default::default()
+                },
                 ..Default::default()
             },
             ttl_millis: 600_000,
@@ -508,13 +676,20 @@ async fn atomic_carry(tier: super::served::Tier) {
         };
         let linked: lash_vm_runtime::KernelProcessInput = serde_json::from_slice(&bytes).unwrap();
         assert_eq!(root, page);
-        assert_eq!(linked.packages, held_b.digest());
-        assert_eq!(linked.document, document(&b).identity());
+        assert_eq!(
+            linked.code,
+            lash_vm_runtime::process::InlineRequest::Linked {
+                start: LinkedStart {
+                    link: link_b,
+                    selector: StartSelector::Main
+                }
+            }
+        );
     }
     assert!(loaded.0.borrow().contains_key(&closure_b.reference()));
     assert!(
         !loaded.0.borrow().contains_key(&closure_a.reference()),
-        "new root no longer reaches A's closure"
+        "the union closure supersedes the old closure node while retaining its definitions"
     );
     let answer = loaded
         .clone()
@@ -527,15 +702,20 @@ async fn atomic_carry(tier: super::served::Tier) {
         .unwrap();
     let checkpoint = lash_kernel_state::paged::Checkpoint::of_answer(&answer).unwrap();
     let mut resumed = KernelMachine::open(
-        program(document(&b), registry(&b), PageId(closure_b.reference().0)),
+        program(
+            &content,
+            link_b,
+            b_registry,
+            PageId(closure_b.reference().0),
+        ),
         bounds(),
         &checkpoint,
         Box::new(loaded.clone()),
     )
     .unwrap();
     assert_eq!(
-        finish(&mut resumed, request.wait),
-        finish(&mut original, request.wait)
+        finish(&mut resumed, request.wait, link_a, link_b),
+        finish(&mut original, request.wait, link_a, link_a)
     );
     store.release_node(&node).await.unwrap();
 }

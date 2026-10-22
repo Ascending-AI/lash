@@ -10,6 +10,10 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use lash_core::OwnerConfigView;
+use lash_core::ToolCall;
+use lash_core::ToolPrepareCall;
+use lash_core::ToolProvider;
 use lash_core::plugin::CandidateFacts;
 use lash_core::plugin::ConfigCommand;
 use lash_core::plugin::ConfigOwner;
@@ -17,11 +21,11 @@ use lash_core::plugin::ConfigRegistrar;
 use lash_core::plugin::OwnerChange;
 use lash_core::plugin::PluginDeclaration;
 use lash_core::plugin::PluginFactory;
-use lash_core::{
-    OwnerConfigView, ToolCall, ToolContract, ToolId, ToolManifest, ToolPrepareCall, ToolProvider,
-};
 use lash_execution_contracts::config_error::ConfigRegistrationError;
 use lash_execution_contracts::plugin_error::PluginError;
+use lash_vocabulary::tool_contract::ToolContract;
+use lash_vocabulary::tool_contract::ToolId;
+use lash_vocabulary::tool_contract::ToolManifest;
 use serde::{Deserialize, Serialize};
 
 use crate::ToolSelection;
@@ -219,6 +223,24 @@ impl SelectedToolsSession {
             lash_core::tool_provider_key!("tools"),
             move |this, _state| Ok(Arc::clone(&this.provider)),
         )?;
+        let owner = reg
+            .declared_owner()
+            .ok_or_else(|| PluginError::Registration("selected tools need an owner".into()))?
+            .to_owned();
+        reg.package_provider_bound(lash_core::tool_provider_key!("tools"), move |this, _| {
+            let roots = this
+                .provider
+                .tool_manifests(&OwnerConfigView::default())?
+                .into_iter()
+                .map(|manifest| manifest.operation.package.as_slice()[0].clone())
+                .collect();
+            Ok(Arc::new(crate::ToolPackageProvider::new(
+                owner.clone(),
+                lash_core::tool_provider_key!("tools"),
+                roots,
+                Arc::clone(&this.provider),
+            )))
+        })?;
         Ok(())
     }
 }
@@ -290,7 +312,7 @@ impl ToolProvider for Selected {
         self.inner.execute(call).await
     }
 
-    fn readable_binding_formats(&self) -> &'static [lash_core::FormatVersion] {
+    fn readable_binding_formats(&self) -> &'static [lash_vocabulary::providers::FormatVersion] {
         self.inner.readable_binding_formats()
     }
 

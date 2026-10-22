@@ -66,7 +66,7 @@ impl ProcessWorkSubstrate for DurableProcessWork {
     /// cancellable.
     async fn await_process_terminal(
         &self,
-        process_id: &crate::ProcessId,
+        process_id: &lash_vocabulary::identity::ProcessId,
     ) -> Result<ProcessTerminalWait, PluginError> {
         let registry = self.backend.process_registry();
         let awaiter = match &self.changes {
@@ -82,7 +82,7 @@ impl ProcessWorkSubstrate for DurableProcessWork {
 
     async fn deliver_cancel(
         &self,
-        process_id: &crate::ProcessId,
+        process_id: &lash_vocabulary::identity::ProcessId,
         request: &crate::CancelRequest,
         _key: &str,
     ) -> Result<(), PluginError> {

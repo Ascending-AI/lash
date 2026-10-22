@@ -6,9 +6,9 @@ use lash_durable::domain::ProcessWrite;
 use lash_durable::{ActorTx, DomainWrite};
 
 use super::driver::{Driver, InFlight};
-use crate::ProcessId;
 use lash_core_store::tool_run::SettledOutput;
 use lash_execution_contracts::process::StepRequest;
+use lash_vocabulary::identity::ProcessId;
 
 /// Record `step`'s settled `outcome` on `tx` as an occurrence of the effect
 /// node it runs for, in the transaction that hands it to the engine: once,
@@ -23,9 +23,10 @@ pub(super) fn record_effect(
     outcome: &SettledOutput,
     fleet: crate::FleetFormat,
 ) {
-    let Some(site) = step.request.site() else {
+    let Some(location) = step.request.location() else {
         return;
     };
+    let site = &location.at;
     let Some((class, code)) = effect_class(outcome) else {
         return;
     };
@@ -49,7 +50,7 @@ pub(super) fn record_effect(
         .insert(site.position().to_string(), recorded + 1);
     let operation = step.request.operation();
     let mut occurrence = lash_execution_contracts::process::ProcessEffectOccurrence::new(
-        site.clone(),
+        location.clone(),
         operation,
         class,
         code,

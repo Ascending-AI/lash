@@ -1,43 +1,34 @@
 kernel 1
 numbers float
-use brand.built = @c373085ebe73e883e1942e301da0444bc0c91072bc5d5c1d909f09b06c2ceb78
-use kind = @3e2a9836b16b3ade4f7fcc2d56d1fb203dffed4bd5d7f4bf800df213c8c8c5f7
-use list.copy = @9582e9497de80ffe91797c946b2d48fc9e1621735e02d33bf53c8c828a41d63a
-use same = @1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578
-use ts.await = @18a30299db399e09c5772b4431f1c4baf6e139a164f476b6fe173b1447d54a6f
-use ts.promise.adopt = @ec07dd4e314068cde58b9c1223c9fc11094029f4f5fe6f8d325a12e10b32a475
-use ts.promise.is = @0f99cae1fc6ad1ff6812fb50d4070182ec247c6fe07f1a7b049a4fa7aa9c82a5
-use ts.promise.pending = @fe3c6398a88ccbf7d94c89866a9ae6bf339b8d3137d24ac0335391feec55cce8
-use ts.promise.run = @16fe1f1d98e1f2072247aeee93643c627d12d9fb390ee5c3c99baf2cd2455330
-use ts.promise.start = @875c36466719a5b387ab5f5241da695208b61ff4632bc449a7b566d2c67c5ad0
-entry arrow(value: Number) -> Any ts_direct(ts.await)
-entry declared() -> Any ts_direct(ts.await)
-
-fn arrow(value) {
-  return value via ts.promise.adopt
-}
-
-fn declared() {
-  return "top" via ts.promise.adopt
-}
-
+import 0 code ts.h_n7_promise_n5_adopt(value: Any) -> Any direct
+import 1 code ts.h_n5_await(value: Any) -> Any direct
+import 2 code ts.h_n7_promise_n5_start(work: Any, this: Any, args: Any) -> Any direct
+native @048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544
+native @3bf2a0bb0651a209dbb3d7f7d03e01826d7a92a4d31a105ba32da39fc2aaf948
+native @c3fb28f03761c4ba70c0af3d4d1985af9660a8f1ff7d494315fee5cf10242c3a
+export arrow "{\"kind\":\"function\",\"value\":{\"function\":\"54d6cab968b254d15c38d43144b7026c5bb2f91b6161a454d1427357d6a24eed\",\"signature\":{\"params\":[{\"name\":\"value\",\"ty\":\"number\"}],\"result\":\"number\"},\"convention\":{\"kind\":\"ts_direct\",\"value\":{\"await_fn\":{\"kind\":\"import\",\"value\":1}}},\"asynchronous\":true,\"rest\":false}}"
+export declared "{\"kind\":\"function\",\"value\":{\"function\":\"9c6d4df232c9aa39105c8e704709c81d79b287d65f2592428e640ea20fa6836a\",\"signature\":{\"result\":\"text\"},\"convention\":{\"kind\":\"ts_direct\",\"value\":{\"await_fn\":{\"kind\":\"import\",\"value\":1}}},\"asynchronous\":true,\"rest\":false}}"
+definition "function same(arg0: Any, arg1: Any) -> Bool\nkernel 1\nerrors \"arity\"\ncharge sum(1, sum(min(size(arg0), size(arg1)), nested(arg0), nested(arg1)), deep(result))\nnative\n"
+definition "function local.function(this6: Any, args6: Any) -> Any\nkernel 1\nmetering statements\nimport 2 code ts.h_n7_promise_n5_start(work: Any, this: Any, args: Any) -> Any direct\nuse list.copy = @c3fb28f03761c4ba70c0af3d4d1985af9660a8f1ff7d494315fee5cf10242c3a\nuse local.function = @b79b4ff0c13b091737d41c82ecfc69423675704dfe30f97e7af4161849fc22df\nbody {\n  return invoke import 2(fn local.function, this6, list.copy(args6))\n}\n"
+definition "function ts.promise.run(promise: Any, work: Any, this: Any, args: Any) -> Any\nkernel 1\ncharge 8\nbody {\n  let value = absent\n  try {\n    set value = apply work(this, args)\n  } catch reason {\n    set promise.state = \"rejected\"\n    throw reason\n  }\n  set promise.state = \"fulfilled\"\n  return value\n}\n"
+definition "function ts.promise.start(work: Any, this: Any, args: Any) -> Any\nkernel 1\ncharge 12\nuse ts.promise.pending = @ba3c3a544f54afc5b9bd2037899cad1b43ef569cc74b56990671a257572c77af\nuse ts.promise.run = @172c6e045a95eb3cb7ed4a8f5a5d2e56d8874a0373597133e75f132333a63b8a\nbody {\n  let promise = invoke ts.promise.pending()\n  set promise.task = spawn invoke ts.promise.run(promise, work, this, args)\n  return promise\n}\n"
+definition "function brand.built() -> Union(Bytes, Absent)\nkernel 1\ncharge 0\nnative\n"
+definition "function local.function(value: Any) -> Any\nkernel 1\nmetering statements\nimport 0 code ts.h_n7_promise_n5_adopt(value: Any) -> Any direct\nbody {\n  return value via import 0\n}\n"
+definition "function local.function(this3: Any, args3: Any) -> Any\nkernel 1\nmetering statements\nimport 0 code ts.h_n7_promise_n5_adopt(value: Any) -> Any direct\nbody {\n  return \"block\" via import 0\n}\n"
+definition "function local.function() -> Any\nkernel 1\nmetering statements\nimport 0 code ts.h_n7_promise_n5_adopt(value: Any) -> Any direct\nbody {\n  return \"top\" via import 0\n}\n"
+definition "function local.function(this5: Any, args5: Any) -> Any\nkernel 1\nmetering statements\nimport 0 code ts.h_n7_promise_n5_adopt(value: Any) -> Any direct\nbody {\n  return \"block\" via import 0\n}\n"
+definition "function ts.promise.pending() -> Any\nkernel 1\ncharge 5\nuse brand.built = @3bf2a0bb0651a209dbb3d7f7d03e01826d7a92a4d31a105ba32da39fc2aaf948\nbody {\n  let built = brand.built()\n  return {__lash_brand: (\"typescript\", \"promise\"), __lash_built: built, state: \"pending\", task: absent}\n}\n"
+definition "function list.copy(xs: List(Any)) -> List(Any)\nkernel 1\nerrors \"cyclic_value\", \"index_out_of_range\", \"invalid_key\", \"key_missing\", \"too_deep\", \"type_error\"\ncharge sum(1, size(xs), size(result))\nnative\n"
+definition "function local.function(this4: Any, args4: Any) -> Any\nkernel 1\nmetering statements\nimport 2 code ts.h_n7_promise_n5_start(work: Any, this: Any, args: Any) -> Any direct\nuse list.copy = @c3fb28f03761c4ba70c0af3d4d1985af9660a8f1ff7d494315fee5cf10242c3a\nuse local.function = @9ae591c69ecb5f7247c7bcff882f2874019b5487fe55e04a589e88f3dd5b2c78\nbody {\n  return invoke import 2(fn local.function, this4, list.copy(args4))\n}\n"
 main {
-  let arrow = &arrow
-  let declared = &declared
+  let arrow = &@54d6cab968b254d15c38d43144b7026c5bb2f91b6161a454d1427357d6a24eed
+  let declared = &@9c6d4df232c9aa39105c8e704709c81d79b287d65f2592428e640ea20fa6836a
   if true {
-    let local_1 = ("ts.function", "", "local", 0.0, fn(this4, args4) start() -> Any token("ts.function", 4) ts_direct(ts.await) {
-      return invoke ts.promise.start(fn(this3, args3) {
-        return "block" via ts.promise.adopt
-      }, this4, list.copy(args4))
-    }, {})
-    let alsoLocal_1 = ("ts.function", "", "alsoLocal", 0.0, fn(this6, args6) start() -> Any token("ts.function", 4) ts_direct(ts.await) {
-      return invoke ts.promise.start(fn(this5, args5) {
-        return "block" via ts.promise.adopt
-      }, this6, list.copy(args6))
-    }, {})
+    let local_1 = ("ts.function", "", "local", 0.0, fn @d207107a9be7d9bafc3fb928356260d60f5ba131eb225ab8d9e19c952a702716 presentation() -> Any token("ts.function", 4) ts_args(import 1, same), {})
+    let alsoLocal_1 = ("ts.function", "", "alsoLocal", 0.0, fn @15ff6a17280791130db6f082f7d3d1233f7316bb8afaf0936c64fe379eb76f8d presentation() -> Any token("ts.function", 4) ts_args(import 1, same), {})
   }
 }
 
-unit Function(Name("arrow")): statements=1 scopes=1 sites=13
+unit Library(FunctionId(54d6cab968b254d15c38d43144b7026c5bb2f91b6161a454d1427357d6a24eed)): statements=1 scopes=1 sites=13
 
-unit Function(Name("declared")): statements=1 scopes=1 sites=13
+unit Library(FunctionId(9c6d4df232c9aa39105c8e704709c81d79b287d65f2592428e640ea20fa6836a)): statements=1 scopes=1 sites=13

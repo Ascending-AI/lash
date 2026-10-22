@@ -3,13 +3,19 @@
 
 use std::sync::Arc;
 
+use lash_core::LiveReplayEventDraft;
+use lash_core::LiveReplayStoreError;
+use lash_core::SessionCursor;
+use lash_core::SessionObservationEvent;
+use lash_core::SessionObservationEventPayload;
+use lash_core::SessionProcessEventKind;
+use lash_core::SessionQueueEventKind;
+use lash_core::SessionRevision;
+use lash_core::TurnActivity;
 use lash_core::transcript::TranscriptEntry;
-use lash_core::{
-    LiveReplayEventDraft, LiveReplayStoreError, ProcessId, SessionCursor, SessionObservationEvent,
-    SessionObservationEventPayload, SessionProcessEventKind, SessionQueueEventKind,
-    SessionRevision, TurnActivity, TurnId,
-};
-use lash_protocol_types::SessionId;
+use lash_vocabulary::identity::ProcessId;
+use lash_vocabulary::identity::SessionId;
+use lash_vocabulary::identity::TurnId;
 
 /// The stored form of [`SessionObservationEventPayload`], one variant each:
 /// what a row reads back as.

@@ -73,7 +73,7 @@ pub enum ParkReason {
     /// The deployment must supply the configured worker before redrive can run it.
     WorkerDeployment {
         executable: std::path::PathBuf,
-        fault: lash_vm_protocol::WorkerDeploymentFault,
+        fault: lash_protocol_types::engine_fault::WorkerDeploymentFault,
         message: String,
     },
     /// A code cell's re-execution issued a command its journal does not hold
@@ -98,7 +98,7 @@ pub enum ParkReason {
         /// generation.
         message: String,
     },
-    /// A code cell needed a host tool binding its journal names, and the live
+    /// A code cell needed a host operation binding its journal names, and the live
     /// tool for it is missing or changed since the pass that wrote the
     /// journal (FIG-3587).
     BindingDrift {

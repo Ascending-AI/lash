@@ -20,7 +20,8 @@ use lash_durable::{
 use lash_execution_contracts::scope::scope_id;
 use lash_execution_contracts::scope::scope_index;
 use lash_execution_contracts::scope::subtree_roots;
-use lash_protocol_types::{CancelOrigin, ProcessId};
+use lash_protocol_types::CancelOrigin;
+use lash_vocabulary::identity::ProcessId;
 use rusqlite::{Connection, OptionalExtension};
 
 use super::{Answer, Committing, SQL, actor_key, integer, wake_within};
@@ -89,7 +90,7 @@ pub(super) fn stamp_requires(
 ) -> rusqlite::Result<()> {
     cached_execute(
         tx,
-        SQL.actor.stamp_requires.sql(),
+        SQL.actor.stamp_effective_requires.sql(),
         rusqlite::params![actor, lash_durable::encode_requires(requires)],
     )
     .map(drop)
@@ -296,7 +297,22 @@ fn register_within(
         staged.prepared_at_ms,
         commit.fleet,
     ) {
-        Ok(receipt) if receipt.record.id == rows.process => Ok(()),
+        Ok(receipt) if receipt.record.id == rows.process => {
+            if matches!(
+                receipt.outcome,
+                lash_execution_contracts::process::ProcessRegistrationOutcome::Created
+            ) {
+                super::packages::register_process_execution(
+                    tx,
+                    &rows.process,
+                    rows.execution.as_deref(),
+                    &rows.initial_resolutions,
+                )
+                .map_err(super::store_failure)?
+            } else {
+                Ok(())
+            }
+        }
         Ok(receipt) => Err(refused(format!(
             "process `{}` already holds its start key",
             receipt.record.id
@@ -423,6 +439,8 @@ pub(super) fn apply(tx: &Connection, commit: &Committing<'_>, write: &ProcessWri
                 millis(commit.now)?,
             )
             .map_err(crate::sqlite_conversion_error)?;
+            // Package registration is optional; every terminal retires any live executions.
+            super::packages::end_actor_executions(tx, commit.actor)?;
             if ended {
                 cached_execute(
                     tx,

@@ -12,8 +12,8 @@ const SLOW_OPERATION: &str = "tools.slow";
 /// A tool that answers every call at once.
 struct Answering;
 
-fn definition() -> lash_core::ToolDefinition {
-    lash_core::ToolDefinition::raw(
+fn definition() -> lash_vocabulary::tool_contract::ToolDefinition {
+    lash_vocabulary::tool_contract::ToolDefinition::raw(
         format!("tool:{SLOW}"),
         SLOW_OPERATION,
         "Answers at once.",
@@ -29,7 +29,10 @@ impl ToolProvider for Answering {
     fn tool_manifests(
         &self,
         _config: &lash_core::OwnerConfigView,
-    ) -> std::result::Result<Vec<lash_core::ToolManifest>, lash::plugins::PluginError> {
+    ) -> std::result::Result<
+        Vec<lash_vocabulary::tool_contract::ToolManifest>,
+        lash::plugins::PluginError,
+    > {
         Ok(vec![definition().manifest()])
     }
 
@@ -37,7 +40,7 @@ impl ToolProvider for Answering {
         &self,
         name: &str,
         _config: &lash_core::OwnerConfigView,
-    ) -> Option<Arc<lash_core::ToolContract>> {
+    ) -> Option<Arc<lash_vocabulary::tool_contract::ToolContract>> {
         (name == SLOW_OPERATION).then(|| Arc::new(definition().contract()))
     }
 
@@ -160,7 +163,10 @@ async fn presentation_step_failure_feeds_fallback_to_next_step() -> Result<()> {
     let seen = Seen::default();
     let core = deploy(&sqlite_memory_store_backend().await, &seen, false)?;
     let session = core
-        .session(lash::SessionId::parse("presentation-fallback").expect("nonblank host identity"))
+        .session(
+            lash_vocabulary::identity::SessionId::parse("presentation-fallback")
+                .expect("nonblank host identity"),
+        )
         .create(lash::SessionCreation::root(mock_session_spec()))
         .await?;
     let report = session.send(TurnInput::text("call it")).output().await?;
@@ -203,12 +209,14 @@ async fn a_recorded_presentation_is_served_after_its_owners_loss_without_its_ste
     let seen = Seen::default();
     let backend = sqlite_memory_store_backend().await;
     let core = deploy(&backend, &seen, true)?;
-    let session_id = lash::SessionId::parse(ID).expect("nonblank host identity");
+    let session_id =
+        lash_vocabulary::identity::SessionId::parse(ID).expect("nonblank host identity");
     let session = core
         .session(session_id.clone())
         .create(lash::SessionCreation::root(mock_session_spec()))
         .await?;
-    let run = lash::TurnId::parse("presented-turn").expect("nonblank host identity");
+    let run =
+        lash_vocabulary::identity::TurnId::parse("presented-turn").expect("nonblank host identity");
     session
         .send(TurnInput::text("call it"))
         .id(run.clone())

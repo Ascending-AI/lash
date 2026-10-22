@@ -114,7 +114,7 @@ fn request(model: &str, stream: bool, structured: bool) -> LlmRequest {
         output_spec: structured.then(|| {
             LlmOutputSpec::JsonSchema(LlmJsonSchema {
                 name: "answer".to_string(),
-                schema: lash_protocol_types::SchemaContract::admit(json!({
+                schema: lash_vocabulary::schema_contract::SchemaContract::admit(json!({
                     "type": "object",
                     "properties": { "answer": { "type": "string" } }
                 }))

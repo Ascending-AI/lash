@@ -6,7 +6,7 @@ use crate::{
     ProcessRetention as _,
 };
 use lash_core::testing::{Script, StoreOp};
-use lash_protocol_types::SessionId;
+use lash_vocabulary::identity::SessionId;
 
 /// A transient registry failure during fork-observer publication is best
 /// effort: it does not fail session creation and the durable intent is
@@ -141,9 +141,9 @@ pub async fn fork_observer_transient_failure_retains_intent_until_publication(
     ];
     meta.pending_observer_intents = unresolved.clone();
     meta.pending_observer_intents.extend([
-        crate::SessionObserverIntent::host_requested(lash_protocol_types::ProcessId::fixture(
-            "missing",
-        )),
+        crate::SessionObserverIntent::host_requested(
+            lash_vocabulary::identity::ProcessId::fixture("missing"),
+        ),
         crate::SessionObserverIntent::host_requested(pruned),
     ]);
     store

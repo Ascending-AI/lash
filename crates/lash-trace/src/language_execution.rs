@@ -29,8 +29,6 @@ impl LanguageExecutionObservation {
     }
 }
 
-pub use lash_kernel_doc::{WorkflowDocumentEntry, WorkflowDocumentRef};
-
 /// The admitted body of a process step started: the step's actor committed
 /// its admission, bound it to a call, and is about to run it. A step that is
 /// refused never produces one, and a retried body produces one more with the
@@ -41,10 +39,11 @@ pub use lash_kernel_doc::{WorkflowDocumentEntry, WorkflowDocumentRef};
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct StepBodyStarted {
-    pub process_id: lash_protocol_types::ProcessId,
+    pub process_id: lash_vocabulary::identity::ProcessId,
     /// The occurrence of the site in the process's workflow document the
     /// step runs for.
-    pub at: lash_protocol_types::EffectId,
+    pub at: lash_vocabulary::sites::EffectId,
+    pub origin: lash_vocabulary::sites::Site,
     /// The call the admission bound the step to.
     pub call_id: lash_protocol_types::ToolCallId,
     /// The one-based attempt of the admitted body.
@@ -81,7 +80,7 @@ pub enum TraceLanguageExecutionPayload {
     /// entry; the document itself is read through facade workflow inspection.
     ExecutionStarted {
         subject: crate::TraceRuntimeSubject,
-        observation: lash_kernel_doc::RunObservation,
+        observation: lash_vocabulary::observation::RunObservation,
     },
     ExecutionFinished {
         subject: crate::TraceRuntimeSubject,
@@ -92,7 +91,7 @@ pub enum TraceLanguageExecutionPayload {
     /// One fact about one occurrence of one execution site.
     Node {
         subject: crate::TraceRuntimeSubject,
-        at: lash_protocol_types::EffectId,
+        at: lash_vocabulary::sites::EffectId,
         fact: TraceNodeFact,
     },
     /// Statement starts and empty-block entries, with their accumulation law.
@@ -103,7 +102,7 @@ pub enum TraceLanguageExecutionPayload {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct TraceProcessCounts {
-    pub process_id: lash_protocol_types::ProcessId,
+    pub process_id: lash_vocabulary::identity::ProcessId,
     pub segment: String,
     pub frame: u64,
     pub delta: Vec<(u32, u64)>,
@@ -170,7 +169,7 @@ impl TraceLanguageExecutionPayload {
 
     /// The occurrence this fact is about; `None` for a fact about the whole
     /// execution.
-    pub fn at(&self) -> Option<&lash_protocol_types::EffectId> {
+    pub fn at(&self) -> Option<&lash_vocabulary::sites::EffectId> {
         match self {
             Self::ExecutionStarted { .. }
             | Self::ExecutionFinished { .. }
@@ -198,7 +197,9 @@ impl TraceLanguageExecutionPayload {
 pub enum TraceNodeFact {
     /// Display attribution from an effect request. This does not start an
     /// occurrence or change its identity, admission, counts or outcome.
-    Origin { origin: lash_kernel_doc::Site },
+    Origin {
+        origin: lash_vocabulary::sites::Site,
+    },
     Started {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         call_id: Option<lash_protocol_types::ToolCallId>,
@@ -262,7 +263,7 @@ pub enum TraceNodeAwaited {
         key: String,
     },
     ChildProcesses {
-        process_ids: Vec<lash_protocol_types::ProcessId>,
+        process_ids: Vec<lash_vocabulary::identity::ProcessId>,
     },
     ToolBatch {
         batch_id: String,

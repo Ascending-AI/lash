@@ -3,7 +3,7 @@
   "cases": [
     {
       "name": "binary64 rounds ties to even and retains signed zero",
-      "document": "kernel 1\nnumbers by_spelling\nuse mul = @16c930374dc518862f2c4f68a88248760ad0cddb3b96742f004d21aa74a89857\nuse add = @7e4f2312e59326d1b501e7b4d092549da7b8db86c07ada94902ee61f3317b537\nuse sub = @59b9d484a581bca4a1909189b23b1f4363670e1af545c6b28c6110f6ee95b01a\nmain {  finish [add(9007199254740992.0, 1.0), add(9007199254740994.0, 1.0), mul(-0.0, 2.0), sub(0.1, 0.2)] }\n",
+      "document": "kernel 1\nnumbers by_spelling\nnative @052b6f277f77a05678bb144df4b079838a438c4adb97894512aeb9cb01e2522c\nnative @c00cf80881ccac569a1263a3b0a9c6589c0a0f75e1902fe5453b77b86427afef\nnative @ec37c849a26a5d8b9be903d103df3e4a73cbc0ef4cf0acc8387508eea9aa9b8e\ndefinition \"function sub(arg0: Number, arg1: Number) -> Number\\nkernel 1\\nerrors \\\"arity\\\", \\\"number_range\\\", \\\"type_error\\\"\\ncharge sum(1, sum(deep(arg0), deep(arg1)), deep(result))\\nnative\\n\"\ndefinition \"function add(arg0: Number, arg1: Number) -> Number\\nkernel 1\\nerrors \\\"arity\\\", \\\"number_range\\\", \\\"type_error\\\"\\ncharge sum(1, sum(deep(arg0), deep(arg1)), deep(result))\\nnative\\n\"\ndefinition \"function mul(arg0: Number, arg1: Number) -> Number\\nkernel 1\\nerrors \\\"arity\\\", \\\"number_range\\\", \\\"type_error\\\"\\ncharge sum(1, product(sum(deep(arg0), deep(arg1)), sum(deep(arg0), deep(arg1))), deep(result))\\nnative\\n\"\nmain {\n  finish [add(9007199254740992.0, 1.0), add(9007199254740994.0, 1.0), mul(-0.0, 2.0), sub(0.1, 0.2)]\n}\n",
       "expected": {
         "prints": [],
         "trace": [],

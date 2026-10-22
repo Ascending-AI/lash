@@ -4,203 +4,25 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use super::{invalid, unsupported, variant};
-use crate::graph_tokens::{
-    CanonicalFault, CodecVariant, TokenCodec, TokenError, TokenReader, TokenWriter,
-};
+use super::{unsupported, variant};
 use crate::{
-    ActExpr, ActKind, Action, AssignOrder, Atom, Block, Bytes, Callee, Catch, Closure, Document,
-    Expr, Float, Formula, Function, FunctionBody, FunctionDefinition, FunctionId, Guard,
-    Implementation, Integer, JoinMode, Literal, Manifest, MapEntry, MapType, Member, Name,
-    NumberPolicy, Operand, Param, Place, ProjectionRead, Protocol, QualifiedName, RecordEntry,
-    RecordType, RecordTypeField, Rhs, Signature, Stmt, TryStmt, Type,
+    ActExpr, ActKind, Action, AssignOrder, Atom, Bytes, Callee, Catch, Closure, Document, Expr,
+    Float, Formula, FunctionBody, FunctionDefinition, FunctionId, Guard, Implementation, Integer,
+    JoinMode, Literal, MapEntry, Member, NumberPolicy, Operand, Place, ProjectionRead, Protocol,
+    RecordEntry, Rhs, Stmt, TryStmt,
 };
-use crate::{ContractId, OperationRequirement};
-use crate::{FunctionRepresentation, FunctionValue, StartAdapter, StartConvention};
+use lash_vocabulary::names::Name;
 
-impl TokenCodec for crate::Entry {
-    fn encode(&self, out: &mut TokenWriter) {
-        out.seq(2);
-        self.signature.encode(out);
-        self.convention.encode(out);
-    }
+use lash_vocabulary::tokens::{CodecVariant, TokenCodec, TokenError, TokenReader, TokenWriter};
+use lash_vocabulary::types::Signature;
+use lash_vocabulary::types::Type;
 
-    fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
-        input.expect_struct(2)?;
-        Ok(Self {
-            signature: Signature::decode(input)?,
-            convention: StartConvention::decode(input)?,
-        })
-    }
-}
+use crate::{
+    CallablePresentation, Export, FunctionExport, FunctionRepresentation, FunctionTarget,
+    FunctionValue, StartConvention, TypeDef, TypeMember,
+};
 
-// Types and signatures.
-
-impl TokenCodec for Type {
-    fn encode(&self, out: &mut TokenWriter) {
-        let number = self.codec_variant();
-        match self {
-            Self::Any
-            | Self::Null
-            | Self::Absent
-            | Self::Bool
-            | Self::Int
-            | Self::Float
-            | Self::Number
-            | Self::Text
-            | Self::Bytes
-            | Self::Timestamp
-            | Self::Error
-            | Self::Json => out.sum(number, 0),
-            Self::Tuple(types) | Self::Union(types) => {
-                out.sum(number, 1);
-                types.encode(out);
-            }
-            Self::List(inner) | Self::Set(inner) | Self::Task(inner) => {
-                out.sum(number, 1);
-                inner.encode(out);
-            }
-            Self::Map(map) => {
-                out.sum(number, 1);
-                map.encode(out);
-            }
-            Self::Record(record) => {
-                out.sum(number, 1);
-                record.encode(out);
-            }
-            Self::Enum(texts) => {
-                out.sum(number, 1);
-                texts.encode(out);
-            }
-            Self::Function(signature) => {
-                out.sum(number, 1);
-                signature.encode(out);
-            }
-            Self::Handle(kind) => {
-                out.sum(number, 1);
-                out.text(kind);
-            }
-        }
-    }
-
-    fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
-        input.nested(|input| {
-            let number = variant(input, |variant| match variant {
-                0..=9 | 18 | 21 => Some(0),
-                10..=17 | 19 | 20 => Some(1),
-                _ => None,
-            })?;
-            Ok(match number {
-                0 => Self::Any,
-                1 => Self::Null,
-                2 => Self::Absent,
-                3 => Self::Bool,
-                4 => Self::Int,
-                5 => Self::Float,
-                6 => Self::Number,
-                7 => Self::Text,
-                8 => Self::Bytes,
-                9 => Self::Timestamp,
-                10 => Self::Tuple(Vec::decode(input)?),
-                11 => Self::List(Box::decode(input)?),
-                12 => Self::Map(Box::decode(input)?),
-                13 => Self::Set(Box::decode(input)?),
-                14 => Self::Record(RecordType::decode(input)?),
-                15 => Self::Enum(Vec::decode(input)?),
-                16 => Self::Function(Box::decode(input)?),
-                17 => Self::Task(Box::decode(input)?),
-                18 => Self::Error,
-                19 => Self::Handle(String::decode(input)?),
-                20 => Self::Union(Vec::decode(input)?),
-                _ => Self::Json,
-            })
-        })
-    }
-}
-
-impl TokenCodec for MapType {
-    fn encode(&self, out: &mut TokenWriter) {
-        out.seq(2);
-        self.key.encode(out);
-        self.value.encode(out);
-    }
-
-    fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
-        input.expect_struct(2)?;
-        Ok(Self {
-            key: Type::decode(input)?,
-            value: Type::decode(input)?,
-        })
-    }
-}
-
-impl TokenCodec for RecordType {
-    fn encode(&self, out: &mut TokenWriter) {
-        out.seq(2);
-        self.fields.encode(out);
-        self.rest.encode(out);
-    }
-
-    fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
-        input.expect_struct(2)?;
-        Ok(Self {
-            fields: Vec::decode(input)?,
-            rest: Option::decode(input)?,
-        })
-    }
-}
-
-impl TokenCodec for RecordTypeField {
-    fn encode(&self, out: &mut TokenWriter) {
-        out.seq(3);
-        out.text(&self.name);
-        self.ty.encode(out);
-        out.bool(self.optional);
-    }
-
-    fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
-        input.expect_struct(3)?;
-        Ok(Self {
-            name: String::decode(input)?,
-            ty: Type::decode(input)?,
-            optional: input.bool()?,
-        })
-    }
-}
-
-impl TokenCodec for Param {
-    fn encode(&self, out: &mut TokenWriter) {
-        out.seq(3);
-        self.name.encode(out);
-        self.ty.encode(out);
-        out.bool(self.optional);
-    }
-
-    fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
-        input.expect_struct(3)?;
-        Ok(Self {
-            name: Name::decode(input)?,
-            ty: Type::decode(input)?,
-            optional: input.bool()?,
-        })
-    }
-}
-
-impl TokenCodec for Signature {
-    fn encode(&self, out: &mut TokenWriter) {
-        out.seq(2);
-        self.params.encode(out);
-        self.result.encode(out);
-    }
-
-    fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
-        input.expect_struct(2)?;
-        Ok(Self {
-            params: Vec::decode(input)?,
-            result: Type::decode(input)?,
-        })
-    }
-}
+use lash_vocabulary::{claims::NodeRequirements, names::*};
 
 // Forms.
 
@@ -250,7 +72,7 @@ impl TokenCodec for Literal {
             4 => Self::Float(Float::decode(input)?),
             5 => Self::Text(String::decode(input)?),
             6 => Self::Bytes(Bytes::decode(input)?),
-            _ => Self::Function(Name::decode(input)?),
+            _ => Self::Function(FunctionId::decode(input)?),
         })
     }
 }
@@ -278,17 +100,18 @@ impl TokenCodec for Callee {
     fn encode(&self, out: &mut TokenWriter) {
         out.sum(self.codec_variant(), 1);
         match self {
-            Self::Declared(name) | Self::Value(name) => name.encode(out),
-            Self::Library(id) => id.encode(out),
+            Self::Value(name) => name.encode(out),
+            Self::Import(slot) => slot.encode(out),
+            Self::Local(id) => id.encode(out),
         }
     }
 
     fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
         Ok(
             match variant(input, |variant| (variant <= 2).then_some(1))? {
-                0 => Self::Declared(Name::decode(input)?),
+                0 => Self::Local(FunctionId::decode(input)?),
                 1 => Self::Value(Name::decode(input)?),
-                _ => Self::Library(FunctionId::decode(input)?),
+                _ => Self::Import(ImportSlot::decode(input)?),
             },
         )
     }
@@ -304,19 +127,14 @@ impl TokenCodec for Action {
                 args.encode(out);
             }
             Self::Perform {
-                effect,
-                args,
-                result,
-                ..
+                slot, args, result, ..
             } => {
                 out.sum(number, 3);
-                effect.encode(out);
+                slot.encode(out);
                 args.encode(out);
                 result.encode(out);
             }
-            Self::Sleep { duration: atom, .. }
-            | Self::Join { task: atom }
-            | Self::Cancel { task: atom } => {
+            Self::Join { task: atom } | Self::Cancel { task: atom } => {
                 out.sum(number, 1);
                 atom.encode(out);
             }
@@ -338,7 +156,7 @@ impl TokenCodec for Action {
         let number = variant(input, |variant| match variant {
             0 | 4 | 6 | 10 => Some(2),
             1 | 8 => Some(3),
-            2 | 3 | 7 | 9 => Some(1),
+            3 | 7 => Some(1),
             5 => Some(0),
             _ => None,
         })?;
@@ -348,17 +166,13 @@ impl TokenCodec for Action {
                 args: Vec::decode(input)?,
             },
             1 | 8 => Self::Perform {
-                effect: QualifiedName::decode(input)?,
+                slot: ImportSlot::decode(input)?,
                 args: Vec::decode(input)?,
                 result: Type::decode(input)?,
                 then_yield: number == 8,
             },
-            2 | 9 => Self::Sleep {
-                duration: Atom::decode(input)?,
-                then_yield: number == 9,
-            },
             10 => Self::Await {
-                policy: FunctionId::decode(input)?,
+                policy: FunctionTarget::decode(input)?,
                 value: Atom::decode(input)?,
             },
             3 => Self::Join {
@@ -486,12 +300,12 @@ impl TokenCodec for ActKind {
                 out.sum(number, 1);
                 callee.encode(out);
             }
-            Self::Perform { effect, result, .. } => {
+            Self::Perform { slot, result, .. } => {
                 out.sum(number, 2);
-                effect.encode(out);
+                slot.encode(out);
                 result.encode(out);
             }
-            Self::Sleep { .. } | Self::Join | Self::Yield | Self::Cancel => out.sum(number, 0),
+            Self::Join | Self::Yield | Self::Cancel => out.sum(number, 0),
             Self::JoinMany(mode) => {
                 out.sum(number, 1);
                 mode.encode(out);
@@ -507,23 +321,20 @@ impl TokenCodec for ActKind {
         let number = variant(input, |variant| match variant {
             0 | 3 | 5 | 6 => Some(1),
             1 | 7 => Some(2),
-            2 | 4 | 8 | 9 | 10 => Some(0),
+            4 | 9 | 10 => Some(0),
             _ => None,
         })?;
         Ok(match number {
             0 => Self::Call(Callee::decode(input)?),
             1 | 7 => Self::Perform {
-                effect: QualifiedName::decode(input)?,
+                slot: ImportSlot::decode(input)?,
                 result: Type::decode(input)?,
                 then_yield: number == 7,
-            },
-            2 | 8 => Self::Sleep {
-                then_yield: number == 8,
             },
             3 => Self::Spawn(Callee::decode(input)?),
             4 => Self::Join,
             5 => Self::JoinMany(JoinMode::decode(input)?),
-            6 => Self::Await(FunctionId::decode(input)?),
+            6 => Self::Await(FunctionTarget::decode(input)?),
             9 => Self::Yield,
             _ => Self::Cancel,
         })
@@ -548,58 +359,20 @@ impl TokenCodec for ActExpr {
 
 impl TokenCodec for Closure {
     fn encode(&self, out: &mut TokenWriter) {
-        encode_code(out, &self.params, &self.body, self.start.as_ref());
+        out.seq(2);
+        self.function.encode(out);
+        self.presentation.encode(out);
     }
-
     fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
-        let (params, body, start) = decode_code(input)?;
+        input.expect_struct(2)?;
         Ok(Self {
-            params,
-            body,
-            start,
+            function: FunctionId::decode(input)?,
+            presentation: Option::decode(input)?,
         })
     }
 }
 
-/// Code's parameters and body, then its start adapter only when it has
-/// one: code that states none keeps the identity it had (`K-CLO-004`), and
-/// each value has one encoding.
-fn encode_code(
-    out: &mut TokenWriter,
-    params: &impl TokenCodec,
-    body: &impl TokenCodec,
-    start: Option<&StartAdapter>,
-) {
-    out.seq(if start.is_some() { 3 } else { 2 });
-    params.encode(out);
-    body.encode(out);
-    if let Some(start) = start {
-        start.encode(out);
-    }
-}
-
-fn decode_code(
-    input: &mut TokenReader<'_>,
-) -> Result<(Vec<Name>, Block, Option<StartAdapter>), TokenError> {
-    let fields = input.seq()?;
-    if !matches!(fields, 2 | 3) {
-        return Err(CanonicalFault::FieldCount {
-            expected: 2,
-            found: fields,
-        }
-        .into());
-    }
-    let params = Vec::decode(input)?;
-    let body = Vec::decode(input)?;
-    let start = if fields == 3 {
-        Some(StartAdapter::decode(input)?)
-    } else {
-        None
-    };
-    Ok((params, body, start))
-}
-
-impl TokenCodec for StartAdapter {
+impl TokenCodec for CallablePresentation {
     fn encode(&self, out: &mut TokenWriter) {
         out.seq(3);
         self.signature.encode(out);
@@ -681,14 +454,14 @@ impl TokenCodec for StartConvention {
             })? {
                 0 => Self::Direct,
                 2 => Self::TsDirect {
-                    await_fn: FunctionId::decode(input)?,
+                    await_fn: FunctionTarget::decode(input)?,
                 },
                 3 => Self::PyDirect {
-                    cleanup: FunctionId::decode(input)?,
+                    cleanup: FunctionTarget::decode(input)?,
                 },
                 _ => Self::TsArgsList {
-                    await_fn: FunctionId::decode(input)?,
-                    same_fn: FunctionId::decode(input)?,
+                    await_fn: FunctionTarget::decode(input)?,
+                    same_fn: FunctionTarget::decode(input)?,
                 },
             },
         )
@@ -698,18 +471,27 @@ impl TokenCodec for StartConvention {
 /// A function value: its document and its entry's name.
 impl TokenCodec for FunctionValue {
     fn encode(&self, out: &mut TokenWriter) {
-        out.seq(3);
-        self.document.encode(out);
-        self.entry.encode(out);
+        out.seq(8);
+        self.callable.encode(out);
+        self.captures.encode(out);
+        self.signature.encode(out);
+        self.convention.encode(out);
         self.captions.encode(out);
+        self.representation.encode(out);
+        self.creation.encode(out);
+        self.token.encode(out);
     }
-
     fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
-        input.expect_struct(3)?;
+        input.expect_struct(8)?;
         Ok(Self {
-            document: Document::decode(input)?,
-            entry: Name::decode(input)?,
+            callable: lash_vocabulary::CallableId::decode(input)?,
+            captures: BTreeMap::decode(input)?,
+            signature: Signature::decode(input)?,
+            convention: StartConvention::decode(input)?,
             captions: crate::Captions::decode(input)?,
+            representation: FunctionRepresentation::decode(input)?,
+            creation: Option::decode(input)?,
+            token: Option::decode(input)?,
         })
     }
 }
@@ -751,7 +533,6 @@ impl TokenCodec for Expr {
                 function.encode(out);
                 args.encode(out);
             }
-            Self::Clock | Self::Random => out.sum(number, 0),
             Self::If { cond, then, r#else } => {
                 out.sum(number, 3);
                 cond.encode(out);
@@ -781,7 +562,7 @@ impl TokenCodec for Expr {
                 0..=8 | 12 | 15 => Some(1),
                 9 => Some(2),
                 13 | 14 => Some(3),
-                10 | 11 => Some(0),
+
                 _ => None,
             })?;
             Ok(match number {
@@ -798,8 +579,6 @@ impl TokenCodec for Expr {
                     function: FunctionId::decode(input)?,
                     args: Vec::decode(input)?,
                 },
-                10 => Self::Clock,
-                11 => Self::Random,
                 12 => Self::Read(Box::decode(input)?),
                 13 => Self::If {
                     cond: Box::decode(input)?,
@@ -864,7 +643,7 @@ impl TokenCodec for Protocol {
     fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
         input.expect_struct(4)?;
         Ok(Self {
-            open: FunctionId::decode(input)?,
+            open: FunctionTarget::decode(input)?,
             next: Option::decode(input)?,
             item: Option::decode(input)?,
             check: Option::decode(input)?,
@@ -1087,7 +866,7 @@ impl TokenCodec for Stmt {
                 },
                 17 => Self::ReturnVia {
                     value: Expr::decode(input)?,
-                    policy: FunctionId::decode(input)?,
+                    policy: FunctionTarget::decode(input)?,
                 },
                 10 => Self::Try(TryStmt::decode(input)?),
                 11 => Self::Throw {
@@ -1108,91 +887,35 @@ impl TokenCodec for Stmt {
     }
 }
 
-impl TokenCodec for Function {
-    fn encode(&self, out: &mut TokenWriter) {
-        encode_code(out, &self.params, &self.body, self.start.as_ref());
-    }
-
-    fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
-        let (params, body, start) = decode_code(input)?;
-        Ok(Self {
-            params,
-            body,
-            start,
-        })
-    }
-}
-
 // Documents.
 
-impl TokenCodec for ContractId {
-    fn encode(&self, out: &mut TokenWriter) {
-        out.text(self.as_str());
-    }
-
-    fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
-        Ok(Self::new(String::decode(input)?))
-    }
-}
-
-impl TokenCodec for OperationRequirement {
-    fn encode(&self, out: &mut TokenWriter) {
-        out.seq(2);
-        self.signature.encode(out);
-        self.contract.encode(out);
-    }
-
-    fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
-        input.expect_struct(2)?;
-        Ok(Self {
-            signature: Signature::decode(input)?,
-            contract: ContractId::decode(input)?,
-        })
-    }
-}
-
-impl TokenCodec for Manifest {
-    fn encode(&self, out: &mut TokenWriter) {
-        out.seq(4);
-        out.unsigned(u64::from(self.kernel));
-        self.effects.encode(out);
-        self.functions.encode(out);
-        self.numbers.encode(out);
-    }
-
-    fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
-        input.expect_struct(4)?;
-        Ok(Self {
-            kernel: input.unsigned_u32()?,
-            effects: BTreeMap::decode(input)?,
-            functions: BTreeMap::decode(input)?,
-            numbers: NumberPolicy::decode(input)?,
-        })
-    }
-}
-
-/// Node kind 10's typed body, and the document's canonical form: its
-/// identity, [`Document::identity`], is this body's logical digest.
 impl TokenCodec for Document {
     fn encode(&self, out: &mut TokenWriter) {
         crate::document_work::note(|work| work.token_encodes += 1);
-        out.seq(5);
-        self.manifest.encode(out);
-        self.functions.encode(out);
-        self.entries.encode(out);
-        self.private_bindings.encode(out);
+        out.seq(8);
+        self.imports.encode(out);
+        self.exports.encode(out);
         self.main.encode(out);
+        self.functions.encode(out);
+        self.requires.natives.encode(out);
+        self.requires.kernels.encode(out);
+        self.numbers.encode(out);
+        self.private_bindings.encode(out);
     }
-
     fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
         crate::document_work::note(|work| work.token_decodes += 1);
-        input.expect_struct(5)?;
+        input.expect_struct(8)?;
         Ok(Self {
-            manifest: Manifest::decode(input)?,
+            imports: BTreeMap::decode(input)?,
+            exports: BTreeMap::decode(input)?,
+            main: Option::decode(input)?,
             functions: BTreeMap::decode(input)?,
-            entries: BTreeMap::decode(input)?,
+            requires: NodeRequirements {
+                natives: BTreeSet::decode(input)?,
+                kernels: BTreeSet::decode(input)?,
+            },
+            numbers: NumberPolicy::decode(input)?,
             private_bindings: BTreeSet::decode(input)?,
-            main: Vec::decode(input)?,
         })
     }
 }
@@ -1201,106 +924,6 @@ impl TokenCodec for Document {
 /// (1), number (2), string (3), array (4) and object (5). A number is a sum
 /// of non-negative integer (0), negative integer (1) and finite float (2),
 /// each in exactly one spelling. An object's keys ascend by raw bytes.
-impl TokenCodec for serde_json::Value {
-    fn encode(&self, out: &mut TokenWriter) {
-        match self {
-            Self::Null => out.sum(0, 0),
-            Self::Bool(value) => {
-                out.sum(1, 1);
-                out.bool(*value);
-            }
-            Self::Number(number) => {
-                out.sum(2, 1);
-                if let Some(unsigned) = number.as_u64() {
-                    out.sum(0, 1);
-                    out.unsigned(unsigned);
-                } else if let Some(signed) = number.as_i64() {
-                    out.sum(1, 1);
-                    out.signed(signed);
-                } else {
-                    out.sum(2, 1);
-                    out.float(number.as_f64().unwrap_or(f64::NAN));
-                }
-            }
-            Self::String(text) => {
-                out.sum(3, 1);
-                out.text(text);
-            }
-            Self::Array(items) => {
-                out.sum(4, 1);
-                items.encode(out);
-            }
-            Self::Object(entries) => {
-                out.sum(5, 1);
-                let mut sorted: Vec<(&String, &serde_json::Value)> = entries.iter().collect();
-                sorted.sort_by(|left, right| left.0.as_bytes().cmp(right.0.as_bytes()));
-                out.map(sorted.len() as u64);
-                for (key, value) in sorted {
-                    out.text(key);
-                    value.encode(out);
-                }
-            }
-        }
-    }
-
-    fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
-        input.nested(|input| {
-            let number = variant(input, |variant| match variant {
-                0 => Some(0),
-                1..=5 => Some(1),
-                _ => None,
-            })?;
-            Ok(match number {
-                0 => Self::Null,
-                1 => Self::Bool(input.bool()?),
-                2 => Self::Number(
-                    match variant(input, |variant| (variant <= 2).then_some(1))? {
-                        0 => serde_json::Number::from(input.unsigned()?),
-                        1 => {
-                            let signed = input.signed()?;
-                            if signed >= 0 {
-                                return Err(invalid("a negative JSON integer is not negative"));
-                            }
-                            serde_json::Number::from(signed)
-                        }
-                        _ => {
-                            let float = input.float()?;
-                            let number = serde_json::Number::from_f64(float)
-                                .ok_or_else(|| invalid("a JSON number is not finite"))?;
-                            if number.as_u64().is_some() || number.as_i64().is_some() {
-                                return Err(invalid("a JSON float spells an integer"));
-                            }
-                            number
-                        }
-                    },
-                ),
-                3 => Self::String(String::decode(input)?),
-                4 => Self::Array(Vec::decode(input)?),
-                _ => {
-                    let count = input.map()?;
-                    let mut entries = serde_json::Map::new();
-                    let mut last: Option<String> = None;
-                    for _ in 0..count {
-                        let key = String::decode(input)?;
-                        if last
-                            .as_ref()
-                            .is_some_and(|last| last.as_bytes() >= key.as_bytes())
-                        {
-                            return Err(CanonicalFault::UnsortedOrDuplicateKey.into());
-                        }
-                        let value = serde_json::Value::decode(input)?;
-                        last = Some(key.clone());
-                        entries.insert(key, value);
-                    }
-                    Self::Object(entries)
-                }
-            })
-        })
-    }
-}
-
-// Library-function definitions.
-
 impl TokenCodec for Operand {
     fn encode(&self, out: &mut TokenWriter) {
         match self {
@@ -1382,7 +1005,7 @@ impl TokenCodec for FunctionBody {
     fn encode(&self, out: &mut TokenWriter) {
         out.seq(3);
         self.functions.encode(out);
-        self.effects.encode(out);
+        self.imports.encode(out);
         self.block.encode(out);
     }
 
@@ -1390,58 +1013,112 @@ impl TokenCodec for FunctionBody {
         input.expect_struct(3)?;
         Ok(Self {
             functions: BTreeMap::decode(input)?,
-            effects: BTreeMap::decode(input)?,
+            imports: BTreeMap::decode(input)?,
             block: Vec::decode(input)?,
         })
     }
 }
 
-impl TokenCodec for Implementation {
+impl TokenCodec for crate::Metering {
     fn encode(&self, out: &mut TokenWriter) {
         match self {
-            Self::Native => out.sum(self.codec_variant(), 0),
-            Self::Body(body) | Self::Both(body) => {
-                out.sum(self.codec_variant(), 1);
-                body.encode(out);
+            Self::Statements => out.sum(0, 0),
+            Self::Formula(formula) => {
+                out.sum(1, 1);
+                formula.encode(out);
             }
         }
     }
-
     fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
         Ok(
-            match variant(input, |variant| match variant {
+            match variant(input, |v| match v {
                 0 => Some(0),
-                1 | 2 => Some(1),
+                1 => Some(1),
                 _ => None,
             })? {
-                0 => Self::Native,
-                1 => Self::Body(FunctionBody::decode(input)?),
-                _ => Self::Both(FunctionBody::decode(input)?),
+                0 => Self::Statements,
+                _ => Self::Formula(Formula::decode(input)?),
             },
         )
     }
 }
-
-/// The header of the definition whose token body is `bytes`, read without
-/// decoding its body (FIG-6931): the fields before the implementation, and
-/// which implementation it states.
+impl TokenCodec for Implementation {
+    fn encode(&self, out: &mut TokenWriter) {
+        match self {
+            Self::Native { charge } => {
+                out.sum(0, 1);
+                charge.encode(out);
+            }
+            Self::Guest { body, metering } => {
+                out.sum(1, 2);
+                metering.encode(out);
+                body.encode(out);
+            }
+            Self::Both { body, charge } => {
+                out.sum(2, 2);
+                charge.encode(out);
+                body.encode(out);
+            }
+        }
+    }
+    fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
+        Ok(
+            match variant(input, |v| match v {
+                0 => Some(1),
+                1 | 2 => Some(2),
+                _ => None,
+            })? {
+                0 => Self::Native {
+                    charge: Formula::decode(input)?,
+                },
+                1 => {
+                    let metering = crate::Metering::decode(input)?;
+                    Self::Guest {
+                        body: FunctionBody::decode(input)?,
+                        metering,
+                    }
+                }
+                _ => {
+                    let charge = Formula::decode(input)?;
+                    Self::Both {
+                        body: FunctionBody::decode(input)?,
+                        charge,
+                    }
+                }
+            },
+        )
+    }
+}
+/// Read only the header and implementation metering; skip the executable body.
 pub(crate) fn decode_header(bytes: &[u8]) -> Result<crate::FunctionHeader, TokenError> {
-    let mut input = TokenReader::new(bytes).with_data_limits(crate::KernelDataLimits::standard());
-    input.expect_struct(8)?;
+    let mut input = TokenReader::new(bytes)
+        .with_data_limits(lash_vocabulary::data_limits::KernelDataLimits::standard());
+    input.expect_struct(7)?;
+    let kernel = input.unsigned_u32()?;
+    let name = FunctionName::decode(&mut input)?;
+    let signature = Signature::decode(&mut input)?;
+    let errors = BTreeSet::decode(&mut input)?;
+    let guard = Option::decode(&mut input)?;
+    let kind = variant(&mut input, |v| match v {
+        0 => Some(1),
+        1 | 2 => Some(2),
+        _ => None,
+    })?;
+    let metering = if kind == 1 {
+        crate::Metering::decode(&mut input)?
+    } else {
+        crate::Metering::Formula(Formula::decode(&mut input)?)
+    };
     Ok(crate::FunctionHeader {
-        kernel: input.unsigned_u32()?,
-        name: QualifiedName::decode(&mut input)?,
-        signature: Signature::decode(&mut input)?,
-        errors: BTreeSet::decode(&mut input)?,
-        charge: Formula::decode(&mut input)?,
-        guard: Option::decode(&mut input)?,
-        implementation: match variant(&mut input, |variant| match variant {
-            0 => Some(0),
-            1 | 2 => Some(1),
-            _ => None,
-        })? {
+        kernel,
+        name,
+        signature,
+        errors,
+        guard,
+        metering,
+        implementation: match kind {
             0 => crate::ImplementationKind::Native,
-            1 => crate::ImplementationKind::Body,
+            1 => crate::ImplementationKind::Guest,
             _ => crate::ImplementationKind::Both,
         },
     })
@@ -1450,28 +1127,118 @@ pub(crate) fn decode_header(bytes: &[u8]) -> Result<crate::FunctionHeader, Token
 /// Node kind 14's typed body.
 impl TokenCodec for FunctionDefinition {
     fn encode(&self, out: &mut TokenWriter) {
-        out.seq(8);
+        out.seq(7);
         out.unsigned(u64::from(self.kernel));
         self.name.encode(out);
         self.signature.encode(out);
         self.errors.encode(out);
-        self.charge.encode(out);
         self.guard.encode(out);
         self.implementation.encode(out);
         out.unsigned(u64::from(self.native_version));
     }
 
     fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
-        input.expect_struct(8)?;
+        input.expect_struct(7)?;
         Ok(Self {
             kernel: input.unsigned_u32()?,
-            name: QualifiedName::decode(input)?,
+            name: FunctionName::decode(input)?,
             signature: Signature::decode(input)?,
             errors: BTreeSet::decode(input)?,
-            charge: Formula::decode(input)?,
             guard: Option::decode(input)?,
             implementation: Implementation::decode(input)?,
             native_version: input.unsigned_u32()?,
+        })
+    }
+}
+
+macro_rules! record {
+    ($ty:ty { $($field:ident),+ }) => {
+        impl TokenCodec for $ty {
+            fn encode(&self,out:&mut TokenWriter) {out.seq([$(stringify!($field)),+].len() as u64);$(self.$field.encode(out);)+}
+            fn decode(input:&mut TokenReader<'_>)->Result<Self,TokenError> {
+                input.expect_struct([$(stringify!($field)),+].len() as u64)?;
+                Ok(Self {$($field:TokenCodec::decode(input)?),+})
+            }
+        }
+    };
+}
+record!(FunctionExport {
+    function,
+    signature,
+    convention,
+    asynchronous,
+    rest
+});
+record!(TypeDef {
+    brand,
+    representation,
+    checker,
+    members
+});
+impl TokenCodec for FunctionTarget {
+    fn encode(&self, out: &mut TokenWriter) {
+        match self {
+            Self::Local(id) => {
+                out.sum(0, 1);
+                id.encode(out);
+            }
+            Self::Import(slot) => {
+                out.sum(1, 1);
+                slot.encode(out);
+            }
+        }
+    }
+    fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
+        Ok(match variant(input, |v| (v <= 1).then_some(1))? {
+            0 => Self::Local(FunctionId::decode(input)?),
+            _ => Self::Import(ImportSlot::decode(input)?),
+        })
+    }
+}
+impl TokenCodec for Export {
+    fn encode(&self, out: &mut TokenWriter) {
+        match self {
+            Self::Function(value) => {
+                out.sum(0, 1);
+                value.encode(out);
+            }
+            Self::Type(value) => {
+                out.sum(1, 1);
+                value.encode(out);
+            }
+            Self::Error { kind } => {
+                out.sum(2, 1);
+                kind.encode(out);
+            }
+        }
+    }
+    fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
+        Ok(match variant(input, |v| (v <= 2).then_some(1))? {
+            0 => Self::Function(FunctionExport::decode(input)?),
+            1 => Self::Type(TypeDef::decode(input)?),
+            _ => Self::Error {
+                kind: Brand::decode(input)?,
+            },
+        })
+    }
+}
+impl TokenCodec for TypeMember {
+    fn encode(&self, out: &mut TokenWriter) {
+        let (kind, value) = match self {
+            Self::Static(v) => (0, v),
+            Self::Method(v) => (1, v),
+            Self::Property(v) => (2, v),
+        };
+        out.sum(kind, 1);
+        value.encode(out);
+    }
+    fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
+        let kind = variant(input, |v| (v <= 2).then_some(1))?;
+        let value = FunctionExport::decode(input)?;
+        Ok(match kind {
+            0 => Self::Static(value),
+            1 => Self::Method(value),
+            _ => Self::Property(value),
         })
     }
 }

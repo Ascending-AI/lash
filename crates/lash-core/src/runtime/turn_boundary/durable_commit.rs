@@ -117,7 +117,7 @@ impl TurnBoundary {
         let clock = std::sync::Arc::clone(&self.clock);
         let graph_appends = self.graph_appends.clone();
         let protocol_terminal_output = self.protocol_terminal_output.clone();
-        let turn_id = crate::TurnId::parse(self.operation_scope.id())?;
+        let turn_id = lash_vocabulary::identity::TurnId::parse(self.operation_scope.id())?;
         let terminal_message_id = format!("m_turn_{turn_id}_assistant");
         let operation = self.final_operation();
         let commit_budget = self.commit_budget;
@@ -215,7 +215,10 @@ impl TurnBoundary {
 )]
 fn derived_frame(
     frame: crate::FrameNodeId,
-    derived: &[(crate::NodeId, crate::NodeId)],
+    derived: &[(
+        lash_vocabulary::identity::NodeId,
+        lash_vocabulary::identity::NodeId,
+    )],
 ) -> crate::FrameNodeId {
     derived
         .iter()

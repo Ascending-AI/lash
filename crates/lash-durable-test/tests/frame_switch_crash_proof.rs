@@ -33,6 +33,7 @@ mod sim;
 mod matrix;
 
 use lash_protocol_types::{llm::types::StreamBlockEvent, llm::types::StreamBlockKind};
+
 use matrix::MatrixTestExt as _;
 
 use std::sync::{Arc, Mutex};
@@ -54,7 +55,8 @@ use lash_execution_contracts::backend::BackendParts;
 use lash_execution_contracts::backend::StoreSet;
 use lash_execution_contracts::projection::NoProjectionProviders;
 use lash_protocol_types::sync::MutexExt as _;
-use lash_protocol_types::{SessionId, TurnId};
+use lash_vocabulary::identity::SessionId;
+use lash_vocabulary::identity::TurnId;
 
 use dialect::Dialect;
 
@@ -107,12 +109,12 @@ impl StaticToolExecute for SwitchFrame {
 }
 
 fn switch_frame() -> Arc<dyn lash_core::ToolProvider> {
-    let definition = lash_core::ToolDefinition::control(
+    let definition = lash_vocabulary::tool_contract::ToolDefinition::control(
         TOOL,
         TOOL_OPERATION,
         "Switches the agent frame and hands the new frame a task.",
         serde_json::json!({ "type": "object", "additionalProperties": false, "properties": {} }),
-        lash_core::TurnControls::switch_agent_frame(),
+        lash_vocabulary::tool_declaration::TurnControls::switch_agent_frame(),
     )
     .expect("switch_frame's schemas")
     .with_execution(std::time::Duration::from_secs(120));

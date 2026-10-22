@@ -20,11 +20,12 @@ use std::sync::{Arc, Mutex, OnceLock};
 
 use crate::arena::native::NativeFunction;
 use crate::function::FunctionDefinition;
-use crate::name::{EffectName, FunctionId, FunctionName};
 use crate::plan::HelperPlan;
 use crate::released::{BodyCensus, ReleasedFunctions};
-use crate::requirement::OperationRequirement;
+
 use crate::validate::{Invalid, validate_identified_definition};
+
+use lash_vocabulary::names::{FunctionId, FunctionName};
 
 /// The counter a native function is handed: it counts the function's guard
 /// unit and refuses the unit that passes the limit.
@@ -140,7 +141,7 @@ struct Facts {
     header: OnceLock<Arc<crate::FunctionHeader>>,
     callees: OnceLock<BTreeSet<FunctionId>>,
     /// The empty requirement set for a definition with no body.
-    no_effects: BTreeMap<EffectName, OperationRequirement>,
+    no_imports: BTreeMap<lash_vocabulary::names::ImportSlot, lash_vocabulary::names::Import>,
     /// The definition's token body, encoded once for every holder that
     /// stores it.
     image: OnceLock<Arc<[u8]>>,
@@ -302,13 +303,15 @@ impl RegisteredFunction {
         self.function
     }
 
-    /// The definition's token body ([`crate::graph_tokens::encode_body`]),
+    /// The definition's token body ([`lash_vocabulary::tokens::encode_body`]),
     /// the bytes its checkpoint graph node is encoded from, encoded once per
     /// registration and shared by the registry's clones.
     pub fn image(&self) -> Arc<[u8]> {
         Arc::clone(self.facts().image.get_or_init(|| match &self.held {
             Held::Released(set, at) => Arc::from(set.image.definition_bytes(*at as usize)),
-            Held::Defined(_) => Arc::from(crate::graph_tokens::encode_body(&**self.definition())),
+            Held::Defined(_) => {
+                Arc::from(lash_vocabulary::tokens::encode_body(&**self.definition()))
+            }
         }))
     }
 
@@ -328,10 +331,12 @@ impl RegisteredFunction {
     /// it ([`crate::FunctionBody::effects`]): none for a function with no
     /// body. A document reaching this function requires them through it
     /// (`K-DOC-002`); what its callees perform is theirs.
-    pub fn performs(&self) -> &BTreeMap<EffectName, OperationRequirement> {
+    pub fn imports(
+        &self,
+    ) -> &BTreeMap<lash_vocabulary::names::ImportSlot, lash_vocabulary::names::Import> {
         self.definition()
             .body()
-            .map_or(&self.facts().no_effects, |body| &body.effects)
+            .map_or(&self.facts().no_imports, |body| &body.imports)
     }
 }
 
@@ -592,12 +597,15 @@ impl FunctionRegistry {
     ) -> Result<FunctionId, RegistryError> {
         self.materialize();
         let name = definition.name.clone();
-        let identity =
-            validate_identified_definition(&definition, self, crate::KernelDataLimits::standard())
-                .map_err(|source| RegistryError::Invalid {
-                    name: name.clone(),
-                    source,
-                })?;
+        let identity = validate_identified_definition(
+            &definition,
+            self,
+            lash_vocabulary::data_limits::KernelDataLimits::standard(),
+        )
+        .map_err(|source| RegistryError::Invalid {
+            name: name.clone(),
+            source,
+        })?;
         match (
             definition.has_native(),
             definition.body().is_some(),

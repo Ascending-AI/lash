@@ -81,9 +81,10 @@ struct Sample {
 }
 
 use lash_kernel_dialect::{EffectControl, Environment, NamedLibrary};
-use lash_kernel_doc::{
-    Datum, EffectName, ErrorDatum, FunctionRegistry, Handle, Integer, Timestamp, Unit,
-};
+use lash_kernel_doc::Datum;
+use lash_kernel_doc::ErrorDatum;
+use lash_kernel_doc::FunctionRegistry;
+use lash_kernel_doc::Handle;
 use lash_kernel_vm::perf_witness::{
     GuestContext, GuestProfile, GuestSymbols, Profiling as _, WorkReport,
 };
@@ -91,6 +92,8 @@ use lash_kernel_vm::{
     Bounds, CellStart, End, Host, KernelMachine, Machine, Outcome, PreparedLibrary, Program,
     Request, Step, Target,
 };
+use lash_vocabulary::names::EffectName;
+use lash_vocabulary::sites::Unit;
 use serde_json::{Value as Json, json};
 #[expect(
     dead_code,
@@ -147,14 +150,14 @@ struct Console {
 }
 
 impl Host for Console {
-    fn clock(&mut self) -> Timestamp {
-        Timestamp {
-            nanoseconds: Integer::from(0),
-        }
-    }
-
-    fn random(&mut self) -> u64 {
-        0
+    fn perform(
+        &mut self,
+        use_: &lash_vocabulary::OperationUse,
+        _: &[Datum],
+        _: &lash_vocabulary::sites::PositionLabel,
+        _: &lash_vocabulary::sites::Site,
+    ) -> Result<Result<Datum, ErrorDatum>, lash_kernel_vm::HostFault> {
+        crate::linked_reads::read(use_, 0)
     }
 
     fn read(&mut self, _handle: &Handle, _request: &Datum) -> Result<Datum, ErrorDatum> {
@@ -179,13 +182,15 @@ fn deliver_all(machine: &mut KernelMachine, requests: Vec<Request>) -> Option<Da
     let mut finished = None;
     for request in requests {
         let (wait, outcome) = match request {
-            Request::Sleep(sleep) => (sleep.wait, Outcome::Elapsed),
             Request::Effect(effect) => {
                 let argument = effect.args.into_iter().next().unwrap_or(Datum::Null);
-                if effect.effect.as_str() == "perf.finish" {
+                if crate::linked::operation(&effect.use_).as_str() == "perf.finish" {
                     finished = Some(argument.clone());
                 }
-                (effect.wait, answer(effect.effect.as_str(), argument))
+                (
+                    effect.wait,
+                    answer(crate::linked::operation(&effect.use_).as_str(), argument),
+                )
             }
         };
         machine
@@ -204,7 +209,7 @@ fn start_on(program: &Program, source: &pages::Source) -> KernelMachine {
         target: Target::Main,
         args: Vec::new(),
         session: None,
-        modes: lash_kernel_vm::EffectModes::recorded(),
+        modes: crate::pages::modes(program),
         host: Vec::new(),
     };
     KernelMachine::start(
@@ -227,7 +232,7 @@ fn to_end(machine: &mut KernelMachine, name: &str) -> (u64, Datum) {
     )
 }
 
-fn try_to_end(machine: &mut KernelMachine, name: &str) -> Result<(Option<u64>, Datum), End> {
+fn try_to_end(machine: &mut KernelMachine, name: &str) -> Result<(Option<u64>, Datum), Box<End>> {
     let mut console = Console::default();
     let mut finished = Datum::Null;
     loop {
@@ -241,7 +246,7 @@ fn try_to_end(machine: &mut KernelMachine, name: &str) -> Result<(Option<u64>, D
                 }
             }
             Step::Ended(End::Finished(_)) => return Ok((machine.meters().charged, finished)),
-            Step::Ended(other) => return Err(other),
+            Step::Ended(other) => return Err(Box::new(other)),
             Step::Slice => unreachable!("the slice is unbounded"),
         }
     }
@@ -360,7 +365,7 @@ fn start_observed(
     match observe {
         ObservationMode::Nothing => {}
         ObservationMode::Counts => machine.set_options(lash_kernel_vm::MachineOptions {
-            observation: lash_kernel_vm::ObservationMode::Counts,
+            observation: lash_vocabulary::observation::RunObservation::Counts,
             ..Default::default()
         }),
         ObservationMode::Work => machine.count_work(),
@@ -476,18 +481,16 @@ fn main() -> Result<(), String> {
     // Prepared once, as in a worker: helper bodies compile only on use;
     // each live document's preparation is reused at start.
     let prepared = PreparedLibrary::new(Arc::clone(&registry));
-    let library = NamedLibrary::from_registry(&registry).expect("unique library names");
+    let release = lash_vm_releases::helper_release().map_err(|error| error.to_string())?;
+    let library = NamedLibrary::resolving(&registry, |id| release.resolver_roots().contains(id))
+        .expect("unique library names");
     let effects = effects();
     let controls = BTreeMap::from([(
         EffectName::new("perf.finish").expect("a tool's name"),
         BTreeSet::from([EffectControl::Finish]),
     )]);
-    let environment_namespaces = lash_kernel_dialect::Namespaces::of_effects(
-        &effects,
-        &lash_kernel_doc::ContractId::new("1"),
-        &controls,
-    )
-    .expect("the test's effects are operations");
+    let environment_namespaces =
+        crate::linked::namespaces(&effects, &controls).expect("the test's effects are operations");
     let environment = Environment::new(&library, &environment_namespaces);
     if matches!(mode, Mode::Time) {
         println!(
@@ -518,12 +521,8 @@ fn main() -> Result<(), String> {
                 return Err(format!("{name}: refused: {diagnostic:?}"));
             }
         };
-        let functions = lowered.manifest.functions.len();
-        let program = Program {
-            closure: pages::CLOSURE,
-            document: Arc::clone(lowered.shared()),
-            library: prepared.clone(),
-        };
+        let functions = lowered.functions.len();
+        let program = crate::linked::program(Arc::clone(lowered.shared()), prepared.clone());
         match &mode {
             Mode::Time => {}
             Mode::Work(_) => {
@@ -1095,11 +1094,14 @@ fn host_json_probe() -> Result<(), String> {
         from: [u64; 4],
     }
     impl Host for Output {
-        fn clock(&mut self) -> Timestamp {
-            self.console.clock()
-        }
-        fn random(&mut self) -> u64 {
-            0
+        fn perform(
+            &mut self,
+            use_: &lash_vocabulary::OperationUse,
+            args: &[Datum],
+            label: &lash_vocabulary::sites::PositionLabel,
+            site: &lash_vocabulary::sites::Site,
+        ) -> Result<Result<Datum, ErrorDatum>, lash_kernel_vm::HostFault> {
+            self.console.perform(use_, args, label, site)
         }
         fn read(&mut self, h: &Handle, r: &Datum) -> Result<Datum, ErrorDatum> {
             self.console.read(h, r)
@@ -1117,15 +1119,12 @@ fn host_json_probe() -> Result<(), String> {
         }
     }
     let registry = registry();
-    let library = NamedLibrary::from_registry(&registry).unwrap();
+    let release = lash_vm_releases::helper_release().map_err(|error| error.to_string())?;
+    let library =
+        NamedLibrary::resolving(&registry, |id| release.resolver_roots().contains(id)).unwrap();
     let prepared = PreparedLibrary::new(Arc::clone(&registry));
     let effects = effects();
-    let env_namespaces = lash_kernel_dialect::Namespaces::of_effects(
-        &effects,
-        &lash_kernel_doc::ContractId::new("1"),
-        &Default::default(),
-    )
-    .unwrap();
+    let env_namespaces = crate::linked::namespaces(&effects, &Default::default()).unwrap();
     let env = Environment::new(&library, &env_namespaces);
     let selected = std::env::args().nth(2);
     let iterations: usize = std::env::args()
@@ -1151,11 +1150,8 @@ fn host_json_probe() -> Result<(), String> {
             lash_kernel_dialect::Mode::Cell(lash_kernel_dialect::CellEnvironment::first()),
         )
         .map_err(|e| format!("{e:?}"))?;
-        let program = Program {
-            closure: pages::CLOSURE,
-            document: Arc::clone(lowered.document.shared()),
-            library: prepared.clone(),
-        };
+        let program =
+            crate::linked::program(Arc::clone(lowered.document.shared()), prepared.clone());
         for iteration in 0..iterations {
             let counts = Counts::default();
             let source = Source {
@@ -1170,7 +1166,7 @@ fn host_json_probe() -> Result<(), String> {
                     target: Target::Main,
                     args: Vec::new(),
                     session: None,
-                    modes: lash_kernel_vm::EffectModes::recorded(),
+                    modes: crate::pages::modes(&program),
                     host: Vec::new(),
                 },
                 Box::new(source),
@@ -1187,9 +1183,7 @@ fn host_json_probe() -> Result<(), String> {
             let Step::Parked(park) = machine.run(&mut output, u64::MAX).unwrap() else {
                 panic!("tool park")
             };
-            let Request::Effect(effect) = &park.requests[0] else {
-                panic!("effect")
-            };
+            let Request::Effect(effect) = &park.requests[0];
             let answer = payload.clone();
             let admission_pages = counts.get();
             let admission_counts = stats_alloc::Region::new(ALLOCATOR);
@@ -1223,3 +1217,8 @@ fn host_json_probe() -> Result<(), String> {
     }
     Ok(())
 }
+
+#[path = "../src/tests/linked.rs"]
+mod linked;
+#[path = "../src/tests/linked_reads.rs"]
+mod linked_reads;

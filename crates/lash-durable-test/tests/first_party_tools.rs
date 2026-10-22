@@ -66,7 +66,7 @@ impl ToolProvider for CountingFirstPartyProvider {
         &self,
         config: &lash_core::OwnerConfigView,
     ) -> std::result::Result<
-        Vec<lash_core::ToolManifest>,
+        Vec<lash_vocabulary::tool_contract::ToolManifest>,
         lash_execution_contracts::plugin_error::PluginError,
     > {
         self.inner.tool_manifests(config)
@@ -76,7 +76,7 @@ impl ToolProvider for CountingFirstPartyProvider {
         &self,
         name: &str,
         config: &lash_core::OwnerConfigView,
-    ) -> Option<Arc<lash_core::ToolContract>> {
+    ) -> Option<Arc<lash_vocabulary::tool_contract::ToolContract>> {
         self.inner.resolve_contract(name, config)
     }
 

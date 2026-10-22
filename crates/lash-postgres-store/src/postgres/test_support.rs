@@ -19,7 +19,7 @@ impl StoreTestSupport for PostgresStore {
 
     async fn corrupt_graph_row_for_testing(
         &self,
-        node_id: &lash_protocol_types::NodeId,
+        node_id: &lash_vocabulary::identity::NodeId,
         corruption: GraphRowCorruption,
     ) -> Result<(), StoreError> {
         self.windows.forget_all();
@@ -107,7 +107,7 @@ impl StoreTestSupport for PostgresStore {
     async fn force_fork_lineage_for_testing(
         &self,
         session_id: &SessionId,
-        ancestor_node_id: &lash_protocol_types::NodeId,
+        ancestor_node_id: &lash_vocabulary::identity::NodeId,
     ) -> Result<(), StoreError> {
         self.windows.forget_all();
         let result = sqlx::query(

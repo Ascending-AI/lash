@@ -3,13 +3,13 @@
   "cases": [
     {
       "name": "float Number decodes 9007199254740993",
-      "document": "kernel 1\nnumbers float\neffect source() -> Any contract \"1\"\nmain { let value = perform source() as Number finish value }\n",
+      "document": "kernel 1\nnumbers float\nimport 0 operation host.source() -> Any\nmain {\n  let value = perform 0() as Number\n  finish value\n}\n",
       "expected": {
         "prints": [],
         "trace": [
           {
             "effect": {
-              "effect": "source",
+              "effect": "host.source",
               "args": [],
               "result": "number"
             }
@@ -39,13 +39,13 @@
     },
     {
       "name": "float Number decodes 1.0",
-      "document": "kernel 1\nnumbers float\neffect source() -> Any contract \"1\"\nmain { let value = perform source() as Number finish value }\n",
+      "document": "kernel 1\nnumbers float\nimport 0 operation host.source() -> Any\nmain {\n  let value = perform 0() as Number\n  finish value\n}\n",
       "expected": {
         "prints": [],
         "trace": [
           {
             "effect": {
-              "effect": "source",
+              "effect": "host.source",
               "args": [],
               "result": "number"
             }
@@ -75,13 +75,13 @@
     },
     {
       "name": "float Number decodes 1e3",
-      "document": "kernel 1\nnumbers float\neffect source() -> Any contract \"1\"\nmain { let value = perform source() as Number finish value }\n",
+      "document": "kernel 1\nnumbers float\nimport 0 operation host.source() -> Any\nmain {\n  let value = perform 0() as Number\n  finish value\n}\n",
       "expected": {
         "prints": [],
         "trace": [
           {
             "effect": {
-              "effect": "source",
+              "effect": "host.source",
               "args": [],
               "result": "number"
             }
@@ -111,13 +111,13 @@
     },
     {
       "name": "float Any decodes 9007199254740993",
-      "document": "kernel 1\nnumbers float\neffect source() -> Any contract \"1\"\nmain { let value = perform source() as Any finish value }\n",
+      "document": "kernel 1\nnumbers float\nimport 0 operation host.source() -> Any\nmain {\n  let value = perform 0() as Any\n  finish value\n}\n",
       "expected": {
         "prints": [],
         "trace": [
           {
             "effect": {
-              "effect": "source",
+              "effect": "host.source",
               "args": [],
               "result": "any"
             }
@@ -147,13 +147,13 @@
     },
     {
       "name": "float Any decodes 1.0",
-      "document": "kernel 1\nnumbers float\neffect source() -> Any contract \"1\"\nmain { let value = perform source() as Any finish value }\n",
+      "document": "kernel 1\nnumbers float\nimport 0 operation host.source() -> Any\nmain {\n  let value = perform 0() as Any\n  finish value\n}\n",
       "expected": {
         "prints": [],
         "trace": [
           {
             "effect": {
-              "effect": "source",
+              "effect": "host.source",
               "args": [],
               "result": "any"
             }
@@ -183,13 +183,13 @@
     },
     {
       "name": "float Any decodes 1e3",
-      "document": "kernel 1\nnumbers float\neffect source() -> Any contract \"1\"\nmain { let value = perform source() as Any finish value }\n",
+      "document": "kernel 1\nnumbers float\nimport 0 operation host.source() -> Any\nmain {\n  let value = perform 0() as Any\n  finish value\n}\n",
       "expected": {
         "prints": [],
         "trace": [
           {
             "effect": {
-              "effect": "source",
+              "effect": "host.source",
               "args": [],
               "result": "any"
             }
@@ -219,13 +219,13 @@
     },
     {
       "name": "by_spelling Number decodes 9007199254740993",
-      "document": "kernel 1\nnumbers by_spelling\neffect source() -> Any contract \"1\"\nmain { let value = perform source() as Number finish value }\n",
+      "document": "kernel 1\nnumbers by_spelling\nimport 0 operation host.source() -> Any\nmain {\n  let value = perform 0() as Number\n  finish value\n}\n",
       "expected": {
         "prints": [],
         "trace": [
           {
             "effect": {
-              "effect": "source",
+              "effect": "host.source",
               "args": [],
               "result": "number"
             }
@@ -255,13 +255,13 @@
     },
     {
       "name": "by_spelling Number decodes 1.0",
-      "document": "kernel 1\nnumbers by_spelling\neffect source() -> Any contract \"1\"\nmain { let value = perform source() as Number finish value }\n",
+      "document": "kernel 1\nnumbers by_spelling\nimport 0 operation host.source() -> Any\nmain {\n  let value = perform 0() as Number\n  finish value\n}\n",
       "expected": {
         "prints": [],
         "trace": [
           {
             "effect": {
-              "effect": "source",
+              "effect": "host.source",
               "args": [],
               "result": "number"
             }
@@ -291,13 +291,13 @@
     },
     {
       "name": "by_spelling Number decodes 1e3",
-      "document": "kernel 1\nnumbers by_spelling\neffect source() -> Any contract \"1\"\nmain { let value = perform source() as Number finish value }\n",
+      "document": "kernel 1\nnumbers by_spelling\nimport 0 operation host.source() -> Any\nmain {\n  let value = perform 0() as Number\n  finish value\n}\n",
       "expected": {
         "prints": [],
         "trace": [
           {
             "effect": {
-              "effect": "source",
+              "effect": "host.source",
               "args": [],
               "result": "number"
             }
@@ -327,13 +327,13 @@
     },
     {
       "name": "by_spelling Any decodes 9007199254740993",
-      "document": "kernel 1\nnumbers by_spelling\neffect source() -> Any contract \"1\"\nmain { let value = perform source() as Any finish value }\n",
+      "document": "kernel 1\nnumbers by_spelling\nimport 0 operation host.source() -> Any\nmain {\n  let value = perform 0() as Any\n  finish value\n}\n",
       "expected": {
         "prints": [],
         "trace": [
           {
             "effect": {
-              "effect": "source",
+              "effect": "host.source",
               "args": [],
               "result": "any"
             }
@@ -363,13 +363,13 @@
     },
     {
       "name": "by_spelling Any decodes 1.0",
-      "document": "kernel 1\nnumbers by_spelling\neffect source() -> Any contract \"1\"\nmain { let value = perform source() as Any finish value }\n",
+      "document": "kernel 1\nnumbers by_spelling\nimport 0 operation host.source() -> Any\nmain {\n  let value = perform 0() as Any\n  finish value\n}\n",
       "expected": {
         "prints": [],
         "trace": [
           {
             "effect": {
-              "effect": "source",
+              "effect": "host.source",
               "args": [],
               "result": "any"
             }
@@ -399,13 +399,13 @@
     },
     {
       "name": "by_spelling Any decodes 1e3",
-      "document": "kernel 1\nnumbers by_spelling\neffect source() -> Any contract \"1\"\nmain { let value = perform source() as Any finish value }\n",
+      "document": "kernel 1\nnumbers by_spelling\nimport 0 operation host.source() -> Any\nmain {\n  let value = perform 0() as Any\n  finish value\n}\n",
       "expected": {
         "prints": [],
         "trace": [
           {
             "effect": {
-              "effect": "source",
+              "effect": "host.source",
               "args": [],
               "result": "any"
             }

@@ -28,6 +28,7 @@ testing = []
 # vocabulary and the parent's identity vocabulary. It drives a machine
 # through its interface and never compiles model code (ADR 0123).
 [dependencies]
+lash-vocabulary = { workspace = true }
 lash-execution-contracts = { workspace = true }
 lash-core-execution = { workspace = true }
 lash-core-store = { workspace = true }

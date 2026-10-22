@@ -149,7 +149,9 @@ crate::statements! {
 
         /// Record actor `?1`'s claim requirements: the canonical JSON array
         /// `?2`, or `NULL` for none (FIG-6034 D3).
-        stamp_requires = "UPDATE actors SET requires = ?2 WHERE actor_key = ?1";
+        stamp_requires = "UPDATE actors SET base_requires = ?2, requires = ?2 WHERE actor_key = ?1";
+        /// Materialize the exact union without overwriting the actor owner's baseline.
+        stamp_effective_requires = "UPDATE actors SET requires = ?2 WHERE actor_key = ?1";
 
         /// Up to `?3` actors in format set `?1` that have not ended, by key,
         /// after key `?2`.

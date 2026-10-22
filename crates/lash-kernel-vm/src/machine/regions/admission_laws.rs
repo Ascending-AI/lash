@@ -74,9 +74,7 @@ fn allocated_during<T>(work: impl FnOnce() -> T) -> (T, u64) {
 /// `main` calling `f`, whose loop's first statement binds `expression`
 /// and whose region is the program's one.
 fn program(expression: &str) -> String {
-    format!(
-        "fn f() {{ while true {{ let xs = {expression} break }} }}\nmain {{ do call f() finish null }}"
-    )
+    format!("definition {}\nmain {{ do call f() finish null }}", serde_json::to_string(&format!("function f() -> Any\nkernel 1\nmetering statements\nbody {{ while true {{ let xs = {expression} break }} }}")).unwrap())
 }
 
 /// The value node of the first statement of `embedder`'s one region, run

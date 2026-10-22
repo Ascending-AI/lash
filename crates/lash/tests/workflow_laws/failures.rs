@@ -15,8 +15,8 @@ use lash::workflow::view::{self, CalleeView};
 /// `pick(event)` reads a member of its event; `send(note)` hands
 /// `tools.echo` a text where its schema takes an object; `triage(event)`
 /// calls `tools.echo`, then reads a member of its event.
-const TYPESCRIPT: &str = "export async function pick(event: any) {\n  const label = \"routine\";\n  if (event.urgent) {\n    return \"urgent\";\n  }\n  return label;\n}\n\nexport async function send(note: string) {\n  const sent = await tools.echo(note);\n  return sent;\n}\n\nexport async function triage(event: any) {\n  const echoed = await tools.echo({ value: \"seen\" });\n  if (event.urgent) {\n    return echoed;\n  }\n  return \"routine\";\n}\n";
-const PYTHON: &str = "async def pick(event):\n    label = \"routine\"\n    if event[\"urgent\"]:\n        return \"urgent\"\n    return label\n\n\nasync def send(note: str):\n    sent = await tools.echo(note)\n    return sent\n\n\nasync def triage(event):\n    echoed = await tools.echo({\"value\": \"seen\"})\n    if event[\"urgent\"]:\n        return echoed\n    return \"routine\"\n";
+const TYPESCRIPT: &str = "export async function pick(event: { urgent: boolean } | null): Promise<string> {\n  const label = \"routine\";\n  if (event.urgent) {\n    return \"urgent\";\n  }\n  return label;\n}\n\nexport async function send(note: string): Promise<string> {\n  const sent = await tools.echo(note);\n  return sent;\n}\n\nexport async function triage(event: { urgent: boolean } | null): Promise<string> {\n  const echoed = await tools.echo({ value: \"seen\" });\n  if (event.urgent) {\n    return echoed;\n  }\n  return \"routine\";\n}\n";
+const PYTHON: &str = "async def pick(event: dict[str, bool] | None) -> str:\n    label = \"routine\"\n    if event[\"urgent\"]:\n        return \"urgent\"\n    return label\n\n\nasync def send(note: str) -> str:\n    sent = await tools.echo(note)\n    return sent\n\n\nasync def triage(event: dict[str, bool] | None) -> str:\n    echoed = await tools.echo({\"value\": \"seen\"})\n    if event[\"urgent\"]:\n        return echoed\n    return \"routine\"\n";
 
 /// One dialect's module, imported and published, entry by entry.
 pub(super) struct Module {
@@ -25,7 +25,8 @@ pub(super) struct Module {
     map: lash::workflow::document::SourceMap,
     pin: lash::process::HostArtifactPin,
     document: lash::workflow::document::DocumentBytes,
-    packages: lash::package::WorkflowPackages,
+    namespace: lash::vm::WorkflowEnvironmentRequest,
+    packages: lash::package::RecordedPackages,
     environment: lash::process::ProcessEnv,
 }
 
@@ -36,36 +37,28 @@ impl Module {
         source: &'static str,
     ) -> Self {
         let artifacts = core.host_artifacts();
-        let environment = environment(false);
-        let (document, source_map, packages) = match artifacts
-            .import_workflow(
-                language,
-                source,
-                &environment,
-                artifacts
-                    .cell_packages()
-                    .await
-                    .expect("the package gate answers")
-                    .declare_all(),
-                None,
-            )
+        let environment = source_environment(false);
+        let pin = lash::process::HostArtifactPin::mint();
+        let (packages, namespace) = namespace(core, &pin, &environment).await;
+        let (document, source_map) = match artifacts
+            .import_workflow(language, source, &namespace, None)
             .await
-            .expect("import answers")
+            .unwrap()
         {
             lash::workflow::WorkflowImport::Imported {
                 document,
                 source_map,
-                packages,
                 ..
-            } => (document, source_map, packages),
+            } => (document, source_map),
             other => panic!("the module imports: {other:?}\n{source}"),
         };
         Self {
             language,
             source,
             map: source_map,
-            pin: lash::process::HostArtifactPin::mint(),
+            pin,
             document,
+            namespace,
             packages,
             environment,
         }
@@ -77,32 +70,26 @@ impl Module {
         &self,
         core: &lash::LashCore,
         entry: &str,
-        effects: &[&str],
+        _effects: &[&str],
         args: serde_json::Value,
-    ) -> (WorkflowPublication, lash_core::ProcessId) {
-        let env_ref = core
-            .host_artifacts()
-            .publish_process_env(&self.pin, &linking(&self.environment, effects))
-            .await
-            .expect("the process environment publishes");
-        let publication = published(
-            core.host_artifacts()
-                .publish_workflow(
-                    &self.pin,
-                    &self.document,
-                    &Name::new(entry),
-                    &self.environment,
-                    self.packages.clone(),
-                    None,
-                )
-                .await
-                .expect("the entry publishes"),
-        );
+    ) -> (Publication, lash_vocabulary::identity::ProcessId) {
+        let publication = publish_recorded(
+            core,
+            &self.pin,
+            &self.document,
+            &Name::new(entry),
+            &self.environment,
+            None,
+            (&self.packages, &self.namespace),
+        )
+        .await
+        .unwrap();
+        let env_ref = publication.env_ref.clone();
         let settings = core
             .processes()
             .kernel_engine_defaults()
             .expect("the kernel states its settings")
-            .observing(lash::process::ObservationMode::Counts)
+            .observing(lash_vocabulary::observation::RunObservation::Counts)
             .into_engine_settings();
         let serde_json::Value::Object(args) = args else {
             panic!("arguments are a record");
@@ -124,6 +111,28 @@ impl Module {
             .await
             .expect("the process starts")
             .process_id;
+        let actor = lash_durable::ActorKey::process(process.as_str()).unwrap();
+        let facts = core
+            .backend()
+            .stores()
+            .durable_store()
+            .claim_facts(None, &actor)
+            .await
+            .unwrap()
+            .actor
+            .unwrap();
+        let serves = lash::testing::node_serves(core);
+        let missing: Vec<_> = facts
+            .requires
+            .iter()
+            .filter(|required| !serves.contains(required))
+            .cloned()
+            .collect();
+        assert!(
+            missing.is_empty(),
+            "{:?} process is eligible on its publishing node: {missing:?}",
+            self.language
+        );
         (publication, process)
     }
 
@@ -140,7 +149,10 @@ impl Module {
 }
 
 /// The failure a process ended with.
-async fn failed(core: &lash::LashCore, process: &lash_core::ProcessId) -> ToolFailure {
+async fn failed(
+    core: &lash::LashCore,
+    process: &lash_vocabulary::identity::ProcessId,
+) -> ToolFailure {
     let output = tokio::time::timeout(
         std::time::Duration::from_secs(120),
         core.processes().await_output(process),
@@ -204,7 +216,11 @@ async fn an_uncaught_error_ends_a_workflow_with_its_kind_message_and_site() {
             (Some(kind), message),
             "{language:?}"
         );
-        assert_eq!(site.unit, Unit::Function(Name::new("pick")), "{language:?}");
+        assert_eq!(
+            site.unit,
+            function_unit(&module.document.to_document().unwrap(), "pick"),
+            "{language:?}"
+        );
         assert!(
             module.spelled(&site).iter().any(|text| text.contains(read)),
             "{language:?}: {site} spells {:?}",
@@ -230,13 +246,21 @@ async fn an_uncaught_error_ends_a_workflow_with_its_kind_message_and_site() {
         assert_eq!(tool["code"], "invalid_tool_args", "{language:?}: {tool}");
         assert_eq!(failure.message, tool["message"], "{language:?}");
         let document = publication_document(&core, &publication).await;
-        let performs: Vec<_> = view::derive(&document, &super::test_packages())
+        let context = core
+            .host_artifacts()
+            .workflow_view_context(
+                document.reference(),
+                &publication.environment.execution().publications,
+            )
+            .await
+            .unwrap();
+        let performs: Vec<_> = view::derive(&document, &context)
             .expect("the entry's view")
             .execution_sites
             .into_iter()
             .filter(|action| {
                 action.kind == view::SiteKind::Perform
-                    && action.site.unit == Unit::Function(Name::new("send"))
+                    && action.site.unit == function_unit(document.document(), "send")
             })
             .map(|action| action.site)
             .collect();
@@ -279,7 +303,15 @@ async fn a_library_call_has_no_activity_state_and_its_coverage_counts_it() {
             .await;
         let (_, raised) = uncaught(&failed(&core, &process).await);
         let document = publication_document(&core, &publication).await;
-        let view = view::derive(&document, &super::test_packages()).expect("the entry's view");
+        let context = core
+            .host_artifacts()
+            .workflow_view_context(
+                document.reference(),
+                &publication.environment.execution().publications,
+            )
+            .await
+            .unwrap();
+        let view = view::derive(&document, &context).expect("the entry's view");
         let library: Vec<Site> = view
             .dataflow
             .actions
@@ -426,13 +458,21 @@ async fn echo_states(
     };
     let succeeded = matches!(output.outcome, ToolCallOutcome::Success(_));
     let document = publication_document(core, &publication).await;
-    let view = view::derive(&document, &super::test_packages()).expect("the entry's view");
+    let context = core
+        .host_artifacts()
+        .workflow_view_context(
+            document.reference(),
+            &publication.environment.execution().publications,
+        )
+        .await
+        .unwrap();
+    let view = view::derive(&document, &context).expect("the entry's view");
     let performs: Vec<Site> = view
         .execution_sites
         .iter()
         .filter(|action| {
             action.kind == view::SiteKind::Perform
-                && action.site.unit == Unit::Function(Name::new(entry))
+                && action.site.unit == function_unit(document.document(), entry)
         })
         .map(|action| action.site.clone())
         .collect();
@@ -503,7 +543,7 @@ async fn a_caught_failure_reports_recovered() {
         let module = Module::import(&core, language, source).await;
         for entry in ["guarded", "nested"] {
             assert_eq!(
-                echo_states(&core, &module, entry).await,
+                Box::pin(echo_states(&core, &module, entry)).await,
                 (
                     true,
                     vec![ProcessWorkflowSiteState::Recovered],
@@ -527,7 +567,7 @@ async fn an_uncaught_failure_stays_failed() {
     ] {
         let module = Module::import(&core, language, source).await;
         assert_eq!(
-            echo_states(&core, &module, "unguarded").await,
+            Box::pin(echo_states(&core, &module, "unguarded")).await,
             (
                 false,
                 vec![ProcessWorkflowSiteState::Failed],
@@ -553,12 +593,12 @@ async fn a_failure_a_catch_raises_again_is_not_recovered() {
     ] {
         let module = Module::import(&core, language, source).await;
         assert_eq!(
-            echo_states(&core, &module, "rethrown").await,
+            Box::pin(echo_states(&core, &module, "rethrown")).await,
             (false, vec![Failed], vec![Some(view::ActionState::Failed)]),
             "{language:?}"
         );
         assert_eq!(
-            echo_states(&core, &module, "fallback").await,
+            Box::pin(echo_states(&core, &module, "fallback")).await,
             (
                 false,
                 vec![Recovered, Failed],

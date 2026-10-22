@@ -58,7 +58,10 @@ async fn a_held_base_serves_only_the_window_it_is() {
 
     let mut prelude = crate::runtime::effect::TurnPrelude::new(
         crate::EffectAddress::new(
-            crate::ExecutionScope::turn(session.clone(), crate::TurnId::from("held-base")),
+            crate::ExecutionScope::turn(
+                session.clone(),
+                lash_vocabulary::identity::TurnId::from("held-base"),
+            ),
             "turn-config:held-base",
         )
         .expect("an effect address"),

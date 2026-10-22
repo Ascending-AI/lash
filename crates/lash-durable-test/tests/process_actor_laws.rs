@@ -9,13 +9,15 @@
 
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
+#[path = "support/scripted_steps.rs"]
+mod scripted_steps;
 #[path = "support/sim.rs"]
 mod sim;
+
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use lash_core_execution::DurableSettings;
-use lash_core_execution::ProcessId;
 use lash_core_execution::StartKey;
 use lash_core_execution::ToolCallOutput;
 use lash_core_execution::ToolCancellation;
@@ -46,8 +48,10 @@ use lash_execution_contracts::process::ProjectionWatermark;
 use lash_execution_contracts::process::StepName;
 use lash_execution_contracts::process::StepRequest;
 use lash_execution_contracts::projection::NoProjectionProviders;
+use lash_protocol_types::ExecutionLimit;
 use lash_protocol_types::sync::MutexExt as _;
-use lash_protocol_types::{ExecutionLimit, ExecutionPolicy};
+use lash_vocabulary::identity::ProcessId;
+use lash_vocabulary::tool_contract::ExecutionPolicy;
 use serde_json::{Value, json};
 
 const KIND: &str = "l9d-law";
@@ -115,12 +119,39 @@ impl ProcessEngine for LawEngine {
         lash_execution_contracts::process::ProcessTraceClass::Internal
     }
 
-    async fn performed_effects(
+    async fn inspect_link(
+        &self,
+        link: lash_vocabulary::LinkId,
+        selector: &lash_execution_contracts::process::linking::ReachSelector,
+    ) -> Result<
+        lash_execution_contracts::process::linking::LinkInspection,
+        lash_execution_contracts::process::linking::EnginePortError,
+    > {
+        Ok(lash_execution_contracts::process::linking::LinkInspection {
+            link,
+            document: lash_vocabulary::DocumentId::from_bytes([0; 32]),
+            selector: selector.clone(),
+            operations: Default::default(),
+            machine: Default::default(),
+            artifacts: Vec::new(),
+            signature: None,
+        })
+    }
+    async fn inspect_start(
         &self,
         _payload: &serde_json::Value,
-    ) -> Result<lash_execution_contracts::process::PerformedEffects, lash_core::ProcessEnvRefusal>
-    {
-        Ok(lash_execution_contracts::process::PerformedEffects::new())
+    ) -> Result<
+        lash_execution_contracts::process::linking::LinkInspection,
+        lash_execution_contracts::process::linking::EnginePortError,
+    > {
+        Err(
+            lash_execution_contracts::process::linking::EnginePortError::Unsupported {
+                operation: "generic fixture has no linked code".into(),
+            },
+        )
+    }
+    fn capabilities(&self) -> lash_vocabulary::claims::NodeRequirements {
+        Default::default()
     }
 
     async fn check_args(
@@ -204,19 +235,19 @@ impl ProcessEngine for LawEngine {
                 )))
             }
             ("sleep", EngineEvent::Started { .. }) => EngineAction::Sleep {
-                until: DurableInstant(script["until_ms"].as_i64().unwrap_or_default()),
                 site: None,
+                until: DurableInstant(script["until_ms"].as_i64().unwrap_or_default()),
             },
             ("sleep", EngineEvent::Woke) => success(json!({ "slept": true })),
             ("await", EngineEvent::Started { .. }) => EngineAction::AwaitProcess {
+                site: None,
                 process: ProcessId::parse(script["await"].as_str().unwrap_or_default())
                     .map_err(infra)?,
-                bound: lash_core::ParkBound::Within(
+                bound: lash_vocabulary::tool_contract::ParkBound::Within(
                     script["deadline_ms"]
                         .as_u64()
                         .map_or(LONG, Duration::from_millis),
                 ),
-                site: None,
             },
             ("await", EngineEvent::ProcessEnded { outcome, .. }) => success(json!({
                 "ended": serde_json::to_value(lash_protocol_types::Durable(&outcome)).map_err(infra)?,
@@ -225,13 +256,10 @@ impl ProcessEngine for LawEngine {
                 success(json!({ "timed_out": true }))
             }
             ("refused_step", EngineEvent::Started { .. }) => EngineAction::Steps {
-                steps: vec![StepRequest::Tool {
+                steps: vec![StepRequest::Engine {
                     step: StepName("refused".to_owned()),
-                    effect: lash_core_execution::testing::effect(REFUSED_TOOL),
-                    contract: lash_core::ContractId::new("fixture"),
+                    kind: lash_execution_contracts::process::EngineStepKind::new(REFUSED_TOOL),
                     input: json!({}),
-                    site: None,
-                    matched: None,
                 }],
                 wake: None,
             },
@@ -311,16 +339,17 @@ impl ProcessSteps for LawSteps {
         _runtime: &Arc<lash_core_execution::runtime::process::StepRuntime>,
         _process: &ProcessRecord,
         step: &StepRequest,
+        _target: Option<&lash_core_execution::runtime::process::steps::InvocationTarget>,
         now_ms: u64,
     ) -> Result<StepAdmission, StepRefusal> {
-        if lash_core_execution::testing::step_tool(step, KIND).as_str() == REFUSED_TOOL {
+        if scripted_steps::tool(step).as_str() == REFUSED_TOOL {
             return Err(StepRefusal::Refused {
                 step: step.step().0.clone(),
                 reason: "its input does not match the tool's declaration".to_owned(),
             });
         }
         Ok(StepAdmission::new(
-            lash_core_execution::testing::step_tool(step, KIND),
+            scripted_steps::tool(step),
             ExecutionPolicy::Once,
             ExecutionLimit::starting_at(now_ms, Duration::from_secs(60), Duration::from_secs(60)),
             None,

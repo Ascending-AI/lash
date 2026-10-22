@@ -21,6 +21,7 @@ use std::ops::Range;
 use lash_kernel_doc::arena::{ArenaHandle, Body, Chunks};
 use lash_kernel_doc::plan::Table;
 use lash_kernel_doc::{NewObject, Value, ValueKind};
+
 use lash_kernel_state::arena::VALUE_BYTES;
 
 use super::super::expr::{self, Callee, Expr, Kind, Make};
@@ -454,8 +455,10 @@ pub(super) fn compile(
         {
             node
         }
-        Kind::Operator { lib, args, .. } => {
-            match fused(
+        Kind::Operator {
+            lib, args, invoke, ..
+        } => {
+            let called = match fused(
                 libs,
                 *lib,
                 args,
@@ -473,6 +476,11 @@ pub(super) fn compile(
             }) {
                 Some(called) => called,
                 None => operator(libs, *lib, nodes(args, &mut node)?)?,
+            };
+            if invoke.is_some_and(|invoke| invoke.imported) {
+                checked_result(libs, *lib, called)
+            } else {
+                called
             }
         }
         Kind::Native { lib, args, .. } => call(libs, *lib, nodes(args, &mut node)?, fresh(args))?,
@@ -609,9 +617,29 @@ pub(super) fn root_call(
         super::super::Callee::Declared(_) => None,
         super::super::Callee::Value(super::super::Var::Local(local)) => Some(celled(local.at)),
         super::super::Callee::Value(var) => Some(variable(libs, var)?),
-        super::super::Callee::Library(_) => return None,
+        super::super::Callee::Import(..) | super::super::Callee::Library(_) => return None,
     };
     guest_call(call.clone(), read, atoms(libs, args)?)
+}
+
+/// An imported helper retains its public result check before statement commit.
+pub(super) fn import_result(libs: &Libs<'_>, callee: &super::super::Callee, node: Node) -> Node {
+    match callee {
+        super::super::Callee::Import(_, Some(lib)) => checked_result(libs, *lib, node),
+        _ => node,
+    }
+}
+
+fn checked_result(libs: &Libs<'_>, lib: LibId, node: Node) -> Node {
+    let ty = libs.exe.lib(lib).header.signature.result.clone();
+    Box::new(move |slots, cx| {
+        // The public Text check warms its payload. Decline before a helper
+        // allocates when that boundary could read cold data.
+        if ty == lash_vocabulary::Type::Text && cx.arena.any_cold() {
+            return None;
+        }
+        node(slots, cx).filter(|value| super::super::import_result_fits(&ty, *value))
+    })
 }
 
 /// The compiled reads of a root action's atoms `args`.

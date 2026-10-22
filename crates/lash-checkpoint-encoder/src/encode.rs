@@ -29,14 +29,20 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex, OnceLock};
 
-use lash_kernel_doc::graph_tokens::{
-    CanonicalFault, ChildRef, TokenCodec, TokenEvent, TokenReader, TokenWriter, encode_body,
-    logical_digest, put_varint, varint_len,
-};
+use lash_vocabulary::tokens::CanonicalFault;
+use lash_vocabulary::tokens::ChildRef;
+use lash_vocabulary::tokens::TokenCodec;
+use lash_vocabulary::tokens::TokenEvent;
+use lash_vocabulary::tokens::TokenReader;
+use lash_vocabulary::tokens::TokenWriter;
+use lash_vocabulary::tokens::encode_body;
+use lash_vocabulary::tokens::logical_digest;
+use lash_vocabulary::tokens::put_varint;
+use lash_vocabulary::tokens::varint_len;
 
 use super::node::{
-    EncodedNode, INDEX_FANOUT, INLINE_TOKEN_MAX, LEAF_PAYLOAD_MAX, MAX_NODE_BYTES, NodeId,
-    envelope_len, parse_envelope, write_envelope,
+    EncodedNode, Framing, INDEX_FANOUT, INLINE_TOKEN_MAX, LEAF_PAYLOAD_MAX, MAX_NODE_BYTES, NodeId,
+    check_decoded, envelope_len, write_envelope,
 };
 use super::refusal::GraphRefusal;
 use super::registry::{BodyShape, NodeKind};
@@ -78,8 +84,9 @@ pub struct GraphStaging {
 
 // Canonical encoding depends only on the operation and its complete input,
 // never on a store, owner, release catalog or decoder. Keep its immutable
-// envelopes across captures and canonical read checks. Runtime reads still
-// fetch and check every supplied envelope before deriving their logical body.
+// envelopes and framing across captures and canonical read checks. Runtime
+// reads still fetch, bound, hash and compare every supplied envelope before
+// reusing its framing or deriving its logical body.
 const CACHE_BYTES: usize = 32 << 20;
 const CACHE_ENTRIES: usize = 256;
 
@@ -88,6 +95,9 @@ enum EncodingKind {
     Node(NodeKind),
     Text,
     Bytes,
+    Envelope,
+    Logical(usize),
+    LogicalScan,
 }
 
 type EncodingKey = (EncodingKind, [u8; 32]);
@@ -101,9 +111,51 @@ struct PreparedEncoding {
     bytes: usize,
 }
 
+enum PreparedGraph {
+    Encoding(Arc<PreparedEncoding>),
+    Envelope {
+        input: Box<[u8]>,
+        framing: Framing,
+    },
+    Logical {
+        input: Box<[u8]>,
+        tokens: Arc<[u8]>,
+    },
+    LogicalScan {
+        input: Box<[u8]>,
+        references: Arc<LogicalScan>,
+    },
+}
+
+impl PreparedGraph {
+    fn input(&self) -> &[u8] {
+        match self {
+            Self::Encoding(prepared) => &prepared.input,
+            Self::Envelope { input, .. }
+            | Self::Logical { input, .. }
+            | Self::LogicalScan { input, .. } => input,
+        }
+    }
+
+    fn bytes(&self) -> usize {
+        match self {
+            Self::Encoding(prepared) => prepared.bytes,
+            Self::Envelope { input, .. } => input.len() + std::mem::size_of::<Framing>(),
+            Self::Logical { input, tokens } => input.len() + tokens.len(),
+            Self::LogicalScan { input, references } => {
+                input.len()
+                    + references.at.capacity() * std::mem::size_of::<(usize, [u8; 32])>()
+                    + references.children.capacity() * std::mem::size_of::<[u8; 32]>()
+                    + references.ends.capacity() * std::mem::size_of::<usize>()
+                    + std::mem::size_of::<LogicalScan>()
+            }
+        }
+    }
+}
+
 #[derive(Default)]
 struct EncodingCache {
-    entries: BTreeMap<EncodingKey, (Arc<PreparedEncoding>, u64)>,
+    entries: BTreeMap<EncodingKey, (PreparedGraph, u64)>,
     bytes: usize,
     clock: u64,
 }
@@ -118,14 +170,48 @@ impl std::fmt::Debug for EncodingCache {
 }
 
 impl EncodingCache {
-    fn get(&mut self, key: &EncodingKey, input: &[u8]) -> Option<Arc<PreparedEncoding>> {
+    fn get_prepared(&mut self, key: &EncodingKey, input: &[u8]) -> Option<&PreparedGraph> {
         let (prepared, used) = self.entries.get_mut(key)?;
-        if prepared.input.as_ref() != input {
+        if prepared.input() != input {
             return None;
         }
         self.clock = self.clock.wrapping_add(1);
         *used = self.clock;
-        Some(Arc::clone(prepared))
+        Some(prepared)
+    }
+
+    fn get(&mut self, key: &EncodingKey, input: &[u8]) -> Option<Arc<PreparedEncoding>> {
+        match self.get_prepared(key, input)? {
+            PreparedGraph::Encoding(prepared) => Some(Arc::clone(prepared)),
+            PreparedGraph::Envelope { .. }
+            | PreparedGraph::Logical { .. }
+            | PreparedGraph::LogicalScan { .. } => None,
+        }
+    }
+
+    fn envelope(&mut self, key: &EncodingKey, input: &[u8]) -> Option<Framing> {
+        match self.get_prepared(key, input)? {
+            PreparedGraph::Envelope { framing, .. } => Some(*framing),
+            PreparedGraph::Encoding(_)
+            | PreparedGraph::Logical { .. }
+            | PreparedGraph::LogicalScan { .. } => None,
+        }
+    }
+
+    fn logical(&mut self, key: &EncodingKey, input: &[u8]) -> Option<Arc<[u8]>> {
+        match self.get_prepared(key, input)? {
+            PreparedGraph::Logical { tokens, .. } => Some(Arc::clone(tokens)),
+            PreparedGraph::Encoding(_)
+            | PreparedGraph::Envelope { .. }
+            | PreparedGraph::LogicalScan { .. } => None,
+        }
+    }
+
+    fn references(&mut self, key: &EncodingKey, input: &[u8]) -> Option<Arc<LogicalScan>> {
+        match self.get_prepared(key, input)? {
+            PreparedGraph::LogicalScan { references, .. } => Some(Arc::clone(references)),
+            _ => None,
+        }
     }
 
     fn insert(&mut self, key: EncodingKey, input: &[u8], root: NodeId, nodes: Vec<EncodedNode>) {
@@ -138,8 +224,24 @@ impl EncodingCache {
         if bytes > CACHE_BYTES {
             return;
         }
+        self.insert_prepared(
+            key,
+            PreparedGraph::Encoding(Arc::new(PreparedEncoding {
+                input: input.into(),
+                root,
+                nodes,
+                bytes,
+            })),
+        );
+    }
+
+    fn insert_prepared(&mut self, key: EncodingKey, prepared: PreparedGraph) {
+        let bytes = prepared.bytes();
+        if bytes > CACHE_BYTES {
+            return;
+        }
         if let Some((previous, _)) = self.entries.remove(&key) {
-            self.bytes -= previous.bytes;
+            self.bytes -= previous.bytes();
         }
         while self.entries.len() >= CACHE_ENTRIES || self.bytes + bytes > CACHE_BYTES {
             let Some(oldest) = self
@@ -151,22 +253,11 @@ impl EncodingCache {
                 break;
             };
             if let Some((removed, _)) = self.entries.remove(&oldest) {
-                self.bytes -= removed.bytes;
+                self.bytes -= removed.bytes();
             }
         }
         self.clock = self.clock.wrapping_add(1);
-        self.entries.insert(
-            key,
-            (
-                Arc::new(PreparedEncoding {
-                    input: input.into(),
-                    root,
-                    nodes,
-                    bytes,
-                }),
-                self.clock,
-            ),
-        );
+        self.entries.insert(key, (prepared, self.clock));
         self.bytes += bytes;
     }
 }
@@ -174,6 +265,74 @@ impl EncodingCache {
 fn encoding_cache() -> Arc<Mutex<EncodingCache>> {
     static CACHE: OnceLock<Arc<Mutex<EncodingCache>>> = OnceLock::new();
     Arc::clone(CACHE.get_or_init(|| Arc::new(Mutex::new(EncodingCache::default()))))
+}
+
+/// Canonical framing belongs to the same bounded pure-preparation inventory
+/// as encoding. Every lookup compares the current bytes in full; no stored
+/// presence, referrer or receiving limit is memoized.
+pub(crate) fn prepare_envelope(
+    digest: NodeId,
+    bytes: &[u8],
+    parse: impl FnOnce() -> Result<Framing, GraphRefusal>,
+) -> Result<Framing, GraphRefusal> {
+    let cache = encoding_cache();
+    let key = (EncodingKind::Envelope, digest.0);
+    if let Some(framing) = cache
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .envelope(&key, bytes)
+    {
+        return Ok(framing);
+    }
+    let framing = parse()?;
+    let mut cache = cache
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    if let Some(framing) = cache.envelope(&key, bytes) {
+        return Ok(framing);
+    }
+    cache.insert_prepared(
+        key,
+        PreparedGraph::Envelope {
+            input: bytes.into(),
+            framing,
+        },
+    );
+    Ok(framing)
+}
+
+// A token expansion depends on the complete envelope and the body offset.
+// Compare actual bytes on lookup and publication, under the same bounded
+// preparation owner as canonical encoding and envelope framing.
+pub(crate) fn prepare_logical(
+    bytes: &[u8],
+    skip: usize,
+    expand: impl FnOnce() -> Result<Vec<u8>, GraphRefusal>,
+) -> Result<Arc<[u8]>, GraphRefusal> {
+    let cache = encoding_cache();
+    let key = (EncodingKind::Logical(skip), NodeId::of_envelope(bytes).0);
+    if let Some(tokens) = cache
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .logical(&key, bytes)
+    {
+        return Ok(tokens);
+    }
+    let tokens: Arc<[u8]> = expand()?.into();
+    let mut cache = cache
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    if let Some(tokens) = cache.logical(&key, bytes) {
+        return Ok(tokens);
+    }
+    cache.insert_prepared(
+        key,
+        PreparedGraph::Logical {
+            input: bytes.into(),
+            tokens: Arc::clone(&tokens),
+        },
+    );
+    Ok(tokens)
 }
 
 /// Encodes one node of `kind` into `staging` and returns it. Placed leaves,
@@ -304,7 +463,11 @@ impl GraphStaging {
                 limit: MAX_NODE_BYTES,
             });
         }
-        parse_envelope(&node.bytes, Some(node.id))?;
+        check_decoded(
+            &node.bytes,
+            node.id,
+            &crate::DecodeLimits::within_total(u64::MAX),
+        )?;
         if !self.nodes.contains_key(&node.id) {
             self.budget.charge(node.len())?;
             self.nodes.insert(node.id, node);
@@ -626,40 +789,185 @@ pub fn to_physical(
     logical: &[u8],
     kind: NodeKind,
 ) -> Result<(Vec<[u8; 32]>, Vec<u8>), GraphRefusal> {
-    let references = References::scan(logical, kind)?;
+    let references = LogicalScan::scan(logical, kind)?;
     let mut body = Vec::with_capacity(references.physical_len(logical.len()));
     references.write_physical(logical, &mut body);
-    Ok((references.children, body))
+    Ok((references.children.clone(), body))
+}
+
+/// An enveloped kind's size if `placed` were inline, without writing the
+/// physical body. References and their lengths come from its logical scan.
+///
+/// # Errors
+/// A token refusal if `placed` is not canonical logical tokens.
+pub fn inline_envelope_len(placed: &[u8], kind: NodeKind) -> Result<u64, GraphRefusal> {
+    let scan = LogicalScan::scan(placed, kind)?;
+    Ok(envelope_len(
+        kind,
+        scan.children.len(),
+        scan.physical_len(placed.len()) + 3,
+    ) as u64)
 }
 
 /// A logical reference's length: its tag and its child's digest.
 const LOGICAL_REF_LEN: usize = 1 + 32;
 
-/// The child references of a logical body, read in one pass: where each
-/// starts and what it names, and the body's children, sorted and unique.
-pub(crate) struct References {
+/// Pure facts from one canonical logical token stream: ordered token
+/// boundaries, child references, and the first oversized inline value.
+/// These facts grant no store presence, receiving limits or child authority.
+pub struct LogicalScan {
     at: Vec<(usize, [u8; 32])>,
     pub(crate) children: Vec<[u8; 32]>,
+    ends: Vec<usize>,
+    oversized_inline: Option<(usize, usize)>,
 }
 
-impl References {
-    /// Reads every token of `logical`, each of which must be canonical.
-    pub(crate) fn scan(logical: &[u8], kind: NodeKind) -> Result<Self, GraphRefusal> {
+/// One validated logical token event, retained in its original order.
+#[derive(Clone, Copy, Debug)]
+pub struct PlacementStep {
+    pub start: usize,
+    pub end: usize,
+    pub placement: Placement,
+}
+
+/// The part of a canonical token event graph placement needs.
+#[derive(Clone, Copy, Debug)]
+pub enum Placement {
+    Oversized,
+    Child(ChildRef),
+}
+
+#[cfg(any(test, feature = "testing"))]
+thread_local! {
+    static LOGICAL_SCAN_EVENTS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+    static REFERENCE_SCANS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+
+/// Token events parsed by logical preparation on this testing thread.
+#[cfg(any(test, feature = "testing"))]
+pub fn logical_scan_events() -> u64 {
+    LOGICAL_SCAN_EVENTS.with(std::cell::Cell::get)
+}
+
+fn prepare_references(
+    key: EncodingKey,
+    logical: &[u8],
+    scan: impl FnOnce() -> Result<LogicalScan, GraphRefusal>,
+) -> Result<Arc<LogicalScan>, GraphRefusal> {
+    let cache = encoding_cache();
+    if let Some(references) = cache
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .references(&key, logical)
+    {
+        return Ok(references);
+    }
+    let references = Arc::new(scan()?);
+    let prepared = PreparedGraph::LogicalScan {
+        input: logical.into(),
+        references: Arc::clone(&references),
+    };
+    let mut cache = cache
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    if let Some(references) = cache.references(&key, logical) {
+        return Ok(references);
+    }
+    cache.insert_prepared(key, prepared);
+    Ok(references)
+}
+
+impl LogicalScan {
+    /// Reads canonical logical tokens once, retaining their references and
+    /// ordered placement facts in the bounded graph preparation owner.
+    ///
+    /// # Errors
+    /// A token refusal if the supplied logical bytes are not canonical.
+    pub fn scan(logical: &[u8], kind: NodeKind) -> Result<Arc<Self>, GraphRefusal> {
+        if logical.len() > CACHE_BYTES {
+            return Self::scan_uncached(logical, kind).map(Arc::new);
+        }
+        #[cfg(feature = "perf-witness")]
+        crate::perf_witness::record_hash_pass(logical.len());
+        let key = (
+            EncodingKind::LogicalScan,
+            TypedBody::logical(logical).digest(),
+        );
+        prepare_references(key, logical, || Self::scan_uncached(logical, kind))
+    }
+
+    fn scan_uncached(logical: &[u8], kind: NodeKind) -> Result<Self, GraphRefusal> {
+        #[cfg(any(test, feature = "testing"))]
+        REFERENCE_SCANS.with(|count| count.set(count.get() + 1));
         let mut at = Vec::new();
+        let mut ends = Vec::new();
+        let mut oversized_inline = None;
         let mut reader = TokenReader::new(logical);
         while !reader.is_empty() {
             let start = reader.position();
-            if let TokenEvent::Child(ChildRef(digest)) = reader
+            let event = reader
                 .next_event()
-                .map_err(|error| GraphRefusal::from_token(error, None, Some(kind.0)))?
-            {
-                at.push((start, digest));
+                .map_err(|error| GraphRefusal::from_token(error, None, Some(kind.0)))?;
+            #[cfg(any(test, feature = "testing"))]
+            LOGICAL_SCAN_EVENTS.with(|count| count.set(count.get() + 1));
+            match event {
+                TokenEvent::Child(child) => at.push((start, child.0)),
+                TokenEvent::Text(text) if token_len(text.len()) > INLINE_TOKEN_MAX => {
+                    oversized_inline.get_or_insert((start, reader.position()));
+                }
+                TokenEvent::Bytes(bytes) if token_len(bytes.len()) > INLINE_TOKEN_MAX => {
+                    oversized_inline.get_or_insert((start, reader.position()));
+                }
+                _ => {}
             }
+            ends.push(reader.position());
         }
         let mut children: Vec<[u8; 32]> = at.iter().map(|(_, digest)| *digest).collect();
         children.sort_unstable();
         children.dedup();
-        Ok(Self { at, children })
+        Ok(Self {
+            at,
+            children,
+            ends,
+            oversized_inline,
+        })
+    }
+
+    /// Events that may change placement, in validated token order. Plain
+    /// spans are admitted with [`Self::first_event_past`] instead of walking
+    /// them. A consumer must refuse the first oversized inline value.
+    pub fn placement_changes(&self) -> impl Iterator<Item = PlacementStep> + '_ {
+        let mut references = self.at.iter().peekable();
+        let mut oversized = self.oversized_inline;
+        std::iter::from_fn(move || {
+            if let Some((start, end)) = oversized
+                && references.peek().is_none_or(|(at, _)| *at >= start)
+            {
+                oversized = None;
+                return Some(PlacementStep {
+                    start,
+                    end,
+                    placement: Placement::Oversized,
+                });
+            }
+            references.next().map(|(start, digest)| PlacementStep {
+                start: *start,
+                end: *start + LOGICAL_REF_LEN,
+                placement: Placement::Child(ChildRef(*digest)),
+            })
+        })
+    }
+
+    /// The first token whose original end exceeds `limit`. The common
+    /// admitted case is constant work; a tight limit uses binary search,
+    /// retaining the exact event the sequential reader would refuse at.
+    pub fn first_event_past(&self, limit: u64) -> Option<usize> {
+        if *self.ends.last()? as u64 <= limit {
+            return None;
+        }
+        self.ends
+            .get(self.ends.partition_point(|end| *end as u64 <= limit))
+            .copied()
     }
 
     fn slot(&self, digest: &[u8; 32]) -> u64 {
@@ -768,6 +1076,69 @@ fn longest_block(events: &[Event], start: usize) -> usize {
 #[cfg(test)]
 mod cache_tests {
     use super::*;
+
+    /// FIG-7135: repeated physical framing scans each logical content once,
+    /// independently of fresh allocations and the number of cold readers.
+    #[test]
+    fn reference_scans_are_bounded_by_content_not_reads() {
+        let mut tokens = TokenWriter::new();
+        tokens.seq(4);
+        tokens.text("FIG-7135 repeated reference scan");
+        tokens.child(ChildRef([0x61; 32]));
+        tokens.child(ChildRef([0x62; 32]));
+        tokens.child(ChildRef([0x61; 32]));
+        let logical = tokens.into_bytes();
+        REFERENCE_SCANS.with(|count| count.set(0));
+        for _ in 0..12 {
+            let (children, physical) =
+                to_physical(&logical.clone(), NodeKind::FROZEN_VALUE).unwrap();
+            assert_eq!(children, [[0x61; 32], [0x62; 32]]);
+            assert!(!physical.is_empty());
+            let _scan = LogicalScan::scan(&logical.clone(), NodeKind(0)).unwrap();
+        }
+        assert_eq!(
+            REFERENCE_SCANS.with(std::cell::Cell::get),
+            1,
+            "reference scanning grows with reader count"
+        );
+    }
+
+    /// FIG-7135: racing reference scans reclassify under the same owner
+    /// and compare complete inputs, even when their lookup keys coincide.
+    #[test]
+    fn racing_reference_preparations_keep_each_inputs_children() {
+        let barrier = std::sync::Barrier::new(2);
+        let key = (EncodingKind::LogicalScan, [0x94; 32]);
+        let bodies: Vec<_> = [0x81, 0x82]
+            .into_iter()
+            .map(|byte| {
+                let mut body = TokenWriter::new();
+                body.child(ChildRef([byte; 32]));
+                body.into_bytes()
+            })
+            .collect();
+        std::thread::scope(|scope| {
+            for body in &bodies {
+                let barrier = &barrier;
+                scope.spawn(move || {
+                    let refs = prepare_references(key, body, || {
+                        let refs = LogicalScan::scan_uncached(body, NodeKind(1_002))?;
+                        barrier.wait();
+                        Ok(refs)
+                    })
+                    .unwrap();
+                    assert_eq!(refs.children, [<[u8; 32]>::try_from(&body[1..]).unwrap()]);
+                });
+            }
+        });
+        for body in &bodies {
+            let refs = prepare_references(key, body, || {
+                LogicalScan::scan_uncached(body, NodeKind(1_002))
+            })
+            .unwrap();
+            assert_eq!(refs.children, [<[u8; 32]>::try_from(&body[1..]).unwrap()]);
+        }
+    }
 
     /// Preparation residency is bounded by both retained bytes and entries;
     /// eviction cannot change an encoding and an oversized input runs uncached.

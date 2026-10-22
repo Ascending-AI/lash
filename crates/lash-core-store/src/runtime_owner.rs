@@ -2,5 +2,3 @@
 //!
 //! The type lives beside `SessionId` and `ProcessId` in `lash-sansio`,
 //! because tool intents carry it as the authority they were declared under.
-
-pub use lash_protocol_types::RuntimeOwner;

@@ -95,36 +95,15 @@ fn refused(detail: impl Into<String>) -> CarryFault {
     .into()
 }
 
-/// Reads exactly the pinned snapshot and checks that it supplies each pinned
-/// declaration. Another retained set is never a fallback for missing code.
+/// A carry cold-loads its exact pinned Link DAG.
 pub async fn carry_snapshot(
-    authority: &dyn crate::InternalAuthority,
-    held: &lash_kernel_package::HeldPackages,
-    pinned: lash_kernel_doc::PackageSetDigest,
-    functions: impl IntoIterator<Item = lash_kernel_doc::FunctionId>,
-) -> Result<Arc<lash_kernel_package::SurfaceSnapshot>, CarryFault> {
-    let surface = if pinned == held.digest() {
-        Arc::clone(held.surface())
-    } else {
-        let bytes = authority
-            .package_surface(&pinned)
-            .await
-            .map_err(|error| HeapFault::Transport(error.to_string()))?
-            .ok_or_else(|| refused(format!("pinned snapshot {pinned} is unavailable")))?;
-        Arc::new(
-            lash_kernel_package::SurfaceSnapshot::decode(pinned, &bytes)
-                .map_err(|error| refused(format!("pinned snapshot {pinned}: {error}")))?,
-        )
-    };
-    let supplied = surface.functions();
-    for function in functions {
-        if !supplied.contains(&function) {
-            return Err(refused(format!(
-                "pinned snapshot {pinned} lacks function {function}"
-            )));
-        }
-    }
-    Ok(surface)
+    documents: &super::KernelDocuments,
+    link: lash_vocabulary::package::LinkId,
+) -> Result<lash_kernel_package::LinkedContent, CarryFault> {
+    documents
+        .load_linked(link)
+        .await
+        .map_err(|error| refused(error.to_string()))
 }
 
 impl KernelProcessEngine {
@@ -135,98 +114,58 @@ impl KernelProcessEngine {
         process: &lash_core::ProcessId,
         state: &mut KernelEngineState,
         rewritten: &Rewritten,
-        environment: Option<&lash_execution_contracts::process::ProcessEnv>,
+        successor: Option<&lash_vocabulary::names::LinkedStart>,
+        retained: &std::collections::BTreeSet<lash_vocabulary::CallableId>,
         redeclared: Option<&lash_kernel_doc::FunctionRegistry>,
-    ) -> Result<Vec<EncodedNode>, CarryFault> {
+    ) -> Result<
+        (
+            Vec<EncodedNode>,
+            std::collections::BTreeSet<lash_vocabulary::CallableId>,
+        ),
+        CarryFault,
+    > {
         let Some(parked) = state.parked else {
-            return Ok(Vec::new());
+            return Ok(Default::default());
         };
         let input = super::state::KernelProcessInput::from_payload(&state.payload)
             .map_err(|error| refused(error.to_string()))?;
 
-        let pinned_document = self
-            .documents
-            .get(&rewritten.correspondence.base)
-            .await
-            .map_err(|error| HeapFault::Transport(error.to_string()))?
-            .ok_or_else(|| refused("pinned document is missing"))?;
-        let old_stored = self
-            .documents
-            .stored_definitions(&pinned_document, &self.functions)
-            .await
-            .map_err(|error| HeapFault::Transport(error.to_string()))?
-            .map_err(|error| refused(format!("pinned snapshot {}: {error:?}", input.packages)))?;
-        let old_closure = lash_vm_broker::kernel::closure::derive(
-            pinned_document.manifest.functions.keys().copied(),
-            &self.functions,
-            &old_stored,
-        )
-        .map_err(|error| refused(error.to_string()))?;
-        let supplied = if environment.is_some() {
-            &rewritten.document
-        } else {
-            &pinned_document
+        let super::InlineRequest::Linked { start } = &input.code else {
+            return Err(refused(
+                "captured callable carry requires a capture correspondence",
+            ));
         };
-        carry_snapshot(
-            self.authority.as_ref(),
-            &self.packages,
-            input.packages,
-            supplied.manifest.functions.keys().copied(),
-        )
-        .await?;
-        let needed = rewritten
-            .document
-            .manifest
-            .functions
-            .keys()
-            .filter(|id| self.functions.get(id).is_none())
-            .copied()
-            .collect::<Vec<_>>();
-        let mut stored = BTreeMap::new();
-        let mut unread = Vec::new();
-        for function in needed {
-            if let Some(definition) = redeclared.and_then(|registry| registry.get(&function)) {
-                stored.insert(function, Arc::clone(definition.definition()));
-            } else {
-                unread.push(function);
-            }
-        }
-        stored.extend(
-            self.documents
-                .stored_functions(unread)
-                .await
-                .map_err(|error| HeapFault::Transport(error.to_string()))?
-                .map_err(|error| {
-                    refused(format!("pinned snapshot {}: {error:?}", input.packages))
-                })?,
-        );
-        let mut declarations = stored.clone();
-        for function in rewritten.document.manifest.functions.keys() {
-            if let Some(held) = self.functions.get(function) {
-                declarations.insert(*function, Arc::clone(held.definition()));
-            }
-        }
-        crate::admit_internal(self.authority.as_ref(), &declarations)
+        let content = carry_snapshot(&self.documents, start.link).await?;
+        let pinned_document = content
+            .document(
+                content
+                    .link(start.link)
+                    .map_err(|e| refused(e.to_string()))?
+                    .document,
+            )
+            .map_err(|e| refused(e.to_string()))?;
+        let prior = self
+            .load_execution(&input.code, retained)
             .await
-            .map_err(|error| HeapFault::Transport(error.to_string()))?
             .map_err(|error| refused(error.to_string()))?;
-        let declared = lash_vm_broker::kernel::loader::declare(
-            rewritten.document.manifest.functions.keys().copied(),
-            rewritten.document.manifest.kernel,
+        let old = lash_vm_broker::kernel::loader::declare_reach(
+            pinned_document,
+            &prior
+                .content
+                .documents
+                .iter()
+                .map(|(id, document)| (*id, Arc::new(document.clone())))
+                .collect(),
+            &prior.reach.functions,
+            &prior.reach.machine,
             &self.functions,
-            &stored,
         )
         .map_err(|error| refused(error.to_string()))?;
-        let closure = lash_vm_broker::kernel::closure::derive(
-            rewritten.document.manifest.functions.keys().copied(),
-            &self.functions,
-            &stored,
-        )
-        .map_err(|error| refused(error.to_string()))?;
+        let pinned_closure = PageId(old.closure.reference().0);
         let stores = self
             .carry_stores
             .as_ref()
-            .ok_or_else(|| refused("this engine has no page store for carry"))?;
+            .ok_or_else(|| refused("this engine has no carry stores"))?;
         let durable = stores.durable_store();
         let pages = durable
             .pages()
@@ -237,13 +176,101 @@ impl KernelProcessEngine {
             .await
             .map_err(|error| HeapFault::Transport(error.to_string()))?
             .ok_or_else(|| refused("the process has no execution root"))?;
-        let kernel = rewritten.document.manifest.kernel;
-        let correspondence = rewritten.correspondence.clone();
-        let program = lash_kernel_vm::Program {
-            closure: PageId(closure.reference().0),
-            document: Arc::new(rewritten.document.clone()),
-            library: lash_kernel_vm::PreparedLibrary::new(Arc::new(declared)),
+        let request = RootLeaseRequest {
+            owner: RootOwner::Exec(exec.clone()),
+            expected: row.root,
+            fence: LeaseFence::Reader,
+            ttl_millis: 600_000,
         };
+        let source = leased_pages(Arc::clone(&pages), request.clone()).await?;
+        let live = tokio::task::spawn_blocking(move || {
+            let mut source = source;
+            let answer = source
+                .read(&[PageRef {
+                    id: PageId(parked.page.root.0),
+                    grant: PageGrant::NONE,
+                }])?
+                .remove(0)?;
+            let checkpoint = Checkpoint::of_answer(&answer)?;
+            lash_kernel_state::paged::checkpoint_code(&checkpoint, Box::new(source))
+        })
+        .await
+        .map_err(|error| HeapFault::Transport(error.to_string()))??;
+        let mut predecessor_code = live.callables;
+        for (link, unit) in live.frames {
+            if link == start.link {
+                continue;
+            }
+            let lash_vocabulary::sites::Unit::Library(function) = unit else {
+                return Err(refused("foreign frame has no defining callable"));
+            };
+            predecessor_code.insert(lash_vocabulary::CallableId { link, function });
+        }
+        let next = successor.unwrap_or(start);
+        let mut next_content = carry_snapshot(&self.documents, next.link).await?;
+        let selected = next_content
+            .inspect(
+                next.link,
+                &lash_kernel_package::ReachSelection::Start(next.selector.clone()),
+            )
+            .map_err(|e| refused(e.to_string()))?;
+        predecessor_code.retain(|callable| callable.link != next.link);
+        let mut selected = selected;
+        for callable in &predecessor_code {
+            if !next_content.links.contains_key(&callable.link) {
+                let held = carry_snapshot(&self.documents, callable.link).await?;
+                next_content.documents.extend(held.documents);
+                next_content.links.extend(held.links);
+                next_content.packages.extend(held.packages);
+            }
+            let debt = next_content
+                .inspect(
+                    callable.link,
+                    &lash_kernel_package::ReachSelection::Callable(callable.function),
+                )
+                .map_err(|error| refused(error.to_string()))?;
+            selected.machine.extend(&debt.machine);
+            for (link, functions) in debt.functions {
+                selected
+                    .functions
+                    .entry(link)
+                    .or_default()
+                    .extend(functions);
+            }
+        }
+        let selected_ids: std::collections::BTreeSet<_> =
+            selected.functions.values().flatten().copied().collect();
+        let stored: BTreeMap<_, _> = next_content
+            .documents
+            .values()
+            .flat_map(|d| &d.functions)
+            .filter(|(id, _)| selected_ids.contains(id))
+            .map(|(id, f)| (*id, Arc::new(f.clone())))
+            .collect();
+        let held = redeclared.unwrap_or(&self.functions);
+        let declared = lash_vm_broker::kernel::loader::declare(
+            selected_ids.iter().copied(),
+            rewritten.document.kernel(),
+            held,
+            &stored,
+        )
+        .map_err(|e| refused(e.to_string()))?;
+        let closure = lash_vm_broker::kernel::closure::derive(selected_ids, held, &stored)
+            .map_err(|e| refused(e.to_string()))?;
+        let kernel = rewritten.document.kernel();
+        let correspondence = rewritten.correspondence.clone();
+        let program = lash_kernel_vm::Program::prepare(
+            next.link,
+            next_content
+                .documents
+                .iter()
+                .map(|(id, d)| (*id, Arc::new(d.clone())))
+                .collect(),
+            &next_content.links,
+            PageId(closure.reference().0),
+            lash_kernel_vm::PreparedLibrary::new(Arc::new(declared)),
+        )
+        .map_err(|e| refused(e.to_string()))?;
         let (page, mut nodes) = carry_parked_checkpoint(
             pages,
             RootLeaseRequest {
@@ -256,10 +283,7 @@ impl KernelProcessEngine {
             rewritten.clone(),
             program,
             self.bounds,
-            (
-                pinned_document.manifest.kernel,
-                PageId(old_closure.reference().0),
-            ),
+            (pinned_document.kernel(), pinned_closure),
         )
         .await?;
         nodes.extend(closure.nodes().values().cloned());
@@ -268,31 +292,20 @@ impl KernelProcessEngine {
         }
         // Only code requirements change here. The owner derives link requirements
         // from the successor env at the same commit that repoints that env.
-        let links = state.requirements.clone();
-        state.requirements =
-            lash_vm_broker::kernel::loader::requirements(&closure, kernel, std::iter::empty());
-        if let Some(environment) = environment {
-            for link in environment.effects().values() {
-                link.require(&mut state.requirements);
-            }
-        } else {
-            state.requirements.providers = links.providers;
-            state.requirements.codecs = links.codecs;
-        }
+        state.requirements.machine = selected.machine;
         for held in state.admissions.values_mut() {
             held.admission.0.identity =
                 lash_kernel_migrate::carry_effect(&correspondence, &held.admission.0.identity)?;
         }
         for wait in state.waits.values_mut() {
-            let (super::state::Wait::Step { identity, .. }
-            | super::state::Wait::Timer { identity, .. }) = wait;
+            let super::state::Wait::Step { identity, .. } = wait;
             *identity = lash_kernel_migrate::carry_effect(&correspondence, identity)?;
         }
         for delivery in &mut state.settled {
             delivery.identity =
                 lash_kernel_migrate::carry_effect(&correspondence, &delivery.identity)?;
         }
-        Ok(nodes)
+        Ok((nodes, predecessor_code))
     }
 }
 /// Prepares a foreign checkpoint under a lease. Publishing the returned nodes
@@ -311,28 +324,7 @@ pub async fn carry_parked_checkpoint(
     };
     let owner = lash_vm_broker::kernel::graph::owner_binding_node(exec)
         .map_err(|error| refused(error.to_string()))?;
-    let lease = store
-        .acquire_root_lease(request)
-        .await
-        .map_err(|error| HeapFault::Transport(error.to_string()))?;
-    let runtime = tokio::runtime::Handle::current();
-    let release_store = Arc::clone(&store);
-    let release_runtime = runtime.clone();
-    let id = lease.id;
-    let release = ReleaseLease(Some(Box::new(move || {
-        release_runtime.spawn(async move {
-            let _ = release_store.release_root_lease(id).await;
-        });
-    })));
-    let pages = Pages {
-        lease: Arc::new(Lease {
-            store,
-            lease,
-            runtime,
-            _release: release,
-        }),
-        nodes: Arc::default(),
-    };
+    let pages = leased_pages(store, request).await?;
     tokio::task::spawn_blocking(move || {
         let mut source = pages;
         let reference = PageRef {
@@ -349,6 +341,7 @@ pub async fn carry_parked_checkpoint(
             &checkpoint,
             &rewritten,
             program.closure,
+            program.link,
             pinned,
         )?;
         lash_kernel_vm::validate_foreign_checkpoint(
@@ -369,4 +362,32 @@ pub async fn carry_parked_checkpoint(
     })
     .await
     .map_err(|error| HeapFault::Transport(error.to_string()))?
+}
+
+async fn leased_pages(
+    store: Arc<dyn PageStore>,
+    request: RootLeaseRequest,
+) -> Result<Pages, CarryFault> {
+    let lease = store
+        .acquire_root_lease(request)
+        .await
+        .map_err(|error| HeapFault::Transport(error.to_string()))?;
+    let runtime = tokio::runtime::Handle::current();
+    let release_store = Arc::clone(&store);
+    let release_runtime = runtime.clone();
+    let id = lease.id;
+    let release = ReleaseLease(Some(Box::new(move || {
+        release_runtime.spawn(async move {
+            let _ = release_store.release_root_lease(id).await;
+        });
+    })));
+    Ok(Pages {
+        lease: Arc::new(Lease {
+            store,
+            lease,
+            runtime,
+            _release: release,
+        }),
+        nodes: Arc::default(),
+    })
 }

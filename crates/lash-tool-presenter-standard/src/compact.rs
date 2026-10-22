@@ -3,7 +3,11 @@
 use std::collections::BTreeMap;
 
 use lash_tool_presenter_api::PresentationRefusal;
-use lash_tool_shape::{DefinitionId, ExtraKeys, SchemaDocument, SchemaShape, ShapeKind};
+use lash_vocabulary::tool_shape::DefinitionId;
+use lash_vocabulary::tool_shape::ExtraKeys;
+use lash_vocabulary::tool_shape::SchemaDocument;
+use lash_vocabulary::tool_shape::SchemaShape;
+use lash_vocabulary::tool_shape::ShapeKind;
 
 use crate::STANDARD_TOOL_PRESENTER_ID;
 

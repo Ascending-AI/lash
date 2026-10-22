@@ -3,8 +3,10 @@
 use super::*;
 
 /// The component that contributes `tools.lookup`.
-const KNOWLEDGE: lash_core::ProcessConfigKey<()> =
-    lash_core::ProcessConfigKey::new("core-node-knowledge", lash_core::FormatVersion::ONE);
+const KNOWLEDGE: lash_core::ProcessConfigKey<()> = lash_core::ProcessConfigKey::new(
+    "core-node-knowledge",
+    lash_vocabulary::providers::FormatVersion::ONE,
+);
 
 /// The lookup tool's id: what its step's admission names. Its effect is
 /// `tools.lookup`.
@@ -13,23 +15,18 @@ const LOOKUP_TOOL: &str = "core-node-knowledge-lookup";
 /// `lookup()`: one `perform` of the knowledge component's `Read` tool.
 const LOOKUP: &str = r#"kernel 1
 numbers float
-effect tools.lookup(input: Json) -> Json contract "1"
-entry lookup() -> Any
-
-fn lookup() {
-  let input = {topic: "lash"}
-  let got = perform tools.lookup(input) as Any
-  return got
-}
-
+import 0 operation tools.lookup(input: Any) -> Any
+import 1 operation typescript.sleep(milliseconds: Int) -> Null
 main {
-  finish null
+  let input = {topic: "lash"}
+  let got = perform 0(input) as Any
+  return got
 }
 "#;
 
 /// The `Read` tool `lookup`: what the knowledge base says about a topic.
-fn lookup_definition() -> lash_core::ToolDefinition {
-    lash_core::ToolDefinition::raw(
+fn lookup_definition() -> lash_vocabulary::tool_contract::ToolDefinition {
+    lash_vocabulary::tool_contract::ToolDefinition::raw(
         LOOKUP_TOOL,
         "tools.lookup",
         "Looks a topic up.",
@@ -38,9 +35,9 @@ fn lookup_definition() -> lash_core::ToolDefinition {
     )
     .expect("the lookup tool's schemas")
     // The contract the laws' kernel texts pin.
-    .declared_contract(lash_core::ContractId::new("1"))
+    .declared_contract(lash_vocabulary::operations::ContractId::new("1"))
     .with_execution(Duration::from_secs(120))
-    .with_execution_policy(lash_core::ExecutionPolicy::Read)
+    .with_execution_policy(lash_vocabulary::tool_contract::ExecutionPolicy::Read)
 }
 
 /// What the knowledge base says about the topic `args` names.
@@ -98,11 +95,19 @@ fn knowledge_component(
     Arc::new(
         lash_core::plugin::StaticPluginFactory::new(
             lash_core::plugin::PluginDeclaration::initial(KNOWLEDGE.component()),
-            lash_core::facade_support::PluginSpec::new().with_tool_provider_registration(
-                lash::tool_provider_key!("tools"),
-                lash::tools::ToolProviderRegistration::new(provider)
-                    .with_reads(Arc::new(LookupReads(Arc::clone(answered)))),
-            ),
+            lash_core::facade_support::PluginSpec::new()
+                .with_tool_provider_registration(
+                    lash::tool_provider_key!("tools"),
+                    lash::tools::ToolProviderRegistration::new(provider)
+                        .with_reads(Arc::new(LookupReads(Arc::clone(answered)))),
+                )
+                .with_package_provider(
+                    lash::tool_provider_key!("lookup-package"),
+                    Arc::new(operations::Packages {
+                        provider: KNOWLEDGE.tool_provider(lash::tool_provider_key!("tools")),
+                        definitions: vec![lookup_definition()],
+                    }),
+                ),
         )
         .as_component(KNOWLEDGE.format())
         .expect("a provider with its reader is a process component"),
@@ -130,12 +135,17 @@ async fn a_sessionless_workflow_reads_fresh_after_a_cold_resume_on_sqlite_memory
         super::session_and_isolated_envs::booted(&stores, Vec::new(), "read-first", build);
     let source = LOOKUP.replace(
         "  return got",
-        "  let gate = perform tools.lookup({topic: \"gate\"}) as Any\n  do sleep 5000\n  let again = perform tools.lookup(input) as Any\n  return [got, again]",
+        "  let gate = perform 0({topic: \"gate\"}) as Any\n  do perform 1(5000) as Null then yield\n  let again = perform 0(input) as Any\n  return [got, again]",
     );
-    let payload = kernel_process::payload(&backend, &source, "lookup").await;
+    let env = lash::process::ProcessEnv::builder(lash::MaxToolCalls::new(16))
+        .component(KNOWLEDGE, &())
+        .component(lash::vm::KERNEL_SERVICES_CONFIG, &())
+        .build()
+        .unwrap();
+    let (payload, env) = kernel_process::publish(&first, &source, &env).await;
     let process = start_under(
         &first,
-        &environment_of(vec![(KNOWLEDGE, lookup_definition())], &[KNOWLEDGE]),
+        &env,
         lash_vm_runtime::LASH_VM_ENGINE_KIND,
         payload,
         |mut request| {
@@ -149,7 +159,7 @@ async fn a_sessionless_workflow_reads_fresh_after_a_cold_resume_on_sqlite_memory
                 .unwrap();
                 launch.settings = Some(
                     settings
-                        .observing(lash_kernel_vm::ObservationMode::Counts)
+                        .observing(lash_vocabulary::observation::RunObservation::Counts)
                         .into_engine_settings(),
                 );
             }
@@ -217,12 +227,21 @@ async fn a_sessionless_workflow_reads_fresh_after_a_cold_resume_on_sqlite_memory
                     );
                 }
             }
-            if steps.iter().any(|step| {
-                step.outcome
-                    .as_ref()
-                    .and_then(|outcome| outcome.payload())
-                    .is_some_and(|text| text.contains("until_ms"))
-            }) {
+            if answered.reads.load(Ordering::SeqCst) == 2 && !record.waits().is_empty() {
+                let wait = &record.waits()[0];
+                let lash::process::WaitKind::Call { resume_at_ms: Some(deadline), .. } = wait.kind else {
+                    panic!("TIMER-OBSERVE: the ordinary pending call retains its timer deadline: {wait:?}");
+                };
+                let actor = lash_durable::ActorKey::process(process.as_str()).unwrap();
+                let timers = backend.durable().pending_waits(&actor).await.unwrap();
+                assert!(timers.iter().any(|timer| matches!(timer.purpose,
+                    lash_durable::domain::WaitPurpose::Timer { deadline: at } if at.0 == deadline)),
+                    "the observed deadline is the exact committed timer's: {timers:?}");
+                let snapshot = first.processes().observe(&process).snapshot().await.unwrap();
+                let lash::process::ProcessReadView::Retained(read) = snapshot.read_view else { panic!("the parked process is retained") };
+                assert!(read.workflow.unwrap().sites.iter().any(|row| row.state == lash::workflow::ProcessWorkflowSiteState::Waiting {
+                    kind: lash::workflow::ProcessWorkflowWaitKind::Effect, resume_at_ms: Some(deadline),
+                }), "the workflow overlay carries the same committed deadline");
                 break;
             }
             if answered.bodies.load(Ordering::SeqCst) != 0 {

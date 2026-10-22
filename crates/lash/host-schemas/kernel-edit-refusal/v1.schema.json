@@ -1,9 +1,5 @@
 {
   "$defs": {
-    "ContractId": {
-      "description": "What pins an operation's meaning under its signature: opaque text,\ncompared for equality and never read for anything else.",
-      "type": "string"
-    },
     "DocumentId": {
       "pattern": "^[0-9a-f]{64}$",
       "type": "string"
@@ -262,6 +258,16 @@
       "pattern": "^[0-9a-f]{64}$",
       "type": "string"
     },
+    "FunctionName": {
+      "pattern": "^[A-Za-z_][A-Za-z0-9_]*(\\.[A-Za-z_][A-Za-z0-9_]*)*$",
+      "type": "string"
+    },
+    "ImportSlot": {
+      "description": "A stable document-local Import coordinate. Names are diagnostic, never dispatch keys.",
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    },
     "InvalidReason": {
       "oneOf": [
         {
@@ -273,6 +279,48 @@
             "empty_guard_unit"
           ],
           "type": "string"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "document": {
+              "additionalProperties": false,
+              "properties": {
+                "message": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "message"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "document"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "import": {
+              "additionalProperties": false,
+              "properties": {
+                "slot": {
+                  "$ref": "#/$defs/ImportSlot"
+                }
+              },
+              "required": [
+                "slot"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "import"
+          ],
+          "type": "object"
         },
         {
           "additionalProperties": false,
@@ -400,7 +448,7 @@
                   "$ref": "#/$defs/FunctionId"
                 },
                 "name": {
-                  "$ref": "#/$defs/QualifiedName"
+                  "$ref": "#/$defs/FunctionName"
                 }
               },
               "required": [
@@ -425,7 +473,7 @@
                   "$ref": "#/$defs/FunctionId"
                 },
                 "name": {
-                  "$ref": "#/$defs/QualifiedName"
+                  "$ref": "#/$defs/FunctionName"
                 },
                 "required": {
                   "format": "uint32",
@@ -539,12 +587,12 @@
             "effect_not_listed": {
               "additionalProperties": false,
               "properties": {
-                "effect": {
-                  "$ref": "#/$defs/QualifiedName"
+                "slot": {
+                  "$ref": "#/$defs/ImportSlot"
                 }
               },
               "required": [
-                "effect"
+                "slot"
               ],
               "type": "object"
             }
@@ -603,12 +651,12 @@
             "effect_not_declared": {
               "additionalProperties": false,
               "properties": {
-                "effect": {
-                  "$ref": "#/$defs/QualifiedName"
+                "slot": {
+                  "$ref": "#/$defs/ImportSlot"
                 }
               },
               "required": [
-                "effect"
+                "slot"
               ],
               "type": "object"
             }
@@ -933,23 +981,6 @@
       ],
       "type": "string"
     },
-    "OperationRequirement": {
-      "additionalProperties": false,
-      "description": "An operation as code requires it: the signature it performs the\noperation under and the contract it was written against, which the\noperation's runner declares or derives. A manifest states one for each\noperation the document performs or reaches, and a library body one for\neach operation it performs itself. A changed contract under one\nsignature is a different requirement (OP-SAME-SIGNATURE).",
-      "properties": {
-        "contract": {
-          "$ref": "#/$defs/ContractId"
-        },
-        "signature": {
-          "$ref": "#/$defs/Signature"
-        }
-      },
-      "required": [
-        "signature",
-        "contract"
-      ],
-      "type": "object"
-    },
     "Param": {
       "additionalProperties": false,
       "properties": {
@@ -969,10 +1000,6 @@
         "ty"
       ],
       "type": "object"
-    },
-    "QualifiedName": {
-      "pattern": "^[A-Za-z_][A-Za-z0-9_]*(\\.[A-Za-z_][A-Za-z0-9_]*)*$",
-      "type": "string"
     },
     "RecordType": {
       "additionalProperties": false,
@@ -1039,12 +1066,12 @@
             "missing_effect": {
               "additionalProperties": false,
               "properties": {
-                "effect": {
-                  "$ref": "#/$defs/QualifiedName"
+                "slot": {
+                  "$ref": "#/$defs/ImportSlot"
                 }
               },
               "required": [
-                "effect"
+                "slot"
               ],
               "type": "object"
             }
@@ -1056,36 +1083,11 @@
         },
         {
           "additionalProperties": false,
-          "description": "OP-INTERNAL: only the declaring package's bodies may perform it.",
-          "properties": {
-            "internal_operation": {
-              "additionalProperties": false,
-              "properties": {
-                "effect": {
-                  "$ref": "#/$defs/QualifiedName"
-                }
-              },
-              "required": [
-                "effect"
-              ],
-              "type": "object"
-            }
-          },
-          "required": [
-            "internal_operation"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
           "description": "`K-ADM-002`: the environment's effect does not serve the signature\nthe document expects.",
           "properties": {
             "effect_signature": {
               "additionalProperties": false,
               "properties": {
-                "effect": {
-                  "$ref": "#/$defs/QualifiedName"
-                },
                 "expected": {
                   "$ref": "#/$defs/Signature"
                 },
@@ -1094,10 +1096,13 @@
                 },
                 "provided": {
                   "$ref": "#/$defs/Signature"
+                },
+                "slot": {
+                  "$ref": "#/$defs/ImportSlot"
                 }
               },
               "required": [
-                "effect",
+                "slot",
                 "expected",
                 "provided",
                 "mismatch"
@@ -1121,7 +1126,7 @@
                   "$ref": "#/$defs/FunctionId"
                 },
                 "name": {
-                  "$ref": "#/$defs/QualifiedName"
+                  "$ref": "#/$defs/FunctionName"
                 }
               },
               "required": [
@@ -1202,15 +1207,15 @@
                 "declared": {
                   "$ref": "#/$defs/Type"
                 },
-                "effect": {
-                  "$ref": "#/$defs/QualifiedName"
+                "slot": {
+                  "$ref": "#/$defs/ImportSlot"
                 },
                 "stated": {
                   "$ref": "#/$defs/Type"
                 }
               },
               "required": [
-                "effect",
+                "slot",
                 "declared",
                 "stated"
               ],
@@ -1221,200 +1226,8 @@
             "perform_result"
           ],
           "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "description": "`K-ADM-007`: the manifest lists an effect nothing performs.",
-          "properties": {
-            "effect_not_performed": {
-              "additionalProperties": false,
-              "properties": {
-                "effect": {
-                  "$ref": "#/$defs/QualifiedName"
-                }
-              },
-              "required": [
-                "effect"
-              ],
-              "type": "object"
-            }
-          },
-          "required": [
-            "effect_not_performed"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "description": "`K-ADM-007`: the manifest lists a function nothing reaches.",
-          "properties": {
-            "function_not_reached": {
-              "additionalProperties": false,
-              "properties": {
-                "function": {
-                  "$ref": "#/$defs/FunctionId"
-                },
-                "name": {
-                  "$ref": "#/$defs/QualifiedName"
-                }
-              },
-              "required": [
-                "function",
-                "name"
-              ],
-              "type": "object"
-            }
-          },
-          "required": [
-            "function_not_reached"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "description": "`K-ADM-007`: a function reached through another function's body is\nnot in the manifest.",
-          "properties": {
-            "function_not_listed": {
-              "additionalProperties": false,
-              "properties": {
-                "function": {
-                  "$ref": "#/$defs/FunctionId"
-                },
-                "name": {
-                  "$ref": "#/$defs/QualifiedName"
-                },
-                "through": {
-                  "$ref": "#/$defs/FunctionId"
-                }
-              },
-              "required": [
-                "function",
-                "name",
-                "through"
-              ],
-              "type": "object"
-            }
-          },
-          "required": [
-            "function_not_listed"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "description": "`K-ADM-007`: a library body the document reaches performs an\noperation the manifest does not list.",
-          "properties": {
-            "requirement_not_listed": {
-              "additionalProperties": false,
-              "properties": {
-                "effect": {
-                  "$ref": "#/$defs/QualifiedName"
-                },
-                "requirement": {
-                  "$ref": "#/$defs/OperationRequirement"
-                },
-                "through": {
-                  "$ref": "#/$defs/FunctionId"
-                }
-              },
-              "required": [
-                "effect",
-                "through",
-                "requirement"
-              ],
-              "type": "object"
-            }
-          },
-          "required": [
-            "requirement_not_listed"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "description": "`ADM-REQUIREMENT`: the document's code and the bodies it reaches\nrequire one effect name under two requirements.",
-          "properties": {
-            "requirement_conflict": {
-              "additionalProperties": false,
-              "properties": {
-                "effect": {
-                  "$ref": "#/$defs/QualifiedName"
-                },
-                "first": {
-                  "$ref": "#/$defs/RequiredBy"
-                },
-                "second": {
-                  "$ref": "#/$defs/RequiredBy"
-                }
-              },
-              "required": [
-                "effect",
-                "first",
-                "second"
-              ],
-              "type": "object"
-            }
-          },
-          "required": [
-            "requirement_conflict"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "description": "`K-ADM-007`: a function is listed under a name its definition does\nnot carry.",
-          "properties": {
-            "function_name": {
-              "additionalProperties": false,
-              "properties": {
-                "defined": {
-                  "$ref": "#/$defs/QualifiedName"
-                },
-                "function": {
-                  "$ref": "#/$defs/FunctionId"
-                },
-                "listed": {
-                  "$ref": "#/$defs/QualifiedName"
-                }
-              },
-              "required": [
-                "function",
-                "listed",
-                "defined"
-              ],
-              "type": "object"
-            }
-          },
-          "required": [
-            "function_name"
-          ],
-          "type": "object"
         }
       ]
-    },
-    "RequiredBy": {
-      "additionalProperties": false,
-      "description": "A requirement of an effect, and the code that states it.",
-      "properties": {
-        "requirement": {
-          "$ref": "#/$defs/OperationRequirement"
-        },
-        "through": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/FunctionId"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "description": "The library function whose body states it; `None` for the\ndocument's manifest, which states its own code's."
-        }
-      },
-      "required": [
-        "requirement"
-      ],
-      "type": "object"
     },
     "Signature": {
       "additionalProperties": false,
@@ -1494,7 +1307,6 @@
       "enum": [
         "call",
         "perform",
-        "sleep",
         "join",
         "yield",
         "spawn",

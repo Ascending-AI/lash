@@ -20,6 +20,7 @@
 //! with.
 
 use lash_kernel_doc::{Datum, Float, Integer, NumberPolicy};
+
 use serde_json::{Map, Value as Json};
 
 /// The field that names the kind of a value JSON has no spelling for.
@@ -139,7 +140,7 @@ pub(crate) fn datum_json(value: &Datum) -> Json {
             ],
         ),
         Datum::FunctionValue(function) => function.transport_json().unwrap_or(Json::Null),
-        Datum::Function(name) => kinded("function", [("name", Json::String(name.to_string()))]),
+        Datum::Function(name) => kinded("function", [("callable", serde_json::json!(name))]),
         Datum::Handle(handle) => kinded(
             "handle",
             [

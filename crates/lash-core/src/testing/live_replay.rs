@@ -34,7 +34,7 @@ impl crate::InMemoryProcessReplayStore {
 /// started node. `event_key` is its redelivery identity and `label` the
 /// fact it states, as the node it names.
 pub fn process_language_observation(
-    process_id: &crate::ProcessId,
+    process_id: &lash_vocabulary::identity::ProcessId,
     event_key: &str,
     label: &str,
 ) -> crate::LanguageExecutionObservation {
@@ -44,12 +44,14 @@ pub fn process_language_observation(
             event_key: event_key.to_string(),
             identity: lash_trace::TraceLanguageExecutionIdentity {
                 scope: lash_trace::TraceRuntimeScope::none(),
-                document: lash_trace::WorkflowDocumentRef {
-                    document: lash_kernel_doc::DocumentId::from_bytes([0x5a; 32]),
-                    entry: lash_trace::WorkflowDocumentEntry::Entry {
-                        function: lash_kernel_doc::Name::new("fixture"),
+                document: lash_trace::TraceExecutionCode::Start(
+                    lash_vocabulary::names::LinkedStart {
+                        link: lash_vocabulary::content_ids::LinkId::from_bytes([0x5a; 32]),
+                        selector: lash_vocabulary::names::StartSelector::Export(
+                            lash_vocabulary::names::Name::new("fixture"),
+                        ),
                     },
-                },
+                ),
                 entry_name: "fixture".to_string(),
                 engine_execution_id: None,
                 generation: None,
@@ -68,7 +70,7 @@ pub fn process_language_observation(
 
 /// The label a fixture site was built from
 /// ([`lash_protocol_types::effect_identity_fixture`]).
-fn fixture_label(site: &lash_protocol_types::PositionLabel) -> String {
+fn fixture_label(site: &lash_vocabulary::sites::PositionLabel) -> String {
     site.callee_label()
         .map_or_else(|| site.to_string(), str::to_owned)
 }
@@ -103,7 +105,7 @@ pub fn process_observation_label(event: &crate::ProcessObservationEvent) -> Stri
 /// The start of attempt `attempt` of an admitted step body of `process`, at
 /// the first occurrence of the node `label`, for replay tests.
 pub fn process_step_body_started(
-    process: &crate::ProcessId,
+    process: &lash_vocabulary::identity::ProcessId,
     label: &str,
     attempt: u32,
     observed_at_ms: u64,
@@ -111,6 +113,10 @@ pub fn process_step_body_started(
     lash_trace::StepBodyStartedObservation {
         step: lash_trace::StepBodyStarted {
             process_id: process.clone(),
+            origin: (lash_protocol_types::effect_identity_fixture(label, 1))
+                .position()
+                .site()
+                .clone(),
             at: lash_protocol_types::effect_identity_fixture(label, 1),
             call_id: crate::ToolCallId::fixture(label),
             attempt,
@@ -136,12 +142,15 @@ pub fn process_committed_event(
 
 /// A session-cell language observation for the session replay identity law.
 pub fn session_language_observation(
-    session_id: &crate::SessionId,
+    session_id: &lash_vocabulary::identity::SessionId,
     event_key: &str,
     label: &str,
 ) -> crate::LanguageExecutionObservation {
-    let mut observation =
-        process_language_observation(&crate::ProcessId::fixture("session-cell"), event_key, label);
+    let mut observation = process_language_observation(
+        &lash_vocabulary::identity::ProcessId::fixture("session-cell"),
+        event_key,
+        label,
+    );
     let subject = lash_trace::TraceRuntimeSubject::Effect {
         address: lash_protocol_types::EffectAddress::new(
             lash_protocol_types::ExecutionScope::session_operation(session_id.clone(), "cell"),
@@ -156,6 +165,10 @@ pub fn session_language_observation(
     {
         *current = subject;
     }
-    observation.execution.identity.document.entry = lash_trace::WorkflowDocumentEntry::Main;
+    if let lash_trace::TraceExecutionCode::Start(start) =
+        &mut observation.execution.identity.document
+    {
+        start.selector = lash_vocabulary::names::StartSelector::Main;
+    }
     observation
 }

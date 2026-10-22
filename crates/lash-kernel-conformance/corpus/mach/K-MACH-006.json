@@ -3,7 +3,7 @@
   "cases": [
     {
       "name": "pending host cancellation ends at safe point without cleanup",
-      "document": "kernel 1\nnumbers by_spelling\n\nmain {\ntry { do sleep 0 } finally { print 1 }\n}\n",
+      "document": "kernel 1\nnumbers by_spelling\nimport 0 operation typescript.sleep(milliseconds: Int) -> Null\nmain {\n  try {\n    do perform 0(0) as Null\n  } finally {\n    print 1\n  }\n}\n",
       "expected": {
         "prints": [],
         "end": "cancelled",

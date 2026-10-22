@@ -2,9 +2,9 @@
 
 use std::collections::BTreeSet;
 
-use lash_kernel_doc::{
-    AssignOrder, Closure, Expr, Literal, Member, Name, Place, Protocol, Rhs, Stmt,
-};
+use lash_kernel_doc::{AssignOrder, Expr, Literal, Member, Place, Protocol, Rhs, Stmt};
+
+use lash_vocabulary::Name;
 use ruff_python_ast::{self as ast, Expr as PyExpr, Stmt as PyStmt};
 use ruff_text_size::{Ranged, TextRange};
 
@@ -57,7 +57,7 @@ impl Lowerer<'_> {
         self.nested(statement.range(), |this| {
             this.statement_inner(statement, span)
         })?;
-        self.own_caption(statement, first);
+        self.own_caption(statement, first)?;
         Ok(())
     }
 
@@ -170,11 +170,10 @@ impl Lowerer<'_> {
             PyStmt::Import(import) => {
                 for alias in &import.names {
                     let module = alias.name.id.as_str();
-                    let renamed = alias
-                        .asname
-                        .as_ref()
-                        .is_some_and(|asname| asname.id.as_str() != module);
-                    if module != "asyncio" || renamed {
+                    if !module
+                        .split('.')
+                        .all(lash_vocabulary::Segment::is_canonical)
+                    {
                         return Err(unsupported_import(module, None, alias.range));
                     }
                 }
@@ -185,8 +184,14 @@ impl Lowerer<'_> {
                     .module
                     .as_ref()
                     .map_or("", |module| module.id.as_str());
-                let member = import.names.first().map(|alias| alias.name.id.as_str());
-                Err(unsupported_import(module, member, import.range))
+                if module.is_empty()
+                    || !module
+                        .split('.')
+                        .all(lash_vocabulary::Segment::is_canonical)
+                {
+                    return Err(unsupported_import(module, None, import.range));
+                }
+                Ok(())
             }
             PyStmt::If(branch) => {
                 let test = self.expr(&branch.test)?;
@@ -252,22 +257,12 @@ impl Lowerer<'_> {
                 }
                 Err(class_refusal(class.range, class.name.id.as_str()))
             }
-            PyStmt::With(with) => {
-                for item in &with.items {
-                    if let PyExpr::Call(call) = &item.context_expr
-                        && let PyExpr::Attribute(attribute) = call.func.as_ref()
-                        && let Some(refusal) = self.printed_receiver(&attribute.value)
-                    {
-                        return Err(refusal);
-                    }
-                }
-                Err(diagnostics::with_repair(
-                    Code::WithUnsupported,
-                    "`with` is not in the dialect",
-                    with.range,
-                    "write `try:` and `finally:` around the block",
-                ))
-            }
+            PyStmt::With(with) => Err(diagnostics::with_repair(
+                Code::WithUnsupported,
+                "`with` is not in the dialect",
+                with.range,
+                "write `try:` and `finally:` around the block",
+            )),
             PyStmt::Match(node) => Err(diagnostics::with_repair(
                 Code::MatchUnsupported,
                 "`match` is not in the dialect",
@@ -423,15 +418,15 @@ impl Lowerer<'_> {
                     let receiver = self.expr(&attribute.value)?;
                     let view = attribute.attr.id.as_str();
                     let item = match view {
-                        "items" => Some(self.function("py.for_in.item")?),
-                        "values" => Some(self.function("py.for_in.value")?),
+                        "items" => Some(self.function_target("py.for_in.item")?),
+                        "values" => Some(self.function_target("py.for_in.value")?),
                         _ => None,
                     };
                     let via = Protocol {
-                        open: self.function(&format!("py.for_in.{view}"))?,
+                        open: self.function_target(&format!("py.for_in.{view}"))?,
                         next: None,
                         item,
-                        check: Some(self.function("py.for_in.check")?),
+                        check: Some(self.function_target("py.for_in.check")?),
                     };
                     return Ok((receiver, via));
                 }
@@ -440,10 +435,10 @@ impl Lowerer<'_> {
         }
         let value = self.expr(iter)?;
         let via = Protocol {
-            open: self.function("py.for_in.open")?,
+            open: self.function_target("py.for_in.open")?,
             next: None,
             item: None,
-            check: Some(self.function("py.for_in.check")?),
+            check: Some(self.function_target("py.for_in.check")?),
         };
         Ok((value, via))
     }
@@ -756,20 +751,24 @@ impl Lowerer<'_> {
         let has_else = !attempt.orelse.is_empty();
         let passed = has_else.then(|| {
             let flag = self.fresh("passed");
+            self.span = None;
             self.emit(Stmt::Let {
                 name: flag.clone(),
                 value: Rhs::Expr(Expr::Literal(Literal::Bool(false))),
             });
+            self.span = span;
             flag
         });
         let body = self.block(|this| {
             this.statements(&attempt.body)?;
             if let Some(flag) = &passed {
+                let span = this.span.take();
                 this.emit(Stmt::Assign {
                     place: Place::Variable(flag.clone()),
                     value: Rhs::Expr(Expr::Literal(Literal::Bool(true))),
                     order: AssignOrder::ValueFirst,
                 });
+                this.span = span;
             }
             Ok(())
         })?;
@@ -781,8 +780,9 @@ impl Lowerer<'_> {
         self.caption_arm(Arm::Last, finally_caption);
         if let Some(flag) = passed {
             let orelse = self.suite(&attempt.orelse)?;
-            self.span = span;
+            self.span = None;
             self.emit_if(Expr::Variable(flag), orelse, Buf::default());
+            self.span = span;
         }
         Ok(())
     }
@@ -835,7 +835,13 @@ impl Lowerer<'_> {
             }
         };
         let then_block = self.block(body)?;
-        let else_block = self.block(|this| this.handlers(rest, caught))?;
+        let else_block = self.block(|this| {
+            // Unmatched dispatch belongs to this except clause, not to
+            // the last statement emitted by its suite. Preserve the range
+            // while keeping authored caption ownership on that statement.
+            this.span = span;
+            this.handlers(rest, caught)
+        })?;
         self.span = span;
         self.emit_if(matched.expr, then_block, else_block);
         Ok(())
@@ -1071,25 +1077,15 @@ impl Lowerer<'_> {
         )?;
         let written =
             self.function_written(Some(&def.parameters), def.is_async, def.returns.as_deref());
-        let start = super::saved::start_adapter(
+        let start = super::saved::callable_presentation(
             Some(&def.parameters),
             def.returns.as_deref(),
             params.len(),
         );
         let variable = self.written(name, def.name.range)?;
         self.span_of(def);
-        self.push(
-            Stmt::Assign {
-                place: Place::Variable(variable),
-                value: Rhs::Expr(Expr::Closure(Box::new(Closure {
-                    params,
-                    body: body.stmts,
-                    start,
-                }))),
-                order: AssignOrder::ValueFirst,
-            },
-            vec![body.notes],
-        );
+        let closure = self.emit_closure(params, body, start);
+        self.store(Place::Variable(variable), closure);
         if let Some(note) = self.buf.notes.last_mut() {
             note.written = Some(written);
         }
@@ -1196,12 +1192,16 @@ impl Lowerer<'_> {
         });
         let span = self.span;
         let block = self.block(|this| {
+            // Scope slots are synthetic. The first authored assignment (or
+            // captured read) owns its range, never this absent initialization.
+            let authored_span = this.span.take();
             for local in &declared {
                 this.emit(Stmt::Let {
                     name: Name::new(local.as_str()),
                     value: Rhs::Expr(Expr::Literal(Literal::Absent)),
                 });
             }
+            this.span = authored_span;
             // Arguments fill parameters in order, so the last parameter
             // without a default tells whether any is missing.
             let required = params

@@ -190,7 +190,7 @@ async fn served_turn() -> Result<(Observed, LashCore)> {
     let core = builder.build(lash_facade_tests::runtime_lease_owner())?;
     let session = created_session(
         &core,
-        lash::SessionId::parse(TURN_SESSION).expect("nonblank host identity"),
+        lash_vocabulary::identity::SessionId::parse(TURN_SESSION).expect("nonblank host identity"),
     )
     .await
     .open()
@@ -198,7 +198,7 @@ async fn served_turn() -> Result<(Observed, LashCore)> {
     for _ in 0..2 {
         let output = session
             .send(TurnInput::text("call the tool"))
-            .id(lash::TurnId::parse(TURN).expect("nonblank host identity"))
+            .id(lash_vocabulary::identity::TurnId::parse(TURN).expect("nonblank host identity"))
             .output()
             .await?;
         assert!(
@@ -229,7 +229,7 @@ async fn a_turn_closer_exports_its_answer_only_with_output_consent() -> Result<(
         let (observed, builder) = Observed::install(builder);
         let core = builder.build(lash_facade_tests::runtime_lease_owner())?;
         let session = core
-            .session(lash::SessionId::parse("turn-answer-consent").unwrap())
+            .session(lash_vocabulary::identity::SessionId::parse("turn-answer-consent").unwrap())
             .create(lash::SessionCreation::root(mock_session_spec()))
             .await?;
         let output = session.send(TurnInput::text("answer")).output().await?;
@@ -298,7 +298,9 @@ async fn a_control_finished_turn_exports_its_value_only_with_output_consent() ->
             let (observed, builder) = Observed::install(builder);
             let core = builder.build(lash_facade_tests::runtime_lease_owner())?;
             let session = core
-                .session(lash::SessionId::parse("control-finish-answer").unwrap())
+                .session(
+                    lash_vocabulary::identity::SessionId::parse("control-finish-answer").unwrap(),
+                )
                 .create(lash::SessionCreation::root(mock_session_spec()))
                 .await?;
             let result = session.send(TurnInput::text("finish")).output().await?;
@@ -567,7 +569,7 @@ async fn observed_engine_core() -> Result<(Observed, LashCore, Arc<dyn ProcessRe
 async fn a_submitted_tool_intent_exports_one_span_for_its_settlement() -> Result<()> {
     let (observed, core, _registry) = observed_engine_core().await?;
     let ingress = core.tool_intents(
-        lash::SessionId::parse(SESSION).expect("nonblank host identity"),
+        lash_vocabulary::identity::SessionId::parse(SESSION).expect("nonblank host identity"),
         lash_core::ExecutionScope::turn(SESSION, SCOPE),
     )?;
     let intent =
@@ -665,7 +667,7 @@ async fn a_submitted_tool_intent_exports_one_span_for_its_settlement() -> Result
 async fn an_ended_process_exports_one_lash_process_span() -> Result<()> {
     let (observed, core, registry) = observed_engine_core().await?;
     let ingress = core.tool_intents(
-        lash::SessionId::parse(SESSION).expect("nonblank host identity"),
+        lash_vocabulary::identity::SessionId::parse(SESSION).expect("nonblank host identity"),
         lash_core::ExecutionScope::turn(SESSION, SCOPE),
     )?;
     let started = ingress
@@ -731,7 +733,7 @@ async fn a_parked_process_counts_one_park() -> Result<()> {
     let (observed, core, _registry) = observed_engine_core().await?;
     assert_eq!(observed.counter("lash.parked_work.parks"), 0);
     let ingress = core.tool_intents(
-        lash::SessionId::parse(SESSION).expect("nonblank host identity"),
+        lash_vocabulary::identity::SessionId::parse(SESSION).expect("nonblank host identity"),
         lash_core::ExecutionScope::turn(SESSION, SCOPE),
     )?;
     let started = ingress
@@ -896,7 +898,8 @@ async fn a_cut_attempt_names_the_response_metadata_keys_its_leaf_captured() -> R
     let core = builder.build(lash_facade_tests::runtime_lease_owner())?;
     let session = created_session(
         &core,
-        lash::SessionId::parse("emission-attempt-metadata").expect("nonblank host identity"),
+        lash_vocabulary::identity::SessionId::parse("emission-attempt-metadata")
+            .expect("nonblank host identity"),
     )
     .await
     .open()
@@ -964,7 +967,7 @@ async fn a_process_start_attributes_its_time_to_each_phase_it_reached() -> Resul
     let (observed, builder) = Observed::install(builder);
     let core = builder.build(lash_facade_tests::runtime_lease_owner())?;
     core.session(
-        lash::SessionId::parse(lash_facade_tests::session_process::PARENT)
+        lash_vocabulary::identity::SessionId::parse(lash_facade_tests::session_process::PARENT)
             .expect("nonblank session id"),
     )
     .create(lash::SessionCreation::root(mock_session_spec()))

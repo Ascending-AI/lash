@@ -31,13 +31,15 @@ mod sim;
 #[path = "support/matrix.rs"]
 mod matrix;
 
+#[path = "support/scripted_steps.rs"]
+mod scripted_steps;
+
 use matrix::MatrixTestExt as _;
 
 use std::sync::{Arc, Mutex, OnceLock, Weak};
 use std::time::Duration;
 
 use lash_core_execution::DurableSettings;
-use lash_core_execution::ProcessId;
 use lash_core_execution::ToolCallOutput;
 use lash_core_execution::runtime::actor::process::ProcessActivation;
 use lash_core_execution::runtime::process::steps::{ProcessSteps, StepAdmission, StepRefusal};
@@ -66,8 +68,10 @@ use lash_execution_contracts::process::ProcessRegistration;
 use lash_execution_contracts::process::StepName;
 use lash_execution_contracts::process::StepRequest;
 use lash_execution_contracts::projection::NoProjectionProviders;
+use lash_protocol_types::ExecutionLimit;
 use lash_protocol_types::sync::MutexExt as _;
-use lash_protocol_types::{ExecutionLimit, ExecutionPolicy};
+use lash_vocabulary::identity::ProcessId;
+use lash_vocabulary::tool_contract::ExecutionPolicy;
 use serde_json::{Value, json};
 
 use dialect::Dialect;
@@ -87,13 +91,10 @@ fn infra(error: impl std::fmt::Display) -> ProcessInfraError {
 }
 
 fn step(name: &str, tool: &str) -> StepRequest {
-    StepRequest::Tool {
+    StepRequest::Engine {
         step: StepName(name.to_owned()),
-        effect: lash_core_execution::testing::effect(tool),
-        contract: lash_core::ContractId::new("fixture"),
+        kind: lash_execution_contracts::process::EngineStepKind::new(tool),
         input: json!({ "step": name }),
-        site: None,
-        matched: None,
     }
 }
 
@@ -111,12 +112,39 @@ impl ProcessEngine for DrainEngine {
         lash_execution_contracts::process::ProcessTraceClass::Internal
     }
 
-    async fn performed_effects(
+    async fn inspect_link(
+        &self,
+        link: lash_vocabulary::LinkId,
+        selector: &lash_execution_contracts::process::linking::ReachSelector,
+    ) -> Result<
+        lash_execution_contracts::process::linking::LinkInspection,
+        lash_execution_contracts::process::linking::EnginePortError,
+    > {
+        Ok(lash_execution_contracts::process::linking::LinkInspection {
+            link,
+            document: lash_vocabulary::DocumentId::from_bytes([0; 32]),
+            selector: selector.clone(),
+            operations: Default::default(),
+            machine: Default::default(),
+            artifacts: Vec::new(),
+            signature: None,
+        })
+    }
+    async fn inspect_start(
         &self,
         _payload: &serde_json::Value,
-    ) -> Result<lash_execution_contracts::process::PerformedEffects, lash_core::ProcessEnvRefusal>
-    {
-        Ok(lash_execution_contracts::process::PerformedEffects::new())
+    ) -> Result<
+        lash_execution_contracts::process::linking::LinkInspection,
+        lash_execution_contracts::process::linking::EnginePortError,
+    > {
+        Err(
+            lash_execution_contracts::process::linking::EnginePortError::Unsupported {
+                operation: "generic fixture has no linked code".into(),
+            },
+        )
+    }
+    fn capabilities(&self) -> lash_vocabulary::claims::NodeRequirements {
+        Default::default()
     }
 
     async fn check_args(
@@ -288,10 +316,11 @@ impl ProcessSteps for DrainSteps {
         _runtime: &Arc<lash_core_execution::runtime::process::StepRuntime>,
         _process: &ProcessRecord,
         _step: &StepRequest,
+        _target: Option<&lash_core_execution::runtime::process::steps::InvocationTarget>,
         now_ms: u64,
     ) -> Result<StepAdmission, StepRefusal> {
         Ok(StepAdmission::new(
-            lash_core_execution::testing::step_tool(_step, KIND),
+            scripted_steps::tool(_step),
             ExecutionPolicy::Once,
             ExecutionLimit::starting_at(now_ms, Duration::from_secs(60), Duration::from_secs(60)),
             None,
@@ -320,9 +349,7 @@ impl ProcessSteps for DrainSteps {
         lash_core_execution::runtime::actor::round::member_body({
             let world = Arc::clone(&self.world);
             let process = process.id.clone();
-            let tool = lash_core_execution::testing::step_tool(step, KIND)
-                .as_str()
-                .to_owned();
+            let tool = scripted_steps::tool(step).as_str().to_owned();
             Box::new(move |_token| {
                 world.entries.lock_recover().push(tool.clone());
                 Box::pin(async move {

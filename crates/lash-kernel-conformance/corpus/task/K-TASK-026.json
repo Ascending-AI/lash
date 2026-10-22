@@ -3,7 +3,7 @@
   "cases": [
     {
       "name": "an await gives what its policy returns for the value",
-      "document": "kernel 1\nnumbers by_spelling\nuse list.len = @70d92c79f9c69cfe8cda0752cf30f5f0db0499a1bbffeeed9e2abddad9cf302b\nmain { let xs = [1, 2] let n = await xs via list.len finish n }\n",
+      "document": "kernel 1\nnumbers by_spelling\nnative @40590fcc56fe886746ecbc896b0342e86e0f5b80b06165b243b68224d4fea6d8\ndefinition \"function list.len(xs: List(Any)) -> Int\\nkernel 1\\nerrors \\\"cyclic_value\\\", \\\"index_out_of_range\\\", \\\"invalid_key\\\", \\\"key_missing\\\", \\\"too_deep\\\", \\\"type_error\\\"\\ncharge 1\\nnative\\n\"\nmain {\n  let xs = [1, 2]\n  let n = await xs via list.len\n  finish n\n}\n",
       "expected": {
         "prints": [],
         "end": {

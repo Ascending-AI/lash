@@ -220,9 +220,9 @@ impl Rendezvous {
     }
 }
 
-fn leaf_definition(name: &str) -> lash_core::ToolDefinition {
+fn leaf_definition(name: &str) -> lash_vocabulary::tool_contract::ToolDefinition {
     let object = serde_json::json!({ "type": "object", "additionalProperties": true });
-    let definition = lash_core::ToolDefinition::raw(
+    let definition = lash_vocabulary::tool_contract::ToolDefinition::raw(
         format!("tool:{name}"),
         format!("tools.{name}"),
         "A rendezvous leaf: answers once its whole group has started.",
@@ -234,8 +234,8 @@ fn leaf_definition(name: &str) -> lash_core::ToolDefinition {
     if name == DEFERRED_LEAF {
         definition
             .with_declaration(
-                lash_core::ToolDeclaration::deferring(),
-                Some(lash_core::ParkBound::Within(
+                lash_vocabulary::tool_declaration::ToolDeclaration::deferring(),
+                Some(lash_vocabulary::tool_contract::ParkBound::Within(
                     std::time::Duration::from_secs(120),
                 )),
             )
@@ -263,7 +263,7 @@ impl lash_core::ToolProvider for Leaves {
         &self,
         _config: &lash_core::OwnerConfigView,
     ) -> std::result::Result<
-        Vec<lash_core::ToolManifest>,
+        Vec<lash_vocabulary::tool_contract::ToolManifest>,
         lash_execution_contracts::plugin_error::PluginError,
     > {
         Ok({
@@ -276,9 +276,9 @@ impl lash_core::ToolProvider for Leaves {
 
     fn resolve_manifest_by_id(
         &self,
-        id: &lash_core::ToolId,
+        id: &lash_vocabulary::tool_contract::ToolId,
         _config: &lash_core::OwnerConfigView,
-    ) -> Option<lash_core::ToolManifest> {
+    ) -> Option<lash_vocabulary::tool_contract::ToolManifest> {
         [LEAF, DEFERRED_LEAF, GRANTED_LEAF]
             .into_iter()
             .map(leaf_definition)
@@ -290,7 +290,7 @@ impl lash_core::ToolProvider for Leaves {
         &self,
         name: &str,
         _config: &lash_core::OwnerConfigView,
-    ) -> Option<Arc<lash_core::ToolContract>> {
+    ) -> Option<Arc<lash_vocabulary::tool_contract::ToolContract>> {
         let (_, name) = name.split_once('.')?;
         [LEAF, DEFERRED_LEAF, GRANTED_LEAF]
             .contains(&name)
@@ -350,7 +350,7 @@ impl lash_core::ToolProvider for GrantedLeaves {
         &self,
         _config: &lash_core::OwnerConfigView,
     ) -> std::result::Result<
-        Vec<lash_core::ToolManifest>,
+        Vec<lash_vocabulary::tool_contract::ToolManifest>,
         lash_execution_contracts::plugin_error::PluginError,
     > {
         Ok(Vec::new())
@@ -360,7 +360,7 @@ impl lash_core::ToolProvider for GrantedLeaves {
         &self,
         _name: &str,
         _config: &lash_core::OwnerConfigView,
-    ) -> Option<Arc<lash_core::ToolContract>> {
+    ) -> Option<Arc<lash_vocabulary::tool_contract::ToolContract>> {
         None
     }
 
@@ -382,7 +382,7 @@ impl lash::tools::DeferredToolProvider for GrantedLeaves {
                 let outcome = if *path == format!("tools.{GRANTED_LEAF}") {
                     lash::tools::DeferredOutcome::resolved(
                         lash::plugins::ToolProviderHandle::new(
-                            lash::plugins::RegistryKind::Session,
+                            lash_vocabulary::claims::RegistryKind::Session,
                             "tools",
                             lash::tool_provider_key!("tools"),
                         ),
@@ -861,7 +861,7 @@ async fn refusals(
 ) -> Vec<lash_core::ToolFailure> {
     let session = world
         .core
-        .session(lash::SessionId::parse(name).unwrap())
+        .session(lash_vocabulary::identity::SessionId::parse(name).unwrap())
         .durable()
         .await
         .unwrap();
@@ -1145,8 +1145,8 @@ impl Witness {
 
 const SUGAR_TOOLS: [&str; 2] = ["echo", "guarded"];
 
-fn sugar_tool(name: &str) -> lash_core::ToolDefinition {
-    lash_core::ToolDefinition::raw(
+fn sugar_tool(name: &str) -> lash_vocabulary::tool_contract::ToolDefinition {
+    lash_vocabulary::tool_contract::ToolDefinition::raw(
         format!("tool:{name}"),
         format!("tools.{name}"),
         "Records each execution and answers its value.",
@@ -1173,7 +1173,7 @@ impl lash_core::ToolProvider for SugarTools {
         &self,
         _config: &lash_core::OwnerConfigView,
     ) -> std::result::Result<
-        Vec<lash_core::ToolManifest>,
+        Vec<lash_vocabulary::tool_contract::ToolManifest>,
         lash_execution_contracts::plugin_error::PluginError,
     > {
         Ok({
@@ -1188,7 +1188,7 @@ impl lash_core::ToolProvider for SugarTools {
         &self,
         name: &str,
         _config: &lash_core::OwnerConfigView,
-    ) -> Option<Arc<lash_core::ToolContract>> {
+    ) -> Option<Arc<lash_vocabulary::tool_contract::ToolContract>> {
         let (_, name) = name.split_once('.')?;
         SUGAR_TOOLS
             .contains(&name)
@@ -1415,7 +1415,7 @@ async fn batch_admission_and_identity_contract(tier: Tier) {
     let view = world.read(context).await;
     let session = world
         .core
-        .session(lash::SessionId::from(context))
+        .session(lash_vocabulary::identity::SessionId::from(context))
         .durable()
         .await
         .unwrap();
@@ -1574,7 +1574,7 @@ async fn batch_admission_and_identity_contract(tier: Tier) {
     assert_eq!(status, lash_protocol_types::ToolCallStatus::Failure);
     let session = world
         .core
-        .session(lash::SessionId::from(context))
+        .session(lash_vocabulary::identity::SessionId::from(context))
         .durable()
         .await
         .unwrap();

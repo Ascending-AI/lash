@@ -1,5 +1,5 @@
 use super::*;
-use lash_protocol_types::SessionId;
+use lash_vocabulary::identity::SessionId;
 
 const HARDENING_IDENTITY_ITERATIONS: usize = 64;
 const HARDENING_PRUNE_BATCH: usize = 16;
@@ -397,7 +397,7 @@ async fn measure_store_hardening_backend_turn(
 /// fork's head leaf.
 struct HardeningHistoryFork {
     session_id: SessionId,
-    fork_point: lash_core::NodeId,
+    fork_point: lash_vocabulary::identity::NodeId,
 }
 
 /// The history-read hot path: one-node pages from the head and from a

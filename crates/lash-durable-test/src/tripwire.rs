@@ -11,7 +11,8 @@
 use lash_durable::domain::{AdmittedId, ExecKey, Ordinal, OwnerKey, RunSeq};
 use lash_durable::{ActorKey, CommitLabel, DurableError, DurableProbe, Epoch, OwnerCut, OwnerRead};
 use lash_protocol_types::sync::MutexExt as _;
-use lash_protocol_types::{SessionId, TurnId};
+use lash_vocabulary::identity::SessionId;
+use lash_vocabulary::identity::TurnId;
 use std::collections::BTreeMap;
 use std::sync::Mutex;
 

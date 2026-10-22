@@ -22,5 +22,5 @@ pub(crate) use edit::Edit;
 pub use edit::{Position, Transaction};
 pub use extract::{Extraction, extract_entry};
 pub use refusal::{EditDiagnostic, EditDiagnosticKind, EditRefusal, Location};
-pub use relink::RelinkRefusal;
+
 pub use tree::NodeClass;

@@ -3,7 +3,7 @@
   "cases": [
     {
       "name": "any skips failures and selects first succeeded member",
-      "document": "kernel 1\nnumbers by_spelling\nfn bad() { throw 1 } fn good() { return 2 }\nmain {\nlet a = spawn call bad() let b = spawn call good() let tasks = [a, b] let answer = join any tasks finish answer\n}\n",
+      "document": "kernel 1\nnumbers by_spelling\ndefinition \"function bad() -> Any\\nkernel 1\\nmetering statements\\nbody {\\n  throw 1\\n}\\n\"\ndefinition \"function good() -> Any\\nkernel 1\\nmetering statements\\nbody {\\n  return 2\\n}\\n\"\nmain {\n  let a = spawn invoke bad()\n  let b = spawn invoke good()\n  let tasks = [a, b]\n  let answer = join any tasks\n  finish answer\n}\n",
       "expected": {
         "prints": [],
         "end": {

@@ -17,7 +17,7 @@ impl DialectPrompts for TypescriptPrompts {
 
     fn schema_type(
         &self,
-        shape: &lash_tool_shape::SchemaShape,
+        shape: &lash_vocabulary::tool_shape::SchemaShape,
     ) -> Result<String, lash_tool_presenter_api::PresentationRefusal> {
         lash_tool_presenter_typescript::render_schema_shape(shape).map_err(Into::into)
     }
@@ -25,7 +25,7 @@ impl DialectPrompts for TypescriptPrompts {
     fn schema_definition(
         &self,
         name: &str,
-        shape: &lash_tool_shape::SchemaShape,
+        shape: &lash_vocabulary::tool_shape::SchemaShape,
     ) -> Result<String, lash_tool_presenter_api::PresentationRefusal> {
         lash_tool_presenter_typescript::schema_definition(name, shape).map_err(Into::into)
     }

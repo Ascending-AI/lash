@@ -34,7 +34,7 @@ pub struct LaunchReceipt {
     /// child's value only.
     pub outcome: lash_execution_contracts::tool_intent_outcome::ToolIntentExecutionOutcome,
     /// The child the start registered, when it realized.
-    pub process_id: Option<crate::ProcessId>,
+    pub process_id: Option<lash_vocabulary::identity::ProcessId>,
 }
 
 /// Stage the start a parked call declared, under the start's own admission
@@ -109,7 +109,7 @@ pub(super) fn unbound_declaration(
             lash_execution_contracts::tool_intent_outcome::ToolIntentExecutionOutcome::Refused {
                 identity: Some(declaring.clone()),
                 intent_index: declaring.intent_index,
-                kind: crate::ToolIntentKind::StartProcess,
+                kind: lash_vocabulary::ToolIntentKind::StartProcess,
                 refusal,
             },
         process_id: None,
@@ -178,7 +178,7 @@ mod intent_shape_laws {
         let outcome = lash_execution_contracts::tool_intent_outcome::ToolIntentExecutionOutcome::Refused {
             identity: None,
             intent_index: 0,
-            kind: crate::ToolIntentKind::StartProcess,
+            kind: lash_vocabulary::ToolIntentKind::StartProcess,
             refusal: lash_execution_contracts::tool_intent_outcome::ToolIntentRefusalReason::CommandFailed {
                 cause: lash_execution_contracts::plugin_error::ToolIntentCommandFailure::from(&error),
             },
@@ -210,7 +210,9 @@ mod intent_shape_laws {
     #[test]
     fn realized_start_cannot_decode_without_its_handle() {
         let identity = lash_execution_contracts::tool_intent::derive_tool_intent_identity(
-            &crate::RuntimeOwner::Session(crate::SessionId::from("session")),
+            &lash_vocabulary::identity::RuntimeOwner::Session(
+                lash_vocabulary::identity::SessionId::from("session"),
+            ),
             "turn",
             &crate::ToolCallId::fixture("call"),
             0,

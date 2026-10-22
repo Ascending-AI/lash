@@ -66,7 +66,9 @@ async fn whitespace_only_text_does_not_split_terminal_history() {
     .build(lash_facade_tests::runtime_lease_owner())
     .expect("standard core");
     let session = core
-        .session(lash::SessionId::from("whitespace-response-session"))
+        .session(lash_vocabulary::identity::SessionId::from(
+            "whitespace-response-session",
+        ))
         .create(lash::SessionCreation::root(mock_session_spec()))
         .await
         .expect("created");
@@ -139,8 +141,8 @@ struct CountingTools {
     executed: Arc<AtomicUsize>,
 }
 
-fn status_tool() -> lash_core::ToolDefinition {
-    lash_core::ToolDefinition::raw(
+fn status_tool() -> lash_vocabulary::tool_contract::ToolDefinition {
+    lash_vocabulary::tool_contract::ToolDefinition::raw(
         "tool:status",
         "tools.status",
         "",
@@ -162,7 +164,10 @@ impl ToolProvider for CountingTools {
     fn tool_manifests(
         &self,
         _config: &lash_core::OwnerConfigView,
-    ) -> std::result::Result<Vec<lash_core::ToolManifest>, lash::plugins::PluginError> {
+    ) -> std::result::Result<
+        Vec<lash_vocabulary::tool_contract::ToolManifest>,
+        lash::plugins::PluginError,
+    > {
         Ok(vec![status_tool().manifest()])
     }
 
@@ -170,7 +175,7 @@ impl ToolProvider for CountingTools {
         &self,
         name: &str,
         _config: &lash_core::OwnerConfigView,
-    ) -> Option<Arc<lash_core::ToolContract>> {
+    ) -> Option<Arc<lash_vocabulary::tool_contract::ToolContract>> {
         (name == "tools.status").then(|| Arc::new(status_tool().contract()))
     }
 
@@ -204,7 +209,9 @@ async fn malformed_tool_arguments_are_refused_not_dispatched() {
     .build(lash_facade_tests::runtime_lease_owner())
     .expect("standard core");
     let session = core
-        .session(lash::SessionId::from("malformed-args-session"))
+        .session(lash_vocabulary::identity::SessionId::from(
+            "malformed-args-session",
+        ))
         .create(lash::SessionCreation::root(mock_session_spec()))
         .await
         .expect("created");
@@ -328,8 +335,8 @@ struct DiscoveryTools {
     refused: Arc<AtomicUsize>,
 }
 
-fn discovery_tool(name: &str, inline: bool) -> lash_core::ToolDefinition {
-    let mut tool = lash_core::ToolDefinition::raw(
+fn discovery_tool(name: &str, inline: bool) -> lash_vocabulary::tool_contract::ToolDefinition {
+    let mut tool = lash_vocabulary::tool_contract::ToolDefinition::raw(
         format!("tool:{name}"),
         name,
         "discovery refusal regression tool",
@@ -352,7 +359,10 @@ impl ToolProvider for DiscoveryTools {
     fn tool_manifests(
         &self,
         _config: &lash_core::OwnerConfigView,
-    ) -> std::result::Result<Vec<lash_core::ToolManifest>, lash::plugins::PluginError> {
+    ) -> std::result::Result<
+        Vec<lash_vocabulary::tool_contract::ToolManifest>,
+        lash::plugins::PluginError,
+    > {
         Ok({
             vec![
                 discovery_tool("tools.search", true).manifest(),
@@ -365,7 +375,7 @@ impl ToolProvider for DiscoveryTools {
         &self,
         name: &str,
         _config: &lash_core::OwnerConfigView,
-    ) -> Option<Arc<lash_core::ToolContract>> {
+    ) -> Option<Arc<lash_vocabulary::tool_contract::ToolContract>> {
         match name {
             "tools.search" => Some(Arc::new(discovery_tool(name, true).contract())),
             "tools.catalog_only" => Some(Arc::new(discovery_tool(name, false).contract())),
@@ -423,7 +433,7 @@ async fn assert_discovery_refusal_is_reported_and_accounted(mixed: bool) {
         LashCore::builder(sqlite_memory_store_backend().await).protocol_plugin(Arc::new(
             lash_protocol_standard::StandardProtocolPluginFactory::with_config(
                 lash_protocol_standard::StandardProtocolConfig {
-                    discovery: Some(lash_core::ToolDiscovery {
+                    discovery: Some(lash_vocabulary::tool_contract::ToolDiscovery {
                         operation: "tools.search".to_string(),
                     }),
                     ..lash_protocol_standard::StandardProtocolConfig::default()
@@ -451,7 +461,7 @@ async fn assert_discovery_refusal_is_reported_and_accounted(mixed: bool) {
         "discovery-refusal-all"
     };
     let session = core
-        .session(lash::SessionId::from(session_id))
+        .session(lash_vocabulary::identity::SessionId::from(session_id))
         .create(lash::SessionCreation::root(mock_session_spec()))
         .await
         .expect("created");
@@ -598,8 +608,8 @@ fn tool_calling_provider_response(n: usize) -> LlmResponse {
 
 struct LookupTool;
 
-fn lookup_tool() -> lash_core::ToolDefinition {
-    lash_core::ToolDefinition::raw(
+fn lookup_tool() -> lash_vocabulary::tool_contract::ToolDefinition {
+    lash_vocabulary::tool_contract::ToolDefinition::raw(
         "tool:lookup",
         "tools.lookup",
         "",
@@ -615,7 +625,10 @@ impl ToolProvider for LookupTool {
     fn tool_manifests(
         &self,
         _config: &lash_core::OwnerConfigView,
-    ) -> std::result::Result<Vec<lash_core::ToolManifest>, lash::plugins::PluginError> {
+    ) -> std::result::Result<
+        Vec<lash_vocabulary::tool_contract::ToolManifest>,
+        lash::plugins::PluginError,
+    > {
         Ok(vec![lookup_tool().manifest()])
     }
 
@@ -623,7 +636,7 @@ impl ToolProvider for LookupTool {
         &self,
         name: &str,
         _config: &lash_core::OwnerConfigView,
-    ) -> Option<Arc<lash_core::ToolContract>> {
+    ) -> Option<Arc<lash_vocabulary::tool_contract::ToolContract>> {
         (name == "tools.lookup").then(|| Arc::new(lookup_tool().contract()))
     }
 
@@ -660,7 +673,7 @@ async fn persisted_provider_parts(
     .build(lash_facade_tests::runtime_lease_owner())
     .expect("standard core");
     let session = core
-        .session(lash::SessionId::from(session_id))
+        .session(lash_vocabulary::identity::SessionId::from(session_id))
         .create(lash::SessionCreation::root(mock_session_spec()))
         .await
         .expect("created");
@@ -774,7 +787,9 @@ async fn a_terminal_required_standard_session_ends_through_finish() {
     .build(lash_facade_tests::runtime_lease_owner())
     .expect("standard core");
     let session = core
-        .session(lash::SessionId::from("terminal-required-standard"))
+        .session(lash_vocabulary::identity::SessionId::from(
+            "terminal-required-standard",
+        ))
         .create(lash::SessionCreation::root(
             mock_session_spec()
                 .plugin(
