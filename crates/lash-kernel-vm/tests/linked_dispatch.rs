@@ -408,7 +408,7 @@ fn callable_start_installs_the_captured_environment() {
     };
     let link_id = link.identity();
     let registry = FunctionRegistry::new();
-    let program = Program::prepare(
+    let mut program = Program::prepare(
         link_id,
         BTreeMap::from([(document_id, Arc::new(document))]),
         &BTreeMap::from([(link_id, link)]),
@@ -416,6 +416,7 @@ fn callable_start_installs_the_captured_environment() {
         PreparedLibrary::new(Arc::new(registry)),
     )
     .unwrap_or_else(|error| panic!("linked law fixture: {error:?}"));
+    program.functions.insert(function);
     let target = Target::Callable(Box::new(lash_kernel_doc::FunctionValue {
         callable: lash_vocabulary::CallableId {
             link: link_id,
