@@ -488,13 +488,13 @@ pub fn fork_checkpoint_plugin_state(
             StateFork::Reset => {
                 checkpoint
                     .components
-                    .remove(&namespace_component_key(&plugin));
+                    .remove(&namespace_component_key(&plugin))?;
             }
         }
     }
     // A catalog fork is in the source store: its copied roots already exist.
     // The hydrated closure is a read view, not a new publication.
-    checkpoint.namespace_nodes.clear();
+    checkpoint.namespace_nodes.clear()?;
     if forked == map {
         return Ok(false);
     }
@@ -506,7 +506,7 @@ pub fn fork_checkpoint_plugin_state(
     checkpoint.components.insert(
         key.to_owned(),
         crate::store::HydratedCheckpointComponent::changed_for_fleet(body, fleet_format),
-    );
+    )?;
     Ok(true)
 }
 
@@ -595,8 +595,9 @@ mod keyed_publication_tests {
                 components: BTreeMap::from([(
                     key.clone(),
                     crate::store::HydratedCheckpointComponent::changed(after.bytes.clone()),
-                )]),
-                namespace_nodes: after.graph.clone(),
+                )])
+                .into(),
+                namespace_nodes: after.graph.clone().into(),
                 ..Default::default()
             };
             assert_eq!(

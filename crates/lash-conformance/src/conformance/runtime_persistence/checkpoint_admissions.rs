@@ -33,24 +33,28 @@ where
         "known-execution-state",
     ));
     let mut first_commit = RuntimeCommit::persisted_state_for_test(&state);
-    first_commit.checkpoint.components.extend([
-        (
-            "arbitrary/unchanged".to_string(),
-            crate::HydratedCheckpointComponent::changed(b"stable-body".to_vec()),
-        ),
-        (
-            "arbitrary/duplicate-ref".to_string(),
-            crate::HydratedCheckpointComponent::changed(b"stable-body".to_vec()),
-        ),
-        (
-            "arbitrary/deleted".to_string(),
-            crate::HydratedCheckpointComponent::changed(b"delete-me".to_vec()),
-        ),
-        (
-            "arbitrary/changed".to_string(),
-            crate::HydratedCheckpointComponent::changed(b"before".to_vec()),
-        ),
-    ]);
+    first_commit
+        .checkpoint
+        .components
+        .extend([
+            (
+                "arbitrary/unchanged".to_string(),
+                crate::HydratedCheckpointComponent::changed(b"stable-body".to_vec()),
+            ),
+            (
+                "arbitrary/duplicate-ref".to_string(),
+                crate::HydratedCheckpointComponent::changed(b"stable-body".to_vec()),
+            ),
+            (
+                "arbitrary/deleted".to_string(),
+                crate::HydratedCheckpointComponent::changed(b"delete-me".to_vec()),
+            ),
+            (
+                "arbitrary/changed".to_string(),
+                crate::HydratedCheckpointComponent::changed(b"before".to_vec()),
+            ),
+        ])
+        .expect("fixture allocation admitted");
     let first =
         commit_runtime_state_for_test(&open, first_commit, "checkpoint-component-refs-first")
             .await
@@ -141,11 +145,16 @@ where
     third_commit
         .checkpoint
         .components
-        .remove("arbitrary/deleted");
-    third_commit.checkpoint.components.insert(
-        "arbitrary/changed".to_string(),
-        crate::HydratedCheckpointComponent::changed(b"after".to_vec()),
-    );
+        .remove("arbitrary/deleted")
+        .expect("fixture allocation admitted");
+    third_commit
+        .checkpoint
+        .components
+        .insert(
+            "arbitrary/changed".to_string(),
+            crate::HydratedCheckpointComponent::changed(b"after".to_vec()),
+        )
+        .expect("fixture allocation admitted");
     let third =
         commit_runtime_state_for_test(&reopen, third_commit, "checkpoint-component-refs-third")
             .await
@@ -218,17 +227,21 @@ where
     .expect("reload current state before rejection laws")
     .expect("current checkpoint state before rejection laws");
     let mut unknown = RuntimeCommit::persisted_state_for_test(&state);
-    unknown.checkpoint.components.insert(
-        "arbitrary/unknown-ref".to_string(),
-        crate::HydratedCheckpointComponent::Unchanged {
-            descriptor: crate::CheckpointComponentDescriptor {
-                blob_ref: crate::BlobRef("never-stored".to_string()).into(),
-                encoding_version: crate::FleetFormat::current().writer_version(
-                    lash_core::surface_format!(CHECKPOINT_COMPONENT_ENCODING_VERSION),
-                ),
+    unknown
+        .checkpoint
+        .components
+        .insert(
+            "arbitrary/unknown-ref".to_string(),
+            crate::HydratedCheckpointComponent::Unchanged {
+                descriptor: crate::CheckpointComponentDescriptor {
+                    blob_ref: crate::BlobRef("never-stored".to_string()).into(),
+                    encoding_version: crate::FleetFormat::current().writer_version(
+                        lash_core::surface_format!(CHECKPOINT_COMPONENT_ENCODING_VERSION),
+                    ),
+                },
             },
-        },
-    );
+        )
+        .expect("fixture allocation admitted");
     let unknown_error = cold_reopen
         .commit_runtime_state(unknown)
         .await
@@ -240,16 +253,20 @@ where
     ));
 
     let mut mismatch = RuntimeCommit::persisted_state_for_test(&state);
-    mismatch.checkpoint.components.insert(
-        "arbitrary/versioned".to_string(),
-        crate::HydratedCheckpointComponent::Changed {
-            encoding_version: crate::FleetFormat::current().writer_version(
-                lash_core::surface_format!(CHECKPOINT_COMPONENT_ENCODING_VERSION),
-            ) + 1,
-            body_ref: crate::store::BlobRef::for_content(b"unsupported").into(),
-            body: b"unsupported".as_slice().into(),
-        },
-    );
+    mismatch
+        .checkpoint
+        .components
+        .insert(
+            "arbitrary/versioned".to_string(),
+            crate::HydratedCheckpointComponent::Changed {
+                encoding_version: crate::FleetFormat::current().writer_version(
+                    lash_core::surface_format!(CHECKPOINT_COMPONENT_ENCODING_VERSION),
+                ) + 1,
+                body_ref: crate::store::BlobRef::for_content(b"unsupported").into(),
+                body: b"unsupported".as_slice().into(),
+            },
+        )
+        .expect("fixture allocation admitted");
     let mismatch_error = cold_reopen
         .commit_runtime_state(mismatch)
         .await
@@ -283,18 +300,24 @@ pub async fn checkpoint_rejects_unknown_component_ref(store: Arc<dyn RuntimeStor
         ))
     };
     let mut commit = RuntimeCommit::persisted_state_for_test(&state);
-    commit.checkpoint.components.insert(
-        "arbitrary/unknown-ref".to_string(),
-        crate::HydratedCheckpointComponent::Unchanged {
-            descriptor: crate::CheckpointComponentDescriptor {
-                blob_ref: crate::BlobRef("checkpoint-component-that-was-never-stored".to_string())
+    commit
+        .checkpoint
+        .components
+        .insert(
+            "arbitrary/unknown-ref".to_string(),
+            crate::HydratedCheckpointComponent::Unchanged {
+                descriptor: crate::CheckpointComponentDescriptor {
+                    blob_ref: crate::BlobRef(
+                        "checkpoint-component-that-was-never-stored".to_string(),
+                    )
                     .into(),
-                encoding_version: crate::FleetFormat::current().writer_version(
-                    lash_core::surface_format!(CHECKPOINT_COMPONENT_ENCODING_VERSION),
-                ),
+                    encoding_version: crate::FleetFormat::current().writer_version(
+                        lash_core::surface_format!(CHECKPOINT_COMPONENT_ENCODING_VERSION),
+                    ),
+                },
             },
-        },
-    );
+        )
+        .expect("fixture allocation admitted");
 
     let error = commit_runtime_state_for_test(&store, commit, "checkpoint-unknown-ref")
         .await
