@@ -685,6 +685,22 @@ impl BackendRunner {
                 .await
                 .map_err(|error| StoreError::Backend(error.to_string()))?;
                 let resolutions = stores.execution_resolutions();
+                let missing = lash_core_store::resolutions::ResolutionKey {
+                    execution: lash_core_store::resolutions::ExecutionId(
+                        "process:unregistered-resolution".to_owned(),
+                    ),
+                    use_: lash_vocabulary::names::OperationUse {
+                        link: lash_vocabulary::package::LinkId::from_bytes([0; 32]),
+                        slot: lash_vocabulary::names::ImportSlot(0),
+                    },
+                };
+                assert!(
+                    resolutions
+                        .load(&missing)
+                        .await
+                        .map_err(|error| StoreError::Backend(error.to_string()))?
+                        .is_none()
+                );
                 assert_eq!(
                     resolutions
                         .requirements(

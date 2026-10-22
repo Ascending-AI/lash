@@ -263,7 +263,7 @@ async fn requirements(
     tx: &mut PgConnection,
     actor: &lash_durable::ActorKey,
 ) -> Result<lash_durable::resolutions::ClaimRequirements, DurableError> {
-    let rows: Vec<(String, i64)> = crate::observed_sql::query_as(SQL.requirements_rows.sql())
+    let rows: Vec<(String, i32)> = crate::observed_sql::query_as(SQL.requirements_rows.sql())
         .bind(actor.as_str())
         .fetch_all(crate::observed_sql::executor(&mut *tx))
         .await
