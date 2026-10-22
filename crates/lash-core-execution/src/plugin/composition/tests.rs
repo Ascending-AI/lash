@@ -986,7 +986,11 @@ fn a_process_admits_exactly_the_callback_slots_it_runs() {
     let mut reg = PluginRegistrar::<Owner>::new("test_protocol");
     every_contribution(&mut reg);
     let state = Arc::new(std::sync::Mutex::new(
-        crate::plugin::state::PluginStateRegistry::from_snapshot(None),
+        crate::plugin::state::PluginStateRegistry::from_snapshot(
+            None,
+            &lash_protocol_types::allocation::AllocationBudget::unowned(),
+        )
+        .unwrap(),
     ));
     let mut bound = BoundRegistrar::for_process("test_protocol".to_owned());
     reg.bind(
