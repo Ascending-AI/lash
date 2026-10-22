@@ -3,7 +3,7 @@
   "cases": [
     {
       "name": "div: K-NUM-004 edge",
-      "function": "e14bda27238ed858ee9307d2c894b3400add981ebb21583bd441b5531f49321a",
+      "function": "fd5f2d08b3f838ee342e7a86f9125313b8d7b935ce69224393971ad403247399",
       "args": [
         {
           "int": "2"
@@ -24,7 +24,7 @@
     },
     {
       "name": "float.div: K-NUM-004 edge",
-      "function": "62128f6d6ce64974a5d079577417e86f8c7f6ecddae08d26b289ee3b2bddc751",
+      "function": "10688e0ffeea5429c3bfce439b1c0a6ae46a4ac0e2199bfad5335007c9f1821e",
       "args": [
         {
           "float": "2.0"
@@ -45,7 +45,7 @@
     },
     {
       "name": "int.div: K-NUM-004 edge",
-      "function": "b371d8e2fd14928cfdd732941ee524dbbde0a2c0c99d2fa7706b168e84f20d30",
+      "function": "6298771a1b50c4560b473f982268bc491494b1773704a6823b502cf3e1b9c77f",
       "args": [
         {
           "int": "2"
@@ -66,7 +66,7 @@
     },
     {
       "name": "num.div: K-NUM-004 edge",
-      "function": "911f0bcde803695098852e1c76b7506de3978c961cfdbe375faa942a23b85211",
+      "function": "3c5fb29c062dc4bd5960f318c0e6c0396a8910e64ee49e8d207802dc1e82517a",
       "args": [
         {
           "int": "2"

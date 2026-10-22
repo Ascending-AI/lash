@@ -103,6 +103,23 @@
       ],
       "type": "object"
     },
+    "CallableId": {
+      "additionalProperties": false,
+      "description": "A stored function under its defining Link. Calls and escaped captures retain this Link.",
+      "properties": {
+        "function": {
+          "$ref": "#/$defs/FunctionId"
+        },
+        "link": {
+          "$ref": "#/$defs/LinkId"
+        }
+      },
+      "required": [
+        "link",
+        "function"
+      ],
+      "type": "object"
+    },
     "CancelOrigin": {
       "description": "The runtime or actor decision that requested cancellation of a process\nor of a tool call's attempt. `RunClosing` is a call's owning tool Run\ndischarging its cancellation at Closing while the turn itself runs on.",
       "enum": [
@@ -255,7 +272,7 @@
               "type": "string"
             },
             "operation": {
-              "$ref": "#/$defs/QualifiedName"
+              "$ref": "#/$defs/FunctionName"
             },
             "unit": {
               "$ref": "#/$defs/Unit"
@@ -1000,6 +1017,10 @@
       "pattern": "^[0-9a-f]{64}$",
       "type": "string"
     },
+    "FunctionName": {
+      "pattern": "^[A-Za-z_][A-Za-z0-9_]*(\\.[A-Za-z_][A-Za-z0-9_]*)*$",
+      "type": "string"
+    },
     "GenerationOptionOutcome": {
       "description": "What became of one host-set generation setting on one request.\n\nA setting a host sets is sent, or the call is refused before any I/O with a\ntyped failure; nothing is silently dropped. The receipt therefore names only\nthe two deliberate non-send dispositions besides `Applied`: a cap reduced to\nthe model's capacity, and stop sequences a protocol owns. `Applied` means\nlash put the value on the wire, never that the provider complied.",
       "oneOf": [
@@ -1686,10 +1707,6 @@
       ],
       "type": "object"
     },
-    "QualifiedName": {
-      "pattern": "^[A-Za-z_][A-Za-z0-9_]*(\\.[A-Za-z_][A-Za-z0-9_]*)*$",
-      "type": "string"
-    },
     "ResponsePhase": {
       "description": "Provider replay phase tag: the two-value vocabulary the kernel interprets\n(`\"commentary\"`/`\"final_answer\"` on the wire). An unknown spelling fails\ndecoding rather than silently meaning \"neither\".",
       "enum": [
@@ -2211,6 +2228,9 @@
           "description": "The call the admission bound the step to.",
           "type": "string"
         },
+        "origin": {
+          "$ref": "#/$defs/Site"
+        },
         "process_id": {
           "type": "string"
         }
@@ -2218,6 +2238,7 @@
       "required": [
         "process_id",
         "at",
+        "origin",
         "call_id",
         "attempt"
       ],
@@ -3335,6 +3356,45 @@
       ],
       "type": "object"
     },
+    "TraceExecutionCode": {
+      "description": "Recorded code identity for diagnostics. Captures remain in kernel input.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "start",
+              "type": "string"
+            },
+            "value": {
+              "$ref": "#/$defs/LinkedStart"
+            }
+          },
+          "required": [
+            "kind",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "callable",
+              "type": "string"
+            },
+            "value": {
+              "$ref": "#/$defs/CallableId"
+            }
+          },
+          "required": [
+            "kind",
+            "value"
+          ],
+          "type": "object"
+        }
+      ]
+    },
     "TraceLanguageChildExecution": {
       "properties": {
         "attempt": {
@@ -3551,7 +3611,7 @@
           "type": "integer"
         },
         "document": {
-          "$ref": "#/$defs/LinkedStart"
+          "$ref": "#/$defs/TraceExecutionCode"
         },
         "engine_execution_id": {
           "type": [

@@ -3,7 +3,7 @@
   "cases": [
     {
       "name": "float.parse: K-VAL-031 edge",
-      "function": "a4262f9eeb1b48f06aef5450c638868fb05b4b52b7a5df3aec00257c0ef7f9ae",
+      "function": "45e080852f949006a2a263a2887cbfae92bc7e04b9d4a0180a2d5ed4fdbf09a7",
       "args": [
         {
           "text": "-0.0"
@@ -21,7 +21,7 @@
     },
     {
       "name": "float.to_text: K-VAL-031 edge",
-      "function": "957826df86783362d38a492b8f352cbb455383fc80c31ad8a47fa6fe2bec525c",
+      "function": "f6644f1ee14ded1f172a3be500ee8f24df35cd7eede2391f93ee643d3d0c2fa3",
       "args": [
         {
           "float": "1e16"

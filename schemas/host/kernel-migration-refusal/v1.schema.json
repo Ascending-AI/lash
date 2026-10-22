@@ -70,7 +70,7 @@
               "$ref": "#/$defs/FunctionId"
             },
             "name": {
-              "$ref": "#/$defs/QualifiedName"
+              "$ref": "#/$defs/FunctionName"
             },
             "reason": {
               "const": "function_retired",
@@ -88,7 +88,7 @@
           "description": "The rewrite performs `operation` under another requirement than the\ndocument did: adoption never moves code onto a changed operation\ncontract.",
           "properties": {
             "operation": {
-              "$ref": "#/$defs/QualifiedName"
+              "$ref": "#/$defs/FunctionName"
             },
             "reason": {
               "const": "operation_contract_changed",
@@ -137,6 +137,10 @@
     },
     "FunctionId": {
       "pattern": "^[0-9a-f]{64}$",
+      "type": "string"
+    },
+    "FunctionName": {
+      "pattern": "^[A-Za-z_][A-Za-z0-9_]*(\\.[A-Za-z_][A-Za-z0-9_]*)*$",
       "type": "string"
     },
     "LinkId": {
@@ -248,10 +252,6 @@
           "type": "object"
         }
       ]
-    },
-    "QualifiedName": {
-      "pattern": "^[A-Za-z_][A-Za-z0-9_]*(\\.[A-Za-z_][A-Za-z0-9_]*)*$",
-      "type": "string"
     },
     "Site": {
       "additionalProperties": false,

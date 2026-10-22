@@ -86,7 +86,7 @@ impl InlineRequest {
             Self::Unlinked { .. } => None,
         }
     }
-    pub fn artifacts(&self) -> Vec<lash_core::ArtifactName> {
+    pub(crate) fn links(&self) -> std::collections::BTreeSet<lash_vocabulary::package::LinkId> {
         let mut links = std::collections::BTreeSet::new();
         match self {
             Self::Linked { start } => {
@@ -103,7 +103,14 @@ impl InlineRequest {
             }
             Self::Unlinked { .. } => {}
         }
-        let mut artifacts: Vec<_> = links.into_iter().map(documents::link_artifact).collect();
+        links
+    }
+    pub fn artifacts(&self) -> Vec<lash_core::ArtifactName> {
+        let mut artifacts: Vec<_> = self
+            .links()
+            .into_iter()
+            .map(documents::link_artifact)
+            .collect();
         if let Self::Callable { origin, .. } = self {
             artifacts.extend(
                 origin

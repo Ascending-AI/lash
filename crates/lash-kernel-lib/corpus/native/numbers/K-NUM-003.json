@@ -3,7 +3,7 @@
   "cases": [
     {
       "name": "int.to_float: K-NUM-003 edge",
-      "function": "ddb3f176d7fbde3735e50e32181e528e6037be182b1492e45afd76fd74f804d3",
+      "function": "e4778156b517120bc46a76dd06861f997a70eb38bfbf46b3c20dcace13e704e1",
       "args": [
         {
           "int": "9007199254740993"
@@ -21,7 +21,7 @@
     },
     {
       "name": "num.to_float: K-NUM-003 edge",
-      "function": "d81bedfbb828d8f81af0837c36d149f2f7fa01413120b322e484b1e20f8434df",
+      "function": "1aad1a79381293bdcd04432b82bd1e45fe6804d78bb50cea35de94a314cadc4c",
       "args": [
         {
           "int": "1"

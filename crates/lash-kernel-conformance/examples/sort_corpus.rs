@@ -24,6 +24,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         &std::sync::Arc::new(lash_ext_regex_ecma::Engine::new(4)),
     )?;
 
+    if std::env::args().nth(2).as_deref() == Some("--native-identities") {
+        return native_identities(std::path::Path::new(&root), &registry);
+    }
     if std::env::args().nth(2).as_deref() == Some("--regex") {
         return regex(std::path::Path::new(&root), &registry);
     }
@@ -176,9 +179,12 @@ fn regex(
             "{\"__lash_brand\": (\"regex.ecma\", \"reg_exp\"), \"__lash_built\": b\"5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a\",",
         );
         case["document"] = serde_json::Value::String(source);
-        if let Some(name) = case["expected"]["end"]["bound"]["name"].as_str() {
+        if case["expected"]["end"]["bound"]["name"]
+            .as_str()
+            .is_some_and(|name| name.starts_with("guard:"))
+        {
             case["expected"]["end"]["bound"]["name"] =
-                serde_json::Value::String(name.replace(&old, &current));
+                serde_json::Value::String(format!("guard:{current}"));
         }
     }
     std::fs::write(path, serde_json::to_string_pretty(&shard)? + "\n")?;
@@ -205,4 +211,58 @@ fn refresh_definitions(document: &mut lash_kernel_doc::Document, registry: &Func
         .into_iter()
         .map(|definition| (definition.identity(), definition))
         .collect();
+}
+
+/// Refresh numeric fixture identities from the registry, preserving every
+/// independently specified argument, outcome, charge and work bound.
+fn native_identities(
+    root: &std::path::Path,
+    registry: &FunctionRegistry,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let mut changed = 0;
+    let mut cases = 0;
+    for entry in std::fs::read_dir(root.join("crates/lash-kernel-lib/corpus/native/numbers"))? {
+        let path = entry?.path();
+        if path.extension().is_none_or(|extension| extension != "json") {
+            continue;
+        }
+        let original = std::fs::read_to_string(&path)?;
+        let shard: serde_json::Value = serde_json::from_str(&original)?;
+        let mut updated = original.clone();
+        for case in shard["cases"].as_array().ok_or("missing native cases")? {
+            let label = case["name"].as_str().ok_or("missing native case name")?;
+            let name = label
+                .split([':', ' '])
+                .next()
+                .ok_or("missing native name")?;
+            let id = registry
+                .named(name)
+                .next()
+                .ok_or_else(|| format!("unknown native {name}"))?;
+            let old = case["function"].as_str().ok_or("missing native identity")?;
+            updated = updated.replace(
+                &format!("\"function\": \"{old}\""),
+                &format!("\"function\": \"{id}\""),
+            );
+            cases += 1;
+        }
+        // K-VAL-001's function-kind witness now carries the defining Link
+        // and function identity. Its tag and independently written oracle stay.
+        if shard["rule"] == "K-VAL-001" {
+            let callable = lash_vocabulary::names::CallableId {
+                link: lash_vocabulary::package::LinkId::from_bytes([0x11; 32]),
+                function: registry.named("kind").next().ok_or("missing kind")?,
+            };
+            updated = updated.replace(
+                "\"function\": \"f\"",
+                &format!("\"function\": {}", serde_json::to_string(&callable)?),
+            );
+        }
+        if original != updated {
+            std::fs::write(path, updated)?;
+            changed += 1;
+        }
+    }
+    println!("refreshed {changed} numeric identity shards across {cases} cases");
+    Ok(())
 }

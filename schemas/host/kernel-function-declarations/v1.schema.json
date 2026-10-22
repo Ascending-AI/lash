@@ -961,7 +961,7 @@
           "description": "Every library function the body calls, by identity, with the name\nits definition carries.",
           "patternProperties": {
             "^[0-9a-f]{64}$": {
-              "$ref": "#/$defs/QualifiedName"
+              "$ref": "#/$defs/FunctionName"
             }
           },
           "type": "object"
@@ -1015,7 +1015,7 @@
           "type": "integer"
         },
         "name": {
-          "$ref": "#/$defs/QualifiedName"
+          "$ref": "#/$defs/FunctionName"
         },
         "native_version": {
           "description": "The version of the native implementation (`K-LIB-011`): its code is\nnot part of the definition, so a native that answers otherwise is\nstated anew under the next version, which is a new function. Only a\ndefinition that states a native implementation states one other\nthan the first.",
@@ -1037,6 +1037,10 @@
     },
     "FunctionId": {
       "pattern": "^[0-9a-f]{64}$",
+      "type": "string"
+    },
+    "FunctionName": {
+      "pattern": "^[A-Za-z_][A-Za-z0-9_]*(\\.[A-Za-z_][A-Za-z0-9_]*)*$",
       "type": "string"
     },
     "FunctionRepresentation": {
@@ -1218,7 +1222,7 @@
           "$ref": "#/$defs/ImportKind"
         },
         "name": {
-          "$ref": "#/$defs/QualifiedName2"
+          "$ref": "#/$defs/QualifiedName"
         }
       },
       "required": [
@@ -1724,10 +1728,6 @@
       "type": "object"
     },
     "QualifiedName": {
-      "pattern": "^[A-Za-z_][A-Za-z0-9_]*(\\.[A-Za-z_][A-Za-z0-9_]*)*$",
-      "type": "string"
-    },
-    "QualifiedName2": {
       "additionalProperties": false,
       "description": "An Import name parsed by segment, optionally addressing a type member.",
       "properties": {

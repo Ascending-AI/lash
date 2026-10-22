@@ -296,16 +296,7 @@ impl InlineStarts for KernelInlineStarts {
                 .hold_callable_origin(claim, origin)
                 .await?;
         }
-        for artifact in code.artifacts() {
-            if artifact.artifact_ref.starts_with("publication:v1:") {
-                continue;
-            }
-            let link = artifact
-                .artifact_ref
-                .strip_prefix("link:v1:")
-                .ok_or_else(|| invalid("callable artifact is not a Link"))?
-                .parse()
-                .map_err(|error| invalid(format!("{error}")))?;
+        for link in code.links() {
             self.engine
                 .documents
                 .hold(claim, &ContentRef::Link(link))

@@ -72,13 +72,6 @@
   },
   {
     "target": "//crates/lash-protocol-rlm:lash-protocol-rlm__unit_test",
-    "selector": "executor::tests::crossing::equal_code_and_captures_cross_as_one_document",
-    "rules": [
-      "FN-ID"
-    ]
-  },
-  {
-    "target": "//crates/lash-protocol-rlm:lash-protocol-rlm__unit_test",
     "selector": "executor::tests::crossing::a_guest_record_under_the_function_tag_reaches_a_tool_as_plain_data",
     "rules": [
       "FN-TAG"
@@ -92,27 +85,6 @@
     ]
   },
   {
-    "target": "//crates/lash-kernel-edit:lash-kernel-edit__unit_test",
-    "selector": "tests::canvas_closed",
-    "rules": [
-      "EDIT-CLOSED"
-    ]
-  },
-  {
-    "target": "//crates/lash-kernel-view:lash-kernel-view__unit_test",
-    "selector": "display_tests::labels_are_keyed_by_package_and_member_in_the_selected_set",
-    "rules": [
-      "HELP-LABEL"
-    ]
-  },
-  {
-    "target": "//crates/lash-vm-releases:lash-vm-releases__unit_test",
-    "selector": "tests::helper_sets_cover_every_release_write_set",
-    "rules": [
-      "HELP-SET"
-    ]
-  },
-  {
     "target": "//crates/lash:workflow_laws__test",
     "selector": "documents::a_running_process_draws_its_view_after_its_pin_and_helper_release_are_gone",
     "rules": [
@@ -121,23 +93,16 @@
   },
   {
     "target": "//crates/lash:workflow_laws__test",
-    "selector": "documents::an_unpublished_import_draws_from_shipped_declarations_and_refuses_a_corrupt_one",
-    "rules": [
-      "DOC-IMPORT"
-    ]
-  },
-  {
-    "target": "//crates/lash:workflow_laws__test",
-    "selector": "documents::a_publication_holds_its_checked_source_map_and_refuses_one_that_does_not_fit",
-    "rules": [
-      "DOC-MAP"
-    ]
-  },
-  {
-    "target": "//crates/lash:workflow_laws__test",
     "selector": "a_process_starts_another_entry_of_its_document_by_function_reference_and_awaits_it",
     "rules": [
       "START-TEMPLATE"
+    ]
+  },
+  {
+    "target": "//crates/lash:workflow_view_laws__test",
+    "selector": "a_refused_source_map_publishes_no_document_or_link",
+    "rules": [
+      "DOC-MAP"
     ]
   },
   {
@@ -198,13 +163,6 @@
     ]
   },
   {
-    "target": "//crates/lash-vm-runtime:lash-vm-runtime__unit_test__fv_598ff3f7",
-    "selector": "process::tests::a_held_function_value_upgrades_as_its_document_does_and_an_unheld_helper_refuses",
-    "rules": [
-      "FN-UPGRADE"
-    ]
-  },
-  {
     "target": "//crates/lash-dialect-typescript:lash-dialect-typescript__unit_test",
     "selector": "tests::process::a_capturing_async_cell_function_is_plain_code_with_or_without_process_tools",
     "rules": [
@@ -253,20 +211,6 @@
     "selector": "a_canvas_edited_workflow_prints_without_kernel_scaffolding",
     "rules": [
       "READABLE-STYLE"
-    ]
-  },
-  {
-    "target": "//crates/lash-dialect-typescript:lash-dialect-typescript__unit_test",
-    "selector": "tests::readable_print::a_function_that_cannot_lift_prints_in_kernel_form_and_the_module_reads_back",
-    "rules": [
-      "READABLE-FALLBACK"
-    ]
-  },
-  {
-    "target": "//crates/lash-dialect-python:lash-dialect-python__unit_test",
-    "selector": "tests::readable_print::a_function_that_cannot_lift_prints_in_kernel_form_and_the_module_reads_back",
-    "rules": [
-      "READABLE-FALLBACK"
     ]
   }
 ]

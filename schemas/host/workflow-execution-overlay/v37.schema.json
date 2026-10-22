@@ -253,6 +253,9 @@
           "description": "The call the admission bound the step to.",
           "type": "string"
         },
+        "origin": {
+          "$ref": "#/$defs/Site"
+        },
         "process_id": {
           "type": "string"
         }
@@ -260,6 +263,7 @@
       "required": [
         "process_id",
         "at",
+        "origin",
         "call_id",
         "attempt"
       ],

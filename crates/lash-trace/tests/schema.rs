@@ -1453,14 +1453,14 @@ fn a_trace_execution_requires_its_link_and_selected_export() {
     let wire = serde_json::to_value(lash_vm_identity()).expect("identity wire");
     for missing in ["link", "selector"] {
         let mut incomplete = wire.clone();
-        incomplete["document"]
+        incomplete["document"]["value"]
             .as_object_mut()
             .unwrap()
             .remove(missing);
         assert!(serde_json::from_value::<TraceLanguageExecutionIdentity>(incomplete).is_err());
     }
     let mut incomplete = wire;
-    incomplete["document"]["selector"]
+    incomplete["document"]["value"]["selector"]
         .as_object_mut()
         .unwrap()
         .remove("value");

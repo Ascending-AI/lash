@@ -817,12 +817,17 @@ pub(super) fn current_census() -> Result<String, String> {
             definitions.insert(definition.identity(), definition);
         }
     }
+    let roots = crate::helper_release()
+        .map_err(|error| error.to_string())?
+        .resolver_roots();
     let mut actual = String::new();
     for dialect in [crate::PYTHON, crate::TYPESCRIPT] {
         let code = read(
             crate::package(dialect).ok_or_else(|| format!("release lacks {dialect} package"))?,
         )?;
-        let exports = (0..code.len()).map(|at| code.id(at)).collect();
+        // Released images include anonymous bodies; analyze those in their
+        // defining scope, reached from the package's authored exports.
+        let exports = code.ids().filter(|id| roots.contains(id)).collect();
         actual.push_str(&census(&definitions, &exports)?);
     }
     Ok(actual)
