@@ -41,13 +41,14 @@ mod tests;
 pub use diagnostic::{Diagnostic, DiagnosticKind, SourceOperandType};
 pub use dialect::{
     CaptionSupport, CellEnvironment, Dialect, EffectControl, Environment, FrontEnd, Lowered, Mode,
-    Printer, ReadSource,
+    Printer, ReadSource, ToolCalls,
 };
 pub use exports::{
     BRAND_FIELD, BUILT_FIELD, FunctionMember, NamespaceKind, NamespaceMember, NamespaceView,
     OperationSignature, TypeMember, ValueType, brand_tuple, brand_type,
 };
 pub use lash_kernel_state::WaitId;
+pub use lash_vocabulary::{NamespaceCollision, NamespaceShadowing};
 pub use library::{Library, LibraryError, NamedLibrary};
 pub use metadata::{check_metadata_uniqueness, metadata_json};
 pub use name_plan::NamePlan;

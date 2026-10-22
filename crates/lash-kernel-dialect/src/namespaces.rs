@@ -357,6 +357,49 @@ impl Namespaces {
                 _ => None,
             })
     }
+    /// Collisions in a discovered surface, spelled as the dialect sees it.
+    /// No binding is renamed and no namespace changes lexical resolution.
+    pub fn collisions(
+        &self,
+        bindings: &BTreeSet<lash_vocabulary::Name>,
+        spelling: Spelling,
+    ) -> Vec<lash_vocabulary::NamespaceCollision> {
+        self.packages
+            .keys()
+            .chain(self.deferred.iter())
+            .filter_map(|path| {
+                let root = spelling.spell(SpellKind::PathSegment, &path.as_slice()[0]);
+                bindings
+                    .contains(&lash_vocabulary::Name::new(&root))
+                    .then(|| lash_vocabulary::NamespaceCollision {
+                        namespace: dotted(path),
+                        binding_name: root,
+                    })
+            })
+            .collect()
+    }
+
+    /// Facts for a call whose root the caller has resolved to a lexical local.
+    /// A deferred grant names an operation just as an enumerated offer does.
+    pub fn shadowed_call(
+        &self,
+        path: &[&str],
+        spelling: Spelling,
+    ) -> Option<lash_vocabulary::NamespaceShadowing> {
+        let operation = match self.resolve(path, spelling) {
+            Resolution::Operation { operation, .. } | Resolution::Deferred { operation } => {
+                operation
+            }
+            _ => return None,
+        };
+        Some(lash_vocabulary::NamespaceShadowing {
+            binding_name: path.first()?.to_string(),
+            binding_origin: None,
+            namespace: dotted(&operation.package),
+            call_path: path.join("."),
+        })
+    }
+
     pub fn is_root(&self, root: &str) -> bool {
         self.packages
             .keys()

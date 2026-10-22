@@ -27,6 +27,28 @@ pub struct Diagnostic {
     pub repairs: Vec<String>,
     /// Static operand facts for an implicit text conversion; no repair prose.
     pub operand_type: Option<Box<SourceOperandType>>,
+    pub namespace_shadowing: Option<Box<lash_vocabulary::NamespaceShadowing>>,
+}
+
+impl Diagnostic {
+    /// A lexical binding wins over the namespace, so this call is unreachable.
+    pub fn namespace_shadowed(
+        shadowing: lash_vocabulary::NamespaceShadowing,
+        span: Option<Span>,
+    ) -> Self {
+        Self {
+            code: "NAMESPACE_SHADOWED_BY_LOCAL".into(),
+            message: format!(
+                "`{}` resolves to local `{}`, which shadows namespace `{}`",
+                shadowing.call_path, shadowing.binding_name, shadowing.namespace
+            ),
+            span,
+            kind: DiagnosticKind::ProgramDefect,
+            repairs: Vec::new(),
+            operand_type: None,
+            namespace_shadowing: Some(Box::new(shadowing)),
+        }
+    }
 }
 
 impl fmt::Display for Diagnostic {

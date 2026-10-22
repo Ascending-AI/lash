@@ -215,7 +215,88 @@ machine::library(),
         lash_kernel_dialect::CellEnvironment { bindings: &bindings, functions: &Default::default() },
     ).expect("discover calls in their scopes");
     assert_eq!(
-        calls,
+        calls.calls,
         std::collections::BTreeSet::from(["items.sort".into(), "other.fetch".into()])
     );
+}
+
+/// FIG-7142: a discovered namespace cannot reinterpret a persistent local.
+#[test]
+fn a_cell_local_shadowing_a_discovered_namespace_is_diagnosed() {
+    use lash_kernel_dialect::{CellEnvironment, Environment, Mode, Namespaces};
+    use lash_vocabulary::{Name, PackagePath};
+    use std::collections::{BTreeMap, BTreeSet};
+
+    let deferred = Namespaces::new(
+        BTreeMap::new(),
+        BTreeSet::from([PackagePath::parse("jev").unwrap()]),
+        &|_| false,
+    )
+    .unwrap();
+    let offered = super::linked::namespaces(
+        &BTreeMap::from([(
+            lash_vocabulary::EffectName::new("jev.decide").unwrap(),
+            lash_vocabulary::Signature {
+                params: vec![lash_vocabulary::Param {
+                    name: Name::new("input"),
+                    ty: lash_vocabulary::Type::Any,
+                    optional: false,
+                }],
+                result: lash_vocabulary::Type::Any,
+            },
+        )]),
+        &BTreeMap::new(),
+    )
+    .unwrap();
+    for namespaces in [deferred, offered] {
+        let bindings = BTreeSet::from([Name::new("jev")]);
+        let functions = BTreeMap::new();
+        let environment = Environment::new(machine::library(), &namespaces);
+        let source = "await jev.decide({})\n";
+        let lower = |source, cell| crate::lower(source, &environment, Mode::Cell(cell));
+        let error = lower(
+            source,
+            CellEnvironment {
+                bindings: &bindings,
+                functions: &functions,
+            },
+        )
+        .expect_err("shadowing is diagnosed before execution");
+        assert_eq!(error.code, "NAMESPACE_SHADOWED_BY_LOCAL");
+        assert!(error.repairs.is_empty());
+        let shadowing = error.namespace_shadowing.as_ref().expect("typed facts");
+        assert_eq!(shadowing.binding_name, "jev");
+        assert_eq!(shadowing.binding_origin, None); // CellEnvironment has names, not cell provenance.
+        assert_eq!(shadowing.namespace, "jev");
+        assert_eq!(shadowing.call_path, "jev.decide");
+        assert_eq!(error.span.unwrap().start, 6);
+        let tool =
+            lower(source, CellEnvironment::first()).expect("without the local the tool resolves");
+        assert!(
+            tool.document
+                .imports
+                .values()
+                .any(|import| import.name.to_string() == "jev.decide")
+        );
+        let error = lower("jev = {}\nawait jev.decide({})\n", CellEnvironment::first())
+            .expect_err("known local also shadows");
+        assert_eq!(error.code, "NAMESPACE_SHADOWED_BY_LOCAL");
+        lower("jev = 41\nprint(jev + 1)\n", CellEnvironment::first())
+            .expect("a namespace root can be used as an ordinary local");
+        lower(
+            "print(jev + 1)\n",
+            CellEnvironment {
+                bindings: &bindings,
+                functions: &functions,
+            },
+        )
+        .expect("a carried local keeps its ordinary value meaning");
+        let empty = Namespaces::default();
+        crate::lower(
+            "jev = []\njev.append(1)\n",
+            &Environment::new(machine::library(), &empty),
+            Mode::Cell(CellEnvironment::first()),
+        )
+        .expect("a local method with no namespace stays local");
+    }
 }

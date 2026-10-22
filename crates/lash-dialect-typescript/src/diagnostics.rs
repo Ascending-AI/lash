@@ -67,7 +67,7 @@ pub enum DiagnosticCode {
     TemporalDeadZone,
     UnknownBinding,
     /// A dotted call whose root is a binding names an offered operation.
-    OperationShadowed,
+    NamespaceShadowedByLocal,
     /// An operation written in another dialect's spelling.
     OperationSpelling,
     /// A package, a nested namespace, a value type or an error used as a
@@ -164,7 +164,7 @@ impl DiagnosticCode {
         Self::DuplicateBinding,
         Self::TemporalDeadZone,
         Self::UnknownBinding,
-        Self::OperationShadowed,
+        Self::NamespaceShadowedByLocal,
         Self::OperationSpelling,
         Self::PackageNamespaceValue,
         Self::OperationValue,
@@ -426,7 +426,7 @@ impl DiagnosticCode {
             | Self::DuplicateBinding
             | Self::TemporalDeadZone
             | Self::UnknownBinding
-            | Self::OperationShadowed
+            | Self::NamespaceShadowedByLocal
             | Self::OperationSpelling
             | Self::PackageMemberUnknown
             | Self::AssignConst
@@ -504,7 +504,7 @@ impl DiagnosticCode {
             Self::DuplicateBinding => "TS_DUPLICATE_BINDING",
             Self::TemporalDeadZone => "TS_TEMPORAL_DEAD_ZONE",
             Self::UnknownBinding => "TS_UNKNOWN_BINDING",
-            Self::OperationShadowed => "TS_OPERATION_SHADOWED",
+            Self::NamespaceShadowedByLocal => "NAMESPACE_SHADOWED_BY_LOCAL",
             Self::OperationSpelling => "TS_OPERATION_SPELLING",
             Self::PackageNamespaceValue => "TS_PACKAGE_NAMESPACE_VALUE",
             Self::OperationValue => "TS_OPERATION_VALUE",
@@ -558,6 +558,7 @@ pub struct Diagnostic {
     /// these hold the rewrite, and no text appears in both.
     pub suggestions: Vec<String>,
     pub operand_type: Option<Box<lash_kernel_dialect::SourceOperandType>>,
+    pub namespace_shadowing: Option<Box<lash_vocabulary::NamespaceShadowing>>,
 }
 
 impl Diagnostic {
@@ -610,6 +611,22 @@ impl Diagnostic {
         Self::classified(code, message, span, DiagnosticKind::ProgramDefect)
     }
 
+    pub(crate) fn namespace_shadowed(
+        shadowing: lash_vocabulary::NamespaceShadowing,
+        span: SourceSpan,
+    ) -> Self {
+        let diagnostic = lash_kernel_dialect::Diagnostic::namespace_shadowed(shadowing, Some(span));
+        Self {
+            code: DiagnosticCode::NamespaceShadowedByLocal,
+            message: diagnostic.message,
+            span: diagnostic.span,
+            kind: diagnostic.kind,
+            suggestions: Vec::new(),
+            operand_type: None,
+            namespace_shadowing: diagnostic.namespace_shadowing,
+        }
+    }
+
     /// The workflow contract's refusal of a module, under its shared code.
     pub(crate) fn module(error: ModuleError) -> Self {
         Self::new(
@@ -644,6 +661,7 @@ impl Diagnostic {
             kind,
             suggestions,
             operand_type: None,
+            namespace_shadowing: None,
         }
     }
 
@@ -666,6 +684,7 @@ impl Diagnostic {
             kind: kind_from_code(code),
             suggestions: vec![repair.into()],
             operand_type: None,
+            namespace_shadowing: None,
         }
     }
 }
@@ -735,6 +754,7 @@ impl From<Diagnostic> for lash_kernel_dialect::Diagnostic {
             kind: diagnostic.kind,
             repairs: diagnostic.suggestions,
             operand_type: diagnostic.operand_type,
+            namespace_shadowing: diagnostic.namespace_shadowing,
         }
     }
 }

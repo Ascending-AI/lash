@@ -366,7 +366,7 @@ impl lash_kernel_dialect::FrontEnd for Unmapped {
         source: &str,
         environment: &lash_kernel_dialect::Environment<'_>,
         cell: lash_kernel_dialect::CellEnvironment<'_>,
-    ) -> Result<std::collections::BTreeSet<String>, lash_kernel_dialect::Diagnostic> {
+    ) -> Result<lash_kernel_dialect::ToolCalls, lash_kernel_dialect::Diagnostic> {
         self.0.tool_calls(source, environment, cell)
     }
 

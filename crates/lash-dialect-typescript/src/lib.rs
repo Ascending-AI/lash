@@ -164,13 +164,19 @@ impl Parser {
         source: &str,
         environment: &Environment<'_>,
         cell: lash_kernel_dialect::CellEnvironment<'_>,
-    ) -> Result<std::collections::BTreeSet<String>, Diagnostic> {
+    ) -> Result<lash_kernel_dialect::ToolCalls, Diagnostic> {
         lower::check_binding_names(cell.bindings.iter().map(lash_vocabulary::Name::as_str))?;
         let program = self.parser.parse(source)?;
-        lower::tool_calls(&program, cell.bindings)
+        let calls = lower::tool_calls(&program, cell.bindings)
             .into_iter()
             .filter_map(|path| candidate(&path, environment).transpose())
-            .collect()
+            .collect::<Result<_, _>>()?;
+        Ok(lash_kernel_dialect::ToolCalls {
+            calls,
+            namespace_collisions: environment
+                .namespaces
+                .collisions(cell.bindings, lash_kernel_dialect::Spelling::TypeScript),
+        })
     }
 
     /// Lowers as [`lower`] does. A cell reuses the parser thread; a module,
@@ -214,7 +220,7 @@ impl FrontEnd for TypeScript {
         source: &str,
         environment: &Environment<'_>,
         cell: lash_kernel_dialect::CellEnvironment<'_>,
-    ) -> Result<std::collections::BTreeSet<String>, lash_kernel_dialect::Diagnostic> {
+    ) -> Result<lash_kernel_dialect::ToolCalls, lash_kernel_dialect::Diagnostic> {
         Parser::default()
             .with_limits(self.limits)
             .tool_calls(source, environment, cell)

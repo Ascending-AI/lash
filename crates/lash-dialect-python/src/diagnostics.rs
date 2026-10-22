@@ -61,7 +61,7 @@ codes! {
     AttributeUnsupported => "PY_ATTRIBUTE_UNSUPPORTED", Refusal;
     MethodUnsupported => "PY_METHOD_UNSUPPORTED", Refusal;
     ShadowsBuiltin => "PY_SHADOWS_BUILTIN", Refusal;
-    OperationShadowed => "PY_OPERATION_SHADOWED", ProgramDefect;
+    NamespaceShadowedByLocal => "NAMESPACE_SHADOWED_BY_LOCAL", ProgramDefect;
     OperationSpelling => "PY_OPERATION_SPELLING", ProgramDefect;
     OperationValue => "PY_OPERATION_VALUE", ProgramDefect;
     PackageNamespaceValue => "PY_PACKAGE_NAMESPACE_VALUE", ProgramDefect;
@@ -96,6 +96,7 @@ pub(crate) fn diagnostic(code: Code, message: impl Into<String>, range: TextRang
         kind: code.kind(),
         repairs: Vec::new(),
         operand_type: None,
+        namespace_shadowing: None,
     }
 }
 
@@ -120,6 +121,7 @@ pub(crate) fn unplaced(code: Code, message: impl Into<String>) -> Diagnostic {
         kind: code.kind(),
         repairs: Vec::new(),
         operand_type: None,
+        namespace_shadowing: None,
     }
 }
 

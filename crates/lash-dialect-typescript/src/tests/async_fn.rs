@@ -352,7 +352,7 @@ fn tool_discovery_resolves_lexical_values_before_namespaces() {
         )
         .expect("discover calls in their scopes");
     assert_eq!(
-        calls,
+        calls.calls,
         std::collections::BTreeSet::from(["items.sort".into(), "other.fetch".into()])
     );
 }
@@ -377,7 +377,7 @@ fn tool_discovery_survives_refusals_and_ignores_bare_calls() {
             )
             .expect("discovery does not lower unrelated refusals");
         assert_eq!(
-            calls,
+            calls.calls,
             std::collections::BTreeSet::from(["tools.lookup".into(), "other.fetch".into()]),
             "{source}"
         );
@@ -403,4 +403,99 @@ fn an_async_body_resumes_with_identical_values_and_charge() {
         cold.2 > 2,
         "the source body was reopened at its waits and calls"
     );
+}
+
+/// FIG-7142: a discovered namespace cannot reinterpret a persistent local.
+#[test]
+fn a_cell_local_shadowing_a_discovered_namespace_is_diagnosed() {
+    use lash_kernel_dialect::{CellEnvironment, Environment, Mode, Namespaces};
+    use lash_vocabulary::{Name, PackagePath};
+    use std::collections::{BTreeMap, BTreeSet};
+
+    let deferred = Namespaces::new(
+        BTreeMap::new(),
+        BTreeSet::from([PackagePath::parse("jev").unwrap()]),
+        &|_| false,
+    )
+    .unwrap();
+    let offered = super::linked::namespaces(
+        &BTreeMap::from([(
+            lash_vocabulary::EffectName::new("jev.decide").unwrap(),
+            lash_vocabulary::Signature {
+                params: vec![lash_vocabulary::Param {
+                    name: Name::new("input"),
+                    ty: lash_vocabulary::Type::Any,
+                    optional: false,
+                }],
+                result: lash_vocabulary::Type::Any,
+            },
+        )]),
+        &BTreeMap::new(),
+    )
+    .unwrap();
+    for namespaces in [deferred, offered] {
+        let bindings = BTreeSet::from([Name::new("jev")]);
+        let functions = BTreeMap::new();
+        let environment = Environment::new(super::library(), &namespaces);
+        let source = "await jev.decide({});";
+        let lower = |source, cell| {
+            crate::Parser::default()
+                .lower(source, &environment, Mode::Cell(cell))
+                .map_err(lash_kernel_dialect::Diagnostic::from)
+        };
+        let error = lower(
+            source,
+            CellEnvironment {
+                bindings: &bindings,
+                functions: &functions,
+            },
+        )
+        .expect_err("shadowing is diagnosed before execution");
+        assert_eq!(error.code, "NAMESPACE_SHADOWED_BY_LOCAL");
+        assert!(error.repairs.is_empty());
+        let shadowing = error.namespace_shadowing.as_ref().expect("typed facts");
+        assert_eq!(shadowing.binding_name, "jev");
+        assert_eq!(shadowing.binding_origin, None); // CellEnvironment has names, not cell provenance.
+        assert_eq!(shadowing.namespace, "jev");
+        assert_eq!(shadowing.call_path, "jev.decide");
+        assert_eq!(error.span.unwrap().start, 6);
+        let tool =
+            lower(source, CellEnvironment::first()).expect("without the local the tool resolves");
+        assert!(
+            tool.document
+                .imports
+                .values()
+                .any(|import| import.name.to_string() == "jev.decide")
+        );
+        for source in [
+            "const jev = {}; await jev.decide({});",
+            "const jev: any = {}; await jev.decide({});",
+        ] {
+            let error = lower(source, CellEnvironment::first())
+                .expect_err("types do not change lexical resolution");
+            assert_eq!(error.code, "NAMESPACE_SHADOWED_BY_LOCAL");
+            assert_eq!(error.namespace_shadowing.unwrap().binding_name, "jev");
+        }
+        lower(
+            "const jev = 41; console.log(jev + 1);",
+            CellEnvironment::first(),
+        )
+        .expect("a namespace root can be used as an ordinary local");
+        lower(
+            "console.log(jev + 1);",
+            CellEnvironment {
+                bindings: &bindings,
+                functions: &functions,
+            },
+        )
+        .expect("a carried local keeps its ordinary value meaning");
+        let empty = Namespaces::default();
+        crate::Parser::default()
+            .lower(
+                "const jev = { decide: () => 1 }; jev.decide();",
+                &Environment::new(super::library(), &empty),
+                Mode::Cell(CellEnvironment::first()),
+            )
+            .expect("a local method with no namespace stays local");
+    }
 }

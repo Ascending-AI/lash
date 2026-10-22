@@ -265,6 +265,43 @@
       "description": "A rule of a session's cells that a cell's program broke.",
       "oneOf": [
         {
+          "description": "A lexical local makes an offered or deferred operation unreachable.",
+          "properties": {
+            "kind": {
+              "const": "namespace_shadowed_by_local",
+              "type": "string"
+            },
+            "shadowing": {
+              "$ref": "#/$defs/NamespaceShadowing"
+            },
+            "span": {
+              "maxItems": 2,
+              "minItems": 2,
+              "prefixItems": [
+                {
+                  "format": "uint",
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "format": "uint",
+                  "minimum": 0,
+                  "type": "integer"
+                }
+              ],
+              "type": [
+                "array",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "kind",
+            "shadowing"
+          ],
+          "type": "object"
+        },
+        {
           "description": "OP-INTERNAL: an authored unit tried to perform a package-private operation.",
           "properties": {
             "kind": {
@@ -1396,6 +1433,34 @@
     "Name": {
       "description": "A variable, parameter or declared-function name.\n\nAny text is a name; the kernel gives none of them meaning. Structural\nvalidation refuses the empty name.",
       "type": "string"
+    },
+    "NamespaceShadowing": {
+      "additionalProperties": false,
+      "description": "The requested operation hidden by a lexical binding, independent of its type.",
+      "properties": {
+        "binding_name": {
+          "type": "string"
+        },
+        "binding_origin": {
+          "description": "The originating cell, when the resolution environment retains it.\nName-only session environments leave this absent.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "call_path": {
+          "type": "string"
+        },
+        "namespace": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "binding_name",
+        "namespace",
+        "call_path"
+      ],
+      "type": "object"
     },
     "NonNegativeFiniteF64": {
       "minimum": 0.0,

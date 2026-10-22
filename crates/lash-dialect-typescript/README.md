@@ -12,6 +12,22 @@ representation on use. A new cell uses its round's Current snapshot; a
 parked run keeps its exact Link and Execution Environment. A session relinks its
 saved functions against each cell's Namespaces while preserving resolved pins; see the guide for saving limitations.
 
+## Name resolution
+
+Lexical locals, including persistent bindings from earlier cells, shadow package
+namespace roots. Discovering a tool never changes the meaning of existing locals
+or code. A call such as `jev.decide(...)` whose root resolves to a local `jev`
+is refused at compile time when the namespace offers that operation, including
+through a deferred grant. `NAMESPACE_SHADOWED_BY_LOCAL` carries the binding name,
+its origin when available, the canonical namespace, the requested call path and
+the source span. This rule is independent of the local's type; without a matching
+namespace operation, ordinary local member resolution applies.
+
+Tool discovery returns namespace collisions separately from free call paths.
+`Namespaces::collisions` projects the same typed namespace and binding facts for
+consumers rendering discovery. Presentation and any repair hints belong to the
+consumer.
+
 ## How an operation is lowered
 
 Each operation takes the first tier that applies.

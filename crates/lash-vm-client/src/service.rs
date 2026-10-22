@@ -255,12 +255,13 @@ pub struct DialectRefusal {
     pub unsupported: bool,
     pub repairs: Vec<String>,
     pub operand_type: Option<Box<lash_kernel_dialect::SourceOperandType>>,
+    pub namespace_shadowing: Option<Box<lash_vocabulary::NamespaceShadowing>>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub enum Response {
-    ToolCalls(BTreeSet<String>),
+    ToolCalls(lash_kernel_dialect::ToolCalls),
     Lowered {
         /// The document's token body (`K-ID-003`).
         #[serde(with = "serde_bytes")]

@@ -176,6 +176,11 @@ pub struct CellFailureRepair {
 )]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum CellDefect {
+    /// A lexical local makes an offered or deferred operation unreachable.
+    NamespaceShadowedByLocal {
+        shadowing: Box<lash_vocabulary::NamespaceShadowing>,
+        span: Option<(usize, usize)>,
+    },
     /// OP-INTERNAL: an authored unit tried to perform a package-private operation.
     InternalOperation {
         operation: lash_vocabulary::names::EffectName,

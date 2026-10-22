@@ -318,19 +318,10 @@ impl Lowerer<'_> {
         };
         let written = path.iter().map(String::as_str).collect::<Vec<_>>();
         if bound {
-            if let Resolution::Operation { operation, .. } =
-                self.namespaces.resolve(&written, Spelling::Python)
-            {
-                let binding = &path[0];
-                return Err(diagnostics::with_repair(
-                    Code::OperationShadowed,
-                    format!(
-                        "`{binding}` is a variable here, so `{}` calls a value, while the session offers the operation `{}`",
-                        path.join("."),
-                        operation.effect_name()
-                    ),
-                    call.func.range(),
-                    format!("rename `{binding}` and update its references"),
+            if let Some(shadowing) = self.namespaces.shadowed_call(&written, Spelling::Python) {
+                return Err(lash_kernel_dialect::Diagnostic::namespace_shadowed(
+                    shadowing,
+                    Some(diagnostics::span(call.func.range())),
                 ));
             }
             return Ok(());

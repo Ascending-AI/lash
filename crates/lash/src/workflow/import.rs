@@ -92,6 +92,7 @@ pub(crate) fn source_refusal(
                 },
                 repairs: refusal.repairs,
                 operand_type: refusal.operand_type,
+                namespace_shadowing: refusal.namespace_shadowing,
             }]))
         }
         lash_vm_client::service::SourceServiceError::UnknownDialect { dialect } => Ok(

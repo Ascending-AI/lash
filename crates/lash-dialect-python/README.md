@@ -11,6 +11,22 @@ Package values expose declared members only; indexing, iterating or
 converting one to a dict raises `TypeError`. A changed representation raises
 `package.stale_value` at member use and names the releases involved.
 
+## Name resolution
+
+Lexical locals, including persistent bindings from earlier cells, shadow package
+namespace roots. Discovering a tool never changes the meaning of existing locals
+or code. A call such as `jev.decide(...)` whose root resolves to a local `jev`
+is refused at compile time when the namespace offers that operation, including
+through a deferred grant. `NAMESPACE_SHADOWED_BY_LOCAL` carries the binding name,
+its origin when available, the canonical namespace, the requested call path and
+the source span. This rule is independent of the local's type; without a matching
+namespace operation, ordinary local member resolution applies.
+
+Tool discovery returns namespace collisions separately from free call paths.
+`Namespaces::collisions` projects the same typed namespace and binding facts for
+consumers rendering discovery. Presentation and any repair hints belong to the
+consumer.
+
 ## Parser
 
 The parser is `ruff_python_parser` 0.0.11 with `ruff_python_ast` and

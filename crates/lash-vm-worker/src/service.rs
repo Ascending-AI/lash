@@ -263,6 +263,7 @@ fn refusal(diagnostic: Diagnostic) -> DialectRefusal {
         unsupported: matches!(diagnostic.kind, DiagnosticKind::Refusal),
         repairs: diagnostic.repairs,
         operand_type: diagnostic.operand_type,
+        namespace_shadowing: diagnostic.namespace_shadowing,
     }
 }
 
@@ -270,6 +271,79 @@ fn refusal(diagnostic: Diagnostic) -> DialectRefusal {
 mod tests {
     use super::*;
     use lash_kernel_dialect::{GeneratedSourceLimits, PrintOptions, SourceFormat};
+
+    /// FIG-7142: discovery reports namespace collisions as facts, not hints.
+    #[test]
+    fn discovery_reports_a_namespace_shadowed_by_a_cell_local() {
+        use lash_vocabulary::{Name, PackagePath};
+        use std::collections::{BTreeMap, BTreeSet};
+        let embedding = crate::embedding::tests::every_dialect(&Default::default()).unwrap();
+        for dialect in ["typescript", "python"] {
+            let namespaces = lash_kernel_dialect::Namespaces::new(
+                BTreeMap::new(),
+                BTreeSet::from([PackagePath::parse("jev").unwrap()]),
+                &|_| false,
+            )
+            .unwrap();
+            let bindings = BTreeSet::from([Name::new("jev")]);
+            let send = |request| {
+                let response = perform(
+                    &embedding,
+                    &EncodedPayload(rmp_serde::to_vec_named(&request).unwrap()),
+                )
+                .unwrap();
+                rmp_serde::from_slice::<Response>(&response.0).unwrap()
+            };
+            for bound in [false, true] {
+                let response = send(Request::ToolCalls {
+                    dialect: dialect.into(),
+                    source: "".into(),
+                    bindings: if bound {
+                        bindings.clone()
+                    } else {
+                        BTreeSet::new()
+                    },
+                    functions: BTreeMap::new(),
+                    namespaces: namespaces.clone(),
+                });
+                let json = serde_json::to_value(response).unwrap();
+                assert_eq!(
+                    json["tool_calls"]["namespace_collisions"],
+                    if bound {
+                        serde_json::json!([
+                            {"namespace": "jev", "binding_name": "jev"}
+                        ])
+                    } else {
+                        serde_json::json!([])
+                    }
+                );
+            }
+            let response = send(Request::Lower {
+                dialect: dialect.into(),
+                source: if dialect == "typescript" {
+                    "await jev.decide({});"
+                } else {
+                    "await jev.decide({})\n"
+                }
+                .into(),
+                bindings,
+                functions: BTreeMap::new(),
+                namespaces,
+            });
+            let Response::DialectRefused(refusal) = response else {
+                panic!("compile-time refusal");
+            };
+            assert_eq!(refusal.code, "NAMESPACE_SHADOWED_BY_LOCAL");
+            assert_eq!(refusal.span.unwrap().0, 6);
+            assert!(!refusal.unsupported);
+            assert!(refusal.repairs.is_empty());
+            let facts = refusal.namespace_shadowing.unwrap();
+            assert_eq!(facts.binding_name, "jev");
+            assert_eq!(facts.binding_origin, None);
+            assert_eq!(facts.namespace, "jev");
+            assert_eq!(facts.call_path, "jev.decide");
+        }
+    }
 
     /// FIG-6257: a document crosses the worker IPC as its canonical token
     /// body, never as JSON: `Lowered` answers the body its source map's

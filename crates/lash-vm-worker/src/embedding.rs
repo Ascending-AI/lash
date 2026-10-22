@@ -371,7 +371,7 @@ mod typescript {
             source: &str,
             environment: &Environment<'_>,
             cell: lash_kernel_dialect::CellEnvironment<'_>,
-        ) -> Result<std::collections::BTreeSet<String>, Diagnostic> {
+        ) -> Result<lash_kernel_dialect::ToolCalls, Diagnostic> {
             self.parser
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner)

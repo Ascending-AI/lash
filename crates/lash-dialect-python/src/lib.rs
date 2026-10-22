@@ -144,6 +144,7 @@ fn lower_with_calls(
         kind: Code::Syntax.kind(),
         repairs: Vec::new(),
         operand_type: None,
+        namespace_shadowing: None,
     })?;
     let spelled = captions::spelled(
         source,
@@ -177,7 +178,7 @@ impl FrontEnd for Python {
         source: &str,
         environment: &Environment<'_>,
         cell: lash_kernel_dialect::CellEnvironment<'_>,
-    ) -> Result<std::collections::BTreeSet<String>, Diagnostic> {
+    ) -> Result<lash_kernel_dialect::ToolCalls, Diagnostic> {
         let mut calls = std::collections::BTreeSet::new();
         lower_with_calls(
             source,
@@ -187,7 +188,12 @@ impl FrontEnd for Python {
             Some(&mut calls),
             &[],
         )?;
-        Ok(calls)
+        Ok(lash_kernel_dialect::ToolCalls {
+            calls,
+            namespace_collisions: environment
+                .namespaces
+                .collisions(cell.bindings, lash_kernel_dialect::Spelling::Python),
+        })
     }
 
     fn lower(

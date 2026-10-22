@@ -1,5 +1,5 @@
 //! Laws of operation names in TypeScript cells: OP-NAME,
-//! OP-SPELLING-REPAIR, NS-SHADOW, NS-ESCAPE and PRINT-ROUNDTRIP.
+//! OP-SPELLING-REPAIR, NS-ESCAPE and PRINT-ROUNDTRIP.
 
 use std::collections::BTreeMap;
 
@@ -69,34 +69,6 @@ fn the_canonical_spelling_of_a_multiword_operation_is_refused_with_its_repair() 
             .any(|repair| repair == "write `inbox.sendItem`"),
         "{error:?}"
     );
-}
-
-/// NS-SHADOW: a binding, a session binding included, takes a package root's
-/// name lexically; a dotted call through it that names an offered operation
-/// is refused naming both.
-#[test]
-fn a_binding_shadows_a_package_root_and_a_dotted_call_through_it_is_refused() {
-    let offered = effects(&["report.read"]);
-    for (source, bindings) in [
-        ("const report = 41; console.log(report + 1);", &[][..]),
-        ("console.log(report + 1);", &["report"][..]),
-    ] {
-        lower_against(source, bindings, &offered).unwrap_or_else(|error| panic!("{error}"));
-    }
-    for (source, bindings) in [
-        (
-            "const report = { read: (x) => x }; await report.read({});",
-            &[][..],
-        ),
-        ("await report.read({});", &["report"][..]),
-    ] {
-        let error = lower_against(source, bindings, &offered).expect_err(source);
-        assert_eq!(error.code.as_str(), "TS_OPERATION_SHADOWED", "{error}");
-        assert!(
-            error.message.contains("`report`") && error.message.contains("`report.read`"),
-            "{error}"
-        );
-    }
 }
 
 /// NS-ESCAPE: an operation whose spelling is a keyword stays callable

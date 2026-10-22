@@ -251,19 +251,8 @@ impl Lowerer<'_> {
             return Ok(());
         };
         if self.is_bound(root) {
-            if let Resolution::Operation { operation, .. } =
-                self.namespaces.resolve(&path, Spelling::TypeScript)
-            {
-                return Err(Diagnostic::with_repair(
-                    DiagnosticCode::OperationShadowed,
-                    format!(
-                        "`{root}` is a binding here, so `{}` calls a value, while the session offers the operation `{}`",
-                        path.join("."),
-                        operation.effect_name()
-                    ),
-                    format!("rename `{root}` and update its references"),
-                    Some(span),
-                ));
+            if let Some(shadowing) = self.namespaces.shadowed_call(&path, Spelling::TypeScript) {
+                return Err(Diagnostic::namespace_shadowed(shadowing, span));
             }
             return Ok(());
         }

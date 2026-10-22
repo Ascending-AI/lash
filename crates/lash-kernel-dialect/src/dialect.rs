@@ -115,6 +115,14 @@ pub struct Lowered {
     pub validated: bool,
 }
 
+/// Lexically free calls and collisions in the discovered namespace surface.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ToolCalls {
+    pub calls: BTreeSet<String>,
+    pub namespace_collisions: Vec<lash_vocabulary::NamespaceCollision>,
+}
+
 /// Lowers source in one language to a kernel document.
 ///
 /// The document it returns nests no action (`K-EVAL-008`): the front end
@@ -129,7 +137,7 @@ pub trait FrontEnd {
         source: &str,
         environment: &Environment<'_>,
         cell: CellEnvironment<'_>,
-    ) -> Result<BTreeSet<String>, Diagnostic>;
+    ) -> Result<ToolCalls, Diagnostic>;
 
     fn lower(
         &self,

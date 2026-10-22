@@ -1,4 +1,4 @@
-//! Laws of operation names in Python cells: OP-NAME, NS-SHADOW, NS-ESCAPE
+//! Laws of operation names in Python cells: OP-NAME, NS-ESCAPE
 //! and PRINT-ROUNDTRIP.
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -82,26 +82,6 @@ fn a_dotted_call_performs_the_operation_by_its_canonical_name() {
     let error = lower("await web_fetch({})\n", &[], &["web.fetch"])
         .expect_err("the flattened name is no operation");
     assert!(!error.code.is_empty(), "{error}");
-}
-
-/// NS-SHADOW: a binding, a session binding included, takes a package root's
-/// name lexically; a dotted call through it that names an offered operation
-/// is refused naming both.
-#[test]
-fn a_binding_shadows_a_package_root_and_a_dotted_call_through_it_is_refused() {
-    for (source, bindings) in [
-        ("report = 41\nprint(report + 1)\n", &[][..]),
-        ("print(report + 1)\n", &["report"][..]),
-    ] {
-        lower(source, bindings, &["report.read"]).unwrap_or_else(|error| panic!("{error}"));
-    }
-    let error = lower("await report.read({})\n", &["report"], &["report.read"])
-        .expect_err("the root is a binding");
-    assert_eq!(error.code, "PY_OPERATION_SHADOWED", "{error}");
-    assert!(
-        error.message.contains("`report`") && error.message.contains("`report.read`"),
-        "{error}"
-    );
 }
 
 /// NS-ESCAPE: an operation whose spelling is a Python keyword stays

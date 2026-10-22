@@ -334,14 +334,21 @@ impl CellObservation {
                         vocabulary.cell_tags.close, vocabulary.cell_noun,
                     ));
                 }
-                CellFailure::new(
+                let mut failure = CellFailure::new(
                     if refusal.unsupported {
                         CellFailureKind::Policy
                     } else {
                         CellFailureKind::Program
                     },
                     message,
-                )
+                );
+                if let Some(shadowing) = &refusal.namespace_shadowing {
+                    failure = failure.with_defect(CellDefect::NamespaceShadowedByLocal {
+                        shadowing: shadowing.clone(),
+                        span: refusal.span,
+                    });
+                }
+                failure
             }
             Self::BindingNotCarried { binding, why } => CellFailure::new(
                 CellFailureKind::Program,

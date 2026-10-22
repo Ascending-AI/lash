@@ -19,7 +19,7 @@ pub enum SourceServiceError {
     #[error(transparent)]
     Print(#[from] lash_kernel_dialect::PrintError),
     #[error("generated source refused: {0:?}")]
-    Dialect(DialectRefusal),
+    Dialect(Box<DialectRefusal>),
     #[error("the worker has no `{dialect}` dialect")]
     UnknownDialect { dialect: String },
     #[error("undeclared package members: {members:?}")]
@@ -129,14 +129,15 @@ impl Service {
                     limit: limits.max_bytes,
                 }
                 .into();
-            return Err(SourceServiceError::Dialect(DialectRefusal {
+            return Err(SourceServiceError::Dialect(Box::new(DialectRefusal {
                 code: diagnostic.code,
                 message: diagnostic.message,
                 span: None,
                 unsupported: true,
                 repairs: diagnostic.repairs,
                 operand_type: diagnostic.operand_type,
-            }));
+                namespace_shadowing: diagnostic.namespace_shadowing,
+            })));
         }
         let response = self
             .request_accounted(Request::Read {
@@ -165,7 +166,7 @@ fn refused(response: Response) -> SourceServiceError {
         Response::Unprintable { site } => {
             SourceServiceError::Print(lash_kernel_dialect::PrintError::Unprintable { site })
         }
-        Response::DialectRefused(refusal) => SourceServiceError::Dialect(refusal),
+        Response::DialectRefused(refusal) => SourceServiceError::Dialect(Box::new(refusal)),
         Response::UndeclaredMembers { members } => {
             SourceServiceError::UndeclaredMembers { members }
         }

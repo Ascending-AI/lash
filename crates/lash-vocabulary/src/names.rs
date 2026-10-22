@@ -764,3 +764,24 @@ identity!(
     /// names its document and the SHA-256 of its source.
     SourceMapId
 );
+
+/// A namespace root already held by a lexical binding. Discovery reports facts;
+/// consumers decide how to present the collision.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct NamespaceCollision {
+    pub namespace: String,
+    pub binding_name: String,
+}
+
+/// The requested operation hidden by a lexical binding, independent of its type.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct NamespaceShadowing {
+    pub binding_name: String,
+    /// The originating cell, when the resolution environment retains it.
+    /// Name-only session environments leave this absent.
+    pub binding_origin: Option<String>,
+    pub namespace: String,
+    pub call_path: String,
+}
