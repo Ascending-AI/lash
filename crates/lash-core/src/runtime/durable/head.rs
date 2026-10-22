@@ -247,23 +247,6 @@ impl SessionOwner {
                         let mut head = SessionHead::load_in(cx.backend(), session, &allocation_budget).await?;
                         Arc::make_mut(&mut head.state).session_graph.detach_owner_prompt_rendering().map_err(refused)?;
                         let turn = cx.durable_reads()?.turn(session).await?;
-                        let phase_surface = match turn
-                            .as_ref()
-                            .and_then(|turn| turn.phase.checkpoint().map(|root| (turn, root)))
-                        {
-                            Some((turn, root)) => Some((
-                                root,
-                                super::phase_root::read_plugin_phase(
-                                    cx.durable_reads()?,
-                                    session,
-                                    &turn.run,
-                                )
-                                .await?
-                                .and_then(|phase| phase.surface)
-                                .map(Arc::new),
-                            )),
-                            None => None,
-                        };
                         let checked = cx.begin().await?;
                         if checked.revision() != basis.revision() {
                             return Err(TurnError::Exec(
@@ -277,7 +260,10 @@ impl SessionOwner {
                                 allocation_budget,
                                 allocations,
                                 composition: None,
-                                phase_surface,
+                                // Restore owns checkpoint decoding and its typed
+                                // refusal. Head hydration must also let a cancel
+                                // end a turn whose checkpoint cannot be read.
+                                phase_surface: None,
                                 head: Arc::clone(&head.state),
                                 fleet: head.fleet,
                                 turn,
