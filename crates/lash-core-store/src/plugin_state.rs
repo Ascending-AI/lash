@@ -901,7 +901,7 @@ mod keyed_publication_tests {
                     crate::store::HydratedCheckpointComponent::changed(after.bytes().clone()),
                 )])
                 .into(),
-                namespace_nodes: after.graph().clone(),
+                namespace_nodes: after.graph().clone().into(),
                 ..Default::default()
             };
             assert_eq!(
