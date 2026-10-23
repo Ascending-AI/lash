@@ -85,6 +85,19 @@ fn first_commit_may_end_its_own_appended_frame_open() {
             .journal_identity()
             .expect("journal identity"),
     };
+    // A staged frame already has a guard. Ending it must publish the gate
+    // identity when replacing that guard, so terminal cleanup can find it.
+    crate::obligation_ledger::arm_cleanup_tx(
+        &conn,
+        &lash_core_store::artifact_referrer::ArtifactCleanup::Await(
+            lash_core_store::artifact_referrer::ReferrerGuard::Frame {
+                frame: transition.ended.clone(),
+                creator: transition.gate.clone(),
+            },
+        ),
+        122,
+    )
+    .expect("arm the staged frame guard");
     let tx = conn.transaction().expect("transaction");
     commit_frame_transition_tx(
         &tx,

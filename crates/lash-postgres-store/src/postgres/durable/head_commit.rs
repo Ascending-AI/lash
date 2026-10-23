@@ -27,6 +27,9 @@
 //! read under locks the commit keeps, and the one call declines a commit
 //! that needs them.
 
+#[path = "head_commit/frame_cleanup.rs"]
+mod frame_cleanup;
+
 use std::collections::BTreeSet;
 use std::sync::LazyLock;
 
@@ -258,12 +261,12 @@ pub(super) static FENCE_REFERRER: Entry = Entry::new(
 );
 pub(super) static CLEANUP_INSERT: Entry = Entry::new(
     || &crate::obligation_ledger::cleanup_sql().insert_if_absent,
-    &[Ty::Text, Ty::Text, Ty::Text, Ty::Text, Ty::Now],
+    &[Ty::Text, Ty::Text, Ty::Text, Ty::Text, Ty::Now, Ty::Text],
     Shape::Exec,
 );
 pub(super) static CLEANUP_REPLACE: Entry = Entry::new(
     || &crate::obligation_ledger::cleanup_sql().replace_guard_with_ended,
-    &[Ty::Text, Ty::Text, Ty::Text, Ty::Now],
+    &[Ty::Text, Ty::Text, Ty::Text, Ty::Now, Ty::Text],
     Shape::Exec,
 );
 pub(super) static CARRY_EDGE: Entry = Entry::new(
@@ -789,7 +792,7 @@ pub(super) fn program(
         ),
         Refusal::HeadMoved,
     );
-    end_frames_left(&mut program, commit, read)?;
+    frame_cleanup::end_frames_left(&mut program, commit, read)?;
     let mut touch = Step::any(&TOUCH, vec![text(session), Value::Now]).capturing(RETENTION);
     if plan.head_changed()
         && let Some(old_leaf) = plan.old_leaf_node_id()
@@ -882,97 +885,6 @@ fn guard_hints(
             Step::one(&LEAF, vec![text(parent.node_id.as_str())]),
             Refusal::LeafRetired(parent.node_id.clone()),
         );
-    }
-    Ok(())
-}
-
-/// The writes of the frames the commit leaves (ADR 0113 §3.1), decided
-/// under their referrer locks: a transition's carries into its successor,
-/// each left frame's fence and its `Ended` cleanup, and the SQL share of an
-/// ungated end.
-fn end_frames_left(
-    program: &mut Program,
-    commit: &lash_core_store::store::RuntimeCommit,
-    read: &ReadFacts,
-) -> Result<(), StoreError> {
-    if let Some(transition) = &commit.frame_transition {
-        let successor = lash_core_store::artifact_referrer::ArtifactReferrer::FrameEnvironment(
-            transition.successor.clone(),
-        );
-        for (namespace, artifact_ref) in &read.carries {
-            program.push(
-                Step::any(
-                    &CARRY_EDGE,
-                    vec![
-                        text(*namespace),
-                        text(artifact_ref.as_str()),
-                        text(successor.kind().as_str()),
-                        text(successor.canonical_id()),
-                    ],
-                ),
-                Refusal::Backstop,
-            );
-        }
-    }
-    let gate = commit
-        .frame_transition
-        .as_ref()
-        .map(|transition| transition.gate.clone());
-    for ended in &read.ended {
-        let kind = ended.referrer.kind().as_str();
-        let id = ended.referrer.canonical_id();
-        program.push(
-            Step::any(
-                &FENCE_REFERRER,
-                vec![text(kind), text(id.clone()), Value::Now],
-            ),
-            Refusal::Backstop,
-        );
-        let cleanup = lash_core_store::artifact_referrer::ArtifactCleanup::ended(
-            ended.referrer.clone(),
-            Vec::new(),
-            gate.clone(),
-        );
-        let json = cleanup
-            .to_json()
-            .map_err(|error| StoreError::Backend(error.to_string()))?;
-        let obligation = lash_core_store::store::ObligationKey::ArtifactCleanup {
-            referrer: ended.referrer.clone(),
-        }
-        .id();
-        use lash_core_store::store::CleanupUpsert;
-        match ended.decision {
-            CleanupUpsert::Insert => program.push(
-                Step::any(
-                    &CLEANUP_INSERT,
-                    vec![
-                        text(kind),
-                        text(id.clone()),
-                        text(json),
-                        text(obligation.as_str()),
-                        Value::Now,
-                    ],
-                ),
-                Refusal::Backstop,
-            ),
-            CleanupUpsert::ReplaceGuard => program.push(
-                Step::any(
-                    &CLEANUP_REPLACE,
-                    vec![text(kind), text(id.clone()), text(json), Value::Now],
-                ),
-                Refusal::Backstop,
-            ),
-            CleanupUpsert::Keep => {}
-        }
-        if gate.is_none()
-            && ended.decision != CleanupUpsert::Keep
-            && ended.referrer.kind().holds_artifacts()
-        {
-            program.push(
-                super::turns::end_local_step(&ended.referrer, None)?,
-                Refusal::Backstop,
-            );
-        }
     }
     Ok(())
 }

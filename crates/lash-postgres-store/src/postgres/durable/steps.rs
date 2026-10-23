@@ -462,7 +462,7 @@ impl Step {
 
 /// How many parameters the local end's statement takes; an end step's
 /// further values are what a one-call commit vouches for.
-pub(super) const END_LOCAL_PARAMS: usize = 6;
+pub(super) const END_LOCAL_PARAMS: usize = 5;
 
 /// What a program runs under: the roots it retires, the committing actor a
 /// wake skips, and the commit's clock.

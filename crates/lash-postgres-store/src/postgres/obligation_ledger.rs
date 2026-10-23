@@ -136,6 +136,7 @@ pub(crate) async fn arm_cleanup_tx(
                 .bind(json)
                 .bind(id.as_str())
                 .bind(sql_i64("cleanup due instant", now_ms)?)
+                .bind(cleanup.gate().map(|gate| gate.key()))
                 .execute(crate::observed_sql::executor(&mut *conn))
                 .await
                 .map_err(store_sqlx_error)?;
@@ -146,6 +147,7 @@ pub(crate) async fn arm_cleanup_tx(
                 .bind(&referrer_id)
                 .bind(json)
                 .bind(sql_i64("cleanup due instant", now_ms)?)
+                .bind(cleanup.gate().map(|gate| gate.key()))
                 .execute(crate::observed_sql::executor(&mut *conn))
                 .await
                 .map_err(store_sqlx_error)?;

@@ -479,6 +479,7 @@ CREATE TABLE IF NOT EXISTS artifact_cleanup_obligations (
     referrer_kind TEXT NOT NULL CONSTRAINT ck_artifact_cleanup_obligations_kind CHECK (length(referrer_kind) > 0),
     referrer_id TEXT NOT NULL CHECK (length(referrer_id) > 0),
     cleanup_json TEXT NOT NULL,
+    gate_execution TEXT, -- The ended plan's typed EffectJournalIdentity key.
     obligation_id TEXT NOT NULL,
     obligation_state TEXT NOT NULL,
     obligation_attempts INTEGER NOT NULL DEFAULT 0,
@@ -491,6 +492,10 @@ CREATE TABLE IF NOT EXISTS artifact_cleanup_obligations (
     PRIMARY KEY (referrer_kind, referrer_id),
     CONSTRAINT ck_artifact_cleanup_obligations_obligation CHECK (((obligation_state = 'due' AND obligation_due_at_ms IS NOT NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NULL) OR (obligation_state = 'claimed' AND obligation_due_at_ms IS NOT NULL AND obligation_claim_token IS NOT NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NULL) OR (obligation_state = 'stalled' AND obligation_due_at_ms IS NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IN ('attempts_exhausted', 'refused', 'undecodable') AND obligation_settled_at_ms IS NOT NULL)) IS TRUE)
 );
+-- Exact gate identity bounds terminal work to this execution's frames.
+CREATE INDEX IF NOT EXISTS idx_artifact_cleanup_obligations_gate
+    ON artifact_cleanup_obligations(gate_execution, referrer_id)
+    WHERE referrer_kind = 'frame_environment' AND gate_execution IS NOT NULL;
 CREATE UNIQUE INDEX IF NOT EXISTS idx_artifact_cleanup_obligations_id
     ON artifact_cleanup_obligations(obligation_id);
 CREATE INDEX IF NOT EXISTS idx_artifact_cleanup_obligations_due

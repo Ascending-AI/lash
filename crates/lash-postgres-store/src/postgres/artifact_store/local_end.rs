@@ -27,13 +27,11 @@ pub(super) async fn end(
     now_ms: u64,
     namespaces: &[&str],
 ) -> Result<(), StoreError> {
-    let pattern = gate.map(gate_pattern).transpose()?;
     let answer: serde_json::Value =
         crate::observed_sql::query_scalar(super::artifact_sql().postgres.end_local.sql())
             .bind(referrer.kind().as_str())
             .bind(referrer.canonical_id())
             .bind(gate.map(EffectJournalIdentity::key))
-            .bind(pattern)
             .bind(crate::support::clamp_epoch_ms(now_ms))
             .bind(namespaces)
             .fetch_one(crate::observed_sql::executor(tx))
@@ -43,13 +41,12 @@ pub(super) async fn end(
 }
 
 /// The arguments of an end of `referrer` gated on `gate` run as a step:
-/// the end call's six, then the canonical body of a frame cleanup gated on
+/// the end call's five, then the canonical body of a frame cleanup gated on
 /// `gate`, which a one-call commit vouches each answered plan against.
 pub(crate) struct EndArguments {
     pub(crate) kind: &'static str,
     pub(crate) id: String,
     pub(crate) gate: Option<String>,
-    pub(crate) pattern: Option<String>,
     pub(crate) namespaces: &'static [&'static str],
     pub(crate) gated_body: Option<String>,
 }
@@ -70,26 +67,10 @@ impl EndArguments {
             kind: referrer.kind().as_str(),
             id: referrer.canonical_id(),
             gate: gate.map(|gate| gate.key().to_owned()),
-            pattern: gate.map(gate_pattern).transpose()?,
             namespaces: &NAMESPACES,
             gated_body,
         })
     }
-}
-
-/// The `LIKE` pattern of the cleanups gated on `gate`.
-pub(super) fn gate_pattern(gate: &EffectJournalIdentity) -> Result<String, StoreError> {
-    serde_json::to_string(gate.key())
-        .map(|encoded| {
-            format!(
-                "%\"gate\":{}%",
-                encoded
-                    .replace('\\', "\\\\")
-                    .replace('%', "\\%")
-                    .replace('_', "\\_")
-            )
-        })
-        .map_err(|error| StoreError::Backend(error.to_string()))
 }
 
 /// A failed end call, as the store reports it: a stored cleanup body that
@@ -132,10 +113,10 @@ pub(crate) fn validate(answer: serde_json::Value) -> Result<(), StoreError> {
 #[cfg(test)]
 pub(crate) fn function_ddl() -> String {
     // Static SQL, generated together with the owner function. No stored
-    // record or owner-function argument changes; the existing transaction
-    // calls this helper for terminals and eligible end hooks.
+    // cleanup body changes; the typed gate key replaces the text pattern.
+    // Terminals and eligible end hooks call the same helper.
     r#"CREATE OR REPLACE FUNCTION lash_artifact_end_local(
-    p_kind text, p_id text, p_gate text, p_pattern text, p_now bigint, p_namespaces text[]
+    p_kind text, p_id text, p_gate text, p_now bigint, p_namespaces text[]
 ) RETURNS jsonb LANGUAGE plpgsql VOLATILE AS $lash_artifact_end_local$
 DECLARE
     v_refs jsonb := jsonb_build_array(jsonb_build_array(p_kind, p_id));
@@ -153,7 +134,7 @@ BEGIN
         SELECT COALESCE(jsonb_agg(jsonb_build_array(referrer_kind, referrer_id, cleanup_json)
             ORDER BY referrer_id), '[]'::jsonb) INTO v_plans
         FROM lash_artifact_cleanup_obligations
-        WHERE referrer_kind = 'frame_environment' AND cleanup_json LIKE p_pattern ESCAPE '\';
+        WHERE referrer_kind = 'frame_environment' AND gate_execution = p_gate;
         FOR item IN SELECT value FROM jsonb_array_elements(v_plans) LOOP
             v_body := (item->>2)::jsonb;
             IF v_body->>'plan' = 'ended' AND v_body->>'gate' = p_gate

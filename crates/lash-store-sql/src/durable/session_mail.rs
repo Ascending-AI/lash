@@ -26,6 +26,7 @@ crate::statements! {
              UNION ALL
              SELECT admitted_run FROM queued_work_batches
              WHERE session_id = ?1 AND admitted_run IS NOT NULL
+               AND terminal_cause IS NULL
              LIMIT 1";
 
         /// Session `?1`'s open, unbound inputs that a turn may admit, in

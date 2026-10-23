@@ -17,7 +17,7 @@ use crate::*;
 
 lash_store_sql::statements! {
     pub(crate) struct ReferrerPostgresStatements @ "artifact_referrer_edge" {
-        end_local = "SELECT lash_artifact_end_local(?1, ?2, ?3, ?4, ?5, ?6)";
+        end_local = "SELECT lash_artifact_end_local(?1, ?2, ?3, ?4, ?5)";
         /// Delete artifact `?2` of namespace `?1` unless a referrer edge
         /// names it, returning the graph node a bridged artifact rooted.
         delete_unreferenced = "DELETE FROM lash_vm_artifacts AS artifact

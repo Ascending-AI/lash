@@ -21,7 +21,7 @@ pub const TABLE: &str = "artifact_cleanup_obligations";
 /// The columns a new row is inserted with, in insert order. The remaining
 /// obligation columns keep their defaults: an inserted row is `due` with no
 /// claim, no attempt and no error.
-pub const INSERT_COLUMNS: &str = "referrer_kind, referrer_id, cleanup_json, obligation_id, obligation_state, obligation_due_at_ms";
+pub const INSERT_COLUMNS: &str = "referrer_kind, referrer_id, cleanup_json, obligation_id, obligation_state, obligation_due_at_ms, gate_execution";
 
 /// The columns a row read by referrer or id returns, in order.
 pub const CLEANUP_COLUMNS: &str =
@@ -32,18 +32,19 @@ crate::statements! {
     /// verbatim.
     pub struct CleanupObligationStatements @ "artifact_cleanup" {
         /// Ended frames whose settlement gate may have just ended. Frame
-        /// carries already committed with the successor's head.
+        /// carries already committed with the successor's head. `?1` is the
+        /// typed execution identity's key, projected when the plan is armed.
         select_frame_cleanups = "SELECT referrer_kind, referrer_id, cleanup_json
              FROM artifact_cleanup_obligations WHERE referrer_kind = 'frame_environment'
-               AND cleanup_json LIKE ?1 ESCAPE '\\'
+               AND gate_execution = ?1
              ORDER BY referrer_id";
 
         /// Insert referrer `?1`/`?2`'s cleanup `?3` as obligation `?4`, due at `?5`,
-        /// unless the referrer already has a row. The caller reads the
+        /// with gate execution `?6`, unless the referrer already has a row. The caller reads the
         /// affected-row count.
         insert_if_absent = "INSERT INTO artifact_cleanup_obligations
-             (referrer_kind, referrer_id, cleanup_json, obligation_id, obligation_state, obligation_due_at_ms)
-             VALUES (?1, ?2, ?3, ?4, 'due', ?5)
+             (referrer_kind, referrer_id, cleanup_json, obligation_id, obligation_state, obligation_due_at_ms, gate_execution)
+             VALUES (?1, ?2, ?3, ?4, 'due', ?5, ?6)
              ON CONFLICT (referrer_kind, referrer_id) DO NOTHING";
 
         /// Referrer `?1`/`?2`'s row: its obligation, state and body.
@@ -58,9 +59,10 @@ crate::statements! {
 
         /// Replace referrer `?1`/`?2`'s guard with its `Ended` body `?3`,
         /// re-armed due at `?4` whatever the guard's state: a relay holding the guard's claim
-        /// loses it, and a stalled guard is new work.
+        /// loses it, and a stalled guard is new work. Gate execution `?5`
+        /// comes from the same typed plan as the body.
         replace_guard_with_ended = "UPDATE artifact_cleanup_obligations
-             SET cleanup_json = ?3, obligation_state = 'due', obligation_attempts = 0,
+             SET cleanup_json = ?3, gate_execution = ?5, obligation_state = 'due', obligation_attempts = 0,
                  obligation_due_at_ms = ?4, obligation_claim_token = NULL,
                  obligation_stall_reason = NULL, obligation_last_error = NULL, obligation_last_error_code = NULL,
                  obligation_settled_at_ms = NULL

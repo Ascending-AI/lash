@@ -469,14 +469,27 @@ pub(crate) fn arm_cleanup_tx(
         CleanupUpsert::Insert => {
             tx.execute(
                 CLEANUPS.insert_if_absent.sql(),
-                params![kind, referrer_id, body, id.as_str(), due],
+                params![
+                    kind,
+                    referrer_id,
+                    body,
+                    id.as_str(),
+                    due,
+                    cleanup.gate().map(|gate| gate.key())
+                ],
             )
             .map_err(sqlite_error)?;
         }
         CleanupUpsert::ReplaceGuard => {
             tx.execute(
                 CLEANUPS.replace_guard_with_ended.sql(),
-                params![kind, referrer_id, body, due],
+                params![
+                    kind,
+                    referrer_id,
+                    body,
+                    due,
+                    cleanup.gate().map(|gate| gate.key())
+                ],
             )
             .map_err(sqlite_error)?;
         }
@@ -518,17 +531,10 @@ pub(crate) fn end_execution_tx(
         now_ms,
     )
     .map_err(sqlite_error)?;
-    let encoded = serde_json::to_string(journal.key())
-        .map_err(|error| StoreError::Backend(error.to_string()))?;
-    let escaped = encoded
-        .replace('\\', "\\\\")
-        .replace('%', "\\%")
-        .replace('_', "\\_");
-    let pattern = format!("%\"gate\":{escaped}%");
     let rows = tx
         .prepare_cached(CLEANUPS.select_frame_cleanups.sql())
         .map_err(sqlite_error)?
-        .query_map([pattern], |row| {
+        .query_map([journal.key()], |row| {
             Ok((
                 row.get::<_, String>(0)?,
                 row.get::<_, String>(1)?,

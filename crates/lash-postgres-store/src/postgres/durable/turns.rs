@@ -242,15 +242,7 @@ pub(super) static SETTLE_HELD_BATCHES: Entry = Entry::new(
 );
 pub(super) static END_LOCAL: Entry = Entry::new(
     || &crate::artifact_store::artifact_sql().postgres.end_local,
-    &[
-        Ty::Text,
-        Ty::Text,
-        Ty::Text,
-        Ty::Text,
-        Ty::Now,
-        Ty::Texts,
-        Ty::Text,
-    ],
+    &[Ty::Text, Ty::Text, Ty::Text, Ty::Now, Ty::Texts, Ty::Text],
     Shape::EndLocal,
 );
 pub(super) static TERMINAL_STATE: Entry = Entry::new(
@@ -283,7 +275,6 @@ pub(super) fn end_local_step(
             Value::text(end.kind),
             Value::text(end.id),
             Value::Text(end.gate),
-            Value::Text(end.pattern),
             Value::Now,
             Value::texts(end.namespaces),
             Value::Text(end.gated_body),

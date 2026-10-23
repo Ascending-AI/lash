@@ -183,8 +183,10 @@ async fn postgres_first_commit_may_end_its_own_appended_frame_open() {
         .expect("publish under first frame");
     let mut state = state;
     let successor = append_successor_frame(&mut state);
+    let transition = frame_transition(&session_id, ended, successor);
+    let gate = transition.gate.clone();
     let commit = lash_core_store::store::RuntimeCommit::persisted_state_for_test(&state)
-        .with_frame_transition(frame_transition(&session_id, ended, successor));
+        .with_frame_transition(transition);
     session_store(&storage, session_id)
         .await
         .commit_runtime_state(commit)
@@ -222,6 +224,33 @@ async fn postgres_first_commit_may_end_its_own_appended_frame_open() {
             .await,
         Err(lash_execution_contracts::module_artifacts::ArtifactStoreError::ReferrerEnded { .. })
     ));
+    assert_eq!(
+        artifacts
+            .get_module_artifact("first-turn-module")
+            .await
+            .expect("read gated bytes"),
+        Some(b"bytes".to_vec()),
+        "the unfinished gate retains the source frame's bytes"
+    );
+    // Exercise the same helper used by terminal owner commits, with the
+    // typed gate key rather than a serialized-body search pattern.
+    let answer: serde_json::Value = sqlx::query_scalar(
+        "SELECT lash_artifact_end_local('execution', $1, $1, 124,
+             ARRAY(SELECT DISTINCT namespace FROM lash_artifact_referrer_edges))",
+    )
+    .bind(gate.key())
+    .fetch_one(storage.pool())
+    .await
+    .expect("settle the switching execution's SQL share");
+    assert_eq!(answer["plans"].as_array().expect("gated plans").len(), 1);
+    assert_eq!(
+        artifacts
+            .get_module_artifact("first-turn-module")
+            .await
+            .expect("read after gate settlement"),
+        None,
+        "gate settlement reclaims its frame's SQL artifacts without a due pass"
+    );
 }
 
 #[tokio::test]

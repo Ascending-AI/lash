@@ -823,6 +823,7 @@ CREATE TABLE IF NOT EXISTS lash_artifact_cleanup_obligations (
     referrer_kind TEXT NOT NULL CONSTRAINT ck_artifact_cleanup_obligations_kind CHECK (referrer_kind IN ('environment_version', 'frame_environment', 'process_record', 'start', 'start_input', 'execution', 'host_pin', 'session', 'upload', 'source')),
     referrer_id TEXT NOT NULL CONSTRAINT ck_artifact_cleanup_obligations_id CHECK (char_length(referrer_id) > 0),
     cleanup_json TEXT NOT NULL,
+    gate_execution TEXT COLLATE "C", -- The ended plan's typed EffectJournalIdentity key.
     obligation_id TEXT NOT NULL,
     obligation_state TEXT NOT NULL DEFAULT 'due',
     obligation_attempts INTEGER NOT NULL DEFAULT 0,
@@ -835,6 +836,10 @@ CREATE TABLE IF NOT EXISTS lash_artifact_cleanup_obligations (
     CONSTRAINT ck_artifact_cleanup_obligations_obligation CHECK (((obligation_state = 'due' AND obligation_due_at_ms IS NOT NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NULL) OR (obligation_state = 'claimed' AND obligation_due_at_ms IS NOT NULL AND obligation_claim_token IS NOT NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NULL) OR (obligation_state = 'stalled' AND obligation_due_at_ms IS NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IN ('attempts_exhausted', 'refused', 'undecodable') AND obligation_settled_at_ms IS NOT NULL)) IS TRUE),
     PRIMARY KEY (referrer_kind, referrer_id)
 );
+-- Exact gate identity bounds terminal work to this execution's frames.
+CREATE INDEX IF NOT EXISTS idx_lash_artifact_cleanup_obligations_gate
+    ON lash_artifact_cleanup_obligations(gate_execution, referrer_id)
+    WHERE referrer_kind = 'frame_environment' AND gate_execution IS NOT NULL;
 CREATE UNIQUE INDEX IF NOT EXISTS idx_lash_artifact_cleanup_obligations_id
     ON lash_artifact_cleanup_obligations(obligation_id);
 CREATE INDEX IF NOT EXISTS idx_lash_artifact_cleanup_obligations_due
@@ -1414,9 +1419,9 @@ DECLARE
     v_answer JSONB;
     v_frame TEXT;
 BEGIN
-    -- Generated from this build's statements (registry c5833bee22cdf434); a call
+    -- Generated from this build's statements (registry a0d25687a48b2614); a call
     -- built from others is refused, as is any isolation but read committed.
-    IF p_registry IS DISTINCT FROM 'c5833bee22cdf434'
+    IF p_registry IS DISTINCT FROM 'a0d25687a48b2614'
         OR current_setting('transaction_isolation') <> 'read committed' THEN
         RAISE EXCEPTION 'lash_owner_commit: registry or isolation refused' USING ERRCODE = 'LX000';
     END IF;
@@ -1890,7 +1895,7 @@ BEGIN
             IF v_rows > 0 THEN v_first := '{}'::JSONB; END IF;
         WHEN 'artifact_referrer_edge.end_local' THEN
             BEGIN
-                SELECT lash_artifact_end_local((v_p->>0), (v_p->>1), (v_p->>2), (v_p->>3), (v_now), (ARRAY(SELECT element FROM jsonb_array_elements_text(v_p->5) WITH ORDINALITY AS listed(element, position) ORDER BY position))) INTO v_answer;
+                SELECT lash_artifact_end_local((v_p->>0), (v_p->>1), (v_p->>2), (v_now), (ARRAY(SELECT element FROM jsonb_array_elements_text(v_p->4) WITH ORDINALITY AS listed(element, position) ORDER BY position))) INTO v_answer;
             EXCEPTION WHEN invalid_text_representation THEN
                 RAISE EXCEPTION 'lash_owner_commit: an end read a stored cleanup that is not JSON'
                     USING ERRCODE = 'LX006';
@@ -1900,7 +1905,7 @@ BEGIN
                 SELECT 1 FROM jsonb_array_elements(v_answer->'plans') AS planned(item)
                 WHERE NOT COALESCE(
                     planned.item->>0 = 'frame_environment'
-                    AND planned.item->>2 = v_p->>6
+                    AND planned.item->>2 = v_p->>5
                     AND starts_with(planned.item->>1, v_frame)
                     AND right(planned.item->>1, 2) = '"]'
                     AND substr(planned.item->>1, length(v_frame) + 1,
@@ -2618,14 +2623,14 @@ BEGIN
             IF v_rows > 0 THEN v_first := '{}'::JSONB; END IF;
         WHEN 'artifact_cleanup.insert_if_absent' THEN
             INSERT INTO lash_artifact_cleanup_obligations
-             (referrer_kind, referrer_id, cleanup_json, obligation_id, obligation_state, obligation_due_at_ms)
-             VALUES ((v_p->>0), (v_p->>1), (v_p->>2), (v_p->>3), 'due', (v_now))
+             (referrer_kind, referrer_id, cleanup_json, obligation_id, obligation_state, obligation_due_at_ms, gate_execution)
+             VALUES ((v_p->>0), (v_p->>1), (v_p->>2), (v_p->>3), 'due', (v_now), (v_p->>5))
              ON CONFLICT (referrer_kind, referrer_id) DO NOTHING;
             GET DIAGNOSTICS v_rows = ROW_COUNT;
             IF v_rows > 0 THEN v_first := '{}'::JSONB; END IF;
         WHEN 'artifact_cleanup.replace_guard_with_ended' THEN
             UPDATE lash_artifact_cleanup_obligations
-             SET cleanup_json = (v_p->>2), obligation_state = 'due', obligation_attempts = 0,
+             SET cleanup_json = (v_p->>2), gate_execution = (v_p->>4), obligation_state = 'due', obligation_attempts = 0,
                  obligation_due_at_ms = (v_now), obligation_claim_token = NULL,
                  obligation_stall_reason = NULL, obligation_last_error = NULL, obligation_last_error_code = NULL,
                  obligation_settled_at_ms = NULL
@@ -2804,7 +2809,7 @@ BEGIN
 END
 $lash_owner_commit$;
 CREATE OR REPLACE FUNCTION lash_artifact_end_local(
-    p_kind text, p_id text, p_gate text, p_pattern text, p_now bigint, p_namespaces text[]
+    p_kind text, p_id text, p_gate text, p_now bigint, p_namespaces text[]
 ) RETURNS jsonb LANGUAGE plpgsql VOLATILE AS $lash_artifact_end_local$
 DECLARE
     v_refs jsonb := jsonb_build_array(jsonb_build_array(p_kind, p_id));
@@ -2822,7 +2827,7 @@ BEGIN
         SELECT COALESCE(jsonb_agg(jsonb_build_array(referrer_kind, referrer_id, cleanup_json)
             ORDER BY referrer_id), '[]'::jsonb) INTO v_plans
         FROM lash_artifact_cleanup_obligations
-        WHERE referrer_kind = 'frame_environment' AND cleanup_json LIKE p_pattern ESCAPE '\';
+        WHERE referrer_kind = 'frame_environment' AND gate_execution = p_gate;
         FOR item IN SELECT value FROM jsonb_array_elements(v_plans) LOOP
             v_body := (item->>2)::jsonb;
             IF v_body->>'plan' = 'ended' AND v_body->>'gate' = p_gate
