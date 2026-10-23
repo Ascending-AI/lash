@@ -109,7 +109,10 @@ fn marked_forms() -> Vec<(Value, Type)> {
                     ty: Type::Text,
                     optional: false,
                 }],
-                result: Type::Json,
+                result: Type::Record(RecordType {
+                    fields: Vec::new(),
+                    rest: Some(Box::new(Type::Json)),
+                }),
             })),
         ),
         (json!({"x-lash": {"kind": "function"}}), Type::Any),
@@ -615,9 +618,14 @@ fn an_open_object_schema_projects_to_a_record_of_its_typed_fields_and_a_json_res
         })
     );
     assert_eq!(result_type_of_schema(&closed), open(Type::Json));
-    // An object schema that states neither fields nor a rest states no
-    // record; one that closes or types its rest does.
-    assert_eq!(type_of_schema(&json!({"type": "object"})), Type::Json);
+    // A bare object is exactly an open empty record.
+    assert_eq!(
+        type_of_schema(&json!({"type": "object"})),
+        Type::Record(RecordType {
+            fields: Vec::new(),
+            rest: Some(Box::new(Type::Json)),
+        })
+    );
     assert_eq!(
         type_of_schema(&json!({"type": "object", "additionalProperties": {"type": "integer"}})),
         Type::Record(RecordType {

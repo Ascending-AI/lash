@@ -4,6 +4,36 @@
 use crate::{JsonSchema, RecordType, RecordTypeField, Signature, Type};
 use serde_json::{Value, json};
 
+/// Why an event schema could not be proved to fit an entry parameter.
+#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
+pub enum EventContainmentRefusal {
+    /// The schema has no representable projection; retains its schema path
+    /// and typed conflict.
+    #[error(transparent)]
+    Projection(#[from] crate::schema::SchemaProjectionRefusal),
+    /// The projected event does not fit; retains the type path and both types.
+    #[error("event does not fit entry parameter: {0}")]
+    Mismatch(crate::SignatureMismatch),
+}
+
+/// Prove that every value of an event schema fits an entry parameter.
+/// Projection only widens: if its superset fits, every event value fits too.
+/// Widenings therefore do not refuse this direction of containment.
+///
+/// # Errors
+/// Returns a typed projection refusal or the first mismatch, rooted at
+/// `/input`, with the expected parameter and provided event types there.
+pub fn event_fits_entry_parameter(
+    event_schema: &Value,
+    parameter: &Type,
+) -> Result<(), EventContainmentRefusal> {
+    let (event, _) = crate::schema::type_of_schema(event_schema)?;
+    match crate::type_relations::type_mismatch(&event, parameter) {
+        Some(mismatch) => Err(EventContainmentRefusal::Mismatch(mismatch)),
+        None => Ok(()),
+    }
+}
+
 /// JSON Schema draft 2020-12 is fixed. Hosts may narrow or raise the traversal
 /// limits; defaults match the schema projector (64 levels, 4096 nodes).
 #[derive(
@@ -429,7 +459,7 @@ mod laws {
     }
 
     /// ENTRY-SCHEMA-EVIDENCE: references resolve at the original root;
-    /// recursion, unsupported constraints and budgets never prove a fit.
+    /// recursion, unsupported constraints and budgets retain their losses.
     #[test]
     fn schema_losses_keep_their_paths_and_reasons() {
         let schema = json!({"$defs": {"E": {"type": "string"}}, "type": "array", "items": {"$ref": "#/$defs/E"}});
@@ -454,6 +484,96 @@ mod laws {
         assert_eq!(
             type_of_schema(&deep).unwrap().1[0].reason,
             WideningReason::Budget
+        );
+    }
+
+    /// EVENT-CONTAINMENT: ordinary event shapes fit Text and record parameters;
+    /// narrowing a nested parameter refuses at its escaped type path.
+    #[test]
+    fn figments_events_fit_and_narrow_parameters_keep_the_exact_mismatch() {
+        for schema in [
+            json!({"type": "string", "format": "date-time"}),
+            json!({"type": "string", "format": "uuid"}),
+            json!({"oneOf": [
+                {"const": "human", "description": "A person"},
+                {"const": "agent", "description": "An agent"}
+            ]}),
+        ] {
+            assert_eq!(event_fits_entry_parameter(&schema, &Type::Text), Ok(()));
+        }
+        let object = Type::Record(RecordType {
+            fields: vec![],
+            rest: Some(Box::new(Type::Json)),
+        });
+        assert_eq!(
+            event_fits_entry_parameter(&json!({"type": "object"}), &object),
+            Ok(())
+        );
+        let schema = json!({"type": "object", "properties": {
+            "a/b~c": {"type": "string", "format": "uuid"},
+            "values": {"type": "object"}
+        }, "required": ["a/b~c", "values"]});
+        let mut parameter = Type::Record(RecordType {
+            fields: vec![
+                RecordTypeField {
+                    name: "a/b~c".into(),
+                    ty: Type::Text,
+                    optional: false,
+                },
+                RecordTypeField {
+                    name: "values".into(),
+                    ty: object,
+                    optional: false,
+                },
+            ],
+            rest: Some(Box::new(Type::Json)),
+        });
+        assert_eq!(event_fits_entry_parameter(&schema, &parameter), Ok(()));
+        let Type::Record(record) = &mut parameter else {
+            unreachable!()
+        };
+        record.fields[0].ty = Type::Enum(vec!["one-id".into()]);
+        assert_eq!(
+            event_fits_entry_parameter(&schema, &parameter),
+            Err(EventContainmentRefusal::Mismatch(
+                crate::SignatureMismatch {
+                    side: crate::SignatureSide::Input,
+                    path: "/input/properties/a~1b~0c".into(),
+                    expected: Type::Enum(vec!["one-id".into()]),
+                    provided: Type::Text,
+                }
+            ))
+        );
+    }
+
+    /// EVENT-CONTAINMENT-SOUNDNESS: lost validation evidence can only prevent
+    /// a proof, while an unrepresentable projection remains a typed refusal.
+    #[test]
+    fn widened_events_fit_but_projection_conflicts_refuse() {
+        let schema = json!({"type": "string", "minLength": 2});
+        assert_eq!(
+            type_of_schema(&schema).unwrap().1,
+            vec![crate::schema::Widening {
+                schema_path: "/minLength".into(),
+                reason: WideningReason::UnsupportedKeyword("minLength".into()),
+            }]
+        );
+        assert_eq!(event_fits_entry_parameter(&schema, &Type::Text), Ok(()));
+        let schema = json!({"type": "object", "properties": {"value": {
+            "allOf": [{"type": "string"}, {"type": "integer"}]
+        }}});
+        assert_eq!(
+            event_fits_entry_parameter(&schema, &Type::Json),
+            Err(EventContainmentRefusal::Projection(
+                crate::schema::SchemaProjectionRefusal {
+                    path: "/properties/value/allOf".into(),
+                    conflict: crate::schema::SchemaConflict::Meet {
+                        fields: vec![],
+                        left: Type::Text,
+                        right: Type::Int,
+                    },
+                }
+            ))
         );
     }
 }

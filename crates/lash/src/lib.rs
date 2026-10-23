@@ -1095,8 +1095,8 @@ pub mod schema {
     pub mod host;
     pub use lash_vocabulary::Name;
     pub use lash_vocabulary::entry_schema::{
-        EntrySchemaPolicy, EntrySchemas, TypeSchemaRefusal, TypeSchemaRefusalReason, entry_schemas,
-        json_schema_of_type,
+        EntrySchemaPolicy, EntrySchemas, EventContainmentRefusal, TypeSchemaRefusal,
+        TypeSchemaRefusalReason, entry_schemas, event_fits_entry_parameter, json_schema_of_type,
     };
     pub use lash_vocabulary::schema::{Widening, WideningReason};
     pub use lash_vocabulary::schema_contract::*;

@@ -177,8 +177,9 @@ impl JsonSchema {
         &self.types.result
     }
 
-    /// Losses retained with the cached input projection. Entry-registration
-    /// proof must refuse when this is nonempty.
+    /// Losses retained with the cached input projection. Widened event types
+    /// can prove a fit into an entry parameter; a schema-defined consumer's
+    /// widened type cannot prove that it accepts typed values.
     pub fn input_widenings(&self) -> &[crate::schema::Widening] {
         &self.types.input_widenings
     }

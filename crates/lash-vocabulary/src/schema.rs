@@ -26,9 +26,9 @@
 //! Compositions are types too. `anyOf`, `oneOf` and a `type` list are the
 //! union of their members; `allOf`, and every keyword beside another in one
 //! schema, is the meet of its members. `oneOf` is typed as `anyOf`: that
-//! exactly one member matches is a fact about values no kernel type states,
-//! and every value of the `oneOf` is a value of the union, so the union is
-//! the tightest type that admits them all; the tool validates exclusivity.
+//! exactly one member matches is retained when the projected arms are disjoint.
+//! Otherwise projection reports the lost exclusivity as a widening; every
+//! value of the `oneOf` is still a value of the union. The tool validates it.
 //! A meet the grammar cannot state refuses the schema, naming where.
 //!
 //! A projection is bounded. A meet distributes over a union, so two unions
@@ -63,7 +63,10 @@ pub const MAX_RESOLVED_REFERENCES: usize = 4096;
 /// a form the grammar has no exact type for is [`Type::Json`], which
 /// admits no function, and only a slot an `x-lash` declaration marks
 /// admits one. The tool still validates its own input. The returned widenings
-/// name every loss of evidence; entry-registration proof must refuse any loss.
+/// name every loss of evidence. The projected type contains every schema value,
+/// so event-to-entry containment accepts widening when that type fits the
+/// parameter. A schema-defined consumer must not rely on a widened projection
+/// to prove that it accepts typed values.
 ///
 /// # Errors
 ///
@@ -85,9 +88,10 @@ pub fn result_type_of_schema(
     project_schema(schema, Openness::Open)
 }
 
-/// Evidence discarded by the structural projection. A host proving entry
-/// compatibility must refuse a projection with any widening; ordinary tools
-/// may use the type and retain JSON Schema validation as their authority.
+/// Evidence discarded by the structural projection. Widening an event's type
+/// is sound for event-to-parameter containment, though it may prevent a proof.
+/// When values flow into a schema-defined consumer, its widened type cannot
+/// prove acceptance; retain JSON Schema validation as the authority.
 #[derive(
     Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
 )]
@@ -356,6 +360,7 @@ impl<'a> Projector<'a> {
                 "$schema"
                     | "$id"
                     | "$anchor"
+                    | "$dynamicAnchor"
                     | "$comment"
                     | "$defs"
                     | "definitions"
@@ -366,12 +371,17 @@ impl<'a> Projector<'a> {
                     | "deprecated"
                     | "readOnly"
                     | "writeOnly"
+                    | "format"
+                    | "contentMediaType"
+                    | "contentEncoding"
+                    | "contentSchema"
                     | "type"
                     | "enum"
                     | "const"
                     | "$ref"
                     | "allOf"
                     | "anyOf"
+                    | "oneOf"
                     | "properties"
                     | "required"
                     | "additionalProperties"
@@ -413,6 +423,7 @@ impl<'a> Projector<'a> {
                 "$ref",
                 "allOf",
                 "anyOf",
+                "oneOf",
                 "properties",
                 "required",
                 "additionalProperties",
@@ -451,6 +462,17 @@ impl<'a> Projector<'a> {
             let mut projected = Vec::with_capacity(members.len());
             for (index, member) in members.iter().enumerate() {
                 projected.push(self.project(member, openness, &at.index(index))?);
+            }
+            // Disjoint projected arms preserve oneOf's exclusivity exactly.
+            // Otherwise the union forgets the requirement to match only one.
+            if keyword == "oneOf"
+                && projected.iter().enumerate().any(|(index, left)| {
+                    projected[index + 1..]
+                        .iter()
+                        .any(|right| !crate::type_relations::disjoint(left, right))
+                })
+            {
+                self.widen(&at, WideningReason::UnsupportedKeyword(keyword.into()));
             }
             let composed = if keyword == "allOf" {
                 projected
@@ -607,23 +629,14 @@ impl<'a> Projector<'a> {
                 Some(items) => self.project(items, openness, &at.key("items"))?,
                 None => Type::Json,
             })),
-            "object" => {
-                let ty = self.record_of(object, openness, at)?;
-                if ty == Type::Json {
-                    self.widen(
-                        &at.key("type"),
-                        WideningReason::UnsupportedKeyword("type".into()),
-                    );
-                }
-                ty
-            }
+            "object" => self.record_of(object, openness, at)?,
             _ => Type::Json,
         })
     }
 
     /// An object schema as a record of its declared `properties`, its rest
     /// what `additionalProperties` states (open in an open result); an
-    /// object schema that states neither is data.
+    /// object schema that states neither is an open empty record.
     fn record_of(
         &mut self,
         object: &'a serde_json::Map<String, Value>,
@@ -656,13 +669,10 @@ impl<'a> Projector<'a> {
                     WideningReason::UnsupportedKeyword("required".into()),
                 );
             }
-            return Ok(match (additional, rest) {
-                (Some(Value::Bool(false) | Value::Object(_)), rest) => Type::Record(RecordType {
-                    fields: Vec::new(),
-                    rest: rest.map(Box::new),
-                }),
-                _ => Type::Json,
-            });
+            return Ok(Type::Record(RecordType {
+                fields: Vec::new(),
+                rest: rest.map(Box::new),
+            }));
         };
         let required: BTreeSet<&str> = object
             .get("required")
@@ -978,7 +988,139 @@ pub fn signature_mismatch(
 mod entry_projection_laws {
     use super::*;
 
-    /// ENTRY-SCHEMA-EVIDENCE: an unresolved reference cannot establish containment.
+    /// EVENT-SCHEMA-EXACT: annotations and unconstrained objects lose no evidence.
+    #[test]
+    fn figments_event_shapes_project_without_widening() {
+        for (schema, expected) in [
+            (
+                serde_json::json!({"type": "string", "format": "date-time"}),
+                Type::Text,
+            ),
+            (
+                serde_json::json!({"type": "string", "format": "uuid"}),
+                Type::Text,
+            ),
+            (
+                serde_json::json!({"oneOf": [
+                    {"const": "human", "description": "A person"},
+                    {"const": "agent", "description": "An agent"}
+                ]}),
+                Type::Union(vec![
+                    Type::Enum(vec!["human".into()]),
+                    Type::Enum(vec!["agent".into()]),
+                ]),
+            ),
+            (
+                serde_json::json!({"type": "object"}),
+                Type::Record(RecordType {
+                    fields: vec![],
+                    rest: Some(Box::new(Type::Json)),
+                }),
+            ),
+        ] {
+            assert_eq!(
+                type_of_schema(&schema).unwrap(),
+                (expected, vec![]),
+                "{schema}"
+            );
+        }
+    }
+
+    /// SCHEMA-ANNOTATIONS: 2020-12 annotations constrain no values, even when
+    /// their contents look like a validation schema.
+    #[test]
+    fn annotations_do_not_widen_but_validation_keywords_do() {
+        let schema = serde_json::json!({
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "$id": "https://example.com/event", "$anchor": "event", "$dynamicAnchor": "event",
+            "title": "Event", "description": "A value", "$comment": "A comment",
+            "examples": ["a"], "default": "a", "deprecated": true,
+            "readOnly": true, "writeOnly": true, "format": "uuid",
+            "contentMediaType": "application/json", "contentEncoding": "base64",
+            "contentSchema": {"type": "integer", "minimum": 10}, "type": "string"
+        });
+        assert_eq!(type_of_schema(&schema).unwrap(), (Type::Text, vec![]));
+        for (keyword, value, ty) in [
+            ("minLength", serde_json::json!(2), Type::Text),
+            ("pattern", serde_json::json!("^a"), Type::Text),
+            ("minimum", serde_json::json!(1), Type::Number),
+        ] {
+            let mut schema = match ty {
+                Type::Text => serde_json::json!({"type": "string"}),
+                _ => serde_json::json!({"type": "number"}),
+            };
+            schema[keyword] = value;
+            assert_eq!(
+                type_of_schema(&schema).unwrap(),
+                (
+                    ty,
+                    vec![Widening {
+                        schema_path: format!("/{keyword}"),
+                        reason: WideningReason::UnsupportedKeyword(keyword.into()),
+                    }]
+                )
+            );
+        }
+    }
+
+    /// SCHEMA-OBJECT: the rest is open, closed or typed exactly as declared,
+    /// even with no properties; result projection retains its open policy.
+    #[test]
+    fn objects_without_properties_preserve_additional_properties() {
+        for (schema, rest) in [
+            (serde_json::json!({"type": "object"}), Some(Type::Json)),
+            (
+                serde_json::json!({"type": "object", "additionalProperties": true}),
+                Some(Type::Json),
+            ),
+            (
+                serde_json::json!({"type": "object", "additionalProperties": false}),
+                None,
+            ),
+            (
+                serde_json::json!({"type": "object", "additionalProperties": {"type": "string"}}),
+                Some(Type::Text),
+            ),
+        ] {
+            assert_eq!(
+                type_of_schema(&schema).unwrap(),
+                (
+                    Type::Record(RecordType {
+                        fields: vec![],
+                        rest: rest.clone().map(Box::new),
+                    }),
+                    vec![]
+                )
+            );
+            assert_eq!(
+                result_type_of_schema(&schema).unwrap(),
+                (
+                    Type::Record(RecordType {
+                        fields: vec![],
+                        rest: Some(Box::new(rest.unwrap_or(Type::Json))),
+                    }),
+                    vec![]
+                )
+            );
+        }
+    }
+
+    /// SCHEMA-ONEOF: a union loses exclusivity where arms can overlap.
+    #[test]
+    fn overlapping_one_of_retains_its_exclusivity_widening() {
+        let schema = serde_json::json!({"oneOf": [
+            {"type": "string"}, {"const": "human", "description": "A person"}
+        ]});
+        assert_eq!(
+            type_of_schema(&schema).unwrap().1,
+            vec![Widening {
+                schema_path: "/oneOf".into(),
+                reason: WideningReason::UnsupportedKeyword("oneOf".into()),
+            }]
+        );
+    }
+
+    /// ENTRY-SCHEMA-EVIDENCE: unresolved references retain their widening evidence.
     #[test]
     fn unresolved_reference_keeps_evidence_of_widening() {
         let (ty, widenings) = type_of_schema(&serde_json::json!({"$ref": "#/missing"})).unwrap();
