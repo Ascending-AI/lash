@@ -6,6 +6,8 @@
 
 crates/lash-dialect-typescript/src/builtins/mod.rs::table::TABLE  # build table of the dialect's built-in rows, derived from constants; no guest input
 crates/lash-dialect-typescript/src/lower/process.rs::<module>::NO_SESSION  # the constant empty binding set a process body lowers against; no guest input
+crates/lash-dialect-services/src/lib.rs::<module>::TYPESCRIPT  # immutable clock, random and sleep operation declarations derived only from the fixed typescript package name and signatures; no guest input or host routes
+crates/lash-dialect-services/src/lib.rs::<module>::PYTHON  # immutable clock, random and sleep operation declarations derived only from the fixed python package name and signatures; no guest input or host routes
 crates/lash-kernel-dialect/src/dialect.rs::first::BINDINGS  # immutable empty binding set for the first cell; no guest input
 crates/lash-kernel-dialect/src/dialect.rs::first::FUNCTIONS  # immutable empty function map for the first cell; no guest input
 crates/lash-kernel-doc/src/identified.rs::<module>::DEFINITION_PARSES  # opt-in definition parse count, enabled per thread by document_work::take_definition_parses; holds only an aggregate integer, no definitions, identities or guest values (ADR 0123)
@@ -30,4 +32,6 @@ crates/lash-kernel-state/src/arena/mod.rs::<module>::COLD_CLOSURE_SITE  # immuta
 crates/lash-kernel-vm/src/functions.rs::brand_built::BRAND_BUILT  # constant identity of the brand.built machine function, computed once from a fixed definition and KERNEL_VERSION; holds no guest state (FIG-6987)
 crates/lash-kernel-doc/src/identified.rs::<module>::HELPERS  # opt-in per-thread helper hash/decode counts; two aggregate integers only, no identities, definitions or guest values (ADR 0123)
 crates/lash-kernel-doc/src/released.rs::empty::EMPTY  # immutable empty helper image initialized only from declarations and the empty member-set identity; no guest input or run state
+crates/lash-kernel-doc/src/released.rs::<module>::ADMISSION_EDGES  # per-thread aggregate helper admission edge-visit count; no definitions, identities or guest values; cfg(any(test, feature = "perf-witness")) excludes ordinary builds
+crates/lash-kernel-state/src/perf_witness.rs::<module>::SEAL_DEPTH  # opt-in per-thread diagnostic seal-scope nesting count, restored on drop; no guest values or identities; cfg(any(test, feature = "perf-witness")) excludes ordinary builds
 crates/lash-kernel-state/src/paged/checkpoint.rs::<module>::WORK  # opt-in per-thread helper compatibility counts; four aggregate integers only, no guest values or identities; cfg(any(test, feature = "perf-witness")) excludes ordinary builds

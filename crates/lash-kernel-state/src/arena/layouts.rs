@@ -421,7 +421,8 @@ mod tests {
         record(&mut arena, &["index", "pair", "label"]);
         let shared = arena.layouts.held();
         assert!(shared > 0);
-        assert_eq!(arena.held() - held, shared + 7 * 16);
+        // One body slot, six key/value slots and 32 bytes of flat-size metadata.
+        assert_eq!(arena.held() - held, shared + 7 * 16 + 32);
         for _ in 0..100 {
             record(&mut arena, &["index", "pair", "label"]);
         }
