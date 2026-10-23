@@ -596,7 +596,26 @@ impl Compiler<'_> {
             doc::Callee::Local(function) => match self.declared.get(function) {
                 Some(code) => Callee::Declared(*code),
                 None => match self.resolve.lib(function) {
-                    Some(lib) => Callee::Library(lib),
+                    Some(lib) => {
+                        let header = &self.resolve.library.lib(lib).header;
+                        let checked = self.scopes.last().is_some_and(|scope| scope.charged)
+                            && !header.has_native()
+                            && self
+                                .resolve
+                                .helpers
+                                .is_some_and(|helpers| helpers.contains(function))
+                            && (header.signature.result != lash_vocabulary::Type::Any
+                                || header
+                                    .signature
+                                    .params
+                                    .iter()
+                                    .any(|param| param.ty != lash_vocabulary::Type::Any));
+                        if checked {
+                            Callee::CheckedHelper(lib)
+                        } else {
+                            Callee::Library(lib)
+                        }
+                    }
                     None => Callee::Value(Var::Unbound(Name::new(function.to_string()))),
                 },
             },
@@ -927,6 +946,7 @@ impl Compiler<'_> {
                 let mut runs = |callee: &doc::Callee| match self.callee(callee) {
                     Callee::Declared(code) => NestedCallee::Declared(code),
                     Callee::Library(lib) => NestedCallee::Library(lib),
+                    Callee::CheckedHelper(lib) => NestedCallee::CheckedHelper(lib),
                     Callee::Import(slot, lib) => NestedCallee::Import(slot, lib),
                     Callee::Value(var) => {
                         read = Some(var);

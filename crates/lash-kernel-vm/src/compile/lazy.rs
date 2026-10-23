@@ -84,6 +84,7 @@ impl LibraryTables {
                 prepared.layout.shape(),
                 Shuffler(prepared.layout.shape().0),
                 Resolve {
+                    helpers: None,
                     library: prepared,
                     listed: None,
                 },

@@ -760,6 +760,7 @@ impl KernelMachine {
         match callee {
             Callee::Declared(code) => Ok(Target::Code(*code, Vec::new(), self.current_link())),
             Callee::Library(lib) => Ok(Target::Library(*lib, self.current_link())),
+            Callee::CheckedHelper(lib) => Ok(self.build_helper_target(exe, *lib)),
             Callee::Import(slot, _) => self.import_target(exe, *slot),
             Callee::Value(var) => {
                 let value = self.read_var(task, exe, var)?;
@@ -786,38 +787,6 @@ impl KernelMachine {
                 .lib_of(&callable.function)
                 .map(|lib| Target::Library(lib, callable.link))
                 .ok_or_else(|| fault("callable definition is not loaded").into()),
-        }
-    }
-
-    pub(super) fn import_target(
-        &self,
-        exe: &Executable,
-        slot: lash_vocabulary::names::ImportSlot,
-    ) -> Eval<Target> {
-        let instance = self.program.instances.get(&self.current_link());
-        match instance.and_then(|instance| instance.slots.get(&slot)) {
-            Some(crate::interface::PreparedSlot::Function { callable, export }) => {
-                let document = exe
-                    .instances
-                    .get(&callable.link)
-                    .ok_or_else(|| fault("export Link is not loaded"))?;
-                let descriptor = match (document.exports.get(&export.name), &export.member) {
-                    (Some(lash_kernel_doc::Export::Function(function)), None) => function,
-                    (Some(lash_kernel_doc::Export::Type(ty)), Some(member)) => {
-                        match ty.members.get(member) {
-                            Some(
-                                lash_kernel_doc::TypeMember::Static(function)
-                                | lash_kernel_doc::TypeMember::Method(function)
-                                | lash_kernel_doc::TypeMember::Property(function),
-                            ) => function,
-                            _ => return Err(fault("imported Type member is absent").into()),
-                        }
-                    }
-                    _ => return Err(fault("imported function Export is absent").into()),
-                };
-                Ok(Target::Export(*callable, Box::new(descriptor.clone())))
-            }
-            _ => Err(fault("call import does not name linked code").into()),
         }
     }
 
@@ -918,6 +887,7 @@ impl KernelMachine {
                 (Target::Code(*code, Vec::new(), self.current_link()), args)
             }
             NestedCallee::Library(lib) => (Target::Library(*lib, self.current_link()), args),
+            NestedCallee::CheckedHelper(lib) => (self.build_helper_target(exe, *lib), args),
             NestedCallee::Import(slot, _) => (self.import_target(exe, *slot)?, args),
             NestedCallee::Read => {
                 let value = self.take(args);

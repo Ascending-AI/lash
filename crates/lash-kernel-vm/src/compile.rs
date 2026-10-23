@@ -972,53 +972,7 @@ pub(crate) struct NestedRole {
     pub(crate) reg: Reg,
 }
 
-/// What a nested action does.
-pub(crate) enum NestedKind {
-    Yield,
-    Cancel,
-    /// A `call`, `apply` or `invoke`: of a declared function, a closure or
-    /// function reference, or a library function, which enters a frame
-    /// when it runs its body.
-    Call(NestedCallee),
-    /// A library call inside an expression of a function that runs its
-    /// body here: it enters a frame, as a call does, but it is no action,
-    /// so no occurrence of its site is counted.
-    Body(LibId),
-    Perform {
-        slot: lash_vocabulary::names::ImportSlot,
-        result: Type,
-        then_yield: bool,
-    },
-
-    Spawn(NestedCallee),
-    Join,
-    JoinMany(JoinMode),
-}
-
-impl NestedKind {
-    /// Whether the task takes one more turn once the action's outcome is
-    /// in (`K-TASK-005`).
-    pub(crate) fn then_yield(&self) -> bool {
-        matches!(
-            self,
-            Self::Perform {
-                then_yield: true,
-                ..
-            }
-        )
-    }
-}
-
-/// What a nested call or `spawn` runs.
-pub(crate) enum NestedCallee {
-    Import(lash_vocabulary::names::ImportSlot, Option<LibId>),
-    Declared(CodeId),
-    Library(LibId),
-    /// A closure or function reference held in a variable, read into the
-    /// action's first register before its arguments (`K-EVAL-004`): a role
-    /// of the actions in them, named by the action's own site.
-    Read,
-}
+pub(crate) use expr::{NestedCallee, NestedKind};
 
 /// One statement: its ops in its stream, how many registers they use, and
 /// what the machine's control needs of its shape.
@@ -1081,29 +1035,7 @@ pub(crate) enum Form {
     Action(Action),
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum LinkedHook {
-    Library(LibId),
-    Code(CodeId),
-    Import(lash_vocabulary::names::ImportSlot, Option<LibId>),
-}
-impl LinkedHook {
-    pub(crate) fn library(self) -> Option<LibId> {
-        match self {
-            Self::Library(lib) | Self::Import(_, Some(lib)) => Some(lib),
-            _ => None,
-        }
-    }
-}
-
-/// A loop protocol's hooks, compiled (`K-ITER-005`).
-#[derive(Clone, Copy)]
-pub(crate) struct Via {
-    pub(crate) open: LinkedHook,
-    pub(crate) next: Option<LinkedHook>,
-    pub(crate) item: Option<LinkedHook>,
-    pub(crate) check: Option<LinkedHook>,
-}
+pub(crate) use expr::{LinkedHook, Via};
 
 impl Stmt {
     /// Where the statement resumes when its action has a value.
@@ -1191,6 +1123,8 @@ pub(crate) enum Callee {
     Declared(CodeId),
     Value(Var),
     Library(LibId),
+    /// A document's body-helper call retains its typed boundary.
+    CheckedHelper(LibId),
     Import(lash_vocabulary::names::ImportSlot, Option<LibId>),
 }
 
@@ -1263,6 +1197,8 @@ const NO_BINDINGS: BTreeSet<Name> = BTreeSet::new();
 /// How a compiled call names a library function.
 #[derive(Clone, Copy)]
 struct Resolve<'a> {
+    /// Only installed build helpers have the dialect's typed call boundary.
+    helpers: Option<&'a doc::BuildHelpers>,
     /// The library the calls resolve against: each function's id, how it
     /// runs and whether it is an operator (`Op::Operator`).
     library: &'a Prepared,

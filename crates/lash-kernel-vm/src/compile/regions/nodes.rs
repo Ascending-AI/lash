@@ -617,7 +617,9 @@ pub(super) fn root_call(
         super::super::Callee::Declared(_) => None,
         super::super::Callee::Value(super::super::Var::Local(local)) => Some(celled(local.at)),
         super::super::Callee::Value(var) => Some(variable(libs, var)?),
-        super::super::Callee::Import(..) | super::super::Callee::Library(_) => return None,
+        super::super::Callee::Import(..)
+        | super::super::Callee::Library(_)
+        | super::super::Callee::CheckedHelper(_) => return None,
     };
     guest_call(call.clone(), read, atoms(libs, args)?)
 }

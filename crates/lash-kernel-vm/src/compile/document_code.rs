@@ -65,6 +65,7 @@ pub(super) fn compile_document(
         layout,
         shuffler,
         Resolve {
+            helpers: Some(library.helpers().as_ref()),
             library: prepared,
             listed: None,
         },

@@ -27,7 +27,83 @@ use lash_kernel_exec::{
     ActIx, FieldIx, FieldListIx, LocalRef, NameIx, Op, OpRange, Reg, RegRange, SiteIx,
 };
 
-use super::{CodeId, Constant, LibId, NestedCallee, NestedKind, Stream};
+use super::{CodeId, Constant, LibId, Stream};
+use lash_kernel_doc::JoinMode;
+use lash_vocabulary::Type;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum LinkedHook {
+    Library(LibId),
+    Code(CodeId),
+    Import(lash_vocabulary::names::ImportSlot, Option<LibId>),
+}
+impl LinkedHook {
+    pub(crate) fn library(self) -> Option<LibId> {
+        match self {
+            Self::Library(lib) | Self::Import(_, Some(lib)) => Some(lib),
+            _ => None,
+        }
+    }
+}
+
+/// A loop protocol's hooks, compiled (`K-ITER-005`).
+#[derive(Clone, Copy)]
+pub(crate) struct Via {
+    pub(crate) open: LinkedHook,
+    pub(crate) next: Option<LinkedHook>,
+    pub(crate) item: Option<LinkedHook>,
+    pub(crate) check: Option<LinkedHook>,
+}
+
+/// What a nested action does.
+pub(crate) enum NestedKind {
+    Yield,
+    Cancel,
+    /// A `call`, `apply` or `invoke`: of a declared function, a closure or
+    /// function reference, or a library function, which enters a frame
+    /// when it runs its body.
+    Call(NestedCallee),
+    /// A library call inside an expression of a function that runs its
+    /// body here: it enters a frame, as a call does, but it is no action,
+    /// so no occurrence of its site is counted.
+    Body(LibId),
+    Perform {
+        slot: lash_vocabulary::names::ImportSlot,
+        result: Type,
+        then_yield: bool,
+    },
+
+    Spawn(NestedCallee),
+    Join,
+    JoinMany(JoinMode),
+}
+
+impl NestedKind {
+    /// Whether the task takes one more turn once the action's outcome is
+    /// in (`K-TASK-005`).
+    pub(crate) fn then_yield(&self) -> bool {
+        matches!(
+            self,
+            Self::Perform {
+                then_yield: true,
+                ..
+            }
+        )
+    }
+}
+
+/// What a nested call or `spawn` runs.
+pub(crate) enum NestedCallee {
+    Import(lash_vocabulary::names::ImportSlot, Option<LibId>),
+    Declared(CodeId),
+    Library(LibId),
+    /// A document's body-helper call retains its typed boundary.
+    CheckedHelper(LibId),
+    /// A closure or function reference held in a variable, read into the
+    /// action's first register before its arguments (`K-EVAL-004`): a role
+    /// of the actions in them, named by the action's own site.
+    Read,
+}
 
 /// A charge region an op closes: the reference charges it whole there,
 /// and an exit before it resumes at its head.

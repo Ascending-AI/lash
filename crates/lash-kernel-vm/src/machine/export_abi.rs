@@ -5,8 +5,61 @@ use super::ops::Reg;
 use super::ops::{Flow, Status};
 use super::{Eval, KernelMachine, fault, raise};
 use crate::compile::Executable;
+use crate::compile::LibId;
 use lash_kernel_doc::{NewObject, Value};
 impl KernelMachine {
+    /// A document enters a body helper under its declared contract, as it
+    /// enters imported code. The helper keeps the caller's Link for operations;
+    /// its internal kernel calls and native expressions retain K-FN-007.
+    pub(super) fn build_helper_target(&self, exe: &Executable, lib: LibId) -> Target {
+        let function = exe.lib(lib);
+        Target::Export(
+            lash_vocabulary::CallableId {
+                function: function.id,
+                link: self.current_link(),
+            },
+            Box::new(lash_kernel_doc::FunctionExport {
+                function: function.id,
+                signature: function.header.signature.clone(),
+                convention: lash_kernel_doc::StartConvention::Direct,
+                asynchronous: false,
+                rest: false,
+            }),
+        )
+    }
+
+    pub(super) fn import_target(
+        &self,
+        exe: &Executable,
+        slot: lash_vocabulary::names::ImportSlot,
+    ) -> Eval<Target> {
+        let instance = self.program.instances.get(&self.current_link());
+        match instance.and_then(|instance| instance.slots.get(&slot)) {
+            Some(crate::interface::PreparedSlot::Function { callable, export }) => {
+                let document = exe
+                    .instances
+                    .get(&callable.link)
+                    .ok_or_else(|| fault("export Link is not loaded"))?;
+                let descriptor = match (document.exports.get(&export.name), &export.member) {
+                    (Some(lash_kernel_doc::Export::Function(function)), None) => function,
+                    (Some(lash_kernel_doc::Export::Type(ty)), Some(member)) => {
+                        match ty.members.get(member) {
+                            Some(
+                                lash_kernel_doc::TypeMember::Static(function)
+                                | lash_kernel_doc::TypeMember::Method(function)
+                                | lash_kernel_doc::TypeMember::Property(function),
+                            ) => function,
+                            _ => return Err(fault("imported Type member is absent").into()),
+                        }
+                    }
+                    _ => return Err(fault("imported function Export is absent").into()),
+                };
+                Ok(Target::Export(*callable, Box::new(descriptor.clone())))
+            }
+            _ => Err(fault("call import does not name linked code").into()),
+        }
+    }
+
     pub(super) fn call_export(
         &mut self,
         task: lash_kernel_doc::TaskId,
