@@ -113,12 +113,6 @@ def declare_pool_platforms(name, constraints):
         native.constraint_value(name = budget_name, constraint_setting = ":budget")
         budgets["{}|{}|{}".format(budget_name, cpu, memory_kb)] = ":" + budget_name
 
-    # Compatibility names used by the one-crate proof remain valid while the
-    # generated graph names every shape by its exact request.
-    for alias, cpu, memory_kb in [("small", 1, 1572864), ("large", 2, 3145728)]:
-        native.constraint_value(name = alias, constraint_setting = ":budget")
-        budgets["{}|{}|{}".format(alias, cpu, memory_kb)] = ":" + alias
-
     native.constraint_value(name = "local_helper", constraint_setting = ":budget")
     platforms(name = name, budgets = budgets, constraints = constraints, local_helper = ":local_helper")
 
