@@ -686,3 +686,6 @@ mod carried_callback;
 
 #[path = "support/callback_carry.rs"]
 mod callback_carry;
+
+#[path = "kernel_step_crash_laws/successor_pair.rs"]
+mod successor_pair;
