@@ -66,6 +66,8 @@ Host convenience can live on facade types or extension traits. Package version
 constants do not arbitrate durable compatibility; trait contracts, data shapes
 and the registered format contracts do.
 
+Workflow authoring is exposed through lash::workflow::authoring: a Draft, typed Operation batches and their refusals. HostArtifacts opens stored definitions as ordinary editable content and prints them as standalone source. Publication accepts the resulting document or ordinarily imported source with an explicit environment; it accepts no authenticated edit token or original-definition claim. Internal materialization and source-worker implementation types do not become additional host editing interfaces.
+
 ## Plugin authoring
 
 `lash::plugins` exposes plugin operations, hook arguments, state access,

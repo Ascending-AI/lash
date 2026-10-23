@@ -119,8 +119,8 @@ pub struct HostArtifacts {
 }
 
 #[cfg(feature = "codemode")]
-#[path = "artifacts/source_edit.rs"]
-mod source_edit;
+#[path = "artifacts/printing.rs"]
+mod printing;
 
 impl HostArtifacts {
     pub(crate) fn new(core: &crate::LashCore) -> Self {
@@ -877,11 +877,21 @@ impl HostArtifacts {
                 "lower",
                 tracing::debug_span!("lash.artifacts.lower"),
                 async {
-                    checked
-                        .worker_service()
-                        .read_exported(text, &typed, format, Default::default(), limits)
-                        .await
-                        .map_err(crate::EmbedError::WorkflowSource)
+                    let (compiled, compiled_map, _) = if typed.document().exports.is_empty() {
+                        let (document, captions) = checked.worker_service().read_exported(text, &typed, format, Default::default(), limits).await.map_err(crate::EmbedError::WorkflowSource)?;
+                        (document, None, captions)
+                    } else {
+                        let (document, map, captions) = checked.worker_service().import_workflow(map.language, text, checked.namespaces(), limits).await.map_err(crate::EmbedError::WorkflowSource)?;
+                        (document, Some(map), captions)
+                    };
+                    if compiled.canonical_bytes() != typed.document().canonical_bytes() || compiled_map.as_ref().is_some_and(|compiled| compiled != map) {
+                        return Err(crate::workflow::import::admission_error(crate::dialect::Diagnostic {
+                            code: "WORKFLOW_SOURCE_MISMATCH".into(),
+                            message: "submitted workflow content or map differs from ordinary source import".into(),
+                            ..Default::default()
+                        }));
+                    }
+                    Ok(())
                 },
             )
             .await?;
@@ -1317,14 +1327,28 @@ impl ProcessDefinitions {
     }
 }
 
-#[cfg(all(feature = "codemode", feature = "workflow-authoring"))]
+#[cfg(feature = "codemode")]
 impl HostArtifacts {
     /// Open retained code as an ordinary Draft, without publishing or running it.
+    #[cfg(feature = "workflow-authoring")]
     pub async fn open_workflow(
         &self,
         definition: &ProcessDefinitionId,
         captions: Option<&crate::workflow::document::Captions>,
     ) -> Result<crate::workflow::OpenedWorkflow> {
+        let opened = self.materialized_workflow(definition, captions).await?;
+        Ok(crate::workflow::OpenedWorkflow {
+            draft: lash_kernel_edit::Draft::open(opened.document)?,
+            selector: opened.selector,
+            captions: opened.captions,
+            dropped: opened.dropped,
+        })
+    }
+    async fn materialized_workflow(
+        &self,
+        definition: &ProcessDefinitionId,
+        captions: Option<&crate::workflow::document::Captions>,
+    ) -> Result<lash_kernel_package::MaterializedWorkflow> {
         let draft = self
             .definition_ports
             .read_definition_draft(definition)
@@ -1367,11 +1391,6 @@ impl HostArtifacts {
             captions,
             documents.helpers(),
         )?;
-        Ok(crate::workflow::OpenedWorkflow {
-            draft: lash_kernel_edit::Draft::open(opened.document)?,
-            selector: opened.selector,
-            captions: opened.captions,
-            dropped: opened.dropped,
-        })
+        Ok(opened)
     }
 }

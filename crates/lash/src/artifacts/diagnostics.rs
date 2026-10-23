@@ -22,13 +22,13 @@ pub(crate) fn source_refused(phase: &str, error: &SourceServiceError) {
     match error {
         SourceServiceError::Dialect(refusal) => refused(phase, &refusal.code),
         SourceServiceError::UnknownDialect { .. } => refused(phase, "dialect_unavailable"),
-        SourceServiceError::Edit(_) => refused(phase, "callable_edit_refused"),
         SourceServiceError::UndeclaredMembers { .. } => refused(phase, "undeclared_members"),
         SourceServiceError::Print(error) => {
             use crate::dialect::PrintError;
             refused(
                 phase,
                 match error {
+                    PrintError::Namespace(_) => "generated_source_namespace",
                     PrintError::Bytes { .. } => "generated_source_bytes",
                     PrintError::Depth { .. } => "generated_source_depth",
                     PrintError::Encode(_) => "generated_source_encode",
@@ -53,7 +53,6 @@ fn report(phase: &str, error: &EmbedError) {
         EmbedError::WorkflowSource(error) => source_refused(phase, error),
         EmbedError::WorkflowBytes(_) => refused(phase, "document_bytes"),
         EmbedError::WorkflowSourceMap(_) => refused(phase, "source_map"),
-        EmbedError::WorkflowEdit(_) => refused(phase, "workflow_edit"),
         EmbedError::ConflictingOperationRoutes { .. } => {
             refused(phase, "conflicting_operation_routes")
         }

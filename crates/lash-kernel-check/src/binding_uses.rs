@@ -27,7 +27,7 @@ pub fn rename_binding_uses(
         let Some(node) = block.and_then(|b| NodeMut::Block(b).descend(&checked.site.path)) else {
             continue;
         };
-        let references = references(&checked.kind);
+        let references = binding_references(&checked.kind);
         for (written, resolved) in written_references(node).into_iter().zip(references) {
             if *resolved == Reference::Binding(binding) {
                 *written = name.clone();
@@ -36,7 +36,8 @@ pub fn rename_binding_uses(
     }
 }
 
-fn references(kind: &NodeKind) -> Vec<&Reference> {
+/// The ordered lexical uses owned by one checked node.
+pub fn binding_references(kind: &NodeKind) -> Vec<&Reference> {
     let mut out = Vec::new();
     fn callee(c: &CalleeNode) -> Option<&Reference> {
         if let CalleeNode::Value(r) = c {

@@ -6,7 +6,7 @@ use lash_vocabulary::Name;
 use lash_vocabulary::sites::Site;
 
 use super::lift::{Lift, Lifter, refuse};
-use super::source::{self, Arm, Body, Expr, StmtKind};
+use super::source::{self, Arm, Expr, StmtKind};
 
 impl Lifter<'_> {
     pub(super) fn statement(&mut self, statement: &k::Stmt, site: &Site) -> Lift<StmtKind> {
@@ -16,10 +16,7 @@ impl Lifter<'_> {
                 if let k::Rhs::Expr(value) = value
                     && let Some(function) = self.closure(value, &site.child(0))?
                 {
-                    return Ok(match function.body {
-                        Body::Block(_) => StmtKind::Function { name, function },
-                        Body::Expr(_) => StmtKind::Const(name, Expr::arrow(function)),
-                    });
+                    return Ok(StmtKind::Const(name, Expr::arrow(function)));
                 }
                 let value = self.rhs(value)?;
                 if self.reassigned(&name) {

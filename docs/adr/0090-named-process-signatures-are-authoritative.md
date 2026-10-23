@@ -15,8 +15,7 @@ name and type, followed by the output type. Arity and named invocation shape
 derive from it. Parameter names are valid identifiers and unique.
 `Process<(), bool>`, `Process<(message: str), bool>`, and
 `Process<(left: str, right: int), bool>` are canonical IR diagnostic renderings.
-TypeScript is the source dialect under
-[ADR 0096](0096-typescript-is-the-sole-rlm-dialect.md).
+Installed source dialects lower public signatures to the same kernel entry contract.
 
 Hosts may declare an unknown process type when they cannot assert a signature.
 It renders as bare `Process`, implies no parameter name or arity, and is
@@ -35,20 +34,11 @@ process definition. A value carries a claim: an unknown claim adopts the
 derivation, and a known mismatch is refused before durable registration. The
 descriptor must also derive the claimed definition id.
 
-Source linking infers and materializes omitted process output annotations.
-`ModuleArtifact::from_program` accepts complete IR and refuses a process without
-an explicit output; it does not invent `any`. Parameter names, order, types,
-and outputs participate in executable module and process-reference identity.
-Artifact construction and store decoding refuse an unlifted process literal
-at any expression root. Only linked, lifted process declarations are admitted.
-The definition id excludes the signature claim because the engine derives it,
-as specified by
-[ADR 0095](0095-processes-are-values-and-process-controls-are-tools.md).
+Promoting source to a workflow entry requires written annotations for every public parameter and the settled result. FunctionExport.signature and a saved FunctionValue's public signature are checked against their callable presentation and convention. Opening a saved callable preserves that contract in the initial editable document; the host may rename parameters or change the contract before publishing a new independent definition. B's own entry is checked afresh. No rule requires its signature or adapter to match A. Definition identity is derived from the engine-owned descriptor, and signature claims cannot authorize different code.
 
-Evidence: `crates/lash-vm/src/ast.rs:219`, `:1252`, `:1354`,
-`crates/lash-vm/src/linker/pass_validation.rs:4`, `:415`,
-`crates/lash-vm/src/artifact.rs:273`, `:334`, `:1053`, and
-`crates/lash-execution-contracts/src/process/definition.rs:417`.
+Evidence: `crates/lash-kernel-doc/src/function_value.rs`,
+`crates/lash-kernel-check/src/workflow.rs` and
+`crates/lash-kernel-vm/src/machine/export_abi.rs`.
 
 ## Alternatives considered
 

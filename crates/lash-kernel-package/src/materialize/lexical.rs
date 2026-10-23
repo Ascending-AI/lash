@@ -54,7 +54,19 @@ pub(super) fn environment(
     raw: Expr,
     helpers: &BuildHelpers,
     fresh: &mut impl FnMut(String) -> Name,
-) -> Result<FunctionId, MaterializeRefusal> {
+) -> Result<Expr, MaterializeRefusal> {
+    let ts = matches!(node.convention, StartConvention::TsArgsList { .. });
+    let abi = if ts {
+        source::Abi::TypeScript
+    } else if node
+        .written_signature
+        .as_ref()
+        .is_some_and(|written| written.language == SourceLanguage::Python)
+    {
+        source::Abi::Python
+    } else {
+        source::Abi::Kernel
+    };
     let mut params = vec![];
     let mut fill = vec![];
     let mut body = vec![];
@@ -75,41 +87,68 @@ pub(super) fn environment(
     fill.push(Stmt::Return {
         value: Expr::Literal(Literal::Null),
     });
-    let setter = definition(
-        format!("materialized.fill{index}"),
+    let setter_name = fresh(format!("fill_environment_{index}"));
+    let setter = source::closure(
+        document,
+        setter_name.to_string(),
         params,
-        Type::Null,
         fill,
-        document,
+        abi,
         helpers,
+        fresh,
     )?;
-    let setter_id = setter.identity();
-    document.functions.insert(setter_id, setter);
+    body.push(binding(setter_name.clone(), setter));
+    let raw_name = node
+        .token
+        .as_ref()
+        .and_then(|token| token.get(2))
+        .and_then(|v| {
+            if let Datum::Text(name) = v {
+                Some(Name::new(name))
+            } else {
+                None
+            }
+        })
+        .or_else(|| {
+            node.signature_origin
+                .as_ref()
+                .and_then(|origin| origin.name.as_ref())
+                .map(Name::new)
+        })
+        .unwrap_or_else(|| fresh(format!("make_callable_{index}")));
+    let raw = match (&node.representation, &node.token) {
+        (FunctionRepresentation::Bare, None) => raw,
+        (FunctionRepresentation::Token { callable, .. }, Some(token)) if ts => {
+            let mut values = Values::new(&[], document.numbers, helpers);
+            let mut parts = Vec::new();
+            for (i, datum) in token.iter().enumerate() {
+                parts.push(if i == *callable as usize {
+                    raw.clone()
+                } else {
+                    values.datum(index as u32, &format!("token.{i}"), datum, 0)?
+                });
+            }
+            document.library.0.extend(values.library);
+            Expr::Tuple(parts)
+        }
+        _ => return Err(MaterializeRefusal::Callable(FunctionValueRefusal::Identity)),
+    };
+    body.push(binding(raw_name.clone(), raw));
+    let parts = vec![Expr::Variable(raw_name), Expr::Variable(setter_name)];
     body.push(Stmt::Return {
-        value: Expr::Tuple(vec![
-            raw,
-            Expr::Closure(Box::new(Closure {
-                function: setter_id,
-                presentation: None,
-            })),
-        ]),
+        value: if ts {
+            Expr::List(parts)
+        } else {
+            Expr::Tuple(parts)
+        },
     });
-    let factory = definition(
-        format!("materialized.environment{index}"),
-        vec![],
-        Type::Any,
-        body,
+    source::closure(
         document,
+        format!("saved_factory_{index}"),
+        vec![],
+        body,
+        abi,
         helpers,
-    )?;
-    let factory_id = factory.identity();
-    document.functions.insert(factory_id, factory);
-    Ok(factory_id)
-}
-
-pub(super) fn member(name: &Name, index: i64) -> Expr {
-    Expr::Member(Box::new(Member::Index {
-        target: Expr::Variable(name.clone()),
-        index: Expr::Literal(Literal::Int(index.into())),
-    }))
+        fresh,
+    )
 }

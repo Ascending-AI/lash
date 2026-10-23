@@ -259,7 +259,6 @@ pub(crate) fn lower_with_calls(
     calls: Option<&mut BTreeSet<String>>,
     spelled: crate::captions::Spelled,
     beside: &[String],
-    retained_imports: Option<&BTreeMap<lash_vocabulary::ImportSlot, lash_vocabulary::Import>>,
 ) -> Lowering<Lowered> {
     let (cell, workflow) = match mode {
         Mode::Cell(cell) => (cell, None),
@@ -366,9 +365,7 @@ pub(crate) fn lower_with_calls(
         imported,
         library: environment.library,
         namespaces: environment.namespaces,
-        imports: retained_imports
-            .map(lash_kernel_dialect::authoring::Imports::retained)
-            .unwrap_or_default(),
+        imports: Default::default(),
         local_functions: BTreeMap::new(),
         local_notes: BTreeMap::new(),
         used: BTreeMap::new(),
@@ -379,12 +376,7 @@ pub(crate) fn lower_with_calls(
             bindings,
             integer_locals,
             sequence_locals,
-            // A bound fragment reads an already initialized frozen environment.
-            bound: vec![if retained_imports.is_some() {
-                cell.bindings.iter().map(ToString::to_string).collect()
-            } else {
-                BTreeSet::new()
-            }],
+            bound: vec![BTreeSet::new()],
             handlers: Vec::new(),
             loops: 0,
         }],

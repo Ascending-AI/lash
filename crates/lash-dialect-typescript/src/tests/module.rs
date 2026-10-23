@@ -951,81 +951,83 @@ export function handle(event: Event): string { return `${event.answered_by}`; }
     );
 }
 
-/// K-CALLABLE-ROUNDTRIP: frozen bindings stay out of the fragment and readback.
+/// PRINT-NORMAL-FORM: materialized captures compile without a defining
+/// document and retain the strict native operations in their ordered body.
 #[test]
-fn callable_roundtrip_preserves_the_defining_document_and_capture_bytes() {
-    use lash_kernel_dialect::{CallableSourceBase, CallableSourceCodec};
-    use lash_kernel_doc::{CaptureValue, Datum, FunctionValue, Node};
-    let lowered =
-        super::lower("const secret = 7; const answer = (x: number): number => x + secret;")
-            .unwrap();
-    let (creation, written) = lowered.written.iter().next().unwrap();
-    let Node::Expr(lash_kernel_doc::Expr::Closure(closure)) =
-        lowered.document.node(creation).unwrap()
-    else {
+fn print_normal_form_preserves_ordered_calls_and_native_identities() {
+    use lash_kernel_doc as k;
+    let library = super::library();
+    let namespaces = Default::default();
+    let lowered = crate::lower(
+        "const offset = 7; const answer = (x: number): number => x + offset;",
+        &lash_kernel_dialect::Environment::new(library, &namespaces),
+        lash_kernel_dialect::Mode::Cell(lash_kernel_dialect::CellEnvironment::first()),
+    )
+    .unwrap();
+    let (site, written) = lowered.written.iter().next().unwrap();
+    let Some(k::Node::Expr(k::Expr::Closure(closure))) = lowered.document.node(site) else {
         panic!("closure");
     };
     let presentation = closure.presentation.as_ref().unwrap();
-    let base = CallableSourceBase {
-        document: lowered.document.clone().into(),
-        function: FunctionValue {
-            written_signature: Some(k_written(written)),
-            signature_origin: written.signature_origin.clone(),
-            implicit_text_conversions: written.implicit_text_conversions.clone(),
-            callable: lash_vocabulary::CallableId {
-                link: lash_vocabulary::LinkId::from_bytes([1; 32]),
-                function: closure.function,
-            },
-            captures: [(
-                lash_vocabulary::Name::new("secret"),
-                CaptureValue::Data(Datum::Float(lash_kernel_doc::Float::new(7.0))),
-            )]
-            .into(),
-            signature: presentation.signature.clone(),
-            convention: presentation.convention.clone(),
-            captions: lowered.captions.clone(),
-            representation: presentation.representation.clone(),
-            creation: Some(creation.clone()),
-            token: Some(vec![
-                Datum::Text("ts.function".into()),
-                Datum::Text(String::new()),
-                Datum::Text("answer".into()),
-                Datum::Float(lash_kernel_doc::Float::new(1.0)),
-                Datum::Null,
-                Datum::Record(Vec::new()),
-            ]),
-        },
+    let link = lash_vocabulary::Link {
+        document: lowered.document.identity(),
+        fills: Default::default(),
     };
-    let capture_bytes = lash_vocabulary::tokens::encode_body(&base.function.captures);
-    let codec = crate::TypeScript::default();
-    let printed =
-        CallableSourceCodec::print(&codec, &base, super::library(), Default::default()).unwrap();
-    assert!(
-        !printed.source.contains("secret ="),
-        "capture values never become source"
-    );
-    let read = CallableSourceCodec::read(
-        &codec,
-        &printed.source,
-        &base,
-        super::library(),
-        Default::default(),
+    let function = k::FunctionValue {
+        callable: lash_vocabulary::CallableId {
+            link: link.identity(),
+            function: closure.function,
+        },
+        captures: [(
+            lash_vocabulary::Name::new("offset"),
+            k::CaptureValue::Data(k::Datum::Float(k::Float::new(7.0))),
+        )]
+        .into(),
+        signature: presentation.signature.clone(),
+        convention: presentation.convention.clone(),
+        representation: presentation.representation.clone(),
+        token: Some(vec![
+            k::Datum::Text("ts.function".into()),
+            k::Datum::Text(String::new()),
+            k::Datum::Text("answer".into()),
+            k::Datum::Float(k::Float::new(1.0)),
+            k::Datum::Null,
+            k::Datum::Record(vec![]),
+        ]),
+        written_signature: Some(k::WrittenSignature {
+            language: written.language,
+            signature: written.signature.clone(),
+        }),
+        signature_origin: written.signature_origin.clone(),
+        implicit_text_conversions: vec![],
+        captions: lowered.captions.clone(),
+        creation: Some(site.clone()),
+    };
+    let content = lash_kernel_package::LinkedContent {
+        documents: [(
+            lowered.document.identity(),
+            lowered.document.into_document(),
+        )]
+        .into(),
+        links: [(link.identity(), link)].into(),
+        ..Default::default()
+    };
+    let release = lash_vm_releases::helper_release().unwrap();
+    let opened = lash_kernel_package::materialize_workflow(
+        &content,
+        &k::WorkflowReference::Callable(function.callable),
+        Some(&function),
         None,
+        &release.helpers,
     )
     .unwrap();
-    assert_eq!(read.document, base.document);
-    assert_eq!(read.function, base.function.callable.function);
-    assert_eq!(
-        lash_vocabulary::tokens::encode_body(&base.function.captures),
-        capture_bytes
-    );
-}
-
-fn k_written(written: &lash_kernel_dialect::Written) -> lash_kernel_doc::WrittenSignature {
-    lash_kernel_doc::WrittenSignature {
-        language: written.language,
-        signature: written.signature.clone(),
-    }
+    let printed = crate::print(&opened.document, None, library, Default::default()).unwrap();
+    crate::lower(
+        &printed.source,
+        &lash_kernel_dialect::Environment::new(library, &namespaces),
+        lash_kernel_dialect::Mode::Module,
+    )
+    .unwrap();
 }
 
 /// ENTRY-RECORD-MODES: promotion and source round trips preserve each input

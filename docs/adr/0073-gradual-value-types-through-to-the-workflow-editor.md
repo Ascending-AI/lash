@@ -2,24 +2,15 @@
 
 ## Context
 
-A workflow editor needs types for available variables, argument slots, and
-local diagnostics. The source and resolved IR remain authoritative; editor
-annotations must not become a second language representation.
+A workflow editor needs types for bindings, value slots and diagnostics. The kernel Document is authoritative; source and graph are ways to author or view it, and facets never become a second program.
 
 ## Decision
 
-Value types are derived, read-only workflow facets. The TypeScript projection
-and Lash VM linker share the host operation contracts and resolved IR under
-ADRs 0037, 0091, and 0100.
+Value types are derived, read-only facts from the kernel checker and the host's explicit operation contracts. They apply equally to captured values materialized as declarations and other document content.
 
 ### D1: Type diagnostics and draft policy
 
-Lash reports link and type diagnostics. The host editor decides whether to
-save a workflow as a draft. A projection of admitted source uses the admitted
-artifact's resolved IR and paths, including lifted process declarations.
-A draft projection carries diagnostics and has no admitted artifact identity.
-Runtime tool-schema validation enforces tool boundaries independently of
-editor facets.
+Draft::open permits a document that is not admitted in the current environment. Draft::apply admits a whole transaction atomically or leaves the draft unchanged. The host owns draft storage. A published definition supplies its own runtime identity; source publication independently applies current source policy, entry checking and fulfilment. Runtime argument/result validation remains separate from editor facets.
 
 ### D2: `Any` is consistent
 
@@ -63,10 +54,7 @@ Each node can carry `WorkflowNodeTypeFacets` with typed available variables,
 expected argument slots, and diagnostics. Argument slots have structured paths.
 Facets describe the same IR node paths as the graph and run observations.
 
-The facet schema has its own version. Decoding drops facets stamped with a
-different facet version while retaining the authoritative graph. Projection
-recomputes facets. Source printing and semantic graph comparison do not treat
-them as edits, so the code-to-graph-to-code lens retains its laws.
+Recomputing facets is not an edit. Print/import laws compare authoritative content and behavior under the stated equivalence relation, never facet caches.
 
 ## Alternatives considered
 
@@ -85,13 +73,7 @@ or identify an admitted artifact by itself.
 
 ## Code references
 
-- `crates/lash-vm/src/linker/` defines assignability.
-- `crates/lash-vm-runtime/src/lib.rs:492-534` preserves tool contracts.
-- `crates/lash-vm/src/linker/catalog.rs:60-82` imports operation schemas.
-- `crates/lash-vm/src/linker/pass_setup.rs:330-379` resolves closed schema witnesses.
-- `crates/lash-vm/src/linker/type_helpers.rs:61-98` joins and widens local bindings.
-- `crates/lash-typescript/src/workflow_graph/mod.rs:44-114` distinguishes draft and artifact projections.
-- `crates/lash-vm/src/workflow_graph/facets.rs:12-45,389-430` defines and derives facets.
-- `crates/lash-vm/src/workflow_graph.rs:174-184` discards incompatible facet data.
+- `crates/lash-kernel-check/src/graph.rs`, `link.rs`, `workflow.rs`.
+- `crates/lash-kernel-edit/src/draft.rs` and `crates/lash-kernel-view`.
 
 [ADR 0137](0137-the-host-owns-events-routing-and-scheduling.md) owns host events, routing and scheduling.

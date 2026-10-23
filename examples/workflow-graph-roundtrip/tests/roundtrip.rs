@@ -38,6 +38,40 @@ async fn answer(response: reqwest::Response) -> Value {
     body
 }
 
+// OperationUse is (Link, ImportSlot), not a display-name string. Resolve
+// each action's slot in the body the action's Site owns.
+fn echo_action(workflow: &Value) -> &Value {
+    use lash::workflow::document::{Document, Site, Unit};
+    let document: Document =
+        serde_json::from_value(workflow["document"].clone()).expect("the workflow document");
+    workflow["view"]["dataflow"]["actions"]
+        .as_array()
+        .expect("the action list")
+        .iter()
+        .find(|action| {
+            let Some(effect) = action["callee"].get("effect") else {
+                return false;
+            };
+            let use_: lash::package::OperationUse =
+                serde_json::from_value(effect.clone()).expect("a typed operation use");
+            let site: Site =
+                serde_json::from_value(action["site"].clone()).expect("the action site");
+            let imports = match site.unit {
+                Unit::Library(id) => {
+                    &document.functions[&id]
+                        .body()
+                        .expect("the authored function body")
+                        .imports
+                }
+                _ => &document.imports,
+            };
+            imports
+                .get(&use_.slot)
+                .is_some_and(|import| import.name.to_string() == "corpus.echo")
+        })
+        .expect("the fixture's corpus.echo action")
+}
+
 /// Runs the saved workflow with `inputs` to its end, approving whatever it
 /// asks for.
 async fn run(client: &reqwest::Client, base: &str, inputs: Value) -> Vec<RunEvent> {
@@ -204,7 +238,7 @@ async fn canvas_closed_http() {
 async fn authored_source_is_read_from_its_published_map() {
     let (base, core) = Box::pin(serve()).await;
     let client = reqwest::Client::new();
-    for (dialect, source, format) in [
+    for (dialect, source, _format) in [
         (
             "typescript",
             "export async function demo(): Promise<string> { return await corpus.echo(\"日本 🦀\"); }",
@@ -243,7 +277,7 @@ async fn authored_source_is_read_from_its_published_map() {
                 .post(format!("{base}/workflow/source"))
                 .json(&json!({
                     "version": imported["version"], "entry": "demo", "dialect": dialect,
-                    "format": format, "source": imported["source"]
+                    "source": imported["source"]
                 }))
                 .send()
                 .await
@@ -260,12 +294,7 @@ async fn authored_source_is_read_from_its_published_map() {
         let imported = answer(client.post(format!("{base}/workflow/source")).json(&json!({
             "version": read["version"], "entry": "demo", "dialect": dialect, "source": source
         })).send().await.unwrap()).await;
-        let action = imported["view"]["dataflow"]["actions"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .find(|action| action["callee"]["effect"] == "corpus.echo")
-            .unwrap();
+        let action = echo_action(&imported);
         let operation = json!({"set_value": {"base": imported["identity"],
             "target": {"tool_argument": {"action": action["site"], "index": 0}},
             "value": {"literal": {"text": "edited λ"}}}});
@@ -322,7 +351,7 @@ async fn captions_follow_import_edit_rename_and_printed_read() {
             .json(&body)
             .send()
     };
-    for (dialect, format, spelled) in [
+    for (dialect, _format, spelled) in [
         ("typescript", "type_script_v1", "/** Email the team */"),
         ("python", "python_v1", "#: Email the team"),
     ] {
@@ -349,21 +378,15 @@ async fn captions_follow_import_edit_rename_and_printed_read() {
             opened["captionView"]["callables"][0]["caption"]["title"],
             "Say hello"
         );
-        let step = opened["captionView"]["nodes"][0].clone();
+        let mut step = opened["captionView"]["nodes"][0].clone();
         assert_eq!(
             step["caption"]["title"],
             "Send a greeting and give back the reply"
         );
         assert_eq!(opened["captionsToReview"], json!([]));
         // A canvas edit of the step's argument keeps its caption and marks it.
-        let action = opened["view"]["dataflow"]["actions"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .find(|action| action["callee"]["effect"] == "corpus.echo")
-            .unwrap()
-            .clone();
-        let edited = answer(
+        let action = echo_action(&opened).clone();
+        let applied = answer(
             post(
                 "edits",
                 json!({"version": opened["version"], "edits": [{"set_value": {
@@ -374,8 +397,18 @@ async fn captions_follow_import_edit_rename_and_printed_read() {
             .await
             .unwrap(),
         )
-        .await["workflow"]
-            .clone();
+        .await;
+        let correspondence: lash::workflow::document::Correspondence =
+            serde_json::from_value(applied["correspondence"].clone()).unwrap();
+        let old_site: lash::workflow::document::Site =
+            serde_json::from_value(step["site"].clone()).unwrap();
+        step["site"] = serde_json::to_value(
+            correspondence
+                .successor(&old_site)
+                .expect("the edited step survives in the new document"),
+        )
+        .unwrap();
+        let edited = applied["workflow"].clone();
         assert_ne!(edited["identity"], opened["identity"]);
         assert_eq!(edited["captions"]["document"], edited["identity"]);
         assert_eq!(titles(&edited), titles(&opened));
@@ -433,7 +466,7 @@ async fn captions_follow_import_edit_rename_and_printed_read() {
             post(
                 "source",
                 json!({"version": renamed["version"], "entry": "demo", "dialect": dialect,
-                    "format": format, "source": printed}),
+                    "source": printed}),
             )
             .await
             .unwrap(),

@@ -75,7 +75,7 @@ The generated region below is checked against the live filenames and headings.
 | 0034 | [Harness evolution lives outside the runtime repository](0034-harness-evolution-lives-outside-the-runtime-repository.md) |
 | 0035 | [Frontends are independent host applications](0035-frontends-are-independent-host-applications.md) |
 | 0036 | [Stream termination is explicit dialect policy](0036-stream-termination-is-explicit-dialect-policy.md) |
-| 0037 | [Lash VM workflows use a code-graph-code lens](0037-lash-vm-workflows-use-a-code-graph-code-lens.md) |
+| 0037 | [Lash VM workflows use Draft authoring and standalone source](0037-lash-vm-workflows-use-a-code-graph-code-lens.md) |
 | 0038 | [Response metadata is allowlisted host-supplied capture](0038-response-metadata-is-allowlisted-host-supplied-capture.md) |
 | 0039 | [Turn cancellation is a first-party work-driver primitive](0039-turn-cancellation-is-a-first-party-work-driver-primitive.md) |
 | 0040 | [Retried model attempts retract live text by correlation](0040-retried-model-attempts-retract-live-text-by-correlation.md) |

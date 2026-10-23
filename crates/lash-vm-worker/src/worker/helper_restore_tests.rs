@@ -663,10 +663,10 @@ fn a_callback_helper_carries_only_with_its_original_operation_contract() {
     finish(resume(&fixture, &embed(&image), &selection), fixture.wait);
 }
 
-/// K-CALLABLE-RESTORE: source inspection cannot mint the restore selection
-/// needed by a fresh captured entry, while the original parked run remains valid.
+/// K-CALLABLE-RESTORE: fresh callable admission refuses a removed helper,
+/// while the original parked run retains its compatible restore selection.
 #[test]
-fn callable_source_edit_cannot_grant_removed_helper_authority() {
+fn fresh_callable_admission_cannot_grant_removed_helper_authority() {
     let fixture = fixture();
     let image = fixture.image(&["parent", "dead"], true);
     let selection = fixture.selection(&image).unwrap();
@@ -678,7 +678,7 @@ fn callable_source_edit_cannot_grant_removed_helper_authority() {
     )).unwrap();
     let function = body.identity();
     document.functions.insert(function, body);
-    let callable = lash_kernel_doc::FunctionValue {
+    let mut callable = lash_kernel_doc::FunctionValue {
         callable: CallableId {
             link: fixture.link.identity(),
             function,
@@ -707,44 +707,39 @@ fn callable_source_edit_cannot_grant_removed_helper_authority() {
             .is_ok()
     );
 
-    let error = lash_kernel_check::WorkflowDocument::captured(
+    let link = lash_vocabulary::Link {
+        document: document.identity(),
+        fills: Default::default(),
+    };
+    callable.callable.link = link.identity();
+    let content = lash_kernel_package::LinkedContent {
+        documents: [(document.identity(), document)].into(),
+        links: [(link.identity(), link)].into(),
+        ..Default::default()
+    };
+    let opened = lash_kernel_package::materialize_workflow(
+        &content,
+        &lash_kernel_doc::WorkflowReference::Callable(callable.callable),
+        Some(&callable),
+        None,
+        fixture.helpers.as_ref(),
+    )
+    .unwrap();
+    let document = opened.document;
+    let error = lash_kernel_check::WorkflowDocument::entered(
         document.clone(),
-        callable.clone(),
+        lash_vocabulary::LinkedStart {
+            link: callable.callable.link,
+            selector: opened.selector,
+        },
         image.helpers().as_ref(),
     )
     .unwrap_err();
     let lash_kernel_check::WorkflowDocumentError::Refused(refused) = error else {
         panic!("fresh admission refuses unavailable helper identity: {error}");
     };
-    assert!(refused.errors.iter().any(|error| matches!(&error.reason, lash_kernel_check::RefusalReason::Invalid(lash_kernel_doc::InvalidReason::FunctionNotResolved { function }) if *function == fixture.ids["dead"])));
+    assert!(refused.errors.iter().any(|error| matches!(&error.reason, lash_kernel_check::RefusalReason::Invalid(lash_kernel_doc::InvalidReason::FunctionNotResolved { function }) if *function == fixture.ids["dead"])), "{refused:#?}");
     assert!(!document.functions.contains_key(&fixture.ids["dead"]));
-    let codec = crate::typescript(&lash_vm_client::WorkerTuning::standard()).unwrap();
-    let base = lash_kernel_dialect::CallableSourceBase {
-        document: document.clone().into(),
-        function: callable.clone(),
-    };
     let embedding = embed(&image);
-    assert!(matches!(
-        codec.callable_source.as_ref().unwrap().print(
-            &base,
-            embedding.library(),
-            Default::default()
-        ),
-        Err(lash_kernel_dialect::PrintError::Unprintable { .. })
-    ));
-    assert!(
-        codec
-            .callable_source
-            .as_ref()
-            .unwrap()
-            .read(
-                "const callable = (): number => 2;",
-                &base,
-                embedding.library(),
-                Default::default(),
-                None
-            )
-            .is_err()
-    );
     finish(resume(&fixture, &embedding, &selection), fixture.wait);
 }

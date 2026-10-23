@@ -33,7 +33,7 @@ Durable-backend conformance laws are an explicit tooling dependency on
 
 Each public name has exactly one canonical facade home. In the workflow
 domain, `BuildHelpers`, `LibraryDependencies` and `WrittenSignature` belong to
-`lash::workflow::document`; `WorkflowReference` and `WorkflowEditRefusal` belong
+`lash::workflow::document`; `WorkflowReference` belongs
 to `lash::workflow`. Feature combinations preserve those homes. The
 `one_home::every_public_name_has_exactly_one_home` law in
 `crates/lash/tests/integration/one_home.rs` checks the exported

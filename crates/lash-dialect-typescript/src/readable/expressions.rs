@@ -30,6 +30,21 @@ impl Lifter<'_> {
                     .map(|item| self.expr(item))
                     .collect::<Lift<_>>()?,
             )),
+            k::Expr::Tuple(items) | k::Expr::Set(items) => Ok(constructor(
+                if matches!(expr, k::Expr::Tuple(_)) {
+                    "tuple.of"
+                } else {
+                    "set.of"
+                },
+                items.iter().map(|v| self.expr(v)).collect::<Lift<_>>()?,
+            )),
+            k::Expr::Map(entries) => Ok(constructor(
+                "map.from_entries",
+                entries
+                    .iter()
+                    .map(|e| Ok(Expr::Array(vec![self.expr(&e.key)?, self.expr(&e.value)?])))
+                    .collect::<Lift<_>>()?,
+            )),
             k::Expr::Record(entries) => {
                 let mut fields = Vec::with_capacity(entries.len());
                 for entry in entries {
@@ -48,7 +63,7 @@ impl Lifter<'_> {
                 k::Member::Index { target, index } => {
                     let target = self.expr(target)?;
                     let index = self.expr(index)?;
-                    Ok(Expr::Index(Box::new(target), Box::new(index)))
+                    Ok(constructor("tuple.at", vec![target, index]))
                 }
             },
             k::Expr::Call { function, args } => self.native(function, args),
@@ -80,6 +95,12 @@ impl Lifter<'_> {
         let Some(name) = self.library(function) else {
             return refuse("a call of a function the manifest does not list");
         };
+        if lash_kernel_dialect::value_constructors::Constructor::named(&name).is_some() {
+            return Ok(constructor(
+                &name,
+                args.iter().map(|v| self.expr(v)).collect::<Lift<_>>()?,
+            ));
+        }
         match (name.as_str(), args) {
             ("num.to_float", [value]) => self.expr(value),
             ("num.neg", [value]) => Ok(Expr::Unary("-", Box::new(self.expr(value)?))),
@@ -245,6 +266,7 @@ impl Lifter<'_> {
             return Ok(None);
         };
         let held = k::Expr::Variable(callee.clone());
+        let direct = matches!(&**selected, k::Expr::Member(_));
         let selects = match &**selected {
             k::Expr::Member(member) => matches!(&**member, k::Member::Index { target, index }
             if *target == held
@@ -275,7 +297,14 @@ impl Lifter<'_> {
         }
         let callee = self.expr(value)?;
         let args = args.iter().map(|arg| self.expr(arg)).collect::<Lift<_>>()?;
-        Ok(Some(Expr::Call(Box::new(callee), args)))
+        Ok(Some(if direct {
+            constructor(
+                "callable.invoke_token",
+                std::iter::once(callee).chain(args).collect(),
+            )
+        } else {
+            Expr::Call(Box::new(callee), args)
+        }))
     }
 
     pub(super) fn act(&mut self, act: &k::ActExpr) -> Lift<Expr> {
@@ -520,10 +549,18 @@ pub(super) fn literal_of(literal: &k::Literal) -> Lift<Expr> {
         k::Literal::Absent => Expr::Undefined,
         k::Literal::Bool(value) => Expr::Bool(*value),
         k::Literal::Text(text) => Expr::Text(text.clone()),
+        k::Literal::Int(value) => {
+            constructor("integer.from_decimal", vec![Expr::Text(value.to_string())])
+        }
+        k::Literal::Bytes(value) => constructor("bytes.from_hex", vec![Expr::Text(value.to_hex())]),
         k::Literal::Float(value) => match source::number(value.get()) {
             Some(text) => Expr::Number(text),
             None => return refuse("a number no literal writes"),
         },
         _ => return refuse("a literal the authored dialect does not lower to"),
     })
+}
+
+fn constructor(name: &str, args: Vec<Expr>) -> Expr {
+    Expr::Call(Box::new(Expr::Ident(name.into())), args)
 }

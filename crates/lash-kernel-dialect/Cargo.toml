@@ -24,6 +24,7 @@ workspace = true
 lash-vocabulary = { workspace = true }
 schemars = { workspace = true }
 lash-kernel-doc = { workspace = true }
+lash-kernel-check = { workspace = true }
 lash-kernel-state = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

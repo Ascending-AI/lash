@@ -55,7 +55,16 @@ pub fn namespaces(document: &k::Document) -> Result<Namespaces, NamespaceRefusal
         BTreeMap<lash_vocabulary::Segment, crate::NamespaceMember>,
     >::new();
     let terminal = terminal_operations(document);
+    let mut requirements = BTreeMap::new();
     for (slot, import) in &document.imports {
+        if let Some(first) = requirements.insert(import.name.clone(), import)
+            && first != import
+        {
+            return Err(NamespaceRefusal::ImportNameConflict {
+                first: Box::new(first.clone()),
+                second: Box::new(import.clone()),
+            });
+        }
         let name = &import.name;
         let kind = match &import.kind {
             ImportKind::Operation { signature } => {
@@ -200,6 +209,7 @@ pub fn print_verified(
     options: PrintOptions,
     lifted: BTreeSet<Name>,
     regions: &dyn Regions,
+    library: &dyn crate::Library,
 ) -> Result<PrintedSource, PrintError> {
     let empty = k::Captions::empty(document.identity());
     let captions = captions.unwrap_or(&empty);
@@ -214,25 +224,56 @@ pub fn print_verified(
         site: lash_vocabulary::sites::Site::new(lash_vocabulary::sites::Unit::Main, Vec::new()),
     };
     let read = regions.read(&whole.source).map_err(|_| unprintable())?;
-    if read.document.canonical_bytes() != document.canonical_bytes()
-        || read
-            .captions
-            .entries()
-            .iter()
-            .any(|entry| captions.get(&entry.target) != Some(&entry.caption))
+    let identities = if read.document.canonical_bytes() == document.canonical_bytes() {
+        read.document
+            .functions
+            .keys()
+            .map(|id| (*id, *id))
+            .collect()
+    } else {
+        crate::normalization::module(document, &read.document, library).ok_or_else(unprintable)?
+    };
+    let remap = |site: &mut lash_vocabulary::sites::Site| {
+        if let lash_vocabulary::sites::Unit::Library(id) = &mut site.unit {
+            *id = identities.get(id).copied().unwrap_or(*id);
+        }
+    };
+    let mapped_entries = read
+        .captions
+        .entries()
+        .iter()
+        .map(|entry| {
+            let mut entry = entry.clone();
+            if let k::CaptionTarget::Site(site) = &mut entry.target {
+                remap(site);
+            }
+            entry
+        })
+        .collect();
+    let read_captions = k::Captions::new(document, mapped_entries).map_err(|_| unprintable())?;
+    if read_captions
+        .entries()
+        .iter()
+        .any(|entry| captions.get(&entry.target) != Some(&entry.caption))
     {
         return Err(unprintable());
     }
+    let map = read.map.map(|mut map| {
+        for row in &mut map.sites {
+            remap(&mut row.site);
+        }
+        map
+    });
     // A retained library body or synthetic binding has no authored syntax.
     // Compare every caption that was spelled exactly, and report each input
     // target absent from the source rather than silently losing its sidecar.
     let dropped = captions
         .entries()
         .iter()
-        .filter(|entry| read.captions.get(&entry.target).is_none())
+        .filter(|entry| read_captions.get(&entry.target).is_none())
         .map(|entry| entry.target.clone())
         .collect();
-    let mut printed = whole_printed(document, whole.source, read.map, regions.format(), options)?;
+    let mut printed = whole_printed(document, whole.source, map, regions.format(), options)?;
     printed.dropped = dropped;
     Ok(printed)
 }

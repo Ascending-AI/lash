@@ -155,21 +155,15 @@ pub trait FrontEnd {
     }
 }
 
-/// Writes a document as plain source in the dialect, without admitting it:
-/// only code an agent could have written, read back by [`Dialect::read`]
-/// against the document it was printed from to identical canonical bytes.
-/// `library` is the one the document's dialect functions resolve in: a
-/// printer may check the source it proposes by lowering it there. What the
-/// source cannot spell (the manifest, entries' signatures, private
-/// bindings, helper identities and name renames of a region in the
-/// dialect's kernel surface) stays in the document. Optional maps describe
-/// final UTF-8 offsets and never change the source.
+/// Writes supported documents as ordinary source and verifies candidates with
+/// ordinary lowering. Canonical identity remains exact for the general document
+/// codec; workflow modules also permit private alpha-renaming, local function
+/// reidentification and exact import-slot renumbering. Public contracts,
+/// executable structure and resolved binding identity remain exact.
 ///
-/// `captions`, of `document`, are spelled in the dialect's caption syntax;
-/// the source then reads back with them (`K-CAP-002`). Each caption the
-/// dialect cannot spell is listed in [`crate::PrintedSource::dropped`]
-/// (`K-CAP-006`). Captions that do not validate against `document` are
-/// [`crate::PrintError::Invalid`].
+/// Unsupported representations refuse with a typed cause. Printing confers no
+/// publication authority. Captions remain sidecars: spelled targets survive
+/// verification and unspellable targets are listed in PrintedSource::dropped.
 pub trait Printer {
     fn print(
         &self,
@@ -220,8 +214,6 @@ pub type ReadSource = fn(
 /// A dialect, as an embedder installs it: its front end, reader and
 /// printer. The library functions it lowers to are lash's packages.
 pub struct Dialect {
-    /// Bound callable fragments, whose environment stays in the base.
-    pub callable_source: Option<Box<dyn crate::CallableSourceCodec>>,
     /// The dialect's name, as a session and a cell envelope record it.
     pub name: String,
     pub front_end: Box<dyn FrontEnd>,

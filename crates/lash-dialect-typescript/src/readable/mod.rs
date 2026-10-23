@@ -4,7 +4,6 @@
 //! Every printed module must lower to the complete original document and
 //! captions. If authored source cannot express it, printing refuses.
 
-mod callable;
 mod closures;
 mod expressions;
 mod lift;
@@ -36,10 +35,24 @@ pub fn print(
     library: &dyn Library,
     options: PrintOptions,
 ) -> Result<PrintedSource, PrintError> {
+    match print_attempt(document, captions, library, options, false) {
+        Err(PrintError::Unprintable { .. }) => {
+            print_attempt(document, captions, library, options, true)
+        }
+        result => result,
+    }
+}
+
+fn print_attempt(
+    document: &k::Document,
+    captions: Option<&k::Captions>,
+    library: &dyn Library,
+    options: PrintOptions,
+    preserve_temporaries: bool,
+) -> Result<PrintedSource, PrintError> {
     check_document_depth(document, options.limits)?;
-    let namespaces =
-        regions::namespaces(document).map_err(|error| PrintError::Invalid(error.to_string()))?;
-    let lifted = lift::document(document, captions, library);
+    let namespaces = regions::namespaces(document).map_err(PrintError::Namespace)?;
+    let lifted = lift::document(document, captions, library, preserve_temporaries);
     let printing = Printing {
         document,
         options,
@@ -62,7 +75,7 @@ pub fn print(
         })?),
     };
     let verified = printing.items.keys().cloned().collect();
-    regions::print_verified(document, captions, options, verified, &printing)
+    regions::print_verified(document, captions, options, verified, &printing, library)
 }
 
 /// One document's lifts, printed and read for [`regions::print_verified`].

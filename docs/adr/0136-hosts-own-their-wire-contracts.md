@@ -26,15 +26,7 @@ host wire contract (FIG-6331), internally tagged by `kind`, with snake_case
 variant names and typed payloads. This typed JSON is the readable host form,
 so hosts may exchange it directly without a wire mirror.
 
-Authoring `Operation` is also Lash-owned serialized request data (FIG-6350,
-Sam's FIG-6349 ruling). Its externally tagged closed canvas operation cases
-reuse the existing nested encodings and reject unknown structural fields.
-Lash publishes its JSON Schema and TypeScript declarations; hosts embed
-`Vec<Operation>` in their own transport, revision and authentication envelope.
-The `Transaction` holds those same operations for replay against its base and
-admission context. InsertStep keeps data inputs inside the performed action,
-with no generated temporaries. Atomic entry extraction also publishes a typed
-document/effect result and refusal schema (FIG-6477).
+Authoring Operation is Lash-owned closed serialized request data. Its canvas operations, binding/entry edits and typed whole-document replacement apply through Draft transactions with base identity and atomic admission. Lash publishes its JSON Schema and TypeScript declarations. Hosts place Vec<Operation> inside their own transport, revision and authentication envelope. Materialization and source import produce ordinary documents; there is no Lash workflow text-edit protocol. Entry extraction retains its typed document/effect result and refusal schema. Other host DTOs and version policies remain host-owned.
 
 Other core types carry no wire-stability promise; a host may serialize them
 when its own contract permits it.

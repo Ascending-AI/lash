@@ -107,11 +107,6 @@ pub(crate) enum Origin {
         captions: Captions,
         review: Vec<Site>,
     },
-    /// Read back from printed source, with the captions it spells.
-    Read {
-        dialect: Dialect,
-        captions: Captions,
-    },
 }
 
 impl SavedWorkflow {
@@ -400,7 +395,7 @@ impl AppState {
         };
         let existing_packages = match &origin {
             Origin::Imported { packages, .. } => Some((**packages).clone()),
-            Origin::Edited { .. } | Origin::Read { .. } => self.current().namespace,
+            Origin::Edited { .. } => self.current().namespace,
             Origin::Document => None,
         };
         let selected = match existing_packages {
@@ -421,20 +416,18 @@ impl AppState {
             let version = store.as_ref().map_or(1, |saved| saved.version + 1);
             let dialect = match &origin {
                 Origin::Document => Dialect::TypeScript,
-                Origin::Imported { dialect, .. } | Origin::Read { dialect, .. } => *dialect,
+                Origin::Imported { dialect, .. } => *dialect,
                 Origin::Edited { .. } => store
                     .as_ref()
                     .map_or(Dialect::TypeScript, |saved| saved.dialect),
             };
             let (captions, review) = match &origin {
                 Origin::Document => (Captions::empty(draft.identity()), Vec::new()),
-                Origin::Imported { captions, .. } | Origin::Read { captions, .. } => {
-                    (captions.clone(), Vec::new())
-                }
+                Origin::Imported { captions, .. } => (captions.clone(), Vec::new()),
                 Origin::Edited { captions, review } => (captions.clone(), review.clone()),
             };
             let authored = match origin {
-                Origin::Document | Origin::Read { .. } => None,
+                Origin::Document => None,
                 Origin::Imported { dialect, text, .. } => Some(AuthoredSource {
                     dialect,
                     text,

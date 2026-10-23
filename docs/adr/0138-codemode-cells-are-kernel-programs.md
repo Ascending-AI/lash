@@ -41,13 +41,9 @@ cell adopts those roots without copying, renaming or loading a binding
 ([ADR 0145](0145-kernel-execution-and-its-checkpoints-share-one-persistent-heap.md)
 §9). A capture writes only the pages the cell changed.
 
-A function or a task does not outlive its cell (`K-SES-003`). A binding
-that reaches one is not carried, and the run's end names it. A later cell
-that uses the name fails with the typed refusal `SESSION_BINDING_NOT_CARRIED`
-(`CellDefect::BindingNotCarried`), which names the binding and says to
-define the function again or keep the awaited result. This is the behaviour
-`TS_FUNCTION_NOT_PERSISTED` had, stated once for every dialect. The bound
-variables prompt lists such a name with why it is not bound.
+Session carry and workflow authoring are separate. A function crossing to a tool is a bounded FunctionValue retaining its defining Links and frozen value graph; publish_callable may retain it as an immutable callable definition. Opening that definition for editing materializes its captured values into a new Document without running the old cell or reading current session bindings. Draft edits and source re-import publish an independent Linked definition with a newly selected environment. Existing cells and parked runs retain their recorded state.
+
+Session functions may be retained by the saved-function tree. Values the session carry path cannot retain are reported as not carried; task/live-runtime state is not made portable by printing or workflow publication. A frozen callable is not a live session closure.
 
 ## A cell's end
 

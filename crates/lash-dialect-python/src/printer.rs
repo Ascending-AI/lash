@@ -1,9 +1,6 @@
-//! Exported Python: plain source whose environment stays in the base
-//! document. Lowering inverses are verified by the readable export path.
+//! Ordinary Python source, verified by the readable export path.
 use crate::generated_scope::BindingScope;
 mod authored;
-mod callable;
-pub(crate) use callable::print_callable;
 mod names;
 mod readable;
 mod signature;
@@ -47,6 +44,7 @@ pub(crate) fn print_regions(
         captions: captions.is_some_and(|c| !c.is_empty()),
         authored: true,
         sync: synchronous.clone(),
+        asynchronous: BTreeSet::new(),
         substitutions: BTreeMap::new(),
         comprehensions: BTreeMap::new(),
         expression_depth: 0,
@@ -114,6 +112,7 @@ struct Renderer<'a> {
     /// The local functions an authored region writes as plain `def`s,
     /// whose calls take no `await`.
     sync: BTreeSet<Name>,
+    asynchronous: BTreeSet<Name>,
     substitutions: BTreeMap<Name, k::Expr>,
     comprehensions: BTreeMap<Name, authored::Comprehension>,
     expression_depth: usize,
@@ -149,6 +148,8 @@ impl Renderer<'_> {
         self.caption_of(lash_vocabulary::sites::Site::new(unit.clone(), Vec::new()));
         if !export.asynchronous {
             self.sync.insert(name.clone());
+        } else {
+            self.asynchronous.insert(name.clone());
         }
         self.out.write(if export.asynchronous {
             "async def "
@@ -220,15 +221,51 @@ impl Renderer<'_> {
     }
     fn root_block(&mut self, block: &k::Block, root: Option<&lash_vocabulary::sites::Unit>) {
         let sync = self.sync.clone();
+        let asynchronous = self.asynchronous.clone();
         self.out.begin_node(root);
         self.indent += 1;
         if block.is_empty() {
             self.empty();
         }
+        if let Some(lash_vocabulary::sites::Unit::Library(id)) = root {
+            let mut locals: BTreeSet<_> = self.document.functions[id]
+                .signature
+                .params
+                .iter()
+                .map(|p| p.name.clone())
+                .collect();
+            let mut writes = BTreeSet::new();
+            let mut pending = vec![k::Node::Block(block)];
+            while let Some(node) = pending.pop() {
+                match node {
+                    k::Node::Stmt(
+                        k::Stmt::Let { name, .. } | k::Stmt::For { binding: name, .. },
+                    )
+                    | k::Node::Expr(k::Expr::Let { name, .. }) => {
+                        locals.insert(name.clone());
+                    }
+                    k::Node::Stmt(k::Stmt::Assign {
+                        place: k::Place::Variable(name),
+                        ..
+                    }) => {
+                        writes.insert(name.clone());
+                    }
+                    _ => {}
+                }
+                pending.extend(node.children());
+            }
+            for name in writes.difference(&locals) {
+                self.padding();
+                self.out.write("nonlocal ");
+                self.name(name);
+                self.out.write("\n");
+            }
+        }
         self.authored_statements(block);
         self.indent -= 1;
         self.out.end_node();
         self.sync = sync;
+        self.asynchronous = asynchronous;
     }
     fn name(&mut self, n: &Name) {
         // Authored source spells the document's names; only the kernel
@@ -305,9 +342,7 @@ impl Renderer<'_> {
     fn literal(&mut self, literal: &k::Literal) {
         match literal {
             k::Literal::Null => self.out.write("None"),
-            k::Literal::Absent => self.out.refuse(PrintError::Invalid(
-                "an absent value has no authored Python spelling".into(),
-            )),
+            k::Literal::Absent => self.out.write("value.absent()"),
             k::Literal::Bool(b) => self.out.write(if *b { "True" } else { "False" }),
             k::Literal::Text(s) => self.out.json(s),
             k::Literal::Int(n) => {
@@ -320,7 +355,7 @@ impl Renderer<'_> {
                 self.out.write(")");
             }
             k::Literal::Bytes(b) => {
-                self.out.write("bytes.fromhex(");
+                self.out.write("bytes.from_hex(");
                 self.out.json(&b.to_hex());
                 self.out.write(")");
             }

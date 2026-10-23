@@ -23,6 +23,8 @@ shared execution services own stores, routes, worker transport and bounds.
 A new front end supplies its own semantic and prompt evidence. Permanent
 parity with another language is not a requirement of the shared machine.
 
+TypeScript and Python provide ordinary workflow source printing and import. Each printer succeeds only for representations it can spell faithfully and reports typed refusals otherwise. A printed callable includes declarations for its frozen values; unchanged source imported and published under equivalent dependencies gives an equivalent independent workflow. Cross-language spelling is subject to the same proof and may refuse.
+
 ## Consequences
 
 Dialect selection remains coherent with saved state and prompt teaching.

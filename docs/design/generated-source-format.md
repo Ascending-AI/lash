@@ -1,234 +1,81 @@
-# Exported workflow source, format v1
+# Workflow source and the general document codec
 
-This is the shared contract for exporting a kernel Document as TypeScript or
-Python and reading it back (FIG-6202, FIG-6205, FIG-6250, FIG-6251, FIG-6265,
-FIG-6272). A dialect changes spelling only.
+Saved workflows print as standalone source through
+`HostArtifacts::print_workflow(definition, captions, format, options)`. It loads
+retained content and uses the shared materializer also used by `open_workflow`.
+Captured data, callable environments and initialization appear as ordinary
+lexical declarations inside the selected entry. Reading executes no guest code
+and publishes no artifacts. The caller retains the original definition while
+loading; the resulting document and text own their content.
 
-Ruling (2026-10-14): exported source contains only code an agent could have
-written. The environment (effect manifest, number mode, entry signatures,
-private bindings, helper identities, name renames) stays where it normally
-lives, in the tool definitions, host configuration and the stored Document.
-It is never serialized into dialect source.
+The host edits the text freely, selects B's entry, and calls `import_workflow`
+with the host's current environment and source policy. It publishes the imported
+DocumentBytes, map and source with `publish_workflow`, then creates and publishes
+a Linked definition. No original definition ID, capture table, edit token or old
+Link fills participate. Equivalent dependencies preserve the public contract and
+observable behavior; another dependency choice can change behavior or refuse.
+Definition identity, formatting, private names, internal Sites and charge need
+not remain equal. A remains independently executable.
 
-A supported, structurally valid Document prints, and reading the printed
-source against that Document gives identical `Document::canonical_bytes()` and
-the same `DocumentId`: entries, private names, every declaration (including
-unused ones) and main. There is no alpha-equivalence or normalization.
-Source maps are outside the Document. Source is a generated language
-subset with kernel semantics; a stock language runtime is not promised to run it.
+## Ordinary lowering and verification
 
-## Readable print (FIG-6953)
+Printers emit supported ordinary TypeScript or Python. They lower candidates
+through the ordinary front end. Exact canonical equality remains the first
+proof. Module verification additionally permits private alpha-renaming,
+reidentification of local functions and exact import-slot renumbering, while
+comparing executable node shapes, helper identities, public contracts and the
+checker's resolved binding identities. Rendering may retain explicit ordered
+locals when folding temporaries would change evaluation or failure order.
+This is a structural proof, not sampled execution or a general equivalence solver.
 
-`print(document, captions, library, options)` prints the workflow module an
-author writes. Each declared function, and `main`, is a region. A region is
-written as authored source, and kept only when reading the print back lowers
-it to the identical region; a module whose every region lifts is a plain
-workflow module, and lowering it, with no base, gives the document's identity.
-Any other module keeps the kernel layout below: each region that did not
-verify, and `main`, is written in kernel form, its body opened by the
-`"use kernel"` directive, and the rest as authored source.
-`read(source, base, library, limits, source_limits)` reads either back: the authored regions
-through the front end, against `library` and the operations `base` performs,
-and the kernel-form regions as `read_kernel` does. The printer never answers
-text that reads as another document; when no mixture verifies, every region
-is in kernel form. The shared machinery is `lash_kernel_dialect::regions`.
+Typed data constructors preserve value kinds: `error.new`,
+`timestamp.from_nanoseconds`, `integer.from_decimal`, `bytes.from_hex`,
+`tuple.of`, `map.from_entries`, `set.of`, `record.new` and `value.absent`.
+`tuple.at` expresses strict kernel indexing. TypeScript can spell strict
+numeric operations by their `num.*` helpers and known-token calls by
+`callable.invoke_token`; they lower normally and need no retained document.
+Native calls still select the installed helper by name and must reproduce its
+exact identity for printing to succeed. Constructor roots are reserved package
+roots. Bound or opaque function tokens without a faithful source spelling
+refuse with typed `PrintError::Unprintable`, never plausible fragments.
 
-## Independent operations
+Conflicting requirements with one qualified source name refuse as
+`NamespaceRefusal::ImportNameConflict`, carrying both declarations through the
+worker boundary. No source namespace silently overwrites a contract. Missing
+requirements and fresh helper admission retain their ordinary typed refusals.
+A Main-only definition without an annotated module entry refuses standalone
+printing rather than inventing a public result contract.
 
-The kernel surface is `print_kernel` and `read_kernel`, every region in
-kernel form; the readable pair's kernel-form regions use the same spelling.
+Source-backed module publication compiles under the supplied namespace and
+checks both the document and source map against that import. A permissive read
+or print grants no authority to a stricter publication or a removed helper.
 
-`print_kernel(document, PrintOptions { source_map, limits }) -> PrintedSource`
-performs naming and structural rendering only. It does not compile, compare,
-resolve Imports, admit, execute, or sample Current. `PrintedSource`
-holds `source`, `SourceFormat` and an optional `SourceMap`; maps default off.
+## Captions, maps and limits
 
-`read_kernel(source, base, GeneratedSourceLimits) -> Document` reads exported source
-back against `base`, the Document it was printed from (the host holds it, as
-JSON or, per FIG-6258, as its bytes or id). The source supplies the code: the
-functions and main. The base supplies the rest: manifest, entries, private
-bindings, the full identity behind each helper spelling and each renamed
-identifier. `read_kernel` needs no library or name catalogue and does not admit.
-`Document::canonical_bytes()` is the canonical token encoding the identity is
-the digest of (`K-ID-003`).
+Captions are sidecars, outside executable identity. Overrides validate against
+the original document before materialization maps them into owned content.
+The printer spells supported captions and reports explicit dropped targets.
+A print map names the materialized document, not the original cell. Imports
+answer a new map and sidecar for the source actually compiled. Hosts own their
+versions, layout and any historical relationship between A and B.
 
-Tests compose all three on every successful print; hosts may too. There is no
-verifier service or verification flag:
+GeneratedSourceLimits independently bounds source bytes and node depth.
+Printing refuses oversized or unrepresentable content with typed errors and
+never returns truncated source. Optional SourceMaps describe final UTF-8 spans
+and complete implicit locations; maps validate against their own document and
+text. Printing and import do not select execution authority.
 
-```rust,ignore
-let printed = lash::typescript::print(&document, None, library, Default::default(), None)?;
-let (read, _) = lash::typescript::read(&printed.source, &document, library, Default::default(), None)?;
-assert_eq!(document.canonical_bytes(), read.canonical_bytes());
-```
+## General document codec
 
-A host that edits the exported text reads the edit against the same base. An
-edit can change any function body or main. It cannot add, drop or retype an
-entry (in TypeScript, `export` must mark exactly the base's entries), add a
-helper the base does not hold, or rename the environment. A construct the
-reader has no exact inverse for is a typed refusal naming it
-(`GeneratedSourceFormat` for module structure, the dialect's `InvalidAst` for
-body syntax), never a silent change. Nothing falls through to authored
-lowering, and authored lowering is not the reader: lowering is not injective
-(boundary calls, guarded reads, iterator expansion and temporaries), so its
-output has no unique authored source. New agent-written cells still lower
-through the authored front end.
+The pre-existing `Dialect::read`, `ReadSource`, worker `Read` request,
+`WorkerService::read_exported` and `HostArtifacts::import_exported_workflow`
+remain for general document/cell codec consumers. They accept a Document as
+source-name metadata and carry no ProcessDefinitionId, capture environment or
+saved Link fills. Their existing exact document laws remain applicable to
+that supported subset. They are not the workflow author's source-edit path
+and are not a fallback when standalone printing refuses.
 
-## Module shape
-
-TypeScript: zero or more function declarations, then exactly one
-`async function main()`. An entry is `export async function name(...)`; every
-other function is `async function name(...)`. Python: zero or more
-`def`/`async def` functions, then one `def main():` (`async def` wherever a body
-awaits). Additional module items, duplicate declarations, a missing main and
-trailing text refuse.
-
-```typescript
-export async function deep_research() {
-  let search_input = {topic: "Reducing customer onboarding drop-off", max_sources: 3};
-  let evidence = await research.search(search_input);
-  let synthesis_input = {topic: evidence.topic, sources: evidence.sources};
-  let report = await research.synthesize(synthesis_input);
-  let display_input = {text: report.summary};
-  await display.showMessage(display_input);
-  return report;
-}
-async function main() {
-  finish(null);
-}
-```
-
-There is no header, directive, declaration or stub block, no name or helper
-table and, in the ordinary case, no cast. An effect call without an annotation
-reads as `result: any`, which is what authored lowering stores. Only a
-document whose effect result is another type spells it
-(`as KernelType<...>` in TypeScript, `result=...` in Python). The previous
-`k.document(...)` envelope and its reader are deleted; there is no dual format.
-`SourceFormat::TypeScriptV1` and `PythonV1` identify the selected syntax.
-
-## Deterministic naming plan
-
-`NamePlan::new(document, legal)` is computed from the Document by the printer
-and from the base by the reader, so both sides agree without printing a table.
-It first collects declaration names and parameters in the Document's BTreeMap
-order, then walks main and declaration bodies in kernel `Node::children`
-preorder, collecting bindings, variables, closure parameters, callee names and
-function literals on first encounter. Entry and private names follow in their
-BTree order. It reserves every legal original identifier before assigning any
-alias. Equal original Names share one spelling everywhere.
-
-Legal original names keep their spelling. Other names (keywords, reserved
-generated APIs, `main`, names in the `kernel_name_` or `helper_` namespaces,
-and for Python names that are not NFKC-stable) receive `kernel_name_1`,
-`kernel_name_2`, ..., in first-encounter order, skipping used spellings. The
-mapping is injective. A name an edit introduces reads as itself if it is legal
-and is not the original of a renamed name.
-
-Helper identities are collected from the manifest and the call nodes and
-sorted by full identity. A manifest label becomes `helper_` plus its qualified
-name with dots replaced by underscores; an identity with no label uses
-`helper_function`. Collisions get `_2`, `_3`, ... in ID order. The reader
-resolves a helper spelling to the base's identity; a spelling the base does
-not hold refuses. Ordered table operations cost O((names + helpers) log(names +
-helpers)); structural walks and writing are linear in nodes and bytes.
-
-## Authored spellings and remaining fallbacks
-
-Every modeled ordinary construct uses ordinary syntax with a direct inverse:
-functions, calls, awaited effects, bindings, literals, records/objects,
-collections, members, operators by precedence with minimal parentheses, and
-structured controls. A library action whose authored spelling is the node's
-exact inverse prints that way: TypeScript `console.log(...args)` and
-`target.name(...args)`; Python builtins such as `len(x)` and `range(a, b)`,
-methods such as `xs.append(v)` and `"a b".split()`, `x[a:b]` slices and
-`type(x).__name__`. The base document must hold the helper label once.
-Everything else keeps a body-level fallback, each listed per dialect with a
-corpus witness and reason in
-[`generated_rules.md`](../../crates/lash-dialect-typescript/src/generated_rules.md)
-and [`generated-source-python.md`](generated-source-python.md). Examples are
-the handlerless Try, kernel task primitives, and helper actions lowering
-inserts that no source spells.
-
-## Resource policy and optional final-text spans
-
-`GeneratedSourceLimits` defaults to 16 MiB and node depth 64 (root block at
-zero), independently of ordinary cell limits. Hosts can narrow these limits;
-the native depth ceiling remains 64. Print checks node and type depth
-iteratively before recursive rendering, then counts actual encoded Document
-input bytes with a bounded sink. Input and output both obey the byte budget.
-A single append-only writer checks each addition. Byte arithmetic is checked.
-Exhaustion yields `PrintError::Bytes` or `Depth`, never truncated source.
-
-Reading bounds source bytes and lexical/parser nesting before parsing, keeps
-parsing, decoding and AST destruction on a reserved stack, checks result-type
-nesting before decoding it, then checks the reconstructed Document under the
-same policy. Reconstructed renamed names are counted against the byte budget
-before they are cloned. Refusals use the typed dialect codes
-`GeneratedSourceFormat`, `GeneratedSourceBytes` and `GeneratedSourceDepth`;
-malformed body syntax uses the dialect's `InvalidAst` diagnostic.
-
-`SourceWriter` records final UTF-8 offsets while nodes emit their final layout.
-Maps identify the SHA-256 of the source bytes, the DocumentId and the
-SourceFormat; reusing a map requires checking all three. Nothing stores maps
-automatically. With collection disabled, no Site, range, hash or identity is
-computed for maps (an instrumented writer law proves it).
-
-Map completeness is exactly `Node::children` from main and the declared
-Function roots. Each Site occurs once, with nonempty half-open ranges at valid
-UTF-8 boundaries. TypeScript's omitted empty else records its Block with
-`SourceSite::implicit` immediately after the then block. Actions have no child
-Sites for their atoms. Library bodies and graph IDs are outside the map.
-
-## Host and worker operations
-
-`WorkflowDocument::typescript(options)` and `::python(options)` return the
-complete `PrintedSource`. The facade exposes `lash::typescript::read` and
-`lash::python::read`; their results are unadmitted Documents.
-`HostArtifacts::import_exported_workflow(source, format, base, environment, source_limits)`
-reads and admits in one step, against the same environment as publication.
-`HostArtifacts::import_workflow` is authored module lowering only, in either dialect.
-Authored TypeScript and Python lowering refuse unresolved printed helper names
-(`helper_*`), renamed bindings (`kernel_name_*`) and the `declared`
-namespace (also `k` attribute and method references in Python) as
-`PrintedSourceNeedsBase` (`TS_PRINTED_SOURCE_NEEDS_BASE` or
-`PY_PRINTED_SOURCE_NEEDS_BASE`). The diagnostic names
-`typescript::read(source, base)` or `python::read(source, base)` so a host can
-route the source with its
-base document. Ordinary authored bindings with those spellings still resolve;
-quoted data and unrelated unknown names do not trigger this refusal. Source
-without these unresolved references carries no provenance marker and is not
-guaranteed to be distinguishable from newly authored source.
-
-Operations print by canonical path in the dialect's spelling, such as
-`inbox.sendItem` in TypeScript and `inbox.send_item` in Python. The reader
-unspells the path and resolves it against the base manifest. `tools` is an
-ordinary namespace. Code calls keep identity-bound `helper_` aliases unless
-a spelling has an exact inverse. See [host packages](../host-packages.md).
-
-`lash::vm::WorkerService::print(document, captions, format, options)` and
-`::read_exported(source, base, format, limits, source_limits)` run the same operations in the
-worker crash domain. The read request carries the base Document's JSON; the
-response is a Document with the captions its source spells, without a
-library, Current snapshot or admission.
-The installed dialect package owns a `read` function pointer alongside its
-authored front end and printer. The worker wire-v1 snapshots change in place
-before the 1.0 cut; no stored shape changes.
-
-To execute a read document, admit it through `WorkflowDocument::admit` or
-publish it through the host's workflow API. Unavailable requirements and
-mismatched signatures remain admission refusals.
-
-## Readability acceptance
-
-The shared `lash_kernel_dialect::readability` harness owns seven realistic
-documents (three effects with record inputs, recursion with a foreign helper,
-nested controls, loops over records, error handling, multiple entries and an
-RLM tool cell) and the real `deep_research` agent cell. Each dialect registers
-its printer, its `read`, a node-based generic detector and its documented
-unavoidable rules. The harness reads each print against the case's Document,
-checks complete canonical bytes and the DocumentId, and requires unique
-real-Site coverage. It lexes each Site's own source (descendant ranges and
-quoted data excluded) and counts every `k.` form, `helper_*` call,
-pseudo-intrinsic and cast. Outside every node, the source may hold only
-function declarations (names, keywords and parameter lists): any header,
-directive, table or data there fails. A form without a matching named rule
-and reason fails.
+`WorkerService::print` also prints supported cell Documents, which may have no
+module entry. This generic codec contract is distinct from definition-level
+standalone workflow-module printing. Hosts use ordinary module import when
+independently publishing printed workflows.

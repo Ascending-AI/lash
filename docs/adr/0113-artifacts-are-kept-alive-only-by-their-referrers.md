@@ -581,18 +581,9 @@ process definitions. The cell retains its document once through the document
 funnel. Session bindings keep saved functions in kind-30 bundles at settle;
 the frame acquires no new definition or FunctionValue edge.
 
-Functions in tool arguments cross while the VM heap is live, as small kernel
-documents with frozen captures. `processes.start({ definition: value, args })`
-records an inline start declaration. Only after its outcome commits does
-realization publish the ordinary linked code and selected
-descriptor under `Start(key)`, then register and adopt their closure into the
-process record. Cancelling an uncommitted cell publishes no definition.
+Functions crossing in tool arguments are bounded FunctionValues containing a defining callable and a frozen capture graph, not newly stored Documents. Runtime realization or publish_callable retains the defining Links and provenance and publishes the callable descriptor under the appropriate referrer. Crossing and reading alone publish nothing.
 
-A host starts held values with `HostArtifacts::start_function` and an explicit
-key and launch, or makes a workflow durable with `publish_workflow` under a
-host pin. Only published workflows are exposed as stored references.
-The returned process handle includes its realized `definition_id`; listing
-accepts that id or an inline function whose id is derived without storing it.
+Opening a callable for authoring materializes its values into an ordinary in-memory Document. Publishing that document uses a new host pin and fresh fulfilment; the resulting definition contains no original-definition or edit-origin edge. A and B retain their own actual content dependencies, which may deduplicate. Host revision history is not an artifact retention edge unless the host explicitly pins it.
 
 ### 7. Acceptance tests
 

@@ -1,8 +1,8 @@
 //! K-CALLABLE source authoring laws over retained SQLite definitions.
 use super::*;
 use lash::dialect::SourceFormat;
+use lash::workflow::WorkflowInspection;
 use lash::workflow::document::{CaptureValue, Datum, FunctionValue, Node, WrittenSignature};
-use lash::workflow::{WorkflowEditRefusal, WorkflowInspection};
 
 const TS: &str = "const offset = 7; const f = (x: number): number => x + offset; const first = f; const second = f; const answer = async (x: number): Promise<number> => await tools.echo({value: first(x) + second(x)});";
 const PY: &str = "offset = 7\ndef f(x: int) -> int:\n    return x + offset\nfirst = f\nsecond = f\nasync def answer(x: int) -> int:\n    return await tools.echo({\"value\": first(x) + second(x)})\n";
@@ -120,6 +120,27 @@ async fn saved(
         (Name::new("recursive_surplus"), CaptureValue::Reference(0)),
     ]
     .into();
+    // PRINT-STANDALONE retains exact non-JSON kinds in surplus captures too.
+    function.captures.insert(
+        Name::new("typed_surplus"),
+        CaptureValue::Data(Datum::Tuple(vec![
+            Datum::Error(Box::new(lash_kernel_doc::ErrorDatum {
+                kind: "saved".into(),
+                message: "typed value".into(),
+                data: Datum::Absent,
+            })),
+            Datum::Timestamp(lash_kernel_doc::Timestamp {
+                nanoseconds: lash_kernel_doc::Integer::parse("123456789012345678901234567890")
+                    .unwrap(),
+            }),
+            Datum::Bytes(lash_kernel_doc::Bytes::parse_hex("00ff").unwrap()),
+            Datum::Map(vec![(
+                Datum::Int(7.into()),
+                Datum::Set(vec![Datum::Int(2.into()), Datum::Int(1.into())]),
+            )]),
+            Datum::Record(vec![("absent".into(), Datum::Absent)]),
+        ])),
+    );
     let origin = lash::package::CallableOrigin {
         authored: [start.link].into(),
         publications: environment
@@ -177,551 +198,6 @@ async fn inspect(
     *base
 }
 
-/// FIG-7191: every host publication reports an ended pin through the typed
-/// artifact accessor, including document and package publication wrappers.
-#[tokio::test]
-async fn released_pin_publications_keep_the_typed_artifact_refusal() {
-    let core = core().await;
-    let artifacts = core.host_artifacts();
-    let retained = lash::process::HostArtifactPin::mint();
-    let (definition, environment, function) =
-        saved(&core, &retained, SourceFormat::TypeScriptV1).await;
-    let base = inspect(&core, &definition).await;
-    let printed = artifacts
-        .print_workflow(&base, None, SourceFormat::TypeScriptV1, Default::default())
-        .await
-        .unwrap();
-    let edited_source = printed.source.replace("second(x)", "second(x) + 1");
-    assert_ne!(edited_source, printed.source);
-    let edit = artifacts
-        .edited_from_read(
-            &base,
-            &edited_source,
-            SourceFormat::TypeScriptV1,
-            &environment,
-            None,
-        )
-        .await
-        .unwrap();
-    let document = base.document.document().clone().into();
-    let start = lash::package::LinkedStart {
-        link: function.callable.link,
-        selector: lash::package::StartSelector::Main,
-    };
-    let draft = lash::vm::definition_draft(&lash::process::KernelProcessDefinition {
-        code: lash::vm::KernelInlineRequest::Linked { start },
-    })
-    .unwrap();
-    let origin = lash::package::CallableOrigin {
-        authored: [function.callable.link].into(),
-        publications: environment
-            .snapshot
-            .advertisements
-            .iter()
-            .map(|accepted| accepted.publication.key())
-            .collect(),
-    };
-    let pin = lash::process::HostArtifactPin::mint();
-    artifacts.release(pin.clone()).await.unwrap();
-    let errors = [
-        (
-            "publish_workflow",
-            artifacts
-                .publish_workflow(
-                    &pin,
-                    &document,
-                    &lash::package::StartSelector::Main,
-                    &environment,
-                    None,
-                    None,
-                )
-                .await
-                .unwrap_err(),
-        ),
-        (
-            "publish_callable",
-            artifacts
-                .publish_callable(&pin, &function, &environment, &origin, None)
-                .await
-                .unwrap_err(),
-        ),
-        (
-            "publish_definition",
-            artifacts
-                .publish_definition(&pin, &draft)
-                .await
-                .unwrap_err(),
-        ),
-        (
-            "publish_workflow_edit",
-            artifacts
-                .publish_workflow_edit(&pin, &edit, &environment, None)
-                .await
-                .unwrap_err(),
-        ),
-        (
-            "process_namespace",
-            artifacts
-                .process_namespace(
-                    &pin,
-                    &source_environment(false),
-                    environment.context.clone(),
-                )
-                .await
-                .unwrap_err(),
-        ),
-        (
-            "publish_process_env",
-            artifacts
-                .publish_process_env(&pin, &source_environment(false))
-                .await
-                .unwrap_err(),
-        ),
-    ];
-    for (entry, error) in errors {
-        assert_eq!(
-            error.artifact_refusal(),
-            Some(lash::process::HostArtifactRefusal::PinReleased),
-            "{entry}: {error:?}",
-        );
-    }
-    core.shutdown().await.unwrap();
-}
-
-/// K-CALLABLE-ROUNDTRIP: reopen, duplicate code identities with distinct
-/// environments, and Reference(0) survive unchanged source publication.
-#[tokio::test]
-async fn sqlite_reopen_callable_roundtrip_preserves_descriptor_and_frozen_graph() {
-    for format in [SourceFormat::TypeScriptV1, SourceFormat::PythonV1] {
-        let files = Files::new();
-        let core = core_over(files.open().await, "callable-save").await;
-        let pin = lash::process::HostArtifactPin::mint();
-        let (definition, environment, function) = saved(&core, &pin, format).await;
-        let captures = lash_vocabulary::tokens::encode_body(&function.captures);
-        core.shutdown().await.unwrap();
-        drop(core);
-        let core = core_over(files.open().await, "callable-open").await;
-        let base = inspect(&core, &definition).await;
-        let printed = core
-            .host_artifacts()
-            .print_workflow(
-                &base,
-                None,
-                format,
-                lash::dialect::PrintOptions {
-                    source_map: true,
-                    ..Default::default()
-                },
-            )
-            .await
-            .unwrap_or_else(|error| panic!("{format:?}: {error:?}"));
-        assert!(!printed.source.contains("offset ="));
-        let map = printed.source_map.as_ref().unwrap();
-        map.validate(base.document.document(), &printed.source)
-            .unwrap();
-        let edit = core
-            .host_artifacts()
-            .edited_from_read(&base, &printed.source, format, &environment, None)
-            .await
-            .unwrap();
-        assert_eq!(edit.base_definition(), &definition.id);
-        let published = core
-            .host_artifacts()
-            .publish_workflow_edit(&pin, &edit, &environment, None)
-            .await
-            .unwrap();
-        assert_eq!(published, definition);
-        let after = inspect(&core, &published).await;
-        assert_eq!(after.document.callable(), Some(&function));
-        assert_eq!(
-            lash_vocabulary::tokens::encode_body(&after.document.callable().unwrap().captures),
-            captures
-        );
-        let env = execution_environment(&core, &pin, &function).await;
-        let run = start_with(
-            &core,
-            &env,
-            &published,
-            "reopened-callable",
-            [("x".into(), serde_json::json!(3))].into_iter().collect(),
-        )
-        .await;
-        assert_eq!(finished(&core, &run).await, serde_json::json!(22));
-        core.shutdown().await.unwrap();
-    }
-}
-
-/// K-CALLABLE-EDIT: replacement code preserves the frozen environment and
-/// leaves the original definition usable after publication.
-#[tokio::test]
-async fn callable_edits_replace_code_and_preserve_capture_bytes() {
-    for format in [SourceFormat::TypeScriptV1, SourceFormat::PythonV1] {
-        let core = core().await;
-        let pin = lash::process::HostArtifactPin::mint();
-        let (definition, environment, original) = saved(&core, &pin, format).await;
-        let base = inspect(&core, &definition).await;
-        let printed = core
-            .host_artifacts()
-            .print_workflow(&base, None, format, Default::default())
-            .await
-            .unwrap();
-        let edited = printed.source.replace("second(x)", "second(x) + 1");
-        assert_ne!(edited, printed.source);
-        let edit = core
-            .host_artifacts()
-            .edited_from_read(&base, &edited, format, &environment, None)
-            .await
-            .unwrap();
-        let result = core
-            .host_artifacts()
-            .publish_workflow_edit(&pin, &edit, &environment, None)
-            .await
-            .unwrap();
-        assert_ne!(result.id, definition.id);
-        let after = inspect(&core, &result).await;
-        let function = after.document.callable().unwrap();
-        assert_ne!(function.callable.function, original.callable.function);
-        assert_eq!(
-            lash_vocabulary::tokens::encode_body(&function.captures),
-            lash_vocabulary::tokens::encode_body(&original.captures)
-        );
-        assert_eq!(function.token, original.token);
-        let packages = core.backend().package_store();
-        let old_link = packages
-            .link(&original.callable.link)
-            .await
-            .unwrap()
-            .unwrap();
-        let new_link = packages
-            .link(&function.callable.link)
-            .await
-            .unwrap()
-            .unwrap();
-        assert_eq!(
-            new_link.link.fills, old_link.link.fills,
-            "an edit keeps exact chosen import fills"
-        );
-        let refused = edited.replace("tools.echo", "tools.changed");
-        assert!(matches!(
-            core.host_artifacts()
-                .edited_from_read(&base, &refused, format, &environment, None)
-                .await
-                .unwrap_err(),
-            lash::EmbedError::WorkflowEdit(WorkflowEditRefusal::Callable(
-                lash::workflow::document::CallableEditRefusal::ImportsChanged
-            ))
-        ));
-        assert_eq!(
-            inspect(&core, &definition).await.document.callable(),
-            Some(&original)
-        );
-        let env = execution_environment(&core, &pin, &original).await;
-        let args = [("x".into(), serde_json::json!(3))].into_iter().collect();
-        let first = start_with(&core, &env, &definition, "original-callable", args).await;
-        assert_eq!(finished(&core, &first).await, serde_json::json!(22));
-        let edited_env = execution_environment(&core, &pin, function).await;
-        let second = start_with(
-            &core,
-            &edited_env,
-            &result,
-            "edited-callable",
-            [("x".into(), serde_json::json!(3))].into_iter().collect(),
-        )
-        .await;
-        assert_eq!(finished(&core, &second).await, serde_json::json!(23));
-        core.shutdown().await.unwrap();
-    }
-}
-
-/// K-CALLABLE-CAPTURE-SET: exact lexical free-name differences are typed.
-#[tokio::test]
-async fn callable_edits_refuse_added_removed_and_renamed_captures() {
-    for format in [SourceFormat::TypeScriptV1, SourceFormat::PythonV1] {
-        let core = core().await;
-        let pin = lash::process::HostArtifactPin::mint();
-        let (definition, environment, _) = saved(&core, &pin, format).await;
-        let base = inspect(&core, &definition).await;
-        let printed = core
-            .host_artifacts()
-            .print_workflow(&base, None, format, Default::default())
-            .await
-            .unwrap();
-        for (edited, added, removed) in [
-            (
-                printed.source.replace("second(x)", "second(x) + surprise"),
-                vec!["surprise"],
-                vec![],
-            ),
-            (
-                printed.source.replace("second(x)", "first(x)"),
-                vec![],
-                vec!["second"],
-            ),
-            (
-                printed.source.replace(
-                    "second(x)",
-                    if format == SourceFormat::TypeScriptV1 {
-                        "second(x) + (() : number => surprise)()"
-                    } else {
-                        "second(x) + (lambda: surprise)()"
-                    },
-                ),
-                vec!["surprise"],
-                vec![],
-            ),
-            (
-                printed.source.replace(
-                    "first(x)",
-                    if format == SourceFormat::TypeScriptV1 {
-                        "((first: number): number => first)(x)"
-                    } else {
-                        "(lambda first: first)(x)"
-                    },
-                ),
-                vec![],
-                vec!["first"],
-            ),
-            (
-                printed.source.replace("first(x)", "third(x)"),
-                vec!["third"],
-                vec!["first"],
-            ),
-        ] {
-            let error = core
-                .host_artifacts()
-                .edited_from_read(&base, &edited, format, &environment, None)
-                .await
-                .unwrap_err();
-            let lash::EmbedError::WorkflowEdit(WorkflowEditRefusal::Callable(
-                lash::workflow::document::CallableEditRefusal::CaptureSetChanged {
-                    added: actual_added,
-                    removed: actual_removed,
-                },
-            )) = error
-            else {
-                panic!("typed capture refusal: {error:?}");
-            };
-            assert_eq!(actual_added, added.into_iter().map(Name::new).collect());
-            assert_eq!(actual_removed, removed.into_iter().map(Name::new).collect());
-        }
-        assert!(matches!(
-            core.host_artifacts()
-                .edited_from_read(&base, "", format, &environment, None)
-                .await
-                .unwrap_err(),
-            lash::EmbedError::WorkflowEdit(WorkflowEditRefusal::Callable(
-                lash::workflow::document::CallableEditRefusal::EntryMissing
-            ))
-        ));
-        let changed_shape = if format == SourceFormat::TypeScriptV1 {
-            printed
-                .source
-                .replace("(x: number)", "(x: number, y: number)")
-        } else {
-            printed.source.replace("(x: int)", "(x: int, y: int)")
-        };
-        assert_ne!(changed_shape, printed.source);
-        assert!(matches!(
-            core.host_artifacts()
-                .edited_from_read(&base, &changed_shape, format, &environment, None)
-                .await
-                .unwrap_err(),
-            lash::EmbedError::WorkflowEdit(WorkflowEditRefusal::Callable(
-                lash::workflow::document::CallableEditRefusal::EntryShapeChanged
-            ))
-        ));
-        core.shutdown().await.unwrap();
-    }
-}
-
-/// K-CALLABLE-PRESENTATION: caption edits retain captures and the complete
-/// public signature even though the body uses a private packed adapter.
-#[tokio::test]
-async fn callable_caption_edits_preserve_the_public_presentation() {
-    let core = core().await;
-    let pin = lash::process::HostArtifactPin::mint();
-    let (definition, environment, original) = saved(&core, &pin, SourceFormat::TypeScriptV1).await;
-    let base = inspect(&core, &definition).await;
-    let printed = core
-        .host_artifacts()
-        .print_workflow(&base, None, SourceFormat::TypeScriptV1, Default::default())
-        .await
-        .unwrap();
-    let source = format!("/** New title */\n{}", printed.source);
-    let edit = core
-        .host_artifacts()
-        .edited_from_read(
-            &base,
-            &source,
-            SourceFormat::TypeScriptV1,
-            &environment,
-            None,
-        )
-        .await
-        .unwrap();
-    let published = core
-        .host_artifacts()
-        .publish_workflow_edit(&pin, &edit, &environment, None)
-        .await
-        .unwrap();
-    assert_ne!(published.id, definition.id);
-    let after = inspect(&core, &published).await;
-    let function = after.document.callable().unwrap();
-    assert_eq!(function.callable, original.callable);
-    assert_eq!(function.signature, original.signature);
-    assert_eq!(function.captures, original.captures);
-    assert_eq!(function.written_signature, original.written_signature);
-    assert!(
-        function
-            .captions
-            .entries()
-            .iter()
-            .any(|entry| entry.caption.title() == "New title")
-    );
-    let missing = printed.source.replace("(x: number)", "(x)");
-    assert_ne!(missing, printed.source);
-    let error = core
-        .host_artifacts()
-        .edited_from_read(
-            &base,
-            &missing,
-            SourceFormat::TypeScriptV1,
-            &environment,
-            None,
-        )
-        .await
-        .unwrap_err();
-    assert!(
-        matches!(&error, lash::EmbedError::WorkflowSource(lash_vm_client::service::SourceServiceError::Dialect(refused)) if refused.fact.is_some()),
-        "{error:?}"
-    );
-    let implicit = printed
-        .source
-        .replace("second(x)", "second(x) + `${{value: x}}`.length");
-    let error = core
-        .host_artifacts()
-        .edited_from_read(
-            &base,
-            &implicit,
-            SourceFormat::TypeScriptV1,
-            &environment,
-            None,
-        )
-        .await
-        .unwrap_err();
-    assert!(
-        matches!(&error, lash::EmbedError::WorkflowSource(lash_vm_client::service::SourceServiceError::Dialect(refused)) if refused.code == lash_kernel_doc::ImplicitTextConversion::CODE),
-        "{error:?}"
-    );
-    let allow = Some(implicit_text_limits(
-        lash::dialect::workflow::ImplicitTextConversionPolicy::Allow,
-    ));
-    let permitted = core
-        .host_artifacts()
-        .edited_from_read(
-            &base,
-            &implicit,
-            SourceFormat::TypeScriptV1,
-            &environment,
-            allow,
-        )
-        .await
-        .unwrap();
-    let error = core
-        .host_artifacts()
-        .publish_workflow_edit(&pin, &permitted, &environment, None)
-        .await
-        .unwrap_err();
-    assert!(
-        matches!(&error, lash::EmbedError::WorkflowSource(lash_vm_client::service::SourceServiceError::Dialect(refused)) if refused.code == lash_kernel_doc::ImplicitTextConversion::CODE),
-        "{error:?}"
-    );
-    let captioned = inspect(&core, &published).await;
-    let printed_captioned = core
-        .host_artifacts()
-        .print_workflow(
-            &captioned,
-            None,
-            SourceFormat::TypeScriptV1,
-            Default::default(),
-        )
-        .await
-        .unwrap();
-    let removed_caption = printed_captioned.source.replace("/** New title */\n", "");
-    assert_ne!(removed_caption, printed_captioned.source);
-    let removed = core
-        .host_artifacts()
-        .edited_from_read(
-            &captioned,
-            &removed_caption,
-            SourceFormat::TypeScriptV1,
-            &environment,
-            None,
-        )
-        .await
-        .unwrap();
-    assert!(!removed.dropped_captions().is_empty());
-    core.shutdown().await.unwrap();
-}
-
-/// K-CALLABLE-SOURCE-COVERAGE: authenticating the supplied inspection fails
-/// with BaseMismatch before a different environment can be printed or read.
-#[tokio::test]
-async fn callable_source_operations_refuse_a_mismatched_inspection() {
-    let core = core().await;
-    let pin = lash::process::HostArtifactPin::mint();
-    let (definition, environment, original) = saved(&core, &pin, SourceFormat::TypeScriptV1).await;
-    let mut unprintable = original.clone();
-    unprintable.token.as_mut().unwrap()[1] = Datum::Text("bound-this".into());
-    let origin = lash::package::CallableOrigin {
-        authored: [original.callable.link].into(),
-        publications: environment
-            .snapshot
-            .advertisements
-            .iter()
-            .map(|ad| ad.publication.key())
-            .collect(),
-    };
-    let opaque = core
-        .host_artifacts()
-        .publish_callable(&pin, &unprintable, &environment, &origin, None)
-        .await
-        .unwrap();
-    let graph = inspect(&core, &opaque).await;
-    assert!(!lash_kernel_doc::print_document(graph.document.document()).is_empty());
-    assert!(matches!(
-        core.host_artifacts()
-            .print_workflow(&graph, None, SourceFormat::TypeScriptV1, Default::default())
-            .await
-            .unwrap_err(),
-        lash::EmbedError::WorkflowSource(lash_vm_client::service::SourceServiceError::Print(
-            lash::dialect::PrintError::Unprintable { .. }
-        ))
-    ));
-    let mut base = inspect(&core, &definition).await;
-    let mut function = base.document.callable().unwrap().clone();
-    function
-        .captures
-        .insert(Name::new("extra"), CaptureValue::Reference(0));
-    let documents = base.document.document().clone();
-    let release = lash_vm_releases::helper_release().unwrap();
-    base.document =
-        lash::workflow::WorkflowDocument::captured(documents, function, &release.helpers).unwrap();
-    let error = core
-        .host_artifacts()
-        .print_workflow(&base, None, SourceFormat::TypeScriptV1, Default::default())
-        .await
-        .unwrap_err();
-    assert!(
-        matches!(
-            error,
-            lash::EmbedError::WorkflowEdit(WorkflowEditRefusal::BaseMismatch { .. })
-        ),
-        "{error:?}"
-    );
-    core.shutdown().await.unwrap();
-}
-
 async fn linked_draft(
     core: &lash::LashCore,
     environment: &lash::vm::WorkflowEnvironmentRequest,
@@ -768,6 +244,12 @@ fn host_captions(base: &WorkflowInspection, title: &str) -> lash::workflow::docu
             Caption::new("Host step", Some("Step details".into())).unwrap(),
         ));
     }
+    if base.document.callable().is_some() {
+        entries.push(CaptionEntry::site(
+            Site::new(Unit::Main, [0]),
+            Caption::new("Original initializer", None).unwrap(),
+        ));
+    }
     Captions::new(document, entries).unwrap()
 }
 
@@ -795,137 +277,6 @@ async fn caption_base(
         .unwrap();
         (inspect(core, &published.definition).await, environment)
     }
-}
-
-/// FIG-7189: unchanged source saves preserve the host's authoritative sidecar
-/// on both representations, without mutating the authenticated print base.
-#[tokio::test]
-async fn host_captions_survive_saved_workflow_source_edits() {
-    for format in [SourceFormat::TypeScriptV1, SourceFormat::PythonV1] {
-        for callable in [false, true] {
-            let core = core().await;
-            let pin = lash::process::HostArtifactPin::mint();
-            let (base, environment) = caption_base(&core, &pin, format, callable).await;
-            let captions = host_captions(&base, "Host title");
-            let printed = core
-                .host_artifacts()
-                .print_workflow(&base, Some(&captions), format, Default::default())
-                .await
-                .unwrap();
-            assert!(printed.source.contains("Host title"), "{}", printed.source);
-            if !callable {
-                assert!(printed.source.contains("Host step"), "{}", printed.source);
-            }
-            let edit = core
-                .host_artifacts()
-                .edited_from_read(&base, &printed.source, format, &environment, None)
-                .await
-                .unwrap();
-            assert_eq!(edit.captions(), &captions);
-            assert!(edit.dropped_captions().is_empty());
-            let published = core
-                .host_artifacts()
-                .publish_workflow_edit(&pin, &edit, &environment, None)
-                .await
-                .unwrap();
-            assert_eq!(edit.captions(), &captions);
-            let after = inspect(&core, &published).await;
-            if callable {
-                assert_eq!(&after.document.callable().unwrap().captions, &captions);
-                assert_eq!(
-                    inspect(&core, &base.definition).await.document.callable(),
-                    base.document.callable()
-                );
-                // An explicit empty override replaces stored captions only for this print.
-                let empty =
-                    lash::workflow::document::Captions::empty(after.document.document().identity());
-                let cleared = core
-                    .host_artifacts()
-                    .print_workflow(&after, Some(&empty), format, Default::default())
-                    .await
-                    .unwrap();
-                assert!(!cleared.source.contains("Host title"));
-                let frozen = core
-                    .host_artifacts()
-                    .print_workflow(&after, None, format, Default::default())
-                    .await
-                    .unwrap();
-                assert!(frozen.source.contains("Host title"));
-            } else {
-                assert_eq!(published, base.definition);
-            }
-            core.shutdown().await.unwrap();
-        }
-    }
-}
-
-/// FIG-7189: a source-only caption change never invalidates the saved base.
-#[tokio::test]
-async fn caption_only_source_edits_do_not_mismatch_the_base() {
-    for format in [SourceFormat::TypeScriptV1, SourceFormat::PythonV1] {
-        for callable in [false, true] {
-            let core = core().await;
-            let pin = lash::process::HostArtifactPin::mint();
-            let (base, environment) = caption_base(&core, &pin, format, callable).await;
-            let captions = host_captions(&base, "Host title");
-            let printed = core
-                .host_artifacts()
-                .print_workflow(&base, Some(&captions), format, Default::default())
-                .await
-                .unwrap();
-            let source = printed.source.replace("Host title", "Edited title");
-            assert_ne!(source, printed.source);
-            let edit = core
-                .host_artifacts()
-                .edited_from_read(&base, &source, format, &environment, None)
-                .await
-                .unwrap();
-            assert_eq!(edit.base_definition(), &base.definition.id);
-            assert_eq!(edit.captions(), &host_captions(&base, "Edited title"));
-            let published = core
-                .host_artifacts()
-                .publish_workflow_edit(&pin, &edit, &environment, None)
-                .await
-                .unwrap();
-            if !callable {
-                assert_eq!(published, base.definition);
-            }
-            core.shutdown().await.unwrap();
-        }
-    }
-}
-
-/// FIG-7189: unpublished linked drafts need no authenticated base to print
-/// and read their host captions through the exported worker source service.
-#[tokio::test]
-async fn unpublished_linked_drafts_roundtrip_host_captions() {
-    let core = core().await;
-    let pin = lash::process::HostArtifactPin::mint();
-    let (_, environment) = namespace(&core, &pin, &source_environment(false)).await;
-    let service = lash::vm::WorkerService::default();
-    for format in [SourceFormat::TypeScriptV1, SourceFormat::PythonV1] {
-        let draft = linked_draft(&core, &environment, format).await;
-        let document = draft.to_document().unwrap();
-        let captions = lash::workflow::document::Captions::new(
-            &document,
-            vec![lash::workflow::document::CaptionEntry::site(
-                lash::workflow::document::Site::new(function_unit(&document, "answer"), vec![]),
-                lash::workflow::document::Caption::new("Draft title", None).unwrap(),
-            )],
-        )
-        .unwrap();
-        let printed = service
-            .print(&document, Some(&captions), format, Default::default())
-            .await
-            .unwrap();
-        let (read, read_captions) = service
-            .read_exported(&printed.source, &document, format, Default::default(), None)
-            .await
-            .unwrap();
-        assert_eq!(read.canonical_bytes(), document.canonical_bytes());
-        assert_eq!(read_captions, captions);
-    }
-    core.shutdown().await.unwrap();
 }
 
 /// FIG-7189: callable overrides retain check_captions' typed identity and
@@ -958,7 +309,7 @@ async fn callable_caption_overrides_validate_identity_and_limits() {
                 .unwrap_err();
         let error = core
             .host_artifacts()
-            .print_workflow(&base, Some(captions), format, options)
+            .print_workflow(&base.definition.id, Some(captions), format, options)
             .await
             .unwrap_err();
         let lash::EmbedError::WorkflowSource(lash::vm::SourceServiceError::Print(actual)) = error
@@ -1027,4 +378,599 @@ async fn materialized_callable_adapters_and_environments_survive_sqlite_reopen()
         }
         core.shutdown().await.unwrap();
     }
+}
+
+/// K-CALLABLE-ROUNDTRIP: reopen, duplicate code identities with distinct
+/// environments, and Reference(0) survive unchanged source publication.
+#[tokio::test]
+async fn print_standalone_reopens_both_dialects_without_a_source_definition() {
+    for format in [SourceFormat::TypeScriptV1, SourceFormat::PythonV1] {
+        let files = Files::new();
+        let core = core_over(files.open().await, "callable-save").await;
+        let pin = lash::process::HostArtifactPin::mint();
+        let (definition, _, function) = saved(&core, &pin, format).await;
+        core.shutdown().await.unwrap();
+        drop(core);
+        let core = core_over(files.open().await, "callable-open").await;
+        let printed = core
+            .host_artifacts()
+            .print_workflow(
+                &definition.id,
+                None,
+                format,
+                lash::dialect::PrintOptions {
+                    source_map: true,
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap_or_else(|error| panic!("{format:?}: {error:?}"));
+        assert!(
+            printed.source.contains("= 7"),
+            "PRINT-STANDALONE needs ordinary captured declarations: {}",
+            printed.source
+        );
+        let fresh = super::core().await;
+        let pin_b = lash::process::HostArtifactPin::mint();
+        let (_, environment_b) = namespace(&fresh, &pin_b, &source_environment(false)).await;
+        assert!(matches!(
+            fresh
+                .host_artifacts()
+                .definition_graph(&definition.id)
+                .await
+                .unwrap(),
+            WorkflowRead::Unavailable(_)
+        ));
+        let published = publish_source(
+            &fresh,
+            &pin_b,
+            &printed.source,
+            format,
+            &environment_b,
+            "run",
+        )
+        .await;
+        assert_eq!(published.signature, definition.signature);
+        let after = inspect(&fresh, &published).await;
+        assert!(after.document.callable().is_none());
+        let env_a = execution_environment(&core, &pin, &function).await;
+        let env_b =
+            definition_environment(&fresh, &pin_b, &published, &source_environment(false)).await;
+        for (host, env, workflow, key) in [
+            (&core, &env_a, &definition, "standalone-a"),
+            (&fresh, &env_b, &published, "standalone-b"),
+        ] {
+            let run = start_with(
+                host,
+                env,
+                workflow,
+                key,
+                [("x".into(), serde_json::json!(3))].into_iter().collect(),
+            )
+            .await;
+            assert_eq!(finished(host, &run).await, serde_json::json!(22));
+        }
+        fresh.shutdown().await.unwrap();
+        core.shutdown().await.unwrap();
+    }
+}
+
+async fn publish_source(
+    core: &lash::LashCore,
+    pin: &lash::process::HostArtifactPin,
+    source: &str,
+    format: SourceFormat,
+    environment: &lash::vm::WorkflowEnvironmentRequest,
+    entry: &str,
+) -> lash::process::ProcessDefinition {
+    let imported = core
+        .host_artifacts()
+        .import_workflow(format.language(), source, environment, None)
+        .await
+        .unwrap();
+    let lash::workflow::WorkflowImport::Imported {
+        document,
+        source_map,
+        ..
+    } = imported
+    else {
+        panic!("ordinary import: {imported:?}\n{source}");
+    };
+    let start = core
+        .host_artifacts()
+        .publish_workflow(
+            pin,
+            &document,
+            &lash::package::StartSelector::Export(Name::new(entry)),
+            environment,
+            Some((&source_map, source)),
+            None,
+        )
+        .await
+        .unwrap();
+    let draft = lash::vm::definition_draft(&lash::process::KernelProcessDefinition {
+        code: lash::vm::KernelInlineRequest::Linked { start },
+    })
+    .unwrap();
+    core.host_artifacts()
+        .publish_definition(pin, &draft)
+        .await
+        .unwrap()
+}
+
+/// CAPTION-STANDALONE: both dialects spell mapped host captions and import independently.
+#[tokio::test]
+async fn caption_standalone_preserves_supported_sidecars_and_reports_losses() {
+    let core = core().await;
+    let pin = lash::process::HostArtifactPin::mint();
+    for format in [SourceFormat::TypeScriptV1, SourceFormat::PythonV1] {
+        for callable in [false, true] {
+            let (base, environment) = caption_base(&core, &pin, format, callable).await;
+            let captions = host_captions(&base, "Host title");
+            let printed = core
+                .host_artifacts()
+                .print_workflow(
+                    &base.definition.id,
+                    Some(&captions),
+                    format,
+                    Default::default(),
+                )
+                .await
+                .unwrap();
+            let imported = core
+                .host_artifacts()
+                .import_workflow(format.language(), &printed.source, &environment, None)
+                .await
+                .unwrap();
+            let lash::workflow::WorkflowImport::Imported {
+                captions: after, ..
+            } = imported
+            else {
+                panic!("{imported:?}");
+            };
+            assert!(
+                after
+                    .entries()
+                    .iter()
+                    .any(|e| e.caption.title() == "Host title"),
+                "{format:?} callable={callable}: {printed:?}"
+            );
+            if callable {
+                assert!(
+                    printed
+                        .dropped
+                        .contains(&lash::workflow::document::CaptionTarget::Site(
+                            lash::workflow::document::Site::new(Unit::Main, [0]),
+                        ))
+                );
+                assert!(
+                    !after
+                        .entries()
+                        .iter()
+                        .any(|entry| entry.caption.title() == "Original initializer")
+                );
+            } else {
+                assert!(
+                    after
+                        .entries()
+                        .iter()
+                        .any(|entry| entry.caption.title() == "Host step")
+                );
+            }
+            publish_source(
+                &core,
+                &pin,
+                &printed.source,
+                format,
+                &environment,
+                if callable { "run" } else { "answer" },
+            )
+            .await;
+        }
+    }
+    core.shutdown().await.unwrap();
+}
+
+/// FIG-7191: every host publication reports an ended pin through the typed
+/// artifact accessor, including document and package publication wrappers.
+#[tokio::test]
+async fn released_pin_publications_keep_the_typed_artifact_refusal() {
+    let core = core().await;
+    let artifacts = core.host_artifacts();
+    let retained = lash::process::HostArtifactPin::mint();
+    let (definition, environment, function) =
+        saved(&core, &retained, SourceFormat::TypeScriptV1).await;
+    let base = inspect(&core, &definition).await;
+    let document = base.document.document().clone().into();
+    let start = lash::package::LinkedStart {
+        link: function.callable.link,
+        selector: lash::package::StartSelector::Main,
+    };
+    let draft = lash::vm::definition_draft(&lash::process::KernelProcessDefinition {
+        code: lash::vm::KernelInlineRequest::Linked { start },
+    })
+    .unwrap();
+    let origin = lash::package::CallableOrigin {
+        authored: [function.callable.link].into(),
+        publications: environment
+            .snapshot
+            .advertisements
+            .iter()
+            .map(|accepted| accepted.publication.key())
+            .collect(),
+    };
+    let pin = lash::process::HostArtifactPin::mint();
+    artifacts.release(pin.clone()).await.unwrap();
+    let errors = [
+        (
+            "publish_workflow",
+            artifacts
+                .publish_workflow(
+                    &pin,
+                    &document,
+                    &lash::package::StartSelector::Main,
+                    &environment,
+                    None,
+                    None,
+                )
+                .await
+                .unwrap_err(),
+        ),
+        (
+            "publish_callable",
+            artifacts
+                .publish_callable(&pin, &function, &environment, &origin, None)
+                .await
+                .unwrap_err(),
+        ),
+        (
+            "publish_definition",
+            artifacts
+                .publish_definition(&pin, &draft)
+                .await
+                .unwrap_err(),
+        ),
+        (
+            "process_namespace",
+            artifacts
+                .process_namespace(
+                    &pin,
+                    &source_environment(false),
+                    environment.context.clone(),
+                )
+                .await
+                .unwrap_err(),
+        ),
+        (
+            "publish_process_env",
+            artifacts
+                .publish_process_env(&pin, &source_environment(false))
+                .await
+                .unwrap_err(),
+        ),
+    ];
+    for (entry, error) in errors {
+        assert_eq!(
+            error.artifact_refusal(),
+            Some(lash::process::HostArtifactRefusal::PinReleased),
+            "{entry}: {error:?}",
+        );
+    }
+    core.shutdown().await.unwrap();
+}
+
+/// VALUE-PRINT-REFUSAL: unspellable bound tokens refuse, while inspection remains available.
+#[tokio::test]
+async fn value_print_refusal_retains_the_typed_token_site() {
+    let core = core().await;
+    let pin = lash::process::HostArtifactPin::mint();
+    let (_, environment, original) = saved(&core, &pin, SourceFormat::TypeScriptV1).await;
+    let mut unprintable = original.clone();
+    unprintable.token.as_mut().unwrap()[1] = Datum::Text("bound-this".into());
+    let origin = lash::package::CallableOrigin {
+        authored: [original.callable.link].into(),
+        publications: environment
+            .snapshot
+            .advertisements
+            .iter()
+            .map(|ad| ad.publication.key())
+            .collect(),
+    };
+    let opaque = core
+        .host_artifacts()
+        .publish_callable(&pin, &unprintable, &environment, &origin, None)
+        .await
+        .unwrap();
+    let graph = inspect(&core, &opaque).await;
+    assert!(!lash_kernel_doc::print_document(graph.document.document()).is_empty());
+    assert!(matches!(
+        core.host_artifacts()
+            .print_workflow(
+                &graph.definition.id,
+                None,
+                SourceFormat::TypeScriptV1,
+                Default::default()
+            )
+            .await
+            .unwrap_err(),
+        lash::EmbedError::WorkflowSource(lash_vm_client::service::SourceServiceError::Print(
+            lash::dialect::PrintError::Unprintable { .. }
+        ))
+    ));
+    core.shutdown().await.unwrap();
+}
+
+/// FIG-7189: unpublished drafts print and ordinarily import their host captions.
+#[tokio::test]
+async fn unpublished_linked_drafts_roundtrip_host_captions() {
+    let core = core().await;
+    let pin = lash::process::HostArtifactPin::mint();
+    let (_, environment) = namespace(&core, &pin, &source_environment(false)).await;
+    let service = lash::vm::WorkerService::default();
+    for format in [SourceFormat::TypeScriptV1, SourceFormat::PythonV1] {
+        let draft = linked_draft(&core, &environment, format).await;
+        let document = draft.to_document().unwrap();
+        let captions = lash::workflow::document::Captions::new(
+            &document,
+            vec![lash::workflow::document::CaptionEntry::site(
+                lash::workflow::document::Site::new(function_unit(&document, "answer"), vec![]),
+                lash::workflow::document::Caption::new("Draft title", None).unwrap(),
+            )],
+        )
+        .unwrap();
+        let printed = service
+            .print(&document, Some(&captions), format, Default::default())
+            .await
+            .unwrap();
+        let (read, _, read_captions) = service
+            .import_workflow(
+                format.language(),
+                &printed.source,
+                core.host_artifacts()
+                    .workflow_environment(&environment)
+                    .await
+                    .unwrap()
+                    .unwrap()
+                    .namespaces(),
+                None,
+            )
+            .await
+            .unwrap();
+        assert_eq!(read.canonical_bytes(), document.canonical_bytes());
+        assert_eq!(read_captions, captions);
+    }
+    core.shutdown().await.unwrap();
+}
+
+async fn definition_environment(
+    core: &lash::LashCore,
+    pin: &lash::process::HostArtifactPin,
+    definition: &lash::process::ProcessDefinition,
+    base: &lash::process::ProcessEnv,
+) -> lash::process::ProcessEnvRef {
+    let (packages, _) = namespace(core, pin, base).await;
+    let environment = core
+        .host_artifacts()
+        .link_process_env(
+            base,
+            &lash::process::LinkTarget::Definition(definition.id.clone()),
+            &packages,
+            &Default::default(),
+        )
+        .await
+        .unwrap();
+    core.host_artifacts()
+        .publish_process_env(pin, &environment)
+        .await
+        .unwrap()
+}
+
+/// FRESH-SOURCE-POLICY: printing permissively admitted code cannot authorize strict publication.
+#[tokio::test]
+async fn fresh_source_policy_checks_printed_text_again_at_publication() {
+    use lash::dialect::workflow::ImplicitTextConversionPolicy as Policy;
+    let core = core().await;
+    let pin = lash::process::HostArtifactPin::mint();
+    let (_, environment) = namespace(&core, &pin, &source_environment(false)).await;
+    let source =
+        "export function run(event: { identity_id: string }): string { return 'answer ' + event; }";
+    let imported = core
+        .host_artifacts()
+        .import_workflow(
+            SourceFormat::TypeScriptV1.language(),
+            source,
+            &environment,
+            Some(implicit_text_limits(Policy::Allow)),
+        )
+        .await
+        .unwrap();
+    let lash::workflow::WorkflowImport::Imported { document, .. } = imported else {
+        panic!("{imported:?}");
+    };
+    let service = lash::vm::WorkerService::default();
+    let printed = service
+        .print(
+            &document.to_document().unwrap(),
+            None,
+            SourceFormat::TypeScriptV1,
+            Default::default(),
+        )
+        .await
+        .unwrap();
+    let checked = core
+        .host_artifacts()
+        .workflow_environment(&environment)
+        .await
+        .unwrap()
+        .unwrap();
+    let (document, map, _) = service
+        .import_workflow(
+            SourceFormat::TypeScriptV1.language(),
+            &printed.source,
+            checked.namespaces(),
+            Some(implicit_text_limits(Policy::Allow)),
+        )
+        .await
+        .unwrap();
+    let error = core
+        .host_artifacts()
+        .publish_workflow(
+            &pin,
+            &document.into(),
+            &lash::package::StartSelector::Export(Name::new("run")),
+            &environment,
+            Some((&map, &printed.source)),
+            Some(implicit_text_limits(Policy::Strict)),
+        )
+        .await
+        .unwrap_err();
+    let diagnostic = implicit_text_diagnostic(error);
+    assert_eq!(diagnostic.code, "TS_IMPLICIT_TEXT_CONVERSION");
+    core.shutdown().await.unwrap();
+}
+
+const FRESH_ECHO: lash::process::ProcessConfigKey<()> =
+    lash::process::ProcessConfigKey::new("print-fresh-echo", lash::plugins::FormatVersion::ONE);
+struct FreshEcho;
+#[lash::async_trait]
+impl lash::tools::StaticToolExecute for FreshEcho {
+    async fn execute(&self, call: lash::tools::ToolCall<'_>) -> lash::tools::ToolAttemptOutcome {
+        lash::tools::ToolOutcome::ok(serde_json::json!(
+            call.args["value"].as_f64().unwrap() + 100.0
+        ))
+        .into()
+    }
+}
+
+/// PRINT-ENVIRONMENT: source requirements are fulfilled by B's selected
+/// host, with typed missing and conflicting requirement refusals.
+#[tokio::test]
+async fn print_environment_selects_fresh_dependencies_and_refuses_conflicts() {
+    let stores = Arc::new(lash_sqlite_store::SqliteStoreSet::memory().await.unwrap());
+    let provider = Arc::new(lash::tools::StaticToolProvider::new(
+        echo_definitions(),
+        FreshEcho,
+    ));
+    let factory = lash::plugins::StaticPluginFactory::new(
+        lash::plugins::PluginDeclaration::initial(FRESH_ECHO.component()),
+        lash::plugins::PluginSpec::new()
+            .with_tool_provider(lash::tool_provider_key!("fresh"), provider.clone())
+            .with_package_provider(
+                lash::tool_provider_key!("fresh"),
+                Arc::new(lash::package::ToolPackageProvider::new(
+                    FRESH_ECHO.component(),
+                    lash::tool_provider_key!("fresh"),
+                    [lash::package::Segment::new("tools").unwrap()].into(),
+                    provider,
+                )),
+            ),
+    )
+    .as_component(FRESH_ECHO.format())
+    .unwrap();
+    let core = builder_with_process_tools(stores, false, EchoComponent::Installed)
+        .await
+        .process_component(Arc::new(factory), FRESH_ECHO)
+        .build(node_identity("print-environment"))
+        .unwrap();
+    let pin = lash::process::HostArtifactPin::mint();
+    let (a, _, original) = saved(&core, &pin, SourceFormat::TypeScriptV1).await;
+    let printed = core
+        .host_artifacts()
+        .print_workflow(&a.id, None, SourceFormat::TypeScriptV1, Default::default())
+        .await
+        .unwrap();
+    let fresh = lash::process::ProcessEnv::builder(lash::MaxToolCalls::new(1024))
+        .component(FRESH_ECHO, &())
+        .component(lash::vm::KERNEL_SERVICES_CONFIG, &())
+        .build()
+        .unwrap();
+    let (_, request) = namespace(&core, &pin, &fresh).await;
+    let b = publish_source(
+        &core,
+        &pin,
+        &printed.source,
+        SourceFormat::TypeScriptV1,
+        &request,
+        "run",
+    )
+    .await;
+    let env_a = execution_environment(&core, &pin, &original).await;
+    let env_b = definition_environment(&core, &pin, &b, &fresh).await;
+    for (definition, env, key, expected) in [
+        (&a, &env_a, "print-env-a", 22),
+        (&b, &env_b, "print-env-b", 122),
+    ] {
+        let run = start_with(
+            &core,
+            env,
+            definition,
+            key,
+            [("x".into(), serde_json::json!(3))].into_iter().collect(),
+        )
+        .await;
+        assert_eq!(
+            finished(&core, &run).await.as_f64(),
+            Some(f64::from(expected))
+        );
+    }
+    let missing = lash::process::ProcessEnv::builder(lash::MaxToolCalls::new(1024))
+        .component(lash::vm::KERNEL_SERVICES_CONFIG, &())
+        .build()
+        .unwrap();
+    let (_, missing) = namespace(&core, &pin, &missing).await;
+    let refused = core
+        .host_artifacts()
+        .import_workflow(
+            SourceFormat::TypeScriptV1.language(),
+            &printed.source,
+            &missing,
+            None,
+        )
+        .await
+        .unwrap();
+    let lash::workflow::WorkflowImport::Refused(diagnostics) = refused else {
+        panic!("{refused:?}");
+    };
+    assert!(!diagnostics.is_empty());
+    assert!(
+        diagnostics
+            .iter()
+            .any(|d| d.code.contains("PACKAGE") || d.code.contains("UNKNOWN"))
+    );
+    let opened = core
+        .host_artifacts()
+        .open_workflow(&a.id, None)
+        .await
+        .unwrap();
+    let mut document = opened.draft.into_document();
+    let mut conflict = document
+        .imports
+        .values()
+        .find(|i| i.name.to_string() == "tools.echo")
+        .unwrap()
+        .clone();
+    let lash::package::ImportKind::Operation { signature } = &mut conflict.kind else {
+        panic!("operation");
+    };
+    signature.result = lash::schema::Type::Text;
+    document.imports.insert(
+        lash::package::ImportSlot(document.imports.len() as u32),
+        conflict,
+    );
+    let error = lash::vm::WorkerService::default()
+        .print(
+            &document,
+            None,
+            SourceFormat::TypeScriptV1,
+            Default::default(),
+        )
+        .await
+        .unwrap_err();
+    assert!(matches!(
+        error,
+        lash::vm::SourceServiceError::Print(lash::dialect::PrintError::Namespace(
+            lash::dialect::NamespaceRefusal::ImportNameConflict { .. }
+        ))
+    ));
+    core.shutdown().await.unwrap();
 }

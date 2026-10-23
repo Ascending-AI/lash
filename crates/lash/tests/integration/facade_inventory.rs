@@ -38,7 +38,6 @@ use lash::vm::{
 };
 
 #[cfg(feature = "codemode")]
-use lash::workflow::WorkflowEditRefusal as _;
 #[cfg(any(feature = "codemode", feature = "workflow-view"))]
 use lash::workflow::WorkflowReference as _;
 #[cfg(any(feature = "codemode", feature = "workflow-view"))]

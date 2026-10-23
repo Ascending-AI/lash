@@ -44,11 +44,7 @@ cost table and parked-run schema are written down rule by rule in
   Document-local Imports name ordinary code, operations, types and errors;
   fulfilment checks kind, signature, visibility and package ownership and
   records the fills in an immutable Link. Admission refuses unmet requirements.
-- **Documents.** A workflow document is a kernel program with typed function, type and error
-  Exports, document-local Imports and an optional `main`.
-  Its identity is the hash of its content without annotations. Hosts edit it
-  through typed, serialisable transactions and read correspondence for every
-  node they touch.
+- **Documents.** A workflow Document is typed kernel code with a content identity. Hosts edit it only through Draft's typed operation batches, then independently publish its resulting content. A saved callable opens by materializing frozen values and reachable code into that representation.
 - **Parked runs.** A run executes on one persistent heap and is saved, in
   the document's terms, as a checkpoint root over that heap's pages
   whenever it parks
@@ -63,21 +59,21 @@ cost table and parked-run schema are written down rule by rule in
 
 ### Dialects lower to the kernel
 
-A dialect ships a front end that lowers source to a kernel document,
-a printer that spells any document as equivalent source, and immutable
-build-owned helper functions addressed by FunctionId. Helpers are library
-references, outside package Documents, publications and Links. Packages
-remain the distribution mechanism for user- and host-installed code. A
-Package Publication supplies scoped provenance and members; its presence
-does not put them in the Tool Catalog. Extra visible members do not enlarge
-a selected execution's reach. Links retain the full reached DAG, so calls
-and callbacks use their defining Link and Import slot, including after a cold
+A dialect lowers source to kernel Documents and prints supported Documents as equivalent standalone source, refusing unrepresentable content with a typed reason. Build helpers remain exact FunctionId dependencies outside package Documents and Links. Source print/import does not grant helper authority; fresh publication checks the installed environment, while parked restore retains its existing compatibility proof. A definition can be printed in a selected dialect only when the printer proves that representation faithful.
+
+Packages remain the distribution mechanism for user- and host-installed code.
+A Package Publication supplies scoped provenance and members; its presence does
+not put them in the Tool Catalog. Extra visible members do not enlarge a
+selected execution's reach. Links retain the full reached DAG, so calls and
+callbacks use their defining Link and Import slot, including after a cold
 restore. `OperationUse` preserves that identity, while a process permits one
 provider and tool per operation (ADR 0141 §5).
-A parked root records its HelperLibraryId. An equal installed identity
-requires no compatibility walk; a changed identity checks the saved live
-helper reach and refuses a missing FunctionId before execution resumes. A workflow has exactly one dialect. For each
-construct a front end picks the first tier that applies: a kernel form or
+
+A parked root records its HelperLibraryId. An equal installed identity requires
+no compatibility walk; a changed identity checks the saved live helper reach
+and refuses a missing FunctionId before execution resumes.
+
+For each construct a front end picks the first tier that applies: a kernel form or
 library function with the same meaning, the difference compiled in as kernel
 code or a helper call, an extension function for what kernel code cannot
 reasonably express, or a typed refusal with a repair hint. A dialect needs no

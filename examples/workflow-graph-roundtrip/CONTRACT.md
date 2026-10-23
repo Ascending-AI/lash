@@ -38,10 +38,10 @@ Selecting an undeclared dialect returns 422 without changing the saved workflow.
 
 `POST /workflow/select` takes `{ id, dialect?, entry? }`; the default is
 TypeScript and the case's first entry. Cell/refusal selections return 422.
-`POST /workflow/source` takes `{ version, source, entry, dialect?, format? }`.
-Without `format`, it imports a workflow module in the selected language.
-With `type_script_v1` or `python_v1`, it reads generated source against the
-current document. An unchanged printed read preserves canonical bytes.
+`POST /workflow/source` takes `{ version, source, entry, dialect? }`.
+It ordinarily imports a workflow module in the selected language, including
+edited printed source, and independently publishes the selected new entry.
+The host checks its version token; no base document participates in compilation.
 
 An error is `{ "error": { code, message, details } }`. An unknown catalog id
 is HTTP 404 `unknown_workflow`; a stale `version` is HTTP 409
@@ -69,8 +69,8 @@ explicit namespace and retains the resulting Link; restarts load that Link.
 | `sourceDialect` | The dialect used to print the saved document. |
 | `functionLabels` | Shipped helper titles keyed by name, joined against view callees. Unknown names fall back to themselves. |
 | `sourceMap` | Lash's `SourceMap` for `source` (snake_case, lash's shape): UTF-8 byte ranges of `source` for each site of the document. |
-| `authored` | `{ dialect, text, version, sourceMapId?, sourceMap?, mapUnavailable? }`: the imported source, read back through the publication's held map id. Authoring edits retain historical text but drop the map and id. A printed read or opening a kernel document drops authored source. |
-| `captions` | The version's captions, lash's `kernel-captions` shape (snake_case): `{ document, entries: [{ site, caption: { title, description? } }] }`, keyed to `identity`. Import and printed reads replace them with the source's; an edit rekeys them; a kernel document opens with none. |
+| `authored` | `{ dialect, text, version, sourceMapId?, sourceMap?, mapUnavailable? }`: the imported source, read back through the publication's held map id. Authoring edits retain historical text but drop the map and id. An ordinary import retains its new source and map; opening a kernel document drops authored source. |
+| `captions` | The version's captions, lash's `kernel-captions` shape (snake_case): `{ document, entries: [{ site, caption: { title, description? } }] }`, keyed to `identity`. Ordinary source import replaces them with the source's; an edit rekeys them; a kernel document opens with none. |
 | `captionView` | `captions` joined with `view` by lash's `WorkflowView::captions`, the `kernel-caption-view` shape: `{ document, nodes: [{ node, site, caption }], arms: [{ node, arm, block, caption }], callables: [{ callable, block, caption }], params: [{ index, name, caption }], fields: [{ path: { root, fields }, caption }] }`, indexing `view.nodes`, a node's `arms` and `view.callables`; `params` and `fields` caption what the entry takes and gives back. Absent with `view`, or with `captionsUnavailable`. |
 | `captionsToReview` | Captioned sites an edit has written at or beneath since their caption was saved (`Rekeyed.touched`, carried through later edits). |
 | `captionsDropped` | The targets (`{ site }`, `{ param }` or `{ field }`) of captions `source` could not spell; absent when it spells all of them. |

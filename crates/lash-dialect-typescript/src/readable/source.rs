@@ -121,10 +121,6 @@ pub(super) enum StmtKind {
         catch: Option<(Arm, Option<String>)>,
         finally: Option<Arm>,
     },
-    Function {
-        name: String,
-        function: Function,
-    },
 }
 
 /// A clause arm: `else`, `catch` or `finally`, with its caption.
@@ -213,7 +209,11 @@ impl Writer {
         self.params(&item.params);
         if let Some(result) = &item.result {
             self.out.push_str(": ");
-            self.ty(&Type::Promise(Box::new(result.clone())));
+            if item.is_async {
+                self.ty(&Type::Promise(Box::new(result.clone())));
+            } else {
+                self.ty(result);
+            }
         }
         self.out.push(' ');
         self.block(&item.body);
@@ -470,30 +470,6 @@ impl Writer {
                     self.clause(arm.caption.as_ref());
                     self.out.push_str("finally ");
                     self.block(&arm.body);
-                }
-            }
-            StmtKind::Function { name, function } => {
-                if function.is_async {
-                    self.out.push_str("async ");
-                }
-                self.out.push_str("function ");
-                self.out.push_str(name);
-                self.params(&function.params);
-                if let Some(result) = &function.result {
-                    self.out.push_str(": ");
-                    if function.is_async {
-                        self.ty(&Type::Promise(Box::new(result.clone())));
-                    } else {
-                        self.ty(result);
-                    }
-                }
-                self.out.push(' ');
-                match &function.body {
-                    Body::Block(body) => self.block(body),
-                    Body::Expr(value) => self.block(&[Stmt {
-                        caption: None,
-                        kind: StmtKind::Return(Some(value.clone())),
-                    }]),
                 }
             }
         }

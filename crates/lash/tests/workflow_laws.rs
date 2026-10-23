@@ -1951,16 +1951,16 @@ async fn materialized_draft_retains_implicit_text_policy() {
     core.shutdown().await.unwrap();
 }
 
-/// FIG-7173: edited_from_read cannot replace an admitted workflow with a new record addition.
+/// FIG-7173: ordinary import cannot replace an admitted workflow with a new record addition.
 #[cfg(feature = "typescript")]
 #[tokio::test]
-async fn edited_from_read_replacement_applies_the_hosts_implicit_text_policy() {
+async fn ordinary_source_replacement_applies_the_hosts_implicit_text_policy() {
     use lash::workflow::{WorkflowImport, document::SourceLanguage};
     let core = core().await;
     let pin = lash::process::HostArtifactPin::mint();
     let (_, request) = namespace(&core, &pin, &source_environment(false)).await;
     let source = "export function answer(event: { identity_id: string }): string { return 'ok'; }";
-    let WorkflowImport::Imported { document, .. } = core
+    let WorkflowImport::Imported { .. } = core
         .host_artifacts()
         .import_workflow(SourceLanguage::TypeScript, source, &request, None)
         .await
@@ -1968,17 +1968,10 @@ async fn edited_from_read_replacement_applies_the_hosts_implicit_text_policy() {
     else {
         panic!("safe source imports");
     };
-    let base = document.to_document().unwrap();
     let edited = source.replace("'ok'", "'answered by ' + event");
     let WorkflowImport::Refused(diagnostics) = core
         .host_artifacts()
-        .import_exported_workflow(
-            &edited,
-            lash::dialect::SourceFormat::TypeScriptV1,
-            &base,
-            &request,
-            None,
-        )
+        .import_workflow(SourceLanguage::TypeScript, &edited, &request, None)
         .await
         .unwrap()
     else {
@@ -2289,7 +2282,7 @@ mod artifact_tracing {
             };
             artifacts
                 .print_workflow(
-                    &inspection,
+                    &inspection.definition.id,
                     None,
                     lash::dialect::SourceFormat::TypeScriptV1,
                     Default::default(),

@@ -90,8 +90,7 @@ recovery reads that recorded namespace, never a newly selected advertisement.
 - A helper executable is built for its host's dialects. Recipes that build it
   with Cargo pass the dialect features.
 - A worker must hold the run's recorded dialect and meet its machine requirements.
-- A new round records accepted plugin advertisements with committed config.
-  Existing cells, saved callables and workflows retain their defining Links.
+- A new round records accepted plugin advertisements with committed config. Existing cells, saved callables and workflows retain their defining Links. Opening or printing a saved workflow does not rebind it; publication of independently edited content creates a new definition fulfilled in the host-selected environment.
 - Model tools require explicit provider registration; service Packages do not
   change model exposure.
 

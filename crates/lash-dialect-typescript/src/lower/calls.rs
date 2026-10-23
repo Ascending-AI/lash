@@ -953,6 +953,45 @@ impl Lowerer<'_> {
         discard_result: bool,
         awaited: bool,
     ) -> Lowering<Operand> {
+        if let Some((root, path)) = static_path(callee)
+            && !self.is_bound(root)
+            && let Some(constructor) =
+                lash_kernel_dialect::value_constructors::Constructor::named(&path)
+        {
+            let args = plain_arguments(args).ok_or_else(|| {
+                Diagnostic::new(
+                    DiagnosticCode::InvalidAst,
+                    "value constructors take positional arguments",
+                    Some(span),
+                )
+            })?;
+            let operands = self.operands(&args)?;
+            if matches!(
+                constructor,
+                lash_kernel_dialect::value_constructors::Constructor::CallToken
+            ) {
+                let Some((function, args)) = operands.split_first() else {
+                    return Err(Diagnostic::new(
+                        DiagnosticCode::InvalidAst,
+                        "callable.invoke_token requires a token",
+                        Some(span),
+                    ));
+                };
+                let args = self.inline(
+                    Expr::List(args.iter().map(Operand::expr).collect()),
+                    Ty::Array,
+                );
+                return self.apply(function.clone(), Operand::undefined(), args, true);
+            }
+            let value = constructor
+                .build(operands.iter().map(Operand::expr).collect(), |name| {
+                    self.function(name).ok()
+                })
+                .map_err(|message| {
+                    Diagnostic::new(DiagnosticCode::LinkError, message, Some(span))
+                })?;
+            return Ok(self.inline(value, Ty::Unknown));
+        }
         if let ast::Expr::Member {
             object,
             property: ast::MemberProperty::Field(name),

@@ -360,6 +360,7 @@ impl Discovery<'_> {
                     && path.contains('.')
                     && !self.is_bound(root)
                     && !crate::builtins::is_global(root)
+                    && lash_kernel_dialect::value_constructors::Constructor::named(&path).is_none()
                 {
                     self.calls.insert(path);
                 }

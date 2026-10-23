@@ -152,12 +152,7 @@ Evidence: `crates/lash-trace/src/workflow_overlay/model.rs`,
 
 ### R6: expose the admitted document's identity
 
-A document's identity is the hash of its content without annotations
-(`K-ID-001`). It is not a text digest or a dialect's spelling: two sources
-that lower to the same document share it. A draft has no runtime identity
-until it is published and admitted. A host reconciles a document with an
-edited one through the correspondence the edit published, never by matching
-revisions semantically.
+A Document's identity hashes executable content, not source text or captions. A Draft already has that content identity but acquires no published-definition authority until publication. Typed correspondence maps nodes between applied Draft transactions. Materializing a callable establishes a new editable document; textual replacement creates another document. Neither operation links the resulting definition to the old definition. Run overlays continue to name the immutable document actually executed.
 
 Evidence: `crates/lash-kernel-doc/src/document.rs` and
 `crates/lash-kernel-edit`.
@@ -171,6 +166,8 @@ types and sites (`K-EDIT-010`). Type facets are derived, read-only facts.
 Admission names every fault with the node it is at (`K-ADM`).
 
 Evidence: `docs/kernel/semantics.md` and `crates/lash-kernel-check`.
+
+Source editing uses ordinary module import and independent publication; no original-definition edit token participates. Printed callable values are ordinary document declarations.
 
 ### R8: the document needs no dialect
 

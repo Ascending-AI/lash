@@ -286,3 +286,5 @@ Events identify the execution owner, call and attempt, and support resumption
 within their own retention window with explicit gaps. This example does not
 yet subscribe to that feed or publish mock tool-live facts. Display progress
 here remains the mock host's display state, separate from tool progress.
+
+Saved workflow source is standalone: print, edit the text, then ordinarily import and independently publish under the chosen environment. Typed editing uses Draft operations on the materialized document.

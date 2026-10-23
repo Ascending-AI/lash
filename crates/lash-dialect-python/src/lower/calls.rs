@@ -382,6 +382,29 @@ impl Lowerer<'_> {
     }
 
     pub(super) fn call(&mut self, call: &ast::ExprCall, awaited: bool) -> Lowering<Operand> {
+        let constructor_path = match call.func.as_ref() {
+            PyExpr::Attribute(attribute) => match attribute.value.as_ref() {
+                PyExpr::Name(name) if self.variable(name.id.as_str()).is_none() => {
+                    Some(format!("{}.{}", name.id, attribute.attr.id))
+                }
+                _ => None,
+            },
+            _ => None,
+        };
+        if let Some(path) = constructor_path
+            && let Some(constructor) =
+                lash_kernel_dialect::value_constructors::Constructor::named(&path)
+        {
+            self.plain_arguments(&call.arguments, "a value constructor")?;
+            let args: Vec<_> = call.arguments.args.iter().collect();
+            let operands = self.operands(&args)?;
+            let value = constructor
+                .build(operands.into_iter().map(|v| v.expr).collect(), |name| {
+                    self.function(name).ok()
+                })
+                .map_err(|message| diagnostics::unplaced(Code::Syntax, message))?;
+            return Ok(Operand::inline(value, Ty::Unknown));
+        }
         if self
             .call_path(&call.func)
             .is_some_and(|(path, bound)| !bound && path == ["time", "time"])

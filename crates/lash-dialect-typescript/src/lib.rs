@@ -237,6 +237,9 @@ impl FrontEnd for TypeScript {
     }
 
     fn reserves(&self, root: &str) -> Option<String> {
+        if lash_kernel_dialect::value_constructors::Constructor::reserves(root) {
+            return Some("a typed value constructor".into());
+        }
         if builtins::is_global(root) {
             Some("a TypeScript global".to_owned())
         } else if !printer::legal_identifier(root) {

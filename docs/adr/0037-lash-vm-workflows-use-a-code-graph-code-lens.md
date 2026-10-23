@@ -1,4 +1,4 @@
-# Lash VM workflows use a code-graph-code lens
+# Lash VM workflows use Draft authoring and standalone source
 
 ## Status
 
@@ -6,82 +6,34 @@ Accepted.
 
 ## Context
 
-Hosts need to visualize and structurally edit workflows and correlate a run
-with the program it executes. TypeScript is the source dialect (ADR 0096);
-Lash VM names the language-neutral IR and VM. Source supports review and
-diffing, while a graph supports structural editing. Hosts own presentation
-and layout.
+Hosts visualize, edit and publish kernel workflow Documents. Installed TypeScript and Python dialects provide source views; hosts own presentation and layout.
 
 ## Decision
 
-`WorkflowGraph` is the serializable graph model for editing and run overlays.
-It is a total typed document of the IR: the IR crate projects a program to it
-and reconstructs the program from it exactly, with no dialect involved. The
-source lens parses and canonicalizes TypeScript and prints a reconstructed
-program through the TypeScript canonical printer; it is an optional view of
-the document, not its validator. Projection and rendering do not execute the
-workflow.
+The kernel Document is the authoring representation. Workflow graph views and type facets are derived read models. Hosts apply typed authoring::Operation transactions to a Draft; atomic admission and correspondence describe each applied batch. A graph projection is not a second mutable program and does not require an editing inverse.
 
-Structured expression fields carry authoritative serialized IR, including
-bindings, assignment targets, conditions, loop iterables and call receivers
-and arguments. Rendering consumes that IR rather than parsing an adjacent text
-copy. A text edit uses the dialect's fragment parser to produce replacement
-IR. No node carries source text: `try`, `throw` and a nested scope are typed
-regions like every other admitted construct, and the document stamps the IR
-interpretation version it was written under.
+Opening a saved callable materializes its frozen value graph as ordinary declarations inside a closed entry. Captured values and names can be changed like other document content. Taking the Draft's Document and publishing it creates an independent Linked definition under the environment the host chooses. The new definition does not name its source definition; existing runs retain their original code.
 
-Argument slot paths are typed sequences of `call`, `arg`, `field` and `index`
-segments. Type facets and diagnostics are derived facts; they do not select
-execution semantics. Diagnostics carry an exact slot when it corresponds to a
-projected expression. Graph and facet carriers have separate version contracts
-under ADR 0100. Hosts decide whether a draft with diagnostics may be saved.
+Printing produces standalone source for the representations the selected dialect can express. The host edits text freely and uses ordinary source import and publication, without a base definition or text-edit token. Successful unchanged print/import/publication preserves the public contract, values, sharing and observable behavior under equivalent dependency bindings. It need not preserve definition identity, original formatting, private names, internal Sites or metering. Unsupported representations refuse with a typed reason. Supported captions survive through mapped sites; unspellable captions are reported.
 
-The lens laws are:
+A Draft has a content identity but no published runtime authority. Typed edit correspondence begins at the document opened in that Draft. Runtime overlays name the document actually executed; hosts own versions, revision checks, layout and any historical relationship between definitions. Source replacement creates a new document and does not invent edit history.
 
-1. Canonical source reaches an exact textual fixpoint through source, graph
-   and source.
-2. Parsing rendered source preserves the span-insensitive IR.
-3. Projecting a rendered projected graph recovers that graph, the PutGet law.
-
-Formatting and comments are outside these laws. A step label is host data
-keyed by site; the former statement JSDoc `@label` comment is ordinary
-trivia (FIG-6377). Invalid structure is a
-typed document error from the IR crate. A valid document without a canonical
-TypeScript spelling is a typed lens refusal rather than plausible source, and
-stays a valid document.
-
-Calls, effects, terminal values, data expressions, updates and computations
-are typed nodes. Control flow and process bodies have nested subgraphs.
-Dependency edges track variable versions; sequencing edges preserve effect
-order. A composite computation retains one ordered expression, including
-short-circuit and unwrap behavior, rather than scheduling its operands as
-independent nodes. Loop projections summarize writes and preserve lexical
-shadowing. A statement with no narrower kind is a computation that carries its
-whole expression.
-
-A draft projected from unadmitted source claims no runtime identity.
-`workflow_graph_from_artifact` projects the admitted artifact's own IR and
-carries its `source_identity`. Node identity derives from structural owner
-and owner-relative AST path. Runtime execution sites use the same identity.
-Artifact identity belongs to the graph and execution, not the node's preimage;
-a lifted process's owner includes its body digest. ADR 0100 governs admitted
-source and run correlation.
+Calls, effects, terminal values, data expressions, updates and computations are
+typed nodes. Control flow and process bodies have nested subgraphs. Sequencing
+preserves effect order; a composite expression retains short-circuit and unwrap
+behavior without scheduling its operands independently. Binding resolution
+preserves lexical shadowing and writes. Diagnostics and argument slots use typed
+paths; derived facets select no execution semantics (ADR 0100).
 
 ## Consequences
 
-Code and graph authoring share one IR and one canonical printer. Rendering
-exposes canonical formatting and does not preserve ordinary comment trivia.
-Hosts own draft identity, mutation commands, document versions, layout and
-interaction. The trace-derived execution graph can use the workflow graph
-without becoming the authoring model.
-
-A read-only lossy map is rejected because it has no authoring inverse. Storing
-both expression text and IR is rejected because it adds competing authority.
-Splitting effectful operands into scheduled nodes is rejected because it can
-change evaluation order.
+Code and graph views share one kernel Document. Projection does not execute code.
+Hosts own revision history, layout and retention. Source compilation checks fresh
+policy and dependency choices. Editing leaves parked executions on their recorded code.
 
 ## Implementation
 
-- [Graph types and structural identity](../../crates/lash-vm/src/workflow_graph.rs) and [IR projector](../../crates/lash-vm/src/workflow_graph/projection.rs).
-- [TypeScript lens and source view](../../crates/lash-typescript/src/workflow_graph/mod.rs).
-- [Editable-field and round-trip laws](../../crates/lash-typescript/tests/workflow_graph/adr_claims.rs).
+- `crates/lash-kernel-edit/src/draft.rs` and `authoring.rs`.
+- `crates/lash-kernel-package/src/materialize.rs`.
+- `crates/lash-kernel-view` and `crates/lash-kernel-dialect/src/regions.rs`.
+- `crates/lash-dialect-typescript/src/readable` and `crates/lash-dialect-python/src/readable.rs`.

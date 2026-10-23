@@ -1529,6 +1529,7 @@ PACKAGE_DEPS = {
         "build": {},
         "dev": {},
         "normal": {
+            "lash_kernel_check": "//crates/lash-kernel-check:lash-kernel-check",
             "lash_kernel_doc": "//crates/lash-kernel-doc:lash-kernel-doc",
             "lash_kernel_state": "//crates/lash-kernel-state:lash-kernel-state",
             "lash_vocabulary": "//crates/lash-vocabulary:lash-vocabulary",

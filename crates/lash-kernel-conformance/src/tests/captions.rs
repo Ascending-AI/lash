@@ -93,7 +93,6 @@ fn each_dialect(law: impl Fn(&CaptionDialect<'_>) -> Result<(), crate::HarnessEr
 
 fn typescript() -> Dialect {
     Dialect {
-        callable_source: None,
         name: "typescript".into(),
         front_end: Box::new(lash_dialect_typescript::TypeScript::default()),
         read: |source, base, library, limits, source_limits| {

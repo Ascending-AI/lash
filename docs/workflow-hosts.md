@@ -24,7 +24,7 @@ The installed image is `lash::workflow::document::BuildHelpers`; a Document name
 helper requirements with `lash::workflow::document::LibraryDependencies`.
 A callable's source signature is `lash::workflow::document::WrittenSignature`.
 A checked workflow's identity is `lash::workflow::WorkflowReference`, and
-source edit refusals are `lash::workflow::WorkflowEditRefusal`. The
+typed materialization refusals are `lash::workflow::MaterializeRefusal`. The
 [host-package guide](host-packages.md) describes publication ownership, visibility,
 retention and deferred resolution for installed code.
 
@@ -86,7 +86,7 @@ use lash::workflow::{SourceMapRead, WorkflowImport, WorkflowRead};
 
 // Public vocabulary has one home: BuildHelpers, LibraryDependencies and
 // WrittenSignature are in lash::workflow::document, including for viewers
-// without code mode. WorkflowReference and WorkflowEditRefusal are in
+// without code mode. WorkflowReference is in
 // lash::workflow.
 
 pub async fn namespace(
@@ -450,11 +450,7 @@ source policy to check.
 Direct dialect callers select the same policy with
 `SourceLimits::with_implicit_text_conversion` before `lower_with_limits`.
 
-`import_exported_workflow` checks edited source before returning
-`WorkflowImport::Read`; pass the policy there whenever edited printed source replaces a saved
-version. `publish_workflow` checks supplied map-and-source text. A raw
-source-less `DocumentBytes` publication is kernel-authored: kernel conversions
-are explicit, so this TypeScript authoring policy does not apply. Printing
+`import_workflow` applies current source policy to every newly imported module. `publish_workflow` checks supplied map-and-source text. A source-less Draft publication also checks copied source evidence; newly typed kernel conversions are explicit. Printing
 applies no admission policy. Generated-source limits and ordinary source-byte
 limits are independent bounds. The in-process dialect readers and
 `WorkerService::read_exported` take the same optional `WorkflowSourceLimits`
@@ -477,35 +473,86 @@ An absent required helper refuses restore as
 by name, relinking to a newer helper or permissive default. Keep a capable build
 available for retained work. Surface the typed refusal and its function identity.
 
-## Edit documents and retain identity
+## Edit and independently publish workflows
 
-With `workflow-authoring`, open `lash::workflow::edit::Draft` on the typed
-Document. `Draft::apply` takes a `Transaction` and checker environment. Every
-operation carries the base `DocumentId` and exact `Site` in that base. Supported
-canvas operations are `SetValue`, `InsertStep`, `RemoveStep`, `MoveStep`,
-`WrapSteps`, `UnwrapSteps` and `ChangeCondition` in `lash::workflow::authoring`.
-Use source replacement for arbitrary declarations, handlers or terminal structure.
+With `workflow-authoring`, call `HostArtifacts::open_workflow` by definition ID.
+The returned `OpenedWorkflow` owns a `Draft`, entry selector, mapped captions and
+explicit dropped caption targets. A callable's frozen values become ordinary
+initializers and lexical functions in a closed entry. Opening executes no code.
 
-A transaction applies atomically after checker admission or changes neither the
-draft nor its correspondence. Structural operations require separable effect
-steps. `EditDiagnosticKind::NonSeparableStep` supplies optional
-`enclosing_statement` and `separable_step` base sites, so a host can offer an
-appropriate source or structural edit. A statement with several effects is not
-one separable effect step. Wrapping supports if/for/try; while loops support
-condition changes.
+Apply typed `Operation` transactions: `SetValue`, `InsertStep`, `RemoveStep`,
+`MoveStep`, `WrapSteps`, `UnwrapSteps`, `ChangeCondition`, `RenameBinding`,
+`InsertBinding`, `RemoveBinding`, `RenameExport` or `ReplaceDocument`.
+Whole-document replacement is the sole operation in its transaction. Admission
+is atomic; refusal leaves both draft and correspondence unchanged. Binding
+renames follow checker identity through captures and nested scopes.
 
-A Site names a unit and a path in `Node::children` order. Its root omits the
-serialized `path`; children have a nonempty path. It is an address within one
-Document, so an insertion can move the sites after it. Use the returned
-`Correspondence` to carry layout, comments and selection to the new Document.
-`successor`, `predecessor` and `then` follow and compose surviving nodes;
-`Draft::correspondence_since_open` spans all applied transactions. A wholesale
-replacement has no edit history. Editing never moves a parked execution.
+Publish `DocumentBytes::from(draft.into_document())` through `publish_workflow`,
+then `definition_draft(Linked)` and `publish_definition`, under the host's chosen
+environment. B contains no edit base or descriptor edge to A. Existing runs keep A.
+`Draft::correspondence_since_open` begins at the materialized document. Hosts own
+revision history, layout and any relationship between saved versions.
 
-Use `extract_entry` with the checker to obtain an admitted document for a
-selected entry. A missing entry is a typed `NoSuchEntry`. Keep the returned
-document and its correspondence where provided; publish the resulting bytes
-against an explicit workflow environment.
+`print_workflow(&definition.id, captions, format, options)` uses that same
+materializer and ordinary printer. Its source is sufficient for ordinary
+`import_workflow` and fresh publication; no base document or saved environment is
+needed. Import chooses the new entry, contracts and dependency bindings. A print
+map names the materialized document, not the original saved cell. A Main-only
+workflow without an annotated module entry refuses printing with typed
+`PrintError::Unprintable`; it still opens as a typed Draft.
+
+<!-- host-guide: authoring -->
+```rust
+pub async fn edit_saved(
+    core: &LashCore,
+    pin: &HostArtifactPin,
+    definition: &lash::process::ProcessDefinitionId,
+    environment: &WorkflowEnvironmentRequest,
+    edits: Vec<lash::workflow::authoring::Operation>,
+) -> anyhow::Result<ProcessDefinition> {
+    let artifacts = core.host_artifacts();
+    let mut opened = artifacts.open_workflow(definition, None).await?;
+    let checked = artifacts
+        .workflow_environment(environment)
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("workflow engine unavailable"))?;
+    opened.draft.apply(
+        &lash::workflow::edit::Transaction {
+            base: opened.draft.identity(),
+            edits,
+        },
+        &checked.checker(),
+    )?;
+    let start = artifacts
+        .publish_workflow(
+            pin,
+            &opened.draft.into_document().into(),
+            &opened.selector,
+            environment,
+            None,
+            None,
+        )
+        .await?;
+    let draft = lash::vm::definition_draft(&lash::process::KernelProcessDefinition {
+        code: lash::vm::KernelInlineRequest::Linked { start },
+    })?;
+    Ok(artifacts.publish_definition(pin, &draft).await?)
+}
+
+pub async fn print_saved(
+    core: &LashCore,
+    definition: &lash::process::ProcessDefinitionId,
+    captions: Option<&Captions>,
+    format: lash::dialect::SourceFormat,
+) -> lash::Result<lash::dialect::PrintedSource> {
+    core.host_artifacts()
+        .print_workflow(definition, captions, format, Default::default())
+        .await
+}
+// The host edits PrintedSource::source, chooses an entry and calls publish
+// above (or import_workflow for Python) under its chosen namespace. No original
+// definition, saved captures or edit token is an input to that compilation.
+```
 
 ## Captions and source editing
 
@@ -654,12 +701,7 @@ prompt rather than hard-coding a syntax. Both dialects spell every kind.
   result with a `TypedDict` class the module declares and put `#:` lines
   above its fields. Field annotations may use `NotRequired[...]`.
 
-Source printing is a lens over the Document. Use the worker service's `print`
-with the Document, captions, source format and print options. A printer can
-return typed `Unprintable` for code the chosen dialect cannot spell; the
-Document remains inspectable and executable. Read edited printed source with
-`import_exported_workflow` against the base Document and the same host source
-policy.
+For saved workflows, call `print_workflow` by definition ID and pass the authoritative caption sidecar. For unpublished Documents, use the worker service's `print`. A printer may return typed `Unprintable` for code the chosen dialect cannot spell; the Document remains inspectable and executable. Edit the text and use ordinary `import_workflow` and fresh publication under the selected environment. The general `import_exported_workflow` document codec remains available to its existing cell/document consumers; it is not the saved-workflow editing path.
 
 Once a canvas or caption edit changes a version, show freshly printed source so
 saving old authored source cannot undo those edits. Draft storage, revision

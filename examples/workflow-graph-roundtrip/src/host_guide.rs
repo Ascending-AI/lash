@@ -19,7 +19,7 @@ use lash::workflow::{SourceMapRead, WorkflowImport, WorkflowRead};
 
 // Public vocabulary has one home: BuildHelpers, LibraryDependencies and
 // WrittenSignature are in lash::workflow::document, including for viewers
-// without code mode. WorkflowReference and WorkflowEditRefusal are in
+// without code mode. WorkflowReference is in
 // lash::workflow.
 
 pub async fn namespace(
@@ -181,6 +181,58 @@ pub async fn save_callable(
         .await?)
 }
 // ANCHOR_END: callable
+
+// ANCHOR: authoring
+pub async fn edit_saved(
+    core: &LashCore,
+    pin: &HostArtifactPin,
+    definition: &lash::process::ProcessDefinitionId,
+    environment: &WorkflowEnvironmentRequest,
+    edits: Vec<lash::workflow::authoring::Operation>,
+) -> anyhow::Result<ProcessDefinition> {
+    let artifacts = core.host_artifacts();
+    let mut opened = artifacts.open_workflow(definition, None).await?;
+    let checked = artifacts
+        .workflow_environment(environment)
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("workflow engine unavailable"))?;
+    opened.draft.apply(
+        &lash::workflow::edit::Transaction {
+            base: opened.draft.identity(),
+            edits,
+        },
+        &checked.checker(),
+    )?;
+    let start = artifacts
+        .publish_workflow(
+            pin,
+            &opened.draft.into_document().into(),
+            &opened.selector,
+            environment,
+            None,
+            None,
+        )
+        .await?;
+    let draft = lash::vm::definition_draft(&lash::process::KernelProcessDefinition {
+        code: lash::vm::KernelInlineRequest::Linked { start },
+    })?;
+    Ok(artifacts.publish_definition(pin, &draft).await?)
+}
+
+pub async fn print_saved(
+    core: &LashCore,
+    definition: &lash::process::ProcessDefinitionId,
+    captions: Option<&Captions>,
+    format: lash::dialect::SourceFormat,
+) -> lash::Result<lash::dialect::PrintedSource> {
+    core.host_artifacts()
+        .print_workflow(definition, captions, format, Default::default())
+        .await
+}
+// The host edits PrintedSource::source, chooses an entry and calls publish
+// above (or import_workflow for Python) under its chosen namespace. No original
+// definition, saved captures or edit token is an input to that compilation.
+// ANCHOR_END: authoring
 
 #[cfg(test)]
 mod tests {

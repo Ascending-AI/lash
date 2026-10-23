@@ -9,6 +9,7 @@ use lash_vocabulary::{
 use std::collections::{BTreeMap, BTreeSet};
 
 mod lexical;
+mod source;
 mod values;
 use values::Values;
 
@@ -112,6 +113,9 @@ pub fn materialize_workflow(
             }
         }
     }
+    // Captures may occur only as action callees or surplus values, so the
+    // executable-name walk alone cannot reserve all lexical cell names.
+    used.extend(nodes.iter().flat_map(|node| node.captures.keys().cloned()));
     let mut fresh = |preferred: String| {
         let mut name = Name::new(&preferred);
         let mut suffix = 0;
@@ -123,9 +127,6 @@ pub fn materialize_workflow(
     };
     let callable_names: Vec<_> = (0..nodes.len())
         .map(|n| fresh(format!("saved_callable_{n}")))
-        .collect();
-    let raw_names: Vec<_> = (0..nodes.len())
-        .map(|n| fresh(format!("saved_body_{n}")))
         .collect();
     let environment_names: Vec<_> = (0..nodes.len())
         .map(|n| fresh(format!("saved_environment_{n}")))
@@ -257,7 +258,16 @@ pub fn materialize_workflow(
         }
         for (old, new) in &ids {
             let mut definition = copied.functions[old].clone();
+            let mut normalized_paths = BTreeMap::new();
+            let parameter_names = definition.signature.params.clone();
             if let Some(body) = definition.body_mut() {
+                if matches!(
+                    node.convention,
+                    StartConvention::TsArgsList { .. } | StartConvention::TsDirect { .. }
+                ) {
+                    normalized_paths =
+                        source::declarations(&mut body.block, &parameter_names, source);
+                }
                 remap(
                     NodeMut::Block(&mut body.block),
                     &ids,
@@ -286,7 +296,13 @@ pub fn materialize_workflow(
             {
                 sites.insert(
                     (n, node.callable.link, site.clone()),
-                    Site::new(Unit::Library(*new), site.path.clone()),
+                    Site::new(
+                        Unit::Library(*new),
+                        normalized_paths
+                            .get(&site.path)
+                            .cloned()
+                            .unwrap_or_else(|| site.path.clone()),
+                    ),
                 );
             }
             // Include non-execution nodes and function-body captions too.
@@ -314,40 +330,22 @@ pub fn materialize_workflow(
         );
         // One lexical factory per environment keeps copied code unchanged, even
         // when one nested body is instantiated beneath different local shadows.
+        let ts = matches!(node.convention, StartConvention::TsArgsList { .. });
+        let factory_name = fresh(format!("saved_factory_{n}"));
         let factory = lexical::environment(&mut document, n, node, raw, helpers, &mut fresh)?;
+        block.push(binding(factory_name.clone(), factory));
         block.push(binding(
             environment_names[n].clone(),
-            Expr::Act(Box::new(ActExpr {
-                kind: ActKind::Call(Callee::Local(factory)),
-                args: vec![],
-            })),
+            source::call(&factory_name, vec![], ts, true, helpers, &mut fresh)?,
         ));
         block.push(binding(
-            raw_names[n].clone(),
-            lexical::member(&environment_names[n], 0),
+            callable_names[n].clone(),
+            source::member(&environment_names[n], 0, ts),
         ));
         block.push(binding(
             setter_names[n].clone(),
-            lexical::member(&environment_names[n], 1),
+            source::member(&environment_names[n], 1, ts),
         ));
-        let value = match (&node.representation, &node.token) {
-            (FunctionRepresentation::Bare, None) => Expr::Variable(raw_names[n].clone()),
-            (FunctionRepresentation::Token { callable, .. }, Some(token)) => Expr::Tuple(
-                token
-                    .iter()
-                    .enumerate()
-                    .map(|(i, datum)| {
-                        if i == *callable as usize {
-                            Ok(Expr::Variable(raw_names[n].clone()))
-                        } else {
-                            values.datum(n as u32, &format!("token.{i}"), datum, 0)
-                        }
-                    })
-                    .collect::<Result<_, _>>()?,
-            ),
-            _ => return Err(MaterializeRefusal::Callable(FunctionValueRefusal::Identity)),
-        };
-        block.push(binding(callable_names[n].clone(), value));
     }
     // Every environment's cells, callable and setter now exist. Fill those
     // same cells only after all callable/token objects have been constructed.
@@ -359,27 +357,49 @@ pub fn materialize_workflow(
     }
     for (n, args) in fills.into_iter().enumerate() {
         block.push(Stmt::Do {
-            value: Expr::Act(Box::new(ActExpr {
-                kind: ActKind::Call(Callee::Value(setter_names[n].clone())),
+            value: source::call(
+                &setter_names[n],
                 args,
-            })),
+                matches!(nodes[n].convention, StartConvention::TsArgsList { .. }),
+                false,
+                helpers,
+                &mut fresh,
+            )?,
         });
     }
     document.library.0.extend(values.library);
+    let ts = matches!(root_convention, StartConvention::TsArgsList { .. });
+    let params = if ts {
+        function.signature.params.clone()
+    } else {
+        private.params
+    };
     block.push(Stmt::Return {
-        value: Expr::Act(Box::new(ActExpr {
-            kind: ActKind::Call(Callee::Value(raw_names[0].clone())),
-            args: private
-                .params
+        value: source::call(
+            &callable_names[0],
+            params
                 .iter()
                 .map(|p| Expr::Variable(p.name.clone()))
                 .collect(),
-        })),
+            ts,
+            false,
+            helpers,
+            &mut fresh,
+        )?,
     });
+    if let StartConvention::TsArgsList { await_fn, .. } = root_convention {
+        root_convention = StartConvention::TsDirect { await_fn };
+    }
     let wrapper = lexical::definition(
         "materialized.entry".into(),
-        private.params,
-        private.result,
+        params
+            .into_iter()
+            .map(|mut param| {
+                param.ty = lash_vocabulary::Type::Any;
+                param
+            })
+            .collect(),
+        lash_vocabulary::Type::Any,
         block,
         &document,
         helpers,
@@ -392,10 +412,24 @@ pub fn materialize_workflow(
             function: wrapper_id,
             signature: function.signature.clone(),
             convention: root_convention,
-            asynchronous: false,
+            asynchronous: function
+                .written_signature
+                .as_ref()
+                .is_some_and(|written| written.language == SourceLanguage::Python),
             rest: false,
         }),
     );
+    document.main = Some(vec![binding(
+        Name::new("run"),
+        Expr::Literal(Literal::Function(wrapper_id)),
+    )]);
+    let used_helpers: BTreeSet<_> = document
+        .units()
+        .flat_map(|(_, block)| Node::Block(block).functions_within())
+        .filter(|id| helpers.contains(id))
+        .collect();
+    document.library.0.extend(used_helpers);
+    source::requirements(&mut document, helpers)?;
     let reidentified = document
         .reidentify_functions()
         .map_err(|message| MaterializeRefusal::Document { message })?;
@@ -420,6 +454,16 @@ pub fn materialize_workflow(
         for entry in captions.entries() {
             let mut next = entry.clone();
             let target = match &entry.target {
+                CaptionTarget::Site(old)
+                    if n == 0
+                        && old.unit == Unit::Library(node.callable.function)
+                        && old.path.is_empty() =>
+                {
+                    Some(CaptionTarget::Site(Site::new(
+                        Unit::Library(reidentified.get(&wrapper_id).copied().unwrap_or(wrapper_id)),
+                        [],
+                    )))
+                }
                 CaptionTarget::Site(old) => {
                     sites
                         .get(&(n, node.callable.link, old.clone()))

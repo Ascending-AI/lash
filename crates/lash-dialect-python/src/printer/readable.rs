@@ -235,9 +235,18 @@ impl Renderer<'_> {
                 }
                 self.out.write("}");
             }
-            k::Expr::Record(_) => self.out.refuse(PrintError::Invalid(
-                "record has no authored spelling outside a typed boundary".into(),
-            )),
+            k::Expr::Record(entries) => {
+                self.out.write("record.new({");
+                for (index, entry) in entries.iter().enumerate() {
+                    if index > 0 {
+                        self.out.write(", ");
+                    }
+                    self.out.json(&entry.field);
+                    self.out.write(": ");
+                    self.inline_expr(&entry.value);
+                }
+                self.out.write("})");
+            }
             k::Expr::Member(member) if matches!(member.as_ref(), k::Member::Field { field, .. } if !attribute_identifier(field)) =>
             {
                 let k::Member::Field { target, field } = member.as_ref() else {
@@ -247,6 +256,16 @@ impl Renderer<'_> {
                 self.inline_expr(target);
                 self.out.write(", ");
                 self.out.json(field);
+                self.out.write(")");
+            }
+            k::Expr::Member(member) if matches!(member.as_ref(), k::Member::Index { .. }) => {
+                let k::Member::Index { target, index } = member.as_ref() else {
+                    unreachable!()
+                };
+                self.out.write("tuple.at(");
+                self.inline_expr(target);
+                self.out.write(", ");
+                self.inline_expr(index);
                 self.out.write(")");
             }
             k::Expr::Member(member) => {
@@ -309,7 +328,7 @@ impl Renderer<'_> {
                         self.out.write(")");
                     }
                 } else {
-                    if !matches!(callee,k::Callee::Value(name) if self.sync.contains(name)) {
+                    if matches!(callee,k::Callee::Value(name) if self.asynchronous.contains(name)) {
                         self.out.write("await ");
                     }
                     self.callee(callee);
@@ -334,7 +353,10 @@ impl Renderer<'_> {
                 self.operation_args(import, &act.args);
                 self.out.write(")");
             }
-            k::ActKind::Await(policy) if self.operators.is(policy, "py.await") => {
+            k::ActKind::Await(policy)
+                if self.operators.is(policy, "py.await")
+                    || self.operators.is(policy, "py.await.result") =>
+            {
                 self.out.write("await ");
                 self.authored_args(&act.args, true);
             }
@@ -510,6 +532,8 @@ impl Renderer<'_> {
                 let asynchronous = authored_awaits(&body.block, &self.sync);
                 if self.authored && !asynchronous {
                     self.sync.insert(name.clone());
+                } else if asynchronous {
+                    self.asynchronous.insert(name.clone());
                 }
                 self.out
                     .write(if asynchronous { "async def " } else { "def " });

@@ -21,8 +21,14 @@ pub fn spell_operation(spelling: Spelling, operation: &QualifiedOperation) -> St
         .join(".")
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
+#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub enum NamespaceRefusal {
+    #[error("conflicting source requirements {first:?} and {second:?}")]
+    ImportNameConflict {
+        first: Box<lash_vocabulary::Import>,
+        second: Box<lash_vocabulary::Import>,
+    },
     #[error("the package export `{name:?}` in Link {link} is not loaded")]
     MissingExport {
         link: lash_vocabulary::LinkId,

@@ -709,7 +709,13 @@ async fn draft_independent_edits_publish_fresh_linked_content() {
         view.document.reference(),
         &lash::workflow::WorkflowReference::Linked(b.start.clone())
     );
-    assert!(view.document.document().main.is_none());
+    assert!(matches!(
+        view.document.document().main.as_deref(),
+        Some([Stmt::Let {
+            value: lash::workflow::document::Rhs::Expr(Expr::Literal(Literal::Function(_))),
+            ..
+        }])
+    ));
     assert!(
         !serde_json::to_string(view.document.document())
             .unwrap()

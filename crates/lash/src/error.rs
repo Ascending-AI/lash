@@ -1,34 +1,16 @@
 use crate::support::SessionError;
 use lash_vocabulary::identity::SessionId;
 
-#[cfg(feature = "codemode")]
-use crate::process::ProcessDefinitionId;
-#[cfg(feature = "codemode")]
-use lash_kernel_doc::CallableEditRefusal;
-#[cfg(feature = "codemode")]
-#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
-pub enum WorkflowEditRefusal {
-    #[error(transparent)]
-    Callable(#[from] CallableEditRefusal),
-    #[error("workflow edit base differs: expected {expected}, actual {actual}")]
-    BaseMismatch {
-        expected: ProcessDefinitionId,
-        actual: ProcessDefinitionId,
-    },
-}
 #[derive(Debug, thiserror::Error)]
 /// Errors returned while configuring or operating the embedded Lash runtime.
 #[non_exhaustive]
 pub enum EmbedError {
-    #[cfg(all(feature = "codemode", feature = "workflow-authoring"))]
+    #[cfg(feature = "codemode")]
     #[error(transparent)]
     WorkflowMaterialization(#[from] lash_kernel_package::MaterializeRefusal),
     #[cfg(feature = "workflow-authoring")]
     #[error(transparent)]
     WorkflowDraft(#[from] lash_kernel_edit::EditRefusal),
-    #[cfg(feature = "codemode")]
-    #[error(transparent)]
-    WorkflowEdit(#[from] crate::workflow::WorkflowEditRefusal),
     /// Two uses of one operation select routes the process surface cannot serve together.
     /// Refused before an environment is published or a process is started.
     #[cfg(feature = "codemode")]
@@ -552,7 +534,7 @@ impl EmbedError {
     pub fn is_retryable(&self) -> bool {
         match self {
             Self::IngressConfiguration(_) => false,
-            #[cfg(all(feature = "codemode", feature = "workflow-authoring"))]
+            #[cfg(feature = "codemode")]
             Self::WorkflowMaterialization(_) => false,
             #[cfg(feature = "workflow-authoring")]
             Self::WorkflowDraft(_) => false,
@@ -564,7 +546,6 @@ impl EmbedError {
             Self::WorkflowSource(_)
             | Self::WorkflowBytes(_)
             | Self::WorkflowSourceMap(_)
-            | Self::WorkflowEdit(_)
             | Self::ConflictingOperationRoutes { .. } => false,
             #[cfg(feature = "codemode")]
             Self::ProcessRender(_) => false,
@@ -653,7 +634,7 @@ impl EmbedError {
     pub fn is_terminal(&self) -> bool {
         match self {
             Self::IngressConfiguration(_) => true,
-            #[cfg(all(feature = "codemode", feature = "workflow-authoring"))]
+            #[cfg(feature = "codemode")]
             Self::WorkflowMaterialization(_) => true,
             #[cfg(feature = "workflow-authoring")]
             Self::WorkflowDraft(_) => true,
@@ -665,7 +646,6 @@ impl EmbedError {
             Self::WorkflowSource(_)
             | Self::WorkflowBytes(_)
             | Self::WorkflowSourceMap(_)
-            | Self::WorkflowEdit(_)
             | Self::ConflictingOperationRoutes { .. } => true,
             #[cfg(feature = "codemode")]
             Self::ProcessRender(_) => true,

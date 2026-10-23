@@ -302,19 +302,23 @@ fn validate_document_in(
         ));
     };
     for function in document.library.iter() {
-        if document.functions.contains_key(function)
-            || (!structural && catalog.header(function).is_none())
-        {
+        if document.functions.contains_key(function) {
             return Err(invalid(
                 None,
                 InvalidReason::Document {
-                    message: format!(
-                        "library reference {function} is missing or overlaps a local definition"
-                    ),
+                    message: format!("library reference {function} overlaps a local definition"),
                 },
             ));
         }
         if !structural {
+            if catalog.header(function).is_none() {
+                return Err(invalid(
+                    None,
+                    InvalidReason::FunctionNotResolved {
+                        function: *function,
+                    },
+                ));
+            }
             check_written_for(catalog, function, version)?;
         }
     }

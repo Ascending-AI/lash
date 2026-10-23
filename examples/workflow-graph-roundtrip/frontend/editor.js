@@ -205,7 +205,6 @@ $("import").onclick = () =>
       source: $("source").value,
       entry: $("entry").value,
       dialect: $("source-dialect").value,
-      ...($("source-kind").value === "printed" ? { format: workflow.sourceDialect === "python" ? "python_v1" : "type_script_v1" } : {}),
     });
     selected = undefined;
     show(next);

@@ -130,19 +130,6 @@ fn lower_with_calls(
     calls: Option<&mut std::collections::BTreeSet<String>>,
     beside: &[String],
 ) -> Result<Lowered, Diagnostic> {
-    lower_bound(source, environment, mode, limits, calls, beside, None)
-}
-fn lower_bound(
-    source: &str,
-    environment: &Environment<'_>,
-    mode: Mode<'_>,
-    limits: SourceLimits,
-    calls: Option<&mut std::collections::BTreeSet<String>>,
-    beside: &[String],
-    retained_imports: Option<
-        &std::collections::BTreeMap<lash_vocabulary::ImportSlot, lash_vocabulary::Import>,
-    >,
-) -> Result<Lowered, Diagnostic> {
     if let Mode::Cell(cell) = mode {
         lower::check_binding_names(
             cell.bindings
@@ -185,7 +172,6 @@ fn lower_bound(
         calls,
         spelled,
         beside,
-        retained_imports,
     )
 }
 
@@ -229,6 +215,9 @@ impl FrontEnd for Python {
     }
 
     fn reserves(&self, root: &str) -> Option<String> {
+        if lash_kernel_dialect::value_constructors::Constructor::reserves(root) {
+            return Some("a typed value constructor".into());
+        }
         if lower::is_builtin(root) || root == "asyncio" {
             Some("a Python built-in".to_owned())
         } else if !printer::legal_identifier(root) {
@@ -243,7 +232,6 @@ impl FrontEnd for Python {
 /// generated-source printer. Its helpers are lash's `python` package.
 pub fn dialect() -> Dialect {
     Dialect {
-        callable_source: Some(Box::new(Python::default())),
         name: DIALECT.to_string(),
         front_end: Box::new(Python::default()),
         read,

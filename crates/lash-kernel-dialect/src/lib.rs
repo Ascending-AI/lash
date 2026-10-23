@@ -13,11 +13,6 @@
 //! lines carry names only; [`define_functions`] fills the identities in.
 
 pub mod authoring;
-pub mod callable;
-pub use callable::{
-    CallableReadError, CallableSourceBase, CallableSourceCodec, CallableSourceRead,
-};
-pub use lash_kernel_doc::CallableEditRefusal;
 mod diagnostic;
 mod dialect;
 pub mod dispatch;
@@ -27,12 +22,14 @@ mod library;
 mod metadata;
 mod name_plan;
 mod namespaces;
+mod normalization;
 mod notes;
 pub mod readability;
 pub mod regions;
 mod saved;
 mod source;
 mod spelling;
+pub mod value_constructors;
 pub mod workflow;
 mod written;
 

@@ -43,6 +43,7 @@ pub(super) fn document(
     document: &k::Document,
     captions: Option<&k::Captions>,
     library: &dyn lash_kernel_dialect::Library,
+    preserve_temporaries: bool,
 ) -> Lifted {
     let functions = document
         .exports
@@ -57,8 +58,14 @@ pub(super) fn document(
                         .get(&export.function)
                         .ok_or_else(|| "missing exported function".to_owned())
                         .and_then(|function| {
-                            Lifter::new(document, captions, Unit::Library(export.function), library)
-                                .item(name, function, export)
+                            Lifter::new(
+                                document,
+                                captions,
+                                Unit::Library(export.function),
+                                library,
+                                preserve_temporaries,
+                            )
+                            .item(name, function, export)
                         }),
                 ),
             )),
@@ -66,13 +73,19 @@ pub(super) fn document(
         })
         .collect::<BTreeMap<_, _>>();
     let main = if document.exports.is_empty() {
-        let mut lifter = Lifter::new(document, captions, Unit::Main, library);
+        let mut lifter = Lifter::new(
+            document,
+            captions,
+            Unit::Main,
+            library,
+            preserve_temporaries,
+        );
         let block = document.main.as_deref().unwrap_or_default();
         lifter
             .block(block, &Site::new(Unit::Main, Vec::new()))
             .map(Main::Cell)
     } else {
-        module_main(document, captions, library).map(Main::Module)
+        module_main(document, captions, library, preserve_temporaries).map(Main::Module)
     };
     Lifted { functions, main }
 }
@@ -81,11 +94,18 @@ fn module_main(
     document: &k::Document,
     captions: Option<&k::Captions>,
     library: &dyn lash_kernel_dialect::Library,
+    preserve_temporaries: bool,
 ) -> Lift<Vec<ModulePart>> {
     let parts = lash_kernel_dialect::regions::module_parts(document)
         .ok_or_else(|| "module exports do not match their Main bindings".to_owned())?;
     let main = document.main.as_deref().unwrap_or_default();
-    let mut lifter = Lifter::new(document, captions, Unit::Main, library);
+    let mut lifter = Lifter::new(
+        document,
+        captions,
+        Unit::Main,
+        library,
+        preserve_temporaries,
+    );
     parts
         .into_iter()
         .filter_map(|part| {
@@ -126,6 +146,7 @@ pub(super) struct Lifter<'a> {
     /// The temporaries lifted and not yet read, in the order they were
     /// bound: the order the source evaluated them.
     pending: Vec<Pending>,
+    preserve_temporaries: bool,
     /// The captions of the temporaries the statement being lifted read.
     taken_captions: Vec<Caption>,
     /// The names some statement of the unit assigns.
@@ -140,6 +161,7 @@ impl<'a> Lifter<'a> {
         captions: Option<&'a k::Captions>,
         unit: Unit,
         library: &'a dyn lash_kernel_dialect::Library,
+        preserve_temporaries: bool,
     ) -> Self {
         let imports = match &unit {
             Unit::Library(id) => document
@@ -160,6 +182,11 @@ impl<'a> Lifter<'a> {
         };
         if let Some(body) = body {
             assigned_in(body, &mut assigned);
+        }
+        for definition in document.functions.values() {
+            if let Some(body) = definition.body() {
+                assigned_in(&body.block, &mut assigned);
+            }
         }
         let mut bindings = BTreeMap::new();
         if let Some(body) = body {
@@ -188,11 +215,6 @@ impl<'a> Lifter<'a> {
                     ] = parts.as_slice()
                     && tag == "ts.function"
                     && source::identifier(original)
-                    && name.as_str().strip_prefix(original).is_some_and(|suffix| {
-                        suffix.strip_prefix('_').is_some_and(|number| {
-                            !number.is_empty() && number.bytes().all(|b| b.is_ascii_digit())
-                        })
-                    })
                 {
                     bindings.insert(name.clone(), original.clone());
                 }
@@ -205,6 +227,7 @@ impl<'a> Lifter<'a> {
             imports,
             captions,
             pending: Vec::new(),
+            preserve_temporaries,
             taken_captions: Vec::new(),
             assigned,
             bindings,
@@ -235,6 +258,7 @@ impl<'a> Lifter<'a> {
             self.captions,
             Unit::Library(function),
             self.library,
+            self.preserve_temporaries,
         );
         inner.bindings.extend(self.bindings.clone());
         inner
@@ -268,7 +292,13 @@ impl<'a> Lifter<'a> {
     ) -> Lift<Item> {
         // An export's convention belongs to the document, while this lifter's
         // ordinary references belong to the defining function's body imports.
-        let export_scope = Lifter::new(self.document, self.captions, Unit::Main, self.library);
+        let export_scope = Lifter::new(
+            self.document,
+            self.captions,
+            Unit::Main,
+            self.library,
+            self.preserve_temporaries,
+        );
         if !matches!(&entry.convention, k::StartConvention::TsDirect { await_fn }
             if export_scope.is(await_fn, "ts.await"))
         {
@@ -533,6 +563,7 @@ impl<'a> Lifter<'a> {
                 value: k::Rhs::Expr(value),
             } = &block[index]
                 && temporary(name)
+                && !self.preserve_temporaries
             {
                 let value = self.expr(value)?;
                 self.pending.push(Pending {

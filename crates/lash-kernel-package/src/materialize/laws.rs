@@ -371,7 +371,7 @@ fn materialize_graph_preserves_instances_cycles_nested_code_and_surplus() {
     for binding in graph
         .bindings()
         .iter()
-        .filter(|b| b.name.as_str() == "self" || b.name.as_str().starts_with("back"))
+        .filter(|b| b.name.as_str().starts_with("self") || b.name.as_str().starts_with("back"))
     {
         let lash_kernel_check::NodeKind::Stmt(lash_kernel_check::StmtNode::Let { value, .. }) =
             graph.node(binding.declared_at).kind

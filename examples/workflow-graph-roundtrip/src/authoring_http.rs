@@ -23,7 +23,6 @@ pub(crate) struct SourceRequest {
     entry: Name,
     #[serde(default)]
     dialect: Dialect,
-    format: Option<lash::dialect::SourceFormat>,
 }
 
 pub(crate) async fn import_source(
@@ -33,50 +32,13 @@ pub(crate) async fn import_source(
     let _publishing = state.publishing.lock().await;
     let current = state.current();
     check_version(request.version, current.version)?;
-    let (document, map, captions, packages) = if let Some(format) = request.format {
-        let packages = match current.namespace.clone() {
-            Some(packages) => packages,
-            None => runtime::namespace(&state.core, &state.namespace_pin)
-                .await
-                .map_err(|error| ErrorResponse::invalid("namespace", error))?,
-        };
-        let read = state
-            .core
-            .host_artifacts()
-            .import_exported_workflow(
-                &request.source,
-                format,
-                current.draft.document(),
-                &packages.request,
-                None,
-            )
-            .await
-            .map_err(|error| ErrorResponse::invalid("source_read", error))?;
-        match read {
-            WorkflowImport::Read { document, captions } => (
-                document
-                    .to_document()
-                    .map_err(|error| ErrorResponse::invalid("document_bytes", error))?,
-                None,
-                captions,
-                packages,
-            ),
-            other => {
-                return Err(ErrorResponse::invalid(
-                    "source_read_refused",
-                    format!("{other:?}"),
-                ));
-            }
-        }
-    } else {
-        import(
-            &state.core,
-            &state.namespace_pin,
-            request.dialect,
-            &request.source,
-        )
-        .await?
-    };
+    let (document, map, captions, packages) = import(
+        &state.core,
+        &state.namespace_pin,
+        request.dialect,
+        &request.source,
+    )
+    .await?;
     if !document.exports.contains_key(&request.entry) {
         return Err(ErrorResponse::invalid(
             "entry",
@@ -89,25 +51,12 @@ pub(crate) async fn import_source(
         .install(
             draft,
             request.entry,
-            if let Some(format) = request.format {
-                Origin::Read {
-                    dialect: if format.language()
-                        == lash::workflow::document::SourceLanguage::Python
-                    {
-                        Dialect::Python
-                    } else {
-                        Dialect::TypeScript
-                    },
-                    captions,
-                }
-            } else {
-                Origin::Imported {
-                    packages: Box::new(packages),
-                    dialect: request.dialect,
-                    text: request.source,
-                    map,
-                    captions,
-                }
+            Origin::Imported {
+                packages: Box::new(packages),
+                dialect: request.dialect,
+                text: request.source,
+                map,
+                captions,
             },
         )
         .await;
@@ -195,8 +144,9 @@ pub(crate) async fn preview(
         base: current.draft.identity(),
         edits: request.operations,
     };
-    let applied = current
-        .draft
+    // Keep the caption base intact until the staged edit has been rekeyed.
+    let mut draft = current.draft.clone();
+    let applied = draft
         .apply(&transaction, &environment.checker())
         .map_err(|refusal| {
             ErrorResponse::new(
@@ -210,7 +160,8 @@ pub(crate) async fn preview(
         })?;
     // The preview shows the captions the edit would keep, and marks.
     (current.captions, current.review) =
-        current.rekeyed(&applied.correspondence, current.draft.document())?;
+        current.rekeyed(&applied.correspondence, draft.document())?;
+    current.draft = draft;
     // A preview is an unpublished edit and must not read the old definition or map.
     current.published = Err(std::sync::Arc::new(runtime::RunError::Invalid(
         "preview".into(),

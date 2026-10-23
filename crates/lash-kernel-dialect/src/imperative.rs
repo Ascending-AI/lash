@@ -66,6 +66,8 @@ pub struct PrintedSource {
 }
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 pub enum PrintError {
+    #[error(transparent)]
+    Namespace(#[from] crate::NamespaceRefusal),
     #[error("generated source exceeds byte budget {limit}")]
     Bytes { limit: usize },
     #[error("generated source exceeds depth budget {limit}")]
@@ -82,6 +84,7 @@ impl From<PrintError> for crate::Diagnostic {
     fn from(error: PrintError) -> Self {
         Self {
             code: match &error {
+                PrintError::Namespace(_) => "GENERATED_SOURCE_NAMESPACE",
                 PrintError::Bytes { .. } => "GENERATED_SOURCE_BYTES",
                 PrintError::Depth { .. } => "GENERATED_SOURCE_DEPTH",
                 PrintError::Unprintable { .. } => "GENERATED_SOURCE_UNPRINTABLE",
