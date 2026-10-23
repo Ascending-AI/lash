@@ -30,12 +30,12 @@ pub(super) fn laws(
     let again = match lang {
         SourceLanguage::TypeScript => {
             let (read, captions) =
-                lash_dialect_typescript::read(source, document, library, Default::default())?;
+                lash_dialect_typescript::read(source, document, library, Default::default(), None)?;
             lash_dialect_typescript::print(&read, Some(&captions), library, options)?
         }
         SourceLanguage::Python => {
             let (read, captions) =
-                lash_dialect_python::read(source, document, library, Default::default())?;
+                lash_dialect_python::read(source, document, library, Default::default(), None)?;
             lash_dialect_python::print(&read, Some(&captions), library, options)?
         }
     };

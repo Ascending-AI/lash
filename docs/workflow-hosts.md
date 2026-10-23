@@ -37,6 +37,41 @@ with the found and supported versions. Keep readable JSON or source to
 re-lower when longevity across versions matters. See the
 [format note](kernel/document-bytes.md) for receipt and compatibility rules.
 
+## Implicit text conversion in saved TypeScript workflows
+
+`WorkflowSourceLimits::implicit_text_conversion` selects one policy for
+`import_workflow`, `import_exported_workflow`, `publish_callable`, and
+`publish_workflow` when source is supplied. Each call takes
+`Option<WorkflowSourceLimits>`; `None` selects `Refuse` for implicit text.
+Pass `Some(limits)` to use `Allow` or `Strict` and to set source byte and
+nesting limits where text is read.
+
+`Refuse` rejects implicit conversion of known records, collections, functions,
+and package objects in template interpolations and string `+`. Unconstrained
+operands remain admitted. `Strict` also rejects unconstrained operands;
+`Allow` admits every implicit conversion. Explicit `String(x)` and
+`JSON.stringify(x)` remain available under every policy. Refusals carry
+`TS_IMPLICIT_TEXT_CONVERSION`, the original operand's byte span, and
+`operand_type`; Lash emits no repair hints.
+
+Cell execution always keeps JavaScript semantics. Its `Written` metadata
+retains the conversion facts, and saved and crossing callables carry them.
+`publish_callable` checks those retained facts, including captured callables,
+before publication. It needs no source reconstruction. A callable with no
+retained TypeScript authoring facts has nothing for this source policy to check.
+
+`import_exported_workflow` checks the edited source before returning
+`WorkflowImport::Read`; hosts using an `edited_from_read` replacement must
+pass their policy there. `publish_workflow` checks supplied map-and-source
+text under the same policy before publishing. A raw `DocumentBytes`
+publication with no source is kernel-authored: kernel conversions are explicit,
+and this TypeScript authoring policy does not apply. Printing alone applies
+no admission policy and preserves executable identity.
+
+The in-process dialect readers and `WorkerService::read_exported` take the
+same optional `WorkflowSourceLimits` after their generated-source limits.
+Generated-source byte bounds remain independent of ordinary cell byte bounds.
+
 ## The typed document
 
 A `lash::workflow::document::Document` is one program. It holds a `main`
@@ -416,30 +451,15 @@ editor; a host that edited one converts `draft.document().clone()` to
 
 ```rust,ignore
 let pin = HostArtifactPin::mint();
-let offered = core.host_artifacts().cell_packages().await?;
-let packages = offered.declare(declared); // the host's explicit package/operation map
-match core
-    .host_artifacts()
-    .publish_workflow(
-        &pin,
-        &DocumentBytes::from(draft.document().clone()),
-        &Name::new("order_review"),
-        &env_spec,
-        packages,
-        Some((&source_map, &source)),   // or None
-    )
-    .await?
-{
-    WorkflowPublish::Published(publication) => {
-        let definition = publication.definition;   // id and signature: what a run starts
-        let reference = publication.reference;    // document id and selected entry
-        let map = publication.source_map;          // Some(SourceMapId): keep it beside the id
-        let document = core.host_artifacts().execution_document(&reference).await?; // read under the live pin
-    }
-    WorkflowPublish::Refused(refusal) => { /* why admission refused it */ }
-    WorkflowPublish::SourceMapRefused(refusal) => { /* the map is not this document's or source's */ }
-    WorkflowPublish::Unsupported { .. } => { /* no engine admits documents */ }
-}
+let start = core.host_artifacts().publish_workflow(
+    &pin,
+    &DocumentBytes::from(draft.document().clone()),
+    &StartSelector::Export(Name::new("order_review")),
+    &workflow_environment,
+    Some((&source_map, &source)), // or None for a kernel-authored document
+    source_limits,              // None selects the default Refuse policy
+).await?;
+
 ```
 
 A source map is optional and never changes behaviour. Published with the
@@ -881,7 +901,7 @@ feature, `lash::typescript::print(document.document(), captions, library, option
 answers the TypeScript module an author writes for a document: each function
 and `main` that reads back as itself is authored source, and any other is in
 kernel form, opened by `"use kernel";`. `lash::typescript::read(source, &base,
-library, limits)` reads it back, edited or not. `print_kernel` writes every
+library, limits, source_limits)` reads it back, edited or not. `print_kernel` writes every
 region in kernel form, keeping every temporary and statement boundary.
 `dialect-typescript` and `dialect-python` select dialect support and never
 link a parser into the host's own process:
@@ -963,7 +983,7 @@ let required = lash::workflow::graph::requirements(&document, offered.catalog().
 // operations from required.effects and required.performs.keys().
 let packages = offered.declare(declared);
 artifacts.publish_workflow(&pin, &DocumentBytes::from(document), &entry,
-    &process_environment, packages, Some((&map, &code))).await?;
+    &workflow_environment, Some((&map, &code)), source_limits).await?;
 ```
 
 Stored definitions and their start inputs require `declared_packages`.
@@ -997,7 +1017,7 @@ Import returns opaque `DocumentBytes`; select an entry when publishing them.
 Decode explicitly with `to_document()` when you need to inspect the entries.
 
 Printed source reads back through
-`HostArtifacts::import_exported_workflow(source, format, &base, &environment, packages)`,
+`HostArtifacts::import_exported_workflow(source, format, &base, &environment, source_limits)`,
 where `base` is the stored Document it was printed from. The source carries
 only code; the manifest, entries, helper identities and renames come from
 `base`, and the result is admitted against `environment` and the required

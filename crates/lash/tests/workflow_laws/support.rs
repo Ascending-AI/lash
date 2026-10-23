@@ -87,6 +87,7 @@ pub(super) async fn publish_recorded(
             &StartSelector::Export(name.clone()),
             request,
             source,
+            None,
         )
         .await?;
     let environment = artifacts

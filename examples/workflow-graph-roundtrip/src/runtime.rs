@@ -174,6 +174,7 @@ pub(crate) async fn publish(
                 &lash::package::StartSelector::Export(entry.clone()),
                 &packages.request,
                 source,
+                None,
             )
             .await?;
         let env = artifacts

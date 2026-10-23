@@ -128,6 +128,7 @@ async fn publication(
             &StartSelector::Export(Name::new("wait")),
             &environment,
             None,
+            None,
         )
         .await
         .unwrap();
@@ -206,6 +207,7 @@ async fn publication(
             &document.into(),
             &StartSelector::Main,
             &environment,
+            None,
             None,
         )
         .await

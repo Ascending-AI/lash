@@ -101,7 +101,7 @@ pub(crate) fn start(
         host: Vec::new(),
         save: None,
         captions: Vec::new(),
-        signature_origins: Default::default(),
+        function_origins: Default::default(),
         limiters: Limiters::default(),
         session_cell: matches!(start.target, Target::Main),
         session: Default::default(),

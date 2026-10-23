@@ -41,7 +41,7 @@ impl Machine for KernelMachine {
         }
         self.save = options.cell_save;
         self.captions = options.captions;
-        self.signature_origins = options.signature_origins;
+        self.function_origins = options.function_origins;
         self.limiters = Limiters {
             memory: options.memory_limiter,
             charge: options.charge_limiter,
@@ -411,7 +411,7 @@ impl KernelMachine {
             boundaries: 0,
             save: None,
             captions: Vec::new(),
-            signature_origins: Default::default(),
+            function_origins: Default::default(),
             limiters: Limiters::default(),
         };
         machine.capacity_counted();

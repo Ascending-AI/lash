@@ -168,6 +168,7 @@ mod tests {
     fn function() -> FunctionValue {
         FunctionValue {
             signature_origin: None,
+            implicit_text_conversions: Vec::new(),
             callable: CallableId {
                 link: "11".repeat(32).parse().unwrap(),
                 function: lash_vocabulary::FunctionId::parse(&"22".repeat(32)).unwrap(),

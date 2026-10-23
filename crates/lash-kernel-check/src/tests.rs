@@ -70,6 +70,7 @@ fn incomplete_entry_requires_signature_without_restricting_ordinary_functions() 
     }]);
     let captured = lash_kernel_doc::FunctionValue {
         signature_origin: None,
+        implicit_text_conversions: Vec::new(),
         callable: lash_vocabulary::CallableId {
             link: lash_vocabulary::LinkId::from_bytes([1; 32]),
             function,
@@ -160,6 +161,7 @@ fn entry_promotion_verifies_the_defining_callable_contract() {
     document.functions.insert(id, definition);
     let mut value = lash_kernel_doc::FunctionValue {
         signature_origin: None,
+        implicit_text_conversions: Vec::new(),
         callable: lash_vocabulary::CallableId {
             link: lash_vocabulary::LinkId::from_bytes([1; 32]),
             function: id,

@@ -73,6 +73,7 @@ pub enum Request {
         #[serde(with = "serde_bytes")]
         base: Vec<u8>,
         limits: lash_kernel_dialect::GeneratedSourceLimits,
+        source_limits: Option<lash_kernel_dialect::workflow::WorkflowSourceLimits>,
     },
 }
 

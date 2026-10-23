@@ -27,7 +27,7 @@ workflow module, and lowering it, with no base, gives the document's identity.
 Any other module keeps the kernel layout below: each region that did not
 verify, and `main`, is written in kernel form, its body opened by the
 `"use kernel"` directive, and the rest as authored source.
-`read(source, base, library, limits)` reads either back: the authored regions
+`read(source, base, library, limits, source_limits)` reads either back: the authored regions
 through the front end, against `library` and the operations `base` performs,
 and the kernel-form regions as `read_kernel` does. The printer never answers
 text that reads as another document; when no mixture verifies, every region
@@ -56,8 +56,8 @@ Tests compose all three on every successful print; hosts may too. There is no
 verifier service or verification flag:
 
 ```rust,ignore
-let printed = lash::typescript::print(&document, None, library, Default::default())?;
-let (read, _) = lash::typescript::read(&printed.source, &document, library, Default::default())?;
+let printed = lash::typescript::print(&document, None, library, Default::default(), None)?;
+let (read, _) = lash::typescript::read(&printed.source, &document, library, Default::default(), None)?;
 assert_eq!(document.canonical_bytes(), read.canonical_bytes());
 ```
 
@@ -183,7 +183,7 @@ Sites for their atoms. Library bodies and graph IDs are outside the map.
 `WorkflowDocument::typescript(options)` and `::python(options)` return the
 complete `PrintedSource`. The facade exposes `lash::typescript::read` and
 `lash::python::read`; their results are unadmitted Documents.
-`HostArtifacts::import_exported_workflow(source, format, base, environment)`
+`HostArtifacts::import_exported_workflow(source, format, base, environment, source_limits)`
 reads and admits in one step, against the same environment as publication.
 `HostArtifacts::import_workflow` is authored module lowering only, in either dialect.
 Authored TypeScript and Python lowering refuse unresolved printed helper names
@@ -205,7 +205,7 @@ ordinary namespace. Code calls keep identity-bound `helper_` aliases unless
 a spelling has an exact inverse. See [host packages](../host-packages.md).
 
 `lash::vm::WorkerService::print(document, captions, format, options)` and
-`::read_exported(source, base, format, limits)` run the same operations in the
+`::read_exported(source, base, format, limits, source_limits)` run the same operations in the
 worker crash domain. The read request carries the base Document's JSON; the
 response is a Document with the captions its source spells, without a
 library, Current snapshot or admission.

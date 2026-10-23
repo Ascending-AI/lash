@@ -132,6 +132,7 @@ pub(crate) fn perform(
             source,
             base,
             limits,
+            source_limits,
         } => match embedding.dialects.get(format.dialect()) {
             None => Response::UnknownDialect {
                 dialect: format.dialect().into(),
@@ -141,6 +142,7 @@ pub(crate) fn perform(
                 &decoded_document(base)?,
                 embedding.library(),
                 limits,
+                source_limits,
             ) {
                 Ok((document, captions)) => Response::Read {
                     document: document.canonical_bytes(),
@@ -513,6 +515,7 @@ mod tests {
         _: &Document,
         _: &dyn lash_kernel_dialect::Library,
         _: GeneratedSourceLimits,
+        _: Option<WorkflowSourceLimits>,
     ) -> Result<(Document, lash_kernel_doc::Captions), Diagnostic> {
         READER_CALLS.set(READER_CALLS.get() + 1);
         let document = Document::new(
@@ -573,6 +576,7 @@ mod tests {
                         &document,
                         embedding.library(),
                         Default::default(),
+                        None,
                     )
                     .expect("TS read"),
                     SourceFormat::PythonV1 => lash_dialect_python::read(
@@ -580,6 +584,7 @@ mod tests {
                         &document,
                         embedding.library(),
                         Default::default(),
+                        None,
                     )
                     .expect("Python read"),
                 };
@@ -592,6 +597,7 @@ mod tests {
                     source: String::new(),
                     base: document.canonical_bytes(),
                     limits: Default::default(),
+                    source_limits: None,
                 })
                 .expect("request"),
             );

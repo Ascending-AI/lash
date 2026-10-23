@@ -11,6 +11,7 @@ pub(super) fn read(
     base: &k::Document,
     environment: &Environment<'_>,
     limits: GeneratedSourceLimits,
+    source_limits: Option<SourceLimits>,
 ) -> Result<RegionRead, Diagnostic> {
     if source.len() > limits.max_bytes {
         return Err(Diagnostic::new(
@@ -19,7 +20,13 @@ pub(super) fn read(
             None,
         ));
     }
-    let lowered = lower(source, environment, base.exports.is_empty(), &[])?;
+    let lowered = lower(
+        source,
+        environment,
+        base.exports.is_empty(),
+        &[],
+        source_limits,
+    )?;
     Ok(RegionRead {
         document: lowered.document.document().clone(),
         captions: lowered.captions,
@@ -32,8 +39,15 @@ fn lower(
     environment: &Environment<'_>,
     cell: bool,
     beside: &[String],
+    source_limits: Option<SourceLimits>,
 ) -> Result<Lowered, Diagnostic> {
-    let limits = SourceLimits::new(source.len().max(1), crate::MAX_SOURCE_NESTING_DEPTH)?;
+    let limits = match source_limits {
+        Some(limits) => limits,
+        None => SourceLimits::new(source.len().max(1), crate::MAX_SOURCE_NESTING_DEPTH)?
+            .with_implicit_text_conversion(
+                lash_kernel_dialect::workflow::ImplicitTextConversionPolicy::Allow,
+            ),
+    };
     if cell {
         let program = crate::adapter::parse_with_limits(source, limits)?;
         crate::lower::lower_beside(
@@ -42,7 +56,7 @@ fn lower(
             environment,
             Mode::Cell(CellEnvironment::first()),
             beside,
-            lash_kernel_dialect::workflow::ImplicitTextConversionPolicy::Allow,
+            limits.implicit_text_conversion(),
         )
     } else {
         let program = crate::adapter::parse_workflow(source, limits)?;
@@ -52,7 +66,7 @@ fn lower(
             environment,
             Mode::Module,
             beside,
-            lash_kernel_dialect::workflow::ImplicitTextConversionPolicy::Allow,
+            limits.implicit_text_conversion(),
         )
     }
 }

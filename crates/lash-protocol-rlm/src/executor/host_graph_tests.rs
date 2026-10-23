@@ -267,18 +267,28 @@ fn a_cells_envelope_is_one_node_and_its_end_reads_back_after_collection() {
     )
     .unwrap();
     let envelope = CellEnvelope {
-        saved_origins: BTreeMap::from([(
+        saved_written: BTreeMap::from([(
             lash_kernel_doc::heap::EntityId {
                 family: lash_kernel_doc::heap::FamilyId::PRIMARY,
                 ordinal: 7,
             },
-            lash_vocabulary::SignatureOrigin {
-                name: Some("plan".into()),
-                params: Vec::new(),
-                result: lash_vocabulary::AnnotationOrigin {
-                    span: Some(lash_vocabulary::sites::Span::new(0, 1).unwrap()),
-                    refusal: Some(lash_vocabulary::AnnotationResolutionReason::Limit),
-                },
+            lash_kernel_dialect::Written {
+                signature_origin: Some(lash_vocabulary::SignatureOrigin {
+                    name: Some("plan".into()),
+                    params: Vec::new(),
+                    result: lash_vocabulary::AnnotationOrigin {
+                        span: Some(lash_vocabulary::sites::Span::new(0, 1).unwrap()),
+                        refusal: Some(lash_vocabulary::AnnotationResolutionReason::Limit),
+                    },
+                }),
+                implicit_text_conversions: vec![lash_kernel_doc::ImplicitTextConversion {
+                    span: Some(lash_kernel_doc::Span::new(0, 1).unwrap()),
+                    operand_type: lash_kernel_doc::SourceOperandType::Record(Default::default()),
+                }],
+                language: lash_kernel_doc::SourceLanguage::TypeScript,
+                signature: "()".into(),
+                call: None,
+                captions: Vec::new(),
             },
         )]),
         code: CellEnvelope::code_digest("1"),
@@ -346,7 +356,7 @@ fn a_cells_envelope_is_one_node_and_its_end_reads_back_after_collection() {
     assert_eq!(loaded.environment, envelope.environment);
     assert_eq!(loaded.inspection, envelope.inspection);
     assert_eq!(loaded.source_map, envelope.source_map);
-    assert_eq!(loaded.saved_origins, envelope.saved_origins);
+    assert_eq!(loaded.saved_written, envelope.saved_written);
     assert_eq!(loaded.projected, envelope.projected);
     assert_eq!(
         HostState::load(&mut decoder, end.host)

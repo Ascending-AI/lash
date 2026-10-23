@@ -29,12 +29,12 @@ fn decode(
 ) -> Document {
     match format {
         SourceFormat::TypeScriptV1 => {
-            lash::typescript::read(source, base, library, Default::default())
+            lash::typescript::read(source, base, library, Default::default(), None)
                 .expect("TypeScript reads against its base")
                 .0
         }
         SourceFormat::PythonV1 => {
-            lash::python::read(source, base, library, Default::default())
+            lash::python::read(source, base, library, Default::default(), None)
                 .expect("Python reads against its base without a library")
                 .0
         }
@@ -183,7 +183,7 @@ async fn both_dialects_and_transports_preserve_exact_documents_and_optional_maps
                     "local and worker agree including final spans"
                 );
                 let decoded = service
-                    .read_exported(&remote.source, &document, format, Default::default())
+                    .read_exported(&remote.source, &document, format, Default::default(), None)
                     .await
                     .expect("worker decode")
                     .0;

@@ -214,6 +214,7 @@ pub type ReadSource = fn(
     &Document,
     &dyn crate::Library,
     crate::GeneratedSourceLimits,
+    Option<crate::workflow::WorkflowSourceLimits>,
 ) -> Result<(Document, Captions), Diagnostic>;
 
 /// A dialect, as an embedder installs it: its front end, reader and

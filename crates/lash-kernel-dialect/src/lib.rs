@@ -47,6 +47,7 @@ pub use exports::{
     BRAND_FIELD, BUILT_FIELD, FunctionMember, NamespaceKind, NamespaceMember, NamespaceView,
     OperationSignature, TypeMember, ValueType, brand_tuple, brand_type,
 };
+pub use lash_kernel_doc::ImplicitTextConversion;
 pub use lash_kernel_state::WaitId;
 pub use lash_vocabulary::{NamespaceCollision, NamespaceShadowing};
 pub use library::{Library, LibraryError, NamedLibrary};

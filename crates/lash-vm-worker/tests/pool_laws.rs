@@ -917,7 +917,7 @@ fn a_worker_runs_code_in_a_dialect_its_host_did_not_name_and_refuses_to_save_it(
             wire::encode(
                 PayloadKind::Start,
                 &wire::SaveWire {
-                    saved_origins: Default::default(),
+                    saved_written: Default::default(),
                     controls: std::collections::BTreeMap::new(),
                     written: std::collections::BTreeMap::new(),
                 },

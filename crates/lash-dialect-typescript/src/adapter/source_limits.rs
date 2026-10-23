@@ -42,7 +42,7 @@ impl SourceLimits {
                 lash_kernel_dialect::workflow::ImplicitTextConversionPolicy::Refuse,
         })
     }
-    /// Select implicit text admission for workflow modules. Omission is `refuse`.
+    /// Select implicit text admission for authored workflows. Omission is `refuse`.
     /// Cells keep their ordinary JavaScript conversion behavior.
     pub const fn with_implicit_text_conversion(
         mut self,

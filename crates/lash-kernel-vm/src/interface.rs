@@ -507,7 +507,7 @@ pub trait RunObserver {
 #[derive(Default)]
 pub struct MachineOptions {
     /// Annotation diagnostics, keyed by creation identity or saved environment.
-    pub signature_origins: FunctionOrigins,
+    pub function_origins: FunctionOrigins,
     pub observation: crate::ObservationMode,
     pub trace_path: bool,
     pub cell_save: Option<Box<dyn CellSave>>,
@@ -786,6 +786,6 @@ pub struct PreparedInstance {
 /// Source-owned coordinates used only when callables cross a boundary.
 #[derive(Clone, Debug, Default)]
 pub struct FunctionOrigins {
-    pub sites: BTreeMap<(LinkId, lash_vocabulary::sites::Site), lash_vocabulary::SignatureOrigin>,
-    pub environments: BTreeMap<lash_kernel_doc::heap::EntityId, lash_vocabulary::SignatureOrigin>,
+    pub sites: BTreeMap<(LinkId, lash_vocabulary::sites::Site), lash_kernel_dialect::Written>,
+    pub environments: BTreeMap<lash_kernel_doc::heap::EntityId, lash_kernel_dialect::Written>,
 }

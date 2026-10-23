@@ -119,6 +119,7 @@ impl regions::Regions for Printing<'_> {
             self.document,
             &self.environment,
             self.options.limits,
+            None,
         )
         .map_err(|diagnostic| diagnostic.span.map(|span| span.start))
     }
@@ -133,6 +134,7 @@ pub fn read(
     base: &k::Document,
     library: &dyn Library,
     limits: GeneratedSourceLimits,
+    source_limits: Option<lash_kernel_dialect::workflow::WorkflowSourceLimits>,
 ) -> Result<(k::Document, k::Captions), Diagnostic> {
     let namespaces = regions::namespaces(base).map_err(|refused| {
         Diagnostic::new(
@@ -142,7 +144,12 @@ pub fn read(
         )
     })?;
     let environment = Environment::new(library, &namespaces);
-    let read = mixed::read(source, base, &environment, limits)?;
+    let source_limits = match source_limits {
+        Some(limits) => crate::SourceLimits::new(limits.max_bytes, limits.max_nesting)?
+            .with_implicit_text_conversion(limits.implicit_text_conversion),
+        None => crate::SourceLimits::new(source.len().max(1), crate::MAX_SOURCE_NESTING_DEPTH)?,
+    };
+    let read = mixed::read(source, base, &environment, limits, Some(source_limits))?;
     Ok((read.document, read.captions))
 }
 

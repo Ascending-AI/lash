@@ -420,7 +420,7 @@ pub struct KernelMachine {
     /// drops them.
     save: Option<Box<dyn crate::interface::CellSave>>,
     captions: Vec<lash_kernel_doc::CaptionEntry>,
-    signature_origins: crate::interface::FunctionOrigins,
+    function_origins: crate::interface::FunctionOrigins,
     /// What decides at the run's bounds (FIG-6768); none refuses.
     limiters: Limiters,
     session_cell: bool,

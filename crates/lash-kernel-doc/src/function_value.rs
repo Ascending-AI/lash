@@ -53,6 +53,8 @@ pub struct FunctionValue {
     /// Source coordinates for diagnostics, independent of executable identity.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub signature_origin: Option<lash_vocabulary::SignatureOrigin>,
+    /// Source evidence used when this callable becomes a saved workflow.
+    pub implicit_text_conversions: Vec<crate::ImplicitTextConversion>,
     pub callable: lash_vocabulary::names::CallableId,
     pub captures: std::collections::BTreeMap<Name, crate::CaptureValue>,
     pub signature: Signature,

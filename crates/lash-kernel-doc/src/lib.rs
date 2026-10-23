@@ -47,6 +47,8 @@ pub mod arena;
 mod document_bytes;
 pub mod function;
 mod function_capture;
+mod implicit_text;
+pub use implicit_text::{ImplicitTextConversion, SourceOperandType};
 pub mod function_value;
 pub use function_capture::CaptureValue;
 mod graph_codec;

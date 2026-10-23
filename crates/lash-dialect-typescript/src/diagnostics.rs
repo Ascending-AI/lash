@@ -521,7 +521,7 @@ impl DiagnosticCode {
             Self::UnsupportedExpression => "TS_EXPRESSION_UNSUPPORTED",
             Self::InvalidAst => "TS_INVALID_SHARED_AST",
             Self::LinkError => "TS_LINK_ERROR",
-            Self::ImplicitTextConversion => "TS_IMPLICIT_TEXT_CONVERSION",
+            Self::ImplicitTextConversion => lash_kernel_doc::ImplicitTextConversion::CODE,
         }
     }
 }

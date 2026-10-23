@@ -419,6 +419,7 @@ fn callable_start_installs_the_captured_environment() {
     program.functions.insert(function);
     let target = Target::Callable(Box::new(lash_kernel_doc::FunctionValue {
         signature_origin: None,
+        implicit_text_conversions: Vec::new(),
         callable: lash_vocabulary::CallableId {
             link: link_id,
             function,

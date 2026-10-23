@@ -264,6 +264,7 @@ impl Packages {
                 &lash::package::StartSelector::Export(Name::new(name)),
                 &self.namespace,
                 None,
+                None,
             )
             .await
             .unwrap();

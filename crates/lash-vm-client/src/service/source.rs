@@ -109,7 +109,8 @@ impl Service {
         }
     }
 
-    /// Read exported source back against `base`, the document it was printed
+    /// Read exported source under the host's source limits (implicit text
+    /// defaults to `Refuse`), against `base`, the document it was printed
     /// from, without resolving or admitting its dependencies, with the
     /// captions the source spells. The source carries only code; the
     /// environment is the base document's. A host may
@@ -122,6 +123,7 @@ impl Service {
         base: &Document,
         format: SourceFormat,
         limits: GeneratedSourceLimits,
+        source_limits: Option<lash_kernel_dialect::workflow::WorkflowSourceLimits>,
     ) -> Result<(Document, Captions), SourceServiceError> {
         if source.len() > limits.max_bytes {
             let diagnostic: lash_kernel_dialect::Diagnostic =
@@ -146,6 +148,7 @@ impl Service {
                 source: source.to_owned(),
                 base: base.canonical_bytes(),
                 limits,
+                source_limits,
             })
             .await?;
         match response {

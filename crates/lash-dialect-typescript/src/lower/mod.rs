@@ -295,6 +295,7 @@ enum Control {
 
 #[derive(Debug)]
 struct FunctionFrame {
+    implicit_text_conversions: Vec<lash_kernel_doc::ImplicitTextConversion>,
     arrow: bool,
     async_body: bool,
     this: Option<Name>,
@@ -397,11 +398,15 @@ pub(crate) fn lower(
     mode: Mode<'_>,
     policy: workflow::ImplicitTextConversionPolicy,
 ) -> Lowering<Lowered> {
+    let policy = match mode {
+        Mode::Cell(_) => workflow::ImplicitTextConversionPolicy::Allow,
+        Mode::Module => policy,
+    };
     lower_beside(program, source, environment, mode, &[], policy)
 }
 
 /// Lower with the words of adjacent generated source reserved from fresh names.
-/// A generated-source reader selects `Allow`; authored modules carry host policy.
+/// Print verification selects `Allow`; authored reads and modules carry host policy.
 pub(crate) fn lower_beside(
     program: &ast::Program,
     source: &str,
@@ -410,10 +415,7 @@ pub(crate) fn lower_beside(
     beside: &[String],
     policy: workflow::ImplicitTextConversionPolicy,
 ) -> Lowering<Lowered> {
-    let implicit_text_conversion = match mode {
-        Mode::Module => policy,
-        Mode::Cell(_) => workflow::ImplicitTextConversionPolicy::Allow,
-    };
+    let implicit_text_conversion = policy;
     let (cell, module) = match mode {
         Mode::Cell(cell) => (cell, None),
         Mode::Module => (CellEnvironment::first(), Some(workflow::Module::new())),
@@ -452,6 +454,7 @@ pub(crate) fn lower_beside(
         temporaries: HashSet::new(),
         scopes: Vec::new(),
         functions: vec![FunctionFrame {
+            implicit_text_conversions: Vec::new(),
             arrow: false,
             async_body: false,
             this: None,

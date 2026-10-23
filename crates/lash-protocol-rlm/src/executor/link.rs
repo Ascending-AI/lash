@@ -300,14 +300,13 @@ pub(super) async fn link_cell(
         }
     }
     let envelope = CellEnvelope {
-        saved_origins: state
+        saved_written: state
             .lowering_functions()
             .values()
             .filter_map(|function| {
                 function
                     .written
-                    .as_ref()
-                    .and_then(|written| written.signature_origin.clone())
+                    .clone()
                     .map(|origin| (function.environment, origin))
             })
             .collect(),

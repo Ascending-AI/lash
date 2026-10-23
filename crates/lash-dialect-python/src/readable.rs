@@ -51,6 +51,7 @@ pub fn read(
     base: &k::Document,
     library: &dyn Library,
     limits: GeneratedSourceLimits,
+    source_limits: Option<lash_kernel_dialect::workflow::WorkflowSourceLimits>,
 ) -> Result<(k::Document, k::Captions), Diagnostic> {
     let namespaces = regions::namespaces(base).map_err(|refused| {
         crate::diagnostics::unplaced(
@@ -59,7 +60,10 @@ pub fn read(
         )
     })?;
     let environment = Environment::new(library, &namespaces);
-    let read = read_regions(source, base, &environment, limits)?;
+    let parser_limits = source_limits
+        .map(|limits| SourceLimits::new(limits.max_bytes, limits.max_nesting))
+        .transpose()?;
+    let read = read_regions(source, base, &environment, limits, parser_limits)?;
     Ok((read.document, read.captions))
 }
 
@@ -126,6 +130,7 @@ impl regions::Regions for Printing<'_> {
             self.document,
             &self.environment,
             self.options.limits,
+            None,
         )
         .map_err(|diagnostic| diagnostic.span.map(|span| span.start))
     }
@@ -136,6 +141,7 @@ fn read_regions(
     base: &k::Document,
     environment: &Environment<'_>,
     limits: GeneratedSourceLimits,
+    source_limits: Option<SourceLimits>,
 ) -> Result<RegionRead, Diagnostic> {
     if source.len() > limits.max_bytes {
         return Err(crate::diagnostics::unplaced(
@@ -143,7 +149,13 @@ fn read_regions(
             "generated source exceeds byte budget",
         ));
     }
-    let lowered = lower(source, environment, base.exports.is_empty(), &[])?;
+    let lowered = lower(
+        source,
+        environment,
+        base.exports.is_empty(),
+        &[],
+        source_limits,
+    )?;
     Ok(RegionRead {
         document: lowered.document.document().clone(),
         captions: lowered.captions,
@@ -156,11 +168,12 @@ fn lower(
     environment: &Environment<'_>,
     cell: bool,
     beside: &[String],
+    source_limits: Option<SourceLimits>,
 ) -> Result<lash_kernel_dialect::Lowered, Diagnostic> {
-    let limits = SourceLimits {
+    let limits = source_limits.unwrap_or(SourceLimits {
         max_bytes: source.len().max(1),
         ..SourceLimits::standard()
-    };
+    });
     crate::lower_with_calls(
         source,
         environment,

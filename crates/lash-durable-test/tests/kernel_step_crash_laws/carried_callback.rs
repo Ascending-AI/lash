@@ -584,6 +584,7 @@ async fn publish(
             &StartSelector::Main,
             environment,
             None,
+            None,
         )
         .await
         .unwrap();

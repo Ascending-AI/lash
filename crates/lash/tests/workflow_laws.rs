@@ -1489,6 +1489,7 @@ async fn a_missing_operation_is_refused_at_workflow_publication() {
             &lash::package::StartSelector::Main,
             &request,
             None,
+            None,
         )
         .await
         .unwrap_err();
@@ -1619,4 +1620,311 @@ async fn implicit_text_admission_preserves_operand_facts_for_hosts() {
             }
         }
     }
+}
+
+#[cfg(feature = "typescript")]
+fn implicit_text_limits(
+    policy: lash::dialect::workflow::ImplicitTextConversionPolicy,
+) -> lash::dialect::workflow::WorkflowSourceLimits {
+    lash::dialect::workflow::WorkflowSourceLimits {
+        max_bytes: 65536,
+        max_nesting: 28,
+        implicit_text_conversion: policy,
+    }
+}
+
+#[cfg(feature = "typescript")]
+fn cell_with_implicit_text(source: &str) -> lash::dialect::Lowered {
+    let release = lash_vm_releases::helper_release().unwrap();
+    let roots = release.resolver_roots();
+    let library =
+        lash::dialect::NamedLibrary::resolving(&release.functions, |id| roots.contains(id))
+            .unwrap();
+    lash::typescript::lower(
+        source,
+        &lash::dialect::Environment::new(&library, &Default::default()),
+        lash::dialect::Mode::Cell(lash::dialect::CellEnvironment::first()),
+    )
+    .unwrap()
+}
+
+#[cfg(feature = "typescript")]
+fn implicit_text_diagnostic(error: lash::EmbedError) -> Box<lash::vm::DialectRefusal> {
+    let lash::EmbedError::WorkflowSource(lash::vm::SourceServiceError::Dialect(diagnostic)) = error
+    else {
+        panic!("the refusal keeps its typed source diagnostic: {error:?}");
+    };
+    diagnostic
+}
+
+#[cfg(feature = "typescript")]
+fn assert_record_conversion(diagnostic: &lash::vm::DialectRefusal, source: &str, expression: &str) {
+    assert_eq!(diagnostic.code, "TS_IMPLICIT_TEXT_CONVERSION");
+    let start = source.rfind(expression).unwrap();
+    assert_eq!(diagnostic.span, Some((start, start + expression.len())));
+    assert_eq!(
+        diagnostic.operand_type,
+        Some(Box::new(lash::dialect::SourceOperandType::Record(
+            [("identity_id".into(), lash::dialect::SourceOperandType::Text)].into()
+        )))
+    );
+    assert!(diagnostic.repairs.is_empty());
+}
+
+/// FIG-7173: promotion cannot inherit the cell's permissive execution policy.
+#[cfg(feature = "typescript")]
+#[tokio::test]
+async fn promoting_a_cell_applies_the_hosts_implicit_text_policy() {
+    use lash::dialect::workflow::ImplicitTextConversionPolicy as Policy;
+    let core = core().await;
+    let pin = lash::process::HostArtifactPin::mint();
+    let (_, request) = namespace(&core, &pin, &source_environment(false)).await;
+    let source = "const answer = (event: { answered_by: { identity_id: string } }): string => `answered by ${event.answered_by}`;";
+    let lowered = cell_with_implicit_text(source);
+    let document = lash::workflow::document::DocumentBytes::from(lowered.document);
+    for policy in [
+        None,
+        Some(Policy::Refuse),
+        Some(Policy::Strict),
+        Some(Policy::Allow),
+    ] {
+        let answer = core
+            .host_artifacts()
+            .publish_workflow(
+                &pin,
+                &document,
+                &lash::package::StartSelector::Main,
+                &request,
+                Some((lowered.source_map.as_ref().unwrap(), source)),
+                policy.map(implicit_text_limits),
+            )
+            .await;
+        if policy == Some(Policy::Allow) {
+            answer.unwrap();
+        } else {
+            assert_record_conversion(
+                &implicit_text_diagnostic(
+                    answer.expect_err("saved workflows apply Refuse by default"),
+                ),
+                source,
+                "event.answered_by",
+            );
+        }
+    }
+    // A raw kernel document carries no source authoring to admit.
+    core.host_artifacts()
+        .publish_workflow(
+            &pin,
+            &document,
+            &lash::package::StartSelector::Main,
+            &request,
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+    core.shutdown().await.unwrap();
+}
+
+/// FIG-7173: source-less callable promotion uses retained Written facts.
+#[cfg(feature = "typescript")]
+#[tokio::test]
+async fn publishing_a_cell_callable_applies_the_hosts_implicit_text_policy() {
+    use lash::dialect::workflow::ImplicitTextConversionPolicy as Policy;
+    use lash::workflow::document::{Datum, FunctionValue, Node};
+    let core = core().await;
+    let pin = lash::process::HostArtifactPin::mint();
+    let (_, request) = namespace(&core, &pin, &source_environment(false)).await;
+    let source =
+        "const answer = (event: { identity_id: string }): string => `answered by ${event}`;";
+    let lowered = cell_with_implicit_text(source);
+    let (site, written) = lowered
+        .written
+        .iter()
+        .find(|(_, written)| !written.implicit_text_conversions.is_empty())
+        .unwrap();
+    let Some(Node::Expr(Expr::Closure(closure))) = lowered.document.node(site) else {
+        panic!("the Written owner is a closure");
+    };
+    let presentation = closure.presentation.as_ref().unwrap();
+    let start = core
+        .host_artifacts()
+        .publish_workflow(
+            &pin,
+            &lowered.document.clone().into(),
+            &lash::package::StartSelector::Main,
+            &request,
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+    let function = FunctionValue {
+        signature_origin: written.signature_origin.clone(),
+        implicit_text_conversions: written.implicit_text_conversions.clone(),
+        callable: lash::package::CallableId {
+            link: start.link,
+            function: closure.function,
+        },
+        captures: Default::default(),
+        signature: presentation.signature.clone(),
+        convention: presentation.convention.clone(),
+        captions: lowered.captions.clone(),
+        representation: presentation.representation.clone(),
+        creation: Some(site.clone()),
+        token: Some(vec![
+            Datum::Text("ts.function".into()),
+            Datum::Text(String::new()),
+            Datum::Text("answer".into()),
+            Datum::Float(lash::workflow::document::Float::new(1.0)),
+            Datum::Null,
+            Datum::Record(Vec::new()),
+        ]),
+    };
+    let origin = lash::package::CallableOrigin {
+        publications: request
+            .snapshot
+            .advertisements
+            .iter()
+            .map(|accepted| accepted.publication.key())
+            .collect(),
+        authored: [start.link].into(),
+    };
+    // The actual transport must retain these facts, rather than a host-side hint.
+    let function: FunctionValue =
+        serde_json::from_value(serde_json::to_value(&function).unwrap()).unwrap();
+    let function: FunctionValue = lash::workflow::document::tokens::decode_body(
+        &lash::workflow::document::tokens::encode_body(&function),
+    )
+    .unwrap();
+    for policy in [None, Some(Policy::Refuse), Some(Policy::Allow)] {
+        let answer = core
+            .host_artifacts()
+            .publish_callable(
+                &pin,
+                &function,
+                &request,
+                &origin,
+                policy.map(implicit_text_limits),
+            )
+            .await;
+        if policy == Some(Policy::Allow) {
+            answer.unwrap();
+        } else {
+            assert_record_conversion(
+                &implicit_text_diagnostic(answer.unwrap_err()),
+                source,
+                "event",
+            );
+        }
+    }
+    core.shutdown().await.unwrap();
+}
+
+/// FIG-7173: edited_from_read cannot replace an admitted workflow with a new record addition.
+#[cfg(feature = "typescript")]
+#[tokio::test]
+async fn edited_from_read_replacement_applies_the_hosts_implicit_text_policy() {
+    use lash::workflow::{WorkflowImport, document::SourceLanguage};
+    let core = core().await;
+    let pin = lash::process::HostArtifactPin::mint();
+    let (_, request) = namespace(&core, &pin, &source_environment(false)).await;
+    let source = "export function answer(event: { identity_id: string }): string { return 'ok'; }";
+    let WorkflowImport::Imported { document, .. } = core
+        .host_artifacts()
+        .import_workflow(SourceLanguage::TypeScript, source, &request, None)
+        .await
+        .unwrap()
+    else {
+        panic!("safe source imports");
+    };
+    let base = document.to_document().unwrap();
+    let edited = source.replace("'ok'", "'answered by ' + event");
+    let WorkflowImport::Refused(diagnostics) = core
+        .host_artifacts()
+        .import_exported_workflow(
+            &edited,
+            lash::dialect::SourceFormat::TypeScriptV1,
+            &base,
+            &request,
+            None,
+        )
+        .await
+        .unwrap()
+    else {
+        panic!("edited record addition is refused before replacement");
+    };
+    assert_eq!(diagnostics.len(), 1);
+    let diagnostic = &diagnostics[0];
+    assert_eq!(diagnostic.code, "TS_IMPLICIT_TEXT_CONVERSION");
+    let start = edited.rfind("event").unwrap();
+    assert_eq!(
+        diagnostic.span,
+        Some(lash::workflow::document::Span {
+            start,
+            end: start + 5
+        })
+    );
+    assert_eq!(
+        diagnostic.operand_type,
+        Some(Box::new(lash::dialect::SourceOperandType::Record(
+            [("identity_id".into(), lash::dialect::SourceOperandType::Text)].into()
+        )))
+    );
+    core.shutdown().await.unwrap();
+}
+
+/// FIG-7173: strict readback refuses an unconstrained operand and preserves the original source facts.
+#[cfg(feature = "typescript")]
+#[tokio::test]
+async fn exported_workflow_readback_honours_strict_implicit_text_policy() {
+    use lash::dialect::workflow::ImplicitTextConversionPolicy as Policy;
+    use lash::workflow::{WorkflowImport, document::SourceLanguage};
+    let core = core().await;
+    let pin = lash::process::HostArtifactPin::mint();
+    let (_, request) = namespace(&core, &pin, &source_environment(false)).await;
+    let source = "export function answer(event: any): string { return `answered by ${event}`; }";
+    let WorkflowImport::Imported { document, .. } = core
+        .host_artifacts()
+        .import_workflow(SourceLanguage::TypeScript, source, &request, None)
+        .await
+        .unwrap()
+    else {
+        panic!("Refuse permits unconstrained operands");
+    };
+    let base = document.to_document().unwrap();
+    for policy in [Policy::Refuse, Policy::Allow, Policy::Strict] {
+        let answer = core
+            .host_artifacts()
+            .import_exported_workflow(
+                source,
+                lash::dialect::SourceFormat::TypeScriptV1,
+                &base,
+                &request,
+                Some(implicit_text_limits(policy)),
+            )
+            .await
+            .unwrap();
+        if policy == Policy::Strict {
+            let WorkflowImport::Refused(diagnostics) = answer else {
+                panic!("Strict refuses Any");
+            };
+            assert_eq!(diagnostics[0].code, "TS_IMPLICIT_TEXT_CONVERSION");
+            assert_eq!(
+                diagnostics[0].operand_type,
+                Some(Box::new(lash::dialect::SourceOperandType::Any))
+            );
+            let start = source.rfind("event").unwrap();
+            assert_eq!(
+                diagnostics[0].span,
+                Some(lash::workflow::document::Span {
+                    start,
+                    end: start + 5
+                })
+            );
+        } else {
+            assert!(matches!(answer, WorkflowImport::Read { .. }), "{answer:?}");
+        }
+    }
+    core.shutdown().await.unwrap();
 }

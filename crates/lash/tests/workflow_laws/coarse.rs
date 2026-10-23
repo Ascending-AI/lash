@@ -570,6 +570,7 @@ async fn launch(
             &lash::package::StartSelector::Main,
             &namespace,
             None,
+            None,
         )
         .await
         .unwrap();

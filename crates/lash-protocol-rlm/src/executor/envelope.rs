@@ -52,7 +52,7 @@ pub struct CellEnvelope {
     /// site of its closure: what the cell saves a function it leaves with
     /// ([`lash_kernel_dialect::Lowered::written`]).
     pub written: BTreeMap<Site, Written>,
-    pub saved_origins: BTreeMap<lash_kernel_doc::heap::EntityId, lash_vocabulary::SignatureOrigin>,
+    pub saved_written: BTreeMap<lash_kernel_doc::heap::EntityId, lash_kernel_dialect::Written>,
     /// What the dialect's function values are, where its sessions keep the
     /// functions a cell binds ([`lash_kernel_dialect::Dialect::function_values`]).
     pub function_values: Option<lash_kernel_doc::FunctionRepresentation>,
@@ -408,7 +408,7 @@ struct EnvelopeBody {
     link: LinkId,
     source_map: Option<NodeId>,
     written: NodeId,
-    saved_origins: BTreeMap<lash_kernel_doc::heap::EntityId, lash_vocabulary::SignatureOrigin>,
+    saved_written: BTreeMap<lash_kernel_doc::heap::EntityId, lash_kernel_dialect::Written>,
     function_values: Option<lash_kernel_doc::FunctionRepresentation>,
     effects: NodeId,
 }
@@ -423,7 +423,7 @@ impl TokenCodec for EnvelopeBody {
         self.link.encode(out);
         self.source_map.encode(out);
         self.written.encode(out);
-        self.saved_origins.encode(out);
+        self.saved_written.encode(out);
         encode_opt_tree(self.function_values.as_ref(), out);
         self.effects.encode(out);
     }
@@ -438,7 +438,7 @@ impl TokenCodec for EnvelopeBody {
             link: LinkId::decode(input)?,
             source_map: Option::decode(input)?,
             written: NodeId::decode(input)?,
-            saved_origins: BTreeMap::decode(input)?,
+            saved_written: BTreeMap::decode(input)?,
             function_values: decode_opt_tree(input)?,
             effects: NodeId::decode(input)?,
         })
@@ -480,7 +480,7 @@ impl CellEnvelope {
                 .map(|map| staging.encode_value(NodeKind::SOURCE_MAP, map))
                 .transpose()?,
             written: staging.encode_value(NodeKind::WRITTEN_TABLE, &self.written)?,
-            saved_origins: self.saved_origins.clone(),
+            saved_written: self.saved_written.clone(),
             function_values: self.function_values.clone(),
             effects: staging.encode_value(
                 NodeKind::EFFECT_TABLE,
@@ -538,7 +538,7 @@ impl CellEnvelope {
             link: body.link,
             source_map,
             written,
-            saved_origins: body.saved_origins,
+            saved_written: body.saved_written,
             function_values: body.function_values,
             environment: table.environment,
             inspection: table.inspection,

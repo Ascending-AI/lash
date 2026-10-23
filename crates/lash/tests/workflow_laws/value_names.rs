@@ -148,6 +148,7 @@ fn a_binding_caption_round_trips_through_print_and_read_in_typescript_and_python
                 &document,
                 embedding.library(),
                 Default::default(),
+                None,
             )
             .expect("read TypeScript back"),
             SourceFormat::PythonV1 => lash::python::read(
@@ -155,6 +156,7 @@ fn a_binding_caption_round_trips_through_print_and_read_in_typescript_and_python
                 &document,
                 embedding.library(),
                 Default::default(),
+                None,
             )
             .expect("read Python back"),
         };

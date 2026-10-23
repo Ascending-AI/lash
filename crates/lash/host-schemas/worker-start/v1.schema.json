@@ -824,6 +824,13 @@
             }
           ]
         },
+        "implicit_text_conversions": {
+          "description": "Source evidence used when this callable becomes a saved workflow.",
+          "items": {
+            "$ref": "#/$defs/ImplicitTextConversion"
+          },
+          "type": "array"
+        },
         "representation": {
           "$ref": "#/$defs/FunctionRepresentation"
         },
@@ -853,6 +860,7 @@
         }
       },
       "required": [
+        "implicit_text_conversions",
         "callable",
         "captures",
         "signature",
@@ -878,6 +886,29 @@
       "required": [
         "kind",
         "id"
+      ],
+      "type": "object"
+    },
+    "ImplicitTextConversion": {
+      "additionalProperties": false,
+      "description": "One implicit conversion computed before lowering erases the operand's type.",
+      "properties": {
+        "operand_type": {
+          "$ref": "#/$defs/SourceOperandType"
+        },
+        "span": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Span"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "operand_type"
       ],
       "type": "object"
     },
@@ -1234,6 +1265,112 @@
         "caption"
       ],
       "type": "object"
+    },
+    "SourceOperandType": {
+      "description": "What source analysis knows about an operand, independently of runtime values.\nFunctions retain only their known result; objects and arrays distinguish proven\nrepresentation from annotated fields or elements.",
+      "oneOf": [
+        {
+          "enum": [
+            "any",
+            "undefined",
+            "null",
+            "boolean",
+            "number",
+            "text",
+            "object",
+            "array",
+            "map",
+            "set"
+          ],
+          "type": "string"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "list": {
+              "$ref": "#/$defs/SourceOperandType"
+            }
+          },
+          "required": [
+            "list"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "record": {
+              "additionalProperties": {
+                "$ref": "#/$defs/SourceOperandType"
+              },
+              "type": "object"
+            }
+          },
+          "required": [
+            "record"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "function": {
+              "properties": {
+                "result": {
+                  "$ref": "#/$defs/SourceOperandType"
+                }
+              },
+              "required": [
+                "result"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "function"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "union": {
+              "items": {
+                "$ref": "#/$defs/SourceOperandType"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "union"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "package": {
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "package": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "package",
+                "name"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "package"
+          ],
+          "type": "object"
+        }
+      ]
     },
     "Span": {
       "additionalProperties": false,

@@ -387,6 +387,7 @@ pub(super) async fn publish(core: &lash::LashCore, source: &str) -> Result<Publi
             &StartSelector::Main,
             &environment,
             None,
+            None,
         ),
     )
     .await??;

@@ -141,6 +141,7 @@ impl Lowerer<'_> {
             &mut self.functions,
             vec![
                 FunctionFrame {
+                    implicit_text_conversions: Vec::new(),
                     arrow: false,
                     async_body: false,
                     this: None,
@@ -150,6 +151,7 @@ impl Lowerer<'_> {
                     controls: Vec::new(),
                 },
                 FunctionFrame {
+                    implicit_text_conversions: Vec::new(),
                     arrow: false,
                     async_body: false,
                     this: None,

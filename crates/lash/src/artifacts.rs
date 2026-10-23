@@ -456,6 +456,8 @@ impl HostArtifacts {
 
     /// Retain the whole captured callable under the caller's existing pin and
     /// publish its process descriptor. Captures keep their original Links.
+    /// Retained TypeScript conversion facts are admitted under `limits`;
+    /// omitted limits select the default `Refuse` conversion policy.
     #[cfg(feature = "codemode")]
     pub async fn publish_callable(
         &self,
@@ -463,7 +465,16 @@ impl HostArtifacts {
         function: &crate::workflow::document::FunctionValue,
         environment: &lash_vm_runtime::WorkflowEnvironmentRequest,
         origin: &lash_vocabulary::package::CallableOrigin,
+        limits: Option<crate::dialect::workflow::WorkflowSourceLimits>,
     ) -> Result<ProcessDefinition> {
+        let policy = limits
+            .map(|limits| limits.implicit_text_conversion)
+            .unwrap_or_default();
+        for captured in function.nodes() {
+            policy
+                .check(&captured.implicit_text_conversions)
+                .map_err(crate::workflow::import::admission_error)?;
+        }
         let request = lash_vm_runtime::process::InlineRequest::Callable {
             link: function.callable.link,
             function: Box::new(function.clone()),
@@ -542,6 +553,7 @@ impl HostArtifacts {
         format: crate::dialect::SourceFormat,
         base: &crate::workflow::document::Document,
         environment: &lash_vm_runtime::WorkflowEnvironmentRequest,
+        limits: Option<crate::dialect::workflow::WorkflowSourceLimits>,
     ) -> Result<crate::workflow::WorkflowImport> {
         let Some(checked) = self.workflow_environment(environment).await? else {
             return Ok(crate::workflow::WorkflowImport::Unsupported(
@@ -550,7 +562,7 @@ impl HostArtifacts {
         };
         match checked
             .worker_service()
-            .read_exported(source, base, format, Default::default())
+            .read_exported(source, base, format, Default::default(), limits)
             .await
         {
             Ok((document, captions)) => Ok(crate::workflow::WorkflowImport::Read {
@@ -563,6 +575,9 @@ impl HostArtifacts {
 
     /// Publish one Main or data-only function Export under its immutable Link.
     /// The explicit attachment includes any permitted deferred paths.
+    /// Supplied source is admitted under `limits` (implicit text defaults to
+    /// `Refuse`). Without source, the document is kernel-authored and has no
+    /// TypeScript source policy to apply.
     #[cfg(feature = "codemode")]
     pub async fn publish_workflow(
         &self,
@@ -571,10 +586,34 @@ impl HostArtifacts {
         selector: &lash_vocabulary::names::StartSelector,
         environment: &lash_vm_runtime::WorkflowEnvironmentRequest,
         source: Option<(&crate::workflow::document::SourceMap, &str)>,
+        limits: Option<crate::dialect::workflow::WorkflowSourceLimits>,
     ) -> Result<lash_vocabulary::names::LinkedStart> {
         let typed = document.decode(lash_vocabulary::KernelDataLimits::standard())?;
         if let Some((map, text)) = source {
             map.validate_identified(&typed, text)?;
+            let format = match map.language {
+                crate::workflow::document::SourceLanguage::TypeScript => {
+                    crate::dialect::SourceFormat::TypeScriptV1
+                }
+                crate::workflow::document::SourceLanguage::Python => {
+                    crate::dialect::SourceFormat::PythonV1
+                }
+            };
+            let checked = self
+                .workflow_environment(environment)
+                .await?
+                .ok_or_else(|| {
+                    crate::EmbedError::WorkflowSource(
+                        lash_vm_client::service::SourceServiceError::UnknownDialect {
+                            dialect: format.dialect().to_owned(),
+                        },
+                    )
+                })?;
+            checked
+                .worker_service()
+                .read_exported(text, &typed, format, Default::default(), limits)
+                .await
+                .map_err(crate::EmbedError::WorkflowSource)?;
         }
         let request = lash_vm_runtime::WorkflowPublishRequest {
             document: document.clone(),

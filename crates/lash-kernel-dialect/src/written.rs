@@ -26,6 +26,8 @@ pub struct Written {
     /// Retained annotation coordinates and typed resolution evidence.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub signature_origin: Option<lash_vocabulary::SignatureOrigin>,
+    /// Implicit conversion evidence retained from source authoring.
+    pub implicit_text_conversions: Vec<lash_kernel_doc::ImplicitTextConversion>,
     /// The language the function was written in.
     pub language: SourceLanguage,
     /// Its signature in the dialect's own syntax, for display: Python's
@@ -111,22 +113,24 @@ pub mod written_table {
 
 impl TokenCodec for Written {
     fn encode(&self, out: &mut TokenWriter) {
-        out.seq(5);
+        out.seq(6);
         self.language.encode(out);
         out.text(&self.signature);
         self.call.encode(out);
         self.captions.encode(out);
         self.signature_origin.encode(out);
+        self.implicit_text_conversions.encode(out);
     }
 
     fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
-        input.expect_struct(5)?;
+        input.expect_struct(6)?;
         Ok(Self {
             language: SourceLanguage::decode(input)?,
             signature: String::decode(input)?,
             call: Option::decode(input)?,
             captions: Vec::decode(input)?,
             signature_origin: Option::decode(input)?,
+            implicit_text_conversions: Vec::decode(input)?,
         })
     }
 }

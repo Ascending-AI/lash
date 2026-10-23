@@ -136,6 +136,7 @@ fn a_canvas_edited_non_ascii_python_document_reads_back_identically() -> anyhow:
         draft.document(),
         embedding.library(),
         Default::default(),
+        None,
     )?;
     assert_eq!(read.canonical_bytes(), draft.document().canonical_bytes());
     assert_eq!(read_captions, captions.captions);
@@ -198,12 +199,14 @@ fn module_main_roundtrip(
             &lowered.document,
             embedding.library(),
             Default::default(),
+            None,
         )?,
         SourceLanguage::Python => lash_dialect_python::read(
             &printed.source,
             &lowered.document,
             embedding.library(),
             Default::default(),
+            None,
         )?,
     };
     assert_eq!(read.canonical_bytes(), lowered.document.canonical_bytes());
@@ -336,12 +339,14 @@ fn terminal_operation_roundtrip(language: lash_kernel_doc::SourceLanguage) -> an
                 &lowered.document,
                 embedding.library(),
                 Default::default(),
+                None,
             )?,
             SourceLanguage::Python => lash_dialect_python::read(
                 &printed.source,
                 &lowered.document,
                 embedding.library(),
                 Default::default(),
+                None,
             )?,
         };
         assert_eq!(
@@ -395,6 +400,7 @@ fn typescript_capturing_cell_prints_and_reads_identically() -> anyhow::Result<()
         &lowered.document,
         embedding.library(),
         Default::default(),
+        None,
     )?;
     assert_eq!(read.canonical_bytes(), lowered.document.canonical_bytes());
     assert_eq!(captions, lowered.captions);
@@ -432,6 +438,7 @@ fn python_capturing_cell_prints_and_reads_identically() -> anyhow::Result<()> {
         &lowered.document,
         embedding.library(),
         Default::default(),
+        None,
     )?;
     assert_eq!(read.canonical_bytes(), lowered.document.canonical_bytes());
     assert_eq!(captions, lowered.captions);

@@ -26,34 +26,36 @@ impl Lowerer<'_> {
         self.binary(op, left, right)
     }
 
-    pub(super) fn check_implicit_text(&self, ty: &Ty, span: Option<SourceSpan>) -> Lowering<()> {
-        fn refused(ty: &Ty, strict: bool) -> bool {
-            match ty {
-                Ty::Unknown => strict,
-                Ty::Record(_)
-                | Ty::Object
-                | Ty::List(_)
-                | Ty::Array
-                | Ty::Map
-                | Ty::Set
-                | Ty::Function(_)
-                | Ty::Callable(_)
-                | Ty::Package(_) => true,
-                Ty::Union(parts) => parts.iter().any(|ty| refused(ty, strict)),
-                _ => false,
-            }
+    pub(super) fn check_implicit_text(
+        &mut self,
+        ty: &Ty,
+        span: Option<SourceSpan>,
+    ) -> Lowering<()> {
+        if *ty == Ty::Never {
+            return Ok(());
+        }
+        let fact = lash_kernel_doc::ImplicitTextConversion {
+            span,
+            operand_type: static_type(ty),
+        };
+        // Primitive conversions cannot be refused by any policy.
+        if !fact.refused(true) {
+            return Ok(());
+        }
+        for frame in &mut self.functions {
+            frame.implicit_text_conversions.push(fact.clone());
         }
         if self.implicit_text_conversion == Policy::Allow
-            || !refused(ty, self.implicit_text_conversion == Policy::Strict)
+            || !fact.refused(self.implicit_text_conversion == Policy::Strict)
         {
             return Ok(());
         }
         let mut diagnostic = Diagnostic::refusal(
             DiagnosticCode::ImplicitTextConversion,
             "implicit text conversion refused by source admission policy",
-            span,
+            fact.span,
         );
-        diagnostic.operand_type = Some(Box::new(static_type(ty)));
+        diagnostic.operand_type = Some(Box::new(fact.operand_type));
         Err(diagnostic)
     }
 }

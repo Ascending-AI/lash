@@ -524,6 +524,7 @@ async fn publish_draft(State(host): State<Host>, Json(request): Json<PublishDraf
             &lash::package::StartSelector::Export(request.entry),
             &namespace,
             None,
+            None,
         )
         .await
         .map_err(api_error)?;

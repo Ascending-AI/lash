@@ -31,6 +31,7 @@ impl Lowerer<'_> {
         }
         Written {
             signature_origin: None,
+            implicit_text_conversions: Vec::new(),
             captions: Vec::new(),
             language: SourceLanguage::TypeScript,
             signature,
@@ -154,6 +155,7 @@ impl Lowerer<'_> {
         let args = self.fresh("args");
         let arguments = (!function.is_arrow).then(|| self.fresh("arguments"));
         self.functions.push(FunctionFrame {
+            implicit_text_conversions: Vec::new(),
             arrow: function.is_arrow,
             async_body: function.is_async,
             this: Some(this.clone()),
@@ -192,11 +194,13 @@ impl Lowerer<'_> {
             Ok(())
         });
         self.span = outer_span;
-        let Some(_) = self.functions.pop() else {
+        let Some(frame) = self.functions.pop() else {
             unreachable!("function frame is active");
         };
         let body = body?;
-        self.written = Some(self.written(function));
+        let mut written = self.written(function);
+        written.implicit_text_conversions = frame.implicit_text_conversions;
+        self.written = Some(written);
         let start = self.callable_presentation(function);
         let closure = self.emit_closure(vec![this, args], body, start);
         Ok(Operand {
@@ -219,6 +223,7 @@ impl Lowerer<'_> {
         let args = self.fresh("args");
         let arguments = self.fresh("arguments");
         self.functions.push(FunctionFrame {
+            implicit_text_conversions: Vec::new(),
             arrow: false,
             async_body: function.is_async,
             this: Some(this.clone()),
@@ -322,10 +327,11 @@ impl Lowerer<'_> {
         &mut self,
         function: &ast::Function,
         arity: usize,
-    ) -> Lowering<(Operand, bool)> {
+    ) -> Lowering<(Operand, bool, Written)> {
         let this = self.fresh("this");
         let mut params = vec![this.clone()];
         self.functions.push(FunctionFrame {
+            implicit_text_conversions: Vec::new(),
             arrow: function.is_arrow,
             async_body: function.is_async,
             this: Some(this),
@@ -357,8 +363,14 @@ impl Lowerer<'_> {
         };
         let body = body?;
         params.resize_with(params.len().max(arity + 1), || self.fresh("unused"));
-        self.written = Some(self.written(function));
-        Ok((self.emit_closure(params, body, None), frame.context_used))
+        let mut written = self.written(function);
+        written.implicit_text_conversions = frame.implicit_text_conversions;
+        self.written = Some(written.clone());
+        Ok((
+            self.emit_closure(params, body, None),
+            frame.context_used,
+            written,
+        ))
     }
 
     /// A packed exported entry normalizes arguments into one positional body.
@@ -369,7 +381,7 @@ impl Lowerer<'_> {
         function: &ast::Function,
         entry: &super::Positional,
     ) -> Lowering<Operand> {
-        let (made, _) = self.callback_closure(function, entry.arity)?;
+        let (made, _, written) = self.callback_closure(function, entry.arity)?;
         self.store(Place::Variable(entry.name.clone()), made);
 
         let this = self.fresh("this");
@@ -394,7 +406,7 @@ impl Lowerer<'_> {
             });
             Ok(())
         })?;
-        self.written = Some(self.written(function));
+        self.written = Some(written);
         let start = self.callable_presentation(function);
         let closure = self.emit_closure(vec![this, args], body, start);
         let closure = Operand {

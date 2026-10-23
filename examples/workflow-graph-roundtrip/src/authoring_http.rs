@@ -48,6 +48,7 @@ pub(crate) async fn import_source(
                 format,
                 current.draft.document(),
                 &packages.request,
+                None,
             )
             .await
             .map_err(|error| ErrorResponse::invalid("source_read", error))?;

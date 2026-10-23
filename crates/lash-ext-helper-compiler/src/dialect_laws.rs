@@ -376,6 +376,7 @@ fn authored_modules_print_without_kernel_forms_and_roundtrip() {
                 &document,
                 &fixture.library,
                 Default::default(),
+                None,
             )
             .map_err(|error| error.to_string()),
             Dialect::Python => lash_dialect_python::read(
@@ -383,6 +384,7 @@ fn authored_modules_print_without_kernel_forms_and_roundtrip() {
                 &document,
                 &fixture.library,
                 Default::default(),
+                None,
             )
             .map_err(|error| error.to_string()),
         }

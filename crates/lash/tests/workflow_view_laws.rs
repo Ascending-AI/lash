@@ -185,22 +185,15 @@ async fn a_refused_source_map_publishes_no_document_or_link() {
             lash_core::LeaseIncarnationId::new("source-map-boot"),
         ))
         .unwrap();
-    let document = k::parse_document("kernel 1\nnumbers float\nmain { return 42 }").unwrap();
-    let source = "return 42;";
-    let map = k::SourceMap::new(
-        &document,
+    let source = "const answer = 42;";
+    let lowered = lash::typescript::lower(
         source,
-        k::SourceLanguage::TypeScript,
-        vec![k::SourceSite {
-            site: k::Site::new(k::Unit::Main, [0]),
-            ranges: vec![k::Span {
-                start: 0,
-                end: source.len(),
-            }],
-            implicit: None,
-        }],
+        &lash::dialect::Environment::new(&lash::dialect::NamedLibrary::new(), &Default::default()),
+        lash::dialect::Mode::Cell(lash::dialect::CellEnvironment::first()),
     )
     .unwrap();
+    let document = lowered.document.into_document();
+    let map = lowered.source_map.unwrap();
     let pin = lash::process::HostArtifactPin::mint();
     let context = PublicationContext {
         domain: PublicationDomain(core.backend().binding_identity().to_string()),
@@ -252,6 +245,7 @@ async fn a_refused_source_map_publishes_no_document_or_link() {
                 &StartSelector::Main,
                 &namespace,
                 Some((sidecar, text)),
+                None,
             )
             .await
             .unwrap_err();
@@ -289,6 +283,7 @@ async fn a_refused_source_map_publishes_no_document_or_link() {
             &StartSelector::Main,
             &namespace,
             Some((&map, source)),
+            None,
         )
         .await
         .unwrap();
@@ -301,7 +296,7 @@ async fn a_refused_source_map_publishes_no_document_or_link() {
         document.identity()
     );
     assert!(
-        matches!(core.host_artifacts().read_source_map(&map.identity()).await.unwrap(),lash::workflow::SourceMapRead::Read {map:stored,source} if stored == map && source == "return 42;")
+        matches!(core.host_artifacts().read_source_map(&map.identity()).await.unwrap(),lash::workflow::SourceMapRead::Read {map:stored,source} if stored == map && source == "const answer = 42;")
     );
     core.shutdown().await.unwrap();
 }

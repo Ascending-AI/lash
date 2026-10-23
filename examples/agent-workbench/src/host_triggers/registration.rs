@@ -159,7 +159,7 @@ impl HostTriggers {
         ) = serde_json::from_str(&environment)?;
         let published = core
             .host_artifacts()
-            .publish_callable(pin, &value, &environment, &origin)
+            .publish_callable(pin, &value, &environment, &origin, None)
             .await?;
         if published != *expected {
             return Err(HostTriggerError::Registration(

@@ -38,6 +38,7 @@ async fn function(
     .unwrap();
     FunctionValue {
         signature_origin: None,
+        implicit_text_conversions: Vec::new(),
         callable: lash::package::CallableId {
             link: publication.start.link,
             function: definition.identity(),

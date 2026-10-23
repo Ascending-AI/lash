@@ -273,6 +273,7 @@ pub(crate) async fn entry_view(
             &lash::package::StartSelector::Export(entry.clone()),
             environment,
             None,
+            None,
         )
         .await
         .map_err(|error| error.to_string())?;

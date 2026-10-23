@@ -64,6 +64,7 @@ impl WorkflowCreator {
                 &StartSelector::Export(Name::new(entry)),
                 &request,
                 Some((&map, source)),
+                None,
             )
             .await
             .map_err(|error| error.to_string())

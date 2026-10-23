@@ -80,9 +80,11 @@ fn read_local(
 ) -> Result<Document> {
     Ok(match format {
         SourceFormat::TypeScriptV1 => {
-            lash::typescript::read(source, base, library, Default::default())?.0
+            lash::typescript::read(source, base, library, Default::default(), None)?.0
         }
-        SourceFormat::PythonV1 => lash::python::read(source, base, library, Default::default())?.0,
+        SourceFormat::PythonV1 => {
+            lash::python::read(source, base, library, Default::default(), None)?.0
+        }
     })
 }
 
@@ -146,7 +148,13 @@ async fn measure(iterations: u32) -> Result<()> {
                         // Verify the print-only sample outside its timed region.
                         let decoded = if worker {
                             service
-                                .read_exported(&printed.source, &document, format, options.limits)
+                                .read_exported(
+                                    &printed.source,
+                                    &document,
+                                    format,
+                                    options.limits,
+                                    None,
+                                )
                                 .await?
                                 .0
                         } else {
@@ -171,7 +179,13 @@ async fn measure(iterations: u32) -> Result<()> {
                         };
                         let decoded = if worker {
                             service
-                                .read_exported(&printed.source, &document, format, options.limits)
+                                .read_exported(
+                                    &printed.source,
+                                    &document,
+                                    format,
+                                    options.limits,
+                                    None,
+                                )
                                 .await?
                                 .0
                         } else {

@@ -302,8 +302,9 @@ pub fn typescript(tuning: &lash_vm_client::WorkerTuning) -> Result<Dialect, Embe
     Ok(Dialect {
         name: lash_vm_releases::TYPESCRIPT.to_owned(),
         front_end: Box::new(front_end),
-        read: |source, base, library, limits| {
-            lash_dialect_typescript::read(source, base, library, limits).map_err(Into::into)
+        read: |source, base, library, limits, source_limits| {
+            lash_dialect_typescript::read(source, base, library, limits, source_limits)
+                .map_err(Into::into)
         },
         printer: Some(Box::new(lash_dialect_typescript::TypeScript::default())),
         captions: lash_dialect_typescript::CAPTIONS,

@@ -66,7 +66,9 @@ impl Lowerer<'_> {
             unreachable!("a source body is a fresh closure");
         };
         source_body.presentation = None;
-        let written = self.written(function);
+        let Some(written) = note.written.clone() else {
+            unreachable!("the source closure carries its Written facts");
+        };
         let this = self.fresh("this");
         let args = self.fresh("args");
         let params = vec![this.clone(), args.clone()];

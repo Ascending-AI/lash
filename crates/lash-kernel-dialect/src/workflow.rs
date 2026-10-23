@@ -144,6 +144,28 @@ pub enum ImplicitTextConversionPolicy {
     Strict,
 }
 
+impl ImplicitTextConversionPolicy {
+    /// The first retained source fact refused by this host's admission policy.
+    pub fn check(
+        self,
+        facts: &[lash_kernel_doc::ImplicitTextConversion],
+    ) -> Result<(), Diagnostic> {
+        if self == Self::Allow {
+            return Ok(());
+        }
+        if let Some(fact) = facts.iter().find(|fact| fact.refused(self == Self::Strict)) {
+            return Err(Diagnostic {
+                code: lash_kernel_doc::ImplicitTextConversion::CODE.into(),
+                message: "implicit text conversion refused by source admission policy".into(),
+                span: fact.span,
+                operand_type: Some(Box::new(fact.operand_type.clone())),
+                ..Default::default()
+            });
+        }
+        Ok(())
+    }
+}
+
 /// One entry a front end lowered: the declared function a start calls, the
 /// signature its annotations state, and the notes of its body.
 #[derive(Clone, Debug)]

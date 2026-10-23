@@ -479,6 +479,7 @@ fn sleep_prints_its_authored_duration_and_preserves_the_document() {
             &lowered.document,
             super::library(),
             Default::default(),
+            None,
         )
         .unwrap();
         assert_eq!(read.canonical_bytes(), lowered.document.canonical_bytes());

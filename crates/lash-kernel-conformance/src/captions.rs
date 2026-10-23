@@ -205,6 +205,7 @@ impl CaptionDialect<'_> {
                 document,
                 self.environment.library,
                 Default::default(),
+                None,
             )
             .map_err(|diagnostic| fail(RULE, &case.name, format!("{diagnostic:?}")))?;
             if read.canonical_bytes() != document.canonical_bytes() {

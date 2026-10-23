@@ -781,3 +781,83 @@ fn a_function_crossing_to_a_tool_uses_its_source_entry_convention() {
         assert_eq!(result.result, expected, "{source}");
     }
 }
+
+/// FIG-7173: cell execution keeps JS semantics while crossing preserves admission evidence.
+#[test]
+fn cells_keep_javascript_text_semantics_and_ship_conversion_facts() {
+    use lash_kernel_dialect::workflow::ImplicitTextConversionPolicy as Policy;
+    use lash_kernel_vm::{FunctionOrigins, MachineOptions};
+    let body = "const answer = async (event: { identity_id: string }): Promise<string> => `answered by ${event}`;";
+    let source = format!("{body} console.log(await answer({{ identity_id: 'sam' }}));");
+    let recorded = run(&source, &[]);
+    assert_eq!(recorded.end, "ok");
+    assert_eq!(recorded.lines(), ["answered by [object Object]"]);
+
+    let source = format!("{body} await control.finish(answer);");
+    let lowered =
+        super::lower_with_effects(&source).expect("a cell is never refused by source policy");
+    let program =
+        crate::tests::linked::program(Arc::clone(lowered.document.shared()), prepared().clone());
+    let mut machine = super::pages::start(
+        program.clone(),
+        BOUNDS,
+        CellStart {
+            target: Target::Main,
+            args: Vec::new(),
+            session: None,
+            owner: super::pages::OWNER,
+            modes: Default::default(),
+            host: Vec::new(),
+        },
+    )
+    .expect("start the cell");
+    machine.set_options(MachineOptions {
+        function_origins: FunctionOrigins {
+            sites: lowered
+                .written
+                .iter()
+                .map(|(site, written)| ((program.link, site.clone()), written.clone()))
+                .collect(),
+            environments: Default::default(),
+        },
+        ..Default::default()
+    });
+    let Step::Parked(park) = machine
+        .run(&mut Console::default(), u64::MAX)
+        .expect("cell executes")
+    else {
+        panic!("finish carries the callable");
+    };
+    let [Request::Effect(effect)] = park.requests.as_slice() else {
+        panic!("only finish");
+    };
+    let [Datum::FunctionValue(function)] = effect.args.as_slice() else {
+        panic!("the callable crosses as typed data");
+    };
+    assert_eq!(function.implicit_text_conversions.len(), 1);
+    let diagnostic = Policy::Refuse
+        .check(&function.implicit_text_conversions)
+        .expect_err("promotion refuses the retained fact");
+    assert_eq!(diagnostic.code, "TS_IMPLICIT_TEXT_CONVERSION");
+    let start = source.find("${event}").unwrap() + 2;
+    assert_eq!(
+        diagnostic.span,
+        Some(lash_kernel_doc::Span {
+            start,
+            end: start + 5
+        })
+    );
+    assert_eq!(
+        diagnostic.operand_type,
+        Some(Box::new(lash_kernel_dialect::SourceOperandType::Record(
+            [(
+                "identity_id".into(),
+                lash_kernel_dialect::SourceOperandType::Text
+            )]
+            .into()
+        )))
+    );
+    Policy::Allow
+        .check(&function.implicit_text_conversions)
+        .expect("the host can allow it");
+}

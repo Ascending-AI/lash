@@ -49,6 +49,7 @@ fn gathered_local_coroutines_print_without_task_thunks() {
         &lowered.document,
         machine::library(),
         Default::default(),
+        None,
     )
     .expect("authored fan-out readback");
     assert_eq!(
@@ -434,6 +435,7 @@ fn saved_handle(
         creation: Some(site.clone()),
         token: None,
         signature_origin: lowered.written[site].signature_origin.clone(),
+        implicit_text_conversions: lowered.written[site].implicit_text_conversions.clone(),
     };
     let wire = serde_json::to_string(&value).unwrap();
     let value: lash_kernel_doc::FunctionValue = serde_json::from_str(&wire).unwrap();

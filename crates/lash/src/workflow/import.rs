@@ -103,3 +103,18 @@ pub(crate) fn source_refusal(
         error => Err(crate::EmbedError::WorkflowSource(error)),
     }
 }
+
+/// Source evidence reaches hosts through the same typed refusal as worker lowering.
+pub(crate) fn admission_error(diagnostic: lash_kernel_dialect::Diagnostic) -> crate::EmbedError {
+    crate::EmbedError::WorkflowSource(lash_vm_client::service::SourceServiceError::Dialect(
+        Box::new(lash_vm_client::service::DialectRefusal {
+            code: diagnostic.code,
+            message: diagnostic.message,
+            span: diagnostic.span.map(|span| (span.start, span.end)),
+            unsupported: diagnostic.kind == lash_kernel_dialect::DiagnosticKind::Refusal,
+            repairs: diagnostic.repairs,
+            operand_type: diagnostic.operand_type,
+            fact: diagnostic.fact,
+        }),
+    ))
+}

@@ -141,6 +141,7 @@ async fn definition_args_checks_partial_and_complete_inputs_without_starting() {
             &lash::package::StartSelector::Export(lash::schema::Name::new("handler")),
             &environment,
             None,
+            None,
         )
         .await
         .unwrap();
@@ -362,6 +363,7 @@ async fn a_saved_definition_start_read_fault_is_an_outer_store_error() {
             &lash::workflow::document::DocumentBytes::from(document),
             &lash::package::StartSelector::Export(lash::schema::Name::new("handler")),
             &environment,
+            None,
             None,
         )
         .await

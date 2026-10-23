@@ -97,21 +97,26 @@ impl Graph {
         let mut captured = BTreeMap::new();
         let mut creation = None;
         let mut signature_origin = None;
+        let mut implicit_text_conversions = Vec::new();
         let mut token = None;
         if let PageValue::Closure(id) = value {
             let closure = heap.heap.closure(*id)?;
             let site = closure.site.resolve(heap.heap.pages())?;
             creation = Some(site.as_ref().clone());
-            signature_origin = run
-                .signature_origins
+            let written = run
+                .function_origins
                 .environments
                 .get(id)
                 .or_else(|| {
-                    run.signature_origins
+                    run.function_origins
                         .sites
                         .get(&(callable.link, site.as_ref().clone()))
                 })
                 .cloned();
+            if let Some(written) = written {
+                signature_origin = written.signature_origin;
+                implicit_text_conversions = written.implicit_text_conversions;
+            }
             let start = lash_kernel_doc::snapshot::closure_at(document, &site)
                 .and_then(|c| c.presentation.as_ref())
                 .ok_or_else(|| raised("not_data", "the function states no start signature"))?;
@@ -198,6 +203,7 @@ impl Graph {
         }
         Ok(CaptureValue::Function(Box::new(FunctionValue {
             signature_origin,
+            implicit_text_conversions,
             callable,
             captures,
             signature,

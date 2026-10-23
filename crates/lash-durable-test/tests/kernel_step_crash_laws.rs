@@ -297,6 +297,7 @@ impl KernelSteps {
                         &lash::package::StartSelector::Export(lash::schema::Name::new("worker")),
                         &request,
                         None,
+                        None,
                     )
                     .await
                     .map_err(|error| format!("publish the workflow: {error}"))?;
