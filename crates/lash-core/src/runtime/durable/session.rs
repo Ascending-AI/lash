@@ -414,11 +414,12 @@ impl SessionActivation {
             Closing::Ran(pass) => return Ok(pass),
             Closing::Not(tx) => *tx,
         };
-        heads.head(cx, session).await?;
-        let mut open = cx
-            .session_projection()
-            .await?
-            .and_then(|projection| projection.turn);
+        // Admission owns the answer to an unreadable head. Do not hydrate
+        // that head before the queued sender has a run that can be refused.
+        let mut open = match cx.session_projection().await? {
+            Some(projection) => projection.turn,
+            None => cx.durable_reads()?.turn(session).await?,
+        };
         if let Some(row) = &mut open {
             row.cancel = tx.turn_cancel().cloned();
         }
@@ -488,6 +489,14 @@ impl SessionActivation {
             };
         };
         drop(tx);
+        match heads.head(cx, session).await {
+            Ok(_) => {}
+            Err(TurnError::Runtime(refusal)) if refusal.is_terminal() => {
+                phases::refuse(cx, self.services.tracing(), &row, refusal).await?;
+                return Ok(Pass::Again);
+            }
+            Err(error) => return Err(error),
+        }
         // An accepted cancel request ends the turn before anything else
         // runs: the live owner stopped its work for it, or a crash left it.
         // Its stop commits from the turn's last checkpoint.

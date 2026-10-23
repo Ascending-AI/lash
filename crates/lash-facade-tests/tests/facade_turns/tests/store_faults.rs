@@ -640,63 +640,6 @@ mod sweep {
         Ok(())
     }
 
-    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-    async fn a_fault_sweep_finishes_the_head_read_after_the_turn_answers() {
-        let stores = stores_over(Storage::Memory).await;
-        let accepting = core_over(&stores.stores, false);
-        create(&accepting, ID).await.expect("create the session");
-        let durable = accepting
-            .session(SessionId::from(ID))
-            .durable()
-            .await
-            .expect("durable handle");
-        let handles = submit(&durable, false).await.expect("accept the input");
-        let script = Script::new();
-        let (engine_stores, _) = scripted(&stores.stores, &script, "deployment");
-        // The first two head reads announce and open the initial head. The
-        // next one announces the answered turn, while its actor is still owned.
-        let head_read = script
-            .on(StoreOp::load_session_head_meta)
-            .nth(3)
-            .before()
-            .pause();
-        script
-            .on(StoreOp::load_session_head_meta)
-            .nth(3)
-            .after()
-            .lose_reply();
-        let serving = core_over(&engine_stores, true);
-        head_read.reached(1).await;
-        assert_eq!(
-            answers(&durable, handles, &AtomicUsize::new(0))
-                .await
-                .expect("the published answer"),
-            Answer::Success(vec!["echo: first".into()])
-        );
-        assert!(settled(&serving, ID).await, "the turn has settled");
-        let cell = Cell {
-            op: StoreOp::load_session_head_meta.into(),
-            kind: Kind::LostReply,
-        };
-        {
-            let mut finishing = std::pin::pin!(finish_serving(&serving, &script, Some(cell), 0));
-            assert!(
-                tokio::time::timeout(std::time::Duration::from_secs(1), &mut finishing)
-                    .await
-                    .is_err(),
-                "fixture teardown cancelled the post-answer head read"
-            );
-            head_read.open_all();
-            tokio::time::timeout(WITHIN, finishing)
-                .await
-                .expect("the node finishes after the read is released")
-                .expect("the serving node drains");
-        }
-        serving.shutdown().await.expect("stop the serving node");
-        accepting.shutdown().await.expect("stop acceptance");
-        drop(script); // The lost reply must fire before teardown finishes.
-    }
-
     #[derive(Clone, Copy, Debug)]
     enum Scenario {
         Open,

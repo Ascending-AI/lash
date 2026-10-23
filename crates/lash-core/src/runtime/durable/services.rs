@@ -630,10 +630,13 @@ impl InputBatching for RuntimeTurnServices {
         session: &SessionId,
     ) -> Result<Option<InputAdmission>, SessionMailError> {
         let mut view = super::head::SessionOwner::default();
-        let head = view
-            .head(_cx, session)
-            .await
-            .map_err(|error| SessionMailError::Batching(error.to_string()))?;
+        let head = match view.head(_cx, session).await {
+            Ok(head) => head,
+            // Admit the head input alone so its preparation can settle the
+            // typed refusal, even when policy hydration cannot read the head.
+            Err(TurnError::Runtime(refusal)) if refusal.is_terminal() => return Ok(None),
+            Err(error) => return Err(SessionMailError::Batching(error.to_string())),
+        };
         let mut runtime = self
             .runtimes
             .open_retained(_cx, head)

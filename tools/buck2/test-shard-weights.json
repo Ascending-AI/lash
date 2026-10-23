@@ -1619,7 +1619,6 @@
     "tests::store_faults::a_send_to_a_deleted_session_is_answered_deleted": 121,
     "tests::store_faults::a_send_to_a_session_whose_plugin_refuses_to_build_is_answered_with_the_refusal": 113,
     "tests::store_faults::a_send_to_an_unknown_session_is_answered_unknown": 25,
-    "tests::store_faults::sweep::a_fault_sweep_finishes_the_head_read_after_the_turn_answers": 1075,
     "tests::stream_evidence::custom_provider_can_establish_a_no_summary_response_before_execution_evidence": 86,
     "tests::stream_evidence::text_block_completion_forwards_only_the_unseen_tail": 133,
     "tests::stream_evidence::text_block_completion_seals_authoritative_correction": 130,

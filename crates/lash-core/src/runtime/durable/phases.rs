@@ -1347,15 +1347,14 @@ pub(super) async fn refuse(
     }
     let current = match cx.session_projection().await {
         Ok(Some(projection)) => projection.turn,
-        Ok(None) | Err(_) => {
+        Ok(None) => cx.durable_reads()?.turn(&row.session).await?,
+        Err(_) => {
             // A refused head commit has already poisoned its whole basis.
-            // Reload coherently before deriving the refusal's terminal.
+            // Discard the old basis before deriving the refusal's terminal.
             cx.invalidate_session_projection().await;
-            let mut heads = super::head::SessionOwner::default();
-            heads.head(cx, &row.session).await?;
-            cx.session_projection()
-                .await?
-                .and_then(|projection| projection.turn)
+            // A terminal refusal can itself be the head's read refusal.
+            // Its run and ledger remain readable without hydrating that head.
+            cx.durable_reads()?.turn(&row.session).await?
         }
     };
     let Some(row) = current.as_ref().filter(|current| current.run == row.run) else {
