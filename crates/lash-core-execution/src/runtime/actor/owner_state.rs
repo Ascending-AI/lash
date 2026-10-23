@@ -161,6 +161,19 @@ impl<S> OwnerState<S> {
         Ok(receipt)
     }
 
+    /// A reload owns invalidation before its first await. Cancellation or
+    /// failure leaves no usable basis; only a complete fenced load restores it.
+    pub(super) async fn reload(
+        &mut self,
+        load: impl Future<Output = Result<(StateRevision, S), DurableError>>,
+    ) -> Result<(), DurableError> {
+        self.poison();
+        let (revision, state) = load.await?;
+        self.revision = revision;
+        self.state = Some(state);
+        Ok(())
+    }
+
     /// Drop every retained fact. Only a new coherent load can restore use.
     pub fn poison(&mut self) {
         self.state = None;
@@ -272,11 +285,14 @@ impl SessionProjection {
                     run,
                     answer,
                 } if target == session => {
-                    let turn = self
-                        .turn
-                        .as_mut()
-                        .filter(|turn| turn.run == *run)
-                        .ok_or_else(|| invalid("answer postimage has no matching open turn"))?;
+                    let Some(turn) = self.turn.as_mut().filter(|turn| turn.run == *run) else {
+                        return Err(DurableError::Domain(
+                            lash_durable::domain::DomainRefusal::TurnNotOpen {
+                                session: target.clone(),
+                                run: run.clone(),
+                            },
+                        ));
+                    };
                     let UnfinishedPhase::Model { call, .. } = &mut turn.phase else {
                         return Err(invalid("answer postimage has no model phase"));
                     };
@@ -395,6 +411,23 @@ mod tests {
             root_leases: Vec::new(),
             turn_cancel: None,
         }
+    }
+
+    /// FIG-7193: dropping coherent recovery at its read cannot make the
+    /// old acknowledged projection usable again.
+    #[tokio::test]
+    async fn a_dropped_reload_keeps_the_entire_owner_basis_poisoned() {
+        let mut owner = owner();
+        let mut reload = Box::pin(owner.reload(std::future::pending()));
+        assert!(futures_util::poll!(reload.as_mut()).is_pending());
+        drop(reload);
+        assert!(owner.state().is_err());
+        owner
+            .reload(async { Ok((StateRevision(1), 7)) })
+            .await
+            .unwrap();
+        assert_eq!(owner.revision().unwrap(), StateRevision(1));
+        assert_eq!(*owner.state().unwrap(), 7);
     }
 
     /// LO-POSTIMAGE: no interrupted or refused commit can expose its old

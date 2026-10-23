@@ -10,6 +10,9 @@ use lash_durable::{
 };
 use tokio_util::sync::CancellationToken;
 
+#[path = "core_session.rs"]
+mod session;
+
 use crate::AdmittedScope;
 use crate::Clock;
 use crate::ExecutionScope;
@@ -572,111 +575,6 @@ impl ActorContext {
         self.inner.tool_call_admissions.load(Ordering::Relaxed)
     }
 
-    /// The acknowledged session projection. A poisoned projection is never
-    /// exposed as an absent cache entry: recovery must explicitly replace it.
-    #[doc(hidden)]
-    pub async fn session_projection(
-        &self,
-    ) -> Result<Option<super::owner_state::SessionProjection>, DurableError> {
-        if !self.inner.claim_live.load(Ordering::Acquire) {
-            return Err(DurableError::Store(lash_durable::StoreFailure {
-                kind: lash_durable::StoreFailureKind::Unavailable,
-                message: "session claim has ended".into(),
-            }));
-        }
-        self.inner
-            .session_projection
-            .lock()
-            .await?
-            .as_ref()
-            .map(|owner| owner.state().cloned())
-            .transpose()
-    }
-
-    /// The compatible plugin assembly belongs to the acknowledged claim,
-    /// so releasing or poisoning its projection drops the assembly as well.
-    #[doc(hidden)]
-    pub async fn retain_session_composition(
-        &self,
-        composition: Arc<crate::plugin::PluginHost>,
-    ) -> Result<(), DurableError> {
-        let mut projection = self.inner.session_projection.lock().await?;
-        let owner = projection.as_mut().ok_or_else(|| {
-            DurableError::Store(lash_durable::StoreFailure {
-                kind: lash_durable::StoreFailureKind::Unavailable,
-                message: "session claim has no projection".into(),
-            })
-        })?;
-        let revision = owner.revision()?;
-        let mut next = owner.state()?.clone();
-        next.composition = Some(composition);
-        // This is an immutable assembly, not a durable state transition.
-        *owner = super::owner_state::OwnerState::loaded(
-            self.actor().clone(),
-            self.epoch(),
-            revision,
-            next,
-        );
-        Ok(())
-    }
-
-    /// Install a coherent cold load at its unchanged transaction basis.
-    #[doc(hidden)]
-    pub async fn load_session_projection(
-        &self,
-        tx: &ActorTx,
-        projection: super::owner_state::SessionProjection,
-    ) -> Result<(), DurableError> {
-        if tx.actor() != self.actor() || tx.epoch() != self.epoch() {
-            return Err(DurableError::Store(lash_durable::StoreFailure {
-                kind: lash_durable::StoreFailureKind::Corrupt,
-                message: "session hydration names another claim".into(),
-            }));
-        }
-        if let Some(obligations) = &self.inner.obligations {
-            obligations
-                .hydrated(
-                    &projection,
-                    self.durable_reads()?,
-                    self.backend().config().settings().graph_reads.execution(),
-                    self.backend().config().settings().graph_reads.owner(),
-                )
-                .await?;
-        }
-        // Include obligation hydration in the same revision bracket as the head.
-        let checked = self
-            .durable()?
-            .begin_retained(self.actor(), self.epoch(), tx.revision(), 0)
-            .await?;
-        if checked.revision() != tx.revision() {
-            return Err(DurableError::RevisionConflict {
-                actor: self.actor().clone(),
-                epoch: self.epoch(),
-                expected: tx.revision(),
-                actual: checked.revision(),
-            });
-        }
-        *self.inner.session_projection.lock().await? =
-            Some(super::owner_state::OwnerState::loaded(
-                self.actor().clone(),
-                self.epoch(),
-                tx.revision(),
-                projection,
-            ));
-        Ok(())
-    }
-
-    /// Recovery discards head, turn and every revision-derived draft together.
-    #[doc(hidden)]
-    pub async fn invalidate_session_projection(&self) {
-        if let Ok(mut projection) = self.inner.session_projection.lock().await {
-            *projection = None;
-        }
-        if let Some(obligations) = &self.inner.obligations {
-            obligations.invalidate().await;
-        }
-    }
-
     fn with_obligations<'a, F, Fut>(
         &'a self,
         mut tx: ActorTx,
@@ -783,11 +681,22 @@ impl ActorContext {
                 }
                 return Ok(committed);
             };
-            let mut next = owner.state()?.clone();
-            if let Err(error) = next.prepare(&tx) {
-                owner.poison();
-                return Err(error);
-            }
+            let acknowledged = owner.state()?.clone();
+            let basis = owner.revision()?;
+            let mut next = acknowledged.clone();
+            let refused_postimage = match next.prepare(&tx) {
+                Ok(()) => false,
+                // An ambiguous terminal can already have ended this turn.
+                // Let the writer atomically refuse the held answer and all
+                // its staged facts, but never adopt an invalid postimage.
+                Err(DurableError::Domain(lash_durable::domain::DomainRefusal::TurnNotOpen {
+                    ..
+                })) => true,
+                Err(error) => {
+                    owner.poison();
+                    return Err(error);
+                }
+            };
             let postimage = tx.take_session_postimage();
             let prompt = tx.take_prompt_postimage();
             let draft = match owner.draft(tx, next) {
@@ -801,9 +710,33 @@ impl ActorContext {
                 .commit(
                     draft,
                     |tx| self.with_obligations_inner(tx, owing, model_debts, commit),
-                    |next, receipt| next.acknowledge(postimage, receipt, prompt),
+                    |next, receipt| {
+                        if refused_postimage {
+                            return Err(DurableError::Store(lash_durable::StoreFailure {
+                                kind: lash_durable::StoreFailureKind::Corrupt,
+                                message: "writer acknowledged a refused turn postimage".into(),
+                            }));
+                        }
+                        next.acknowledge(postimage, receipt, prompt)
+                    },
                 )
-                .await?;
+                .await;
+            let committed = match committed {
+                Ok(committed) => committed,
+                Err(error) => {
+                    if let Err(reload) = owner
+                        .reload(self.recovered_session(acknowledged, basis))
+                        .await
+                    {
+                        tracing::debug!(actor = %self.actor(), error = %reload,
+                            "failed session commit still requires cold recovery");
+                    }
+                    if !self.inner.claim_live.load(Ordering::Acquire) {
+                        owner.poison();
+                    }
+                    return Err(error);
+                }
+            };
             if !self.inner.claim_live.load(Ordering::Acquire) {
                 owner.poison();
                 return Err(DurableError::Store(lash_durable::StoreFailure {
