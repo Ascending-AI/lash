@@ -60,6 +60,19 @@ impl Runner {
     }
 
     pub fn new_with_charge(dialect: &str, charge: lash_kernel_vm::Charge) -> Result<Self, String> {
+        Self::with_implementations(dialect, charge, true)
+    }
+
+    #[cfg(test)]
+    pub fn bodies(dialect: &str) -> Result<Self, String> {
+        Self::with_implementations(dialect, lash_kernel_vm::Charge::Exact, false)
+    }
+
+    fn with_implementations(
+        dialect: &str,
+        charge: lash_kernel_vm::Charge,
+        implementations: bool,
+    ) -> Result<Self, String> {
         let dialect = match dialect {
             "typescript" => lash_ext_helper_compiler::library::Dialect::TypeScript,
             "python" => lash_ext_helper_compiler::library::Dialect::Python,
@@ -71,21 +84,25 @@ impl Runner {
         let library = built.names;
         // The runner installs each dialect's operation natives, as a worker
         // does (FIG-6440).
-        match dialect {
-            lash_ext_helper_compiler::library::Dialect::TypeScript => {
-                let functions: Vec<_> = registry.iter().map(|(id, _)| *id).collect();
-                lash_ext_date_ecma::implement(&mut registry, functions.iter().copied())
+        if implementations {
+            match dialect {
+                lash_ext_helper_compiler::library::Dialect::TypeScript => {
+                    let functions: Vec<_> = registry.iter().map(|(id, _)| *id).collect();
+                    lash_ext_date_ecma::implement(&mut registry, functions.iter().copied())
+                        .map_err(|e| e.to_string())?;
+                    lash_ext_url_whatwg::implement(&mut registry, functions)
+                        .map_err(|e| e.to_string())?;
+                    lash_ext_regex_ecma::implement(
+                        &mut registry,
+                        &Arc::new(lash_ext_regex_ecma::Engine::new(4)),
+                    )
                     .map_err(|e| e.to_string())?;
-                lash_ext_url_whatwg::implement(&mut registry, functions)
-                    .map_err(|e| e.to_string())?;
-                lash_ext_regex_ecma::implement(
-                    &mut registry,
-                    &Arc::new(lash_ext_regex_ecma::Engine::new(4)),
-                )
-                .map_err(|e| e.to_string())?;
-                lash_ext_ts_core::implement(&mut registry, helpers).map_err(|e| e.to_string())?
+                    lash_ext_ts_core::implement(&mut registry, helpers)
+                        .map_err(|e| e.to_string())?
+                }
+                _ => lash_ext_py_core::implement(&mut registry, helpers)
+                    .map_err(|e| e.to_string())?,
             }
-            _ => lash_ext_py_core::implement(&mut registry, helpers).map_err(|e| e.to_string())?,
         }
         let build_helpers = Arc::new(
             lash_kernel_doc::BuildHelpers::new(
@@ -100,6 +117,73 @@ impl Runner {
             prepared: PreparedLibrary::with_charge(Arc::new(registry), charge)
                 .with_helper_handle(build_helpers),
         })
+    }
+
+    /// Differential leaf calls include arbitrary kernel integers, which TS
+    /// source numbers alone cannot supply, and compare the reference body.
+    #[cfg(test)]
+    pub fn leaf(
+        &self,
+        name: &str,
+        arguments: Vec<lash_kernel_doc::Literal>,
+    ) -> Result<(Result<Datum, Datum>, u64), String> {
+        use lash_kernel_doc::{Document, Expr, NumberPolicy, Stmt};
+        let (function, _) = self
+            .prepared
+            .registry()
+            .iter()
+            .find(|(_, f)| f.name() == name)
+            .ok_or("missing leaf")?;
+        let mut document = Document::new(
+            NumberPolicy::BySpelling,
+            vec![Stmt::Return {
+                value: Expr::Call {
+                    function: *function,
+                    args: arguments.into_iter().map(Expr::Literal).collect(),
+                },
+            }],
+        );
+        document.library.insert(*function);
+        let program = crate::linked::program(Arc::new(document), self.prepared.clone());
+        let mut machine = crate::pages::start(
+            program.clone(),
+            Bounds {
+                memory_meter: lash_kernel_vm::MemoryMeter::On,
+                charge: self.charge,
+                charge_limit: 50_000_000,
+                memory: 64 << 20,
+                call_depth: 200,
+                live_tasks: 100,
+                requests_per_park: 100,
+                join_members: 100,
+            },
+            CellStart {
+                target: Target::Main,
+                args: vec![],
+                session: None,
+                owner: crate::pages::OWNER,
+                modes: modes(&program),
+                host: vec![],
+            },
+        )
+        .map_err(|e| e.to_string())?;
+        let mut host = ScriptHost {
+            bits: 0,
+            stride: 0,
+            nanoseconds: 0,
+        };
+        let result = match machine
+            .run(&mut host, u64::MAX)
+            .map_err(|e| e.to_string())?
+        {
+            Step::Ended(End::Finished(value)) => Ok(value.result),
+            Step::Ended(End::Error(RunError::Uncaught { error, .. })) => Err(error),
+            other => return Err(format!("unexpected leaf end: {other:?}")),
+        };
+        Ok((
+            result,
+            machine.meters().charged.ok_or("missing exact charge")?,
+        ))
     }
 
     pub fn run(&self, case: &Case) -> Result<Observed, String> {

@@ -38,6 +38,7 @@ for name, predicate in [('whitespace', str.isspace), ('printable', lambda c: not
     parts.append(f'''function py.text.{name}(point: Int) -> Bool
 kernel 1
 charge {32 + len(rows) * 8}
+native
 body {{
   let ranges = [
 ''')

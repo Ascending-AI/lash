@@ -155,6 +155,8 @@ pub(crate) fn native(
             let (function, _) = callees.iter().find(|(_, label)| *label == name)?;
             registry.get(function)?.native().cloned()
         }),
+        #[cfg(feature = "dialect-python")]
+        "python" => lash_ext_py_core::native(name),
         _ => None,
     };
     native.unwrap_or_else(|| unreachable!("the source owner's native table names {package}:{name}"))

@@ -12,6 +12,7 @@ use list.len
 function py.text.whitespace(point: Int) -> Bool
 kernel 1
 charge 112
+native
 body {
   let ranges = [
     (9, 13),
@@ -46,6 +47,7 @@ body {
 function py.text.printable(point: Int) -> Bool
 kernel 1
 charge 5728
+native
 body {
   # The common ASCII case needs no range table.
   if lt(point, 32) { return false }

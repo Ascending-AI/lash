@@ -1,6 +1,6 @@
 //! The TypeScript dialect's helpers: closed ones as Rust plans compiled from
 //! their kernel bodies (FIG-6678), and the hot operations that can reach
-//! guest code as partial natives (FIG-6440).
+//! guest code as partial natives (FIG-6440), plus total numeric indexing.
 //!
 //! The helper compiler (`lash-ext-helper-compiler`) compiles each closed body
 //! to a plan the machine runs where a native would answer, through the
@@ -24,6 +24,7 @@
 //! its build registered ([`implement`]).
 
 mod conversions;
+mod number_index;
 
 use std::sync::Arc;
 
@@ -54,28 +55,13 @@ mod plans;
 
 pub use plans::PLANS;
 
-/// The helpers this crate has a native for, by name.
-pub const OPERATIONS: [&str; 11] = [
-    "ts.builtin_name",
-    "ts.get",
-    "ts.add",
-    "ts.sub",
-    "ts.to_number",
-    "ts.to_boolean",
-    "ts.number.format_value",
-    "ts.lt",
-    "ts.le",
-    "ts.gt",
-    "ts.ge",
-];
-
 /// Installs each plan of [`PLANS`] beside the helper of `helpers` it was
 /// compiled from, then adds its native to each of `helpers` that this
 /// crate implements ([`OPERATIONS`]), each looked up by the name its
 /// definition carries. Closed kernel callee plans are installed as
 /// dependencies, sharing an already installed kernel plan across dialects.
 /// The registry must hold the kernel library already: the natives call
-/// its `num.add`, `num.sub`, `text.concat` and `text.utf16_compare`.
+/// its `num.add`, `num.sub`, `num.lt`, `text.concat` and `text.utf16_compare`.
 ///
 /// # Errors
 ///
@@ -100,7 +86,13 @@ pub fn implement(
         })
         .collect();
     registry.install_plans(&plans)?;
-    for name in ["num.add", "text.concat", "num.sub", "text.utf16_compare"] {
+    for name in [
+        "num.add",
+        "text.concat",
+        "num.sub",
+        "num.lt",
+        "text.utf16_compare",
+    ] {
         registry
             .native_named(name)
             .ok_or(ImplementError::Missing(name))?;
@@ -120,13 +112,27 @@ pub fn implement(
     Ok(())
 }
 
-/// Constructs a native by the build's identity table, reading only the
-/// pure kernel implementations that this native delegates to.
-pub fn native(
-    name: &str,
-    kernel: impl Fn(&str) -> Option<Arc<dyn NativeFunction>>,
-) -> Option<Arc<dyn NativeFunction>> {
-    Some(match name {
+// One declaration owns both the constructor dispatch and its name projection.
+macro_rules! natives {
+    ($name:ident, $kernel:ident; $( $($label:literal)|+ => $implementation:expr ),+ $(,)?) => {
+        /// The helpers this crate has a hand-written native for, by name.
+        pub const OPERATIONS: [&str; [$($(stringify!($label)),+),+].len()] = [$($($label),+),+];
+
+        /// Constructs a native by the build's identity table, reading only the
+        /// pure kernel implementations that this native delegates to.
+        pub fn native(
+            $name: &str,
+            $kernel: impl Fn(&str) -> Option<Arc<dyn NativeFunction>>,
+        ) -> Option<Arc<dyn NativeFunction>> {
+            Some(match $name {
+                $( $($label)|+ => $implementation, )+
+                _ => return None,
+            })
+        }
+    };
+}
+
+natives!(name, kernel;
         "ts.builtin_name" => Arc::new(BuiltinName),
         "ts.get" => Arc::new(Get),
         "ts.add" => Arc::new(Add {
@@ -139,6 +145,9 @@ pub fn native(
         "ts.to_number" => Arc::new(ToNumber),
         "ts.to_boolean" => Arc::new(conversions::ToBoolean),
         "ts.number.format_value" => Arc::new(conversions::NumberToString),
+        "ts.number_index" => Arc::new(number_index::NumberIndex {
+            less: kernel("num.lt")?,
+        }),
         "ts.lt" | "ts.le" | "ts.gt" | "ts.ge" => Arc::new(Relate {
             relation: match name {
                 "ts.lt" => Relation::Lt,
@@ -148,9 +157,7 @@ pub fn native(
             },
             compare: kernel("text.utf16_compare")?,
         }),
-        _ => return None,
-    })
-}
+);
 
 fn pair<'a>(call: &'a NativeCall<'_, '_>) -> (&'a Value, &'a Value) {
     match call.args.values() {

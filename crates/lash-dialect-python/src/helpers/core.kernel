@@ -165,7 +165,8 @@ body {
 # and chooses the quote that needs the fewest escapes.
 function py.text_repr(value: Text) -> Text
 kernel 1
-charge sum(4, size(value), size(result))
+charge sum(8, product(32, size(value)), product(2, size(result)))
+native
 body {
   let quote = "'"
   if le(0, text.find(value, "'", 0)) {

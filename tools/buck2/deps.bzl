@@ -271,6 +271,7 @@ PACKAGE_DEPS = {
         },
         "normal": {
             "lash_kernel_doc": "//crates/lash-kernel-doc:lash-kernel-doc",
+            "lash_kernel_lib": "//crates/lash-kernel-lib:lash-kernel-lib",
             "lash_vocabulary": "//crates/lash-vocabulary:lash-vocabulary",
             "thiserror": "//third-party/rust:p0375"
         }

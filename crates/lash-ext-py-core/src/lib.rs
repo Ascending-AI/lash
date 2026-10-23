@@ -1,5 +1,5 @@
 //! The Python dialect's helpers, as Rust plans compiled from their kernel
-//! bodies (FIG-6678).
+//! bodies (FIG-6678), with measured total text leaves as natives (FIG-7171).
 //!
 //! The helpers' bodies are their definitions. The helper compiler
 //! (`lash-ext-helper-compiler`) compiles each closed body to a plan the machine
@@ -20,6 +20,7 @@ use lash_vocabulary::names::FunctionId;
 #[rustfmt::skip]
 #[path = "generated/plans.rs"]
 mod plans;
+mod text;
 
 pub use plans::PLANS;
 
@@ -57,5 +58,25 @@ pub fn implement(
         })
         .collect();
     registry.install_plans(&plans)?;
+    for function in helpers {
+        let registered = registry
+            .get(&function)
+            .ok_or(RegistryError::NotRegistered { function })?;
+        if let Some(native) = native(registered.name()) {
+            registry.implement(function, native)?;
+        }
+    }
     Ok(())
+}
+
+/// Constructs a measured total leaf; Unicode membership is build-generated
+/// from the dialect's kernel bodies, shared with their reference execution.
+pub fn native(name: &str) -> Option<std::sync::Arc<dyn lash_kernel_doc::NativeFunction>> {
+    use std::sync::Arc;
+    match name {
+        "py.text_repr" => Some(Arc::new(text::Repr)),
+        "py.text.printable" => Some(Arc::new(text::Predicate::Printable)),
+        "py.text.whitespace" => Some(Arc::new(text::Predicate::Whitespace)),
+        _ => None,
+    }
 }

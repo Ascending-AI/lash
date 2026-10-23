@@ -22,6 +22,7 @@ pub mod analysis;
 pub mod emit;
 pub mod library;
 mod template;
+mod unicode;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
@@ -87,6 +88,9 @@ fn plan_const(ident: &str) -> String {
 pub fn generate(dialect: Dialect) -> Result<Generated, String> {
     let library = Library::of(dialect)?;
     let mut generated = generate_library(&library, dialect)?;
+    if dialect == Dialect::Python {
+        generated.rust.push_str(&unicode::tables(&library)?);
+    }
     if dialect == Dialect::TypeScript {
         // The fixed table `ts.builtin_name`'s native searches, as the
         // helper's body does.

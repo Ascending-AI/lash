@@ -1132,33 +1132,21 @@ body {
 # cannot observe: -1 when it names none, and -2 when the key is no number.
 function ts.number_index(key: Any, length: Number) -> Number
 kernel 1
-charge 4
+errors "number_range"
+charge sum(4, size(key), size(length))
 native
 body {
-  # A float's position needs no closure.
-  if same(kind(key), "float") {
-    if num.le(0.0, key) {
-      if num.lt(key, length) {
-        if eq(num.floor(key), key) { return num.add(key, 0.0) }
-      }
-    }
-    return -1.0
+  let k = kind(key)
+  if same(k, "float") {} else {
+    if same(k, "integer") {} else { return -2.0 }
   }
-  let dynamic = fn(key, length) {
-    let k = kind(key)
-    if same(k, "float") {} else {
-      if same(k, "integer") {} else { return -2.0 }
+  # Compare before rounding; -0 names +0. No guest frame is needed.
+  if num.le(0, key) {
+    if num.lt(key, length) {
+      if eq(num.floor(key), key) { return num.add(num.to_float(key), 0.0) }
     }
-    # NaN and the infinities fall outside the range; -0 names 0.
-    if num.le(0, key) {
-      if num.lt(key, length) {
-        if eq(num.floor(key), key) { return num.add(num.to_float(key), 0.0) }
-      }
-    }
-    return -1.0
   }
-  let outcome = apply dynamic(key, length)
-  return outcome
+  return -1.0
 }
 
 # The position a property key names in a list of `length` elements, or -1

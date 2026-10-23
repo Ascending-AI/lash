@@ -2229,6 +2229,7 @@ dependencies = [
  "lash-ext-helper-compiler",
  "lash-internal-vocabulary",
  "lash-kernel-doc",
+ "lash-kernel-lib",
  "thiserror 2.0.18",
 ]
 

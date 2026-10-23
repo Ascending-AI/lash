@@ -25,6 +25,288 @@ use runner::{Case, Runner, tag};
 use serde::Deserialize;
 use serde_json::{Value, json};
 
+/// K-CHG-007: index comparison and conversion may read every integer word.
+#[test]
+fn number_index_charge_bounds_arbitrary_integer_comparisons() {
+    use lash_ext_helper_compiler::library::{Dialect, Library};
+    use lash_kernel_doc::Operand;
+    let library = Library::of(Dialect::TypeScript).unwrap();
+    let (_, function) = library
+        .registry
+        .iter()
+        .find(|(_, f)| f.name() == "ts.number_index")
+        .unwrap();
+    let formula = function.definition().charge().unwrap().clone();
+    for words in [1_u64, 16, 128, 1024] {
+        let charged = formula.evaluate(&mut |operand, _| match operand {
+            Operand::Param(name) if name.as_str() == "key" => 1 + words,
+            Operand::Param(_) => 2 + words,
+            Operand::Result => 1,
+        });
+        assert!(
+            charged >= 4 + 2 * words,
+            "{words} words need comparison and conversion work, got {charged}"
+        );
+    }
+}
+
+/// K-CHG-007: quoting includes scalar lookup, scanning and output bytes.
+#[test]
+fn text_repr_charge_bounds_unicode_search_and_output() {
+    use lash_ext_helper_compiler::library::{Dialect, Library};
+    use lash_kernel_doc::Operand;
+    let library = Library::of(Dialect::Python).unwrap();
+    let (_, function) = library
+        .registry
+        .iter()
+        .find(|(_, f)| f.name() == "py.text_repr")
+        .unwrap();
+    let formula = function.definition().charge().unwrap().clone();
+    for count in [1_u64, 16, 256] {
+        // U+0378 is unassigned in Unicode 15 and is spelled \\u0378.
+        let input_bytes = 2 * count;
+        let output_bytes = 2 + 6 * count;
+        let charged = formula.evaluate(&mut |operand, _| match operand {
+            Operand::Param(_) => 1 + input_bytes,
+            Operand::Result => 1 + output_bytes,
+        });
+        let required = 3 * input_bytes + 10 * count + output_bytes;
+        assert!(
+            charged >= required,
+            "{count} unassigned scalars need {required} work, got {charged}"
+        );
+    }
+}
+
+/// K-LIB-006/007 and K-CHG-007: numeric keys compare before rounding,
+/// preserve signed zero and overflow errors, and never coerce a nonnumber.
+#[test]
+fn number_index_native_matches_its_kernel_body() {
+    use lash_kernel_doc::{Float, Integer, Literal};
+    let native = Runner::new("typescript").unwrap();
+    let body = Runner::bodies("typescript").unwrap();
+    let mut keys = vec![
+        Literal::Absent,
+        Literal::Null,
+        Literal::Bool(true),
+        Literal::Text("0".into()),
+    ];
+    for value in [
+        -1.0,
+        -0.0,
+        0.0,
+        f64::from_bits(1),
+        0.5,
+        1.0,
+        2.0,
+        9007199254740992.0,
+        f64::NAN,
+        f64::INFINITY,
+        f64::NEG_INFINITY,
+    ] {
+        keys.push(Literal::Float(Float::new(value)));
+    }
+    for value in [
+        "-9223372036854775809",
+        "0",
+        "1",
+        "9007199254740993",
+        "9007199254740995",
+        "9223372036854775807",
+        "9223372036854775808",
+    ] {
+        keys.push(Literal::Int(Integer::parse(value).unwrap()));
+    }
+    keys.push(Literal::Int(
+        Integer::parse(&format!("1{}", "0".repeat(400))).unwrap(),
+    ));
+    let mut lengths = vec![
+        Literal::Int(0.into()),
+        Literal::Int(2.into()),
+        Literal::Int(Integer::parse("9007199254740993").unwrap()),
+        Literal::Int(Integer::parse(&format!("2{}", "0".repeat(400))).unwrap()),
+    ];
+    for value in [
+        -1.0,
+        -0.0,
+        1.0,
+        2.0,
+        9007199254740992.0,
+        9007199254740996.0,
+        f64::NAN,
+        f64::INFINITY,
+    ] {
+        lengths.push(Literal::Float(Float::new(value)));
+    }
+    let mut cases = 0;
+    for key in keys {
+        for length in &lengths {
+            let args = vec![key.clone(), length.clone()];
+            assert_eq!(
+                native.leaf("ts.number_index", args.clone()).unwrap(),
+                body.leaf("ts.number_index", args.clone()).unwrap(),
+                "{args:?}"
+            );
+            cases += 1;
+        }
+    }
+    println!("numeric indexing: {cases} native/body pairs");
+}
+
+/// K-LIB-006: Unicode 15 boundaries, CPython's extra whitespace,
+/// non-word and out-of-scalar integers retain the source body's answer.
+#[test]
+fn unicode_native_leaves_match_their_kernel_bodies() {
+    use lash_ext_helper_compiler::library::{Dialect, Library};
+    use lash_kernel_doc::{Expr, Literal, Rhs, Stmt};
+    let library = Library::of(Dialect::Python).unwrap();
+    let native = Runner::new("python").unwrap();
+    let body = Runner::bodies("python").unwrap();
+    let mut pairs = 0;
+    for name in ["py.text.whitespace", "py.text.printable"] {
+        let (_, function) = library
+            .registry
+            .iter()
+            .find(|(_, f)| f.name() == name)
+            .unwrap();
+        let mut points = BTreeSet::from([
+            -1,
+            0,
+            9,
+            13,
+            28,
+            32,
+            126,
+            127,
+            0x10ffff,
+            0x110000,
+            i64::MIN,
+            i64::MAX,
+        ]);
+        for statement in &function.definition().body().unwrap().block {
+            if let Stmt::Let {
+                name,
+                value: Rhs::Expr(Expr::List(ranges)),
+            } = statement
+            {
+                if name.as_str() != "ranges" {
+                    continue;
+                }
+                for range in ranges {
+                    if let Expr::Tuple(pair) = range {
+                        for bound in pair {
+                            if let Expr::Literal(Literal::Int(point)) = bound {
+                                let point = point.word().unwrap();
+                                points.extend([point - 1, point, point + 1]);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        for point in points {
+            let args = vec![Literal::Int(point.into())];
+            assert_eq!(
+                native.leaf(name, args.clone()).unwrap(),
+                body.leaf(name, args).unwrap(),
+                "{name} {point}"
+            );
+            pairs += 1;
+        }
+        for point in [
+            "-999999999999999999999999999",
+            "999999999999999999999999999",
+        ] {
+            let args = vec![Literal::Int(
+                lash_kernel_doc::Integer::parse(point).unwrap(),
+            )];
+            assert_eq!(
+                native.leaf(name, args.clone()).unwrap(),
+                body.leaf(name, args).unwrap()
+            );
+            pairs += 1;
+        }
+    }
+    println!("Unicode lookup: {pairs} native/body pairs");
+}
+
+/// K-LIB-006/007: quote choice, escapes and Unicode encoding boundaries
+/// agree with the kernel reference, at the same completion charge.
+#[test]
+fn text_quoting_native_matches_its_kernel_body_and_charge_bound() {
+    use lash_ext_helper_compiler::library::{Dialect, Library};
+    use lash_kernel_doc::{Literal, Operand, WorkCounter};
+    let native = Runner::new("python").unwrap();
+    let body = Runner::bodies("python").unwrap();
+    let mut texts: Vec<String> = [
+        "",
+        "plain",
+        "it's",
+        "say \"hi\"",
+        "'\"\\\t\n\r\0",
+        "é😀\u{378}\u{a0}\u{200d}\u{e000}\u{10ffff}",
+        "\u{ff}\u{100}\u{ffff}\u{10000}",
+    ]
+    .into_iter()
+    .map(str::to_owned)
+    .collect();
+    texts.extend([
+        "\u{7f}".repeat(64),
+        "a".repeat(15),
+        "\u{378}".repeat(256),
+        "a😀\n".repeat(2048),
+    ]);
+    let library = Library::of(Dialect::Python).unwrap();
+    let (_, function) = library
+        .registry
+        .iter()
+        .find(|(_, f)| f.name() == "py.text_repr")
+        .unwrap();
+    let formula = function.definition().charge().unwrap();
+    let implementation = lash_ext_py_core::native("py.text_repr").unwrap();
+    for text in &texts {
+        let args = vec![Literal::Text(text.clone())];
+        let actual = native.leaf("py.text_repr", args.clone()).unwrap();
+        assert_eq!(actual, body.leaf("py.text_repr", args).unwrap(), "{text:?}");
+        let Ok(Datum::Text(result)) = actual.0 else {
+            panic!("quoting did not return text")
+        };
+        let mut heap = lash_kernel_state::arena::Bench::new();
+        let value = heap.build(&Datum::Text(text.clone())).unwrap();
+        let mut counter = WorkCounter::new(None);
+        let called = heap.call(&*implementation, &[value], 64 << 20, &mut counter);
+        assert_eq!(
+            heap.datum(&called.answer.unwrap()).unwrap(),
+            Datum::Text(result.clone())
+        );
+        let charge = formula.evaluate(&mut |operand, _| match operand {
+            Operand::Param(_) => 1 + text.len() as u64,
+            Operand::Result => 1 + result.len() as u64,
+        });
+        assert!(
+            counter.spent() <= charge,
+            "native work {} exceeds {charge}",
+            counter.spent()
+        );
+    }
+    for value in [
+        Literal::Absent,
+        Literal::Null,
+        Literal::Bool(true),
+        Literal::Int(1.into()),
+    ] {
+        let args = vec![value];
+        assert_eq!(
+            native.leaf("py.text_repr", args.clone()).unwrap(),
+            body.leaf("py.text_repr", args).unwrap()
+        );
+    }
+    println!(
+        "text quoting: {} text and 4 typed-error native/body pairs; measured-work bounds",
+        texts.len()
+    );
+}
+
 #[derive(Deserialize)]
 struct Expected {
     engine: String,
