@@ -188,6 +188,21 @@ impl WorkbenchSessionPlugin {
                 )))
             })?;
 
+        reg.package_provider_bound(lash::tool_provider_key!("mail"), |this, _| {
+            Ok(Arc::new(lash::package::ToolPackageProvider::new(
+                "agent_workbench",
+                lash::tool_provider_key!("mail"),
+                [lash::package::Segment::new("inbox").map_err(|error| {
+                    lash::plugins::PluginError::Registration(error.to_string())
+                })?]
+                .into(),
+                Arc::new(mail::MockMailProvider::new(
+                    this.mail_world.clone(),
+                    this.host_triggers.clone(),
+                )),
+            )))
+        })?;
+
         reg.turn()
             .after(lash::hook_key!("write-back-notes"), move |_this, _state| {
                 Ok(Arc::new(|ctx| {
