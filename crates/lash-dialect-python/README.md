@@ -104,30 +104,32 @@ nested tuple/list targets; `async def`; ordinary function decorators;
 `with` and `async with`; value, capture, wildcard, sequence (including star),
 mapping (including rest), or/as patterns and guards in `match`;
 erased function type parameters and statically resolvable `type` aliases;
-`import asyncio`; and `class Name(Base): pass` at the top level to declare
+`import asyncio`, `import math` and `import json` (including aliases and named imports); and `class Name(Base): pass` at the top level to declare
 an exception class.
 
-Expressions: integers of any size, floats, strings and f-strings, `None`,
+Expressions: integers of any radix and size, floats, strings, bytes and f-strings, `Ellipsis`/`...`, `None`,
 `True` and `False`; lists, dicts, sets and tuples; list, dict and set
 comprehensions and generator expressions; subscripts, negative indices
-and slices with a step; arithmetic with `+ - * / // % **`; comparisons,
+and slices with a step; arithmetic with `+ - * / // % **`, exact integer `<< >> ~ | & ^`, and str percent formatting; comparisons,
 chained too; `in` and `not in`; `is` and `is not`; `and`, `or`, `not`; the
 conditional expression and assignment expressions (`:=`, whose targets in
 comprehensions belong to the containing function); set operators `| & - ^`; calls; `await`;
-`type(x).__name__`; an exception's `args` and `__cause__`.
+`type(x).__name__`; numeric metadata such as `real`, `imag`, `numerator` and `denominator`; bound methods; an exception's `args` and `__cause__`. Bytes support construction, concatenation, repetition, indexing, slicing, iteration, splitting and strict UTF-8 encoding/decoding.
 
-Built-in functions: `print` (with `sep`), `len`, `str`, `repr`, `int`,
-`float`, `bool`, `abs`, `min`, `max`, `sum`, `sorted` (with `key` and
-`reverse`), `list`, `tuple`, `set`, `dict`, `range`, `enumerate`, `zip`,
+Built-in functions: `print` (with `sep`, `end`, `flush`, and no `file`), `len`, `str`, `repr`, `int`,
+`float`, `bool`, `bytes`, `ascii`, `format`, safe `getattr`/`hasattr`, `abs`, `min`, `max` (with `key` and `default`), `sum`, `sorted` (with `key` and
+`reverse`), `list`, `tuple`, `set`, `dict` (including keyword entries), `range`, `enumerate`, `zip` (with `strict`),
 `reversed`, `any`, `all`, `round`, `isinstance`, `ord`, `chr`, `divmod`.
 
-Methods: on lists `append`, `extend`, `insert`, `pop`, `remove`, `index`,
-`count`, `sort`, `reverse`, `copy`, `clear`; on dicts `get`, `keys`,
-`values`, `items`, `setdefault`, `update`, `pop`, `copy`, `clear`; on sets
-`add`, `discard`, `remove`, `union`, `intersection`, `difference`, `copy`,
-`clear`; on strings `join`, `split`, `strip`, `lstrip`, `rstrip`, `upper`,
-`lower`, `startswith`, `endswith`, `replace`, `find`, `count`, `index`; on
-tasks `cancel`.
+Methods and properties are owned by the [member catalogue](src/lower/methods.rs),
+which also generates runtime attribute lookup and its name projection. Lists,
+dicts and sets have their ordinary collection methods; strings have the pure
+Python method surface, including case conversion, predicates, translation,
+partitioning, padding, bounded searches, formatting and optional split/strip/
+replace arguments. Set operations accept multiple iterables. `str.format`
+evaluates replacement fields and nested specs in written order. Runtime method
+closures support positional calls; keyword/rest binding through aliases is
+integrated by the callable-convention lane.
 
 Exceptions: `BaseException`, `Exception`, `ArithmeticError`,
 `ZeroDivisionError`, `OverflowError`, `AssertionError`, `LookupError`,
@@ -196,9 +198,19 @@ that calls the member; a namespace, a value type, an error and an
 operation are no values. `except dataframe.ExecutionError` catches the
 error's kind.
 
-f-strings: `!r` and `!s`, and specifications of fill, alignment, sign,
-`#`, `0`, width, `,` or `_` grouping, precision and one of the codes
-`b d e E f F o s x X %`.
+Formatting: `!r`, `!s`, `!a`, debug `=`, computed nested specifications,
+fill, alignment, sign, `z`, `#`, zero padding with grouping, width, precision,
+and `b c d e E f F g G o s x X %`. Literal locale-sensitive `n` is refused;
+a computed `n` raises `ValueError`. Percent formatting handles positional and
+mapping fields, flags and star width/precision.
+
+The pure module [catalogue](src/pure_modules.rs) defines the installed `math`
+functions and constants. Transcendentals use the kernel's pinned software
+binary64 math, with Python domain/range errors. It also provides exact
+factorial and two-argument gcd, numeric classification and angle conversions.
+`json.loads` preserves exact integer tokens; `json.dumps` supports ASCII
+escaping, separators, indentation, sorting, default conversion and JSON scalar
+policies. These are finite installed modules, with no filesystem module loader.
 
 Context managers use an explicit guest dict/record member table with
 `__enter__`/`__exit__` (or `__aenter__`/`__aexit__`). A package value uses its
@@ -227,22 +239,15 @@ Everything else is refused when lowering, with a code of `Code`, the place
 and what to write instead: classes other than exception declarations
 (`PY_CLASS_UNSUPPORTED`), generators (`PY_GENERATOR_UNSUPPORTED`), class
 patterns (`PY_MATCH_UNSUPPORTED`), decorated workflow exports
-(`PY_SYNTAX_UNSUPPORTED`), imports other than `asyncio`
-(`PY_IMPORT_UNSUPPORTED`), `*args`, `**kwargs`, keyword-only and
+(`PY_SYNTAX_UNSUPPORTED`), imports that need a general loader (`PY_IMPORT_UNSUPPORTED`), `*args`, `**kwargs`, keyword-only and
 positional-only parameters and starred targets (`PY_STAR_UNSUPPORTED`), a
 keyword argument to a callee no single `def` binds
-(`PY_KEYWORD_CALL_DYNAMIC`), bitwise and matrix operators and `%`
-formatting of a literal (`PY_OPERATOR_UNSUPPORTED`), attributes and methods
-outside the lists above (`PY_ATTRIBUTE_UNSUPPORTED`,
-`PY_METHOD_UNSUPPORTED`), a built-in used as a value or one the dialect
-lacks (`PY_BUILTIN_AS_VALUE`, `PY_BUILTIN_UNSUPPORTED`), the format codes
-`g G n c`, computed specifications, `{x=}` and `!a`
-(`PY_FORMAT_SPEC_UNSUPPORTED`), other asyncio functions
+(`PY_KEYWORD_CALL_DYNAMIC`), matrix `@` (`PY_OPERATOR_UNSUPPORTED`), frame/code/implementation traversal (`PY_ATTRIBUTE_UNSUPPORTED`) and unavailable methods (`PY_METHOD_UNSUPPORTED`), a built-in used as a value or one the dialect
+lacks (`PY_BUILTIN_AS_VALUE`, `PY_BUILTIN_UNSUPPORTED`), locale-sensitive literal `n` (`PY_FORMAT_SPEC_UNSUPPORTED`), other asyncio functions
 (`PY_ASYNC_UNSUPPORTED`), a tool or a coroutine function called without
 `await` (`PY_COROUTINE_NOT_AWAITED`), attribute assignment/deletion
 (`PY_TARGET_UNSUPPORTED`), an exception class used as a value
-(`PY_EXCEPTION_CLASS`), complex numbers and bytes
-(`PY_LITERAL_UNSUPPORTED`). A package namespace, value type or error used
+(`PY_EXCEPTION_CLASS`), complex numbers (`PY_LITERAL_UNSUPPORTED`); `bytearray`, `frozenset`, and `memoryview` await their guest value designs. A package namespace, value type or error used
 as a value (`PY_PACKAGE_NAMESPACE_VALUE`), an operation read as a value
 (`PY_OPERATION_VALUE`) and a member a package or a known package type does
 not export (`PY_PACKAGE_MEMBER_UNKNOWN`) are program defects.

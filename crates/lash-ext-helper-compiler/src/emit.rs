@@ -30,6 +30,21 @@ use crate::library::Library;
 mod plan;
 pub use plan::emit;
 
+/// Keep NUL separate from following digits: `\0` would look like an octal
+/// escape in packed text tables, even though Rust interprets it as NUL.
+pub(crate) fn text_literal(text: &str) -> String {
+    let mut literal = String::from("\"");
+    for (index, part) in text.split('\0').enumerate() {
+        if index != 0 {
+            literal.push_str(r"\u{0}");
+        }
+        let quoted = format!("{part:?}");
+        literal.push_str(&quoted[1..quoted.len() - 1]);
+    }
+    literal.push('"');
+    literal
+}
+
 /// Why a body is not compiled: the first form the compiler does not
 /// perform as the body does.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -237,7 +252,7 @@ impl Emitter<'_> {
             Literal::Float(value) => {
                 format!("p::PlanLiteral::Float({:#018x})", value.get().to_bits())
             }
-            Literal::Text(text) => format!("p::PlanLiteral::Text({text:?})"),
+            Literal::Text(text) => format!("p::PlanLiteral::Text({})", text_literal(text)),
             Literal::Bytes(bytes) => format!("p::PlanLiteral::Bytes(&{:?})", bytes.as_slice()),
             Literal::Function(name) => {
                 return Err(Unsupported(format!("names the declared function {name}")));

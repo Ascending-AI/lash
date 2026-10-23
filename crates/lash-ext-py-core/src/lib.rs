@@ -74,6 +74,7 @@ pub fn implement(
 pub fn native(name: &str) -> Option<std::sync::Arc<dyn lash_kernel_doc::NativeFunction>> {
     use std::sync::Arc;
     match name {
+        "py.bytes_len" => Some(Arc::new(text::BytesLength)),
         "py.text_repr" => Some(Arc::new(text::Repr)),
         "py.text.printable" => Some(Arc::new(text::Predicate::Printable)),
         "py.text.whitespace" => Some(Arc::new(text::Predicate::Whitespace)),

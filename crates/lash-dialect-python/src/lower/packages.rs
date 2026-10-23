@@ -646,30 +646,27 @@ impl<'a> Lowerer<'a> {
     }
 
     /// `receiver.name` on a receiver of unknown type that a package
-    /// property may answer: selection, then the getter or `helper`, the
-    /// dialect's own attribute, or the `AttributeError` when it has none.
+    /// property may answer: selection, then its declared getter or the
+    /// dialect's shared safe attribute lookup.
     pub(super) fn select_read(
         &mut self,
         receiver: Operand,
         name: &str,
-        helper: Option<&str>,
         targets: &[Target<'a>],
     ) -> Lowering<Operand> {
         let receiver = self.pin(receiver);
         let (selected, same) = self.select(&receiver, name, targets)?;
-        self.branches(&selected, same, targets, |this, at| match (at, helper) {
-            (Some(at), _) => this.invoke_member(
+        self.branches(&selected, same, targets, |this, at| match at {
+            Some(at) => this.invoke_member(
                 targets[at].member.member(),
                 std::slice::from_ref(&receiver),
                 false,
             ),
-            (None, Some(helper)) => {
-                this.invoke(helper, std::slice::from_ref(&receiver), Ty::Unknown)
-            }
-            (None, None) => {
-                this.invoke_do("py.no_attribute", &[receiver.clone(), Operand::text(name)])?;
-                Ok(Operand::none())
-            }
+            None => this.invoke(
+                "py.getattr",
+                &[receiver.clone(), Operand::text(name)],
+                Ty::Unknown,
+            ),
         })
     }
 
@@ -685,7 +682,7 @@ impl<'a> Lowerer<'a> {
     /// The function value of a code member: a closure whose parameters are
     /// the member's slots and whose body invokes its identity. A call that
     /// leaves out a slot that does not admit `absent` raises `TypeError`.
-    fn member_value(
+    pub(super) fn member_value(
         &mut self,
         member: &'a FunctionMember,
         spelled: &str,

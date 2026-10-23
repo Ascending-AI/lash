@@ -1,3 +1,4 @@
+use py.show
 # Python's built-in functions, as far as the dialect has them. The lowerer
 # calls one of these where the source calls the built-in by its name.
 
@@ -284,38 +285,30 @@ body {
 
 # `min(...)` when `largest` is false and `max(...)` when it is true, of the
 # arguments, or of the one iterable given.
-function py.extreme(args: Any, largest: Bool) -> Any
+function py.extreme(args: Any, largest: Bool, key?: Any, default?: Any) -> Any
 kernel 1
 charge sum(4, deep(args))
 body {
   let items = args
-  let name = "min"
-  if largest {
-    set name = "max"
+  if eq(tuple.len(args), 1) { let source = args[0] set items = invoke py.to_list(source) } else {
+    if bool.not(same(default, absent)) { do invoke py.fail("TypeError", "Cannot specify a default for min/max with multiple positional arguments") }
   }
-  if eq(tuple.len(args), 1) {
-    let hoisted6 = args[0]
-    set items = invoke py.to_list(hoisted6)
-    if eq(list.len(items), 0) {
-      let hoisted7 = text.concat(name, "() iterable argument is empty")
-      do invoke py.fail("ValueError", hoisted7)
-    }
-  }
+  let keyed = bool.not(same(key, absent))
+  if same(key, null) { set keyed = false }
   let best = absent
+  let rank = absent
   for item in items {
-    if same(best, absent) {
-      set best = item
-    } else {
-      if largest {
-        if lt(best, item) {
-          set best = item
-        }
-      } else {
-        if lt(item, best) {
-          set best = item
-        }
-      }
+    let candidate = item
+    if keyed { set candidate = apply key(item) }
+    if same(best, absent) { set best = item set rank = candidate } else {
+      let better = false
+      if largest { set better = lt(rank, candidate) } else { set better = lt(candidate, rank) }
+      if better { set best = item set rank = candidate }
     }
+  }
+  if same(best, absent) {
+    if bool.not(same(default, absent)) { return default }
+    do invoke py.fail("ValueError", "min/max iterable argument is empty")
   }
   return best
 }
@@ -416,7 +409,7 @@ body {
 
 # `zip(...)` of the iterables in the tuple `sequences`, as a list of tuples
 # that stops with the shortest.
-function py.zip(sequences: Any) -> List(Any)
+function py.zip(sequences: Any, strict?: Any) -> List(Any)
 kernel 1
 charge sum(4, deep(sequences), size(result))
 body {
@@ -432,6 +425,11 @@ body {
         set shortest = list.len(column)
       }
     }
+  }
+  let checked = false
+  if bool.not(same(strict, absent)) { set checked = invoke py.truth(strict) }
+  if checked {
+    for column in columns { if bool.not(eq(list.len(column), shortest)) { do invoke py.fail("ValueError", "zip() arguments have different lengths") } }
   }
   let out = []
   if same(shortest, absent) {
@@ -626,4 +624,33 @@ body {
   let quotient = invoke py.floordiv(left, right)
   let remainder = invoke py.mod(left, right)
   return (quotient, remainder)
+}
+
+function py.dict(value: Any, keywords: Any) -> Map(Any, Any)
+kernel 1
+charge sum(8, size(value), size(keywords), size(result))
+body {
+  let out = map{}
+  if bool.not(same(value, absent)) { set out = invoke py.to_dict(value) }
+  for key in keywords { set out[key] = keywords[key] }
+  return out
+}
+
+# Every print emits immediately; flush has no buffered stream to drain.
+function py.print_text(args: Any, options: Tuple(Any, Any, Any)) -> Text
+kernel 1
+charge sum(8, deep(args), deep(options), size(result))
+body {
+  let sep = options[0]
+  let end = options[1]
+  let flush = options[2]
+  if same(sep, absent) { set sep = " " }
+  if same(sep, null) { set sep = " " }
+  if same(end, absent) { set end = "\n" }
+  if same(end, null) { set end = "\n" }
+  if bool.not(same(kind(sep), "text")) { do invoke py.fail("TypeError", "sep must be None or a string") }
+  if bool.not(same(kind(end), "text")) { do invoke py.fail("TypeError", "end must be None or a string") }
+  let shown = invoke py.show(args, sep)
+  if same(end, "\n") { return shown }
+  return text.concat(shown, end)
 }

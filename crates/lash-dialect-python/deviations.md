@@ -41,3 +41,10 @@ arguments and in definition order, in the materialized module environment.
 Ordinary Python functions evaluate defaults when the definition runs. A workflow
 has no module execution phase; static data is fresh per start. Explicit `None`
 is retained. Law: `tests::module::entry_defaults_test_absence_in_definition_order`.
+
+Pure value restoration uses the existing kernel kinds: bytes are immutable
+Bytes, integers remain exact, and Ellipsis is a private guest marker. The
+existing immutable-identity and bool/numeric laws above still apply. The restored Unicode
+case conversion and predicate helpers use the pinned Python 3.12 / Unicode 15 tables.
+No ambient locale is installed: format code `n` remains refused. The pure
+module surface is finite and listed by its owning catalogue in the README.

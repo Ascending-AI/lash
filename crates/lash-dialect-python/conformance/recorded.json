@@ -243,6 +243,22 @@
    "end": "ok"
   },
   {
+   "path": "tests/basics/dict_popitem.py",
+   "epochs": [
+    {
+     "delivered": [],
+     "asked": [],
+     "logged": [
+      "1",
+      "0",
+      "Raised KeyError",
+      "[(1, 2), (3, 4)]"
+     ]
+    }
+   ],
+   "end": "ok"
+  },
+  {
    "path": "tests/basics/dict_setdefault.py",
    "epochs": [
     {
@@ -438,6 +454,55 @@
      "logged": [
       "ZeroDivisionError",
       "ZeroDivisionError"
+     ]
+    }
+   ],
+   "end": "ok"
+  },
+  {
+   "path": "tests/basics/int_small.py",
+   "epochs": [
+    {
+     "delivered": [],
+     "asked": [],
+     "logged": [
+      "0",
+      "1",
+      "-1",
+      "63",
+      "64",
+      "65",
+      "-63",
+      "-64",
+      "-65",
+      "1073741823",
+      "-1073741823",
+      "4",
+      "1",
+      "6",
+      "1",
+      "3",
+      "2",
+      "3",
+      "-3",
+      "-4",
+      "4194303",
+      "67108848",
+      "1073741568",
+      "1073741823",
+      "-4194303",
+      "-67108848",
+      "-1073741568",
+      "-1073741823",
+      "-1073741824",
+      "ValueError",
+      "ValueError",
+      "0",
+      "0",
+      "0",
+      "0",
+      "0",
+      "0"
      ]
     }
    ],
@@ -673,6 +738,41 @@
       "2",
       "1",
       "1"
+     ]
+    }
+   ],
+   "end": "ok"
+  },
+  {
+   "path": "tests/basics/string_split.py",
+   "epochs": [
+    {
+     "delivered": [],
+     "asked": [],
+     "logged": [
+      "['a', 'b']",
+      "['a', 'b']",
+      "['a', 'b    ']",
+      "['a', 'b']",
+      "['a', 'b  c  ']",
+      "['a   b  c  ']",
+      "['a', 'b', 'c']",
+      "['foo', '\\x07', 'bar']",
+      "['foo', 'bar']",
+      "ValueError",
+      "['', 'bc']",
+      "['a', 'c']",
+      "['ab', '']",
+      "['abc']",
+      "['', 'c']",
+      "['a', '']",
+      "['', '']",
+      "['abc']",
+      "['a', 'a', '']",
+      "['abcabc']",
+      "['a', 'abc']",
+      "['a', 'a', '']",
+      "[b'a', b'a', b'']"
      ]
     }
    ],

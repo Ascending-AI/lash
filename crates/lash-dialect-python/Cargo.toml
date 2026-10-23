@@ -21,6 +21,7 @@ doctest = false
 workspace = true
 
 [dependencies]
+num-bigint = { workspace = true }
 lash-dialect-services = { workspace = true }
 lash-vocabulary = { workspace = true }
 unicode-ident = "1"

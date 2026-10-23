@@ -85,3 +85,63 @@ parts.append('''  ] {
 }
 ''')
 (pathlib.Path(__file__).parent.parent / 'src/helpers/unicode.kernel').write_text(''.join(parts))
+
+# Finite pinned scalar tables are packed text, not thousands of AST tuples.
+# Predicate rows contain two six-digit hexadecimal endpoints. Mapping rows
+# contain a six-digit key and three output scalars, padded with NUL.
+import json
+
+def quoted(text):
+    return json.dumps(text, ensure_ascii=False).replace('\\u0000', '\\u{0}')
+
+text_parts = [header.replace('use list.len', 'use text.len\nuse text.slice\nuse text.find\nuse int.parse\nuse mul\nuse text.from_code_points')]
+for name, predicate in [('alpha', str.isalpha), ('alnum', str.isalnum), ('digit', str.isdigit), ('numeric', str.isnumeric), ('lower', str.islower), ('upper', str.isupper), ('title', str.istitle), ('identifier_start', str.isidentifier), ('identifier_continue', lambda c: ('a' + c).isidentifier()), ('ignorable', lambda c: ('AΣ' + c + 'B').lower()[1] == 'σ' and not (c.islower() or c.isupper() or c.istitle()))]:
+    rows = ranges(predicate)
+    table = ''.join(f'{lo:06x}{hi:06x}' for lo, hi in rows)
+    text_parts.append(f'''function py.text.{name}(point: Int) -> Bool
+kernel 1
+charge {64 + len(table) * 32}
+body {{
+  let table = {quoted(table)}
+  let low = 0
+  let high = {len(rows)}
+  while lt(low, high) {{
+    let middle = div_floor(add(low, high), 2)
+    let offset = mul(middle, 12)
+    let lower = int.parse(text.slice(table, offset, add(offset, 6)), 16)
+    let upper = int.parse(text.slice(table, add(offset, 6), add(offset, 12)), 16)
+    if lt(point, lower) {{ set high = middle }} else {{
+      if lt(upper, point) {{ set low = add(middle, 1) }} else {{ return true }}
+    }}
+  }}
+  return false
+}}
+''')
+for name, transform in [('lowercase', str.lower), ('uppercase', str.upper), ('titlecase', str.title), ('casefold', str.casefold)]:
+    rows = [(point, transform(chr(point))) for point in range(0x110000) if transform(chr(point)) != chr(point)]
+    assert all(len(text) <= 3 for _, text in rows)
+    table = ''.join(f'{point:06x}' + text.ljust(3, chr(0)) for point, text in rows)
+    text_parts.append(f'''function py.text.{name}(point: Int) -> Text
+kernel 1
+charge {64 + len(table.encode()) * 32}
+body {{
+  let table = {quoted(table)}
+  let low = 0
+  let high = {len(rows)}
+  while lt(low, high) {{
+    let middle = div_floor(add(low, high), 2)
+    let offset = mul(middle, 9)
+    let key = int.parse(text.slice(table, offset, add(offset, 6)), 16)
+    if lt(point, key) {{ set high = middle }} else {{
+      if lt(key, point) {{ set low = add(middle, 1) }} else {{
+        let mapped = text.slice(table, add(offset, 6), add(offset, 9))
+        let end = text.find(mapped, "\\u{{0}}", 0)
+        if lt(end, 0) {{ return mapped }}
+        return text.slice(mapped, 0, end)
+      }}
+    }}
+  }}
+  return text.from_code_points([point])
+}}
+''')
+(pathlib.Path(__file__).parent.parent / 'src/helpers/text_data.kernel').write_text(''.join(text_parts))

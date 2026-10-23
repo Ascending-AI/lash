@@ -1,0 +1,360 @@
+use py.text.ignorable
+use py.text.sigma
+# Pure scalar text operations and Python's optional slice-style bounds.
+use kind
+use same
+use eq
+use lt
+use le
+use add
+use sub
+use mul
+use div_floor
+use rem_floor
+use bool.not
+use text.len
+use text.get
+use text.slice
+use text.find
+use text.concat
+use text.join
+use text.repeat
+use text.to_code_points
+use text.from_code_points
+use text.starts_with
+use text.ends_with
+use text.trim_set
+use list.len
+use list.slice
+use list.contains
+use tuple.len
+use tuple.contains
+use py.fail
+use py.no_attribute
+use py.text_of
+use py.length
+use py.to_list
+use py.text.whitespace
+use py.text.printable
+use py.text.decimal
+use py.text.alpha
+use py.text.alnum
+use py.text.digit
+use py.text.numeric
+use py.text.lower
+use py.text.upper
+use py.text.title
+use py.text.identifier_start
+use py.text.identifier_continue
+use py.text.lowercase
+use py.text.uppercase
+use py.text.titlecase
+use py.text.casefold
+use py.text.case
+use py.text.predicate
+use py.text.bounds
+use py.text.search
+use py.text.split
+use py.text.pad
+use py.text.partition
+
+function py.text.bounds(length: Int, start: Any, end: Any) -> Any
+kernel 1
+charge 8
+body {
+  if same(start, absent) { set start = 0 }
+  if same(end, absent) { set end = length }
+  if same(start, null) { set start = 0 }
+  if same(end, null) { set end = length }
+  if bool.not(same(kind(start), "integer")) { do invoke py.fail("TypeError", "slice indices must be integers or None") }
+  if bool.not(same(kind(end), "integer")) { do invoke py.fail("TypeError", "slice indices must be integers or None") }
+  if lt(start, 0) { set start = add(start, length) if lt(start, 0) { set start = 0 } }
+  if lt(end, 0) { set end = add(end, length) if lt(end, 0) { set end = 0 } }
+  if lt(length, end) { set end = length }
+  return (start, end)
+}
+
+function py.text.search(self: Text, needle: Text, start: Any, end: Any, backwards: Bool) -> Int
+kernel 1
+charge sum(8, product(size(self), size(needle)))
+body {
+  let n = text.len(self)
+  let bounds = invoke py.text.bounds(n, start, end)
+  let low = bounds[0]
+  let high = bounds[1]
+  if lt(high, low) { return -1 }
+  let found = text.find(self, needle, low)
+  if lt(found, 0) { return -1 }
+  if lt(high, add(found, text.len(needle))) { return -1 }
+  if backwards {
+    let next = found
+    while lt(next, high) metered 2 {
+      set next = text.find(self, needle, add(next, 1))
+      if lt(next, 0) { break }
+      if lt(high, add(next, text.len(needle))) { break }
+      set found = next
+    }
+  }
+  return found
+}
+
+function py.text.case(self: Any, mode: Text) -> Text
+kernel 1
+charge sum(8, size(self), size(result))
+body {
+  let value = invoke py.text_of(self, mode)
+  let parts = []
+  let previous = false
+  let first = true
+  let points = text.to_code_points(value)
+  let position = -1
+  for point in points metered 2 {
+    set position = add(position, 1)
+    let lower = invoke py.text.lower(point)
+    let upper = invoke py.text.upper(point)
+    let title = invoke py.text.title(point)
+    let cased = lower
+    if upper { set cased = true }
+    if title { set cased = true }
+    let part = text.from_code_points([point])
+    if same(mode, "casefold") { set part = invoke py.text.casefold(point) }
+    if same(mode, "swapcase") {
+      if lower { set part = invoke py.text.uppercase(point) } else {
+        if upper { set part = invoke py.text.lowercase(point) }
+      }
+    }
+    if same(mode, "title") {
+      if previous { set part = invoke py.text.lowercase(point) } else { set part = invoke py.text.titlecase(point) }
+    }
+    if same(mode, "capitalize") {
+      if first { set part = invoke py.text.titlecase(point) } else { set part = invoke py.text.lowercase(point) }
+    }
+    if eq(point, 931) {
+      let lowered = same(mode, "capitalize")
+      if lowered { set lowered = bool.not(first) }
+      if same(mode, "title") { set lowered = previous }
+      if same(mode, "swapcase") { set lowered = true }
+      if lowered { set part = invoke py.text.sigma(points, position) }
+    }
+    set previous = cased
+    set first = false
+    set parts[list.len(parts)] = part
+  }
+  return text.join(parts, "")
+}
+
+function py.text.predicate(self: Any, mode: Text) -> Bool
+kernel 1
+charge sum(8, size(self))
+body {
+  let value = invoke py.text_of(self, mode)
+  let points = text.to_code_points(value)
+  if eq(list.len(points), 0) {
+    if same(mode, "isprintable") { return true }
+    return same(mode, "isascii")
+  }
+  let saw_case = false
+  let previous = false
+  let first = true
+  for point in points metered 2 {
+    let ok = true
+    if same(mode, "isalpha") { set ok = invoke py.text.alpha(point) }
+    if same(mode, "isalnum") { set ok = invoke py.text.alnum(point) }
+    if same(mode, "isdigit") { set ok = invoke py.text.digit(point) }
+    if same(mode, "isnumeric") { set ok = invoke py.text.numeric(point) }
+    if same(mode, "isdecimal") { let digit = invoke py.text.decimal(point) set ok = le(0, digit) }
+    if same(mode, "isspace") { set ok = invoke py.text.whitespace(point) }
+    if same(mode, "isprintable") { set ok = invoke py.text.printable(point) }
+    if same(mode, "isascii") { set ok = lt(point, 128) }
+    if same(mode, "isidentifier") {
+      if first { set ok = invoke py.text.identifier_start(point) } else { set ok = invoke py.text.identifier_continue(point) }
+    }
+    if same(mode, "islower") {
+      let lower = invoke py.text.lower(point)
+      let upper = invoke py.text.upper(point)
+      let title = invoke py.text.title(point)
+      if upper { set ok = false }
+      if title { set ok = false }
+      if lower { set saw_case = true }
+    }
+    if same(mode, "isupper") {
+      let lower = invoke py.text.lower(point)
+      let upper = invoke py.text.upper(point)
+      let title = invoke py.text.title(point)
+      if lower { set ok = false }
+      if title { if bool.not(upper) { set ok = false } }
+      if upper { set saw_case = true }
+    }
+    if same(mode, "istitle") {
+      let lower = invoke py.text.lower(point)
+      let upper = invoke py.text.upper(point)
+      let title = invoke py.text.title(point)
+      if title { set upper = true }
+      if upper { if previous { return false } set saw_case = true }
+      if lower { if bool.not(previous) { return false } set saw_case = true }
+      set previous = lower
+      if upper { set previous = true }
+    }
+    if bool.not(ok) { return false }
+    set first = false
+  }
+  for cased in ["islower", "isupper", "istitle"] { if same(mode, cased) { return saw_case } }
+  return true
+}
+
+function py.text.pad(self: Any, width: Any, fill: Any, mode: Text) -> Text
+kernel 1
+charge sum(8, size(self), magnitude(width), size(result))
+body {
+  let value = invoke py.text_of(self, mode)
+  if bool.not(same(kind(width), "integer")) { do invoke py.fail("TypeError", "width must be an integer") }
+  if same(fill, absent) { set fill = " " }
+  if bool.not(same(kind(fill), "text")) { do invoke py.fail("TypeError", "fill character must be a string") }
+  if bool.not(eq(text.len(fill), 1)) { do invoke py.fail("TypeError", "fill character must be exactly one character long") }
+  let missing = sub(width, text.len(value))
+  if le(missing, 0) { return value }
+  if same(mode, "ljust") { return text.concat(value, text.repeat(fill, missing)) }
+  if same(mode, "rjust") { return text.concat(text.repeat(fill, missing), value) }
+  let left = div_floor(missing, 2)
+  if eq(rem_floor(missing, 2), 1) { if eq(rem_floor(width, 2), 1) { set left = add(left, 1) } }
+  return text.join([text.repeat(fill, left), value, text.repeat(fill, sub(missing, left))], "")
+}
+
+function py.text.partition(self: Any, separator: Any, backwards: Bool) -> Any
+kernel 1
+charge sum(8, size(self), size(separator), size(result))
+body {
+  let value = invoke py.text_of(self, "partition")
+  let needle = invoke py.text_of(separator, "partition")
+  if same(needle, "") { do invoke py.fail("ValueError", "empty separator") }
+  let found = invoke py.text.search(value, needle, absent, absent, backwards)
+  if lt(found, 0) { if backwards { return ("", "", value) } return (value, "", "") }
+  return (text.slice(value, 0, found), needle, text.slice(value, add(found, text.len(needle)), text.len(value)))
+}
+
+function py.text.split(self: Any, separator: Any, maximum: Any, backwards: Bool, ascii?: Bool) -> Any
+kernel 1
+charge sum(8, product(size(self), size(self)), size(result))
+body {
+  let value = invoke py.text_of(self, "split")
+  if same(maximum, absent) { set maximum = -1 }
+  if bool.not(same(kind(maximum), "integer")) { do invoke py.fail("TypeError", "maxsplit must be an integer") }
+  let whitespace = same(separator, absent)
+  if same(separator, null) { set whitespace = true }
+  let needle = ""
+  if bool.not(whitespace) {
+    set needle = invoke py.text_of(separator, "split")
+    if same(needle, "") { do invoke py.fail("ValueError", "empty separator") }
+  }
+  let low = 0
+  let high = text.len(value)
+  let out = []
+  let splits = 0
+  if backwards {
+    while true metered 2 {
+      if whitespace {
+        while lt(low, high) metered 2 {
+          let p = text.to_code_points(text.get(value, sub(high, 1)))
+          let blank = invoke py.text.whitespace(p[0])
+          if same(ascii, true) { set blank = list.contains([9, 10, 11, 12, 13, 32], p[0]) }
+          if bool.not(blank) { break }
+          set high = sub(high, 1)
+        }
+        if eq(low, high) { break }
+      }
+      if eq(splits, maximum) { set out[list.len(out)] = text.slice(value, low, high) break }
+      let cut = -1
+      let after = 0
+      if whitespace {
+        let i = sub(high, 1)
+        while le(low, i) metered 2 {
+          let p = text.to_code_points(text.get(value, i))
+          let blank = invoke py.text.whitespace(p[0])
+          if same(ascii, true) { set blank = list.contains([9, 10, 11, 12, 13, 32], p[0]) }
+          if blank { set cut = i set after = add(i, 1) break }
+          set i = sub(i, 1)
+        }
+      } else {
+        set cut = invoke py.text.search(value, needle, low, high, true)
+        set after = add(cut, text.len(needle))
+      }
+      if lt(cut, 0) { set out[list.len(out)] = text.slice(value, low, high) break }
+      set out[list.len(out)] = text.slice(value, after, high)
+      set high = cut
+      set splits = add(splits, 1)
+    }
+    let reversed = []
+    let i = list.len(out)
+    while lt(0, i) metered 2 { set i = sub(i, 1) set reversed[list.len(reversed)] = out[i] }
+    return reversed
+  }
+  while true metered 2 {
+    if whitespace {
+      while lt(low, high) metered 2 {
+        let p = text.to_code_points(text.get(value, low))
+        let blank = invoke py.text.whitespace(p[0])
+          if same(ascii, true) { set blank = list.contains([9, 10, 11, 12, 13, 32], p[0]) }
+        if bool.not(blank) { break }
+        set low = add(low, 1)
+      }
+      if eq(low, high) { break }
+    }
+    if eq(splits, maximum) { set out[list.len(out)] = text.slice(value, low, high) break }
+    let cut = -1
+    let after = 0
+    if whitespace {
+      let i = low
+      while lt(i, high) metered 2 {
+        let p = text.to_code_points(text.get(value, i))
+        let blank = invoke py.text.whitespace(p[0])
+          if same(ascii, true) { set blank = list.contains([9, 10, 11, 12, 13, 32], p[0]) }
+        if blank { set cut = i set after = add(i, 1) break }
+        set i = add(i, 1)
+      }
+    } else { set cut = text.find(value, needle, low) set after = add(cut, text.len(needle)) }
+    if lt(cut, 0) { set out[list.len(out)] = text.slice(value, low, high) break }
+    set out[list.len(out)] = text.slice(value, low, cut)
+    set low = after
+    set splits = add(splits, 1)
+  }
+  return out
+}
+
+# Unicode final-sigma context skips exactly the pinned case-ignorable set.
+function py.text.sigma(points: Any, position: Int) -> Text
+kernel 1
+charge sum(8, size(points))
+body {
+  let before = false
+  let i = sub(position, 1)
+  while le(0, i) metered 2 {
+    let point = points[i]
+    let ignore = invoke py.text.ignorable(point)
+    if bool.not(ignore) {
+      set before = invoke py.text.lower(point)
+      let upper = invoke py.text.upper(point)
+      let title = invoke py.text.title(point)
+      if upper { set before = true }
+      if title { set before = true }
+      break
+    }
+    set i = sub(i, 1)
+  }
+  if bool.not(before) { return "σ" }
+  set i = add(position, 1)
+  while lt(i, list.len(points)) metered 2 {
+    let point = points[i]
+    let ignore = invoke py.text.ignorable(point)
+    if bool.not(ignore) {
+      let lower = invoke py.text.lower(point)
+      let upper = invoke py.text.upper(point)
+      let title = invoke py.text.title(point)
+      if lower { return "σ" }
+      if upper { return "σ" }
+      if title { return "σ" }
+      break
+    }
+    set i = add(i, 1)
+  }
+  return "ς"
+}

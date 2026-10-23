@@ -2109,6 +2109,7 @@ dependencies = [
  "lash-kernel-package",
  "lash-kernel-state",
  "lash-kernel-vm",
+ "num-bigint",
  "ruff_python_ast",
  "ruff_python_parser",
  "ruff_text_size",

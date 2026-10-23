@@ -27,17 +27,8 @@ const REFUSED: &[(&str, Code)] = &[
     ("first, *rest = [1, 2]\n", Code::StarUnsupported),
     ("xs = [1]\nprint(*xs)\n", Code::StarUnsupported),
     ("fs = [lambda a: a]\nfs[0](a=1)\n", Code::KeywordCallDynamic),
-    ("x = (1).real\n", Code::AttributeUnsupported),
-    ("x = 'a'.title()\n", Code::MethodUnsupported),
-    ("x = '{}'.format(1)\n", Code::MethodUnsupported),
     ("f = len\n", Code::BuiltinAsValue),
     ("x = list(map(str, [1]))\n", Code::BuiltinUnsupported),
-    ("x = 1 << 2\n", Code::OperatorUnsupported),
-    ("x = ~1\n", Code::OperatorUnsupported),
-    ("x = '%d' % 1\n", Code::OperatorUnsupported),
-    ("x = f'{1.5:g}'\n", Code::FormatSpecUnsupported),
-    ("w = 5\nx = f'{1:{w}}'\n", Code::FormatSpecUnsupported),
-    ("x = 1\ny = f'{x=}'\n", Code::FormatSpecUnsupported),
     (
         "import asyncio\nawait asyncio.wait_for(host.echo(1), 1)\n",
         Code::AsyncUnsupported,
@@ -53,7 +44,11 @@ const REFUSED: &[(&str, Code)] = &[
         Code::ExceptionClass,
     ),
     ("x = 1j\n", Code::LiteralUnsupported),
-    ("x = b'bytes'\n", Code::LiteralUnsupported),
+    (
+        "def f():\n    pass\nx = f.__globals__\n",
+        Code::AttributeUnsupported,
+    ),
+    ("x = f'{1:n}'\n", Code::FormatSpecUnsupported),
 ];
 
 /// FIG-5777: repair forms retain the submitted callee and its operands.
@@ -310,57 +305,15 @@ fn every_advertised_repair_form_lowers() {
         ),
         (
             "invoice_number = 42\n",
-            "format(invoice_number)",
-            BuiltinUnsupported,
-            "f\"{invoice_number}\"",
-        ),
-        (
-            "invoice_number = 42\n",
-            "'{}'.format(invoice_number)",
-            MethodUnsupported,
-            "f\"{invoice_number}\"",
-        ),
-        (
-            "invoice_number = 42\n",
             "type(invoice_number)",
             BuiltinUnsupported,
             "type(invoice_number).__name__",
         ),
         (
             "invoice = {'total': 1}\n",
-            "invoice.total",
-            AttributeUnsupported,
-            "(invoice)[\"total\"]",
-        ),
-        (
-            "invoice = {'total': 1}\n",
             "invoice.total = 2",
             TargetUnsupported,
             "(invoice)[\"total\"] = 2",
-        ),
-        (
-            "invoice_number = 42\nshift = 2\n",
-            "invoice_number << shift",
-            OperatorUnsupported,
-            "(invoice_number) * (2 ** (shift))",
-        ),
-        (
-            "invoice_number = 42\nshift = 2\n",
-            "invoice_number >> shift",
-            OperatorUnsupported,
-            "(invoice_number) // (2 ** (shift))",
-        ),
-        (
-            "invoice_number = 42\n",
-            "'%d' % invoice_number",
-            OperatorUnsupported,
-            "f\"{invoice_number}\"",
-        ),
-        (
-            "invoice_number = 42\n",
-            "~invoice_number",
-            OperatorUnsupported,
-            "-(invoice_number) - 1",
         ),
         (
             "fs = [lambda a: a]\ninvoice_number = 42\n",
@@ -383,17 +336,6 @@ fn every_advertised_repair_form_lowers() {
         );
         machine::lower(&format!("{prelude}{form}\n"))
             .unwrap_or_else(|error| panic!("the offered form must lower: {error}\n{form}"));
-    }
-    let diagnostic =
-        machine::lower("invoice_number = 42\nf'{invoice_number:g}'").expect_err("g is refused");
-    for form in diagnostic.repairs[0]
-        .split('`')
-        .skip(1)
-        .step_by(2)
-        .filter(|form| form.starts_with("f\""))
-    {
-        machine::lower(&format!("invoice_number = 42\n{form}"))
-            .unwrap_or_else(|error| panic!("the offered format must lower: {error}\n{form}"));
     }
 }
 

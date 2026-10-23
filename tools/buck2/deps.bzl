@@ -142,6 +142,7 @@ PACKAGE_DEPS = {
             "lash_kernel_dialect": "//crates/lash-kernel-dialect:lash-kernel-dialect",
             "lash_kernel_doc": "//crates/lash-kernel-doc:lash-kernel-doc",
             "lash_vocabulary": "//crates/lash-vocabulary:lash-vocabulary",
+            "num_bigint": "//third-party/rust:p0212",
             "ruff_python_ast": "//third-party/rust:p0288",
             "ruff_python_parser": "//third-party/rust:p0289",
             "ruff_text_size": "//third-party/rust:p0292",

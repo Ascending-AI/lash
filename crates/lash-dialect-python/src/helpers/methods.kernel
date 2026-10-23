@@ -1,3 +1,46 @@
+use is_nan
+use format.decimal_parts
+use bytes.from_octets
+use py.bytes_items
+use py.bytes_text
+use py.getitem
+use py.method.format
+use py.exc.name
+use map.len
+use abs
+use bytes.utf8_decode
+use bytes.utf8_encode
+use div
+use div_floor
+use float.parse
+use int.to_text
+use is_finite
+use is_integer
+use mul
+use num.to_float
+use num.to_int
+use pow
+use py.bytes
+use py.length
+use py.str
+use py.sub
+use py.text.bounds
+use py.text.case
+use py.text.pad
+use py.text.partition
+use py.text.predicate
+use py.text.search
+use py.text.split
+use py.truth
+use record.contains
+use rem_floor
+use text.find
+use text.get
+use text.len
+use text.repeat
+use text.slice
+use text.trim_set
+use tuple.len
 # Methods of the built-in types. `value.name(...)` lowers to a call of
 # `py.method.name` with the receiver first; the receiver's kind chooses what
 # runs, and a kind that has no such method raises AttributeError.
@@ -229,66 +272,58 @@ body {
   return null
 }
 
-function py.method.index(self: Any, value: Any) -> Int
+function py.method.index(self: Any, value: Any, start?: Any, end?: Any) -> Int
 kernel 1
-charge sum(6, size(self), deep(value))
+charge sum(8, product(size(self), size(value)), deep(value))
 body {
   let k = kind(self)
-  if same(k, "list") {
-    let position = list.index_of(self, value)
-    if lt(position, 0) {
-      let shown = invoke py.repr(value)
-      let hoisted4 = text.concat(shown, " is not in list")
-      do invoke py.fail("ValueError", hoisted4)
-    }
-    return position
-  }
-  if same(k, "tuple") {
-    let position = tuple.index_of(self, value)
-    if lt(position, 0) {
-      do invoke py.fail("ValueError", "tuple.index(x): x not in tuple")
-    }
-    return position
-  }
+  if same(k, "list") { } else { if same(k, "tuple") { } else {
+    if bool.not(same(k, "text")) { do invoke py.no_attribute(self, "index") }
+  } }
   if same(k, "text") {
     let needle = invoke py.text_of(value, "index")
-    let position = text.find(self, needle, 0)
-    if lt(position, 0) {
-      do invoke py.fail("ValueError", "substring not found")
-    }
-    return position
+    let found = invoke py.text.search(self, needle, start, end, false)
+    if lt(found, 0) { do invoke py.fail("ValueError", "substring not found") }
+    return found
   }
-  do invoke py.no_attribute(self, "index")
+  let length = invoke py.length(self)
+  let bounds = invoke py.text.bounds(length, start, end)
+  let i = bounds[0]
+  while lt(i, bounds[1]) metered 2 {
+    if eq(self[i], value) { return i }
+    set i = add(i, 1)
+  }
+  do invoke py.fail("ValueError", "value is not in sequence")
   return 0
 }
 
-function py.method.count(self: Any, value: Any) -> Int
+function py.method.count(self: Any, value: Any, start?: Any, end?: Any) -> Int
 kernel 1
-charge sum(6, size(self), deep(value))
+charge sum(8, product(size(self), size(value)), deep(value))
 body {
   let k = kind(self)
-  let total = 0
   if same(k, "text") {
     let needle = invoke py.text_of(value, "count")
-    if same(needle, "") {
-      return add(text.len(self), 1)
-    }
-    return sub(list.len(text.split(self, needle)), 1)
-  }
-  let walked = same(k, "list")
-  if bool.not(walked) {
-    set walked = same(k, "tuple")
-  }
-  if walked {
-    for item in self {
-      if eq(item, value) {
-        set total = add(total, 1)
-      }
+    let n = text.len(self)
+    let bounds = invoke py.text.bounds(n, start, end)
+    let i = bounds[0]
+    let total = 0
+    while le(i, bounds[1]) metered 2 {
+      let found = invoke py.text.search(self, needle, i, bounds[1], false)
+      if lt(found, 0) { break }
+      set total = add(total, 1)
+      let step = text.len(needle)
+      if eq(step, 0) { set step = 1 }
+      set i = add(found, step)
     }
     return total
   }
-  do invoke py.no_attribute(self, "count")
-  return 0
+  if bool.not(same(start, absent)) { do invoke py.fail("TypeError", "count takes exactly one argument") }
+  if bool.not(same(end, absent)) { do invoke py.fail("TypeError", "count takes exactly one argument") }
+  let total = 0
+  if same(k, "list") { } else { if bool.not(same(k, "tuple")) { do invoke py.no_attribute(self, "count") } }
+  for item in self { if eq(item, value) { set total = add(total, 1) } }
+  return total
 }
 
 # `list.sort(key=key, reverse=reverse)`, in place.
@@ -499,22 +534,26 @@ body {
 }
 
 # `dict.update(other)` and `set.update(other)`.
-function py.method.update(self: Any, other: Any) -> Null
+function py.method.update(self: Any, args: Any, keywords: Any) -> Null
 kernel 1
-charge sum(4, size(other))
+charge sum(8, deep(args), size(keywords))
 body {
   let k = kind(self)
   if same(k, "map") {
-    let entries = invoke py.to_dict(other)
-    for key in entries {
-      set self[key] = entries[key]
+    if lt(1, tuple.len(args)) { do invoke py.fail("TypeError", "update expected at most one positional argument") }
+    if eq(tuple.len(args), 1) {
+      let source = args[0]
+      let entries = invoke py.to_dict(source)
+      for key in entries { set self[key] = entries[key] }
     }
+    for key in keywords { set self[key] = keywords[key] }
     return null
   }
   if same(k, "set") {
-    let members = invoke py.to_list(other)
-    for member in members {
-      set self[member] = true
+    if lt(0, map.len(keywords)) { do invoke py.fail("TypeError", "set.update takes no keyword arguments") }
+    for source in args {
+      let members = invoke py.to_list(source)
+      for member in members { set self[member] = true }
     }
     return null
   }
@@ -546,48 +585,46 @@ body {
   return null
 }
 
-function py.method.union(self: Any, other: Any) -> Any
+function py.method.union(self: Any, args: Any, keywords: Any) -> Any
 kernel 1
-charge sum(4, size(self), size(other))
+charge sum(8, size(self), deep(args), size(result))
 body {
-  if same(kind(self), "set") {
-    let members = invoke py.to_set(other)
-    let out = invoke py.set_op("|", self, members)
-    return out
+  if bool.not(same(kind(self), "set")) { do invoke py.no_attribute(self, "union") }
+  if lt(0, map.len(keywords)) { do invoke py.fail("TypeError", "set methods take no keyword arguments") }
+  let out = set.copy(self)
+  for source in args {
+    let members = invoke py.to_set(source)
+    set out = invoke py.set_op("|", out, members)
   }
-  do invoke py.no_attribute(self, "union")
-  return null
+  return out
 }
 
-function py.method.intersection(self: Any, other: Any) -> Any
+function py.method.intersection(self: Any, args: Any, keywords: Any) -> Any
 kernel 1
-charge sum(4, size(self), size(other))
+charge sum(8, size(self), deep(args), size(result))
 body {
-  if same(kind(self), "set") {
-    let members = invoke py.to_set(other)
-    let out = invoke py.set_op("&", self, members)
-    return out
+  if bool.not(same(kind(self), "set")) { do invoke py.no_attribute(self, "intersection") }
+  if lt(0, map.len(keywords)) { do invoke py.fail("TypeError", "set methods take no keyword arguments") }
+  let out = set.copy(self)
+  for source in args {
+    let members = invoke py.to_set(source)
+    set out = invoke py.set_op("&", out, members)
   }
-  do invoke py.no_attribute(self, "intersection")
-  return null
+  return out
 }
 
-function py.method.difference(self: Any, other: Any) -> Any
+function py.method.difference(self: Any, args: Any, keywords: Any) -> Any
 kernel 1
-charge sum(4, size(self), size(other))
+charge sum(8, size(self), deep(args), size(result))
 body {
-  if same(kind(self), "set") {
-    let members = invoke py.to_set(other)
-    let out = set{}
-    for member in self {
-      if bool.not(set.contains(members, member)) {
-        set out[member] = true
-      }
-    }
-    return out
+  if bool.not(same(kind(self), "set")) { do invoke py.no_attribute(self, "difference") }
+  if lt(0, map.len(keywords)) { do invoke py.fail("TypeError", "set methods take no keyword arguments") }
+  let out = set.copy(self)
+  for source in args {
+    let members = invoke py.to_set(source)
+    set out = invoke py.sub(out, members)
   }
-  do invoke py.no_attribute(self, "difference")
-  return null
+  return out
 }
 
 function py.method.join(self: Any, values: Any) -> Text
@@ -610,73 +647,53 @@ body {
 
 # `str.split()` splits on runs of white space and drops empty pieces;
 # `str.split(separator)` keeps them.
-function py.method.split(self: Any, separator?: Any) -> Any
+function py.method.split(self: Any, separator?: Any, maximum?: Any) -> Any
 kernel 1
-charge sum(4, size(self), size(result))
+charge sum(8, size(self), size(separator), size(result))
 body {
-  if same(kind(self), "text") {
-    let plain = same(separator, absent)
-    if bool.not(plain) {
-      set plain = same(separator, null)
-    }
-    if plain {
-      let out = []
-      let word = []
-      for point in text.to_code_points(self) {
-        let whitespace = invoke py.text.whitespace(point)
-        if whitespace {
-          if lt(0, list.len(word)) {
-            set out[list.len(out)] = text.from_code_points(word)
-            set word = []
-          }
-        } else {
-          set word[list.len(word)] = point
-        }
-      }
-      if lt(0, list.len(word)) { set out[list.len(out)] = text.from_code_points(word) }
-      return out
-    }
-    let needle = invoke py.text_of(separator, "split")
-    if same(needle, "") {
-      do invoke py.fail("ValueError", "empty separator")
-    }
-    return text.split(self, needle)
+  if same(kind(self), "bytes") {
+    let value = invoke py.bytes_text(self)
+    let needle = separator
+    if bool.not(same(separator, absent)) { if bool.not(same(separator, null)) { set needle = invoke py.bytes_text(separator) } }
+    let parts = invoke py.text.split(value, needle, maximum, false, true)
+    let out = []
+    for part in parts { set out[list.len(out)] = bytes.from_octets(text.to_code_points(part)) }
+    return out
   }
-  do invoke py.no_attribute(self, "split")
-  return null
+  return invoke py.text.split(self, separator, maximum, false, false)
 }
 
-function py.method.strip(self: Any) -> Text
+function py.method.strip(self: Any, characters?: Any) -> Text
 kernel 1
-charge sum(4, size(self))
+charge sum(8, product(size(self), size(characters)), size(result))
 body {
-  if same(kind(self), "text") {
-    return text.trim_u17_0_0(self)
-  }
-  do invoke py.no_attribute(self, "strip")
-  return ""
+  let value = invoke py.text_of(self, "strip")
+  if same(characters, absent) { return text.trim_u17_0_0(value) }
+  if same(characters, null) { return text.trim_u17_0_0(value) }
+  let chars = invoke py.text_of(characters, "strip")
+  return text.trim_set(value, chars, true, true)
 }
 
-function py.method.lstrip(self: Any) -> Text
+function py.method.lstrip(self: Any, characters?: Any) -> Text
 kernel 1
-charge sum(4, size(self))
+charge sum(8, product(size(self), size(characters)), size(result))
 body {
-  if same(kind(self), "text") {
-    return text.trim_start_u17_0_0(self)
-  }
-  do invoke py.no_attribute(self, "lstrip")
-  return ""
+  let value = invoke py.text_of(self, "lstrip")
+  if same(characters, absent) { return text.trim_start_u17_0_0(value) }
+  if same(characters, null) { return text.trim_start_u17_0_0(value) }
+  let chars = invoke py.text_of(characters, "lstrip")
+  return text.trim_set(value, chars, true, false)
 }
 
-function py.method.rstrip(self: Any) -> Text
+function py.method.rstrip(self: Any, characters?: Any) -> Text
 kernel 1
-charge sum(4, size(self))
+charge sum(8, product(size(self), size(characters)), size(result))
 body {
-  if same(kind(self), "text") {
-    return text.trim_end_u17_0_0(self)
-  }
-  do invoke py.no_attribute(self, "rstrip")
-  return ""
+  let value = invoke py.text_of(self, "rstrip")
+  if same(characters, absent) { return text.trim_end_u17_0_0(value) }
+  if same(characters, null) { return text.trim_end_u17_0_0(value) }
+  let chars = invoke py.text_of(characters, "rstrip")
+  return text.trim_set(value, chars, false, true)
 }
 
 function py.method.upper(self: Any) -> Text
@@ -701,53 +718,82 @@ body {
   return ""
 }
 
-function py.method.startswith(self: Any, prefix: Any) -> Bool
+function py.method.startswith(self: Any, prefix: Any, start?: Any, end?: Any) -> Bool
 kernel 1
-charge sum(4, size(self), size(prefix))
+charge sum(8, size(self), deep(prefix))
 body {
-  if same(kind(self), "text") {
-    let needle = invoke py.text_of(prefix, "startswith")
-    return text.starts_with(self, needle)
+  let value = invoke py.text_of(self, "startswith")
+  let n = text.len(value)
+  let bounds = invoke py.text.bounds(n, start, end)
+  let needles = (prefix,)
+  if same(kind(prefix), "tuple") { set needles = prefix }
+  for item in needles {
+    let needle = invoke py.text_of(item, "startswith")
+    if le(bounds[0], bounds[1]) {
+      let sliced = text.slice(value, bounds[0], bounds[1])
+      if text.starts_with(sliced, needle) { return true }
+    }
   }
-  do invoke py.no_attribute(self, "startswith")
   return false
 }
 
-function py.method.endswith(self: Any, suffix: Any) -> Bool
+function py.method.endswith(self: Any, prefix: Any, start?: Any, end?: Any) -> Bool
 kernel 1
-charge sum(4, size(self), size(suffix))
+charge sum(8, size(self), deep(prefix))
 body {
-  if same(kind(self), "text") {
-    let needle = invoke py.text_of(suffix, "endswith")
-    return text.ends_with(self, needle)
+  let value = invoke py.text_of(self, "endswith")
+  let n = text.len(value)
+  let bounds = invoke py.text.bounds(n, start, end)
+  let needles = (prefix,)
+  if same(kind(prefix), "tuple") { set needles = prefix }
+  for item in needles {
+    let needle = invoke py.text_of(item, "endswith")
+    if le(bounds[0], bounds[1]) {
+      let sliced = text.slice(value, bounds[0], bounds[1])
+      if text.ends_with(sliced, needle) { return true }
+    }
   }
-  do invoke py.no_attribute(self, "endswith")
   return false
 }
 
-function py.method.replace(self: Any, old: Any, new: Any) -> Text
+function py.method.replace(self: Any, old: Any, new: Any, count?: Any) -> Text
 kernel 1
-charge sum(4, size(self), size(result))
+charge sum(8, product(size(self), size(old)), size(new), size(result))
 body {
-  if same(kind(self), "text") {
-    let needle = invoke py.text_of(old, "replace")
-    let replacement = invoke py.text_of(new, "replace")
-    return text.replace(self, needle, replacement)
+  let value = invoke py.text_of(self, "replace")
+  let needle = invoke py.text_of(old, "replace")
+  let replacement = invoke py.text_of(new, "replace")
+  if same(count, absent) { set count = -1 }
+  if bool.not(same(kind(count), "integer")) { do invoke py.fail("TypeError", "count must be an integer") }
+  let parts = []
+  let i = 0
+  let replaced = 0
+  let length = text.len(value)
+  while le(i, length) metered 2 {
+    if eq(replaced, count) { break }
+    let found = text.find(value, needle, i)
+    if lt(found, 0) { break }
+    set parts[list.len(parts)] = text.slice(value, i, found)
+    set parts[list.len(parts)] = replacement
+    set replaced = add(replaced, 1)
+    set i = add(found, text.len(needle))
+    if eq(text.len(needle), 0) {
+      if lt(i, length) { set parts[list.len(parts)] = text.get(value, i) }
+      set i = add(i, 1)
+    }
   }
-  do invoke py.no_attribute(self, "replace")
-  return ""
+  set parts[list.len(parts)] = text.slice(value, i, length)
+  return text.join(parts, "")
 }
 
-function py.method.find(self: Any, value: Any) -> Int
+function py.method.find(self: Any, value: Any, start?: Any, end?: Any) -> Int
 kernel 1
-charge sum(4, size(self), size(value))
+charge sum(8, product(size(self), size(value)), deep(value))
 body {
-  if same(kind(self), "text") {
-    let needle = invoke py.text_of(value, "find")
-    return text.find(self, needle, 0)
-  }
-  do invoke py.no_attribute(self, "find")
-  return 0
+  let text = invoke py.text_of(self, "find")
+  let needle = invoke py.text_of(value, "find")
+  let found = invoke py.text.search(text, needle, start, end, false)
+  return found
 }
 
 # `task.cancel()`: the task meets CancelledError at the wait it is in, and
@@ -763,4 +809,558 @@ body {
   }
   do invoke py.no_attribute(self, "cancel")
   return false
+}
+
+function py.method.title(self: Any) -> Text
+kernel 1
+charge sum(8, size(self), size(result))
+body {
+  return invoke py.text.case(self, "title")
+}
+
+function py.method.capitalize(self: Any) -> Text
+kernel 1
+charge sum(8, size(self), size(result))
+body {
+  return invoke py.text.case(self, "capitalize")
+}
+
+function py.method.swapcase(self: Any) -> Text
+kernel 1
+charge sum(8, size(self), size(result))
+body {
+  return invoke py.text.case(self, "swapcase")
+}
+
+function py.method.casefold(self: Any) -> Text
+kernel 1
+charge sum(8, size(self), size(result))
+body {
+  return invoke py.text.case(self, "casefold")
+}
+
+function py.method.isalpha(self: Any) -> Bool
+kernel 1
+charge sum(8, size(self), size(result))
+body {
+  return invoke py.text.predicate(self, "isalpha")
+}
+
+function py.method.isalnum(self: Any) -> Bool
+kernel 1
+charge sum(8, size(self), size(result))
+body {
+  return invoke py.text.predicate(self, "isalnum")
+}
+
+function py.method.isdecimal(self: Any) -> Bool
+kernel 1
+charge sum(8, size(self), size(result))
+body {
+  return invoke py.text.predicate(self, "isdecimal")
+}
+
+function py.method.isdigit(self: Any) -> Bool
+kernel 1
+charge sum(8, size(self), size(result))
+body {
+  return invoke py.text.predicate(self, "isdigit")
+}
+
+function py.method.isnumeric(self: Any) -> Bool
+kernel 1
+charge sum(8, size(self), size(result))
+body {
+  return invoke py.text.predicate(self, "isnumeric")
+}
+
+function py.method.islower(self: Any) -> Bool
+kernel 1
+charge sum(8, size(self), size(result))
+body {
+  return invoke py.text.predicate(self, "islower")
+}
+
+function py.method.isupper(self: Any) -> Bool
+kernel 1
+charge sum(8, size(self), size(result))
+body {
+  return invoke py.text.predicate(self, "isupper")
+}
+
+function py.method.istitle(self: Any) -> Bool
+kernel 1
+charge sum(8, size(self), size(result))
+body {
+  return invoke py.text.predicate(self, "istitle")
+}
+
+function py.method.isspace(self: Any) -> Bool
+kernel 1
+charge sum(8, size(self), size(result))
+body {
+  return invoke py.text.predicate(self, "isspace")
+}
+
+function py.method.isprintable(self: Any) -> Bool
+kernel 1
+charge sum(8, size(self), size(result))
+body {
+  return invoke py.text.predicate(self, "isprintable")
+}
+
+function py.method.isascii(self: Any) -> Bool
+kernel 1
+charge sum(8, size(self), size(result))
+body {
+  return invoke py.text.predicate(self, "isascii")
+}
+
+function py.method.isidentifier(self: Any) -> Bool
+kernel 1
+charge sum(8, size(self), size(result))
+body {
+  return invoke py.text.predicate(self, "isidentifier")
+}
+
+function py.method.center(self: Any, width: Any, fill?: Any) -> Text
+kernel 1
+charge sum(8, size(self), magnitude(width), size(result))
+body {
+  return invoke py.text.pad(self, width, fill, "center")
+}
+
+function py.method.ljust(self: Any, width: Any, fill?: Any) -> Text
+kernel 1
+charge sum(8, size(self), magnitude(width), size(result))
+body {
+  return invoke py.text.pad(self, width, fill, "ljust")
+}
+
+function py.method.rjust(self: Any, width: Any, fill?: Any) -> Text
+kernel 1
+charge sum(8, size(self), magnitude(width), size(result))
+body {
+  return invoke py.text.pad(self, width, fill, "rjust")
+}
+
+function py.method.partition(self: Any, separator: Any) -> Any
+kernel 1
+charge sum(8, size(self), size(result))
+body {
+  return invoke py.text.partition(self, separator, false)
+}
+
+function py.method.rpartition(self: Any, separator: Any) -> Any
+kernel 1
+charge sum(8, size(self), size(result))
+body {
+  return invoke py.text.partition(self, separator, true)
+}
+
+function py.method.rsplit(self: Any, separator?: Any, maximum?: Any) -> Any
+kernel 1
+charge sum(8, size(self), size(separator), size(result))
+body {
+  if same(kind(self), "bytes") {
+    let value = invoke py.bytes_text(self)
+    let needle = separator
+    if bool.not(same(separator, absent)) { if bool.not(same(separator, null)) { set needle = invoke py.bytes_text(separator) } }
+    let parts = invoke py.text.split(value, needle, maximum, true, true)
+    let out = []
+    for part in parts { set out[list.len(out)] = bytes.from_octets(text.to_code_points(part)) }
+    return out
+  }
+  return invoke py.text.split(self, separator, maximum, true, false)
+}
+
+function py.method.rfind(self: Any, value: Any, start?: Any, end?: Any) -> Int
+kernel 1
+charge sum(8, product(size(self), size(value)), deep(value))
+body {
+  let text = invoke py.text_of(self, "rfind")
+  let needle = invoke py.text_of(value, "rfind")
+  let found = invoke py.text.search(text, needle, start, end, true)
+  return found
+}
+
+function py.method.rindex(self: Any, value: Any, start?: Any, end?: Any) -> Int
+kernel 1
+charge sum(8, product(size(self), size(value)), deep(value))
+body {
+  let text = invoke py.text_of(self, "rindex")
+  let needle = invoke py.text_of(value, "rindex")
+  let found = invoke py.text.search(text, needle, start, end, true)
+  if lt(found, 0) { do invoke py.fail("ValueError", "substring not found") }
+  return found
+}
+
+function py.method.removeprefix(self: Any, prefix: Any) -> Text
+kernel 1
+charge sum(8, size(self), size(result))
+body {
+  let value = invoke py.text_of(self, "removeprefix")
+  let needle = invoke py.text_of(prefix, "removeprefix")
+  if text.starts_with(value, needle) { return text.slice(value, text.len(needle), text.len(value)) }
+  return value
+}
+
+function py.method.removesuffix(self: Any, prefix: Any) -> Text
+kernel 1
+charge sum(8, size(self), size(result))
+body {
+  let value = invoke py.text_of(self, "removesuffix")
+  let needle = invoke py.text_of(prefix, "removesuffix")
+  if text.ends_with(value, needle) { return text.slice(value, 0, sub(text.len(value), text.len(needle))) }
+  return value
+}
+
+function py.method.zfill(self: Any, width: Any) -> Text
+kernel 1
+charge sum(8, size(self), magnitude(width), size(result))
+body {
+  let value = invoke py.text_of(self, "zfill")
+  if bool.not(same(kind(width), "integer")) { do invoke py.fail("TypeError", "width must be an integer") }
+  let n = sub(width, text.len(value))
+  if le(n, 0) { return value }
+  let prefix = ""
+  if text.starts_with(value, "+") { set prefix = "+" }
+  if text.starts_with(value, "-") { set prefix = "-" }
+  return text.join([prefix, text.repeat("0", n), text.slice(value, text.len(prefix), text.len(value))], "")
+}
+
+function py.method.expandtabs(self: Any, tabsize?: Any) -> Text
+kernel 1
+charge sum(8, size(self), size(result))
+body {
+  let value = invoke py.text_of(self, "expandtabs")
+  if same(tabsize, absent) { set tabsize = 8 }
+  if bool.not(same(kind(tabsize), "integer")) { do invoke py.fail("TypeError", "tabsize must be an integer") }
+  let parts = []
+  let column = 0
+  for point in text.to_code_points(value) metered 2 {
+    if eq(point, 9) {
+      let n = 0
+      if lt(0, tabsize) { set n = sub(tabsize, rem_floor(column, tabsize)) }
+      set parts[list.len(parts)] = text.repeat(" ", n)
+      set column = add(column, n)
+    } else {
+      set parts[list.len(parts)] = text.from_code_points([point])
+      set column = add(column, 1)
+      if eq(point, 10) { set column = 0 }
+      if eq(point, 13) { set column = 0 }
+    }
+  }
+  return text.join(parts, "")
+}
+
+function py.method.splitlines(self: Any, keepends?: Any) -> Any
+kernel 1
+charge sum(8, size(self), size(result))
+body {
+  let value = invoke py.text_of(self, "splitlines")
+  let keep = false
+  if bool.not(same(keepends, absent)) { set keep = invoke py.truth(keepends) }
+  let points = text.to_code_points(value)
+  let out = []
+  let start = 0
+  let i = 0
+  while lt(i, list.len(points)) metered 2 {
+    let point = points[i]
+    if list.contains([10, 11, 12, 13, 28, 29, 30, 133, 8232, 8233], point) {
+      let end = i
+      set i = add(i, 1)
+      if eq(point, 13) { if lt(i, list.len(points)) { if eq(points[i], 10) { set i = add(i, 1) } } }
+      if keep { set end = i }
+      set out[list.len(out)] = text.slice(value, start, end)
+      set start = i
+    } else { set i = add(i, 1) }
+  }
+  if lt(start, list.len(points)) { set out[list.len(out)] = text.slice(value, start, list.len(points)) }
+  return out
+}
+
+function py.method.encode(self: Any, encoding?: Any, error_policy?: Any) -> Bytes
+kernel 1
+charge sum(8, size(self), size(result))
+body {
+  if bool.not(same(kind(self), "text")) { do invoke py.no_attribute(self, "encode") }
+  if same(encoding, absent) { set encoding = "utf-8" }
+  if bool.not(same(encoding, "utf-8")) { if bool.not(same(encoding, "utf8")) { do invoke py.fail("LookupError", "unknown encoding") } }
+  if bool.not(same(error_policy, absent)) { if bool.not(same(error_policy, "strict")) { do invoke py.fail("ValueError", "unsupported encoding error handler") } }
+  return bytes.utf8_encode(self)
+}
+
+function py.method.decode(self: Any, encoding?: Any, error_policy?: Any) -> Text
+kernel 1
+charge sum(8, size(self), size(result))
+body {
+  if bool.not(same(kind(self), "bytes")) { do invoke py.no_attribute(self, "decode") }
+  if same(encoding, absent) { set encoding = "utf-8" }
+  if bool.not(same(encoding, "utf-8")) { if bool.not(same(encoding, "utf8")) { do invoke py.fail("LookupError", "unknown encoding") } }
+  if bool.not(same(error_policy, absent)) { if bool.not(same(error_policy, "strict")) { do invoke py.fail("ValueError", "unsupported encoding error handler") } }
+  return bytes.utf8_decode(self)
+}
+
+function py.method.is_integer(self: Any) -> Bool
+kernel 1
+charge sum(8, size(self), size(result))
+body {
+  if bool.not(same(kind(self), "float")) { do invoke py.no_attribute(self, "is_integer") }
+  return is_integer(self)
+}
+
+function py.method.as_integer_ratio(self: Any) -> Any
+kernel 1
+charge sum(262144, size(self), size(result))
+body {
+  if same(kind(self), "integer") { return (self, 1) }
+  if bool.not(same(kind(self), "float")) { do invoke py.no_attribute(self, "as_integer_ratio") }
+  if bool.not(is_finite(self)) {
+    if is_nan(self) { do invoke py.fail("ValueError", "cannot convert NaN to integer ratio") }
+    do invoke py.fail("OverflowError", "cannot convert Infinity to integer ratio")
+  }
+  let numerator = self
+  let denominator = 1
+  while bool.not(is_integer(numerator)) metered 2 { set numerator = mul(numerator, 2) set denominator = mul(denominator, 2) }
+  return (num.to_int(numerator), denominator)
+}
+
+function py.method.bit_length(self: Any) -> Int
+kernel 1
+charge sum(8, product(64, product(size(self), size(self))))
+body {
+  if bool.not(same(kind(self), "integer")) { do invoke py.no_attribute(self, "bit_length") }
+  let value = abs(self)
+  let out = 0
+  while lt(0, value) metered 2 { set out = add(out, 1) set value = div_floor(value, 2) }
+  return out
+}
+
+function py.method.bit_count(self: Any) -> Int
+kernel 1
+charge sum(8, product(64, product(size(self), size(self))))
+body {
+  if bool.not(same(kind(self), "integer")) { do invoke py.no_attribute(self, "bit_count") }
+  let value = abs(self)
+  let out = 0
+  while lt(0, value) metered 2 { set out = add(out, rem_floor(value, 2)) set value = div_floor(value, 2) }
+  return out
+}
+
+function py.method.hex(self: Any) -> Text
+kernel 1
+charge sum(16384, size(self), size(result))
+body {
+  if bool.not(same(kind(self), "float")) { do invoke py.no_attribute(self, "hex") }
+  if bool.not(is_finite(self)) { return invoke py.str(self) }
+  let value = abs(self)
+  let sign = ""
+  let metadata = format.decimal_parts(self)
+  if metadata[1] { set sign = "-" }
+  if eq(value, 0) { return text.concat(sign, "0x0.0p+0") }
+  let exponent = 0
+  while le(2, value) metered 2 { set value = div(value, 2) set exponent = add(exponent, 1) }
+  while lt(value, 1) metered 2 { if eq(exponent, -1022) { break } set value = mul(value, 2) set exponent = sub(exponent, 1) }
+  let whole = num.to_int(floor(value))
+  let fraction = sub(value, num.to_float(whole))
+  let digits = []
+  let i = 0
+  while lt(i, 13) metered 2 { set fraction = mul(fraction, 16) let digit = num.to_int(floor(fraction)) set digits[i] = int.to_text(digit, 16) set fraction = sub(fraction, num.to_float(digit)) set i = add(i, 1) }
+  let exp_sign = "+"
+  if lt(exponent, 0) { set exp_sign = "-" }
+  return text.join([sign, "0x", int.to_text(whole, 16), ".", text.join(digits, ""), "p", exp_sign, num.to_text(abs(exponent))], "")
+}
+
+function py.method.symmetric_difference(self: Any, other: Any) -> Any
+kernel 1
+charge sum(8, size(self), size(other), size(result))
+body {
+  if bool.not(same(kind(self), "set")) { do invoke py.no_attribute(self, "symmetric_difference") }
+  let members = invoke py.to_set(other)
+  let out = invoke py.set_op("^", self, members)
+  return out
+}
+
+function py.method.symmetric_difference_update(self: Any, other: Any) -> Null
+kernel 1
+charge sum(8, size(self), size(other), size(result))
+body {
+  if bool.not(same(kind(self), "set")) { do invoke py.no_attribute(self, "symmetric_difference_update") }
+  let members = invoke py.to_set(other)
+  let out = invoke py.set_op("^", self, members)
+  do invoke set.clear(self)
+  for item in out { set self[item] = true }
+  return null
+}
+
+function py.method.intersection_update(self: Any, args: Any, keywords: Any) -> Null
+kernel 1
+charge sum(8, size(self), deep(args))
+body {
+  if bool.not(same(kind(self), "set")) { do invoke py.no_attribute(self, "intersection_update") }
+  if lt(0, map.len(keywords)) { do invoke py.fail("TypeError", "set methods take no keyword arguments") }
+  for source in args {
+    let members = invoke py.to_set(source)
+    let out = invoke py.set_op("&", self, members)
+    do invoke set.clear(self)
+    for member in out { set self[member] = true }
+  }
+  return null
+}
+
+function py.method.difference_update(self: Any, args: Any, keywords: Any) -> Null
+kernel 1
+charge sum(8, size(self), deep(args))
+body {
+  if bool.not(same(kind(self), "set")) { do invoke py.no_attribute(self, "difference_update") }
+  if lt(0, map.len(keywords)) { do invoke py.fail("TypeError", "set methods take no keyword arguments") }
+  for source in args {
+    let members = invoke py.to_set(source)
+    let out = invoke py.sub(self, members)
+    do invoke set.clear(self)
+    for member in out { set self[member] = true }
+  }
+  return null
+}
+
+function py.method.issubset(self: Any, other: Any) -> Bool
+kernel 1
+charge sum(8, size(self), size(other))
+body {
+  if bool.not(same(kind(self), "set")) { do invoke py.no_attribute(self, "issubset") }
+  let members = invoke py.to_set(other)
+  let left = self
+  let right = members
+
+  for item in left { if bool.not(set.contains(right, item)) { return false } }
+  return true
+}
+
+function py.method.issuperset(self: Any, other: Any) -> Bool
+kernel 1
+charge sum(8, size(self), size(other))
+body {
+  if bool.not(same(kind(self), "set")) { do invoke py.no_attribute(self, "issuperset") }
+  let members = invoke py.to_set(other)
+  let left = self
+  let right = members
+  set left = members set right = self
+  for item in left { if bool.not(set.contains(right, item)) { return false } }
+  return true
+}
+
+function py.method.isdisjoint(self: Any, other: Any) -> Bool
+kernel 1
+charge sum(8, size(self), size(other))
+body {
+  if bool.not(same(kind(self), "set")) { do invoke py.no_attribute(self, "isdisjoint") }
+  let members = invoke py.to_set(other)
+  let left = self
+  let right = members
+
+  for item in left { if set.contains(right, item) { return false } }
+  return true
+}
+
+
+function py.method.popitem(self: Any) -> Any
+kernel 1
+charge sum(8, size(self))
+body {
+  if bool.not(same(kind(self), "map")) { do invoke py.no_attribute(self, "popitem") }
+  let keys = map.keys(self)
+  if eq(list.len(keys), 0) { do invoke py.fail("KeyError", "popitem(): dictionary is empty") }
+  let key = keys[sub(list.len(keys), 1)]
+  let value = self[key]
+  remove self[key]
+  return (key, value)
+}
+
+function py.method.fromkeys(self: Any, source: Any, value?: Any) -> Any
+kernel 1
+charge sum(8, size(source), size(result))
+body {
+  if bool.not(same(kind(self), "map")) { do invoke py.no_attribute(self, "fromkeys") }
+  if same(value, absent) { set value = null }
+  let keys = invoke py.to_list(source)
+  let out = map{}
+  for key in keys { set out[key] = value }
+  return out
+}
+
+function py.method.conjugate(self: Any) -> Any
+kernel 1
+charge 4
+body {
+  if same(kind(self), "integer") { return self }
+  if same(kind(self), "float") { return self }
+  do invoke py.no_attribute(self, "conjugate")
+  return null
+}
+
+function py.method.format_map(self: Any, mapping: Any) -> Text
+kernel 1
+charge sum(8, size(self), deep(mapping), size(result))
+body {
+  if bool.not(same(kind(mapping), "map")) { do invoke py.fail("TypeError", "format_map requires a mapping") }
+  try { return invoke py.method.format(self, (), mapping) } catch problem {
+    let name = invoke py.exc.name(problem)
+    if same(name, "IndexError") { do invoke py.fail("ValueError", "Format string contains positional fields") }
+    throw problem
+  }
+}
+
+function py.method.translate(self: Any, table: Any) -> Text
+kernel 1
+charge sum(8, size(self), deep(table), size(result))
+body {
+  let value = invoke py.text_of(self, "translate")
+  let parts = []
+  for point in text.to_code_points(value) metered 2 {
+    let replacement = point
+    try { set replacement = invoke py.getitem(table, point) } catch problem {
+      let name = invoke py.exc.name(problem)
+      if same(name, "KeyError") {} else { if bool.not(same(name, "IndexError")) { throw problem } }
+    }
+    if same(replacement, null) { continue }
+    if same(kind(replacement), "integer") { set replacement = text.from_code_points([replacement]) }
+    if bool.not(same(kind(replacement), "text")) { do invoke py.fail("TypeError", "character mapping must return integer, None or str") }
+    set parts[list.len(parts)] = replacement
+  }
+  return text.join(parts, "")
+}
+
+function py.method.maketrans(self: Any, first: Any, second?: Any, deleted?: Any) -> Any
+kernel 1
+charge sum(8, deep(first), size(second), size(deleted), size(result))
+body {
+  let receiver = invoke py.text_of(self, "maketrans")
+  let out = map{}
+  if same(second, absent) {
+    if bool.not(same(kind(first), "map")) { do invoke py.fail("TypeError", "if you give only one argument to maketrans it must be a dict") }
+    for key in first {
+      let index = key
+      if same(kind(index), "text") {
+        let points = text.to_code_points(index)
+        if bool.not(eq(list.len(points), 1)) { do invoke py.fail("ValueError", "string keys in translate table must be of length 1") }
+        set index = points[0]
+      }
+      if bool.not(same(kind(index), "integer")) { do invoke py.fail("TypeError", "keys in translate table must be strings or integers") }
+      set out[index] = first[key]
+    }
+    return out
+  }
+  let left = invoke py.text_of(first, "maketrans")
+  let right = invoke py.text_of(second, "maketrans")
+  let a = text.to_code_points(left)
+  let b = text.to_code_points(right)
+  if bool.not(eq(list.len(a), list.len(b))) { do invoke py.fail("ValueError", "the first two maketrans arguments must have equal length") }
+  let i = 0
+  while lt(i, list.len(a)) metered 2 { set out[a[i]] = b[i] set i = add(i, 1) }
+  if bool.not(same(deleted, absent)) {
+    let text = invoke py.text_of(deleted, "maketrans")
+    for point in text.to_code_points(text) { set out[point] = null }
+  }
+  return out
 }

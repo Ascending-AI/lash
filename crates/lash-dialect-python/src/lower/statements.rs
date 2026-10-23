@@ -157,6 +157,9 @@ impl Lowerer<'_> {
             PyStmt::Import(import) => {
                 for alias in &import.names {
                     let module = alias.name.id.as_str();
+                    if module == "re" || module.starts_with("re.") {
+                        return Err(unsupported_import(module, None, alias.range));
+                    }
                     if !module
                         .split('.')
                         .all(lash_vocabulary::Segment::is_canonical)
@@ -171,6 +174,9 @@ impl Lowerer<'_> {
                     .module
                     .as_ref()
                     .map_or("", |module| module.id.as_str());
+                if module == "re" || module.starts_with("re.") {
+                    return Err(unsupported_import(module, None, import.range));
+                }
                 if module.is_empty()
                     || !module
                         .split('.')
@@ -1386,7 +1392,9 @@ fn unsupported_import(
     };
     diagnostics::with_repair(
         Code::ImportUnsupported,
-        format!("`{module}` cannot be imported: the dialect has `import asyncio` and nothing else"),
+        format!(
+            "`{module}` cannot be imported: use an installed pure module or an advertised package"
+        ),
         range,
         repair,
     )

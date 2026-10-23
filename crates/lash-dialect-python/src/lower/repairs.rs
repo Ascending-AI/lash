@@ -74,21 +74,6 @@ impl Lowerer<'_> {
         }
     }
 
-    pub(super) fn format_repair(&self, call: &ast::ExprCall) -> String {
-        let values = call
-            .arguments
-            .args
-            .iter()
-            .chain(call.arguments.keywords.iter().map(|keyword| &keyword.value))
-            .map(|value| format!("{{{}}}", self.text(value.range())))
-            .collect::<Vec<_>>()
-            .join(" ");
-        format!(
-            "use an f-string for the values passed to `{}`: `f\"{values}\"`",
-            self.text(call.func.range())
-        )
-    }
-
     pub(super) fn builtin_repair(&self, name: &str, call: &ast::ExprCall) -> String {
         let args = call.arguments.args.as_ref();
         if call.arguments.keywords.is_empty() {
@@ -118,13 +103,6 @@ impl Lowerer<'_> {
                         self.text(exponent.range()),
                     );
                 }
-                ("format", [value] | [value, _]) => {
-                    return format!(
-                        "use an f-string for `{}`: `f\"{{{}}}\"`; choose a supported literal format specification",
-                        self.text(call.range()),
-                        self.text(value.range()),
-                    );
-                }
                 _ => {}
             }
         }
@@ -137,7 +115,6 @@ impl Lowerer<'_> {
                 "replace `{}` with `**` and, for a modulus, `%`",
                 self.text(call.range())
             ),
-            "format" => self.format_repair(call),
             _ => format!(
                 "replace `{}` with a supported built-in or a host tool; see the dialect's README",
                 self.text(call.range())

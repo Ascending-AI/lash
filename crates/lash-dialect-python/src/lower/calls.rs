@@ -14,6 +14,11 @@ use crate::scope::Ty;
 
 /// The built-in functions the dialect has.
 const SUPPORTED: &[&str] = &[
+    "getattr",
+    "hasattr",
+    "format",
+    "ascii",
+    "bytes",
     "print",
     "len",
     "str",
@@ -55,22 +60,17 @@ const UNSUPPORTED: &[&str] = &[
     "hash",
     "id",
     "callable",
-    "getattr",
     "setattr",
-    "hasattr",
     "delattr",
-    "format",
     "super",
     "object",
     "frozenset",
-    "bytes",
     "bytearray",
     "complex",
     "pow",
     "hex",
     "oct",
     "bin",
-    "ascii",
     "vars",
     "dir",
     "globals",
@@ -418,6 +418,9 @@ impl Lowerer<'_> {
             }
             return self.invoke("py.time", &[], Ty::Float);
         }
+        if let Some(value) = self.pure_module_call(call) {
+            return value;
+        }
         self.operation_refusal(call)?;
         if self.calls.is_some()
             && let Some(path) = self.tool_path(&call.func)
@@ -662,7 +665,11 @@ impl Lowerer<'_> {
         Ok(Ok(Prepared { callee, args }))
     }
 
-    fn call_function(&mut self, call: &ast::ExprCall, awaited: bool) -> Lowering<Operand> {
+    pub(super) fn call_function(
+        &mut self,
+        call: &ast::ExprCall,
+        awaited: bool,
+    ) -> Lowering<Operand> {
         let prepared = match self.prepare(call, awaited, false)? {
             Ok(prepared) => prepared,
             Err(problem) => {
@@ -1271,7 +1278,7 @@ impl Lowerer<'_> {
 
     /// The arguments of a built-in whose later parameters may be passed
     /// under the names `keywords`, absent where the call gives none.
-    fn with_keywords(
+    pub(super) fn with_keywords(
         &mut self,
         name: &str,
         call: &ast::ExprCall,
@@ -1319,21 +1326,11 @@ impl Lowerer<'_> {
     }
 
     fn builtin(&mut self, name: &str, call: &ast::ExprCall) -> Lowering<Operand> {
+        if let Some(result) = self.pure_builtin(name, call) {
+            return result;
+        }
         let simple = |helper: &'static str, min: usize, max: usize, ty: Ty| (helper, min, max, ty);
         let (helper, min, max, ty) = match name {
-            "print" => {
-                let mut operands =
-                    self.with_keywords(name, call, call.arguments.args.len(), &["sep"])?;
-                let sep = if operands.len() > call.arguments.args.len() {
-                    operands.pop().unwrap_or_else(|| Operand::text(" "))
-                } else {
-                    Operand::text(" ")
-                };
-                let args = Self::tuple_of(&operands);
-                let line = self.invoke("py.show", &[args, sep], Ty::Str)?;
-                self.emit(Stmt::Print { value: line.expr });
-                return Ok(Operand::none());
-            }
             "str" => {
                 let operands = self.positional(name, call, 0, 1)?;
                 return match operands.into_iter().next() {
@@ -1360,12 +1357,6 @@ impl Lowerer<'_> {
                     Operand::literal(Literal::Float(0.0.into()), Ty::Float)
                 });
             }
-            "min" | "max" => {
-                let operands = self.positional(name, call, 1, usize::MAX)?;
-                let args = Self::tuple_of(&operands);
-                let largest = Operand::literal(Literal::Bool(name == "max"), Ty::Bool);
-                return self.invoke("py.extreme", &[args, largest], Ty::Unknown);
-            }
             "sorted" => {
                 let operands = self.with_keywords(name, call, 1, &["key", "reverse"])?;
                 if call.arguments.args.len() > 1 {
@@ -1380,16 +1371,10 @@ impl Lowerer<'_> {
                 let operands = self.with_keywords(name, call, 1, &["start"])?;
                 return self.invoke("py.enumerate", &operands, Ty::List);
             }
-            "zip" => {
-                let operands = self.positional(name, call, 0, usize::MAX)?;
-                let sequences = Self::tuple_of(&operands);
-                return self.invoke("py.zip", &[sequences], Ty::List);
-            }
-            "list" | "tuple" | "set" | "dict" if call.arguments.is_empty() => {
+            "list" | "tuple" | "set" if call.arguments.is_empty() => {
                 return Ok(match name {
                     "list" => self.let_rhs(Rhs::Expr(Expr::List(Vec::new())), Ty::List),
                     "set" => self.let_rhs(Rhs::Expr(Expr::Set(Vec::new())), Ty::Set),
-                    "dict" => self.let_rhs(Rhs::Expr(Expr::Map(Vec::new())), Ty::Dict),
                     _ => Operand::inline(Expr::Tuple(Vec::new()), Ty::Tuple),
                 });
             }
@@ -1411,7 +1396,6 @@ impl Lowerer<'_> {
             "list" => simple("py.to_list", 1, 1, Ty::List),
             "tuple" => simple("py.to_tuple", 1, 1, Ty::Tuple),
             "set" => simple("py.to_set", 1, 1, Ty::Set),
-            "dict" => simple("py.to_dict", 1, 1, Ty::Dict),
             "range" => simple("py.range", 1, 3, Ty::List),
             "reversed" => simple("py.reversed", 1, 1, Ty::List),
             "any" => simple("py.any", 1, 1, Ty::Bool),

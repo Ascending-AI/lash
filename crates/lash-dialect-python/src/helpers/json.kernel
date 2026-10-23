@@ -1,0 +1,165 @@
+# JSON policy belongs to the Python module, over the kernel JSON codecs.
+use kind
+use same
+use eq
+use lt
+use le
+use add
+use sub
+use div_floor
+use rem_floor
+use bool.not
+use is_nan
+use is_infinite
+use num.to_text
+use int.to_text
+use text.len
+use text.concat
+use text.join
+use text.repeat
+use text.to_code_points
+use text.from_code_points
+use json.stringify
+use list.len
+use list.slice
+use list.contains
+use record.keys
+use record.contains
+use map.keys
+use py.fail
+use py.sealed
+use py.str
+use py.float_text
+use py.sorted
+use py.json_quote
+
+function py.json_quote(value: Text, ascii: Bool) -> Text
+kernel 1
+charge sum(8, size(value), size(result))
+body {
+  let shown = json.stringify(value)
+  if bool.not(ascii) { return shown }
+  let parts = []
+  for point in text.to_code_points(shown) {
+    if lt(point, 128) { set parts[list.len(parts)] = text.from_code_points([point]) } else {
+      let points = [point]
+      if le(65536, point) {
+        set point = sub(point, 65536)
+        set points = [add(55296, div_floor(point, 1024)), add(56320, rem_floor(point, 1024))]
+      }
+      for scalar in points {
+        let digits = int.to_text(scalar, 16)
+        set parts[list.len(parts)] = text.join(["\\u", text.repeat("0", sub(4, text.len(digits))), digits], "")
+      }
+    }
+  }
+  return text.join(parts, "")
+}
+
+function py.json_dump(value: Any, options: Tuple(Any, Any, Any, Any, Any, Any, Any, Any, Any)) -> Text
+kernel 1
+charge sum(16, deep(value), deep(options), size(result))
+body {
+  let skipkeys = options[0]
+  let ascii = options[1]
+  let check = options[2]
+  let allow_nan = options[3]
+  let cls = options[4]
+  let indent = options[5]
+  let separators = options[6]
+  let default = options[7]
+  let sort_keys = options[8]
+
+  if same(skipkeys, absent) { set skipkeys = false }
+  if same(ascii, absent) { set ascii = true }
+  if same(allow_nan, absent) { set allow_nan = true }
+  if same(sort_keys, absent) { set sort_keys = false }
+  if bool.not(same(cls, absent)) { if bool.not(same(cls, null)) { do invoke py.fail("TypeError", "custom encoder classes are not available") } }
+  let indentation = ""
+  let pretty = false
+  if bool.not(same(indent, absent)) {
+    if bool.not(same(indent, null)) {
+      set pretty = true
+      if same(kind(indent), "integer") { if lt(0, indent) { set indentation = text.repeat(" ", indent) } } else {
+        if bool.not(same(kind(indent), "text")) { do invoke py.fail("TypeError", "indent must be int, str or None") }
+        set indentation = indent
+      }
+    }
+  }
+  let item_separator = ", "
+  let key_separator = ": "
+  if pretty { set item_separator = "," }
+  if bool.not(same(separators, absent)) {
+    if bool.not(same(separators, null)) { set item_separator = separators[0] set key_separator = separators[1] }
+  }
+  let active = []
+  let go = absent
+  set go = fn(item, depth) {
+    let k = kind(item)
+    if same(k, "null") { return "null" }
+    if same(k, "bool") { if item { return "true" } return "false" }
+    if same(k, "integer") { return num.to_text(item) }
+    if same(k, "float") {
+      if is_nan(item) { if bool.not(allow_nan) { do invoke py.fail("ValueError", "Out of range float values are not JSON compliant") } return "NaN" }
+      if is_infinite(item) {
+        if bool.not(allow_nan) { do invoke py.fail("ValueError", "Out of range float values are not JSON compliant") }
+        if lt(item, 0) { return "-Infinity" }
+        return "Infinity"
+      }
+      return invoke py.float_text(item)
+    }
+    if same(k, "text") { return invoke py.json_quote(item, ascii) }
+    let sequence = same(k, "list")
+    if same(k, "tuple") { set sequence = true }
+    let mapping = same(k, "map")
+    if same(k, "record") { if bool.not(invoke py.sealed(item)) { set mapping = true } }
+    if bool.not(sequence) {
+      if bool.not(mapping) {
+        if bool.not(same(default, absent)) {
+          if bool.not(same(default, null)) { let converted = apply default(item) return apply go(converted, depth) }
+        }
+        do invoke py.fail("TypeError", "Object is not JSON serializable")
+      }
+    }
+    for ancestor in active { if same(ancestor, item) { do invoke py.fail("ValueError", "Circular reference detected") } }
+    let position = list.len(active)
+    set active[position] = item
+    let parts = []
+    let opening = "["
+    let closing = "]"
+    if sequence {
+      for member in item { let encoded = apply go(member, add(depth, 1)) set parts[list.len(parts)] = encoded }
+    } else {
+      set opening = "{"
+      set closing = "}"
+      let keys = []
+      if same(k, "map") { set keys = map.keys(item) } else { set keys = record.keys(item) }
+      if sort_keys { set keys = invoke py.sorted(keys) }
+      for key in keys {
+        let name = key
+        let kk = kind(key)
+        let valid = true
+        if same(kk, "text") {} else {
+          if same(kk, "integer") { set name = num.to_text(key) } else {
+          if same(kk, "float") { set name = apply go(key, depth) } else {
+          if same(kk, "bool") { if key { set name = "true" } else { set name = "false" } } else {
+          if same(kk, "null") { set name = "null" } else { set valid = false }
+          } } }
+        }
+        if bool.not(valid) { if skipkeys { continue } do invoke py.fail("TypeError", "keys must be str, int, float, bool or None") }
+        let quoted = invoke py.json_quote(name, ascii)
+        let member = item[key]
+        let encoded = apply go(member, add(depth, 1))
+        set parts[list.len(parts)] = text.join([quoted, key_separator, encoded], "")
+      }
+    }
+    set active = list.slice(active, 0, position)
+    if eq(list.len(parts), 0) { return text.concat(opening, closing) }
+    if pretty {
+      let prefix = text.concat("\n", text.repeat(indentation, add(depth, 1)))
+      return text.join([opening, prefix, text.join(parts, text.concat(item_separator, prefix)), "\n", text.repeat(indentation, depth), closing], "")
+    }
+    return text.join([opening, text.join(parts, item_separator), closing], "")
+  }
+  return apply go(value, 0)
+}

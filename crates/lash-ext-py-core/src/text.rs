@@ -183,3 +183,20 @@ impl NativeFunction for Repr {
         Ok(call.new.text(&output))
     }
 }
+
+/// Bytes length reads only immutable metadata; the body is its bounded reference.
+pub(super) struct BytesLength;
+impl NativeFunction for BytesLength {
+    fn call(&self, call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
+        let [value] = call.args.values() else {
+            return Err(NativeError::Decline);
+        };
+        let Some(bytes) = call.args.bytes(value)? else {
+            return Err(NativeError::Decline);
+        };
+        call.counter.spend(1)?;
+        Ok(Value::Int(
+            i64::try_from(bytes.len()).map_err(|_| NativeError::Decline)?,
+        ))
+    }
+}

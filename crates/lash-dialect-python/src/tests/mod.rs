@@ -11,6 +11,7 @@ mod module;
 mod naming;
 mod pages;
 mod protocol_loops;
+mod pure;
 mod refusals;
 mod replies;
 mod session;

@@ -74,8 +74,9 @@
   "qualifier": ""
  },
  "tests/basics/dict_popitem.py": {
-  "status": "refused",
-  "qualifier": "PY_METHOD_UNSUPPORTED"
+  "status": "pass",
+  "qualifier": "",
+  "observed": null
  },
  "tests/basics/dict_setdefault.py": {
   "status": "pass",
@@ -148,7 +149,7 @@
  },
  "tests/basics/int_bytes.py": {
   "status": "refused",
-  "qualifier": "PY_METHOD_UNSUPPORTED"
+  "qualifier": "PY_KEYWORD_CALL_DYNAMIC"
  },
  "tests/basics/int_divmod.py": {
   "status": "pass",
@@ -159,8 +160,9 @@
   "qualifier": ""
  },
  "tests/basics/int_small.py": {
-  "status": "refused",
-  "qualifier": "PY_OPERATOR_UNSUPPORTED"
+  "status": "pass",
+  "qualifier": "",
+  "observed": null
  },
  "tests/basics/list_clear.py": {
   "status": "pass",
@@ -216,11 +218,12 @@
  },
  "tests/basics/string_partition.py": {
   "status": "refused",
-  "qualifier": "PY_ATTRIBUTE_UNSUPPORTED"
+  "qualifier": "PY_BUILTIN_AS_VALUE"
  },
  "tests/basics/string_split.py": {
-  "status": "refused",
-  "qualifier": "PY_ARGUMENTS"
+  "status": "pass",
+  "qualifier": "",
+  "observed": null
  },
  "tests/basics/string_upperlow.py": {
   "status": "pass",

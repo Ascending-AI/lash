@@ -1,3 +1,18 @@
+use py.sealed
+use bytes.at
+use bytes.slice
+use bytes.concat
+use bytes.from_octets
+use bytes.utf8_encode
+use bytes.utf8_decode
+use py.bytes_len
+use py.bytes_items
+use py.bytes_repr
+use py.same
+use py.bitwise
+use py.shift
+use py.invert
+use py.ellipsis
 use timestamp.nanoseconds
 use num.to_float
 use num.div
@@ -88,6 +103,7 @@ use py.index
 use py.slice_bounds
 use py.to_list
 use py.add
+use py.percent
 
 # The Python class name of a raised value. A kernel operation's own error
 # kind is the Python exception a program would catch it as.
@@ -214,6 +230,8 @@ native
 body {
   let k = kind(value)
   if same(k, "record") {
+    if record.contains(value, "__py_ellipsis") { return "ellipsis" }
+    if record.contains(value, "__py_module") { return "module" }
     let brand = invoke brand.of(value)
     if same(brand, absent) {
       return k
@@ -276,6 +294,11 @@ body {
     if same(k, "text") {
       let shown = invoke py.text_repr(v)
       return shown
+    }
+    if same(k, "bytes") { return invoke py.bytes_repr(v) }
+    if same(k, "record") {
+      if record.contains(v, "__py_ellipsis") { return "Ellipsis" }
+      if record.contains(v, "__py_module") { return text.join(["<module '", v.__py_module, "'>"], "") }
     }
     let parts = []
     if same(k, "error") {
@@ -557,6 +580,7 @@ body {
   if same(k, "text") {
     return bool.not(same(value, ""))
   }
+  if same(k, "bytes") { return bool.not(same(value, b"")) }
   if same(k, "list") {
     return lt(0, list.len(value))
   }
@@ -601,6 +625,7 @@ body {
     }
   }
   if same(k, r) {
+    if same(k, "bytes") { return bytes.concat(left, right) }
     if same(k, "text") {
       return text.concat(left, right)
     }
@@ -631,7 +656,7 @@ body {
     return map.keys(value)
   }
   if same(k, "record") {
-    if bool.not(record.contains(value, "__lash_brand")) {
+    if bool.not(invoke py.sealed(value)) {
       return record.keys(value)
     }
   }
@@ -641,6 +666,7 @@ body {
   if same(k, "text") {
     return text.split(value, "")
   }
+  if same(k, "bytes") { return invoke py.bytes_items(value) }
   let name = invoke py.type(value)
   let hoisted21 = text.join(["'", name, "' object is not iterable"], "")
   do invoke py.fail("TypeError", hoisted21)
@@ -681,6 +707,7 @@ body {
     }
   }
   if same(k, r) {
+    if same(k, "bytes") { return bytes.concat(left, right) }
     if same(k, "text") {
       return text.concat(left, right)
     }
@@ -750,6 +777,15 @@ body {
   if same(kind(count), "integer") {
     if lt(count, 0) {
       set count = 0
+    }
+    if same(k, "bytes") {
+      let out = b""
+      let round = 0
+      while lt(round, count) metered 2 {
+        set out = bytes.concat(out, sequence)
+        set round = add(round, 1)
+      }
+      return out
     }
     if same(k, "text") {
       return text.repeat(sequence, count)
@@ -827,6 +863,7 @@ function py.mod(left: Any, right: Any) -> Any
 kernel 1
 charge sum(4, size(left), size(right))
 body {
+  if same(kind(left), "text") { return invoke py.percent(left, right) }
   let ok = invoke py.is_number(left)
   if ok {
     set ok = invoke py.is_number(right)
@@ -961,6 +998,24 @@ kernel 1
 charge sum(4, size(container), deep(item))
 body {
   let k = kind(container)
+  if same(k, "bytes") {
+    let items = invoke py.bytes_items(container)
+    if same(kind(item), "integer") {
+      if lt(item, 0) { do invoke py.fail("ValueError", "byte must be in range(0, 256)") }
+      if le(256, item) { do invoke py.fail("ValueError", "byte must be in range(0, 256)") }
+      return list.contains(items, item)
+    }
+    if same(kind(item), "bytes") {
+      let needle = invoke py.bytes_items(item)
+      let i = 0
+      while le(add(i, list.len(needle)), list.len(items)) metered 2 {
+        if eq(list.slice(items, i, add(i, list.len(needle))), needle) { return true }
+        set i = add(i, 1)
+      }
+      return false
+    }
+    do invoke py.fail("TypeError", "a bytes-like object is required")
+  }
   if same(k, "list") {
     return list.contains(container, item)
   }
@@ -971,7 +1026,7 @@ body {
     return map.contains(container, item)
   }
   if same(k, "record") {
-    if record.contains(container, "__lash_brand") {
+    if invoke py.sealed(container) {
       let name = invoke py.type(container)
       let sealed = text.join(["argument of type '", name, "' is not iterable"], "")
       do invoke py.fail("TypeError", sealed)
@@ -1032,9 +1087,14 @@ kernel 1
 charge sum(6, deep(index))
 body {
   let k = kind(target)
+  if same(k, "bytes") {
+    let length = invoke py.bytes_len(target)
+    let position = invoke py.index(index, length, "bytes", "")
+    return bytes.at(target, position)
+  }
   let mapping = same(k, "map")
   if same(k, "record") {
-    if record.contains(target, "__lash_brand") {} else { set mapping = true }
+    if invoke py.sealed(target) {} else { set mapping = true }
   }
   if mapping {
     let present = false
@@ -1196,9 +1256,11 @@ body {
       if same(k, "text") {
         set length = text.len(target)
       } else {
+        if same(k, "bytes") { set length = invoke py.bytes_len(target) } else {
         let name = invoke py.type(target)
         let hoisted18 = text.join(["'", name, "' object is not subscriptable"], "")
         do invoke py.fail("TypeError", hoisted18)
+        }
       }
     }
   }
@@ -1213,6 +1275,7 @@ body {
     if same(k, "tuple") {
       return tuple.slice(target, start, stop)
     }
+    if same(k, "bytes") { return bytes.slice(target, start, stop) }
     return text.slice(target, start, stop)
   }
   let picked = []
@@ -1230,7 +1293,9 @@ body {
     if same(k, "text") {
       set picked[list.len(picked)] = text.get(target, position)
     } else {
+      if same(k, "bytes") { set picked[list.len(picked)] = bytes.at(target, position) } else {
       set picked[list.len(picked)] = target[position]
+      }
     }
     set position = add(position, step)
   }
@@ -1240,6 +1305,7 @@ body {
   if same(k, "text") {
     return text.join(picked, "")
   }
+  if same(k, "bytes") { return bytes.from_octets(picked) }
   let out = ()
   for item in picked {
     set out = tuple.concat(out, (item,))
@@ -1252,6 +1318,7 @@ kernel 1
 charge 4
 body {
   let k = kind(value)
+  if same(k, "bytes") { return invoke py.bytes_len(value) }
   if same(k, "list") {
     return list.len(value)
   }
@@ -1262,7 +1329,7 @@ body {
     return map.len(value)
   }
   if same(k, "record") {
-    if bool.not(record.contains(value, "__lash_brand")) {
+    if bool.not(invoke py.sealed(value)) {
       return record.len(value)
     }
   }
@@ -1287,8 +1354,9 @@ kernel 1
 charge 4
 body {
   let k = kind(value)
+  if same(k, "bytes") { return invoke py.bytes_items(value) }
   if same(k, "record") {
-    if bool.not(record.contains(value, "__lash_brand")) {
+    if bool.not(invoke py.sealed(value)) {
       return record.keys(value)
     }
   }
@@ -1393,7 +1461,7 @@ body {
     let k = kind(v)
     # A package value stays one: sealed, it is no dict.
     if same(k, "record") {
-      if record.contains(v, "__lash_brand") {
+      if invoke py.sealed(v) {
         return v
       }
       let out = map{}
@@ -1472,4 +1540,200 @@ body {
     return out
   }
   return value
+}
+
+# Private marker records cannot be constructed by Python container syntax.
+function py.ellipsis() -> Any
+kernel 1
+charge 2
+body { return {__py_ellipsis: true} }
+
+function py.same(left: Any, right: Any) -> Bool
+kernel 1
+charge 4
+body {
+  if same(kind(left), "record") {
+    if record.contains(left, "__py_ellipsis") {
+      if same(kind(right), "record") { return record.contains(right, "__py_ellipsis") }
+      return false
+    }
+  }
+  return same(left, right)
+}
+
+# Each step consumes one bit and is priced by the primitive integer work.
+# Sign extension terminates at 0/-1, retaining exact two's-complement semantics.
+function py.bitwise(operator: Text, left: Any, right: Any) -> Any
+kernel 1
+charge sum(8, product(64, product(sum(size(left), size(right)), sum(size(left), size(right)))))
+body {
+  if same(kind(left), "set") { return invoke py.set_op(operator, left, right) }
+  if same(kind(left), "bool") {
+    if same(kind(right), "bool") {
+      if same(operator, "|") { if left { return true } return right }
+      if same(operator, "&") { if left { return right } return false }
+      return bool.not(same(left, right))
+    }
+  }
+  if same(kind(left), "bool") { if left { set left = 1 } else { set left = 0 } }
+  if same(kind(right), "bool") { if right { set right = 1 } else { set right = 0 } }
+  if bool.not(same(kind(left), "integer")) { do invoke py.operand_error(operator, left, right) }
+  if bool.not(same(kind(right), "integer")) { do invoke py.operand_error(operator, left, right) }
+  let out = 0
+  let place = 1
+  while true metered 4 {
+    let a = rem_floor(left, 2)
+    let b = rem_floor(right, 2)
+    let bit = mul(a, b)
+    if same(operator, "|") { if lt(0, add(a, b)) { set bit = 1 } }
+    if same(operator, "^") { set bit = rem_floor(add(a, b), 2) }
+    let final = le(-1, left)
+    if final { set final = le(left, 0) }
+    if final { set final = le(-1, right) }
+    if final { set final = le(right, 0) }
+    if final {
+      if eq(bit, 1) { return sub(out, place) }
+      return out
+    }
+    set out = add(out, mul(bit, place))
+    set place = mul(place, 2)
+    set left = div_floor(left, 2)
+    set right = div_floor(right, 2)
+  }
+}
+
+function py.invert(value: Any) -> Int
+kernel 1
+charge sum(4, size(value))
+body {
+  if same(kind(value), "bool") { if value { return -2 } return -1 }
+  if bool.not(same(kind(value), "integer")) { do invoke py.fail("TypeError", "bad operand type for unary ~") }
+  return sub(neg(value), 1)
+}
+
+# Left shifts use integer_pow's reservation before amplified allocation;
+# right shifts stop at sign extension without building a huge power of two.
+function py.shift(operator: Text, value: Any, count: Any) -> Int
+kernel 1
+charge sum(8, size(result), product(size(value), size(result)), product(64, product(sum(size(value), size(count)), sum(size(value), size(count)))))
+body {
+  if same(kind(value), "bool") { if value { set value = 1 } else { set value = 0 } }
+  if same(kind(count), "bool") { if count { set count = 1 } else { set count = 0 } }
+  if bool.not(same(kind(value), "integer")) { do invoke py.operand_error(operator, value, count) }
+  if bool.not(same(kind(count), "integer")) { do invoke py.operand_error(operator, value, count) }
+  if lt(count, 0) { do invoke py.fail("ValueError", "negative shift count") }
+  if eq(value, 0) { return 0 }
+  if same(operator, "<<") { return mul(value, pow(2, count)) }
+  while lt(0, count) metered 2 {
+    if eq(value, 0) { return 0 }
+    if eq(value, -1) { return -1 }
+    set value = div_floor(value, 2)
+    set count = sub(count, 1)
+  }
+  return value
+}
+
+function py.bytes_len(value: Bytes) -> Int
+kernel 1
+charge sum(4, size(value))
+native
+body {
+  let length = 0
+  while true metered 2 {
+    try { do bytes.at(value, length) } catch problem {
+      if same(problem.kind, "index_out_of_range") { return length }
+      throw problem
+    }
+    set length = add(length, 1)
+  }
+}
+
+function py.bytes_items(value: Bytes) -> List(Int)
+kernel 1
+charge sum(4, size(value), size(result))
+body {
+  let length = invoke py.bytes_len(value)
+  let items = []
+  let i = 0
+  while lt(i, length) metered 2 {
+    set items[i] = bytes.at(value, i)
+    set i = add(i, 1)
+  }
+  return items
+}
+
+function py.bytes_repr(value: Bytes) -> Text
+kernel 1
+charge sum(8, size(value), size(result))
+body {
+  let items = invoke py.bytes_items(value)
+  let quote = "'"
+  if list.contains(items, 39) { if bool.not(list.contains(items, 34)) { set quote = "\"" } }
+  let parts = ["b", quote]
+  for point in items {
+    let shown = ""
+    if eq(point, 9) { set shown = "\\t" } else {
+    if eq(point, 10) { set shown = "\\n" } else {
+    if eq(point, 13) { set shown = "\\r" } else {
+    if eq(point, 92) { set shown = "\\\\" } else {
+    if le(32, point) {
+      if lt(point, 127) { set shown = text.from_code_points([point]) }
+    }
+    if same(shown, "") {
+      let digits = int.to_text(point, 16)
+      if lt(point, 16) { set digits = text.concat("0", digits) }
+      set shown = text.concat("\\x", digits)
+    } else { if same(shown, quote) { set shown = text.concat("\\", shown) } }
+    } } } }
+    set parts[list.len(parts)] = shown
+  }
+  set parts[list.len(parts)] = quote
+  return text.join(parts, "")
+}
+
+function py.bytes(value?: Any, encoding?: Any, error_policy?: Any) -> Bytes
+kernel 1
+charge sum(6, deep(value), size(result))
+body {
+  if same(value, absent) { return b"" }
+  if bool.not(same(encoding, absent)) {
+    if bool.not(same(kind(value), "text")) { do invoke py.fail("TypeError", "encoding without a string argument") }
+    if bool.not(same(encoding, "utf-8")) {
+      if bool.not(same(encoding, "utf8")) { do invoke py.fail("LookupError", "unknown encoding") }
+    }
+    if bool.not(same(error_policy, absent)) { if bool.not(same(error_policy, "strict")) { do invoke py.fail("ValueError", "unsupported encoding error handler") } }
+    return bytes.utf8_encode(value)
+  }
+  if same(kind(value), "bytes") { return value }
+  if same(kind(value), "integer") {
+    if lt(value, 0) { do invoke py.fail("ValueError", "negative count") }
+    return bytes.utf8_encode(text.repeat("\u{0}", value))
+  }
+  let items = invoke py.to_list(value)
+  for item in items {
+    if bool.not(same(kind(item), "integer")) { do invoke py.fail("TypeError", "an integer is required") }
+    if lt(item, 0) { do invoke py.fail("ValueError", "bytes must be in range(0, 256)") }
+    if le(256, item) { do invoke py.fail("ValueError", "bytes must be in range(0, 256)") }
+  }
+  return bytes.from_octets(items)
+}
+
+# These private helper records and package values never expose record internals.
+function py.sealed(value: Any) -> Bool
+kernel 1
+charge 4
+body {
+  if bool.not(same(kind(value), "record")) { return false }
+  if record.contains(value, "__lash_brand") { return true }
+  if record.contains(value, "__py_ellipsis") { return true }
+  return record.contains(value, "__py_module")
+}
+
+# A lossless byte projection used only by octet algorithms, never by decode().
+function py.bytes_text(value: Bytes) -> Text
+kernel 1
+charge sum(8, size(value), size(result))
+body {
+  let points = invoke py.bytes_items(value)
+  return text.from_code_points(points)
 }

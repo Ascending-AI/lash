@@ -13,9 +13,10 @@ mod entries;
 mod expressions;
 mod format;
 mod lazy;
-mod methods;
+pub(crate) mod methods;
 mod packages;
 mod patterns;
+mod pure;
 mod range;
 mod repairs;
 mod saved;
@@ -879,6 +880,12 @@ impl Lowerer<'_> {
     /// A read of the name `id`.
     fn read(&mut self, id: &str, range: TextRange) -> Lowering<Operand> {
         let Some(found) = self.variable(id) else {
+            if id == "Ellipsis" {
+                return self.invoke("py.ellipsis", &[], Ty::Unknown);
+            }
+            if let Some(value) = self.imported_value(id) {
+                return value;
+            }
             return Err(self.not_a_variable(id, range));
         };
         if found.scope == Some(0) && !self.is_bound(0, id) && self.saved.contains_key(&found.name) {

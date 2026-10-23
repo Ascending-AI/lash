@@ -35,18 +35,13 @@ impl Lowerer<'_> {
             }
             PyExpr::NumberLiteral(literal) => number(&literal.value, literal.range),
             PyExpr::StringLiteral(literal) => Ok(Operand::text(literal.value.to_str())),
-            PyExpr::BytesLiteral(literal) => Err(diagnostics::with_repair(
-                Code::LiteralUnsupported,
-                "bytes literals are not in the dialect",
-                literal.range,
-                "use a str",
+            PyExpr::BytesLiteral(literal) => Ok(Operand::literal(
+                Literal::Bytes(lash_kernel_doc::Bytes::new(
+                    literal.value.bytes().collect::<Vec<_>>(),
+                )),
+                Ty::Unknown,
             )),
-            PyExpr::EllipsisLiteral(literal) => Err(diagnostics::with_repair(
-                Code::LiteralUnsupported,
-                "`...` is not a value in the dialect",
-                literal.range,
-                "use None",
-            )),
+            PyExpr::EllipsisLiteral(_) => self.invoke("py.ellipsis", &[], Ty::Unknown),
             PyExpr::FString(fstring) => self.fstring(fstring),
             PyExpr::TString(tstring) => Err(diagnostics::with_repair(
                 Code::SyntaxUnsupported,
@@ -56,23 +51,6 @@ impl Lowerer<'_> {
             )),
             PyExpr::Name(name) => self.read(name.id.as_str(), name.range),
             PyExpr::BinOp(operation) => {
-                if operation.op == ast::Operator::Mod
-                    && matches!(
-                        operation.left.as_ref(),
-                        PyExpr::StringLiteral(_) | PyExpr::FString(_)
-                    )
-                {
-                    return Err(diagnostics::with_repair(
-                        Code::OperatorUnsupported,
-                        "`%` formatting of a str is not in the dialect",
-                        operation.range,
-                        format!(
-                            "replace the format `{}` with an f-string containing the value: `f\"{{{}}}\"`",
-                            self.text(operation.left.range()),
-                            self.text(operation.right.range())
-                        ),
-                    ));
-                }
                 let operands = self.operands(&[&operation.left, &operation.right])?;
                 self.binary(
                     operation.op,
@@ -292,9 +270,16 @@ impl Lowerer<'_> {
             Operator::Pow => ("py.pow", Ty::Unknown),
             Operator::BitOr | Operator::BitAnd | Operator::BitXor => {
                 let symbol = Operand::text(op.as_str());
-                return self.invoke("py.set_op", &[symbol, left, right], Ty::Set);
+                return self.invoke("py.bitwise", &[symbol, left, right], Ty::Unknown);
             }
-            Operator::MatMult | Operator::LShift | Operator::RShift => {
+            Operator::LShift | Operator::RShift => {
+                return self.invoke(
+                    "py.shift",
+                    &[Operand::text(op.as_str()), left, right],
+                    Ty::Int,
+                );
+            }
+            Operator::MatMult => {
                 return Err(diagnostics::with_repair(
                     Code::OperatorUnsupported,
                     format!("the operator `{}` is not in the dialect", op.as_str()),
@@ -354,12 +339,10 @@ impl Lowerer<'_> {
                 }
                 self.invoke("py.pos", &[operand], Ty::Unknown)
             }
-            ast::UnaryOp::Invert => Err(diagnostics::with_repair(
-                Code::OperatorUnsupported,
-                "the operator `~` is not in the dialect",
-                operation.range,
-                format!("write `-({}) - 1`", self.text(operation.operand.range())),
-            )),
+            ast::UnaryOp::Invert => {
+                let value = self.expr(&operation.operand)?;
+                self.invoke("py.invert", &[value], Ty::Int)
+            }
         }
     }
 
@@ -440,6 +423,14 @@ impl Lowerer<'_> {
                 return Ok(Operand::inline(self.not(found.expr)?, Ty::Bool));
             }
         };
+        if function == "same" {
+            let value = self.invoke("py.same", &[left, right], Ty::Bool)?;
+            return if negated {
+                Ok(Operand::inline(self.not(value.expr)?, Ty::Bool))
+            } else {
+                Ok(value)
+            };
+        }
         let mut call = self.native(function, vec![left.expr, right.expr])?;
         if negated {
             call = self.not(call)?;
@@ -503,6 +494,24 @@ impl Lowerer<'_> {
             return read;
         }
         let name = attribute.attr.id.as_str();
+        if matches!(
+            name,
+            "__globals__"
+                | "__code__"
+                | "__closure__"
+                | "__getattribute__"
+                | "__subclasses__"
+                | "f_globals"
+                | "f_locals"
+                | "gi_frame"
+        ) {
+            return Err(diagnostics::with_repair(
+                Code::AttributeUnsupported,
+                "implementation objects and frame traversal are not guest attributes",
+                attribute.range,
+                "pass the required data explicitly as an argument or keep it in a dict",
+            ));
+        }
         // `type(x).__name__`.
         if name == "__name__"
             && let PyExpr::Call(call) = attribute.value.as_ref()
@@ -515,13 +524,8 @@ impl Lowerer<'_> {
             let value = self.expr(argument)?;
             return self.invoke("py.type", &[value], Ty::Str);
         }
-        let helper = match name {
-            "args" => Some("py.exc.args"),
-            "__cause__" => Some("py.exc.cause"),
-            _ => None,
-        };
+        let receiver = self.expr(&attribute.value)?;
         if self.seals() && !self.is_asyncio(&attribute.value) {
-            let receiver = self.expr(&attribute.value)?;
             if let Some(brand) = self.brand_of(receiver.ty) {
                 return self.read_typed_member(receiver, &brand, name, attribute.range);
             }
@@ -531,28 +535,10 @@ impl Lowerer<'_> {
                 Vec::new()
             };
             if !targets.is_empty() {
-                return self.select_read(receiver, name, helper, &targets);
-            }
-            if let Some(helper) = helper {
-                return self.invoke(helper, &[receiver], Ty::Unknown);
+                return self.select_read(receiver, name, &targets);
             }
         }
-        match helper {
-            Some(helper) if !self.is_asyncio(&attribute.value) => {
-                let value = self.expr(&attribute.value)?;
-                self.invoke(helper, &[value], Ty::Unknown)
-            }
-            _ => Err(diagnostics::with_repair(
-                Code::AttributeUnsupported,
-                format!("the attribute `{name}` is not in the dialect"),
-                attribute.range,
-                format!(
-                    "keep `{}` in a dict and read `({})[{name:?}]`; exceptions also have `args` and `__cause__`",
-                    self.text(attribute.value.range()),
-                    self.text(attribute.value.range())
-                ),
-            )),
-        }
+        self.invoke("py.getattr", &[receiver, Operand::text(name)], Ty::Unknown)
     }
 
     fn comprehension(
@@ -727,15 +713,29 @@ fn number(value: &ast::Number, range: TextRange) -> Lowering<Operand> {
         ast::Number::Int(value) => {
             let integer = match value.as_u64() {
                 Some(small) => Some(Integer::new(small)),
-                None => Integer::parse(&value.to_string()).ok(),
+                None => {
+                    let written = value.to_string().replace('_', "");
+                    let radix = match written.get(..2) {
+                        Some("0x" | "0X") => 16,
+                        Some("0o" | "0O") => 8,
+                        Some("0b" | "0B") => 2,
+                        _ => 10,
+                    };
+                    if radix == 10 {
+                        Integer::parse(&written).ok()
+                    } else {
+                        num_bigint::BigInt::parse_bytes(&written.as_bytes()[2..], radix)
+                            .map(Integer::new)
+                    }
+                }
             };
             match integer {
                 Some(integer) => Ok(Operand::literal(Literal::Int(integer), Ty::Int)),
                 None => Err(diagnostics::with_repair(
                     Code::LiteralUnsupported,
-                    "an integer this large is written in decimal here",
+                    "the integer literal could not be decoded",
                     range,
-                    "write the number in base ten",
+                    "write valid digits for the literal radix",
                 )),
             }
         }

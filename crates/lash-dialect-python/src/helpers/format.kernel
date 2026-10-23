@@ -1,3 +1,31 @@
+use record.contains
+use py.value_attribute
+use py.exc.args
+use py.exc.cause
+use py.no_attribute
+use py.text_of
+use py.format.attribute
+use py.format_parse
+use eq
+use neg
+use abs
+use num.to_int
+use int.parse
+use int.to_text
+use list.len
+use list.contains
+use map.contains
+use tuple.len
+use text.get
+use text.from_code_points
+use text.to_code_points
+use py.ascii
+use py.format
+use py.format_spec
+use py.format.general
+use py.format.read_count
+use py.length
+use py.getitem
 # Python's format specification, as far as the dialect has it. The lowerer
 # reads a replacement field's specification when it lowers the f-string and
 # passes its parts; what it does not have it refuses there.
@@ -74,10 +102,22 @@ body {
 # `[[fill]align][sign][#][0][width][grouping][.precision][code]`. `align`
 # and `code` are "" and `precision` is null where the field leaves them
 # out; `width` is 0 for none.
-function py.format(value: Any, conversion: Text, fill: Text, align: Text, sign: Text, alternate: Bool, zero: Bool, width: Int, grouping: Text, precision: Any, code: Text) -> Text
+function py.format(value: Any, fields: Tuple(Text, Text, Text, Text, Bool, Bool, Int, Text, Any, Text, Bool)) -> Text
 kernel 1
-charge sum(16, deep(value), size(result), magnitude(width))
+charge sum(16, deep(value), deep(fields), size(result))
 body {
+  let conversion = fields[0]
+  let fill = fields[1]
+  let align = fields[2]
+  let sign = fields[3]
+  let alternate = fields[4]
+  let zero = fields[5]
+  let width = fields[6]
+  let grouping = fields[7]
+  let precision = fields[8]
+  let code = fields[9]
+  let coerce = fields[10]
+
   if same(conversion, "r") {
     set value = invoke py.repr(value)
   }
@@ -109,11 +149,23 @@ body {
         if same(precision, null) {
           set form = "r"
         } else {
-          do invoke py.fail("ValueError", "a float precision without a format code is the general format, which this dialect does not have")
+          set form = "g"
         }
       }
     }
     let known = false
+    if same(form, "c") {
+      if bool.not(same(k, "integer")) { do invoke py.fail("ValueError", "Unknown format code 'c' for object of type 'float'") }
+      if bool.not(same(sign, "")) { do invoke py.fail("ValueError", "Sign not allowed with integer format specifier 'c'") }
+      if alternate { do invoke py.fail("ValueError", "Alternate form not allowed with integer format specifier 'c'") }
+      if bool.not(same(precision, null)) { do invoke py.fail("ValueError", "Precision not allowed in integer format specifier") }
+      if bool.not(same(grouping, "")) { do invoke py.fail("ValueError", "Grouping not allowed with 'c'") }
+      set digits = text.from_code_points([value])
+      set known = true
+    }
+    if same(form, "g") { set known = true let implicit = same(code, "") set digits = invoke py.format.general(value, precision, alternate, false, implicit) }
+    if same(form, "G") { set known = true set digits = invoke py.format.general(value, precision, alternate, true) }
+
     for whole in ["d", "x", "X", "o", "b"] {
       if same(form, whole) {
         set known = true
@@ -205,6 +257,19 @@ body {
       let hoisted3 = text.join(["Unknown format code '", form, "' for object of type '", name, "'"], "")
       do invoke py.fail("ValueError", hoisted3)
     }
+    if same(coerce, true) {
+      if same(k, "integer") { if list.contains(["d", "x", "X", "o", "b", "c"], form) { do invoke py.fail("ValueError", "Negative zero coercion is not allowed in integer formatting") } }
+      if text.starts_with(digits, "-") {
+        let zeroed = true
+        for character in text.to_code_points(text.slice(digits, 1, text.len(digits))) {
+          if eq(character, 101) { break }
+          if eq(character, 69) { break }
+          if eq(character, 37) { break }
+          if bool.not(eq(character, 48)) { if bool.not(eq(character, 46)) { set zeroed = false } }
+        }
+        if zeroed { set digits = text.slice(digits, 1, text.len(digits)) }
+      }
+    }
     if text.starts_with(digits, "-") {
       set digits = text.slice(digits, 1, text.len(digits))
       set prefix = text.concat("-", prefix)
@@ -238,11 +303,23 @@ body {
           set group_width = 4
         }
       }
-      let whole = invoke py.format.group(hoisted4, grouping, group_width)
+      let ungrouped = hoisted4
+      let whole = invoke py.format.group(ungrouped, grouping, group_width)
+      if zero {
+        let inner = same(align, "")
+        if same(align, "=") { set inner = true }
+        if inner {
+          while lt(add(text.len(prefix), add(text.len(whole), sub(text.len(digits), cut))), width) metered 2 {
+            set ungrouped = text.concat("0", ungrouped)
+            set whole = invoke py.format.group(ungrouped, grouping, group_width)
+          }
+        }
+      }
       set digits = text.concat(whole, text.slice(digits, cut, text.len(digits)))
     }
   } else {
     if same(k, "text") {
+      if coerce { do invoke py.fail("ValueError", "Negative zero coercion is not allowed in string formatting") }
       if bool.not(same(sign, "")) { do invoke py.fail("ValueError", "Sign not allowed in string format specifier") }
       if alternate { do invoke py.fail("ValueError", "Alternate form (#) not allowed in string format specifier") }
       if same(align, "=") { do invoke py.fail("ValueError", "'=' alignment not allowed in string format specifier") }
@@ -307,4 +384,436 @@ body {
   }
   let before = div_floor(missing, 2)
   return text.join([text.repeat(filler, before), prefix, digits, text.repeat(filler, sub(missing, before))], "")
+}
+
+# ASCII repr escapes every non-ASCII scalar, with Python's smallest width.
+function py.ascii(value: Any) -> Text
+kernel 1
+charge sum(8, deep(value), size(result))
+body {
+  let shown = invoke py.repr(value)
+  let parts = []
+  for point in text.to_code_points(shown) {
+    let part = text.from_code_points([point])
+    if le(128, point) {
+      let prefix = "\\x"
+      let width = 2
+      if le(256, point) { set prefix = "\\u" set width = 4 }
+      if le(65536, point) { set prefix = "\\U" set width = 8 }
+      let digits = int.to_text(point, 16)
+      set part = text.join([prefix, text.repeat("0", sub(width, text.len(digits))), digits], "")
+    }
+    set parts[list.len(parts)] = part
+  }
+  return text.join(parts, "")
+}
+
+# General formatting chooses notation from the rounded exponent, not the
+# unrounded input. The kernel performs exact decimal rounding ties to even.
+function py.format.general(value: Any, precision: Any, alternate: Bool, upper: Bool, implicit?: Bool) -> Text
+kernel 1
+charge sum(16, size(value), magnitude(precision), size(result))
+body {
+  if same(precision, null) { set precision = 6 }
+  if eq(precision, 0) { set precision = 1 }
+  let number = num.to_float(value)
+  if bool.not(is_finite(number)) {
+    let shown = invoke py.float_text(number)
+    if upper { return text.upper_u17_0_0(shown) }
+    return shown
+  }
+  let scientific = format.scientific(number, sub(precision, 1))
+  let mark = text.find(scientific, "e", 0)
+  let exponent = int.parse(text.slice(scientific, add(mark, 1), text.len(scientific)), 10)
+  let digits = ""
+  let exponential = lt(exponent, -4)
+  if le(precision, exponent) { set exponential = true }
+  if same(implicit, true) { if le(sub(precision, 1), exponent) { set exponential = true } }
+  if exponential { set digits = text.slice(scientific, 0, mark) } else {
+    set digits = format.fixed(number, sub(sub(precision, 1), exponent))
+  }
+  if bool.not(alternate) {
+    if le(0, text.find(digits, ".", 0)) {
+      while text.starts_with(text.slice(digits, sub(text.len(digits), 1), text.len(digits)), "0") metered 2 { set digits = text.slice(digits, 0, sub(text.len(digits), 1)) }
+      if same(text.slice(digits, sub(text.len(digits), 1), text.len(digits)), ".") { set digits = text.slice(digits, 0, sub(text.len(digits), 1)) }
+    }
+  } else { if lt(text.find(digits, ".", 0), 0) { set digits = text.concat(digits, ".") } }
+  if same(implicit, true) {
+    if bool.not(exponential) { if lt(text.find(digits, ".", 0), 0) { set digits = text.concat(digits, ".0") } }
+  }
+  if exponential {
+    let suffix = text.slice(scientific, mark, text.len(scientific))
+    set suffix = invoke py.format.exponent(suffix)
+    set digits = text.concat(digits, suffix)
+  }
+  if upper { return text.upper_u17_0_0(digits) }
+  return digits
+}
+
+function py.format.read_count(spec: Text, position: Int) -> Any
+kernel 1
+charge sum(8, size(spec))
+body {
+  let start = position
+  while lt(position, text.len(spec)) metered 2 {
+    let character = text.get(spec, position)
+    if lt(text.find("0123456789", character, 0), 0) { break }
+    set position = add(position, 1)
+  }
+  if eq(position, start) { return (null, position) }
+  return (int.parse(text.slice(spec, start, position), 10), position)
+}
+
+# The same parser owns f-strings, format(), str.format and percent rendering.
+function py.format_spec(value: Any, spec?: Any, conversion?: Any) -> Text
+kernel 1
+charge sum(16, deep(value), size(spec), size(result))
+body {
+  if same(spec, absent) { set spec = "" }
+  if bool.not(same(kind(spec), "text")) { do invoke py.fail("TypeError", "format specifier must be a string") }
+  if same(conversion, "a") { set value = invoke py.ascii(value) }
+  if same(conversion, "r") { set value = invoke py.repr(value) }
+  if same(conversion, "s") { set value = invoke py.str(value) }
+  if same(spec, "") { return invoke py.str(value) }
+  return invoke py.format_parse(value, spec)
+}
+
+function py.format_parse(value: Any, spec: Text) -> Text
+kernel 1
+charge sum(16, deep(value), size(spec), size(result))
+body {
+  let fill = " "
+  let explicit_fill = false
+  let align = ""
+  let sign = ""
+  let alternate = false
+  let zero = false
+  let coerce = false
+  let width = 0
+  let grouping = ""
+  let precision = null
+  let code = ""
+  let i = 0
+  let length = text.len(spec)
+  if lt(1, length) {
+    let second = text.get(spec, 1)
+    if le(0, text.find("<>=^", second, 0)) { set explicit_fill = true set fill = text.get(spec, 0) set align = second set i = 2 }
+  }
+  if eq(i, 0) { let first = text.get(spec, 0) if le(0, text.find("<>=^", first, 0)) { set align = first set i = 1 } }
+  let stage = 0
+  while lt(i, length) metered 2 {
+    let c = text.get(spec, i)
+    if eq(stage, 0) {
+      set stage = 1
+      if le(0, text.find("+- ", c, 0)) { set sign = c set i = add(i, 1) continue }
+    }
+    if eq(stage, 1) {
+      set stage = 2
+      if same(c, "z") { set coerce = true set i = add(i, 1) continue }
+    }
+    if eq(stage, 2) {
+      set stage = 3
+      if same(c, "#") { set alternate = true set i = add(i, 1) continue }
+    }
+    if eq(stage, 3) {
+      set stage = 4
+      if same(c, "0") { set zero = true if bool.not(explicit_fill) { set fill = "0" } set i = add(i, 1) continue }
+    }
+    if eq(stage, 4) {
+      let count = invoke py.format.read_count(spec, i)
+      if bool.not(same(count[0], null)) { set width = count[0] }
+      set i = count[1]
+      set stage = 5
+      if eq(i, length) { break }
+      set c = text.get(spec, i)
+    }
+    if eq(stage, 5) {
+      set stage = 6
+      if le(0, text.find(",_", c, 0)) { set grouping = c set i = add(i, 1) continue }
+    }
+    if eq(stage, 6) {
+      set stage = 7
+      if same(c, ".") {
+        set i = add(i, 1)
+        let count = invoke py.format.read_count(spec, i)
+        set precision = count[0]
+        set i = count[1]
+        if same(precision, null) { do invoke py.fail("ValueError", "Format specifier missing precision") }
+        continue
+      }
+    }
+    if eq(stage, 7) { set code = c set i = add(i, 1) set stage = 8 continue }
+    do invoke py.fail("ValueError", "Invalid format specifier")
+  }
+  if same(code, "n") { do invoke py.fail("ValueError", "locale-dependent format code n is not available") }
+  return invoke py.format(value, ("", fill, align, sign, alternate, zero, width, grouping, precision, code, coerce))
+}
+
+# Percent formatting consumes mapping keys or tuple positions in field order.
+function py.percent(pattern: Text, arguments: Any) -> Text
+kernel 1
+charge sum(16, size(pattern), deep(arguments), size(result))
+body {
+  let args = (arguments,)
+  if same(kind(arguments), "tuple") { set args = arguments }
+  let used = 0
+  let mapping = same(kind(arguments), "map")
+  if same(kind(arguments), "record") { set mapping = true }
+  let parts = []
+  let i = 0
+  let length = text.len(pattern)
+  while lt(i, length) metered 2 {
+    let c = text.get(pattern, i)
+    set i = add(i, 1)
+    if bool.not(same(c, "%")) { set parts[list.len(parts)] = c continue }
+    if eq(i, length) { do invoke py.fail("ValueError", "incomplete format") }
+    if same(text.get(pattern, i), "%") { set parts[list.len(parts)] = "%" set i = add(i, 1) continue }
+    let key = absent
+    if same(text.get(pattern, i), "(") {
+      set mapping = true
+      let end = text.find(pattern, ")", i)
+      if lt(end, 0) { do invoke py.fail("ValueError", "incomplete format key") }
+      set key = text.slice(pattern, add(i, 1), end)
+      set i = add(end, 1)
+    }
+    let left = false
+    let sign = ""
+    let alternate = false
+    let zero = false
+    while lt(i, length) metered 2 {
+      let flag = text.get(pattern, i)
+      if same(flag, "-") { set left = true } else {
+      if same(flag, "+") { set sign = "+" } else {
+      if same(flag, " ") { if bool.not(same(sign, "+")) { set sign = " " } } else {
+      if same(flag, "#") { set alternate = true } else {
+      if same(flag, "0") { set zero = true } else { break }
+      } } } }
+      set i = add(i, 1)
+    }
+    let width = 0
+    if lt(i, length) {
+      if same(text.get(pattern, i), "*") {
+        if le(tuple.len(args), used) { do invoke py.fail("TypeError", "not enough arguments for format string") }
+        set width = args[used]
+        set used = add(used, 1)
+        set i = add(i, 1)
+        if bool.not(same(kind(width), "integer")) { do invoke py.fail("TypeError", "* wants int") }
+        if lt(width, 0) { set left = true set width = neg(width) }
+      } else {
+        let count = invoke py.format.read_count(pattern, i)
+        if bool.not(same(count[0], null)) { set width = count[0] }
+        set i = count[1]
+      }
+    }
+    let precision = null
+    if lt(i, length) {
+      if same(text.get(pattern, i), ".") {
+        set i = add(i, 1)
+        set precision = 0
+        if lt(i, length) {
+          if same(text.get(pattern, i), "*") {
+            if le(tuple.len(args), used) { do invoke py.fail("TypeError", "not enough arguments for format string") }
+            set precision = args[used]
+            set used = add(used, 1)
+            set i = add(i, 1)
+            if bool.not(same(kind(precision), "integer")) { do invoke py.fail("TypeError", "* wants int") }
+            if lt(precision, 0) { set precision = 0 }
+          } else {
+            let count = invoke py.format.read_count(pattern, i)
+            if bool.not(same(count[0], null)) { set precision = count[0] }
+            set i = count[1]
+          }
+        }
+      }
+    }
+    if lt(i, length) { if list.contains(["h", "l", "L"], text.get(pattern, i)) { set i = add(i, 1) } }
+    if eq(i, length) { do invoke py.fail("ValueError", "incomplete format") }
+    let code = text.get(pattern, i)
+    set i = add(i, 1)
+    let value = absent
+    if same(key, absent) {
+      if le(tuple.len(args), used) { do invoke py.fail("TypeError", "not enough arguments for format string") }
+      set value = args[used]
+      set used = add(used, 1)
+    } else { set value = invoke py.getitem(arguments, key) }
+    let align = ">"
+    let fill = " "
+    if left { set align = "<" }
+    let textual = list.contains(["s", "r", "a"], code)
+    let shown = ""
+    if textual {
+      if same(code, "s") { set value = invoke py.str(value) }
+      if same(code, "r") { set value = invoke py.repr(value) }
+      if same(code, "a") { set value = invoke py.ascii(value) }
+      set shown = invoke py.format(value, ("", " ", align, "", false, false, width, "", precision, "s", false))
+    } else {
+      if same(kind(value), "bool") { if value { set value = 1 } else { set value = 0 } }
+      if list.contains(["d", "i", "u"], code) {
+        if same(kind(value), "float") { set value = num.to_int(value) }
+        set code = "d"
+      }
+      if same(code, "c") {
+        if same(kind(value), "text") {
+          if bool.not(eq(text.len(value), 1)) { do invoke py.fail("TypeError", "%c requires int or char") }
+          set code = "s"
+        }
+      }
+      let places = precision
+      let whole = list.contains(["d", "x", "X", "o"], code)
+      if whole {
+        if bool.not(same(kind(value), "integer")) { do invoke py.fail("TypeError", "integer format requires a number") }
+        set precision = null
+      }
+      if zero { if bool.not(left) { set align = "=" set fill = "0" } }
+      set shown = invoke py.format(value, ("", fill, align, sign, alternate, zero, width, "", precision, code, false))
+      # Percent integer precision pads digits independently of field width.
+      if whole {
+        if bool.not(same(places, null)) {
+          let digits = format.radix(abs(value), 10)
+          if same(code, "x") { set digits = format.radix(abs(value), 16) }
+          if same(code, "X") { set digits = text.upper_u17_0_0(format.radix(abs(value), 16)) }
+          if same(code, "o") { set digits = format.radix(abs(value), 8) }
+          let padding = sub(places, text.len(digits))
+          if lt(0, padding) {
+            let prefix = ""
+            if lt(value, 0) { set prefix = "-" } else { if bool.not(same(sign, "")) { set prefix = sign } }
+            if alternate {
+              if same(code, "x") { set prefix = text.concat(prefix, "0x") }
+              if same(code, "X") { set prefix = text.concat(prefix, "0X") }
+              if same(code, "o") { set prefix = text.concat(prefix, "0o") }
+            }
+            set shown = text.join([prefix, text.repeat("0", padding), digits], "")
+            set shown = invoke py.format(shown, ("", " ", align, "", false, false, width, "", null, "s", false))
+          }
+        }
+      }
+    }
+    set parts[list.len(parts)] = shown
+  }
+  if bool.not(mapping) { if bool.not(eq(used, tuple.len(args))) { do invoke py.fail("TypeError", "not all arguments converted during string formatting") } }
+  return text.join(parts, "")
+}
+
+# Guest attribute traversal for replacement fields never reaches host objects.
+function py.format.attribute(value: Any, name: Text) -> Any
+kernel 1
+charge sum(8, size(name))
+body {
+  let found = invoke py.value_attribute(value, name)
+  if bool.not(same(found, absent)) { return found }
+  if same(kind(value), "record") {
+    if record.contains(value, "__py_module") {
+      if bool.not(same(name, "__py_module")) { if record.contains(value, name) { return value[name] } }
+    }
+  }
+  if same(kind(value), "error") {
+    if same(name, "args") { return invoke py.exc.args(value) }
+    if same(name, "__cause__") { return invoke py.exc.cause(value) }
+  }
+  do invoke py.no_attribute(value, name)
+  return null
+}
+
+# str.format resolves each field once, including nested specs, in written
+# order. Arguments have already been evaluated by the ordinary call lowerer.
+function py.method.format(self: Any, args: Any, keywords: Any) -> Text
+kernel 1
+charge sum(16, size(self), deep(args), deep(keywords), size(result))
+body {
+  let pattern = invoke py.text_of(self, "format")
+  let automatic = 0
+  let used_auto = false
+  let used_manual = false
+  let render = absent
+  set render = fn(pattern, depth) {
+    if lt(2, depth) { do invoke py.fail("ValueError", "Max string recursion exceeded") }
+    let parts = []
+    let i = 0
+    let length = text.len(pattern)
+    while lt(i, length) metered 2 {
+      let c = text.get(pattern, i)
+      set i = add(i, 1)
+      if same(c, "}") {
+        if lt(i, length) { if same(text.get(pattern, i), "}") { set parts[list.len(parts)] = "}" set i = add(i, 1) continue } }
+        do invoke py.fail("ValueError", "Single '}' encountered in format string")
+      }
+      if bool.not(same(c, "{")) { set parts[list.len(parts)] = c continue }
+      if lt(i, length) { if same(text.get(pattern, i), "{") { set parts[list.len(parts)] = "{" set i = add(i, 1) continue } }
+      let start = i
+      let nesting = 0
+      while lt(i, length) metered 2 {
+        let character = text.get(pattern, i)
+        if same(character, "{") { set nesting = add(nesting, 1) }
+        if same(character, "}") { if eq(nesting, 0) { break } set nesting = sub(nesting, 1) }
+        set i = add(i, 1)
+      }
+      if eq(i, length) { do invoke py.fail("ValueError", "expected '}' before end of string") }
+      let field = text.slice(pattern, start, i)
+      set i = add(i, 1)
+      let end = 0
+      while lt(end, text.len(field)) metered 2 {
+        let character = text.get(field, end)
+        if list.contains(["!", ":", ".", "["], character) { break }
+        set end = add(end, 1)
+      }
+      let name = text.slice(field, 0, end)
+      let numeric = true
+      for point in text.to_code_points(name) { if lt(point, 48) { set numeric = false } if lt(57, point) { set numeric = false } }
+      let value = absent
+      if same(name, "") {
+        if used_manual { do invoke py.fail("ValueError", "cannot switch from manual field specification to automatic field numbering") }
+        set used_auto = true
+        set value = invoke py.getitem(args, automatic)
+        set automatic = add(automatic, 1)
+      } else {
+        if numeric {
+          if used_auto { do invoke py.fail("ValueError", "cannot switch from automatic field numbering to manual field specification") }
+          set used_manual = true
+          let index = int.parse(name, 10)
+          set value = invoke py.getitem(args, index)
+        } else { set value = invoke py.getitem(keywords, name) }
+      }
+      while lt(end, text.len(field)) metered 2 {
+        let character = text.get(field, end)
+        if same(character, ".") {
+          set end = add(end, 1)
+          let start = end
+          while lt(end, text.len(field)) metered 2 { if list.contains(["!", ":", ".", "["], text.get(field, end)) { break } set end = add(end, 1) }
+          let member = text.slice(field, start, end)
+          set value = invoke py.format.attribute(value, member)
+        } else {
+          if same(character, "[") {
+            let close = text.find(field, "]", end)
+            if lt(close, 0) { do invoke py.fail("ValueError", "Missing ']' in format string") }
+            let key = text.slice(field, add(end, 1), close)
+            let numeric = lt(0, text.len(key))
+            for point in text.to_code_points(key) { if lt(point, 48) { set numeric = false } if lt(57, point) { set numeric = false } }
+            if numeric { set key = int.parse(key, 10) }
+            set value = invoke py.getitem(value, key)
+            set end = add(close, 1)
+          } else { break }
+        }
+      }
+      let conversion = ""
+      if lt(end, text.len(field)) {
+        if same(text.get(field, end), "!") {
+          set end = add(end, 1)
+          if eq(end, text.len(field)) { do invoke py.fail("ValueError", "end of string while looking for conversion specifier") }
+          set conversion = text.get(field, end)
+          if bool.not(list.contains(["s", "r", "a"], conversion)) { do invoke py.fail("ValueError", "Unknown conversion specifier") }
+          set end = add(end, 1)
+        }
+      }
+      let spec = ""
+      if lt(end, text.len(field)) {
+        if bool.not(same(text.get(field, end), ":")) { do invoke py.fail("ValueError", "expected ':' after conversion specifier") }
+        let nested = text.slice(field, add(end, 1), text.len(field))
+        set spec = apply render(nested, add(depth, 1))
+      }
+      let shown = invoke py.format_spec(value, spec, conversion)
+      set parts[list.len(parts)] = shown
+    }
+    return text.join(parts, "")
+  }
+  return apply render(pattern, 0)
 }

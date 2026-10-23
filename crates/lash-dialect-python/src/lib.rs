@@ -18,6 +18,7 @@ mod generated_operators;
 mod lower;
 mod package;
 mod printer;
+mod pure_modules;
 mod readable;
 mod scope;
 

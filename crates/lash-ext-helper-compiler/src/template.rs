@@ -61,8 +61,8 @@ impl Symbol {
                 value.get().to_bits()
             ),
             Value::Text(value) => format!(
-                "Value::Text(const {{ lash_kernel_doc::arena::ShortText::new({:?}) }}?)",
-                value.as_str()
+                "Value::Text(const {{ lash_kernel_doc::arena::ShortText::new({}) }}?)",
+                crate::emit::text_literal(value.as_str())
             ),
             _ => return None,
         };
