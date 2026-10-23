@@ -202,13 +202,19 @@ impl KernelMachine {
                         if self.nested_operator(running, act, lib, at(args.start))? == Flow::Step {
                             return Ok(Ran::Step);
                         }
-                    } else if nested.operator
+                    } else if (nested.operator
+                        || matches!(
+                            nested.kind,
+                            crate::compile::NestedKind::Call(
+                                crate::compile::NestedCallee::CheckedHelper(_)
+                            )
+                        ))
                         && let crate::compile::NestedKind::Call(
-                            crate::compile::NestedCallee::Library(lib),
+                            crate::compile::NestedCallee::Library(lib)
+                            | crate::compile::NestedCallee::CheckedHelper(lib),
                         ) = nested.kind
                     {
-                        if self.nested_invoke_operator(host, running, act, lib, at(args.start))?
-                            == Flow::Step
+                        if self.nested_invoke_operator(host, running, act, lib, args)? == Flow::Step
                         {
                             return Ok(Ran::Step);
                         }

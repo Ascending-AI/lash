@@ -847,13 +847,16 @@ impl<'e, T: Domain> Builder<'e, T> {
     fn test(&mut self, summary: &Summary) -> Option<Test<T>> {
         let root = root(summary)?;
         let program = program(summary)?;
-        let Kind::Operator { lib, args, .. } = &root.kind else {
+        let Kind::Operator {
+            lib, args, invoke, ..
+        } = &root.kind
+        else {
             return None;
         };
         let [a, b] = &**args else {
             return None;
         };
-        let (op, table) = self.kernel(*lib)?;
+        let (op, table) = self.kernel(*lib, invoke.is_some_and(|invoke| invoke.checked))?;
         if !op.compares() {
             return None;
         }
@@ -873,7 +876,7 @@ impl<'e, T: Domain> Builder<'e, T> {
 
     /// The typed kernel of operator `lib` in this domain and its scalar
     /// table: the fused node's, which the entry's general path agrees with.
-    fn kernel(&self, lib: LibId) -> Option<(ScalarOp, [u64; 16])> {
+    fn kernel(&self, lib: LibId, checked: bool) -> Option<(ScalarOp, [u64; 16])> {
         let function = self.exe.lib(lib);
         let (entry, fast) = function.prepared.as_ref()?;
         let op = T::kernel(entry.pair()?)?;
@@ -881,6 +884,23 @@ impl<'e, T: Domain> Builder<'e, T> {
         // general path.
         if !T::answers(op) {
             return None;
+        }
+        if checked {
+            let signature = &function.header.signature;
+            let value = T::value(T::default());
+            let result = if op.compares() {
+                Value::Bool(false)
+            } else {
+                value
+            };
+            if !signature
+                .params
+                .iter()
+                .all(|param| super::super::import_result_fits(&param.ty, value))
+                || !super::super::import_result_fits(&signature.result, result)
+            {
+                return None;
+            }
         }
         let table = fast.scalar()?;
         let mut units = [0; 16];
@@ -895,11 +915,13 @@ impl<'e, T: Domain> Builder<'e, T> {
     /// constant's.
     fn operand(&mut self, expr: &Expr, formulas: &mut Formulas) -> Option<Arg<T>> {
         match &expr.kind {
-            Kind::Operator { lib, args, .. } => {
+            Kind::Operator {
+                lib, args, invoke, ..
+            } => {
                 let [a, b] = &**args else {
                     return None;
                 };
-                let (op, table) = self.kernel(*lib)?;
+                let (op, table) = self.kernel(*lib, invoke.is_some_and(|invoke| invoke.checked))?;
                 if op.compares() {
                     return None;
                 }

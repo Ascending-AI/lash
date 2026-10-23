@@ -455,6 +455,22 @@ impl<'a> Island<'a> {
         {
             return Err(self.at_operands(close.head, site.reg, args));
         }
+        if site.checked
+            && !self
+                .exe
+                .lib(site.lib)
+                .header
+                .signature
+                .params
+                .iter()
+                .zip(args)
+                .all(|(param, value)| {
+                    (param.optional && matches!(value, Value::Absent))
+                        || crate::compile::import_result_fits(&param.ty, *value)
+                })
+        {
+            return Err(self.at_operands(site.pc, site.reg, args));
+        }
         // The prepared entry answers and declines as its charged guard
         // does, and on scalars the sizes the table indexes are the values'.
         let charge = if !self.admits(site) {
@@ -477,7 +493,7 @@ impl<'a> Island<'a> {
             return Err(self.at_operands(site.pc, site.reg, args));
         };
         if !self.fits(units)
-            || (site.imported
+            || (site.checked
                 && !crate::compile::import_result_fits(
                     &self.exe.lib(site.lib).header.signature.result,
                     result,
@@ -508,7 +524,7 @@ impl<'a> Island<'a> {
         units: Option<u64>,
     ) -> Option<Answer> {
         if !self.admits(site)
-            || (site.imported
+            || (site.checked
                 && !crate::compile::import_result_fits(
                     &self.exe.lib(site.lib).header.signature.result,
                     value,

@@ -849,7 +849,9 @@ impl Formation<'_> {
         let units = 1 + args.len() as u64;
         let mut program = vec![Event::Fixed(Weight::Atomic(1)); 1 + args.len()];
         let walk = match callee {
-            super::Callee::Library(lib) | super::Callee::Import(_, Some(lib)) => {
+            super::Callee::Library(lib)
+            | super::Callee::CheckedHelper(lib)
+            | super::Callee::Import(_, Some(lib)) => {
                 // A write its value then takes is the reference's: what
                 // the operator writes commits only with a `do`.
                 if writes(&self.lowered, *lib) {
@@ -1479,10 +1481,7 @@ fn value(stream: &Stream, libs: &Libs<'_>, summary: &Summary) -> Option<nodes::N
 fn root(libs: &Libs<'_>, summary: &Summary, id: StmtId) -> Option<nodes::Node> {
     let (_, callee, args) = root_call(&libs.exe.stmt(id).form)?;
     match (callee, &summary.guest) {
-        (callee, None) => {
-            let node = nodes::action(libs, callee.library()?, args)?;
-            Some(nodes::import_result(libs, callee, node))
-        }
+        (callee, None) => nodes::action(libs, callee, args),
         (_, Some(guest)) => nodes::root_call(libs, guest, callee, args),
     }
 }

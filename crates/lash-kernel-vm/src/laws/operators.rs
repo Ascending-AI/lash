@@ -448,7 +448,7 @@ fn uncharged_helpers_use_the_value_only_prepared_entry() {
 }
 
 /// FIG-6754: a template-bearing library invoke is a prepared operator site,
-/// retaining its call occurrence, rather than generic action dispatch.
+/// retaining its call occurrence and typed boundary, rather than generic action dispatch.
 #[test]
 fn template_bearing_invokes_are_prepared_operator_sites() {
     use lash_kernel_doc::plan::{HelperPlan, HelperTemplate};
@@ -457,7 +457,7 @@ fn template_bearing_invokes_are_prepared_operator_sites() {
     let fixture = super::embedder::library(true);
     let mut registry = (*fixture.registry).clone();
     let definition = parse_definition(
-        "function law.templated(x: Any) -> Any\nkernel 1\ncharge sum(3, size(x))\nbody { return x }"
+        "function law.templated(x: Float) -> Float\nkernel 1\ncharge sum(3, size(x))\nbody { return x }"
     ).unwrap();
     let function = registry.register(definition, None).unwrap();
     let plan = Box::leak(Box::new(HelperPlan {
@@ -501,9 +501,11 @@ fn template_bearing_invokes_are_prepared_operator_sites() {
             )],
         })),
     }]);
+    let helpers =
+        Arc::new(lash_kernel_doc::BuildHelpers::new(registry.clone(), [function]).unwrap());
     let program = crate::laws::embedder::program(
         Arc::new(document),
-        crate::PreparedLibrary::new(Arc::new(registry)),
+        crate::PreparedLibrary::with_helpers(Arc::new(registry), helpers),
     );
     let admitted = program
         .library
@@ -525,7 +527,7 @@ fn template_bearing_invokes_are_prepared_operator_sites() {
         .find(|nested| {
             matches!(
                 nested.kind,
-                crate::compile::NestedKind::Call(crate::compile::NestedCallee::Library(_))
+                crate::compile::NestedKind::Call(crate::compile::NestedCallee::CheckedHelper(_))
             )
         })
         .unwrap();

@@ -212,7 +212,7 @@ pub(super) enum Depth {
 
 /// A compiled operator or helper call.
 pub(super) struct OperatorSite {
-    pub(super) imported: bool,
+    pub(super) checked: bool,
     pub(super) lib: LibId,
     pub(super) entry: Entry,
     pub(super) table: ScalarTable,
@@ -773,9 +773,19 @@ fn typed(
     pair: &lash_kernel_doc::scalar::Pair,
     x: Value,
     y: Value,
+    exe: &Executable,
 ) -> Option<(Value, Option<u64>)> {
     use lash_kernel_doc::scalar;
-    match (x, y) {
+    let signature = &exe.lib(site.lib).header.signature;
+    if site.checked
+        && !signature.params.iter().zip([x, y]).all(|(param, value)| {
+            (param.optional && matches!(value, Value::Absent))
+                || crate::compile::import_result_fits(&param.ty, value)
+        })
+    {
+        return None;
+    }
+    let answer = match (x, y) {
         (Value::Float(p), Value::Float(q)) => {
             Some((scalar::floats(pair.floats?, p, q)?, site.floats))
         }
@@ -784,7 +794,9 @@ fn typed(
             Some((value, site.table.units(super::sizes(&[x, y], &value))))
         }
         _ => None,
-    }
+    }?;
+    (!site.checked || crate::compile::import_result_fits(&signature.result, answer.0))
+        .then_some(answer)
 }
 
 /// Resolves an operator's entry, charge and resume sites.
@@ -815,7 +827,7 @@ fn operator_site(expr: &Expr, exe: &Executable) -> Option<OperatorSite> {
     let table = fast.scalar()?.clone();
     let close = closes.first().copied();
     let site = OperatorSite {
-        imported: invoke.is_some_and(|invoke| invoke.imported),
+        checked: invoke.is_some_and(|invoke| invoke.checked),
         lib: *lib,
         entry: entry.clone(),
         floats: table.units(0),

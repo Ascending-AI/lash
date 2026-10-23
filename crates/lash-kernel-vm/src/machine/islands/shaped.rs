@@ -175,7 +175,7 @@ fn typed_commit<const COVERED: bool, const COUNTED: bool>(
     x: Value,
     y: Value,
 ) -> Answer {
-    if let Some((value, units)) = typed(site, pair, x, y) {
+    if let Some((value, units)) = typed(site, pair, x, y, island.exe) {
         if COVERED
             && island.covered
             && let Some(units) = units

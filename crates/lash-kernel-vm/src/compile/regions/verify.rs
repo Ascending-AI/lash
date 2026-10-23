@@ -248,10 +248,12 @@ impl Check<'_, '_> {
                     }
                     let counted = action.guest;
                     match callee {
-                        Callee::Import(_, None) | Callee::CheckedHelper(_) => {
+                        Callee::Import(_, None) => {
                             return Err(Refused::Calls);
                         }
-                        Callee::Library(lib) | Callee::Import(_, Some(lib)) => {
+                        Callee::Library(lib)
+                        | Callee::CheckedHelper(lib)
+                        | Callee::Import(_, Some(lib)) => {
                             if counted {
                                 seen.calls.push(action.occurrence);
                             }

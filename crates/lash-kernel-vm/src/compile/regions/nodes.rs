@@ -18,6 +18,9 @@
 
 use std::ops::Range;
 
+#[path = "nodes_boundary.rs"]
+mod boundary;
+
 use lash_kernel_doc::arena::{ArenaHandle, Body, Chunks};
 use lash_kernel_doc::plan::Table;
 use lash_kernel_doc::{NewObject, Value, ValueKind};
@@ -457,6 +460,12 @@ pub(super) fn compile(
         }
         Kind::Operator {
             lib, args, invoke, ..
+        } if invoke.is_some_and(|invoke| invoke.checked) && boundary::typed(libs, *lib) => {
+            let args = boundary::arguments(libs, *lib, nodes(args, &mut node)?)?;
+            boundary::result(libs, *lib, operator(libs, *lib, args)?)
+        }
+        Kind::Operator {
+            lib, args, invoke, ..
         } => {
             let called = match fused(
                 libs,
@@ -477,8 +486,8 @@ pub(super) fn compile(
                 Some(called) => called,
                 None => operator(libs, *lib, nodes(args, &mut node)?)?,
             };
-            if invoke.is_some_and(|invoke| invoke.imported) {
-                checked_result(libs, *lib, called)
+            if invoke.is_some_and(|invoke| invoke.checked) {
+                boundary::result(libs, *lib, called)
             } else {
                 called
             }
@@ -585,8 +594,21 @@ fn conditional(condition: Node, then: (Node, u64), otherwise: (Node, u64)) -> No
 
 /// The compiled statement-root invoke of operator `id` on `args`, each a
 /// frame variable or a resident literal.
-pub(super) fn action(libs: &Libs<'_>, id: LibId, args: &[super::super::Atom]) -> Option<Node> {
-    fused(
+pub(super) fn action(
+    libs: &Libs<'_>,
+    callee: &super::super::Callee,
+    args: &[super::super::Atom],
+) -> Option<Node> {
+    let id = callee.library()?;
+    let checked = matches!(
+        callee,
+        super::super::Callee::Import(..) | super::super::Callee::CheckedHelper(_)
+    );
+    if checked && boundary::typed(libs, id) {
+        let args = boundary::arguments(libs, id, atoms(libs, args)?)?;
+        return Some(boundary::result(libs, id, operator(libs, id, args)?));
+    }
+    let node = fused(
         libs,
         id,
         args,
@@ -602,7 +624,12 @@ pub(super) fn action(libs: &Libs<'_>, id: LibId, args: &[super::super::Atom]) ->
             Fresh::default(),
         )
     })
-    .or_else(|| operator(libs, id, atoms(libs, args)?))
+    .or_else(|| operator(libs, id, atoms(libs, args)?))?;
+    Some(if checked {
+        boundary::result(libs, id, node)
+    } else {
+        node
+    })
 }
 
 /// The compiled statement-root guest call `call` of `callee` on `args`,
@@ -622,26 +649,6 @@ pub(super) fn root_call(
         | super::super::Callee::CheckedHelper(_) => return None,
     };
     guest_call(call.clone(), read, atoms(libs, args)?)
-}
-
-/// An imported helper retains its public result check before statement commit.
-pub(super) fn import_result(libs: &Libs<'_>, callee: &super::super::Callee, node: Node) -> Node {
-    match callee {
-        super::super::Callee::Import(_, Some(lib)) => checked_result(libs, *lib, node),
-        _ => node,
-    }
-}
-
-fn checked_result(libs: &Libs<'_>, lib: LibId, node: Node) -> Node {
-    let ty = libs.exe.lib(lib).header.signature.result.clone();
-    Box::new(move |slots, cx| {
-        // The public Text check warms its payload. Decline before a helper
-        // allocates when that boundary could read cold data.
-        if ty == lash_vocabulary::Type::Text && cx.arena.any_cold() {
-            return None;
-        }
-        node(slots, cx).filter(|value| super::super::import_result_fits(&ty, *value))
-    })
 }
 
 /// The compiled reads of a root action's atoms `args`.

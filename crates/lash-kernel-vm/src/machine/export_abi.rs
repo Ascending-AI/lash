@@ -3,10 +3,13 @@ use super::actions::Target;
 use super::exec::Call;
 use super::ops::Reg;
 use super::ops::{Flow, Status};
+use super::stream::Running;
 use super::{Eval, KernelMachine, fault, raise};
 use crate::compile::Executable;
 use crate::compile::LibId;
+use crate::compile::{NestedCallee, NestedKind};
 use lash_kernel_doc::{NewObject, Value};
+use lash_kernel_state::paged::PhaseRecord;
 impl KernelMachine {
     /// A document enters a body helper under its declared contract, as it
     /// enters imported code. The helper keeps the caller's Link for operations;
@@ -119,32 +122,17 @@ impl KernelMachine {
         count: usize,
     ) -> Eval<usize> {
         use lash_kernel_doc::StartConvention;
-        if matches!(
-            descriptor.convention,
-            StartConvention::Direct | StartConvention::PyDirect { .. }
-        ) && !(descriptor.signature.required()..=descriptor.signature.params.len())
-            .contains(&count)
-        {
-            return raise(
-                "arity",
-                "arguments do not fit the imported function signature",
-            );
-        }
-        for (index, param) in descriptor.signature.params.iter().enumerate().take(count) {
-            let value = self.regs[args + index];
-            if !(param.optional && matches!(value, Value::Absent))
-                && let Some(mismatch) =
-                    self.public_value_fits(exe, value, &param.ty, self.limits.value_depth())?
-            {
-                return self.raise_typed(
-                    "function_argument",
-                    &lash_vocabulary::EntryTypeMismatch {
-                        callable,
-                        mismatch: mismatch.within(param.name.as_str()).within("input"),
-                    },
-                );
-            }
-        }
+        self.check_call_arguments(
+            exe,
+            callable,
+            &descriptor.signature,
+            args,
+            count,
+            matches!(
+                descriptor.convention,
+                StartConvention::Direct | StartConvention::PyDirect { .. }
+            ),
+        )?;
         match descriptor.convention {
             StartConvention::TsArgsList { .. } => {
                 let values = self.regs[args..args + count].to_vec();
@@ -171,6 +159,92 @@ impl KernelMachine {
                 Ok(count.min(arity))
             }
             _ => Ok(count),
+        }
+    }
+    /// Validate a borrowed contract without building an export descriptor or
+    /// resolving a callable that lowering has already resolved.
+    pub(super) fn check_call_arguments(
+        &mut self,
+        exe: &Executable,
+        callable: lash_vocabulary::CallableId,
+        signature: &lash_vocabulary::Signature,
+        args: Reg,
+        count: usize,
+        direct: bool,
+    ) -> Eval<()> {
+        if direct && !(signature.required()..=signature.params.len()).contains(&count) {
+            return raise(
+                "arity",
+                "arguments do not fit the imported function signature",
+            );
+        }
+        for (index, param) in signature.params.iter().enumerate().take(count) {
+            let value = self.regs[args + index];
+            if !(param.optional && matches!(value, Value::Absent))
+                && let Some(mismatch) =
+                    self.public_value_fits(exe, value, &param.ty, self.limits.value_depth())?
+            {
+                return self.raise_typed(
+                    "function_argument",
+                    &lash_vocabulary::EntryTypeMismatch {
+                        callable,
+                        mismatch: mismatch.within(param.name.as_str()).within("input"),
+                    },
+                );
+            }
+        }
+        Ok(())
+    }
+
+    /// Where an operation's call stands once answered: done, or at the
+    /// action while its body or its plan's segment runs.
+    pub(super) fn body_answered(
+        &mut self,
+        running: &Running<'_>,
+        act: lash_kernel_exec::ActIx,
+        lib: LibId,
+        args: Reg,
+        answer: super::ops::Answer,
+    ) -> Status {
+        let (task, exe, stmt) = (running.task, running.exe, running.id);
+        let entry = &running.stream.nested[act.ix()];
+        let boundary = matches!(entry.kind, NestedKind::Call(NestedCallee::CheckedHelper(_)))
+            .then_some(super::exec::ExportBoundary {
+                convention: &lash_kernel_doc::StartConvention::Direct,
+                result: &exe.lib(lib).header.signature.result,
+            });
+        match answer {
+            super::ops::Answer::Done => {
+                if let Some(boundary) = boundary {
+                    let value = self.regs[args];
+                    self.check_public_result(
+                        exe,
+                        &value,
+                        boundary.result,
+                        lash_vocabulary::CallableId {
+                            function: exe.lib(lib).id,
+                            link: self.current_link(),
+                        },
+                    )?;
+                }
+                Ok(Flow::Done)
+            }
+            super::ops::Answer::Body(code) => {
+                self.capture(task, entry, act, PhaseRecord::Called)?;
+                self.enter_body(
+                    task,
+                    exe,
+                    lib,
+                    code,
+                    super::exec::Invocation::new(args, exe.lib(lib).arity)
+                        .awaited_by(Some(stmt))
+                        .with_boundary(boundary),
+                )
+            }
+            super::ops::Answer::Yielded => {
+                self.capture(task, entry, act, PhaseRecord::Called)?;
+                self.stand_segments(task, exe, Some(stmt), boundary)
+            }
         }
     }
 }

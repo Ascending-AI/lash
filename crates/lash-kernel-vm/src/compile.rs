@@ -1131,7 +1131,9 @@ pub(crate) enum Callee {
 impl Callee {
     pub(crate) fn library(&self) -> Option<LibId> {
         match self {
-            Self::Library(lib) | Self::Import(_, Some(lib)) => Some(*lib),
+            Self::Library(lib) | Self::CheckedHelper(lib) | Self::Import(_, Some(lib)) => {
+                Some(*lib)
+            }
             _ => None,
         }
     }

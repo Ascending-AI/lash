@@ -14,7 +14,9 @@ impl super::NestedKind {
         match self {
             Self::Body(lib)
             | Self::Call(
-                super::NestedCallee::Library(lib) | super::NestedCallee::Import(_, Some(lib)),
+                super::NestedCallee::Library(lib)
+                | super::NestedCallee::CheckedHelper(lib)
+                | super::NestedCallee::Import(_, Some(lib)),
             ) => Some(*lib),
             _ => None,
         }

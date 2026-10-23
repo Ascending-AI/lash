@@ -21,9 +21,9 @@ enum Departure { Next, Return(Value), Break, Continue }
 
 /// Every plan, in function identity order.
 pub const PLANS: &[&p::HelperPlan] = &[
-    &LAW_FACTORY_PLAN,
     &LAW_HANDLERS_PLAN,
     &LAW_DECLINE_CALLER_PLAN,
+    &LAW_FACTORY_PLAN,
     &LAW_BUDGET_PLAN,
     &LAW_DECLINING_PLAN,
     &LAW_HALT_PLAN,
@@ -452,7 +452,7 @@ fn law_halt(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::PlanE
 
 const LAW_FACTORY_PLAN: p::HelperPlan = p::HelperPlan {
     name: "law.factory",
-    function: p::function("04aa95a266323754caffb0346dd48866692a56416d36426552c2da5b5c6eb098"),
+    function: p::function("4fcefed8c3535a252d9f411bb355a5ff09430c5f39618ea12f06e56f3a01d8f5"),
     callees: &[
         p::function("94621ce821ee886636f7d33907340b7290c9e71c2137bd762b6c70bb464566f9"),
     ],

@@ -502,59 +502,42 @@ impl KernelMachine {
         running: &Running<'_>,
         act: lash_kernel_exec::ActIx,
         lib: LibId,
-        args: Reg,
+        args: lash_kernel_exec::RegRange,
     ) -> Status {
+        let count = args.len as usize;
+        let args = args.start.0 as usize;
         let entry = &running.stream.nested[act.ix()];
         self.observe_action(running.exe, &entry.site);
         if entry.guest {
             self.enter(running.task, host, &entry.site, entry.occurrence)?;
         }
         let function = running.exe.lib(lib);
+        if matches!(entry.kind, NestedKind::Call(NestedCallee::CheckedHelper(_))) {
+            self.check_call_arguments(
+                running.exe,
+                lash_vocabulary::CallableId {
+                    function: function.id,
+                    link: self.current_link(),
+                },
+                &function.header.signature,
+                args,
+                count,
+                true,
+            )?;
+        }
         // Observed deferred plans validate before offering their prepared
         // entry, just as general invoke dispatch does.
-        let answer = if self.observer.is_some()
-            && matches!(function.run, crate::compile::LibRun::DeferredPlan { .. })
-            && running.exe.fallback(lib).is_none()
+        let answer = if !entry.operator
+            || (self.observer.is_some()
+                && matches!(function.run, crate::compile::LibRun::DeferredPlan { .. })
+                && running.exe.fallback(lib).is_none())
         {
-            self.answer(running.task, running.exe, lib, args, function.arity, args)
+            self.answer(running.task, running.exe, lib, args, count, args)
         } else {
             self.operator(running.task, running.exe, lib, args, args)
         }
         .map_err(|interrupt| interrupt.answering(function))?;
         self.body_answered(running, act, lib, args, answer)
-    }
-
-    /// Where an operation's call stands once answered: done, or at the
-    /// action while its body or its plan's segment runs.
-    fn body_answered(
-        &mut self,
-        running: &Running<'_>,
-        act: lash_kernel_exec::ActIx,
-        lib: LibId,
-        args: Reg,
-        answer: super::ops::Answer,
-    ) -> Status {
-        let (task, exe, stmt) = (running.task, running.exe, running.id);
-        let entry = &running.stream.nested[act.ix()];
-        match answer {
-            super::ops::Answer::Done => Ok(Flow::Done),
-            super::ops::Answer::Body(code) => {
-                self.capture(task, entry, act, PhaseRecord::Called)?;
-                self.enter_body(
-                    task,
-                    exe,
-                    lib,
-                    code,
-                    super::exec::Invocation::new(args, exe.lib(lib).arity)
-                        .awaited_by(Some(stmt))
-                        .with_boundary(None),
-                )
-            }
-            super::ops::Answer::Yielded => {
-                self.capture(task, entry, act, PhaseRecord::Called)?;
-                self.stand_segments(task, exe, Some(stmt), None)
-            }
-        }
     }
 
     fn answered_at(&mut self, flow: Flow, at: Reg, dst: Reg) -> Flow {
