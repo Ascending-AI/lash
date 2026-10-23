@@ -86,6 +86,11 @@ constant_path = "crates/lash-protocol-rlm/src/executor/host.rs"
 reason = "names the projection a frozen request's call arguments were made under; the FrozenRequest node it is written in is the format, frozen with the 1.0 checkpoint graph"
 
 [[unregistered]]
+constant = "DEFERRED_CALL_ARGS"
+constant_path = "crates/lash-protocol-rlm/src/executor/host.rs"
+reason = "names the projection a frozen request's call arguments were made under; the FrozenRequest node it is written in is the format, frozen with the 1.0 checkpoint graph"
+
+[[unregistered]]
 constant = "MODEL_RETURN_RENDERER"
 constant_path = "crates/lash-protocol-types/src/tool_output/graph.rs"
 reason = "the spec whose digest identifies the one renderer a presentation recipe is reconstructed with; a recipe under another renderer is refused, never re-rendered, so it versions no stored shape"

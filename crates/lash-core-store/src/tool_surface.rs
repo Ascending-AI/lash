@@ -47,7 +47,7 @@ pub enum ReconfigureError {
 
 /// One tool of a recorded surface: its link, and its whole definition as
 /// the model was shown it, kept for prompt replay and as a round's pin.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct SurfaceEntry {
     pub link: OperationRoute,
@@ -238,7 +238,7 @@ impl RecordedSurface {
 }
 
 /// Where a linked operation's tool comes from.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(
     tag = "kind",
     content = "value",
@@ -265,7 +265,7 @@ pub enum RouteSource {
 ///
 /// It holds no contract id: the pin is the performing code's requirement,
 /// or for a model round its recorded definition's ([`judge`]).
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct OperationRoute {
     pub tool: ToolId,
@@ -629,7 +629,7 @@ impl RoutedOperation {
 
 use lash_vocabulary::package::NamespaceSnapshot;
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 /// One qualified operation's definition/route candidate. Selection also keys by contract, provider and tool ID.
 pub struct AdvertisedRoute {

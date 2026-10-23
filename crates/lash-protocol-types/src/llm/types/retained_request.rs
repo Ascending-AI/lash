@@ -1,6 +1,10 @@
 //! Persistent owner requests and their compatible message digest.
 use super::*;
 
+/// version_surface = "coexist"
+/// version_guard(items(LLM_REQUEST_CONTENT_DOMAIN, MessageDigests))
+const LLM_REQUEST_CONTENT_DOMAIN: &str = "lash-llm-request-content/v1";
+
 /// Immutable request messages shared across owner drafts and held readers.
 #[derive(Clone, Debug, Default)]
 pub struct RequestMessages(
@@ -103,8 +107,7 @@ struct MessageDigest {
 }
 impl MessageDigests {
     fn initial() -> crate::core_support::Blake3DomainHasher {
-        let mut hasher =
-            crate::core_support::Blake3DomainHasher::new("lash-llm-request-content/v1");
+        let mut hasher = crate::core_support::Blake3DomainHasher::new(LLM_REQUEST_CONTENT_DOMAIN);
         hasher.update(b"[");
         hasher
     }

@@ -66,6 +66,8 @@ pub(crate) const BLAKE3_DOMAINS: &[&str] = &[
     "lash-runtime-usage-payload/v3",
     "lash-runtime-usage-payload/v4",
     "lash-session-append-draft-fallback/v2",
+    "lash-session-environment-fragment/v1",
+    "lash-session-environment/v1",
     "lash-stable-identity/v2",
     "lash-standard-compaction/v1",
     "lash-tool-call-id/v1",

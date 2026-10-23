@@ -214,7 +214,9 @@ impl From<MemberPath> for String {
 }
 
 /// An operation has exactly one name segment beneath a nonempty package path.
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[derive(
+    Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, schemars::JsonSchema,
+)]
 pub struct QualifiedOperation {
     pub package: PackagePath,
     pub name: Segment,

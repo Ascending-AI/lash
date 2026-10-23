@@ -196,7 +196,7 @@ pub struct Attachment {
     pub deferred: BTreeSet<PackagePath>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 /// An advertisement paired with its accepted immutable publication provenance.
 pub struct AcceptedAdvertisement {

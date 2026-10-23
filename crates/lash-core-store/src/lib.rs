@@ -34,6 +34,7 @@ pub mod compat;
 pub mod config_transaction;
 pub mod effect_identity;
 pub mod effect_opener;
+pub mod environment;
 pub mod executable_generation;
 pub mod execution_limits;
 pub mod execution_state;

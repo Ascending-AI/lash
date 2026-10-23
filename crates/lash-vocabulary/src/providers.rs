@@ -407,7 +407,7 @@ impl Default for DeferredResolutionPolicy {
 /// provider: the provider whose declared formats read it, the format it is
 /// written in and the payload. Readability is checked before the binding is
 /// installed or a call is prepared, never by the provider's reader first.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ExecutionBinding {
     pub codec: ProviderKey,
