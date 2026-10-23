@@ -60,10 +60,15 @@ commits one user message per admitted input, in admission order, with each
 message naming exactly its own input. Its application evidence names that
 message. Hosts do not derive correlation from either ID's spelling.
 
-FIG-984: every settled turn has one committed reply. Its writer depends on
-termination: standard output, an RLM finish, a terminal tool, or a stopped
-turn's committed text. The writer supplies the existing sealed `TurnReply`;
-the decoder consumes it. Host code never mints a reply marker.
+FIG-984: every `Finished` turn has one committed reply. Its writer depends on
+termination: standard output, an RLM finish, or a terminal tool. The writer
+supplies the existing sealed `TurnReply`; the decoder consumes it. Host code
+never mints a reply marker.
+
+A `Stopped` turn commits no reply. Its commit records the typed stop fact as
+`TurnCommitOutcome::Cancelled` or `TurnCommitOutcome::Failed` with a
+`TurnCommitFailureCause`, alongside the history retained at its stop boundary.
+The host renders that typed outcome; Lash does not invent reply text for it.
 
 `DurableSession::transcript()` walks retained ancestry across frame boundaries,
 without restoring a writer or admitting a turn. `SessionReadView::transcript()`
