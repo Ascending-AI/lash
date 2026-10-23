@@ -185,7 +185,7 @@ async fn deleting_a_session_with_a_running_turn_cancels_it_before_retiring() {
     let trace = Arc::new(RecordingTrace::default());
     let workbench = Workbench::builder(replying_provider(
         r#"<typescript>
-const hold_for_delete = async () => {
+const hold_for_delete = async (): Promise<string> => {
   await sleep(600000);
   return "unreachable";
 };

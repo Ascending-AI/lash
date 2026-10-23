@@ -335,7 +335,7 @@ await control.finish(first_result.value);"#,
         RuntimePerfScenario::RlmProcessAsyncToolCompletion => {
             let text = typescript_block(
                 r#"
-const benchmarkAsyncProcess = async (value: string) => {
+const benchmarkAsyncProcess = async (value: string): Promise<{ value: string; mode: string; delay_ms: number }> => {
   return await tools.benchmarkAsync({ value: value, delay_ms: 0 });
 };
 
